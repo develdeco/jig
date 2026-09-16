@@ -12,7 +12,7 @@
 // clear reason when the build failed, so a partially-integrated tree still
 // reports which tests could run.
 //
-// Two assumptions are called out because the package-contract map does not
+// Two assumptions are called out because the design does not
 // pin them down precisely and the CLI could not be exercised against a real
 // build while this suite was written; both are marked inline at their point
 // of use as well:

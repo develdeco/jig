@@ -1,6 +1,6 @@
 ---
 name: platform-sync
-description: Refreshes the store's platform/ notes — contract-index entries and repo notes — from recently landed tickets. Use after a ticket lands, before a big intake starts, or when platform/ looks stale against the ledger.
+description: Refreshes the store's platform/ notes - contract-index entries and repo notes - from recently landed tickets. Use after a ticket lands, before a big intake starts, or when platform/ looks stale against the ledger.
 ---
 
 # platform-sync
@@ -15,7 +15,7 @@ Periodic catch-up for `platform/`, not a per-ticket step.
 
 ## When to run it
 
-After a batch of tickets lands, and before a big intake starts — so the next grilling round's scouts read a `platform/` that reflects what actually shipped.
+After a batch of tickets lands, and before a big intake starts - so the next grilling round's scouts read a `platform/` that reflects what actually shipped.
 
 ## Done when
 

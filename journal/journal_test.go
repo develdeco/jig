@@ -119,7 +119,7 @@ func TestRenderChangelogGolden(t *testing.T) {
 	sliceWS := map[string]string{"a": "root", "b": "root", "c": "other"}
 
 	got := RenderChangelog(lines, "root", sliceWS)
-	want := "# Changelog — root\n" +
+	want := "# Changelog - root\n" +
 		"- a: abcdef1\n" +
 		"- b: 1112223\n"
 	if got != want {
@@ -129,7 +129,7 @@ func TestRenderChangelogGolden(t *testing.T) {
 
 func TestRenderChangelogNoGreens(t *testing.T) {
 	got := RenderChangelog(nil, "root", nil)
-	want := "# Changelog — root\n"
+	want := "# Changelog - root\n"
 	if got != want {
 		t.Fatalf("RenderChangelog(nil) = %q, want %q", got, want)
 	}
@@ -145,7 +145,7 @@ func TestRenderConsolidatedGolden(t *testing.T) {
 	}
 
 	got := RenderConsolidated(lines)
-	want := "# JIG-1 — consolidated changelog\n" +
+	want := "# JIG-1 - consolidated changelog\n" +
 		"\n## Slices\n" +
 		"- a: abcdef1\n" +
 		"- b: 1112223\n" +
@@ -159,7 +159,7 @@ func TestRenderConsolidatedGolden(t *testing.T) {
 
 func TestRenderConsolidatedEmpty(t *testing.T) {
 	got := RenderConsolidated(nil)
-	want := "#  — consolidated changelog\n" +
+	want := "#  - consolidated changelog\n" +
 		"\n## Slices\n- none\n" +
 		"\n## Fix rounds\n- none\n"
 	if got != want {
@@ -179,7 +179,7 @@ func TestRenderDiffChangelogGolden(t *testing.T) {
 	}
 
 	got := RenderDiffChangelog(lines, 2)
-	want := "# Diff changelog — round 2\n" +
+	want := "# Diff changelog - round 2\n" +
 		"- fix-1: 2222222\n"
 	if got != want {
 		t.Fatalf("RenderDiffChangelog(round 2) =\n%q\nwant\n%q", got, want)
@@ -193,7 +193,7 @@ func TestRenderDiffChangelogRoundOneFromStart(t *testing.T) {
 		{Event: "gate-round", Attempt: 1},
 	}
 	got := RenderDiffChangelog(lines, 1)
-	want := "# Diff changelog — round 1\n" +
+	want := "# Diff changelog - round 1\n" +
 		"- a: 1111111\n" +
 		"- b: 2222222\n"
 	if got != want {

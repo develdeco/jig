@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/develdeco/jig/outcome"
@@ -26,9 +25,12 @@ const wslDistro = "Ubuntu-24.04"
 // wslPath mechanically converts a Windows path (e.g. `C:\Users\x`) to its
 // WSL mount equivalent (`/mnt/c/Users/x`): lowercase the drive letter, drop
 // the colon, and flip backslashes to slashes. No wslpath subprocess is
-// needed for this shape of path.
+// needed for this shape of path. This is pure string manipulation rather
+// than filepath.ToSlash, which is a no-op on any OS other than Windows and
+// would leave the backslashes untouched when jig is built on Linux (e.g. in
+// CI, where this helper's own test still runs).
 func wslPath(winPath string) string {
-	p := filepath.ToSlash(winPath)
+	p := strings.ReplaceAll(winPath, `\`, "/")
 	if len(p) >= 2 && p[1] == ':' {
 		drive := strings.ToLower(p[:1])
 		return "/mnt/" + drive + p[2:]

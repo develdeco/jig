@@ -4,23 +4,23 @@ slices:
     goal: Fix Clamp so TestClamp passes.
     oracle: test
     blocked_by: []
-    from_brief: ["@HASH:Slice A — failing clamp"]
+    from_brief: ["@HASH:Slice A - failing clamp"]
   - id: b
     workspace: alpha
     goal: Give Clamp a percentage-range caller, once it works.
     oracle: test
     blocked_by: [a]
-    from_brief: ["@HASH:Slice B — clamp callers"]
+    from_brief: ["@HASH:Slice B - clamp callers"]
   - id: c
     workspace: beta
     goal: Decide and implement the greeting's tone.
     oracle: test
     blocked_by: []
-    from_brief: ["@HASH:Slice C — greeting decision"]
+    from_brief: ["@HASH:Slice C - greeting decision"]
   - id: d
     workspace: beta
     goal: Smoke-test the rig environment class.
     oracle: test
     env: rig
     blocked_by: []
-    from_brief: ["@HASH:Slice D — rig smoke"]
+    from_brief: ["@HASH:Slice D - rig smoke"]

@@ -81,7 +81,7 @@ func writeSliceJSON(path string, body sliceJSONBody) error {
 // prior, non-success attempt of slice (attempts 1..beforeAttempt-1), read
 // back from the store-side result.json files of those attempts (the journal
 // line schema carries no summary field, so the attempt log is built from the
-// persisted results instead — see NOTE in make/make.go). Capped to the most
+// persisted results instead - see NOTE in make/make.go). Capped to the most
 // recent 8 entries.
 func buildAttemptLog(st *store.Store, ticket, slice string, beforeAttempt int) []string {
 	var log []string

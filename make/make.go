@@ -281,7 +281,7 @@ type runCtx struct {
 	// storeMu serializes every Store/Journal/Push/question call this run
 	// makes: the store itself takes no lock of its own for these, and
 	// concurrent repo-group goroutines (see Run's per-group fan-out) would
-	// otherwise race on it — e.g. two slices' NextQuestionID+WriteQuestion
+	// otherwise race on it - e.g. two slices' NextQuestionID+WriteQuestion
 	// sequences interleaving into the same question id. It guards call
 	// duration only, never held across an rc.mu-guarded section.
 	storeMu sync.Mutex
@@ -512,8 +512,8 @@ func trimSHA(data []byte) string {
 // bringUpEnv brings sl's env class up in lease, routing an Unavailable
 // failure to the env-blocked state. It returns the *envrun.Handle Up
 // allocated (nil when dispatch may not proceed) so the caller's deferred
-// tearDownEnv tears down the exact instance that came up — in particular
-// the exact port Up allocated, not a guessed or zero one — and whether
+// tearDownEnv tears down the exact instance that came up - in particular
+// the exact port Up allocated, not a guessed or zero one - and whether
 // dispatch may proceed.
 func (rc *runCtx) bringUpEnv(sl store.Slice, m manifest.Manifest, lease pool.Lease) (*envrun.Handle, bool) {
 	ec, ok := m.Envs[sl.Env]
@@ -608,7 +608,7 @@ func (rc *runCtx) route(sl store.Slice, lease pool.Lease, attempt int, res outco
 
 // verifyGreen checks a claimed-green result against the lease on disk: the
 // commit must exist there, be new (a descendant of startSHA, the run's
-// recorded fork point — not startSHA itself) and reachable from HEAD, and
+// recorded fork point - not startSHA itself) and reachable from HEAD, and
 // every declared artifact must exist inside the commit's tree (checked with
 // `git cat-file -e <commit>:<path>`, never the worktree, since an
 // uncommitted scratch file must not satisfy it).
@@ -712,7 +712,7 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 		rc.push(sl.ID, "stalled")
 
 		reason := fmt.Sprintf(
-			"stall: slice %s returned %s twice with no progress: %s. A repeat is patching — likely a misconception; amend the brief (`jig requeue --from-brief-diff`) or answer with direction (`jig run --answer`)",
+			"stall: slice %s returned %s twice with no progress: %s. A repeat is patching - likely a misconception; amend the brief (`jig requeue --from-brief-diff`) or answer with direction (`jig run --answer`)",
 			sl.ID, res.Outcome, res.Summary,
 		)
 		rc.mu.Lock()

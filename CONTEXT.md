@@ -5,7 +5,7 @@ Vocabulary for jig, a CLI that runs a ticket from brief to merged PR as a dispat
 ## Language
 
 **Project**:
-A declared set of repos plus a tracker plus platform docs. Its identity is the truth repo's `project.yaml` — never inferred from folder layout or the current working directory.
+A declared set of repos plus a tracker plus platform docs. Its identity is the truth repo's `project.yaml` - never inferred from folder layout or the current working directory.
 _Avoid_: workspace config, repo group
 
 **Truth repo (store)**:
@@ -29,7 +29,7 @@ A tracer-bullet unit of work with a named oracle and blocking edges to other sli
 _Avoid_: task, subtask, step
 
 **Oracle**:
-The command that proves a slice done. Green is done — there is no separate test stage beyond the oracle.
+The command that proves a slice done. Green is done - there is no separate test stage beyond the oracle.
 _Avoid_: test suite, check
 
 **Workspace**:
@@ -57,7 +57,7 @@ Evidence that a check passed, stored in the ticket's `evidence/`.
 _Avoid_: screenshot, proof
 
 **Fix slice**:
-A gate finding turned into a new frontier item. Review has no back-edges — every finding becomes forward work.
+A gate finding turned into a new frontier item. Review has no back-edges - every finding becomes forward work.
 _Avoid_: review comment, follow-up task
 
 **Lease**:

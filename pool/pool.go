@@ -35,7 +35,7 @@ func (l Lease) Return() error {
 //   - if the local <branch> already exists in this lease, it is checked out
 //     as-is (a plain `checkout <branch>`, never `-B`): an existing local
 //     branch is never reset, so commits an earlier slice in this same run
-//     landed on it — pushed to origin or not — are never discarded;
+//     landed on it - pushed to origin or not - are never discarded;
 //   - otherwise branch is created fresh with `checkout -B`, off
 //     origin/<branch> if that ref exists (continue a branch pushed by an
 //     earlier run) or else origin/<target>.

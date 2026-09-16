@@ -186,7 +186,7 @@ func (s *Store) Answer(ticket, qid, text string) (slice string, err error) {
 	return q.Slice, nil
 }
 
-// Supersede marks question qid superseded — its slice was re-queued by a
+// Supersede marks question qid superseded - its slice was re-queued by a
 // brief amendment, so the question no longer counts as open.
 func (s *Store) Supersede(ticket, qid string) error {
 	path := s.questionPath(ticket, qid)

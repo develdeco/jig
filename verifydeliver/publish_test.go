@@ -126,7 +126,7 @@ func TestPublishFullChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show retrieval notes in squash commit: %v", err)
 	}
-	if !strings.Contains(show, "# "+fx.Ticket+" — retrieval notes") {
+	if !strings.Contains(show, "# "+fx.Ticket+" - retrieval notes") {
 		t.Fatalf("retrieval notes content = %q, missing heading", show)
 	}
 
@@ -261,8 +261,8 @@ func TestSquashRefusesPushedRange(t *testing.T) {
 }
 
 // TestRecordAndCheckDivergenceRefusesEmptyDiff checks that a reconcile whose
-// merge left the branch with no diff at all against the (moved) target —
-// because the target already carries the identical change — is refused,
+// merge left the branch with no diff at all against the (moved) target -
+// because the target already carries the identical change - is refused,
 // and that the journalled reconcile outcome still records the policy and
 // file count before the refusal.
 func TestRecordAndCheckDivergenceRefusesEmptyDiff(t *testing.T) {
@@ -358,12 +358,12 @@ func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
 // TestPublishConfirmWiring checks that Publish threads an honest confirm
 // value into guardedPush: a declined interactive prompt must stop before
 // any push is attempted, and both --yes and an accepted prompt must pass
-// confirmed=true — never a hardcoded literal, and never proceeding past a
+// confirmed=true - never a hardcoded literal, and never proceeding past a
 // decline.
 func TestPublishConfirmWiring(t *testing.T) {
 	origPush := guardedPush
-	origConfirm := stdinConfirm
-	defer func() { guardedPush = origPush; stdinConfirm = origConfirm }()
+	origConfirm := confirm
+	defer func() { guardedPush = origPush; confirm = origConfirm }()
 
 	newPublishableFixture := func(t *testing.T) (*fixture.Fixture, Deps) {
 		t.Helper()
@@ -381,7 +381,7 @@ func TestPublishConfirmWiring(t *testing.T) {
 			called = true
 			return nil
 		}
-		stdinConfirm = func() (string, error) { return "n", nil }
+		confirm = func(string, string) bool { return false }
 
 		_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: false})
 		var ae *axi.Error
@@ -415,7 +415,7 @@ func TestPublishConfirmWiring(t *testing.T) {
 			gotConfirmed = confirmed
 			return nil
 		}
-		stdinConfirm = func() (string, error) { return "yes", nil }
+		confirm = func(string, string) bool { return true }
 
 		if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: false}); err != nil {
 			t.Fatalf("Publish: %v", err)

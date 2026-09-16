@@ -37,6 +37,15 @@ func run(t *testing.T, dir string, args ...string) string {
 	return out
 }
 
+// commit runs "git commit" in dir with an explicit local identity, so the
+// test passes on a machine with no global git config (every CI runner):
+// unlike newSourceAndRemote's source repo, a lease dir is a fresh clone and
+// never inherits the source's local .git/config.
+func commit(t *testing.T, dir, msg string) string {
+	t.Helper()
+	return run(t, dir, "-c", "user.name=jig-fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", msg)
+}
+
 func TestAcquireCloneAndResume(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	remote := newSourceAndRemote(t)
@@ -63,7 +72,7 @@ func TestAcquireCloneAndResume(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 	run(t, lease1.Dir, "add", "-A")
-	run(t, lease1.Dir, "commit", "-m", "work")
+	commit(t, lease1.Dir, "work")
 	resumeSHA := run(t, lease1.Dir, "rev-parse", "HEAD")
 
 	if err := lease1.Return(); err != nil {
@@ -118,7 +127,7 @@ func TestAcquireNeverResetsExistingLocalBranch(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 	run(t, lease1.Dir, "add", "-A")
-	run(t, lease1.Dir, "commit", "-m", "pushed work")
+	commit(t, lease1.Dir, "pushed work")
 	run(t, lease1.Dir, "push", "origin", "jig/T-2")
 
 	// A second slice in the same run commits again without pushing: origin
@@ -127,7 +136,7 @@ func TestAcquireNeverResetsExistingLocalBranch(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 	run(t, lease1.Dir, "add", "-A")
-	run(t, lease1.Dir, "commit", "-m", "unpushed work")
+	commit(t, lease1.Dir, "unpushed work")
 	localSHA := run(t, lease1.Dir, "rev-parse", "HEAD")
 
 	lease2, err := Acquire("fixture2", remote, "main", "jig/T-2", "T-2")

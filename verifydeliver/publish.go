@@ -34,12 +34,16 @@ type PublishReport struct {
 	PRURL    map[string]string // repo -> opened PR url; empty when the tracker adapter has no PRCreator
 }
 
-// stdinConfirm reads one line from stdin for the interactive publish
-// confirmation. It is a func var so tests can stub it without a real
-// terminal.
-var stdinConfirm = func() (string, error) {
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-	return strings.TrimSpace(line), err
+// confirm asks the interactive "Push ... ? [y/N]" question and reports
+// whether the operator agreed. It is a func var covering the whole seam -
+// both the fmt.Printf prompt and the stdin read - so a test can replace it
+// outright and never touch the real terminal: stubbing only the read half
+// would still print the literal prompt text to the test's real stdout.
+var confirm = func(branch, ticket string) bool {
+	fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes"
 }
 
 // guardedPush pushes branch to origin, refusing a non-local remote without
@@ -177,15 +181,12 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 
 	// confirmed tracks whether an actual publish confirmation ran: --yes
 	// stands in for it, or an interactive "y"/"yes" answer does. A decline
-	// stops cleanly here — nothing is pushed. This is the only value ever
+	// stops cleanly here - nothing is pushed. This is the only value ever
 	// passed to guardedPush; it is never hardcoded to true, so a non-local
 	// remote with no confirmation is refused by the gitx guard downstream.
 	confirmed := o.Yes
 	if !o.Yes {
-		fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
-		answer, _ := stdinConfirm()
-		answer = strings.ToLower(strings.TrimSpace(answer))
-		if answer != "y" && answer != "yes" {
+		if !confirm(branch, ticket) {
 			return PublishReport{}, &axi.Error{Msg: "publish declined at confirmation", Code: "PUBLISH_DECLINED"}
 		}
 		confirmed = true
@@ -304,7 +305,7 @@ func divergenceFileCount(dir, target string) (int, error) {
 // "<policy>:<n>-files" and refuses with PUBLISH_NO_DIVERGENCE when the
 // reconciled branch has no diff against the target at all: a conflict-free
 // integration that changes nothing is an ownership-aware divergence
-// failure — the target already carries the same content, so publishing
+// failure - the target already carries the same content, so publishing
 // would silently keep whatever this ticket's slices actually changed.
 func recordAndCheckDivergence(d Deps, ticket, dir, target, policy string) error {
 	n, err := divergenceFileCount(dir, target)
@@ -317,7 +318,7 @@ func recordAndCheckDivergence(d Deps, ticket, dir, target, policy string) error 
 	}
 	if n == 0 {
 		return &axi.Error{
-			Msg:  "integration produced no change against the target — stale-overwrite suspicion",
+			Msg:  "integration produced no change against the target - stale-overwrite suspicion",
 			Code: "PUBLISH_NO_DIVERGENCE",
 		}
 	}

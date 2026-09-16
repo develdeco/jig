@@ -19,7 +19,7 @@ func shortSHA(sha string) string {
 // workspace in sliceWS. Pure and timestamp-free so it is golden-stable.
 func RenderChangelog(lines []Line, workspace string, sliceWS map[string]string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Changelog — %s\n", workspace)
+	fmt.Fprintf(&b, "# Changelog - %s\n", workspace)
 	for _, l := range lines {
 		if l.Event != "result" || l.Outcome != "green" {
 			continue
@@ -45,7 +45,7 @@ func RenderConsolidated(lines []Line) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %s — consolidated changelog\n", ticket)
+	fmt.Fprintf(&b, "# %s - consolidated changelog\n", ticket)
 
 	b.WriteString("\n## Slices\n")
 	any := false
@@ -96,7 +96,7 @@ func RenderDiffChangelog(lines []Line, round int) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Diff changelog — round %d\n", round)
+	fmt.Fprintf(&b, "# Diff changelog - round %d\n", round)
 	for _, l := range lines[start:end] {
 		if l.Event != "result" || l.Outcome != "green" {
 			continue

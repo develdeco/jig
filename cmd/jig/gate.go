@@ -12,7 +12,7 @@ import (
 // noopGateSource is the placeholder GateSource used when jig gate runs
 // without --scenario (the real, session-dispatching gate reviewer).
 //
-// NOTE: the contract map only specifies the fake scenario-backed source
+// NOTE: v0.1 only specifies the fake scenario-backed source
 // (verifydeliver.NewFakeGateSource); a real, session-driven gate reviewer
 // is out of scope for the tested v0.1 surface ("never invoked by tests",
 // same as the herdr session backend). This always reports a clean round so

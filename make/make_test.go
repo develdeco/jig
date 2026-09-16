@@ -435,7 +435,11 @@ func TestBringUpEnvHandleUsedForTeardown(t *testing.T) {
 	ec := manifest.EnvClass{
 		Up:    "echo up",
 		Check: "echo check",
-		Down:  fmt.Sprintf("echo {port}>%s", portFile),
+		// The space before ">" matters under sh -c: "echo {port}>FILE" with
+		// no space parses the bare number immediately before ">" as a file
+		// descriptor (echo runs with fd <port> redirected, and the file
+		// stays empty) rather than as the redirection target.
+		Down: fmt.Sprintf("echo {port} > %s", portFile),
 	}
 	m := manifest.Manifest{Envs: map[string]manifest.EnvClass{"e": ec}}
 	sl := store.Slice{ID: "s1", Env: "e"}
@@ -503,7 +507,7 @@ func TestVerifyGreenRejectsStartSHAItself(t *testing.T) {
 }
 
 // TestStallSignatureIsPerSlice covers m13: two different slices that each
-// fail once with an identical summary must not stall the run — the stall
+// fail once with an identical summary must not stall the run - the stall
 // signature's unit must be the slice, not a shared literal context.
 func TestStallSignatureIsPerSlice(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())

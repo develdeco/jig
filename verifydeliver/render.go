@@ -31,7 +31,7 @@ func renderMemorize(ticket string, slices []store.Slice, lines []journal.Line, q
 	commits := lastGreenCommits(lines)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %s — retrieval notes\n\n", ticket)
+	fmt.Fprintf(&b, "# %s - retrieval notes\n\n", ticket)
 	for _, s := range slices {
 		fmt.Fprintf(&b, "## %s\n\n", s.ID)
 		fmt.Fprintf(&b, "- goal: %s\n", s.Goal)
@@ -145,7 +145,7 @@ func appendLedgerEntry(st *store.Store, ticket, title string, slices []store.Sli
 		return fmt.Errorf("verifydeliver: ledger: read: %w", err)
 	}
 	entry := fmt.Sprintf(
-		"\n## %s — %s\n\nDelivered %d slice(s).\n\n**Answers:**\n%s\n",
+		"\n## %s - %s\n\nDelivered %d slice(s).\n\n**Answers:**\n%s\n",
 		ticket, title, len(slices), answersBlock(questions),
 	)
 	out := append(append([]byte{}, existing...), []byte(entry)...)

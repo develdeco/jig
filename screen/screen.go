@@ -28,12 +28,12 @@ var gitValueOpts = map[string]bool{
 // bannedSubcommands are git subcommands refused outright, with a short
 // reason. "commit" is deliberately not in this table.
 var bannedSubcommands = map[string]string{
-	"push":         "history must not be pushed from a screened session",
-	"revert":       "destructive git operation; run it yourself if you really want it",
-	"rebase":       "rebase is a gated, ask-first operation, not a screened action",
-	"tag":          "tagging is a release action, out of scope here",
-	"cherry-pick":  "history rewriting is out of scope here",
-	"am":           "history rewriting is out of scope here",
+	"push":        "history must not be pushed from a screened session",
+	"revert":      "destructive git operation; run it yourself if you really want it",
+	"rebase":      "rebase is a gated, ask-first operation, not a screened action",
+	"tag":         "tagging is a release action, out of scope here",
+	"cherry-pick": "history rewriting is out of scope here",
+	"am":          "history rewriting is out of scope here",
 }
 
 // conditionalRule bans a subcommand only when one of its exact-token flags
@@ -159,7 +159,7 @@ func checkGitArgv(argv []string) (string, bool) {
 //
 // The checks operate on the literal string, so a glob token such as
 // ".env*", "*.pem", "*_key*" or "~/.aws/*" is denied whenever its fixed
-// portion already matches — a conservative stance against globs that could
+// portion already matches - a conservative stance against globs that could
 // expand to a secret path.
 func SecretPath(s string) bool {
 	if s == "" {

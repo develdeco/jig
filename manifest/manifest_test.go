@@ -27,7 +27,7 @@ func oracleNames(m Manifest) []string {
 	return names
 }
 
-// TestResolveTable covers the three kickoff-mandated cases: package.json-
+// TestResolveTable covers the three v0.1 manifest-resolution cases: package.json-
 // derived oracles, jig.yaml workspace override, and envs coming only from
 // jig.yaml.
 func TestResolveTable(t *testing.T) {

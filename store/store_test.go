@@ -166,8 +166,9 @@ func TestAppendSlicesRejectsDuplicateID(t *testing.T) {
 	}
 }
 
-// TestSliceStatePathIsSpecForm pins spec §08's on-disk path for slice state:
-// "<ticket>/slices/<id>.state", not the old "<ticket>/state/<id>.yaml".
+// TestSliceStatePathIsSpecForm pins the store schema's on-disk path for slice
+// state (see ARCHITECTURE.md): "<ticket>/slices/<id>.state", not the old
+// "<ticket>/state/<id>.yaml".
 func TestSliceStatePathIsSpecForm(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
 
@@ -177,7 +178,7 @@ func TestSliceStatePathIsSpecForm(t *testing.T) {
 
 	want := filepath.Join(st.TicketDir("JIG-1"), "slices", "a.state")
 	if _, err := os.Stat(want); err != nil {
-		t.Fatalf("expected slice state at %s (spec §08 form): %v", want, err)
+		t.Fatalf("expected slice state at %s (store schema form): %v", want, err)
 	}
 
 	old := filepath.Join(st.TicketDir("JIG-1"), "state", "a.yaml")
@@ -289,10 +290,10 @@ func TestSupersedePreservesAnswer(t *testing.T) {
 }
 
 func TestBriefSectionHashes(t *testing.T) {
-	brief := "# Brief\n\n## Goal\nDo the thing.\n\n## Slice A — repro\nMake it fail first.   \n\n## Slice B\nThen fix it.\n"
+	brief := "# Brief\n\n## Goal\nDo the thing.\n\n## Slice A - repro\nMake it fail first.   \n\n## Slice B\nThen fix it.\n"
 	got := BriefSectionHashes([]byte(brief))
 
-	want := []string{"Goal", "Slice A — repro", "Slice B"}
+	want := []string{"Goal", "Slice A - repro", "Slice B"}
 	for _, h := range want {
 		if _, ok := got[h]; !ok {
 			t.Fatalf("missing hash for section %q in %v", h, got)

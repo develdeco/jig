@@ -53,7 +53,7 @@ func runJig(t *testing.T, cwd string, args ...string) jigResult {
 // source file and writes the machine mapping under whatever JIG_HOME is
 // already set when it is called; it does not create a home directory
 // itself. That means JIG_HOME is a temp dir independent of fx.Dir, not
-// "<fx.Dir>/home" as a first pass at this task assumed — this helper is the
+// "<fx.Dir>/home" as a first pass at this task assumed - this helper is the
 // single place that decision lives.
 func newFixture(t *testing.T, opts fixture.Opts) (fx *fixture.Fixture, home string) {
 	t.Helper()

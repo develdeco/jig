@@ -3,7 +3,7 @@
 jig is one binary plus a set of session skills: the binary owns machinery
 (dispatch, state, screening, git), skills own judgment (reading a brief,
 writing code, reviewing a diff). The two only agree through the store on
-disk — the schema below *is* the API between them, and between jig and any
+disk - the schema below *is* the API between them, and between jig and any
 future tooling that reads a ticket's history.
 
 ## Pipeline
@@ -29,7 +29,7 @@ publish        reconcile, revalidate, docs, squash, route → open the PR
 ```
 
 `make` (the frontier loop) and `verifydeliver` (gate + publish) are separate
-packages that share no in-memory state at all — package `make` never imports
+packages that share no in-memory state at all - package `make` never imports
 `verifydeliver` state and vice versa. The store on disk is the entire
 interface between them. That's deliberate: either package is splittable into
 its own binary later with a `git mv`, no refactor required.
@@ -42,9 +42,9 @@ invalidates it:
 | Invalidated by | Home | What lives there |
 |---|---|---|
 | a jig release | binary + skills (process) | the machinery and judgment code itself |
-| one repo's own change | that repo's `.claude/` + `jig.yaml` | conventions, oracle commands, env classes — knowledge specific to that repo |
+| one repo's own change | that repo's `.claude/` + `jig.yaml` | conventions, oracle commands, env classes - knowledge specific to that repo |
 | platform or ticket history | the truth repo | tickets at root, `platform/`, `ledger.md` |
-| session end | nowhere, except receipts | `evidence/` — a session's reasoning dies with it; only its artifacts persist |
+| session end | nowhere, except receipts | `evidence/` - a session's reasoning dies with it; only its artifacts persist |
 
 Knowledge flows down (repo → session), truth flows sideways (ticket →
 ticket, repo → repo), learning flows up (session → ledger).
@@ -88,7 +88,7 @@ ledger.md
 `work/` is store-side, not lease-side, on purpose: a build session's `git add
 -A` runs inside its worktree lease, and must never sweep dispatch plumbing
 into a slice's commit. `project.yaml`'s `schema_version` is the compatibility
-contract — a store written by one jig version declares the layout a later
+contract - a store written by one jig version declares the layout a later
 version must still read.
 
 ## Module responsibilities
@@ -125,14 +125,14 @@ exists.
 The contract between jig and any backend is pure disk: jig writes
 `slice.json` (goal, oracle, workspace, prior attempt log, any answered
 question), the backend runs a session in the lease worktree, and jig reads
-back `result.json` (outcome, summary, commit, and — for `needs-input` — a
+back `result.json` (outcome, summary, commit, and - for `needs-input` - a
 question). Nothing crosses in memory.
 
 Three backends implement that same narrow interface:
 
-- **fake** — replays a scripted scenario directory; no session, no network. The CI and fixture path.
-- **headless** — runs a local `claude -p` subprocess; the command/secret screens attach as a PreToolUse hook (`jig _screen`).
-- **herdr** — drives a remote agent through a WSL-hosted herdr terminal session; the same screens attach the same way.
+- **fake** - replays a scripted scenario directory; no session, no network. The CI and fixture path.
+- **headless** - runs a local `claude -p` subprocess; the command/secret screens attach as a PreToolUse hook (`jig _screen`).
+- **herdr** - drives a remote agent through a WSL-hosted herdr terminal session; the same screens attach the same way.
 
 Screens attach wherever the backend's tool-call surface allows a PreToolUse
 hook; `fake` has no tool calls to screen.
@@ -143,14 +143,14 @@ hook; `fake` has no tool calls to screen.
 enough to catch a disguised `git push`: `git -C <path> push` is a plain push
 once `-C <path>` is consumed as a global option, and quoting or extra
 whitespace defeats a pattern match without changing what git executes.
-`screen.Command` instead parses each shell segment structurally — split,
-tokenize, unquote, match the git binary, consume global options — and checks
+`screen.Command` instead parses each shell segment structurally - split,
+tokenize, unquote, match the git binary, consume global options - and checks
 the *resulting* subcommand and flags, so path or quoting tricks can't hide a
 push from the screen the way they can from a regex.
 
 **Secret-read screen.** `screen.SecretPath` denies any tool-call path shaped
-like a live credential — `.env*`, `*_key*`, `id_rsa*`, `*.pem`,
-`~/.aws/**`, `~/.config/gh/**` — checked against every path-like argument of
+like a live credential - `.env*`, `*_key*`, `id_rsa*`, `*.pem`,
+`~/.aws/**`, `~/.config/gh/**` - checked against every path-like argument of
 every tool call, not just git's.
 
 **Guarded push.** `gitx.GuardedPush` refuses to push to a remote that is not
@@ -168,4 +168,4 @@ Every test gets its own `t.TempDir()`, `JIG_HOME` is always overridden via
 `t.Setenv` so a test run never touches a real machine's jig home, git author
 and committer identity and dates are pinned to a fixed fixture value so
 commits hash the same on every run, and every remote used in tests is a
-bare, file-path repo — no test ever talks to a real git host.
+bare, file-path repo - no test ever talks to a real git host.

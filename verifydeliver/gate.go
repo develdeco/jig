@@ -257,8 +257,8 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	return report, nil
 }
 
-// checkFrontier errors when any slice — including a fix slice raised by an
-// earlier gate round — is not yet green and early is false: a slice left
+// checkFrontier errors when any slice - including a fix slice raised by an
+// earlier gate round - is not yet green and early is false: a slice left
 // queued, stalled, needs-input, env-blocked or otherwise unfinished means
 // the delivery is incomplete, so gating (or publishing) now would review or
 // ship less than the whole ticket. --early skips the check entirely, for a
