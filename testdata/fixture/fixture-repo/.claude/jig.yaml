@@ -4,7 +4,7 @@ workspaces:
   - id: beta
     path: beta
 oracles:
-  test: "go test ./{path}/..."
+  test: "@GO test ./{path}/..."
 envs:
   rig:
     up: "@ENVTOOL up {port} @STATEFILE"

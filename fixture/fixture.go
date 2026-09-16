@@ -216,8 +216,9 @@ func rewriteJigYAML(t *testing.T, repoDir, envtoolBin, stateFile string, envFail
 		t.Fatalf("fixture: read jig.yaml: %v", err)
 	}
 	text := string(data)
-	text = strings.ReplaceAll(text, "@ENVTOOL", filepath.ToSlash(envtoolBin))
+	text = strings.ReplaceAll(text, "@ENVTOOL", quoteIfSpaced(filepath.ToSlash(envtoolBin)))
 	text = strings.ReplaceAll(text, "@STATEFILE", filepath.ToSlash(stateFile))
+	text = strings.ReplaceAll(text, "@GO", quoteIfSpaced(goBinaryPath()))
 
 	var m manifest.Manifest
 	if err := yaml.Unmarshal([]byte(text), &m); err != nil {
@@ -355,4 +356,13 @@ func commitAll(t *testing.T, dir, msg string) {
 // built with.
 func goBinaryPath() string {
 	return filepath.Join(runtime.GOROOT(), "bin", "go"+exeSuffix())
+}
+
+// quoteIfSpaced wraps a command path in double quotes when it contains a
+// space, so platform-shell command strings stay parseable.
+func quoteIfSpaced(p string) string {
+	if strings.Contains(p, " ") {
+		return "\"" + p + "\""
+	}
+	return p
 }
