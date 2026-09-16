@@ -64,3 +64,9 @@ build authority order: spec semantics; build-decision deltas win on v0.1 scope a
 - --yes IS the publish confirm (documented flag semantics); the fix threads the real confirm state to the push guard instead of a hardcoded true.
 - PR creation lands as an optional tracker capability (github adapter shells gh pr create); local/command trackers keep the PR body file as the artifact.
 - Divergence check lands lite: reconcile journals the integrated-diff file count and publish refuses an empty integration diff (stale-overwrite suspicion); the symbol-grep half stays deferred.
+
+## Phase G (docs & context engineering)
+- Token note: phase G = 3 sonnet agents (~281k). Skills: router 37L/2652B, intake 34L/2610B, fleet-liaison 24L/1003B, retro 24L/1234B, platform-sync 22L/995B — all within the §4.5 budget; lint asserts the constants.
+- `jig validate` prints a brief section-hash table so the intake skill can fill from_brief without a new CLI verb (the §4.14 surface stays exhaustive).
+- ARCHITECTURE.md's module table is drift-guarded by a lint test asserting every named package dir exists.
+- CLAUDE.md = "@AGENTS.md" (one content, two names); AGENTS.md is navigation pointers only.
