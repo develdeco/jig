@@ -51,6 +51,11 @@ func Requeue(d Deps, ticket string, fromBriefDiff bool) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("make: read slice state %s: %w", id, err)
 		}
+		if st.Question != "" {
+			if err := d.Store.Supersede(ticket, st.Question); err != nil {
+				return nil, fmt.Errorf("make: supersede question %s: %w", st.Question, err)
+			}
+		}
 		st.State = "queued"
 		st.Question = ""
 		st.Reason = ""
