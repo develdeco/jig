@@ -19,6 +19,7 @@ import (
 func cmdStatus(args []string, stdout io.Writer) int {
 	fs := newFlagSet("status")
 	storeFlag := fs.String("store", "", "explicit store path")
+	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -27,7 +28,7 @@ func cmdStatus(args []string, stdout io.Writer) int {
 		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
 	}
 
-	st, _, _, err := resolveStore(*storeFlag)
+	st, _, _, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

@@ -25,6 +25,7 @@ func cmdTicket(args []string, stdout io.Writer) int {
 	title := fs.String("title", "", "ticket title (required)")
 	body := fs.String("body", "", "ticket body")
 	storeFlag := fs.String("store", "", "explicit store path")
+	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if err := fs.Parse(rest); err != nil {
 		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
 	}
@@ -32,7 +33,7 @@ func cmdTicket(args []string, stdout io.Writer) int {
 		return renderErr(stdout, &axi.Error{Msg: "jig ticket new requires --title", Code: "VALIDATION_ERROR"})
 	}
 
-	st, cfg, _, err := resolveStore(*storeFlag)
+	st, cfg, _, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

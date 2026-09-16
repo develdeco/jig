@@ -33,6 +33,7 @@ var commandTable = []cmdSpec{
 		{"title", "ticket title (required)"},
 		{"body", "ticket body"},
 		{"store", "explicit store path"},
+		{"project", "project name, resolved via the machine mapping"},
 	}},
 	{"solve", "run the full chain: run, gate, publish", []flagSpec{
 		{"yes", "skip the interactive publish confirm"},
@@ -40,16 +41,19 @@ var commandTable = []cmdSpec{
 		{"backend", "session backend: fake, headless, or herdr"},
 		{"scenario", "scenario dir for the fake backend"},
 		{"store", "explicit store path"},
+		{"project", "project name, resolved via the machine mapping"},
 	}},
 	{"run", "dispatch the frontier of queued slices", []flagSpec{
 		{"answer", "answer a pending question: --answer <qid> <text>"},
 		{"backend", "session backend: fake, headless, or herdr"},
 		{"scenario", "scenario dir for the fake backend"},
 		{"store", "explicit store path"},
+		{"project", "project name, resolved via the machine mapping"},
 	}},
 	{"requeue", "requeue slices touched by a brief edit", []flagSpec{
 		{"from-brief-diff", "requeue slices whose brief section hash changed"},
 		{"store", "explicit store path"},
+		{"project", "project name, resolved via the machine mapping"},
 	}},
 	{"gate", "run a gate round over the ticket's branch", []flagSpec{
 		{"early", "gate before the frontier is fully green"},
@@ -58,16 +62,20 @@ var commandTable = []cmdSpec{
 		{"pr", "pr number (not implemented in v0.1)"},
 		{"scenario", "scenario dir for the fake gate source"},
 		{"store", "explicit store path"},
+		{"project", "project name, resolved via the machine mapping"},
 	}},
 	{"publish", "reconcile, revalidate, and open the PR", []flagSpec{
 		{"yes", "skip the interactive confirm"},
 		{"store", "explicit store path"},
+		{"project", "project name, resolved via the machine mapping"},
 	}},
 	{"status", "print a ticket's slice and question state", []flagSpec{
 		{"store", "explicit store path"},
+		{"project", "project name, resolved via the machine mapping"},
 	}},
 	{"validate", "check a ticket's brief, slices, and manifest", []flagSpec{
 		{"store", "explicit store path"},
+		{"project", "project name, resolved via the machine mapping"},
 	}},
 	{"_screen", "hidden PreToolUse hook: reads a tool call on stdin", nil},
 }
