@@ -50,3 +50,8 @@ build authority order: spec semantics; build-decision deltas win on v0.1 scope a
 - Token note: phase C = 4 sonnet agents (~527k subagent tokens); session, pool, envrun, graphify, board, tracker, fixture + full scenario tree green.
 - graphify Plane.Affected derives --graph <repo>/graphify-out/graph.json --depth 2 itself (contract signature carries no graph/depth params; digest defaults).
 - herdr backend computes /mnt/<drive> paths mechanically instead of shelling wslpath.
+
+## Phase D/E (pipeline + prove)
+- Token note: phase D = 4 sonnet agents (~961k subagent tokens). Phase E fixes in main loop (requeue/supersede). Fresh uncached suite: 21 packages green, e2e ~163s, twice-consecutive e2e asserted inside TestEndToEndTwice.
+- Slice work files (slice.json/result.json) live under the store ticket dir (work/), not the lease — the fake backend's `git add -A` must never sweep dispatch plumbing into slice commits.
+- Gate/publish leases FETCH jig/<ticket> from the build lease directory (a local-path fetch); the branch reaches origin only at publish step 5 after the confirm. Keeps the never-push rule intact across separate pool clones.
