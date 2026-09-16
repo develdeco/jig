@@ -93,7 +93,17 @@ func isAbsPath(s string) bool {
 	if filepath.IsAbs(s) {
 		return true
 	}
-	return strings.HasPrefix(s, "/")
+	if strings.HasPrefix(s, "/") {
+		return true
+	}
+	// A Windows drive path is a local path shape on any host OS (a machine
+	// mapping may carry paths recorded on another machine); it is never a
+	// network remote.
+	if len(s) >= 3 && s[1] == ':' && (s[2] == '\\' || s[2] == '/') &&
+		(('A' <= s[0] && s[0] <= 'Z') || ('a' <= s[0] && s[0] <= 'z')) {
+		return true
+	}
+	return false
 }
 
 // pushRefusedCode is the axi.Error code returned by GuardedPush when it

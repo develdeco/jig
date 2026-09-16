@@ -28,6 +28,11 @@ type Repo struct {
 func (r Repo) Name() string {
 	s := strings.TrimSuffix(r.Remote, "/")
 	s = strings.TrimSuffix(s, "\\")
+	// A remote may be a Windows drive path recorded on another machine, so
+	// split on both separators regardless of the host OS.
+	if i := strings.LastIndexAny(s, "/\\"); i >= 0 {
+		s = s[i+1:]
+	}
 	base := filepath.Base(s)
 	return strings.TrimSuffix(base, ".git")
 }
