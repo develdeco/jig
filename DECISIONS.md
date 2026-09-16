@@ -55,3 +55,12 @@ build authority order: spec semantics; build-decision deltas win on v0.1 scope a
 - Token note: phase D = 4 sonnet agents (~961k subagent tokens). Phase E fixes in main loop (requeue/supersede). Fresh uncached suite: 21 packages green, e2e ~163s, twice-consecutive e2e asserted inside TestEndToEndTwice.
 - Slice work files (slice.json/result.json) live under the store ticket dir (work/), not the lease — the fake backend's `git add -A` must never sweep dispatch plumbing into slice commits.
 - Gate/publish leases FETCH jig/<ticket> from the build lease directory (a local-path fetch); the branch reaches origin only at publish step 5 after the confirm. Keeps the never-push rule intact across separate pool clones.
+
+## Phase F (adversarial review — triage)
+- Token note: phase F review = 3 opus lenses (~394k); 37 findings (18 must-fix, 19 worth-considering); fixes = 3 sonnet agents.
+- Kept per §1 precedence (reviewed, not bugs): the invariant-floor regex stays the delta-log-verbatim form (no word boundaries, literal single spaces, reduced alternative set) — port-fidelity lens flagged the predecessor's richer regex, but the delta log wins on v0.1 contracts.
+- Kept (already-logged scope cuts): reconcile-conflict fix-slice tier (v0.1 aborts with a structured error); pushed-branch publish flow beyond the reconcile policy itself (squash refusal makes it unreachable — known limit, documented in phase G).
+- Kept: staircase signals measure the cumulative lease diff (predecessor measured diff-vs-master, equally cumulative); headless backend's exactly-one-block text parse is the delta-log rule, risk noted for transcripts containing stray fences.
+- --yes IS the publish confirm (documented flag semantics); the fix threads the real confirm state to the push guard instead of a hardcoded true.
+- PR creation lands as an optional tracker capability (github adapter shells gh pr create); local/command trackers keep the PR body file as the artifact.
+- Divergence check lands lite: reconcile journals the integrated-diff file count and publish refuses an empty integration diff (stale-overwrite suspicion); the symbol-grep half stays deferred.
