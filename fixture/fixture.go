@@ -149,6 +149,10 @@ func buildStore(t *testing.T, storeDir, testdataDir, repoRemote string) {
 	if err := os.MkdirAll(filepath.Join(storeDir, "platform"), 0o755); err != nil {
 		t.Fatalf("fixture: create platform dir: %v", err)
 	}
+	// Mirrors project.InitStandalone's store-root .gitignore: store.Lock's
+	// sidecar "*.lock" files and store.AtomicWrite's ".*.tmp" scratch files
+	// must never show up as untracked/dirty in a fixture store either.
+	writeFile(t, filepath.Join(storeDir, ".gitignore"), []byte("*.lock\n.*.tmp\n"))
 
 	briefSrc, err := os.ReadFile(filepath.Join(testdataDir, "brief.md"))
 	if err != nil {

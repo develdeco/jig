@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/develdeco/jig/axi"
@@ -35,11 +36,12 @@ func cmdSolve(args []string, stdout io.Writer) int {
 	backendFlag := fs.String("backend", "", "session backend: fake, headless, or herdr")
 	scenario := fs.String("scenario", "", "scenario dir for the fake backend")
 	storeFlag := fs.String("store", "", "explicit store path")
+	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if err := fs.Parse(rest1); err != nil {
 		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
 	}
 
-	st, cfg, mp, err := resolveStore(*storeFlag)
+	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -60,11 +62,13 @@ func cmdSolve(args []string, stdout io.Writer) int {
 		return printRunReport(stdout, st, ticket, report)
 	}
 
+	var lastVerdict string
 	for round := 0; round < maxSolveRounds; round++ {
 		gr, err := verifydeliver.Gate(vdeps, src, verifydeliver.GateOpts{Ticket: ticket})
 		if err != nil {
 			return renderErr(stdout, err)
 		}
+		lastVerdict = gr.Verdict
 		if gr.Verdict == "clean" {
 			break
 		}
@@ -76,6 +80,9 @@ func cmdSolve(args []string, stdout io.Writer) int {
 		if code := reportExitCode(report); code != 0 {
 			return printRunReport(stdout, st, ticket, report)
 		}
+	}
+	if err := solveShouldPublish(lastVerdict); err != nil {
+		return renderErr(stdout, err)
 	}
 
 	pdeps := vdeps
@@ -97,14 +104,31 @@ func cmdSolve(args []string, stdout io.Writer) int {
 }
 
 // reportExitCode mirrors printRunReport's exit-code logic without printing,
-// so cmdSolve can decide whether to stop the chain before rendering.
+// so cmdSolve can decide whether to stop the chain before rendering. A
+// non-empty Stalled or EnvBlocked table means the ticket is not actually
+// done even when this call's Stopped flag is false (e.g. a slice left
+// stalled or env-blocked by an earlier invocation, not this one).
 func reportExitCode(report makepkg.RunReport) int {
 	switch {
 	case report.PendingQuestion != "":
 		return 2
-	case report.Stopped:
+	case report.Stopped, len(report.Stalled) > 0, len(report.EnvBlocked) > 0:
 		return 1
 	default:
 		return 0
+	}
+}
+
+// solveShouldPublish gates the fall-through to Publish on the gate/fix-slice
+// loop's last verdict: only "clean" permits it. Exhausting maxSolveRounds
+// without ever reaching clean must hand back to the human, not ship
+// unresolved must-fix work.
+func solveShouldPublish(lastVerdict string) error {
+	if lastVerdict == "clean" {
+		return nil
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("gate still returning %q after %d rounds; not publishing", lastVerdict, maxSolveRounds),
+		Code: "GATE_ROUNDS_EXHAUSTED",
 	}
 }

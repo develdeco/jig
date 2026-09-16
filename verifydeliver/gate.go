@@ -140,15 +140,26 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 
 	repo, repoName, target := primaryRepo(d.Cfg)
 	branch := ticketBranch(ticket)
+	// --branch: validate a hand-written branch fetched from origin instead
+	// of the ticket's own jig/<ticket>. Its spec axis reads opts.BriefDoc
+	// instead of the brief; report.yaml's shape stays fixed by contract to
+	// {round,verdict,model,target_sha} (BriefDoc is not recorded there), but
+	// the doc's content is copied into this round's own
+	// gate/round-<n>/spec-input.md so the spec-axis-input swap is real
+	// rather than an accepted, no-op flag.
+	var briefDocContent []byte
 	if o.Branch != "" {
-		// --branch: validate a hand-written branch fetched from origin
-		// instead of the ticket's own jig/<ticket>. Its spec axis reads
-		// opts.BriefDoc instead of the brief; v0.1 runs no AI axes in fake
-		// mode regardless, so BriefDoc has nothing to feed here yet beyond
-		// this note. NOTE: closest working version — report.yaml's shape
-		// is fixed by contract to {round,verdict,model,target_sha}, so
-		// BriefDoc is not recorded on disk pending a v0.2 report field.
 		branch = o.Branch
+		if o.BriefDoc != "" {
+			data, err := os.ReadFile(o.BriefDoc)
+			if err != nil {
+				return GateReport{}, &axi.Error{
+					Msg:  fmt.Sprintf("brief doc %q is set but unreadable: %v", o.BriefDoc, err),
+					Code: "BRIEF_DOC_MISSING",
+				}
+			}
+			briefDocContent = data
+		}
 	}
 	leaseKey := ticket + "-gate"
 	lease, err := pool.Acquire(repoName, repo.Remote, target, branch, leaseKey)
@@ -233,6 +244,12 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		}
 	}
 
+	if briefDocContent != nil {
+		if err := os.WriteFile(filepath.Join(roundDir, "spec-input.md"), briefDocContent, 0o644); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: write spec-input.md: %w", err)
+		}
+	}
+
 	if err := d.Store.Push(fmt.Sprintf("%s: gate round %d %s", ticket, n, report.Verdict)); err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: push store: %w", err)
 	}
@@ -240,25 +257,25 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	return report, nil
 }
 
-// checkFrontier errors when a queued, non-fix slice remains and early is
-// false: the frontier loop has not finished, so gating now would review an
-// incomplete delivery.
+// checkFrontier errors when any slice — including a fix slice raised by an
+// earlier gate round — is not yet green and early is false: a slice left
+// queued, stalled, needs-input, env-blocked or otherwise unfinished means
+// the delivery is incomplete, so gating (or publishing) now would review or
+// ship less than the whole ticket. --early skips the check entirely, for a
+// deliberate mid-ticket milestone batch.
 func checkFrontier(d Deps, ticket string, slices []store.Slice, early bool) error {
 	if early {
 		return nil
 	}
 	for _, s := range slices {
-		if s.FromGate != 0 {
-			continue
-		}
 		st, err := d.Store.ReadSliceState(ticket, s.ID)
 		if err != nil {
 			return fmt.Errorf("verifydeliver: gate: read slice %s state: %w", s.ID, err)
 		}
-		if st.State == "queued" {
+		if st.State != "green" {
 			return &axi.Error{
-				Msg:  fmt.Sprintf("slice %s is still queued; run `jig run %s` first or pass --early", s.ID, ticket),
-				Code: "FRONTIER_NOT_EMPTY",
+				Msg:  fmt.Sprintf("slice %s is %s, not green; run `jig run %s` first or pass --early", s.ID, st.State, ticket),
+				Code: "GATE_NOT_GREEN",
 				Help: []string{fmt.Sprintf("Run `jig run %s` to finish the frontier, or `jig gate %s --early` to review anyway.", ticket, ticket)},
 			}
 		}

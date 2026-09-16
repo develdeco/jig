@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/develdeco/jig/envrun"
@@ -245,14 +246,23 @@ func buildReport(st *store.Store, ticket string, slices []store.Slice, stopped b
 			break
 		}
 	}
+
+	// A ticket that ends this call with any stalled slice is not green,
+	// whether or not the stall fired during this call: a re-run that finds
+	// an already-stalled slice sitting outside the frontier (so this call's
+	// own rc.stopped never gets set) must still report Stopped, or a script
+	// chaining `jig run && jig gate && jig publish` proceeds on it.
+	if len(report.Stalled) > 0 && !report.Stopped {
+		report.Stopped = true
+		report.StopReason = fmt.Sprintf("stall: slice(s) %s already stalled", strings.Join(report.Stalled, ", "))
+	}
 	return report, nil
 }
 
 // runCtx carries the state one Run call shares across its concurrent repo
 // groups: the stall counter (run-scoped, per the contract), the halt flag a
 // stall raises, and the first infrastructure error seen. Every field below
-// mu is guarded by it; the store/journal/session calls each do their own
-// locking and need no additional guard here.
+// mu is guarded by it.
 type runCtx struct {
 	d           Deps
 	ticket      string
@@ -267,6 +277,14 @@ type runCtx struct {
 	stopped    bool // report as Stopped (stall or attempt-cap)
 	stopReason string
 	err        error
+
+	// storeMu serializes every Store/Journal/Push/question call this run
+	// makes: the store itself takes no lock of its own for these, and
+	// concurrent repo-group goroutines (see Run's per-group fan-out) would
+	// otherwise race on it — e.g. two slices' NextQuestionID+WriteQuestion
+	// sequences interleaving into the same question id. It guards call
+	// duration only, never held across an rc.mu-guarded section.
+	storeMu sync.Mutex
 }
 
 func (rc *runCtx) isHalted() bool {
@@ -301,23 +319,53 @@ func (rc *runCtx) fail(err error) {
 }
 
 func (rc *runCtx) journal(l journal.Line) {
-	if err := rc.d.Journal(l); err != nil {
+	rc.storeMu.Lock()
+	err := rc.d.Journal(l)
+	rc.storeMu.Unlock()
+	if err != nil {
 		rc.fail(fmt.Errorf("make: journal %s: %w", l.Event, err))
 	}
 }
 
 func (rc *runCtx) push(sliceID, state string) {
-	if err := rc.d.Store.Push(fmt.Sprintf("%s: slice %s %s", rc.ticket, sliceID, state)); err != nil {
+	rc.storeMu.Lock()
+	err := rc.d.Store.Push(fmt.Sprintf("%s: slice %s %s", rc.ticket, sliceID, state))
+	rc.storeMu.Unlock()
+	if err != nil {
 		rc.fail(fmt.Errorf("make: push: %w", err))
 	}
 }
 
 func (rc *runCtx) writeState(sliceID string, st store.SliceState) bool {
-	if err := rc.d.Store.WriteSliceState(rc.ticket, sliceID, st); err != nil {
+	rc.storeMu.Lock()
+	err := rc.d.Store.WriteSliceState(rc.ticket, sliceID, st)
+	rc.storeMu.Unlock()
+	if err != nil {
 		rc.fail(fmt.Errorf("make: write slice state %s: %w", sliceID, err))
 		return false
 	}
 	return true
+}
+
+// readSliceState reads sliceID's state, serialized against every other
+// store/journal/question write and Push this run makes (see storeMu).
+func (rc *runCtx) readSliceState(sliceID string) (store.SliceState, error) {
+	rc.storeMu.Lock()
+	defer rc.storeMu.Unlock()
+	return rc.d.Store.ReadSliceState(rc.ticket, sliceID)
+}
+
+// writeNewQuestion allocates the next question id and writes q under it,
+// holding storeMu across both steps so two concurrent repo groups can never
+// allocate and write the same id.
+func (rc *runCtx) writeNewQuestion(sliceID, body string) (string, error) {
+	rc.storeMu.Lock()
+	defer rc.storeMu.Unlock()
+	qid := rc.d.Store.NextQuestionID(rc.ticket)
+	if err := rc.d.Store.WriteQuestion(rc.ticket, store.Question{ID: qid, Slice: sliceID, Status: "open", Body: body}); err != nil {
+		return "", err
+	}
+	return qid, nil
 }
 
 // processSlice runs exactly one attempt of sl: acquire the lease, bring up
@@ -346,16 +394,17 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	ws, _ := m.Workspace(sl.Workspace)
 
 	if sl.Env != "" {
-		if !rc.bringUpEnv(sl, m, lease) {
+		h, ok := rc.bringUpEnv(sl, m, lease)
+		if !ok {
 			return
 		}
-		defer rc.tearDownEnv(sl, m, lease)
+		defer rc.tearDownEnv(sl, h)
 	}
 
 	sig := measureSignals(lease.Dir, startSHA)
 	model := staircase.Select(d.Rungs, sig)
 
-	st, err := d.Store.ReadSliceState(ticket, sl.ID)
+	st, err := rc.readSliceState(sl.ID)
 	if err != nil {
 		rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
 		return
@@ -420,7 +469,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		return
 	}
 
-	rc.route(sl, lease, attempt, res)
+	rc.route(sl, lease, attempt, res, startSHA)
 }
 
 // ensureStartSHA writes <ticket>/start.<repoName>.sha the first time this
@@ -461,28 +510,34 @@ func trimSHA(data []byte) string {
 }
 
 // bringUpEnv brings sl's env class up in lease, routing an Unavailable
-// failure to the env-blocked state. It reports whether dispatch may
-// proceed.
-func (rc *runCtx) bringUpEnv(sl store.Slice, m manifest.Manifest, lease pool.Lease) bool {
+// failure to the env-blocked state. It returns the *envrun.Handle Up
+// allocated (nil when dispatch may not proceed) so the caller's deferred
+// tearDownEnv tears down the exact instance that came up — in particular
+// the exact port Up allocated, not a guessed or zero one — and whether
+// dispatch may proceed.
+func (rc *runCtx) bringUpEnv(sl store.Slice, m manifest.Manifest, lease pool.Lease) (*envrun.Handle, bool) {
 	ec, ok := m.Envs[sl.Env]
 	if !ok {
 		// NOTE: a slice naming an env class the manifest never declares is a
 		// brief/slices.yaml authoring error, not a runtime outcome; treat it
 		// as an infrastructure failure rather than guessing a policy.
 		rc.fail(fmt.Errorf("make: slice %s names undeclared env class %q", sl.ID, sl.Env))
-		return false
+		return nil, false
 	}
 
-	_, err := envrun.Up(ec, rc.ticket, lease.Dir)
+	h, err := envrun.Up(ec, rc.ticket, lease.Dir)
 	if err == nil {
 		rc.journal(journal.Line{Slice: sl.ID, Event: "env-up"})
-		return !rc.isHalted()
+		if rc.isHalted() {
+			return nil, false
+		}
+		return h, true
 	}
 
 	var unavail *envrun.Unavailable
 	if !errors.As(err, &unavail) {
 		rc.fail(fmt.Errorf("make: env up for %s: %w", sl.ID, err))
-		return false
+		return nil, false
 	}
 
 	policyOutcome := unavail.Policy
@@ -491,38 +546,37 @@ func (rc *runCtx) bringUpEnv(sl store.Slice, m manifest.Manifest, lease pool.Lea
 	}
 	rc.journal(journal.Line{Slice: sl.ID, Event: "env-unavailable", Outcome: policyOutcome})
 
-	st, rerr := rc.d.Store.ReadSliceState(rc.ticket, sl.ID)
+	st, rerr := rc.readSliceState(sl.ID)
 	if rerr != nil {
 		rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, rerr))
-		return false
+		return nil, false
 	}
 	st.State = "env-blocked"
 	st.Reason = "env-up-failed"
 	if !rc.writeState(sl.ID, st) {
-		return false
+		return nil, false
 	}
 	rc.push(sl.ID, "env-blocked")
-	return false
+	return nil, false
 }
 
-// tearDownEnv brings sl's already-up env class back down; this is a
-// deferred cleanup so it runs whatever the dispatch's outcome was.
-func (rc *runCtx) tearDownEnv(sl store.Slice, m manifest.Manifest, lease pool.Lease) {
-	ec := m.Envs[sl.Env]
-	h := &envrun.Handle{Class: ec, Ticket: rc.ticket, Dir: lease.Dir}
+// tearDownEnv brings h, sl's already-up env class instance, back down; this
+// is a deferred cleanup so it runs whatever the dispatch's outcome was. h
+// must be the *envrun.Handle bringUpEnv returned, so Down substitutes the
+// same port Up allocated rather than a fabricated zero value.
+func (rc *runCtx) tearDownEnv(sl store.Slice, h *envrun.Handle) {
 	_ = h.Down()
 	rc.journal(journal.Line{Slice: sl.ID, Event: "env-down"})
 }
 
 // route applies step 9 of the algorithm: it turns one dispatch's parsed
 // result into the slice's next state, journaling and pushing as it goes.
-func (rc *runCtx) route(sl store.Slice, lease pool.Lease, attempt int, res outcome.Result) {
-	d := rc.d
-	ticket := rc.ticket
-
+// startSHA is the ticket/repo's recorded fork point, passed through to
+// verifyGreen so a claimed-green commit can be checked against it.
+func (rc *runCtx) route(sl store.Slice, lease pool.Lease, attempt int, res outcome.Result, startSHA string) {
 	if res.Outcome == outcome.Green {
-		if reason, ok := verifyGreen(lease.Dir, res); ok {
-			st, err := d.Store.ReadSliceState(ticket, sl.ID)
+		if reason, ok := verifyGreen(lease.Dir, startSHA, res); ok {
+			st, err := rc.readSliceState(sl.ID)
 			if err != nil {
 				rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
 				return
@@ -552,18 +606,32 @@ func (rc *runCtx) route(sl store.Slice, lease pool.Lease, attempt int, res outco
 	}
 }
 
-// verifyGreen checks a claimed-green result against the lease on disk: its
-// commit must exist there, and every declared artifact must exist under it.
-func verifyGreen(leaseDir string, res outcome.Result) (reason string, ok bool) {
+// verifyGreen checks a claimed-green result against the lease on disk: the
+// commit must exist there, be new (a descendant of startSHA, the run's
+// recorded fork point — not startSHA itself) and reachable from HEAD, and
+// every declared artifact must exist inside the commit's tree (checked with
+// `git cat-file -e <commit>:<path>`, never the worktree, since an
+// uncommitted scratch file must not satisfy it).
+func verifyGreen(leaseDir, startSHA string, res outcome.Result) (reason string, ok bool) {
 	if res.Commit == "" {
 		return "commit missing", false
+	}
+	if res.Commit == startSHA {
+		return "commit is the run's start sha: no new work", false
 	}
 	if _, err := gitx.Run(leaseDir, "cat-file", "-e", res.Commit+"^{commit}"); err != nil {
 		return fmt.Sprintf("commit %s not found in lease", res.Commit), false
 	}
+	if _, err := gitx.Run(leaseDir, "merge-base", "--is-ancestor", startSHA, res.Commit); err != nil {
+		return fmt.Sprintf("commit %s is not a descendant of start sha %s", res.Commit, startSHA), false
+	}
+	if _, err := gitx.Run(leaseDir, "merge-base", "--is-ancestor", res.Commit, "HEAD"); err != nil {
+		return fmt.Sprintf("commit %s is not reachable from HEAD", res.Commit), false
+	}
 	for _, a := range res.Artifacts {
-		if _, err := os.Stat(filepath.Join(leaseDir, a)); err != nil {
-			return fmt.Sprintf("artifact %s missing", a), false
+		path := filepath.ToSlash(a)
+		if _, err := gitx.Run(leaseDir, "cat-file", "-e", res.Commit+":"+path); err != nil {
+			return fmt.Sprintf("artifact %s missing at commit %s", a, res.Commit), false
 		}
 	}
 	return "", true
@@ -581,13 +649,13 @@ func (rc *runCtx) routeQuestion(sl store.Slice, attempt int, res outcome.Result)
 		reason = "flawed-brief"
 	}
 
-	qid := d.Store.NextQuestionID(ticket)
-	if err := d.Store.WriteQuestion(ticket, store.Question{ID: qid, Slice: sl.ID, Status: "open", Body: body}); err != nil {
+	qid, err := rc.writeNewQuestion(sl.ID, body)
+	if err != nil {
 		rc.fail(fmt.Errorf("make: write question for %s: %w", sl.ID, err))
 		return
 	}
 
-	st, err := d.Store.ReadSliceState(ticket, sl.ID)
+	st, err := rc.readSliceState(sl.ID)
 	if err != nil {
 		rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
 		return
@@ -605,10 +673,7 @@ func (rc *runCtx) routeQuestion(sl store.Slice, attempt int, res outcome.Result)
 }
 
 func (rc *runCtx) routeBlockedByEnv(sl store.Slice, attempt int) {
-	d := rc.d
-	ticket := rc.ticket
-
-	st, err := d.Store.ReadSliceState(ticket, sl.ID)
+	st, err := rc.readSliceState(sl.ID)
 	if err != nil {
 		rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
 		return
@@ -623,16 +688,16 @@ func (rc *runCtx) routeBlockedByEnv(sl store.Slice, attempt int) {
 }
 
 func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) {
-	d := rc.d
-	ticket := rc.ticket
-
-	sig := outcome.Signature("slice", res.Outcome, res.Summary)
+	// The signature's unit is the slice, not the fixed literal "slice": two
+	// different slices failing once each with the same outcome/summary must
+	// not collide into a shared stall count.
+	sig := outcome.Signature(sl.ID, res.Outcome, res.Summary)
 	rc.mu.Lock()
 	_, stalled := rc.stall.Observe(sig, false)
 	rc.mu.Unlock()
 
 	if stalled {
-		st, err := d.Store.ReadSliceState(ticket, sl.ID)
+		st, err := rc.readSliceState(sl.ID)
 		if err != nil {
 			rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
 			return
@@ -661,7 +726,7 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 	}
 
 	if attempt >= rc.maxAttempts {
-		st, err := d.Store.ReadSliceState(ticket, sl.ID)
+		st, err := rc.readSliceState(sl.ID)
 		if err != nil {
 			rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
 			return
@@ -685,7 +750,7 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 	}
 
 	// Retry: back to queued, attempts kept.
-	st, err := d.Store.ReadSliceState(ticket, sl.ID)
+	st, err := rc.readSliceState(sl.ID)
 	if err != nil {
 		rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
 		return

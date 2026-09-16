@@ -25,11 +25,12 @@ func cmdRun(args []string, stdout io.Writer) int {
 	backendFlag := fs.String("backend", "", "session backend: fake, headless, or herdr")
 	scenario := fs.String("scenario", "", "scenario dir for the fake backend")
 	storeFlag := fs.String("store", "", "explicit store path")
+	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if err := fs.Parse(rest1); err != nil {
 		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
 	}
 
-	st, cfg, mp, err := resolveStore(*storeFlag)
+	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -56,11 +57,12 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 	fs := newFlagSet("requeue")
 	fromBriefDiff := fs.Bool("from-brief-diff", false, "requeue slices whose brief section hash changed")
 	storeFlag := fs.String("store", "", "explicit store path")
+	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if err := fs.Parse(rest); err != nil {
 		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
 	}
 
-	st, cfg, mp, err := resolveStore(*storeFlag)
+	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -98,7 +100,7 @@ func printRunReport(stdout io.Writer, st *store.Store, ticket string, report mak
 	switch {
 	case report.PendingQuestion != "":
 		return 2
-	case report.Stopped:
+	case report.Stopped, len(report.Stalled) > 0, len(report.EnvBlocked) > 0:
 		return 1
 	default:
 		return 0

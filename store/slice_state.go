@@ -17,9 +17,12 @@ type SliceState struct {
 	Reason   string `yaml:"reason,omitempty"`   // e.g. "attempt-cap", "stall", "env-up-failed"
 }
 
-// stateFile returns the on-disk path for a slice's state record.
+// stateFile returns the on-disk path for a slice's state record: spec §08's
+// "<ticket>/slices/<id>.state" (YAML content, ".state" extension). This is
+// the single place that constructs the path; every reader/writer of slice
+// state goes through it.
 func (s *Store) stateFile(ticket, slice string) string {
-	return filepath.Join(s.TicketDir(ticket), "state", slice+".yaml")
+	return filepath.Join(s.TicketDir(ticket), "slices", slice+".state")
 }
 
 // ReadSliceState reads the slice state; an absent file reads as the

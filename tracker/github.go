@@ -116,6 +116,23 @@ func (a *githubAdapter) Mint(d Draft) (string, error) {
 	return "#" + m[1], nil
 }
 
+// CreatePR implements tracker.PRCreator: it opens a GitHub pull request for
+// head against base via `gh pr create`, invoked as argv (never through a
+// shell, same as every other gh call this adapter makes), and returns the
+// PR's URL parsed from the last line of gh's stdout.
+func (a *githubAdapter) CreatePR(head, base, title, bodyFile string) (string, error) {
+	out, err := a.run("pr", "create", "--repo", a.repoSpec(), "--title", title, "--body-file", bodyFile, "--base", base, "--head", head)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	url := strings.TrimSpace(lines[len(lines)-1])
+	if url == "" {
+		return "", fmt.Errorf("tracker: gh pr create: could not parse PR url from %q", out)
+	}
+	return url, nil
+}
+
 // Comment posts body as a comment on ticketID.
 func (a *githubAdapter) Comment(ticketID string, body string) error {
 	n, err := issueNumber(ticketID)

@@ -15,6 +15,7 @@ import (
 	"github.com/develdeco/jig/journal"
 	"github.com/develdeco/jig/manifest"
 	"github.com/develdeco/jig/pool"
+	"github.com/develdeco/jig/project"
 	"github.com/develdeco/jig/store"
 	"github.com/develdeco/jig/tracker"
 )
@@ -30,6 +31,7 @@ type PublishReport struct {
 	Tier     string            // none|oracles-only
 	Squashed map[string]string // repo -> squash commit sha
 	PRBody   map[string]string // repo -> store-relative pr body path
+	PRURL    map[string]string // repo -> opened PR url; empty when the tracker adapter has no PRCreator
 }
 
 // stdinConfirm reads one line from stdin for the interactive publish
@@ -40,12 +42,41 @@ var stdinConfirm = func() (string, error) {
 	return strings.TrimSpace(line), err
 }
 
+// guardedPush pushes branch to origin, refusing a non-local remote without
+// confirmation. It is a func var (defaulting to gitx.GuardedPush) so tests
+// can intercept the call and assert what confirmation value Publish
+// actually threads through, without needing a real non-local remote.
+var guardedPush = gitx.GuardedPush
+
 // Publish reconciles, re-validates, documents, squashes, and routes one
 // ticket's delivery. v0.1 handles a single repo.
 func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 	ticket := o.Ticket
 	if err := d.Store.Sync(); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: sync store: %w", err)
+	}
+
+	// Precondition: every slice must be green (the same frontier check gate
+	// applies before it will even review), and the latest gate round must
+	// have returned a clean verdict. Without this, publish can squash and
+	// push a ticket whose last review found must-fix work still open.
+	slices, err := d.Store.ReadSlices(ticket)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read slices: %w", err)
+	}
+	if err := checkFrontier(d, ticket, slices, false); err != nil {
+		return PublishReport{}, err
+	}
+	gateRep, err := latestGateReport(d.Store, ticket)
+	if err != nil {
+		return PublishReport{}, err
+	}
+	if gateRep.Verdict != "clean" {
+		return PublishReport{}, &axi.Error{
+			Msg:  fmt.Sprintf("latest gate round for %s returned %q, not clean", ticket, gateRep.Verdict),
+			Code: "PUBLISH_NOT_CLEAN",
+			Help: []string{fmt.Sprintf("Run `jig gate %s` until it reports clean before publishing.", ticket)},
+		}
 	}
 
 	repo, repoName, target := primaryRepo(d.Cfg)
@@ -66,8 +97,11 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: "reconcile", Outcome: policy}); err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal reconcile: %w", err)
+	if err := recordAndCheckDivergence(d, ticket, lease.Dir, target, policy); err != nil {
+		return PublishReport{}, err
+	}
+	if err := checkNonEmptyRange(lease.Dir, target); err != nil {
+		return PublishReport{}, err
 	}
 
 	man, err := manifest.Resolve(lease.Dir)
@@ -81,10 +115,6 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 		return PublishReport{}, err
 	}
 
-	slices, err := d.Store.ReadSlices(ticket)
-	if err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read slices: %w", err)
-	}
 	questions, err := d.Store.ReadQuestions(ticket)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read questions: %w", err)
@@ -145,6 +175,12 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 		return PublishReport{}, err
 	}
 
+	// confirmed tracks whether an actual publish confirmation ran: --yes
+	// stands in for it, or an interactive "y"/"yes" answer does. A decline
+	// stops cleanly here — nothing is pushed. This is the only value ever
+	// passed to guardedPush; it is never hardcoded to true, so a non-local
+	// remote with no confirmation is refused by the gitx guard downstream.
+	confirmed := o.Yes
 	if !o.Yes {
 		fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
 		answer, _ := stdinConfirm()
@@ -152,9 +188,10 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 		if answer != "y" && answer != "yes" {
 			return PublishReport{}, &axi.Error{Msg: "publish declined at confirmation", Code: "PUBLISH_DECLINED"}
 		}
+		confirmed = true
 	}
 
-	if err := gitx.GuardedPush(lease.Dir, "origin", branch, true); err != nil {
+	if err := guardedPush(lease.Dir, "origin", branch, confirmed); err != nil {
 		return PublishReport{}, err
 	}
 
@@ -162,17 +199,20 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: build tracker adapter: %w", err)
 	}
-	// NOTE: for a github-tracker project, the contract calls for `gh pr
-	// create` here; tracker.Adapter (Mint/Project/Comment) has no
-	// PR-creation method to shell that through, so for every tracker kind
-	// the PR body file above remains the artifact of record, same as
-	// local/command. Closest working version pending an Adapter extension.
+	prURL := ""
+	if creator, ok := adapter.(tracker.PRCreator); ok {
+		url, err := creator.CreatePR(branch, target, title, filepath.Join(d.Store.Root, prPath))
+		if err != nil {
+			return PublishReport{}, fmt.Errorf("verifydeliver: publish: create PR: %w", err)
+		}
+		prURL = url
+	}
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: "pr"}); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 	}
 
 	// Step 6: route.
-	if err := route(d.Store, adapter, ticket, consolidated, slices, lastRound); err != nil {
+	if err := route(d.Cfg, d.Store, adapter, ticket, slices); err != nil {
 		return PublishReport{}, err
 	}
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: "route"}); err != nil {
@@ -189,6 +229,7 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 		Tier:     tier,
 		Squashed: map[string]string{repoName: sha},
 		PRBody:   map[string]string{repoName: prPath},
+		PRURL:    map[string]string{repoName: prURL},
 	}, nil
 }
 
@@ -243,6 +284,69 @@ func revalidate(d Deps, ticket, repoName, target, leaseDir string, man manifest.
 	return "oracles-only", nil
 }
 
+// divergenceFileCount returns how many files differ between HEAD and
+// origin/target after reconcile, using the triple-dot form (relative to
+// their merge base) so a merge-policy reconcile is measured the same way as
+// a rebase one.
+func divergenceFileCount(dir, target string) (int, error) {
+	out, err := gitx.Run(dir, "diff", "--name-only", "origin/"+target+"...HEAD")
+	if err != nil {
+		return 0, fmt.Errorf("verifydeliver: publish: diff origin/%s...HEAD: %w", target, err)
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return 0, nil
+	}
+	return len(strings.Split(out, "\n")), nil
+}
+
+// recordAndCheckDivergence journals the reconcile step's outcome as
+// "<policy>:<n>-files" and refuses with PUBLISH_NO_DIVERGENCE when the
+// reconciled branch has no diff against the target at all: a conflict-free
+// integration that changes nothing is an ownership-aware divergence
+// failure — the target already carries the same content, so publishing
+// would silently keep whatever this ticket's slices actually changed.
+func recordAndCheckDivergence(d Deps, ticket, dir, target, policy string) error {
+	n, err := divergenceFileCount(dir, target)
+	if err != nil {
+		return err
+	}
+	outcome := fmt.Sprintf("%s:%d-files", policy, n)
+	if err := journal.Append(d.Store, ticket, journal.Line{Event: "reconcile", Outcome: outcome}); err != nil {
+		return fmt.Errorf("verifydeliver: publish: journal reconcile: %w", err)
+	}
+	if n == 0 {
+		return &axi.Error{
+			Msg:  "integration produced no change against the target — stale-overwrite suspicion",
+			Code: "PUBLISH_NO_DIVERGENCE",
+		}
+	}
+	return nil
+}
+
+// checkNonEmptyRange refuses to publish when the reconciled branch has no
+// commits beyond origin/target: an all-green ticket whose slices never
+// landed a commit, or a re-publish after the branch already squashed onto
+// the target, has nothing left to squash. Checked up front, before any of
+// the doc/evidence store writes further down Publish.
+func checkNonEmptyRange(dir, target string) error {
+	start, err := gitx.MergeBase(dir, "origin/"+target, "HEAD")
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: merge-base origin/%s HEAD: %w", target, err)
+	}
+	commits, err := gitx.CommitsIn(dir, start+"..HEAD")
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: list %s..HEAD: %w", start, err)
+	}
+	if len(commits) == 0 {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("nothing to publish: no commits beyond origin/%s", target),
+			Code: "NOTHING_TO_PUBLISH",
+		}
+	}
+	return nil
+}
+
 // squash refuses to publish a range that already reached a remote branch,
 // then collapses start..HEAD into one commit on the ticket branch. The
 // squash base is merge-base(origin/target, HEAD) computed here at squash
@@ -283,11 +387,58 @@ func squash(leaseDir, target, ticket, title string) (string, error) {
 	return gitx.RevParse(leaseDir, "HEAD")
 }
 
+// defaultRoutes is the spec's default routing map, used for any key cfg's
+// own project.yaml routes: block does not declare: pr.description is just
+// the consolidated changelog; pr.comments and ticket.comments are the
+// consolidated changelog followed by every gate round's diff changelog.
+// jig v0.1's Adapter.Project has a single Description/Comments projection
+// (no separate PR-vs-ticket sink), so pr.description/pr.comments are what
+// actually drive Project's call; ticket.comments is accepted and defaulted
+// the same way for forward compatibility with a future adapter split.
+var defaultRoutes = map[string][]string{
+	"pr.description":  {"changelog/consolidated.md"},
+	"pr.comments":     {"changelog/consolidated.md", "gate/round-*/diff-changelog.md"},
+	"ticket.comments": {"changelog/consolidated.md", "gate/round-*/diff-changelog.md"},
+}
+
+// resolveRoutes returns cfg's declared routing map overlaid onto
+// defaultRoutes: an absent cfg.Routes (or an absent individual key) falls
+// back to the spec's default for that key.
+func resolveRoutes(cfg project.Config) map[string][]string {
+	out := make(map[string][]string, len(defaultRoutes))
+	for k, v := range defaultRoutes {
+		out[k] = v
+	}
+	for k, v := range cfg.Routes {
+		out[k] = v
+	}
+	return out
+}
+
+// routeFiles glob-expands each of globs (store-relative to the ticket's
+// folder) and returns the content of every match, in glob order and then
+// lexical match order, skipping any pattern that matches nothing.
+func routeFiles(st *store.Store, ticket string, globs []string) []string {
+	var out []string
+	for _, g := range globs {
+		matches, err := filepath.Glob(filepath.Join(st.TicketDir(ticket), g))
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			if data, err := os.ReadFile(m); err == nil {
+				out = append(out, string(data))
+			}
+		}
+	}
+	return out
+}
+
 // route projects the ticket's final state onto its tracker adapter: a
-// description, one subtask per slice with its blocking links and current
-// state, and a comment trail (the consolidated changelog, then each gate
-// round's diff changelog).
-func route(st *store.Store, adapter tracker.Adapter, ticket, consolidated string, slices []store.Slice, lastRound int) error {
+// description and comment trail assembled from cfg's routing map (the
+// spec's defaults when it declares none), plus one subtask per slice with
+// its blocking links and current state.
+func route(cfg project.Config, st *store.Store, adapter tracker.Adapter, ticket string, slices []store.Slice) error {
 	subtasks := make([]tracker.Subtask, 0, len(slices))
 	for _, s := range slices {
 		state, err := st.ReadSliceState(ticket, s.ID)
@@ -303,16 +454,12 @@ func route(st *store.Store, adapter tracker.Adapter, ticket, consolidated string
 	}
 	sort.Slice(subtasks, func(i, j int) bool { return subtasks[i].ID < subtasks[j].ID })
 
-	comments := []string{consolidated}
-	for n := 1; n <= lastRound; n++ {
-		path := filepath.Join(gateRoundDir(st, ticket, n), "diff-changelog.md")
-		if data, err := os.ReadFile(path); err == nil {
-			comments = append(comments, string(data))
-		}
-	}
+	routes := resolveRoutes(cfg)
+	description := strings.Join(routeFiles(st, ticket, routes["pr.description"]), "\n")
+	comments := routeFiles(st, ticket, routes["pr.comments"])
 
 	return adapter.Project(ticket, tracker.Projection{
-		Description: consolidated,
+		Description: description,
 		Subtasks:    subtasks,
 		Comments:    comments,
 	})

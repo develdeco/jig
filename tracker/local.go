@@ -7,12 +7,18 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/project"
 	"github.com/develdeco/jig/store"
 )
+
+// lockTimeout is the sidecar-lock timeout used around every store write this
+// adapter makes, matching every other store writer (store/slice_state.go,
+// store/question.go, journal/journal.go, verifydeliver/render.go).
+const lockTimeout = 30 * time.Second
 
 // localAdapter projects tickets directly onto the store: a folder per
 // ticket under the store root, with tracker state under <id>/tracker/.
@@ -73,7 +79,13 @@ func (a *localAdapter) Mint(d Draft) (string, error) {
 		return "", fmt.Errorf("tracker: local mint: create %s: %w", dir, err)
 	}
 	content := ticketMD(d.Title, d.Body)
-	if err := store.AtomicWrite(filepath.Join(dir, "ticket.md"), []byte(content)); err != nil {
+	ticketPath := filepath.Join(dir, "ticket.md")
+	release, _, err := store.Lock(ticketPath, lockTimeout)
+	if err != nil {
+		return "", fmt.Errorf("tracker: local mint: lock ticket.md: %w", err)
+	}
+	defer release()
+	if err := store.AtomicWrite(ticketPath, []byte(content)); err != nil {
 		return "", fmt.Errorf("tracker: local mint: write ticket.md: %w", err)
 	}
 	return id, nil
@@ -96,9 +108,16 @@ func (a *localAdapter) Project(ticketID string, p Projection) error {
 	if !strings.HasSuffix(desc, "\n") {
 		desc += "\n"
 	}
-	if err := store.AtomicWrite(filepath.Join(dir, "ticket.md"), []byte(desc)); err != nil {
+	ticketPath := filepath.Join(dir, "ticket.md")
+	releaseTicket, _, err := store.Lock(ticketPath, lockTimeout)
+	if err != nil {
+		return fmt.Errorf("tracker: local project: lock ticket.md: %w", err)
+	}
+	if err := store.AtomicWrite(ticketPath, []byte(desc)); err != nil {
+		releaseTicket()
 		return fmt.Errorf("tracker: local project: write ticket.md: %w", err)
 	}
+	releaseTicket()
 
 	subtasks := p.Subtasks
 	if subtasks == nil {
@@ -108,7 +127,13 @@ func (a *localAdapter) Project(ticketID string, p Projection) error {
 	if err != nil {
 		return fmt.Errorf("tracker: local project: marshal subtasks.yaml: %w", err)
 	}
-	if err := store.AtomicWrite(filepath.Join(dir, "subtasks.yaml"), out); err != nil {
+	subtasksPath := filepath.Join(dir, "subtasks.yaml")
+	releaseSubtasks, _, err := store.Lock(subtasksPath, lockTimeout)
+	if err != nil {
+		return fmt.Errorf("tracker: local project: lock subtasks.yaml: %w", err)
+	}
+	defer releaseSubtasks()
+	if err := store.AtomicWrite(subtasksPath, out); err != nil {
 		return fmt.Errorf("tracker: local project: write subtasks.yaml: %w", err)
 	}
 
@@ -124,11 +149,22 @@ func (a *localAdapter) Project(ticketID string, p Projection) error {
 var commentFileRE = regexp.MustCompile(`^(\d{3})\.md$`)
 
 // Comment appends body as the next numbered file under tracker/comments/.
+// The whole read-modify-write (scanning for the highest existing number,
+// then writing the next one) runs under the sidecar lock, like every other
+// store read-modify-write (e.g. store.AppendSlices), so two concurrent
+// comments never race for the same number.
 func (a *localAdapter) Comment(ticketID string, body string) error {
 	dir := filepath.Join(a.st.TicketDir(ticketID), "tracker", "comments")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("tracker: local comment: create %s: %w", dir, err)
 	}
+
+	release, _, err := store.Lock(dir, lockTimeout)
+	if err != nil {
+		return fmt.Errorf("tracker: local comment: lock %s: %w", dir, err)
+	}
+	defer release()
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("tracker: local comment: read %s: %w", dir, err)

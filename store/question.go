@@ -80,7 +80,9 @@ func renderQuestion(q Question) string {
 	if !strings.HasSuffix(q.Body, "\n") {
 		b.WriteString("\n")
 	}
-	if q.Status == "answered" && q.Answer != "" {
+	// The answer text is preserved regardless of status, so a subsequent
+	// Supersede does not erase a recorded answer.
+	if q.Answer != "" {
 		b.WriteString("\n## Answer\n\n")
 		b.WriteString(q.Answer)
 		if !strings.HasSuffix(q.Answer, "\n") {
@@ -155,7 +157,8 @@ func (s *Store) ReadQuestions(ticket string) ([]Question, error) {
 }
 
 // Answer marks question qid as answered with text and returns its slice so
-// the caller can re-queue it.
+// the caller can re-queue it. It fails if the question is not currently
+// open (e.g. already answered or superseded), naming the current status.
 func (s *Store) Answer(ticket, qid, text string) (slice string, err error) {
 	path := s.questionPath(ticket, qid)
 	release, _, err := Lock(path, 30*time.Second)
@@ -171,6 +174,9 @@ func (s *Store) Answer(ticket, qid, text string) (slice string, err error) {
 	q, err := parseQuestion(qid, data)
 	if err != nil {
 		return "", err
+	}
+	if q.Status != "open" {
+		return "", fmt.Errorf("store: question %s: cannot answer: status is %q, not open", qid, q.Status)
 	}
 	q.Status = "answered"
 	q.Answer = text

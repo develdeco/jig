@@ -90,6 +90,38 @@ func TestParseJSONDirect(t *testing.T) {
 	})
 }
 
+func TestParseJSONRawTail(t *testing.T) {
+	t.Run("last 1200 chars of the raw input, same rule as ParseText", func(t *testing.T) {
+		long := ""
+		for i := 0; i < 2000; i++ {
+			long += "x"
+		}
+		// Padding inside a JSON string keeps the document valid JSON so we
+		// can also assert the tail on the success path.
+		data := []byte(`{"outcome":"green","summary":"` + long + `"}`)
+		res := ParseJSON("slice", data)
+		if res.Outcome != Green {
+			t.Fatalf("Outcome = %q, want green", res.Outcome)
+		}
+		if len(res.RawTail) != 1200 {
+			t.Fatalf("RawTail len = %d, want 1200", len(res.RawTail))
+		}
+		if res.RawTail != string(data)[len(data)-1200:] {
+			t.Fatal("RawTail is not the last 1200 characters of the raw data")
+		}
+	})
+
+	t.Run("populated on the malformed-JSON failure path too", func(t *testing.T) {
+		res := ParseJSON("slice", []byte("{oops"))
+		if res.Outcome != Failed {
+			t.Fatalf("Outcome = %q, want failed", res.Outcome)
+		}
+		if res.RawTail != "{oops" {
+			t.Fatalf("RawTail = %q, want the raw input echoed back", res.RawTail)
+		}
+	})
+}
+
 func TestParseTextRawTail(t *testing.T) {
 	long := ""
 	for i := 0; i < 2000; i++ {

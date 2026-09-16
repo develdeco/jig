@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/axi"
 	"github.com/develdeco/jig/fixture"
+	"github.com/develdeco/jig/project"
 	"github.com/develdeco/jig/store"
 )
 
@@ -147,6 +150,47 @@ func TestHelpContainsCommands(t *testing.T) {
 		if !strings.Contains(out, c.Name) {
 			t.Errorf("help output missing command %q", c.Name)
 		}
+	}
+}
+
+// TestResolveStoreForProjectUsesMachineMapping checks that --project
+// resolves the store via the per-machine project mapping ahead of the
+// --store/cwd fallback resolveStore itself falls through to.
+func TestResolveStoreForProjectUsesMachineMapping(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	cfg, err := project.Load(fx.StoreDir + "/project.yaml")
+	if err != nil {
+		t.Fatalf("project.Load: %v", err)
+	}
+	if _, err := project.InitProject(fx.StoreDir, nil); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	// No --store and a cwd that resolves nothing: --project alone must
+	// still find the store through the machine mapping.
+	st, gotCfg, _, err := resolveStoreForProject(cfg.Name, "")
+	if err != nil {
+		t.Fatalf("resolveStoreForProject: %v", err)
+	}
+	if st.Root != fx.StoreDir {
+		t.Fatalf("st.Root = %q, want %q", st.Root, fx.StoreDir)
+	}
+	if gotCfg.Name != cfg.Name {
+		t.Fatalf("cfg.Name = %q, want %q", gotCfg.Name, cfg.Name)
+	}
+}
+
+// TestResolveStoreForProjectUnknownName checks that an unmapped --project
+// name is refused rather than silently falling back to cwd resolution.
+func TestResolveStoreForProjectUnknownName(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+
+	_, _, _, err := resolveStoreForProject("no-such-project", "")
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "VALIDATION_ERROR" {
+		t.Fatalf("err = %v, want *axi.Error VALIDATION_ERROR", err)
 	}
 }
 

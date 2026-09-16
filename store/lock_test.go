@@ -1,6 +1,8 @@
 package store
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -9,6 +11,50 @@ import (
 	"testing"
 	"time"
 )
+
+// TestLockWarnsOnTimeout simulates held=false (a tiny timeout while another
+// goroutine holds the lock) and asserts Lock says so out loud on stderr,
+// naming the path and the timeout, so a proceeding-without-lock write is
+// never silent.
+func TestLockWarnsOnTimeout(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "warn.txt")
+
+	release, held, err := Lock(target, 30*time.Second)
+	if err != nil || !held {
+		t.Fatalf("Lock (holder): held=%v err=%v", held, err)
+	}
+	defer release()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = w
+
+	_, held2, err2 := Lock(target, 20*time.Millisecond)
+
+	os.Stderr = origStderr
+	w.Close()
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	if err2 != nil {
+		t.Fatalf("Lock (contended): %v", err2)
+	}
+	if held2 {
+		t.Fatal("Lock (contended): held = true, want false while the holder still has it")
+	}
+
+	got := buf.String()
+	want := "jig: proceeding without lock on " + target + " (timeout after 20ms)"
+	if !strings.Contains(got, want) {
+		t.Fatalf("stderr = %q, want it to contain %q", got, want)
+	}
+}
 
 // TestLockLoadBearing demonstrates that Lock is load-bearing: four
 // goroutines read-modify-write one file with a deliberate stall inside the

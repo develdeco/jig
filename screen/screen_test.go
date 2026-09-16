@@ -27,6 +27,14 @@ func TestCommandScreenTable(t *testing.T) {
 		{"worktree remove", "git worktree remove .claude/worktrees/T-758", false, "worktree"},
 		{"cherry-pick", "git cherry-pick abc123", false, "cherry-pick"},
 		{"tag", "git tag v1.2.3", false, "tag"},
+		{"revert", "git revert HEAD~1", false, "revert"},
+		{"am", "git am 0001-patch.mbox", false, "am"},
+		{"stash drop", "git stash drop", false, "stash"},
+		{"stash clear", "git stash clear", false, "stash"},
+		{"worktree prune", "git worktree prune", false, "worktree"},
+		{"branch -d", "git branch -d T-758", false, "branch"},
+		{"branch --delete", "git branch --delete T-758", false, "branch"},
+		{"bareword push denied", "git log --grep push", false, "push"},
 
 		// -- secret paths embedded in a command --
 		{"env production windows path", `type C:\repo\.env.production`, false, ".env.production"},
@@ -138,9 +146,9 @@ func TestSecretReadTable(t *testing.T) {
 
 	// Adapted Read-tool cases via ToolCall's file_path key.
 	toolCases := []struct {
-		name   string
-		input  map[string]any
-		allow  bool
+		name  string
+		input map[string]any
+		allow bool
 	}{
 		{"Read env local denied", map[string]any{"file_path": "/repo/.env.local"}, false},
 		{"Read plain file allowed", map[string]any{"file_path": "src/index.js"}, true},

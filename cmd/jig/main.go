@@ -169,6 +169,29 @@ func resolveStore(storeFlag string) (*store.Store, project.Config, project.Machi
 	return st, cfg, machine[cfg.Name], nil
 }
 
+// resolveStoreForProject resolves the store, project config and machine
+// mapping the same way resolveStore does, except an explicit --project name
+// is tried first: it resolves the store path via the per-machine project
+// mapping (project.LoadMachine()[name].Store), ahead of the --store/cwd
+// fallback chain resolveStore falls through to when projectFlag is empty.
+func resolveStoreForProject(projectFlag, storeFlag string) (*store.Store, project.Config, project.MachineProject, error) {
+	if projectFlag == "" {
+		return resolveStore(storeFlag)
+	}
+	machine, err := project.LoadMachine()
+	if err != nil {
+		return nil, project.Config{}, project.MachineProject{}, err
+	}
+	mp, ok := machine[projectFlag]
+	if !ok || mp.Store == "" {
+		return nil, project.Config{}, project.MachineProject{}, &axi.Error{
+			Msg:  fmt.Sprintf("no project %q in the machine mapping", projectFlag),
+			Code: "VALIDATION_ERROR",
+		}
+	}
+	return resolveStore(mp.Store)
+}
+
 // rungs returns cfg's staircase rungs, falling back to staircase.Default()
 // when the project has not declared any.
 func rungs(cfg project.Config) staircase.Config {

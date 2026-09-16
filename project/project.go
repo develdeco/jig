@@ -46,19 +46,26 @@ type Config struct {
 	Platform   string
 	Staircase  []string
 	Context    map[string]any
+	// Routes is the declared routing map publish's route step consults: keys
+	// "pr.description", "pr.comments" and "ticket.comments", values being
+	// store-relative path globs. A nil/empty map (the common case) means
+	// "use the spec's defaults", applied by the caller — Config itself
+	// carries no defaults so an absent routes: key round-trips as absent.
+	Routes map[string][]string
 }
 
 // configRaw mirrors Config's YAML shape with Tracker left as a raw node so
 // UnmarshalYAML can accept either form the wire format allows.
 type configRaw struct {
-	SchemaVersion int            `yaml:"schema_version"`
-	Name          string         `yaml:"name"`
-	TicketFormat  string         `yaml:"ticket_format"`
-	Tracker       yaml.Node      `yaml:"tracker"`
-	Repos         []Repo         `yaml:"repos"`
-	Platform      string         `yaml:"platform"`
-	Staircase     []string       `yaml:"staircase,omitempty"`
-	Context       map[string]any `yaml:"context,omitempty"`
+	SchemaVersion int                 `yaml:"schema_version"`
+	Name          string              `yaml:"name"`
+	TicketFormat  string              `yaml:"ticket_format"`
+	Tracker       yaml.Node           `yaml:"tracker"`
+	Repos         []Repo              `yaml:"repos"`
+	Platform      string              `yaml:"platform"`
+	Staircase     []string            `yaml:"staircase,omitempty"`
+	Context       map[string]any      `yaml:"context,omitempty"`
+	Routes        map[string][]string `yaml:"routes,omitempty"`
 }
 
 // UnmarshalYAML decodes project.yaml, accepting the tracker field as either
@@ -75,6 +82,7 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	c.Platform = raw.Platform
 	c.Staircase = raw.Staircase
 	c.Context = raw.Context
+	c.Routes = raw.Routes
 
 	switch raw.Tracker.Kind {
 	case 0:
@@ -275,6 +283,13 @@ func InitStandalone(repoDir string) (string, error) {
 	}
 	if err := os.WriteFile(filepath.Join(storeDir, "ledger.md"), []byte{}, 0o644); err != nil {
 		return "", fmt.Errorf("project: write ledger.md: %w", err)
+	}
+	// store.Lock's sidecar "*.lock" files (never removed) and
+	// store.AtomicWrite's ".*.tmp" scratch files are noise the truth repo
+	// must never track: ignore them at the store root so locked writes never
+	// dirty git status or collide with another clone's own lock files.
+	if err := os.WriteFile(filepath.Join(storeDir, ".gitignore"), []byte("*.lock\n.*.tmp\n"), 0o644); err != nil {
+		return "", fmt.Errorf("project: write .gitignore: %w", err)
 	}
 
 	return storeDir, nil

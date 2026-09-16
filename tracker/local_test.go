@@ -1,8 +1,10 @@
 package tracker_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -174,5 +176,45 @@ func TestLocalProjection(t *testing.T) {
 	// Comment files from before the re-project must survive untouched.
 	if _, err := os.Stat(filepath.Join(trackerDir, "comments", "001.md")); err != nil {
 		t.Fatalf("comments/001.md missing after re-project: %v", err)
+	}
+}
+
+// TestLocalCommentConcurrentNumbering drives many concurrent Comment calls
+// like the other store read-modify-write writers' concurrency tests (e.g.
+// store.AppendSlices' TestSlicesAppendRMW): without the sidecar lock around
+// the scan-for-max-then-write cycle, two goroutines can read the same
+// highest number and one write silently overwrites the other, losing a
+// comment.
+func TestLocalCommentConcurrentNumbering(t *testing.T) {
+	st, cfg := newTestStore(t, localCfg())
+	a, err := tracker.New(cfg, st)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	id, err := a.Mint(tracker.Draft{Title: "Epic slice", Body: "Do the thing"})
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+
+	const n = 8
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := a.Comment(id, fmt.Sprintf("comment %d", i)); err != nil {
+				t.Errorf("Comment %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	entries, err := os.ReadDir(filepath.Join(st.TicketDir(id), "tracker", "comments"))
+	if err != nil {
+		t.Fatalf("read comments dir: %v", err)
+	}
+	if len(entries) != n {
+		t.Fatalf("comment files = %d, want %d (a lost update means the write was not serialized)", len(entries), n)
 	}
 }

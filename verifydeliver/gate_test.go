@@ -2,12 +2,14 @@ package verifydeliver
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/develdeco/jig/axi"
 	"github.com/develdeco/jig/fixture"
+	"github.com/develdeco/jig/gitx"
 	"github.com/develdeco/jig/journal"
 	"github.com/develdeco/jig/store"
 )
@@ -191,8 +193,8 @@ func TestGateEarlyAndFrontierGuard(t *testing.T) {
 	d2 := newDeps(t, fx)
 	_, err = Gate(d2, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
 	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "FRONTIER_NOT_EMPTY" {
-		t.Fatalf("Gate without --early: err = %v, want *axi.Error FRONTIER_NOT_EMPTY", err)
+	if !errors.As(err, &ae) || ae.Code != "GATE_NOT_GREEN" {
+		t.Fatalf("Gate without --early: err = %v, want *axi.Error GATE_NOT_GREEN", err)
 	}
 
 	report, err := Gate(d2, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Early: true})
@@ -201,6 +203,142 @@ func TestGateEarlyAndFrontierGuard(t *testing.T) {
 	}
 	if report.Verdict != "clean" {
 		t.Fatalf("Verdict = %q, want clean", report.Verdict)
+	}
+}
+
+// duplicateFixSliceSource is a GateSource stub whose round-1 fix slice
+// reuses an id that already exists in the ticket's slices.yaml.
+type duplicateFixSliceSource struct{}
+
+func (duplicateFixSliceSource) Round(n int) (Round, bool, error) {
+	if n == 1 {
+		return Round{
+			FindingsMD: "duplicate id",
+			FixSlices:  []store.Slice{{ID: "a", Workspace: "root", Goal: "dup", Oracle: "test"}},
+		}, true, nil
+	}
+	return Round{}, false, nil
+}
+
+// TestGateSurfacesDuplicateFixSliceID checks that Gate does not swallow
+// store.AppendSlices's duplicate-id refusal when a round's fix slice reuses
+// an id already present in slices.yaml.
+func TestGateSurfacesDuplicateFixSliceID(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+
+	d := newDeps(t, fx)
+	_, err := Gate(d, duplicateFixSliceSource{}, GateOpts{Ticket: fx.Ticket})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "SLICE_ID_DUPLICATE" {
+		t.Fatalf("err = %v, want *axi.Error SLICE_ID_DUPLICATE", err)
+	}
+}
+
+// TestGateRefusesStalledSlice checks that a slice left "stalled" (not
+// merely "queued") also blocks gate without --early: any non-green state is
+// an incomplete delivery.
+func TestGateRefusesStalledSlice(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+
+	d := newDeps(t, fx)
+	if err := d.Store.WriteSliceState(fx.Ticket, "d", store.SliceState{State: "stalled", Reason: "stall"}); err != nil {
+		t.Fatalf("write slice state d: %v", err)
+	}
+	if err := d.Store.Push(fx.Ticket + ": slice d stalled"); err != nil {
+		t.Fatalf("push after stalling d: %v", err)
+	}
+
+	_, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "GATE_NOT_GREEN" {
+		t.Fatalf("Gate with a stalled slice: err = %v, want *axi.Error GATE_NOT_GREEN", err)
+	}
+}
+
+// TestGateRefusesQueuedFixSlice checks that a queued fix slice (FromGate !=
+// 0, appended by an earlier round) also blocks a later gate round: it used
+// to be exempted from the frontier check entirely.
+func TestGateRefusesQueuedFixSlice(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+
+	d := newDeps(t, fx)
+	if err := d.Store.AppendSlices(fx.Ticket, []store.Slice{{ID: "fix-x", Workspace: "root", Goal: "fix", Oracle: "test", FromGate: 1}}); err != nil {
+		t.Fatalf("AppendSlices: %v", err)
+	}
+	// fix-x defaults to the zero-value "queued" state (no state file
+	// written yet), same as a fix slice fresh off a gate round.
+	if err := d.Store.Push(fx.Ticket + ": append fix-x"); err != nil {
+		t.Fatalf("push after appending fix-x: %v", err)
+	}
+
+	_, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "GATE_NOT_GREEN" {
+		t.Fatalf("Gate with a queued fix slice: err = %v, want *axi.Error GATE_NOT_GREEN", err)
+	}
+}
+
+// TestGateBranchCopiesBriefDoc checks that `--branch --doc <path>` actually
+// wires the spec-axis input swap: the doc's content lands in this round's
+// gate/round-<n>/spec-input.md rather than being silently accepted and
+// dropped.
+func TestGateBranchCopiesBriefDoc(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	// --branch validates a hand-written branch's oracles for real, so it
+	// needs one where they actually pass: drive the ticket's own branch to
+	// green, then push it to origin so the (separate) gate lease this call
+	// acquires can see it as "jig/<ticket>", same as a real hand-written
+	// branch pushed for review.
+	driveBuild(t, fx, "rung-a")
+	buildDir := buildLeaseDir(t, fx)
+	if _, err := gitx.Run(buildDir, "push", "origin", ticketBranch(fx.Ticket)); err != nil {
+		t.Fatalf("push build branch: %v", err)
+	}
+
+	briefDoc := filepath.Join(t.TempDir(), "brief.md")
+	if err := os.WriteFile(briefDoc, []byte("# spec axis input\n"), 0o644); err != nil {
+		t.Fatalf("write brief doc: %v", err)
+	}
+
+	d := newDeps(t, fx)
+	report, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: ticketBranch(fx.Ticket), BriefDoc: briefDoc, Early: true})
+	if err != nil {
+		t.Fatalf("Gate --branch --doc: %v", err)
+	}
+
+	specInput := filepath.Join(d.Store.TicketDir(fx.Ticket), "gate", fmt.Sprintf("round-%d", report.Round), "spec-input.md")
+	data, err := os.ReadFile(specInput)
+	if err != nil {
+		t.Fatalf("read spec-input.md: %v", err)
+	}
+	if string(data) != "# spec axis input\n" {
+		t.Fatalf("spec-input.md content = %q, want brief doc content", data)
+	}
+}
+
+// TestGateBranchMissingDocErrors checks that a --doc path that cannot be
+// read is refused with BRIEF_DOC_MISSING rather than silently ignored.
+func TestGateBranchMissingDocErrors(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	d := newDeps(t, fx)
+	_, err := Gate(d, alwaysCleanSource{}, GateOpts{
+		Ticket:   fx.Ticket,
+		Branch:   "main",
+		BriefDoc: filepath.Join(t.TempDir(), "missing.md"),
+		Early:    true,
+	})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "BRIEF_DOC_MISSING" {
+		t.Fatalf("err = %v, want *axi.Error BRIEF_DOC_MISSING", err)
 	}
 }
 

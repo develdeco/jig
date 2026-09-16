@@ -1,11 +1,14 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/develdeco/jig/axi"
 )
 
 // Slice is one entry of a ticket's slices.yaml.
@@ -47,7 +50,10 @@ func (s *Store) ReadSlices(ticket string) ([]Slice, error) {
 }
 
 // AppendSlices appends add to a ticket's slices.yaml under a locked,
-// read-modify-write cycle.
+// read-modify-write cycle. It refuses when any id in add already exists in
+// the file (or is repeated within add itself): a duplicate id would
+// duplicate the slices.yaml row and reinitialize that slice's attempt
+// counter, silently resurrecting a prior round's result.json.
 func (s *Store) AppendSlices(ticket string, add []Slice) error {
 	path := s.slicesFile(ticket)
 	release, _, err := Lock(path, 30*time.Second)
@@ -65,6 +71,21 @@ func (s *Store) AppendSlices(ticket string, add []Slice) error {
 	} else if err := yaml.Unmarshal(data, &sf); err != nil {
 		return err
 	}
+
+	existing := make(map[string]bool, len(sf.Slices))
+	for _, s := range sf.Slices {
+		existing[s.ID] = true
+	}
+	for _, s := range add {
+		if existing[s.ID] {
+			return &axi.Error{
+				Msg:  fmt.Sprintf("slice id %q already exists in %s", s.ID, path),
+				Code: "SLICE_ID_DUPLICATE",
+			}
+		}
+		existing[s.ID] = true
+	}
+
 	sf.Slices = append(sf.Slices, add...)
 
 	out, err := yaml.Marshal(sf)

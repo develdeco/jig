@@ -51,17 +51,30 @@ func validOutcome(context, outc string) bool {
 	return false
 }
 
+// last1200 returns the last 1200 runes of s, or s itself when it is no
+// longer than that.
+func last1200(s string) string {
+	if r := []rune(s); len(r) > 1200 {
+		return string(r[len(r)-1200:])
+	}
+	return s
+}
+
 // ParseJSON parses a result.json body. Malformed JSON, or an outcome not
 // valid for context, produces a Failed result explaining why; the parser
-// never guesses.
+// never guesses. RawTail is always the last 1200 characters of data (same
+// rule as ParseText), so a malformed or off-vocabulary result can still be
+// diagnosed from the state/journal it produced.
 func ParseJSON(context string, data []byte) Result {
+	tail := last1200(string(data))
 	var res Result
 	if err := json.Unmarshal(data, &res); err != nil {
-		return Result{Outcome: Failed, Summary: fmt.Sprintf("result was not valid JSON: %v", err)}
+		return Result{Outcome: Failed, Summary: fmt.Sprintf("result was not valid JSON: %v", err), RawTail: tail}
 	}
 	if !validOutcome(context, res.Outcome) {
-		return Result{Outcome: Failed, Summary: fmt.Sprintf("outcome %q is not valid for context %q", res.Outcome, context)}
+		return Result{Outcome: Failed, Summary: fmt.Sprintf("outcome %q is not valid for context %q", res.Outcome, context), RawTail: tail}
 	}
+	res.RawTail = tail
 	return res
 }
 
@@ -71,10 +84,7 @@ func ParseJSON(context string, data []byte) Result {
 // the predecessor's last-block-wins rule). RawTail is always the last 1200
 // characters of text.
 func ParseText(context string, text string) Result {
-	tail := text
-	if r := []rune(tail); len(r) > 1200 {
-		tail = string(r[len(r)-1200:])
-	}
+	tail := last1200(text)
 
 	blocks := fencedJSON.FindAllStringSubmatch(text, -1)
 	switch len(blocks) {

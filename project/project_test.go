@@ -2,10 +2,25 @@ package project
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/develdeco/jig/store"
 )
+
+func runGitInProject(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v (in %s): %v\n%s", args, dir, err, out)
+	}
+	return string(out)
+}
 
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
@@ -44,6 +59,58 @@ platform: platform/
 	}
 	if len(cfg.Repos) != 1 || cfg.Repos[0].Remote != "https://example.invalid/org/demo.git" {
 		t.Errorf("Repos = %+v, unexpected", cfg.Repos)
+	}
+}
+
+// TestLoadRoutes checks that a project.yaml's routes: map round-trips into
+// Config.Routes, and that a project.yaml with no routes: key leaves it nil
+// (the "use the spec's defaults" case, resolved by the caller).
+func TestLoadRoutes(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+tracker: local
+repos:
+  - remote: https://example.invalid/org/demo.git
+platform: platform/
+routes:
+  pr.description:
+    - changelog/consolidated.md
+  pr.comments:
+    - changelog/consolidated.md
+  ticket.comments:
+    - changelog/consolidated.md
+    - gate/round-*/diff-changelog.md
+`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Routes["pr.description"]; len(got) != 1 || got[0] != "changelog/consolidated.md" {
+		t.Errorf(`Routes["pr.description"] = %v, unexpected`, got)
+	}
+	if got := cfg.Routes["ticket.comments"]; len(got) != 2 {
+		t.Errorf(`Routes["ticket.comments"] = %v, want 2 entries`, got)
+	}
+
+	noRoutes := filepath.Join(dir, "no-routes.yaml")
+	writeFile(t, noRoutes, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+tracker: local
+repos: []
+platform: platform/
+`)
+	cfg2, err := Load(noRoutes)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg2.Routes != nil {
+		t.Errorf("Routes = %v, want nil when routes: is absent", cfg2.Routes)
 	}
 }
 
@@ -137,6 +204,50 @@ func TestInitStandalone(t *testing.T) {
 	absRepo, _ := filepath.Abs(repoDir)
 	if cfg.Repos[0].Remote != absRepo {
 		t.Errorf("Repos[0].Remote = %q, want %q", cfg.Repos[0].Remote, absRepo)
+	}
+}
+
+// TestInitStandaloneGitignoreKeepsLockFilesUntracked asserts InitStandalone
+// writes a store-root .gitignore covering store.Lock's sidecar "*.lock"
+// files and store.AtomicWrite's ".*.tmp" scratch files, and that a real
+// locked write (store.WriteSliceState) never shows up in `git status`.
+func TestInitStandaloneGitignoreKeepsLockFilesUntracked(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+
+	parent := t.TempDir()
+	repoDir := filepath.Join(parent, "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+
+	storePath, err := InitStandalone(repoDir)
+	if err != nil {
+		t.Fatalf("InitStandalone: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(storePath, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if !strings.Contains(string(data), "*.lock") || !strings.Contains(string(data), ".*.tmp") {
+		t.Fatalf(".gitignore = %q, want it to ignore *.lock and .*.tmp", data)
+	}
+
+	runGitInProject(t, storePath, "config", "user.name", "tester")
+	runGitInProject(t, storePath, "config", "user.email", "tester@example.invalid")
+	runGitInProject(t, storePath, "add", "-A")
+	runGitInProject(t, storePath, "commit", "-m", "init")
+
+	st := &store.Store{Root: storePath}
+	if err := st.WriteSliceState("T-1", "a", store.SliceState{State: "queued"}); err != nil {
+		t.Fatalf("WriteSliceState: %v", err)
+	}
+
+	statusOut := runGitInProject(t, storePath, "status", "--porcelain")
+	for _, line := range strings.Split(statusOut, "\n") {
+		if strings.Contains(line, ".lock") {
+			t.Fatalf("git status shows a lock file (should be gitignored): %q\nfull status:\n%s", line, statusOut)
+		}
 	}
 }
 

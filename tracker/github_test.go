@@ -115,6 +115,65 @@ func TestGithubArgv(t *testing.T) {
 	}
 }
 
+func TestGithubPRCreateArgv(t *testing.T) {
+	stubDir := buildGhStub(t)
+	home := t.TempDir()
+	t.Setenv("JIG_HOME", home)
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	logFile := filepath.Join(t.TempDir(), "gh.log")
+	statePath := filepath.Join(t.TempDir(), "gh.state")
+	t.Setenv("GH_STUB_LOG", logFile)
+	t.Setenv("GH_STUB_STATE", statePath)
+
+	cfg := project.Config{
+		SchemaVersion: 1,
+		Name:          "fixture",
+		TicketFormat:  "JIG-{n}",
+		Tracker:       "github",
+		Repos:         []project.Repo{{Remote: "git@github.com:owner/repo.git"}},
+	}
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "project.yaml"), []byte("schema_version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write project.yaml: %v", err)
+	}
+	st, err := store.Open(root)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	a, err := tracker.New(cfg, st)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	creator, ok := a.(tracker.PRCreator)
+	if !ok {
+		t.Fatal("github adapter does not implement tracker.PRCreator")
+	}
+
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(bodyFile, []byte("pr body"), 0o644); err != nil {
+		t.Fatalf("write body file: %v", err)
+	}
+
+	url, err := creator.CreatePR("jig/JIG-1", "main", "JIG-1: title", bodyFile)
+	if err != nil {
+		t.Fatalf("CreatePR: %v", err)
+	}
+	if url == "" {
+		t.Fatal("CreatePR returned an empty url")
+	}
+
+	lines := readLoggedArgv(t, logFile)
+	if !anyLineHasPrefix(lines, "pr", "create") {
+		t.Fatalf("no logged 'pr create' call in %v", lines)
+	}
+	if !anyLineContainsAll(lines, "--base", "main", "--head", "jig/JIG-1", "--body-file", bodyFile) {
+		t.Fatalf("logged 'pr create' call missing expected flags in %v", lines)
+	}
+}
+
 func TestStubsNotImplemented(t *testing.T) {
 	for _, name := range []string{"jira", "linear"} {
 		t.Run(name, func(t *testing.T) {

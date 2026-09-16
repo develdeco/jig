@@ -88,6 +88,43 @@ func TestGenerate(t *testing.T) {
 	}
 }
 
+// TestGenerateStoreGitignoreKeepsLockFilesUntracked asserts the fixture
+// store carries the same "*.lock"/".*.tmp" .gitignore as
+// project.InitStandalone, and that a real locked write never shows up in
+// `git status` for the (already-committed) fixture store.
+func TestGenerateStoreGitignoreKeepsLockFilesUntracked(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := Generate(t, Opts{})
+
+	data, err := os.ReadFile(filepath.Join(fx.StoreDir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if !strings.Contains(string(data), "*.lock") || !strings.Contains(string(data), ".*.tmp") {
+		t.Fatalf(".gitignore = %q, want it to ignore *.lock and .*.tmp", data)
+	}
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "a", store.SliceState{State: "green"}); err != nil {
+		t.Fatalf("WriteSliceState: %v", err)
+	}
+
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = fx.StoreDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, out)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, ".lock") {
+			t.Fatalf("git status shows a lock file (should be gitignored): %q\nfull status:\n%s", line, out)
+		}
+	}
+}
+
 func TestPatchSequence(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	fx := Generate(t, Opts{})

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -41,8 +42,18 @@ func Lock(path string, timeout time.Duration) (release func(), held bool, err er
 		}
 		if time.Now().After(deadline) {
 			_ = f.Close()
+			warnLockTimeout(path, timeout)
 			return release, false, nil
 		}
 		time.Sleep(lockRetryInterval)
 	}
+}
+
+// warnLockTimeout tells the operator, out loud, that a write is proceeding
+// without the lock: every caller of Lock is a writer (readers never lock),
+// so a timeout here means the write below runs unsynchronized. Centralizing
+// this in Lock itself means every locked-write helper across the codebase
+// gets the warning for free.
+func warnLockTimeout(path string, timeout time.Duration) {
+	fmt.Fprintf(os.Stderr, "jig: proceeding without lock on %s (timeout after %s)\n", path, timeout)
 }

@@ -49,6 +49,16 @@ type Adapter interface {
 	Comment(ticketID string, body string) error
 }
 
+// PRCreator is an optional capability an Adapter may implement: opening a
+// pull request for one repo's reconciled branch. It is distinct from
+// Project's tracker-ticket projection, since not every tracker kind (or
+// every repo host) has a PR concept jig can open directly. Callers type-
+// assert an Adapter to PRCreator rather than requiring it on the interface,
+// so local/command/jira/linear adapters remain valid Adapters without it.
+type PRCreator interface {
+	CreatePR(head, base, title, bodyFile string) (url string, err error)
+}
+
 // New returns the Adapter selected by cfg.Tracker.
 func New(cfg project.Config, st *store.Store) (Adapter, error) {
 	switch cfg.Tracker {

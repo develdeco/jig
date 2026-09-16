@@ -1,6 +1,7 @@
 package make
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,9 @@ import (
 	"github.com/develdeco/jig/fixture"
 	"github.com/develdeco/jig/gitx"
 	"github.com/develdeco/jig/journal"
+	"github.com/develdeco/jig/manifest"
+	"github.com/develdeco/jig/outcome"
+	"github.com/develdeco/jig/pool"
 	"github.com/develdeco/jig/project"
 	"github.com/develdeco/jig/session"
 	"github.com/develdeco/jig/staircase"
@@ -375,5 +379,193 @@ func TestOracleWrongRoundTrip(t *testing.T) {
 	}
 	if !sawOracleWrong {
 		t.Fatal("expected a result line: slice=a outcome=oracle-wrong attempt=1")
+	}
+}
+
+// initTestGitRepo creates a minimal git repo at dir with an initial commit,
+// returning that commit's sha.
+func initTestGitRepo(t *testing.T, dir string) string {
+	t.Helper()
+	runGitT(t, dir, "init", "-b", "main")
+	runGitT(t, dir, "config", "user.email", "fixture@example.invalid")
+	runGitT(t, dir, "config", "user.name", "jig-fixture")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGitT(t, dir, "add", "-A")
+	runGitT(t, dir, "commit", "-m", "init")
+	return runGitT(t, dir, "rev-parse", "HEAD")
+}
+
+func runGitT(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := gitx.Run(dir, args...)
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return out
+}
+
+// newTestStore opens a Store rooted at a fresh git repo with a bare
+// project.yaml: enough for WriteSliceState/Push (no remote configured, so
+// Push commits locally and never touches the network).
+func newTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "project.yaml"), []byte("name: t\n"), 0o644); err != nil {
+		t.Fatalf("write project.yaml: %v", err)
+	}
+	runGitT(t, dir, "init", "-b", "main")
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	return st
+}
+
+// TestBringUpEnvHandleUsedForTeardown covers m0: bringUpEnv must return the
+// *envrun.Handle Up allocated, and tearDownEnv must tear down THAT instance
+// (in particular its allocated port), not a fabricated zero-value one. The
+// env class's down command writes the port it was substituted to a file, so
+// the test can tell a real allocated port from the bug's hardcoded 0.
+func TestBringUpEnvHandleUsedForTeardown(t *testing.T) {
+	dir := t.TempDir()
+	portFile := filepath.Join(dir, "port.txt")
+
+	ec := manifest.EnvClass{
+		Up:    "echo up",
+		Check: "echo check",
+		Down:  fmt.Sprintf("echo {port}>%s", portFile),
+	}
+	m := manifest.Manifest{Envs: map[string]manifest.EnvClass{"e": ec}}
+	sl := store.Slice{ID: "s1", Env: "e"}
+	lease := pool.Lease{Dir: dir}
+
+	rc := &runCtx{
+		d:      Deps{Journal: func(journal.Line) error { return nil }},
+		ticket: "T",
+	}
+
+	h, ok := rc.bringUpEnv(sl, m, lease)
+	if !ok || h == nil {
+		t.Fatalf("bringUpEnv = (%v, %v), want a handle and ok=true", h, ok)
+	}
+	if h.Port == 0 {
+		t.Fatal("handle Port = 0, want the allocated port")
+	}
+
+	rc.tearDownEnv(sl, h)
+
+	data, err := os.ReadFile(portFile)
+	if err != nil {
+		t.Fatalf("read port file: %v", err)
+	}
+	gotPort := strings.TrimSpace(string(data))
+	wantPort := fmt.Sprintf("%d", h.Port)
+	if gotPort != wantPort {
+		t.Fatalf("teardown substituted port = %q, want the allocated port %q (not 0)", gotPort, wantPort)
+	}
+}
+
+// TestVerifyGreenRejectsStartSHAItself covers m4: a claimed-green commit
+// that IS the run's recorded start sha (no new work at all) must not
+// verify, even though the commit exists in the lease. Driven through
+// runCtx.route (not verifyGreen directly) so the assertion also proves the
+// failure is what actually reaches routeFailure/the journal.
+func TestVerifyGreenRejectsStartSHAItself(t *testing.T) {
+	dir := t.TempDir()
+	startSHA := initTestGitRepo(t, dir)
+
+	st := newTestStore(t)
+	rc := &runCtx{
+		d:           Deps{Store: st, Journal: func(journal.Line) error { return nil }},
+		ticket:      "T",
+		maxAttempts: 1, // attempt 1 hits the attempt-cap branch immediately
+	}
+	sl := store.Slice{ID: "a"}
+	lease := pool.Lease{Dir: dir}
+	res := outcome.Result{Outcome: outcome.Green, Commit: startSHA}
+
+	rc.route(sl, lease, 1, res, startSHA)
+
+	_, reason := rc.stopState()
+	if !strings.Contains(reason, "green did not verify") {
+		t.Fatalf("StopReason = %q, want it to say green did not verify", reason)
+	}
+
+	aState, err := st.ReadSliceState("T", "a")
+	if err != nil {
+		t.Fatalf("ReadSliceState: %v", err)
+	}
+	if aState.State != "stalled" || aState.Reason != "attempt-cap" {
+		t.Fatalf("a state = %+v, want stalled/attempt-cap (verify-green failure routed as a normal failure)", aState)
+	}
+}
+
+// TestStallSignatureIsPerSlice covers m13: two different slices that each
+// fail once with an identical summary must not stall the run — the stall
+// signature's unit must be the slice, not a shared literal context.
+func TestStallSignatureIsPerSlice(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "same-summary-stall"})
+	d, st := newDeps(t, fx)
+
+	report, err := Run(d, RunOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if report.Stopped {
+		t.Fatalf("Stopped = true (reason %q), want false: two different slices failing once each with an identical summary must not stall the run", report.StopReason)
+	}
+
+	aState, err := st.ReadSliceState(fx.Ticket, "a")
+	if err != nil {
+		t.Fatalf("ReadSliceState(a): %v", err)
+	}
+	cState, err := st.ReadSliceState(fx.Ticket, "c")
+	if err != nil {
+		t.Fatalf("ReadSliceState(c): %v", err)
+	}
+	// Both slices' identical-summary first failure must be counted
+	// independently: each should still land green on its own attempt 2,
+	// rather than the run halting after their shared first failure.
+	if aState.State != "green" || aState.Attempts != 2 {
+		t.Fatalf("a state = %+v, want green/attempts=2", aState)
+	}
+	if cState.State != "green" || cState.Attempts != 2 {
+		t.Fatalf("c state = %+v, want green/attempts=2", cState)
+	}
+}
+
+// TestReportStoppedForPreExistingStall covers w1: a run whose final states
+// include a stalled slice reports Stopped=true even when that stall
+// pre-existed this call (this call's own frontier is empty, so it never
+// exercises the stall-detection path itself).
+func TestReportStoppedForPreExistingStall(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "stall"})
+	d, _ := newDeps(t, fx)
+
+	first, err := Run(d, RunOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	if !first.Stopped {
+		t.Fatal("first Run: Stopped = false, want true (the stall fires during this call)")
+	}
+
+	second, err := Run(d, RunOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if !second.Stopped {
+		t.Fatal("second Run: Stopped = false, want true (a pre-existing stalled slice)")
+	}
+	if !containsID(second.Stalled, "a") {
+		t.Fatalf("second Run: Stalled = %v, want it to contain a", second.Stalled)
+	}
+	if !strings.Contains(second.StopReason, "a") || !strings.Contains(second.StopReason, "stall") {
+		t.Fatalf("second Run: StopReason = %q, want it to name slice a and mention the stall", second.StopReason)
 	}
 }

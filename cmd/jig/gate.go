@@ -48,11 +48,12 @@ func cmdGate(args []string, stdout io.Writer) int {
 	prNum := fs.Int("pr", 0, "pr number (not implemented in v0.1)")
 	scenario := fs.String("scenario", "", "scenario dir for the fake gate source")
 	storeFlag := fs.String("store", "", "explicit store path")
+	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if err := fs.Parse(rest); err != nil {
 		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
 	}
 
-	st, cfg, mp, err := resolveStore(*storeFlag)
+	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

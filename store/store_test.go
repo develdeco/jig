@@ -1,11 +1,15 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+
+	"github.com/develdeco/jig/axi"
 )
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -136,6 +140,52 @@ func TestSlicesAppendRMW(t *testing.T) {
 	}
 }
 
+// TestAppendSlicesRejectsDuplicateID checks that appending a slice id that
+// already exists in slices.yaml is refused rather than silently duplicating
+// the row (which would also reset that slice's attempt counter to 0, per
+// the port-fidelity finding on gate's fix-slice append).
+func TestAppendSlicesRejectsDuplicateID(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+
+	if err := st.AppendSlices("JIG-1", []Slice{{ID: "a", Workspace: "root", Goal: "g", Oracle: "test"}}); err != nil {
+		t.Fatalf("first AppendSlices: %v", err)
+	}
+
+	err := st.AppendSlices("JIG-1", []Slice{{ID: "a", Workspace: "root", Goal: "g2", Oracle: "test"}})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "SLICE_ID_DUPLICATE" {
+		t.Fatalf("err = %v, want *axi.Error SLICE_ID_DUPLICATE", err)
+	}
+
+	slices, err := st.ReadSlices("JIG-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slices) != 1 {
+		t.Fatalf("len(slices) = %d, want 1 (duplicate must not be appended)", len(slices))
+	}
+}
+
+// TestSliceStatePathIsSpecForm pins spec §08's on-disk path for slice state:
+// "<ticket>/slices/<id>.state", not the old "<ticket>/state/<id>.yaml".
+func TestSliceStatePathIsSpecForm(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+
+	if err := st.WriteSliceState("JIG-1", "a", SliceState{State: "green"}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := filepath.Join(st.TicketDir("JIG-1"), "slices", "a.state")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("expected slice state at %s (spec §08 form): %v", want, err)
+	}
+
+	old := filepath.Join(st.TicketDir("JIG-1"), "state", "a.yaml")
+	if _, err := os.Stat(old); err == nil {
+		t.Fatalf("slice state was also written at the old path %s", old)
+	}
+}
+
 func TestQuestionLifecycle(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
 
@@ -175,6 +225,66 @@ func TestQuestionLifecycle(t *testing.T) {
 	want := Question{ID: "q-001", Slice: "c", Status: "answered", Body: "Formal or casual greeting?", Answer: "Casual."}
 	if len(qs) != 1 || qs[0] != want {
 		t.Fatalf("ReadQuestions after answer = %+v, want [%+v]", qs, want)
+	}
+}
+
+// TestAnswerRejectsNonOpenQuestion asserts Answer refuses to re-answer a
+// question that is no longer open, naming the current status, and does not
+// clobber the previously recorded answer.
+func TestAnswerRejectsNonOpenQuestion(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+
+	q := Question{ID: "q-001", Slice: "c", Status: "open", Body: "Formal or casual greeting?"}
+	if err := st.WriteQuestion("JIG-1", q); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Answer("JIG-1", "q-001", "Casual."); err != nil {
+		t.Fatalf("first Answer: %v", err)
+	}
+
+	if _, err := st.Answer("JIG-1", "q-001", "Formal."); err == nil {
+		t.Fatal("second Answer: expected an error for an already-answered question, got nil")
+	} else if !strings.Contains(err.Error(), "answered") {
+		t.Fatalf("second Answer error = %q, want it to mention the current status %q", err.Error(), "answered")
+	}
+
+	qs, err := st.ReadQuestions("JIG-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs) != 1 || qs[0].Answer != "Casual." {
+		t.Fatalf("ReadQuestions after rejected re-answer = %+v, want the original answer preserved", qs)
+	}
+}
+
+// TestSupersedePreservesAnswer asserts that superseding an already-answered
+// question keeps the recorded answer text on disk instead of dropping it.
+func TestSupersedePreservesAnswer(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+
+	q := Question{ID: "q-001", Slice: "c", Status: "open", Body: "Formal or casual greeting?"}
+	if err := st.WriteQuestion("JIG-1", q); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Answer("JIG-1", "q-001", "Casual."); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Supersede("JIG-1", "q-001"); err != nil {
+		t.Fatal(err)
+	}
+
+	qs, err := st.ReadQuestions("JIG-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs) != 1 {
+		t.Fatalf("ReadQuestions = %+v, want 1 question", qs)
+	}
+	if qs[0].Status != "superseded" {
+		t.Fatalf("Status = %q, want superseded", qs[0].Status)
+	}
+	if qs[0].Answer != "Casual." {
+		t.Fatalf("Answer = %q, want %q to survive Supersede", qs[0].Answer, "Casual.")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/develdeco/jig/axi"
@@ -42,7 +43,22 @@ func cmdValidate(args []string, stdout io.Writer) int {
 		})
 	}
 
-	axi.Render(stdout, "valid: yes", axi.Help(fmt.Sprintf("Run `jig run %s` to start the frontier", ticket)))
+	blocks := []string{"valid: yes"}
+	if data, rerr := os.ReadFile(filepath.Join(st.TicketDir(ticket), "brief.md")); rerr == nil {
+		hashes := store.BriefSectionHashes(data)
+		headings := make([]string, 0, len(hashes))
+		for h := range hashes {
+			headings = append(headings, h)
+		}
+		sort.Strings(headings)
+		rows := make([][]string, 0, len(headings))
+		for _, h := range headings {
+			rows = append(rows, []string{h, hashes[h]})
+		}
+		blocks = append(blocks, axi.Table("sections", []string{"heading", "sha256"}, rows))
+	}
+	blocks = append(blocks, axi.Help(fmt.Sprintf("Run `jig run %s` to start the frontier", ticket)))
+	axi.Render(stdout, blocks...)
 	return 0
 }
 

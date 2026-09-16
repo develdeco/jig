@@ -98,3 +98,47 @@ func TestAcquireCloneAndResume(t *testing.T) {
 		t.Fatalf("gate lease should live under the same repo dir: %q vs %q", lease3.Dir, lease1.Dir)
 	}
 }
+
+// TestAcquireNeverResetsExistingLocalBranch covers the case
+// TestAcquireCloneAndResume's resume step cannot: once the branch has also
+// reached origin (a prior push), the old "checkout -B branch origin/branch"
+// path re-pointed the local branch to the remote tip on every later
+// Acquire, discarding any commit landed locally since. An existing local
+// branch must always be kept as-is.
+func TestAcquireNeverResetsExistingLocalBranch(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	remote := newSourceAndRemote(t)
+
+	lease1, err := Acquire("fixture2", remote, "main", "jig/T-2", "T-2")
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(lease1.Dir, "h.txt"), []byte("pushed work"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	run(t, lease1.Dir, "add", "-A")
+	run(t, lease1.Dir, "commit", "-m", "pushed work")
+	run(t, lease1.Dir, "push", "origin", "jig/T-2")
+
+	// A second slice in the same run commits again without pushing: origin
+	// now lags one commit behind the local branch.
+	if err := os.WriteFile(filepath.Join(lease1.Dir, "i.txt"), []byte("unpushed work"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	run(t, lease1.Dir, "add", "-A")
+	run(t, lease1.Dir, "commit", "-m", "unpushed work")
+	localSHA := run(t, lease1.Dir, "rev-parse", "HEAD")
+
+	lease2, err := Acquire("fixture2", remote, "main", "jig/T-2", "T-2")
+	if err != nil {
+		t.Fatalf("second Acquire: %v", err)
+	}
+	if lease2.Dir != lease1.Dir {
+		t.Fatalf("second Acquire dir = %q, want reuse of %q", lease2.Dir, lease1.Dir)
+	}
+	head := run(t, lease2.Dir, "rev-parse", "HEAD")
+	if head != localSHA {
+		t.Fatalf("re-acquired branch HEAD = %s, want the local commit %s still on the branch tip (must not reset to origin)", head, localSHA)
+	}
+}
