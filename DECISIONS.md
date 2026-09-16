@@ -37,3 +37,7 @@ build authority order: spec semantics; build-decision deltas win on v0.1 scope a
 - Model ids verified against the current API reference: haiku=claude-haiku-4-5, sonnet=claude-sonnet-5, opus=claude-opus-5 (defaults; rungs are project config).
 - herdr probed OK via WSL login shell (herdr 0.8.2); backend implemented against the probed JSON surface; not exercised by tests.
 - Blocked-by on the github adapter uses the REST issue-dependencies endpoint via `gh api`; sub-issues via GraphQL addSubIssue (gh-axi pattern). Tests assert argv against a stub.
+
+## Phase B (foundation)
+- Token note: phase B = 4 sonnet agents (~459k subagent tokens); packages store, journal, axi, gitx, project, manifest, screen, outcome, staircase all green.
+- Secret glob rule needed no glob engine: literal substring/prefix checks already catch `.env*`, `*.pem`, `*_key*` tokens (screen agent note, verified by test cases).

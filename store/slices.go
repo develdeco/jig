@@ -1,0 +1,75 @@
+package store
+
+import (
+	"os"
+	"path/filepath"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Slice is one entry of a ticket's slices.yaml.
+type Slice struct {
+	ID        string   `yaml:"id"`
+	Workspace string   `yaml:"workspace"`
+	Goal      string   `yaml:"goal"`
+	Oracle    string   `yaml:"oracle"`
+	Env       string   `yaml:"env,omitempty"`
+	BlockedBy []string `yaml:"blocked_by"`
+	FromBrief []string `yaml:"from_brief"`          // sha256 hex of brief section bodies
+	FromGate  int      `yaml:"from_gate,omitempty"` // round number for fix slices
+}
+
+// SliceFile is the wire shape of a ticket's slices.yaml.
+type SliceFile struct {
+	Slices []Slice `yaml:"slices"`
+}
+
+func (s *Store) slicesFile(ticket string) string {
+	return filepath.Join(s.TicketDir(ticket), "slices.yaml")
+}
+
+// ReadSlices reads a ticket's slices.yaml. An absent file reads as no
+// slices.
+func (s *Store) ReadSlices(ticket string) ([]Slice, error) {
+	data, err := os.ReadFile(s.slicesFile(ticket))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var sf SliceFile
+	if err := yaml.Unmarshal(data, &sf); err != nil {
+		return nil, err
+	}
+	return sf.Slices, nil
+}
+
+// AppendSlices appends add to a ticket's slices.yaml under a locked,
+// read-modify-write cycle.
+func (s *Store) AppendSlices(ticket string, add []Slice) error {
+	path := s.slicesFile(ticket)
+	release, _, err := Lock(path, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	var sf SliceFile
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	} else if err := yaml.Unmarshal(data, &sf); err != nil {
+		return err
+	}
+	sf.Slices = append(sf.Slices, add...)
+
+	out, err := yaml.Marshal(sf)
+	if err != nil {
+		return err
+	}
+	return AtomicWrite(path, out)
+}
