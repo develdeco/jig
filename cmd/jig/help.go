@@ -77,6 +77,11 @@ var commandTable = []cmdSpec{
 		{"store", "explicit store path"},
 		{"project", "project name, resolved via the machine mapping"},
 	}},
+	{"version", "print jig's version, commit, and go runtime", nil},
+	{"skills", "jig skills install: ship the session skills with the binary", []flagSpec{
+		{"project", "install under ./.claude/skills of the current directory"},
+		{"dest", "install under <dir>/<name>/SKILL.md instead of the default location"},
+	}},
 	{"_screen", "hidden PreToolUse hook: reads a tool call on stdin", nil},
 }
 

@@ -53,6 +53,10 @@ func Main(args []string, stdout io.Writer, stdin io.Reader) int {
 		return cmdStatus(rest, stdout)
 	case "validate":
 		return cmdValidate(rest, stdout)
+	case "version":
+		return cmdVersion(rest, stdout)
+	case "skills":
+		return cmdSkills(rest, stdout)
 	case "_screen":
 		return cmdScreen(stdin, stdout)
 	default:
