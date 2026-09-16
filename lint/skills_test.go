@@ -29,7 +29,7 @@ func repoRoot(t *testing.T) string {
 // rest of the file and returns its raw lines.
 func frontmatter(t *testing.T, path string, data []byte) []string {
 	t.Helper()
-	text := string(data)
+	text := string(normalizeEOL(data))
 	if !strings.HasPrefix(text, "---\n") {
 		t.Fatalf("%s: missing opening --- frontmatter fence", path)
 	}
@@ -39,6 +39,13 @@ func frontmatter(t *testing.T, path string, data []byte) []string {
 		t.Fatalf("%s: missing closing --- frontmatter fence", path)
 	}
 	return strings.Split(rest[:end], "\n")
+}
+
+// normalizeEOL strips carriage returns so the lint checks measure the
+// committed content, not the checkout's line-ending conversion (a CI
+// runner may materialize CRLF).
+func normalizeEOL(data []byte) []byte {
+	return []byte(strings.ReplaceAll(string(data), "\r\n", "\n"))
 }
 
 func TestSkillsBudget(t *testing.T) {
@@ -60,14 +67,14 @@ func TestSkillsBudget(t *testing.T) {
 				t.Fatalf("read %s: %v", path, err)
 			}
 
-			if lines := strings.Count(string(data), "\n"); lines > 100 {
+			if lines := strings.Count(string(normalizeEOL(data)), "\n"); lines > 100 {
 				t.Errorf("%s: %d lines, budget is <=100", path, lines)
 			}
-			if len(data) > 6000 {
-				t.Errorf("%s: %d bytes, budget is <=6000", path, len(data))
+			if n := len(normalizeEOL(data)); n > 6000 {
+				t.Errorf("%s: %d bytes, budget is <=6000", path, n)
 			}
 
-			fm := frontmatter(t, path, data)
+			fm := frontmatter(t, path, normalizeEOL(data))
 			var name, description string
 			for _, line := range fm {
 				switch {
@@ -100,7 +107,7 @@ func TestRouterTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	text := string(data)
+	text := string(normalizeEOL(data))
 
 	for _, phrase := range []string{
 		"fresh work",
@@ -153,7 +160,7 @@ func TestArchitectureDoc(t *testing.T) {
 		t.Fatalf("read %s: %v", path, err)
 	}
 
-	lines := strings.Split(string(data), "\n")
+	lines := strings.Split(string(normalizeEOL(data)), "\n")
 	heading := -1
 	for i, line := range lines {
 		if strings.TrimSpace(line) == "## Module responsibilities" {
