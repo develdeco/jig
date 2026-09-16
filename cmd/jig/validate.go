@@ -1,0 +1,192 @@
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/develdeco/jig/axi"
+	"github.com/develdeco/jig/manifest"
+	"github.com/develdeco/jig/project"
+	"github.com/develdeco/jig/store"
+)
+
+// cmdValidate implements `jig validate <ticket>`.
+func cmdValidate(args []string, stdout io.Writer) int {
+	fs := newFlagSet("validate")
+	storeFlag := fs.String("store", "", "explicit store path")
+	ticket, rest, err := requirePositional(args, "ticket")
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	if err := fs.Parse(rest); err != nil {
+		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
+	}
+
+	st, cfg, mp, err := resolveStore(*storeFlag)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+
+	problems, err := validateTicket(st, cfg, mp, ticket)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	if len(problems) > 0 {
+		return renderErr(stdout, &axi.Error{
+			Msg:  fmt.Sprintf("ticket %s failed validation", ticket),
+			Code: "VALIDATION_ERROR",
+			Help: problems,
+		})
+	}
+
+	axi.Render(stdout, "valid: yes", axi.Help(fmt.Sprintf("Run `jig run %s` to start the frontier", ticket)))
+	return 0
+}
+
+// validateTicket checks ticket's brief, slices.yaml, and manifest per the
+// jig validate contract, returning every problem found (nil means valid).
+func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProject, ticket string) ([]string, error) {
+	var problems []string
+
+	briefData, briefErr := os.ReadFile(filepath.Join(st.TicketDir(ticket), "brief.md"))
+	if briefErr != nil {
+		problems = append(problems, fmt.Sprintf("brief.md not found: %v", briefErr))
+	} else if hashes := store.BriefSectionHashes(briefData); len(hashes) == 0 {
+		problems = append(problems, `brief.md has no "## " sections`)
+	}
+
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		problems = append(problems, fmt.Sprintf("slices.yaml did not parse: %v", err))
+		return problems, nil
+	}
+
+	var hashes map[string]string
+	if briefErr == nil {
+		hashes = store.BriefSectionHashes(briefData)
+	}
+	hashExists := func(h string) bool {
+		for _, cur := range hashes {
+			if cur == h {
+				return true
+			}
+		}
+		return false
+	}
+
+	ids := map[string]bool{}
+	for _, sl := range slices {
+		ids[sl.ID] = true
+	}
+
+	var m manifest.Manifest
+	manifestOK := false
+	if len(cfg.Repos) > 0 {
+		repoDir := mp.Clones[cfg.Repos[0].Name()]
+		if repoDir == "" {
+			problems = append(problems, fmt.Sprintf("no machine-mapped clone for repo %q", cfg.Repos[0].Name()))
+		} else {
+			resolved, merr := manifest.Resolve(repoDir)
+			if merr != nil {
+				problems = append(problems, fmt.Sprintf("manifest resolve failed: %v", merr))
+			} else {
+				m = resolved
+				manifestOK = true
+			}
+		}
+	} else {
+		problems = append(problems, "project.yaml declares no repos")
+	}
+
+	for _, sl := range slices {
+		for _, h := range sl.FromBrief {
+			if !hashExists(h) {
+				problems = append(problems, fmt.Sprintf("slice %s: from_brief hash %s does not match any current brief section", sl.ID, h))
+			}
+		}
+		for _, b := range sl.BlockedBy {
+			if !ids[b] {
+				problems = append(problems, fmt.Sprintf("slice %s: blocked_by %q does not exist", sl.ID, b))
+			}
+		}
+		if manifestOK {
+			if _, ok := m.Workspace(sl.Workspace); !ok {
+				problems = append(problems, fmt.Sprintf("slice %s: workspace %q not in manifest", sl.ID, sl.Workspace))
+			}
+		}
+		if strings.TrimSpace(sl.Oracle) == "" {
+			problems = append(problems, fmt.Sprintf("slice %s: oracle is empty", sl.ID))
+		}
+	}
+
+	if cyc := findBlockedByCycle(slices); cyc != "" {
+		problems = append(problems, "blocked_by cycle: "+cyc)
+	}
+
+	return problems, nil
+}
+
+// findBlockedByCycle runs a DFS over slices' blocked_by edges and returns a
+// description of the first cycle found, or "" when the graph is acyclic.
+func findBlockedByCycle(slices []store.Slice) string {
+	edges := map[string][]string{}
+	for _, sl := range slices {
+		edges[sl.ID] = sl.BlockedBy
+	}
+
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	color := map[string]int{}
+	var path []string
+	var found string
+
+	var dfs func(n string)
+	dfs = func(n string) {
+		if found != "" {
+			return
+		}
+		color[n] = gray
+		path = append(path, n)
+		for _, next := range edges[n] {
+			if found != "" {
+				return
+			}
+			switch color[next] {
+			case gray:
+				idx := -1
+				for i, p := range path {
+					if p == next {
+						idx = i
+						break
+					}
+				}
+				if idx == -1 {
+					found = strings.Join(append(append([]string{}, path...), next), "->")
+				} else {
+					found = strings.Join(append(append([]string{}, path[idx:]...), next), "->")
+				}
+				return
+			case white:
+				dfs(next)
+			}
+		}
+		path = path[:len(path)-1]
+		color[n] = black
+	}
+
+	for _, sl := range slices {
+		if found != "" {
+			break
+		}
+		if color[sl.ID] == white {
+			dfs(sl.ID)
+		}
+	}
+	return found
+}
