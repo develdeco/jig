@@ -215,14 +215,22 @@ func rewriteJigYAML(t *testing.T, repoDir, envtoolBin, stateFile string, envFail
 	if err != nil {
 		t.Fatalf("fixture: read jig.yaml: %v", err)
 	}
-	text := string(data)
-	text = strings.ReplaceAll(text, "@ENVTOOL", quoteIfSpaced(filepath.ToSlash(envtoolBin)))
-	text = strings.ReplaceAll(text, "@STATEFILE", filepath.ToSlash(stateFile))
-	text = strings.ReplaceAll(text, "@GO", quoteIfSpaced(goBinaryPath()))
-
 	var m manifest.Manifest
-	if err := yaml.Unmarshal([]byte(text), &m); err != nil {
+	if err := yaml.Unmarshal(data, &m); err != nil {
 		t.Fatalf("fixture: parse jig.yaml: %v", err)
+	}
+	subst := func(s string) string {
+		s = strings.ReplaceAll(s, "@ENVTOOL", quoteIfSpaced(filepath.ToSlash(envtoolBin)))
+		s = strings.ReplaceAll(s, "@STATEFILE", filepath.ToSlash(stateFile))
+		s = strings.ReplaceAll(s, "@GO", quoteIfSpaced(filepath.ToSlash(goBinaryPath())))
+		return s
+	}
+	for name, cmd := range m.Oracles {
+		m.Oracles[name] = subst(cmd)
+	}
+	for name, ec := range m.Envs {
+		ec.Up, ec.Check, ec.Down = subst(ec.Up), subst(ec.Check), subst(ec.Down)
+		m.Envs[name] = ec
 	}
 	if envFail {
 		for name, ec := range m.Envs {
