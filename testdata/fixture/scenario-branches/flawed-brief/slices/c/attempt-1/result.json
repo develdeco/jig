@@ -1,0 +1,4 @@
+{
+  "outcome": "flawed-brief",
+  "summary": "The brief asks for a tone decision but Greet takes no tone parameter to decide between; the section needs to say what changes, not just that a choice exists."
+}

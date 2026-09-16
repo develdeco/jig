@@ -1,0 +1,13 @@
+diff --git a/alpha/alpha.go b/alpha/alpha.go
+index 8853ad9..886d5f3 100644
+--- a/alpha/alpha.go
++++ b/alpha/alpha.go
+@@ -12,5 +12,8 @@ func Clamp(v, lo, hi int) int {
+ 	if v < lo {
+ 		return lo
+ 	}
++	if v > hi {
++		return hi
++	}
+ 	return v
+ }

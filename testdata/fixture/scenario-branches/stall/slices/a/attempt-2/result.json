@@ -1,0 +1,4 @@
+{
+  "outcome": "code-bug",
+  "summary": "Clamp still returns 10 for Clamp(10, 0, 5); the upper bound check is missing."
+}

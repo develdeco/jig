@@ -1,0 +1,5 @@
+{
+  "outcome": "green",
+  "summary": "Oracle confirmed correct as written; fixed Clamp to enforce the upper bound.",
+  "commit": "@HEAD"
+}

@@ -1,0 +1,4 @@
+{
+  "outcome": "code-bug",
+  "summary": "ClampPercent(150) returns 101, not 100: the upper bound is off by one."
+}

@@ -1,0 +1,5 @@
+$ go test ./alpha/...
+ok  	example.invalid/fixture/alpha	0.002s
+
+Review note: alpha.Add compiles and passes but ships without a doc comment;
+flagged as a must-fix for round 1.

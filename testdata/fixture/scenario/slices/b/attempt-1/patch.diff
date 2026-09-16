@@ -1,0 +1,27 @@
+diff --git a/alpha/percent.go b/alpha/percent.go
+new file mode 100644
+index 0000000..ee1b011
+--- /dev/null
++++ b/alpha/percent.go
+@@ -0,0 +1,6 @@
++package alpha
++
++// ClampPercent clamps v into the 0-100 percentage range.
++func ClampPercent(v int) int {
++	return Clamp(v, 0, 101)
++}
+diff --git a/alpha/percent_test.go b/alpha/percent_test.go
+new file mode 100644
+index 0000000..b1c8af5
+--- /dev/null
++++ b/alpha/percent_test.go
+@@ -0,0 +1,9 @@
++package alpha
++
++import "testing"
++
++func TestClampPercent(t *testing.T) {
++	if got := ClampPercent(150); got != 100 {
++		t.Fatalf("ClampPercent(150) = %d, want 100", got)
++	}
++}

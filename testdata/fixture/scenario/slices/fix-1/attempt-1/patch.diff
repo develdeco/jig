@@ -1,0 +1,14 @@
+diff --git a/alpha/alpha.go b/alpha/alpha.go
+index 886d5f3..10421ca 100644
+--- a/alpha/alpha.go
++++ b/alpha/alpha.go
+@@ -2,7 +2,8 @@
+ // fixture repo.
+ package alpha
+ 
+-// Add returns a plus b.
++// Add returns a plus b. It performs no overflow checking; callers are
++// expected to keep inputs within the range their use case requires.
+ func Add(a, b int) int {
+ 	return a + b
+ }

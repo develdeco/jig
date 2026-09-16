@@ -45,3 +45,8 @@ build authority order: spec semantics; build-decision deltas win on v0.1 scope a
 - Requeue keeps attempt counts (a brief amendment doesn't erase attempt history; the fake backend's attempt numbering advances past the flawed-brief attempt). Kickoff says only "flips to queued".
 - Fixture envtool is pre-built once per Generate (still a cross-platform Go program; the literal `go run` form would hang on PATH-less shells and re-compile per lifecycle call).
 - Status goldens: state (a) ("A green, B blocked") is constructed via store state snapshots + `jig status`; states (b) and (c) are natural pauses in the e2e chain. The CLI rendering is what the goldens pin.
+
+## Phase C (runtime + fixture)
+- Token note: phase C = 4 sonnet agents (~527k subagent tokens); session, pool, envrun, graphify, board, tracker, fixture + full scenario tree green.
+- graphify Plane.Affected derives --graph <repo>/graphify-out/graph.json --depth 2 itself (contract signature carries no graph/depth params; digest defaults).
+- herdr backend computes /mnt/<drive> paths mechanically instead of shelling wslpath.

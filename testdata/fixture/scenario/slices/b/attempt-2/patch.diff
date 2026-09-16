@@ -1,0 +1,11 @@
+diff --git a/alpha/percent.go b/alpha/percent.go
+index ee1b011..68b6b5f 100644
+--- a/alpha/percent.go
++++ b/alpha/percent.go
+@@ -2,5 +2,5 @@ package alpha
+ 
+ // ClampPercent clamps v into the 0-100 percentage range.
+ func ClampPercent(v int) int {
+-	return Clamp(v, 0, 101)
++	return Clamp(v, 0, 100)
+ }

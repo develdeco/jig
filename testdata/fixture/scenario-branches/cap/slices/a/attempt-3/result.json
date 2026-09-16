@@ -1,0 +1,4 @@
+{
+  "outcome": "code-bug",
+  "summary": "Upper-bound check now compares correctly but returns v instead of hi; TestClamp still fails."
+}

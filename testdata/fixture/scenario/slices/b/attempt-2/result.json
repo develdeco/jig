@@ -1,0 +1,5 @@
+{
+  "outcome": "green",
+  "summary": "Fixed ClampPercent's upper bound to 100; TestClampPercent passes.",
+  "commit": "@HEAD"
+}

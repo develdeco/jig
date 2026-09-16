@@ -1,0 +1,13 @@
+workspaces:
+  - id: alpha
+    path: alpha
+  - id: beta
+    path: beta
+oracles:
+  test: "go test ./{path}/..."
+envs:
+  rig:
+    up: "@ENVTOOL up {port} @STATEFILE"
+    check: "@ENVTOOL check @STATEFILE"
+    down: "@ENVTOOL down @STATEFILE"
+    unavailable: defer-ci

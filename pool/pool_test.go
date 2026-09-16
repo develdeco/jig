@@ -1,0 +1,100 @@
+package pool
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/develdeco/jig/gitx"
+)
+
+// newSourceAndRemote creates a tiny source repo committed on main, then a
+// bare clone of it to act as the fixture remote. Returns the remote path.
+func newSourceAndRemote(t *testing.T) string {
+	t.Helper()
+	src := t.TempDir()
+	run(t, src, "init", "-b", "main")
+	run(t, src, "config", "user.email", "fixture@example.invalid")
+	run(t, src, "config", "user.name", "jig-fixture")
+	if err := os.WriteFile(filepath.Join(src, "f.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	run(t, src, "add", "-A")
+	run(t, src, "commit", "-m", "init")
+
+	remote := t.TempDir()
+	remote = filepath.Join(remote, "remote.git")
+	run(t, filepath.Dir(remote), "clone", "--bare", src, remote)
+	return remote
+}
+
+func run(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := gitx.Run(dir, args...)
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return out
+}
+
+func TestAcquireCloneAndResume(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	remote := newSourceAndRemote(t)
+
+	lease1, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1")
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	if lease1.Branch != "jig/T-1" {
+		t.Fatalf("Branch = %q, want jig/T-1", lease1.Branch)
+	}
+	if _, err := os.Stat(lease1.Dir); err != nil {
+		t.Fatalf("lease dir missing: %v", err)
+	}
+	originMain := run(t, lease1.Dir, "rev-parse", "origin/main")
+	head := run(t, lease1.Dir, "rev-parse", "HEAD")
+	if head != originMain {
+		t.Fatalf("fresh lease HEAD = %s, want origin/main %s", head, originMain)
+	}
+
+	// Commit into the lease, then Return and re-Acquire the same key: the
+	// resume case should keep the lease's local branch, not reset it.
+	if err := os.WriteFile(filepath.Join(lease1.Dir, "g.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	run(t, lease1.Dir, "add", "-A")
+	run(t, lease1.Dir, "commit", "-m", "work")
+	resumeSHA := run(t, lease1.Dir, "rev-parse", "HEAD")
+
+	if err := lease1.Return(); err != nil {
+		t.Fatalf("Return: %v", err)
+	}
+
+	lease2, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1")
+	if err != nil {
+		t.Fatalf("second Acquire: %v", err)
+	}
+	if lease2.Dir != lease1.Dir {
+		t.Fatalf("second Acquire dir = %q, want reuse of %q", lease2.Dir, lease1.Dir)
+	}
+	head2 := run(t, lease2.Dir, "rev-parse", "HEAD")
+	if head2 != resumeSHA {
+		t.Fatalf("resumed lease HEAD = %s, want kept commit %s", head2, resumeSHA)
+	}
+
+	// A gate-key Acquire for the same ticket gets a separate directory,
+	// checked out on the same branch name.
+	lease3, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1-gate")
+	if err != nil {
+		t.Fatalf("gate Acquire: %v", err)
+	}
+	if lease3.Dir == lease1.Dir {
+		t.Fatalf("gate lease dir should differ from build lease dir: %q", lease3.Dir)
+	}
+	if lease3.Branch != "jig/T-1" {
+		t.Fatalf("gate lease branch = %q, want jig/T-1", lease3.Branch)
+	}
+	if filepath.Dir(lease3.Dir) != filepath.Dir(lease1.Dir) {
+		t.Fatalf("gate lease should live under the same repo dir: %q vs %q", lease3.Dir, lease1.Dir)
+	}
+}

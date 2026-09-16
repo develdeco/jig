@@ -1,0 +1,11 @@
+diff --git a/beta/version.go b/beta/version.go
+new file mode 100644
+index 0000000..a5923a8
+--- /dev/null
++++ b/beta/version.go
+@@ -0,0 +1,5 @@
++package beta
++
++// Version identifies the beta workspace revision touched by the rig
++// environment-class smoke slice.
++const Version = "v1"
