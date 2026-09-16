@@ -41,3 +41,7 @@ build authority order: spec semantics; build-decision deltas win on v0.1 scope a
 ## Phase B (foundation)
 - Token note: phase B = 4 sonnet agents (~459k subagent tokens); packages store, journal, axi, gitx, project, manifest, screen, outcome, staircase all green.
 - Secret glob rule needed no glob engine: literal substring/prefix checks already catch `.env*`, `*.pem`, `*_key*` tokens (screen agent note, verified by test cases).
+- Squash base: computed as merge-base(origin/<target>, HEAD) in the publish lease at squash time. Equal to the recorded start sha while the target is unmoved; after a reconcile rebase the fork point HAS moved and merge-base is exactly the moved start ("squash start..HEAD" read as the current fork point; stacked bases survive). Pushed-range refusal runs on that same range.
+- Requeue keeps attempt counts (a brief amendment doesn't erase attempt history; the fake backend's attempt numbering advances past the flawed-brief attempt). Kickoff says only "flips to queued".
+- Fixture envtool is pre-built once per Generate (still a cross-platform Go program; the literal `go run` form would hang on PATH-less shells and re-compile per lifecycle call).
+- Status goldens: state (a) ("A green, B blocked") is constructed via store state snapshots + `jig status`; states (b) and (c) are natural pauses in the e2e chain. The CLI rendering is what the goldens pin.
