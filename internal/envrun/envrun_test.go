@@ -3,9 +3,11 @@ package envrun
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -122,4 +124,26 @@ func TestCheckFailureReturnsUnavailableWithPolicy(t *testing.T) {
 	if u.Policy != "" {
 		t.Fatalf("Policy = %q, want empty (pause)", u.Policy)
 	}
+}
+
+// TestAllocatePortLoopbackOnly guards the port probe against binding every
+// interface, which opens a port to the network and makes Windows Firewall
+// prompt for each new jig binary.
+func TestAllocatePortLoopbackOnly(t *testing.T) {
+	host, _, err := net.SplitHostPort(portProbeAddr)
+	if err != nil {
+		t.Fatalf("split %q: %v", portProbeAddr, err)
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		t.Fatalf("portProbeAddr = %q, want a loopback address", portProbeAddr)
+	}
+	port, err := allocatePort()
+	if err != nil {
+		t.Fatalf("allocatePort: %v", err)
+	}
+	l, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		t.Fatalf("port %d from allocatePort is not free on %s: %v", port, host, err)
+	}
+	l.Close()
 }

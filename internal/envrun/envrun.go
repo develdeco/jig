@@ -106,10 +106,14 @@ func substitute(cmd, ticket string, port int) string {
 	return cmd
 }
 
-// allocatePort asks the OS for a free TCP port by binding to :0 and
+// portProbeAddr binds loopback only: the probe never exposes a port to the
+// network, and Windows Firewall does not prompt for loopback listeners.
+const portProbeAddr = "127.0.0.1:0"
+
+// allocatePort asks the OS for a free TCP port by binding portProbeAddr and
 // immediately releasing it.
 func allocatePort() (int, error) {
-	l, err := net.Listen("tcp", ":0")
+	l, err := net.Listen("tcp", portProbeAddr)
 	if err != nil {
 		return 0, err
 	}
