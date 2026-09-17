@@ -1,0 +1,110 @@
+name: smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to smoke-test (e.g. v0.1.1)
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      JIG_TAG: ${{ inputs.tag }}
+    steps:
+      - name: install via install.sh
+        if: runner.os != 'Windows'
+        shell: sh
+        env:
+          JIG_VERSION: ${{ env.JIG_TAG }}
+          JIG_INSTALL_DIR: ${{ runner.temp }}/jig-install
+        run: |
+          set -eu
+          curl -fsSL "https://raw.githubusercontent.com/develdeco/jig/$JIG_TAG/scripts/install.sh" | sh
+          "$JIG_INSTALL_DIR/jig" version
+          "$JIG_INSTALL_DIR/jig" version | grep -Fxq "  version: $JIG_TAG" || {
+            echo "installed jig version does not match $JIG_TAG"
+            exit 1
+          }
+
+      - name: install via install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          JIG_VERSION: ${{ env.JIG_TAG }}
+          JIG_INSTALL_DIR: ${{ runner.temp }}\jig-install
+        run: |
+          irm "https://raw.githubusercontent.com/develdeco/jig/$env:JIG_TAG/scripts/install.ps1" | iex
+          $out = & "$env:JIG_INSTALL_DIR\jig.exe" version
+          $out
+          if (-not ($out -match "(?m)^\s*version: $([regex]::Escape($env:JIG_TAG))$")) {
+            Write-Error "installed jig version does not match $env:JIG_TAG"
+            exit 1
+          }
+
+      # The default, unpinned install resolves releases/latest; check it points
+      # at this tag. Prerelease tags (with a "-") never become latest.
+      - name: install latest via install.sh
+        if: runner.os != 'Windows' && !contains(inputs.tag, '-')
+        shell: sh
+        env:
+          JIG_INSTALL_DIR: ${{ runner.temp }}/jig-latest
+        run: |
+          set -eu
+          curl -fsSL "https://raw.githubusercontent.com/develdeco/jig/$JIG_TAG/scripts/install.sh" | sh
+          "$JIG_INSTALL_DIR/jig" version | grep -Fxq "  version: $JIG_TAG" || {
+            echo "the latest release does not install $JIG_TAG"
+            exit 1
+          }
+
+      - name: install latest via install.ps1
+        if: runner.os == 'Windows' && !contains(inputs.tag, '-')
+        shell: powershell
+        env:
+          JIG_INSTALL_DIR: ${{ runner.temp }}\jig-latest
+        run: |
+          irm "https://raw.githubusercontent.com/develdeco/jig/$env:JIG_TAG/scripts/install.ps1" | iex
+          $out = & "$env:JIG_INSTALL_DIR\jig.exe" version
+          if (-not ($out -match "(?m)^\s*version: $([regex]::Escape($env:JIG_TAG))$")) {
+            Write-Error "the latest release does not install $env:JIG_TAG"
+            exit 1
+          }
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.JIG_TAG }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: go install
+        shell: bash
+        run: go install "github.com/develdeco/jig/cmd/jig@$JIG_TAG"
+
+      - name: verify go install version
+        shell: bash
+        run: |
+          set -eu
+          gopath=$(go env GOPATH)
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            jig_bin="$gopath/bin/jig.exe"
+          else
+            jig_bin="$gopath/bin/jig"
+          fi
+          "$jig_bin" version
+          "$jig_bin" version | grep -Fxq "  version: $JIG_TAG" || {
+            echo "go-installed jig version does not match $JIG_TAG"
+            exit 1
+          }
