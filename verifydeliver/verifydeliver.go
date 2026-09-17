@@ -5,10 +5,8 @@
 package verifydeliver
 
 import (
-	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -36,25 +34,6 @@ var pinnedGitEnv = []string{
 	"GIT_COMMITTER_EMAIL=fixture@example.invalid",
 	"GIT_AUTHOR_DATE=2026-01-01T00:00:00Z",
 	"GIT_COMMITTER_DATE=2026-01-01T00:00:00Z",
-}
-
-// runGitEnv runs git in dir with extra environment variables appended, like
-// gitx.Run but with an env hook gitx does not expose.
-func runGitEnv(dir string, env []string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), env...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
-	}
-	return strings.TrimSpace(stdout.String()), nil
 }
 
 // primaryRepo returns v0.1's single repo and its target branch (defaulting

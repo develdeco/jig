@@ -1,11 +1,9 @@
 package session
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -99,7 +97,7 @@ func applyFakePatch(d Dispatch, patchPath string, res map[string]any) error {
 	}
 	summary, _ := res["summary"].(string)
 	msg := fmt.Sprintf("%s %s: %s", d.Ticket, d.Slice, firstLine(summary))
-	if _, err := runGitEnv(d.Worktree, fakeGitEnv, "commit", "-m", msg); err != nil {
+	if _, err := gitx.RunEnv(d.Worktree, fakeGitEnv, "commit", "-m", msg); err != nil {
 		return fmt.Errorf("session/fake: git commit: %w", err)
 	}
 	return nil
@@ -112,25 +110,4 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
-}
-
-// runGitEnv runs git in dir with extra environment variables appended,
-// exactly like gitx.Run but supporting the pinned identity the fake backend
-// needs for its commits; gitx.Run has no env hook, so this is a small local
-// copy rather than a change to a shared package.
-func runGitEnv(dir string, env []string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), env...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
-	}
-	return strings.TrimSpace(stdout.String()), nil
 }

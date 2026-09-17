@@ -21,6 +21,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/develdeco/jig/gitx"
 	"github.com/develdeco/jig/manifest"
 	"github.com/develdeco/jig/project"
 	"github.com/develdeco/jig/store"
@@ -337,10 +338,8 @@ func normalizeNewlines(data []byte) []byte {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("fixture: git %s (in %s): %v\n%s", strings.Join(args, " "), dir, err, out)
+	if _, err := gitx.Run(dir, args...); err != nil {
+		t.Fatalf("fixture: git %s (in %s): %v", strings.Join(args, " "), dir, err)
 	}
 }
 
@@ -355,11 +354,8 @@ func initGitRepo(t *testing.T, dir string) {
 func commitAll(t *testing.T, dir, msg string) {
 	t.Helper()
 	runGit(t, dir, "add", "-A")
-	cmd := exec.Command("git", "commit", "-m", msg)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), identityEnv...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("fixture: git commit (in %s): %v\n%s", dir, err, out)
+	if _, err := gitx.RunEnv(dir, identityEnv, "commit", "-m", msg); err != nil {
+		t.Fatalf("fixture: git commit (in %s): %v", dir, err)
 	}
 }
 

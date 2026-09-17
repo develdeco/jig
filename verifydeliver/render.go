@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/develdeco/jig/gitx"
 	"github.com/develdeco/jig/journal"
 	"github.com/develdeco/jig/store"
 )
@@ -77,17 +78,17 @@ func writeMemorize(leaseDir, ticket string, slices []store.Slice, lines []journa
 // commitIfChanged stages every change in dir and commits it with the
 // pinned fixture identity, reporting whether a commit was made.
 func commitIfChanged(dir, msg string) (bool, error) {
-	if _, err := runGitEnv(dir, nil, "add", "-A"); err != nil {
+	if _, err := gitx.RunEnv(dir, nil, "add", "-A"); err != nil {
 		return false, err
 	}
-	out, err := runGitEnv(dir, nil, "diff", "--cached", "--name-only")
+	out, err := gitx.RunEnv(dir, nil, "diff", "--cached", "--name-only")
 	if err != nil {
 		return false, err
 	}
 	if strings.TrimSpace(out) == "" {
 		return false, nil
 	}
-	if _, err := runGitEnv(dir, pinnedGitEnv, "commit", "-m", msg); err != nil {
+	if _, err := gitx.RunEnv(dir, pinnedGitEnv, "commit", "-m", msg); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -382,7 +382,7 @@ func squash(leaseDir, target, ticket, title string) (string, error) {
 		return "", fmt.Errorf("verifydeliver: squash: reset --soft %s: %w", start, err)
 	}
 	msg := fmt.Sprintf("%s: %s", ticket, title)
-	if _, err := runGitEnv(leaseDir, pinnedGitEnv, "commit", "-m", msg); err != nil {
+	if _, err := gitx.RunEnv(leaseDir, pinnedGitEnv, "commit", "-m", msg); err != nil {
 		return "", fmt.Errorf("verifydeliver: squash: commit: %w", err)
 	}
 	return gitx.RevParse(leaseDir, "HEAD")

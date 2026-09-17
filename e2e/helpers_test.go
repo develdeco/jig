@@ -113,11 +113,8 @@ func scriptedPush(t *testing.T, remote, relPath, content, message string) {
 	if _, err := gitx.Run(dir, "add", "-A"); err != nil {
 		t.Fatalf("scriptedPush: git add: %v", err)
 	}
-	cmd := exec.Command("git", "commit", "-m", message)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), pinnedIdentityEnv...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("scriptedPush: git commit: %v\n%s", err, out)
+	if _, err := gitx.RunEnv(dir, pinnedIdentityEnv, "commit", "-m", message); err != nil {
+		t.Fatalf("scriptedPush: git commit: %v", err)
 	}
 	branch, err := gitx.Run(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {

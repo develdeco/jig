@@ -103,7 +103,7 @@ func applyScenarioPatch(t *testing.T, fx *fixture.Fixture, dir, ticket, slice st
 		t.Fatalf("git add after %s: %v", path, err)
 	}
 	msg := fmt.Sprintf("%s %s: attempt %d", ticket, slice, attempt)
-	if _, err := runGitEnv(dir, buildGitEnv, "commit", "-m", msg); err != nil {
+	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", msg); err != nil {
 		t.Fatalf("git commit after %s: %v", path, err)
 	}
 }

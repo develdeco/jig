@@ -1,11 +1,14 @@
-// Package gitx wraps the handful of git plumbing calls shared by pool,
-// make, and verifydeliver: always argv-based (never a shell), always
-// scoped to a working directory.
+// Package gitx owns git process execution: product and test code run git
+// only through this package (a lint test enforces it). Every call is
+// argv-based, scoped to a working directory, and runs with git's automatic
+// background maintenance off for that one process; nothing is persisted, so
+// a user's own git commands still maintain their repos.
 package gitx
 
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,21 +18,52 @@ import (
 )
 
 // Run invokes git with args in dir, returning trimmed stdout. On failure the
-// returned error wraps git's stderr output.
+// error carries git's stderr and wraps the exec error (typically
+// *exec.ExitError).
 func Run(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
+	return RunEnv(dir, nil, args...)
+}
+
+// RunEnv is Run with env appended to the process environment, for pinning an
+// identity (GIT_AUTHOR_NAME and friends) without persisting it.
+func RunEnv(dir string, env []string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
+	if err := run(dir, env, &stdout, &stderr, args); err != nil {
+		return "", callError(args, stderr.String(), err)
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// RunRaw is Run returning git's untrimmed combined stdout and stderr, for
+// callers that compare exact output.
+func RunRaw(dir string, args ...string) (string, error) {
+	var out bytes.Buffer
+	if err := run(dir, nil, &out, &out, args); err != nil {
+		return out.String(), callError(args, out.String(), err)
+	}
+	return out.String(), nil
+}
+
+// run spawns git in dir with "-c maintenance.auto=false" ahead of args, so
+// no call leaves git's detached maintenance running after it returns.
+func run(dir string, env []string, stdout, stderr io.Writer, args []string) error {
+	cmd := exec.Command("git", append([]string{"-c", "maintenance.auto=false"}, args...)...)
+	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	return cmd.Run()
+}
+
+// callError formats a failed call as "git <args>: <output>: <exec error>",
+// omitting output when git printed nothing.
+func callError(args []string, output string, err error) error {
+	if msg := strings.TrimSpace(output); msg != "" {
+		return fmt.Errorf("git %s: %s: %w", strings.Join(args, " "), msg, err)
+	}
+	return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 }
 
 // RevParse resolves ref to a full commit sha in dir.

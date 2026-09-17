@@ -19,8 +19,8 @@ const (
 
 // conflictErr is returned whenever a reconcile merge or rebase hits a real
 // conflict: resolving it is new code, so publish defers back to gate. cause
-// carries git's own stderr (via runGitEnv's wrapped error) so a conflict is
-// never indistinguishable from some other git failure, such as a missing
+// carries git's own stderr (via gitx.RunEnv's wrapped error) so a conflict
+// is never indistinguishable from some other git failure, such as a missing
 // pinned identity, that also makes merge/rebase exit non-zero.
 func conflictErr(cause error) error {
 	return &axi.Error{
@@ -36,7 +36,7 @@ func conflictErr(cause error) error {
 //
 // Both merge and a rebase's replayed commits create new commits, which git
 // refuses without an author/committer identity; every history-creating call
-// here runs through runGitEnv with pinnedGitEnv (the same mechanism
+// here runs through gitx.RunEnv with pinnedGitEnv (the same mechanism
 // verifydeliver already uses for its own squash/memorize commits) so
 // reconcile works on a machine with no global git identity, such as a CI
 // runner.
@@ -48,15 +48,15 @@ func reconcile(dir, ticket, target string) (string, error) {
 	}
 
 	if strings.TrimSpace(out) != "" {
-		if _, err := runGitEnv(dir, pinnedGitEnv, "merge", "origin/"+target); err != nil {
-			_, _ = runGitEnv(dir, pinnedGitEnv, "merge", "--abort")
+		if _, err := gitx.RunEnv(dir, pinnedGitEnv, "merge", "origin/"+target); err != nil {
+			_, _ = gitx.RunEnv(dir, pinnedGitEnv, "merge", "--abort")
 			return "", conflictErr(err)
 		}
 		return policyMerge, nil
 	}
 
-	if _, err := runGitEnv(dir, pinnedGitEnv, "rebase", "origin/"+target); err != nil {
-		_, _ = runGitEnv(dir, pinnedGitEnv, "rebase", "--abort")
+	if _, err := gitx.RunEnv(dir, pinnedGitEnv, "rebase", "origin/"+target); err != nil {
+		_, _ = gitx.RunEnv(dir, pinnedGitEnv, "rebase", "--abort")
 		return "", conflictErr(err)
 	}
 	return policyLocalRebase, nil
@@ -70,8 +70,8 @@ func RebaseOnto(dir, newBase, oldBase, branch string) error {
 	if _, err := gitx.Run(dir, "checkout", branch); err != nil {
 		return fmt.Errorf("verifydeliver: rebase onto: checkout %s: %w", branch, err)
 	}
-	if _, err := runGitEnv(dir, pinnedGitEnv, "rebase", "--onto", newBase, oldBase, branch); err != nil {
-		_, _ = runGitEnv(dir, pinnedGitEnv, "rebase", "--abort")
+	if _, err := gitx.RunEnv(dir, pinnedGitEnv, "rebase", "--onto", newBase, oldBase, branch); err != nil {
+		_, _ = gitx.RunEnv(dir, pinnedGitEnv, "rebase", "--abort")
 		return fmt.Errorf("verifydeliver: rebase onto: rebase --onto %s %s %s: %w", newBase, oldBase, branch, err)
 	}
 	return nil

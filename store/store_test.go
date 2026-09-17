@@ -3,26 +3,25 @@ package store
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/develdeco/jig/axi"
+	"github.com/develdeco/jig/gitx"
 )
 
+// runGit uses gitx.RunRaw, not gitx.Run, because TestPush asserts on the
+// exact (untrimmed) text of a `git log --pretty=%s` line, trailing newline
+// included.
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	out, err := cmd.CombinedOutput()
+	out, err := gitx.RunRaw(dir, args...)
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
-	return string(out)
+	return out
 }
 
 // newTestRemoteStore creates a bare remote and a working clone with a

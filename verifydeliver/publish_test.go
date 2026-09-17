@@ -59,7 +59,7 @@ func advanceTarget(t *testing.T, fx *fixture.Fixture) {
 	if _, err := gitx.Run(clone, "add", "-A"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if _, err := runGitEnv(clone, buildGitEnv, "commit", "-m", "upstream: unrelated change"); err != nil {
+	if _, err := gitx.RunEnv(clone, buildGitEnv, "commit", "-m", "upstream: unrelated change"); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	if _, err := gitx.Run(clone, "push", "origin", "main"); err != nil {

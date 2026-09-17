@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/gitx"
 	"github.com/develdeco/jig/store"
 )
 
@@ -112,13 +113,11 @@ func TestGenerateStoreGitignoreKeepsLockFilesUntracked(t *testing.T) {
 		t.Fatalf("WriteSliceState: %v", err)
 	}
 
-	cmd := exec.Command("git", "status", "--porcelain")
-	cmd.Dir = fx.StoreDir
-	out, err := cmd.CombinedOutput()
+	out, err := gitx.Run(fx.StoreDir, "status", "--porcelain")
 	if err != nil {
-		t.Fatalf("git status: %v\n%s", err, out)
+		t.Fatalf("git status: %v", err)
 	}
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, ".lock") {
 			t.Fatalf("git status shows a lock file (should be gitignored): %q\nfull status:\n%s", line, out)
 		}
@@ -140,23 +139,14 @@ func TestPatchSequence(t *testing.T) {
 	for _, step := range steps {
 		patch := filepath.Join(fx.ScenarioDir, "slices", step.slice, "attempt-"+step.attempt, "patch.diff")
 
-		apply := exec.Command("git", "apply", patch)
-		apply.Dir = fx.RepoDir
-		if out, err := apply.CombinedOutput(); err != nil {
-			t.Fatalf("git apply %s: %v\n%s", patch, err, out)
+		if _, err := gitx.Run(fx.RepoDir, "apply", patch); err != nil {
+			t.Fatalf("git apply %s: %v", patch, err)
 		}
-
-		add := exec.Command("git", "add", "-A")
-		add.Dir = fx.RepoDir
-		if out, err := add.CombinedOutput(); err != nil {
-			t.Fatalf("git add after %s: %v\n%s", patch, err, out)
+		if _, err := gitx.Run(fx.RepoDir, "add", "-A"); err != nil {
+			t.Fatalf("git add after %s: %v", patch, err)
 		}
-
-		commit := exec.Command("git", "commit", "-m", step.slice+" attempt-"+step.attempt)
-		commit.Dir = fx.RepoDir
-		commit.Env = append(os.Environ(), identityEnv...)
-		if out, err := commit.CombinedOutput(); err != nil {
-			t.Fatalf("git commit after %s: %v\n%s", patch, err, out)
+		if _, err := gitx.RunEnv(fx.RepoDir, identityEnv, "commit", "-m", step.slice+" attempt-"+step.attempt); err != nil {
+			t.Fatalf("git commit after %s: %v", patch, err)
 		}
 	}
 

@@ -9,7 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+
+	"github.com/develdeco/jig/gitx"
 )
 
 // Store is a truth-repo checkout rooted at Root.
@@ -32,9 +33,8 @@ func (s *Store) TicketDir(id string) string {
 
 // HasRemote reports whether the store has a git remote named "origin".
 func (s *Store) HasRemote() bool {
-	cmd := exec.Command("git", "remote", "get-url", "origin")
-	cmd.Dir = s.Root
-	return cmd.Run() == nil
+	_, err := gitx.Run(s.Root, "remote", "get-url", "origin")
+	return err == nil
 }
 
 // Sync pulls with rebase when a remote exists; it is a silent no-op
@@ -47,7 +47,7 @@ func (s *Store) Sync() error {
 	if err != nil {
 		return err
 	}
-	_, err = s.git("pull", "--rebase", "origin", branch)
+	_, err = gitx.Run(s.Root, "pull", "--rebase", "origin", branch)
 	return err
 }
 
@@ -55,7 +55,7 @@ func (s *Store) Sync() error {
 // staged) and, when a remote exists, pushes it, retrying once with a
 // pull --rebase on rejection.
 func (s *Store) Push(msg string) error {
-	if _, err := s.git("add", "-A"); err != nil {
+	if _, err := gitx.Run(s.Root, "add", "-A"); err != nil {
 		return err
 	}
 	staged, err := s.hasStagedChanges()
@@ -63,7 +63,7 @@ func (s *Store) Push(msg string) error {
 		return err
 	}
 	if staged {
-		if _, err := s.git("-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", msg); err != nil {
+		if _, err := gitx.Run(s.Root, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", msg); err != nil {
 			return err
 		}
 	}
@@ -74,45 +74,33 @@ func (s *Store) Push(msg string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.git("push", "origin", branch); err != nil {
-		if _, perr := s.git("pull", "--rebase", "origin", branch); perr != nil {
+	if _, err := gitx.Run(s.Root, "push", "origin", branch); err != nil {
+		if _, perr := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); perr != nil {
 			return perr
 		}
-		if _, err2 := s.git("push", "origin", branch); err2 != nil {
+		if _, err2 := gitx.Run(s.Root, "push", "origin", branch); err2 != nil {
 			return err2
 		}
 	}
 	return nil
 }
 
+// currentBranch returns the checked-out branch name.
 func (s *Store) currentBranch() (string, error) {
-	out, err := s.git("rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(out), nil
+	return gitx.Run(s.Root, "rev-parse", "--abbrev-ref", "HEAD")
 }
 
+// hasStagedChanges reports whether the index differs from HEAD: "diff
+// --cached --quiet" exits 1 for staged changes; any other failure is an
+// error.
 func (s *Store) hasStagedChanges() (bool, error) {
-	cmd := exec.Command("git", "diff", "--cached", "--quiet")
-	cmd.Dir = s.Root
-	err := cmd.Run()
+	_, err := gitx.Run(s.Root, "diff", "--cached", "--quiet")
 	if err == nil {
 		return false, nil
 	}
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 		return true, nil
 	}
 	return false, err
-}
-
-func (s *Store) git(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = s.Root
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return string(out), nil
 }

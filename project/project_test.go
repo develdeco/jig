@@ -2,24 +2,22 @@ package project
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/gitx"
 	"github.com/develdeco/jig/store"
 )
 
 func runGitInProject(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	out, err := gitx.Run(dir, args...)
 	if err != nil {
-		t.Fatalf("git %v (in %s): %v\n%s", args, dir, err, out)
+		t.Fatalf("git %v (in %s): %v", args, dir, err)
 	}
-	return string(out)
+	return out
 }
 
 func writeFile(t *testing.T, path, content string) {

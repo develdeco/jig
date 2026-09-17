@@ -105,7 +105,7 @@ exists.
 | `envrun/` | `Up`, `Shell` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable` |
 | `fixture/` | `Generate` | test `Opts` → a temp fixture repo, its store, and a scripted attempt scenario |
 | `gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
-| `gitx/` | `Run`, `RevParse`, `MergeBase`, `CommitsIn`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
+| `gitx/` | `Run`, `RunEnv`, `RunRaw`, `RevParse`, `MergeBase`, `CommitsIn`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
 | `graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → per-machine paths |
 | `journal/` | `Append`, `Read`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs |
@@ -158,6 +158,11 @@ every tool call, not just git's.
 a local file path unless the caller has confirmed. `publish` is the only
 command that ever pushes, and it only passes `confirmed` after its
 interactive confirm (or `--yes`) has run.
+
+**Single git owner.** Only `gitx` spawns `git`. Every gitx call runs with
+`-c maintenance.auto=false`, so none leaves git's detached background
+maintenance running; the flag is argv-only, so a user's own git still
+maintains their repos.
 
 ## Testing
 
