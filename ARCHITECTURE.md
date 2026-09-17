@@ -132,10 +132,12 @@ Three backends implement that same narrow interface:
 
 - **fake** - replays a scripted scenario directory; no session, no network. The CI and fixture path.
 - **headless** - runs a local `claude -p` subprocess; the command/secret screens attach as a PreToolUse hook (`jig _screen`).
-- **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); the same screens attach the same way.
+- **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); it has no PreToolUse hook to attach a screen to, so herdr sessions are not screened.
 
-Screens attach wherever the backend's tool-call surface allows a PreToolUse
-hook; `fake` has no tool calls to screen.
+Screens attach only where the backend's tool-call surface allows a
+PreToolUse hook, which today is `headless` alone; `fake` has no tool calls
+to screen, and `herdr`'s tool calls run inside the remote agent it drives,
+outside jig's own process.
 
 ## Safety
 
@@ -155,8 +157,11 @@ every tool call, not just git's.
 
 **Guarded push.** `gitx.GuardedPush` refuses to push to a remote that is not
 a local file path unless the caller has confirmed. `publish` is the only
-command that ever pushes, and it only passes `confirmed` after its
-interactive confirm (or `--yes`) has run.
+command that pushes the ticket branch, and it only passes `confirmed` after
+its interactive confirm (or `--yes`) has run. Every command separately
+pushes the store's own bookkeeping commits to the store's remote
+(`store.Push`) as it works; that push is unguarded by design - it moves
+jig's own journal and ticket-folder state, not product code.
 
 **Single git owner.** Only `gitx` spawns `git`; `lint.TestNoGitSpawnOutsideGitx`
 parses every other package and fails on an `os/exec` call or `exec.Cmd`
