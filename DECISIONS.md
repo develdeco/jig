@@ -189,3 +189,28 @@ was ambiguous, what was chosen, and why.
   validated; govulncheck runs on the Linux leg.
 - Windows Defender exclusions were considered for Windows CI time and dropped: GitHub's
   Windows runner images already turn real-time scanning off and exclude the C: and D: drives.
+
+## Release and install
+
+- The version `jig version` prints comes from Go's build-info VCS stamping, not
+  ldflags: the exact tag when HEAD sits at that tag with a clean tree, otherwise a
+  Go pseudo-version (`v0.0.0-<timestamp>-<commit>` before any tag exists,
+  `vX.Y.(Z+1)-0.<timestamp>-<commit>` once one does), with `+dirty` appended by
+  Go itself when the tree carried local modifications, and `(devel)` when build
+  info is missing (a `-buildvcs=false` build, or `go run`).
+- GoReleaser archives are named `jig_<os>_<arch>` with no version segment, so a
+  "latest" download URL stays stable release over release instead of changing with
+  every tag.
+- Both install scripts verify the downloaded archive against `checksums.txt`
+  (SHA-256) before extracting, and install to a user directory with no sudo or
+  admin rights. `JIG_RELEASE_URL` overrides the base URL for mirrors and for
+  testing against a local or snapshot build; `JIG_VERSION` pins a release tag.
+- `release.yml` runs the full test matrix through `ci.yml`'s `workflow_call`
+  trigger, checks the built binary reports the tag exactly, publishes with
+  GoReleaser, attests build provenance, then smoke-tests the installers and
+  `go install` as a `needs:` job - a release published with the default
+  `GITHUB_TOKEN` does not fire `release: published`, so the smoke test cannot be
+  a separate trigger on that event.
+- The GoReleaser snapshot dry run and the installer checks against it run only on
+  manual dispatch of `ci.yml`, keeping every push and pull request fast while still
+  giving a way to validate the release pipeline before tagging.
