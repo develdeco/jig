@@ -10,6 +10,7 @@
 package fixture
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -17,10 +18,12 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/develdeco/jig/gittest"
 	"github.com/develdeco/jig/gitx"
 	"github.com/develdeco/jig/manifest"
 	"github.com/develdeco/jig/project"
@@ -74,7 +77,7 @@ func Generate(t *testing.T, opts Opts) *Fixture {
 	root := t.TempDir()
 	testdataDir := testdataFixtureDir(t)
 
-	envtoolBin := buildEnvtool(t, testdataDir, root)
+	envtoolBin := buildEnvtool(t, testdataDir)
 	stateFile := filepath.Join(root, "rig-state.txt")
 
 	repoDir := filepath.Join(root, "fixture-repo")
@@ -250,20 +253,45 @@ func rewriteJigYAML(t *testing.T, repoDir, envtoolBin, stateFile string, envFail
 	writeFile(t, path, out)
 }
 
-// buildEnvtool builds the fixture's envtool helper once, into root, and
-// returns its path.
-func buildEnvtool(t *testing.T, testdataDir, root string) string {
-	t.Helper()
-	out := filepath.Join(root, "envtool"+exeSuffix())
-	goBin := filepath.Join(runtime.GOROOT(), "bin", "go"+exeSuffix())
+// The envtool helper is built once per test binary and shared by every
+// Generate call.
+var (
+	envtoolOnce     sync.Once
+	envtoolBin      string
+	envtoolBuildErr error
+)
 
-	cmd := exec.Command(goBin, "build", "-o", out, ".")
-	cmd.Dir = filepath.Join(testdataDir, "envtool")
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if outBytes, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("fixture: build envtool: %v\n%s", err, outBytes)
+// buildEnvtool returns the path of the once-built envtool helper. It lives in
+// its own temp dir (a t.TempDir would vanish with the first test that used
+// it), removed through gittest.AtExit when the test binary finishes; the
+// generated jig.yaml refers to it by absolute path. A build failure fails
+// every caller with the original error.
+func buildEnvtool(t *testing.T, testdataDir string) string {
+	t.Helper()
+	envtoolOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "jig-envtool")
+		if err != nil {
+			envtoolBuildErr = fmt.Errorf("fixture: create envtool build dir: %w", err)
+			return
+		}
+		gittest.AtExit(func() { os.RemoveAll(dir) })
+
+		out := filepath.Join(dir, "envtool"+exeSuffix())
+		goBin := filepath.Join(runtime.GOROOT(), "bin", "go"+exeSuffix())
+
+		cmd := exec.Command(goBin, "build", "-o", out, ".")
+		cmd.Dir = filepath.Join(testdataDir, "envtool")
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+		if outBytes, err := cmd.CombinedOutput(); err != nil {
+			envtoolBuildErr = fmt.Errorf("fixture: build envtool: %w\n%s", err, outBytes)
+			return
+		}
+		envtoolBin = out
+	})
+	if envtoolBuildErr != nil {
+		t.Fatalf("%v", envtoolBuildErr)
 	}
-	return out
+	return envtoolBin
 }
 
 func exeSuffix() string {
