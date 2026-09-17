@@ -8,10 +8,6 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 )
 
-// jigVersion is jig's release version. This is the one place it is defined;
-// every other reference (help text, the version command) reads it from here.
-const jigVersion = "0.1.0"
-
 // cmdVersion implements `jig version`.
 func cmdVersion(args []string, stdout io.Writer) int {
 	fs := newFlagSet("version")
@@ -21,10 +17,11 @@ func cmdVersion(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
+	info, _ := debug.ReadBuildInfo()
 	axi.Render(stdout,
 		axi.KV("version", [][2]string{
-			{"version", jigVersion},
-			{"commit", buildCommit()},
+			{"version", formatVersion(info)},
+			{"commit", formatCommit(info)},
 			{"go", runtime.Version()},
 		}),
 		axi.Help("Run `jig` to see every command"),
@@ -32,24 +29,39 @@ func cmdVersion(args []string, stdout io.Writer) int {
 	return 0
 }
 
-// buildCommit reads the short vcs revision jig was built from via
-// runtime/debug.ReadBuildInfo, appending "+dirty" when the build tree had
-// local modifications. It returns "unknown" when build info carries no vcs
-// stamp (e.g. `go run`, or a binary built without module/vcs info).
-func buildCommit() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
+// formatVersion derives jig's displayed version from build info. Since
+// Go 1.24, `go build` in a VCS checkout stamps the main module's Version:
+// the exact tag when HEAD sits exactly at that tag with a clean tree,
+// otherwise a pseudo-version, and Go already appends "+dirty" to that
+// value itself when the tree carried local modifications. This function
+// only reads that value through - it never re-derives or re-appends
+// dirty state, so "+dirty" never appears twice.
+//
+// It falls back to "(devel)" when build info is unavailable or empty;
+// -buildvcs=false builds already report "(devel)" themselves.
+func formatVersion(info *debug.BuildInfo) string {
+	if info == nil || info.Main.Version == "" {
+		return "(devel)"
+	}
+	return info.Main.Version
+}
+
+// formatCommit reads the short vcs revision jig was built from. Local
+// modifications already surface in the version string (see formatVersion),
+// so this reports the bare revision without its own dirty suffix. It
+// returns "unknown" when build info is unavailable or carries no vcs
+// stamp (e.g. `go run`, -buildvcs=false, or a binary built without
+// module/vcs info).
+func formatCommit(info *debug.BuildInfo) string {
+	if info == nil {
 		return "unknown"
 	}
 
 	var revision string
-	var dirty bool
 	for _, s := range info.Settings {
-		switch s.Key {
-		case "vcs.revision":
+		if s.Key == "vcs.revision" {
 			revision = s.Value
-		case "vcs.modified":
-			dirty = s.Value == "true"
+			break
 		}
 	}
 	if revision == "" {
@@ -57,9 +69,6 @@ func buildCommit() string {
 	}
 	if len(revision) > 12 {
 		revision = revision[:12]
-	}
-	if dirty {
-		revision += "+dirty"
 	}
 	return revision
 }
