@@ -264,7 +264,7 @@ func TestRequeueFromBriefDiff(t *testing.T) {
 		t.Fatalf("question for c = %+v, want its body to mention the brief", q)
 	}
 
-	amended, err := os.ReadFile(filepath.Join("..", "testdata", "fixture", "scenario-branches", "flawed-brief", "brief-amended.md"))
+	amended, err := os.ReadFile(filepath.Join(fixture.RepoRoot(t), "testdata", "fixture", "scenario-branches", "flawed-brief", "brief-amended.md"))
 	if err != nil {
 		t.Fatalf("read brief-amended.md: %v", err)
 	}

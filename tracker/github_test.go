@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/fixture"
 	"github.com/develdeco/jig/project"
 	"github.com/develdeco/jig/store"
 	"github.com/develdeco/jig/tracker"
@@ -19,12 +20,7 @@ import (
 // it can be prepended to PATH.
 func buildGhStub(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	repoRoot := filepath.Dir(filepath.Dir(thisFile)) // tracker/ -> repo root
-	src := filepath.Join(repoRoot, "testdata", "fixture", "ghstub")
+	src := filepath.Join(fixture.RepoRoot(t), "testdata", "fixture", "ghstub")
 
 	dir := t.TempDir()
 	name := "gh"

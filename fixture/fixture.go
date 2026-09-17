@@ -301,18 +301,33 @@ func exeSuffix() string {
 	return ""
 }
 
-// testdataFixtureDir locates the product repo's testdata/fixture directory
-// relative to this source file, so Generate works regardless of the
-// caller's own working directory.
+// testdataFixtureDir locates the product repo's testdata/fixture directory,
+// so Generate works regardless of the caller's own working directory.
 func testdataFixtureDir(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
+	return filepath.Join(RepoRoot(t), "testdata", "fixture")
+}
+
+// RepoRoot returns the module root: the directory containing go.mod. It
+// walks up from the source file of RepoRoot's caller, so it keeps working
+// no matter how deep in the tree that caller's package lives.
+func RepoRoot(t testing.TB) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(1)
 	if !ok {
-		t.Fatal("fixture: cannot determine source file location")
+		t.Fatal("fixture: cannot determine caller's source file location")
 	}
-	// This file lives at <productRoot>/fixture/fixture.go.
-	productRoot := filepath.Dir(filepath.Dir(file))
-	return filepath.Join(productRoot, "testdata", "fixture")
+	dir := filepath.Dir(file)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("fixture: no go.mod found above %s", file)
+		}
+		dir = parent
+	}
 }
 
 // copyTree recursively copies src onto dst, normalizing line endings in
