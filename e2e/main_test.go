@@ -60,7 +60,7 @@ func TestMain(m *testing.M) {
 
 	goBin := filepath.Join(runtime.GOROOT(), "bin", "go"+exeSuffix())
 	out := filepath.Join(tmp, "jig"+exeSuffix())
-	cmd := exec.Command(goBin, "build", "-o", out, filepath.Join(repoRoot, "cmd", "jig"))
+	cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, filepath.Join(repoRoot, "cmd", "jig"))
 	cmd.Dir = repoRoot
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

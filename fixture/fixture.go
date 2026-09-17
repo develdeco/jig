@@ -279,7 +279,7 @@ func buildEnvtool(t *testing.T, testdataDir string) string {
 		out := filepath.Join(dir, "envtool"+exeSuffix())
 		goBin := filepath.Join(runtime.GOROOT(), "bin", "go"+exeSuffix())
 
-		cmd := exec.Command(goBin, "build", "-o", out, ".")
+		cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, ".")
 		cmd.Dir = filepath.Join(testdataDir, "envtool")
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if outBytes, err := cmd.CombinedOutput(); err != nil {

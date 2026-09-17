@@ -37,7 +37,7 @@ func buildGhStub(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		goBin += ".exe"
 	}
-	cmd := exec.Command(goBin, "build", "-o", out, src)
+	cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, src)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build ghstub: %v\n%s", err, output)
 	}
