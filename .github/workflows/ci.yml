@@ -15,11 +15,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["windows-latest","ubuntu-latest","macos-latest"]') || fromJSON('["windows-latest","ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: gofmt
@@ -27,4 +27,7 @@ jobs:
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go build ./...
       - run: go vet ./...
+      - name: govulncheck
+        if: runner.os == 'Linux'
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
       - run: go test -timeout 30m ./...
