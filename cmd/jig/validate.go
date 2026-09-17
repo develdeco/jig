@@ -65,8 +65,8 @@ func cmdValidate(args []string, stdout io.Writer) int {
 	return 0
 }
 
-// validateTicket checks ticket's brief, slices.yaml, and manifest per the
-// jig validate contract, returning every problem found (nil means valid).
+// validateTicket checks that ticket's brief, slices.yaml, and manifest
+// agree, returning every problem found (nil means valid).
 func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProject, ticket string) ([]string, error) {
 	var problems []string
 

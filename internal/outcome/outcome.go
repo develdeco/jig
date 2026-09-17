@@ -80,8 +80,8 @@ func ParseJSON(context string, data []byte) Result {
 
 // ParseText extracts a session result from free-form text. Exactly one
 // fenced ```json block is required: zero blocks or more than one both
-// produce a Failed result with a distinct summary (a jig deviation from
-// the predecessor's last-block-wins rule). RawTail is always the last 1200
+// produce a Failed result with a distinct summary, rather than falling
+// back to a last-block-wins heuristic. RawTail is always the last 1200
 // characters of text.
 func ParseText(context string, text string) Result {
 	tail := last1200(text)

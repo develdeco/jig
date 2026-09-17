@@ -12,12 +12,12 @@ import (
 // noopGateSource is the placeholder GateSource used when jig gate runs
 // without --scenario (the real, session-dispatching gate reviewer).
 //
-// NOTE: v0.1 only specifies the fake scenario-backed source
+// NOTE: v0.1 ships only the fake scenario-backed source
 // (verifydeliver.NewFakeGateSource); a real, session-driven gate reviewer
-// is out of scope for the tested v0.1 surface ("never invoked by tests",
-// same as the herdr session backend). This always reports a clean round so
-// `jig gate` without --scenario still completes rather than hanging on an
-// unimplemented dependency; wiring a real reviewer is future work.
+// is not implemented yet (untested, same as the herdr session backend).
+// This always reports a clean round so `jig gate` without --scenario still
+// completes rather than hanging on an unimplemented dependency; wiring a
+// real reviewer is future work (see the README Roadmap).
 type noopGateSource struct{}
 
 func (noopGateSource) Round(n int) (verifydeliver.Round, bool, error) {

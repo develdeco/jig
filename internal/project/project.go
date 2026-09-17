@@ -54,8 +54,9 @@ type Config struct {
 	// Routes is the declared routing map publish's route step consults: keys
 	// "pr.description", "pr.comments" and "ticket.comments", values being
 	// store-relative path globs. A nil/empty map (the common case) means
-	// "use the spec's defaults", applied by the caller - Config itself
-	// carries no defaults so an absent routes: key round-trips as absent.
+	// "use the caller's defaults" (internal/verifydeliver's defaultRoutes) -
+	// Config itself carries no defaults so an absent routes: key round-trips
+	// as absent.
 	Routes map[string][]string
 }
 

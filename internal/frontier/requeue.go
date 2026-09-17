@@ -17,8 +17,8 @@ import (
 // order.
 func Requeue(d Deps, ticket string, fromBriefDiff bool) ([]string, error) {
 	if !fromBriefDiff {
-		// The contract names --from-brief-diff as Requeue's only mode; there
-		// is nothing else for this seam to do yet.
+		// --from-brief-diff is Requeue's only mode; there is nothing else
+		// for this seam to do yet.
 		return nil, nil
 	}
 

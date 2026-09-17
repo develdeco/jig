@@ -131,14 +131,14 @@ func TestFlawedBriefRequeue(t *testing.T) {
 	// frontier.Run's buildReport treats "the first open question record" as
 	// PendingQuestion regardless of whether its slice has since resolved.
 	// So after a flawed-brief episode is remediated purely through
-	// --from-brief-diff (the contract's own prescribed remediation, with no
-	// mention of also answering the question), the orphaned open question
-	// keeps reporting exit 2 on every subsequent run forever, even once
-	// every slice is green. This assertion encodes the contractually
-	// intended behavior (exit 0 once the requeue+run resolves the ticket)
-	// and will fail until that is fixed in package frontier (either Requeue
-	// closes the question(s) tied to its touched slices, or buildReport
-	// only counts an open question whose slice is still needs-input).
+	// --from-brief-diff (Requeue's only mode, with no separate step to
+	// answer the question), the orphaned open question keeps reporting
+	// exit 2 on every subsequent run forever, even once every slice is
+	// green. This assertion encodes the intended behavior (exit 0 once the
+	// requeue+run resolves the ticket) and will fail until that is fixed in
+	// package frontier (either Requeue closes the question(s) tied to its
+	// touched slices, or buildReport only counts an open question whose
+	// slice is still needs-input).
 	r3 := runJig(t, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r3.Code != 0 {
 		t.Fatalf("second jig run exit = %d, want 0 (all green)\nstdout:\n%s\nstderr:\n%s", r3.Code, r3.Stdout, r3.Stderr)
@@ -247,10 +247,9 @@ func TestCapExhaustion(t *testing.T) {
 	}
 	// NOTE: cmd/jig's RenderStatus (status.go) only ever puts ss.Question in
 	// the 5th column; it never surfaces ss.Reason there, so "attempt-cap"
-	// does not currently appear in `jig status` output at all (the contract's
-	// status format table has no reason column either). The Reason value
-	// itself is fully covered above via store.ReadSliceState, which is the
-	// authoritative source RenderStatus would need to start reading from to
-	// satisfy the DoD wording literally; flagged as a follow-up rather than
-	// asserted here against code this suite does not own.
+	// does not currently appear in `jig status` output at all. The Reason
+	// value itself is fully covered above via store.ReadSliceState, which is
+	// the source RenderStatus would need to start reading from to surface it
+	// in status output; flagged as a known gap rather than asserted here
+	// against code this suite does not own.
 }

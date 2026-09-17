@@ -394,7 +394,7 @@ func squash(leaseDir, target, ticket, title string, identityEnv []string) (strin
 	return gitx.RevParse(leaseDir, "HEAD")
 }
 
-// defaultRoutes is the spec's default routing map, used for any key cfg's
+// defaultRoutes is jig's default routing map, used for any key cfg's
 // own project.yaml routes: block does not declare: pr.description is just
 // the consolidated changelog; pr.comments and ticket.comments are the
 // consolidated changelog followed by every gate round's diff changelog.
@@ -410,7 +410,7 @@ var defaultRoutes = map[string][]string{
 
 // resolveRoutes returns cfg's declared routing map overlaid onto
 // defaultRoutes: an absent cfg.Routes (or an absent individual key) falls
-// back to the spec's default for that key.
+// back to this default for that key.
 func resolveRoutes(cfg project.Config) map[string][]string {
 	out := make(map[string][]string, len(defaultRoutes))
 	for k, v := range defaultRoutes {

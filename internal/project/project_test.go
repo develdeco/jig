@@ -62,7 +62,8 @@ platform: platform/
 
 // TestLoadRoutes checks that a project.yaml's routes: map round-trips into
 // Config.Routes, and that a project.yaml with no routes: key leaves it nil
-// (the "use the spec's defaults" case, resolved by the caller).
+// (the "use the caller's defaults" case, resolved by
+// internal/verifydeliver's resolveRoutes).
 func TestLoadRoutes(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")

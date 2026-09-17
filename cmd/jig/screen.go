@@ -47,11 +47,10 @@ func runScreen(stdin io.Reader, stdout io.Writer) {
 
 	var call screenHookInput
 	if err := json.Unmarshal(data, &call); err != nil {
-		// NOTE: the contract does not define behavior for malformed hook
-		// input. jig fails open (no deny output) here, matching the
-		// headless backend's "best-effort screening" framing rather than
-		// blocking a tool call because the hook payload itself was
-		// unparseable.
+		// jig fails open (no deny output) on malformed hook input,
+		// matching the headless backend's "best-effort screening" framing
+		// rather than blocking a tool call because the hook payload itself
+		// was unparseable.
 		return
 	}
 

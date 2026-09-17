@@ -1,9 +1,10 @@
 // Package screen implements jig's structural command screen and secret-path
-// screen. It is a Go port of a Python predecessor: git commands are parsed
-// structurally (segment split, whitespace tokenize, unquote, git-binary
-// match, global-option consumption) rather than matched against a regex over
-// the whole command line. The only regexes in this package are the segment
-// splitter and the (structural, not command-wide) secret-path checks.
+// screen. git commands are parsed structurally (segment split, whitespace
+// tokenize, unquote, git-binary match, global-option consumption) rather
+// than matched against a regex over the whole command line - see
+// ARCHITECTURE.md's Safety section for why a regex isn't enough. The only
+// regexes in this package are the segment splitter and the (structural, not
+// command-wide) secret-path checks.
 package screen
 
 import (

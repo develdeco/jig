@@ -9,7 +9,7 @@ import (
 
 // TestStatusGoldenConstructed writes slice states directly through the store
 // package (no run/gate involved) and asserts `jig status` renders exactly
-// the contract's status format for that snapshot.
+// cmd/jig's RenderStatus format (status.go) for that snapshot.
 func TestStatusGoldenConstructed(t *testing.T) {
 	fx, _ := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)

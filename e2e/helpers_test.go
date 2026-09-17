@@ -267,9 +267,9 @@ var knownSliceTokens = []string{"a", "b", "c", "d", "fix-1"}
 
 // assertOnlySlicesListed scans output for occurrences of known slice-id
 // tokens (as whole words, so "a" doesn't match inside other text) and fails
-// unless the set of tokens found equals want exactly. It is used where the
-// contract fixes a command's behavior (e.g. requeue --from-brief-diff
-// touching exactly one slice) but not its exact output format.
+// unless the set of tokens found equals want exactly. It is used where a
+// command's behavior is fixed (e.g. requeue --from-brief-diff touching
+// exactly one slice) but its exact output format is not asserted here.
 func assertOnlySlicesListed(t *testing.T, output string, want []string) {
 	t.Helper()
 	found := map[string]bool{}

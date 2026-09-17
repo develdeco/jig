@@ -10,17 +10,17 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
-// maxSolveRounds caps the run/gate fix-slice loop `jig solve` drives, per
-// the contract's "cap 5 rounds".
+// maxSolveRounds caps the run/gate fix-slice loop `jig solve` drives at 5
+// rounds before handing back to the human (see solveShouldPublish).
 const maxSolveRounds = 5
 
-// cmdSolve implements `jig solve <ticket> [--yes] [--answer <qid> <text>]`.
+// cmdSolve implements `jig solve <ticket> [--yes] [--answer <qid> <text>]
+// [--backend <name>] [--scenario <dir>]`.
 //
-// NOTE: the contract's grammar line for solve lists only --yes and
-// --answer, but solve's internal run steps need a session backend exactly
-// like `jig run` does; --backend/--scenario are added here as the closest
-// working superset (needed for the fake-backend e2e chain) rather than a
-// redesign.
+// NOTE: --backend/--scenario are accepted here, beyond solve's own --yes
+// and --answer, because solve's internal run steps need a session backend
+// exactly like `jig run` does; they are the closest working superset
+// (needed for the fake-backend e2e chain) rather than a redesign.
 func cmdSolve(args []string, stdout io.Writer) int {
 	ticket, rest0, err := requirePositional(args, "ticket")
 	if err != nil {

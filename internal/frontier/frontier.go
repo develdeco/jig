@@ -63,9 +63,8 @@ type RunReport struct {
 // green get dispatched, in repo-grouped, per-repo-serial batches, until no
 // slice is left eligible or a stall halts the run.
 //
-// NOTE: v0.1 supports a single repo per project, per the contract's own
-// "v0.1 single repo" note on step 3; every slice's workspace is mapped to
-// d.Cfg.Repos[0].
+// NOTE: v0.1 supports a single repo per project; every slice's workspace
+// is mapped to d.Cfg.Repos[0].
 func Run(d Deps, o RunOpts) (RunReport, error) {
 	ticket := o.Ticket
 	maxAttempts := o.MaxAttempts
@@ -260,7 +259,7 @@ func buildReport(st *store.Store, ticket string, slices []store.Slice, stopped b
 }
 
 // runCtx carries the state one Run call shares across its concurrent repo
-// groups: the stall counter (run-scoped, per the contract), the halt flag a
+// groups: the stall counter (scoped to this Run call), the halt flag a
 // stall raises, and the first infrastructure error seen. Every field below
 // mu is guarded by it.
 type runCtx struct {

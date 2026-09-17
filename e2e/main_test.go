@@ -1,33 +1,21 @@
 // Package e2e drives the built jig binary end to end against the fixture
 // package's materialized repos and store, exercising the full command
-// surface the way an operator would from a shell.
+// surface the way an operator would from a shell. TestMain builds the
+// binary once, before any test runs; if that build fails, TestMain prints
+// the error and exits non-zero instead of letting every test run and report
+// a misleading pass or skip.
 //
-// NOTE (read before editing): at the time this suite was authored, cmd/jig,
-// frontier, and verifydeliver were still being written by sibling agents in
-// the same integration pass. Every test here compiles against packages that do
-// exist (fixture, store, journal, project, manifest, gitx, session, tracker,
-// outcome, axi) and drives the binary purely as a subprocess, so it never
-// needs those packages to exist for e2e itself to compile. TestMain builds
-// the binary once, before any test runs; if that build fails, TestMain
-// prints the error and exits non-zero instead of letting every test run and
-// report a misleading pass or skip.
+// This suite relies on two things about the CLI surface, called out here
+// and marked inline at their point of use as well:
 //
-// Two assumptions are called out because the design does not
-// pin them down precisely and the CLI could not be exercised against a real
-// build while this suite was written; both are marked inline at their point
-// of use as well:
-//
-//  1. `jig solve` is assumed to accept the same `--backend`/`--scenario`
-//     flags as `jig run`/`jig gate`, even though the CLI surface table in
-//     CONTRACTS.md lists only `--yes`/`--answer` for solve. Without them,
-//     DoD-5 (TestSolveOneProcess) cannot run deterministically in CI. If
-//     cmd/jig's flag parser rejects unknown flags, add them there rather
-//     than changing this test's expectations.
-//  2. The status table's 5th column (`question`) is assumed to carry the
-//     slice's Reason string (e.g. "attempt-cap") when the slice is stalled
-//     or env-blocked and has no open question, since the column budget in
-//     the contract's status format leaves no other place for it. See
-//     TestCapExhaustion.
+//  1. `jig solve` accepts the same `--backend`/`--scenario` flags as
+//     `jig run`/`jig gate` (see `jig solve -h`, cmd/jig/help.go). Without
+//     them, TestSolveOneProcess cannot run deterministically in CI.
+//  2. cmd/jig's RenderStatus (status.go) only ever puts a slice's Question
+//     in the status table's 5th column, never its Reason (e.g.
+//     "attempt-cap"), so that value does not currently surface in `jig
+//     status` output at all. TestCapExhaustion documents this as a known
+//     gap rather than asserting a Reason column that does not exist.
 package e2e
 
 import (

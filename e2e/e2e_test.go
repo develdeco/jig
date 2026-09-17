@@ -15,7 +15,7 @@ import (
 	"github.com/develdeco/jig/internal/tracker"
 )
 
-// TestEndToEndTwice drives the full DoD-3 chain (run to first pause, answer
+// TestEndToEndTwice drives the full chain (run to first pause, answer
 // to full green, a divergent store push that the next command must
 // pull-rebase past, a gate round that finds a must-fix and appends a fix
 // slice, clearing that fix slice, a clean gate, a target-branch move that

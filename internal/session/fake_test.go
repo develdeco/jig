@@ -90,7 +90,7 @@ func TestFakeBackendAppliesPatchAndCommits(t *testing.T) {
 		t.Fatalf("hello.txt not created: %v", err)
 	}
 
-	// A commit was created with the contract's message shape.
+	// A commit was created with the expected message shape.
 	subject, err := gitx.Run(worktree, "log", "-1", "--format=%s")
 	if err != nil {
 		t.Fatalf("git log: %v", err)

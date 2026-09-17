@@ -12,11 +12,10 @@ import (
 // second answers it and rides the chain (run -> gate -> fix round -> gate
 // clean -> publish) to completion in one call.
 //
-// NOTE: the CLI surface table in CONTRACTS.md lists only --yes/--answer for
-// solve, but DoD-5 cannot run deterministically without threading the fake
-// backend through solve's internal run/gate calls the same way the run and
-// gate subcommands take them directly. This test assumes solve also accepts
-// --backend/--scenario; see the package doc in main_test.go.
+// NOTE: this test threads the fake backend through solve's internal
+// run/gate calls the same way the run and gate subcommands take them
+// directly, via solve's --backend/--scenario flags (see `jig solve -h`);
+// see the package doc in main_test.go.
 //
 // NOTE: this chain reaches gate/publish oracle execution, so on a machine
 // where Go lives under a space-containing path it hits the same

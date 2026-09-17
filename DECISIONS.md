@@ -19,10 +19,10 @@ was ambiguous, what was chosen, and why.
   The env-class up/check/down commands are the one sanctioned shell-string exception
   (`cmd /C` on Windows, `sh -c` under WSL).
 - Reconcile conflicts in v0.1 abort publish with a structured error pointing at
-  `jig gate`; the conflict-resolution fix-slice loop is deferred, and the DoD only
-  asserts the oracles-only tier. The pushed-branch publish flow beyond the reconcile
-  policy is unreachable in v0.1 because squash refusal blocks it first - a known,
-  documented limit.
+  `jig gate`; the conflict-resolution fix-slice loop is deferred, and v0.1's
+  acceptance criteria only assert the oracles-only tier. The pushed-branch publish
+  flow beyond the reconcile policy is unreachable in v0.1 because squash refusal
+  blocks it first - a known, documented limit.
 - Publish re-validate treats "affected oracles" as all manifest oracles in v0.1;
   graphify-based scoping is deferred.
 - Divergence checking lands as a lite version: reconcile journals the integrated-diff
@@ -43,12 +43,11 @@ was ambiguous, what was chosen, and why.
 ## Store
 
 - `from_brief` hashes are computed as the sha256 of a section's body (the heading line
-  excluded), newline-normalized, with trailing whitespace trimmed on each line -
-  chosen because the spec's "##-delimited section bodies" reads most naturally that
-  way.
+  excluded), newline-normalized, with trailing whitespace trimmed on each line, so
+  editing one `## ` section changes only that section's hash.
 - The standalone store's default `ticket_format` is `T-{n}`; the tracker is local by
-  default. The design names no default, so this was chosen as the simplest workable
-  one.
+  default. No default was specified beforehand, so this was chosen as the simplest
+  workable one.
 - The journal event vocabulary is fixed as: dispatch, result, question, answer,
   requeue, stall, env-*, gate-*, fix-slice, reconcile, revalidate, memorize,
   changelog, squash, pr, route, publish-done. The graduated-revalidate reason is
@@ -62,34 +61,31 @@ was ambiguous, what was chosen, and why.
 
 ## Build loop
 
-- Result-text parsing requires exactly one fenced json block; the v0.1 contract chose
-  this over the predecessor's last-block-wins behavior. Zero or multiple blocks parse
-  as a failed result, and this port-fidelity tradeoff is recorded in the outcome
-  tests.
-- The stall signature strips digits and path segments before comparison - the v0.1
-  contract chose this normalization over the predecessor's signature, which had
-  neither.
-- The staircase invariant regex is applied case-insensitively, matching the
-  predecessor's IGNORECASE behavior where v0.1 left the choice open.
+- Result-text parsing requires exactly one fenced json block; zero or multiple blocks
+  both parse as a failed result rather than falling back to a last-block-wins
+  heuristic. This stricter rule is recorded in the outcome tests.
+- The stall signature strips digits and path segments before comparison, so the
+  same failure at a different line number or path still counts as a repeat.
+- The staircase invariant regex is applied case-insensitively; v0.1 left this choice
+  open and case-insensitive was picked.
 - Attempt-cap exhaustion has two candidate behaviors: setting a `stalled` state, or
   failing and surfacing the run. Both were kept: on-disk state uses the `stalled`
   vocabulary with reason `attempt-cap`, while the run report surfaces it as a failure.
   This satisfies both readings at once.
 - A slice's `oracle` field resolves through the manifest's oracle names (with `{path}`
-  substituted); an unknown name is treated as a literal command. This was left
-  unconstrained by design and chosen to keep both the fixture and real repos working.
+  substituted); an unknown name is treated as a literal command. This was left open
+  and chosen to keep both the fixture and real repos working.
 - Requeue keeps attempt counts, so a brief amendment does not erase attempt history;
   the fake backend's attempt numbering advances past the flawed-brief attempt rather
   than resetting.
 - The invariant-floor regex keeps its verbatim v0.1 form (no word boundaries, literal
   single spaces, a reduced alternative set) rather than a richer regex considered
-  during review, because the v0.1 contract for this pattern was intentional, not an
-  oversight.
+  during review, because that verbatim v0.1 form was intentional, not an oversight.
 - The headless backend's exactly-one-fenced-block text parse is the v0.1 rule; the
   known risk is a transcript containing a stray fence, which is documented rather than
   guarded against in v0.1.
-- Staircase signals measure the cumulative lease diff, matching how the predecessor
-  measured diff-vs-master (also cumulative), so no behavior change was needed here.
+- Staircase signals measure the lease's whole diff against its start point, not
+  just the latest attempt's changes.
 - graphify's `Plane.Affected` derives `--graph <repo>/graphify-out/graph.json --depth
   2` itself, since the interface carries no graph/depth parameters and these are
   reasonable defaults.
@@ -115,8 +111,8 @@ was ambiguous, what was chosen, and why.
 
 ## CLI
 
-- `jig init` takes `--store <path>` for the project form, while the DoD scenario passes
-  explicit `--clone` flags; the flag surface was not fixed by design, so both entry
+- `jig init` takes `--store <path>` for the project form, while the end-to-end fixture
+  passes explicit `--clone` flags; the flag surface was left open, so both entry
   points were kept.
 - `jig solve` pauses by exiting with code 2 at a needs-input state; a second
   `jig solve --yes --answer <qid> "<text>"` resumes the chain. "One process" is
