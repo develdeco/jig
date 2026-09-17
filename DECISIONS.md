@@ -5,8 +5,7 @@ was ambiguous, what was chosen, and why.
 
 ## Scope and deferrals
 
-- Boards deferred: structural rounds render as markdown tables in v0.1; the `board`
-  package is an interface stub.
+- Structural rounds render as markdown tables in v0.1.
 - jira/linear trackers are compile-checked stubs that return a structured
   not-implemented error.
 - `jig gate` pr-mode parses its flags and returns not-implemented.

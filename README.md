@@ -178,4 +178,4 @@ Shipped: init, ticket, run, requeue, gate, publish, solve, status, validate,
 version, skills, the fake/headless/herdr backends, and the local/github
 tracker adapters.
 Jira/Linear tracker adapters, gate's `--pr` mode, the `fleet`/`retro` verbs,
-structural-round boards, and design oracles ship in v0.2.
+and design oracles ship in v0.2.

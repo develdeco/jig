@@ -99,7 +99,6 @@ exists.
 | Package | Entry points | Input → Output |
 |---|---|---|
 | `axi/` | `Render`, `Table`, `KV`, `Help`, `RenderError`, `ExitCode` | labelled data → jig's plain-text output register and process exit codes |
-| `board/` | `Board`, `Deferred` | a structural-round call → a not-implemented error (v0.1 stub; see [DECISIONS.md](./DECISIONS.md)) |
 | `cmd/jig/` | `main`, `cmdScreen` | CLI args, or a PreToolUse hook payload on stdin → subcommand dispatch, or a screen allow/deny |
 | `e2e/` | (tests only) | the fixture + fake backend → asserts the full brief→publish chain twice |
 | `envrun/` | `Up`, `Shell` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable` |

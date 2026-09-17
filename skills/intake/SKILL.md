@@ -9,7 +9,7 @@ One skill, two destinations: **brief** (fog fits one ticket) or **chart** (fog s
 
 ## Grilling round
 
-A round asks the whole **frontier** - every question whose prerequisites are settled - numbered, each carrying a recommended answer. Facts are your job: dispatch read-only, repo-rooted scouts to draft per-workspace sections naming real oracles; only decisions go to the human. Structural rounds (slice map, competing proposals) render as markdown tables (boards deferred, v0.2). Stop when the frontier is empty. Record every decision as user-confirmed or defaulted - never silent.
+A round asks the whole **frontier** - every question whose prerequisites are settled - numbered, each carrying a recommended answer. Facts are your job: dispatch read-only, repo-rooted scouts to draft per-workspace sections naming real oracles; only decisions go to the human. Structural rounds (slice map, competing proposals) render as markdown tables. Stop when the frontier is empty. Record every decision as user-confirmed or defaulted - never silent.
 
 ## Three shapes
 
