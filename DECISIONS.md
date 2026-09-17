@@ -130,9 +130,12 @@ was ambiguous, what was chosen, and why.
 
 ## Fixture and tests
 
-- The fixture envtool is pre-built once per Generate rather than invoked via
-  `go run`, because it is a cross-platform Go program and the `go run` form would
-  hang on PATH-less shells and recompile on every lifecycle call.
+- The fixture envtool is pre-built rather than invoked via `go run`, because it is a
+  cross-platform Go program and the `go run` form would hang on PATH-less shells and
+  recompile on every lifecycle call. It is built once per test binary and shared by
+  every Generate call, since nothing about it varies between fixtures.
+- e2e fails the whole run when the jig binary does not build, instead of skipping
+  every test: a skipped suite reads as green.
 - Status goldens: state (a) ("A green, B blocked") is constructed directly via store
   state snapshots plus `jig status`; states (b) and (c) are natural pauses that occur
   during the end-to-end chain. In all cases the CLI's rendering is what the goldens
@@ -148,3 +151,25 @@ was ambiguous, what was chosen, and why.
   named package directory actually exists.
 - CLAUDE.md consists of a single `@AGENTS.md` import line, so the two files share one
   content; AGENTS.md itself stays navigation pointers only.
+
+## Git execution and CI
+
+- git's detached auto-maintenance, spawned after commits, fetches and on the receiving
+  side of local pushes, was still writing when a test's `TempDir` cleanup ran, so
+  cleanup failed with "directory not empty" (on Linux, under load, 8 in 3,200 runs of
+  one e2e test; 0 in 3,200 with maintenance off). Tests run git under a generated global
+  config (`maintenance.auto=false`, `receive.autogc=false`, `gc.autoDetach=false`) with
+  no system config. `-c` flags and `GIT_CONFIG_COUNT` would not do: git clears them for
+  local transport, so they never reach `git-receive-pack`. A trace2 capture shows
+  `GIT_CONFIG_GLOBAL` does.
+- gitx is the single owner of git execution, enforced by a lint test. Every call passes
+  `-c maintenance.auto=false` on its own argv instead of persisting config, so a
+  user's own git keeps maintaining their repos.
+- Long-lived repos (the store after a push, a pool lease after a reuse fetch) get a
+  foreground, best-effort `git maintenance run --auto`. The per-call flag only stops
+  commands from spawning detached maintenance, not this explicit run;
+  `gc.autoDetach=false` keeps its gc child in the foreground on git older than 2.54.
+- CI actions are on v7; macOS joins the matrix only on manual dispatch until
+  validated; govulncheck runs on the Linux leg.
+- Windows Defender exclusions were considered for Windows CI time and dropped: GitHub's
+  Windows runner images already turn real-time scanning off and exclude the C: and D: drives.
