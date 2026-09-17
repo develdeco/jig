@@ -1,13 +1,41 @@
 # jig
 
-jig drives a ticket from raw ask to an opened, evidence-backed PR through
-Brief → Build → Gate → Publish. One Go binary does the machinery - dispatching
-sessions, tracking slice state, screening commands, opening the PR - while
-session skills supply judgment: reading a brief, writing code, reviewing a
-diff. All state lives in a remote-backed git repo (the *store*), so a ticket's
-progress survives any single session ending. Two moments need a human:
-deciding what a brief actually asks for, and confirming before the PR goes
-out.
+jig drives a ticket from brief to an evidence-backed, opened pull request -
+one dispatch loop over small, provable slices of work.
+
+[![CI](https://github.com/develdeco/jig/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/develdeco/jig/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/develdeco/jig)](https://github.com/develdeco/jig/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/develdeco/jig)](LICENSE)
+
+- Turns a brief into slices of work, each with a named oracle command that
+  proves it done.
+- Dispatches the frontier of ready slices to a build session, and resumes
+  where a session left off.
+- Re-verifies the branch's oracles in its own gate round before anything
+  ships (session-driven review is on the roadmap).
+- Reconciles, revalidates, and opens the pull request itself, evidence
+  attached.
+- Keeps every ticket's state in a plain git repo, so progress survives any
+  one session ending.
+
+## Pipeline
+
+```
+brief     write brief.md + slices.yaml (you, with the intake skill)
+  │
+  ▼
+run       dispatch the frontier of ready slices to a build session
+  │
+  ▼
+gate      re-verify the ticket's branch's oracles
+  │
+  ▼
+publish   reconcile, revalidate, and open the PR
+```
+
+Two moments need a human: deciding what the brief actually asks for, and
+confirming before the PR goes out. See [ARCHITECTURE.md](ARCHITECTURE.md) for
+what each stage reads and writes.
 
 ## Install
 
@@ -23,171 +51,117 @@ curl -fsSL https://raw.githubusercontent.com/develdeco/jig/main/scripts/install.
 irm https://raw.githubusercontent.com/develdeco/jig/main/scripts/install.ps1 | iex
 ```
 
-Set `JIG_VERSION` to install a specific release tag (for example `v0.1.1`)
-instead of the latest one, and `JIG_INSTALL_DIR` to change where `jig` is
-installed.
+Set `JIG_VERSION` to install a specific release tag instead of the latest,
+and `JIG_INSTALL_DIR` to change where `jig` is installed.
 
-With a Go toolchain:
+With Go 1.27 or newer:
 
 ```sh
 go install github.com/develdeco/jig/cmd/jig@latest
 ```
 
-Or clone and build:
+Either way, install the session skills next:
 
 ```sh
-git clone git@github.com:develdeco/jig.git
+jig skills install
+```
+
+This writes the skills - drafting a brief or chart (`intake`), routing a
+stated intent to the right skill or command (`router`), running many
+tickets in parallel (`fleet-liaison`), refreshing the store's platform
+notes after a ticket lands (`platform-sync`), and mining repeated failures
+for a skill or rule fix (`retro`) - to `~/.claude/skills`; pass `--project`
+to install them under `./.claude/skills` of the current directory instead.
+
+**Prerequisites:** `git` on PATH. The default session backend is `herdr`,
+which needs `herdr` and the Claude Code CLI (`claude`) on PATH, plus a WSL
+login shell on Windows (`JIG_WSL_DISTRO` picks the distro) - jig does not
+check for these before it starts a session, so a missing one surfaces as a
+stalled slice, not a clear error. Pass `--backend headless` to drive a
+local `claude -p` subprocess instead, which only needs `claude` on PATH.
+`graphify` is optional; jig falls back cleanly without it.
+[`gh`](https://cli.github.com/) is needed for the GitHub tracker and
+opening pull requests.
+
+### Building from a clone
+
+```sh
+git clone https://github.com/develdeco/jig.git
 cd jig
 go build ./cmd/jig
 ```
 
-## Skills
-
-Session skills (drafting a brief, classifying a gate finding, and the rest of
-the judgment calls in `skills/`) ship embedded in the `jig` binary. Install
-them where a session expects to find them with `jig skills install`: with no
-flags it writes to `~/.claude/skills` (every session on the machine); with
-`--project` it writes to `./.claude/skills` (this repo only).
-
 ## Quickstart
 
 ```sh
-go build ./cmd/jig                        # builds the jig binary
-./jig init --standalone                   # creates a sibling tickets store next to this repo
-./jig ticket new --title "Fix the thing"  # mints a ticket (T-1) in the store
-# write T-1/brief.md and T-1/slices.yaml - the intake skill drafts both with you
-./jig validate T-1                        # checks the brief, slices, and manifest agree
-./jig run T-1                             # dispatches the frontier of queued slices to a build session
-./jig gate T-1                            # runs a review + re-verification round over the ticket's branch
-./jig publish T-1                         # reconciles, revalidates, and opens the PR
+jig init --standalone                     # creates a sibling tickets store next to this repo
+jig ticket new --title "Fix the thing"    # mints a ticket (T-1) in the store
+# the intake skill drafts T-1/brief.md and T-1/slices.yaml with you
+jig validate T-1                          # checks the brief, slices, and manifest agree
+jig solve T-1 --backend headless --yes    # runs run, gate, and publish as one chain
 ```
 
-Run `jig ticket new`, `jig run`, and `jig gate` again as slices need more
-attempts or a brief gets amended (`jig requeue --from-brief-diff`); `jig
-solve` runs `run` → `gate` → `publish` as one chain and pauses for a question
-or the publish confirm.
-
-## CLI reference
-
-`jig` with no arguments prints this:
-
-```
-usage: jig <command> [flags]
-commands[11]{name,summary}:
-  init,"initialize a store (standalone, or store + clones)"
-  ticket,"mint a new ticket: jig ticket new --title <t>"
-  solve,"run the full chain: run, gate, publish"
-  run,dispatch the frontier of queued slices
-  requeue,requeue slices touched by a brief edit
-  gate,run a gate round over the ticket's branch
-  publish,"reconcile, revalidate, and open the PR"
-  status,print a ticket's slice and question state
-  validate,"check a ticket's brief, slices, and manifest"
-  version,"print jig's version, commit, and go runtime"
-  skills,"jig skills install: ship the session skills with the binary"
-flags{init}[3]{flag,usage}:
-  --standalone,create a sibling tickets store next to the current repo
-  --store,store path to initialize (used with --clone)
-  --clone,name=path clone mapping; repeatable
-flags{ticket}[4]{flag,usage}:
-  --title,ticket title (required)
-  --body,ticket body
-  --store,explicit store path
-  --project,"project name, resolved via the machine mapping"
-flags{solve}[6]{flag,usage}:
-  --yes,skip the interactive publish confirm
-  --answer,"answer a pending question: --answer <qid> <text>"
-  --backend,"session backend: fake, headless, or herdr"
-  --scenario,scenario dir for the fake backend
-  --store,explicit store path
-  --project,"project name, resolved via the machine mapping"
-flags{run}[5]{flag,usage}:
-  --answer,"answer a pending question: --answer <qid> <text>"
-  --backend,"session backend: fake, headless, or herdr"
-  --scenario,scenario dir for the fake backend
-  --store,explicit store path
-  --project,"project name, resolved via the machine mapping"
-flags{requeue}[3]{flag,usage}:
-  --from-brief-diff,requeue slices whose brief section hash changed
-  --store,explicit store path
-  --project,"project name, resolved via the machine mapping"
-flags{gate}[6]{flag,usage}:
-  --early,gate before the frontier is fully green
-  --branch,validate this branch instead of jig/<ticket>
-  --doc,"brief doc path, used together with --branch"
-  --scenario,scenario dir for the fake gate source
-  --store,explicit store path
-  --project,"project name, resolved via the machine mapping"
-flags{publish}[3]{flag,usage}:
-  --yes,skip the interactive confirm
-  --store,explicit store path
-  --project,"project name, resolved via the machine mapping"
-flags{status}[2]{flag,usage}:
-  --store,explicit store path
-  --project,"project name, resolved via the machine mapping"
-flags{validate}[2]{flag,usage}:
-  --store,explicit store path
-  --project,"project name, resolved via the machine mapping"
-flags{version}[0]{flag,usage}:
-flags{skills}[2]{flag,usage}:
-  --project,install under ./.claude/skills of the current directory
-  --dest,install under <dir>/<name>/SKILL.md instead of the default location
-help[3]:
-  jig ticket new --title "Fix the thing"
-  jig run T-1
-  jig solve T-1 --yes
-```
-
-## Status rendering
-
-`jig status <ticket>` prints the slice/question table straight from the
-store - no separate dashboard. Real output from the test fixture, mid-gate:
-
-```
-ticket: JIG-1
-state: building
-slices[5]{id,state,attempts,blocked_by,question}:
-  a,green,1,-,-
-  b,green,2,a,-
-  c,green,2,-,-
-  d,green,1,-,-
-  fix-1,queued,0,-,-
-questions[1]{id,slice,status}:
-  q-001,c,answered
-help[1]:
-  Run `jig run JIG-1` to work the frontier
-```
-
-## Proof
-
-```sh
-go build ./... && go test ./...
-```
-
-23 packages, 175 test functions. The deterministic end-to-end fixture (a
-fake session backend, no API calls) runs the full brief-to-PR chain twice in
-about three minutes, asserting the second run lands on the same result as
-the first. The safety screens, the outcome parser, staircase model
-selection, stall detection, and the store's lock-file race each carry a
-table-driven test ported from the original spec.
+`jig solve` dispatches slices, gates the branch, and publishes in one
+chain. `--yes` skips only the publish confirm: when a session asks a
+question, `jig solve` stops, and you resume it with
+`jig solve T-1 --yes --answer <qid> "<text>"`. With the standalone store above (`tracker: local`), publish
+pushes `jig/T-1` and writes the PR body into the store instead of opening a
+PR - set `tracker: github` in `project.yaml` and have `gh` on PATH to get
+an opened PR. Run `jig run T-1` and `jig gate T-1` on their own as slices
+need another attempt or a brief gets amended (`jig requeue
+--from-brief-diff`). `jig status T-1` prints the ticket's slice and
+question state at any point, and `jig <command> -h` prints that command's
+flags.
 
 ## Session backends
 
-A build or gate session runs against one of three backends: `fake` replays a
-scripted scenario with no network calls (the CI and fixture path), `headless`
-drives a local `claude -p` subprocess, and `herdr` drives a remote agent
-through herdr, exec'd natively off Windows and, on Windows, inside a WSL
-login shell (`JIG_WSL_DISTRO` picks the distro). All three read the same
-`slice.json` and write the same `result.json` - see [ARCHITECTURE.md](./ARCHITECTURE.md#session-backends).
+A build session (`jig run`) runs against one of three backends, picked with
+`--backend` (default `herdr`, or `fake` when `--scenario` is set): `fake`
+replays a scripted scenario with no network calls, `headless` drives a local
+`claude -p` subprocess, and `herdr` drives a remote agent through herdr -
+natively off Windows, and on Windows inside a WSL login shell
+(`JIG_WSL_DISTRO` picks the distro). All three read the same `slice.json`
+and write the same `result.json`; see
+[ARCHITECTURE.md](ARCHITECTURE.md#session-backends).
 
-Every session backend that can run tools is wrapped by a structural command
-screen and a secret-read screen; the binary itself pushes only at publish's
-confirmed step, and refuses to push to a non-local remote without one.
+`jig gate` has no `--backend` flag: without `--scenario` it re-runs every
+manifest oracle on a fresh lease and reports clean, with no review step of
+its own yet (see Roadmap).
 
-## v0.1 scope
+## Safety
 
-Shipped: init, ticket, run, requeue, gate, publish, solve, status, validate,
-version, skills, the fake/headless/herdr backends, and the local/github
-tracker adapters.
-Jira/Linear tracker adapters, gate's `--pr` mode, the `fleet`/`retro` verbs,
-and design oracles ship in v0.2.
+The `headless` backend is wrapped by two screens before a tool call runs: a
+structural command screen that parses each shell command instead of
+pattern-matching it, so quoting or a `-C <path>` trick can't hide a `git
+push` from it, and a secret-path screen that denies any tool-call path
+shaped like a live credential (`.env*`, `*_key*`, `id_rsa*`, `~/.aws/**`, and
+the like). `herdr` sessions are not screened yet. Every command pushes the
+ticket store's own bookkeeping commits to the store's remote as it works;
+only the ticket branch push is guarded, and only `jig publish` makes it,
+after its interactive confirm (or `--yes`) has run - it refuses to push a
+branch to a remote that isn't a local file path without one. Product
+commits - the ones that land on your PR branch - use your own git identity,
+not jig's. See [ARCHITECTURE.md](ARCHITECTURE.md#safety) for the full
+model.
+
+## Docs
+
+- [CONTEXT.md](CONTEXT.md) - the vocabulary jig's code and docs share.
+- [ARCHITECTURE.md](ARCHITECTURE.md) - the pipeline, store schema, module
+  responsibilities, and the safety model in full.
+- [docs/adr/](docs/adr/) - why each structural decision was made.
+- [DECISIONS.md](DECISIONS.md) - the build log: what was ambiguous, what was
+  chosen, and why.
+- [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) - how to build, test,
+  and change jig.
+- [.github/SECURITY.md](.github/SECURITY.md) - how to report a
+  vulnerability.
+- [skills/](skills/) - the session skills that ship embedded in the binary.
+
+## Roadmap
+
+Coming in v0.2: a session-driven gate reviewer, Jira and Linear tracker
+adapters, `gate`'s `--pr` mode for reviewing a PR someone else opened, the
+`fleet` and `retro` binary verbs for working many tickets and mining
+repeated failures, and design-facet oracles. Later: more than one repo per
+project, and nix packaging.

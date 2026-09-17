@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"flag"
 	"io"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -103,43 +100,6 @@ func TestCommandTableFlagsMatchRegistration(t *testing.T) {
 		if !found {
 			t.Errorf("newFlagSet(%q) has no commandTable entry", key)
 		}
-	}
-}
-
-// TestBareHelpMatchesREADME checks that README.md's bare `jig` output block
-// matches what the binary prints.
-func TestBareHelpMatchesREADME(t *testing.T) {
-	var buf bytes.Buffer
-	if code := Main(nil, &buf, strings.NewReader("")); code != 0 {
-		t.Fatalf("jig (bare) exit code = %d", code)
-	}
-	want := strings.TrimRight(buf.String(), "\n")
-
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	readmePath := filepath.Join(filepath.Dir(file), "..", "..", "README.md")
-	data, err := os.ReadFile(readmePath)
-	if err != nil {
-		t.Fatalf("read README.md: %v", err)
-	}
-	readme := strings.ReplaceAll(string(data), "\r\n", "\n")
-
-	marker := "`jig` with no arguments prints this:\n\n```\n"
-	start := strings.Index(readme, marker)
-	if start == -1 {
-		t.Fatal(`README.md: missing "jig` + "`" + ` with no arguments prints this:" fenced block`)
-	}
-	start += len(marker)
-	end := strings.Index(readme[start:], "\n```")
-	if end == -1 {
-		t.Fatal("README.md: unterminated fenced block after the bare-jig marker")
-	}
-	got := readme[start : start+end]
-
-	if got != want {
-		t.Fatalf("README.md's bare `jig` block is stale; want it replaced with:\n\n%s", want)
 	}
 }
 
