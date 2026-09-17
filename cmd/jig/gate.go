@@ -59,6 +59,13 @@ func cmdGate(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	check := requireSlices
+	if *branch != "" {
+		check = requireTicket
+	}
+	if err := check(st, ticket); err != nil {
+		return renderErr(stdout, err)
+	}
 
 	deps := verifydeliverDeps(st, cfg, mp)
 	report, err := verifydeliver.Gate(deps, gateSourceFor(*scenario), verifydeliver.GateOpts{

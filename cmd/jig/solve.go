@@ -47,6 +47,9 @@ func cmdSolve(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if err := requireSlices(st, ticket); err != nil {
+		return renderErr(stdout, err)
+	}
 	backend, err := session.New(backendName(*backendFlag, *scenario), session.Options{ScenarioDir: *scenario})
 	if err != nil {
 		return renderErr(stdout, err)

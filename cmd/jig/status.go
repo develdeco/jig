@@ -34,6 +34,9 @@ func cmdStatus(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if err := requireTicket(st, ticket); err != nil {
+		return renderErr(stdout, err)
+	}
 
 	out, err := RenderStatus(st, ticket)
 	if err != nil {
@@ -145,7 +148,10 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		}
 	}
 
-	allGreen := len(slices) > 0
+	if len(slices) == 0 {
+		return intakeHint(ticket), nil
+	}
+	allGreen := true
 	for _, sl := range slices {
 		ss, err := st.ReadSliceState(ticket, sl.ID)
 		if err != nil {

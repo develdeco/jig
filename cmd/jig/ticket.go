@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/tracker"
 )
 
@@ -54,4 +56,41 @@ func cmdTicket(args []string, stdout io.Writer) int {
 		axi.Help(fmt.Sprintf("Run `jig validate %s` once its brief and slices are written", id)),
 	)
 	return 0
+}
+
+// intakeHint is the next step for a ticket that has no slices yet.
+func intakeHint(ticket string) string {
+	return fmt.Sprintf("Write its brief.md and slices.yaml (the intake skill drafts both), then run `jig validate %s`", ticket)
+}
+
+// requireTicket fails when the store has no folder for ticket.
+func requireTicket(st *store.Store, ticket string) error {
+	if fi, err := os.Stat(st.TicketDir(ticket)); err == nil && fi.IsDir() {
+		return nil
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("ticket %s not found in the store at %s", ticket, st.Root),
+		Code: "VALIDATION_ERROR",
+		Help: []string{
+			"Run `jig ticket new --title \"...\"` to mint a ticket",
+			"For a ticket that exists only in the tracker, write its brief.md and slices.yaml (the intake skill drafts both)",
+		},
+	}
+}
+
+// requireSlices fails when ticket has no slices to work, which is also the
+// case for a ticket with no folder in the store yet.
+func requireSlices(st *store.Store, ticket string) error {
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		return err
+	}
+	if len(slices) > 0 {
+		return nil
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("ticket %s has no slices yet", ticket),
+		Code: "VALIDATION_ERROR",
+		Help: []string{intakeHint(ticket)},
+	}
 }
