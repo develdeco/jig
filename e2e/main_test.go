@@ -39,6 +39,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/develdeco/jig/gittest"
 )
 
 // jigBinary is the path to the once-built jig.exe.
@@ -69,7 +71,7 @@ func TestMain(m *testing.M) {
 	}
 	jigBinary = out
 
-	code := m.Run()
+	code := gittest.Run(m)
 	os.RemoveAll(tmp)
 	os.Exit(code)
 }

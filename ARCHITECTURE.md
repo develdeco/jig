@@ -104,6 +104,7 @@ exists.
 | `e2e/` | (tests only) | the fixture + fake backend → asserts the full brief→publish chain twice |
 | `envrun/` | `Up`, `Shell` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable` |
 | `fixture/` | `Generate` | test `Opts` → a temp fixture repo, its store, and a scripted attempt scenario |
+| `gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
 | `gitx/` | `Run`, `RevParse`, `MergeBase`, `CommitsIn`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
 | `graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → per-machine paths |
@@ -169,3 +170,11 @@ Every test gets its own `t.TempDir()`, `JIG_HOME` is always overridden via
 and committer identity and dates are pinned to a fixed fixture value so
 commits hash the same on every run, and every remote used in tests is a
 bare, file-path repo - no test ever talks to a real git host.
+
+Every package whose tests run git has a `TestMain` built on `gittest.Run`,
+which points `GIT_CONFIG_GLOBAL` at a generated config
+(`maintenance.auto = false`, `receive.autogc = false`, `gc.autoDetach = false`)
+and sets `GIT_CONFIG_NOSYSTEM=1`. That reaches every git process the binary
+spawns, including `git-receive-pack` behind a local push, so no detached
+maintenance outlives a test. With no system or user config, a test that
+needs a git setting (for example `core.autocrlf`) sets it itself.
