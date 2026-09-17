@@ -17,6 +17,10 @@ func cmdSkills(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if sub == "" {
+		// requirePositional passed a leading -h/--help through.
+		sub = "install"
+	}
 	if sub != "install" {
 		return renderErr(stdout, &axi.Error{
 			Msg:  fmt.Sprintf("unknown skills subcommand %q; only \"install\" is supported", sub),

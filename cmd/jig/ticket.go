@@ -16,6 +16,10 @@ func cmdTicket(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if sub == "" {
+		// requirePositional passed a leading -h/--help through.
+		sub = "new"
+	}
 	if sub != "new" {
 		return renderErr(stdout, &axi.Error{
 			Msg:  fmt.Sprintf("unknown ticket subcommand %q; only \"new\" is supported", sub),

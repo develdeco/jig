@@ -117,6 +117,8 @@ func TestPerCommandHelpFlag(t *testing.T) {
 		{"gate -h with no ticket", []string{"gate", "-h"}, "flags{gate}"},
 		{"ticket new -h", []string{"ticket", "new", "-h"}, "flags{ticket}"},
 		{"version --help", []string{"version", "--help"}, "flags{version}"},
+		{"ticket -h", []string{"ticket", "-h"}, "flags{ticket}"},
+		{"skills --help", []string{"skills", "--help"}, "flags{skills}"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
