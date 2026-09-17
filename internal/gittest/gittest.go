@@ -52,6 +52,33 @@ func Run(m *testing.M) int {
 	return code
 }
 
+// pinnedIdentity is the fixture identity and date PinIdentity sets, matching
+// internal/fixture and the fake session backend so shas stay comparable
+// across all three.
+var pinnedIdentity = [][2]string{
+	{"GIT_AUTHOR_NAME", "jig-fixture"},
+	{"GIT_AUTHOR_EMAIL", "fixture@example.invalid"},
+	{"GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z"},
+	{"GIT_COMMITTER_NAME", "jig-fixture"},
+	{"GIT_COMMITTER_EMAIL", "fixture@example.invalid"},
+	{"GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z"},
+}
+
+// PinIdentity sets the six GIT_AUTHOR_* and GIT_COMMITTER_* name, email and
+// date variables for the whole test binary, so commits hash the same on
+// every run. The environment beats git config, so call it only from a
+// package whose tests do not rely on their own configured identity:
+//
+//	func TestMain(m *testing.M) {
+//	    gittest.PinIdentity()
+//	    os.Exit(gittest.Run(m))
+//	}
+func PinIdentity() {
+	for _, kv := range pinnedIdentity {
+		_ = os.Setenv(kv[0], kv[1])
+	}
+}
+
 // AtExit registers f to run after m.Run() returns, in LIFO order, before
 // Run removes its own temp directory. It is safe to call concurrently.
 func AtExit(f func()) {
