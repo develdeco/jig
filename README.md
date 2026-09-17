@@ -74,11 +74,11 @@ for a skill or rule fix (`retro`) - to `~/.claude/skills`; pass `--project`
 to install them under `./.claude/skills` of the current directory instead.
 
 **Prerequisites:** `git` on PATH. The default session backend is `herdr`,
-which needs `herdr` and the Claude Code CLI (`claude`) on PATH, plus a WSL
-login shell on Windows (`JIG_WSL_DISTRO` picks the distro) - jig does not
-check for these before it starts a session, so a missing one surfaces as a
-stalled slice, not a clear error. Pass `--backend headless` to drive a
+which needs `herdr` and the Claude Code CLI (`claude`), inside WSL on Windows
+(`JIG_WSL_DISTRO` picks the distro). Pass `--backend headless` to drive a
 local `claude -p` subprocess instead, which only needs `claude` on PATH.
+`jig run` and `jig solve` check that the backend's program is on PATH before
+they start and say what to install if it is not.
 `graphify` is optional; jig falls back cleanly without it.
 [`gh`](https://cli.github.com/) is needed for the GitHub tracker and
 opening pull requests.

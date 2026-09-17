@@ -6,7 +6,13 @@
 // via WSL on Windows).
 package session
 
-import "fmt"
+import (
+	"fmt"
+	"os/exec"
+	"runtime"
+
+	"github.com/develdeco/jig/internal/axi"
+)
 
 // Dispatch describes one slice attempt for a backend to run. Prompt carries
 // paths, not file contents; the backend (or the agent it drives) reads
@@ -47,5 +53,40 @@ func New(name string, opts Options) (Backend, error) {
 		return newHerdrBackend(opts), nil
 	default:
 		return nil, fmt.Errorf("session: unknown backend %q", name)
+	}
+}
+
+// Available reports whether the program the named backend runs is on PATH,
+// so a command can stop before it spends attempts on a missing tool. The
+// fake backend needs nothing.
+func Available(name string) error {
+	return available(runtime.GOOS, name)
+}
+
+func available(goos, name string) error {
+	var prog, install string
+	switch name {
+	case "headless":
+		prog, install = "claude", "Install the Claude Code CLI so `claude` is on PATH"
+	case "herdr":
+		if goos == "windows" {
+			prog, install = "wsl", "Install WSL with herdr in its default distro (JIG_WSL_DISTRO picks another)"
+		} else {
+			prog, install = "herdr", "Install herdr so it is on PATH"
+		}
+	default:
+		return nil
+	}
+	if _, err := exec.LookPath(prog); err == nil {
+		return nil
+	}
+	other := "headless"
+	if name == "headless" {
+		other = "herdr"
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("the %s backend needs %s, which is not on PATH", name, prog),
+		Code: "BACKEND_UNAVAILABLE",
+		Help: []string{install, fmt.Sprintf("Or run with `--backend %s`", other)},
 	}
 }

@@ -50,7 +50,11 @@ func cmdSolve(args []string, stdout io.Writer) int {
 	if err := requireSlices(st, ticket); err != nil {
 		return renderErr(stdout, err)
 	}
-	backend, err := session.New(backendName(*backendFlag, *scenario), session.Options{ScenarioDir: *scenario})
+	backendKind := backendName(*backendFlag, *scenario)
+	if err := session.Available(backendKind); err != nil {
+		return renderErr(stdout, err)
+	}
+	backend, err := session.New(backendKind, session.Options{ScenarioDir: *scenario})
 	if err != nil {
 		return renderErr(stdout, err)
 	}
