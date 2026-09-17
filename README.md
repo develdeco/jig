@@ -11,21 +11,35 @@ out.
 
 ## Install
 
+One line, no Go toolchain required. This downloads the release archive for
+your platform, verifies it against `checksums.txt`, and installs `jig` to a
+user directory (no sudo or admin rights):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/develdeco/jig/main/scripts/install.sh | sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/develdeco/jig/main/scripts/install.ps1 | iex
+```
+
+Set `JIG_VERSION` to install a specific release tag (for example `v0.1.1`)
+instead of the latest one, and `JIG_INSTALL_DIR` to change where `jig` is
+installed.
+
+With a Go toolchain:
+
+```sh
+go install github.com/develdeco/jig/cmd/jig@latest
+```
+
+Or clone and build:
+
 ```sh
 git clone git@github.com:develdeco/jig.git
 cd jig
 go build ./cmd/jig
 ```
-
-Or install straight from the module, without cloning:
-
-```sh
-GOPRIVATE=github.com/develdeco go install github.com/develdeco/jig/cmd/jig@latest
-```
-
-`GOPRIVATE` is required because the repo is private - it tells `go install` to
-fetch the module directly over git instead of through the public module proxy,
-which cannot see a private repo.
 
 ## Skills
 
