@@ -123,3 +123,37 @@ func usageBlocks() []string {
 	))
 	return blocks
 }
+
+// flagSetName returns the name a command passes to newFlagSet: its table name,
+// or "<cmd> <sub>" for the commands whose flags belong to their one
+// subcommand.
+func flagSetName(cmdName string) string {
+	switch cmdName {
+	case "ticket":
+		return "ticket new"
+	case "skills":
+		return "skills install"
+	default:
+		return cmdName
+	}
+}
+
+// flagsBlockFor renders the usage line and visible flags for the command
+// whose FlagSet is named fsName, for `jig <command> -h`.
+func flagsBlockFor(fsName string) []string {
+	usage := fmt.Sprintf("usage: jig %s [flags]", fsName)
+	for _, c := range commandTable {
+		if flagSetName(c.Name) != fsName {
+			continue
+		}
+		var frows [][]string
+		for _, f := range c.Flags {
+			if f.Hidden {
+				continue
+			}
+			frows = append(frows, []string{"--" + f.Name, f.Usage})
+		}
+		return []string{usage, axi.Table(fmt.Sprintf("flags{%s}", c.Name), []string{"flag", "usage"}, frows)}
+	}
+	return []string{usage}
+}

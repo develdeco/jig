@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/frontier"
@@ -95,9 +96,51 @@ func newFlagSet(name string) *flag.FlagSet {
 	return fs
 }
 
+// flagErrDashPatterns match the flag package's parse errors, which always
+// name a flag with one dash, so they can be rewritten to jig's "--name" form.
+var flagErrDashPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^(flag provided but not defined: )-(\S+)$`),
+	regexp.MustCompile(`^(flag needs an argument: )-(\S+)$`),
+	regexp.MustCompile(`^(invalid value ".*" for flag )-(\S+?)(:.*)$`),
+	regexp.MustCompile(`^(invalid boolean value ".*" for )-(\S+?)(:.*)$`),
+}
+
+// normalizeFlagErr renders err's message with flagErrDashPatterns applied.
+func normalizeFlagErr(err error) string {
+	msg := err.Error()
+	for _, re := range flagErrDashPatterns {
+		if m := re.FindStringSubmatch(msg); m != nil {
+			out := m[1] + "--" + m[2]
+			if len(m) == 4 {
+				out += m[3]
+			}
+			return out
+		}
+	}
+	return msg
+}
+
+// parseFlags parses args against fs. For "-h"/"--help" it prints the
+// command's flags and reports handled, so the caller exits 0; a parse failure
+// comes back as a VALIDATION_ERROR.
+func parseFlags(stdout io.Writer, fs *flag.FlagSet, args []string) (bool, error) {
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			axi.Render(stdout, flagsBlockFor(fs.Name())...)
+			return true, nil
+		}
+		return false, &axi.Error{Msg: normalizeFlagErr(err), Code: "VALIDATION_ERROR"}
+	}
+	return false, nil
+}
+
 // requirePositional extracts args[0] as a required positional (e.g. a
-// ticket id): present and not itself a flag.
+// ticket id): present and not itself a flag. A leading "-h"/"--help" is
+// passed through so the command prints its help instead.
 func requirePositional(args []string, what string) (string, []string, error) {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		return "", args, nil
+	}
 	if len(args) == 0 || len(args[0]) == 0 || args[0][0] == '-' {
 		return "", nil, &axi.Error{
 			Msg:  fmt.Sprintf("missing required %s", what),

@@ -15,8 +15,10 @@ const jigVersion = "0.1.0"
 // cmdVersion implements `jig version`.
 func cmdVersion(args []string, stdout io.Writer) int {
 	fs := newFlagSet("version")
-	if err := fs.Parse(args); err != nil {
-		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
+	if handled, err := parseFlags(stdout, fs, args); handled {
+		return 0
+	} else if err != nil {
+		return renderErr(stdout, err)
 	}
 
 	axi.Render(stdout,

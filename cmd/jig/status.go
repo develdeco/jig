@@ -24,8 +24,10 @@ func cmdStatus(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	if err := fs.Parse(rest); err != nil {
-		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
+	if handled, err := parseFlags(stdout, fs, rest); handled {
+		return 0
+	} else if err != nil {
+		return renderErr(stdout, err)
 	}
 
 	st, _, _, err := resolveStoreForProject(*projectFlag, *storeFlag)

@@ -213,6 +213,28 @@ func TestResolveStoreForProjectUnknownName(t *testing.T) {
 	}
 }
 
+// TestNormalizeFlagErr checks that every message shape the stdlib flag
+// package produces gets its single-dash flag reference rewritten to jig's
+// own double-dash convention.
+func TestNormalizeFlagErr(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{`flag provided but not defined: -nonexistent`, `flag provided but not defined: --nonexistent`},
+		{`flag needs an argument: -branch`, `flag needs an argument: --branch`},
+		{`invalid value "notanumber" for flag -pr: parse error`, `invalid value "notanumber" for flag --pr: parse error`},
+		{`invalid value "badformat" for flag -clone: --clone must be name=path, got "badformat"`, `invalid value "badformat" for flag --clone: --clone must be name=path, got "badformat"`},
+		{`invalid boolean value "notabool" for -standalone: parse error`, `invalid boolean value "notabool" for --standalone: parse error`},
+		{`bad flag syntax: -=x`, `bad flag syntax: -=x`}, // no known flag name to rewrite; left as-is
+	}
+	for _, c := range cases {
+		if got := normalizeFlagErr(errors.New(c.in)); got != c.want {
+			t.Errorf("normalizeFlagErr(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // TestUnknownCommand checks the VALIDATION_ERROR/exit-2 path for an
 // unrecognized subcommand.
 func TestUnknownCommand(t *testing.T) {

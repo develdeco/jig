@@ -27,8 +27,10 @@ func cmdSkills(args []string, stdout io.Writer) int {
 	fs := newFlagSet("skills install")
 	projectFlag := fs.Bool("project", false, "install under ./.claude/skills of the current directory")
 	destFlag := fs.String("dest", "", "install under <dir>/<name>/SKILL.md instead of the default location")
-	if err := fs.Parse(rest); err != nil {
-		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
+	if handled, err := parseFlags(stdout, fs, rest); handled {
+		return 0
+	} else if err != nil {
+		return renderErr(stdout, err)
 	}
 
 	root, err := skillsDestRoot(*projectFlag, *destFlag)

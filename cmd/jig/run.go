@@ -26,8 +26,10 @@ func cmdRun(args []string, stdout io.Writer) int {
 	scenario := fs.String("scenario", "", "scenario dir for the fake backend")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
-	if err := fs.Parse(rest1); err != nil {
-		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
+	if handled, err := parseFlags(stdout, fs, rest1); handled {
+		return 0
+	} else if err != nil {
+		return renderErr(stdout, err)
 	}
 
 	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)
@@ -58,8 +60,10 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 	fromBriefDiff := fs.Bool("from-brief-diff", false, "requeue slices whose brief section hash changed")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
-	if err := fs.Parse(rest); err != nil {
-		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
+	if handled, err := parseFlags(stdout, fs, rest); handled {
+		return 0
+	} else if err != nil {
+		return renderErr(stdout, err)
 	}
 
 	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)

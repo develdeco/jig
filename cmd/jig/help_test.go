@@ -18,20 +18,6 @@ var handParsedFlags = map[string]map[string]bool{
 	"run":   {"answer": true},
 }
 
-// flagSetKeyFor maps a commandTable command name to the name it passes to
-// newFlagSet, for commands whose flag set has a different name (a
-// subcommand's flags are registered under "<cmd> <sub>").
-func flagSetKeyFor(cmdName string) string {
-	switch cmdName {
-	case "ticket":
-		return "ticket new"
-	case "skills":
-		return "skills install"
-	default:
-		return cmdName
-	}
-}
-
 // TestCommandTableFlagsMatchRegistration checks that each command's table
 // flags, hidden ones included, match the names and usage it really registers.
 // Every command runs with a valid positional and an unknown flag, so it fails
@@ -70,7 +56,7 @@ func TestCommandTableFlagsMatchRegistration(t *testing.T) {
 			continue
 		}
 
-		key := flagSetKeyFor(c.Name)
+		key := flagSetName(c.Name)
 		fs, ok := captured[key]
 		if !ok {
 			t.Errorf("command %q: no flag.FlagSet captured (looked for newFlagSet(%q))", c.Name, key)
@@ -109,7 +95,7 @@ func TestCommandTableFlagsMatchRegistration(t *testing.T) {
 	for key := range captured {
 		found := false
 		for _, c := range commandTable {
-			if flagSetKeyFor(c.Name) == key {
+			if flagSetName(c.Name) == key {
 				found = true
 				break
 			}
@@ -154,5 +140,37 @@ func TestBareHelpMatchesREADME(t *testing.T) {
 
 	if got != want {
 		t.Fatalf("README.md's bare `jig` block is stale; want it replaced with:\n\n%s", want)
+	}
+}
+
+// TestPerCommandHelpFlag checks that "-h"/"--help" prints the command's flags
+// and exits 0, with or without its positional argument.
+func TestPerCommandHelpFlag(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+
+	cases := []struct {
+		name string
+		args []string
+		want string // substring the output must contain
+	}{
+		{"gate --help with a ticket", []string{"gate", "T-1", "--help"}, "flags{gate}"},
+		{"gate -h with no ticket", []string{"gate", "-h"}, "flags{gate}"},
+		{"ticket new -h", []string{"ticket", "new", "-h"}, "flags{ticket}"},
+		{"version --help", []string{"version", "--help"}, "flags{version}"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			code := Main(c.args, &buf, strings.NewReader(""))
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0; output:\n%s", code, buf.String())
+			}
+			if strings.Contains(buf.String(), "VALIDATION_ERROR") {
+				t.Fatalf("output unexpectedly contains VALIDATION_ERROR:\n%s", buf.String())
+			}
+			if !strings.Contains(buf.String(), c.want) {
+				t.Fatalf("output missing %q:\n%s", c.want, buf.String())
+			}
+		})
 	}
 }

@@ -37,8 +37,10 @@ func cmdSolve(args []string, stdout io.Writer) int {
 	scenario := fs.String("scenario", "", "scenario dir for the fake backend")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
-	if err := fs.Parse(rest1); err != nil {
-		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
+	if handled, err := parseFlags(stdout, fs, rest1); handled {
+		return 0
+	} else if err != nil {
+		return renderErr(stdout, err)
 	}
 
 	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)
