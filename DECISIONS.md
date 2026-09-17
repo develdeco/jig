@@ -181,8 +181,8 @@ was ambiguous, what was chosen, and why.
   measurably: 656 s median over eight runs before (564-807 s), 664 s and 691 s after;
   the 15% saved on one package is inside that runner's run-to-run spread. The Linux
   test step went from 44-48 s to 38-42 s, and macOS takes 52 s.
-- CI actions are on v7; macOS joins the matrix only on manual dispatch until
-  validated; govulncheck runs on the Linux leg.
+- CI actions are on v7; the test matrix runs Windows, Linux, and macOS on
+  every push to main and every pull request; govulncheck runs on the Linux leg.
 - Windows Defender exclusions were considered for Windows CI time and dropped: GitHub's
   Windows runner images already turn real-time scanning off and exclude the C: and D: drives.
 
