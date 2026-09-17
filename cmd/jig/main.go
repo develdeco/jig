@@ -79,12 +79,19 @@ func renderErr(stdout io.Writer, err error) int {
 	return axi.ExitCode(ae)
 }
 
+// newFlagSetHook, when set, sees every FlagSet newFlagSet builds; tests use
+// it to compare real flag registration with commandTable.
+var newFlagSetHook func(name string, fs *flag.FlagSet)
+
 // newFlagSet builds a stdlib FlagSet for name that reports parse errors
 // without dumping its own usage text (jig's help block covers that).
 func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
+	if newFlagSetHook != nil {
+		newFlagSetHook(name, fs)
+	}
 	return fs
 }
 

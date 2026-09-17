@@ -59,7 +59,7 @@ or the publish confirm.
 
 ```
 usage: jig <command> [flags]
-commands[12]{name,summary}:
+commands[11]{name,summary}:
   init,"initialize a store (standalone, or store + clones)"
   ticket,"mint a new ticket: jig ticket new --title <t>"
   solve,"run the full chain: run, gate, publish"
@@ -71,7 +71,6 @@ commands[12]{name,summary}:
   validate,"check a ticket's brief, slices, and manifest"
   version,"print jig's version, commit, and go runtime"
   skills,"jig skills install: ship the session skills with the binary"
-  _screen,"hidden PreToolUse hook: reads a tool call on stdin"
 flags{init}[3]{flag,usage}:
   --standalone,create a sibling tickets store next to the current repo
   --store,store path to initialize (used with --clone)
@@ -98,11 +97,10 @@ flags{requeue}[3]{flag,usage}:
   --from-brief-diff,requeue slices whose brief section hash changed
   --store,explicit store path
   --project,"project name, resolved via the machine mapping"
-flags{gate}[7]{flag,usage}:
+flags{gate}[6]{flag,usage}:
   --early,gate before the frontier is fully green
   --branch,validate this branch instead of jig/<ticket>
   --doc,"brief doc path, used together with --branch"
-  --pr,pr number (not implemented in v0.1)
   --scenario,scenario dir for the fake gate source
   --store,explicit store path
   --project,"project name, resolved via the machine mapping"
@@ -120,11 +118,10 @@ flags{version}[0]{flag,usage}:
 flags{skills}[2]{flag,usage}:
   --project,install under ./.claude/skills of the current directory
   --dest,install under <dir>/<name>/SKILL.md instead of the default location
-flags{_screen}[0]{flag,usage}:
 help[3]:
-  jig run JIG-1 --backend fake --scenario ./scenario
-  jig gate JIG-1 --early
-  jig publish JIG-1 --yes
+  jig ticket new --title "Fix the thing"
+  jig run T-1
+  jig solve T-1 --yes
 ```
 
 ## Status rendering

@@ -138,7 +138,8 @@ func TestScreenDenyAllow(t *testing.T) {
 }
 
 // TestHelpContainsCommands checks that bare `jig` help output names every
-// command in commandTable.
+// non-hidden command and flag in commandTable, and that hidden ones (the
+// _screen command, gate's --pr flag) are absent from it.
 func TestHelpContainsCommands(t *testing.T) {
 	var buf bytes.Buffer
 	code := Main(nil, &buf, strings.NewReader(""))
@@ -147,8 +148,26 @@ func TestHelpContainsCommands(t *testing.T) {
 	}
 	out := buf.String()
 	for _, c := range commandTable {
+		if c.Hidden {
+			if strings.Contains(out, c.Name) {
+				t.Errorf("help output unexpectedly contains hidden command %q", c.Name)
+			}
+			continue
+		}
 		if !strings.Contains(out, c.Name) {
 			t.Errorf("help output missing command %q", c.Name)
+		}
+		for _, f := range c.Flags {
+			row := "--" + f.Name + ","
+			if f.Hidden {
+				if strings.Contains(out, row) {
+					t.Errorf("help output unexpectedly contains hidden flag %q for command %q", f.Name, c.Name)
+				}
+				continue
+			}
+			if !strings.Contains(out, row) {
+				t.Errorf("help output missing flag %q for command %q", f.Name, c.Name)
+			}
 		}
 	}
 }
