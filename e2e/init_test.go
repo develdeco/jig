@@ -16,8 +16,6 @@ import (
 // clone and asserts it creates a sibling "<repo>-tickets" store: a fresh git
 // repo on main with project.yaml, ledger.md, and platform/.
 func TestInitStandalone(t *testing.T) {
-	requireBinary(t)
-
 	fx, _ := newFixture(t, fixture.Opts{})
 
 	r := runJig(t, fx.RepoDir, "init", "--standalone")
@@ -52,8 +50,6 @@ func TestInitStandalone(t *testing.T) {
 // against a fresh JIG_HOME and asserts the machine mapping it writes there
 // contains the expected entry, keyed by the project's name.
 func TestInitProject(t *testing.T) {
-	requireBinary(t)
-
 	// Generate the fixture under its own JIG_HOME (fixture.Generate performs
 	// its own InitProject call as part of materializing the fixture); then
 	// point a second, fresh JIG_HOME at the `jig init` invocation under test,

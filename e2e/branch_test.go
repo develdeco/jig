@@ -12,8 +12,6 @@ import (
 // with an "unavailable: defer-ci" policy: jig run should pause (exit 2) and
 // journal the env-unavailable event with that policy as its outcome.
 func TestEnvPauseDeferCI(t *testing.T) {
-	requireBinary(t)
-
 	fx, _ := newFixture(t, fixture.Opts{EnvFail: true})
 
 	r := runJig(t, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
@@ -52,8 +50,6 @@ func TestEnvPauseDeferCI(t *testing.T) {
 // scripted question, exactly like the default scenario; answering it drives
 // the ticket to fully green.
 func TestOracleWrong(t *testing.T) {
-	requireBinary(t)
-
 	fx, _ := newFixture(t, fixture.Opts{ScenarioBranch: "oracle-wrong"})
 
 	r1 := runJig(t, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
@@ -98,8 +94,6 @@ func TestOracleWrong(t *testing.T) {
 // --from-brief-diff` re-queues exactly the touched slice, and re-running
 // resolves it green.
 func TestFlawedBriefRequeue(t *testing.T) {
-	requireBinary(t)
-
 	fx, _ := newFixture(t, fixture.Opts{ScenarioBranch: "flawed-brief"})
 
 	r1 := runJig(t, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
@@ -171,8 +165,6 @@ func TestFlawedBriefRequeue(t *testing.T) {
 // the stall itself is still asserted directly, via the stopped block in
 // stdout and the slice's on-disk state/reason/journal line.
 func TestStallStops(t *testing.T) {
-	requireBinary(t)
-
 	fx, _ := newFixture(t, fixture.Opts{ScenarioBranch: "stall"})
 
 	r := runJig(t, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
@@ -213,8 +205,6 @@ func TestStallStops(t *testing.T) {
 // printRunReport), so the process exits 2, not 1; the cap exhaustion itself
 // is asserted directly via slice a's on-disk state/reason/attempts.
 func TestCapExhaustion(t *testing.T) {
-	requireBinary(t)
-
 	fx, _ := newFixture(t, fixture.Opts{ScenarioBranch: "cap"})
 
 	r := runJig(t, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)

@@ -23,8 +23,6 @@ import (
 // end to end against two independent fixtures, then asserts the product
 // repo's own working tree is left clean.
 func TestEndToEndTwice(t *testing.T) {
-	requireBinary(t)
-
 	for i := 1; i <= 2; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			runEndToEndOnce(t)

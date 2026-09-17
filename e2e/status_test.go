@@ -11,8 +11,6 @@ import (
 // package (no run/gate involved) and asserts `jig status` renders exactly
 // the contract's status format for that snapshot.
 func TestStatusGoldenConstructed(t *testing.T) {
-	requireBinary(t)
-
 	fx, _ := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {

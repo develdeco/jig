@@ -12,8 +12,6 @@ import (
 // section hashes, resolvable blocked_by ids with no cycles, workspace ids
 // present in the repo manifest, and non-empty oracles.
 func TestValidateFixture(t *testing.T) {
-	requireBinary(t)
-
 	fx, _ := newFixture(t, fixture.Opts{})
 
 	r := runJig(t, fx.StoreDir, "validate", fx.Ticket)

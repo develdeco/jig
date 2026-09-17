@@ -31,8 +31,6 @@ type jigResult struct {
 // paths are meaningful exit codes, not test failures.
 func runJig(t *testing.T, cwd string, args ...string) jigResult {
 	t.Helper()
-	requireBinary(t)
-
 	cmd := exec.Command(jigBinary, args...)
 	cmd.Dir = cwd
 	cmd.Env = os.Environ()

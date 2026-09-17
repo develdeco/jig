@@ -24,8 +24,6 @@ import (
 // runEndToEndOnce; see that comment before treating a failure here as a
 // solve-specific regression.
 func TestSolveOneProcess(t *testing.T) {
-	requireBinary(t)
-
 	fx, _ := newFixture(t, fixture.Opts{})
 
 	r1 := runJig(t, fx.StoreDir, "solve", fx.Ticket, "--yes", "--backend", "fake", "--scenario", fx.ScenarioDir)
