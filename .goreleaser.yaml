@@ -60,3 +60,4 @@ release:
     name: jig
   draft: false
   prerelease: auto
+  replace_existing_artifacts: true

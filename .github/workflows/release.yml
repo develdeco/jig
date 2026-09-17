@@ -1,0 +1,82 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  repo-visibility:
+    runs-on: ubuntu-latest
+    steps:
+      - name: require a public repository
+        if: github.event.repository.private
+        run: |
+          echo "refusing to publish a release from a private repository" >&2
+          exit 1
+
+  ci:
+    needs: repo-visibility
+    uses: ./.github/workflows/ci.yml
+
+  version-check:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go build ./cmd/jig
+      - name: verify version
+        shell: bash
+        run: |
+          set -eu
+          out=$(./jig version)
+          echo "$out"
+          echo "$out" | grep -Fxq "  version: ${GITHUB_REF_NAME}" || {
+            echo "jig version does not report ${GITHUB_REF_NAME} exactly"
+            exit 1
+          }
+
+  release:
+    needs: version-check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+
+  smoke:
+    needs: release
+    uses: ./.github/workflows/smoke.yml
+    with:
+      tag: ${{ github.ref_name }}
