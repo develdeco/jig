@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/axi"
-	"github.com/develdeco/jig/fixture"
-	"github.com/develdeco/jig/project"
-	"github.com/develdeco/jig/store"
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // TestRenderStatus checks the status renderer against a hand-constructed

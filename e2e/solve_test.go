@@ -3,8 +3,8 @@ package e2e
 import (
 	"testing"
 
-	"github.com/develdeco/jig/fixture"
-	"github.com/develdeco/jig/gitx"
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitx"
 )
 
 // TestSolveOneProcess drives `jig solve` end to end in exactly two process

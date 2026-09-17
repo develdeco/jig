@@ -4,9 +4,9 @@ import (
 	"io"
 	"strconv"
 
-	"github.com/develdeco/jig/axi"
-	"github.com/develdeco/jig/store"
-	"github.com/develdeco/jig/verifydeliver"
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/store"
+	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // noopGateSource is the placeholder GateSource used when jig gate runs

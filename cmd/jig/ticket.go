@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/develdeco/jig/axi"
-	"github.com/develdeco/jig/tracker"
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/tracker"
 )
 
 // cmdTicket implements `jig ticket new --title <t> [--body <b>]`.

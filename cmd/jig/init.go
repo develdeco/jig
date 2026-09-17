@@ -5,8 +5,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/develdeco/jig/axi"
-	"github.com/develdeco/jig/project"
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/project"
 )
 
 // cmdInit implements `jig init [--standalone] [--store <path>] [--clone

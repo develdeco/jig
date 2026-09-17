@@ -10,14 +10,14 @@ import (
 	"io"
 	"os"
 
-	"github.com/develdeco/jig/axi"
-	"github.com/develdeco/jig/frontier"
-	"github.com/develdeco/jig/journal"
-	"github.com/develdeco/jig/project"
-	"github.com/develdeco/jig/session"
-	"github.com/develdeco/jig/staircase"
-	"github.com/develdeco/jig/store"
-	"github.com/develdeco/jig/verifydeliver"
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/frontier"
+	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/session"
+	"github.com/develdeco/jig/internal/staircase"
+	"github.com/develdeco/jig/internal/store"
+	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 func main() {

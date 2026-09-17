@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/develdeco/jig/axi"
+	"github.com/develdeco/jig/internal/axi"
 )
 
 // flagSpec is one flag a command accepts: its name (without leading dashes)

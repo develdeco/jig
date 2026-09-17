@@ -8,10 +8,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/develdeco/jig/axi"
-	"github.com/develdeco/jig/manifest"
-	"github.com/develdeco/jig/project"
-	"github.com/develdeco/jig/store"
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/manifest"
+	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // cmdValidate implements `jig validate <ticket>`.

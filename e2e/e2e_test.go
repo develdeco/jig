@@ -8,11 +8,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/develdeco/jig/fixture"
-	"github.com/develdeco/jig/gitx"
-	"github.com/develdeco/jig/project"
-	"github.com/develdeco/jig/store"
-	"github.com/develdeco/jig/tracker"
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/store"
+	"github.com/develdeco/jig/internal/tracker"
 )
 
 // TestEndToEndTwice drives the full DoD-3 chain (run to first pause, answer

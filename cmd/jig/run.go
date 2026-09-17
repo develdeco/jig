@@ -3,10 +3,10 @@ package main
 import (
 	"io"
 
-	"github.com/develdeco/jig/axi"
-	"github.com/develdeco/jig/frontier"
-	"github.com/develdeco/jig/session"
-	"github.com/develdeco/jig/store"
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/frontier"
+	"github.com/develdeco/jig/internal/session"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // cmdRun implements `jig run <ticket> [--answer <qid> <text>] [--backend

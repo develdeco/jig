@@ -11,8 +11,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/develdeco/jig/axi"
-	"github.com/develdeco/jig/store"
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // cmdStatus implements `jig status [<ticket>]`.

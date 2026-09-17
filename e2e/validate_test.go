@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/fixture"
+	"github.com/develdeco/jig/internal/fixture"
 )
 
 // TestValidateFixture asserts `jig validate` accepts the fixture ticket as

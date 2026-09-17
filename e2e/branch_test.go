@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/fixture"
-	"github.com/develdeco/jig/store"
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // TestEnvPauseDeferCI exercises a slice whose env class fails to come up

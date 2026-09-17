@@ -3,8 +3,8 @@ package main
 import (
 	"io"
 
-	"github.com/develdeco/jig/axi"
-	"github.com/develdeco/jig/verifydeliver"
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // cmdPublish implements `jig publish <ticket> [--yes]`.

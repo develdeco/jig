@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/develdeco/jig/axi"
-	"github.com/develdeco/jig/fixture"
-	"github.com/develdeco/jig/frontier"
-	"github.com/develdeco/jig/store"
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/frontier"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // TestSolveShouldPublish checks the pure gate on solve's fall-through to

@@ -40,7 +40,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/develdeco/jig/gittest"
+	"github.com/develdeco/jig/internal/gittest"
 )
 
 // jigBinary is the path to the once-built jig.exe.

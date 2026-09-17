@@ -14,7 +14,7 @@ import (
 
 // gitxDir is the one directory allowed to spawn git directly: it is git
 // execution's single owner (see the gitx package doc comment).
-const gitxDir = "gitx"
+const gitxDir = "internal/gitx"
 
 // gitProgram reports whether s is a program name that spawns git: the bare
 // command or, as Windows' PATH lookup can resolve it, the .exe form.
@@ -23,7 +23,7 @@ func gitProgram(s string) bool {
 }
 
 // TestNoGitSpawnOutsideGitx keeps gitx the single owner of git execution. It
-// parses every .go file outside gitx/ (testdata included, .git and vendor
+// parses every .go file outside internal/gitx/ (testdata included, .git and vendor
 // skipped) and fails, naming file:line, on an os/exec Command, CommandContext
 // or LookPath call, or an exec.Cmd literal, whose program is git or git.exe:
 // written literally, through a const or var, from a LookPath result, or with

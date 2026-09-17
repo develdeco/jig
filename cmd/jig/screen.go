@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/develdeco/jig/screen"
+	"github.com/develdeco/jig/internal/screen"
 )
 
 // screenHookInput is the PreToolUse hook payload jig reads on stdin: the

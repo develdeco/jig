@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/fixture"
-	"github.com/develdeco/jig/gitx"
-	"github.com/develdeco/jig/journal"
-	"github.com/develdeco/jig/store"
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // jigResult is one jig subprocess invocation's captured output.
@@ -157,7 +157,7 @@ func findJournalLine(lines []journal.Line, event, slice, outcome string) (journa
 	return journal.Line{}, false
 }
 
-// firstLine mirrors session/fake.go's firstLine: the text up to its first
+// firstLine mirrors internal/session/fake.go's firstLine: the text up to its first
 // line break, or all of it if there is none. Used to derive expected commit
 // messages from scenario result.json summaries without hardcoding them.
 func firstLine(s string) string {
@@ -187,7 +187,7 @@ func scenarioResultSummary(t *testing.T, scenarioDir, slice, attempt string) str
 
 // committedPatchSteps is every (slice, attempt) pair in the base fixture
 // scenario whose patch.diff is non-empty and therefore produces a commit in
-// the fake backend, in the order fixture/fixture_test.go's own
+// the fake backend, in the order internal/fixture/fixture_test.go's own
 // TestPatchSequence applies them (that test is the generator package's own
 // authority on which attempts commit). TestEndToEndTwice uses it to derive
 // the expected pre-squash commit message SET without hardcoding scenario

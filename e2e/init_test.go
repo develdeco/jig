@@ -7,9 +7,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/develdeco/jig/fixture"
-	"github.com/develdeco/jig/gitx"
-	"github.com/develdeco/jig/project"
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/project"
 )
 
 // TestInitStandalone runs `jig init --standalone` against a fixture repo

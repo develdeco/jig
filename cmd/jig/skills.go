@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/develdeco/jig/axi"
+	"github.com/develdeco/jig/internal/axi"
 	skillspkg "github.com/develdeco/jig/skills"
 )
 

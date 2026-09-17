@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"runtime/debug"
 
-	"github.com/develdeco/jig/axi"
+	"github.com/develdeco/jig/internal/axi"
 )
 
 // jigVersion is jig's release version. This is the one place it is defined;

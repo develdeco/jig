@@ -3,8 +3,8 @@ package e2e
 import (
 	"testing"
 
-	"github.com/develdeco/jig/fixture"
-	"github.com/develdeco/jig/store"
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // TestStatusGoldenConstructed writes slice states directly through the store

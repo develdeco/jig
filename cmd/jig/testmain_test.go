@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/develdeco/jig/gittest"
+	"github.com/develdeco/jig/internal/gittest"
 )
 
 func TestMain(m *testing.M) {

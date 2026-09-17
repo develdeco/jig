@@ -146,8 +146,8 @@ func TestRouterTable(t *testing.T) {
 }
 
 // moduleRowRE matches a "## Module responsibilities" table row whose first
-// cell is a package dir like "store/".
-var moduleRowRE = regexp.MustCompile(`^\|\s*` + "`" + `?([a-zA-Z0-9_]+)/` + "`" + `?\s*\|`)
+// cell is a package dir like "store/" or "internal/store/".
+var moduleRowRE = regexp.MustCompile(`^\|\s*` + "`" + `?((?:internal/)?[a-zA-Z0-9_]+)/` + "`" + `?\s*\|`)
 
 func TestArchitectureDoc(t *testing.T) {
 	root := repoRoot(t)

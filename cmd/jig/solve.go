@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/develdeco/jig/axi"
-	"github.com/develdeco/jig/frontier"
-	"github.com/develdeco/jig/session"
-	"github.com/develdeco/jig/verifydeliver"
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/frontier"
+	"github.com/develdeco/jig/internal/session"
+	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // maxSolveRounds caps the run/gate fix-slice loop `jig solve` drives, per
