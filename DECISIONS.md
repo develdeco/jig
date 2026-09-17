@@ -169,6 +169,13 @@ was ambiguous, what was chosen, and why.
   foreground, best-effort `git maintenance run --auto`. The per-call flag only stops
   commands from spawning detached maintenance, not this explicit run;
   `gc.autoDetach=false` keeps its gc child in the foreground on git older than 2.54.
+- Measured effect. The same 3,200-run load test passes 3,200 of 3,200 with no
+  environment overrides, in 171 s instead of 292 s. A traced local verifydeliver run on
+  Windows spawns 3,809 git processes instead of 4,331, none of them detached maintenance
+  (580 before), and takes 163 s instead of 191 s. Windows CI's test step did not change
+  measurably: 656 s median over eight runs before (564-807 s), 664 s and 691 s after;
+  the 15% saved on one package is inside that runner's run-to-run spread. The Linux
+  test step went from 44-48 s to 38-42 s, and macOS takes 52 s.
 - CI actions are on v7; macOS joins the matrix only on manual dispatch until
   validated; govulncheck runs on the Linux leg.
 - Windows Defender exclusions were considered for Windows CI time and dropped: GitHub's
