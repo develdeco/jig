@@ -1,7 +1,7 @@
 // Package verifydeliver implements jig's second pipeline: gate (review +
 // re-verification rounds) and publish (reconcile, re-validate, docs,
-// squash, and route). It shares no in-memory state with package make; the
-// store on disk is the only interface between them.
+// squash, and route). It shares no in-memory state with package frontier;
+// the store on disk is the only interface between them.
 package verifydeliver
 
 import (
@@ -16,7 +16,7 @@ import (
 )
 
 // Deps is verifydeliver's own dependency bundle. It never imports package
-// make; the store on disk is the only seam between the two pipelines.
+// frontier; the store on disk is the only seam between the two pipelines.
 type Deps struct {
 	Store   *store.Store
 	Cfg     project.Config

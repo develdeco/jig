@@ -28,11 +28,11 @@ publish        reconcile, revalidate, docs, squash, route → open the PR
                        ledger.md, platform/contract-index.md
 ```
 
-`make` (the frontier loop) and `verifydeliver` (gate + publish) are separate
-packages that share no in-memory state at all - package `make` never imports
-`verifydeliver` state and vice versa. The store on disk is the entire
-interface between them. That's deliberate: either package is splittable into
-its own binary later with a `git mv`, no refactor required.
+`frontier` (the frontier loop) and `verifydeliver` (gate + publish) are
+separate packages that share no in-memory state at all - package `frontier`
+never imports `verifydeliver` state and vice versa. The store on disk is the
+entire interface between them. That's deliberate: either package is
+splittable into its own binary later with a `git mv`, no refactor required.
 
 ## The four homes
 
@@ -103,12 +103,12 @@ exists.
 | `e2e/` | (tests only) | the fixture + fake backend → asserts the full brief→publish chain twice |
 | `envrun/` | `Up`, `Shell` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable` |
 | `fixture/` | `Generate` | test `Opts` → a temp fixture repo, its store, and a scripted attempt scenario |
+| `frontier/` | `Run`, `Requeue`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, paused, or stalled) |
 | `gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
 | `gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
 | `graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → per-machine paths |
 | `journal/` | `Append`, `Read`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs |
-| `make/` | `Run`, `Requeue`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, paused, or stalled) |
 | `manifest/` | `Resolve` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes |
 | `outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `pool/` | `Acquire` | repo/remote/target/branch/key → a `Lease` (a full clone, re-pointed to its start point) |

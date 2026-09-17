@@ -1,5 +1,5 @@
 // Command jig is the CLI entry point for the jig ticket-solving tool: it
-// wires the store, project, session, staircase, make and verifydeliver
+// wires the store, project, session, staircase, frontier and verifydeliver
 // packages into a small set of subcommands.
 package main
 
@@ -11,8 +11,8 @@ import (
 	"os"
 
 	"github.com/develdeco/jig/axi"
+	"github.com/develdeco/jig/frontier"
 	"github.com/develdeco/jig/journal"
-	makepkg "github.com/develdeco/jig/make"
 	"github.com/develdeco/jig/project"
 	"github.com/develdeco/jig/session"
 	"github.com/develdeco/jig/staircase"
@@ -218,16 +218,16 @@ func backendName(explicit, scenario string) string {
 	return "herdr"
 }
 
-// journalFunc binds a make.Deps-shaped journal callback to st and ticket.
+// journalFunc binds a frontier.Deps-shaped journal callback to st and ticket.
 func journalFunc(st *store.Store, ticket string) func(journal.Line) error {
 	return func(l journal.Line) error {
 		return journal.Append(st, ticket, l)
 	}
 }
 
-// makeDeps assembles make.Deps for one ticket.
-func makeDeps(st *store.Store, cfg project.Config, mp project.MachineProject, backend session.Backend, ticket string) makepkg.Deps {
-	return makepkg.Deps{
+// frontierDeps assembles frontier.Deps for one ticket.
+func frontierDeps(st *store.Store, cfg project.Config, mp project.MachineProject, backend session.Backend, ticket string) frontier.Deps {
+	return frontier.Deps{
 		Store:   st,
 		Cfg:     cfg,
 		Machine: mp,
@@ -238,7 +238,7 @@ func makeDeps(st *store.Store, cfg project.Config, mp project.MachineProject, ba
 }
 
 // verifydeliverDeps assembles verifydeliver.Deps for one ticket. Unlike
-// make.Deps, verifydeliver.Deps carries no Backend or injected Journal
+// frontier.Deps, verifydeliver.Deps carries no Backend or injected Journal
 // func: Gate and Publish journal internally, bound to d.Store.
 func verifydeliverDeps(st *store.Store, cfg project.Config, mp project.MachineProject) verifydeliver.Deps {
 	return verifydeliver.Deps{

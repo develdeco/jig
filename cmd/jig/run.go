@@ -4,7 +4,7 @@ import (
 	"io"
 
 	"github.com/develdeco/jig/axi"
-	makepkg "github.com/develdeco/jig/make"
+	"github.com/develdeco/jig/frontier"
 	"github.com/develdeco/jig/session"
 	"github.com/develdeco/jig/store"
 )
@@ -39,8 +39,8 @@ func cmdRun(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	deps := makeDeps(st, cfg, mp, backend, ticket)
-	report, err := makepkg.Run(deps, makepkg.RunOpts{Ticket: ticket, AnswerQID: qid, AnswerText: text})
+	deps := frontierDeps(st, cfg, mp, backend, ticket)
+	report, err := frontier.Run(deps, frontier.RunOpts{Ticket: ticket, AnswerQID: qid, AnswerText: text})
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -67,8 +67,8 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	deps := makeDeps(st, cfg, mp, nil, ticket)
-	touched, err := makepkg.Requeue(deps, ticket, *fromBriefDiff)
+	deps := frontierDeps(st, cfg, mp, nil, ticket)
+	touched, err := frontier.Requeue(deps, ticket, *fromBriefDiff)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -80,10 +80,10 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 	return 0
 }
 
-// printRunReport prints the outcome of a make.Run call and returns the
+// printRunReport prints the outcome of a frontier.Run call and returns the
 // exit code its report implies: 2 on a pending question, 1 when the run
 // stopped (stall or attempt-cap), else 0.
-func printRunReport(stdout io.Writer, st *store.Store, ticket string, report makepkg.RunReport) int {
+func printRunReport(stdout io.Writer, st *store.Store, ticket string, report frontier.RunReport) int {
 	blocks := []string{
 		axi.KV("run", [][2]string{{"ticket", ticket}}),
 		axi.Table("green", []string{"id"}, idRows(report.Green)),

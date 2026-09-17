@@ -1,9 +1,9 @@
-// Package make is the frontier loop: it dispatches queued, unblocked slices
-// to a build session backend, routes their results, and drives a ticket's
-// slices from queued to green (or to a paused/stalled stop) one attempt at
-// a time. make and verifydeliver share no in-memory state; the store on
-// disk is their only interface.
-package make
+// Package frontier is the frontier loop: it dispatches queued, unblocked
+// slices to a build session backend, routes their results, and drives a
+// ticket's slices from queued to green (or to a paused/stalled stop) one
+// attempt at a time. frontier and verifydeliver share no in-memory state;
+// the store on disk is their only interface.
+package frontier
 
 import (
 	"errors"
@@ -74,7 +74,7 @@ func Run(d Deps, o RunOpts) (RunReport, error) {
 	}
 
 	if err := d.Store.Sync(); err != nil {
-		return RunReport{}, fmt.Errorf("make: sync: %w", err)
+		return RunReport{}, fmt.Errorf("frontier: sync: %w", err)
 	}
 
 	if o.AnswerQID != "" {
@@ -84,7 +84,7 @@ func Run(d Deps, o RunOpts) (RunReport, error) {
 	}
 
 	if len(d.Cfg.Repos) == 0 {
-		return RunReport{}, errors.New("make: project has no repos")
+		return RunReport{}, errors.New("frontier: project has no repos")
 	}
 	repo := d.Cfg.Repos[0]
 	repoName := repo.Name()
@@ -95,7 +95,7 @@ func Run(d Deps, o RunOpts) (RunReport, error) {
 
 	slices, err := d.Store.ReadSlices(ticket)
 	if err != nil {
-		return RunReport{}, fmt.Errorf("make: read slices: %w", err)
+		return RunReport{}, fmt.Errorf("frontier: read slices: %w", err)
 	}
 	sliceByID := make(map[string]store.Slice, len(slices))
 	wsRepo := make(map[string]string, len(slices))
@@ -161,23 +161,23 @@ func Run(d Deps, o RunOpts) (RunReport, error) {
 func answerAndRequeue(d Deps, ticket, qid, text string) error {
 	slice, err := d.Store.Answer(ticket, qid, text)
 	if err != nil {
-		return fmt.Errorf("make: answer %s: %w", qid, err)
+		return fmt.Errorf("frontier: answer %s: %w", qid, err)
 	}
 	st, err := d.Store.ReadSliceState(ticket, slice)
 	if err != nil {
-		return fmt.Errorf("make: read slice state %s: %w", slice, err)
+		return fmt.Errorf("frontier: read slice state %s: %w", slice, err)
 	}
 	st.State = "queued"
 	st.Question = ""
 	st.Reason = ""
 	if err := d.Store.WriteSliceState(ticket, slice, st); err != nil {
-		return fmt.Errorf("make: write slice state %s: %w", slice, err)
+		return fmt.Errorf("frontier: write slice state %s: %w", slice, err)
 	}
 	if err := d.Journal(journal.Line{Slice: slice, Event: "answer"}); err != nil {
-		return fmt.Errorf("make: journal answer: %w", err)
+		return fmt.Errorf("frontier: journal answer: %w", err)
 	}
 	if err := d.Store.Push(fmt.Sprintf("%s: slice %s queued", ticket, slice)); err != nil {
-		return fmt.Errorf("make: push: %w", err)
+		return fmt.Errorf("frontier: push: %w", err)
 	}
 	return nil
 }
@@ -187,7 +187,7 @@ func readStates(st *store.Store, ticket string, slices []store.Slice) (map[strin
 	for _, s := range slices {
 		state, err := st.ReadSliceState(ticket, s.ID)
 		if err != nil {
-			return nil, fmt.Errorf("make: read slice state %s: %w", s.ID, err)
+			return nil, fmt.Errorf("frontier: read slice state %s: %w", s.ID, err)
 		}
 		states[s.ID] = state
 	}
@@ -223,7 +223,7 @@ func buildReport(st *store.Store, ticket string, slices []store.Slice, stopped b
 	for _, s := range slices {
 		state, err := st.ReadSliceState(ticket, s.ID)
 		if err != nil {
-			return RunReport{}, fmt.Errorf("make: read slice state %s: %w", s.ID, err)
+			return RunReport{}, fmt.Errorf("frontier: read slice state %s: %w", s.ID, err)
 		}
 		switch state.State {
 		case "green":
@@ -238,7 +238,7 @@ func buildReport(st *store.Store, ticket string, slices []store.Slice, stopped b
 	}
 	questions, err := st.ReadQuestions(ticket)
 	if err != nil {
-		return RunReport{}, fmt.Errorf("make: read questions: %w", err)
+		return RunReport{}, fmt.Errorf("frontier: read questions: %w", err)
 	}
 	for _, q := range questions {
 		if q.Status == "open" {
@@ -323,7 +323,7 @@ func (rc *runCtx) journal(l journal.Line) {
 	err := rc.d.Journal(l)
 	rc.storeMu.Unlock()
 	if err != nil {
-		rc.fail(fmt.Errorf("make: journal %s: %w", l.Event, err))
+		rc.fail(fmt.Errorf("frontier: journal %s: %w", l.Event, err))
 	}
 }
 
@@ -332,7 +332,7 @@ func (rc *runCtx) push(sliceID, state string) {
 	err := rc.d.Store.Push(fmt.Sprintf("%s: slice %s %s", rc.ticket, sliceID, state))
 	rc.storeMu.Unlock()
 	if err != nil {
-		rc.fail(fmt.Errorf("make: push: %w", err))
+		rc.fail(fmt.Errorf("frontier: push: %w", err))
 	}
 }
 
@@ -341,7 +341,7 @@ func (rc *runCtx) writeState(sliceID string, st store.SliceState) bool {
 	err := rc.d.Store.WriteSliceState(rc.ticket, sliceID, st)
 	rc.storeMu.Unlock()
 	if err != nil {
-		rc.fail(fmt.Errorf("make: write slice state %s: %w", sliceID, err))
+		rc.fail(fmt.Errorf("frontier: write slice state %s: %w", sliceID, err))
 		return false
 	}
 	return true
@@ -377,7 +377,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 
 	lease, err := pool.Acquire(rc.repoName, rc.remote, rc.target, "jig/"+ticket, ticket)
 	if err != nil {
-		rc.fail(fmt.Errorf("make: acquire lease for %s: %w", sl.ID, err))
+		rc.fail(fmt.Errorf("frontier: acquire lease for %s: %w", sl.ID, err))
 		return
 	}
 
@@ -388,7 +388,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 
 	m, err := manifest.Resolve(lease.Dir)
 	if err != nil {
-		rc.fail(fmt.Errorf("make: resolve manifest for %s: %w", sl.ID, err))
+		rc.fail(fmt.Errorf("frontier: resolve manifest for %s: %w", sl.ID, err))
 		return
 	}
 	ws, _ := m.Workspace(sl.Workspace)
@@ -406,7 +406,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 
 	st, err := rc.readSliceState(sl.ID)
 	if err != nil {
-		rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
+		rc.fail(fmt.Errorf("frontier: read slice state %s: %w", sl.ID, err))
 		return
 	}
 	attempt := st.Attempts + 1
@@ -431,7 +431,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		Answer:        answerFor(d.Store, ticket, sl.ID),
 	}
 	if err := writeSliceJSON(sjPath, body); err != nil {
-		rc.fail(fmt.Errorf("make: write slice.json for %s: %w", sl.ID, err))
+		rc.fail(fmt.Errorf("frontier: write slice.json for %s: %w", sl.ID, err))
 		return
 	}
 
@@ -481,21 +481,21 @@ func (rc *runCtx) ensureStartSHA(lease pool.Lease) (string, bool) {
 	if data, err := os.ReadFile(path); err == nil {
 		return trimSHA(data), true
 	} else if !os.IsNotExist(err) {
-		rc.fail(fmt.Errorf("make: read %s: %w", path, err))
+		rc.fail(fmt.Errorf("frontier: read %s: %w", path, err))
 		return "", false
 	}
 
 	sha, err := gitx.RevParse(lease.Dir, "origin/"+rc.target)
 	if err != nil {
-		rc.fail(fmt.Errorf("make: resolve origin/%s: %w", rc.target, err))
+		rc.fail(fmt.Errorf("frontier: resolve origin/%s: %w", rc.target, err))
 		return "", false
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		rc.fail(fmt.Errorf("make: create ticket dir: %w", err))
+		rc.fail(fmt.Errorf("frontier: create ticket dir: %w", err))
 		return "", false
 	}
 	if err := os.WriteFile(path, []byte(sha), 0o644); err != nil {
-		rc.fail(fmt.Errorf("make: write %s: %w", path, err))
+		rc.fail(fmt.Errorf("frontier: write %s: %w", path, err))
 		return "", false
 	}
 	return sha, true
@@ -521,7 +521,7 @@ func (rc *runCtx) bringUpEnv(sl store.Slice, m manifest.Manifest, lease pool.Lea
 		// NOTE: a slice naming an env class the manifest never declares is a
 		// brief/slices.yaml authoring error, not a runtime outcome; treat it
 		// as an infrastructure failure rather than guessing a policy.
-		rc.fail(fmt.Errorf("make: slice %s names undeclared env class %q", sl.ID, sl.Env))
+		rc.fail(fmt.Errorf("frontier: slice %s names undeclared env class %q", sl.ID, sl.Env))
 		return nil, false
 	}
 
@@ -536,7 +536,7 @@ func (rc *runCtx) bringUpEnv(sl store.Slice, m manifest.Manifest, lease pool.Lea
 
 	var unavail *envrun.Unavailable
 	if !errors.As(err, &unavail) {
-		rc.fail(fmt.Errorf("make: env up for %s: %w", sl.ID, err))
+		rc.fail(fmt.Errorf("frontier: env up for %s: %w", sl.ID, err))
 		return nil, false
 	}
 
@@ -548,7 +548,7 @@ func (rc *runCtx) bringUpEnv(sl store.Slice, m manifest.Manifest, lease pool.Lea
 
 	st, rerr := rc.readSliceState(sl.ID)
 	if rerr != nil {
-		rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, rerr))
+		rc.fail(fmt.Errorf("frontier: read slice state %s: %w", sl.ID, rerr))
 		return nil, false
 	}
 	st.State = "env-blocked"
@@ -578,7 +578,7 @@ func (rc *runCtx) route(sl store.Slice, lease pool.Lease, attempt int, res outco
 		if reason, ok := verifyGreen(lease.Dir, startSHA, res); ok {
 			st, err := rc.readSliceState(sl.ID)
 			if err != nil {
-				rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
+				rc.fail(fmt.Errorf("frontier: read slice state %s: %w", sl.ID, err))
 				return
 			}
 			st.State = "green"
@@ -651,13 +651,13 @@ func (rc *runCtx) routeQuestion(sl store.Slice, attempt int, res outcome.Result)
 
 	qid, err := rc.writeNewQuestion(sl.ID, body)
 	if err != nil {
-		rc.fail(fmt.Errorf("make: write question for %s: %w", sl.ID, err))
+		rc.fail(fmt.Errorf("frontier: write question for %s: %w", sl.ID, err))
 		return
 	}
 
 	st, err := rc.readSliceState(sl.ID)
 	if err != nil {
-		rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
+		rc.fail(fmt.Errorf("frontier: read slice state %s: %w", sl.ID, err))
 		return
 	}
 	st.State = "needs-input"
@@ -675,7 +675,7 @@ func (rc *runCtx) routeQuestion(sl store.Slice, attempt int, res outcome.Result)
 func (rc *runCtx) routeBlockedByEnv(sl store.Slice, attempt int) {
 	st, err := rc.readSliceState(sl.ID)
 	if err != nil {
-		rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
+		rc.fail(fmt.Errorf("frontier: read slice state %s: %w", sl.ID, err))
 		return
 	}
 	st.State = "env-blocked"
@@ -699,7 +699,7 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 	if stalled {
 		st, err := rc.readSliceState(sl.ID)
 		if err != nil {
-			rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
+			rc.fail(fmt.Errorf("frontier: read slice state %s: %w", sl.ID, err))
 			return
 		}
 		st.State = "stalled"
@@ -728,7 +728,7 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 	if attempt >= rc.maxAttempts {
 		st, err := rc.readSliceState(sl.ID)
 		if err != nil {
-			rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
+			rc.fail(fmt.Errorf("frontier: read slice state %s: %w", sl.ID, err))
 			return
 		}
 		st.State = "stalled"
@@ -752,7 +752,7 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 	// Retry: back to queued, attempts kept.
 	st, err := rc.readSliceState(sl.ID)
 	if err != nil {
-		rc.fail(fmt.Errorf("make: read slice state %s: %w", sl.ID, err))
+		rc.fail(fmt.Errorf("frontier: read slice state %s: %w", sl.ID, err))
 		return
 	}
 	st.State = "queued"

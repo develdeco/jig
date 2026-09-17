@@ -125,10 +125,10 @@ func TestFlawedBriefRequeue(t *testing.T) {
 	}
 	assertOnlySlicesListed(t, r2.Stdout, []string{"c"})
 
-	// NOTE (known gap, not this suite's bug): make.Requeue clears the touched
-	// slice's SliceState.Question field but never marks the store's
+	// NOTE (known gap, not this suite's bug): frontier.Requeue clears the
+	// touched slice's SliceState.Question field but never marks the store's
 	// questions/<id>.md record itself answered/closed, and
-	// make.Run's buildReport treats "the first open question record" as
+	// frontier.Run's buildReport treats "the first open question record" as
 	// PendingQuestion regardless of whether its slice has since resolved.
 	// So after a flawed-brief episode is remediated purely through
 	// --from-brief-diff (the contract's own prescribed remediation, with no
@@ -136,7 +136,7 @@ func TestFlawedBriefRequeue(t *testing.T) {
 	// keeps reporting exit 2 on every subsequent run forever, even once
 	// every slice is green. This assertion encodes the contractually
 	// intended behavior (exit 0 once the requeue+run resolves the ticket)
-	// and will fail until that is fixed in package make (either Requeue
+	// and will fail until that is fixed in package frontier (either Requeue
 	// closes the question(s) tied to its touched slices, or buildReport
 	// only counts an open question whose slice is still needs-input).
 	r3 := runJig(t, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)

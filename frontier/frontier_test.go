@@ -1,4 +1,4 @@
-package make
+package frontier
 
 import (
 	"fmt"
@@ -19,7 +19,7 @@ import (
 	"github.com/develdeco/jig/store"
 )
 
-// newDeps wires make.Deps against a generated fixture, using the fake
+// newDeps wires Deps against a generated fixture, using the fake
 // session backend against fx.ScenarioDir.
 func newDeps(t *testing.T, fx *fixture.Fixture) (Deps, *store.Store) {
 	t.Helper()

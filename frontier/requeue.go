@@ -1,4 +1,4 @@
-package make
+package frontier
 
 import (
 	"fmt"
@@ -24,7 +24,7 @@ func Requeue(d Deps, ticket string, fromBriefDiff bool) ([]string, error) {
 
 	briefData, err := os.ReadFile(filepath.Join(d.Store.TicketDir(ticket), "brief.md"))
 	if err != nil {
-		return nil, fmt.Errorf("make: read brief.md: %w", err)
+		return nil, fmt.Errorf("frontier: read brief.md: %w", err)
 	}
 	current := map[string]bool{}
 	for _, h := range store.BriefSectionHashes(briefData) {
@@ -33,7 +33,7 @@ func Requeue(d Deps, ticket string, fromBriefDiff bool) ([]string, error) {
 
 	slices, err := d.Store.ReadSlices(ticket)
 	if err != nil {
-		return nil, fmt.Errorf("make: read slices: %w", err)
+		return nil, fmt.Errorf("frontier: read slices: %w", err)
 	}
 
 	var touched []string
@@ -49,27 +49,27 @@ func Requeue(d Deps, ticket string, fromBriefDiff bool) ([]string, error) {
 	for _, id := range touched {
 		st, err := d.Store.ReadSliceState(ticket, id)
 		if err != nil {
-			return nil, fmt.Errorf("make: read slice state %s: %w", id, err)
+			return nil, fmt.Errorf("frontier: read slice state %s: %w", id, err)
 		}
 		if st.Question != "" {
 			if err := d.Store.Supersede(ticket, st.Question); err != nil {
-				return nil, fmt.Errorf("make: supersede question %s: %w", st.Question, err)
+				return nil, fmt.Errorf("frontier: supersede question %s: %w", st.Question, err)
 			}
 		}
 		st.State = "queued"
 		st.Question = ""
 		st.Reason = ""
 		if err := d.Store.WriteSliceState(ticket, id, st); err != nil {
-			return nil, fmt.Errorf("make: write slice state %s: %w", id, err)
+			return nil, fmt.Errorf("frontier: write slice state %s: %w", id, err)
 		}
 		if err := d.Journal(journal.Line{Slice: id, Event: "requeue"}); err != nil {
-			return nil, fmt.Errorf("make: journal requeue: %w", err)
+			return nil, fmt.Errorf("frontier: journal requeue: %w", err)
 		}
 	}
 
 	if len(touched) > 0 {
 		if err := d.Store.Push(fmt.Sprintf("%s: requeue from brief diff", ticket)); err != nil {
-			return nil, fmt.Errorf("make: push: %w", err)
+			return nil, fmt.Errorf("frontier: push: %w", err)
 		}
 	}
 

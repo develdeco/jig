@@ -50,7 +50,7 @@ func newDeps(t *testing.T, fx *fixture.Fixture) Deps {
 	return Deps{Store: st, Cfg: cfg, Rungs: testRungs()}
 }
 
-// buildLeaseDir returns the build lease directory make would use for the
+// buildLeaseDir returns the build lease directory frontier would use for the
 // fixture's ticket: <pool>/fixture-repo/<ticket>.
 func buildLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	t.Helper()
@@ -109,9 +109,9 @@ func applyScenarioPatch(t *testing.T, fx *fixture.Fixture, dir, ticket, slice st
 }
 
 // driveAttempt plays one scenario attempt for slice against the build
-// lease exactly as make would: it writes the dispatch line, applies any
+// lease exactly as frontier would: it writes the dispatch line, applies any
 // patch, then routes the scenario result to a journal result line and slice
-// state the way make's Run does.
+// state the way frontier's Run does.
 func driveAttempt(t *testing.T, st *store.Store, fx *fixture.Fixture, dir, model, slice string, attempt int) {
 	t.Helper()
 	ticket := fx.Ticket
@@ -170,7 +170,7 @@ func driveAttempt(t *testing.T, st *store.Store, fx *fixture.Fixture, dir, model
 }
 
 // answerSliceC answers slice c's open question and re-queues it, mirroring
-// store.Answer + make's requeue-on-answer step.
+// store.Answer + frontier's requeue-on-answer step.
 func answerSliceC(t *testing.T, st *store.Store, ticket, text string) {
 	t.Helper()
 	questions, err := st.ReadQuestions(ticket)
@@ -208,8 +208,8 @@ func answerSliceC(t *testing.T, st *store.Store, ticket, text string) {
 }
 
 // driveBuild plays the fixture's whole a/b/c/d scenario against a fresh
-// build lease, exactly as make's frontier loop would, and records the
-// ticket's start sha the way make's first dispatch does. Every builder
+// build lease, exactly as frontier's own loop would, and records the
+// ticket's start sha the way frontier's first dispatch does. Every builder
 // dispatch uses model.
 func driveBuild(t *testing.T, fx *fixture.Fixture, model string) {
 	t.Helper()

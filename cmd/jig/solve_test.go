@@ -7,7 +7,7 @@ import (
 
 	"github.com/develdeco/jig/axi"
 	"github.com/develdeco/jig/fixture"
-	makepkg "github.com/develdeco/jig/make"
+	"github.com/develdeco/jig/frontier"
 	"github.com/develdeco/jig/store"
 )
 
@@ -41,14 +41,14 @@ func TestSolveShouldPublish(t *testing.T) {
 func TestReportExitCodeStalledOrEnvBlocked(t *testing.T) {
 	cases := []struct {
 		name   string
-		report makepkg.RunReport
+		report frontier.RunReport
 		want   int
 	}{
-		{"all-green", makepkg.RunReport{Green: []string{"a"}}, 0},
-		{"stalled-not-stopped", makepkg.RunReport{Stalled: []string{"b"}}, 1},
-		{"env-blocked-not-stopped", makepkg.RunReport{EnvBlocked: []string{"c"}}, 1},
-		{"stopped", makepkg.RunReport{Stopped: true}, 1},
-		{"pending-question-wins", makepkg.RunReport{Stalled: []string{"b"}, PendingQuestion: "q-1"}, 2},
+		{"all-green", frontier.RunReport{Green: []string{"a"}}, 0},
+		{"stalled-not-stopped", frontier.RunReport{Stalled: []string{"b"}}, 1},
+		{"env-blocked-not-stopped", frontier.RunReport{EnvBlocked: []string{"c"}}, 1},
+		{"stopped", frontier.RunReport{Stopped: true}, 1},
+		{"pending-question-wins", frontier.RunReport{Stalled: []string{"b"}, PendingQuestion: "q-1"}, 2},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -72,13 +72,13 @@ func TestPrintRunReportStalledExitsNonZero(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	code := printRunReport(&buf, st, fx.Ticket, makepkg.RunReport{Stalled: []string{"b"}})
+	code := printRunReport(&buf, st, fx.Ticket, frontier.RunReport{Stalled: []string{"b"}})
 	if code != 1 {
 		t.Fatalf("printRunReport with a stalled slice, Stopped=false: exit code = %d, want 1", code)
 	}
 
 	buf.Reset()
-	code = printRunReport(&buf, st, fx.Ticket, makepkg.RunReport{EnvBlocked: []string{"c"}})
+	code = printRunReport(&buf, st, fx.Ticket, frontier.RunReport{EnvBlocked: []string{"c"}})
 	if code != 1 {
 		t.Fatalf("printRunReport with an env-blocked slice, Stopped=false: exit code = %d, want 1", code)
 	}

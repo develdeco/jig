@@ -3,8 +3,8 @@
 // surface the way an operator would from a shell.
 //
 // NOTE (read before editing): at the time this suite was authored, cmd/jig,
-// make, and verifydeliver were still being written by sibling agents in the
-// same integration pass. Every test here compiles against packages that do
+// frontier, and verifydeliver were still being written by sibling agents in
+// the same integration pass. Every test here compiles against packages that do
 // exist (fixture, store, journal, project, manifest, gitx, session, tracker,
 // outcome, axi) and drives the binary purely as a subprocess, so it never
 // needs those packages to exist for e2e itself to compile. TestMain builds

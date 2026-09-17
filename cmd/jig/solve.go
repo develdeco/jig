@@ -5,7 +5,7 @@ import (
 	"io"
 
 	"github.com/develdeco/jig/axi"
-	makepkg "github.com/develdeco/jig/make"
+	"github.com/develdeco/jig/frontier"
 	"github.com/develdeco/jig/session"
 	"github.com/develdeco/jig/verifydeliver"
 )
@@ -50,11 +50,11 @@ func cmdSolve(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	mdeps := makeDeps(st, cfg, mp, backend, ticket)
+	fdeps := frontierDeps(st, cfg, mp, backend, ticket)
 	vdeps := verifydeliverDeps(st, cfg, mp)
 	src := gateSourceFor(*scenario)
 
-	report, err := makepkg.Run(mdeps, makepkg.RunOpts{Ticket: ticket, AnswerQID: qid, AnswerText: text})
+	report, err := frontier.Run(fdeps, frontier.RunOpts{Ticket: ticket, AnswerQID: qid, AnswerText: text})
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -73,7 +73,7 @@ func cmdSolve(args []string, stdout io.Writer) int {
 			break
 		}
 
-		report, err = makepkg.Run(mdeps, makepkg.RunOpts{Ticket: ticket})
+		report, err = frontier.Run(fdeps, frontier.RunOpts{Ticket: ticket})
 		if err != nil {
 			return renderErr(stdout, err)
 		}
@@ -108,7 +108,7 @@ func cmdSolve(args []string, stdout io.Writer) int {
 // non-empty Stalled or EnvBlocked table means the ticket is not actually
 // done even when this call's Stopped flag is false (e.g. a slice left
 // stalled or env-blocked by an earlier invocation, not this one).
-func reportExitCode(report makepkg.RunReport) int {
+func reportExitCode(report frontier.RunReport) int {
 	switch {
 	case report.PendingQuestion != "":
 		return 2

@@ -1,4 +1,4 @@
-package make
+package frontier
 
 import "github.com/develdeco/jig/store"
 
