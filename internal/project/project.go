@@ -223,6 +223,13 @@ func resolveStorePath(cwd, storeFlag string) (string, error) {
 			}
 		}
 	}
+	// Last resort: the store `jig init --standalone` creates next to this
+	// directory, so commands work from the repo it was initialized for.
+	if sibling, err := StandaloneStoreDir(cwd); err == nil {
+		if _, err := os.Stat(filepath.Join(sibling, "project.yaml")); err == nil {
+			return sibling, nil
+		}
+	}
 	return "", &axi.Error{
 		Msg:  "no jig store found for this directory: pass --store or run inside a store or a mapped clone",
 		Code: "VALIDATION_ERROR",
@@ -249,17 +256,32 @@ func pathContains(base, target string) bool {
 	return !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)
 }
 
+// StandaloneStoreDir returns the sibling "<repoDir base>-tickets" path
+// InitStandalone creates its store at.
+func StandaloneStoreDir(repoDir string) (string, error) {
+	absRepo, err := filepath.Abs(repoDir)
+	if err != nil {
+		return "", fmt.Errorf("project: resolve repo dir: %w", err)
+	}
+	return siblingStoreDir(absRepo), nil
+}
+
+func siblingStoreDir(absRepo string) string {
+	return filepath.Join(filepath.Dir(absRepo), filepath.Base(absRepo)+"-tickets")
+}
+
 // InitStandalone creates a sibling "<repoDir base>-tickets" store next to
 // repoDir: a fresh git repo on branch main, project.yaml pointing back at
 // repoDir, an empty platform/ dir, and an empty ledger.md. It returns the
-// new store's path.
+// new store's path. Run against an existing store, it resets project.yaml
+// and ledger.md.
 func InitStandalone(repoDir string) (string, error) {
 	absRepo, err := filepath.Abs(repoDir)
 	if err != nil {
 		return "", fmt.Errorf("project: resolve repo dir: %w", err)
 	}
 	base := filepath.Base(absRepo)
-	storeDir := filepath.Join(filepath.Dir(absRepo), base+"-tickets")
+	storeDir := siblingStoreDir(absRepo)
 
 	if err := os.MkdirAll(storeDir, 0o755); err != nil {
 		return "", fmt.Errorf("project: create store dir: %w", err)

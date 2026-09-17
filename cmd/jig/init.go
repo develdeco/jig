@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/project"
@@ -17,14 +18,27 @@ func cmdInit(args []string, stdout io.Writer) int {
 	storeFlag := fs.String("store", "", "store path to initialize (used with --clone)")
 	var clones cloneFlag
 	fs.Var(&clones, "clone", "name=path clone mapping; repeatable")
-	if err := fs.Parse(args); err != nil {
-		return renderErr(stdout, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"})
+	if handled, err := parseFlags(stdout, fs, args); handled {
+		return 0
+	} else if err != nil {
+		return renderErr(stdout, err)
 	}
 
 	if *standalone {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return renderErr(stdout, err)
+		}
+		existing, err := project.StandaloneStoreDir(cwd)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		if _, err := os.Stat(filepath.Join(existing, "project.yaml")); err == nil {
+			return renderErr(stdout, &axi.Error{
+				Msg:  fmt.Sprintf("store already initialized at %s; init would reset its project.yaml and ledger.md", existing),
+				Code: "VALIDATION_ERROR",
+				Help: []string{"Run `jig ticket new --title \"...\"` to use the existing store"},
+			})
 		}
 		storeDir, err := project.InitStandalone(cwd)
 		if err != nil {

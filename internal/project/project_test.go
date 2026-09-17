@@ -158,6 +158,23 @@ func TestMintLocalID(t *testing.T) {
 	}
 }
 
+// TestStandaloneStoreDir checks that it returns the same path InitStandalone
+// itself creates the store at, so a caller can check for an existing store
+// before calling InitStandalone (which always overwrites one).
+func TestStandaloneStoreDir(t *testing.T) {
+	parent := t.TempDir()
+	repoDir := filepath.Join(parent, "myrepo")
+
+	got, err := StandaloneStoreDir(repoDir)
+	if err != nil {
+		t.Fatalf("StandaloneStoreDir: %v", err)
+	}
+	want := filepath.Join(parent, "myrepo-tickets")
+	if got != want {
+		t.Fatalf("StandaloneStoreDir(%q) = %q, want %q", repoDir, got, want)
+	}
+}
+
 func TestInitStandalone(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 
@@ -410,6 +427,44 @@ platform: platform/
 	// 4. nothing matches → error.
 	orphan := t.TempDir()
 	if _, _, err := Resolve(orphan, ""); err == nil {
+		t.Fatal("expected error when no store can be resolved")
+	}
+}
+
+// TestResolveFallsBackToSiblingStandaloneStore checks that Resolve finds a
+// repo's own "jig init --standalone" store even when cwd is the repo dir
+// itself, not the store: without this, the worked example in `jig`'s own
+// bare-usage help (init --standalone, then jig ticket new, run, solve, all
+// run from the repo) fails on its very first command.
+func TestResolveFallsBackToSiblingStandaloneStore(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+
+	parent := t.TempDir()
+	repoDir := filepath.Join(parent, "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	storePath, err := InitStandalone(repoDir)
+	if err != nil {
+		t.Fatalf("InitStandalone: %v", err)
+	}
+
+	storeDir, cfg, err := Resolve(repoDir, "")
+	if err != nil {
+		t.Fatalf("Resolve(repoDir, \"\"): %v", err)
+	}
+	absStore, _ := filepath.Abs(storePath)
+	absGot, _ := filepath.Abs(storeDir)
+	if absGot != absStore {
+		t.Fatalf("storeDir = %q, want %q", absGot, absStore)
+	}
+	if cfg.Name != "myrepo" {
+		t.Fatalf("cfg.Name = %q, want %q", cfg.Name, "myrepo")
+	}
+
+	// A cwd with neither its own project.yaml, a machine mapping, nor a
+	// sibling standalone store still refuses, same as before.
+	if _, _, err := Resolve(t.TempDir(), ""); err == nil {
 		t.Fatal("expected error when no store can be resolved")
 	}
 }
