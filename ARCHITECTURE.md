@@ -159,7 +159,9 @@ a local file path unless the caller has confirmed. `publish` is the only
 command that ever pushes, and it only passes `confirmed` after its
 interactive confirm (or `--yes`) has run.
 
-**Single git owner.** Only `gitx` spawns `git`. Every gitx call runs with
+**Single git owner.** Only `gitx` spawns `git`; `lint.TestNoGitSpawnOutsideGitx`
+parses every other package and fails on an `os/exec` call or `exec.Cmd`
+literal whose program resolves to `git`. Every gitx call runs with
 `-c maintenance.auto=false`, so none leaves git's detached background
 maintenance running; the flag is argv-only, so a user's own git still
 maintains their repos.
