@@ -82,6 +82,10 @@ func (s *Store) Push(msg string) error {
 			return err2
 		}
 	}
+	// Keep the long-lived store packed. Best-effort: a maintenance failure
+	// (for example a lock held by the user's own maintenance) must not fail
+	// a push that already succeeded.
+	_ = gitx.MaintenanceAuto(s.Root)
 	return nil
 }
 

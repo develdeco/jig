@@ -66,6 +66,17 @@ func callError(args []string, output string, err error) error {
 	return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 }
 
+// MaintenanceAuto runs "git maintenance run --auto" in the foreground in dir.
+// Each task checks its own threshold, so the call is cheap when there is
+// nothing to do. The per-call maintenance.auto=false only stops commands
+// from spawning detached maintenance; it does not disable this explicit run.
+// gc.autoDetach=false keeps the gc task's "git gc --auto" child (the packing
+// path before git 2.54) from detaching, so the work is done on return.
+func MaintenanceAuto(dir string) error {
+	_, err := Run(dir, "-c", "gc.autoDetach=false", "maintenance", "run", "--auto")
+	return err
+}
+
 // RevParse resolves ref to a full commit sha in dir.
 func RevParse(dir, ref string) (string, error) {
 	return Run(dir, "rev-parse", ref)

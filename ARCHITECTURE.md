@@ -105,7 +105,7 @@ exists.
 | `envrun/` | `Up`, `Shell` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable` |
 | `fixture/` | `Generate` | test `Opts` → a temp fixture repo, its store, and a scripted attempt scenario |
 | `gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
-| `gitx/` | `Run`, `RunEnv`, `RunRaw`, `RevParse`, `MergeBase`, `CommitsIn`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
+| `gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
 | `graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → per-machine paths |
 | `journal/` | `Append`, `Read`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs |
@@ -165,6 +165,12 @@ literal whose program resolves to `git`. Every gitx call runs with
 `-c maintenance.auto=false`, so none leaves git's detached background
 maintenance running; the flag is argv-only, so a user's own git still
 maintains their repos.
+
+**Synchronous maintenance.** jig's long-lived repos still get upkeep:
+`store.Push` after a successful push and `pool.Acquire` after a reuse fetch
+call `gitx.MaintenanceAuto`, a foreground `git maintenance run --auto` with
+`gc.autoDetach=false`. It is best-effort; a failure never fails the push or
+the acquire.
 
 ## Testing
 

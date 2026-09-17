@@ -59,6 +59,68 @@ func initRepo(t *testing.T, remote string) string {
 	return dir
 }
 
+// TestMaintenanceAutoPacksWhenThresholdMet forces gc.autoPackLimit's exact
+// (non-sampled) pack-count check low, accumulates several small packs, and
+// asserts MaintenanceAuto consolidates them - proving the "-c
+// maintenance.auto=false" flag every gitx call carries does not suppress
+// this explicit, synchronous invocation.
+//
+// Which maintenance task does the consolidating depends on the git version
+// under test: git 2.54 made the geometric-repack task the default
+// strategy, and that task is the one that packs here on a git that new; on
+// an older git, the gc task does it instead, by shelling out to "git gc
+// --auto" (kept synchronous by the gc.autoDetach=false MaintenanceAuto
+// itself sets). gc.auto is left at its default rather than forced to 0:
+// 0 disables the gc task's pack-count check entirely, which would silently
+// stop this test from exercising the older-git path.
+func TestMaintenanceAutoPacksWhenThresholdMet(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Run(dir, "init", "-b", "main"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if _, err := Run(dir, "config", "gc.autoPackLimit", "1"); err != nil {
+		t.Fatalf("git config gc.autoPackLimit: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		name := filepath.Join(dir, "f"+string(rune('a'+i))+".txt")
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+		if _, err := Run(dir, "add", "-A"); err != nil {
+			t.Fatalf("git add: %v", err)
+		}
+		if _, err := RunEnv(dir, []string{"GIT_AUTHOR_NAME=jig-fixture", "GIT_AUTHOR_EMAIL=fixture@example.invalid", "GIT_COMMITTER_NAME=jig-fixture", "GIT_COMMITTER_EMAIL=fixture@example.invalid"}, "commit", "-m", "c"); err != nil {
+			t.Fatalf("git commit: %v", err)
+		}
+		if _, err := Run(dir, "repack", "-d", "-q"); err != nil {
+			t.Fatalf("git repack: %v", err)
+		}
+	}
+
+	before := countPackFiles(t, dir)
+	if before < 2 {
+		t.Fatalf("setup: %d pack files before MaintenanceAuto, want >= 2 to prove consolidation", before)
+	}
+
+	if err := MaintenanceAuto(dir); err != nil {
+		t.Fatalf("MaintenanceAuto: %v", err)
+	}
+
+	after := countPackFiles(t, dir)
+	if after >= before {
+		t.Fatalf("pack files after MaintenanceAuto = %d, want fewer than %d (threshold was met, so it should have done real work)", after, before)
+	}
+}
+
+func countPackFiles(t *testing.T, dir string) int {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, ".git", "objects", "pack", "*.pack"))
+	if err != nil {
+		t.Fatalf("glob pack files: %v", err)
+	}
+	return len(matches)
+}
+
 func TestGuardedPush(t *testing.T) {
 	t.Run("non-local unconfirmed refuses", func(t *testing.T) {
 		dir := initRepo(t, "https://example.invalid/fake/repo.git")

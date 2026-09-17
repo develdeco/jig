@@ -50,6 +50,9 @@ func Acquire(repoName, remote, target, branch, key string) (Lease, error) {
 		if _, err := gitx.Run(dir, "fetch", "origin"); err != nil {
 			return Lease{}, fmt.Errorf("pool: fetch %s: %w", dir, err)
 		}
+		// Keep the reused clone packed. Best-effort: a maintenance failure
+		// must not fail an Acquire whose fetch already succeeded.
+		_ = gitx.MaintenanceAuto(dir)
 	} else {
 		parent := filepath.Dir(dir)
 		if err := os.MkdirAll(parent, 0o755); err != nil {
