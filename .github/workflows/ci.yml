@@ -5,9 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Include the event so a manual run on a tag never shares a group with
+  # release.yml's call to this workflow, which cancel-in-progress would kill.
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -15,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["windows-latest","ubuntu-latest","macos-latest"]') || fromJSON('["windows-latest","ubuntu-latest"]') }}
+        os: ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && fromJSON('["windows-latest","ubuntu-latest","macos-latest"]') || fromJSON('["windows-latest","ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -30,4 +33,109 @@ jobs:
       - name: govulncheck
         if: runner.os == 'Linux'
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: actionlint
+        if: runner.os == 'Linux'
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - run: go test -timeout 30m ./...
+
+  snapshot:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+      - name: verify checksums
+        run: |
+          set -eu
+          cd dist
+          sha256sum -c checksums.txt
+      - name: verify version stamp
+        id: verify
+        run: |
+          set -eu
+          bin=$(find dist -type f -path '*linux_amd64*' -name jig | head -n1)
+          if [ -z "$bin" ]; then
+            echo "no linux/amd64 jig binary found under dist/"
+            exit 1
+          fi
+          chmod +x "$bin"
+          out=$("$bin" version)
+          echo "$out"
+          ver=$(printf '%s\n' "$out" | awk '/^[[:space:]]+version:/ {print $2}')
+          commit=$(printf '%s\n' "$out" | awk '/^[[:space:]]+commit:/ {print $2}')
+          echo "parsed version: $ver"
+          echo "parsed commit: $commit"
+          want_commit=$(git rev-parse HEAD | cut -c1-12)
+          if [ "$commit" != "$want_commit" ]; then
+            echo "unexpected commit: $commit (want $want_commit)"
+            exit 1
+          fi
+          case "$ver" in
+            *+dirty)
+              echo "version reports a dirty build: $ver"
+              exit 1
+              ;;
+          esac
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+
+  installers:
+    needs: snapshot
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      EXPECTED_VERSION: ${{ needs.snapshot.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - name: install via install.sh
+        if: runner.os != 'Windows'
+        shell: sh
+        env:
+          JIG_INSTALL_DIR: ${{ runner.temp }}/jig-install
+        run: |
+          set -eu
+          JIG_RELEASE_URL="file://$(pwd)/dist" sh scripts/install.sh
+          "$JIG_INSTALL_DIR/jig" version
+          "$JIG_INSTALL_DIR/jig" version | grep -Fxq "  version: $EXPECTED_VERSION" || {
+            echo "installed jig version does not match $EXPECTED_VERSION"
+            exit 1
+          }
+      - name: install via install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          JIG_INSTALL_DIR: ${{ runner.temp }}\jig-install
+        run: |
+          $distPath = (Resolve-Path dist).Path -replace '\\', '/'
+          $env:JIG_RELEASE_URL = "file:///$distPath"
+          & .\scripts\install.ps1
+          $out = & "$env:JIG_INSTALL_DIR\jig.exe" version
+          $out
+          if (-not ($out -match "(?m)^\s*version: $([regex]::Escape($env:EXPECTED_VERSION))$")) {
+            Write-Error "installed jig version does not match $env:EXPECTED_VERSION"
+            exit 1
+          }
