@@ -132,7 +132,7 @@ Three backends implement that same narrow interface:
 
 - **fake** - replays a scripted scenario directory; no session, no network. The CI and fixture path.
 - **headless** - runs a local `claude -p` subprocess; the command/secret screens attach as a PreToolUse hook (`jig _screen`).
-- **herdr** - drives a remote agent through a WSL-hosted herdr terminal session; the same screens attach the same way.
+- **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); the same screens attach the same way.
 
 Screens attach wherever the backend's tool-call surface allows a PreToolUse
 hook; `fake` has no tool calls to screen.

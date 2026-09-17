@@ -165,7 +165,8 @@ table-driven test ported from the original spec.
 A build or gate session runs against one of three backends: `fake` replays a
 scripted scenario with no network calls (the CI and fixture path), `headless`
 drives a local `claude -p` subprocess, and `herdr` drives a remote agent
-through a WSL-hosted herdr terminal session. All three read the same
+through herdr, exec'd natively off Windows and, on Windows, inside a WSL
+login shell (`JIG_WSL_DISTRO` picks the distro). All three read the same
 `slice.json` and write the same `result.json` - see [ARCHITECTURE.md](./ARCHITECTURE.md#session-backends).
 
 Every session backend that can run tools is wrapped by a structural command

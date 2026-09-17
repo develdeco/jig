@@ -2,7 +2,8 @@
 // and lets the caller read the result back off disk. Three backends
 // implement the same narrow interface: fake (a deterministic scenario
 // player used in CI and tests), headless (a local `claude -p` subprocess),
-// and herdr (a remote agent driven through a WSL-hosted herdr instance).
+// and herdr (a remote agent driven through herdr, natively off Windows and
+// via WSL on Windows).
 package session
 
 import "fmt"

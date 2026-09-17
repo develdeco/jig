@@ -141,8 +141,11 @@ was ambiguous, what was chosen, and why.
   pin.
 - The herdr backend computes `/mnt/<drive>` paths mechanically instead of shelling out
   to `wslpath`, after herdr was probed to behave as expected via a WSL login shell
-  (herdr 0.8.2); the backend is implemented against that probed JSON surface but is
-  not exercised by automated tests.
+  (herdr 0.8.2); the backend is implemented against that probed JSON surface. Off
+  Windows it runs herdr directly; on Windows it goes through a WSL login shell in the
+  default distro, or `JIG_WSL_DISTRO`. A stub `herdr` binary checks the full command
+  sequence of a run on every OS; the WSL command line and its quoting are unit-tested
+  as pure functions, without spawning `wsl`.
 - Blocked-by relationships on the github adapter use the REST issue-dependencies
   endpoint via `gh api`; sub-issues use the GraphQL `addSubIssue` mutation. Tests
   assert the resulting argv against a stub rather than hitting the network.

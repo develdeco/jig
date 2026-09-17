@@ -5,22 +5,26 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/develdeco/jig/internal/outcome"
 )
 
-// herdrBackend drives a remote coding agent through herdr, itself reached
-// inside a WSL login shell. It is compile-checked only: unit tests never
-// invoke wsl or a real herdr instance.
-type herdrBackend struct{}
-
-func newHerdrBackend(opts Options) Backend {
-	return &herdrBackend{}
+// herdrBackend drives a remote coding agent through herdr: natively off
+// Windows, inside a WSL login shell on Windows. goos is runtime.GOOS except in
+// tests.
+type herdrBackend struct {
+	goos string
 }
 
-// wslDistro is the WSL distribution herdr runs in.
-const wslDistro = "Ubuntu-24.04"
+func newHerdrBackend(opts Options) Backend {
+	return &herdrBackend{goos: runtime.GOOS}
+}
+
+// jigWSLDistroEnv picks the WSL distro herdr runs in on Windows; unset uses
+// WSL's default.
+const jigWSLDistroEnv = "JIG_WSL_DISTRO"
 
 // wslPath mechanically converts a Windows path (e.g. `C:\Users\x`) to its
 // WSL mount equivalent (`/mnt/c/Users/x`): lowercase the drive letter, drop
@@ -28,7 +32,8 @@ const wslDistro = "Ubuntu-24.04"
 // needed for this shape of path. This is pure string manipulation rather
 // than filepath.ToSlash, which is a no-op on any OS other than Windows and
 // would leave the backslashes untouched when jig is built on Linux (e.g. in
-// CI, where this helper's own test still runs).
+// CI, where this helper's own test still runs). Only called on the Windows
+// (WSL) branch; off Windows, herdr sees the worktree path unchanged.
 func wslPath(winPath string) string {
 	p := strings.ReplaceAll(winPath, `\`, "/")
 	if len(p) >= 2 && p[1] == ':' {
@@ -38,18 +43,33 @@ func wslPath(winPath string) string {
 	return p
 }
 
-// runHerdr runs one herdr control command inside the WSL login shell
-// (`wsl -d Ubuntu-24.04 -e bash -lc '<cmd>'`) and parses its JSON response.
-func runHerdr(args ...string) (map[string]any, error) {
+// herdrCommand returns the process for one herdr control command. Off
+// Windows that is herdr itself with args. On Windows it is
+// `wsl [-d <distro>] -e bash -lc '<herdr command line>'`.
+func herdrCommand(goos string, distro string, args []string) (name string, argv []string) {
+	if goos != "windows" {
+		return "herdr", args
+	}
 	cmdline := "herdr " + strings.Join(quoteHerdrArgs(args), " ")
-	cmd := exec.Command("wsl", "-d", wslDistro, "-e", "bash", "-lc", cmdline)
-	out, err := cmd.Output()
+	var wslArgs []string
+	if distro != "" {
+		wslArgs = append(wslArgs, "-d", distro)
+	}
+	wslArgs = append(wslArgs, "-e", "bash", "-lc", cmdline)
+	return "wsl", wslArgs
+}
+
+// runHerdr runs one herdr control command (see herdrCommand) and parses its
+// JSON response.
+func (b *herdrBackend) runHerdr(args ...string) (map[string]any, error) {
+	name, argv := herdrCommand(b.goos, os.Getenv(jigWSLDistroEnv), args)
+	out, err := exec.Command(name, argv...).Output()
 	if err != nil {
-		return nil, fmt.Errorf("session/herdr: %s: %w", cmdline, err)
+		return nil, fmt.Errorf("session/herdr: herdr %s: %w", strings.Join(args, " "), err)
 	}
 	var res map[string]any
 	if err := json.Unmarshal(out, &res); err != nil {
-		return nil, fmt.Errorf("session/herdr: parse response for %q: %w", cmdline, err)
+		return nil, fmt.Errorf("session/herdr: parse response for %q: %w", strings.Join(args, " "), err)
 	}
 	return res, nil
 }
@@ -79,7 +99,11 @@ func herdrResult(res map[string]any) map[string]any {
 // (logged) on failure, for jump-in.
 func (b *herdrBackend) Run(d Dispatch) error {
 	label := fmt.Sprintf("jig-%s-%s", d.Ticket, d.Slice)
-	ws, err := runHerdr("workspace", "create", "--cwd", wslPath(d.Worktree), "--label", label, "--no-focus")
+	cwd := d.Worktree
+	if b.goos == "windows" {
+		cwd = wslPath(cwd)
+	}
+	ws, err := b.runHerdr("workspace", "create", "--cwd", cwd, "--label", label, "--no-focus")
 	if err != nil {
 		return err
 	}
@@ -88,12 +112,12 @@ func (b *herdrBackend) Run(d Dispatch) error {
 	paneID, _ := paneIDOf(wsResult)
 
 	agentName := fmt.Sprintf("jig-%s-%s-a%d", d.Ticket, d.Slice, d.Attempt)
-	if _, err := runHerdr("agent", "start", agentName, "--kind", "claude", "--pane", paneID, "--timeout", "60000"); err != nil {
+	if _, err := b.runHerdr("agent", "start", agentName, "--kind", "claude", "--pane", paneID, "--timeout", "60000"); err != nil {
 		b.leaveOpen(workspaceID)
 		return err
 	}
 
-	promptRes, err := runHerdr("agent", "prompt", agentName, d.Prompt, "--wait")
+	promptRes, err := b.runHerdr("agent", "prompt", agentName, d.Prompt, "--wait")
 	if err != nil {
 		b.leaveOpen(workspaceID)
 		return err
@@ -112,7 +136,7 @@ func (b *herdrBackend) Run(d Dispatch) error {
 	}
 
 	if _, err := os.Stat(d.ResultJSON); err != nil {
-		readRes, err := runHerdr("agent", "read", agentName)
+		readRes, err := b.runHerdr("agent", "read", agentName)
 		if err != nil {
 			b.leaveOpen(workspaceID)
 			return err
@@ -128,7 +152,7 @@ func (b *herdrBackend) Run(d Dispatch) error {
 		}
 	}
 
-	if _, err := runHerdr("workspace", "close", workspaceID); err != nil {
+	if _, err := b.runHerdr("workspace", "close", workspaceID); err != nil {
 		b.leaveOpen(workspaceID)
 	}
 	return nil
