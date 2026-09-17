@@ -178,10 +178,18 @@ go test ./...
 ```
 
 Every test gets its own `t.TempDir()`, `JIG_HOME` is always overridden via
-`t.Setenv` so a test run never touches a real machine's jig home, git author
-and committer identity and dates are pinned to a fixed fixture value so
-commits hash the same on every run, and every remote used in tests is a
-bare, file-path repo - no test ever talks to a real git host.
+`t.Setenv` so a test run never touches a real machine's jig home, and every
+remote used in tests is a bare, file-path repo - no test ever talks to a
+real git host.
+
+Product commits on the ticket branch (reconcile, memorize, squash) use the
+operator's git identity, resolved with `gitx.IdentityEnv` from their mapped
+clone, since the pool lease has none of their repo-local config. Packages
+whose tests reach those commits call `gittest.PinIdentity()` in `TestMain`,
+which pins all six `GIT_AUTHOR_*`/`GIT_COMMITTER_*` variables so commits hash
+the same on every run. The environment beats config, so in those test
+binaries the store's bookkeeping commits carry the pinned identity too,
+instead of jig's own `jig <jig@invalid>`.
 
 Every package whose tests run git has a `TestMain` built on `gittest.Run`,
 which points `GIT_CONFIG_GLOBAL` at a generated config

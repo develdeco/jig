@@ -54,6 +54,12 @@ func cmdSolve(args []string, stdout io.Writer) int {
 	vdeps := verifydeliverDeps(st, cfg, mp)
 	src := gateSourceFor(*scenario)
 
+	// Check identity before any session or gate round runs, not only at
+	// publish.
+	if err := verifydeliver.CheckIdentity(vdeps); err != nil {
+		return renderErr(stdout, err)
+	}
+
 	report, err := frontier.Run(fdeps, frontier.RunOpts{Ticket: ticket, AnswerQID: qid, AnswerText: text})
 	if err != nil {
 		return renderErr(stdout, err)

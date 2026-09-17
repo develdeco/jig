@@ -89,6 +89,12 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
 	}
+	// Resolve the operator's identity once, before the first commit
+	// (reconcile, memorize and squash all use it).
+	identityEnv, err := gitx.IdentityEnv(identityDir(d, repoName, lease.Dir))
+	if err != nil {
+		return PublishReport{}, err
+	}
 	if err := fetchTicketBranchFromBuildLease(lease.Dir, repoName, ticket); err != nil {
 		return PublishReport{}, err
 	}
@@ -97,7 +103,7 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 	}
 
 	// Step 1: reconcile.
-	policy, err := reconcile(lease.Dir, ticket, target)
+	policy, err := reconcile(lease.Dir, ticket, target, identityEnv)
 	if err != nil {
 		return PublishReport{}, err
 	}
@@ -129,7 +135,7 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
-	if err := writeMemorize(lease.Dir, ticket, slices, lines, questions); err != nil {
+	if err := writeMemorize(lease.Dir, ticket, slices, lines, questions, identityEnv); err != nil {
 		return PublishReport{}, err
 	}
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: "memorize"}); err != nil {
@@ -165,7 +171,7 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 	}
 
 	// Step 5: PR (squash + confirm + push).
-	sha, err := squash(lease.Dir, target, ticket, title)
+	sha, err := squash(lease.Dir, target, ticket, title, identityEnv)
 	if err != nil {
 		return PublishReport{}, err
 	}
@@ -355,7 +361,7 @@ func checkNonEmptyRange(dir, target string) error {
 // the two are equal, but after a reconcile rebase the recorded start sha
 // is stale (it would wrongly pull the target's own new history into the
 // range), while the merge-base tracks the rebase's new fork point.
-func squash(leaseDir, target, ticket, title string) (string, error) {
+func squash(leaseDir, target, ticket, title string, identityEnv []string) (string, error) {
 	start, err := gitx.MergeBase(leaseDir, "origin/"+target, "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("verifydeliver: squash: merge-base origin/%s HEAD: %w", target, err)
@@ -382,7 +388,7 @@ func squash(leaseDir, target, ticket, title string) (string, error) {
 		return "", fmt.Errorf("verifydeliver: squash: reset --soft %s: %w", start, err)
 	}
 	msg := fmt.Sprintf("%s: %s", ticket, title)
-	if _, err := gitx.RunEnv(leaseDir, pinnedGitEnv, "commit", "-m", msg); err != nil {
+	if _, err := gitx.RunEnv(leaseDir, identityEnv, "commit", "-m", msg); err != nil {
 		return "", fmt.Errorf("verifydeliver: squash: commit: %w", err)
 	}
 	return gitx.RevParse(leaseDir, "HEAD")

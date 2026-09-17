@@ -71,6 +71,13 @@ func TestMain(m *testing.M) {
 	}
 	jigBinary = out
 
+	// The real jig binary run by runJig inherits this process's environment
+	// (see helpers_test.go), so pinning identity here also pins it for every
+	// product commit the subprocess itself makes in a fresh pool lease - the
+	// operator identity it would otherwise need is unavailable inside this
+	// hermetic test environment. See
+	// internal/verifydeliver/testmain_test.go for the same reasoning.
+	gittest.PinIdentity()
 	code := gittest.Run(m)
 	os.RemoveAll(tmp)
 	os.Exit(code)

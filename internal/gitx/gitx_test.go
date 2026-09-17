@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -119,6 +120,162 @@ func countPackFiles(t *testing.T, dir string) int {
 		t.Fatalf("glob pack files: %v", err)
 	}
 	return len(matches)
+}
+
+// unsetEnvForTest unsets each of keys for the duration of t, restoring
+// whatever value (or absence) each one had beforehand once t finishes.
+// Mutating process env like this is safe here because these tests never run
+// in parallel with each other.
+func unsetEnvForTest(t *testing.T, keys ...string) {
+	t.Helper()
+	for _, k := range keys {
+		old, had := os.LookupEnv(k)
+		if err := os.Unsetenv(k); err != nil {
+			t.Fatalf("unset %s: %v", k, err)
+		}
+		t.Cleanup(func() {
+			if had {
+				os.Setenv(k, old)
+			} else {
+				os.Unsetenv(k)
+			}
+		})
+	}
+}
+
+// TestCheckIdentityFailsWithoutIdentity forces git into a state where it
+// cannot resolve any author/committer identity - no env vars, and a global
+// config that declares user.useConfigOnly=true with no [user] name/email -
+// and asserts CheckIdentity turns that into an actionable IDENTITY_REQUIRED
+// error rather than a bare git failure.
+//
+// useConfigOnly is required for this to be deterministic: without it, git
+// may auto-detect an identity from the machine's username/hostname instead
+// of failing, on some machines.
+func TestCheckIdentityFailsWithoutIdentity(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Run(dir, "init", "-b", "main"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+
+	cfgPath := filepath.Join(t.TempDir(), "gitconfig-no-identity")
+	if err := os.WriteFile(cfgPath, []byte("[user]\n\tuseConfigOnly = true\n"), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", cfgPath)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	unsetEnvForTest(t,
+		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE",
+	)
+
+	err := CheckIdentity(dir)
+	var ae *axi.Error
+	if !errors.As(err, &ae) {
+		t.Fatalf("CheckIdentity = %v (%T), want *axi.Error", err, err)
+	}
+	if ae.Code != "IDENTITY_REQUIRED" {
+		t.Fatalf("code = %q, want IDENTITY_REQUIRED", ae.Code)
+	}
+	if len(ae.Help) == 0 {
+		t.Fatal("expected help lines telling the operator how to configure an identity, got none")
+	}
+}
+
+// TestCheckIdentitySucceedsWithConfiguredIdentity is the control: a repo
+// with an ordinary repo-level identity configured must pass.
+func TestCheckIdentitySucceedsWithConfiguredIdentity(t *testing.T) {
+	dir := initRepo(t, "https://example.invalid/fake/repo.git")
+	if err := CheckIdentity(dir); err != nil {
+		t.Fatalf("CheckIdentity = %v, want nil", err)
+	}
+}
+
+// TestIdentityEnvResolvesDirsOwnIdentity checks that IdentityEnv reads the
+// identity configured in dir itself - a repo-local user.name/user.email -
+// rather than any ambient process environment, and renders it as plain
+// GIT_AUTHOR_*/GIT_COMMITTER_* env entries with no dates.
+func TestIdentityEnvResolvesDirsOwnIdentity(t *testing.T) {
+	unsetEnvForTest(t,
+		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE",
+	)
+	dir := initRepo(t, "https://example.invalid/fake/repo.git")
+
+	env, err := IdentityEnv(dir)
+	if err != nil {
+		t.Fatalf("IdentityEnv: %v", err)
+	}
+	want := []string{
+		"GIT_AUTHOR_NAME=jig-fixture",
+		"GIT_AUTHOR_EMAIL=fixture@example.invalid",
+		"GIT_COMMITTER_NAME=jig-fixture",
+		"GIT_COMMITTER_EMAIL=fixture@example.invalid",
+	}
+	if len(env) != len(want) {
+		t.Fatalf("IdentityEnv = %v, want %v", env, want)
+	}
+	for i := range want {
+		if env[i] != want[i] {
+			t.Errorf("IdentityEnv[%d] = %q, want %q", i, env[i], want[i])
+		}
+	}
+
+	// The env it returns must actually steer a commit made elsewhere: a
+	// second, identity-less repo commits with dir's identity when given
+	// this env, proving the whole point of resolving it in one directory
+	// to use in another.
+	other := t.TempDir()
+	if _, err := Run(other, "init", "-b", "main"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if _, err := RunEnv(other, env, "commit", "--allow-empty", "-m", "x"); err != nil {
+		t.Fatalf("commit with resolved env: %v", err)
+	}
+	got, err := Run(other, "log", "-1", "--format=%an <%ae> / %cn <%ce>")
+	if err != nil {
+		t.Fatalf("log: %v", err)
+	}
+	if wantLine := "jig-fixture <fixture@example.invalid> / jig-fixture <fixture@example.invalid>"; got != wantLine {
+		t.Fatalf("commit identity = %q, want %q", got, wantLine)
+	}
+}
+
+// TestIdentityRequiredErrorIsOneLine checks that a missing identity's error
+// message stays to one line (no embedded multi-line git advice dump) and
+// that its help lines use jig's own "Run `...`" hint style.
+func TestIdentityRequiredErrorIsOneLine(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Run(dir, "init", "-b", "main"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	cfgPath := filepath.Join(t.TempDir(), "gitconfig-no-identity")
+	if err := os.WriteFile(cfgPath, []byte("[user]\n\tuseConfigOnly = true\n"), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", cfgPath)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	unsetEnvForTest(t,
+		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE",
+	)
+
+	_, err := IdentityEnv(dir)
+	var ae *axi.Error
+	if !errors.As(err, &ae) {
+		t.Fatalf("IdentityEnv = %v (%T), want *axi.Error", err, err)
+	}
+	if strings.Count(ae.Msg, "\n") != 0 {
+		t.Fatalf("Msg = %q, want a single line", ae.Msg)
+	}
+	if !strings.Contains(ae.Msg, dir) {
+		t.Errorf("Msg = %q, want it to name %q", ae.Msg, dir)
+	}
+	for _, h := range ae.Help {
+		if !strings.HasPrefix(h, "Run `") {
+			t.Errorf("help line %q, want jig's \"Run `...`\" hint style", h)
+		}
+	}
 }
 
 func TestGuardedPush(t *testing.T) {

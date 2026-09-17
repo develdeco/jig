@@ -281,7 +281,7 @@ func TestRecordAndCheckDivergenceRefusesEmptyDiff(t *testing.T) {
 	run(t, advance, "push", "origin", "main")
 
 	run(t, clone, "fetch", "origin")
-	policy, err := reconcile(clone, "T-1", "main")
+	policy, err := reconcile(clone, "T-1", "main", nil)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
 	run(t, advance, "push", "origin", "main")
 
 	run(t, clone, "fetch", "origin")
-	policy, err := reconcile(clone, "T-1", "main")
+	policy, err := reconcile(clone, "T-1", "main", nil)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}

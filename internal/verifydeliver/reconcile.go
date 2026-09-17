@@ -34,13 +34,9 @@ func conflictErr(cause error) error {
 // history linear), or a merge when it has (so pushed history is never
 // rewritten). It reports which policy it used.
 //
-// Both merge and a rebase's replayed commits create new commits, which git
-// refuses without an author/committer identity; every history-creating call
-// here runs through gitx.RunEnv with pinnedGitEnv (the same mechanism
-// verifydeliver already uses for its own squash/memorize commits) so
-// reconcile works on a machine with no global git identity, such as a CI
-// runner.
-func reconcile(dir, ticket, target string) (string, error) {
+// Merge and rebase create commits, so they run with identityEnv, the
+// operator's identity that Publish resolved.
+func reconcile(dir, ticket, target string, identityEnv []string) (string, error) {
 	branch := ticketBranch(ticket)
 	out, err := gitx.Run(dir, "ls-remote", "origin", "refs/heads/"+branch)
 	if err != nil {
@@ -48,15 +44,15 @@ func reconcile(dir, ticket, target string) (string, error) {
 	}
 
 	if strings.TrimSpace(out) != "" {
-		if _, err := gitx.RunEnv(dir, pinnedGitEnv, "merge", "origin/"+target); err != nil {
-			_, _ = gitx.RunEnv(dir, pinnedGitEnv, "merge", "--abort")
+		if _, err := gitx.RunEnv(dir, identityEnv, "merge", "origin/"+target); err != nil {
+			_, _ = gitx.Run(dir, "merge", "--abort")
 			return "", conflictErr(err)
 		}
 		return policyMerge, nil
 	}
 
-	if _, err := gitx.RunEnv(dir, pinnedGitEnv, "rebase", "origin/"+target); err != nil {
-		_, _ = gitx.RunEnv(dir, pinnedGitEnv, "rebase", "--abort")
+	if _, err := gitx.RunEnv(dir, identityEnv, "rebase", "origin/"+target); err != nil {
+		_, _ = gitx.Run(dir, "rebase", "--abort")
 		return "", conflictErr(err)
 	}
 	return policyLocalRebase, nil
@@ -64,14 +60,14 @@ func reconcile(dir, ticket, target string) (string, error) {
 
 // RebaseOnto rebases branch from oldBase onto newBase in dir: the v0.1
 // helper for a stacked-branch base-branch-config policy, unit-tested but
-// not yet wired into Publish. The rebase replays commits, so it runs
-// through the same pinned-identity mechanism as reconcile.
+// not yet wired into Publish. The rebase replays commits with the caller's
+// git identity, so a caller should check it with gitx.CheckIdentity first.
 func RebaseOnto(dir, newBase, oldBase, branch string) error {
 	if _, err := gitx.Run(dir, "checkout", branch); err != nil {
 		return fmt.Errorf("verifydeliver: rebase onto: checkout %s: %w", branch, err)
 	}
-	if _, err := gitx.RunEnv(dir, pinnedGitEnv, "rebase", "--onto", newBase, oldBase, branch); err != nil {
-		_, _ = gitx.RunEnv(dir, pinnedGitEnv, "rebase", "--abort")
+	if _, err := gitx.Run(dir, "rebase", "--onto", newBase, oldBase, branch); err != nil {
+		_, _ = gitx.Run(dir, "rebase", "--abort")
 		return fmt.Errorf("verifydeliver: rebase onto: rebase --onto %s %s %s: %w", newBase, oldBase, branch, err)
 	}
 	return nil

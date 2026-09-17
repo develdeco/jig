@@ -59,7 +59,7 @@ func renderMemorize(ticket string, slices []store.Slice, lines []journal.Line, q
 // writeMemorize writes and commits the retrieval-notes file inside the
 // publish lease, before the squash commit so the squash's tree contains
 // it.
-func writeMemorize(leaseDir, ticket string, slices []store.Slice, lines []journal.Line, questions []store.Question) error {
+func writeMemorize(leaseDir, ticket string, slices []store.Slice, lines []journal.Line, questions []store.Question, identityEnv []string) error {
 	content := renderMemorize(ticket, slices, lines, questions)
 	path := filepath.Join(leaseDir, ".claude", "retrieval", ticket+".md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -68,27 +68,27 @@ func writeMemorize(leaseDir, ticket string, slices []store.Slice, lines []journa
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("verifydeliver: memorize: write retrieval notes: %w", err)
 	}
-	_, err := commitIfChanged(leaseDir, fmt.Sprintf("docs: memorize %s", ticket))
+	_, err := commitIfChanged(leaseDir, fmt.Sprintf("docs: memorize %s", ticket), identityEnv)
 	if err != nil {
 		return fmt.Errorf("verifydeliver: memorize: commit: %w", err)
 	}
 	return nil
 }
 
-// commitIfChanged stages every change in dir and commits it with the
-// pinned fixture identity, reporting whether a commit was made.
-func commitIfChanged(dir, msg string) (bool, error) {
-	if _, err := gitx.RunEnv(dir, nil, "add", "-A"); err != nil {
+// commitIfChanged stages every change in dir and commits it with
+// identityEnv, reporting whether a commit was made.
+func commitIfChanged(dir, msg string, identityEnv []string) (bool, error) {
+	if _, err := gitx.Run(dir, "add", "-A"); err != nil {
 		return false, err
 	}
-	out, err := gitx.RunEnv(dir, nil, "diff", "--cached", "--name-only")
+	out, err := gitx.Run(dir, "diff", "--cached", "--name-only")
 	if err != nil {
 		return false, err
 	}
 	if strings.TrimSpace(out) == "" {
 		return false, nil
 	}
-	if _, err := gitx.RunEnv(dir, pinnedGitEnv, "commit", "-m", msg); err != nil {
+	if _, err := gitx.RunEnv(dir, identityEnv, "commit", "-m", msg); err != nil {
 		return false, err
 	}
 	return true, nil

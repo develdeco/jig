@@ -2,6 +2,11 @@
 // re-verification rounds) and publish (reconcile, re-validate, docs,
 // squash, and route). It shares no in-memory state with package frontier;
 // the store on disk is the only interface between them.
+//
+// The commits Publish makes on the ticket branch (reconcile, memorize,
+// squash) carry the operator's identity, resolved from their mapped clone
+// rather than the pool lease, which has none of their repo-local config.
+// The store's own bookkeeping commits keep jig's identity.
 package verifydeliver
 
 import (
@@ -10,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
@@ -22,18 +28,6 @@ type Deps struct {
 	Cfg     project.Config
 	Machine project.MachineProject
 	Rungs   staircase.Config
-}
-
-// pinnedGitEnv fixes the author/committer identity and dates for every
-// commit verifydeliver makes itself (memorize, squash), matching the fake
-// session backend's identity so shas and messages stay comparable in tests.
-var pinnedGitEnv = []string{
-	"GIT_AUTHOR_NAME=jig-fixture",
-	"GIT_AUTHOR_EMAIL=fixture@example.invalid",
-	"GIT_COMMITTER_NAME=jig-fixture",
-	"GIT_COMMITTER_EMAIL=fixture@example.invalid",
-	"GIT_AUTHOR_DATE=2026-01-01T00:00:00Z",
-	"GIT_COMMITTER_DATE=2026-01-01T00:00:00Z",
 }
 
 // primaryRepo returns v0.1's single repo and its target branch (defaulting
@@ -49,6 +43,27 @@ func primaryRepo(cfg project.Config) (project.Repo, string, string) {
 
 // ticketBranch is the ticket's working branch name.
 func ticketBranch(ticket string) string { return "jig/" + ticket }
+
+// identityDir returns where Publish resolves the operator's identity for
+// repoName: their mapped clone, or leaseDir when none is recorded.
+func identityDir(d Deps, repoName, leaseDir string) string {
+	if dir, ok := d.Machine.Clones[repoName]; ok && dir != "" {
+		return dir
+	}
+	return leaseDir
+}
+
+// CheckIdentity lets a command fail fast, before any frontier or gate work,
+// when the operator's mapped clone has no git identity. Without a mapped
+// clone it returns nil; Publish still checks its lease before committing.
+func CheckIdentity(d Deps) error {
+	_, repoName, _ := primaryRepo(d.Cfg)
+	dir, ok := d.Machine.Clones[repoName]
+	if !ok || dir == "" {
+		return nil
+	}
+	return gitx.CheckIdentity(dir)
+}
 
 // consolidatedTitle picks the ticket's headline title: the first slice's
 // goal, falling back to the ticket id when there are no slices yet.

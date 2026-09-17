@@ -153,6 +153,13 @@ was ambiguous, what was chosen, and why.
 
 ## Git execution and CI
 
+- Commits that land on the user's PR branch (reconcile, memorize, squash) use the
+  user's git identity and the current time. The identity is resolved with `git var` in
+  the user's mapped clone, so repo-local and `includeIf` identities apply even though
+  the commits are made in a pool lease. A missing identity stops `solve` and `publish`
+  before any work, with the `git config` commands to fix it. Store bookkeeping commits
+  keep jig's own identity: they are jig's commits, not the user's. Tests pin identity
+  through the environment (`gittest.PinIdentity`).
 - git's detached auto-maintenance, spawned after commits, fetches and on the receiving
   side of local pushes, was still writing when a test's `TempDir` cleanup ran, so
   cleanup failed with "directory not empty" (on Linux, under load, 8 in 3,200 runs of

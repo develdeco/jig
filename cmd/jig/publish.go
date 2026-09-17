@@ -28,6 +28,12 @@ func cmdPublish(args []string, stdout io.Writer) int {
 	}
 
 	deps := verifydeliverDeps(st, cfg, mp)
+
+	// Check identity before acquiring a lease.
+	if err := verifydeliver.CheckIdentity(deps); err != nil {
+		return renderErr(stdout, err)
+	}
+
 	report, err := verifydeliver.Publish(deps, verifydeliver.PublishOpts{Ticket: ticket, Yes: *yes})
 	if err != nil {
 		return renderErr(stdout, err)

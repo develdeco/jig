@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -149,6 +150,84 @@ func isAbsPath(s string) bool {
 		return true
 	}
 	return false
+}
+
+// identityRequiredCode is the axi.Error code IdentityEnv and CheckIdentity
+// return when git cannot resolve an author or committer identity in dir.
+const identityRequiredCode = "IDENTITY_REQUIRED"
+
+// identRe splits "git var GIT_AUTHOR_IDENT"'s output - "Name <email>
+// <timestamp> <zone>" - into its name and email.
+var identRe = regexp.MustCompile(`^(.*) <([^>]*)> \d+ [+-]\d{4}$`)
+
+// IdentityEnv resolves the author and committer identity a commit in dir
+// would get ("git var GIT_AUTHOR_IDENT" and "GIT_COMMITTER_IDENT", which
+// honor the environment and dir's config) and returns it as
+// GIT_AUTHOR_NAME/EMAIL and GIT_COMMITTER_NAME/EMAIL entries, without dates.
+// Passing them to RunEnv makes a commit in another clone carry dir's
+// identity. It fails with IDENTITY_REQUIRED when git has none.
+func IdentityEnv(dir string) ([]string, error) {
+	authorIdent, err := Run(dir, "var", "GIT_AUTHOR_IDENT")
+	if err != nil {
+		return nil, identityRequiredError(dir, err)
+	}
+	committerIdent, err := Run(dir, "var", "GIT_COMMITTER_IDENT")
+	if err != nil {
+		return nil, identityRequiredError(dir, err)
+	}
+	authorName, authorEmail, err := parseIdent(authorIdent)
+	if err != nil {
+		return nil, identityRequiredError(dir, err)
+	}
+	committerName, committerEmail, err := parseIdent(committerIdent)
+	if err != nil {
+		return nil, identityRequiredError(dir, err)
+	}
+	return []string{
+		"GIT_AUTHOR_NAME=" + authorName,
+		"GIT_AUTHOR_EMAIL=" + authorEmail,
+		"GIT_COMMITTER_NAME=" + committerName,
+		"GIT_COMMITTER_EMAIL=" + committerEmail,
+	}, nil
+}
+
+// parseIdent splits one "git var" identity line into name and email.
+func parseIdent(ident string) (name, email string, err error) {
+	m := identRe.FindStringSubmatch(strings.TrimSpace(ident))
+	if m == nil {
+		return "", "", fmt.Errorf("unexpected identity format %q", ident)
+	}
+	return m[1], m[2], nil
+}
+
+// CheckIdentity reports IdentityEnv's error for dir, if any.
+func CheckIdentity(dir string) error {
+	_, err := IdentityEnv(dir)
+	return err
+}
+
+// identityRequiredError reports a missing identity in one line, keeping only
+// git's final fatal line; the setup commands go in Help.
+func identityRequiredError(dir string, cause error) error {
+	return &axi.Error{
+		Msg:  fmt.Sprintf("git has no author/committer identity for %s: %s", dir, lastLine(cause.Error())),
+		Code: identityRequiredCode,
+		Help: []string{
+			"Run `git config --global user.name \"Your Name\"`",
+			"Run `git config --global user.email \"you@example.com\"`",
+		},
+	}
+}
+
+// lastLine returns s's final non-empty line, trimmed.
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if t := strings.TrimSpace(lines[i]); t != "" {
+			return t
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 // pushRefusedCode is the axi.Error code returned by GuardedPush when it
