@@ -44,6 +44,13 @@ func cmdInit(args []string, stdout io.Writer) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
+		// Record the machine mapping (store path, and this repo's clone
+		// mapped to cwd) the same way the --store/--clone form does, so a
+		// later command in this repo (validate, run, gate, ...) resolves
+		// its manifest without a separate `jig init --store --clone` step.
+		if _, err := project.InitProject(storeDir, map[string]string{filepath.Base(cwd): cwd}); err != nil {
+			return renderErr(stdout, err)
+		}
 		axi.Render(stdout,
 			axi.KV("init", [][2]string{{"mode", "standalone"}, {"store", storeDir}}),
 			axi.Help("Run `jig ticket new --title \"...\"` to mint the first ticket"),
