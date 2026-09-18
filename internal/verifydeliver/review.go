@@ -871,7 +871,37 @@ func synthesizeFixSlices(round int, kept []Finding, man manifest.Manifest) ([]st
 			Rung:      staircase.RungCheapest,
 		})
 	}
+	disambiguateFixSliceIDs(slices)
 	return slices, nil
+}
+
+// disambiguateFixSliceIDs breaks ties between two synthesized slices that
+// computed the same id - in practice, two manifest workspace ids that
+// sanitizeWorkspaceID maps to the same string (e.g. "svc/a" and "svc:a"
+// both give "fix-N-mech-svc-a"). AppendSlices refuses a duplicate id
+// outright, which would otherwise leave the round half-applied (some fix
+// slices already appended, the rest rejected). The first occurrence of an
+// id, in synthesis order, keeps it; each later duplicate gets the lowest
+// "-2", "-3", ... suffix not already taken by any id in the batch (original
+// or already disambiguated), so this can never itself produce a new
+// collision.
+func disambiguateFixSliceIDs(slices []store.Slice) {
+	used := make(map[string]bool, len(slices))
+	for i := range slices {
+		id := slices[i].ID
+		if !used[id] {
+			used[id] = true
+			continue
+		}
+		for n := 2; ; n++ {
+			candidate := fmt.Sprintf("%s-%d", id, n)
+			if !used[candidate] {
+				slices[i].ID = candidate
+				used[candidate] = true
+				break
+			}
+		}
+	}
 }
 
 // renderFindingsMD deterministically renders a reviewer round's

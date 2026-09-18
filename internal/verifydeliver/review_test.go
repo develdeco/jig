@@ -1405,3 +1405,53 @@ func TestSynthesizeFixSlicesSanitizesWorkspaceID(t *testing.T) {
 		t.Fatalf("slice ids = %v, want one sanitized to %q", got, want)
 	}
 }
+
+// TestSynthesizeFixSlicesDisambiguatesCollidingIDs checks D4: two mechanical
+// findings in different workspaces whose sanitized ids collide ("svc/a" and
+// "svc:a" both give "fix-1-mech-svc-a") get distinct slice ids instead of
+// AppendSlices later rejecting the duplicate and leaving the round
+// half-applied.
+func TestSynthesizeFixSlicesDisambiguatesCollidingIDs(t *testing.T) {
+	man := manifest.Manifest{Oracles: map[string]string{"test": "go test"}}
+	kept := []Finding{
+		{ID: "r1-f1", Class: ClassMechanical, Title: "a", Workspace: "svc/a", Oracle: "test"},
+		{ID: "r1-f2", Class: ClassMechanical, Title: "b", Workspace: "svc:a", Oracle: "test"},
+	}
+	slices, err := synthesizeFixSlices(1, kept, man)
+	if err != nil {
+		t.Fatalf("synthesizeFixSlices: %v", err)
+	}
+	if len(slices) != 2 {
+		t.Fatalf("len(slices) = %d, want 2", len(slices))
+	}
+	ids := []string{slices[0].ID, slices[1].ID}
+	if ids[0] == ids[1] {
+		t.Fatalf("colliding slice ids not disambiguated: %v", ids)
+	}
+	if ids[0] != "fix-1-mech-svc-a" {
+		t.Fatalf("first slice id = %q, want %q (first occurrence keeps the plain id)", ids[0], "fix-1-mech-svc-a")
+	}
+	if ids[1] != "fix-1-mech-svc-a-2" {
+		t.Fatalf("second slice id = %q, want %q", ids[1], "fix-1-mech-svc-a-2")
+	}
+}
+
+// TestDisambiguateFixSliceIDsSkipsTakenSuffixes checks that the suffix
+// search does not stop at the first "-2" if a slice already legitimately
+// has that id: it keeps counting until it finds a suffix nothing in the
+// batch already uses.
+func TestDisambiguateFixSliceIDsSkipsTakenSuffixes(t *testing.T) {
+	slices := []store.Slice{
+		{ID: "fix-1-mech-x"},
+		{ID: "fix-1-mech-x-2"},
+		{ID: "fix-1-mech-x"},
+	}
+	disambiguateFixSliceIDs(slices)
+	got := []string{slices[0].ID, slices[1].ID, slices[2].ID}
+	want := []string{"fix-1-mech-x", "fix-1-mech-x-2", "fix-1-mech-x-3"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("slice[%d].ID = %q, want %q (got %v)", i, got[i], want[i], got)
+		}
+	}
+}

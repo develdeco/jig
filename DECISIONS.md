@@ -299,6 +299,17 @@ was ambiguous, what was chosen, and why.
   redundant: the abort covers jig's own failed retries, the check covers a
   rebase left by anything else (a person, a different tool, a crash between
   the failed pull and the abort).
+- Fix round 2, synthesized fix-slice id collisions (D4): two mechanical
+  bundles in different workspaces can sanitize to the same id
+  (`sanitizeWorkspaceID` maps both `svc/a` and `svc:a` to `svc-a`, giving
+  both `fix-N-mech-svc-a`); `AppendSlices` refuses a duplicate id outright,
+  which would otherwise leave the round half-applied - some fix slices
+  already appended, the rest rejected mid-round. `synthesizeFixSlices` now
+  ends with `disambiguateFixSliceIDs`, run before any round file is written:
+  the first occurrence of an id, in synthesis order, keeps it; each later
+  duplicate gets the lowest `-2`, `-3`, ... suffix not already used by any
+  id in the batch (original or already disambiguated), so disambiguation
+  itself can never produce a new collision.
 
 ## Review eval
 
