@@ -84,7 +84,10 @@ was ambiguous, what was chosen, and why.
   wrapped: one that failed before rebasing (an unreachable or moved remote,
   an auth failure) left nothing to abort, so git's own error is returned
   unchanged rather than misreported as a conflict
-  (`TestUnreachableRemoteIsNotReportedAsConflict`). `TestPushRefusesWhileMidMerge` and `TestPushRefusesWhileMidRebase`
+  (`TestUnreachableRemoteIsNotReportedAsConflict`). If the rebase state
+  cannot be read at all, the abort still runs and the error is wrapped, so
+  jig never leaves the store mid-rebase on a detection failure.
+  `TestPushRefusesWhileMidMerge` and `TestPushRefusesWhileMidRebase`
   prove the guard now covers `Push`; `TestSyncOwnConflictingPullAbortsAndWraps`
   kills the surviving `store_nosyncabort` mutant (dropping Sync's own abort
   call) by asserting the store is not left mid-rebase after Sync's own
