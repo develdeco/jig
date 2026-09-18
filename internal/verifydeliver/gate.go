@@ -211,11 +211,13 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	// mode, fetchTicketBranchFromBuildLease's checkout right after) refuses
 	// with "local changes ... would be overwritten" before the restore below
 	// ever runs, wedging every later attempt at the same point. This restore
-	// is best-effort: if the pool dir cannot be resolved, or the lease does
-	// not exist yet, Acquire runs unchanged and surfaces its own error.
+	// is best-effort: if the pool dir cannot be resolved, or the lease is not
+	// yet its own git working copy with a commit checked out (a key never
+	// acquired, or a clone killed before its first checkout), Acquire runs
+	// unchanged and surfaces its own error.
 	if poolDir, perr := home.PoolDir(); perr == nil {
 		leaseDir := filepath.Join(poolDir, repoName, leaseKey)
-		if isGitLeaseDir(leaseDir) {
+		if isOwnGitRepoWithHead(leaseDir) {
 			if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
 				return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
 			}
@@ -592,5 +594,33 @@ func writeDiffChangelog(d Deps, ticket, dir string, n int) error {
 // checkout (a git working copy), as opposed to a key never acquired yet.
 func isGitLeaseDir(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
+// isOwnGitRepoWithHead reports whether dir is itself the top level of a git
+// working copy whose HEAD resolves to a commit. A `.git` entry alone is not
+// enough before a destructive reset: when that entry is not a repository
+// git can open, git's upward discovery would resolve an enclosing repo
+// (JIG_HOME inside a dotfiles checkout, say) and the reset would discard
+// that repo's uncommitted work; and a clone killed before its first
+// checkout has an unborn HEAD that `reset --hard HEAD` cannot resolve,
+// which would wedge every later gate instead of letting Acquire recover.
+func isOwnGitRepoWithHead(dir string) bool {
+	if !isGitLeaseDir(dir) {
+		return false
+	}
+	top, err := gitx.Run(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false
+	}
+	topInfo, err := os.Stat(top)
+	if err != nil {
+		return false
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil || !os.SameFile(topInfo, dirInfo) {
+		return false
+	}
+	_, err = gitx.Run(dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
 	return err == nil
 }

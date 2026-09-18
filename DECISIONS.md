@@ -342,12 +342,31 @@ was ambiguous, what was chosen, and why.
   `git checkout` - the same hand-cleaning wedge NM2 was accepted for. `Gate`
   now restores an existing lease pristine at its current `HEAD` before
   `pool.Acquire` runs at all (best-effort: if the pool dir cannot be
-  resolved, or the lease does not exist yet, `Acquire` runs unchanged and
-  surfaces its own error). `TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances`
+  resolved, or the lease is not yet its own git working copy with a commit
+  checked out, `Acquire` runs unchanged and surfaces its own error).
+  `TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances`
   proves both the direct case (branch advances once, the very next gate
   succeeds) and recovery from a lease already left wedged by an earlier
   failed attempt (detached, still dirty, its local branch ref already
   fast-forwarded past the dirty file).
+- Fix round 3, the pre-Acquire restore runs only in the lease's own
+  repository (NM6, a regression in F1 found by the round-3 re-verify): F1
+  first ran `git reset --hard HEAD` and `git clean -fd` whenever the lease
+  directory had any `.git` entry. When that entry is not a repository git
+  can open (a lease deleted by hand and stopped by a locked pack file, a
+  clone killed mid-write) and `JIG_HOME` sits inside another working copy,
+  git's upward discovery resolved the enclosing repository and the reset
+  discarded its uncommitted work, silently; and a clone killed before its
+  first checkout has an unborn `HEAD`, so the reset failed and wedged every
+  later gate. The restore now runs only when `git rev-parse --show-toplevel`
+  is the lease directory itself (compared with `os.SameFile`) and
+  `HEAD^{commit}` resolves; otherwise `pool.Acquire` handles the lease as it
+  did before F1. `TestIsOwnGitRepoWithHead`,
+  `TestGateBrokenLeaseNeverResetsEnclosingRepo` and
+  `TestGateRecoversFromUnbornLease` pin it (the last two fail on F1's
+  original condition). `pool.Acquire`'s own `.git` check has the same
+  enclosing-repository weakness for its fetch and checkout; that predates
+  this work and is recorded as a follow-up, not fixed here.
 - Fix round 3, `--branch` detects a branch deleted on origin (F3, reverify-2
   Nice 1; corrects D2's overclaim): `pool.Acquire`'s own fetch has no
   `--prune`, so a branch deleted on origin after an earlier gate on the same
