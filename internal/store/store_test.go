@@ -85,7 +85,7 @@ func TestSliceStateRoundTrip(t *testing.T) {
 		t.Fatalf("absent state = %+v, want queued zero-value", got)
 	}
 
-	want := SliceState{State: "needs-input", Attempts: 2, Session: "sess-1", Question: "q-001", Reason: "flawed-brief"}
+	want := SliceState{State: "needs-input", Attempts: 2, Session: "sess-1", Question: "q-001", Reason: "flawed-brief", Signature: "a:code-bug:nil pointer"}
 	if err := st.WriteSliceState("JIG-1", "a", want); err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +95,29 @@ func TestSliceStateRoundTrip(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("round trip = %+v, want %+v", got, want)
+	}
+}
+
+// TestSliceStateSignatureNoKeyWhenAbsent checks that a slice state written
+// with no Signature re-marshals with no "signature:" key at all (an older
+// jig's on-disk states must stay byte-unchanged by this additive field).
+func TestSliceStateSignatureNoKeyWhenAbsent(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+
+	if err := st.WriteSliceState("JIG-1", "a", SliceState{State: "queued"}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(st.stateFile("JIG-1", "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["signature"]; ok {
+		t.Fatalf("state with no Signature wrote a signature: key: %v", raw)
 	}
 }
 

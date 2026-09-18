@@ -15,6 +15,13 @@ type SliceState struct {
 	Session  string `yaml:"session,omitempty"`
 	Question string `yaml:"question,omitempty"` // question id when needs-input
 	Reason   string `yaml:"reason,omitempty"`   // e.g. "attempt-cap", "stall", "env-up-failed"
+
+	// Signature is the stall signature (outcome.Signature's output) that
+	// tripped a stalled state, set on both stalled paths - repeat-failure
+	// stall and attempt-cap - and cleared when the slice reaches green.
+	// Additive field: absent on states an older jig wrote, which read back
+	// as the zero value ("-" in `jig status`'s stalled table).
+	Signature string `yaml:"signature,omitempty"`
 }
 
 // stateFile returns the on-disk path for a slice's state record: the store

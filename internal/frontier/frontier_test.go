@@ -212,6 +212,9 @@ func TestAttemptCapExhaustion(t *testing.T) {
 	if aState.State != "stalled" || aState.Reason != "attempt-cap" || aState.Attempts != 3 {
 		t.Fatalf("a state = %+v, want stalled/attempt-cap after 3 attempts", aState)
 	}
+	if aState.Signature == "" {
+		t.Fatalf("a state = %+v, want a non-empty stall signature on the attempt-cap path", aState)
+	}
 
 	bState, err := st.ReadSliceState(fx.Ticket, "b")
 	if err != nil {
@@ -245,6 +248,9 @@ func TestStallStops(t *testing.T) {
 	}
 	if aState.State != "stalled" || aState.Reason != "stall" {
 		t.Fatalf("a state = %+v, want stalled/stall", aState)
+	}
+	if aState.Signature == "" {
+		t.Fatalf("a state = %+v, want a non-empty stall signature on the repeat-failure stall path", aState)
 	}
 
 	bState, err := st.ReadSliceState(fx.Ticket, "b")

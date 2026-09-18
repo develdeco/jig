@@ -592,6 +592,7 @@ func (rc *runCtx) route(sl store.Slice, lease pool.Lease, attempt int, res outco
 			st.Attempts = attempt
 			st.Question = ""
 			st.Reason = ""
+			st.Signature = ""
 			if !rc.writeState(sl.ID, st) {
 				return
 			}
@@ -712,6 +713,7 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 		st.State = "stalled"
 		st.Attempts = attempt
 		st.Reason = "stall"
+		st.Signature = sig
 		if !rc.writeState(sl.ID, st) {
 			return
 		}
@@ -741,6 +743,7 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 		st.State = "stalled"
 		st.Attempts = attempt
 		st.Reason = "attempt-cap"
+		st.Signature = sig
 		if !rc.writeState(sl.ID, st) {
 			return
 		}
