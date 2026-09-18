@@ -18,7 +18,7 @@ import (
 // round, for tests that only care about the frontier/model/oracle path.
 type alwaysCleanSource struct{}
 
-func (alwaysCleanSource) Round(int) (Round, bool, error) { return Round{}, false, nil }
+func (alwaysCleanSource) Round(RoundInput) (Round, bool, error) { return Round{}, false, nil }
 
 func TestGateRound1FixSlice(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
@@ -210,8 +210,8 @@ func TestGateEarlyAndFrontierGuard(t *testing.T) {
 // reuses an id that already exists in the ticket's slices.yaml.
 type duplicateFixSliceSource struct{}
 
-func (duplicateFixSliceSource) Round(n int) (Round, bool, error) {
-	if n == 1 {
+func (duplicateFixSliceSource) Round(in RoundInput) (Round, bool, error) {
+	if n := in.Round; n == 1 {
 		return Round{
 			FindingsMD: "duplicate id",
 			FixSlices:  []store.Slice{{ID: "a", Workspace: "root", Goal: "dup", Oracle: "test"}},

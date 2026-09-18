@@ -37,8 +37,13 @@ var fakeGitEnv = []string{
 // scenario coverage becomes a failed result, a present patch.diff is
 // applied and committed with a pinned identity, and the scenario's
 // result.json is copied to d.ResultJSON (substituting the real HEAD sha for
-// a green result whose commit field is "@HEAD" or absent).
+// a green result whose commit field is "@HEAD" or absent). A gate-review
+// dispatch (d.Slice == "gate") is played back separately by runGate.
 func (b *fakeBackend) Run(d Dispatch) error {
+	if d.Slice == "gate" {
+		return b.runGate(d)
+	}
+
 	attemptDir := filepath.Join(b.scenarioDir, "slices", d.Slice, fmt.Sprintf("attempt-%d", d.Attempt))
 	if fi, err := os.Stat(attemptDir); err != nil || !fi.IsDir() {
 		return writeJSONResult(d.ResultJSON, map[string]any{
@@ -79,6 +84,20 @@ func (b *fakeBackend) Run(d Dispatch) error {
 		return fmt.Errorf("session/fake: marshal result: %w", err)
 	}
 	return writeResultBytes(d.ResultJSON, out)
+}
+
+// runGate plays back a gate-review dispatch: it copies
+// <scenario>/gate/round-<n>/review-result.json verbatim into d.ResultJSON.
+// Missing scenario coverage is an error, never a silent clean result - a
+// gate round the scenario forgot to script must fail loudly rather than be
+// misread as "nothing to find". The worktree is never touched.
+func (b *fakeBackend) runGate(d Dispatch) error {
+	path := filepath.Join(b.scenarioDir, "gate", fmt.Sprintf("round-%d", d.Attempt), "review-result.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("session/fake: scenario has no gate round %d review-result.json", d.Attempt)
+	}
+	return writeResultBytes(d.ResultJSON, data)
 }
 
 // applyFakePatch applies patchPath in d.Worktree, stages everything, and

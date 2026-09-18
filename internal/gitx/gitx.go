@@ -7,6 +7,7 @@ package gitx
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -86,6 +87,24 @@ func RevParse(dir, ref string) (string, error) {
 // MergeBase returns the merge base of a and b in dir.
 func MergeBase(dir, a, b string) (string, error) {
 	return Run(dir, "merge-base", a, b)
+}
+
+// IsAncestor reports whether ancestor is an ancestor of (or equal to)
+// descendant in dir, via "git merge-base --is-ancestor": exit 0 is true,
+// exit 1 is false (not an ancestor, not an error), and any other outcome
+// (e.g. an unknown object after a rebase) is an error.
+func IsAncestor(dir, ancestor, descendant string) (bool, error) {
+	args := []string{"merge-base", "--is-ancestor", ancestor, descendant}
+	var stdout, stderr bytes.Buffer
+	err := run(dir, nil, &stdout, &stderr, args)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, callError(args, stderr.String(), err)
 }
 
 // CommitsIn returns the commit shas selected by rangeSpec (git rev-list),

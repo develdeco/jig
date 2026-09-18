@@ -314,3 +314,65 @@ func TestGuardedPush(t *testing.T) {
 		}
 	})
 }
+
+// TestIsAncestor exercises all three outcomes: true, false (a valid but
+// unrelated commit), and error (an unknown object).
+func TestIsAncestor(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := Run(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return out
+	}
+	run("init", "-b", "main")
+	run("config", "user.name", "jig-fixture")
+	run("config", "user.email", "fixture@example.invalid")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("1"), 0o644); err != nil {
+		t.Fatalf("write f.txt: %v", err)
+	}
+	run("add", "-A")
+	run("commit", "-m", "c1")
+	c1, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse c1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("2"), 0o644); err != nil {
+		t.Fatalf("write f.txt: %v", err)
+	}
+	run("add", "-A")
+	run("commit", "-m", "c2")
+	c2, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse c2: %v", err)
+	}
+
+	t.Run("true", func(t *testing.T) {
+		ok, err := IsAncestor(dir, c1, c2)
+		if err != nil {
+			t.Fatalf("IsAncestor: %v", err)
+		}
+		if !ok {
+			t.Fatal("IsAncestor(c1, c2) = false, want true")
+		}
+	})
+
+	t.Run("false", func(t *testing.T) {
+		ok, err := IsAncestor(dir, c2, c1)
+		if err != nil {
+			t.Fatalf("IsAncestor: %v", err)
+		}
+		if ok {
+			t.Fatal("IsAncestor(c2, c1) = true, want false")
+		}
+	})
+
+	t.Run("error on unknown object", func(t *testing.T) {
+		_, err := IsAncestor(dir, "0000000000000000000000000000000000000000", c2)
+		if err == nil {
+			t.Fatal("IsAncestor with an unknown object: expected an error, got nil")
+		}
+	})
+}
