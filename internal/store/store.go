@@ -37,11 +37,24 @@ func (s *Store) HasRemote() bool {
 	return err == nil
 }
 
-// Sync pulls with rebase when a remote exists; it is a silent no-op
-// otherwise. Callers run it at the start of every command.
+// Sync stages and commits any uncommitted store state left behind by an
+// earlier command that failed after writing to the store - for example a
+// gate that appended its gate-open journal line and then failed at an
+// oracle, or failed on SLICE_ID_DUPLICATE after writing its round - then
+// pulls with rebase when a remote exists. Without this, a dirty tree makes
+// every later command's Sync fail with "cannot pull with rebase", wedging
+// the store until someone commits by hand. Committing the leftovers does
+// not retry the failed command's round: Sync records them as a jig commit
+// and the command proceeds, but a partial gate round directory still counts
+// as a round, so the next `jig gate` opens round N+1 rather than replaying
+// the failed one. It is a silent no-op when there is no remote. Callers run
+// it at the start of every command.
 func (s *Store) Sync() error {
 	if !s.HasRemote() {
 		return nil
+	}
+	if _, err := s.stageAndCommit("jig: record uncommitted store state"); err != nil {
+		return err
 	}
 	branch, err := s.currentBranch()
 	if err != nil {
@@ -51,21 +64,32 @@ func (s *Store) Sync() error {
 	return err
 }
 
+// stageAndCommit stages every change (`add -A`) and, when anything is
+// staged, commits it with jig's identity and msg. It reports whether a
+// commit was made.
+func (s *Store) stageAndCommit(msg string) (bool, error) {
+	if _, err := gitx.Run(s.Root, "add", "-A"); err != nil {
+		return false, err
+	}
+	staged, err := s.hasStagedChanges()
+	if err != nil {
+		return false, err
+	}
+	if !staged {
+		return false, nil
+	}
+	if _, err := gitx.Run(s.Root, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", msg); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Push stages every change, commits it (skipping the commit when nothing is
 // staged) and, when a remote exists, pushes it, retrying once with a
 // pull --rebase on rejection.
 func (s *Store) Push(msg string) error {
-	if _, err := gitx.Run(s.Root, "add", "-A"); err != nil {
+	if _, err := s.stageAndCommit(msg); err != nil {
 		return err
-	}
-	staged, err := s.hasStagedChanges()
-	if err != nil {
-		return err
-	}
-	if staged {
-		if _, err := gitx.Run(s.Root, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", msg); err != nil {
-			return err
-		}
 	}
 	if !s.HasRemote() {
 		return nil

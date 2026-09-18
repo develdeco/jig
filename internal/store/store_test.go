@@ -388,6 +388,65 @@ func TestSync(t *testing.T) {
 	}
 }
 
+// TestSyncCommitsUncommittedLeftoversBeforeRebase reproduces the store wedge
+// left by a command that failed after writing to the store (a dirty
+// tracked file plus an untracked attempt work file) at the same time as a
+// divergent remote commit: Sync must stage and commit the leftovers with
+// jig's identity, then still pull the other writer's commit, instead of
+// failing "cannot pull with rebase: you have unstaged changes".
+func TestSyncCommitsUncommittedLeftoversBeforeRebase(t *testing.T) {
+	st, work, remote := newTestRemoteStore(t)
+
+	// Leave dirty + untracked leftovers, as a command that failed after
+	// writing to the store would (a modified journal.ndjson-like file and
+	// an untracked attempt work file).
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\nx: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(work, "JIG-1", "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "JIG-1", "work", "a.attempt-1.result.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate another writer pushing directly to the bare remote, so Sync's
+	// pull --rebase has real work to do.
+	other := t.TempDir()
+	runGit(t, "", "clone", remote, other)
+	runGit(t, other, "config", "user.name", "other")
+	runGit(t, other, "config", "user.email", "other@example.invalid")
+	if err := os.WriteFile(filepath.Join(other, "from-other.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "add", "-A")
+	runGit(t, other, "commit", "-m", "from other")
+	runGit(t, other, "push", "origin", "main")
+
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	if status := runGit(t, work, "status", "--porcelain"); status != "" {
+		t.Fatalf("Sync left the tree dirty: %q", status)
+	}
+	if _, err := os.Stat(filepath.Join(work, "from-other.txt")); err != nil {
+		t.Fatalf("Sync did not pull the other writer's commit: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(work, "JIG-1", "work", "a.attempt-1.result.json")); err != nil {
+		t.Fatalf("Sync lost the leftover work file: %v", err)
+	}
+
+	log := runGit(t, work, "log", "--oneline", "--grep=jig: record uncommitted store state")
+	if strings.TrimSpace(log) == "" {
+		t.Fatal("Sync did not commit the leftovers with the expected message")
+	}
+	author := runGit(t, work, "log", "-1", "--grep=jig: record uncommitted store state", "--pretty=%an <%ae>")
+	if strings.TrimSpace(author) != "jig <jig@invalid>" {
+		t.Fatalf("leftover commit author = %q, want jig <jig@invalid>", strings.TrimSpace(author))
+	}
+}
+
 func TestPushRebasesOnRejection(t *testing.T) {
 	st, work, remote := newTestRemoteStore(t)
 
