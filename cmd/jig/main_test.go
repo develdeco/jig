@@ -101,6 +101,33 @@ func TestValidateFixture(t *testing.T) {
 	}
 }
 
+// TestValidateRejectsRungPin checks that a slice whose rung is set to
+// anything other than "cheapest" (the only pin) fails validation.
+func TestValidateRejectsRungPin(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.AppendSlices(fx.Ticket, []store.Slice{
+		{ID: "e", Workspace: "alpha", Goal: "g", Oracle: "test", Rung: "dearest"},
+	}); err != nil {
+		t.Fatalf("AppendSlices: %v", err)
+	}
+
+	var buf bytes.Buffer
+	code := Main([]string{"validate", fx.Ticket, "--store", fx.StoreDir}, &buf, strings.NewReader(""))
+	if code == 0 {
+		t.Fatalf("jig validate exit code = 0, want nonzero, output:\n%s", buf.String())
+	}
+	want := `slice e: rung "dearest" is not "cheapest" (the only pin)`
+	if !strings.Contains(buf.String(), want) {
+		t.Fatalf("expected output to contain %q, got:\n%s", want, buf.String())
+	}
+}
+
 // TestValidateCatchesCycle checks that a blocked_by cycle is reported as a
 // validation problem instead of hanging or panicking.
 func TestValidateCatchesCycle(t *testing.T) {

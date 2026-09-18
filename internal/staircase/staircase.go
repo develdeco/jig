@@ -26,6 +26,10 @@ type Signals struct {
 // precision, schema migrations, or the contract index.
 var InvariantRE = regexp.MustCompile(`(?i)(BigDecimal|rounding|toFixed|precision|CREATE TABLE|ALTER TABLE|migration|contract-index)`)
 
+// RungCheapest is the only staircase pin: it holds selection to the cheapest
+// rung regardless of volume signals.
+const RungCheapest = "cheapest"
+
 // Select picks a rung for cfg given s. Selection opens on the cheapest rung;
 // a volume signal (more than 400 diff lines or more than 10 files changed)
 // climbs one rung; an invariant match floors to the dearest rung, overriding
@@ -49,6 +53,25 @@ func Select(cfg Config, s Signals) string {
 		idx = 0
 	}
 	return cfg.Rungs[idx]
+}
+
+// SelectPinned is Select with an optional pin: pin == RungCheapest holds
+// selection to the cheapest rung (index 0) regardless of volume, but
+// s.Invariant still floors to the dearest rung - invariants are floored
+// even when a slice is pinned (CONTEXT.md Staircase). Any other pin,
+// including "", defers to Select unchanged.
+func SelectPinned(cfg Config, pin string, s Signals) string {
+	if pin != RungCheapest {
+		return Select(cfg, s)
+	}
+	n := len(cfg.Rungs)
+	if n == 0 {
+		return ""
+	}
+	if s.Invariant {
+		return cfg.Rungs[n-1]
+	}
+	return cfg.Rungs[0]
 }
 
 // Disjoint picks a model not already used by any builder this ticket: the

@@ -401,7 +401,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	}
 
 	sig := measureSignals(lease.Dir, startSHA)
-	model := staircase.Select(d.Rungs, sig)
+	model := modelFor(d.Rungs, sl, sig)
 
 	st, err := rc.readSliceState(sl.ID)
 	if err != nil {
@@ -469,6 +469,14 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	}
 
 	rc.route(sl, lease, attempt, res, startSHA)
+}
+
+// modelFor picks the build model for sl given cfg and the measured signals.
+// It is split out from processSlice so sl.Rung's wiring into
+// staircase.SelectPinned is unit-testable without a real lease (measuring
+// sig cheaply needs one; sl.Rung and cfg do not).
+func modelFor(cfg staircase.Config, sl store.Slice, sig staircase.Signals) string {
+	return staircase.SelectPinned(cfg, sl.Rung, sig)
 }
 
 // ensureStartSHA writes <ticket>/start.<repoName>.sha the first time this

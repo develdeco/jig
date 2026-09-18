@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 )
@@ -162,6 +164,55 @@ func TestAppendSlicesRejectsDuplicateID(t *testing.T) {
 	}
 	if len(slices) != 1 {
 		t.Fatalf("len(slices) = %d, want 1 (duplicate must not be appended)", len(slices))
+	}
+}
+
+// TestSliceRungRoundTrip checks that Slice.Rung persists through
+// AppendSlices/ReadSlices, and that a slice without one re-marshals with no
+// "rung:" key at all (existing slices.yaml bytes must stay unchanged).
+func TestSliceRungRoundTrip(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+
+	if err := st.AppendSlices("JIG-1", []Slice{
+		{ID: "a", Workspace: "root", Goal: "g", Oracle: "test"},
+		{ID: "b", Workspace: "root", Goal: "g", Oracle: "test", Rung: "cheapest"},
+	}); err != nil {
+		t.Fatalf("AppendSlices: %v", err)
+	}
+
+	slices, err := st.ReadSlices("JIG-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Slice{}
+	for _, sl := range slices {
+		byID[sl.ID] = sl
+	}
+	if got := byID["a"].Rung; got != "" {
+		t.Fatalf("slice a Rung = %q, want \"\"", got)
+	}
+	if got := byID["b"].Rung; got != "cheapest" {
+		t.Fatalf("slice b Rung = %q, want \"cheapest\"", got)
+	}
+
+	data, err := os.ReadFile(st.slicesFile("JIG-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		Slices []map[string]any `yaml:"slices"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.Slices) != 2 {
+		t.Fatalf("len(raw.Slices) = %d, want 2", len(raw.Slices))
+	}
+	if _, ok := raw.Slices[0]["rung"]; ok {
+		t.Fatalf("slice a with no Rung wrote a rung: key: %v", raw.Slices[0])
+	}
+	if got := raw.Slices[1]["rung"]; got != "cheapest" {
+		t.Fatalf("slice b raw rung = %v, want \"cheapest\"", got)
 	}
 }
 

@@ -54,6 +54,33 @@ func containsID(ids []string, want string) bool {
 	return false
 }
 
+// TestModelFor checks that processSlice's model choice wires sl.Rung into
+// staircase.SelectPinned: a cheapest-pinned slice holds the cheapest rung
+// under volume, an unpinned slice climbs normally, and an invariant still
+// floors even when pinned.
+func TestModelFor(t *testing.T) {
+	cfg := staircase.Config{Rungs: []string{"a", "b", "c"}}
+
+	cases := []struct {
+		name string
+		sl   store.Slice
+		sig  staircase.Signals
+		want string
+	}{
+		{"unpinned, no signals", store.Slice{}, staircase.Signals{}, "a"},
+		{"unpinned, volume", store.Slice{}, staircase.Signals{DiffLines: 401}, "b"},
+		{"pinned cheapest, volume", store.Slice{Rung: staircase.RungCheapest}, staircase.Signals{DiffLines: 401, DiffFiles: 11}, "a"},
+		{"pinned cheapest, invariant floors", store.Slice{Rung: staircase.RungCheapest}, staircase.Signals{Invariant: true}, "c"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := modelFor(cfg, c.sl, c.sig); got != c.want {
+				t.Fatalf("modelFor(cfg, %+v, %+v) = %q, want %q", c.sl, c.sig, got, c.want)
+			}
+		})
+	}
+}
+
 func TestRunScenarioMainChain(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	fx := fixture.Generate(t, fixture.Opts{})
