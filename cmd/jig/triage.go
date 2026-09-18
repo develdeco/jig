@@ -12,9 +12,14 @@ import (
 )
 
 // stdinIsTerminal reports whether r is an interactive terminal. It is true
-// only for an *os.File whose Stat mode has os.ModeCharDevice; anything else
-// (a pipe, a bytes.Buffer, a strings.Reader) is not a terminal. Tests
-// override this var with a scripted stub.
+// only for an *os.File whose Stat mode has os.ModeCharDevice and which is
+// not the null device; anything else (a pipe, a bytes.Buffer, a
+// strings.Reader) is not a terminal. The null device (/dev/null, NUL) is
+// itself a character device on every OS, not only Windows, so a plain
+// os.ModeCharDevice check misreads a deliberately null stdin (a supervisor
+// spawning jig with nil/DEVNULL Stdin) as a terminal; os.SameFile against
+// os.Stat(os.DevNull) rules that case out. Tests override this var with a
+// scripted stub.
 var stdinIsTerminal = func(r io.Reader) bool {
 	f, ok := r.(*os.File)
 	if !ok {
@@ -24,7 +29,13 @@ var stdinIsTerminal = func(r io.Reader) bool {
 	if err != nil {
 		return false
 	}
-	return fi.Mode()&os.ModeCharDevice != 0
+	if fi.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	if devNull, err := os.Stat(os.DevNull); err == nil && os.SameFile(fi, devNull) {
+		return false
+	}
+	return true
 }
 
 // triageFor builds the GateOpts.Triage hook cmdGate and cmdSolve wire in:

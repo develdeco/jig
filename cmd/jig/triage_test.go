@@ -159,6 +159,21 @@ func TestStdinIsTerminalRegularFile(t *testing.T) {
 	}
 }
 
+// TestStdinIsTerminalDevNull checks that the null device is never treated as
+// a terminal, on every OS: it is a character device (like /dev/null on
+// Linux/macOS or NUL on Windows), so the mode bit alone is not enough to
+// tell it apart from a real tty.
+func TestStdinIsTerminalDevNull(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	defer f.Close()
+	if stdinIsTerminal(f) {
+		t.Fatalf("stdinIsTerminal(%s) = true, want false", os.DevNull)
+	}
+}
+
 func assertKeptIDs(t *testing.T, kept []verifydeliver.Finding, want []string) {
 	t.Helper()
 	if len(kept) != len(want) {

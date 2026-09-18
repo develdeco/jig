@@ -241,12 +241,15 @@ was ambiguous, what was chosen, and why.
   `internal/frontier`'s own call site, which already sets that value as a literal;
   this avoids a new cross-package import into `cmd/jig` for one string.
 - The e2e reviewer test drives `jig gate`'s stdin through an explicit empty pipe
-  (`strings.NewReader("")`) rather than leaving `exec.Cmd.Stdin` unset, because on
-  this Windows box the null device opens with `os.ModeCharDevice` set - it reads as
-  a terminal to `stdinIsTerminal`'s literal contract even though it plainly is not
-  one interactively. A pipe is unambiguously not a character device on every
-  platform, so triage's non-terminal path (keep all, print the note) is what the
-  test actually exercises, deterministically.
+  (`strings.NewReader("")`) rather than leaving `exec.Cmd.Stdin` unset. The null
+  device (`/dev/null`, `NUL`) is a character device on every OS, not only this
+  Windows box, so a bare `os.ModeCharDevice` check misreads it as a terminal;
+  `stdinIsTerminal` now also compares against `os.Stat(os.DevNull)` via
+  `os.SameFile` and treats it as non-terminal directly. The e2e test still uses a
+  pipe rather than a null stdin, since a pipe is unambiguously not a character
+  device on every platform without relying on that comparison, so triage's
+  non-terminal path (keep all, print the note) is what the test exercises,
+  deterministically.
 
 ## Fixture and tests
 
