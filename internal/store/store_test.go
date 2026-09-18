@@ -779,3 +779,33 @@ func TestPushRebasesOnRejection(t *testing.T) {
 		t.Fatalf("Push did not rebase in the other writer's commit: %v", err)
 	}
 }
+
+// TestUnreachableRemoteIsNotReportedAsConflict checks that a pull which
+// fails before rebasing (here: the remote path no longer exists) returns
+// git's own error from both Sync and Push, not STORE_CONFLICT with
+// conflict-resolution help, and leaves nothing to abort.
+func TestUnreachableRemoteIsNotReportedAsConflict(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+	runGit(t, work, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "moved.git"))
+
+	for name, run := range map[string]func() error{
+		"Sync": st.Sync,
+		"Push": func() error { return st.Push("after the remote moved") },
+	} {
+		err := run()
+		if err == nil {
+			t.Fatalf("%s with an unreachable remote: err = nil, want git's error", name)
+		}
+		var ae *axi.Error
+		if errors.As(err, &ae) && ae.Code == "STORE_CONFLICT" {
+			t.Fatalf("%s with an unreachable remote was misreported as STORE_CONFLICT: %v", name, err)
+		}
+		mid, ierr := inProgressRebaseOrMerge(work)
+		if ierr != nil {
+			t.Fatalf("inProgressRebaseOrMerge: %v", ierr)
+		}
+		if mid {
+			t.Fatalf("%s left the store mid-rebase", name)
+		}
+	}
+}

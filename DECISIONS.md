@@ -80,7 +80,11 @@ was ambiguous, what was chosen, and why.
   conflicted and was aborted (git's raw output kept in the message text) and
   a Help line pointing at resolving the divergence in the store - git's own
   "run git rebase --continue" hint is stale by the time jig has already run
-  the abort. `TestPushRefusesWhileMidMerge` and `TestPushRefusesWhileMidRebase`
+  the abort. Only a pull that actually stopped mid-rebase is aborted and
+  wrapped: one that failed before rebasing (an unreachable or moved remote,
+  an auth failure) left nothing to abort, so git's own error is returned
+  unchanged rather than misreported as a conflict
+  (`TestUnreachableRemoteIsNotReportedAsConflict`). `TestPushRefusesWhileMidMerge` and `TestPushRefusesWhileMidRebase`
   prove the guard now covers `Push`; `TestSyncOwnConflictingPullAbortsAndWraps`
   kills the surviving `store_nosyncabort` mutant (dropping Sync's own abort
   call) by asserting the store is not left mid-rebase after Sync's own

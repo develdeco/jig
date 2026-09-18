@@ -60,10 +60,7 @@ func (s *Store) Sync() error {
 		return err
 	}
 	if _, err := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); err != nil {
-		// jig itself must never leave the store mid-rebase: best effort,
-		// ignore the abort's own error (there may be nothing to abort).
-		_, _ = gitx.Run(s.Root, "rebase", "--abort")
-		return s.wrapAbortedPullConflict(err)
+		return s.abortFailedPull(err)
 	}
 	return nil
 }
@@ -153,10 +150,7 @@ func (s *Store) Push(msg string) error {
 	}
 	if _, err := gitx.Run(s.Root, "push", "origin", branch); err != nil {
 		if _, perr := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); perr != nil {
-			// jig itself must never leave the store mid-rebase: best effort,
-			// ignore the abort's own error (there may be nothing to abort).
-			_, _ = gitx.Run(s.Root, "rebase", "--abort")
-			return s.wrapAbortedPullConflict(perr)
+			return s.abortFailedPull(perr)
 		}
 		if _, err2 := gitx.Run(s.Root, "push", "origin", branch); err2 != nil {
 			return err2
@@ -167,6 +161,22 @@ func (s *Store) Push(msg string) error {
 	// a push that already succeeded.
 	_ = gitx.MaintenanceAuto(s.Root)
 	return nil
+}
+
+// abortFailedPull handles jig's own failed `pull --rebase`. A pull that
+// stopped on a conflict leaves a rebase in progress (stageAndCommit refused
+// any rebase or merge that was already there, so this one is jig's own): it
+// is aborted, since jig never leaves the store mid-rebase, and reported as
+// STORE_CONFLICT. A pull that failed before rebasing (an unreachable or
+// moved remote, an auth failure) left nothing to abort, so its error is
+// returned unchanged rather than misreported as a conflict. When the state
+// cannot be read, the abort is still attempted (best effort).
+func (s *Store) abortFailedPull(pullErr error) error {
+	if mid, err := inProgressRebaseOrMerge(s.Root); err == nil && !mid {
+		return pullErr
+	}
+	_, _ = gitx.Run(s.Root, "rebase", "--abort")
+	return s.wrapAbortedPullConflict(pullErr)
 }
 
 // wrapAbortedPullConflict turns a failed pull --rebase's raw git error, once
