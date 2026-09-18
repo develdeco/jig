@@ -5,7 +5,11 @@ was ambiguous, what was chosen, and why.
 
 ## Scope and deferrals
 
-- Structural rounds render as markdown tables in v0.1.
+- Structural rounds render as markdown tables in v0.1; this described every gate
+  round until the reviewer landed, and still describes the old scripted source's
+  rounds. A real reviewer round instead persists structured `findings.yaml` and
+  renders `findings.md` from it deterministically (no shas, a trailing newline,
+  "none" when there are no findings).
 - jira/linear trackers are compile-checked stubs that return a structured
   not-implemented error.
 - `jig gate` pr-mode parses its flags and returns not-implemented.
@@ -28,6 +32,10 @@ was ambiguous, what was chosen, and why.
 - Divergence checking lands as a lite version: reconcile journals the integrated-diff
   file count, and publish refuses an empty integration diff as a stale-overwrite
   signal. The symbol-grep half of the check stays deferred.
+- CI-after-PR monitoring (tracking which findings a human later found were CI
+  misses, and revalidating a round after CI runs against it), `jig gate`'s `--pr`
+  mode, and any daemon/TUI/background machinery stay deferred to v0.2+; jig stays
+  foreground and disk-only in this run too.
 
 ## Safety
 
@@ -66,6 +74,15 @@ was ambiguous, what was chosen, and why.
   heuristic. This stricter rule is recorded in the outcome tests.
 - The stall signature strips digits and path segments before comparison, so the
   same failure at a different line number or path still counts as a repeat.
+- The stall signature is now persisted on the slice state (`signature`, additive,
+  empty on states an older jig wrote), set on both paths that land a slice in
+  `stalled` (repeat-failure stall and attempt-cap) and cleared on the green route
+  alongside the existing `question`/`reason` clears. `jig status`'s stalled table
+  renders it, `-` when absent.
+- `frontier` extracts a small `modelFor(cfg, sl, sig)` helper wrapping
+  `staircase.SelectPinned` at its rung-selection call site, since a real run
+  cannot cheaply produce a volume signal for a unit test; the helper itself, not
+  a live dispatch, is what the rung-pin wiring is tested against.
 - The staircase invariant regex is applied case-insensitively; v0.1 left this choice
   open and case-insensitive was picked.
 - Attempt-cap exhaustion has two candidate behaviors: setting a `stalled` state, or
@@ -108,6 +125,95 @@ was ambiguous, what was chosen, and why.
 - PR creation is an optional tracker capability: the github adapter shells out to
   `gh pr create`, while local/command trackers keep the PR body file as the artifact
   instead.
+- Gate/solve scripted-source compatibility rule: `jig gate` never had `--backend`
+  before the reviewer landed, so its old scripted source (`NewFakeGateSource`) runs
+  iff `--scenario` is set AND `--backend` is not; every other combination, including
+  `--backend fake --scenario X`, dispatches a real reviewer session played back by
+  whichever backend resolves. `jig solve` always had `--backend`, so its own rule
+  ignores it: the scripted source runs whenever `--scenario` is set, the real
+  reviewer otherwise, on solve's own already-constructed backend.
+- `review.json`'s `brief_path` in `--branch --doc` mode points at the `--doc` file
+  itself, not the round's `spec-input.md`: writing into the round directory before
+  the round exists would leave a partial round behind whenever the reviewer fails,
+  since `spec-input.md` is written only after the round completes.
+- Fix-slice oracle fallback: a finding's suggested oracle is used when it names a
+  real manifest oracle, else the first manifest oracle name in sorted order (plan's
+  "workspace's first manifest oracle" read literally, since manifest oracles are
+  global, not per workspace, in this codebase). A manifest with no oracles is
+  `GATE_NO_ORACLE`.
+- Mechanical bundle id rule: kept mechanical findings become one fix slice per
+  workspace, first-seen order. The unqualified id `fix-<round>-mech` is used only
+  when every kept mechanical finding in the round shares one workspace; once a
+  round has mechanical findings in more than one workspace, every bundle gets the
+  qualified `fix-<round>-mech-<workspace>` form instead, so two workspaces never
+  collide on the same id.
+- `result.json` is parsed strictly (`ParseReviewResult`): exactly one JSON object,
+  a known verdict with a consistent finding count, a valid class and non-empty
+  title per finding, a valid status per closure - anything else is
+  `REVIEW_INVALID` naming the problem, so a malformed or off-contract session
+  result fails loudly instead of silently reading as clean. The headless backend's
+  failure fallback shape (`{"outcome":"failed",...}`) has no `verdict` and so fails
+  here too. Paired with this: a forward-only guard checks the gate lease's HEAD and
+  `git status --porcelain` are unchanged after the reviewer dispatch and rejects the
+  round (`REVIEW_INVALID`) if either moved - reviewers never edit.
+- CONTEXT.md's Intake entry dropped "triage" from its `_Avoid_` list: Triage is
+  now its own CONTEXT.md term naming the gate's human seam (keep or dismiss each
+  finding before fix slices are synthesized), so it is no longer a synonym to
+  steer writers away from near Intake.
+- Auto-dismiss compares a finding's normalized title (lowercased, whitespace
+  collapsed, trimmed) against every prior round's cumulative dismissed titles; a
+  match is dismissed before triage ever sees it, so a dismissal is permanent even
+  if the reviewer re-raises the same finding in slightly different words.
+- The fake session backend's gate playback (`d.Slice == "gate"`) errors loudly on
+  missing scenario coverage for a round (`session/fake: scenario has no gate round
+  <n> review-result.json`) rather than defaulting to a silent clean result, since a
+  scenario author forgetting to script a round should fail the test, not pass it
+  by accident.
+- No `schema_version` bump for this run: every store-schema change (slice `rung`,
+  slice state `signature`, `report.yaml`'s `reviewed_sha`, the new `gate/round-N/
+  findings.yaml` and `work/gate.round-N.*` files) is additive - an older jig reading
+  a newer store's ticket folder still parses every field it knows about, and a
+  field absent on write leaves no key on disk.
+- `report.yaml` gained `reviewed_sha` (repo → sha for that round, `omitempty`)
+  beyond what the design digest's field list named, because rendering it required
+  plumbing the reviewer's `reviewed_sha` map through `GateReport`; kept additive
+  so a scripted round's `report.yaml` bytes are unchanged.
+- Right after a gate round appends fix slices, `jig status`'s next-step hint still
+  falls through to "work the frontier" rather than "work the fix-slice round",
+  because its `allGreen` check counts every slice including the newly-appended,
+  still-queued fix slices - unchanged behavior, shared with the old scripted path,
+  not something this run needed to fix.
+
+## Review eval
+
+- A corpus case's `review.json` is a template the runner partially overwrites, not
+  a throwaway file: `RunCase` keeps its authored fields (ticket, round, scope,
+  prior findings, dismissed) and overwrites only the sha/path fields it computes,
+  then marshals the same struct through `verifydeliver.MarshalReviewRequest` - the
+  same function the real gate calls. This lets a case author adjust a case's
+  static fields without the runner needing per-case Go code, while still
+  guaranteeing the exact wire shape.
+- The eval dispatch sets `Dispatch.Screen: false`, unlike the real gate's `true`:
+  the `_screen` PreToolUse hook re-execs `os.Executable()`, which inside `go
+  test` is the test binary, not `jig`, and the eval repo is a throwaway temp
+  dir with no remote, so screening would buy nothing and would break the
+  headless backend's hook wiring.
+- The eval dispatch identifies a case by `session.Dispatch.Ticket` (set to the
+  case name), since `Dispatch` has no dedicated case-name field; the structural
+  tests' scripted backend keys its scenario lookup on that field.
+- Eval repo commits are identity-pinned via `gitx.RunEnv` with the same
+  `GIT_AUTHOR_*`/`GIT_COMMITTER_*` values `internal/fixture` and the fake session
+  backend already use, not a `.git/config` write, so the throwaway repo's commits
+  hash the same on every run without a new pinning convention.
+- Gold `title_pattern`s must not overlap within a case: `mechanical-batch`'s first
+  draft matched a doc-typo finding's title against its own missing-doc-comment
+  gold entry too, since both titles contained the phrase "doc comment". Corpus
+  authors writing `gold.yaml` need to check a new pattern against every other
+  finding's title in the same case, not just its own gold file.
+- `RenderReport`'s exact text format is a plain, greppable line
+  (`<case>: PASS|FAIL found=a/b missed=N fp=N unmatched=N[ reason: ...]`) plus a
+  `totals:` line; tests assert on substrings, not the exact format, so it can be
+  reformatted later without touching test expectations.
 
 ## CLI
 
@@ -122,6 +228,25 @@ was ambiguous, what was chosen, and why.
 - `jig validate` prints a brief section-hash table so a calling skill can fill
   `from_brief` without needing a new CLI verb, keeping the CLI surface exhaustive
   without growing it.
+- `jig status`'s old combined `paused` state (needs-input OR env-blocked) is gone.
+  `state:` now has four precedence tiers, worst first: `stalled` (any slice
+  stalled) > `parked` (any slice needs-input specifically) > `env-blocked` (any
+  slice env-blocked) > `green` (every slice green), falling back to `building`.
+  A `parked[N]{slice,question,resume}` table and a `stalled[N]{slice,reason,
+  signature}` table render whenever the ticket has one, in that order, alongside
+  the existing questions table - independent of the `state:` line's own
+  precedence, which only picks the one summary word.
+- `resumeCommand`'s flawed-brief branch compares `SliceState.Reason` against the
+  literal string `"flawed-brief"` rather than a shared constant, matching
+  `internal/frontier`'s own call site, which already sets that value as a literal;
+  this avoids a new cross-package import into `cmd/jig` for one string.
+- The e2e reviewer test drives `jig gate`'s stdin through an explicit empty pipe
+  (`strings.NewReader("")`) rather than leaving `exec.Cmd.Stdin` unset, because on
+  this Windows box the null device opens with `os.ModeCharDevice` set - it reads as
+  a terminal to `stdinIsTerminal`'s literal contract even though it plainly is not
+  one interactively. A pipe is unambiguously not a character device on every
+  platform, so triage's non-terminal path (keep all, print the note) is what the
+  test actually exercises, deterministically.
 
 ## Fixture and tests
 
@@ -185,6 +310,16 @@ was ambiguous, what was chosen, and why.
   every push to main and every pull request; govulncheck runs on the Linux leg.
 - Windows Defender exclusions were considered for Windows CI time and dropped: GitHub's
   Windows runner images already turn real-time scanning off and exclude the C: and D: drives.
+- `lint/workflow_test.go`'s "release reuses ci before publishing" check verifies an
+  actual dependency, not just that both jobs exist: it finds the job whose `uses`
+  names `ci.yml` and the job whose steps use `goreleaser-action` (the real
+  publishing step), then asserts the second depends on the first through a
+  transitive `needs` walk. A weaker version asserting only that both jobs exist
+  would not catch a release pipeline that publishes before ci passes, which is the
+  bug the invariant exists to prevent.
+- The same test's tag-pattern check also rejects an empty `push.tags` list, beyond
+  the literal "every tag pattern starts with v" wording, since an empty list would
+  vacuously satisfy that wording while defeating the trigger's point.
 
 ## Release and install
 
