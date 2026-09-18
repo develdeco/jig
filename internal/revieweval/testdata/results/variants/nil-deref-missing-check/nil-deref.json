@@ -1,0 +1,15 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "intent",
+      "title": "Missing nil check in Lookup",
+      "detail": "users/lookup.go: Lookup does not check store[id] for nil before using it.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "Lookup needs a nil check."
+}

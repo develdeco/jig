@@ -5,37 +5,39 @@ import (
 	"strconv"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
-// noopGateSource is the placeholder GateSource used when jig gate runs
-// without --scenario (the real, session-dispatching gate reviewer).
-//
-// NOTE: v0.1 ships only the fake scenario-backed source
-// (verifydeliver.NewFakeGateSource); a real, session-driven gate reviewer
-// is not implemented yet (untested, same as the herdr session backend).
-// This always reports a clean round so `jig gate` without --scenario still
-// completes rather than hanging on an unimplemented dependency; wiring a
-// real reviewer is future work (see the README Roadmap).
-type noopGateSource struct{}
-
-func (noopGateSource) Round(n int) (verifydeliver.Round, bool, error) {
-	return verifydeliver.Round{}, false, nil
-}
-
-// gateSourceFor picks the GateSource for a gate invocation: the fake
-// scenario reader when --scenario is set, else the noop placeholder.
-func gateSourceFor(scenario string) verifydeliver.GateSource {
-	if scenario != "" {
-		return verifydeliver.NewFakeGateSource(scenario)
+// gateSourceFor picks the GateSource for a `jig gate` invocation. The
+// compatibility rule: the old scripted source (NewFakeGateSource) runs iff
+// --scenario is set AND --backend is not - `jig gate` never had --backend,
+// so every old --scenario invocation behaves exactly as before. Any other
+// combination (including --backend fake --scenario X, and a plain `jig gate
+// <ticket>` with neither flag) dispatches a real reviewer session, played
+// back by whichever backend backendName resolves (default herdr); a plain
+// invocation used to run the old no-op clean round instead and now needs a
+// backend available.
+func gateSourceFor(backendFlag, scenario string) (verifydeliver.GateSource, error) {
+	if scenario != "" && backendFlag == "" {
+		return verifydeliver.NewFakeGateSource(scenario), nil
 	}
-	return noopGateSource{}
+	kind := backendName(backendFlag, scenario)
+	if err := session.Available(kind); err != nil {
+		return nil, err
+	}
+	backend, err := session.New(kind, session.Options{ScenarioDir: scenario})
+	if err != nil {
+		return nil, err
+	}
+	return verifydeliver.NewReviewerGateSource(backend), nil
 }
 
 // cmdGate implements `jig gate <ticket> [--early] [--branch <name> [--doc
-// <path>]] [--pr <n>] [--scenario <dir>]`.
-func cmdGate(args []string, stdout io.Writer) int {
+// <path>]] [--pr <n>] [--yes] [--backend fake|headless|herdr] [--scenario
+// <dir>]`.
+func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -46,7 +48,9 @@ func cmdGate(args []string, stdout io.Writer) int {
 	branch := fs.String("branch", "", "validate this branch instead of jig/<ticket>")
 	doc := fs.String("doc", "", "brief doc path, used together with --branch")
 	prNum := fs.Int("pr", 0, "pr number (not implemented in v0.1)")
-	scenario := fs.String("scenario", "", "scenario dir for the fake gate source")
+	yes := fs.Bool("yes", false, "keep every finding without the triage prompt")
+	backendFlag := fs.String("backend", "", "session backend for the reviewer: fake, headless, or herdr")
+	scenario := fs.String("scenario", "", "scenario dir for the fake gate source, or for the fake backend's reviewer playback when --backend is set")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -67,13 +71,19 @@ func cmdGate(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
+	src, err := gateSourceFor(*backendFlag, *scenario)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+
 	deps := verifydeliverDeps(st, cfg, mp)
-	report, err := verifydeliver.Gate(deps, gateSourceFor(*scenario), verifydeliver.GateOpts{
+	report, err := verifydeliver.Gate(deps, src, verifydeliver.GateOpts{
 		Ticket:   ticket,
 		Early:    *early,
 		Branch:   *branch,
 		BriefDoc: *doc,
 		PRMode:   *prNum != 0,
+		Triage:   triageFor(*yes, stdin, stdout),
 	})
 	if err != nil {
 		return renderErr(stdout, err)
@@ -90,15 +100,28 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	for repo, sha := range report.TargetSHA {
 		shaRows = append(shaRows, []string{repo, sha})
 	}
-	axi.Render(stdout,
-		axi.KV("gate", [][2]string{
-			{"ticket", ticket},
-			{"round", strconv.Itoa(report.Round)},
-			{"verdict", report.Verdict},
-			{"model", report.Model},
-		}),
+	kv := [][2]string{
+		{"ticket", ticket},
+		{"round", strconv.Itoa(report.Round)},
+		{"verdict", report.Verdict},
+		{"model", report.Model},
+	}
+	if report.Scope != "" {
+		kv = append(kv, [2]string{"scope", report.Scope})
+	}
+	blocks := []string{
+		axi.KV("gate", kv),
 		axi.Table("target_sha", []string{"repo", "sha"}, shaRows),
-		axi.Help(hintOrFallback(st, ticket)),
-	)
+	}
+	if report.Scope != "" {
+		var findingRows [][]string
+		for _, f := range report.Findings {
+			findingRows = append(findingRows, []string{f.ID, f.Class, f.Status, f.Title})
+		}
+		blocks = append(blocks, axi.Table("findings", []string{"id", "class", "status", "title"}, findingRows))
+		blocks = append(blocks, axi.Table("fix_slices", []string{"id"}, idRows(report.FixSlices)))
+	}
+	blocks = append(blocks, axi.Help(hintOrFallback(st, ticket)))
+	axi.Render(stdout, blocks...)
 	return 0
 }

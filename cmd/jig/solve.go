@@ -21,7 +21,7 @@ const maxSolveRounds = 5
 // and --answer, because solve's internal run steps need a session backend
 // exactly like `jig run` does; they are the closest working superset
 // (needed for the fake-backend e2e chain) rather than a redesign.
-func cmdSolve(args []string, stdout io.Writer) int {
+func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest0, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -32,7 +32,7 @@ func cmdSolve(args []string, stdout io.Writer) int {
 	}
 
 	fs := newFlagSet("solve")
-	yes := fs.Bool("yes", false, "skip the interactive publish confirm")
+	yes := fs.Bool("yes", false, "skip the finding triage and the publish confirm")
 	backendFlag := fs.String("backend", "", "session backend: fake, headless, or herdr")
 	scenario := fs.String("scenario", "", "scenario dir for the fake backend")
 	storeFlag := fs.String("store", "", "explicit store path")
@@ -61,7 +61,16 @@ func cmdSolve(args []string, stdout io.Writer) int {
 
 	fdeps := frontierDeps(st, cfg, mp, backend, ticket)
 	vdeps := verifydeliverDeps(st, cfg, mp)
-	src := gateSourceFor(*scenario)
+	// The scripted source runs whenever --scenario is set (solve always had
+	// --backend, unlike gate, so this decision does not look at it); without
+	// --scenario solve's gate rounds run the real reviewer on solve's own
+	// backend, constructed above.
+	var src verifydeliver.GateSource
+	if *scenario != "" {
+		src = verifydeliver.NewFakeGateSource(*scenario)
+	} else {
+		src = verifydeliver.NewReviewerGateSource(backend)
+	}
 
 	// Check identity before any session or gate round runs, not only at
 	// publish.
@@ -79,7 +88,7 @@ func cmdSolve(args []string, stdout io.Writer) int {
 
 	var lastVerdict string
 	for round := 0; round < maxSolveRounds; round++ {
-		gr, err := verifydeliver.Gate(vdeps, src, verifydeliver.GateOpts{Ticket: ticket})
+		gr, err := verifydeliver.Gate(vdeps, src, verifydeliver.GateOpts{Ticket: ticket, Triage: triageFor(*yes, stdin, stdout)})
 		if err != nil {
 			return renderErr(stdout, err)
 		}

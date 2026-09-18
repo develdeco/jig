@@ -1,0 +1,15 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "mechanical",
+      "title": "mathutil.go has a typo, dead code, and an undocumented export",
+      "detail": "mathutil/mathutil.go: \"restrict\" is a typo, unusedHelper is never called (dead code), and Average has no doc comment.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "One lumped finding covering all three issues."
+}

@@ -1,0 +1,15 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "intent",
+      "title": "Lookup does not handle a missing id",
+      "detail": "users/lookup.go: store[id] yields nil for an unknown id and u.Name crashes.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "Lookup crashes for an unknown id."
+}

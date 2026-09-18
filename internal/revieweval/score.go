@@ -1,0 +1,152 @@
+package revieweval
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"github.com/develdeco/jig/internal/verifydeliver"
+)
+
+// CaseScore is one case's scoring result. Reason is set only when the
+// dispatch failed or result.json was invalid (an infrastructure or
+// contract failure rather than a review-quality one); Passed is then
+// always false and Found/Missed/FalsePositives/Unmatched are empty.
+type CaseScore struct {
+	Name           string
+	Found          []string // gold finding ids the result matched
+	Missed         []string // gold finding ids the result did not match
+	FalsePositives []string // finding titles matching a trap, or (no gold findings) any finding
+	Unmatched      []string // finding titles matching neither gold nor a trap; reported, not failing
+	Passed         bool
+	Reason         string
+}
+
+// containsFile reports whether text names file: either its slash path or
+// its base name appears in text.
+func containsFile(text, file string) bool {
+	if file == "" {
+		return true
+	}
+	return strings.Contains(text, file) || strings.Contains(text, filepath.Base(file))
+}
+
+// scoreCase matches result's findings against c's gold: a result finding is
+// compatible with a gold finding when their classes are equal, the gold
+// title_pattern matches "title\ndetail", and the gold file (or its base
+// name) appears in title or detail. Compatibility is one-to-one: a maximum
+// bipartite matching (Kuhn's augmenting-path algorithm, cheap at corpus
+// case sizes) pairs each result finding with at most one gold finding, and
+// each gold finding with at most one result finding, so one lumped finding
+// can satisfy only one gold entry and a single gold entry cannot be
+// double-counted by two findings. A finding left unmatched by the pairing
+// is a false positive when it matches a trap, or (a case with no gold
+// findings at all, e.g. a clean or trap case) unconditionally; otherwise it
+// is reported as unmatched, which does not fail the case. A case passes
+// iff it has zero missed gold findings and zero false positives.
+func scoreCase(c Case, result verifydeliver.ReviewResult) CaseScore {
+	sc := CaseScore{Name: c.Name}
+
+	texts := make([]string, len(result.Findings))
+	compat := make([][]int, len(result.Findings)) // finding index -> compatible gold indices
+	for j, f := range result.Findings {
+		text := f.Title + "\n" + f.Detail
+		texts[j] = text
+		for i, g := range c.Gold.Findings {
+			if g.Class == f.Class && c.goldFindingRe[i].MatchString(text) && containsFile(text, g.File) {
+				compat[j] = append(compat[j], i)
+			}
+		}
+	}
+
+	// matchGold[i] is the finding index paired with gold entry i, or -1.
+	matchGold := make([]int, len(c.Gold.Findings))
+	for i := range matchGold {
+		matchGold[i] = -1
+	}
+	var tryAugment func(j int, visited []bool) bool
+	tryAugment = func(j int, visited []bool) bool {
+		for _, i := range compat[j] {
+			if visited[i] {
+				continue
+			}
+			visited[i] = true
+			if matchGold[i] == -1 || tryAugment(matchGold[i], visited) {
+				matchGold[i] = j
+				return true
+			}
+		}
+		return false
+	}
+	for j := range result.Findings {
+		tryAugment(j, make([]bool, len(c.Gold.Findings)))
+	}
+
+	matchedFinding := make([]bool, len(result.Findings))
+	for _, j := range matchGold {
+		if j != -1 {
+			matchedFinding[j] = true
+		}
+	}
+
+	for j, f := range result.Findings {
+		if matchedFinding[j] {
+			continue
+		}
+		text := texts[j]
+
+		matchedTrap := false
+		for i, tr := range c.Gold.Traps {
+			if c.goldTrapRe[i].MatchString(text) && containsFile(text, tr.File) {
+				matchedTrap = true
+				break
+			}
+		}
+		if matchedTrap || len(c.Gold.Findings) == 0 {
+			sc.FalsePositives = append(sc.FalsePositives, f.Title)
+			continue
+		}
+		sc.Unmatched = append(sc.Unmatched, f.Title)
+	}
+
+	for i, g := range c.Gold.Findings {
+		if matchGold[i] != -1 {
+			sc.Found = append(sc.Found, g.ID)
+		} else {
+			sc.Missed = append(sc.Missed, g.ID)
+		}
+	}
+
+	sc.Passed = len(sc.Missed) == 0 && len(sc.FalsePositives) == 0
+	return sc
+}
+
+// RenderReport renders a plain-text report from scores: one PASS/FAIL line
+// per case, then totals (cases passed, recall, total false positives).
+func RenderReport(scores []CaseScore) string {
+	var b strings.Builder
+	var passed, totalFound, totalGold, totalFP int
+	for _, s := range scores {
+		status := "PASS"
+		if !s.Passed {
+			status = "FAIL"
+		} else {
+			passed++
+		}
+		gold := len(s.Found) + len(s.Missed)
+		totalFound += len(s.Found)
+		totalGold += gold
+		totalFP += len(s.FalsePositives)
+		fmt.Fprintf(&b, "%s: %s found=%d/%d missed=%d fp=%d unmatched=%d", s.Name, status, len(s.Found), gold, len(s.Missed), len(s.FalsePositives), len(s.Unmatched))
+		if s.Reason != "" {
+			fmt.Fprintf(&b, " reason: %s", s.Reason)
+		}
+		b.WriteString("\n")
+	}
+	recall := 0.0
+	if totalGold > 0 {
+		recall = float64(totalFound) / float64(totalGold)
+	}
+	fmt.Fprintf(&b, "\ntotals: cases passed %d/%d, recall %.2f, false positives %d\n", passed, len(scores), recall, totalFP)
+	return b.String()
+}

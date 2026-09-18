@@ -1,0 +1,23 @@
+diff --git a/stringutil/stringutil.go b/stringutil/stringutil.go
+new file mode 100644
+index 0000000..6371bd6
+--- /dev/null
++++ b/stringutil/stringutil.go
+@@ -0,0 +1,17 @@
++package stringutil
++
++import "strings"
++
++// Reverse returns s with its runes in reverse order.
++func Reverse(s string) string {
++	r := []rune(s)
++	for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 {
++		r[i], r[j] = r[j], r[i]
++	}
++	return string(r)
++}
++
++// TrimAndLower trims surrounding whitespace from s and lowercases it.
++func TrimAndLower(s string) string {
++	return strings.ToLower(strings.TrimSpace(s))
++}

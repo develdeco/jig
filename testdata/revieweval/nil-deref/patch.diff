@@ -1,0 +1,25 @@
+diff --git a/users/lookup.go b/users/lookup.go
+new file mode 100644
+index 0000000..dcf6641
+--- /dev/null
++++ b/users/lookup.go
+@@ -0,0 +1,19 @@
++package users
++
++// User is a person record.
++type User struct {
++	ID   string
++	Name string
++}
++
++// store is a lookup table populated at startup.
++var store = map[string]*User{
++	"anna": {ID: "anna", Name: "Anna"},
++	"bo":   {ID: "bo", Name: "Bo"},
++}
++
++// Lookup returns the display name for id, or "" when id is unknown.
++func Lookup(id string) string {
++	u := store[id]
++	return u.Name
++}

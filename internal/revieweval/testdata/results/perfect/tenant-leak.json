@@ -1,0 +1,15 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "intent",
+      "title": "ForTenant ignores the tenant filter and leaks other tenants' invoices",
+      "detail": "billing/invoices.go: ForTenant returns the entire invoices slice regardless of tenantID, leaking other tenants' data.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "Missing tenant filter causes a cross-tenant data leak."
+}

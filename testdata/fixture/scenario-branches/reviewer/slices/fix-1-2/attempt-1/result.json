@@ -1,0 +1,5 @@
+{
+  "outcome": "green",
+  "summary": "Made Greet fall back to a generic greeting for an empty name per gate round 1.",
+  "commit": "@HEAD"
+}

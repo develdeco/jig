@@ -1,0 +1,6 @@
+findings:
+  - id: nil-deref
+    class: intent
+    title_pattern: "(?i)nil (pointer|deref)|derefer|nil check|check (for|against) nil|panic|crash"
+    file: users/lookup.go
+traps: []

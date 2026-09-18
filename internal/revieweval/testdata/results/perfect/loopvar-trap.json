@@ -1,0 +1,6 @@
+{
+  "verdict": "clean",
+  "findings": [],
+  "closures": [],
+  "summary": "RunAll's closures capture per-iteration loop variables correctly under Go 1.22+; no issues found."
+}

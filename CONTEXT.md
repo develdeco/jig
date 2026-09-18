@@ -14,7 +14,7 @@ _Avoid_: database, state dir
 
 **Intake**:
 The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several.
-_Avoid_: onboarding, triage
+_Avoid_: onboarding
 
 **Shape**:
 A ticket's intent, one of feature, bug, or refactor.
@@ -56,6 +56,10 @@ _Avoid_: log file, history
 Evidence that a check passed, stored in the ticket's `evidence/`.
 _Avoid_: screenshot, proof
 
+**Finding class**:
+A gate finding's mechanical/intent split. Mechanical (typo, dead code, doc gap, formatting) bundles into one fix slice per workspace, pinned to the cheapest staircase rung unless the ticket's invariant floor overrides the pin; intent (behavior, correctness, security, design) becomes its own fix slice, built at whatever rung the normal staircase selects.
+_Avoid_: severity, priority
+
 **Fix slice**:
 A gate finding turned into a new frontier item. Review has no back-edges - every finding becomes forward work.
 _Avoid_: review comment, follow-up task
@@ -67,6 +71,10 @@ _Avoid_: checkout, sandbox
 **Gate**:
 Out-of-band verification of a ticket's branch, run on its own lease, under a different model, with fresh context.
 _Avoid_: code review, QA pass
+
+**Triage**:
+The human seam after a gate round raises findings: keep or dismiss each one, before any fix slice is synthesized. jig, not the reviewer, auto-dismisses a finding whose title later resurfaces identically (lowercased, whitespace collapsed); a reworded title reaches triage again.
+_Avoid_: review, approval
 
 **Staircase**:
 The per-dispatch model ladder: cheapest model first, climbing with volume, with invariants floored to the dearest model.

@@ -1,0 +1,15 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "intent",
+      "title": "ForTenant ignores its tenantID parameter",
+      "detail": "billing/invoices.go: the tenantID argument is never used.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "ForTenant ignores its tenantID parameter."
+}

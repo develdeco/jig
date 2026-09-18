@@ -1,0 +1,13 @@
+diff --git a/beta/beta.go b/beta/beta.go
+index fdd3442..c2218bb 100644
+--- a/beta/beta.go
++++ b/beta/beta.go
+@@ -4,5 +4,8 @@ package beta
+ // Greet returns a casual greeting for name, per the ticket's greeting
+ // decision.
+ func Greet(name string) string {
++	if name == "" {
++		name = "there"
++	}
+ 	return "Hello, " + name + "."
+ }

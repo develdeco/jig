@@ -1,0 +1,14 @@
+findings:
+  - id: doc-typo
+    class: mechanical
+    title_pattern: "(?i)typo|restrict"
+    file: mathutil/mathutil.go
+  - id: dead-code
+    class: mechanical
+    title_pattern: "(?i)dead code|unused|never called"
+    file: mathutil/mathutil.go
+  - id: missing-doc
+    class: mechanical
+    title_pattern: "(?i)missing (a )?doc comment|no doc comment|undocumented"
+    file: mathutil/mathutil.go
+traps: []

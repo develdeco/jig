@@ -1,0 +1,12 @@
+{
+  "ticket": "mechanical-batch",
+  "round": 1,
+  "scope": "full",
+  "base_sha": "PLACEHOLDER",
+  "head_sha": "PLACEHOLDER",
+  "brief_path": "PLACEHOLDER",
+  "slices_path": "PLACEHOLDER",
+  "journal_path": "PLACEHOLDER",
+  "prior_findings": [],
+  "dismissed": []
+}

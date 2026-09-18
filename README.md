@@ -12,7 +12,10 @@ one dispatch loop over small, provable slices of work.
 - Dispatches the frontier of ready slices to a build session, and resumes
   where a session left off.
 - Re-verifies the branch's oracles in its own gate round before anything
-  ships (session-driven review is on the roadmap).
+  ships, then dispatches a real reviewer session that classifies findings,
+  bundles mechanical fixes at the cheapest rung (unless an invariant floor
+  overrides it), and turns kept findings into forward fix slices - you
+  triage, review has no back-edges.
 - Reconciles, revalidates, and opens the pull request itself, evidence
   attached.
 - Keeps every ticket's state in a plain git repo, so progress survives any
@@ -33,9 +36,13 @@ gate      re-verify the ticket's branch's oracles
 publish   reconcile, revalidate, and open the PR
 ```
 
-Two moments need a human: deciding what the brief actually asks for, and
-confirming before the PR goes out. See [ARCHITECTURE.md](ARCHITECTURE.md) for
-what each stage reads and writes.
+Three moments need a human: deciding what the brief actually asks for,
+triaging a gate round's findings (interactively when stdin is a terminal;
+`--yes` or a non-terminal stdin keeps them all), and confirming before the PR
+goes out. Like the publish confirm, a triage wait writes nothing to disk
+until it is answered, so `jig status` shows no sign of it while it waits -
+just the state the ticket was in going in. See
+[ARCHITECTURE.md](ARCHITECTURE.md) for what each stage reads and writes.
 
 ## Install
 
@@ -102,8 +109,9 @@ jig solve T-1 --backend headless --yes    # runs run, gate, and publish as one c
 ```
 
 `jig solve` dispatches slices, gates the branch, and publishes in one
-chain. `--yes` skips only the publish confirm: when a session asks a
-question, `jig solve` stops, and you resume it with
+chain. `--yes` keeps every gate finding without the triage prompt and skips
+the publish confirm: when a session asks a question, `jig solve` stops, and
+you resume it with
 `jig solve T-1 --yes --answer <qid> "<text>"`. With the standalone store above (`tracker: local`), publish
 pushes `jig/T-1` and writes the PR body into the store instead of opening a
 PR - set `tracker: github` in `project.yaml` and have `gh` on PATH to get
@@ -124,9 +132,18 @@ natively off Windows, and on Windows inside a WSL login shell
 and write the same `result.json`; see
 [ARCHITECTURE.md](ARCHITECTURE.md#session-backends).
 
-`jig gate` has no `--backend` flag: without `--scenario` it re-runs every
-manifest oracle on a fresh lease and reports clean, with no review step of
-its own yet (see Roadmap).
+`jig gate` takes the same `--backend` flag: after re-running every manifest
+oracle on a fresh lease, it dispatches a reviewer session on that backend
+(default `herdr`, preflighted before it runs) to review the branch's diff
+against the brief. The old scripted path (`--scenario` with no `--backend`)
+is unchanged, so every `jig gate --scenario <dir>` invocation from before
+this reviewer existed still behaves exactly as it did; a plain `jig gate
+<ticket>`, with no `--scenario`, now dispatches a real reviewer instead of
+the old no-op clean round, and needs a backend available. `jig gate
+--backend fake --scenario <dir>` is a real review dispatch played back by
+the fake backend, the same way `jig run --backend fake --scenario <dir>` is.
+`--yes` keeps every finding without the interactive triage prompt, which
+also runs automatically whenever stdin is not a terminal.
 
 ## Safety
 
@@ -160,8 +177,14 @@ model.
 
 ## Roadmap
 
-Coming in v0.2: a session-driven gate reviewer, Jira and Linear tracker
-adapters, `gate`'s `--pr` mode for reviewing a PR someone else opened, the
-`fleet` and `retro` binary verbs for working many tickets and mining
-repeated failures, and design-facet oracles. Later: more than one repo per
-project, and nix packaging.
+Shipped: a session-driven gate reviewer with incremental rounds, finding
+classes, and human triage (see [ADR 0007](docs/adr/0007-session-gate-reviewer.md)),
+plus a review-quality eval corpus and scorer
+([ADR 0008](docs/adr/0008-review-eval-corpus.md)).
+
+Coming in v0.2: Jira and Linear tracker adapters, `gate`'s `--pr` mode for
+reviewing a PR someone else opened, CI-after-PR monitoring, the `fleet` and
+`retro` binary verbs for working many tickets and mining repeated failures,
+and design-facet oracles. Later: more than one repo per project, and nix
+packaging. jig stays foreground and disk-only - no daemon or background
+machinery is planned.

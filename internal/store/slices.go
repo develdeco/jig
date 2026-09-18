@@ -21,6 +21,7 @@ type Slice struct {
 	BlockedBy []string `yaml:"blocked_by"`
 	FromBrief []string `yaml:"from_brief"`          // sha256 hex of brief section bodies
 	FromGate  int      `yaml:"from_gate,omitempty"` // round number for fix slices
+	Rung      string   `yaml:"rung,omitempty"`      // "" or "cheapest": staircase pin
 }
 
 // SliceFile is the wire shape of a ticket's slices.yaml.

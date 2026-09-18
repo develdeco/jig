@@ -11,6 +11,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -121,6 +122,9 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	}
 
 	for _, sl := range slices {
+		if sl.ID == "gate" {
+			problems = append(problems, `slice gate: the id "gate" is reserved for the gate reviewer`)
+		}
 		for _, h := range sl.FromBrief {
 			if !hashExists(h) {
 				problems = append(problems, fmt.Sprintf("slice %s: from_brief hash %s does not match any current brief section", sl.ID, h))
@@ -138,6 +142,9 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 		}
 		if strings.TrimSpace(sl.Oracle) == "" {
 			problems = append(problems, fmt.Sprintf("slice %s: oracle is empty", sl.ID))
+		}
+		if sl.Rung != "" && sl.Rung != staircase.RungCheapest {
+			problems = append(problems, fmt.Sprintf("slice %s: rung %q is not %q (the only pin)", sl.ID, sl.Rung, staircase.RungCheapest))
 		}
 	}
 

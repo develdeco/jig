@@ -20,17 +20,36 @@ import (
 )
 
 // Round is one gate round's content, whether played back by a fake source
-// (tests) or produced by a real reviewer session (a future version).
+// (tests) or produced by a real reviewer session. Review is nil for the
+// scripted source's old fix-slices/clean shape; non-nil for a real
+// reviewer round (see review.go).
 type Round struct {
 	FindingsMD string
 	FixSlices  []store.Slice
 	Receipts   map[string][]byte
+	Review     *Review
 }
 
-// GateSource supplies one gate round's content. Round(n) returns ok=false
-// for a clean round (no round directory, or an empty one).
+// RoundInput is what Gate knows about a round when it asks a source for
+// it.
+type RoundInput struct {
+	Store     *store.Store
+	Ticket    string
+	Round     int
+	LeaseDir  string // gate lease, checked out at the branch under review
+	RepoName  string
+	Target    string // target branch, e.g. "main"
+	Model     string // the gate model (staircase.Disjoint)
+	BriefPath string // absolute; see Brief path in review.go
+	Manifest  manifest.Manifest
+}
+
+// GateSource supplies one gate round's content. Round(in) returns
+// ok=false for a clean round (no round directory, or an empty one); the
+// real reviewer source always returns ok=true when the review ran (a
+// clean review still carries closures, summary and reviewed_sha).
 type GateSource interface {
-	Round(n int) (Round, bool, error)
+	Round(in RoundInput) (Round, bool, error)
 }
 
 // fakeGateSource reads gate rounds from a materialized fixture scenario
@@ -46,7 +65,8 @@ func NewFakeGateSource(scenarioDir string) GateSource {
 	return &fakeGateSource{scenarioDir: scenarioDir}
 }
 
-func (f *fakeGateSource) Round(n int) (Round, bool, error) {
+func (f *fakeGateSource) Round(in RoundInput) (Round, bool, error) {
+	n := in.Round
 	dir := filepath.Join(f.scenarioDir, "gate", fmt.Sprintf("round-%d", n))
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -99,22 +119,35 @@ type GateOpts struct {
 	Branch   string // validate this branch instead of jig/<ticket>
 	BriefDoc string // spec-axis input when Branch is set
 	PRMode   bool
+	// Triage receives a real reviewer round's open findings (only called
+	// when there is at least one) and returns the kept subset, matched
+	// back by ID; every open finding not returned becomes dismissed. nil
+	// keeps all. Never used by the scripted source. No IO happens inside
+	// verifydeliver; cmd wires the interactive prompt, tests wire
+	// identity/dismisser stubs.
+	Triage func([]Finding) []Finding
 }
 
-// GateReport is Gate's result.
+// GateReport is Gate's result. Scope, Findings and FixSlices are set only
+// for a real reviewer round; the scripted source leaves them zero.
 type GateReport struct {
-	Round     int
-	Verdict   string // clean|fix-slices
-	TargetSHA map[string]string
-	Model     string
+	Round       int
+	Verdict     string // clean|fix-slices
+	TargetSHA   map[string]string
+	Model       string
+	Scope       string            // full|delta, reviewer rounds only
+	Findings    []Finding         // final statuses, reviewer rounds only
+	FixSlices   []string          // appended fix-slice ids, reviewer rounds only
+	ReviewedSHA map[string]string // repoName -> HeadSHA, reviewer rounds only
 }
 
 // reportYAML is gate/round-<n>/report.yaml's exact on-disk shape.
 type reportYAML struct {
-	Round     int               `yaml:"round"`
-	Verdict   string            `yaml:"verdict"`
-	Model     string            `yaml:"model"`
-	TargetSHA map[string]string `yaml:"target_sha"`
+	Round       int               `yaml:"round"`
+	Verdict     string            `yaml:"verdict"`
+	Model       string            `yaml:"model"`
+	TargetSHA   map[string]string `yaml:"target_sha"`
+	ReviewedSHA map[string]string `yaml:"reviewed_sha,omitempty"`
 }
 
 // Gate runs one gate round for ticket: it re-verifies every manifest
@@ -143,11 +176,18 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	// --branch: validate a hand-written branch fetched from origin instead
 	// of the ticket's own jig/<ticket>. Its spec axis reads opts.BriefDoc
 	// instead of the brief; report.yaml's shape stays fixed by contract to
-	// {round,verdict,model,target_sha} (BriefDoc is not recorded there), but
-	// the doc's content is copied into this round's own
+	// {round,verdict,model,target_sha} on a scripted round (a reviewer round
+	// also carries reviewed_sha; BriefDoc is not recorded there either way),
+	// but the doc's content is copied into this round's own
 	// gate/round-<n>/spec-input.md so the spec-axis-input swap is real
 	// rather than an accepted, no-op flag.
 	var briefDocContent []byte
+	// briefPath is the review dispatch's brief_path (D1): the ticket's own
+	// brief.md normally, or the --doc file itself in --branch --doc mode.
+	// Pointing at the round's spec-input.md instead would leave a partial
+	// round directory behind whenever the reviewer fails, since that file
+	// is written only after the round completes.
+	briefPath := absPath(filepath.Join(d.Store.TicketDir(ticket), "brief.md"))
 	if o.Branch != "" {
 		branch = o.Branch
 		if o.BriefDoc != "" {
@@ -159,17 +199,71 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 				}
 			}
 			briefDocContent = data
+			briefPath = absPath(o.BriefDoc)
 		}
 	}
 	leaseKey := ticket + "-gate"
+	// Restore an existing gate lease pristine at its current HEAD before
+	// Acquire ever touches it. A reviewer that outlived a killed jig, or an
+	// oracle rewrite left over from an earlier attempt, can leave tracked
+	// dirt in the lease; if the ticket branch later advances past whatever
+	// file that dirt touched, Acquire's own `git checkout` (and, in normal
+	// mode, fetchTicketBranchFromBuildLease's checkout right after) refuses
+	// with "local changes ... would be overwritten" before the restore below
+	// ever runs, wedging every later attempt at the same point. This restore
+	// is best-effort: if the pool dir cannot be resolved, or the lease is not
+	// yet its own git working copy with a commit checked out (a key never
+	// acquired, or a clone killed before its first checkout), Acquire runs
+	// unchanged and surfaces its own error.
+	if poolDir, perr := home.PoolDir(); perr == nil {
+		leaseDir := filepath.Join(poolDir, repoName, leaseKey)
+		if isOwnGitRepoWithHead(leaseDir) {
+			if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
+				return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
+			}
+		}
+	}
 	lease, err := pool.Acquire(repoName, repo.Remote, target, branch, leaseKey)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: acquire lease: %w", err)
 	}
 
+	// Restore the gate lease to a pristine, known-correct head right after
+	// acquire and before any oracle runs. pool.Acquire never resets an
+	// existing local branch (a deliberate rule so a same-run slice's commits
+	// on it survive later acquires), so without this, a reviewer or an
+	// oracle that left the lease dirty or ahead on an earlier, killed jig
+	// (NM2) has its leftovers reviewed by this round's own oracles, or in
+	// --branch mode makes this gate review the stale local copy instead of
+	// origin's current branch tip.
 	if o.Branch == "" {
 		if err := fetchTicketBranchFromBuildLease(lease.Dir, repoName, ticket); err != nil {
 			return GateReport{}, err
+		}
+		if err := resetLeasePristine(lease.Dir, "HEAD"); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease before oracles: %w", err)
+		}
+	} else {
+		// pool.Acquire's own fetch has no --prune, so a branch deleted on
+		// origin since an earlier gate on this same lease would otherwise
+		// leave refs/remotes/origin/<branch> stale, and the check below
+		// would pass against the last-fetched tip instead of catching the
+		// deletion. Prune here so a deleted branch is always caught.
+		if _, err := gitx.Run(lease.Dir, "fetch", "--prune", "origin"); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: fetch --prune origin: %w", err)
+		}
+		// refs/remotes/origin/<branch> is now current. The gate lease never
+		// commits (reviewers and oracles are always undone), so it must
+		// always equal origin/<branch> exactly.
+		if _, err := gitx.RevParse(lease.Dir, "refs/remotes/origin/"+branch); err != nil {
+			return GateReport{}, &axi.Error{
+				Msg:  fmt.Sprintf("branch %q does not exist on origin", branch),
+				Code: "BRANCH_NOT_FOUND",
+				Help: []string{"Push the branch to origin, then rerun."},
+			}
+		}
+		if err := resetLeasePristine(lease.Dir, "origin/"+branch); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease to origin/%s: %w", branch, err)
 		}
 	}
 
@@ -201,7 +295,17 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: round %d already exists", n)
 	}
 
-	round, ok, err := src.Round(n)
+	round, ok, err := src.Round(RoundInput{
+		Store:     d.Store,
+		Ticket:    ticket,
+		Round:     n,
+		LeaseDir:  lease.Dir,
+		RepoName:  repoName,
+		Target:    target,
+		Model:     model,
+		BriefPath: briefPath,
+		Manifest:  man,
+	})
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: read round %d: %w", n, err)
 	}
@@ -212,19 +316,50 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	}
 
 	report := GateReport{Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA}}
-	if !ok {
+	switch {
+	case !ok:
+		// Old scripted-clean path: unchanged.
 		report.Verdict = "clean"
 		if err := writeCleanRound(d, ticket, n, report); err != nil {
 			return GateReport{}, err
 		}
-		if err := journal.Append(d.Store, ticket, journal.Line{Event: "gate-clean", Attempt: n}); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-clean: %w", err)
-		}
-	} else {
+	case round.Review == nil:
+		// Old scripted-fix-slices path: unchanged.
 		report.Verdict = "fix-slices"
 		if err := writeFixRound(d, ticket, n, report, round); err != nil {
 			return GateReport{}, err
 		}
+	default:
+		// Real reviewer round: triage the open findings, synthesize fix
+		// slices from the kept ones only, then render the round files.
+		rv := round.Review
+		finalFindings, kept := triageOpenFindings(rv.Findings, o.Triage)
+		fixSlices, err := synthesizeFixSlices(n, kept, man)
+		if err != nil {
+			return GateReport{}, err
+		}
+		if len(fixSlices) > 0 {
+			report.Verdict = "fix-slices"
+		} else {
+			report.Verdict = "clean"
+		}
+		report.Scope = rv.Scope
+		report.Findings = finalFindings
+		report.ReviewedSHA = rv.ReviewedSHA
+		for _, fs := range fixSlices {
+			report.FixSlices = append(report.FixSlices, fs.ID)
+		}
+		round.FixSlices = fixSlices
+		if err := writeReviewerRound(d, ticket, n, report, rv, finalFindings); err != nil {
+			return GateReport{}, err
+		}
+	}
+
+	if report.Verdict == "clean" {
+		if err := journal.Append(d.Store, ticket, journal.Line{Event: "gate-clean", Attempt: n}); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-clean: %w", err)
+		}
+	} else {
 		if err := journal.Append(d.Store, ticket, journal.Line{Event: "gate-round", Attempt: n}); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-round: %w", err)
 		}
@@ -428,10 +563,11 @@ func writeFixRound(d Deps, ticket string, n int, report GateReport, round Round)
 
 func writeReportYAML(dir string, report GateReport) error {
 	out, err := yaml.Marshal(reportYAML{
-		Round:     report.Round,
-		Verdict:   report.Verdict,
-		Model:     report.Model,
-		TargetSHA: report.TargetSHA,
+		Round:       report.Round,
+		Verdict:     report.Verdict,
+		Model:       report.Model,
+		TargetSHA:   report.TargetSHA,
+		ReviewedSHA: report.ReviewedSHA,
 	})
 	if err != nil {
 		return fmt.Errorf("verifydeliver: gate: marshal report.yaml: %w", err)
@@ -452,4 +588,39 @@ func writeDiffChangelog(d Deps, ticket, dir string, n int) error {
 		return fmt.Errorf("verifydeliver: gate: write diff-changelog.md: %w", err)
 	}
 	return nil
+}
+
+// isGitLeaseDir reports whether dir looks like an existing pool lease
+// checkout (a git working copy), as opposed to a key never acquired yet.
+func isGitLeaseDir(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
+// isOwnGitRepoWithHead reports whether dir is itself the top level of a git
+// working copy whose HEAD resolves to a commit. A `.git` entry alone is not
+// enough before a destructive reset: when that entry is not a repository
+// git can open, git's upward discovery would resolve an enclosing repo
+// (JIG_HOME inside a dotfiles checkout, say) and the reset would discard
+// that repo's uncommitted work; and a clone killed before its first
+// checkout has an unborn HEAD that `reset --hard HEAD` cannot resolve,
+// which would wedge every later gate instead of letting Acquire recover.
+func isOwnGitRepoWithHead(dir string) bool {
+	if !isGitLeaseDir(dir) {
+		return false
+	}
+	top, err := gitx.Run(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false
+	}
+	topInfo, err := os.Stat(top)
+	if err != nil {
+		return false
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil || !os.SameFile(topInfo, dirInfo) {
+		return false
+	}
+	_, err = gitx.Run(dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	return err == nil
 }

@@ -1,0 +1,13 @@
+ticket: JIG-1
+state: building
+slices[6]{id,state,attempts,blocked_by,question}:
+  a,green,1,-,-
+  b,green,2,a,-
+  c,green,2,-,-
+  d,green,1,-,-
+  fix-1-2,queued,0,-,-
+  fix-1-mech,queued,0,-,-
+questions[1]{id,slice,status}:
+  q-001,c,answered
+help[1]:
+  Run `jig run JIG-1` to work the frontier

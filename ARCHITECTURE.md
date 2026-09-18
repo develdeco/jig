@@ -18,9 +18,11 @@ run(frontier)  dispatch queued, unblocked slices to a build session
   │                    journal.ndjson, questions/q-NNN.md, start.<repo>.sha
   ▼
 gate           review + re-verification round over the ticket's branch
-  │            reads:  journal.ndjson, slices.yaml
-  │            writes: gate/round-N/{findings.md,report.yaml,diff-changelog.md},
-  │                    evidence/round-N/*, slices.yaml (fix slices, from_gate: N)
+  │            reads:  journal.ndjson, slices.yaml, start.<repo>.sha,
+  │                    gate/round-N/{findings.yaml,report.yaml} (prior rounds)
+  │            writes: work/gate.round-N.{review,result}.json (reviewer dispatch),
+  │                    gate/round-N/{findings.yaml,findings.md,report.yaml,diff-changelog.md},
+  │                    evidence/round-N/* (scripted rounds only), slices.yaml (fix slices, from_gate: N)
   ▼
 publish        reconcile, revalidate, docs, squash, route → open the PR
                reads:  gate/round-N/*, journal.ndjson
@@ -70,8 +72,11 @@ ledger.md
   work/
     <id>.attempt-N.slice.json
     <id>.attempt-N.result.json
+    gate.round-N.review.json
+    gate.round-N.result.json
   gate/
     round-N/
+      findings.yaml
       findings.md
       diff-changelog.md
       report.yaml
@@ -91,6 +96,12 @@ into a slice's commit. `project.yaml`'s `schema_version` is the compatibility
 contract - a store written by one jig version declares the layout a later
 version must still read.
 
+Two fields are additive since v0.1, marshaling with no key at all when unset
+so existing on-disk bytes are unchanged: a slice's `rung` (`""` or
+`"cheapest"`, a staircase pin - a mechanical fix-slice bundle always pins
+cheapest) and a slice state's `signature` (the stall signature that tripped a
+`stalled` state, cleared once the slice reaches green).
+
 ## Module responsibilities
 
 The dir column is exact; a lint test parses this table and asserts every dir
@@ -103,9 +114,9 @@ exists.
 | `internal/axi/` | `Render`, `Table`, `KV`, `Help`, `RenderError`, `ExitCode` | labelled data → jig's plain-text output register and process exit codes |
 | `internal/envrun/` | `Up`, `Shell` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable` |
 | `internal/fixture/` | `Generate` | test `Opts` → a temp fixture repo, its store, and a scripted attempt scenario |
-| `internal/frontier/` | `Run`, `Requeue`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, paused, or stalled) |
+| `internal/frontier/` | `Run`, `Requeue`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
-| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
+| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `IsAncestor`, `CommitsIn`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
 | `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `internal/home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → per-machine paths |
 | `internal/journal/` | `Append`, `Read`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs |
@@ -113,12 +124,13 @@ exists.
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire` | repo/remote/target/branch/key → a `Lease` (a full clone, re-pointed to its start point) |
 | `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping → a `Config` |
+| `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `RenderReport` | a labeled case corpus + a session backend → per-case `CaseScore` (found/missed/false-positive), scored against `gold.yaml` |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall` | a shell command, path, or tool-call input → allow, or deny with a reason |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`) → `result.json` written to disk |
-| `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` + `Config` → a model rung, disjoint from rungs already in use |
-| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices` | ticket-folder reads/writes → the truth-repo tree described above |
+| `internal/staircase/` | `Select`, `SelectPinned`, `Disjoint`, `Default` | build `Signals` + `Config` (+ an optional pin) → a model rung, disjoint from rungs already in use |
+| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `AppendSlices` | ticket-folder reads/writes → the truth-repo tree described above |
 | `internal/tracker/` | `New`, `Graduate` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command) |
-| `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport`, or a `PublishReport` with an opened PR |
+| `internal/verifydeliver/` | `Gate`, `NewReviewerGateSource`, `Publish`, `RebaseOnto` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (findings, fix slices, and `reviewed_sha` on a real reviewer round), or a `PublishReport` with an opened PR |
 
 ## Session backends
 
@@ -138,6 +150,15 @@ Screens attach only where the backend's tool-call surface allows a
 PreToolUse hook, which today is `headless` alone; `fake` has no tool calls
 to screen, and `herdr`'s tool calls run inside the remote agent it drives,
 outside jig's own process.
+
+The gate reviewer's dispatch reuses this same disk contract, `Slice: "gate"`
+in the `Dispatch`: jig writes `review.json` (paths, not contents, like the
+build side's `slice.json`) and the reviewer session writes `result.json`.
+`fake` plays a gate dispatch back by copying
+`<scenario>/gate/round-<n>/review-result.json` verbatim into `result.json` -
+distinct from a scripted build attempt's `patch.diff`/`result.json` pair,
+and the worktree is never touched; missing scenario coverage for a round is
+an error, never a silently clean round.
 
 ## Safety
 
@@ -203,3 +224,22 @@ and sets `GIT_CONFIG_NOSYSTEM=1`. That reaches every git process the binary
 spawns, including `git-receive-pack` behind a local push, so no detached
 maintenance outlives a test. With no system or user config, a test that
 needs a git setting (for example `core.autocrlf`) sets it itself.
+
+The gate reviewer's live eval corpus (`internal/revieweval`) is env-gated so
+it never runs unattended in CI:
+`JIG_REVIEWEVAL_BACKEND=headless go test ./internal/revieweval -run Eval`
+drives a real backend against the corpus under `testdata/revieweval/`,
+`JIG_REVIEWEVAL_MODEL` picks the model (default `claude-sonnet-5`), and
+`JIG_REVIEWEVAL_REPORT` writes the plain-text report to a file. CI runs only
+the structural path - a test-local scripted stub backend, keyed by case name
+(not `session`'s own `fake` backend, which is keyed by round), replaying
+scripted results, both a perfect one and a seeded-regression one - which
+proves the scorer itself can fail, not just pass. Matching is one-to-one
+(each result finding satisfies at most one gold entry), and a case that
+fails outright counts every one of its gold findings as missed.
+
+`lint/workflow_test.go` parses `.github/workflows/{ci,release,smoke}.yml` and
+asserts the invariants that have already bitten or must hold - ci's OS matrix
+and its gofmt/vet/test steps, release firing only on version tags and always
+gated behind ci's `workflow_call`, smoke's required `tag` input - by shape
+rather than exact text, so a routine workflow edit does not churn the test.

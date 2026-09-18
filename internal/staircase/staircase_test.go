@@ -37,6 +37,44 @@ func TestTransitions(t *testing.T) {
 	})
 }
 
+func TestSelectPinned(t *testing.T) {
+	cfg := Config{Rungs: []string{"a", "b", "c"}}
+
+	cases := []struct {
+		name string
+		pin  string
+		s    Signals
+		want string
+	}{
+		{"cheapest pin holds under volume", RungCheapest, Signals{DiffLines: 401, DiffFiles: 11}, "a"},
+		{"cheapest pin, no signals", RungCheapest, Signals{}, "a"},
+		{"invariant floors even when pinned", RungCheapest, Signals{Invariant: true}, "c"},
+		{"invariant and volume, pinned", RungCheapest, Signals{Invariant: true, DiffLines: 401}, "c"},
+		{"empty pin behaves as Select", "", Signals{}, "a"},
+		{"empty pin behaves as Select, volume", "", Signals{DiffLines: 401}, "b"},
+		{"unknown pin behaves as Select", "dearest", Signals{DiffLines: 401}, "b"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := SelectPinned(cfg, c.pin, c.s)
+			if got != c.want {
+				t.Fatalf("SelectPinned(cfg, %q, %+v) = %q, want %q", c.pin, c.s, got, c.want)
+			}
+		})
+	}
+
+	t.Run("empty rungs", func(t *testing.T) {
+		empty := Config{}
+		if got := SelectPinned(empty, RungCheapest, Signals{}); got != "" {
+			t.Fatalf("SelectPinned(empty, RungCheapest, {}) = %q, want \"\"", got)
+		}
+		if got := SelectPinned(empty, "", Signals{}); got != "" {
+			t.Fatalf("SelectPinned(empty, \"\", {}) = %q, want \"\"", got)
+		}
+	})
+}
+
 func TestDisjoint(t *testing.T) {
 	cfg := Config{Rungs: []string{"a", "b", "c"}}
 
