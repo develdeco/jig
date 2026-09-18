@@ -120,6 +120,13 @@ func TestRenderStatusParkedFlawedBrief(t *testing.T) {
 	if !strings.Contains(got, wantParked) {
 		t.Errorf("expected flawed-brief parked table %q, got:\n%s", wantParked, got)
 	}
+	// The help hint must offer the exact same resume command as the parked
+	// table's "resume" column, not the generic --answer form: the question
+	// is not going to be answered with text, the brief needs amending.
+	wantHint := "  Run `jig requeue JIG-1 --from-brief-diff` to amend the brief and resume\n"
+	if !strings.HasSuffix(got, wantHint) {
+		t.Errorf("expected flawed-brief hint suffix %q, got:\n%s", wantHint, got)
+	}
 }
 
 // TestRenderStatusStalled exercises the stalled path: a stalled slice should

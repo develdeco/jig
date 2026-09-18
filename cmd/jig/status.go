@@ -181,9 +181,20 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		return "", err
 	}
 	for _, q := range questions {
-		if q.Status == "open" {
-			return fmt.Sprintf("Run `jig run %s --answer %s \"<text>\"` to answer and resume", ticket, q.ID), nil
+		if q.Status != "open" {
+			continue
 		}
+		ss, err := st.ReadSliceState(ticket, q.Slice)
+		if err != nil {
+			return "", err
+		}
+		if ss.Reason == "flawed-brief" {
+			// Same resume command as the parked table's "resume" column
+			// (resumeCommand): the hint and the table must never disagree
+			// about how to get unstuck.
+			return fmt.Sprintf("Run `%s` to amend the brief and resume", resumeCommand(ticket, ss)), nil
+		}
+		return fmt.Sprintf("Run `jig run %s --answer %s \"<text>\"` to answer and resume", ticket, q.ID), nil
 	}
 
 	if len(slices) == 0 {
