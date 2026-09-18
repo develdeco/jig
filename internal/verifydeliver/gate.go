@@ -203,6 +203,24 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		}
 	}
 	leaseKey := ticket + "-gate"
+	// Restore an existing gate lease pristine at its current HEAD before
+	// Acquire ever touches it. A reviewer that outlived a killed jig, or an
+	// oracle rewrite left over from an earlier attempt, can leave tracked
+	// dirt in the lease; if the ticket branch later advances past whatever
+	// file that dirt touched, Acquire's own `git checkout` (and, in normal
+	// mode, fetchTicketBranchFromBuildLease's checkout right after) refuses
+	// with "local changes ... would be overwritten" before the restore below
+	// ever runs, wedging every later attempt at the same point. This restore
+	// is best-effort: if the pool dir cannot be resolved, or the lease does
+	// not exist yet, Acquire runs unchanged and surfaces its own error.
+	if poolDir, perr := home.PoolDir(); perr == nil {
+		leaseDir := filepath.Join(poolDir, repoName, leaseKey)
+		if isGitLeaseDir(leaseDir) {
+			if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
+				return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
+			}
+		}
+	}
 	lease, err := pool.Acquire(repoName, repo.Remote, target, branch, leaseKey)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: acquire lease: %w", err)
@@ -559,4 +577,11 @@ func writeDiffChangelog(d Deps, ticket, dir string, n int) error {
 		return fmt.Errorf("verifydeliver: gate: write diff-changelog.md: %w", err)
 	}
 	return nil
+}
+
+// isGitLeaseDir reports whether dir looks like an existing pool lease
+// checkout (a git working copy), as opposed to a key never acquired yet.
+func isGitLeaseDir(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
 }

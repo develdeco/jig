@@ -402,6 +402,124 @@ func TestGateWipesLeftoverLeaseDirtBeforeOracles(t *testing.T) {
 	}
 }
 
+// TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances reproduces NM5, a
+// residual of NM2: leftover tracked dirt in the gate lease (a reviewer that
+// outlived a killed jig, or an oracle rewrite from an earlier attempt) does
+// not get in the way of an oracle run by itself, but once the ticket branch
+// later advances past the same file, the checkout that runs before Gate's
+// existing post-acquire restore (fetchTicketBranchFromBuildLease's own
+// final `git checkout <branch>`) refuses with "local changes ... would be
+// overwritten", and Gate returns before that restore ever runs - leaving
+// the lease detached and still dirty, so pool.Acquire's own checkout fails
+// the exact same way on every later attempt. Gate now restores an existing
+// lease pristine before Acquire ever touches it, so the very next gate
+// succeeds, and a lease already left wedged by an earlier failed attempt
+// (detached, still dirty, its local branch ref already fast-forwarded past
+// the dirty file) recovers too.
+func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+
+	d := newDeps(t, fx)
+	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+
+	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket+"-gate")
+	if err != nil {
+		t.Fatalf("reacquire gate lease: %v", err)
+	}
+	trackedPath := filepath.Join(gateLease.Dir, "alpha", "alpha.go")
+	orig, err := os.ReadFile(trackedPath)
+	if err != nil {
+		t.Fatalf("read tracked file: %v", err)
+	}
+	dirty := func(note string) {
+		t.Helper()
+		edited := append(append([]byte{}, orig...), []byte("\n// "+note+"\n")...)
+		if err := os.WriteFile(trackedPath, edited, 0o644); err != nil {
+			t.Fatalf("dirty tracked file: %v", err)
+		}
+	}
+	dirty("leftover reviewer edit")
+
+	buildDir := buildLeaseDir(t, fx)
+	bp := filepath.Join(buildDir, "alpha", "alpha.go")
+	advance := func(note string) {
+		t.Helper()
+		bdata, err := os.ReadFile(bp)
+		if err != nil {
+			t.Fatalf("read build alpha.go: %v", err)
+		}
+		if err := os.WriteFile(bp, append(bdata, []byte("\n// "+note+"\n")...), 0o644); err != nil {
+			t.Fatalf("write build alpha.go: %v", err)
+		}
+		if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
+			t.Fatalf("git add: %v", err)
+		}
+		if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", note); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+	}
+	// Advance jig/<ticket> in the build lease with a commit touching the
+	// same file, as a later slice build (e.g. after an --early gate) would.
+	advance("next slice")
+
+	report2, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 2 should succeed on the first attempt despite the leftover tracked dirt and the advanced branch: %v", err)
+	}
+	if report2.Round != 2 || report2.Verdict != "clean" {
+		t.Fatalf("report2 = %+v, want round 2 clean", report2)
+	}
+	status, err := gitx.Run(gateLease.Dir, "status", "--porcelain")
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if status != "" {
+		t.Fatalf("gate lease left dirty after round 2: %q", status)
+	}
+
+	// Now forge exactly the state a pre-fix failed attempt would have left
+	// behind: advance the branch again, dirty the lease again, then call
+	// the real fetchTicketBranchFromBuildLease directly - its fetch force-
+	// updates the local branch ref to the new tip and succeeds, but its own
+	// final checkout back onto that branch fails on the dirty file, so it
+	// returns with the lease detached at the old commit and still dirty.
+	advance("third slice")
+	dirty("leftover from a killed attempt")
+	if err := fetchTicketBranchFromBuildLease(gateLease.Dir, "fixture-repo", fx.Ticket); err == nil {
+		t.Fatal("test setup: fetchTicketBranchFromBuildLease should still fail on the dirty file before the fix is in effect")
+	}
+
+	report3, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 3 should recover a lease left detached and dirty by an earlier failed attempt: %v", err)
+	}
+	if report3.Round != 3 || report3.Verdict != "clean" {
+		t.Fatalf("report3 = %+v, want round 3 clean", report3)
+	}
+	head, err := gitx.RevParse(gateLease.Dir, "HEAD")
+	if err != nil {
+		t.Fatalf("resolve HEAD: %v", err)
+	}
+	branchHead, err := gitx.RevParse(gateLease.Dir, ticketBranch(fx.Ticket))
+	if err != nil {
+		t.Fatalf("resolve branch HEAD: %v", err)
+	}
+	if head != branchHead {
+		t.Fatalf("gate lease HEAD %s is not the ticket branch's HEAD %s: still detached", head, branchHead)
+	}
+	status3, err := gitx.Run(gateLease.Dir, "status", "--porcelain")
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if status3 != "" {
+		t.Fatalf("gate lease left dirty after round 3: %q", status3)
+	}
+}
+
 // TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin reproduces
 // NM2 scenario B: `--branch` mode's gate lease never commits, so a local
 // commit left behind by a killed reviewer must be discarded - not reviewed
