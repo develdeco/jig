@@ -66,6 +66,25 @@ was ambiguous, what was chosen, and why.
 - Slice work files (`slice.json`, `result.json`) live under the store's ticket
   directory (`work/`), not the build lease, so that the lease's `git add -A` never
   sweeps dispatch plumbing into slice commits.
+- Fix round 3, Push also refuses a mid-rebase or mid-merge store (F2, reverify-2
+  Nice 2/3/4): round 2's D3 fix put `refuseIfMidRebaseOrMerge` only in `Sync`,
+  so `Push` - the only path `jig requeue` takes, since it never Syncs first -
+  could still `add -A` and commit over unresolved conflict markers left by a
+  person's own `git pull` or `git rebase`, or blow away an operator's
+  in-progress rebase with its own unconditional retry-pull-then-abort. The
+  check now runs inside `stageAndCommit`, the one staging/commit step both
+  `Sync` and `Push` already shared, so it guards both without duplicating the
+  call. Separately, when Push's or Sync's own retry `pull --rebase` conflicts
+  and jig aborts it, the returned error is now wrapped as
+  `axi.Error{Code: "STORE_CONFLICT"}` with a message that says the pull
+  conflicted and was aborted (git's raw output kept in the message text) and
+  a Help line pointing at resolving the divergence in the store - git's own
+  "run git rebase --continue" hint is stale by the time jig has already run
+  the abort. `TestPushRefusesWhileMidMerge` and `TestPushRefusesWhileMidRebase`
+  prove the guard now covers `Push`; `TestSyncOwnConflictingPullAbortsAndWraps`
+  kills the surviving `store_nosyncabort` mutant (dropping Sync's own abort
+  call) by asserting the store is not left mid-rebase after Sync's own
+  conflicting pull.
 
 ## Build loop
 
@@ -310,6 +329,53 @@ was ambiguous, what was chosen, and why.
   duplicate gets the lowest `-2`, `-3`, ... suffix not already used by any
   id in the batch (original or already disambiguated), so disambiguation
   itself can never produce a new collision.
+- Fix round 3, restore an existing gate lease before Acquire (F1, a residual
+  of NM2/D2): D2's post-acquire restore still ran after
+  `fetchTicketBranchFromBuildLease`'s own checkout back onto the ticket
+  branch. Leftover tracked dirt in the lease (a reviewer that outlived a
+  killed jig, or an oracle rewrite) does not matter by itself - the next
+  gate's oracles still see a restored tree - but once the ticket branch
+  later advances past the same file, that checkout refuses ("local changes
+  ... would be overwritten") before D2's restore ever runs, and `Gate`
+  returns with the lease detached and still dirty. Every later attempt then
+  fails the same way, one step earlier, inside `pool.Acquire`'s own
+  `git checkout` - the same hand-cleaning wedge NM2 was accepted for. `Gate`
+  now restores an existing lease pristine at its current `HEAD` before
+  `pool.Acquire` runs at all (best-effort: if the pool dir cannot be
+  resolved, or the lease does not exist yet, `Acquire` runs unchanged and
+  surfaces its own error). `TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances`
+  proves both the direct case (branch advances once, the very next gate
+  succeeds) and recovery from a lease already left wedged by an earlier
+  failed attempt (detached, still dirty, its local branch ref already
+  fast-forwarded past the dirty file).
+- Fix round 3, `--branch` detects a branch deleted on origin (F3, reverify-2
+  Nice 1; corrects D2's overclaim): `pool.Acquire`'s own fetch has no
+  `--prune`, so a branch deleted on origin after an earlier gate on the same
+  lease left `refs/remotes/origin/<branch>` stale, and the
+  `refs/remotes/origin/<branch>` existence check D2 added passed against
+  that stale ref instead of catching the deletion - the gate then silently
+  reviewed the last-fetched tip. D2's own DECISIONS entry and ADR 0007
+  claimed this check covered a branch "deleted or renamed on origin"; it
+  did not, until now. `Gate`'s `--branch` mode now runs
+  `git fetch --prune origin` in the gate lease before the existence check,
+  and `BRANCH_NOT_FOUND` gained a Help line ("push the branch to origin,
+  then rerun"). `TestGateBranchDeletedOnOriginAfterEarlierGate` gates a
+  branch, deletes it on origin, then gates it again and asserts
+  `BRANCH_NOT_FOUND` with a non-empty Help.
+- Fix round 3, `carriedFindingOracle` matches mechanical bundles by
+  workspace (F4, reverify-2 Nice 7): it used to rebuild the mechanical
+  bundle id it expected (`fix-<round>-mech` or
+  `fix-<round>-mech-<sanitizeWorkspaceID(workspace)>`) and match on that
+  string. `disambiguateFixSliceIDs` (D4) can push a colliding bundle's id
+  to a `-2` (or higher) suffix that `sanitizeWorkspaceID` alone never
+  produces, so a still-open mechanical finding carried from the *second* of
+  two colliding workspaces resolved the *first* workspace's bundle's
+  oracle instead of its own. It now matches by `FromGate == round`,
+  `Workspace == prior.Workspace`, and an `ID` `fix-<round>-mech` prefix
+  (to exclude intent slices, which share the round but not the prefix),
+  so the match is independent of whatever suffix disambiguation gave the
+  id. `TestCarriedFindingOracleMatchesByWorkspaceNotUndisambiguatedID`
+  proves both bundles resolve their own oracle, not each other's.
 
 ## Review eval
 
@@ -397,6 +463,17 @@ was ambiguous, what was chosen, and why.
   them as misses - a run where most dispatches failed could still report a
   high recall. A `failedScore` helper now fills `Missed` with every one of the
   failed case's gold finding ids.
+- Fix round 3, documented as a known limit, not fixed (F6; reverify-2 Nice
+  6): `title_pattern` regex matching is a heuristic, and reverify-2
+  demonstrated both directions still slip through after E1 - a negated or
+  reworded wrong review ("no nil check is needed in Lookup"; a trap's own
+  wording spilled into an unrelated finding's detail) can score a false
+  PASS, and a correct review phrased outside the pattern's alternatives
+  ("ForTenant never uses tenantID") can score a false FAIL. This is stated
+  plainly in ADR 0008 now: the accept/reject phrasing tables each fix
+  round records here are the contract a pattern must satisfy, not a claim
+  of completeness. No pattern change in this round; widening again on a
+  specific gap (as B2 and E1 did) is the fix when a real gap surfaces.
 
 ## CLI
 
@@ -443,6 +520,23 @@ was ambiguous, what was chosen, and why.
   loses findings silently). A pipe, a regular file, and the null device all
   fail these queries the same way a heuristic would, without needing a
   dedicated null-device comparison.
+- Fix round 3, guard the NM1 regression class (F5, reverify-2 Nice 5): every
+  existing `stdinIsTerminal` test asserted a negative (non-file, regular
+  file, the null device, a pipe), so a mutant that makes `isTerminalFile`
+  always return `false` - exactly the shape of the NM1 regression, a real
+  console misread as non-terminal - passed the whole suite. A new
+  windows-tagged `TestStdinIsTerminalRealConsole` opens `CONIN$` (the
+  process's own console input) and asserts `stdinIsTerminal` is true for it;
+  it skips, rather than failing, when the open itself fails (some CI runners
+  have no console attached). Opening `CONIN$` works under `go test` on this
+  box, so the test runs for real here, not skipped.
+- Fix round 3, documented as a known limit, not fixed (F6; reverify-2 Nice
+  8): on Windows, Git Bash's default mintty terminal gives jig's process a
+  pipe for stdin, not a console handle, so `stdinIsTerminal` reads it as
+  non-terminal and triage runs non-interactively there - this matches
+  `golang.org/x/term`'s own behavior, so it is not specific to jig's
+  `GetConsoleMode` query. PowerShell, cmd, and Windows Terminal (ConPTY) are
+  all detected correctly.
 
 ## Fixture and tests
 
