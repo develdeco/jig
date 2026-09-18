@@ -1,6 +1,9 @@
 findings:
   - id: tenant-leak
     class: intent
-    title_pattern: "(?i)tenant|filter"
+    title_pattern: "(?i)(leak|cross-tenant|other tenants|every invoice|all invoices|without (a )?(tenant )?filter|ignor\\w+ (the )?tenant)"
     file: billing/invoices.go
-traps: []
+traps:
+  - id: summarize-nil-leak
+    title_pattern: "(?i)leak|cross-tenant"
+    file: billing/report.go

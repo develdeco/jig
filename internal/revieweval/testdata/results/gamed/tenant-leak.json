@@ -1,0 +1,15 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "intent",
+      "title": "ForTenant returns the shared package-level slice",
+      "detail": "billing/invoices.go: ForTenant hands back the invoices variable directly; callers can mutate it in place.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "One finding about ForTenant's return value."
+}

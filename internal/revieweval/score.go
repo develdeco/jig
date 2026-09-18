@@ -31,31 +31,69 @@ func containsFile(text, file string) bool {
 	return strings.Contains(text, file) || strings.Contains(text, filepath.Base(file))
 }
 
-// scoreCase matches result's findings against c's gold: a result finding
-// matches a gold finding when their classes are equal, the gold
+// scoreCase matches result's findings against c's gold: a result finding is
+// compatible with a gold finding when their classes are equal, the gold
 // title_pattern matches "title\ndetail", and the gold file (or its base
-// name) appears in title or detail. A finding that matches no gold entry
+// name) appears in title or detail. Compatibility is one-to-one: a maximum
+// bipartite matching (Kuhn's augmenting-path algorithm, cheap at corpus
+// case sizes) pairs each result finding with at most one gold finding, and
+// each gold finding with at most one result finding, so one lumped finding
+// can satisfy only one gold entry and a single gold entry cannot be
+// double-counted by two findings. A finding left unmatched by the pairing
 // is a false positive when it matches a trap, or (a case with no gold
-// findings at all, e.g. a clean or trap case) unconditionally; otherwise
-// it is reported as unmatched, which does not fail the case. A case
-// passes iff it has zero missed gold findings and zero false positives.
+// findings at all, e.g. a clean or trap case) unconditionally; otherwise it
+// is reported as unmatched, which does not fail the case. A case passes
+// iff it has zero missed gold findings and zero false positives.
 func scoreCase(c Case, result verifydeliver.ReviewResult) CaseScore {
 	sc := CaseScore{Name: c.Name}
-	foundGold := make([]bool, len(c.Gold.Findings))
 
-	for _, f := range result.Findings {
+	texts := make([]string, len(result.Findings))
+	compat := make([][]int, len(result.Findings)) // finding index -> compatible gold indices
+	for j, f := range result.Findings {
 		text := f.Title + "\n" + f.Detail
-
-		matchedGold := false
+		texts[j] = text
 		for i, g := range c.Gold.Findings {
 			if g.Class == f.Class && c.goldFindingRe[i].MatchString(text) && containsFile(text, g.File) {
-				foundGold[i] = true
-				matchedGold = true
+				compat[j] = append(compat[j], i)
 			}
 		}
-		if matchedGold {
+	}
+
+	// matchGold[i] is the finding index paired with gold entry i, or -1.
+	matchGold := make([]int, len(c.Gold.Findings))
+	for i := range matchGold {
+		matchGold[i] = -1
+	}
+	var tryAugment func(j int, visited []bool) bool
+	tryAugment = func(j int, visited []bool) bool {
+		for _, i := range compat[j] {
+			if visited[i] {
+				continue
+			}
+			visited[i] = true
+			if matchGold[i] == -1 || tryAugment(matchGold[i], visited) {
+				matchGold[i] = j
+				return true
+			}
+		}
+		return false
+	}
+	for j := range result.Findings {
+		tryAugment(j, make([]bool, len(c.Gold.Findings)))
+	}
+
+	matchedFinding := make([]bool, len(result.Findings))
+	for _, j := range matchGold {
+		if j != -1 {
+			matchedFinding[j] = true
+		}
+	}
+
+	for j, f := range result.Findings {
+		if matchedFinding[j] {
 			continue
 		}
+		text := texts[j]
 
 		matchedTrap := false
 		for i, tr := range c.Gold.Traps {
@@ -72,7 +110,7 @@ func scoreCase(c Case, result verifydeliver.ReviewResult) CaseScore {
 	}
 
 	for i, g := range c.Gold.Findings {
-		if foundGold[i] {
+		if matchGold[i] != -1 {
 			sc.Found = append(sc.Found, g.ID)
 		} else {
 			sc.Missed = append(sc.Missed, g.ID)
