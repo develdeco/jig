@@ -18,7 +18,8 @@ run(frontier)  dispatch queued, unblocked slices to a build session
   │                    journal.ndjson, questions/q-NNN.md, start.<repo>.sha
   ▼
 gate           review + re-verification round over the ticket's branch
-  │            reads:  journal.ndjson, slices.yaml, gate/round-<n>/findings.yaml (prior rounds)
+  │            reads:  journal.ndjson, slices.yaml, start.<repo>.sha,
+  │                    gate/round-N/{findings.yaml,report.yaml} (prior rounds)
   │            writes: work/gate.round-N.{review,result}.json (reviewer dispatch),
   │                    gate/round-N/{findings.yaml,findings.md,report.yaml,diff-changelog.md},
   │                    evidence/round-N/* (scripted rounds only), slices.yaml (fix slices, from_gate: N)
@@ -115,7 +116,7 @@ exists.
 | `internal/fixture/` | `Generate` | test `Opts` → a temp fixture repo, its store, and a scripted attempt scenario |
 | `internal/frontier/` | `Run`, `Requeue`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
-| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
+| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `IsAncestor`, `CommitsIn`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
 | `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `internal/home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → per-machine paths |
 | `internal/journal/` | `Append`, `Read`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs |
@@ -230,9 +231,12 @@ it never runs unattended in CI:
 drives a real backend against the corpus under `testdata/revieweval/`,
 `JIG_REVIEWEVAL_MODEL` picks the model (default `claude-sonnet-5`), and
 `JIG_REVIEWEVAL_REPORT` writes the plain-text report to a file. CI runs only
-the structural path - a fake backend replaying scripted results, both a
-perfect one and a seeded-regression one - which proves the scorer itself can
-fail, not just pass.
+the structural path - a test-local scripted stub backend, keyed by case name
+(not `session`'s own `fake` backend, which is keyed by round), replaying
+scripted results, both a perfect one and a seeded-regression one - which
+proves the scorer itself can fail, not just pass. Matching is one-to-one
+(each result finding satisfies at most one gold entry), and a case that
+fails outright counts every one of its gold findings as missed.
 
 `lint/workflow_test.go` parses `.github/workflows/{ci,release,smoke}.yml` and
 asserts the invariants that have already bitten or must hold - ci's OS matrix

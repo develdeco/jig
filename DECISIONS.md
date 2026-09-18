@@ -153,17 +153,23 @@ was ambiguous, what was chosen, and why.
   `REVIEW_INVALID` naming the problem, so a malformed or off-contract session
   result fails loudly instead of silently reading as clean. The headless backend's
   failure fallback shape (`{"outcome":"failed",...}`) has no `verdict` and so fails
-  here too. Paired with this: a forward-only guard checks the gate lease's HEAD and
-  `git status --porcelain` are unchanged after the reviewer dispatch and rejects the
-  round (`REVIEW_INVALID`) if either moved - reviewers never edit.
+  here too. Paired with this: a forward-only guard requires the gate lease's HEAD
+  and tracked `git status --porcelain` (untracked files ignored) to still match a
+  pristine head after the reviewer dispatch, and rejects the round
+  (`REVIEW_INVALID`) if either moved - reviewers never edit.
 - CONTEXT.md's Intake entry dropped "triage" from its `_Avoid_` list: Triage is
   now its own CONTEXT.md term naming the gate's human seam (keep or dismiss each
   finding before fix slices are synthesized), so it is no longer a synonym to
   steer writers away from near Intake.
 - Auto-dismiss compares a finding's normalized title (lowercased, whitespace
   collapsed, trimmed) against every prior round's cumulative dismissed titles; a
-  match is dismissed before triage ever sees it, so a dismissal is permanent even
-  if the reviewer re-raises the same finding in slightly different words.
+  match is dismissed before triage ever sees it. This is permanent only for a
+  title identical after normalization - a genuinely reworded re-raise is a
+  different string and reaches triage again, defended only by the prompt telling
+  the reviewer not to raise a dismissed finding again and by `review.json` sending
+  it the cumulative dismissed list every round. Fix round 1 corrected ADR 0007,
+  CONTEXT.md, and this file's own earlier wording, which had overclaimed that
+  rewording could never resurface a dismissal.
 - The fake session backend's gate playback (`d.Slice == "gate"`) errors loudly on
   missing scenario coverage for a round (`session/fake: scenario has no gate round
   <n> review-result.json`) rather than defaulting to a silent clean result, since a
@@ -174,15 +180,83 @@ was ambiguous, what was chosen, and why.
   findings.yaml` and `work/gate.round-N.*` files) is additive - an older jig reading
   a newer store's ticket folder still parses every field it knows about, and a
   field absent on write leaves no key on disk.
-- `report.yaml` gained `reviewed_sha` (repo → sha for that round, `omitempty`)
-  beyond what the design digest's field list named, because rendering it required
-  plumbing the reviewer's `reviewed_sha` map through `GateReport`; kept additive
-  so a scripted round's `report.yaml` bytes are unchanged.
+- `report.yaml` gained `reviewed_sha` (repo → sha for that round, `omitempty`); the
+  design digest named this field on `reportYAML` explicitly. What the digest left
+  unlisted was `GateReport.ReviewedSHA`, the in-memory field that carries the
+  reviewer source's `Review.ReviewedSHA` through `Gate` to `writeReportYAML`; both
+  are kept additive so a scripted round's `report.yaml` bytes are unchanged.
 - Right after a gate round appends fix slices, `jig status`'s next-step hint still
   falls through to "work the frontier" rather than "work the fix-slice round",
   because its `allGreen` check counts every slice including the newly-appended,
   still-queued fix slices - unchanged behavior, shared with the old scripted path,
   not something this run needed to fix.
+- Fix round 1, store wedge (A1): `Store.Sync` used to run `pull --rebase`
+  straight away, so any uncommitted leftover in the store (a gate-open journal
+  line, `work/gate.round-N.*` from a reviewer attempt that failed before the
+  round finished, or an operator's Ctrl-C at the triage prompt) failed every
+  later command's `Sync`, including the retry the design relies on. `Sync` now
+  stages and commits any uncommitted leftovers with jig's identity before it
+  pulls, reusing the same stage+commit helper `Push` already had (factored out
+  rather than duplicated).
+- Fix round 1, lease hygiene (A2): the forward-only guard alone left a reviewer's
+  edit, untracked file, or commit sitting in the gate lease after a rejected
+  round, poisoning every later round and, in `--branch` mode, moving the branch
+  ref onto the reviewer's own commit. `reviewerGateSource.Round` now force-resets
+  the lease to a pristine head (`git reset --hard` + `git clean -fd`, never
+  `-x`, so ignored build caches survive) both right before dispatch - which also
+  wipes dirt a manifest oracle left behind moments earlier, so it is never
+  blamed on the reviewer - and unconditionally after dispatch, on every return
+  path (`defer`).
+- Fix round 1, full-scope base (A3): full scope's base is `gitx.MergeBase(lease,
+  "origin/"+target, "HEAD")`, with the ticket's `start.<repo>.sha` used only as a
+  fallback when that lookup itself fails (and only if it is still an ancestor of
+  HEAD) - a deviation from the design digest's literal "start sha first" text.
+  The start sha stays an ancestor of HEAD through a rebase onto an advanced
+  target, or a `--branch` branch cut from a newer main, which is exactly when it
+  stops being the right fork point; merge-base already gets this right for the
+  publish-time squash base, so the reviewer's full-scope base now matches it.
+- Fix round 1, closure enforcement and carry-forward (A4): a round's result must
+  close every one of `review.json`'s `prior_findings` exactly once - a missing or
+  duplicate closure is `REVIEW_INVALID`, same as an unknown id already was, so a
+  clean verdict can no longer coexist with an unresolved prior finding. A
+  `still-open` closure is not re-raised by the reviewer (the prompt says not to);
+  jig itself appends a new finding in the closing round, continuing the id
+  sequence after the reviewer's own findings, copying class/title/workspace/
+  detail from the original (read back from its own round's `findings.yaml`) and
+  extending detail with the closure's note, inheriting the oracle of the fix
+  slice the original finding produced. `priorFindingsAndDismissed` now removes an
+  id from `prior_findings` on any closure, closed or still-open, since a
+  still-open id is superseded by its carried successor and must not also linger
+  as open forever under its old id.
+- Fix round 1, dismissals through Gate (A5): the flagship two-round
+  `TestGateReviewerTwoRounds` now also re-raises a round-1-dismissed title in
+  round 2 with case/spacing drift, alongside its closures, and asserts the
+  Triage hook never even sees it. This is a test-only addition - A2's lease
+  restore and A4's closure enforcement did not change the auto-dismiss code
+  path itself, which already existed via `normalizeTitle`; the gap was that
+  nothing drove it through `Gate` end to end.
+- Fix round 1, title and id sanitizing (A6, A7): a reviewer-supplied title with
+  embedded newlines or irregular spacing is collapsed to single spaces
+  (`collapseTitle`) before it becomes a jig `Finding.Title`, so it cannot break
+  `findings.md`'s rendered list or a mechanical bundle's goal bullet. A
+  mechanical bundle id's workspace component is sanitized
+  (`sanitizeWorkspaceID`: anything outside `[A-Za-z0-9._-]` becomes `-`) before
+  it is embedded in `fix-<n>-mech-<workspace>`, since a manifest workspace id
+  may legally contain `/`, `\`, or `:`, which would otherwise nest directories
+  or break on Windows in `slices/<id>.state` and `work/<id>.attempt-N.*`.
+- Fix round 1, known limit (`--early`): a `jig gate --early` round before an
+  earlier round's fix slices have landed can carry a still-open finding forward
+  while its first fix slice is still queued, producing a duplicate fix slice,
+  because the reviewer is reviewing code the earlier fix has not touched yet.
+  `--early` is a deliberate mid-ticket review of unfinished work, so this is
+  accepted rather than solved in this run.
+- Fix round 1, known limit (stalled gate fix slice): `jig status`'s stalled hint
+  always suggests `jig requeue <ticket> --from-brief-diff`, but `Requeue` only
+  requeues a slice whose `from_brief` names a changed brief-section hash.
+  Synthesized fix slices have no `from_brief`, so the hint is a no-op for a
+  stalled `fix-N-mech` or `fix-N-k` - and mechanical bundles, pinned to the
+  cheapest rung, are the most likely to stall. Recorded, not solved in this run;
+  a `from_gate`-aware resume path is the fix.
 
 ## Review eval
 
@@ -214,6 +288,38 @@ was ambiguous, what was chosen, and why.
   (`<case>: PASS|FAIL found=a/b missed=N fp=N unmatched=N[ reason: ...]`) plus a
   `totals:` line; tests assert on substrings, not the exact format, so it can be
   reformatted later without touching test expectations.
+- Fix round 1, one-to-one gold matching (B1): `scoreCase` used to check a result
+  finding against every gold entry independently, so one lumped finding could
+  satisfy every gold entry in a case at once (a gamed 3-for-1 on
+  `mechanical-batch`). It now runs a maximum bipartite matching (an
+  augmenting-path matcher, cheap at 1-3 gold entries per case) over the
+  compatible (gold, finding) pairs, so each side pairs at most once; a finding
+  left unmatched still goes through the trap/false-positive/unmatched checks as
+  before.
+- Fix round 1, tightened gold patterns (B2): `tenant-leak` and `nil-deref`'s
+  `title_pattern`s matched code vocabulary rather than the defect
+  (`(?i)tenant|filter` matched any finding merely naming the function
+  `ForTenant`; `(?i)nil` matched a finding that argued values are "never
+  nil"). Patterns now require defect wording (leak/cross-tenant phrasing; nil
+  pointer/deref/map/value or panic phrasing). `mechanical-batch`'s three
+  patterns were already mutually exclusive by wording; B1's one-to-one
+  matching is what stops a single lumped finding from claiming all three.
+- Fix round 1, trap coverage (B3): the corpus's only trap lived in
+  `loopvar-trap`, a case with zero gold findings, where every finding is a
+  false positive by the no-gold rule regardless of whether it matches the trap
+  - so `traps:` never actually decided a case's pass/fail, and a broken trap
+  check or a dropped file check would not fail any test. Added a trap to
+  `tenant-leak` (a correct, tenant-filtered `Summarize` helper that tempts a
+  false "this leaks too" flag) alongside its gold finding, plus direct
+  `scoreCase` unit tests exercising the trap match and the per-entry file check
+  in isolation on a synthetic case.
+- Fix round 1, failed cases count as missed (B4): `RunCase` used to return a
+  `CaseScore` with an empty `Missed` on a dispatch error or an invalid
+  `result.json`, so `RenderReport`'s `recall = found/(found+missed)` silently
+  dropped that case's gold findings from the denominator instead of counting
+  them as misses - a run where most dispatches failed could still report a
+  high recall. A `failedScore` helper now fills `Missed` with every one of the
+  failed case's gold finding ids.
 
 ## CLI
 

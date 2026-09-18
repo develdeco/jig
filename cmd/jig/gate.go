@@ -13,9 +13,12 @@ import (
 // gateSourceFor picks the GateSource for a `jig gate` invocation. The
 // compatibility rule: the old scripted source (NewFakeGateSource) runs iff
 // --scenario is set AND --backend is not - `jig gate` never had --backend,
-// so every old invocation behaves exactly as before. Any other combination
-// (including --backend fake --scenario X) dispatches a real reviewer
-// session, played back by whichever backend backendName resolves.
+// so every old --scenario invocation behaves exactly as before. Any other
+// combination (including --backend fake --scenario X, and a plain `jig gate
+// <ticket>` with neither flag) dispatches a real reviewer session, played
+// back by whichever backend backendName resolves (default herdr); a plain
+// invocation used to run the old no-op clean round instead and now needs a
+// backend available.
 func gateSourceFor(backendFlag, scenario string) (verifydeliver.GateSource, error) {
 	if scenario != "" && backendFlag == "" {
 		return verifydeliver.NewFakeGateSource(scenario), nil
@@ -47,7 +50,7 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 	prNum := fs.Int("pr", 0, "pr number (not implemented in v0.1)")
 	yes := fs.Bool("yes", false, "keep every finding without the triage prompt")
 	backendFlag := fs.String("backend", "", "session backend for the reviewer: fake, headless, or herdr")
-	scenario := fs.String("scenario", "", "scenario dir for the fake gate source")
+	scenario := fs.String("scenario", "", "scenario dir for the fake gate source, or for the fake backend's reviewer playback when --backend is set")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {

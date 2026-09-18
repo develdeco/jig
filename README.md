@@ -13,8 +13,9 @@ one dispatch loop over small, provable slices of work.
   where a session left off.
 - Re-verifies the branch's oracles in its own gate round before anything
   ships, then dispatches a real reviewer session that classifies findings,
-  bundles mechanical fixes at the cheapest model, and turns kept findings
-  into forward fix slices - you triage, review has no back-edges.
+  bundles mechanical fixes at the cheapest rung (unless an invariant floor
+  overrides it), and turns kept findings into forward fix slices - you
+  triage, review has no back-edges.
 - Reconciles, revalidates, and opens the pull request itself, evidence
   attached.
 - Keeps every ticket's state in a plain git repo, so progress survives any
@@ -35,9 +36,13 @@ gate      re-verify the ticket's branch's oracles
 publish   reconcile, revalidate, and open the PR
 ```
 
-Two moments need a human: deciding what the brief actually asks for, and
-confirming before the PR goes out. See [ARCHITECTURE.md](ARCHITECTURE.md) for
-what each stage reads and writes.
+Three moments need a human: deciding what the brief actually asks for,
+triaging a gate round's findings (interactively when stdin is a terminal;
+`--yes` or a non-terminal stdin keeps them all), and confirming before the PR
+goes out. Like the publish confirm, a triage wait writes nothing to disk
+until it is answered, so `jig status` shows no sign of it while it waits -
+just the state the ticket was in going in. See
+[ARCHITECTURE.md](ARCHITECTURE.md) for what each stage reads and writes.
 
 ## Install
 
@@ -129,14 +134,16 @@ and write the same `result.json`; see
 
 `jig gate` takes the same `--backend` flag: after re-running every manifest
 oracle on a fresh lease, it dispatches a reviewer session on that backend
-(default `herdr`) to review the branch's diff against the brief. The old
-scripted path (`--scenario` with no `--backend`) is unchanged, so every
-`jig gate` invocation from before this reviewer existed still behaves
-exactly as it did; `jig gate --backend fake --scenario <dir>` is instead a
-real review dispatch played back by the fake backend, the same way `jig run
---backend fake --scenario <dir>` is. `--yes` keeps every finding without the
-interactive triage prompt, which also runs automatically whenever stdin is
-not a terminal.
+(default `herdr`, preflighted before it runs) to review the branch's diff
+against the brief. The old scripted path (`--scenario` with no `--backend`)
+is unchanged, so every `jig gate --scenario <dir>` invocation from before
+this reviewer existed still behaves exactly as it did; a plain `jig gate
+<ticket>`, with no `--scenario`, now dispatches a real reviewer instead of
+the old no-op clean round, and needs a backend available. `jig gate
+--backend fake --scenario <dir>` is a real review dispatch played back by
+the fake backend, the same way `jig run --backend fake --scenario <dir>` is.
+`--yes` keeps every finding without the interactive triage prompt, which
+also runs automatically whenever stdin is not a terminal.
 
 ## Safety
 

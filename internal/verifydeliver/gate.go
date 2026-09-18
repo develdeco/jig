@@ -176,8 +176,9 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	// --branch: validate a hand-written branch fetched from origin instead
 	// of the ticket's own jig/<ticket>. Its spec axis reads opts.BriefDoc
 	// instead of the brief; report.yaml's shape stays fixed by contract to
-	// {round,verdict,model,target_sha} (BriefDoc is not recorded there), but
-	// the doc's content is copied into this round's own
+	// {round,verdict,model,target_sha} on a scripted round (a reviewer round
+	// also carries reviewed_sha; BriefDoc is not recorded there either way),
+	// but the doc's content is copied into this round's own
 	// gate/round-<n>/spec-input.md so the spec-axis-input swap is real
 	// rather than an accepted, no-op flag.
 	var briefDocContent []byte

@@ -57,7 +57,7 @@ Evidence that a check passed, stored in the ticket's `evidence/`.
 _Avoid_: screenshot, proof
 
 **Finding class**:
-A gate finding's mechanical/intent split. Mechanical (typo, dead code, doc gap, formatting) bundles into one fix slice per workspace, pinned to the cheapest staircase rung; intent (behavior, correctness, security, design) becomes its own fix slice at the gate's model.
+A gate finding's mechanical/intent split. Mechanical (typo, dead code, doc gap, formatting) bundles into one fix slice per workspace, pinned to the cheapest staircase rung unless the ticket's invariant floor overrides the pin; intent (behavior, correctness, security, design) becomes its own fix slice, built at whatever rung the normal staircase selects.
 _Avoid_: severity, priority
 
 **Fix slice**:
@@ -73,7 +73,7 @@ Out-of-band verification of a ticket's branch, run on its own lease, under a dif
 _Avoid_: code review, QA pass
 
 **Triage**:
-The human seam after a gate round raises findings: keep or dismiss each one, before any fix slice is synthesized. A dismissal is permanent - the reviewer auto-dismisses a finding whose title later resurfaces.
+The human seam after a gate round raises findings: keep or dismiss each one, before any fix slice is synthesized. jig, not the reviewer, auto-dismisses a finding whose title later resurfaces identically (lowercased, whitespace collapsed); a reworded title reaches triage again.
 _Avoid_: review, approval
 
 **Staircase**:

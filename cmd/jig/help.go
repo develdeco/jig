@@ -64,7 +64,7 @@ var commandTable = []cmdSpec{
 		{"pr", "pr number (not implemented in v0.1)", true},
 		{"yes", "keep every finding without the triage prompt", false},
 		{"backend", "session backend for the reviewer: fake, headless, or herdr", false},
-		{"scenario", "scenario dir for the fake gate source", false},
+		{"scenario", "scenario dir for the fake gate source, or for the fake backend's reviewer playback when --backend is set", false},
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},
