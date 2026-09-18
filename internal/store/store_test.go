@@ -520,6 +520,96 @@ func TestSyncCommitsUncommittedLeftoversBeforeRebase(t *testing.T) {
 	}
 }
 
+// TestPushLeavesNoMidRebaseOnConflict reproduces a real conflicting write
+// from a second clone: Push's own retry `pull --rebase` conflicts (both
+// clones change the same line), so Push must fail, but jig itself must
+// never leave the store mid-rebase - the next command's Sync needs a clean
+// tree to detect, not a repo already wedged by this failed Push.
+func TestPushLeavesNoMidRebaseOnConflict(t *testing.T) {
+	st, work, remote := newTestRemoteStore(t)
+
+	other := t.TempDir()
+	runGit(t, "", "clone", remote, other)
+	runGit(t, other, "config", "user.name", "other")
+	runGit(t, other, "config", "user.email", "other@example.invalid")
+	if err := os.WriteFile(filepath.Join(other, "project.yaml"), []byte("schema_version: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "commit", "-am", "remote change")
+	runGit(t, other, "push", "origin", "main")
+
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.Push("local change"); err == nil {
+		t.Fatal("Push should fail: the retry pull --rebase conflicts on project.yaml")
+	}
+
+	mid, err := inProgressRebaseOrMerge(work)
+	if err != nil {
+		t.Fatalf("inProgressRebaseOrMerge: %v", err)
+	}
+	if mid {
+		t.Fatal("Push left the store mid-rebase after a failed retry pull")
+	}
+}
+
+// TestSyncRefusesWhileMidRebase places the store mid-rebase by hand (a real
+// conflict, not a simulated one) and checks that Sync refuses with
+// STORE_CONFLICT, commits nothing, and leaves the rebase state untouched for
+// the operator to resolve.
+func TestSyncRefusesWhileMidRebase(t *testing.T) {
+	st, work, remote := newTestRemoteStore(t)
+
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "commit", "-am", "local change")
+
+	other := t.TempDir()
+	runGit(t, "", "clone", remote, other)
+	runGit(t, other, "config", "user.name", "other")
+	runGit(t, other, "config", "user.email", "other@example.invalid")
+	if err := os.WriteFile(filepath.Join(other, "project.yaml"), []byte("schema_version: 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "commit", "-am", "remote change")
+	runGit(t, other, "push", "origin", "main")
+
+	runGit(t, work, "fetch", "origin")
+	if _, err := gitx.Run(work, "rebase", "origin/main"); err == nil {
+		t.Fatal("expected the rebase to conflict")
+	}
+	mid, err := inProgressRebaseOrMerge(work)
+	if err != nil {
+		t.Fatalf("inProgressRebaseOrMerge: %v", err)
+	}
+	if !mid {
+		t.Fatal("fixture did not leave the repo mid-rebase; test setup is wrong")
+	}
+
+	beforeCount := runGit(t, work, "rev-list", "--count", "HEAD")
+
+	err = st.Sync()
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "STORE_CONFLICT" {
+		t.Fatalf("Sync mid-rebase: err = %v, want *axi.Error STORE_CONFLICT", err)
+	}
+
+	afterCount := runGit(t, work, "rev-list", "--count", "HEAD")
+	if beforeCount != afterCount {
+		t.Fatalf("Sync committed while mid-rebase: HEAD count %q -> %q", beforeCount, afterCount)
+	}
+	midAfter, err := inProgressRebaseOrMerge(work)
+	if err != nil {
+		t.Fatalf("inProgressRebaseOrMerge after Sync: %v", err)
+	}
+	if !midAfter {
+		t.Fatal("Sync must not touch the rebase state; only the operator resolves it")
+	}
+}
+
 func TestPushRebasesOnRejection(t *testing.T) {
 	st, work, remote := newTestRemoteStore(t)
 

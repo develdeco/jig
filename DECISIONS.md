@@ -280,6 +280,25 @@ was ambiguous, what was chosen, and why.
   run's leftover commit. Existing `--branch` tests already pushed the branch
   to origin before gating it, so none relied on the old
   local-branch/origin-fallback behavior and none needed changing.
+- Fix round 2, store conflict safety (D3): `Store.Sync` used to run
+  `git add -A` and commit unconditionally before pulling, with no check for
+  whether the store was already mid-rebase (left there by a previous `Push`
+  whose retry `pull --rebase` itself conflicted). `add -A` stages unresolved
+  conflict markers as ordinary content, and a `commit` (or later
+  `rebase --continue`) finalizes them onto the store branch, corrupting
+  whatever file conflicted - `journal.ndjson` for every later reader in the
+  worst case. `Sync` now checks `.git/rebase-merge`, `.git/rebase-apply` and
+  `MERGE_HEAD` first (via `git rev-parse --git-path`, resolved against the
+  store root) and refuses with `axi.Error{Code: "STORE_CONFLICT"}` without
+  touching the index when any exists, pointing the operator at `git status`
+  and a rerun once they resolve it by hand. Separately, both `Push` and
+  `Sync` now run `git rebase --abort` (best effort, its own error ignored)
+  whenever their own `pull --rebase` fails, so a conflict jig's own retry
+  causes never leaves the store mid-rebase for STORE_CONFLICT to catch on
+  the next command - the check and the abort are complementary, not
+  redundant: the abort covers jig's own failed retries, the check covers a
+  rebase left by anything else (a person, a different tool, a crash between
+  the failed pull and the abort).
 
 ## Review eval
 

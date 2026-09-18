@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 )
 
@@ -50,6 +52,9 @@ func (s *Store) Sync() error {
 	if !s.HasRemote() {
 		return nil
 	}
+	if err := s.refuseIfMidRebaseOrMerge(); err != nil {
+		return err
+	}
 	if _, err := s.stageAndCommit("jig: record uncommitted store state"); err != nil {
 		return err
 	}
@@ -57,8 +62,54 @@ func (s *Store) Sync() error {
 	if err != nil {
 		return err
 	}
-	_, err = gitx.Run(s.Root, "pull", "--rebase", "origin", branch)
-	return err
+	if _, err := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); err != nil {
+		_, _ = gitx.Run(s.Root, "rebase", "--abort")
+		return err
+	}
+	return nil
+}
+
+// refuseIfMidRebaseOrMerge errors when the store has an unfinished rebase or
+// merge in progress, without touching the index. Sync must never stage or
+// commit over that: `git add -A` would pick up unresolved conflict markers,
+// and a later `rebase --continue` (or manual resolution) would then commit
+// them onto the store branch, corrupting whatever file conflicted (e.g.
+// journal.ndjson) for every later reader.
+func (s *Store) refuseIfMidRebaseOrMerge() error {
+	mid, err := inProgressRebaseOrMerge(s.Root)
+	if err != nil {
+		return err
+	}
+	if !mid {
+		return nil
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("the store at %s has an unfinished rebase or merge", s.Root),
+		Code: "STORE_CONFLICT",
+		Help: []string{"Resolve it in the store with `git status`, then rerun."},
+	}
+}
+
+// inProgressRebaseOrMerge reports whether dir has an unfinished rebase (git
+// leaves a rebase-merge or rebase-apply directory under .git for the
+// duration of one) or an unresolved merge (MERGE_HEAD).
+func inProgressRebaseOrMerge(dir string) (bool, error) {
+	for _, gitPath := range []string{"rebase-merge", "rebase-apply", "MERGE_HEAD"} {
+		out, err := gitx.Run(dir, "rev-parse", "--git-path", gitPath)
+		if err != nil {
+			return false, err
+		}
+		p := strings.TrimSpace(out)
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(dir, p)
+		}
+		if _, err := os.Stat(p); err == nil {
+			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 // stageAndCommit stages every change (`add -A`) and, when anything is
@@ -97,6 +148,9 @@ func (s *Store) Push(msg string) error {
 	}
 	if _, err := gitx.Run(s.Root, "push", "origin", branch); err != nil {
 		if _, perr := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); perr != nil {
+			// jig itself must never leave the store mid-rebase: best effort,
+			// ignore the abort's own error (there may be nothing to abort).
+			_, _ = gitx.Run(s.Root, "rebase", "--abort")
 			return perr
 		}
 		if _, err2 := gitx.Run(s.Root, "push", "origin", branch); err2 != nil {
