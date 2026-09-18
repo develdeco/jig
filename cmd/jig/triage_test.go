@@ -174,6 +174,20 @@ func TestStdinIsTerminalDevNull(t *testing.T) {
 	}
 }
 
+// TestStdinIsTerminalPipe checks that an *os.File backed by an os.Pipe end
+// (not a character device) is not treated as a terminal.
+func TestStdinIsTerminalPipe(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if stdinIsTerminal(r) {
+		t.Fatalf("stdinIsTerminal(pipe) = true, want false")
+	}
+}
+
 func assertKeptIDs(t *testing.T, kept []verifydeliver.Finding, want []string) {
 	t.Helper()
 	if len(kept) != len(want) {

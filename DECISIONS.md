@@ -347,15 +347,25 @@ was ambiguous, what was chosen, and why.
   `internal/frontier`'s own call site, which already sets that value as a literal;
   this avoids a new cross-package import into `cmd/jig` for one string.
 - The e2e reviewer test drives `jig gate`'s stdin through an explicit empty pipe
-  (`strings.NewReader("")`) rather than leaving `exec.Cmd.Stdin` unset. The null
-  device (`/dev/null`, `NUL`) is a character device on every OS, not only this
-  Windows box, so a bare `os.ModeCharDevice` check misreads it as a terminal;
-  `stdinIsTerminal` now also compares against `os.Stat(os.DevNull)` via
-  `os.SameFile` and treats it as non-terminal directly. The e2e test still uses a
-  pipe rather than a null stdin, since a pipe is unambiguously not a character
-  device on every platform without relying on that comparison, so triage's
-  non-terminal path (keep all, print the note) is what the test exercises,
-  deterministically.
+  (`strings.NewReader("")`) rather than leaving `exec.Cmd.Stdin` unset, so
+  triage's non-terminal path (keep all, print the note) is what the test
+  exercises, deterministically, regardless of how stdin is decided.
+- `stdinIsTerminal`'s mode-bit heuristic (`os.ModeCharDevice` plus an
+  `os.SameFile` compare against `os.Stat(os.DevNull)`) could not tell a real
+  Windows console apart from `NUL`: `os/stat_windows.go`'s `statHandle`
+  returns an empty path and zero volume/index ids for any `FILE_TYPE_CHAR`
+  handle, so `os.SameFile` came out true for both, and a real console was
+  misread as non-terminal - interactive triage never ran on Windows, this
+  project's own development platform. `stdinIsTerminal` now decides with a
+  real OS terminal query instead of any Stat heuristic: `isTerminalFile`
+  (build-tagged per GOOS in `cmd/jig/tty_*.go`) calls `GetConsoleMode` on
+  windows, a termios ioctl (`TCGETS` on linux, `TIOCGETA` on
+  darwin/freebsd/netbsd/openbsd/dragonfly, via `golang.org/x/sys/unix`) on
+  the unix family, and returns false unconditionally on every other GOOS (the
+  non-interactive path, which keeps every finding, so an unsupported OS never
+  loses findings silently). A pipe, a regular file, and the null device all
+  fail these queries the same way a heuristic would, without needing a
+  dedicated null-device comparison.
 
 ## Fixture and tests
 
