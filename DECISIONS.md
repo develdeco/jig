@@ -257,6 +257,29 @@ was ambiguous, what was chosen, and why.
   stalled `fix-N-mech` or `fix-N-k` - and mechanical bundles, pinned to the
   cheapest rung, are the most likely to stall. Recorded, not solved in this run;
   a `from_gate`-aware resume path is the fix.
+- Fix round 2, gate lease restore before oracles (D2): fix round 1's A2 restore
+  (`resetLeasePristine`) ran only inside `reviewerGateSource.Round`, as a
+  `defer`, so it never ran at all when jig was killed before or during a
+  reviewer dispatch (no signal handler) or when the reviewer itself outlived
+  its dispatch (the herdr backend leaves a failed reviewer's workspace open
+  "for jump-in"). The next `jig gate` on the same lease then ran
+  `runGateOracles` - and in `--branch` mode, the reviewer flow itself - over
+  whatever the reviewer had left behind: an untracked repro file failed every
+  later gate's oracles until someone deleted it by hand, or a reviewer commit
+  became the lease HEAD and was reviewed and passed clean, breaking
+  forward-only. `Gate` now calls `resetLeasePristine` itself, right after the
+  lease is acquired and the branch is in place, before any oracle or reviewer
+  round runs: normal mode resets to `HEAD` (already force-updated to the
+  build lease's copy by `fetchTicketBranchFromBuildLease`); `--branch` mode
+  first requires `refs/remotes/origin/<branch>` to exist - `pool.Acquire`
+  fetches origin but never resets an existing local branch, so without this
+  check a branch deleted or renamed on origin would silently validate
+  whatever stale local copy the lease still had - then resets to
+  `origin/<branch>`, since the gate lease never commits and so must always
+  equal origin's branch tip exactly, never a stale local copy or a killed
+  run's leftover commit. Existing `--branch` tests already pushed the branch
+  to origin before gating it, so none relied on the old
+  local-branch/origin-fallback behavior and none needed changing.
 
 ## Review eval
 

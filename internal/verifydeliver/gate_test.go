@@ -11,6 +11,7 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -339,6 +340,167 @@ func TestGateBranchMissingDocErrors(t *testing.T) {
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "BRIEF_DOC_MISSING" {
 		t.Fatalf("err = %v, want *axi.Error BRIEF_DOC_MISSING", err)
+	}
+}
+
+// TestGateWipesLeftoverLeaseDirtBeforeOracles reproduces NM2 scenario A: a
+// reviewer that outlived a killed jig (no signal handler reaches the
+// reviewer source's own defer restore) can leave an untracked failing test
+// file and a tracked edit sitting in the gate lease. The next `jig gate`
+// must not have its oracles fail or get skewed by that leftover dirt - Gate
+// itself now restores the lease to a pristine head before any oracle runs,
+// not only the reviewer source's own pre-dispatch restore inside Round.
+func TestGateWipesLeftoverLeaseDirtBeforeOracles(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+
+	d := newDeps(t, fx)
+	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+
+	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket+"-gate")
+	if err != nil {
+		t.Fatalf("reacquire gate lease: %v", err)
+	}
+	// An untracked failing test file, as a reviewer's own repro would leave
+	// behind: the fixture's "test" oracle runs `go test ./alpha/...`.
+	reproPath := filepath.Join(gateLease.Dir, "alpha", "zz_repro_test.go")
+	repro := "package alpha\n\nimport \"testing\"\n\nfunc TestZZRepro(t *testing.T) { t.Fatal(\"boom\") }\n"
+	if err := os.WriteFile(reproPath, []byte(repro), 0o644); err != nil {
+		t.Fatalf("write leftover repro test: %v", err)
+	}
+	// A tracked edit left uncommitted, as an oracle rewrite or a killed
+	// reviewer's own edit would leave behind.
+	trackedPath := filepath.Join(gateLease.Dir, "alpha", "alpha.go")
+	orig, err := os.ReadFile(trackedPath)
+	if err != nil {
+		t.Fatalf("read tracked file: %v", err)
+	}
+	if err := os.WriteFile(trackedPath, append(orig, []byte("\n// leftover dirt\n")...), 0o644); err != nil {
+		t.Fatalf("dirty tracked file: %v", err)
+	}
+
+	report2, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 2 should succeed despite leftover lease dirt: %v", err)
+	}
+	if report2.Round != 2 || report2.Verdict != "clean" {
+		t.Fatalf("report2 = %+v, want round 2 clean", report2)
+	}
+
+	if _, err := os.Stat(reproPath); !os.IsNotExist(err) {
+		t.Fatalf("leftover untracked repro file still present after Gate: err = %v", err)
+	}
+	status, err := gitx.Run(gateLease.Dir, "status", "--porcelain")
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if status != "" {
+		t.Fatalf("gate lease left dirty after Gate: %q", status)
+	}
+}
+
+// TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin reproduces
+// NM2 scenario B: `--branch` mode's gate lease never commits, so a local
+// commit left behind by a killed reviewer must be discarded - not reviewed
+// and passed clean - and origin advancing between two `--branch` gates must
+// make the second gate review the new head, not a stale local copy that
+// pool.Acquire would otherwise reuse as-is (pool.Acquire never resets an
+// existing local branch).
+func TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+	buildDir := buildLeaseDir(t, fx)
+	branch := ticketBranch(fx.Ticket)
+	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
+		t.Fatalf("push build branch: %v", err)
+	}
+
+	d := newDeps(t, fx)
+	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: branch, Early: true}); err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+	origin1, err := gitx.Run(buildDir, "rev-parse", "origin/"+branch)
+	if err != nil {
+		t.Fatalf("resolve origin/%s: %v", branch, err)
+	}
+
+	// Simulate a killed reviewer's leftover commit in the gate lease: a
+	// local commit ahead of origin, never pushed.
+	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket+"-gate")
+	if err != nil {
+		t.Fatalf("reacquire gate lease: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gateLease.Dir, "leftover.txt"), []byte("leftover reviewer commit\n"), 0o644); err != nil {
+		t.Fatalf("write leftover file: %v", err)
+	}
+	if _, err := gitx.Run(gateLease.Dir, "add", "-A"); err != nil {
+		t.Fatalf("git add leftover: %v", err)
+	}
+	if _, err := gitx.RunEnv(gateLease.Dir, buildGitEnv, "commit", "-m", "leftover reviewer commit"); err != nil {
+		t.Fatalf("commit leftover: %v", err)
+	}
+	leftoverHead, err := gitx.RevParse(gateLease.Dir, "HEAD")
+	if err != nil {
+		t.Fatalf("resolve leftover HEAD: %v", err)
+	}
+	if leftoverHead == origin1 {
+		t.Fatal("test setup: leftover commit did not move HEAD")
+	}
+
+	// Advance origin's branch, as a later build would.
+	if err := os.WriteFile(filepath.Join(buildDir, "alpha", "advance.txt"), []byte("advance\n"), 0o644); err != nil {
+		t.Fatalf("write advance file: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
+		t.Fatalf("git add advance: %v", err)
+	}
+	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "advance origin"); err != nil {
+		t.Fatalf("commit advance: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
+		t.Fatalf("push advance: %v", err)
+	}
+	origin2, err := gitx.Run(buildDir, "rev-parse", "origin/"+branch)
+	if err != nil {
+		t.Fatalf("resolve advanced origin/%s: %v", branch, err)
+	}
+	if origin2 == origin1 {
+		t.Fatal("test setup: origin did not advance")
+	}
+
+	report2, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: branch, Early: true})
+	if err != nil {
+		t.Fatalf("Gate round 2: %v", err)
+	}
+	if report2.Round != 2 {
+		t.Fatalf("report2.Round = %d, want 2", report2.Round)
+	}
+	head2, err := gitx.RevParse(gateLease.Dir, "HEAD")
+	if err != nil {
+		t.Fatalf("resolve gate lease HEAD after round 2: %v", err)
+	}
+	if head2 != origin2 {
+		t.Fatalf("gate lease HEAD after round 2 = %s, want the advanced origin/%s = %s (a stale local copy, or the leftover commit, must not survive)", head2, branch, origin2)
+	}
+}
+
+// TestGateBranchNotFoundOnOrigin checks that gating a branch missing on
+// origin fails loudly with BRANCH_NOT_FOUND, instead of pool.Acquire's own
+// fallback (origin/<target> as the start point for a brand-new local
+// branch) silently validating a branch that was never pushed.
+func TestGateBranchNotFoundOnOrigin(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	d := newDeps(t, fx)
+	_, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: "no-such-branch", Early: true})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "BRANCH_NOT_FOUND" {
+		t.Fatalf("Gate --branch missing on origin: err = %v, want *axi.Error BRANCH_NOT_FOUND", err)
 	}
 }
 

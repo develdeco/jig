@@ -208,9 +208,33 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: acquire lease: %w", err)
 	}
 
+	// Restore the gate lease to a pristine, known-correct head right after
+	// acquire and before any oracle runs. pool.Acquire never resets an
+	// existing local branch (a deliberate rule so a same-run slice's commits
+	// on it survive later acquires), so without this, a reviewer or an
+	// oracle that left the lease dirty or ahead on an earlier, killed jig
+	// (NM2) has its leftovers reviewed by this round's own oracles, or in
+	// --branch mode makes this gate review the stale local copy instead of
+	// origin's current branch tip.
 	if o.Branch == "" {
 		if err := fetchTicketBranchFromBuildLease(lease.Dir, repoName, ticket); err != nil {
 			return GateReport{}, err
+		}
+		if err := resetLeasePristine(lease.Dir, "HEAD"); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease before oracles: %w", err)
+		}
+	} else {
+		// pool.Acquire just fetched origin, so refs/remotes/origin/<branch>
+		// is current. The gate lease never commits (reviewers and oracles are
+		// always undone), so it must always equal origin/<branch> exactly.
+		if _, err := gitx.RevParse(lease.Dir, "refs/remotes/origin/"+branch); err != nil {
+			return GateReport{}, &axi.Error{
+				Msg:  fmt.Sprintf("branch %q does not exist on origin", branch),
+				Code: "BRANCH_NOT_FOUND",
+			}
+		}
+		if err := resetLeasePristine(lease.Dir, "origin/"+branch); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease to origin/%s: %w", branch, err)
 		}
 	}
 
