@@ -1,0 +1,9 @@
+{
+  "verdict": "clean",
+  "findings": [],
+  "closures": [
+    {"id": "r1-f1", "status": "closed", "note": "Add's doc comment now reads \"a + b\"."},
+    {"id": "r1-f2", "status": "closed", "note": "Greet now falls back to a generic greeting for an empty name."}
+  ],
+  "summary": "Round 2 review: both round 1 findings are resolved."
+}
