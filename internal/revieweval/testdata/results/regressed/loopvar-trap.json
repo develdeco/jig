@@ -1,0 +1,15 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "intent",
+      "title": "RunAll captures the loop variable job by reference across goroutines",
+      "detail": "worker/pool.go: job is a shared loop variable; every goroutine may see the last value.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "Potential loop variable capture in RunAll."
+}

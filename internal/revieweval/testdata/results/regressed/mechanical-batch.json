@@ -1,0 +1,31 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "mechanical",
+      "title": "Clamp's doc comment has a typo",
+      "detail": "mathutil/mathutil.go: \"restrict\" should read \"restricts\".",
+      "workspace": "root",
+      "oracle": "test"
+    },
+    {
+      "id": "f2",
+      "class": "intent",
+      "title": "unusedHelper is dead code",
+      "detail": "mathutil/mathutil.go: unusedHelper is never called anywhere in the package.",
+      "workspace": "root",
+      "oracle": "test"
+    },
+    {
+      "id": "f3",
+      "class": "mechanical",
+      "title": "Average is missing a doc comment",
+      "detail": "mathutil/mathutil.go: the exported function Average has no doc comment.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "Three gate findings, one misclassified."
+}

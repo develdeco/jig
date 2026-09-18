@@ -1,0 +1,15 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "intent",
+      "title": "Lookup dereferences a nil user pointer for an unknown id",
+      "detail": "users/lookup.go: store[id] returns nil for an unknown id, and Lookup then dereferences it via u.Name, causing a nil pointer panic.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "One nil-deref risk in Lookup for an unknown id."
+}

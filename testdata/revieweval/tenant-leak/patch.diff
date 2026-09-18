@@ -1,0 +1,25 @@
+diff --git a/billing/invoices.go b/billing/invoices.go
+new file mode 100644
+index 0000000..48f3394
+--- /dev/null
++++ b/billing/invoices.go
+@@ -0,0 +1,19 @@
++package billing
++
++// Invoice is one tenant's invoice record.
++type Invoice struct {
++	ID       string
++	TenantID string
++	Amount   int
++}
++
++var invoices = []Invoice{
++	{ID: "inv-1", TenantID: "acme", Amount: 100},
++	{ID: "inv-2", TenantID: "globex", Amount: 250},
++	{ID: "inv-3", TenantID: "acme", Amount: 75},
++}
++
++// ForTenant returns the invoices belonging to tenantID.
++func ForTenant(tenantID string) []Invoice {
++	return invoices
++}

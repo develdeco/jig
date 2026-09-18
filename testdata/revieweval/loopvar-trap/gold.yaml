@@ -1,0 +1,5 @@
+findings: []
+traps:
+  - id: loopvar-capture
+    title_pattern: "(?i)loop var|captur"
+    file: worker/pool.go

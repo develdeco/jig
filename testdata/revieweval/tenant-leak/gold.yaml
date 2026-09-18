@@ -1,0 +1,6 @@
+findings:
+  - id: tenant-leak
+    class: intent
+    title_pattern: "(?i)tenant|filter"
+    file: billing/invoices.go
+traps: []
