@@ -1,0 +1,15 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "intent",
+      "title": "ForTenant does not filter by tenantID",
+      "detail": "billing/invoices.go: ForTenant returns the whole invoices slice.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "ForTenant does not filter by tenantID."
+}

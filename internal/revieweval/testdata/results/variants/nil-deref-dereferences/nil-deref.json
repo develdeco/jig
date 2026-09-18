@@ -1,0 +1,15 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "intent",
+      "title": "Lookup dereferences a nil *User for an unknown id",
+      "detail": "users/lookup.go: store[id] is nil for an unknown id, and Lookup dereferences it anyway.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "Lookup dereferences a nil pointer."
+}

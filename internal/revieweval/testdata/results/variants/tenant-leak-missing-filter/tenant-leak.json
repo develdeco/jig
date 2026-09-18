@@ -1,0 +1,15 @@
+{
+  "verdict": "findings",
+  "findings": [
+    {
+      "id": "f1",
+      "class": "intent",
+      "title": "Missing tenant filter in ForTenant",
+      "detail": "billing/invoices.go: ForTenant returns invoices for all tenants.",
+      "workspace": "root",
+      "oracle": "test"
+    }
+  ],
+  "closures": [],
+  "summary": "ForTenant needs a tenant filter."
+}

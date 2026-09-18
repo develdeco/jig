@@ -357,6 +357,30 @@ was ambiguous, what was chosen, and why.
   pointer/deref/map/value or panic phrasing). `mechanical-batch`'s three
   patterns were already mutually exclusive by wording; B1's one-to-one
   matching is what stops a single lumped finding from claiming all three.
+- Fix round 2, gold patterns widened to accept plausible correct wording
+  (E1): round 1's tightened patterns (B2) still rejected several one-
+  sentence correct reviews. `nil-deref`'s `(?i)nil (pointer|deref|map|value)
+  |panic` missed "Missing nil check in Lookup" (no "nil pointer/deref"
+  phrase), "Lookup dereferences a nil *User..." (no contiguous "nil deref"
+  phrase, just "dereferences" and "nil" apart), and a review whose only
+  defect wording was "crashes". `tenant-leak`'s pattern missed "Missing
+  tenant filter in ForTenant", "ForTenant does not filter by tenantID", and
+  "ForTenant ignores its tenantID parameter" (the old `ignor\w+ (the
+  )?tenant` required the literal word "the" right after "ignores", so "its"
+  fell through). Patterns now add `derefer|nil check|check (for|against)
+  nil|crash` (nil-deref) and `for all tenants|missing (a )?(tenant
+  )?filter|does(n't| not) filter|ignor\w+ (its |the )?tenant` (tenant-leak).
+  Both still reject the wrong-direction reviews B2 was written to catch
+  ("the map never holds a nil value..."; "values are never nil"; an
+  unrelated ForTenant aliasing finding that never names the tenant filter),
+  proven by a table-driven test per gold entry
+  (`TestGoldPatternsAcceptCorrectAndRejectWrongReviews`) plus
+  `testdata/results/variants/` fixtures that PASS through the full
+  `RunCase` pipeline, not just `scoreCase` in isolation
+  (`TestScorerPassesCorrectVariantsThroughFullScorer`). `mechanical-batch`'s
+  three patterns needed no change; a direct test
+  (`TestMechanicalBatchPatternsStayMutuallyExclusive`) confirms each
+  positive phrasing still matches exactly one entry.
 - Fix round 1, trap coverage (B3): the corpus's only trap lived in
   `loopvar-trap`, a case with zero gold findings, where every finding is a
   false positive by the no-gold rule regardless of whether it matches the trap

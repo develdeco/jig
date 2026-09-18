@@ -135,6 +135,45 @@ func TestScorerRejectsGamedReviews(t *testing.T) {
 	}
 }
 
+// TestScorerPassesCorrectVariantsThroughFullScorer proves the tightened
+// nil-deref and tenant-leak patterns accept plausible correct wording, not
+// just the one exact perfect/ phrasing, by driving each variant through the
+// real pipeline (materialized repo, prompt, ParseReviewResult, scoreCase) -
+// not scoreCase alone. Each variants/<name>/ directory scripts exactly one
+// case's result.json so RunCorpus's ticket-keyed lookup (case name ->
+// "<case>.json") can hold several different correct phrasings for the same
+// case across directories.
+func TestScorerPassesCorrectVariantsThroughFullScorer(t *testing.T) {
+	cases := loadCorpus(t)
+	nilDeref := caseByName(t, cases, "nil-deref")
+	tenantLeak := caseByName(t, cases, "tenant-leak")
+
+	variants := []struct {
+		dir string
+		c   Case
+	}{
+		{"nil-deref-missing-check", nilDeref},
+		{"nil-deref-dereferences", nilDeref},
+		{"nil-deref-does-not-handle", nilDeref},
+		{"tenant-leak-missing-filter", tenantLeak},
+		{"tenant-leak-does-not-filter", tenantLeak},
+		{"tenant-leak-ignores-param", tenantLeak},
+	}
+
+	for _, v := range variants {
+		t.Run(v.dir, func(t *testing.T) {
+			backend := scriptedBackend{dir: filepath.Join("testdata", "results", "variants", v.dir)}
+			score, err := RunCase(t.TempDir(), v.c, backend, "test-model")
+			if err != nil {
+				t.Fatalf("revieweval: run case %s: %v", v.c.Name, err)
+			}
+			if !score.Passed {
+				t.Errorf("variant %s: want PASS, got FAIL (missed=%v fp=%v unmatched=%v reason=%q)", v.dir, score.Missed, score.FalsePositives, score.Unmatched, score.Reason)
+			}
+		})
+	}
+}
+
 // TestScoreCaseFalsePositiveWithNoGoldFindings covers the clean-case rule
 // directly: with zero gold findings, every raised finding is a false
 // positive, whether or not it happens to match a trap.
@@ -147,6 +186,103 @@ func TestScoreCaseFalsePositiveWithNoGoldFindings(t *testing.T) {
 	sc := scoreCase(clean, result)
 	if sc.Passed || len(sc.FalsePositives) != 1 || len(sc.Missed) != 0 || len(sc.Unmatched) != 0 {
 		t.Errorf("clean case with a spurious finding: want FAIL fp=1, got passed=%v fp=%v missed=%v unmatched=%v", sc.Passed, sc.FalsePositives, sc.Missed, sc.Unmatched)
+	}
+}
+
+// TestGoldPatternsAcceptCorrectAndRejectWrongReviews makes nil-deref's and
+// tenant-leak's title_pattern contracts explicit: every plausible correct
+// phrasing of the real defect must match, and every phrasing that only
+// echoes code vocabulary (the wording the gate reviewer might use to argue
+// the OPPOSITE of the defect, or a different defect on the same function)
+// must not. mechanical-batch's three patterns must stay mutually exclusive:
+// each positive phrasing matches exactly one gold entry.
+func TestGoldPatternsAcceptCorrectAndRejectWrongReviews(t *testing.T) {
+	cases := loadCorpus(t)
+	nilDeref := caseByName(t, cases, "nil-deref")
+	tenantLeak := caseByName(t, cases, "tenant-leak")
+
+	tests := []struct {
+		name      string
+		c         Case
+		findingID string
+		text      string
+		want      bool
+	}{
+		{"nil-deref: missing nil check", nilDeref, "nil-deref",
+			"Missing nil check in Lookup", true},
+		{"nil-deref: dereferences a nil pointer", nilDeref, "nil-deref",
+			"Lookup dereferences a nil *User for an unknown id", true},
+		{"nil-deref: does not handle a missing id", nilDeref, "nil-deref",
+			"Lookup does not handle a missing id\nstore[id] yields nil for an unknown id and u.Name crashes", true},
+		{"nil-deref: existing perfect fixture", nilDeref, "nil-deref",
+			"Lookup dereferences a nil user pointer for an unknown id\n" +
+				"users/lookup.go: store[id] returns nil for an unknown id, and Lookup then dereferences it via u.Name, causing a nil pointer panic.", true},
+		{"nil-deref: map is never nil (wrong, opposite claim)", nilDeref, "nil-deref",
+			"the map never holds a nil value, but callers cannot tell whether the id existed", false},
+		{"nil-deref: values are never nil (wrong, opposite claim)", nilDeref, "nil-deref",
+			"values are never nil", false},
+
+		{"tenant-leak: missing tenant filter", tenantLeak, "tenant-leak",
+			"Missing tenant filter in ForTenant\nreturns invoices for all tenants", true},
+		{"tenant-leak: does not filter by tenantID", tenantLeak, "tenant-leak",
+			"ForTenant does not filter by tenantID", true},
+		{"tenant-leak: ignores its tenantID parameter", tenantLeak, "tenant-leak",
+			"ForTenant ignores its tenantID parameter", true},
+		{"tenant-leak: existing perfect fixture", tenantLeak, "tenant-leak",
+			"ForTenant ignores the tenant filter and leaks other tenants' invoices\n" +
+				"billing/invoices.go: ForTenant returns the entire invoices slice regardless of tenantID, leaking other tenants' data.", true},
+		{"tenant-leak: unrelated aliasing finding (wrong defect)", tenantLeak, "tenant-leak",
+			"ForTenant returns the shared package-level slice\n" +
+				"ForTenant hands back the invoices variable directly; callers can mutate it in place.", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx := -1
+			for i, g := range tt.c.Gold.Findings {
+				if g.ID == tt.findingID {
+					idx = i
+				}
+			}
+			if idx == -1 {
+				t.Fatalf("revieweval: no gold finding %q in case %s", tt.findingID, tt.c.Name)
+			}
+			got := tt.c.goldFindingRe[idx].MatchString(tt.text)
+			if got != tt.want {
+				t.Errorf("pattern %q against %q: got match=%v, want %v", tt.c.Gold.Findings[idx].TitlePattern, tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMechanicalBatchPatternsStayMutuallyExclusive proves each of
+// mechanical-batch's three gold patterns matches only its own correct
+// phrasing and none of the others, so one-to-one matching (not overlapping
+// patterns) is what stops a single lumped finding from claiming all three.
+func TestMechanicalBatchPatternsStayMutuallyExclusive(t *testing.T) {
+	cases := loadCorpus(t)
+	mech := caseByName(t, cases, "mechanical-batch")
+
+	tests := []struct {
+		title  string
+		wantID string
+	}{
+		{"Typo in the doc comment restricting Clamp's range", "doc-typo"},
+		{"Dead code: helper is never called", "dead-code"},
+		{"Missing a doc comment on Clamp", "missing-doc"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.wantID, func(t *testing.T) {
+			var matches []string
+			for i, g := range mech.Gold.Findings {
+				if mech.goldFindingRe[i].MatchString(tt.title) {
+					matches = append(matches, g.ID)
+				}
+			}
+			if len(matches) != 1 || matches[0] != tt.wantID {
+				t.Errorf("title %q: want exactly [%s], got %v", tt.title, tt.wantID, matches)
+			}
+		})
 	}
 }
 
