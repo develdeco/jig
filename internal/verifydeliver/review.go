@@ -629,9 +629,8 @@ func findFindingByID(st *store.Store, ticket, id string) (Finding, bool, error) 
 // carriedFindingOracle resolves the oracle a "still-open" closure's
 // jig-carried finding should synthesize with: the oracle of the fix slice
 // prior's own finding produced (intent: fix-<round>-<k>; mechanical: that
-// round's bundle for prior's workspace, singular or per-workspace id), or ""
-// (synthesis then falls back to the manifest's first oracle) when that slice
-// cannot be found.
+// round's bundle for prior's workspace), or "" (synthesis then falls back to
+// the manifest's first oracle) when that slice cannot be found.
 func carriedFindingOracle(st *store.Store, ticket, id string, prior Finding) (string, error) {
 	round, ok := findingRound(id)
 	if !ok {
@@ -641,21 +640,24 @@ func carriedFindingOracle(st *store.Store, ticket, id string, prior Finding) (st
 	if err != nil {
 		return "", err
 	}
-	var wantIDs []string
 	switch prior.Class {
 	case ClassIntent:
-		wantIDs = []string{fmt.Sprintf("fix-%d-%s", round, findingSeq(id))}
-	case ClassMechanical:
-		wantIDs = []string{
-			fmt.Sprintf("fix-%d-mech", round),
-			fmt.Sprintf("fix-%d-mech-%s", round, sanitizeWorkspaceID(prior.Workspace)),
-		}
-	default:
-		return "", nil
-	}
-	for _, s := range slices {
-		for _, want := range wantIDs {
+		want := fmt.Sprintf("fix-%d-%s", round, findingSeq(id))
+		for _, s := range slices {
 			if s.ID == want {
+				return s.Oracle, nil
+			}
+		}
+	case ClassMechanical:
+		// Match the round's mechanical bundle by workspace, not by
+		// rebuilding its id ("fix-<round>-mech" or
+		// "fix-<round>-mech-<sanitized workspace>"): disambiguateFixSliceIDs
+		// can push a colliding bundle's id to a "-2" (or higher) suffix that
+		// sanitizeWorkspaceID alone would never produce, which would
+		// otherwise resolve a different workspace's bundle's oracle here.
+		prefix := fmt.Sprintf("fix-%d-mech", round)
+		for _, s := range slices {
+			if s.FromGate == round && s.Workspace == prior.Workspace && strings.HasPrefix(s.ID, prefix) {
 				return s.Oracle, nil
 			}
 		}

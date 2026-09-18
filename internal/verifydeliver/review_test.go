@@ -1455,3 +1455,40 @@ func TestDisambiguateFixSliceIDsSkipsTakenSuffixes(t *testing.T) {
 		}
 	}
 }
+
+// TestCarriedFindingOracleMatchesByWorkspaceNotUndisambiguatedID checks F4:
+// when two mechanical bundles in different workspaces collide on the
+// sanitized id ("svc/a" and "svc:a" both give "fix-1-mech-svc-a") and
+// disambiguateFixSliceIDs pushes the second to "fix-1-mech-svc-a-2",
+// carriedFindingOracle for a still-open finding from the second workspace
+// must resolve the second bundle's own oracle, not the first workspace's
+// bundle it would get by rebuilding "fix-1-mech-svc-a" from the workspace
+// id alone.
+func TestCarriedFindingOracleMatchesByWorkspaceNotUndisambiguatedID(t *testing.T) {
+	_, st, ticket := newRoundInputRepo(t)
+	slices := []store.Slice{
+		{ID: "fix-1-mech-svc-a", Workspace: "svc/a", Oracle: "oracle-a", FromGate: 1, Rung: staircase.RungCheapest},
+		{ID: "fix-1-mech-svc-a-2", Workspace: "svc:a", Oracle: "oracle-b", FromGate: 1, Rung: staircase.RungCheapest},
+	}
+	if err := st.AppendSlices(ticket, slices); err != nil {
+		t.Fatalf("AppendSlices: %v", err)
+	}
+
+	prior := Finding{ID: "r1-f2", Class: ClassMechanical, Workspace: "svc:a"}
+	oracle, err := carriedFindingOracle(st, ticket, "r1-f2", prior)
+	if err != nil {
+		t.Fatalf("carriedFindingOracle: %v", err)
+	}
+	if oracle != "oracle-b" {
+		t.Fatalf("oracle = %q, want %q (the second, disambiguated workspace's own bundle)", oracle, "oracle-b")
+	}
+
+	priorFirst := Finding{ID: "r1-f1", Class: ClassMechanical, Workspace: "svc/a"}
+	oracleFirst, err := carriedFindingOracle(st, ticket, "r1-f1", priorFirst)
+	if err != nil {
+		t.Fatalf("carriedFindingOracle: %v", err)
+	}
+	if oracleFirst != "oracle-a" {
+		t.Fatalf("oracle = %q, want %q (the first workspace's own bundle)", oracleFirst, "oracle-a")
+	}
+}
