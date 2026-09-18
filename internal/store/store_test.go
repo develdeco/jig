@@ -542,13 +542,15 @@ func TestPushLeavesNoMidRebaseOnConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := st.Push("local change"); err == nil {
-		t.Fatal("Push should fail: the retry pull --rebase conflicts on project.yaml")
+	err := st.Push("local change")
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "STORE_CONFLICT" {
+		t.Fatalf("Push with a conflicting retry pull: err = %v, want *axi.Error STORE_CONFLICT", err)
 	}
 
-	mid, err := inProgressRebaseOrMerge(work)
-	if err != nil {
-		t.Fatalf("inProgressRebaseOrMerge: %v", err)
+	mid, ierr := inProgressRebaseOrMerge(work)
+	if ierr != nil {
+		t.Fatalf("inProgressRebaseOrMerge: %v", ierr)
 	}
 	if mid {
 		t.Fatal("Push left the store mid-rebase after a failed retry pull")
@@ -607,6 +609,148 @@ func TestSyncRefusesWhileMidRebase(t *testing.T) {
 	}
 	if !midAfter {
 		t.Fatal("Sync must not touch the rebase state; only the operator resolves it")
+	}
+}
+
+// TestPushRefusesWhileMidMerge checks F2: Push (as `jig requeue`, which
+// never Syncs first) refuses with STORE_CONFLICT when the store was left
+// mid-merge by hand (a real conflicting `git merge`), instead of staging
+// and committing the unresolved conflict markers as a merge commit and
+// pushing them to the shared store remote.
+func TestPushRefusesWhileMidMerge(t *testing.T) {
+	st, work, remote := newTestRemoteStore(t)
+
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "commit", "-am", "local change")
+
+	other := t.TempDir()
+	runGit(t, "", "clone", remote, other)
+	runGit(t, other, "config", "user.name", "other")
+	runGit(t, other, "config", "user.email", "other@example.invalid")
+	if err := os.WriteFile(filepath.Join(other, "project.yaml"), []byte("schema_version: 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "commit", "-am", "remote change")
+	runGit(t, other, "push", "origin", "main")
+
+	runGit(t, work, "fetch", "origin")
+	if _, err := gitx.Run(work, "merge", "origin/main"); err == nil {
+		t.Fatal("expected the merge to conflict")
+	}
+	mid, err := inProgressRebaseOrMerge(work)
+	if err != nil {
+		t.Fatalf("inProgressRebaseOrMerge: %v", err)
+	}
+	if !mid {
+		t.Fatal("fixture did not leave the repo mid-merge; test setup is wrong")
+	}
+
+	beforeCount := runGit(t, work, "rev-list", "--count", "HEAD")
+	remoteBefore := runGit(t, "", "--git-dir", remote, "rev-parse", "main")
+
+	err = st.Push("requeue from brief diff")
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "STORE_CONFLICT" {
+		t.Fatalf("Push mid-merge: err = %v, want *axi.Error STORE_CONFLICT", err)
+	}
+
+	afterCount := runGit(t, work, "rev-list", "--count", "HEAD")
+	if beforeCount != afterCount {
+		t.Fatalf("Push committed while mid-merge: HEAD count %q -> %q", beforeCount, afterCount)
+	}
+	remoteAfter := runGit(t, "", "--git-dir", remote, "rev-parse", "main")
+	if remoteBefore != remoteAfter {
+		t.Fatal("Push pushed while mid-merge: remote main moved")
+	}
+}
+
+// TestPushRefusesWhileMidRebase checks F2: Push refuses with STORE_CONFLICT
+// when the store is already mid-rebase (left by hand, or by the operator's
+// own conflicting `git pull --rebase`), instead of running its own
+// `add -A`/commit over the unresolved conflict, and leaves the rebase state
+// untouched afterward for the operator to resolve.
+func TestPushRefusesWhileMidRebase(t *testing.T) {
+	st, work, remote := newTestRemoteStore(t)
+
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "commit", "-am", "local change")
+
+	other := t.TempDir()
+	runGit(t, "", "clone", remote, other)
+	runGit(t, other, "config", "user.name", "other")
+	runGit(t, other, "config", "user.email", "other@example.invalid")
+	if err := os.WriteFile(filepath.Join(other, "project.yaml"), []byte("schema_version: 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "commit", "-am", "remote change")
+	runGit(t, other, "push", "origin", "main")
+
+	runGit(t, work, "fetch", "origin")
+	if _, err := gitx.Run(work, "rebase", "origin/main"); err == nil {
+		t.Fatal("expected the rebase to conflict")
+	}
+	mid, err := inProgressRebaseOrMerge(work)
+	if err != nil {
+		t.Fatalf("inProgressRebaseOrMerge: %v", err)
+	}
+	if !mid {
+		t.Fatal("fixture did not leave the repo mid-rebase; test setup is wrong")
+	}
+
+	err = st.Push("requeue from brief diff")
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "STORE_CONFLICT" {
+		t.Fatalf("Push mid-rebase: err = %v, want *axi.Error STORE_CONFLICT", err)
+	}
+
+	midAfter, err := inProgressRebaseOrMerge(work)
+	if err != nil {
+		t.Fatalf("inProgressRebaseOrMerge after Push: %v", err)
+	}
+	if !midAfter {
+		t.Fatal("Push must not touch the rebase state; only the operator resolves it")
+	}
+}
+
+// TestSyncOwnConflictingPullAbortsAndWraps checks F2: when Sync's own
+// pull --rebase conflicts (not a pre-existing mid-rebase state, but a
+// conflict Sync's own retry causes), Sync still aborts it - dropping that
+// abort (the store_nosyncabort mutant) leaves the store mid-rebase for the
+// next command to trip over - and returns STORE_CONFLICT instead of git's
+// raw, by-then-stale pull error.
+func TestSyncOwnConflictingPullAbortsAndWraps(t *testing.T) {
+	st, work, remote := newTestRemoteStore(t)
+
+	other := t.TempDir()
+	runGit(t, "", "clone", remote, other)
+	runGit(t, other, "config", "user.name", "other")
+	runGit(t, other, "config", "user.email", "other@example.invalid")
+	if err := os.WriteFile(filepath.Join(other, "project.yaml"), []byte("schema_version: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "commit", "-am", "remote change")
+	runGit(t, other, "push", "origin", "main")
+
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := st.Sync()
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "STORE_CONFLICT" {
+		t.Fatalf("Sync with its own conflicting pull: err = %v, want *axi.Error STORE_CONFLICT", err)
+	}
+
+	mid, ierr := inProgressRebaseOrMerge(work)
+	if ierr != nil {
+		t.Fatalf("inProgressRebaseOrMerge: %v", ierr)
+	}
+	if mid {
+		t.Fatal("Sync left the store mid-rebase after its own conflicting pull")
 	}
 }
 
