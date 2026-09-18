@@ -242,13 +242,22 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease before oracles: %w", err)
 		}
 	} else {
-		// pool.Acquire just fetched origin, so refs/remotes/origin/<branch>
-		// is current. The gate lease never commits (reviewers and oracles are
-		// always undone), so it must always equal origin/<branch> exactly.
+		// pool.Acquire's own fetch has no --prune, so a branch deleted on
+		// origin since an earlier gate on this same lease would otherwise
+		// leave refs/remotes/origin/<branch> stale, and the check below
+		// would pass against the last-fetched tip instead of catching the
+		// deletion. Prune here so a deleted branch is always caught.
+		if _, err := gitx.Run(lease.Dir, "fetch", "--prune", "origin"); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: fetch --prune origin: %w", err)
+		}
+		// refs/remotes/origin/<branch> is now current. The gate lease never
+		// commits (reviewers and oracles are always undone), so it must
+		// always equal origin/<branch> exactly.
 		if _, err := gitx.RevParse(lease.Dir, "refs/remotes/origin/"+branch); err != nil {
 			return GateReport{}, &axi.Error{
 				Msg:  fmt.Sprintf("branch %q does not exist on origin", branch),
 				Code: "BRANCH_NOT_FOUND",
+				Help: []string{"Push the branch to origin, then rerun."},
 			}
 		}
 		if err := resetLeasePristine(lease.Dir, "origin/"+branch); err != nil {

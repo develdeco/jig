@@ -622,6 +622,41 @@ func TestGateBranchNotFoundOnOrigin(t *testing.T) {
 	}
 }
 
+// TestGateBranchDeletedOnOriginAfterEarlierGate checks F3: a branch that
+// existed and gated cleanly, then got deleted on origin before the next
+// gate, must fail BRANCH_NOT_FOUND rather than reviewing the stale tip that
+// pool.Acquire's own fetch (no --prune) leaves behind in
+// refs/remotes/origin/<branch>.
+func TestGateBranchDeletedOnOriginAfterEarlierGate(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+	buildDir := buildLeaseDir(t, fx)
+	branch := "feature-x"
+	if _, err := gitx.Run(buildDir, "push", "origin", "HEAD:refs/heads/"+branch); err != nil {
+		t.Fatalf("push branch: %v", err)
+	}
+
+	d := newDeps(t, fx)
+	opts := GateOpts{Ticket: fx.Ticket, Branch: branch, Early: true}
+	if _, err := Gate(d, alwaysCleanSource{}, opts); err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+
+	if _, err := gitx.Run(buildDir, "push", "origin", "--delete", branch); err != nil {
+		t.Fatalf("delete branch on origin: %v", err)
+	}
+
+	_, err := Gate(d, alwaysCleanSource{}, opts)
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "BRANCH_NOT_FOUND" {
+		t.Fatalf("Gate --branch after origin deleted it: err = %v, want *axi.Error BRANCH_NOT_FOUND", err)
+	}
+	if len(ae.Help) == 0 {
+		t.Fatal("BRANCH_NOT_FOUND has no Help line")
+	}
+}
+
 func TestGatePRModeNotImplemented(t *testing.T) {
 	_, err := Gate(Deps{}, nil, GateOpts{PRMode: true})
 	var ae *axi.Error
