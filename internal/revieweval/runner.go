@@ -91,6 +91,18 @@ func absPath(p string) string {
 	return abs
 }
 
+// failedScore builds the CaseScore for a case that never produced a
+// scoreable result: every gold finding counts as missed (not left at zero),
+// so a run with dispatch or parse failures does not inflate recall by
+// dropping those findings from the denominator.
+func failedScore(c Case, reason string) CaseScore {
+	sc := CaseScore{Name: c.Name, Reason: reason}
+	for _, g := range c.Gold.Findings {
+		sc.Missed = append(sc.Missed, g.ID)
+	}
+	return sc
+}
+
 // RunCase materializes c's repo and a work dir (both under workDir),
 // dispatches one reviewer round through backend using the exact
 // verifydeliver prompt/parse contract, and scores the result against c's
@@ -167,16 +179,16 @@ func RunCase(workDir string, c Case, backend session.Backend, model string) (Cas
 		Screen:     false,
 	}
 	if err := backend.Run(dispatch); err != nil {
-		return CaseScore{Name: c.Name, Reason: err.Error()}, nil
+		return failedScore(c, err.Error()), nil
 	}
 
 	resultData, err := os.ReadFile(resultPath)
 	if err != nil {
-		return CaseScore{Name: c.Name, Reason: fmt.Sprintf("no result.json written at %s", resultPath)}, nil
+		return failedScore(c, fmt.Sprintf("no result.json written at %s", resultPath)), nil
 	}
 	result, err := verifydeliver.ParseReviewResult(resultData)
 	if err != nil {
-		return CaseScore{Name: c.Name, Reason: err.Error()}, nil
+		return failedScore(c, err.Error()), nil
 	}
 	return scoreCase(c, result), nil
 }

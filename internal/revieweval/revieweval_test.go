@@ -245,12 +245,13 @@ func TestScoreCaseOneToOneMatching(t *testing.T) {
 
 // TestRunCaseFailsWithReasonOnDispatchError proves a failed dispatch fails
 // the case via Reason rather than as a Go error, so a corpus run keeps
-// scoring the rest of the cases.
+// scoring the rest of the cases, and that it counts the case's gold
+// findings as missed rather than dropping them from recall's denominator.
 func TestRunCaseFailsWithReasonOnDispatchError(t *testing.T) {
 	cases := loadCorpus(t)
-	c := caseByName(t, cases, "clean")
+	c := caseByName(t, cases, "nil-deref")
 
-	backend := scriptedBackend{dir: filepath.Join("testdata", "results", "regressed")} // no clean.json there
+	backend := scriptedBackend{dir: t.TempDir()} // empty dir: no scripted result for any ticket
 	score, err := RunCase(t.TempDir(), c, backend, "test-model")
 	if err != nil {
 		t.Fatalf("revieweval: RunCase returned an error instead of a Reason: %v", err)
@@ -258,13 +259,20 @@ func TestRunCaseFailsWithReasonOnDispatchError(t *testing.T) {
 	if score.Passed || score.Reason == "" {
 		t.Errorf("want a failed case with a Reason, got passed=%v reason=%q", score.Passed, score.Reason)
 	}
+	if len(score.Missed) != len(c.Gold.Findings) {
+		t.Errorf("want every gold finding counted as missed on dispatch failure, got missed=%v (gold has %d)", score.Missed, len(c.Gold.Findings))
+	}
+	if len(score.Found) != 0 {
+		t.Errorf("want no found findings on dispatch failure, got found=%v", score.Found)
+	}
 }
 
 // TestRunCaseFailsWithReasonOnInvalidResult proves a strictly-invalid
-// result.json (ParseReviewResult's job) fails the case via Reason too.
+// result.json (ParseReviewResult's job) fails the case via Reason too, and
+// also counts its gold findings as missed.
 func TestRunCaseFailsWithReasonOnInvalidResult(t *testing.T) {
 	cases := loadCorpus(t)
-	c := caseByName(t, cases, "clean")
+	c := caseByName(t, cases, "nil-deref")
 
 	backend := invalidResultBackend{}
 	score, err := RunCase(t.TempDir(), c, backend, "test-model")
@@ -273,5 +281,8 @@ func TestRunCaseFailsWithReasonOnInvalidResult(t *testing.T) {
 	}
 	if score.Passed || score.Reason == "" {
 		t.Errorf("want a failed case with a Reason, got passed=%v reason=%q", score.Passed, score.Reason)
+	}
+	if len(score.Missed) != len(c.Gold.Findings) {
+		t.Errorf("want every gold finding counted as missed on an invalid result, got missed=%v (gold has %d)", score.Missed, len(c.Gold.Findings))
 	}
 }
