@@ -396,6 +396,70 @@ func TestReviewScope(t *testing.T) {
 			t.Fatalf("scope=%q base=%q, want full/%s (fallback after unknown object)", scope, base, c1)
 		}
 	})
+
+	t.Run("full scope base is the merge base after a rebase onto an advanced target, not the stale start sha", func(t *testing.T) {
+		// The ticket starts at T0, is cut and worked on, then main advances
+		// to T1 (an unrelated commit landed after the ticket started) and
+		// the ticket branch is rebased onto it. T0 is still technically an
+		// ancestor of the rebased head, so the old bug picked it as the
+		// base; the real fork point, and the correct base, is T1.
+		rdir := t.TempDir()
+		rrun := func(args ...string) string {
+			t.Helper()
+			out, err := gitx.Run(rdir, args...)
+			if err != nil {
+				t.Fatalf("git %v: %v", args, err)
+			}
+			return out
+		}
+		write := func(name, content string) {
+			t.Helper()
+			if err := os.WriteFile(filepath.Join(rdir, name), []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", name, err)
+			}
+		}
+		rrun("init", "-b", "main")
+		rrun("config", "user.name", "jig-fixture")
+		rrun("config", "user.email", "fixture@example.invalid")
+		write("f.txt", "0")
+		rrun("add", "-A")
+		rrun("commit", "-m", "T0")
+		t0 := rrun("rev-parse", "HEAD")
+		rrun("update-ref", "refs/remotes/origin/main", t0)
+
+		rrun("checkout", "-b", "jig/T-1")
+		write("ticket.txt", "work")
+		rrun("add", "-A")
+		rrun("commit", "-m", "ticket work")
+
+		rrun("checkout", "main")
+		write("main.txt", "unrelated")
+		rrun("add", "-A")
+		rrun("commit", "-m", "T1")
+		t1 := rrun("rev-parse", "HEAD")
+		rrun("update-ref", "refs/remotes/origin/main", t1)
+
+		rrun("checkout", "jig/T-1")
+		rrun("rebase", "main")
+		head := rrun("rev-parse", "HEAD")
+
+		st := &store.Store{Root: t.TempDir()}
+		ticket := "T-1"
+		if err := os.MkdirAll(st.TicketDir(ticket), 0o755); err != nil {
+			t.Fatalf("mkdir ticket dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(st.TicketDir(ticket), "start.repo.sha"), []byte(t0+"\n"), 0o644); err != nil {
+			t.Fatalf("write start sha: %v", err)
+		}
+
+		scope, base, err := reviewScope(RoundInput{Store: st, Ticket: ticket, Round: 1, LeaseDir: rdir, RepoName: "repo", Target: "main"}, head)
+		if err != nil {
+			t.Fatalf("reviewScope: %v", err)
+		}
+		if scope != "full" || base != t1 {
+			t.Fatalf("scope=%q base=%q, want full/%s (merge-base, not the stale start sha %s)", scope, base, t1, t0)
+		}
+	})
 }
 
 // writeReportYAMLDirect writes rep as round n's report.yaml under st,
@@ -420,15 +484,18 @@ func writeReportYAMLDirect(t *testing.T, st *store.Store, ticket string, n int, 
 // and hands it to a per-attempt scripted function, writing its
 // ReviewResult back to ResultJSON. commitFirst, when set, makes it commit
 // a trivial change in the worktree before writing the result (to exercise
-// the forward-only guard); writeNothing, when set, skips the write
-// entirely (to exercise the missing-result-json path without touching a
-// stale file).
+// the forward-only guard); dirtyFirst leaves an uncommitted edit to a
+// tracked file (seed.txt); untrackedFirst writes an untracked scratch file;
+// writeNothing, when set, skips the write entirely (to exercise the
+// missing-result-json path without touching a stale file).
 type scriptedReviewBackend struct {
-	t            *testing.T
-	byAttempt    map[int]func(ReviewRequest) ReviewResult
-	failErr      error
-	commitFirst  bool
-	writeNothing bool
+	t              *testing.T
+	byAttempt      map[int]func(ReviewRequest) ReviewResult
+	failErr        error
+	commitFirst    bool
+	dirtyFirst     bool
+	untrackedFirst bool
+	writeNothing   bool
 }
 
 func (b *scriptedReviewBackend) Run(d session.Dispatch) error {
@@ -444,6 +511,16 @@ func (b *scriptedReviewBackend) Run(d session.Dispatch) error {
 		}
 		if _, err := gitx.RunEnv(d.Worktree, buildGitEnv, "commit", "-m", "reviewer should never do this"); err != nil {
 			b.t.Fatalf("stub: git commit: %v", err)
+		}
+	}
+	if b.dirtyFirst {
+		if err := os.WriteFile(filepath.Join(d.Worktree, "seed.txt"), []byte("reviewer edit\n"), 0o644); err != nil {
+			b.t.Fatalf("stub: dirty tracked file: %v", err)
+		}
+	}
+	if b.untrackedFirst {
+		if err := os.WriteFile(filepath.Join(d.Worktree, "reviewer-scratch.txt"), []byte("scratch\n"), 0o644); err != nil {
+			b.t.Fatalf("stub: write untracked file: %v", err)
 		}
 	}
 	if b.writeNothing {
@@ -587,6 +664,99 @@ func TestReviewerGateSourceUnknownClosureID(t *testing.T) {
 	}
 }
 
+// TestReviewerGateSourceMissingClosureInvalid checks A4: a result that
+// leaves a prior open finding without any closure at all is REVIEW_INVALID,
+// not silently accepted (which used to let an unclosed id linger in
+// prior_findings forever).
+func TestReviewerGateSourceMissingClosureInvalid(t *testing.T) {
+	dir, st, ticket := newRoundInputRepo(t)
+	writeFindingsFile(t, st, ticket, 1, findingsFile{Findings: []Finding{
+		{ID: "r1-f1", Class: ClassIntent, Title: "A", Status: StatusOpen},
+		{ID: "r1-f2", Class: ClassIntent, Title: "B", Status: StatusOpen},
+	}})
+	writeReportYAMLDirect(t, st, ticket, 1, reportYAML{Round: 1})
+
+	backend := &scriptedReviewBackend{t: t, byAttempt: map[int]func(ReviewRequest) ReviewResult{
+		2: func(ReviewRequest) ReviewResult {
+			// Only closes r1-f1; r1-f2 gets no closure at all.
+			return ReviewResult{Verdict: "clean", Closures: []Closure{{ID: "r1-f1", Status: "closed", Note: "n"}}}
+		},
+	}}
+	_, _, err := NewReviewerGateSource(backend).Round(RoundInput{Store: st, Ticket: ticket, Round: 2, LeaseDir: dir, RepoName: "repo", Target: "main", Manifest: oneWorkspaceManifest})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "REVIEW_INVALID" {
+		t.Fatalf("err = %v, want *axi.Error REVIEW_INVALID (missing closure for r1-f2)", err)
+	}
+}
+
+// TestReviewerGateSourceDuplicateClosureInvalid checks A4: two closures for
+// the same prior finding id is REVIEW_INVALID.
+func TestReviewerGateSourceDuplicateClosureInvalid(t *testing.T) {
+	dir, st, ticket := newRoundInputRepo(t)
+	writeFindingsFile(t, st, ticket, 1, findingsFile{Findings: []Finding{
+		{ID: "r1-f1", Class: ClassIntent, Title: "A", Status: StatusOpen},
+	}})
+	writeReportYAMLDirect(t, st, ticket, 1, reportYAML{Round: 1})
+
+	backend := &scriptedReviewBackend{t: t, byAttempt: map[int]func(ReviewRequest) ReviewResult{
+		2: func(ReviewRequest) ReviewResult {
+			return ReviewResult{Verdict: "clean", Closures: []Closure{
+				{ID: "r1-f1", Status: "closed", Note: "n"},
+				{ID: "r1-f1", Status: "still-open", Note: "actually not"},
+			}}
+		},
+	}}
+	_, _, err := NewReviewerGateSource(backend).Round(RoundInput{Store: st, Ticket: ticket, Round: 2, LeaseDir: dir, RepoName: "repo", Target: "main", Manifest: oneWorkspaceManifest})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "REVIEW_INVALID" {
+		t.Fatalf("err = %v, want *axi.Error REVIEW_INVALID (duplicate closure for r1-f1)", err)
+	}
+}
+
+// TestReviewerGateSourceStillOpenClosureCarriesForward checks A4's
+// carry-forward: a "still-open" closure produces a jig-side finding in this
+// round (not a re-raise from the reviewer), copying class/title/workspace
+// from the prior finding, extending detail with the closure's note, and
+// inheriting the oracle of the fix slice the prior finding produced.
+func TestReviewerGateSourceStillOpenClosureCarriesForward(t *testing.T) {
+	dir, st, ticket := newRoundInputRepo(t)
+	writeFindingsFile(t, st, ticket, 1, findingsFile{Findings: []Finding{
+		{ID: "r1-f1", Class: ClassIntent, Title: "Fix the leak", Detail: "detail here", Workspace: "root", Status: StatusOpen},
+	}})
+	writeReportYAMLDirect(t, st, ticket, 1, reportYAML{Round: 1, ReviewedSHA: map[string]string{}})
+	if err := st.AppendSlices(ticket, []store.Slice{{ID: "fix-1-1", Workspace: "root", Goal: "Fix the leak", Oracle: "special-oracle"}}); err != nil {
+		t.Fatalf("AppendSlices: %v", err)
+	}
+
+	backend := &scriptedReviewBackend{t: t, byAttempt: map[int]func(ReviewRequest) ReviewResult{
+		2: func(ReviewRequest) ReviewResult {
+			return ReviewResult{Verdict: "clean", Closures: []Closure{{ID: "r1-f1", Status: "still-open", Note: "still leaking"}}}
+		},
+	}}
+	round, ok, err := NewReviewerGateSource(backend).Round(RoundInput{Store: st, Ticket: ticket, Round: 2, LeaseDir: dir, RepoName: "repo", Target: "main", Manifest: oneWorkspaceManifest})
+	if err != nil {
+		t.Fatalf("Round: %v", err)
+	}
+	if !ok || round.Review == nil {
+		t.Fatalf("round = %+v, want an ok review", round)
+	}
+	findings := round.Review.Findings
+	if len(findings) != 1 {
+		t.Fatalf("findings = %+v, want 1 carried finding", findings)
+	}
+	f := findings[0]
+	if f.ID != "r2-f1" || f.Class != ClassIntent || f.Title != "Fix the leak" || f.Workspace != "root" || f.Status != StatusOpen {
+		t.Fatalf("carried finding = %+v, want id r2-f1, intent, \"Fix the leak\", root, open", f)
+	}
+	wantDetail := "detail here\n\nStill open in round 2: still leaking"
+	if f.Detail != wantDetail {
+		t.Fatalf("carried finding detail = %q, want %q", f.Detail, wantDetail)
+	}
+	if f.Oracle != "special-oracle" {
+		t.Fatalf("carried finding oracle = %q, want %q (inherited from fix-1-1)", f.Oracle, "special-oracle")
+	}
+}
+
 // TestReviewerGateSourceStaleResultDeletedBeforeDispatch checks that a
 // stale result.json left by a previous attempt is removed before dispatch,
 // so a backend that writes nothing this attempt fails with REVIEW_FAILED
@@ -632,6 +802,109 @@ func TestReviewerGateSourceForwardOnlyGuard(t *testing.T) {
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "REVIEW_INVALID" {
 		t.Fatalf("err = %v, want *axi.Error REVIEW_INVALID", err)
+	}
+}
+
+// TestReviewerGateSourceForwardOnlyGuardRestoresLease checks that a
+// reviewer committing in the lease is REVIEW_INVALID (as
+// TestReviewerGateSourceForwardOnlyGuard already checks) AND that the lease
+// is restored to head afterward: --branch mode's local branch ref must move
+// back too, since HEAD following the branch is what makes reset --hard do
+// that.
+func TestReviewerGateSourceForwardOnlyGuardRestoresLease(t *testing.T) {
+	dir, st, ticket := newRoundInputRepo(t)
+	head, err := gitx.RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	backend := &scriptedReviewBackend{t: t, commitFirst: true, byAttempt: map[int]func(ReviewRequest) ReviewResult{
+		1: func(ReviewRequest) ReviewResult { return ReviewResult{Verdict: "clean"} },
+	}}
+	_, _, err = NewReviewerGateSource(backend).Round(RoundInput{Store: st, Ticket: ticket, Round: 1, LeaseDir: dir, RepoName: "repo", Target: "main", Manifest: oneWorkspaceManifest})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "REVIEW_INVALID" {
+		t.Fatalf("err = %v, want *axi.Error REVIEW_INVALID", err)
+	}
+	after, err := gitx.RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD after Round: %v", err)
+	}
+	if after != head {
+		t.Fatalf("lease HEAD = %s after a rejected round, want restored to %s", after, head)
+	}
+	if status, err := gitx.Run(dir, "status", "--porcelain"); err != nil || status != "" {
+		t.Fatalf("lease not clean after a rejected round: status=%q err=%v", status, err)
+	}
+}
+
+// TestReviewerGateSourceUntrackedReviewerFileWiped checks that an untracked
+// file a reviewer leaves behind fails the round (the guard already used
+// --untracked-files=no before this fix, so this alone would not have caught
+// it) and is gone from the lease afterward, so it does not poison a later,
+// well-behaved round on the same lease.
+func TestReviewerGateSourceUntrackedReviewerFileWiped(t *testing.T) {
+	dir, st, ticket := newRoundInputRepo(t)
+	backend := &scriptedReviewBackend{t: t, untrackedFirst: true, byAttempt: map[int]func(ReviewRequest) ReviewResult{
+		1: func(ReviewRequest) ReviewResult { return ReviewResult{Verdict: "clean"} },
+	}}
+	round, ok, err := NewReviewerGateSource(backend).Round(RoundInput{Store: st, Ticket: ticket, Round: 1, LeaseDir: dir, RepoName: "repo", Target: "main", Manifest: oneWorkspaceManifest})
+	if err != nil {
+		t.Fatalf("Round with an untracked reviewer file: %v", err)
+	}
+	if !ok || round.Review == nil || round.Review.Scope == "" {
+		t.Fatalf("round = %+v, want an ok clean review", round)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "reviewer-scratch.txt")); !os.IsNotExist(err) {
+		t.Fatalf("reviewer's untracked file survived Round: err=%v", err)
+	}
+}
+
+// TestReviewerGateSourceUncommittedTrackedEditThenRetry checks scenario (1)
+// from A2: a reviewer that leaves an uncommitted tracked edit gets
+// REVIEW_INVALID, and a following well-behaved round on the same lease
+// succeeds (the edit does not survive to poison it).
+func TestReviewerGateSourceUncommittedTrackedEditThenRetry(t *testing.T) {
+	dir, st, ticket := newRoundInputRepo(t)
+	bad := &scriptedReviewBackend{t: t, dirtyFirst: true, byAttempt: map[int]func(ReviewRequest) ReviewResult{
+		1: func(ReviewRequest) ReviewResult { return ReviewResult{Verdict: "clean"} },
+	}}
+	_, _, err := NewReviewerGateSource(bad).Round(RoundInput{Store: st, Ticket: ticket, Round: 1, LeaseDir: dir, RepoName: "repo", Target: "main", Manifest: oneWorkspaceManifest})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "REVIEW_INVALID" {
+		t.Fatalf("err = %v, want *axi.Error REVIEW_INVALID", err)
+	}
+
+	good := &scriptedReviewBackend{t: t, byAttempt: map[int]func(ReviewRequest) ReviewResult{
+		2: func(ReviewRequest) ReviewResult { return ReviewResult{Verdict: "clean"} },
+	}}
+	round, ok, err := NewReviewerGateSource(good).Round(RoundInput{Store: st, Ticket: ticket, Round: 2, LeaseDir: dir, RepoName: "repo", Target: "main", Manifest: oneWorkspaceManifest})
+	if err != nil {
+		t.Fatalf("well-behaved retry after a poisoned lease: %v", err)
+	}
+	if !ok || round.Review == nil {
+		t.Fatalf("round = %+v, want an ok review", round)
+	}
+}
+
+// TestReviewerGateSourcePreDispatchDirtNotBlamedOnReviewer checks scenario
+// (4) from A2 / conformance M3: a tracked file dirtied before Round is
+// called (as a gate oracle rewriting a file would) must not fail a
+// well-behaved reviewer round with REVIEW_INVALID, since the pre-dispatch
+// pristine restore wipes it before the reviewer ever runs.
+func TestReviewerGateSourcePreDispatchDirtNotBlamedOnReviewer(t *testing.T) {
+	dir, st, ticket := newRoundInputRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("oracle rewrote this\n"), 0o644); err != nil {
+		t.Fatalf("dirty seed.txt before Round: %v", err)
+	}
+	backend := &scriptedReviewBackend{t: t, byAttempt: map[int]func(ReviewRequest) ReviewResult{
+		1: func(ReviewRequest) ReviewResult { return ReviewResult{Verdict: "clean"} },
+	}}
+	round, ok, err := NewReviewerGateSource(backend).Round(RoundInput{Store: st, Ticket: ticket, Round: 1, LeaseDir: dir, RepoName: "repo", Target: "main", Manifest: oneWorkspaceManifest})
+	if err != nil {
+		t.Fatalf("Round with pre-existing oracle dirt: %v, want no error (dirt wiped before dispatch)", err)
+	}
+	if !ok || round.Review == nil {
+		t.Fatalf("round = %+v, want an ok clean review", round)
 	}
 }
 
@@ -753,7 +1026,9 @@ func TestGateReviewerTwoRounds(t *testing.T) {
 	}
 
 	var triageInput []Finding
+	triageCallCount := 0
 	triage := func(open []Finding) []Finding {
+		triageCallCount++
 		triageInput = append([]Finding{}, open...)
 		var kept []Finding
 		for _, f := range open {
@@ -852,20 +1127,53 @@ func TestGateReviewerTwoRounds(t *testing.T) {
 	landFixSliceGreen(t, d.Store, fx.Ticket, buildDir, "fix-1-mech")
 	landFixSliceGreen(t, d.Store, fx.Ticket, buildDir, "fix-1-2")
 
+	// A5: round 2 re-raises the round-1-dismissed "Clamp off by one" with
+	// case/spacing drift, alongside closing every prior finding. Jig's
+	// mechanical dismissal must catch the drifted title before Triage ever
+	// sees it, so the round still ends up clean with no fix-2-* slice.
 	backend.byAttempt[2] = func(req ReviewRequest) ReviewResult {
 		var closures []Closure
 		for _, pf := range req.PriorFindings {
 			closures = append(closures, Closure{ID: pf.ID, Status: "closed", Note: "resolved"})
 		}
-		return ReviewResult{Verdict: "clean", Closures: closures, Summary: "round 2 clean"}
+		return ReviewResult{
+			Verdict: "findings",
+			Findings: []ResultFinding{
+				{Class: ClassIntent, Title: "  clamp OFF by   one ", Workspace: "alpha", Oracle: "test"},
+			},
+			Closures: closures,
+			Summary:  "round 2 clean",
+		}
 	}
 
+	triageCallCountBeforeRound2 := triageCallCount
 	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Triage: triage})
 	if err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}
 	if report2.Round != 2 || report2.Verdict != "clean" {
-		t.Fatalf("report2 = %+v, want round 2 clean", report2)
+		t.Fatalf("report2 = %+v, want round 2 clean (the re-raised dismissed title must not produce a fix slice)", report2)
+	}
+	if triageCallCount != triageCallCountBeforeRound2 {
+		t.Fatalf("Triage was called in round 2 (count %d -> %d): the re-raised dismissed finding must be auto-dismissed before Triage, never offered to it", triageCallCountBeforeRound2, triageCallCount)
+	}
+
+	ff2, ok, err := readFindingsFile(d.Store, fx.Ticket, 2)
+	if err != nil || !ok {
+		t.Fatalf("readFindingsFile round 2: ok=%v err=%v", ok, err)
+	}
+	if len(ff2.Findings) != 1 || ff2.Findings[0].Status != StatusDismissed {
+		t.Fatalf("round 2 findings.yaml = %+v, want exactly 1 finding, auto-dismissed", ff2.Findings)
+	}
+
+	slicesAfter2, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadSlices after round 2: %v", err)
+	}
+	for _, s := range slicesAfter2 {
+		if strings.HasPrefix(s.ID, "fix-2-") {
+			t.Fatalf("fix slice %s appended for round 2, want none (the only finding was auto-dismissed)", s.ID)
+		}
 	}
 
 	reqData2, err := os.ReadFile(reviewJSONPath(d.Store, fx.Ticket, 2))
@@ -881,5 +1189,219 @@ func TestGateReviewerTwoRounds(t *testing.T) {
 	}
 	if len(req2.PriorFindings) != 2 {
 		t.Fatalf("round 2 prior_findings = %+v, want the 2 kept round-1 findings", req2.PriorFindings)
+	}
+	if len(req2.Dismissed) != 1 || req2.Dismissed[0].ID != "r1-f3" || req2.Dismissed[0].Title != "Clamp off by one" {
+		t.Fatalf("round 2 review.json dismissed = %+v, want exactly [{r1-f3 Clamp off by one}]", req2.Dismissed)
+	}
+}
+
+// invalidJSONBackend is a session.Backend stub that writes garbage to
+// result.json, standing in for a reviewer session that crashed or produced
+// unparseable output.
+type invalidJSONBackend struct{}
+
+func (invalidJSONBackend) Run(d session.Dispatch) error {
+	return os.WriteFile(d.ResultJSON, []byte("not json"), 0o644)
+}
+
+// TestGateRetryAfterFailedReviewerAttempt reproduces the store wedge a
+// failed reviewer attempt used to leave behind (A1): round 1's reviewer
+// writes invalid JSON, so Gate journals gate-open and returns
+// REVIEW_INVALID without ever reaching Store.Push. A second Gate call on the
+// same ticket must not fail in Store.Sync on the leftover uncommitted
+// journal/work files, and must retry as round 1 with the second attempt's
+// valid result, never reading anything from the first, failed attempt.
+func TestGateRetryAfterFailedReviewerAttempt(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+
+	d := newDeps(t, fx)
+	if !d.Store.HasRemote() {
+		t.Fatal("fixture store has no remote; test needs one to reproduce the Sync wedge")
+	}
+
+	_, err := Gate(d, NewReviewerGateSource(invalidJSONBackend{}), GateOpts{Ticket: fx.Ticket})
+	if err == nil {
+		t.Fatal("Gate round 1 with invalid reviewer JSON: want an error")
+	}
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "REVIEW_INVALID" {
+		t.Fatalf("Gate round 1 error = %v, want *axi.Error REVIEW_INVALID", err)
+	}
+
+	// The failed attempt must have left the store dirty (gate-open journal
+	// line, work/gate.round-1.review.json), uncommitted: that is the wedge
+	// this fix removes.
+	if status, serr := gitx.Run(fx.StoreDir, "status", "--porcelain"); serr != nil || status == "" {
+		t.Fatalf("expected the store to be left dirty after the failed attempt; status=%q err=%v", status, serr)
+	}
+
+	retryBackend := &scriptedReviewBackend{t: t, byAttempt: map[int]func(ReviewRequest) ReviewResult{
+		1: func(ReviewRequest) ReviewResult {
+			return ReviewResult{Verdict: "clean", Summary: "round 1 clean on retry"}
+		},
+	}}
+	report, err := Gate(d, NewReviewerGateSource(retryBackend), GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate retry after a failed reviewer attempt: %v", err)
+	}
+	if report.Round != 1 || report.Verdict != "clean" {
+		t.Fatalf("retry report = %+v, want round 1 clean (never reading the failed attempt's stale state)", report)
+	}
+	if status, serr := gitx.Run(fx.StoreDir, "status", "--porcelain"); serr != nil || status != "" {
+		t.Fatalf("store left dirty after a successful retry: status=%q err=%v", status, serr)
+	}
+}
+
+// TestGateReviewerStillOpenClosureCarriesForwardAcrossRounds is A4's
+// Gate-level flagship: round 1 raises an intent finding and its fix slice
+// lands; round 2 reports it "still-open" instead of re-raising it, so jig
+// carries it forward as r2-f1 (inheriting the fix-1-1 oracle) with its own
+// fix-2-1 slice, and round 2's verdict is fix-slices despite the reviewer
+// saying "clean"; once fix-2-1 lands, round 3's prior_findings names only
+// the carried r2-f1, never the original r1-f1.
+func TestGateReviewerStillOpenClosureCarriesForwardAcrossRounds(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+
+	d := newDeps(t, fx)
+	backend := &scriptedReviewBackend{t: t, byAttempt: map[int]func(ReviewRequest) ReviewResult{}}
+	backend.byAttempt[1] = func(ReviewRequest) ReviewResult {
+		return ReviewResult{
+			Verdict: "findings",
+			Findings: []ResultFinding{
+				{Class: ClassIntent, Title: "Leak across tenants", Detail: "detail", Workspace: "alpha", Oracle: "test"},
+			},
+			Summary: "round 1",
+		}
+	}
+	src := NewReviewerGateSource(backend)
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+	if report1.Verdict != "fix-slices" {
+		t.Fatalf("report1 = %+v, want fix-slices", report1)
+	}
+	slices1, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadSlices after round 1: %v", err)
+	}
+	byID1 := map[string]store.Slice{}
+	for _, s := range slices1 {
+		byID1[s.ID] = s
+	}
+	fix11, ok := byID1["fix-1-1"]
+	if !ok {
+		t.Fatal("fix-1-1 not appended")
+	}
+
+	buildDir := buildLeaseDir(t, fx)
+	landFixSliceGreen(t, d.Store, fx.Ticket, buildDir, "fix-1-1")
+
+	backend.byAttempt[2] = func(req ReviewRequest) ReviewResult {
+		if len(req.PriorFindings) != 1 || req.PriorFindings[0].ID != "r1-f1" {
+			t.Fatalf("round 2 prior_findings = %+v, want only r1-f1", req.PriorFindings)
+		}
+		return ReviewResult{Verdict: "clean", Closures: []Closure{{ID: "r1-f1", Status: "still-open", Note: "still leaks in beta"}}}
+	}
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 2: %v", err)
+	}
+	if report2.Verdict != "fix-slices" {
+		t.Fatalf("report2 = %+v, want fix-slices (the still-open closure must be carried forward as a kept finding)", report2)
+	}
+	slices2, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadSlices after round 2: %v", err)
+	}
+	byID2 := map[string]store.Slice{}
+	for _, s := range slices2 {
+		byID2[s.ID] = s
+	}
+	carried, ok := byID2["fix-2-1"]
+	if !ok {
+		t.Fatal("fix-2-1 (the carried finding's fix slice) not appended")
+	}
+	if carried.Oracle != fix11.Oracle {
+		t.Fatalf("carried slice oracle = %q, want %q (inherited from fix-1-1)", carried.Oracle, fix11.Oracle)
+	}
+
+	landFixSliceGreen(t, d.Store, fx.Ticket, buildDir, "fix-2-1")
+
+	backend.byAttempt[3] = func(req ReviewRequest) ReviewResult {
+		if len(req.PriorFindings) != 1 || req.PriorFindings[0].ID != "r2-f1" {
+			t.Fatalf("round 3 prior_findings = %+v, want only the carried r2-f1, not the original r1-f1", req.PriorFindings)
+		}
+		return ReviewResult{Verdict: "clean", Closures: []Closure{{ID: "r2-f1", Status: "closed", Note: "fixed"}}}
+	}
+	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 3: %v", err)
+	}
+	if report3.Verdict != "clean" {
+		t.Fatalf("report3 = %+v, want clean", report3)
+	}
+}
+
+// TestReviewerGateSourceCollapsesTitleWhitespace checks A6: a
+// reviewer-supplied title with embedded newlines is collapsed to single
+// spaces, so it cannot break the rendered findings.md list or a mechanical
+// bundle's goal bullet.
+func TestReviewerGateSourceCollapsesTitleWhitespace(t *testing.T) {
+	dir, st, ticket := newRoundInputRepo(t)
+	backend := &scriptedReviewBackend{t: t, byAttempt: map[int]func(ReviewRequest) ReviewResult{
+		1: func(ReviewRequest) ReviewResult {
+			return ReviewResult{Verdict: "findings", Findings: []ResultFinding{
+				{Class: ClassIntent, Title: "Fix the\nwidget   over\n\nthere", Workspace: "root", Oracle: "test"},
+			}, Summary: "s"}
+		},
+	}}
+	round, ok, err := NewReviewerGateSource(backend).Round(RoundInput{Store: st, Ticket: ticket, Round: 1, LeaseDir: dir, RepoName: "repo", Target: "main", Manifest: oneWorkspaceManifest})
+	if err != nil {
+		t.Fatalf("Round: %v", err)
+	}
+	if !ok || round.Review == nil || len(round.Review.Findings) != 1 {
+		t.Fatalf("round = %+v, want 1 finding", round)
+	}
+	want := "Fix the widget over there"
+	if got := round.Review.Findings[0].Title; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+}
+
+// TestSynthesizeFixSlicesSanitizesWorkspaceID checks A7: a workspace id
+// containing characters unsafe in a path segment ("/", "\", ":") is
+// sanitized in a mechanical bundle's id, since that id becomes part of
+// slices/<id>.state and work/<id>.attempt-N.* paths.
+func TestSynthesizeFixSlicesSanitizesWorkspaceID(t *testing.T) {
+	man := manifest.Manifest{Oracles: map[string]string{"test": "go test"}}
+	kept := []Finding{
+		{ID: "r1-f1", Class: ClassMechanical, Title: "a", Workspace: "svc/a:b\\c", Oracle: "test"},
+		{ID: "r1-f2", Class: ClassMechanical, Title: "b", Workspace: "other", Oracle: "test"},
+	}
+	slices, err := synthesizeFixSlices(1, kept, man)
+	if err != nil {
+		t.Fatalf("synthesizeFixSlices: %v", err)
+	}
+	var got []string
+	for _, s := range slices {
+		got = append(got, s.ID)
+	}
+	want := "fix-1-mech-svc-a-b-c"
+	found := false
+	for _, id := range got {
+		if id == want {
+			found = true
+		}
+		if strings.ContainsAny(id, "/\\:") {
+			t.Fatalf("slice id %q contains an unsafe path character", id)
+		}
+	}
+	if !found {
+		t.Fatalf("slice ids = %v, want one sanitized to %q", got, want)
 	}
 }

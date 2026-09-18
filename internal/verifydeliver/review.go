@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -184,7 +185,7 @@ func ParseReviewResult(data []byte) (ReviewResult, error) {
 const reviewPromptTemplate = "You are a jig gate reviewer for round %d of ticket %s.\n" +
 	"Read your inputs from review.json at %s: the brief, slices and journal paths, the prior open findings, and the dismissed findings.\n" +
 	"Review the %s diff %s..%s in this worktree against the brief. Do NOT edit files, commit, or push: report findings only.\n" +
-	"Classify each finding as \"mechanical\" (typo, dead code, doc gap, formatting, other lint-grade fixes) or \"intent\" (behavior, correctness, security, or design). Name the file, and the line when known, in each finding's detail. Never raise a dismissed finding again. For every prior finding add a closure: \"closed\" when the diff resolves it, else \"still-open\" and raise it again as a finding.\n" +
+	"Classify each finding as \"mechanical\" (typo, dead code, doc gap, formatting, other lint-grade fixes) or \"intent\" (behavior, correctness, security, or design). Name the file, and the line when known, in each finding's detail. Never raise a dismissed finding again. For every prior finding add a closure: \"closed\" when the diff resolves it, else \"still-open\" (jig carries a still-open finding forward into this round; do not raise it again).\n" +
 	"When finished write result.json at %s with exactly one JSON object: {\"verdict\": \"clean|findings\", \"findings\": [{\"id\": \"f1\", \"class\": \"mechanical|intent\", \"title\": \"...\", \"detail\": \"...\", \"workspace\": \"<workspace id>\", \"oracle\": \"<manifest oracle name>\"}], \"closures\": [{\"id\": \"r1-f2\", \"status\": \"closed|still-open\", \"note\": \"...\"}], \"summary\": \"...\"}"
 
 // RenderReviewPrompt fills reviewPromptTemplate for one review dispatch.
@@ -289,11 +290,14 @@ func priorFindingsAndDismissed(st *store.Store, ticket string, n int) ([]PriorFi
 			}
 		}
 		for _, c := range ff.Closures {
-			if c.Status == "closed" {
-				if idx, ok := openIndex[c.ID]; ok {
-					openOrder[idx].Status = "" // mark removed
-					delete(openIndex, c.ID)
-				}
+			// Any closure - "closed" or "still-open" - removes the id from
+			// future prior_findings: "closed" because the diff resolved it,
+			// "still-open" because jig carries it forward under a new id in
+			// the closing round (see the carry-forward step in Round), so
+			// the original id must not also linger as open forever.
+			if idx, ok := openIndex[c.ID]; ok {
+				openOrder[idx].Status = "" // mark removed
+				delete(openIndex, c.ID)
 			}
 		}
 	}
@@ -312,6 +316,14 @@ func priorFindingsAndDismissed(st *store.Store, ticket string, n int) ([]PriorFi
 // dismissals match a finding regardless of case or spacing drift.
 func normalizeTitle(s string) string {
 	return strings.Join(strings.Fields(strings.ToLower(s)), " ")
+}
+
+// collapseTitle collapses every run of whitespace, including newlines, in a
+// reviewer-supplied title down to single spaces and trims it: a multi-line
+// title would otherwise produce an unindented continuation line in
+// findings.md and a broken bullet in a mechanical bundle's goal.
+func collapseTitle(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // reviewerGateSource dispatches a real, session-driven gate review for
@@ -334,6 +346,17 @@ func (r *reviewerGateSource) Round(in RoundInput) (Round, bool, error) {
 	head, err := gitx.RevParse(in.LeaseDir, "HEAD")
 	if err != nil {
 		return Round{}, false, fmt.Errorf("verifydeliver: review: resolve HEAD: %w", err)
+	}
+
+	// Restore the lease to a pristine head before writing review.json or
+	// dispatching. Gate runs every manifest oracle in this same lease just
+	// before Round is called, and an oracle can rewrite a tracked file (a
+	// formatter, a lockfile refresh); without this, the post-dispatch guard
+	// below would blame that pre-existing dirt on the reviewer. It also
+	// wipes any leftover untracked files from an earlier failed attempt on
+	// the same lease.
+	if err := resetLeasePristine(in.LeaseDir, head); err != nil {
+		return Round{}, false, fmt.Errorf("verifydeliver: review: restore lease before dispatch: %w", err)
 	}
 
 	scope, base, err := reviewScope(in, head)
@@ -389,6 +412,15 @@ func (r *reviewerGateSource) Round(in RoundInput) (Round, bool, error) {
 		Prompt:     prompt,
 		Screen:     true,
 	}
+	// After dispatch, whatever happens, the lease must end up back at a
+	// pristine head: this undoes any reviewer edit or commit (and, in
+	// --branch mode, moves the branch ref itself back), so a later round -
+	// or the oracles gate.go runs before it - never sees reviewer-written
+	// content. Runs on every return path from here, success or error.
+	defer func() {
+		_ = resetLeasePristine(in.LeaseDir, head)
+	}()
+
 	if err := r.backend.Run(dispatch); err != nil {
 		return Round{}, false, &axi.Error{
 			Msg:  fmt.Sprintf("gate reviewer dispatch failed: %v", err),
@@ -423,14 +455,35 @@ func (r *reviewerGateSource) Round(in RoundInput) (Round, bool, error) {
 		return Round{}, false, err
 	}
 
+	// Every prior open finding needs exactly one closure: missing or
+	// duplicate is invalid, same as an unknown id. Otherwise an unclosed id
+	// (or a contradictory double closure) would silently linger in
+	// prior_findings forever, or a clean verdict with no closures at all
+	// would pass the gate with open findings the reviewer never spoke to.
 	priorIDs := make(map[string]bool, len(req.PriorFindings))
 	for _, pf := range req.PriorFindings {
 		priorIDs[pf.ID] = true
 	}
+	closureCount := map[string]int{}
 	for _, c := range result.Closures {
 		if !priorIDs[c.ID] {
 			return Round{}, false, &axi.Error{
 				Msg:  fmt.Sprintf("gate reviewer result.json closure %q does not name a prior open finding", c.ID),
+				Code: "REVIEW_INVALID",
+			}
+		}
+		closureCount[c.ID]++
+		if closureCount[c.ID] > 1 {
+			return Round{}, false, &axi.Error{
+				Msg:  fmt.Sprintf("gate reviewer result.json has more than one closure for %q", c.ID),
+				Code: "REVIEW_INVALID",
+			}
+		}
+	}
+	for _, pf := range req.PriorFindings {
+		if closureCount[pf.ID] == 0 {
+			return Round{}, false, &axi.Error{
+				Msg:  fmt.Sprintf("gate reviewer result.json is missing a closure for prior finding %q", pf.ID),
 				Code: "REVIEW_INVALID",
 			}
 		}
@@ -456,12 +509,60 @@ func (r *reviewerGateSource) Round(in RoundInput) (Round, bool, error) {
 		findings = append(findings, Finding{
 			ID:        fmt.Sprintf("r%d-f%d", in.Round, i+1),
 			Class:     rf.Class,
-			Title:     rf.Title,
+			Title:     collapseTitle(rf.Title),
 			Detail:    rf.Detail,
 			Workspace: ws,
 			Oracle:    rf.Oracle,
 			Status:    StatusOpen,
 		})
+	}
+
+	// Carry every "still-open" closure forward as a jig-side finding in this
+	// round, instead of relying on the reviewer to re-raise it (the prompt
+	// now tells it not to). It keeps the prior finding's class/title/
+	// workspace/detail, extends the detail with the closure's note, inherits
+	// the oracle of the fix slice the prior finding produced, and goes
+	// through auto-dismiss and triage exactly like a reviewer-raised
+	// finding.
+	closureByID := make(map[string]Closure, len(result.Closures))
+	for _, c := range result.Closures {
+		closureByID[c.ID] = c
+	}
+	nextSeq := len(findings) + 1
+	for _, pf := range req.PriorFindings {
+		c, ok := closureByID[pf.ID]
+		if !ok || c.Status != "still-open" {
+			continue
+		}
+		prior, found, ferr := findFindingByID(in.Store, in.Ticket, pf.ID)
+		if ferr != nil {
+			return Round{}, false, fmt.Errorf("verifydeliver: review: read carried finding %s: %w", pf.ID, ferr)
+		}
+		if !found {
+			return Round{}, false, fmt.Errorf("verifydeliver: review: prior finding %s not found in its round's findings.yaml", pf.ID)
+		}
+		detail := prior.Detail
+		if note := strings.TrimSpace(c.Note); note != "" {
+			detail = strings.TrimRight(detail, "\n")
+			if detail != "" {
+				detail += "\n\n"
+			}
+			detail += fmt.Sprintf("Still open in round %d: %s", in.Round, note)
+		}
+		oracle, oerr := carriedFindingOracle(in.Store, in.Ticket, pf.ID, prior)
+		if oerr != nil {
+			return Round{}, false, fmt.Errorf("verifydeliver: review: resolve carried finding %s oracle: %w", pf.ID, oerr)
+		}
+		findings = append(findings, Finding{
+			ID:        fmt.Sprintf("r%d-f%d", in.Round, nextSeq),
+			Class:     prior.Class,
+			Title:     prior.Title,
+			Detail:    detail,
+			Workspace: prior.Workspace,
+			Oracle:    oracle,
+			Status:    StatusOpen,
+		})
+		nextSeq++
 	}
 
 	dismissedTitles := make(map[string]bool, len(dismissed))
@@ -485,10 +586,108 @@ func (r *reviewerGateSource) Round(in RoundInput) (Round, bool, error) {
 	}}, true, nil
 }
 
-// reviewScope resolves one round's scope and base sha (D3): round 1, a
-// missing prior reviewed_sha, or a prior reviewed_sha that is not an
-// ancestor of head (including an IsAncestor error, e.g. an unknown object
-// after a rebase) all fall back to a full review.
+// findingRound parses the round number out of a jig finding id
+// "r<round>-f<k>". Ids are always assigned this way (see Round), so the id
+// alone says which round's findings.yaml to read.
+func findingRound(id string) (int, bool) {
+	if !strings.HasPrefix(id, "r") {
+		return 0, false
+	}
+	idx := strings.Index(id, "-f")
+	if idx < 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(id[1:idx])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// findFindingByID looks up a jig finding id in the findings.yaml of the
+// round its id names.
+func findFindingByID(st *store.Store, ticket, id string) (Finding, bool, error) {
+	round, ok := findingRound(id)
+	if !ok {
+		return Finding{}, false, nil
+	}
+	ff, ok, err := readFindingsFile(st, ticket, round)
+	if err != nil {
+		return Finding{}, false, err
+	}
+	if !ok {
+		return Finding{}, false, nil
+	}
+	for _, f := range ff.Findings {
+		if f.ID == id {
+			return f, true, nil
+		}
+	}
+	return Finding{}, false, nil
+}
+
+// carriedFindingOracle resolves the oracle a "still-open" closure's
+// jig-carried finding should synthesize with: the oracle of the fix slice
+// prior's own finding produced (intent: fix-<round>-<k>; mechanical: that
+// round's bundle for prior's workspace, singular or per-workspace id), or ""
+// (synthesis then falls back to the manifest's first oracle) when that slice
+// cannot be found.
+func carriedFindingOracle(st *store.Store, ticket, id string, prior Finding) (string, error) {
+	round, ok := findingRound(id)
+	if !ok {
+		return "", nil
+	}
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		return "", err
+	}
+	var wantIDs []string
+	switch prior.Class {
+	case ClassIntent:
+		wantIDs = []string{fmt.Sprintf("fix-%d-%s", round, findingSeq(id))}
+	case ClassMechanical:
+		wantIDs = []string{
+			fmt.Sprintf("fix-%d-mech", round),
+			fmt.Sprintf("fix-%d-mech-%s", round, sanitizeWorkspaceID(prior.Workspace)),
+		}
+	default:
+		return "", nil
+	}
+	for _, s := range slices {
+		for _, want := range wantIDs {
+			if s.ID == want {
+				return s.Oracle, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// resetLeasePristine hard-resets leaseDir to head and removes every
+// untracked file and directory. It never uses `clean -x`, so ignored build
+// caches (e.g. node_modules) survive; only content git itself would track or
+// that a reviewer left behind is wiped.
+func resetLeasePristine(leaseDir, head string) error {
+	if _, err := gitx.Run(leaseDir, "reset", "--hard", head); err != nil {
+		return err
+	}
+	if _, err := gitx.Run(leaseDir, "clean", "-fd"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// reviewScope resolves one round's scope and base sha (D3): round 1 or a
+// missing/non-ancestor prior reviewed_sha (including an IsAncestor error,
+// e.g. an unknown object after a rebase) falls back to a full review.
+//
+// Full scope's base is the merge base of origin/<target> and HEAD. After a
+// rebase onto a newer target, or for a --branch branch cut from a newer
+// main, the ticket's own start sha is still an ancestor of head (the
+// ancestor check alone cannot tell), so using it as the base would include
+// every unrelated target commit between the old start and the real fork
+// point. The start sha is used only when the merge-base lookup itself
+// fails.
 func reviewScope(in RoundInput, head string) (scope, base string, err error) {
 	if in.Round > 1 {
 		prior, perr := priorReviewedSHA(in.Store, in.Ticket, in.Round-1, in.RepoName)
@@ -502,6 +701,10 @@ func reviewScope(in RoundInput, head string) (scope, base string, err error) {
 		}
 	}
 
+	if mb, mbErr := gitx.MergeBase(in.LeaseDir, "origin/"+in.Target, "HEAD"); mbErr == nil {
+		return "full", mb, nil
+	}
+
 	startPath := filepath.Join(in.Store.TicketDir(in.Ticket), fmt.Sprintf("start.%s.sha", in.RepoName))
 	if data, rerr := os.ReadFile(startPath); rerr == nil {
 		startSHA := strings.TrimSpace(string(data))
@@ -510,11 +713,7 @@ func reviewScope(in RoundInput, head string) (scope, base string, err error) {
 		}
 	}
 
-	base, err = gitx.MergeBase(in.LeaseDir, "origin/"+in.Target, "HEAD")
-	if err != nil {
-		return "", "", fmt.Errorf("verifydeliver: review: merge-base fallback: %w", err)
-	}
-	return "full", base, nil
+	return "", "", fmt.Errorf("verifydeliver: review: resolve full-scope base: merge-base of origin/%s and HEAD failed and no usable start sha", in.Target)
 }
 
 // triageOpenFindings runs triage over findings' open subset (only called
@@ -591,6 +790,22 @@ func findingSeq(id string) string {
 	return id[idx+2:]
 }
 
+// sanitizeWorkspaceID replaces every character outside [A-Za-z0-9._-] with
+// "-". A manifest workspace id can legally contain a character such as "/",
+// "\" or ":" that is not safe in a `fix-<n>-mech-<workspace>` slice id,
+// since that id becomes part of slices/<id>.state and work/<id>.attempt-N.*
+// paths (nesting directories, or invalid on Windows).
+func sanitizeWorkspaceID(ws string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			return r
+		default:
+			return '-'
+		}
+	}, ws)
+}
+
 // synthesizeFixSlices turns kept findings into fix slices (D4, jig-side,
 // from approved findings only): one slice per intent finding, one bundle
 // per workspace for mechanical findings (pinned to the cheapest rung).
@@ -645,7 +860,7 @@ func synthesizeFixSlices(round int, kept []Finding, man manifest.Manifest) ([]st
 		}
 		id := fmt.Sprintf("fix-%d-mech", round)
 		if !singleWorkspace {
-			id = fmt.Sprintf("fix-%d-mech-%s", round, ws)
+			id = fmt.Sprintf("fix-%d-mech-%s", round, sanitizeWorkspaceID(ws))
 		}
 		slices = append(slices, store.Slice{
 			ID:        id,
