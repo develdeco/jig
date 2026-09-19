@@ -2,14 +2,17 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gittest"
 )
 
 func TestWSLPath(t *testing.T) {
@@ -98,29 +101,65 @@ func equalArgs(a, b []string) bool {
 	return true
 }
 
-// buildHerdrStub compiles testdata/fixture/herdrstub into a binary named
-// herdr (or herdr.exe on Windows) inside a fresh directory, returning that
-// directory so it can be prepended to PATH. Mirrors tracker's buildGhStub.
+// buildHerdrStub returns the directory holding the once-built
+// testdata/fixture/herdrstub binary, named herdr (or herdr.exe on Windows),
+// so it can be prepended to PATH. Mirrors tracker's buildGhStub.
 func buildHerdrStub(t *testing.T) string {
 	t.Helper()
-	src := filepath.Join(fixture.RepoRoot(t), "testdata", "fixture", "herdrstub")
+	return buildBinary(t, filepath.Join("testdata", "fixture", "herdrstub"), "herdr")
+}
 
-	dir := t.TempDir()
-	name := "herdr"
-	if runtime.GOOS == "windows" {
-		name = "herdr.exe"
+// Helper binaries are built once per test binary and shared by every test
+// that runs them (the pattern of fixture's envtool helper).
+var (
+	binMu    sync.Mutex
+	binBuilt = map[string]binBuild{}
+)
+
+type binBuild struct {
+	dir string
+	err error
+}
+
+// buildBinary compiles the Go package at pkg (relative to the repo root) into
+// a binary named name (plus .exe on Windows) inside its own directory, and
+// returns that directory. The build happens once per test binary: the
+// directory is an os.MkdirTemp dir (a t.TempDir would vanish with the first
+// test that used it), removed through gittest.AtExit.
+func buildBinary(t *testing.T, pkg, name string) string {
+	t.Helper()
+	binMu.Lock()
+	defer binMu.Unlock()
+	key := pkg + "|" + name
+	b, ok := binBuilt[key]
+	if !ok {
+		b = compileBinary(fixture.RepoRoot(t), pkg, name)
+		binBuilt[key] = b
 	}
-	out := filepath.Join(dir, name)
+	if b.err != nil {
+		t.Fatalf("%v", b.err)
+	}
+	return b.dir
+}
 
+func compileBinary(root, pkg, name string) binBuild {
+	dir, err := os.MkdirTemp("", "jig-session-bin")
+	if err != nil {
+		return binBuild{err: fmt.Errorf("create build dir: %w", err)}
+	}
+	gittest.AtExit(func() { os.RemoveAll(dir) })
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
 	goBin := filepath.Join(runtime.GOROOT(), "bin", "go")
 	if runtime.GOOS == "windows" {
 		goBin += ".exe"
 	}
-	cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, src)
+	cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", filepath.Join(dir, name), filepath.Join(root, pkg))
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build herdrstub: %v\n%s", err, output)
+		return binBuild{err: fmt.Errorf("build %s: %v\n%s", pkg, err, output)}
 	}
-	return dir
+	return binBuild{dir: dir}
 }
 
 // TestHerdrBackendRunDirectExec drives herdrBackend.Run against the herdr
