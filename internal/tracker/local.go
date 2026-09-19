@@ -11,6 +11,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -75,6 +77,16 @@ func (a *localAdapter) Mint(d Draft) (string, error) {
 		}
 	}
 	id := a.cfg.MintLocalID(maxN + 1)
+	// Refuse an id jig cannot use before anything is written for it: a
+	// ticket_format can mint one that ends in a lease suffix, or one that is
+	// not a single directory at all.
+	if err := pool.CheckTicket(id); err != nil {
+		return "", &axi.Error{
+			Msg:  fmt.Sprintf("ticket_format %q mints %s, which jig cannot use: %v", a.cfg.TicketFormat, id, err),
+			Code: "VALIDATION_ERROR",
+			Help: []string{"Change ticket_format in project.yaml, then mint again"},
+		}
+	}
 	dir := filepath.Join(a.st.TicketDir(id), "tracker")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("tracker: local mint: create %s: %w", dir, err)

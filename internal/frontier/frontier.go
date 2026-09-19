@@ -376,7 +376,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	d := rc.d
 	ticket := rc.ticket
 
-	lease, err := pool.Acquire(rc.repoName, rc.remote, rc.target, "jig/"+ticket, ticket)
+	lease, err := pool.Acquire(rc.repoName, rc.remote, rc.target, "jig/"+ticket, ticket, pool.Build)
 	if err != nil {
 		rc.fail(fmt.Errorf("frontier: acquire lease for %s: %w", sl.ID, err))
 		return

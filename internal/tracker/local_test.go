@@ -70,6 +70,49 @@ func TestLocalMint(t *testing.T) {
 	}
 }
 
+// TestLocalMintRefusesUnusableID covers a ticket_format that mints an id jig
+// cannot use (see pool.CheckTicket): Mint must refuse it before writing
+// anything, inside the store or outside it.
+func TestLocalMintRefusesUnusableID(t *testing.T) {
+	for _, format := range []string{"T-{n}-gate", "T-{n}-PUBLISH", "../T-{n}", "a/{n}", ".T-{n}"} {
+		t.Run(format, func(t *testing.T) {
+			cfg := localCfg()
+			cfg.TicketFormat = format
+			st, cfg := newTestStore(t, cfg)
+			a, err := tracker.New(cfg, st)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			before := listDir(t, filepath.Dir(st.Root))
+			storeBefore := listDir(t, st.Root)
+
+			if id, err := a.Mint(tracker.Draft{Title: "x"}); err == nil {
+				t.Fatalf("Mint with ticket_format %q = %q, want an error", format, id)
+			}
+			if got := listDir(t, filepath.Dir(st.Root)); fmt.Sprint(got) != fmt.Sprint(before) {
+				t.Fatalf("Mint wrote beside the store: %v, was %v", got, before)
+			}
+			if got := listDir(t, st.Root); fmt.Sprint(got) != fmt.Sprint(storeBefore) {
+				t.Fatalf("Mint wrote into the store: %v, was %v", got, storeBefore)
+			}
+		})
+	}
+}
+
+// listDir returns dir's entry names.
+func listDir(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
 func TestLocalProjection(t *testing.T) {
 	st, cfg := newTestStore(t, localCfg())
 	a, err := tracker.New(cfg, st)

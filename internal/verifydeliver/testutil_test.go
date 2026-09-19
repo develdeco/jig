@@ -54,7 +54,7 @@ func newDeps(t *testing.T, fx *fixture.Fixture) Deps {
 // fixture's ticket: <pool>/fixture-repo/<ticket>.
 func buildLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	t.Helper()
-	lease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket)
+	lease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Build)
 	if err != nil {
 		t.Fatalf("pool.Acquire build lease: %v", err)
 	}

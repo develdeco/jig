@@ -12,7 +12,6 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
@@ -231,7 +230,6 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 			briefDocContent = data
 		}
 	}
-	leaseKey := ticket + "-gate"
 	// Restore an existing gate lease pristine at its current HEAD before
 	// Acquire ever touches it. A reviewer that outlived a killed jig, or an
 	// oracle rewrite left over from an earlier attempt, can leave tracked
@@ -240,19 +238,17 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	// mode, fetchTicketBranchFromBuildLease's checkout right after) refuses
 	// with "local changes ... would be overwritten" before the restore below
 	// ever runs, wedging every later attempt at the same point. This restore
-	// is best-effort: if the pool dir cannot be resolved, or the lease is not
-	// yet its own git working copy with a commit checked out (a key never
-	// acquired, or a clone killed before its first checkout), Acquire runs
-	// unchanged and surfaces its own error.
-	if poolDir, perr := home.PoolDir(); perr == nil {
-		leaseDir := filepath.Join(poolDir, repoName, leaseKey)
-		if isOwnGitRepoWithHead(leaseDir) {
-			if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
-				return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
-			}
+	// is best-effort: if the lease path cannot be resolved (a bad ticket id,
+	// which Acquire then refuses), or the lease is not yet its own git
+	// working copy with a commit checked out (a key never acquired, or a
+	// clone killed before its first checkout), Acquire runs unchanged and
+	// surfaces its own error.
+	if leaseDir, derr := pool.Dir(repoName, ticket, pool.Gate); derr == nil && isOwnGitRepoWithHead(leaseDir) {
+		if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
 		}
 	}
-	lease, err := pool.Acquire(repoName, repo.Remote, target, branch, leaseKey)
+	lease, err := pool.Acquire(repoName, repo.Remote, target, branch, ticket, pool.Gate)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: acquire lease: %w", err)
 	}
@@ -541,11 +537,10 @@ func checkFrontier(d Deps, ticket string, slices []store.Slice, early bool) erro
 // the build lease's copy: gate and publish leases are separate clones, and
 // the ticket branch exists only in the build lease until publish pushes it.
 func fetchTicketBranchFromBuildLease(leaseDir, repoName, ticket string) error {
-	poolDir, err := home.PoolDir()
+	buildLeaseDir, err := pool.Dir(repoName, ticket, pool.Build)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: resolve pool dir: %w", err)
+		return fmt.Errorf("verifydeliver: resolve build lease: %w", err)
 	}
-	buildLeaseDir := filepath.Join(poolDir, repoName, ticket)
 	branch := ticketBranch(ticket)
 	refspec := fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch)
 	// Fetching into refs/heads/<branch> fails while that branch is the

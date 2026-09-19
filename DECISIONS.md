@@ -264,6 +264,38 @@ was ambiguous, what was chosen, and why.
   fails as `BAD_TIMEOUT` immediately instead of first paying for a screen check that was
   never going to matter.
 
+## Pool leases
+
+- Lease naming moved into the pool: callers pass a ticket and a role (`Build`,
+  `Gate`, `Publish`), and `pool.Dir` derives `<ticket>`, `<ticket>-gate` or
+  `<ticket>-publish`. Ticket ids were never validated, so ticket `X-gate`'s build
+  lease was ticket X's gate lease, which the gate resets and cleans, and
+  `X-publish` collided with X's publish lease the same way. `pool.CheckTicket`
+  now reserves both suffixes, ignoring case and trailing dots and spaces (a
+  case-insensitive filesystem, the Windows and macOS default, resolves `X-GATE`
+  to X's gate lease, and Windows drops trailing dots and spaces). Reserving the
+  suffixes won over moving the gate lease to a separator ticket ids cannot
+  contain: no character is absent from ids that are never validated, so that
+  option needs the same validation, and it would also orphan every existing
+  gate and publish clone. The same check requires a single path component
+  without a leading dot, since the id names a directory in both the store and
+  the pool: `../x` escapes both, `.` and `..` name the repo or pool directory
+  itself, and `.git` is the store's own git directory.
+- `pool.CheckTicket` runs at every entry point: the local tracker's mint,
+  before it writes anything, so a `ticket_format` that yields an unusable id
+  leaves nothing behind (`TestLocalMintRefusesUnusableID`); `jig ticket new`
+  after any other tracker mints, since that id is known only once the tracker
+  has created the ticket, so the refusal names the ticket to close there
+  (`TestTicketNewRefusesReservedIDFromCommandTracker`); `jig validate`
+  (reported as the only problem, since every other check reads paths derived
+  from the id); every ticket command through `requireTicket`/`requireSlices`;
+  and `pool.Dir`, so no caller can reach a lease path with a bad id.
+  `TestCheckTicket`, `TestAcquireRefusesReservedTicket`,
+  `TestTicketNewRefusesReservedID` and the end-to-end
+  `TestReservedLeaseSuffixTicketRefused` pin it. Ticket ids that
+  differ only in case still share one store folder, and so one set of leases,
+  on a case-insensitive filesystem; that predates this and is unchanged.
+
 ## Gate and publish
 
 - Gate writes a machine-readable report (`gate/round-N/report.yaml`) with verdict,

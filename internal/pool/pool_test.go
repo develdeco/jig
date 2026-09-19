@@ -46,11 +46,22 @@ func commit(t *testing.T, dir, msg string) string {
 	return run(t, dir, "-c", "user.name=jig-fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", msg)
 }
 
+// writeFile writes content at path, creating its parent directories.
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAcquireCloneAndResume(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	remote := newSourceAndRemote(t)
 
-	lease1, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1")
+	lease1, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
@@ -79,7 +90,7 @@ func TestAcquireCloneAndResume(t *testing.T) {
 		t.Fatalf("Return: %v", err)
 	}
 
-	lease2, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1")
+	lease2, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err != nil {
 		t.Fatalf("second Acquire: %v", err)
 	}
@@ -93,7 +104,7 @@ func TestAcquireCloneAndResume(t *testing.T) {
 
 	// A gate-key Acquire for the same ticket gets a separate directory,
 	// checked out on the same branch name.
-	lease3, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1-gate")
+	lease3, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Gate)
 	if err != nil {
 		t.Fatalf("gate Acquire: %v", err)
 	}
@@ -118,7 +129,7 @@ func TestAcquireNeverResetsExistingLocalBranch(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	remote := newSourceAndRemote(t)
 
-	lease1, err := Acquire("fixture2", remote, "main", "jig/T-2", "T-2")
+	lease1, err := Acquire("fixture2", remote, "main", "jig/T-2", "T-2", Build)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
@@ -139,7 +150,7 @@ func TestAcquireNeverResetsExistingLocalBranch(t *testing.T) {
 	commit(t, lease1.Dir, "unpushed work")
 	localSHA := run(t, lease1.Dir, "rev-parse", "HEAD")
 
-	lease2, err := Acquire("fixture2", remote, "main", "jig/T-2", "T-2")
+	lease2, err := Acquire("fixture2", remote, "main", "jig/T-2", "T-2", Build)
 	if err != nil {
 		t.Fatalf("second Acquire: %v", err)
 	}

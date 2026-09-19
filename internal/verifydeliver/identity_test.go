@@ -85,7 +85,7 @@ func TestPublishCommitsWithMappedCloneIdentity(t *testing.T) {
 		t.Fatalf("Squashed[fixture-repo] missing, got %v", report.Squashed)
 	}
 
-	leaseDir := filepath.Join(mustPoolDir(t), "fixture-repo", fx.Ticket+"-publish")
+	leaseDir := publishLeaseDir(t, fx)
 	got, err := gitx.Run(leaseDir, "log", "-1", "--format=%an <%ae> / %cn <%ce>", sha)
 	if err != nil {
 		t.Fatalf("log squash identity: %v", err)

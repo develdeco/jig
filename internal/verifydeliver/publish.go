@@ -85,7 +85,7 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 
 	repo, repoName, target := primaryRepo(d.Cfg)
 	branch := ticketBranch(ticket)
-	lease, err := pool.Acquire(repoName, repo.Remote, target, branch, ticket+"-publish")
+	lease, err := pool.Acquire(repoName, repo.Remote, target, branch, ticket, pool.Publish)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
 	}
