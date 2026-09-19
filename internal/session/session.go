@@ -25,7 +25,12 @@ type Dispatch struct {
 	ResultJSON    string // path expected after Run
 	Model         string
 	Prompt        string // rendered dispatch prompt (paths, not contents)
-	Screen        bool
+
+	// Screen attaches the command/secret screens as the session's
+	// PreToolUse hook, where the backend has one (headless only). Every
+	// dispatch jig makes is screened; an unscreened headless session gets
+	// its shell and read tools through plain allow rules instead.
+	Screen bool
 }
 
 // Backend runs one dispatch. A returned error means infrastructure failure
@@ -37,9 +42,16 @@ type Backend interface {
 }
 
 // Options configures backend construction. ScenarioDir is used by "fake"
-// only.
+// only, ScreenBinary by "headless" only.
 type Options struct {
 	ScenarioDir string // fake
+
+	// ScreenBinary is the jig binary whose `_screen` verb a screened
+	// headless dispatch's PreToolUse hook runs. Empty means this process's
+	// own executable, which a screened dispatch refuses unless this process
+	// is the jig binary itself: a test binary or another program running
+	// screened dispatches must pass a built jig.
+	ScreenBinary string // headless
 }
 
 // New constructs a Backend by name: "fake", "headless", or "herdr".

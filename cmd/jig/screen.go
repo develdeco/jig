@@ -14,31 +14,37 @@ type screenHookInput struct {
 	ToolInput map[string]any `json:"tool_input"`
 }
 
-// screenDenyOutput is the PreToolUse hook JSON jig prints on stdout to deny
-// a tool call.
-type screenDenyOutput struct {
-	HookSpecificOutput screenDenyDetail `json:"hookSpecificOutput"`
-	SystemMessage      string           `json:"systemMessage"`
+// screenDecisionOutput is the PreToolUse hook JSON jig prints on stdout to
+// allow or deny a tool call.
+type screenDecisionOutput struct {
+	HookSpecificOutput screenDecisionDetail `json:"hookSpecificOutput"`
+	SystemMessage      string               `json:"systemMessage,omitempty"`
 }
 
-type screenDenyDetail struct {
+type screenDecisionDetail struct {
 	HookEventName            string `json:"hookEventName"`
 	PermissionDecision       string `json:"permissionDecision"`
 	PermissionDecisionReason string `json:"permissionDecisionReason"`
 }
 
+// screenAllowReason is the reason attached to an allow decision.
+const screenAllowReason = "screened by jig"
+
 // cmdScreen implements the hidden `jig _screen` PreToolUse hook verb: read
 // one hook call as JSON on stdin, run it through screen.ToolCall, and print
-// a deny payload on stdout when it is denied (nothing when it is allowed).
-// It always exits 0: denial is communicated through stdout, not the exit
-// code, per the PreToolUse hook contract.
+// the decision on stdout. It always exits 0: the decision is communicated
+// through stdout, not the exit code, per the PreToolUse hook contract.
 func cmdScreen(stdin io.Reader, stdout io.Writer) int {
 	runScreen(stdin, stdout)
 	return 0
 }
 
 // runScreen does the actual work of cmdScreen, factored out so tests can
-// drive it directly against in-memory readers/writers.
+// drive it directly against in-memory readers/writers. A denied call gets a
+// deny decision. A passing call to a tool in screen.Granted gets an allow
+// decision, which is that tool's only grant in a headless session; any
+// other passing call gets no decision, leaving it to the session's
+// permission rules (docs/adr/0008-headless-permission-model.md).
 func runScreen(stdin io.Reader, stdout io.Writer) {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
@@ -47,25 +53,23 @@ func runScreen(stdin io.Reader, stdout io.Writer) {
 
 	var call screenHookInput
 	if err := json.Unmarshal(data, &call); err != nil {
-		// jig fails open (no deny output) on malformed hook input,
-		// matching the headless backend's "best-effort screening" framing
-		// rather than blocking a tool call because the hook payload itself
-		// was unparseable.
+		// Malformed hook input gets no decision. That fails closed for
+		// every tool screen.Granted covers, since only this hook's allow
+		// grants them; an edit tool still falls to the session's
+		// path-scoped permission rules.
 		return
 	}
 
-	reason, ok := screen.ToolCall(call.ToolName, call.ToolInput)
-	if ok {
+	out := screenDecisionOutput{HookSpecificOutput: screenDecisionDetail{HookEventName: "PreToolUse"}}
+	if reason, ok := screen.ToolCall(call.ToolName, call.ToolInput); !ok {
+		out.HookSpecificOutput.PermissionDecision = "deny"
+		out.HookSpecificOutput.PermissionDecisionReason = reason
+		out.SystemMessage = reason
+	} else if screen.Grants(call.ToolName) {
+		out.HookSpecificOutput.PermissionDecision = "allow"
+		out.HookSpecificOutput.PermissionDecisionReason = screenAllowReason
+	} else {
 		return
-	}
-
-	out := screenDenyOutput{
-		HookSpecificOutput: screenDenyDetail{
-			HookEventName:            "PreToolUse",
-			PermissionDecision:       "deny",
-			PermissionDecisionReason: reason,
-		},
-		SystemMessage: reason,
 	}
 	encoded, err := json.Marshal(out)
 	if err != nil {

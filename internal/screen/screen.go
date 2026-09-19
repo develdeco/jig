@@ -259,3 +259,22 @@ func ToolCall(tool string, input map[string]any) (string, bool) {
 	}
 	return "", true
 }
+
+// Granted lists the tools a passing screen grants outright: a headless
+// session reaches its shell and file-read tools only through the screen
+// hook's "allow", so a hook that never runs grants nothing and those tools
+// stay denied (docs/adr/0008-headless-permission-model.md). File-edit tools
+// are deliberately absent: the headless backend grants them through
+// path-scoped permission rules, and the screen only ever denies them.
+var Granted = []string{"Bash", "PowerShell", "Read", "Glob", "Grep"}
+
+// Grants reports whether a passing screen is tool's grant, i.e. whether
+// tool is in Granted.
+func Grants(tool string) bool {
+	for _, g := range Granted {
+		if g == tool {
+			return true
+		}
+	}
+	return false
+}

@@ -113,27 +113,62 @@ func TestValidateCatchesCycle(t *testing.T) {
 	}
 }
 
-// TestScreenDenyAllow drives the _screen hook handler directly against a
-// denied git-push call and an allowed git-status call.
+// TestScreenDenyAllow drives the _screen hook handler directly: a denied
+// git-push call gets a deny decision; a passing call to a tool the screen
+// grants (Bash, Read) gets an allow decision, since that allow is the
+// tool's only grant in a headless session; a passing edit-tool call and
+// malformed input get no decision at all, leaving the call to the session's
+// permission rules.
 func TestScreenDenyAllow(t *testing.T) {
-	deny := `{"tool_name":"Bash","tool_input":{"command":"git push origin main"}}`
-	var out bytes.Buffer
-	runScreen(strings.NewReader(deny), &out)
-	if out.Len() == 0 {
-		t.Fatal("expected deny output for git push, got none")
+	cases := []struct {
+		name  string
+		input string
+		want  string // exact stdout
+	}{
+		{
+			"denied git push",
+			`{"tool_name":"Bash","tool_input":{"command":"git push origin main"}}`,
+			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked ` + "`git push`" + `: history must not be pushed from a screened session."},"systemMessage":"Blocked ` + "`git push`" + `: history must not be pushed from a screened session."}` + "\n",
+		},
+		{
+			"denied secret read",
+			`{"tool_name":"Read","tool_input":{"file_path":"/repo/.env"}}`,
+			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: ` + "`/repo/.env`" + ` may hold live credentials."},"systemMessage":"Blocked: ` + "`/repo/.env`" + ` may hold live credentials."}` + "\n",
+		},
+		{
+			"granted Bash",
+			`{"tool_name":"Bash","tool_input":{"command":"git status"}}`,
+			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"screened by jig"}}` + "\n",
+		},
+		{
+			"granted Read",
+			`{"tool_name":"Read","tool_input":{"file_path":"/store/T-1/work/a.attempt-1.slice.json"}}`,
+			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"screened by jig"}}` + "\n",
+		},
+		{
+			"passing Write left to the rules",
+			`{"tool_name":"Write","tool_input":{"file_path":"/wt/main.go","content":"x"}}`,
+			"",
+		},
+		{
+			"denied secret Write",
+			`{"tool_name":"Write","tool_input":{"file_path":"/wt/.env","content":"x"}}`,
+			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: ` + "`/wt/.env`" + ` may hold live credentials."},"systemMessage":"Blocked: ` + "`/wt/.env`" + ` may hold live credentials."}` + "\n",
+		},
+		{
+			"malformed input",
+			`{"tool_name":`,
+			"",
+		},
 	}
-	if !strings.Contains(out.String(), `"permissionDecision":"deny"`) {
-		t.Fatalf("expected permissionDecision deny, got: %s", out.String())
-	}
-	if !strings.Contains(out.String(), "git push") {
-		t.Fatalf("expected reason to mention git push, got: %s", out.String())
-	}
-
-	allow := `{"tool_name":"Bash","tool_input":{"command":"git status"}}`
-	out.Reset()
-	runScreen(strings.NewReader(allow), &out)
-	if out.Len() != 0 {
-		t.Fatalf("expected no output for an allowed command, got: %s", out.String())
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var out bytes.Buffer
+			runScreen(strings.NewReader(c.input), &out)
+			if out.String() != c.want {
+				t.Fatalf("runScreen(%s) =\n%q\nwant\n%q", c.input, out.String(), c.want)
+			}
+		})
 	}
 }
 

@@ -162,3 +162,20 @@ func TestSecretReadTable(t *testing.T) {
 		})
 	}
 }
+
+// TestGrants pins the tools a passing screen grants: the shell and
+// file-read tools only. An edit tool is never granted here - its grant is
+// the headless backend's path-scoped permission rule - and neither is a tool
+// outside the headless session's surface.
+func TestGrants(t *testing.T) {
+	for _, tool := range []string{"Bash", "PowerShell", "Read", "Glob", "Grep"} {
+		if !Grants(tool) {
+			t.Errorf("Grants(%q) = false, want true", tool)
+		}
+	}
+	for _, tool := range []string{"Edit", "Write", "NotebookEdit", "WebFetch", "Task", "Skill", "mcp__x__y", ""} {
+		if Grants(tool) {
+			t.Errorf("Grants(%q) = true, want false", tool)
+		}
+	}
+}
