@@ -13,6 +13,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/frontier"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/session"
@@ -22,6 +23,7 @@ import (
 )
 
 func main() {
+	gitx.ClearRepoEnv()
 	os.Exit(Main(os.Args[1:], os.Stdout, os.Stdin))
 }
 

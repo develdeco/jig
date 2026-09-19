@@ -376,3 +376,24 @@ func TestAcquireRefusesLeaseGitCannotOpen(t *testing.T) {
 		t.Fatalf("lease HEAD = %s, want %s untouched", got, head)
 	}
 }
+
+// TestAcquireIgnoresInheritedGitDir covers a jig started with GIT_DIR set (a
+// hook in a bare repository exports it, a user can export it): every git
+// call Acquire makes must still act on the lease, never on the repository
+// GIT_DIR names.
+func TestAcquireIgnoresInheritedGitDir(t *testing.T) {
+	enclosing := newEnclosingRepo(t)
+	writeFile(t, filepath.Join(enclosing, "notes.txt"), "uncommitted work\n")
+	t.Setenv("JIG_HOME", t.TempDir())
+	remote := newSourceAndRemote(t)
+	t.Setenv("GIT_DIR", filepath.Join(enclosing, ".git"))
+
+	for i := 0; i < 2; i++ { // a fresh clone, then a reuse
+		lease, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+		if err != nil {
+			t.Fatalf("Acquire %d: %v", i+1, err)
+		}
+		assertOwnClone(t, lease.Dir, remote, "jig/T-1")
+	}
+	assertEnclosingUntouched(t, enclosing)
+}

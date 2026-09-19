@@ -834,6 +834,22 @@ above:
 - gitx is the single owner of git execution, enforced by a lint test. Every call passes
   `-c maintenance.auto=false` on its own argv instead of persisting config, so a
   user's own git keeps maintaining their repos.
+- gitx drops an inherited `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
+  `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` and `GIT_ALTERNATE_OBJECT_DIRECTORIES`
+  from every call (names matched case-insensitively, as Windows resolves them),
+  so git always finds its repository from the working directory jig names. A git
+  hook exports some of these (`GIT_INDEX_FILE`, and `GIT_DIR` in a bare or
+  server-side repository) and a user can export any of them; a jig started with
+  one set ran every call, a pool lease's `checkout -B` included, against that
+  other repository. A caller's own env entries still apply, and `GIT_CONFIG_*`
+  is kept, since users and CI set it on purpose. `cmd/jig` also clears the same
+  variables from its own process at startup (`gitx.ClearRepoEnv`), so a
+  session, an oracle or an env class command it starts inherits none of them:
+  a slice agent's own commits would otherwise land in the other repository and
+  the slice would fail with its commit missing from the lease. The per-call
+  filter stays for any caller that does not start from `main`, tests included.
+  `TestRunIgnoresInheritedRepoEnv`, `TestClearRepoEnv` and
+  `TestAcquireIgnoresInheritedGitDir` pin it.
 - Long-lived repos (the store after a push, a pool lease after a reuse fetch) get a
   foreground, best-effort `git maintenance run --auto`. The per-call flag only stops
   commands from spawning detached maintenance, not this explicit run;

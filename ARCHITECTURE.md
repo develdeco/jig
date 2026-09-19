@@ -290,7 +290,10 @@ parses every other package and fails on an `os/exec` call or `exec.Cmd`
 literal whose program resolves to `git`. Every gitx call runs with
 `-c maintenance.auto=false`, so none leaves git's detached background
 maintenance running; the flag is argv-only, so a user's own git still
-maintains their repos.
+maintains their repos. Every call also drops an inherited `GIT_DIR` and the
+other variables that would point git at a repository other than the one its
+working directory names, and `cmd/jig` clears them from its own process at
+startup (`gitx.ClearRepoEnv`), so sessions and oracles never inherit them.
 
 **Synchronous maintenance.** jig's long-lived repos still get upkeep:
 `store.Push` after a successful push and `pool.Acquire` after a reuse fetch

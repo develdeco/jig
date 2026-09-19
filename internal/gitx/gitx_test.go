@@ -568,3 +568,65 @@ func TestFileExistsAtRevIgnoresTheWorkingTree(t *testing.T) {
 		t.Error("FileExistsAtRev(gen.txt) = true, want false: it is untracked at head regardless of the working tree")
 	}
 }
+
+// TestRunIgnoresInheritedRepoEnv covers a jig started with GIT_DIR and the
+// like set (a git hook exports some, a user can export any): every call
+// must still act on the repository its working directory names, never the
+// one those variables point at, while a caller's own env entries still
+// apply.
+func TestRunIgnoresInheritedRepoEnv(t *testing.T) {
+	other := initRepo(t, "unused")
+	dir := initRepo(t, "unused")
+	if err := os.WriteFile(filepath.Join(dir, "g.txt"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(dir, "add", "-A"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if _, err := Run(dir, "commit", "-m", "second"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	want, err := Run(dir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherHead, err := Run(other, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_WORK_TREE", other)
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(other, ".git", "index"))
+	if got, err := Run(dir, "rev-parse", "HEAD"); err != nil || got != want {
+		t.Fatalf("rev-parse HEAD with an inherited GIT_DIR = %q, %v; want dir's own %s", got, err, want)
+	}
+	if got, err := Run(dir, "rev-parse", "--show-prefix"); err != nil || got != "" {
+		t.Fatalf("rev-parse --show-prefix = %q, %v; want dir as its own top level", got, err)
+	}
+	if got, err := RunEnv(dir, []string{"GIT_DIR=" + filepath.Join(other, ".git")}, "rev-parse", "HEAD"); err != nil || got != otherHead {
+		t.Fatalf("rev-parse HEAD with an explicit GIT_DIR = %q, %v; want %s", got, err, otherHead)
+	}
+}
+
+// TestClearRepoEnv covers the startup half of the same rule: cmd/jig clears
+// GIT_DIR and the like from its own process, so a session, an oracle or an
+// env class command it starts inherits none of them either. Other GIT_*
+// variables (identity, config) are left alone.
+func TestClearRepoEnv(t *testing.T) {
+	t.Setenv("GIT_DIR", "elsewhere")
+	t.Setenv("GIT_WORK_TREE", "elsewhere")
+	t.Setenv("GIT_INDEX_FILE", "elsewhere")
+	t.Setenv("GIT_AUTHOR_NAME", "kept")
+
+	ClearRepoEnv()
+
+	for _, name := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"} {
+		if v, ok := os.LookupEnv(name); ok {
+			t.Errorf("%s = %q after ClearRepoEnv, want it unset", name, v)
+		}
+	}
+	if got := os.Getenv("GIT_AUTHOR_NAME"); got != "kept" {
+		t.Errorf("GIT_AUTHOR_NAME = %q, want it kept", got)
+	}
+}
