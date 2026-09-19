@@ -113,7 +113,7 @@ exists.
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire` | repo/remote/target/branch/key → a `Lease` (a full clone, re-pointed to its start point) |
 | `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping → a `Config` |
-| `internal/screen/` | `Command`, `SecretPath`, `ToolCall` | a shell command, path, or tool-call input → allow, or deny with a reason |
+| `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` + `Config` → a model rung, disjoint from rungs already in use |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices` | ticket-folder reads/writes → the truth-repo tree described above |
@@ -131,7 +131,7 @@ question). Nothing crosses in memory.
 Three backends implement that same narrow interface:
 
 - **fake** - replays a scripted scenario directory; no session, no network. The CI and fixture path.
-- **headless** - runs a local `claude -p` subprocess; the command/secret screens attach as a PreToolUse hook (`jig _screen`).
+- **headless** - runs a local `claude -p` subprocess in `dontAsk` permission mode; the command/secret screens attach as a PreToolUse hook (`jig _screen`) whose allow is the only grant for the session's shell and read tools, and its edits are granted only inside the lease and on the dispatch's own `result.json` (see Safety).
 - **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); it has no PreToolUse hook to attach a screen to, so herdr sessions are not screened.
 
 Screens attach only where the backend's tool-call surface allows a
@@ -154,6 +154,23 @@ push from the screen the way they can from a regex.
 like a live credential - `.env*`, `*_key*`, `id_rsa*`, `*.pem`,
 `~/.aws/**`, `~/.config/gh/**` - checked against every path-like argument of
 every tool call, not just git's.
+
+**Headless permission model.** A `claude -p` session can't be asked
+anything, so the headless backend grants every tool it needs up front and
+runs in `dontAsk` mode, which denies everything else. In a screened
+dispatch (every dispatch jig makes), the shell and file-read tools are
+granted only by the screen hook's allow (`screen.Granted`): Claude Code
+skips a hook that cannot launch, so a screen that only denied would fail
+open, while this one fails closed - no screen, no shell. The edit tools
+are granted by path-scoped permission
+rules for the lease worktree and the dispatch's `result.json`, nothing else
+in the store. Web access, subagents, skills and MCP servers are left out of
+the session entirely. Rules and hook travel as one inline `--settings`
+object, so no settings file lands in the lease. It is not a sandbox: a
+granted shell is not confined to the lease. See
+[ADR 0008](docs/adr/0008-headless-permission-model.md); `JIG_LIVE_CLAUDE=1
+go test ./internal/session -run Live` checks the model against the
+installed CLI through a local mock of the Messages API.
 
 **Guarded push.** `gitx.GuardedPush` refuses to push to a remote that is not
 a local file path unless the caller has confirmed. `publish` is the only

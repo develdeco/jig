@@ -81,14 +81,55 @@ was ambiguous, what was chosen, and why.
 - The invariant-floor regex keeps its verbatim v0.1 form (no word boundaries, literal
   single spaces, a reduced alternative set) rather than a richer regex considered
   during review, because that verbatim v0.1 form was intentional, not an oversight.
-- The headless backend's exactly-one-fenced-block text parse is the v0.1 rule; the
-  known risk is a transcript containing a stray fence, which is documented rather than
-  guarded against in v0.1.
+- The headless backend's exactly-one-fenced-block text parse runs over the session's
+  final message only (the CLI result object's `result`), so a fence in tool output
+  elsewhere in the transcript can no longer count as the result block.
 - Staircase signals measure the lease's whole diff against its start point, not
   just the latest attempt's changes.
 - graphify's `Plane.Affected` derives `--graph <repo>/graphify-out/graph.json --depth
   2` itself, since the interface carries no graph/depth parameters and these are
   reasonable defaults.
+
+## Headless backend
+
+- The permission model itself is ADR 0008. Found on Claude Code CLI 2.1.232: print mode
+  rejected `--output-format stream-json` without `--verbose`, so every headless dispatch
+  failed before a session ran; and even with it, print mode denied the edits, the commit,
+  and the result.json write outside the lease that the disk contract needs.
+- `--output-format json`, not `stream-json --verbose`: jig reads only the final result
+  object (the session's final message, `is_error`, the denied tool calls), so the event
+  stream bought nothing but a whole transcript buffered in memory. Claude Code keeps the
+  transcript in its own session store anyway.
+- A CLI that ran no session (a rejected flag), or whose session ended in error (expired
+  credentials, an API failure), is an infrastructure error carrying the CLI's own message.
+  It used to become a synthesized "no result block" result, which hid the cause. A
+  completed session that wrote no result.json still gets one from its final message, and
+  when that parse fails the summary names the denied tool calls.
+- The tool surface leaves out Skill, subagents, and web access even though some would be
+  harmless. The session's instructions are its prompt, the dispatch inputs, and the
+  repo's CLAUDE.md; skills and subagents would pull in unrelated user-level skills and
+  models the staircase never chose, and fetched pages are an injection path.
+- The operator's own Claude Code settings still load (no `--setting-sources`). Dropping
+  user settings would also drop their deny rules and hooks, widening the session as often
+  as narrowing it; the `--permission-mode` flag already beats any `defaultMode` there,
+  checked against a user-level `bypassPermissions`.
+- The gate reviewer's dispatch (Slice "gate") gets the same grants as a build, worktree
+  edits included: its forward-only guard already rejects a round that changed the lease.
+  A read-only dispatch flag would turn such an edit into a denial the reviewer can work
+  around instead of a failed round; it was left out of this change, which does not touch
+  the reviewer's own code.
+- The screen hook runs this process's own executable only when build info says it is the
+  jig binary. Inside `go test` the executable is the test binary, which `_screen` would
+  rerun tests in on every tool call, so a test or another program running screened
+  dispatches must pass `Options.ScreenBinary`. The check runs per screened dispatch,
+  not in `New`: an unscreened dispatch runs no hook and needs no jig binary.
+- Rule paths take the POSIX drive form Claude Code matches Windows paths in
+  (`C:\a` is `//c/a`), with gitignore characters escaped, plus the symlink-resolved form
+  when it differs. Checked against the CLI: native backslash paths, lowercased paths, and
+  a directory named `w [1] (x) y` all match, and a look-alike sibling does not.
+- The CLI contract test is opt-in (`JIG_LIVE_CLAUDE=1`), not part of `go test ./...`: it
+  runs whichever CLI version is installed, so its result is not reproducible run to run,
+  and CI has no `claude` binary.
 
 ## Gate and publish
 

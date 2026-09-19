@@ -18,10 +18,12 @@ jig runs sessions against a real git checkout (a "lease": a pooled worktree
 checked out for one phase's work). The screens below are a denylist, not a
 lease sandbox: they deny specific destructive or history-rewriting git
 subcommands and credential-shaped paths for the `headless` backend's tool
-calls; they do not confine a session to its lease, and ordinary git commands
-(commit, checkout, fetch, and the like) are still allowed. See the Safety
-section of [ARCHITECTURE.md](../ARCHITECTURE.md#safety) for how each one
-works.
+calls; they do not confine a session's shell to its lease, and ordinary git
+commands (commit, checkout, fetch, and the like) are still allowed. A
+`headless` session's shell and file-read tools run only when the screen
+passes them, and its file-edit tools are granted only inside the lease and
+on its own `result.json`. See the Safety section of
+[ARCHITECTURE.md](../ARCHITECTURE.md#safety) for how each one works.
 
 In scope:
 
@@ -31,6 +33,11 @@ In scope:
 - A path shaped like a live credential (`.env*`, `*_key*`, `id_rsa*`,
   `*.pem`, `~/.aws/**`, `~/.config/gh/**`, and the like) that the
   secret-path screen (`internal/screen.SecretPath`) fails to deny.
+- A `headless` session that runs its shell or file-read tools without the
+  screen hook passing the call (for example, when the hook cannot run), or
+  whose file-edit tools write outside its lease and its own `result.json`,
+  through jig's generated settings rather than the operator's own Claude
+  Code settings.
 - A guarded-push bypass: a push of the ticket branch to a non-local remote
   that goes through without the `publish` command's confirmed step (its
   interactive confirm, or `--yes`) having run. (Every jig command pushes
