@@ -20,22 +20,32 @@ import (
 // pull-rebase past, a gate round that finds a must-fix and appends a fix
 // slice, clearing that fix slice, a clean gate, a target-branch move that
 // publish must reconcile and revalidate against, and publish itself) twice
-// end to end against two independent fixtures, then asserts the product
-// repo's own working tree is left clean.
+// end to end against two independent fixtures, then asserts the runs left
+// the product repo's own working tree exactly as they found it. It compares
+// before and after rather than requiring a clean tree, so the suite still
+// passes while a contributor has uncommitted work.
 func TestEndToEndTwice(t *testing.T) {
+	before := productTreeStatus(t)
 	for i := 1; i <= 2; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			runEndToEndOnce(t)
 		})
 	}
 
+	if after := productTreeStatus(t); after != before {
+		t.Fatalf("e2e runs changed the product repo's working tree:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// productTreeStatus returns `git status --porcelain` for the product repo
+// itself, the jig checkout under test.
+func productTreeStatus(t *testing.T) string {
+	t.Helper()
 	out, err := gitx.Run(repoRoot, "status", "--porcelain")
 	if err != nil {
 		t.Fatalf("git status --porcelain: %v", err)
 	}
-	if strings.TrimSpace(out) != "" {
-		t.Fatalf("product repo working tree is dirty after e2e runs:\n%s", out)
-	}
+	return strings.TrimSpace(out)
 }
 
 // NOTE (known environment-triggered bug, not in this package's scope): on a
