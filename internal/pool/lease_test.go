@@ -172,6 +172,31 @@ func TestAcquireClonesIntoEmptyDir(t *testing.T) {
 	}
 }
 
+// TestAcquireRelativeJIGHome covers a relative JIG_HOME: git runs the clone
+// from the lease's parent directory, so a relative lease path would be
+// resolved twice and every later git call would miss the lease.
+func TestAcquireRelativeJIGHome(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("JIG_HOME", "jig-home")
+	remote := newSourceAndRemote(t)
+
+	lease, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+	if err != nil {
+		t.Fatalf("Acquire with a relative JIG_HOME: %v", err)
+	}
+	if !filepath.IsAbs(lease.Dir) {
+		t.Fatalf("lease dir = %q, want an absolute path", lease.Dir)
+	}
+	want, err := filepath.Abs(filepath.Join("jig-home", "pool", "fixture", "T-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.Dir != want {
+		t.Fatalf("lease dir = %q, want %q", lease.Dir, want)
+	}
+	assertOwnClone(t, lease.Dir, remote, "jig/T-1")
+}
+
 // TestUsable pins the check in front of the gate's pre-Acquire reset: only a
 // directory git opens as its own repository, from its own .git directory,
 // with a commit checked out, qualifies.

@@ -95,7 +95,7 @@ func CheckTicket(ticket string) error {
 	return nil
 }
 
-// Dir returns the lease directory for ticket's role lease of
+// Dir returns the absolute lease directory for ticket's role lease of
 // repoName, <pool>/<repoName>/<ticket><suffix>, after checking that both
 // name a single directory inside the pool.
 func Dir(repoName, ticket string, role Role) (string, error) {
@@ -106,6 +106,12 @@ func Dir(repoName, ticket string, role Role) (string, error) {
 		return "", fmt.Errorf("pool: %w", err)
 	}
 	poolDir, err := home.PoolDir()
+	if err != nil {
+		return "", fmt.Errorf("pool: resolve pool dir: %w", err)
+	}
+	// Git runs the clone from the lease's parent directory, so a relative
+	// JIG_HOME would otherwise be resolved twice.
+	poolDir, err = filepath.Abs(poolDir)
 	if err != nil {
 		return "", fmt.Errorf("pool: resolve pool dir: %w", err)
 	}

@@ -343,6 +343,9 @@ was ambiguous, what was chosen, and why.
   upward walk but not a `.git` file naming another repository, and it
   protects only the git calls it is threaded through, while every git call in
   a lease runs after one check.
+- `pool.Dir` returns an absolute lease path. `Acquire` runs the clone from the
+  lease's parent directory, so a relative `JIG_HOME` used to resolve the lease
+  path twice and fail every Acquire (`TestAcquireRelativeJIGHome`).
 
 ## Gate and publish
 
