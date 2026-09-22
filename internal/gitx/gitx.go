@@ -142,11 +142,12 @@ func DiffNameOnly(dir, base, head, diffFilter string) ([]string, error) {
 // FileExistsAtRev reports whether path exists as a blob (not a tree) in
 // dir's tree at rev. rev is resolved first: a rev that does not name a
 // commit (a bad sha, an unknown ref) is returned as an error. Once rev is
-// known good, "git cat-file -t" and "not a valid object name" both exit
-// non-zero for a missing path, indistinguishable from a bad rev by exit
-// code alone, so that check comes only after rev is confirmed to resolve;
-// any remaining failure there is returned as an error too, rather than
-// folded into false.
+// known good, "git cat-file -t" fails the same way, exit non-zero with no
+// distinguishing code, for a missing path and for anything else that keeps
+// it from answering - so that check comes only after rev is confirmed to
+// resolve, and its failure is read from git's own message: "does not exist
+// in" is a missing path (returned as false, nil, matching this doc); any
+// other failure is returned as an error, never folded into false.
 func FileExistsAtRev(dir, rev, path string) (bool, error) {
 	if _, err := Run(dir, "rev-parse", "--verify", "--quiet", rev+"^{commit}"); err != nil {
 		return false, fmt.Errorf("gitx: file exists at rev: rev %q does not resolve to a commit: %w", rev, err)
@@ -155,13 +156,20 @@ func FileExistsAtRev(dir, rev, path string) (bool, error) {
 	var stdout, stderr bytes.Buffer
 	err := run(dir, nil, &stdout, &stderr, args)
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if missingPathError(stderr.String()) {
 			return false, nil
 		}
 		return false, callError(args, stderr.String(), err)
 	}
 	return strings.TrimSpace(stdout.String()) == "blob", nil
+}
+
+// missingPathError reports whether stderr is git's own message for a path
+// that does not exist at the rev "cat-file -t" was given, as opposed to any
+// other failure - the only distinction FileExistsAtRev can make, since both
+// exit the same way once rev itself is already confirmed to resolve.
+func missingPathError(stderr string) bool {
+	return strings.Contains(stderr, "does not exist in")
 }
 
 // CommitOnAnyRemote reports whether sha is reachable from any remote-

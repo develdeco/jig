@@ -521,3 +521,26 @@ func TestFileExistsAtRev(t *testing.T) {
 		t.Error("FileExistsAtRev with a bad rev: want an error, got nil")
 	}
 }
+
+// TestMissingPathError checks the message match FileExistsAtRev relies on
+// to tell a missing path (returned as false, nil) apart from any other
+// "cat-file -t" failure (returned as an error): both exit the same way once
+// rev itself is already confirmed to resolve, so the distinction has to
+// come from git's own message text, not the exit code.
+func TestMissingPathError(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   bool
+	}{
+		{"fatal: path 'missing.txt' does not exist in 'HEAD'", true},
+		{"fatal: path 'a/b.go' does not exist in '1234abcd'", true},
+		{"fatal: bad object HEAD", false},
+		{"fatal: not a tree object", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := missingPathError(c.stderr); got != c.want {
+			t.Errorf("missingPathError(%q) = %v, want %v", c.stderr, got, c.want)
+		}
+	}
+}
