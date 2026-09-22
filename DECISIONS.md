@@ -58,11 +58,13 @@ was ambiguous, what was chosen, and why.
 - Slice work files (`slice.json`, `result.json`) live under the store's ticket
   directory (`work/`), not the build lease, so that the lease's `git add -A` never
   sweeps dispatch plumbing into slice commits.
-- `Store.Sync` stages and commits any uncommitted leftovers (a gate-open
-  journal line, in-progress `work/` files from a command that failed after
-  writing to the store - an oracle failure or a SLICE_ID_DUPLICATE after a
-  round was written, or a run interrupted mid-dispatch) with jig's identity
-  before it pulls. Without this, the next command's `pull --rebase` fails on
+- `Store.Sync` stages and commits any uncommitted leftovers with jig's
+  identity before it pulls: a gate-open journal line from a gate that then
+  failed at an oracle (no round directory is ever written in that case -
+  the oracle suite runs before the round is computed), a partial gate round
+  directory from a SLICE_ID_DUPLICATE failure after the round itself was
+  written, or in-progress `work/` files from a run interrupted mid-dispatch.
+  Without this, the next command's `pull --rebase` fails on
   the dirty tree with "cannot pull with rebase: you have unstaged changes",
   wedging the store until someone commits by hand. This does not retry the
   failed command's round: the leftovers become an ordinary jig commit and
@@ -161,32 +163,33 @@ was ambiguous, what was chosen, and why.
   `from_brief` without needing a new CLI verb, keeping the CLI surface exhaustive
   without growing it.
 - `jig status` distinguishes a slice parked on an open human question from one
-  that is genuinely stalled, replacing the old single `paused` state value.
-  The state: line precedence is stalled > parked > env-blocked > green >
-  building: a stuck slice outranks one merely waiting, so it is reported the
-  moment it is found rather than waited out. (The help hint's own priority
-  is the opposite: an open question comes first there, matching how a
-  supervising agent should triage a paused fleet - answer it, then unstick
-  what's actually stuck - since answering is the one action that can also
-  unblock other slices queued behind it.) A needs-input slice renders in its
-  own parked table with the exact resume command (`--answer` for a normal
-  question, `requeue --from-brief-diff` when the reason is a flawed brief);
-  a stalled slice renders in its own stalled table with the stall signature
-  that triggered it. `store.SliceState` gains an additive `Signature` field
-  so the table can show it without recomputing; frontier's `routeFailure`
-  records it on both stalled paths (repeat-failure stall and attempt-cap),
-  and every route that clears a stalled signature does so alongside
-  `Reason`: the green route clears it as part of turning the slice green,
-  and requeue and answer-and-requeue clear it while taking the slice out
-  of the stalled state without turning it green, so a stale signature
-  never survives a slice's eventual recovery. The status help hint is routed through the
-  same resume-command logic the parked table uses, so the hint and the
-  table can never disagree about how to get unstuck on a flawed brief. The
-  stalled hint only offers its `requeue --from-brief-diff` remedy when the
-  slice's `FromBrief` is non-empty, since `Requeue` only touches a slice
-  whose `FromBrief` cites a hash that is gone and a gate fix slice has none;
-  otherwise the hint says it has no brief section to amend and names no
-  command.
+  that is genuinely stalled, replacing the old single `paused` state value,
+  and further from one merely blocked on its env coming up. The state: line
+  precedence is stalled > parked > env-blocked > green > building: a stuck
+  slice outranks one merely waiting, so it is reported the moment it is
+  found. (The help hint's own priority is the opposite: an open question
+  comes first there, since answering it is the one action that can also
+  unblock other slices queued behind it.) A needs-input slice renders in
+  its own parked table with the exact resume command; a stalled slice
+  renders in its own stalled table with a human-readable summary of what
+  tripped it.
+- The resume command a parked or stalled slice is offered is chosen from
+  the slice's own structure, not from the state's Reason: a slice with
+  brief sections to amend (`FromBrief` non-empty) is remediated by amending
+  the brief and requeuing with `--from-brief-diff` - the only command that
+  can ever touch it; one with none (for example a gate fix slice, which
+  `routeQuestion`/`routeFailure` can still mark with the same Reason a
+  brief-derived slice gets) is remediated by answering the question
+  directly, or by `jig requeue <ticket> --slice <id>` for a stalled or
+  env-blocked slice - the only commands that work for it. `store.SliceState`
+  gains two additive fields: `Signature` (the stall-matching key, not shown)
+  and `StallSummary` (the human-readable text the stalled table shows,
+  `-` when absent), both set on both stall paths (repeat-failure stall and
+  attempt-cap) and cleared on every route out of a stalled or needs-input
+  state - green, both requeue forms, and answering - so neither survives a
+  slice's eventual recovery. Every resume command jig prints carries the
+  invocation's own `--store`/`--project`, so it still works wherever it is
+  run next.
 
 ## Fixture and tests
 
