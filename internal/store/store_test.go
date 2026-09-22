@@ -952,6 +952,94 @@ func TestSyncAndPushRefuseWhileRebaseApplyInProgress(t *testing.T) {
 	}
 }
 
+// TestSyncAndPushRefuseDetachedHEAD: mid-`git bisect` (or any other detached
+// checkout) HEAD does not point at a branch. `git rev-parse --abbrev-ref
+// HEAD` happily prints the literal "HEAD" for that, which would send Sync
+// and Push into a `pull`/`push origin HEAD`; currentBranch instead uses
+// `git symbolic-ref`, which fails on a detached HEAD, so both refuse with
+// STORE_CONFLICT before touching anything.
+func TestSyncAndPushRefuseDetachedHEAD(t *testing.T) {
+	for _, which := range []string{"Sync", "Push"} {
+		t.Run(which, func(t *testing.T) {
+			st, work, remote := newTestRemoteStore(t)
+			sha := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+			runGit(t, work, "checkout", sha)
+			if err := os.WriteFile(filepath.Join(work, "uncommitted.txt"), []byte("x\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			beforeCount := runGit(t, work, "rev-list", "--count", "HEAD")
+			remoteBefore := runGit(t, "", "--git-dir", remote, "rev-parse", "main")
+
+			var err error
+			switch which {
+			case "Sync":
+				err = st.Sync()
+			case "Push":
+				err = st.Push("should be refused")
+			}
+			var ae *axi.Error
+			if !errors.As(err, &ae) || ae.Code != "STORE_CONFLICT" {
+				t.Fatalf("%s with a detached HEAD: err = %v, want *axi.Error STORE_CONFLICT", which, err)
+			}
+
+			afterCount := runGit(t, work, "rev-list", "--count", "HEAD")
+			if beforeCount != afterCount {
+				t.Fatalf("%s committed on a detached HEAD: HEAD count %q -> %q", which, beforeCount, afterCount)
+			}
+			remoteAfter := runGit(t, "", "--git-dir", remote, "rev-parse", "main")
+			if remoteBefore != remoteAfter {
+				t.Fatalf("%s pushed from a detached HEAD: remote main moved", which)
+			}
+		})
+	}
+}
+
+// newTestStandaloneStore creates a non-bare, remote-less git repo with a
+// committed project.yaml (what `jig init --standalone` produces) and
+// returns a Store rooted there.
+func newTestStandaloneStore(t *testing.T) (st *Store, work string) {
+	t.Helper()
+	work = t.TempDir()
+	runGit(t, "", "init", "-b", "main", work)
+	runGit(t, work, "config", "user.name", "tester")
+	runGit(t, work, "config", "user.email", "tester@example.invalid")
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "-A")
+	runGit(t, work, "commit", "-m", "init")
+	st, err := Open(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st, work
+}
+
+// TestSyncRefusesStandaloneStoreMidConflict: Sync's unfinished-rebase-or-
+// merge refusal must run before its no-remote early return, so a standalone
+// store (`init --standalone`, no origin) left with an unresolved conflict is
+// still refused at the start of the command, not silently let through
+// because there is nothing to pull or push.
+func TestSyncRefusesStandaloneStoreMidConflict(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	if st.HasRemote() {
+		t.Fatal("fixture has a remote; test setup is wrong")
+	}
+	leaveConflictedCherryPick(t, work)
+
+	beforeCount := runGit(t, work, "rev-list", "--count", "HEAD")
+	err := st.Sync()
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "STORE_CONFLICT" {
+		t.Fatalf("Sync on a standalone store mid-conflict: err = %v, want *axi.Error STORE_CONFLICT", err)
+	}
+	afterCount := runGit(t, work, "rev-list", "--count", "HEAD")
+	if beforeCount != afterCount {
+		t.Fatalf("Sync committed on a standalone store mid-conflict: HEAD count %q -> %q", beforeCount, afterCount)
+	}
+}
+
 // TestWrapAbortedPullConflict: the message must not claim the rebase "was
 // aborted" when the best-effort `rebase --abort` itself failed, and the
 // Help line must name the real branch, never a literal "<branch>"

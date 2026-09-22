@@ -49,17 +49,23 @@ func (s *Store) HasRemote() bool {
 // not retry the failed command's round: Sync records them as a jig commit
 // and the command proceeds, but a partial gate round directory still counts
 // as a round, so the next `jig gate` opens round N+1 rather than replaying
-// the failed one. It is a silent no-op when there is no remote. Callers run
-// it at the start of every command.
+// the failed one. The unfinished-rebase-or-merge and detached-HEAD refusals
+// both run first, ahead of the no-remote early return, so a standalone
+// store (no origin) in either state is still refused at the start of the
+// command rather than silently let through. Otherwise it is a silent no-op
+// when there is no remote. Callers run it at the start of every command.
 func (s *Store) Sync() error {
-	if !s.HasRemote() {
-		return nil
-	}
-	if _, err := s.stageAndCommit("jig: record uncommitted store state"); err != nil {
+	if err := s.refuseIfMidRebaseOrMerge(); err != nil {
 		return err
 	}
 	branch, err := s.currentBranch()
 	if err != nil {
+		return err
+	}
+	if !s.HasRemote() {
+		return nil
+	}
+	if _, err := s.stageAndCommit("jig: record uncommitted store state"); err != nil {
 		return err
 	}
 	if _, err := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); err != nil {
@@ -167,17 +173,22 @@ func (s *Store) stageAndCommit(msg string) (bool, error) {
 
 // Push stages every change, commits it (skipping the commit when nothing is
 // staged) and, when a remote exists, pushes it, retrying once with a
-// pull --rebase on rejection.
+// pull --rebase on rejection. Like Sync, it refuses on an unfinished rebase
+// or merge or a detached HEAD before doing anything else, whether or not a
+// remote exists.
 func (s *Store) Push(msg string) error {
+	if err := s.refuseIfMidRebaseOrMerge(); err != nil {
+		return err
+	}
+	branch, err := s.currentBranch()
+	if err != nil {
+		return err
+	}
 	if _, err := s.stageAndCommit(msg); err != nil {
 		return err
 	}
 	if !s.HasRemote() {
 		return nil
-	}
-	branch, err := s.currentBranch()
-	if err != nil {
-		return err
 	}
 	if _, err := gitx.Run(s.Root, "push", "origin", branch); err != nil {
 		if _, perr := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); perr != nil {
@@ -294,9 +305,21 @@ func (s *Store) wrapAbortedPullConflict(abortErr, stateErr error, paths []string
 	}
 }
 
-// currentBranch returns the checked-out branch name.
+// currentBranch returns the checked-out branch name, refusing with
+// STORE_CONFLICT when HEAD is detached (for example mid-`git bisect`):
+// `git symbolic-ref -q --short HEAD` fails exactly when HEAD does not point
+// at a branch, unlike `rev-parse --abbrev-ref HEAD`, which happily prints
+// the literal "HEAD" and lets Sync or Push run `pull`/`push` against it.
 func (s *Store) currentBranch() (string, error) {
-	return gitx.Run(s.Root, "rev-parse", "--abbrev-ref", "HEAD")
+	branch, err := gitx.Run(s.Root, "symbolic-ref", "-q", "--short", "HEAD")
+	if err != nil {
+		return "", &axi.Error{
+			Msg:  fmt.Sprintf("the store at %s has a detached HEAD, not a branch", s.Root),
+			Code: "STORE_CONFLICT",
+			Help: []string{"Check the store's state there with `git status`, resolve it, then rerun."},
+		}
+	}
+	return branch, nil
 }
 
 // hasStagedChanges reports whether the index differs from HEAD: "diff
