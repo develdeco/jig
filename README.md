@@ -126,13 +126,18 @@ natively off Windows, and on Windows inside a WSL login shell
 and write the same `result.json`; see
 [ARCHITECTURE.md](ARCHITECTURE.md#session-backends).
 
-`jig gate` re-runs every manifest oracle on a fresh lease, then dispatches
-a reviewer session on the same three backends `--backend` picks for `jig
-run` (default `herdr`; `fake` when `--scenario` is set without
-`--backend`, for compatibility with the old scripted-only path). At a
-terminal it stops for a triage prompt over what the reviewer found:
+`jig gate` re-runs every manifest oracle on a fresh lease, then dispatches a
+reviewer session on the backend `--backend` names (default `herdr`, or
+`fake` when `--scenario` is also set). `--scenario` alone, with no
+`--backend`, keeps the old scripted gate source instead, for compatibility
+with the pre-reviewer path: no reviewer session runs and there is no triage
+prompt. `jig solve`'s own gate/fix-slice loop follows a narrower rule:
+`--scenario` always selects that same scripted source, whatever `--backend`
+says, so its reviewer only runs without `--scenario`. At a terminal, a
+dispatched reviewer round stops for a triage prompt over what it found:
 `--yes` skips it, keeping every fix and every ask that already has a
-workspace.
+workspace, and leaving an ask on a file in no declared workspace for a
+human to decide later.
 
 ## Safety
 

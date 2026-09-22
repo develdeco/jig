@@ -126,7 +126,15 @@ Design questions the code raised, and their resolution:
   With `--yes` or no terminal, it cannot be kept without that judgment and
   stays `asked`: the round is not clean, and `jig gate` lists it under
   "needs a human" and exits 2 (the same code `jig solve` already uses for a
-  builder's pending question).
+  builder's pending question). `jig solve`'s own gate/fix-slice loop checks
+  the same `NeedsHuman` list after every round and stops the same way,
+  rather than re-dispatching the reviewer on a decision nothing in that
+  loop can make - fixed in fix round 1 (F3): before the fix, `jig solve`
+  read only the round's verdict, so an undecided ask kept the loop
+  re-dispatching a full reviewer session every round up to
+  `maxSolveRounds`, each one repeating the same unresolved ask, before
+  failing `GATE_ROUNDS_EXHAUSTED` without ever printing what needed a
+  human.
 - `findings.yaml` gains two additive fields beyond the design's base shape:
   `triage: human|auto` (who decided - a person at a terminal, or `--yes`/no
   terminal - absent for notes, dismissed repeats, and undecided asks) and
@@ -220,12 +228,47 @@ run's own records):
   without dispatch" shortcut to report correctly (that shortcut always
   succeeds, so a verdict keyed on "did a session run" would call every
   such round fix-slices).
-- The interactive triage prompt's exact wording, and the fix batch's and
-  each ask's answer syntax (`d`/`dismiss` to dismiss, any other text kept
-  as the decision unless it is exactly `k`/`keep`/empty), are this build's
-  own design: the design and digest specify the *behavior* (batch accept
-  or dismiss by id, an ask's keep-or-dismiss with an optional decision,
-  the no-workspace prompt, EOF semantics) but not literal strings.
+- The interactive triage prompt's exact wording is this build's own design:
+  the design and digest specify the *behavior* (batch accept or dismiss by
+  id, an ask's keep-or-dismiss with an optional decision, the no-workspace
+  prompt, EOF semantics) but not literal strings. Each ask's answer syntax
+  is explicit rather than inferred from free text: `n`/`no`/`d`/`dismiss`
+  dismisses, and only `k`/`keep`/Enter keeps - an answer that is none of
+  these reprompts rather than being read as an implicit keep. A kept ask
+  is then asked for its decision text on a second, separate prompt (Enter
+  skips it). An earlier draft treated any answer that wasn't exactly
+  `d`/`dismiss` as an implicit keep, with the typed text becoming the
+  decision - so "no" kept the ask, with "no" itself recorded as the
+  human's decision. Fixed in fix round 1 (F17): keep must now be said
+  explicitly.
+- Design 6.4 ("Findings are always shown sorted by risk, high first, each
+  with its rationale") applies to every place a finding reaches a human,
+  not only the fix batch table: fixed in fix round 1 (F10b) to also cover
+  the notes table, the ask prompt (file:line, detail and risk rationale,
+  not the title alone), and the gate report's own findings and
+  needs_a_human tables (already sorted by risk then id; F10b adds the
+  missing file:line and risk_rationale columns).
+- `--yes`/non-terminal triage's one-line note (`DefaultTriage`, run by
+  `triageFor`) printed unconditionally, including for a dispatched reviewer
+  round that routed nothing at all, and always claimed "kept every fix and
+  workspace ask" even when a no-workspace ask (Q1) was left undecided -
+  fixed in fix round 1 (F16): the note is now printed only when there was
+  something to triage, and states how many no-workspace asks were left for
+  a human instead of claiming they were kept.
+- `TestGateReviewerRoundsThroughMain`'s round 2 previously only asserted
+  that the kept ask `r1-f3` was absent from round 2's own report and
+  findings table - true whether or not it actually cleared, since that
+  table lists only findings reported that round. Fixed in fix round 1
+  (F6): the test now reads round 2's own `findings.yaml` `cleared` list
+  directly and requires `r1-f3` in it; confirmed to fail against a Q6
+  mutant (a dismissed repeat blocking clearing) that the old assertion let
+  through.
+- Q10's `jig gate`/`jig solve` compatibility rule (above) had no test
+  pinning either half - fixed in fix round 1 (F18) with unit tests on
+  `gateSourceFor` and `gateSourceForSolve` asserting the returned
+  `GateSource`'s concrete type (scripted vs. reviewer) for each flag
+  combination, via `%T` rather than reaching into verifydeliver's
+  unexported types.
 - The scope base anchor for a full-scope round prefers `merge-base(origin/
   <target>, HEAD)` over the ticket's recorded start sha, falling back to
   the start sha only when the merge-base lookup itself fails (no such
@@ -233,17 +276,24 @@ run's own records):
   merge-base first, so the carried order was inverted rather than reused
   as is.
 - The decisive e2e test (three real gate rounds through the fake backend,
-  in-process through `cmd/jig`'s `Main`) discards a failed round's
-  leftover `work/gate.round-N.*.json` files with an explicit `git checkout
-  -- .` / `git clean -fd` on the store before retrying that round. `Gate`
-  writes those files to the store's working copy before validating a
-  result, and returns on `REVIEW_INVALID` before its own `Store.Push`, so
-  they are left uncommitted; the store's next `Sync` (`git pull --rebase`)
-  then refuses over them once a remote exists. The underlying gap -
+  in-process through `cmd/jig`'s `Main`) discards a failed round's leftover
+  store changes with an explicit `git checkout -- .` / `git clean -fd` on
+  the store before retrying that round. The actual blocker is the tracked
+  `journal.ndjson`: `Gate` appends its `gate-open` line before dispatching
+  the round at all, and a `REVIEW_INVALID` result returns before `Gate`'s
+  own `Store.Push`, so that line is left committed to the working tree but
+  not pushed - the store's next `Sync` (`git pull --rebase`) then refuses
+  over it once a remote exists. `Gate` also writes `work/gate.round-N.*.json`
+  to the store's working copy before validating a result and leaves those
+  uncommitted the same way, but they are untracked cruft under the store's
+  `work/` tree and do not by themselves block a rebase pull; a store whose
+  only leftover was untracked files would pull cleanly. The underlying gap -
   `Store.Sync` not committing its own leftovers before it pulls - is a
-  separate branch's fix (`gate-split`), not this one's; the test's
-  workaround matches what an operator would do by hand and becomes a
-  no-op, not wrong, once that fix reaches this branch.
+  separate branch's fix (`gate-split`), not this one's, and applies equally
+  to any oracle failure after `gate-open` on `main` today, not only to a
+  reviewer round; the test's workaround matches what an operator would do
+  by hand and becomes a no-op, not wrong, once that fix reaches this
+  branch.
 
 ## CLI
 
