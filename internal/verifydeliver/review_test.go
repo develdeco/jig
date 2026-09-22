@@ -148,7 +148,7 @@ func TestMarshalReviewRequestPreservesPopulatedLists(t *testing.T) {
 
 // --- RenderReviewPrompt -----------------------------------------------------
 
-// TestRenderReviewPromptMatchesDesignGolden is F14: the rendered prompt is
+// TestRenderReviewPromptMatchesDesignGolden: the rendered prompt is
 // pinned to design.md section 4.3's reference text verbatim (transcribed
 // independently here, not derived from reviewPromptTemplate), with only the
 // per-round fields and the schema filled in. A word denylist only catches
@@ -232,23 +232,6 @@ func TestParseReviewResultValid(t *testing.T) {
 	}
 }
 
-// TestParseReviewResultAcceptsNullFindingsWhenTheKeyIsPresent covers the
-// distinction F5 actually requires: design 4.4 rejects a "findings" or
-// "reviewed_paths" key that was never written, not one written as JSON
-// null - which is exactly what encoding/json.Marshal produces for a nil Go
-// slice with no omitempty tag (ReviewResult's own shape), so any reviewer
-// or test fixture built by marshaling a zero-value ReviewResult must still
-// parse as a legitimate, findings-less result.
-func TestParseReviewResultAcceptsNullFindingsWhenTheKeyIsPresent(t *testing.T) {
-	res, err := ParseReviewResult([]byte(`{"findings": null, "reviewed_paths": null}`))
-	if err != nil {
-		t.Fatalf("ParseReviewResult: %v, want null accepted as empty when the key is present", err)
-	}
-	if len(res.Findings) != 0 || len(res.ReviewedPaths) != 0 {
-		t.Errorf("res = %+v, want both empty", res)
-	}
-}
-
 func TestParseReviewResultRejectsEveryInvalidRule(t *testing.T) {
 	cases := []struct {
 		name string
@@ -265,7 +248,7 @@ func TestParseReviewResultRejectsEveryInvalidRule(t *testing.T) {
 		{"absolute unix file", validResultJSON(t, func(r *ReviewResult) { r.Findings[0].File = "/etc/passwd" })},
 		{"absolute windows file", validResultJSON(t, func(r *ReviewResult) { r.Findings[0].File = `C:\etc\passwd` })},
 		{"dot-dot segment", validResultJSON(t, func(r *ReviewResult) { r.Findings[0].File = "../secret.go" })},
-		// F5: a bare JSON null, misnamed top-level and finding keys, and any
+		// A bare JSON null, misnamed top-level and finding keys, and any
 		// non-object top level must all be rejected, never silently
 		// accepted as a clean (zero-finding) result.
 		{"bare null", []byte("null")},
@@ -275,10 +258,21 @@ func TestParseReviewResultRejectsEveryInvalidRule(t *testing.T) {
 		{"misnamed reviewed_paths key", []byte(`{"findings": [], "reviewedPaths": []}`)},
 		{"missing findings key", []byte(`{"reviewed_paths": []}`)},
 		{"missing reviewed_paths key", []byte(`{"findings": []}`)},
+		{"null findings", []byte(`{"findings": null, "reviewed_paths": []}`)},
+		{"null reviewed_paths", []byte(`{"findings": [], "reviewed_paths": null}`)},
 		{"unknown top-level key", []byte(`{"findings": [], "reviewed_paths": [], "issues": []}`)},
 		{"misnamed prior key", validResultJSONRaw(t, func(m map[string]any) {
 			f := m["findings"].([]any)[0].(map[string]any)
 			f["prior_id"] = "r1-f1"
+		})},
+		// A duplicate key - exact, or only a different case of a key already
+		// used - repeats at the top level or inside a finding: encoding/json
+		// would otherwise fold the case and let the last one silently win.
+		{"duplicate findings key (case variant)", []byte(`{"findings": [], "reviewed_paths": [], "FINDINGS": []}`)},
+		{"literal duplicate top-level key", []byte(`{"findings": [], "reviewed_paths": [], "reviewed_paths": ["x.go"]}`)},
+		{"duplicate key inside a finding", validResultJSONRaw(t, func(m map[string]any) {
+			f := m["findings"].([]any)[0].(map[string]any)
+			f["Title"] = "a different title"
 		})},
 	}
 	for _, c := range cases {
@@ -306,10 +300,7 @@ func TestParseReviewResultNormalizesWindowsSeparatorsButKeepsFileVerbatim(t *tes
 }
 
 func TestParseReviewResultCleanNoFindings(t *testing.T) {
-	data, err := json.Marshal(ReviewResult{ReviewedPaths: []string{"a.go"}, Summary: "clean"})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	data := marshalReviewResult(t, ReviewResult{ReviewedPaths: []string{"a.go"}, Summary: "clean"})
 	res, err := ParseReviewResult(data)
 	if err != nil {
 		t.Fatalf("ParseReviewResult: %v", err)
@@ -463,7 +454,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 		}
 	})
 
-	// F4: reviewed_paths absolute entries (review.json, brief_path,
+	// reviewed_paths absolute entries (review.json, brief_path,
 	// slices_path, journal_path are all absolute, and the prompt asks for
 	// "every file you read") never fail the round; an absolute path inside
 	// the lease worktree still counts toward coverage.
@@ -711,8 +702,8 @@ func (s stubBackend) Run(d session.Dispatch) error { return s.run(d) }
 // oneOracleManifest is the manifest every reviewerGateSource.Round test
 // uses unless it specifically wants to exercise the multi-oracle rule: a
 // single oracle, with a root workspace (".") matching a real project's
-// default manifest (Q1: "main's default manifest has a root workspace
-// `.`") so every file a test hands it derives a non-empty workspace unless
+// default manifest (main's default manifest has a root workspace
+// `.`) so every file a test hands it derives a non-empty workspace unless
 // the test builds a narrower manifest itself.
 func oneOracleManifest() manifest.Manifest {
 	return manifest.Manifest{
@@ -735,10 +726,7 @@ func writeMustReviewResult(t *testing.T, d session.Dispatch) {
 		t.Fatalf("parse review.json: %v", err)
 	}
 	result := ReviewResult{ReviewedPaths: req.MustReview, Summary: "clean"}
-	data, err := json.Marshal(result)
-	if err != nil {
-		t.Fatalf("marshal result: %v", err)
-	}
+	data := marshalReviewResult(t, result)
 	if err := os.MkdirAll(filepath.Dir(d.ResultJSON), 0o755); err != nil {
 		t.Fatalf("mkdir result dir: %v", err)
 	}
@@ -964,11 +952,7 @@ func TestReviewerGateSourceRoundMissingCoverageIsInvalid(t *testing.T) {
 	backend := stubBackend{run: func(d session.Dispatch) error {
 		// Covers only a.go, skipping must_review's b.go.
 		result := ReviewResult{ReviewedPaths: []string{"a.go"}}
-		data, err := json.Marshal(result)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		return os.WriteFile(d.ResultJSON, data, 0o644)
+		return os.WriteFile(d.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
 
 	src := NewReviewerGateSource(backend)
@@ -1049,7 +1033,7 @@ func TestReviewerGateSourceRoundPriorNamingNoKnownIDIsInvalid(t *testing.T) {
 
 // TestReviewerGateSourceRoundDeltaScopeAcrossRounds drives two rounds
 // directly (findings bookkeeping, which would normally persist
-// reviewed_sha via Gate, is S2's job - this test writes round 1's
+// reviewed_sha via Gate, is findings bookkeeping's job - this test writes round 1's
 // report.yaml by hand) and checks round 2 resolves a delta scope anchored
 // on round 1's reviewed_sha.
 func TestReviewerGateSourceRoundDeltaScopeAcrossRounds(t *testing.T) {
@@ -1162,7 +1146,7 @@ func TestReviewerGateSourceRoundWithFakeBackend(t *testing.T) {
 }
 
 // TestReviewerGateSourceRoundCleanWithoutDispatchWhenNothingOutstanding
-// covers design 5.4/Q8: when the scope diff changes nothing and no
+// covers design 5.4: when the scope diff changes nothing and no
 // finding is open, the previous review already covers head, so Round
 // never dispatches a reviewer session at all.
 func TestReviewerGateSourceRoundCleanWithoutDispatchWhenNothingOutstanding(t *testing.T) {
@@ -1212,7 +1196,7 @@ func TestReviewerGateSourceRoundCleanWithoutDispatchWhenNothingOutstanding(t *te
 }
 
 // TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding
-// covers the other half of Q8: even with an empty scope diff, an open
+// covers the other half of design 5.4: even with an empty scope diff, an open
 // finding still outstanding from an earlier round means the reviewer must
 // look again, so Round dispatches as usual.
 func TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding(t *testing.T) {
@@ -1244,9 +1228,9 @@ func TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding(t *test
 	}
 }
 
-// TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff covers F1 (design
-// 5.4/Q8's other edge): must_review never lists a deleted file (Q5), so a
-// scope diff that only deletes a file must not look like "nothing changed".
+// TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff covers design
+// 5.4's other edge: must_review never lists a deleted file, so a scope diff
+// that only deletes a file must not look like "nothing changed".
 // Round 1 has no previous review to fall back on, so skipping dispatch here
 // would let a deletion-only change through with no review at all.
 func TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff(t *testing.T) {

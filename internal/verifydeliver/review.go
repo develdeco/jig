@@ -125,31 +125,29 @@ func reviewInvalid(msg string) error {
 	return &axi.Error{Msg: "gate reviewer result.json is invalid: " + msg, Code: "REVIEW_INVALID"}
 }
 
-// reviewResultWire is ParseReviewResult's strict decode target: pointer
-// fields so a JSON null value for "findings" or "reviewed_paths" decodes
-// to nil rather than silently becoming an empty slice indistinguishable
-// from one - a nil is then read as "no findings" (or "nothing reviewed"),
-// same as an explicit [] (design 4.4: "findings" and "reviewed_paths" must
-// both be present, either may be an empty list - "empty" covers both
-// spellings a JSON encoder might reasonably produce for it; summary stays
-// optional, design 4.2).
+// reviewResultWire is ParseReviewResult's strict decode target, used only
+// once key presence, non-null and no-duplicate checks below have already
+// passed for "findings" and "reviewed_paths" (design 4.4: both keys must be
+// present, and a JSON null does not count as the empty list it requires -
+// there is nothing for jig to fall back to when a reviewer session simply
+// never wrote either key, or wrote one as null instead of a real list;
+// summary stays optional, design 4.2).
 type reviewResultWire struct {
-	Findings      *[]ResultFinding `json:"findings"`
-	ReviewedPaths *[]string        `json:"reviewed_paths"`
-	Summary       string           `json:"summary"`
+	Findings      []ResultFinding `json:"findings"`
+	ReviewedPaths []string        `json:"reviewed_paths"`
+	Summary       string          `json:"summary"`
 }
 
 // ParseReviewResult parses result.json strictly and checks the rules that
 // need no context beyond the result itself (design 4.4): exactly one JSON
 // object (a bare JSON null, or any other non-object top level, is
-// rejected), no unknown key at the top level or inside a finding, the
-// "findings" and "reviewed_paths" keys present (either may be an empty
-// list, or JSON null - a key that was simply never written is what design
-// 4.4 requires against, not a null value), a known action and risk on
-// every finding, non-empty title and risk_rationale, a non-negative line,
-// and repo-relative file syntax (Q5). The rules that need the request or
-// the lease's head - oracle membership, prior identity, reviewed_paths
-// coverage, file existence - are checked separately by
+// rejected), no key repeated - exactly or only by case - anywhere in the
+// document, no unknown key at the top level or inside a finding, the
+// "findings" and "reviewed_paths" keys present and not JSON null, a known
+// action and risk on every finding, non-empty title and risk_rationale, a
+// non-negative line, and repo-relative file syntax. The rules that need the
+// request or the lease's head - oracle membership, prior identity,
+// reviewed_paths coverage, file existence - are checked separately by
 // validateReviewResult, once the caller has that context. Errors are
 // *axi.Error{Code: "REVIEW_INVALID"} naming the rule; nothing here is
 // silently accepted.
@@ -159,19 +157,34 @@ func ParseReviewResult(data []byte) (ReviewResult, error) {
 		return ReviewResult{}, reviewInvalid("must contain exactly one JSON object")
 	}
 
-	// Key presence is checked separately from the strict, typed decode
-	// below: a pointer field alone can't tell "the key was never written"
-	// apart from "the key was written as null", and only the former is
-	// design 4.4's rule.
+	// encoding/json's struct decode below matches an object key to a field
+	// case-insensitively, and when two keys in the same object both match
+	// one field (an exact duplicate, or a case variant such as "FINDINGS"
+	// alongside "findings"), the last one silently overwrites the others'
+	// value with no error. A token-level walk of the whole document, top
+	// level and every finding, catches this before that decode ever runs.
+	if dup, derr := duplicateObjectKey(data); derr != nil {
+		return ReviewResult{}, reviewInvalid(fmt.Sprintf("not valid JSON: %v", derr))
+	} else if dup != "" {
+		return ReviewResult{}, reviewInvalid(fmt.Sprintf("key %q repeats an earlier key in the same object", dup))
+	}
+
+	// Key presence and nullness are checked separately from the strict,
+	// typed decode below, which cannot tell "the key was never written" or
+	// "written as null" apart from "written as an empty list" once decoded
+	// into a plain slice.
 	var present map[string]json.RawMessage
 	if err := json.Unmarshal(data, &present); err != nil {
 		return ReviewResult{}, reviewInvalid(fmt.Sprintf("not valid JSON: %v", err))
 	}
-	if _, ok := present["findings"]; !ok {
-		return ReviewResult{}, reviewInvalid(`missing "findings"`)
-	}
-	if _, ok := present["reviewed_paths"]; !ok {
-		return ReviewResult{}, reviewInvalid(`missing "reviewed_paths"`)
+	for _, key := range []string{"findings", "reviewed_paths"} {
+		raw, ok := present[key]
+		if !ok {
+			return ReviewResult{}, reviewInvalid(fmt.Sprintf("missing %q", key))
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return ReviewResult{}, reviewInvalid(fmt.Sprintf("%q must be a list, not null", key))
+		}
 	}
 
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -184,13 +197,7 @@ func ParseReviewResult(data []byte) (ReviewResult, error) {
 	if err := dec.Decode(&extra); err != io.EOF {
 		return ReviewResult{}, reviewInvalid("must contain exactly one JSON object")
 	}
-	res := ReviewResult{Summary: wire.Summary}
-	if wire.Findings != nil {
-		res.Findings = *wire.Findings
-	}
-	if wire.ReviewedPaths != nil {
-		res.ReviewedPaths = *wire.ReviewedPaths
-	}
+	res := ReviewResult{Findings: wire.Findings, ReviewedPaths: wire.ReviewedPaths, Summary: wire.Summary}
 
 	for i, f := range res.Findings {
 		switch f.Action {
@@ -219,9 +226,94 @@ func ParseReviewResult(data []byte) (ReviewResult, error) {
 	return res, nil
 }
 
-// normalizeRepoRelPath normalizes p for comparison (Q5): backslash to
-// slash, a leading "./" stripped, then rejects an empty path, an absolute
-// path (a leading "/" or a Windows drive letter), and any ".." segment.
+// duplicateObjectKey walks data's JSON structure - the top-level object and
+// every object nested inside it, findings included - and returns the first
+// key that repeats an earlier key of the same object, exactly or only by
+// case (a token-level check: it inspects keys, not values). "" means the
+// whole document parsed with no such repeat. A malformed document surfaces
+// its own decode error instead.
+func duplicateObjectKey(data []byte) (string, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	tok, err := dec.Token()
+	if err != nil {
+		return "", err
+	}
+	return walkValueForDuplicateKey(dec, tok)
+}
+
+// walkValueForDuplicateKey inspects one already-read token: an object or
+// array delimiter recurses into it, anything else (a scalar) has no keys of
+// its own.
+func walkValueForDuplicateKey(dec *json.Decoder, tok json.Token) (string, error) {
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return "", nil
+	}
+	switch delim {
+	case '{':
+		return walkObjectForDuplicateKey(dec)
+	case '[':
+		return walkArrayForDuplicateKey(dec)
+	default:
+		return "", nil
+	}
+}
+
+// walkObjectForDuplicateKey reads dec's current object (dec positioned
+// right after its opening '{') member by member, checking each key against
+// this object's own earlier keys only - a duplicate nested inside a
+// different object is that object's own concern, caught when the walk
+// recurses into it - and recursing into every member's value.
+func walkObjectForDuplicateKey(dec *json.Decoder) (string, error) {
+	seen := map[string]bool{}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return "", err
+		}
+		key, _ := keyTok.(string)
+		folded := strings.ToLower(key)
+		if seen[folded] {
+			return key, nil
+		}
+		seen[folded] = true
+
+		valTok, err := dec.Token()
+		if err != nil {
+			return "", err
+		}
+		if dup, err := walkValueForDuplicateKey(dec, valTok); err != nil || dup != "" {
+			return dup, err
+		}
+	}
+	if _, err := dec.Token(); err != nil { // the closing '}'
+		return "", err
+	}
+	return "", nil
+}
+
+// walkArrayForDuplicateKey reads dec's current array (dec positioned right
+// after its opening '[') element by element, recursing into each.
+func walkArrayForDuplicateKey(dec *json.Decoder) (string, error) {
+	for dec.More() {
+		valTok, err := dec.Token()
+		if err != nil {
+			return "", err
+		}
+		if dup, err := walkValueForDuplicateKey(dec, valTok); err != nil || dup != "" {
+			return dup, err
+		}
+	}
+	if _, err := dec.Token(); err != nil { // the closing ']'
+		return "", err
+	}
+	return "", nil
+}
+
+// normalizeRepoRelPath normalizes p for comparison (design 4.4): backslash
+// to slash, a leading "./" stripped, then rejects an empty path, an
+// absolute path (a leading "/" or a Windows drive letter), and any ".."
+// segment.
 func normalizeRepoRelPath(p string) (string, error) {
 	q := strings.ReplaceAll(p, "\\", "/")
 	q = strings.TrimPrefix(q, "./")
@@ -243,7 +335,7 @@ func normalizeRepoRelPath(p string) (string, error) {
 }
 
 // relativizeReviewedPath resolves one reviewed_paths entry for coverage
-// (design 4.4, Q5). A plain repo-relative path normalizes as usual. review.
+// (design 4.4). A plain repo-relative path normalizes as usual. review.
 // json hands the reviewer several absolute paths to read - review.json
 // itself, brief_path, slices_path, journal_path - and the prompt (4.3) asks
 // for "every file you read", so an absolute path inside the lease worktree
@@ -279,7 +371,7 @@ func relativizeReviewedPath(leaseDir, p string) (string, bool) {
 // rules ParseReviewResult cannot check on its own (design 4.4): a finding's
 // file exists at head or was deleted in the scope diff; an oracle, when
 // given, names a manifest oracle, and is required when the manifest has
-// more than one and the finding is fix or ask (Q4, no silent fallback); a
+// more than one and the finding is fix or ask (no silent fallback); a
 // prior names an id under open or dismissed, and no two findings share one;
 // reviewed_paths covers every must_review path. atHead reports whether a
 // (normalized) path exists in the lease at head. leaseDir is the lease
@@ -426,8 +518,8 @@ func priorReviewedSHA(st *store.Store, ticket string, round int, repoName string
 	return rep.ReviewedSHA[repoName], nil
 }
 
-// resolveScopeBase resolves one round's scope and base sha (design 4.1,
-// Q5): delta from the previous reviewer round's reviewed_sha when it is an
+// resolveScopeBase resolves one round's scope and base sha (design 4.1):
+// delta from the previous reviewer round's reviewed_sha when it is an
 // ancestor of head, else full anchored at merge-base(origin/target, HEAD),
 // falling back to the ticket's recorded start sha only when the merge-base
 // call itself fails (e.g. no such ref).
@@ -457,7 +549,7 @@ func resolveScopeBase(st *store.Store, ticket, leaseDir, repoName, target string
 	return "full", strings.TrimSpace(string(data)), nil
 }
 
-// scopeDiff is the scope diff's coverage lists (design 4.1, Q5): Changed is
+// scopeDiff is the scope diff's coverage lists (design 4.1): Changed is
 // every file base..head adds, modifies or type-changes (a rename counts as
 // its new path); Deleted is every file it removes; MustReview is their
 // sorted, deduplicated union with the files of open findings that still
@@ -468,7 +560,7 @@ type scopeDiff struct {
 	MustReview []string
 }
 
-// computeScopeDiff runs the scope diff and builds must_review (Q5). openFiles
+// computeScopeDiff runs the scope diff and builds must_review. openFiles
 // are the open-finding files findings bookkeeping (design 5, findings.go)
 // supplies; a round with no open findings yet (round 1, or every round
 // before the first one that reports any) passes nil. Only the reviewer
@@ -524,10 +616,9 @@ type Review struct {
 	Result     ReviewResult
 }
 
-// RoundInput is what Gate hands a GateSource for one round. GateSource's
-// Round grows from the scripted source's original Round(n int) into this
-// shape so the scripted source's exact behavior stays byte for byte (it
-// reads only Round) while the reviewer source has what it needs to build
+// RoundInput is what Gate hands a GateSource for one round: the scripted
+// source reads only its own Round field (fakeGateSource.Round, gate.go) and
+// ignores the rest, while the reviewer source below uses the rest to build
 // review.json and dispatch.
 type RoundInput struct {
 	Store     *store.Store
@@ -557,8 +648,8 @@ func NewReviewerGateSource(b session.Backend) GateSource {
 
 // Round writes review.json, dispatches the reviewer session, and validates
 // its result.json strictly (design 4), or - when nothing is outstanding
-// and the scope diff changes nothing - skips dispatch entirely (design 5.4,
-// Q8). It never applies findings bookkeeping across rounds or routes
+// and the scope diff changes nothing - skips dispatch entirely (design
+// 5.4). It never applies findings bookkeeping across rounds or routes
 // findings into fix slices (design 5, 6); Gate does both, using the Review
 // this returns (findings.go's ApplyRound and route.go's routeRound). The
 // lease is restored pristine before dispatch (oracles run just before this
@@ -598,13 +689,13 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		return Round{}, false, err
 	}
 
-	// Clean without dispatch (design 5.4, Q8): the scope diff changes no
-	// file at all (nothing added, modified, type-changed or deleted) and
-	// nothing is outstanding - the previous review already covers head, so
-	// there is nothing for a reviewer session to do. must_review alone
-	// cannot stand in for this: it never lists a deleted file (Q5), so a
-	// deletion-only diff would otherwise look empty and skip review on a
-	// round that has never been reviewed at all.
+	// Clean without dispatch (design 5.4): the scope diff changes no file at
+	// all (nothing added, modified, type-changed or deleted) and nothing is
+	// outstanding - the previous review already covers head, so there is
+	// nothing for a reviewer session to do. must_review alone cannot stand
+	// in for this: it never lists a deleted file, so a deletion-only diff
+	// would otherwise look empty and skip review on a round that has never
+	// been reviewed at all.
 	if len(diff.Changed) == 0 && len(diff.Deleted) == 0 && len(in.Open) == 0 {
 		return Round{Review: &Review{
 			Scope:      scope,

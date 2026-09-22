@@ -61,6 +61,29 @@ func buildLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	return lease.Dir
 }
 
+// marshalReviewResult marshals result as result.json's bytes, filling a nil
+// Findings or ReviewedPaths with [] first: ParseReviewResult now rejects a
+// JSON null for either (a genuinely absent key is the only thing "not
+// written" means), so a scripted reviewer double that builds a ReviewResult
+// as a struct literal - where a nil slice with no omitempty tag would
+// otherwise marshal as null - has to write the empty list out explicitly,
+// the same way MarshalReviewRequest does for ReviewRequest's own nil
+// slices.
+func marshalReviewResult(t *testing.T, result ReviewResult) []byte {
+	t.Helper()
+	if result.Findings == nil {
+		result.Findings = []ResultFinding{}
+	}
+	if result.ReviewedPaths == nil {
+		result.ReviewedPaths = []string{}
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal ReviewResult: %v", err)
+	}
+	return data
+}
+
 // scenarioResult reads and parses a scenario attempt's result.json.
 func scenarioResult(t *testing.T, fx *fixture.Fixture, slice string, attempt int) map[string]any {
 	t.Helper()

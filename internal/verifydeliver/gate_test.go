@@ -710,9 +710,9 @@ func TestGateBranchDeletedOnOriginAfterEarlierGate(t *testing.T) {
 	}
 }
 
-// TestGateReviewerFindingsBookkeepingAcrossRounds is S2's own Gate()
-// integration test: it drives two real reviewer rounds through Gate
-// itself (not reviewerGateSource.Round directly) and checks that the
+// TestGateReviewerFindingsBookkeepingAcrossRounds is findings bookkeeping's
+// own Gate() integration test: it drives two real reviewer rounds through
+// Gate itself (not reviewerGateSource.Round directly) and checks that the
 // wiring findings.go adds - review.json's open list built from the fold,
 // the verdict derived from applying the round, findings.yaml/md written to
 // disk, and reviewed_sha recorded - all agree with each other.
@@ -759,11 +759,7 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 			t.Fatalf("unexpected round %d", round)
 		}
 
-		payload, err := json.Marshal(result)
-		if err != nil {
-			t.Fatalf("marshal result: %v", err)
-		}
-		return os.WriteFile(sd.ResultJSON, payload, 0o644)
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
 
 	src := NewReviewerGateSource(backend)
