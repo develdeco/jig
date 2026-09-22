@@ -202,12 +202,18 @@ run's own records):
   digest specify only that "clean" must never appear for a non-clean
   round.
 - The recurrence bound (second recurrence forces `ask`) is applied
-  unconditionally once `recurrences >= 2`, not only when the reviewer's
-  label is `fix`. This is provably equivalent to a fix-only reading: a
-  `note` finding leaves the open set on its very first occurrence, and
-  `prior` may only legitimately name an id under `open`, `asked`, or
-  `dismissed`, so a `note` can never structurally reach a second
-  recurrence.
+  unconditionally once `recurrences >= 2`, whatever this round's own label
+  is (design 5.3: "whatever the reviewer's label"), including `note`: a
+  finding whose earlier occurrence was `open` or `asked` can legitimately
+  recur as a `note` ("still there but harmless now") and still be forced to
+  `ask` on its second recurrence. What can never happen is `prior` naming a
+  *noted* finding as its target: a note leaves the open set on its very
+  first occurrence, and `prior` may only legitimately name an id under
+  `open`, `asked`, or `dismissed` (validated). Rule 1 carries the earlier
+  occurrence's `oracle` forward when this round's finding names none, so a
+  recurrence forced to `ask` by the bound still has one to build a fix
+  slice with even when the reviewer's own report this round is a bare
+  `note`.
 - `Gate`'s clean-vs-fix-slices verdict for a reviewer round is derived
   from findings bookkeeping's own post-round fold, not from whether a
   reviewer session actually dispatched. This is required for the "clean

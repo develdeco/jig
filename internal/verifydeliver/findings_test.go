@@ -7,8 +7,16 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/manifest"
+	"github.com/develdeco/jig/internal/store"
 	"gopkg.in/yaml.v3"
 )
+
+// sliceRecording returns an existingSlices stub with one slice whose
+// Findings names id (F11's structural link, design 6.1): the shape
+// findingHasFixSlice looks for.
+func sliceRecording(id string) []store.Slice {
+	return []store.Slice{{ID: "fix-x", Findings: []string{id}}}
+}
 
 // --- workspaceFor ---------------------------------------------------------
 
@@ -45,6 +53,31 @@ func TestWorkspaceForNestedPathsAndNoWorkspace(t *testing.T) {
 	}
 }
 
+// --- statusForAction ---------------------------------------------------------
+
+// TestStatusForActionRejectsUnknownAction is F12: every action design 4.2
+// defines is handled explicitly, and an action outside that set (only
+// reachable if a caller skips ParseReviewResult's own validation) is a
+// programming error returned up the call chain, never silently folded into
+// StatusNoted.
+func TestStatusForActionRejectsUnknownAction(t *testing.T) {
+	for _, action := range []string{ActionFix, ActionAsk, ActionNote} {
+		status, err := statusForAction(action)
+		if err != nil {
+			t.Errorf("statusForAction(%q): %v", action, err)
+		}
+		if status == "" {
+			t.Errorf("statusForAction(%q) = empty status", action)
+		}
+	}
+	if _, err := statusForAction("maybe"); err == nil {
+		t.Error("statusForAction(\"maybe\"): want an error, got nil")
+	}
+	if _, err := statusForAction(""); err == nil {
+		t.Error("statusForAction(\"\"): want an error, got nil")
+	}
+}
+
 // --- ApplyRound: rule 4 (new findings) ------------------------------------
 
 func TestApplyRoundRule4NewFindingsRouteByAction(t *testing.T) {
@@ -57,9 +90,9 @@ func TestApplyRoundRule4NewFindingsRouteByAction(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go", "b.go", "c.go"},
 	}
-	reported, cleared := ApplyRound(1, map[string]Finding{}, result, nil, man)
-	if len(cleared) != 0 {
-		t.Fatalf("cleared = %v, want none", cleared)
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
 	}
 	if len(reported) != 3 {
 		t.Fatalf("reported = %+v, want 3 findings", reported)
@@ -108,9 +141,9 @@ func TestApplyRoundRule1RecurrenceStaysOpenAndCountsUp(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, cleared := ApplyRound(2, known, result, nil, man)
-	if len(cleared) != 0 {
-		t.Fatalf("cleared = %v, want none", cleared)
+	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
 	}
 	if len(reported) != 1 {
 		t.Fatalf("reported = %+v, want 1 finding", reported)
@@ -143,9 +176,9 @@ func TestApplyRoundRule2DismissedRecurrenceStaysDismissed(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, cleared := ApplyRound(2, known, result, nil, man)
-	if len(cleared) != 0 {
-		t.Fatalf("cleared = %v, want none", cleared)
+	reported, err := ApplyRound(2, known, result, nil, man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
 	}
 	if len(reported) != 1 {
 		t.Fatalf("reported = %+v, want 1 finding", reported)
@@ -156,102 +189,80 @@ func TestApplyRoundRule2DismissedRecurrenceStaysDismissed(t *testing.T) {
 	}
 }
 
-// --- ApplyRound: rule 3 (clearing) -----------------------------------------
-
-func TestApplyRoundRule3ClearsUnreportedFindingWhenFileReviewed(t *testing.T) {
+// TestApplyRoundRule2ResetsQ2FieldsOnADismissedRepeat is F7: a dismissed
+// repeat must not restate an earlier round's human decision as if it were
+// made again this round.
+func TestApplyRoundRule2ResetsQ2FieldsOnADismissedRepeat(t *testing.T) {
 	man := oneOracleManifest()
 	known := map[string]Finding{
-		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r"},
-	}
-	// a.go was reviewed this round (in ReviewedPaths) and no finding was
-	// reported in it: rule 3 clears r1-f1.
-	result := ReviewResult{ReviewedPaths: []string{"a.go"}}
-	reported, cleared := ApplyRound(2, known, result, nil, man)
-	if len(reported) != 0 {
-		t.Fatalf("reported = %+v, want none", reported)
-	}
-	if !equalStrings(cleared, []string{"r1-f1"}) {
-		t.Fatalf("cleared = %v, want [r1-f1]", cleared)
-	}
-}
-
-func TestApplyRoundRule3ClearsFindingWhoseFileWasDeleted(t *testing.T) {
-	man := oneOracleManifest()
-	known := map[string]Finding{
-		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r"},
-	}
-	result := ReviewResult{ReviewedPaths: nil}
-	reported, cleared := ApplyRound(2, known, result, []string{"a.go"}, man)
-	if len(reported) != 0 {
-		t.Fatalf("reported = %+v, want none", reported)
-	}
-	if !equalStrings(cleared, []string{"r1-f1"}) {
-		t.Fatalf("cleared = %v, want [r1-f1]", cleared)
-	}
-}
-
-func TestApplyRoundRule3StaysOpenWhenNotReviewed(t *testing.T) {
-	man := oneOracleManifest()
-	known := map[string]Finding{
-		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r"},
-	}
-	// a.go is neither reviewed nor deleted this round, and not reported
-	// again: it cannot clear (design 5.2 rule 3, "otherwise it stays
-	// open"), and it is absent from this round's own reported list - the
-	// fold, not ApplyRound, is what carries it forward unchanged.
-	result := ReviewResult{ReviewedPaths: []string{"other.go"}}
-	reported, cleared := ApplyRound(2, known, result, nil, man)
-	if len(reported) != 0 {
-		t.Fatalf("reported = %+v, want none", reported)
-	}
-	if len(cleared) != 0 {
-		t.Fatalf("cleared = %v, want none", cleared)
-	}
-}
-
-// TestApplyRoundConvergenceDismissedRepeatDoesNotBlockOpenFinding is Q6's
-// convergence test: a dismissed finding re-reported in the same file as an
-// open one must not keep that open one alive.
-func TestApplyRoundConvergenceDismissedRepeatDoesNotBlockOpenFinding(t *testing.T) {
-	man := oneOracleManifest()
-	known := map[string]Finding{
-		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r"},
-		"r1-f2": {ID: "r1-f2", File: "a.go", Status: StatusDismissed, Action: ActionFix, Risk: RiskLow, RiskRationale: "r"},
+		"r1-f3": {ID: "r1-f3", File: "a.go", Status: StatusDismissed, Action: ActionFix, Risk: RiskLow, RiskRationale: "old",
+			Triage: TriageHuman, Decision: "not worth it", RoutedAs: ActionAsk},
 	}
 	result := ReviewResult{
 		Findings: []ResultFinding{
-			// Only the dismissed finding recurs; r1-f1 is not reported
-			// again at all.
-			{File: "a.go", Title: "dismissed again", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test", Prior: "r1-f2"},
+			{File: "a.go", Title: "old again", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test", Prior: "r1-f3"},
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	_, cleared := ApplyRound(2, known, result, nil, man)
-	if !equalStrings(cleared, []string{"r1-f1"}) {
-		t.Fatalf("cleared = %v, want [r1-f1] (the dismissed repeat must not block it)", cleared)
+	reported, err := ApplyRound(2, known, result, nil, man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	f := reported[0]
+	if f.Triage != "" || f.Decision != "" || f.RoutedAs != "" {
+		t.Errorf("dismissed repeat = %+v, want Triage/Decision/RoutedAs all empty (nobody decided this round)", f)
 	}
 }
 
-// TestApplyRoundConvergenceRoutedFindingBlocksClearing is the other half
-// of Q6: a new or recurring fix/ask finding reported in the same file as
-// an unreported open finding blocks that finding from clearing.
-func TestApplyRoundConvergenceRoutedFindingBlocksClearing(t *testing.T) {
+// --- ApplyRound: rule 1 carries forward oracle, decision and workspace (F9) -
+
+func TestApplyRoundRule1CarriesOracleWhenThisRoundNamesNone(t *testing.T) {
 	man := oneOracleManifest()
+	man.Oracles["lint"] = "true" // now two oracles, so an omitted oracle is never a default
 	known := map[string]Finding{
-		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r"},
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "old", Oracle: "test"},
 	}
 	result := ReviewResult{
 		Findings: []ResultFinding{
-			{File: "a.go", Title: "a new problem", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test"},
+			// This round's own report names no oracle at all (a bare note).
+			{File: "a.go", Title: "still there", Detail: "d", Action: ActionNote, Risk: RiskLow, RiskRationale: "r", Prior: "r1-f1"},
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, cleared := ApplyRound(2, known, result, nil, man)
-	if len(cleared) != 0 {
-		t.Fatalf("cleared = %v, want none (a.go still has a routed finding)", cleared)
+	reported, err := ApplyRound(2, known, result, nil, man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
 	}
-	if len(reported) != 1 {
-		t.Fatalf("reported = %+v, want 1 (the new finding only)", reported)
+	if reported[0].Oracle != "test" {
+		t.Errorf("Oracle = %q, want the prior occurrence's test (carried forward)", reported[0].Oracle)
+	}
+}
+
+func TestApplyRoundRule1CarriesDecisionAndWorkspaceWhenFileUnchanged(t *testing.T) {
+	man := manifest.Manifest{Oracles: map[string]string{"test": "true"}} // no workspaces declared
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "orphan.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "old",
+			Oracle: "test", Workspace: "billing", Decision: "ship it in billing"},
+	}
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "orphan.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test", Prior: "r1-f1"},
+		},
+		ReviewedPaths: []string{"orphan.go"},
+	}
+	reported, err := ApplyRound(2, known, result, nil, man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	f := reported[0]
+	if f.Workspace != "billing" {
+		t.Errorf("Workspace = %q, want billing (the human's earlier Q1 choice, file unchanged)", f.Workspace)
+	}
+	if f.Decision != "ship it in billing" {
+		t.Errorf("Decision = %q, want the earlier kept ask's decision carried forward", f.Decision)
+	}
+	if f.Status != StatusOpen {
+		t.Errorf("Status = %q, want open (a non-empty carried workspace, not forced to ask by Q1)", f.Status)
 	}
 }
 
@@ -268,9 +279,38 @@ func TestApplyRoundRecurrenceBoundFirstRoutesLikeNew(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, _ := ApplyRound(2, known, result, nil, man)
+	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
 	if len(reported) != 1 || reported[0].Status != StatusOpen || reported[0].Recurrences != 1 {
 		t.Fatalf("reported = %+v, want one open finding at recurrences 1", reported)
+	}
+}
+
+// TestApplyRoundRecurrenceNotCountedWithoutAFixSlice is F11: a re-report
+// with prior naming an id that no existing slice has ever recorded is not a
+// genuine recurrence (design 5.3's premise needs a fix slice to have gone
+// green without resolving it) - it updates the finding without bumping
+// Recurrences. Covers both an undecided Q1 ask re-reported and an --early
+// round outrunning the frontier: neither has built a slice for the id yet.
+func TestApplyRoundRecurrenceNotCountedWithoutAFixSlice(t *testing.T) {
+	man := oneOracleManifest()
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusAsked, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Recurrences: 0},
+	}
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "a.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test", Prior: "r1-f1"},
+		},
+		ReviewedPaths: []string{"a.go"},
+	}
+	reported, err := ApplyRound(2, known, result, nil, man) // no existing slice records r1-f1
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	if len(reported) != 1 || reported[0].Recurrences != 0 {
+		t.Fatalf("reported = %+v, want recurrences unchanged at 0 (no fix slice ever went green for it)", reported)
 	}
 }
 
@@ -287,9 +327,144 @@ func TestApplyRoundRecurrenceBoundSecondForcesAsk(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, _ := ApplyRound(3, known, result, nil, man)
+	reported, err := ApplyRound(3, known, result, sliceRecording("r1-f1"), man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
 	if len(reported) != 1 || reported[0].Status != StatusAsked || reported[0].Recurrences != 2 {
 		t.Fatalf("reported = %+v, want one asked finding at recurrences 2", reported)
+	}
+}
+
+// TestApplyRoundRecurrenceBoundSecondAsNoteKeepsPriorOracle is F9's own
+// scenario (M3): a second recurrence reported as a bare note still carries
+// an oracle forward, so the ask it becomes can build a fix slice if kept.
+func TestApplyRoundRecurrenceBoundSecondAsNoteKeepsPriorOracle(t *testing.T) {
+	man := oneOracleManifest()
+	man.Oracles["lint"] = "true"
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test", Recurrences: 1},
+	}
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "a.go", Title: "still there but harmless now", Detail: "d", Action: ActionNote, Risk: RiskLow, RiskRationale: "r", Prior: "r1-f1"},
+		},
+		ReviewedPaths: []string{"a.go"},
+	}
+	reported, err := ApplyRound(3, known, result, sliceRecording("r1-f1"), man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	f := reported[0]
+	if f.Status != StatusAsked || f.RoutedAs != ActionAsk {
+		t.Fatalf("finding = %+v, want asked/routed_as ask (bound forces it, whatever this round's label)", f)
+	}
+	if f.Oracle != "test" {
+		t.Errorf("Oracle = %q, want the prior occurrence's test carried forward", f.Oracle)
+	}
+}
+
+// --- ClearingAfterTriage (rule 3) -------------------------------------------
+
+func TestClearingAfterTriageClearsUnreportedFindingWhenFileReviewed(t *testing.T) {
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
+	}
+	// a.go was reviewed this round and no finding was reported in it: rule
+	// 3 clears r1-f1.
+	cleared, err := ClearingAfterTriage(known, nil, []string{"a.go"}, alwaysExists)
+	if err != nil {
+		t.Fatalf("ClearingAfterTriage: %v", err)
+	}
+	if !equalStrings(cleared, []string{"r1-f1"}) {
+		t.Fatalf("cleared = %v, want [r1-f1]", cleared)
+	}
+}
+
+func TestClearingAfterTriageClearsFindingWhoseFileIsGoneAtHead(t *testing.T) {
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
+	}
+	cleared, err := ClearingAfterTriage(known, nil, nil, existsExcept("a.go"))
+	if err != nil {
+		t.Fatalf("ClearingAfterTriage: %v", err)
+	}
+	if !equalStrings(cleared, []string{"r1-f1"}) {
+		t.Fatalf("cleared = %v, want [r1-f1]", cleared)
+	}
+}
+
+func TestClearingAfterTriageStaysOpenWhenNotReviewed(t *testing.T) {
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
+	}
+	// a.go is neither reviewed nor gone at head this round, and not
+	// reported again: it cannot clear (design 5.2 rule 3, "otherwise it
+	// stays open").
+	cleared, err := ClearingAfterTriage(known, nil, []string{"other.go"}, alwaysExists)
+	if err != nil {
+		t.Fatalf("ClearingAfterTriage: %v", err)
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("cleared = %v, want none", cleared)
+	}
+}
+
+// TestClearingAfterTriageDismissedRepeatDoesNotBlockOpenFinding is Q6's
+// convergence test: a dismissed finding re-reported in the same file as an
+// open one must not keep that open one alive.
+func TestClearingAfterTriageDismissedRepeatDoesNotBlockOpenFinding(t *testing.T) {
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
+		"r1-f2": {ID: "r1-f2", File: "a.go", Status: StatusDismissed},
+	}
+	// Only the dismissed finding was reported this round (r1-f2, now still
+	// dismissed); r1-f1 was not reported again at all.
+	reported := []Finding{{ID: "r1-f2", File: "a.go", Status: StatusDismissed}}
+	cleared, err := ClearingAfterTriage(known, reported, []string{"a.go"}, alwaysExists)
+	if err != nil {
+		t.Fatalf("ClearingAfterTriage: %v", err)
+	}
+	if !equalStrings(cleared, []string{"r1-f1"}) {
+		t.Fatalf("cleared = %v, want [r1-f1] (the dismissed repeat must not block it)", cleared)
+	}
+}
+
+// TestClearingAfterTriageRoutedFindingBlocksClearing is the other half of
+// Q6: a new or recurring fix/ask finding that ends up routed (open or
+// asked) in the same file as an unreported open finding blocks that
+// finding from clearing.
+func TestClearingAfterTriageRoutedFindingBlocksClearing(t *testing.T) {
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
+	}
+	reported := []Finding{{ID: "r2-f1", File: "a.go", Status: StatusOpen}}
+	cleared, err := ClearingAfterTriage(known, reported, []string{"a.go"}, alwaysExists)
+	if err != nil {
+		t.Fatalf("ClearingAfterTriage: %v", err)
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("cleared = %v, want none (a.go still has a routed finding)", cleared)
+	}
+}
+
+// TestClearingAfterTriageDismissedAtTriageDoesNotBlock is F10: a finding
+// the human dismisses at triage must not go on blocking an unrelated open
+// finding in the same file, because clearing runs against the final,
+// post-triage status, not what the reviewer reported before triage.
+func TestClearingAfterTriageDismissedAtTriageDoesNotBlock(t *testing.T) {
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
+	}
+	// r2-f1 was reported open this round, but triage (route.go) already
+	// dismissed it by the time ClearingAfterTriage runs.
+	reported := []Finding{{ID: "r2-f1", File: "a.go", Status: StatusDismissed}}
+	cleared, err := ClearingAfterTriage(known, reported, []string{"a.go"}, alwaysExists)
+	if err != nil {
+		t.Fatalf("ClearingAfterTriage: %v", err)
+	}
+	if !equalStrings(cleared, []string{"r1-f1"}) {
+		t.Fatalf("cleared = %v, want [r1-f1] (a triage dismissal must not keep blocking it)", cleared)
 	}
 }
 
@@ -468,6 +643,19 @@ func TestRenderFindingsMDShowsTriageDecisionRoutedAsAndCleared(t *testing.T) {
 			t.Errorf("findings.md missing %q:\n%s", want, md)
 		}
 	}
+}
+
+// alwaysExists is an existsAtHead stub for tests with nothing gone at head.
+func alwaysExists(file string) (bool, error) { return true, nil }
+
+// existsExcept returns an existsAtHead stub reporting every name in gone as
+// absent at head and everything else present.
+func existsExcept(gone ...string) func(string) (bool, error) {
+	missing := map[string]bool{}
+	for _, f := range gone {
+		missing[f] = true
+	}
+	return func(file string) (bool, error) { return !missing[file], nil }
 }
 
 func indexOf(s, sub string) int {

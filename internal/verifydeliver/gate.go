@@ -23,9 +23,10 @@ import (
 // (tests) or produced by a real reviewer session. Review is set only by the
 // reviewer source (review.go): its validated result plus scope data, which
 // Gate applies through findings bookkeeping (design 5, findings.go) to
-// decide clean vs fix-slices and to persist findings.yaml/md. Routing a
-// finding into a fix slice (design 6) is a later stage's job: FixSlices
-// stays empty for a reviewer round until then, whatever the verdict.
+// decide clean vs fix-slices and to persist findings.yaml/md, then routes
+// into fix slices (design 6, route.go). FixSlices stays empty coming out of
+// a reviewer source's own Round: Gate fills it in afterward from routing,
+// never the source itself.
 type Round struct {
 	FindingsMD string
 	FixSlices  []store.Slice
@@ -123,10 +124,7 @@ type GateReport struct {
 	// ReviewedSHA is repoName -> the head sha a reviewer round reviewed
 	// (design 5.5: "on every reviewer round, clean or not"), the anchor the
 	// next round's scope resolves against (review.go's resolveScopeBase).
-	// nil for a scripted round. Writing it on a real reviewer round is
-	// findings bookkeeping's job (design 5, S2); reportYAML carries the
-	// field now so review.go's own tests, and S2, can read and write it
-	// without another on-disk shape change.
+	// nil for a scripted round.
 	ReviewedSHA map[string]string
 	// Scope is this round's scope diff kind (full|delta), "" for a
 	// scripted round (design 4.1).
@@ -179,8 +177,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	branch := ticketBranch(ticket)
 	// --branch: validate a hand-written branch fetched from origin instead
 	// of the ticket's own jig/<ticket>. Its spec axis reads opts.BriefDoc
-	// instead of the brief; report.yaml's shape stays fixed by contract to
-	// {round,verdict,model,target_sha} (BriefDoc is not recorded there), but
+	// instead of the brief; report.yaml never records BriefDoc itself, but
 	// the doc's content is copied into this round's own
 	// gate/round-<n>/spec-input.md so the spec-axis-input swap is real
 	// rather than an accepted, no-op flag.
@@ -350,12 +347,25 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		// Routing and triage (design 6, route.go) then turn kept fixes and
 		// asks into fix slices, mutating each reported finding's final
 		// Status/Triage/Decision/RoutedAs - entirely in memory, before
-		// anything is persisted or pushed. Only then is the post-round fold
-		// checked for what's still outstanding (design 5.4): that, not
-		// whether the round dispatched a reviewer, decides clean vs
-		// fix-slices.
-		reported, cleared := ApplyRound(n, cum, round.Review.Result, round.Review.Deleted, man)
+		// anything is persisted or pushed. Rule 3's clearing (Q6) runs only
+		// after that, against those final statuses: a finding dismissed at
+		// triage must not go on blocking an unrelated open finding in the
+		// same file. The post-round fold is then checked for what's still
+		// outstanding (design 5.4): that, not whether the round dispatched
+		// a reviewer, decides clean vs fix-slices.
+		reviewHead := round.Review.HeadSHA
+		existsAtHead := func(file string) (bool, error) {
+			return gitx.FileExistsAtRev(lease.Dir, reviewHead, file)
+		}
+		reported, err := ApplyRound(n, cum, round.Review.Result, slices, man)
+		if err != nil {
+			return GateReport{}, err
+		}
 		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, o.Triage, man)
+		if err != nil {
+			return GateReport{}, err
+		}
+		cleared, err := ClearingAfterTriage(cum, routed, round.Review.Result.ReviewedPaths, existsAtHead)
 		if err != nil {
 			return GateReport{}, err
 		}
@@ -371,8 +381,16 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		// against it.
 		report.ReviewedSHA = map[string]string{repoName: round.Review.HeadSHA}
 		report.Scope = round.Review.Scope
-		report.Findings = sortedFindingsByID(routed)
+		// Findings and NeedsHuman are sorted by risk, high first, then id
+		// (sortByRiskThenID, the same helper routing sorts the human seam
+		// with): design 6.4's "always shown sorted by risk, high first"
+		// applies to every place findings reach a human, not only the
+		// triage prompt - the gate report's own tables (cmd/jig) render
+		// these two lists as given, so the ordering has to be right here.
+		report.Findings = append([]Finding(nil), routed...)
+		sortByRiskThenID(report.Findings)
 		report.NeedsHuman = askedFindingsList(updated)
+		sortByRiskThenID(report.NeedsHuman)
 		for _, fs := range fixSlices {
 			report.FixSlices = append(report.FixSlices, fs.ID)
 		}
@@ -590,9 +608,8 @@ func writeFixRound(d Deps, ticket string, n int, report GateReport, round Round)
 
 // appendFixSlices appends every fix slice a round routed, initializing
 // each to queued and journaling it. It is shared by the scripted source's
-// fix-slices path and the reviewer round path; for a reviewer round it is
-// currently always a no-op (round.FixSlices stays empty until routing,
-// design 6, lands).
+// own fix-slices (round.FixSlices) and a reviewer round's routing output
+// (routeRound's slices, passed by Gate).
 func appendFixSlices(d Deps, ticket string, n int, slices []store.Slice) error {
 	for _, fs := range slices {
 		if fs.FromGate == 0 {
