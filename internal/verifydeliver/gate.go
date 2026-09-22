@@ -24,9 +24,11 @@ import (
 // reviewer source (review.go): its validated result plus scope data, which
 // Gate applies through findings bookkeeping (design 5, findings.go) to
 // decide clean vs fix-slices and to persist findings.yaml/md, then routes
-// into fix slices (design 6, route.go). FixSlices stays empty coming out of
-// a reviewer source's own Round: Gate fills it in afterward from routing,
-// never the source itself.
+// into fix slices (design 6, route.go) - those are appended directly from
+// routing's own return value, never stored back onto this struct. FixSlices
+// is the scripted source's own field instead: fakeGateSource.Round reads it
+// straight from a scenario's fix-slices.yaml, and Gate appends it unchanged
+// for that source.
 type Round struct {
 	FindingsMD string
 	FixSlices  []store.Slice
@@ -109,9 +111,9 @@ type GateOpts struct {
 	BriefDoc string // spec-axis input when Branch is set
 	PRMode   bool
 	// Triage is the human seam for a reviewer round's fix batch and ask
-	// findings (design 6, route.go). nil means DefaultTriage: every fix
-	// is kept, every ask with a workspace is kept, a no-workspace ask
-	// stays undecided (Q1). Unused for a scripted (--scenario) round.
+	// findings (design 6, route.go). nil means DefaultTriage: every fix is
+	// kept, every ask with a full build target is kept, one missing part
+	// of it stays undecided. Unused for a scripted (--scenario) round.
 	Triage Triage
 }
 
@@ -138,7 +140,7 @@ type GateReport struct {
 	FixSlices []string
 	// NeedsHuman is every asked finding still undecided after this round
 	// (across every round, not only this one's own): design 6.4's "needs a
-	// human" list, Q1's exit-2 signal. Empty when nothing is waiting on a
+	// human" list, the exit-2 signal. Empty when nothing is waiting on a
 	// person.
 	NeedsHuman []Finding
 }
@@ -347,17 +349,24 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		// Routing and triage (design 6, route.go) then turn kept fixes and
 		// asks into fix slices, mutating each reported finding's final
 		// Status/Triage/Decision/RoutedAs - entirely in memory, before
-		// anything is persisted or pushed. Rule 3's clearing (Q6) runs only
-		// after that, against those final statuses: a finding dismissed at
-		// triage must not go on blocking an unrelated open finding in the
-		// same file. The post-round fold is then checked for what's still
+		// anything is persisted or pushed. Rule 3's clearing runs only after
+		// that, against those final statuses: a finding dismissed at triage
+		// must not go on blocking an unrelated open finding in the same
+		// file. The post-round fold is then checked for what's still
 		// outstanding (design 5.4): that, not whether the round dispatched
 		// a reviewer, decides clean vs fix-slices.
 		reviewHead := round.Review.HeadSHA
 		existsAtHead := func(file string) (bool, error) {
 			return gitx.FileExistsAtRev(lease.Dir, reviewHead, file)
 		}
-		reported, err := ApplyRound(n, cum, round.Review.Result, slices, man)
+		sliceGreen := func(sliceID string) (bool, error) {
+			st, err := d.Store.ReadSliceState(ticket, sliceID)
+			if err != nil {
+				return false, err
+			}
+			return st.State == "green", nil
+		}
+		reported, err := ApplyRound(n, cum, round.Review.Result, slices, sliceGreen, man)
 		if err != nil {
 			return GateReport{}, err
 		}

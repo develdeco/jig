@@ -11,11 +11,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// sliceRecording returns an existingSlices stub with one slice whose
-// Findings names id (F11's structural link, design 6.1): the shape
-// findingHasFixSlice looks for.
+// sliceRecording returns an existingSlices stub with one slice, "fix-x",
+// whose Findings names id (design 6.1's structural link): the shape
+// findingHasGreenFixSlice looks for.
 func sliceRecording(id string) []store.Slice {
 	return []store.Slice{{ID: "fix-x", Findings: []string{id}}}
+}
+
+// alwaysGreen is an ApplyRound sliceGreen stub for tests that want every
+// existing slice treated as finished.
+func alwaysGreen(string) (bool, error) { return true, nil }
+
+// greenExcept is an ApplyRound sliceGreen stub reporting every slice green
+// except the named ones (still queued or building).
+func greenExcept(notGreen ...string) func(string) (bool, error) {
+	set := map[string]bool{}
+	for _, id := range notGreen {
+		set[id] = true
+	}
+	return func(id string) (bool, error) { return !set[id], nil }
 }
 
 // --- workspaceFor ---------------------------------------------------------
@@ -55,7 +69,7 @@ func TestWorkspaceForNestedPathsAndNoWorkspace(t *testing.T) {
 
 // --- statusForAction ---------------------------------------------------------
 
-// TestStatusForActionRejectsUnknownAction is F12: every action design 4.2
+// TestStatusForActionRejectsUnknownAction: every action design 4.2
 // defines is handled explicitly, and an action outside that set (only
 // reachable if a caller skips ParseReviewResult's own validation) is a
 // programming error returned up the call chain, never silently folded into
@@ -90,7 +104,7 @@ func TestApplyRoundRule4NewFindingsRouteByAction(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go", "b.go", "c.go"},
 	}
-	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, man)
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -128,6 +142,104 @@ func TestApplyRoundRule4NewFindingsRouteByAction(t *testing.T) {
 	}
 }
 
+// TestApplyRoundRecordsTheSoleOracleWhenTheReviewerOmitsIt: with exactly
+// one manifest oracle there is no choice to make, so a fix or ask finding
+// that leaves oracle unset still gets it recorded - never left empty on a
+// manifest that does have one.
+func TestApplyRoundRecordsTheSoleOracleWhenTheReviewerOmitsIt(t *testing.T) {
+	man := oneOracleManifest()
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "a.go", Title: "fix me", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r"},
+		},
+		ReviewedPaths: []string{"a.go"},
+	}
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	if reported[0].Oracle != "test" {
+		t.Errorf("Oracle = %q, want the manifest's sole oracle recorded", reported[0].Oracle)
+	}
+}
+
+// TestApplyRoundForcesAskWhenNoOracleCanBeResolved: a fix finding whose
+// oracle cannot be resolved against a multi-oracle manifest (omitted, and
+// there is no single default to fall back to) has no build target jig can
+// derive, the same as a no-workspace fix, so it routes to the human as an
+// ask instead of silently becoming a fix slice with no oracle.
+func TestApplyRoundForcesAskWhenNoOracleCanBeResolved(t *testing.T) {
+	man := oneOracleManifest()
+	man.Oracles["lint"] = "true" // two oracles now: no single default
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "a.go", Title: "fix me", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r"},
+		},
+		ReviewedPaths: []string{"a.go"},
+	}
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	f := reported[0]
+	if f.Status != StatusAsked || f.RoutedAs != ActionAsk {
+		t.Errorf("finding = %+v, want asked/routed_as ask (no oracle jig can resolve)", f)
+	}
+}
+
+// TestApplyRoundStaleOracleAfterManifestChangeForcesAsk covers a recurrence
+// whose earlier occurrence recorded an oracle the manifest no longer has
+// (removed or renamed between rounds): the recorded oracle is not a
+// manifest oracle any more, so this is the same missing-build-target case,
+// not a silent pass-through.
+func TestApplyRoundStaleOracleAfterManifestChangeForcesAsk(t *testing.T) {
+	man := manifest.Manifest{
+		Oracles:    map[string]string{"test": "true", "vet": "true"},
+		Workspaces: []manifest.Workspace{{ID: "root", Path: "."}},
+	}
+	// Recurrences stays at 0 and no slice recorded it yet, so the recurrence
+	// bound itself has no say here: only the stale oracle can force this to
+	// ask.
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "old"},
+	}
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "a.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Prior: "r1-f1"},
+		},
+		ReviewedPaths: []string{"a.go"},
+	}
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	f := reported[0]
+	if f.Recurrences >= 2 {
+		t.Fatalf("test setup: Recurrences = %d, want under 2 so the recurrence bound isn't what forces this", f.Recurrences)
+	}
+	if f.Status != StatusAsked || f.RoutedAs != ActionAsk {
+		t.Errorf("finding = %+v, want asked/routed_as ask (the recorded oracle is no longer a manifest oracle)", f)
+	}
+}
+
+// TestApplyRoundRejectsAnUnnormalizableFindingFile: a finding file that
+// fails path normalization (an absolute path or a ".." segment - already
+// validated upstream by ParseReviewResult in production, but ApplyRound is
+// directly callable, so it must not silently keep an invalid path either)
+// is an error, the same as an unknown action, never kept as if valid.
+func TestApplyRoundRejectsAnUnnormalizableFindingFile(t *testing.T) {
+	man := oneOracleManifest()
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "../secret.go", Title: "t", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test"},
+		},
+		ReviewedPaths: []string{"../secret.go"},
+	}
+	if _, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man); err == nil {
+		t.Error("ApplyRound: want an error for an unnormalizable finding file, got nil")
+	}
+}
+
 // --- ApplyRound: rule 1 (open recurrence) ---------------------------------
 
 func TestApplyRoundRule1RecurrenceStaysOpenAndCountsUp(t *testing.T) {
@@ -141,7 +253,7 @@ func TestApplyRoundRule1RecurrenceStaysOpenAndCountsUp(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), man)
+	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), alwaysGreen, man)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -176,7 +288,7 @@ func TestApplyRoundRule2DismissedRecurrenceStaysDismissed(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, nil, man)
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -189,10 +301,10 @@ func TestApplyRoundRule2DismissedRecurrenceStaysDismissed(t *testing.T) {
 	}
 }
 
-// TestApplyRoundRule2ResetsQ2FieldsOnADismissedRepeat is F7: a dismissed
+// TestApplyRoundRule2ResetsTriageFieldsOnADismissedRepeat: a dismissed
 // repeat must not restate an earlier round's human decision as if it were
 // made again this round.
-func TestApplyRoundRule2ResetsQ2FieldsOnADismissedRepeat(t *testing.T) {
+func TestApplyRoundRule2ResetsTriageFieldsOnADismissedRepeat(t *testing.T) {
 	man := oneOracleManifest()
 	known := map[string]Finding{
 		"r1-f3": {ID: "r1-f3", File: "a.go", Status: StatusDismissed, Action: ActionFix, Risk: RiskLow, RiskRationale: "old",
@@ -204,7 +316,7 @@ func TestApplyRoundRule2ResetsQ2FieldsOnADismissedRepeat(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, nil, man)
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -214,7 +326,7 @@ func TestApplyRoundRule2ResetsQ2FieldsOnADismissedRepeat(t *testing.T) {
 	}
 }
 
-// --- ApplyRound: rule 1 carries forward oracle, decision and workspace (F9) -
+// --- ApplyRound: rule 1 carries forward oracle, decision and workspace ---
 
 func TestApplyRoundRule1CarriesOracleWhenThisRoundNamesNone(t *testing.T) {
 	man := oneOracleManifest()
@@ -229,7 +341,7 @@ func TestApplyRoundRule1CarriesOracleWhenThisRoundNamesNone(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, nil, man)
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -250,23 +362,23 @@ func TestApplyRoundRule1CarriesDecisionAndWorkspaceWhenFileUnchanged(t *testing.
 		},
 		ReviewedPaths: []string{"orphan.go"},
 	}
-	reported, err := ApplyRound(2, known, result, nil, man)
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
 	f := reported[0]
 	if f.Workspace != "billing" {
-		t.Errorf("Workspace = %q, want billing (the human's earlier Q1 choice, file unchanged)", f.Workspace)
+		t.Errorf("Workspace = %q, want billing (the human's earlier choice, file unchanged)", f.Workspace)
 	}
 	if f.Decision != "ship it in billing" {
 		t.Errorf("Decision = %q, want the earlier kept ask's decision carried forward", f.Decision)
 	}
 	if f.Status != StatusOpen {
-		t.Errorf("Status = %q, want open (a non-empty carried workspace, not forced to ask by Q1)", f.Status)
+		t.Errorf("Status = %q, want open (a non-empty carried workspace, not forced to ask)", f.Status)
 	}
 }
 
-// --- ApplyRound: recurrence bound (5.3, Q7) --------------------------------
+// --- ApplyRound: recurrence bound (5.3) --------------------------------
 
 func TestApplyRoundRecurrenceBoundFirstRoutesLikeNew(t *testing.T) {
 	man := oneOracleManifest()
@@ -279,7 +391,7 @@ func TestApplyRoundRecurrenceBoundFirstRoutesLikeNew(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), man)
+	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), alwaysGreen, man)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -288,11 +400,11 @@ func TestApplyRoundRecurrenceBoundFirstRoutesLikeNew(t *testing.T) {
 	}
 }
 
-// TestApplyRoundRecurrenceNotCountedWithoutAFixSlice is F11: a re-report
-// with prior naming an id that no existing slice has ever recorded is not a
+// TestApplyRoundRecurrenceNotCountedWithoutAFixSlice: a re-report with
+// prior naming an id that no existing slice has ever recorded is not a
 // genuine recurrence (design 5.3's premise needs a fix slice to have gone
 // green without resolving it) - it updates the finding without bumping
-// Recurrences. Covers both an undecided Q1 ask re-reported and an --early
+// Recurrences. Covers both an undecided ask re-reported and an --early
 // round outrunning the frontier: neither has built a slice for the id yet.
 func TestApplyRoundRecurrenceNotCountedWithoutAFixSlice(t *testing.T) {
 	man := oneOracleManifest()
@@ -305,12 +417,36 @@ func TestApplyRoundRecurrenceNotCountedWithoutAFixSlice(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, nil, man) // no existing slice records r1-f1
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man) // no existing slice records r1-f1
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
 	if len(reported) != 1 || reported[0].Recurrences != 0 {
 		t.Fatalf("reported = %+v, want recurrences unchanged at 0 (no fix slice ever went green for it)", reported)
+	}
+}
+
+// TestApplyRoundRecurrenceNotCountedWhenRecordingSliceIsNotGreen covers the
+// other half: a slice recording the id exists, but is still queued or
+// building (as under --early), which is not enough on its own - design
+// 5.3's premise is a slice that already went green without resolving it.
+func TestApplyRoundRecurrenceNotCountedWhenRecordingSliceIsNotGreen(t *testing.T) {
+	man := oneOracleManifest()
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Recurrences: 0},
+	}
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "a.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test", Prior: "r1-f1"},
+		},
+		ReviewedPaths: []string{"a.go"},
+	}
+	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), greenExcept("fix-x"), man)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	if len(reported) != 1 || reported[0].Recurrences != 0 {
+		t.Fatalf("reported = %+v, want recurrences unchanged at 0 (the recording slice is not green yet)", reported)
 	}
 }
 
@@ -327,7 +463,7 @@ func TestApplyRoundRecurrenceBoundSecondForcesAsk(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(3, known, result, sliceRecording("r1-f1"), man)
+	reported, err := ApplyRound(3, known, result, sliceRecording("r1-f1"), alwaysGreen, man)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -336,8 +472,8 @@ func TestApplyRoundRecurrenceBoundSecondForcesAsk(t *testing.T) {
 	}
 }
 
-// TestApplyRoundRecurrenceBoundSecondAsNoteKeepsPriorOracle is F9's own
-// scenario (M3): a second recurrence reported as a bare note still carries
+// TestApplyRoundRecurrenceBoundSecondAsNoteKeepsPriorOracle covers this
+// scenario: a second recurrence reported as a bare note still carries
 // an oracle forward, so the ask it becomes can build a fix slice if kept.
 func TestApplyRoundRecurrenceBoundSecondAsNoteKeepsPriorOracle(t *testing.T) {
 	man := oneOracleManifest()
@@ -351,7 +487,7 @@ func TestApplyRoundRecurrenceBoundSecondAsNoteKeepsPriorOracle(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(3, known, result, sliceRecording("r1-f1"), man)
+	reported, err := ApplyRound(3, known, result, sliceRecording("r1-f1"), alwaysGreen, man)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -410,7 +546,7 @@ func TestClearingAfterTriageStaysOpenWhenNotReviewed(t *testing.T) {
 	}
 }
 
-// TestClearingAfterTriageDismissedRepeatDoesNotBlockOpenFinding is Q6's
+// TestClearingAfterTriageDismissedRepeatDoesNotBlockOpenFinding is the
 // convergence test: a dismissed finding re-reported in the same file as an
 // open one must not keep that open one alive.
 func TestClearingAfterTriageDismissedRepeatDoesNotBlockOpenFinding(t *testing.T) {
@@ -430,8 +566,8 @@ func TestClearingAfterTriageDismissedRepeatDoesNotBlockOpenFinding(t *testing.T)
 	}
 }
 
-// TestClearingAfterTriageRoutedFindingBlocksClearing is the other half of
-// Q6: a new or recurring fix/ask finding that ends up routed (open or
+// TestClearingAfterTriageRoutedFindingBlocksClearing is the other half:
+// a new or recurring fix/ask finding that ends up routed (open or
 // asked) in the same file as an unreported open finding blocks that
 // finding from clearing.
 func TestClearingAfterTriageRoutedFindingBlocksClearing(t *testing.T) {
@@ -448,7 +584,7 @@ func TestClearingAfterTriageRoutedFindingBlocksClearing(t *testing.T) {
 	}
 }
 
-// TestClearingAfterTriageDismissedAtTriageDoesNotBlock is F10: a finding
+// TestClearingAfterTriageDismissedAtTriageDoesNotBlock: a finding
 // the human dismisses at triage must not go on blocking an unrelated open
 // finding in the same file, because clearing runs against the final,
 // post-triage status, not what the reviewer reported before triage.
@@ -614,10 +750,10 @@ func TestRenderFindingsMDCleanWhenNoFindings(t *testing.T) {
 	}
 }
 
-// TestRenderFindingsMDNeverSaysCleanForANonCleanRound guards the main-loop
-// review's finding on S2: a round that reports nothing new must not render
-// "clean" when its own verdict is fix-slices (an earlier round's finding is
-// still open or asked, just not reported against again this round).
+// TestRenderFindingsMDNeverSaysCleanForANonCleanRound: a round that reports
+// nothing new must not render "clean" when its own verdict is fix-slices
+// (an earlier round's finding is still open or asked, just not reported
+// against again this round).
 func TestRenderFindingsMDNeverSaysCleanForANonCleanRound(t *testing.T) {
 	md := renderFindingsMD(3, "fix-slices", "", nil, nil)
 	if indexOf(md, "clean") >= 0 {
@@ -628,8 +764,8 @@ func TestRenderFindingsMDNeverSaysCleanForANonCleanRound(t *testing.T) {
 	}
 }
 
-// TestRenderFindingsMDShowsTriageDecisionRoutedAsAndCleared covers Q2's
-// additive fields and the cleared-ids line.
+// TestRenderFindingsMDShowsTriageDecisionRoutedAsAndCleared covers the
+// triage/decision/routed_as additive fields and the cleared-ids line.
 func TestRenderFindingsMDShowsTriageDecisionRoutedAsAndCleared(t *testing.T) {
 	findings := []Finding{
 		{ID: "r2-f1", Title: "kept ask", Risk: RiskHigh, RiskRationale: "r", Status: StatusOpen,
@@ -684,7 +820,7 @@ func TestMarshalFindingsYAMLEmptyListsAsBrackets(t *testing.T) {
 	}
 }
 
-func TestMarshalFindingsYAMLRoundTripsQ2Fields(t *testing.T) {
+func TestMarshalFindingsYAMLRoundTripsTriageFields(t *testing.T) {
 	findings := []Finding{
 		{ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Triage: TriageHuman, Decision: "do it", RoutedAs: ActionAsk},
 	}
@@ -707,7 +843,7 @@ func TestMarshalFindingsYAMLRoundTripsQ2Fields(t *testing.T) {
 	}
 	got := ff.Findings[0]
 	if got.Triage != TriageHuman || got.Decision != "do it" || got.RoutedAs != ActionAsk {
-		t.Errorf("finding = %+v, want Q2 fields round-tripped", got)
+		t.Errorf("finding = %+v, want the triage fields round-tripped", got)
 	}
 }
 

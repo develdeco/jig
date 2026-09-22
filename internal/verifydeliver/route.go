@@ -17,11 +17,11 @@ import (
 // TriageInput is what one Triage hook call sees: this round's newly routed
 // findings (findings.go's ApplyRound output, split by jig's own status),
 // each list sorted by risk, high first (design 6.4). Fixes is every
-// finding routed open (a new or recurring fix, or a no-workspace fix
-// forced to ask by Q1 never appears here - see Asks); Asks is every
-// finding routed asked; Notes is included for display only, since a note
-// is never triaged (design 6.3). Manifest is offered so a hook can list
-// workspace ids when keeping a no-workspace ask needs one (Q1).
+// finding routed open (a new or recurring fix; a fix with no build target
+// jig can derive never appears here - see Asks); Asks is every finding
+// routed asked; Notes is included for display only, since a note is never
+// triaged (design 6.3). Manifest is offered so a hook can list workspace
+// ids and oracle names when keeping an ask needs one it lacks.
 type TriageInput struct {
 	Fixes    []Finding
 	Asks     []Finding
@@ -29,17 +29,19 @@ type TriageInput struct {
 	Manifest manifest.Manifest
 }
 
-// AskOutcome is one ask finding's triage decision (design 6.2, Q2). Keep
-// false dismisses it. Decision is the human's text for a kept ask, carried
-// into its fix slice's goal. Workspace is required only when Keep is true
-// and the finding itself has no derived workspace (Q1): the hook must
-// resolve one, since jig never substitutes a silent default for that
-// judgment. Human records whether a person at a terminal decided it, as
-// opposed to --yes or a non-terminal stdin (Q2's triage: human|auto).
+// AskOutcome is one ask finding's triage decision (design 6.2). Keep false
+// dismisses it. Decision is the human's text for a kept ask, carried into
+// its fix slice's goal. Workspace and Oracle are required only when Keep is
+// true and the finding itself is missing that part of its build target (no
+// derived workspace, or no oracle jig can resolve): the hook must resolve
+// whichever is missing, since jig never substitutes a silent default for
+// that judgment. Human records whether a person at a terminal decided it,
+// as opposed to --yes or a non-terminal stdin.
 type AskOutcome struct {
 	Keep      bool
 	Decision  string
 	Workspace string
+	Oracle    string
 	Human     bool
 }
 
@@ -47,8 +49,8 @@ type AskOutcome struct {
 // names which of TriageInput.Fixes the human dismissed; every other fix is
 // kept. FixHuman records whether a person at a terminal decided the fix
 // batch. Asks maps a TriageInput.Asks finding's id to its outcome; an id
-// absent from Asks is left undecided (Q1: a no-workspace ask that cannot
-// be kept without a human's workspace choice stays asked).
+// absent from Asks is left undecided (an ask missing part of its build
+// target that no human resolved stays asked).
 type TriageResult struct {
 	DismissedFixIDs map[string]bool
 	FixHuman        bool
@@ -64,15 +66,20 @@ type Triage func(TriageInput) TriageResult
 
 // DefaultTriage is what runs when a GateOpts.Triage hook is nil, and what
 // --yes or a non-terminal stdin build on too (design 6.4, D-1): every fix
-// is kept, every ask that already has a derived workspace is kept with no
-// decision text, and an ask whose file lies in no declared workspace stays
-// undecided (Q1) - keeping it needs a human's workspace choice, which
-// nothing here can supply. Every decision it makes is auto (Human false).
+// is kept, every ask that already has a full build target (a derived
+// workspace and a resolvable oracle) is kept with no decision text, and an
+// ask missing either stays undecided - keeping it needs a human's choice,
+// which nothing here can supply. Every decision it makes is auto (Human
+// false).
 func DefaultTriage(in TriageInput) TriageResult {
+	oracleNames := sortedOracleNames(in.Manifest)
 	asks := make(map[string]AskOutcome, len(in.Asks))
 	for _, f := range in.Asks {
 		if f.Workspace == "" {
-			continue // Q1: undecided
+			continue // undecided: keeping it needs a human's workspace choice
+		}
+		if _, ok := resolveOracle(f.Oracle, oracleNames); !ok {
+			continue // undecided: keeping it needs a human's oracle choice
 		}
 		asks[f.ID] = AskOutcome{Keep: true}
 	}
@@ -123,14 +130,15 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 	sortByRiskThenID(asks)
 	sortByRiskThenID(notes)
 
-	// GATE_NO_ORACLE (Q4) is checked before triage, not after: a manifest
-	// with zero oracles can never build a fix slice for anything, so asking
-	// a human to keep or dismiss a fix or ask first - only to discard every
+	// GATE_NO_ORACLE is checked before triage, not after: a manifest with
+	// zero oracles can never build a fix slice for anything, so asking a
+	// human to keep or dismiss a fix or ask first - only to discard every
 	// answer once building the slice fails - wastes their judgment on a
 	// round that was already going to fail. "The manifest has no oracles"
 	// is reserved for exactly this case; a finding that individually lacks
-	// an oracle in a manifest that does have some is a different, narrower
-	// failure inside buildFixSlices (oracleForFinding).
+	// a resolvable oracle in a manifest that does have some is routed to
+	// the human as an ask instead (findings.go's ApplyRound), the same
+	// mechanism a no-workspace fix uses.
 	oracleNames := sortedOracleNames(man)
 	if len(oracleNames) == 0 && (len(fixes) > 0 || len(asks) > 0) {
 		return nil, nil, &axi.Error{
@@ -161,7 +169,7 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 		i := idx[f.ID]
 		decision, decided := result.Asks[f.ID]
 		if !decided {
-			continue // Q1/undecided: stays asked, Triage left empty
+			continue // undecided: stays asked, Triage left empty
 		}
 		askTriage := TriageAuto
 		if decision.Human {
@@ -176,16 +184,22 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 		if ws == "" {
 			ws = decision.Workspace
 		}
-		if ws == "" {
-			// The hook kept a no-workspace ask without resolving one
-			// (Q1 requires it); defensively leave this ask undecided
-			// rather than build a slice with no build target.
+		oracle, ok := resolveOracle(reported[i].Oracle, oracleNames)
+		if !ok {
+			oracle, ok = resolveOracle(decision.Oracle, oracleNames)
+		}
+		if ws == "" || !ok {
+			// The hook kept an ask without resolving every missing part of
+			// its build target (a workspace, an oracle, or both);
+			// defensively leave this ask undecided rather than build a
+			// slice with no build target.
 			reported[i].Triage = ""
 			continue
 		}
 		reported[i].Status = StatusOpen
 		reported[i].Decision = decision.Decision
 		reported[i].Workspace = ws
+		reported[i].Oracle = oracle
 		keptAsks = append(keptAsks, reported[i])
 	}
 
@@ -196,30 +210,60 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 	return reported, slices, nil
 }
 
-// oracleForFinding resolves f's fix-slice oracle (Q4): f.Oracle when set
-// (already validated as a manifest oracle); the sole manifest oracle when
-// there is exactly one and f.Oracle is empty (nothing to choose); else
-// GATE_NO_ORACLE - a manifest with zero oracles can never build a fix
-// slice.
-func oracleForFinding(f Finding, oracleNames []string) (string, error) {
-	if f.Oracle != "" {
-		return f.Oracle, nil
+// validOracle reports whether oracle is one of the manifest's own oracle
+// names, so a manifest change between rounds (an oracle renamed or removed)
+// is caught the same way an unset oracle is.
+func validOracle(oracle string, oracleNames []string) bool {
+	for _, name := range oracleNames {
+		if name == oracle {
+			return true
+		}
 	}
-	if len(oracleNames) == 1 {
-		return oracleNames[0], nil
+	return false
+}
+
+// resolveOracle resolves a finding's recorded oracle against the manifest's
+// current oracle names: an already-valid oracle is returned unchanged; an
+// empty one defaults to the sole manifest oracle when there is exactly one
+// (there is no choice to make); anything else (empty with more than one
+// manifest oracle, or a name the manifest no longer has) is unresolved, ok
+// false.
+func resolveOracle(oracle string, oracleNames []string) (string, bool) {
+	if validOracle(oracle, oracleNames) {
+		return oracle, true
+	}
+	if oracle == "" && len(oracleNames) == 1 {
+		return oracleNames[0], true
+	}
+	return "", false
+}
+
+// oracleForFinding resolves f's fix-slice oracle (resolveOracle); every
+// caller here has already routed a finding with no resolvable oracle to the
+// human as an ask (findings.go's ApplyRound) or had the triage hook resolve
+// one (routeRound's kept-ask handling above), so this only ever reports
+// GATE_NO_ORACLE as a last defense, never as the primary mechanism.
+func oracleForFinding(f Finding, oracleNames []string) (string, error) {
+	if oracle, ok := resolveOracle(f.Oracle, oracleNames); ok {
+		return oracle, nil
+	}
+	if len(oracleNames) == 0 {
+		return "", &axi.Error{
+			Msg:  fmt.Sprintf("finding %s: cannot build a fix slice, the manifest has no oracles", f.ID),
+			Code: "GATE_NO_ORACLE",
+		}
 	}
 	return "", &axi.Error{
-		Msg:  fmt.Sprintf("finding %s: cannot build a fix slice, the manifest has no oracles", f.ID),
+		Msg:  fmt.Sprintf("finding %s: cannot build a fix slice, no oracle recorded and the manifest has more than one: %s", f.ID, strings.Join(oracleNames, ", ")),
 		Code: "GATE_NO_ORACLE",
 	}
 }
 
 // previousFixSlice finds the latest slice in existingSlices whose Findings
-// contains findingID (Q7: "the latest slice in slices.yaml whose findings
-// contains the id"), and reads its summary from its last attempt's
+// contains findingID, and reads its summary from its last attempt's
 // work/<id>.attempt-<attempts>.result.json. found is false when no earlier
 // slice recorded this finding id at all. summary is "" when that result
-// file is absent (Q7: "only its id is named when that file is absent").
+// file is absent, in which case only the slice's id is named.
 func previousFixSlice(st *store.Store, ticket, findingID string, existingSlices []store.Slice) (id, summary string, found bool) {
 	for i := len(existingSlices) - 1; i >= 0; i-- {
 		for _, fid := range existingSlices[i].Findings {
@@ -252,11 +296,11 @@ func previousFixSliceSummary(st *store.Store, ticket, sliceID string) string {
 }
 
 // keptAskHeader phrases a kept ask's fix-slice goal from its recorded
-// Triage (design 6.2, Q2): the builder must never be told a person decided
+// Triage (design 6.2): the builder must never be told a person decided
 // when nobody did, since that is exactly the guessing the ask label exists
 // to prevent (design 1). "kept by the human" only when a person at a
 // terminal actually decided it; a plain, named default otherwise (--yes or
-// no terminal, B1's interim keep, design 6.2).
+// no terminal).
 func keptAskHeader(triage string) string {
 	if triage == TriageHuman {
 		return "kept by the human"
@@ -290,11 +334,10 @@ func findingGoalBlock(f Finding, st *store.Store, ticket string, existingSlices 
 	return b.String()
 }
 
-// sanitizeSliceID replaces every character outside [A-Za-z0-9._-] with "-"
-// (Q9): a manifest workspace id, an oracle name, or a finding id can
-// legally contain a character (e.g. "/", ":") that is not safe in a slice
-// id, since it becomes part of slices/<id>.state and
-// work/<id>.attempt-N.* paths.
+// sanitizeSliceID replaces every character outside [A-Za-z0-9._-] with "-":
+// a manifest workspace id, an oracle name, or a finding id can legally
+// contain a character (e.g. "/", ":") that is not safe in a slice id, since
+// it becomes part of slices/<id>.state and work/<id>.attempt-N.* paths.
 func sanitizeSliceID(id string) string {
 	return strings.Map(func(r rune) rune {
 		switch {
@@ -307,7 +350,7 @@ func sanitizeSliceID(id string) string {
 }
 
 // disambiguateFixSliceIDs breaks ties between two synthesized slices that
-// computed the same id (Q9) - in practice, two workspace/oracle names that
+// computed the same id - in practice, two workspace/oracle names that
 // sanitizeSliceID maps to the same string. AppendSlices refuses a
 // duplicate id outright, which would otherwise leave the round
 // half-applied (some fix slices already appended, the rest rejected). The
@@ -335,12 +378,12 @@ func disambiguateFixSliceIDs(slices []store.Slice) {
 }
 
 // buildFixSlices turns this round's kept findings into fix slices (design
-// 6.1, 6.2, Q9): keptFixes group one slice per (workspace, oracle);
-// keptAsks each become their own slice, carrying the human's decision.
-// existingSlices is the ticket's slices.yaml as of before this round, used
-// only to look up a recurrence's previous fix slice (Q7). oracleNames is
-// the manifest's sorted oracle names, computed once by the caller (Q4's
-// zero-oracle check already ran on it before triage).
+// 6.1, 6.2): keptFixes group one slice per (workspace, oracle); keptAsks
+// each become their own slice, carrying the human's decision. existingSlices
+// is the ticket's slices.yaml as of before this round, used only to look up
+// a recurrence's previous fix slice. oracleNames is the manifest's sorted
+// oracle names, computed once by the caller (the zero-oracle check already
+// ran on it before triage).
 func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []store.Slice, keptFixes, keptAsks []Finding, oracleNames []string) ([]store.Slice, error) {
 	type groupKey struct{ workspace, oracle string }
 	groups := map[groupKey][]Finding{}

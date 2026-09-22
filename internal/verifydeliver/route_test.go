@@ -16,7 +16,7 @@ import (
 )
 
 // writeAttemptResult writes a slice attempt's result.json (outcome.Result
-// shape) under workDir, for previousFixSlice's summary lookup (Q7).
+// shape) under workDir, for previousFixSlice's summary lookup.
 func writeAttemptResult(t *testing.T, workDir, sliceID string, attempt int, summary string) error {
 	t.Helper()
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -74,9 +74,10 @@ func TestDefaultTriageKeepsFixesAndWorkspaceAsksLeavesNoWorkspaceAsksUndecided(t
 	in := TriageInput{
 		Fixes: []Finding{{ID: "r1-f1"}},
 		Asks: []Finding{
-			{ID: "r1-f2", Workspace: "alpha"},
+			{ID: "r1-f2", Workspace: "alpha", Oracle: "test"},
 			{ID: "r1-f3", Workspace: ""},
 		},
+		Manifest: oneOracleManifest(),
 	}
 	out := DefaultTriage(in)
 	if out.DismissedFixIDs["r1-f1"] {
@@ -87,11 +88,28 @@ func TestDefaultTriageKeepsFixesAndWorkspaceAsksLeavesNoWorkspaceAsksUndecided(t
 		t.Errorf("Asks[r1-f2] = %+v, ok=%v, want kept", dec, ok)
 	}
 	if _, ok := out.Asks["r1-f3"]; ok {
-		t.Error("Asks[r1-f3] decided, want undecided (Q1: no workspace)")
+		t.Error("Asks[r1-f3] decided, want undecided (no declared workspace)")
 	}
 }
 
-// --- routeRound: grouping (design 6.1, Q9) ------------------------------
+// TestDefaultTriageLeavesAnAskWithNoResolvableOracleUndecided is the
+// oracle-side half: a workspace ask whose recorded oracle is neither valid
+// nor defaultable (more than one manifest oracle, none recorded) stays
+// undecided even though it has a workspace.
+func TestDefaultTriageLeavesAnAskWithNoResolvableOracleUndecided(t *testing.T) {
+	man := oneOracleManifest()
+	man.Oracles["lint"] = "true" // now two oracles: no single default
+	in := TriageInput{
+		Asks:     []Finding{{ID: "r1-f1", Workspace: "root"}},
+		Manifest: man,
+	}
+	out := DefaultTriage(in)
+	if _, ok := out.Asks["r1-f1"]; ok {
+		t.Error("Asks[r1-f1] decided, want undecided (no oracle jig can resolve)")
+	}
+}
+
+// --- routeRound: grouping (design 6.1) ------------------------------
 
 func TestRouteRoundGroupsFixesByWorkspaceAndOracle(t *testing.T) {
 	st := newReviewStore(t)
@@ -169,7 +187,7 @@ func TestRouteRoundGoalNamesEveryFindingAndDismissedFixIsExcluded(t *testing.T) 
 	}
 }
 
-// --- routeRound: kept asks (design 6.2, Q9) -------------------------------
+// --- routeRound: kept asks (design 6.2) -------------------------------
 
 func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 	st := newReviewStore(t)
@@ -205,7 +223,7 @@ func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 	}
 }
 
-// TestRouteRoundAutoKeptAskGoalDoesNotClaimAHumanDecided is F8: DefaultTriage
+// TestRouteRoundAutoKeptAskGoalDoesNotClaimAHumanDecided: DefaultTriage
 // keeps a workspace ask with no human involved (Triage: auto), and the fix
 // slice goal it builds must say so rather than "kept by the human".
 func TestRouteRoundAutoKeptAskGoalDoesNotClaimAHumanDecided(t *testing.T) {
@@ -255,7 +273,7 @@ func TestRouteRoundDismissedAskNeverBuildsASlice(t *testing.T) {
 	}
 }
 
-// TestRouteRoundUndecidedNoWorkspaceAskStaysAskedWithNoTriage is Q1's core
+// TestRouteRoundUndecidedNoWorkspaceAskStaysAskedWithNoTriage is the core
 // case: a hook that declines to decide a no-workspace ask leaves it asked,
 // with no Triage value and no slice.
 func TestRouteRoundUndecidedNoWorkspaceAskStaysAskedWithNoTriage(t *testing.T) {
@@ -276,14 +294,14 @@ func TestRouteRoundUndecidedNoWorkspaceAskStaysAskedWithNoTriage(t *testing.T) {
 		t.Errorf("Status = %q, want asked (still undecided)", f.Status)
 	}
 	if f.Triage != "" {
-		t.Errorf("Triage = %q, want empty (Q2: absent for an undecided ask)", f.Triage)
+		t.Errorf("Triage = %q, want empty (absent for an undecided ask)", f.Triage)
 	}
 }
 
-// TestRouteRoundQ1WorkspaceSuppliedByTriageBuildsTheSlice checks the other
-// half of Q1: when the hook keeps a no-workspace ask and supplies a
-// workspace, routing builds its slice in that workspace.
-func TestRouteRoundQ1WorkspaceSuppliedByTriageBuildsTheSlice(t *testing.T) {
+// TestRouteRoundWorkspaceSuppliedByTriageBuildsTheSlice checks the other
+// half: when the hook keeps a no-workspace ask and supplies a workspace,
+// routing builds its slice in that workspace.
+func TestRouteRoundWorkspaceSuppliedByTriageBuildsTheSlice(t *testing.T) {
 	st := newReviewStore(t)
 	man := twoWorkspaceManifest()
 	reported := []Finding{
@@ -304,6 +322,60 @@ func TestRouteRoundQ1WorkspaceSuppliedByTriageBuildsTheSlice(t *testing.T) {
 	f := findFinding(routed, "r1-f1")
 	if f.Status != StatusOpen || f.Workspace != "beta" {
 		t.Errorf("f = %+v, want open in workspace beta", f)
+	}
+}
+
+// TestRouteRoundUndecidedInvalidOracleAskStaysAskedWithNoTriage is the
+// oracle-side twin of the no-workspace case: a hook that declines to
+// resolve a missing oracle leaves the ask asked, with no slice built.
+func TestRouteRoundUndecidedInvalidOracleAskStaysAskedWithNoTriage(t *testing.T) {
+	st := newReviewStore(t)
+	man := oneOracleManifest()
+	man.Oracles["lint"] = "true" // two oracles now, so "" cannot default
+	reported := []Finding{
+		{ID: "r1-f1", File: "a.go", Title: "no oracle", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusAsked, RoutedAs: ActionAsk},
+	}
+	triage := func(in TriageInput) TriageResult {
+		return TriageResult{Asks: map[string]AskOutcome{"r1-f1": {Keep: true, Human: true}}} // no Oracle supplied
+	}
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, triage, man)
+	if err != nil {
+		t.Fatalf("routeRound: %v", err)
+	}
+	if len(slices) != 0 {
+		t.Fatalf("slices = %v, want none", sliceIDs(slices))
+	}
+	f := findFinding(routed, "r1-f1")
+	if f.Status != StatusAsked || f.Triage != "" {
+		t.Errorf("f = %+v, want asked with no triage (the hook never resolved an oracle)", f)
+	}
+}
+
+// TestRouteRoundOracleSuppliedByTriageBuildsTheSlice is the oracle-side
+// half: when the hook keeps an ask whose recorded oracle is no longer valid
+// and supplies one, routing builds its slice with that oracle.
+func TestRouteRoundOracleSuppliedByTriageBuildsTheSlice(t *testing.T) {
+	st := newReviewStore(t)
+	man := oneOracleManifest()
+	man.Oracles["lint"] = "true" // two oracles now: "old" is neither
+	reported := []Finding{
+		{ID: "r1-f1", File: "a.go", Title: "stale oracle", RiskRationale: "r", Action: ActionFix, Oracle: "old", Workspace: "root", Status: StatusAsked, RoutedAs: ActionAsk},
+	}
+	triage := func(in TriageInput) TriageResult {
+		return TriageResult{Asks: map[string]AskOutcome{
+			"r1-f1": {Keep: true, Oracle: "lint", Human: true},
+		}}
+	}
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, triage, man)
+	if err != nil {
+		t.Fatalf("routeRound: %v", err)
+	}
+	if len(slices) != 1 || slices[0].Oracle != "lint" {
+		t.Fatalf("slices = %+v, want one slice with oracle lint", slices)
+	}
+	f := findFinding(routed, "r1-f1")
+	if f.Status != StatusOpen || f.Oracle != "lint" {
+		t.Errorf("f = %+v, want open with oracle lint", f)
 	}
 }
 
@@ -342,7 +414,7 @@ func TestRouteRoundNotesPassThroughUntouched(t *testing.T) {
 	}
 }
 
-// --- Q4: GATE_NO_ORACLE ----------------------------------------------------
+// --- GATE_NO_ORACLE ----------------------------------------------------
 
 func TestRouteRoundNoOracleManifestFailsGateNoOracle(t *testing.T) {
 	st := newReviewStore(t)
@@ -357,11 +429,30 @@ func TestRouteRoundNoOracleManifestFailsGateNoOracle(t *testing.T) {
 	}
 }
 
-// TestRouteRoundNoOracleManifestFailsBeforeTriage is F9's second half: a
-// zero-oracle manifest fails GATE_NO_ORACLE before the triage hook ever
-// runs, so a human at a terminal is never asked to decide a fix or ask that
-// can never build a slice - and never has their answer discarded when
-// routing then fails anyway.
+// TestOracleForFindingMultiOracleManifestNamesTheOracles is the multi-
+// oracle twin of the zero-oracle GATE_NO_ORACLE message: it must not claim
+// the manifest has no oracles when it names several, and must name them.
+func TestOracleForFindingMultiOracleManifestNamesTheOracles(t *testing.T) {
+	_, err := oracleForFinding(Finding{ID: "r1-f1"}, []string{"lint", "test"})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "GATE_NO_ORACLE" {
+		t.Fatalf("err = %v, want *axi.Error GATE_NO_ORACLE", err)
+	}
+	if contains(ae.Msg, "has no oracles") {
+		t.Errorf("message = %q, want it not to claim the manifest has no oracles", ae.Msg)
+	}
+	for _, name := range []string{"lint", "test"} {
+		if !contains(ae.Msg, name) {
+			t.Errorf("message = %q, want it to name oracle %q", ae.Msg, name)
+		}
+	}
+}
+
+// TestRouteRoundNoOracleManifestFailsBeforeTriage checks that a zero-oracle
+// manifest fails GATE_NO_ORACLE before the triage hook ever runs, so a
+// human at a terminal is never asked to decide a fix or ask that can never
+// build a slice - and never has their answer discarded when routing then
+// fails anyway.
 func TestRouteRoundNoOracleManifestFailsBeforeTriage(t *testing.T) {
 	st := newReviewStore(t)
 	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}} // zero oracles
@@ -402,7 +493,7 @@ func TestRouteRoundNoOracleManifestWithOnlyNotesDoesNotFail(t *testing.T) {
 	}
 }
 
-// --- Q7: recurrence names the previous fix slice --------------------------
+// --- recurrence names the previous fix slice --------------------------
 
 func TestRouteRoundRecurrenceGoalNamesPreviousFixSlice(t *testing.T) {
 	st := newReviewStore(t)
@@ -436,7 +527,7 @@ func TestRouteRoundRecurrenceGoalNamesPreviousFixSlice(t *testing.T) {
 	}
 }
 
-// TestRouteRoundRecurrenceGoalNamesOnlyIDWhenResultMissing covers Q7's
+// TestRouteRoundRecurrenceGoalNamesOnlyIDWhenResultMissing covers the
 // "only its id is named when that file is absent".
 func TestRouteRoundRecurrenceGoalNamesOnlyIDWhenResultMissing(t *testing.T) {
 	st := newReviewStore(t)
@@ -458,7 +549,7 @@ func TestRouteRoundRecurrenceGoalNamesOnlyIDWhenResultMissing(t *testing.T) {
 	}
 }
 
-// --- Q9: disambiguation ----------------------------------------------------
+// --- disambiguation ----------------------------------------------------
 
 func TestDisambiguateFixSliceIDsBreaksTies(t *testing.T) {
 	slices := []store.Slice{{ID: "fix-1-a"}, {ID: "fix-1-a"}, {ID: "fix-1-a"}}

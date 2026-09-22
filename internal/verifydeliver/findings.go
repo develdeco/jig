@@ -25,18 +25,18 @@ const (
 	StatusNoted     = "noted"
 )
 
-// Triage vocabulary (Q2, design 5.5): who decided a finding's outcome -
-// a person at a terminal, or --yes / no terminal.
+// Triage vocabulary (design 5.5): who decided a finding's outcome - a
+// person at a terminal, or --yes / no terminal.
 const (
 	TriageHuman = "human"
 	TriageAuto  = "auto"
 )
 
 // Finding is one persisted entry of gate/round-N/findings.yaml (design
-// 5.5), plus Q2's additive fields (triage, decision, routed_as). It is
-// jig's own bookkeeping record: the reviewer never sees it directly, only
-// the subset review.json's open and dismissed lists project (OpenFinding,
-// DismissedFinding).
+// 5.5), plus its additive triage fields (triage, decision, routed_as). It
+// is jig's own bookkeeping record: the reviewer never sees it directly,
+// only the subset review.json's open and dismissed lists project
+// (OpenFinding, DismissedFinding).
 type Finding struct {
 	ID            string `yaml:"id"`
 	File          string `yaml:"file"`
@@ -50,19 +50,19 @@ type Finding struct {
 	Workspace     string `yaml:"workspace,omitempty"`
 	Status        string `yaml:"status"`
 	Recurrences   int    `yaml:"recurrences"`
-	// Triage, Decision and RoutedAs are Q2's additive fields. ApplyRound
-	// (this file) sets RoutedAs when the recurrence bound or Q1's
-	// no-workspace rule forces asked despite the reviewer's own label, and
-	// carries Decision forward on a recurrence (rule 1); routing and
-	// triage (route.go) decide Triage, and Decision for a freshly kept
-	// ask, before findings.yaml is persisted.
+	// Triage, Decision and RoutedAs are additive fields beyond what the
+	// reviewer reports. ApplyRound (this file) sets RoutedAs when the
+	// recurrence bound or a missing build target forces asked despite the
+	// reviewer's own label, and carries Decision forward on a recurrence
+	// (rule 1); routing and triage (route.go) decide Triage, and Decision
+	// for a freshly kept ask, before findings.yaml is persisted.
 	Triage   string `yaml:"triage,omitempty"`
 	Decision string `yaml:"decision,omitempty"`
 	RoutedAs string `yaml:"routed_as,omitempty"`
 }
 
 // findingsYAML is gate/round-<n>/findings.yaml's exact on-disk shape
-// (design 5.5, plus Q2's round summary).
+// (design 5.5, plus the round's own summary).
 type findingsYAML struct {
 	Scope         string    `yaml:"scope"`
 	ReviewedPaths []string  `yaml:"reviewed_paths"`
@@ -118,45 +118,58 @@ func workspaceFor(file string, man manifest.Manifest) string {
 	return best
 }
 
-// findingHasFixSlice reports whether any slice in existingSlices already
-// records id in its own Findings (design 6.1's structural link): the
-// premise the recurrence bound (5.3) counts on is that a recurrence means
-// that finding's fix slice went green without resolving it, which can only
-// be true once such a slice actually exists.
-func findingHasFixSlice(id string, existingSlices []store.Slice) bool {
+// findingHasGreenFixSlice reports whether any slice in existingSlices both
+// records id in its own Findings (design 6.1's structural link) and is
+// green: the premise the recurrence bound (5.3) counts on is that a
+// recurrence means that finding's fix slice went green without resolving
+// it, which can only be true once such a slice has actually finished, not
+// merely while it is still queued or building (as under --early).
+// sliceGreen reports one slice's live state by id.
+func findingHasGreenFixSlice(id string, existingSlices []store.Slice, sliceGreen func(sliceID string) (bool, error)) (bool, error) {
 	for _, s := range existingSlices {
 		for _, fid := range s.Findings {
-			if fid == id {
-				return true
+			if fid != id {
+				continue
+			}
+			green, err := sliceGreen(s.ID)
+			if err != nil {
+				return false, fmt.Errorf("verifydeliver: findings: read slice %s state: %w", s.ID, err)
+			}
+			if green {
+				return true, nil
 			}
 		}
 	}
-	return false
+	return false, nil
 }
 
 // ApplyRound applies one validated reviewer round's result onto known, the
-// cumulative fold of every earlier round (design 5.2 rules 1, 2 and 4, Q7):
-// it assigns ids to new findings and resolves recurrences and the
-// recurrence bound. It returns this round's own reported findings (design
-// 5.5's "every finding reported this round") with a provisional Status -
-// routing and triage (route.go) still have to run on it, dismissing some
-// and keeping others, before it is final. known is untouched. Rule 3's
+// cumulative fold of every earlier round (design 5.2 rules 1, 2 and 4): it
+// assigns ids to new findings and resolves recurrences and the recurrence
+// bound. It returns this round's own reported findings (design 5.5's
+// "every finding reported this round") with a provisional Status - routing
+// and triage (route.go) still have to run on it, dismissing some and
+// keeping others, before it is final. known is untouched. Rule 3's
 // clearing is not decided here: ClearingAfterTriage needs reported's final,
-// post-triage statuses (Q6), so the caller runs it only after routeRound.
+// post-triage statuses, so the caller runs it only after routeRound.
 //
-// existingSlices is the ticket's slices.yaml as of before this round (Q7,
-// F11): recurrences only counts up when a fix slice already records the
-// finding's id, since that is what makes a re-report an actual recurrence
-// - a fix slice that went green without resolving it - rather than a
-// finding merely reported again before any slice for it was ever built
-// (an undecided Q1 ask re-reported, or a round run with --early).
-func ApplyRound(round int, known map[string]Finding, result ReviewResult, existingSlices []store.Slice, man manifest.Manifest) (reported []Finding, err error) {
+// existingSlices is the ticket's slices.yaml as of before this round;
+// sliceGreen reports one existing slice's live state by id. Together they
+// decide whether a re-report is a genuine recurrence: recurrences only
+// counts up once a fix slice that already records the finding's id has
+// gone green, since that is the premise the recurrence bound rests on - a
+// fix slice that finished without resolving it - rather than a finding
+// merely reported again before any slice for it was ever built, or while
+// one is still queued or building (an undecided ask re-reported, or a
+// round run with --early).
+func ApplyRound(round int, known map[string]Finding, result ReviewResult, existingSlices []store.Slice, sliceGreen func(sliceID string) (bool, error), man manifest.Manifest) (reported []Finding, err error) {
 	seq := 0
+	oracleNames := sortedOracleNames(man)
 
 	for _, rf := range result.Findings {
 		file, ferr := normalizeRepoRelPath(rf.File)
 		if ferr != nil {
-			file = rf.File // already validated upstream; defensive only
+			return nil, fmt.Errorf("verifydeliver: findings: finding file %q: %w", rf.File, ferr)
 		}
 
 		var id string
@@ -174,9 +187,8 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 			// Rule 2: a repeat of a dismissed finding stays dismissed. It
 			// is not routed and not triaged, so it carries no round's
 			// triage decision forward: Triage, Decision and RoutedAs reset
-			// to empty rather than restating the round that dismissed it
-			// (Q2 - those fields record who decided this round, and nobody
-			// did).
+			// to empty rather than restating the round that dismissed it -
+			// those fields record who decided this round, and nobody did.
 			f := prior
 			f.File, f.Line, f.Title, f.Detail = file, rf.Line, rf.Title, rf.Detail
 			f.Action, f.Risk, f.RiskRationale, f.Oracle = rf.Action, rf.Risk, rf.RiskRationale, rf.Oracle
@@ -198,12 +210,11 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 		if hasPrior {
 			f = prior
 			recurrences = prior.Recurrences
-			// F11: only a fix slice that already recorded this id going
-			// green (without resolving it) is a genuine recurrence; a
-			// re-report with no such slice yet (an undecided Q1 ask, or
-			// --early outrunning the frontier) updates the finding in
-			// place without bumping the count.
-			if findingHasFixSlice(id, existingSlices) {
+			hasGreen, gerr := findingHasGreenFixSlice(id, existingSlices, sliceGreen)
+			if gerr != nil {
+				return nil, gerr
+			}
+			if hasGreen {
 				recurrences = prior.Recurrences + 1
 			}
 		}
@@ -213,25 +224,32 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 		if rf.Oracle != "" {
 			f.Oracle = rf.Oracle
 		}
+		// An omitted oracle defaults to the manifest's sole oracle when it
+		// has exactly one (there is no choice to make); a recurrence whose
+		// prior occurrence never got an oracle resolved this same way
+		// falls back to the same default rather than staying empty.
+		if resolved, ok := resolveOracle(f.Oracle, oracleNames); ok {
+			f.Oracle = resolved
+		}
 		f.Recurrences = recurrences
 		f.Triage, f.RoutedAs = "", ""
 
 		newWorkspace := workspaceFor(file, man)
-		// Q1's workspace is jig-derived, not the reviewer's word, so rule 1
+		// The workspace is jig-derived, not the reviewer's word, so rule 1
 		// leaves it alone only when the file is unchanged and still maps to
 		// no workspace: then a human already chose one for this same file
-		// (routeRound, Q1) and that choice survives the recurrence. Any
-		// other case - a fresh finding, a changed file, or a file that now
-		// does map somewhere - recomputes it.
+		// (routeRound) and that choice survives the recurrence. Any other
+		// case - a fresh finding, a changed file, or a file that now does
+		// map somewhere - recomputes it.
 		if newWorkspace != "" || !hasPrior || file != prior.File || prior.Workspace == "" {
 			f.Workspace = newWorkspace
 		}
 
-		// Recurrence bound (5.3, Q7): the second recurrence comes to the
-		// human as an ask, whatever this round's label - including note,
-		// which is exactly the case that forces an already-oracled finding
-		// (rule 1 above) to a human decision instead of silently dropping
-		// it from the open set.
+		// Recurrence bound (5.3): the second recurrence comes to the human
+		// as an ask, whatever this round's label - including note, which is
+		// exactly the case that forces an already-oracled finding (rule 1
+		// above) to a human decision instead of silently dropping it from
+		// the open set.
 		status, serr := statusForAction(rf.Action)
 		if serr != nil {
 			return nil, serr
@@ -239,17 +257,23 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 		if recurrences >= 2 {
 			status = StatusAsked
 		}
-		// Q1: a fix finding whose file lies in no declared workspace has
-		// no build target, so it can never become a fix slice on its own;
-		// jig routes it to the human as an ask instead (design 5.5).
-		if status == StatusOpen && f.Workspace == "" {
+		// A fix finding missing part of its build target - no declared
+		// workspace for its file, or no oracle jig can resolve against the
+		// current manifest (an oracle recorded before the manifest changed,
+		// say) - can never become a fix slice on its own; jig routes it to
+		// the human as an ask instead (design 5.5). A zero-oracle manifest
+		// is not this case: routeRound fails the whole round with
+		// GATE_NO_ORACLE before triage ever runs, so nothing here needs to
+		// force individual findings to ask over it.
+		missingOracle := len(oracleNames) > 0 && !validOracle(f.Oracle, oracleNames)
+		if status == StatusOpen && (f.Workspace == "" || missingOracle) {
 			status = StatusAsked
 		}
 		f.Status = status
-		// routed_as (Q2): written whenever jig's own status ends up asked
-		// although the reviewer labeled this finding something else
-		// (fix, via the recurrence bound or the no-workspace rule above);
-		// the persisted action always stays the reviewer's own label.
+		// routed_as: written whenever jig's own status ends up asked
+		// although the reviewer labeled this finding something else (fix,
+		// via the recurrence bound or a missing build target above); the
+		// persisted action always stays the reviewer's own label.
 		if status == StatusAsked && rf.Action != ActionAsk {
 			f.RoutedAs = ActionAsk
 		}
@@ -266,10 +290,10 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 // (existsAtHead checks the lease directly, whatever the scope diff says -
 // a file gone before this round's base, or never in a full-scope diff
 // after a rebase, clears a finding on it just the same). Called only after
-// routing and triage (route.go) have set reported's final status (Q6): the
+// routing and triage (route.go) have set reported's final status: the
 // blocking set - a file this round ends up routing a finding into, open or
 // asked - must reflect what a human actually kept, not merely what the
-// reviewer reported before triage dismissed some of it (F10; a finding the
+// reviewer reported before triage dismissed some of it (a finding the
 // human dismisses at triage must not go on blocking an unrelated open
 // finding in the same file from clearing).
 func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedPaths []string, existsAtHead func(file string) (bool, error)) (cleared []string, err error) {
@@ -381,7 +405,7 @@ func dismissedFindingsList(cum map[string]Finding) []Finding {
 }
 
 // askedFindingsList returns cum's asked findings, sorted by id for
-// determinism: design 6.4's "needs a human" list (Q1's exit-2 signal),
+// determinism: design 6.4's "needs a human" list (the exit-2 signal),
 // across every round, not only the one just applied.
 func askedFindingsList(cum map[string]Finding) []Finding {
 	var out []Finding
