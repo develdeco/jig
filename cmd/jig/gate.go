@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"strconv"
 
@@ -11,7 +12,7 @@ import (
 )
 
 // gateSourceFor picks the GateSource for a `jig gate` invocation. The
-// compatibility rule (design Q10): `jig gate` never had --backend before,
+// compatibility rule: `jig gate` never had --backend before,
 // so the old scripted source (NewFakeGateSource) runs iff --scenario is
 // set AND --backend is not - every old invocation behaves exactly as
 // before. Any other combination (including --backend fake --scenario X)
@@ -93,7 +94,7 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 // (oracle failures, env pauses, frontier-not-empty, PR mode) surface as
 // errors from verifydeliver.Gate and are handled by the caller via
 // renderErr before this is reached; this function's own return value is
-// the "needs a human" exit code (Q1): 2 when the round leaves any ask
+// the "needs a human" exit code: 2 when the round leaves any ask
 // undecided, matching frontier's own PendingQuestion convention
 // (printRunReport), else 0.
 func printGateReport(stdout io.Writer, st *store.Store, ticket string, report verifydeliver.GateReport) int {
@@ -133,10 +134,22 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 			blocks = append(blocks, axi.Table("needs_a_human", []string{"id", "risk", "file:line", "title", "risk_rationale"}, needsRows))
 		}
 	}
-	blocks = append(blocks, axi.Help(hintOrFallback(st, ticket)))
+	blocks = append(blocks, axi.Help(gateReportHint(st, ticket, report)))
 	axi.Render(stdout, blocks...)
 	if len(report.NeedsHuman) > 0 {
 		return 2
 	}
 	return 0
+}
+
+// gateReportHint names the way forward after this round: when it leaves
+// any ask undecided, that is always a human decision at a terminal, not
+// more fix-slice work, whatever this round's own fix slices were (there
+// may be none at all, when every routed finding was an undecided ask).
+// Otherwise it falls back to the ticket's general next-step hint.
+func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateReport) string {
+	if len(report.NeedsHuman) > 0 {
+		return fmt.Sprintf("Run `jig gate %s` at a terminal to decide the listed asks", ticket)
+	}
+	return hintOrFallback(st, ticket)
 }

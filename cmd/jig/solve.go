@@ -15,7 +15,7 @@ import (
 const maxSolveRounds = 5
 
 // gateSourceForSolve picks the GateSource for `jig solve`'s own gate/fix-
-// slice loop. The compatibility rule (design Q10): `jig solve` always had
+// slice loop. The compatibility rule: `jig solve` always had
 // --backend, so unlike jig gate its scripted-source decision does not look
 // at it - the old scripted source runs iff --scenario is set, whatever
 // --backend says; otherwise the real reviewer runs on solve's own backend
@@ -99,7 +99,7 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		// Q1: an ask left undecided (no declared workspace, --yes or no
+		// An ask left undecided (no declared workspace, --yes or no
 		// terminal) needs a human, exactly like a builder's parked question -
 		// stop and report it rather than re-dispatching the reviewer on a
 		// decision nothing here can make. printGateReport already returns 2
