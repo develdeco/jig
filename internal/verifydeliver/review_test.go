@@ -148,31 +148,31 @@ func TestMarshalReviewRequestPreservesPopulatedLists(t *testing.T) {
 
 // --- RenderReviewPrompt -----------------------------------------------------
 
-func TestRenderReviewPrompt(t *testing.T) {
+// TestRenderReviewPromptMatchesDesignGolden is F14: the rendered prompt is
+// pinned to design.md section 4.3's reference text verbatim (transcribed
+// independently here, not derived from reviewPromptTemplate), with only the
+// per-round fields and the schema filled in. A word denylist only catches
+// coaching text an editor happened to spell one of a few ways; a golden
+// catches any addition at all - an enumerated problem kind, a rule patching
+// a past model mistake, or reworded prose that drifts from the design -
+// since every one of those changes the byte-for-byte output design 1 and
+// 4.3 require.
+func TestRenderReviewPromptMatchesDesignGolden(t *testing.T) {
 	req := ReviewRequest{Ticket: "JIG-1", Round: 2, Scope: "delta", BaseSHA: "aaa", HeadSHA: "bbb"}
 	prompt := RenderReviewPrompt(req, "/abs/review.json", "/abs/result.json")
 
-	for _, want := range []string{
-		"round 2 of ticket JIG-1",
-		"/abs/review.json",
-		"delta diff aaa..bbb",
-		"Do not edit files, commit, or push",
-		`"fix"`, `"ask"`, `"note"`,
-		"risk_rationale",
-		"/abs/result.json",
-		`"findings"`,
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("prompt missing %q\nprompt:\n%s", want, prompt)
-		}
-	}
-	// The prompt must never enumerate kinds of problems or coach behavior
-	// beyond the output contract (design 1, 4.3): it names no problem
-	// categories like "typo" or "dead code".
-	for _, forbidden := range []string{"typo", "dead code", "mechanical", "class"} {
-		if strings.Contains(strings.ToLower(prompt), forbidden) {
-			t.Errorf("prompt contains forbidden coaching text %q", forbidden)
-		}
+	schema := `{"findings": [{"file": "...", "line": 0, "title": "...", "detail": "...", "action": "fix|ask|note", "risk": "low|medium|high", "risk_rationale": "...", "oracle": "...", "prior": "r1-f2"}], "reviewed_paths": ["..."], "summary": "..."}`
+	golden := `You are reviewing round 2 of ticket JIG-1. Your inputs are in review.json at /abs/review.json.
+Review the delta diff aaa..bbb in this worktree against the brief; the brief says what was asked for. Do not edit files, commit, or push.
+Report every problem you find in the files you review, as they are now, including problems already listed as open. For each, give file, line (0 if unknown), title, detail, action, risk, risk_rationale and oracle, plus prior when it is a finding listed under open or dismissed. The human dismissed the findings listed under dismissed.
+action: "fix" when the fix is objective and does not change what the brief asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
+risk: "low", "medium" or "high": how much harm follows if this part of the change is wrong.
+oracle: the manifest oracle from review.json that best proves the fix.
+reviewed_paths: every file you read. jig rejects a result that does not include every path in must_review.
+When finished, write result.json at /abs/result.json with exactly one JSON object: ` + schema
+
+	if prompt != golden {
+		t.Errorf("prompt does not match design 4.3's golden text.\ngot:\n%s\nwant:\n%s", prompt, golden)
 	}
 }
 
@@ -204,6 +204,23 @@ func validResultJSON(t *testing.T, mutate func(*ReviewResult)) []byte {
 	return data
 }
 
+// validResultJSONRaw is validResultJSON decoded to a generic map so a test
+// can add or rename a key that ResultFinding's own type could never
+// express (e.g. a misnamed "prior_id"), then re-encoded.
+func validResultJSONRaw(t *testing.T, mutate func(map[string]any)) []byte {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(validResultJSON(t, nil), &m); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	mutate(m)
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal mutated result: %v", err)
+	}
+	return data
+}
+
 func TestParseReviewResultValid(t *testing.T) {
 	data := validResultJSON(t, nil)
 	res, err := ParseReviewResult(data)
@@ -212,6 +229,23 @@ func TestParseReviewResultValid(t *testing.T) {
 	}
 	if len(res.Findings) != 1 || res.Findings[0].Action != ActionFix {
 		t.Fatalf("Findings = %+v", res.Findings)
+	}
+}
+
+// TestParseReviewResultAcceptsNullFindingsWhenTheKeyIsPresent covers the
+// distinction F5 actually requires: design 4.4 rejects a "findings" or
+// "reviewed_paths" key that was never written, not one written as JSON
+// null - which is exactly what encoding/json.Marshal produces for a nil Go
+// slice with no omitempty tag (ReviewResult's own shape), so any reviewer
+// or test fixture built by marshaling a zero-value ReviewResult must still
+// parse as a legitimate, findings-less result.
+func TestParseReviewResultAcceptsNullFindingsWhenTheKeyIsPresent(t *testing.T) {
+	res, err := ParseReviewResult([]byte(`{"findings": null, "reviewed_paths": null}`))
+	if err != nil {
+		t.Fatalf("ParseReviewResult: %v, want null accepted as empty when the key is present", err)
+	}
+	if len(res.Findings) != 0 || len(res.ReviewedPaths) != 0 {
+		t.Errorf("res = %+v, want both empty", res)
 	}
 }
 
@@ -231,6 +265,21 @@ func TestParseReviewResultRejectsEveryInvalidRule(t *testing.T) {
 		{"absolute unix file", validResultJSON(t, func(r *ReviewResult) { r.Findings[0].File = "/etc/passwd" })},
 		{"absolute windows file", validResultJSON(t, func(r *ReviewResult) { r.Findings[0].File = `C:\etc\passwd` })},
 		{"dot-dot segment", validResultJSON(t, func(r *ReviewResult) { r.Findings[0].File = "../secret.go" })},
+		// F5: a bare JSON null, misnamed top-level and finding keys, and any
+		// non-object top level must all be rejected, never silently
+		// accepted as a clean (zero-finding) result.
+		{"bare null", []byte("null")},
+		{"json array", []byte(`[{"findings": [], "reviewed_paths": []}]`)},
+		{"json string", []byte(`"clean"`)},
+		{"misnamed findings key", []byte(`{"finding": [], "reviewed_paths": []}`)},
+		{"misnamed reviewed_paths key", []byte(`{"findings": [], "reviewedPaths": []}`)},
+		{"missing findings key", []byte(`{"reviewed_paths": []}`)},
+		{"missing reviewed_paths key", []byte(`{"findings": []}`)},
+		{"unknown top-level key", []byte(`{"findings": [], "reviewed_paths": [], "issues": []}`)},
+		{"misnamed prior key", validResultJSONRaw(t, func(m map[string]any) {
+			f := m["findings"].([]any)[0].(map[string]any)
+			f["prior_id"] = "r1-f1"
+		})},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -290,20 +339,21 @@ func validRequestAndResult() (ReviewRequest, ReviewResult) {
 }
 
 func TestValidateReviewResultRules(t *testing.T) {
+	leaseDir := t.TempDir()
 	present := func(path string) (bool, error) { return true, nil }
 	absent := func(path string) (bool, error) { return false, nil }
 	noDeleted := map[string]bool{}
 
 	t.Run("valid passes", func(t *testing.T) {
 		req, result := validRequestAndResult()
-		if err := validateReviewResult(req, result, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 	})
 
 	t.Run("file neither present nor deleted", func(t *testing.T) {
 		req, result := validRequestAndResult()
-		err := validateReviewResult(req, result, absent, noDeleted, []string{"test"})
+		err := validateReviewResult(req, result, leaseDir, absent, noDeleted, []string{"test"})
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -314,7 +364,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 		deleted := map[string]bool{"c.go": true}
 		calledAtHead := false
 		neverCalled := func(path string) (bool, error) { calledAtHead = true; return false, nil }
-		if err := validateReviewResult(req, result, neverCalled, deleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, leaseDir, neverCalled, deleted, []string{"test"}); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 		if calledAtHead {
@@ -325,7 +375,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("oracle not a manifest oracle", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Oracle = "lint"
-		err := validateReviewResult(req, result, present, noDeleted, []string{"test"})
+		err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"})
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -334,7 +384,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("omitted oracle with more than one manifest oracle and action fix", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Oracle = ""
-		err := validateReviewResult(req, result, present, noDeleted, []string{"lint", "test"})
+		err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"lint", "test"})
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -344,7 +394,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Oracle = ""
 		result.Findings[0].Action = ActionNote
-		if err := validateReviewResult(req, result, present, noDeleted, []string{"lint", "test"}); err != nil {
+		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"lint", "test"}); err != nil {
 			t.Fatalf("validateReviewResult: %v (a note never needs an oracle)", err)
 		}
 	})
@@ -352,7 +402,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("omitted oracle with exactly one manifest oracle", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Oracle = ""
-		if err := validateReviewResult(req, result, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
 			t.Fatalf("validateReviewResult: %v (no choice to make with one oracle)", err)
 		}
 	})
@@ -360,7 +410,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("prior names no known id", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Prior = "r1-f9"
-		err := validateReviewResult(req, result, present, noDeleted, []string{"test"})
+		err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"})
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -369,7 +419,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("prior names an open id", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Prior = "r1-f1"
-		if err := validateReviewResult(req, result, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 	})
@@ -377,7 +427,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("prior names a dismissed id", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Prior = "r1-f2"
-		if err := validateReviewResult(req, result, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 	})
@@ -388,7 +438,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 		second := result.Findings[0]
 		second.File = "a.go"
 		result.Findings = append(result.Findings, second)
-		err := validateReviewResult(req, result, present, noDeleted, []string{"test"})
+		err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"})
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -397,7 +447,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("reviewed_paths missing a must_review path", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.ReviewedPaths = nil
-		err := validateReviewResult(req, result, present, noDeleted, []string{"test"})
+		err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"})
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -408,8 +458,37 @@ func TestValidateReviewResultRules(t *testing.T) {
 		req.MustReview = []string{"dir/c.go"}
 		result.Findings[0].File = "dir/c.go"
 		result.ReviewedPaths = []string{`dir\c.go`}
-		if err := validateReviewResult(req, result, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
+		}
+	})
+
+	// F4: reviewed_paths absolute entries (review.json, brief_path,
+	// slices_path, journal_path are all absolute, and the prompt asks for
+	// "every file you read") never fail the round; an absolute path inside
+	// the lease worktree still counts toward coverage.
+	t.Run("absolute paths outside the worktree in reviewed_paths do not fail the round", func(t *testing.T) {
+		req, result := validRequestAndResult()
+		result.ReviewedPaths = append(result.ReviewedPaths,
+			filepath.Join(leaseDir, "..", "brief.md"), // outside the worktree
+			`C:\some\other\place\review.json`,
+			"../sibling/x.go",
+		)
+		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
+			t.Fatalf("validateReviewResult: %v, want these entries merely ignored", err)
+		}
+	})
+
+	t.Run("an absolute path inside the worktree in reviewed_paths counts as coverage", func(t *testing.T) {
+		req, result := validRequestAndResult()
+		req.MustReview = []string{"c.go", "dir/d.go"}
+		result.Findings[0].File = "c.go"
+		result.ReviewedPaths = []string{
+			filepath.Join(leaseDir, "c.go"),
+			filepath.Join(leaseDir, "dir", "d.go"),
+		}
+		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
+			t.Fatalf("validateReviewResult: %v, want an absolute worktree path to cover must_review", err)
 		}
 	})
 }
@@ -1162,5 +1241,48 @@ func TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding(t *test
 	}
 	if !called {
 		t.Error("the backend was never dispatched despite an open finding")
+	}
+}
+
+// TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff covers F1 (design
+// 5.4/Q8's other edge): must_review never lists a deleted file (Q5), so a
+// scope diff that only deletes a file must not look like "nothing changed".
+// Round 1 has no previous review to fall back on, so skipping dispatch here
+// would let a deletion-only change through with no review at all.
+func TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff(t *testing.T) {
+	dir := newReviewLease(t, "main") // HEAD == origin/main, seed.txt present
+	st := newReviewStore(t)
+
+	if err := os.Remove(filepath.Join(dir, "seed.txt")); err != nil {
+		t.Fatalf("remove seed.txt: %v", err)
+	}
+	commitReviewLease(t, dir, "delete seed.txt")
+	// origin/main stays at the seed commit, so round 1's full scope
+	// (merge-base(origin/main, HEAD)) sees exactly this one deletion.
+
+	called := false
+	backend := stubBackend{run: func(d session.Dispatch) error {
+		called = true
+		writeMustReviewResult(t, d)
+		return nil
+	}}
+
+	src := NewReviewerGateSource(backend)
+	rnd, ok, err := src.Round(RoundInput{
+		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
+		Manifest: oneOracleManifest(),
+	})
+	if err != nil {
+		t.Fatalf("Round: %v", err)
+	}
+	if !ok {
+		t.Fatal("Round: ok = false, want true")
+	}
+	if !called {
+		t.Error("the backend was never dispatched on a deletion-only diff")
+	}
+	if rnd.Review == nil || len(rnd.Review.Deleted) != 1 || rnd.Review.Deleted[0] != "seed.txt" {
+		t.Errorf("Review.Deleted = %v, want [seed.txt]", rnd.Review)
 	}
 }

@@ -125,24 +125,71 @@ func reviewInvalid(msg string) error {
 	return &axi.Error{Msg: "gate reviewer result.json is invalid: " + msg, Code: "REVIEW_INVALID"}
 }
 
+// reviewResultWire is ParseReviewResult's strict decode target: pointer
+// fields so a JSON null value for "findings" or "reviewed_paths" decodes
+// to nil rather than silently becoming an empty slice indistinguishable
+// from one - a nil is then read as "no findings" (or "nothing reviewed"),
+// same as an explicit [] (design 4.4: "findings" and "reviewed_paths" must
+// both be present, either may be an empty list - "empty" covers both
+// spellings a JSON encoder might reasonably produce for it; summary stays
+// optional, design 4.2).
+type reviewResultWire struct {
+	Findings      *[]ResultFinding `json:"findings"`
+	ReviewedPaths *[]string        `json:"reviewed_paths"`
+	Summary       string           `json:"summary"`
+}
+
 // ParseReviewResult parses result.json strictly and checks the rules that
 // need no context beyond the result itself (design 4.4): exactly one JSON
-// object, a known action and risk on every finding, non-empty title and
-// risk_rationale, a non-negative line, and repo-relative file syntax (Q5).
-// The rules that need the request or the lease's head - oracle membership,
-// prior identity, reviewed_paths coverage, file existence - are checked
-// separately by validateReviewResult, once the caller has that context.
-// Errors are *axi.Error{Code: "REVIEW_INVALID"} naming the rule; nothing
-// here is silently accepted.
+// object (a bare JSON null, or any other non-object top level, is
+// rejected), no unknown key at the top level or inside a finding, the
+// "findings" and "reviewed_paths" keys present (either may be an empty
+// list, or JSON null - a key that was simply never written is what design
+// 4.4 requires against, not a null value), a known action and risk on
+// every finding, non-empty title and risk_rationale, a non-negative line,
+// and repo-relative file syntax (Q5). The rules that need the request or
+// the lease's head - oracle membership, prior identity, reviewed_paths
+// coverage, file existence - are checked separately by
+// validateReviewResult, once the caller has that context. Errors are
+// *axi.Error{Code: "REVIEW_INVALID"} naming the rule; nothing here is
+// silently accepted.
 func ParseReviewResult(data []byte) (ReviewResult, error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return ReviewResult{}, reviewInvalid("must contain exactly one JSON object")
+	}
+
+	// Key presence is checked separately from the strict, typed decode
+	// below: a pointer field alone can't tell "the key was never written"
+	// apart from "the key was written as null", and only the former is
+	// design 4.4's rule.
+	var present map[string]json.RawMessage
+	if err := json.Unmarshal(data, &present); err != nil {
+		return ReviewResult{}, reviewInvalid(fmt.Sprintf("not valid JSON: %v", err))
+	}
+	if _, ok := present["findings"]; !ok {
+		return ReviewResult{}, reviewInvalid(`missing "findings"`)
+	}
+	if _, ok := present["reviewed_paths"]; !ok {
+		return ReviewResult{}, reviewInvalid(`missing "reviewed_paths"`)
+	}
+
 	dec := json.NewDecoder(bytes.NewReader(data))
-	var res ReviewResult
-	if err := dec.Decode(&res); err != nil {
+	dec.DisallowUnknownFields()
+	var wire reviewResultWire
+	if err := dec.Decode(&wire); err != nil {
 		return ReviewResult{}, reviewInvalid(fmt.Sprintf("not valid JSON: %v", err))
 	}
 	var extra json.RawMessage
 	if err := dec.Decode(&extra); err != io.EOF {
 		return ReviewResult{}, reviewInvalid("must contain exactly one JSON object")
+	}
+	res := ReviewResult{Summary: wire.Summary}
+	if wire.Findings != nil {
+		res.Findings = *wire.Findings
+	}
+	if wire.ReviewedPaths != nil {
+		res.ReviewedPaths = *wire.ReviewedPaths
 	}
 
 	for i, f := range res.Findings {
@@ -195,6 +242,39 @@ func normalizeRepoRelPath(p string) (string, error) {
 	return q, nil
 }
 
+// relativizeReviewedPath resolves one reviewed_paths entry for coverage
+// (design 4.4, Q5). A plain repo-relative path normalizes as usual. review.
+// json hands the reviewer several absolute paths to read - review.json
+// itself, brief_path, slices_path, journal_path - and the prompt (4.3) asks
+// for "every file you read", so an absolute path inside the lease worktree
+// is relativized to it rather than rejected: design 4.4 has no rule against
+// a reviewed_paths entry beyond coverage, only against a finding's file.
+// Any other entry that still cannot be normalized (absolute outside the
+// worktree, a ".." segment) is ignored rather than failing the round: it
+// can never match a must_review path either way, so rejecting the whole
+// result over it would fail a reviewer that followed the prompt exactly.
+func relativizeReviewedPath(leaseDir, p string) (string, bool) {
+	if norm, err := normalizeRepoRelPath(p); err == nil {
+		return norm, true
+	}
+	if !filepath.IsAbs(p) {
+		return "", false
+	}
+	absLease, err := filepath.Abs(leaseDir)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(absLease, p)
+	if err != nil {
+		return "", false
+	}
+	norm, err := normalizeRepoRelPath(filepath.ToSlash(rel))
+	if err != nil {
+		return "", false
+	}
+	return norm, true
+}
+
 // validateReviewResult checks result against req and the lease's head, the
 // rules ParseReviewResult cannot check on its own (design 4.4): a finding's
 // file exists at head or was deleted in the scope diff; an oracle, when
@@ -202,8 +282,9 @@ func normalizeRepoRelPath(p string) (string, error) {
 // more than one and the finding is fix or ask (Q4, no silent fallback); a
 // prior names an id under open or dismissed, and no two findings share one;
 // reviewed_paths covers every must_review path. atHead reports whether a
-// (normalized) path exists in the lease at head.
-func validateReviewResult(req ReviewRequest, result ReviewResult, atHead func(path string) (bool, error), deleted map[string]bool, oracleNames []string) error {
+// (normalized) path exists in the lease at head. leaseDir is the lease
+// worktree, used only to relativize an absolute reviewed_paths entry.
+func validateReviewResult(req ReviewRequest, result ReviewResult, leaseDir string, atHead func(path string) (bool, error), deleted map[string]bool, oracleNames []string) error {
 	openIDs := make(map[string]bool, len(req.Open))
 	for _, f := range req.Open {
 		openIDs[f.ID] = true
@@ -255,11 +336,9 @@ func validateReviewResult(req ReviewRequest, result ReviewResult, atHead func(pa
 
 	reviewed := map[string]bool{}
 	for _, p := range result.ReviewedPaths {
-		norm, err := normalizeRepoRelPath(p)
-		if err != nil {
-			return reviewInvalid(fmt.Sprintf("reviewed_paths entry %q: %v", p, err))
+		if norm, ok := relativizeReviewedPath(leaseDir, p); ok {
+			reviewed[norm] = true
 		}
-		reviewed[norm] = true
 	}
 	for _, mr := range req.MustReview {
 		if !reviewed[mr] {
@@ -391,8 +470,9 @@ type scopeDiff struct {
 
 // computeScopeDiff runs the scope diff and builds must_review (Q5). openFiles
 // are the open-finding files findings bookkeeping (design 5, findings.go)
-// supplies; a caller with no open findings yet (round 1, or the scripted
-// source) passes nil.
+// supplies; a round with no open findings yet (round 1, or every round
+// before the first one that reports any) passes nil. Only the reviewer
+// source (below) ever calls this; the scripted source never does.
 func computeScopeDiff(leaseDir, base, head string, openFiles []string) (scopeDiff, error) {
 	changed, err := gitx.DiffNameOnly(leaseDir, base, head, "AMT")
 	if err != nil {
@@ -432,7 +512,7 @@ func computeScopeDiff(leaseDir, base, head string, openFiles []string) (scopeDif
 }
 
 // Review is one validated reviewer round's content: Round.Review carries it
-// so a later stage's findings bookkeeping (design 5, S2) can apply it
+// so Gate's findings bookkeeping (design 5, findings.go) can apply it
 // without recomputing scope.
 type Review struct {
 	Scope      string
@@ -444,10 +524,11 @@ type Review struct {
 	Result     ReviewResult
 }
 
-// RoundInput is what Gate hands a GateSource for one round. Round(n int)
-// from PR #8 grows into this shape so the scripted source's exact behavior
-// stays byte for byte (it reads only Round) while the reviewer source has
-// what it needs to build review.json and dispatch.
+// RoundInput is what Gate hands a GateSource for one round. GateSource's
+// Round grows from the scripted source's original Round(n int) into this
+// shape so the scripted source's exact behavior stays byte for byte (it
+// reads only Round) while the reviewer source has what it needs to build
+// review.json and dispatch.
 type RoundInput struct {
 	Store     *store.Store
 	Ticket    string
@@ -478,12 +559,12 @@ func NewReviewerGateSource(b session.Backend) GateSource {
 // its result.json strictly (design 4), or - when nothing is outstanding
 // and the scope diff changes nothing - skips dispatch entirely (design 5.4,
 // Q8). It never applies findings bookkeeping across rounds or routes
-// findings into fix slices (design 5, 6); Gate does the former with the
-// Review this returns, and a later stage does the latter. The lease is
-// restored pristine before dispatch (oracles run just before this in Gate,
-// and may have left tracked dirt) and always after, success or failure, so
-// a broken reviewer never leaves the lease for a later operation to trip
-// over.
+// findings into fix slices (design 5, 6); Gate does both, using the Review
+// this returns (findings.go's ApplyRound and route.go's routeRound). The
+// lease is restored pristine before dispatch (oracles run just before this
+// in Gate, and may have left tracked dirt) and always after, success or
+// failure, so a broken reviewer never leaves the lease for a later
+// operation to trip over.
 func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error) {
 	if err := resetLeasePristine(in.LeaseDir, "HEAD"); err != nil {
 		return Round{}, false, fmt.Errorf("verifydeliver: review: restore lease before round: %w", err)
@@ -517,13 +598,14 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		return Round{}, false, err
 	}
 
-	// Clean without dispatch (design 5.4, Q8): must_review always includes
-	// every open finding's file (computeScopeDiff), so an empty
-	// must_review together with no open finding means the scope diff
-	// changes nothing and nothing is outstanding - the previous review
-	// already covers head, so there is nothing for a reviewer session to
-	// do.
-	if len(diff.MustReview) == 0 && len(in.Open) == 0 {
+	// Clean without dispatch (design 5.4, Q8): the scope diff changes no
+	// file at all (nothing added, modified, type-changed or deleted) and
+	// nothing is outstanding - the previous review already covers head, so
+	// there is nothing for a reviewer session to do. must_review alone
+	// cannot stand in for this: it never lists a deleted file (Q5), so a
+	// deletion-only diff would otherwise look empty and skip review on a
+	// round that has never been reviewed at all.
+	if len(diff.Changed) == 0 && len(diff.Deleted) == 0 && len(in.Open) == 0 {
 		return Round{Review: &Review{
 			Scope:      scope,
 			BaseSHA:    base,
@@ -624,7 +706,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 	atHead := func(path string) (bool, error) {
 		return gitx.FileExistsAtRev(in.LeaseDir, head, path)
 	}
-	if err := validateReviewResult(req, result, atHead, deletedSet, oracleNames); err != nil {
+	if err := validateReviewResult(req, result, in.LeaseDir, atHead, deletedSet, oracleNames); err != nil {
 		return Round{}, false, err
 	}
 
