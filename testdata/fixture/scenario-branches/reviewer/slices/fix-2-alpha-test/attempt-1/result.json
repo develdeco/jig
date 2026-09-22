@@ -1,0 +1,5 @@
+{
+  "outcome": "green",
+  "summary": "Spelled out the math.MaxInt guard the round 2 recurrence asked for.",
+  "commit": "@HEAD"
+}

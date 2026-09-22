@@ -1,0 +1,5 @@
+{
+  "outcome": "green",
+  "summary": "Added the missing overflow note to Add's doc comment per gate round 1.",
+  "commit": "@HEAD"
+}
