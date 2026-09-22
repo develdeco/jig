@@ -1,6 +1,6 @@
 // Package frontier is the frontier loop: it dispatches queued, unblocked
 // slices to a build session backend, routes their results, and drives a
-// ticket's slices from queued to green (or to a paused/stalled stop) one
+// ticket's slices from queued to green (or to a parked/stalled stop) one
 // attempt at a time. frontier and verifydeliver share no in-memory state;
 // the store on disk is their only interface.
 package frontier
@@ -169,6 +169,7 @@ func answerAndRequeue(d Deps, ticket, qid, text string) error {
 	st.State = "queued"
 	st.Question = ""
 	st.Reason = ""
+	st.Signature = ""
 	if err := d.Store.WriteSliceState(ticket, slice, st); err != nil {
 		return fmt.Errorf("frontier: write slice state %s: %w", slice, err)
 	}
@@ -584,6 +585,7 @@ func (rc *runCtx) route(sl store.Slice, lease pool.Lease, attempt int, res outco
 			st.Attempts = attempt
 			st.Question = ""
 			st.Reason = ""
+			st.Signature = ""
 			if !rc.writeState(sl.ID, st) {
 				return
 			}
@@ -704,6 +706,7 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 		st.State = "stalled"
 		st.Attempts = attempt
 		st.Reason = "stall"
+		st.Signature = sig
 		if !rc.writeState(sl.ID, st) {
 			return
 		}
@@ -733,6 +736,7 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 		st.State = "stalled"
 		st.Attempts = attempt
 		st.Reason = "attempt-cap"
+		st.Signature = sig
 		if !rc.writeState(sl.ID, st) {
 			return
 		}

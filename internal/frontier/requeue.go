@@ -59,6 +59,7 @@ func Requeue(d Deps, ticket string, fromBriefDiff bool) ([]string, error) {
 		st.State = "queued"
 		st.Question = ""
 		st.Reason = ""
+		st.Signature = ""
 		if err := d.Store.WriteSliceState(ticket, id, st); err != nil {
 			return nil, fmt.Errorf("frontier: write slice state %s: %w", id, err)
 		}

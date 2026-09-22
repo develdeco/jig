@@ -80,7 +80,7 @@ func runEndToEndOnce(t *testing.T) {
 	assertSliceState(t, st, ticket, "d", "green", 1)
 
 	statusR1 := runJig(t, fx.StoreDir, "status", ticket)
-	assertGolden(t, "status-run1-paused.txt", statusR1.Stdout)
+	assertGolden(t, "status-run1-parked.txt", statusR1.Stdout)
 
 	// --- 2. answer q-001: c goes green, ticket fully green.
 	r2 := runJig(t, fx.StoreDir, "run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)

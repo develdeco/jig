@@ -1,0 +1,12 @@
+ticket: JIG-1
+state: stalled
+slices[4]{id,state,attempts,blocked_by,question}:
+  a,stalled,2,-,-
+  b,queued,0,a,-
+  c,queued,0,-,-
+  d,queued,0,-,-
+questions: none
+stalled[1]{slice,reason,signature}:
+  a,stall,a|code-bug|nil pointer
+help[1]:
+  Slice a is stalled (stall): amend the brief, then run `jig requeue JIG-1 --from-brief-diff`

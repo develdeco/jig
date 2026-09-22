@@ -198,7 +198,10 @@ func TestStallStops(t *testing.T) {
 
 // TestCapExhaustion drives the cap branch: slice a returns three distinct
 // code-bug summaries (no repeated signature, so no stall), exhausting the
-// default 3-attempt cap. Status surfaces the attempt-cap reason for slice a.
+// default 3-attempt cap. `jig status` surfaces the attempt-cap reason for
+// slice a in its stalled table, with the real stall signature format
+// (outcome.Signature's slice|outcome|gist) computed from attempt 3's
+// result.
 //
 // NOTE: as in TestStallStops, slice c's scripted question outranks the
 // attempt-cap stop for exit-code purposes (see cmd/jig/run.go's
@@ -245,11 +248,20 @@ func TestCapExhaustion(t *testing.T) {
 	if !strings.Contains(row, "stalled") {
 		t.Fatalf("slice a status row = %q, want it to contain state stalled", row)
 	}
-	// NOTE: cmd/jig's RenderStatus (status.go) only ever puts ss.Question in
-	// the 5th column; it never surfaces ss.Reason there, so "attempt-cap"
-	// does not currently appear in `jig status` output at all. The Reason
-	// value itself is fully covered above via store.ReadSliceState, which is
-	// the source RenderStatus would need to start reading from to surface it
-	// in status output; flagged as a known gap rather than asserted here
-	// against code this suite does not own.
+
+	wantStalledRow := "a,attempt-cap,a|code-bug|upper-bound check now compares correctly but returns v instead of hi; testclamp still fails."
+	var stalledRow string
+	for _, line := range strings.Split(sr.Stdout, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "a,attempt-cap,") {
+			stalledRow = trimmed
+			break
+		}
+	}
+	if stalledRow != wantStalledRow {
+		t.Fatalf("stalled row = %q, want %q\nfull output:\n%s", stalledRow, wantStalledRow, sr.Stdout)
+	}
+	if !strings.Contains(sr.Stdout, "stalled[1]{slice,reason,signature}:\n") {
+		t.Fatalf("expected the stalled table header, got:\n%s", sr.Stdout)
+	}
 }
