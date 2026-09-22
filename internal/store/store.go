@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 )
 
@@ -60,14 +62,90 @@ func (s *Store) Sync() error {
 	if err != nil {
 		return err
 	}
-	_, err = gitx.Run(s.Root, "pull", "--rebase", "origin", branch)
-	return err
+	if _, err := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); err != nil {
+		// jig itself must never leave the store mid-rebase: best effort,
+		// ignore the abort's own error (there may be nothing to abort).
+		_, _ = gitx.Run(s.Root, "rebase", "--abort")
+		return s.wrapAbortedPullConflict(err)
+	}
+	return nil
 }
 
-// stageAndCommit stages every change (`add -A`) and, when anything is
-// staged, commits it with jig's identity and msg. It reports whether a
-// commit was made.
+// refuseIfMidRebaseOrMerge errors when the store has an unfinished rebase or
+// merge in progress, or unresolved conflict markers already sitting in the
+// index, without touching the index itself. Neither Sync nor Push must ever
+// stage or commit over that: `git add -A` would pick up unresolved conflict
+// markers, and a later `rebase --continue` (or manual resolution) would
+// then commit them onto the store branch, corrupting whatever file
+// conflicted (e.g. journal.ndjson) for every later reader. It is called from
+// stageAndCommit, the shared first step of both Sync and Push, so it guards
+// a command that only ever Pushes (e.g. `jig requeue`) too - not only the
+// commands that Sync first.
+func (s *Store) refuseIfMidRebaseOrMerge() error {
+	mid, err := inProgressRebaseOrMerge(s.Root)
+	if err != nil {
+		return err
+	}
+	if !mid {
+		return nil
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("the store at %s has an unfinished rebase or merge, or unresolved conflicts", s.Root),
+		Code: "STORE_CONFLICT",
+		Help: []string{"Resolve it in the store with `git status`, then rerun."},
+	}
+}
+
+// inProgressRebaseOrMerge reports whether dir has an unfinished rebase (git
+// leaves a rebase-merge or rebase-apply directory under .git for the
+// duration of one), an unresolved merge (MERGE_HEAD), or unmerged index
+// entries left by something other than an in-progress rebase or merge - a
+// conflicted `git stash pop`, `git cherry-pick` or `git revert` leaves the
+// index with conflict markers on disk but none of those three markers (a
+// cherry-pick sets CHERRY_PICK_HEAD, not MERGE_HEAD). The three git-path
+// markers are read with one `rev-parse` call rather than three, since this
+// runs on every Sync and every Push. The unmerged-index check uses
+// `git ls-files -u`, which only reads the index, rather than `git diff
+// --diff-filter=U`, which opportunistically rewrites .git/index as a side
+// effect - a write this read-only guard, called on every Sync and Push,
+// must not make.
+func inProgressRebaseOrMerge(dir string) (bool, error) {
+	out, err := gitx.Run(dir, "rev-parse",
+		"--git-path", "rebase-merge",
+		"--git-path", "rebase-apply",
+		"--git-path", "MERGE_HEAD",
+	)
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		p := strings.TrimSpace(line)
+		if p == "" {
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(dir, p)
+		}
+		if _, err := os.Stat(p); err == nil {
+			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	unmerged, err := gitx.Run(dir, "ls-files", "-u")
+	if err != nil {
+		return false, err
+	}
+	return unmerged != "", nil
+}
+
+// stageAndCommit refuses while the store has an unfinished rebase or merge,
+// then stages every change (`add -A`) and, when anything is staged, commits
+// it with jig's identity and msg. It reports whether a commit was made.
 func (s *Store) stageAndCommit(msg string) (bool, error) {
+	if err := s.refuseIfMidRebaseOrMerge(); err != nil {
+		return false, err
+	}
 	if _, err := gitx.Run(s.Root, "add", "-A"); err != nil {
 		return false, err
 	}
@@ -100,7 +178,10 @@ func (s *Store) Push(msg string) error {
 	}
 	if _, err := gitx.Run(s.Root, "push", "origin", branch); err != nil {
 		if _, perr := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); perr != nil {
-			return perr
+			// jig itself must never leave the store mid-rebase: best effort,
+			// ignore the abort's own error (there may be nothing to abort).
+			_, _ = gitx.Run(s.Root, "rebase", "--abort")
+			return s.wrapAbortedPullConflict(perr)
 		}
 		if _, err2 := gitx.Run(s.Root, "push", "origin", branch); err2 != nil {
 			return err2
@@ -111,6 +192,19 @@ func (s *Store) Push(msg string) error {
 	// a push that already succeeded.
 	_ = gitx.MaintenanceAuto(s.Root)
 	return nil
+}
+
+// wrapAbortedPullConflict turns a failed pull --rebase's raw git error, once
+// jig's own best-effort `rebase --abort` has already run, into a
+// STORE_CONFLICT the operator can act on. Git's own hint text ("run git
+// rebase --continue") is stale by then, since the rebase was just aborted;
+// pullErr's detail is kept in the message so nothing from it is lost.
+func (s *Store) wrapAbortedPullConflict(pullErr error) error {
+	return &axi.Error{
+		Msg:  fmt.Sprintf("the store at %s: pull --rebase conflicted and was aborted: %v", s.Root, pullErr),
+		Code: "STORE_CONFLICT",
+		Help: []string{"Resolve the divergence in the store: `git pull --rebase origin <branch>` there, fix the conflict, then rerun."},
+	}
 }
 
 // currentBranch returns the checked-out branch name.
