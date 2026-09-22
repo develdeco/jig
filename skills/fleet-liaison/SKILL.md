@@ -11,7 +11,7 @@ Many tickets, many sessions - one liaison.
 
 - Spawns one `jig solve` per ticket, each in its own terminal session.
 - Aggregates progress with `jig status`, run per store.
-- Relays a parked session's question back to it with `jig run --answer <qid> <text>`.
+- Relays a parked session's question back to it with `jig run <ticket> --answer <qid> "<text>"`.
 
 ## What it never does
 

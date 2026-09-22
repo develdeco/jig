@@ -199,9 +199,9 @@ func TestStallStops(t *testing.T) {
 // TestCapExhaustion drives the cap branch: slice a returns three distinct
 // code-bug summaries (no repeated signature, so no stall), exhausting the
 // default 3-attempt cap. `jig status` surfaces the attempt-cap reason for
-// slice a in its stalled table, with the real stall signature format
-// (outcome.Signature's slice|outcome|gist) computed from attempt 3's
-// result.
+// slice a in its stalled table, with attempt 3's own human-readable summary
+// text - not the normalized outcome.Signature gist, which stays the
+// matching key underneath but is unfit to show a human.
 //
 // NOTE: as in TestStallStops, slice c's scripted question outranks the
 // attempt-cap stop for exit-code purposes (see cmd/jig/run.go's
@@ -249,7 +249,7 @@ func TestCapExhaustion(t *testing.T) {
 		t.Fatalf("slice a status row = %q, want it to contain state stalled", row)
 	}
 
-	wantStalledRow := "a,attempt-cap,a|code-bug|upper-bound check now compares correctly but returns v instead of hi; testclamp still fails."
+	wantStalledRow := "a,attempt-cap,Upper-bound check now compares correctly but returns v instead of hi; TestClamp still fails."
 	var stalledRow string
 	for _, line := range strings.Split(sr.Stdout, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -261,7 +261,7 @@ func TestCapExhaustion(t *testing.T) {
 	if stalledRow != wantStalledRow {
 		t.Fatalf("stalled row = %q, want %q\nfull output:\n%s", stalledRow, wantStalledRow, sr.Stdout)
 	}
-	if !strings.Contains(sr.Stdout, "stalled[1]{slice,reason,signature}:\n") {
+	if !strings.Contains(sr.Stdout, "stalled[1]{slice,reason,summary}:\n") {
 		t.Fatalf("expected the stalled table header, got:\n%s", sr.Stdout)
 	}
 }

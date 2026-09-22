@@ -170,6 +170,7 @@ func answerAndRequeue(d Deps, ticket, qid, text string) error {
 	st.Question = ""
 	st.Reason = ""
 	st.Signature = ""
+	st.StallSummary = ""
 	if err := d.Store.WriteSliceState(ticket, slice, st); err != nil {
 		return fmt.Errorf("frontier: write slice state %s: %w", slice, err)
 	}
@@ -586,6 +587,7 @@ func (rc *runCtx) route(sl store.Slice, lease pool.Lease, attempt int, res outco
 			st.Question = ""
 			st.Reason = ""
 			st.Signature = ""
+			st.StallSummary = ""
 			if !rc.writeState(sl.ID, st) {
 				return
 			}
@@ -707,15 +709,29 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 		st.Attempts = attempt
 		st.Reason = "stall"
 		st.Signature = sig
+		st.StallSummary = res.Summary
 		if !rc.writeState(sl.ID, st) {
 			return
 		}
 		rc.journal(journal.Line{Slice: sl.ID, Event: "stall", Outcome: res.Outcome, Attempt: attempt})
 		rc.push(sl.ID, "stalled")
 
+		// The remedy names one complete, working command, chosen from the
+		// slice's own structure the same way status.go's stalled hint
+		// does: a slice with a brief section to amend (FromBrief non-empty)
+		// is remediated by amending it and requeuing with
+		// --from-brief-diff; one with none (a gate fix slice) has no
+		// pending question to answer at this point either, so its only
+		// working command is `jig requeue --slice`. res.Summary is
+		// parenthesized rather than appended with a leading period, since
+		// it usually ends in one itself (avoiding a run of two).
+		remedy := fmt.Sprintf("run `jig requeue %s --slice %s`", rc.ticket, sl.ID)
+		if len(sl.FromBrief) > 0 {
+			remedy = fmt.Sprintf("amend the brief, then run `jig requeue %s --from-brief-diff`", rc.ticket)
+		}
 		reason := fmt.Sprintf(
-			"stall: slice %s returned %s twice with no progress: %s. A repeat is patching - likely a misconception; amend the brief (`jig requeue --from-brief-diff`) or answer with direction (`jig run --answer`)",
-			sl.ID, res.Outcome, res.Summary,
+			"stall: slice %s returned %s twice with no progress (%s) - a repeat is likely a misconception: %s",
+			sl.ID, res.Outcome, res.Summary, remedy,
 		)
 		rc.mu.Lock()
 		rc.stopped = true
@@ -737,6 +753,7 @@ func (rc *runCtx) routeFailure(sl store.Slice, attempt int, res outcome.Result) 
 		st.Attempts = attempt
 		st.Reason = "attempt-cap"
 		st.Signature = sig
+		st.StallSummary = res.Summary
 		if !rc.writeState(sl.ID, st) {
 			return
 		}

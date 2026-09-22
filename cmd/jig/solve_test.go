@@ -72,13 +72,13 @@ func TestPrintRunReportStalledExitsNonZero(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	code := printRunReport(&buf, st, fx.Ticket, frontier.RunReport{Stalled: []string{"b"}})
+	code := printRunReport(&buf, st, fx.Ticket, frontier.RunReport{Stalled: []string{"b"}}, "", "")
 	if code != 1 {
 		t.Fatalf("printRunReport with a stalled slice, Stopped=false: exit code = %d, want 1", code)
 	}
 
 	buf.Reset()
-	code = printRunReport(&buf, st, fx.Ticket, frontier.RunReport{EnvBlocked: []string{"c"}})
+	code = printRunReport(&buf, st, fx.Ticket, frontier.RunReport{EnvBlocked: []string{"c"}}, "", "")
 	if code != 1 {
 		t.Fatalf("printRunReport with an env-blocked slice, Stopped=false: exit code = %d, want 1", code)
 	}

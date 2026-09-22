@@ -53,10 +53,11 @@ func cmdRun(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	return printRunReport(stdout, st, ticket, report)
+	return printRunReport(stdout, st, ticket, report, *storeFlag, *projectFlag)
 }
 
-// cmdRequeue implements `jig requeue <ticket> --from-brief-diff`.
+// cmdRequeue implements `jig requeue <ticket> --from-brief-diff` and
+// `jig requeue <ticket> --slice <id>`.
 func cmdRequeue(args []string, stdout io.Writer) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
@@ -65,6 +66,7 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 
 	fs := newFlagSet("requeue")
 	fromBriefDiff := fs.Bool("from-brief-diff", false, "requeue slices whose brief section hash changed")
+	sliceFlag := fs.String("slice", "", "requeue one stalled or env-blocked slice by id")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -82,6 +84,18 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 	}
 
 	deps := frontierDeps(st, cfg, mp, nil, ticket)
+
+	if *sliceFlag != "" {
+		if err := frontier.RequeueSlice(deps, ticket, *sliceFlag); err != nil {
+			return renderErr(stdout, err)
+		}
+		axi.Render(stdout,
+			axi.Table("requeued", []string{"id"}, idRows([]string{*sliceFlag})),
+			axi.Help(hintOrFallback(st, ticket, *storeFlag, *projectFlag)),
+		)
+		return 0
+	}
+
 	touched, err := frontier.Requeue(deps, ticket, *fromBriefDiff)
 	if err != nil {
 		return renderErr(stdout, err)
@@ -89,15 +103,16 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 
 	axi.Render(stdout,
 		axi.Table("requeued", []string{"id"}, idRows(touched)),
-		axi.Help(hintOrFallback(st, ticket)),
+		axi.Help(hintOrFallback(st, ticket, *storeFlag, *projectFlag)),
 	)
 	return 0
 }
 
 // printRunReport prints the outcome of a frontier.Run call and returns the
 // exit code its report implies: 2 on a pending question, 1 when the run
-// stopped (stall or attempt-cap), else 0.
-func printRunReport(stdout io.Writer, st *store.Store, ticket string, report frontier.RunReport) int {
+// stopped (stall or attempt-cap), else 0. storeFlag and projectFlag are the
+// calling command's own (each may be empty); the printed hint carries them.
+func printRunReport(stdout io.Writer, st *store.Store, ticket string, report frontier.RunReport, storeFlag, projectFlag string) int {
 	blocks := []string{
 		axi.KV("run", [][2]string{{"ticket", ticket}}),
 		axi.Table("green", []string{"id"}, idRows(report.Green)),
@@ -108,7 +123,7 @@ func printRunReport(stdout io.Writer, st *store.Store, ticket string, report fro
 	if report.StopReason != "" {
 		blocks = append(blocks, axi.KV("stopped", [][2]string{{"reason", report.StopReason}}))
 	}
-	blocks = append(blocks, axi.Help(hintOrFallback(st, ticket)))
+	blocks = append(blocks, axi.Help(hintOrFallback(st, ticket, storeFlag, projectFlag)))
 	axi.Render(stdout, blocks...)
 
 	switch {

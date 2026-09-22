@@ -39,8 +39,10 @@ func TestStatusGoldenConstructed(t *testing.T) {
 // TestStatusGoldenStalled writes a stalled slice state directly through the
 // store package (no run involved) and asserts `jig status` renders the
 // stalled custody surface: the "stalled" overall state, the stalled table
-// with its stall signature, and the stalled remediation hint, alongside
-// TestStatusGoldenConstructed's plain building state.
+// with its human-readable stall summary (not the normalized signature,
+// which stays the matching key underneath but is unfit to show a human),
+// and the stalled remediation hint, alongside TestStatusGoldenConstructed's
+// plain building state.
 func TestStatusGoldenStalled(t *testing.T) {
 	fx, _ := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
@@ -49,7 +51,7 @@ func TestStatusGoldenStalled(t *testing.T) {
 	}
 
 	states := map[string]store.SliceState{
-		"a": {State: "stalled", Attempts: 2, Reason: "stall", Signature: "a|code-bug|nil pointer"},
+		"a": {State: "stalled", Attempts: 2, Reason: "stall", Signature: "a|code-bug|clamp still returns for clamp   the upper bound check is missing", StallSummary: "clamp still returns for clamp(, , ); the upper bound check is missing."},
 		"b": {State: "queued", Attempts: 0},
 		"c": {State: "queued", Attempts: 0},
 		"d": {State: "queued", Attempts: 0},

@@ -18,10 +18,22 @@ type SliceState struct {
 
 	// Signature is the stall signature (outcome.Signature's output) that
 	// tripped a stalled state, set on both stalled paths - repeat-failure
-	// stall and attempt-cap - and cleared when the slice reaches green.
-	// Additive field: absent on states an older jig wrote, which read back
-	// as the zero value ("-" in `jig status`'s stalled table).
+	// stall and attempt-cap - and cleared on every route out of that state:
+	// green, `jig requeue --from-brief-diff` and `--slice`, and answering
+	// the slice's question. Additive field: absent on states an older jig
+	// wrote, which read back as the zero value ("-" in `jig status`'s
+	// stalled table's matching-key column).
 	Signature string `yaml:"signature,omitempty"`
+
+	// StallSummary is the human-readable result summary (outcome.Result's
+	// own text, not the normalized Signature) that tripped the stall,
+	// carried alongside Signature - same two set points, same clearing
+	// routes - purely for display: `jig status`'s stalled table shows this,
+	// never Signature, which exists only to match repeat failures and reads
+	// as normalized, digit-stripped text unfit to show a human. Additive
+	// field: absent on states an older jig wrote or on a stall this field
+	// predates, which read back as the zero value ("-" in the table).
+	StallSummary string `yaml:"stall_summary,omitempty"`
 }
 
 // stateFile returns the on-disk path for a slice's state record: the store

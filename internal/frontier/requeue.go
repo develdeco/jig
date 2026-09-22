@@ -60,6 +60,7 @@ func Requeue(d Deps, ticket string, fromBriefDiff bool) ([]string, error) {
 		st.Question = ""
 		st.Reason = ""
 		st.Signature = ""
+		st.StallSummary = ""
 		if err := d.Store.WriteSliceState(ticket, id, st); err != nil {
 			return nil, fmt.Errorf("frontier: write slice state %s: %w", id, err)
 		}
@@ -75,4 +76,36 @@ func Requeue(d Deps, ticket string, fromBriefDiff bool) ([]string, error) {
 	}
 
 	return touched, nil
+}
+
+// RequeueSlice requeues one stalled or env-blocked slice by id, the
+// mechanical half of clearing a stall or an env that has since come back
+// up: state back to queued, attempts kept (so the attempt log and cap carry
+// over), reason, stall signature and stall summary cleared. It refuses any
+// other state - a slice with a brief section to amend goes through Requeue
+// (--from-brief-diff) instead, and a needs-input slice through Answer -
+// since RequeueSlice on its own cannot tell whether a queued, building or
+// green slice reaching it is a caller's mistake or a stale id.
+func RequeueSlice(d Deps, ticket, sliceID string) error {
+	st, err := d.Store.ReadSliceState(ticket, sliceID)
+	if err != nil {
+		return fmt.Errorf("frontier: read slice state %s: %w", sliceID, err)
+	}
+	if st.State != "stalled" && st.State != "env-blocked" {
+		return fmt.Errorf("frontier: requeue slice %s: state is %q, not stalled or env-blocked", sliceID, st.State)
+	}
+	st.State = "queued"
+	st.Reason = ""
+	st.Signature = ""
+	st.StallSummary = ""
+	if err := d.Store.WriteSliceState(ticket, sliceID, st); err != nil {
+		return fmt.Errorf("frontier: write slice state %s: %w", sliceID, err)
+	}
+	if err := d.Journal(journal.Line{Slice: sliceID, Event: "requeue"}); err != nil {
+		return fmt.Errorf("frontier: journal requeue: %w", err)
+	}
+	if err := d.Store.Push(fmt.Sprintf("%s: requeue slice %s", ticket, sliceID)); err != nil {
+		return fmt.Errorf("frontier: push: %w", err)
+	}
+	return nil
 }

@@ -78,14 +78,15 @@ func cmdGate(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	return printGateReport(stdout, st, ticket, report)
+	return printGateReport(stdout, st, ticket, report, *storeFlag, *projectFlag)
 }
 
 // printGateReport prints a completed gate round's report and returns 0:
 // gate failures (oracle failures, env pauses, frontier-not-empty, PR mode)
 // surface as errors from verifydeliver.Gate and are handled by the caller
-// via renderErr before this is reached.
-func printGateReport(stdout io.Writer, st *store.Store, ticket string, report verifydeliver.GateReport) int {
+// via renderErr before this is reached. storeFlag and projectFlag are this
+// invocation's own (each may be empty); the printed hint carries them.
+func printGateReport(stdout io.Writer, st *store.Store, ticket string, report verifydeliver.GateReport, storeFlag, projectFlag string) int {
 	var shaRows [][]string
 	for repo, sha := range report.TargetSHA {
 		shaRows = append(shaRows, []string{repo, sha})
@@ -98,7 +99,7 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 			{"model", report.Model},
 		}),
 		axi.Table("target_sha", []string{"repo", "sha"}, shaRows),
-		axi.Help(hintOrFallback(st, ticket)),
+		axi.Help(hintOrFallback(st, ticket, storeFlag, projectFlag)),
 	)
 	return 0
 }

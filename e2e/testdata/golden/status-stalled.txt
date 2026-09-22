@@ -6,7 +6,7 @@ slices[4]{id,state,attempts,blocked_by,question}:
   c,queued,0,-,-
   d,queued,0,-,-
 questions: none
-stalled[1]{slice,reason,signature}:
-  a,stall,a|code-bug|nil pointer
+stalled[1]{slice,reason,summary}:
+  a,stall,"clamp still returns for clamp(, , ); the upper bound check is missing."
 help[1]:
   Slice a is stalled (stall): amend the brief, then run `jig requeue JIG-1 --from-brief-diff`

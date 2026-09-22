@@ -310,11 +310,14 @@ func idRows(ids []string) [][]string {
 
 // hintOrFallback computes the contextual next-step hint for ticket, falling
 // back to a generic status pointer if the hint computation itself fails
-// (e.g. a transient disk error reading questions/state).
-func hintOrFallback(st *store.Store, ticket string) string {
-	hint, err := nextStepHint(st, ticket)
+// (e.g. a transient disk error reading questions/state). storeFlag and
+// projectFlag are this invocation's own --store/--project (each may be
+// empty); the hint carries them on every command it prints, the same way
+// RenderStatus's own hint does.
+func hintOrFallback(st *store.Store, ticket, storeFlag, projectFlag string) string {
+	hint, err := nextStepHint(st, ticket, storeFlag, projectFlag)
 	if err != nil {
-		return fmt.Sprintf("Run `jig status %s` to see slice states", ticket)
+		return fmt.Sprintf("Run `jig status %s%s` to see slice states", ticket, resumeFlags(storeFlag, projectFlag))
 	}
 	return hint
 }
