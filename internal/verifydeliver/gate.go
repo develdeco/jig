@@ -162,14 +162,67 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		}
 	}
 	leaseKey := ticket + "-gate"
+	// Restore an existing gate lease pristine at its current HEAD before
+	// Acquire ever touches it. A reviewer that outlived a killed jig, or an
+	// oracle rewrite left over from an earlier attempt, can leave tracked
+	// dirt in the lease; if the ticket branch later advances past whatever
+	// file that dirt touched, Acquire's own `git checkout` (and, in normal
+	// mode, fetchTicketBranchFromBuildLease's checkout right after) refuses
+	// with "local changes ... would be overwritten" before the restore below
+	// ever runs, wedging every later attempt at the same point. This restore
+	// is best-effort: if the pool dir cannot be resolved, or the lease is not
+	// yet its own git working copy with a commit checked out (a key never
+	// acquired, or a clone killed before its first checkout), Acquire runs
+	// unchanged and surfaces its own error.
+	if poolDir, perr := home.PoolDir(); perr == nil {
+		leaseDir := filepath.Join(poolDir, repoName, leaseKey)
+		if isOwnGitRepoWithHead(leaseDir) {
+			if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
+				return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
+			}
+		}
+	}
 	lease, err := pool.Acquire(repoName, repo.Remote, target, branch, leaseKey)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: acquire lease: %w", err)
 	}
 
+	// Restore the gate lease to a pristine, known-correct head right after
+	// acquire and before any oracle runs. pool.Acquire never resets an
+	// existing local branch (a deliberate rule so a same-run slice's commits
+	// on it survive later acquires), so without this, a reviewer or an
+	// oracle that left the lease dirty or ahead on an earlier, killed jig
+	// has its leftovers reviewed by this round's own oracles, or in
+	// --branch mode makes this gate review the stale local copy instead of
+	// origin's current branch tip.
 	if o.Branch == "" {
 		if err := fetchTicketBranchFromBuildLease(lease.Dir, repoName, ticket); err != nil {
 			return GateReport{}, err
+		}
+		if err := resetLeasePristine(lease.Dir, "HEAD"); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease before oracles: %w", err)
+		}
+	} else {
+		// pool.Acquire's own fetch has no --prune, so a branch deleted on
+		// origin since an earlier gate on this same lease would otherwise
+		// leave refs/remotes/origin/<branch> stale, and the check below
+		// would pass against the last-fetched tip instead of catching the
+		// deletion. Prune here so a deleted branch is always caught.
+		if _, err := gitx.Run(lease.Dir, "fetch", "--prune", "origin"); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: fetch --prune origin: %w", err)
+		}
+		// refs/remotes/origin/<branch> is now current. The gate lease never
+		// commits (reviewers and oracles are always undone), so it must
+		// always equal origin/<branch> exactly.
+		if _, err := gitx.RevParse(lease.Dir, "refs/remotes/origin/"+branch); err != nil {
+			return GateReport{}, &axi.Error{
+				Msg:  fmt.Sprintf("branch %q does not exist on origin", branch),
+				Code: "BRANCH_NOT_FOUND",
+				Help: []string{"Push the branch to origin, then rerun."},
+			}
+		}
+		if err := resetLeasePristine(lease.Dir, "origin/"+branch); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease to origin/%s: %w", branch, err)
 		}
 	}
 
@@ -452,4 +505,53 @@ func writeDiffChangelog(d Deps, ticket, dir string, n int) error {
 		return fmt.Errorf("verifydeliver: gate: write diff-changelog.md: %w", err)
 	}
 	return nil
+}
+
+// resetLeasePristine hard-resets leaseDir to head and removes every
+// untracked file and directory. It never uses `clean -x`, so ignored build
+// caches (e.g. node_modules) survive; only content git itself would track or
+// that a reviewer left behind is wiped.
+func resetLeasePristine(leaseDir, head string) error {
+	if _, err := gitx.Run(leaseDir, "reset", "--hard", head); err != nil {
+		return err
+	}
+	if _, err := gitx.Run(leaseDir, "clean", "-fd"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// isGitLeaseDir reports whether dir looks like an existing pool lease
+// checkout (a git working copy), as opposed to a key never acquired yet.
+func isGitLeaseDir(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
+// isOwnGitRepoWithHead reports whether dir is itself the top level of a git
+// working copy whose HEAD resolves to a commit. A `.git` entry alone is not
+// enough before a destructive reset: when that entry is not a repository
+// git can open, git's upward discovery would resolve an enclosing repo
+// (JIG_HOME inside a dotfiles checkout, say) and the reset would discard
+// that repo's uncommitted work; and a clone killed before its first
+// checkout has an unborn HEAD that `reset --hard HEAD` cannot resolve,
+// which would wedge every later gate instead of letting Acquire recover.
+func isOwnGitRepoWithHead(dir string) bool {
+	if !isGitLeaseDir(dir) {
+		return false
+	}
+	top, err := gitx.Run(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false
+	}
+	topInfo, err := os.Stat(top)
+	if err != nil {
+		return false
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil || !os.SameFile(topInfo, dirInfo) {
+		return false
+	}
+	_, err = gitx.Run(dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	return err == nil
 }
