@@ -63,10 +63,7 @@ func (s *Store) Sync() error {
 		return err
 	}
 	if _, err := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); err != nil {
-		// jig itself must never leave the store mid-rebase: best effort,
-		// ignore the abort's own error (there may be nothing to abort).
-		_, _ = gitx.Run(s.Root, "rebase", "--abort")
-		return s.wrapAbortedPullConflict(err)
+		return s.abortFailedPull(err, branch)
 	}
 	return nil
 }
@@ -178,10 +175,7 @@ func (s *Store) Push(msg string) error {
 	}
 	if _, err := gitx.Run(s.Root, "push", "origin", branch); err != nil {
 		if _, perr := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); perr != nil {
-			// jig itself must never leave the store mid-rebase: best effort,
-			// ignore the abort's own error (there may be nothing to abort).
-			_, _ = gitx.Run(s.Root, "rebase", "--abort")
-			return s.wrapAbortedPullConflict(perr)
+			return s.abortFailedPull(perr, branch)
 		}
 		if _, err2 := gitx.Run(s.Root, "push", "origin", branch); err2 != nil {
 			return err2
@@ -194,16 +188,60 @@ func (s *Store) Push(msg string) error {
 	return nil
 }
 
-// wrapAbortedPullConflict turns a failed pull --rebase's raw git error, once
-// jig's own best-effort `rebase --abort` has already run, into a
-// STORE_CONFLICT the operator can act on. Git's own hint text ("run git
-// rebase --continue") is stale by then, since the rebase was just aborted;
-// pullErr's detail is kept in the message so nothing from it is lost.
-func (s *Store) wrapAbortedPullConflict(pullErr error) error {
+// abortFailedPull handles jig's own failed `pull --rebase` on branch. A
+// pull that stopped on a conflict leaves a rebase in progress
+// (stageAndCommit refused any rebase or merge that was already there, so
+// this one is jig's own): it is aborted with a best-effort `rebase
+// --abort`, and the result reported as STORE_CONFLICT either way, since the
+// store is still mid-rebase if the abort itself failed (for example a
+// Windows file lock) and needs the same manual resolution. A pull that
+// failed before rebasing (an unreachable or moved remote, an auth failure)
+// left nothing to abort, so its error is returned unchanged rather than
+// misreported as a conflict. When the state cannot be read, the abort is
+// still attempted (best effort), and the read's own error is carried into
+// the wrapped message rather than assumed away.
+func (s *Store) abortFailedPull(pullErr error, branch string) error {
+	mid, stateErr := inProgressRebaseOrMerge(s.Root)
+	if stateErr == nil && !mid {
+		return pullErr
+	}
+	_, abortErr := gitx.Run(s.Root, "rebase", "--abort")
+	return s.wrapAbortedPullConflict(pullErr, abortErr, stateErr, branch)
+}
+
+// wrapAbortedPullConflict turns a failed pull --rebase's raw git error into
+// a STORE_CONFLICT the operator can act on, after jig's own best-effort
+// `rebase --abort` has run (abortErr is that attempt's result, nil on
+// success) and after the state read that decided whether to attempt it
+// (stateErr, non-nil when inProgressRebaseOrMerge itself could not read the
+// store's state). When the abort itself failed, the message says so
+// plainly instead of falsely claiming the rebase was aborted. If the state
+// read had also failed, the message does not assert the store is
+// mid-rebase either - that was never confirmed - and instead says the
+// store's state is unknown, pointing at `git status` in the store rather
+// than at a specific rebase to abort or continue. pullErr's detail is kept
+// in the message either way so nothing from it is lost, including whatever
+// stale hint text git itself attached (for example "run git rebase
+// --continue").
+func (s *Store) wrapAbortedPullConflict(pullErr, abortErr, stateErr error, branch string) error {
+	if abortErr != nil {
+		if stateErr != nil {
+			return &axi.Error{
+				Msg:  fmt.Sprintf("the store at %s: pull --rebase conflicted, its state could not be read (%v), and the best-effort `rebase --abort` also failed: %v (pull error: %v)", s.Root, stateErr, abortErr, pullErr),
+				Code: "STORE_CONFLICT",
+				Help: []string{fmt.Sprintf("The store at %s is in an unknown state: check it there with `git status`, then resolve whatever it shows.", s.Root)},
+			}
+		}
+		return &axi.Error{
+			Msg:  fmt.Sprintf("the store at %s: pull --rebase conflicted, and the best-effort `rebase --abort` also failed: %v (pull error: %v)", s.Root, abortErr, pullErr),
+			Code: "STORE_CONFLICT",
+			Help: []string{fmt.Sprintf("The store at %s is still mid-rebase: resolve it there with `git status`, then `git rebase --abort` or `--continue`.", s.Root)},
+		}
+	}
 	return &axi.Error{
 		Msg:  fmt.Sprintf("the store at %s: pull --rebase conflicted and was aborted: %v", s.Root, pullErr),
 		Code: "STORE_CONFLICT",
-		Help: []string{"Resolve the divergence in the store: `git pull --rebase origin <branch>` there, fix the conflict, then rerun."},
+		Help: []string{fmt.Sprintf("Resolve the divergence in the store: `git pull --rebase origin %s` there, fix the conflict, then rerun.", branch)},
 	}
 }
 

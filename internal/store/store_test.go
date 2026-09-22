@@ -839,6 +839,66 @@ func TestSyncAndPushRefuseWhileRebaseApplyInProgress(t *testing.T) {
 	}
 }
 
+// TestWrapAbortedPullConflict: the message must not claim the rebase "was
+// aborted" when the best-effort `rebase --abort` itself failed, and the
+// Help line must name the real branch, never a literal "<branch>"
+// placeholder. When the rebase state could not even be read before that
+// abort failed, the message must not assert the store is mid-rebase either
+// (that was never confirmed) and must instead say the state is unknown and
+// point at `git status` in the store.
+func TestWrapAbortedPullConflict(t *testing.T) {
+	st := &Store{Root: "/store"}
+
+	ok := st.wrapAbortedPullConflict(errors.New("pull failed"), nil, nil, "main")
+	var aeOK *axi.Error
+	if !errors.As(ok, &aeOK) || aeOK.Code != "STORE_CONFLICT" {
+		t.Fatalf("abort ok: err = %v, want *axi.Error STORE_CONFLICT", ok)
+	}
+	if !strings.Contains(aeOK.Msg, "was aborted") {
+		t.Fatalf("abort ok: Msg = %q, want it to say the rebase was aborted", aeOK.Msg)
+	}
+	if len(aeOK.Help) == 0 || !strings.Contains(aeOK.Help[0], "origin main") || strings.Contains(aeOK.Help[0], "<branch>") {
+		t.Fatalf("abort ok: Help = %v, want the real branch name (not a <branch> placeholder)", aeOK.Help)
+	}
+
+	failed := st.wrapAbortedPullConflict(errors.New("pull failed"), errors.New("could not detach HEAD"), nil, "main")
+	var aeFailed *axi.Error
+	if !errors.As(failed, &aeFailed) || aeFailed.Code != "STORE_CONFLICT" {
+		t.Fatalf("abort failed: err = %v, want *axi.Error STORE_CONFLICT", failed)
+	}
+	if strings.Contains(aeFailed.Msg, "was aborted") {
+		t.Fatalf("abort failed: Msg = %q, want it not to claim the rebase was aborted when the abort itself failed", aeFailed.Msg)
+	}
+	if !strings.Contains(aeFailed.Msg, "could not detach HEAD") {
+		t.Fatalf("abort failed: Msg = %q, want the abort's own error included", aeFailed.Msg)
+	}
+	if len(aeFailed.Help) == 0 || !strings.Contains(aeFailed.Help[0], "mid-rebase") {
+		t.Fatalf("abort failed: Help = %v, want it to point at the store still being mid-rebase", aeFailed.Help)
+	}
+
+	// The rebase-state read itself failed (for example the git-path lookup
+	// errored), and the abort then failed too: the message must not claim
+	// the store is mid-rebase, since that was never actually confirmed - it
+	// must say the state is unknown instead.
+	unknown := st.wrapAbortedPullConflict(errors.New("pull failed"), errors.New("no rebase in progress"), errors.New("could not read git state"), "main")
+	var aeUnknown *axi.Error
+	if !errors.As(unknown, &aeUnknown) || aeUnknown.Code != "STORE_CONFLICT" {
+		t.Fatalf("state unknown: err = %v, want *axi.Error STORE_CONFLICT", unknown)
+	}
+	if strings.Contains(aeUnknown.Msg, "was aborted") {
+		t.Fatalf("state unknown: Msg = %q, want it not to claim the rebase was aborted", aeUnknown.Msg)
+	}
+	if !strings.Contains(aeUnknown.Msg, "could not read git state") {
+		t.Fatalf("state unknown: Msg = %q, want the state read's own error included", aeUnknown.Msg)
+	}
+	if strings.Contains(strings.Join(aeUnknown.Help, " "), "mid-rebase") {
+		t.Fatalf("state unknown: Help = %v, want it not to assert the store is mid-rebase when that was never confirmed", aeUnknown.Help)
+	}
+	if len(aeUnknown.Help) == 0 || !strings.Contains(aeUnknown.Help[0], "git status") {
+		t.Fatalf("state unknown: Help = %v, want it to point at `git status` in the store", aeUnknown.Help)
+	}
+}
+
 func TestPushRebasesOnRejection(t *testing.T) {
 	st, work, remote := newTestRemoteStore(t)
 
@@ -862,5 +922,35 @@ func TestPushRebasesOnRejection(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(work, "from-other.txt")); err != nil {
 		t.Fatalf("Push did not rebase in the other writer's commit: %v", err)
+	}
+}
+
+// TestUnreachableRemoteIsNotReportedAsConflict checks that a pull which
+// fails before rebasing (here: the remote path no longer exists) returns
+// git's own error from both Sync and Push, not STORE_CONFLICT with
+// conflict-resolution help, and leaves nothing to abort.
+func TestUnreachableRemoteIsNotReportedAsConflict(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+	runGit(t, work, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "moved.git"))
+
+	for name, run := range map[string]func() error{
+		"Sync": st.Sync,
+		"Push": func() error { return st.Push("after the remote moved") },
+	} {
+		err := run()
+		if err == nil {
+			t.Fatalf("%s with an unreachable remote: err = nil, want git's error", name)
+		}
+		var ae *axi.Error
+		if errors.As(err, &ae) && ae.Code == "STORE_CONFLICT" {
+			t.Fatalf("%s with an unreachable remote was misreported as STORE_CONFLICT: %v", name, err)
+		}
+		mid, ierr := inProgressRebaseOrMerge(work)
+		if ierr != nil {
+			t.Fatalf("inProgressRebaseOrMerge: %v", ierr)
+		}
+		if mid {
+			t.Fatalf("%s left the store mid-rebase", name)
+		}
 	}
 }
