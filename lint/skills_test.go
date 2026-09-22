@@ -1,7 +1,8 @@
 // Package lint enforces the mechanical budgets on jig's agent-facing docs:
 // each skills/<dir>/SKILL.md's size and frontmatter, the router's intent
-// table, and (once it exists) ARCHITECTURE.md's module table against the
-// real package layout.
+// table, (once it exists) ARCHITECTURE.md's module table against the real
+// package layout, and the shape of the CI/release/smoke GitHub Actions
+// workflows.
 package lint
 
 import (
