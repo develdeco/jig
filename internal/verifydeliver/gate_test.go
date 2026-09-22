@@ -1,6 +1,7 @@
 package verifydeliver
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
+	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -653,6 +655,135 @@ func TestGateBranchDeletedOnOriginAfterEarlierGate(t *testing.T) {
 	}
 	if len(ae.Help) == 0 {
 		t.Fatal("BRANCH_NOT_FOUND has no Help line")
+	}
+}
+
+// TestGateReviewerFindingsBookkeepingAcrossRounds is S2's own Gate()
+// integration test: it drives two real reviewer rounds through Gate
+// itself (not reviewerGateSource.Round directly) and checks that the
+// wiring findings.go adds - review.json's open list built from the fold,
+// the verdict derived from applying the round, findings.yaml/md written to
+// disk, and reviewed_sha recorded - all agree with each other.
+func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+
+	round := 0
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		round++
+		reviewData, err := os.ReadFile(sd.SliceJSON)
+		if err != nil {
+			t.Fatalf("read review.json: %v", err)
+		}
+		var req ReviewRequest
+		if err := json.Unmarshal(reviewData, &req); err != nil {
+			t.Fatalf("parse review.json: %v", err)
+		}
+
+		var result ReviewResult
+		switch round {
+		case 1:
+			if len(req.Open) != 0 {
+				t.Fatalf("round 1 review.json Open = %+v, want none", req.Open)
+			}
+			result = ReviewResult{
+				Findings: []ResultFinding{{
+					File: "alpha/alpha.go", Line: 1, Title: "needs a fix",
+					Detail: "leaks a tenant id", Action: ActionFix,
+					Risk: RiskHigh, RiskRationale: "customer data", Oracle: "test",
+				}},
+				ReviewedPaths: req.MustReview,
+				Summary:       "round 1 summary",
+			}
+		case 2:
+			if len(req.Open) != 1 || req.Open[0].Title != "needs a fix" || req.Open[0].File != "alpha/alpha.go" {
+				t.Fatalf("round 2 review.json Open = %+v, want the round 1 finding fed back", req.Open)
+			}
+			// Nothing new reported: the round 1 finding clears (rule 3).
+			result = ReviewResult{ReviewedPaths: req.MustReview, Summary: "round 2 summary"}
+		default:
+			t.Fatalf("unexpected round %d", round)
+		}
+
+		payload, err := json.Marshal(result)
+		if err != nil {
+			t.Fatalf("marshal result: %v", err)
+		}
+		return os.WriteFile(sd.ResultJSON, payload, 0o644)
+	}}
+
+	src := NewReviewerGateSource(backend)
+
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+	if report1.Round != 1 {
+		t.Fatalf("round = %d, want 1", report1.Round)
+	}
+	if report1.Verdict != "fix-slices" {
+		t.Fatalf("round 1 Verdict = %q, want fix-slices", report1.Verdict)
+	}
+	if report1.ReviewedSHA == nil || report1.ReviewedSHA["fixture-repo"] == "" {
+		t.Fatalf("round 1 ReviewedSHA = %+v, want a non-empty fixture-repo entry", report1.ReviewedSHA)
+	}
+
+	ff1, ok, err := readFindingsYAML(d.Store, fx.Ticket, 1)
+	if err != nil {
+		t.Fatalf("read round 1 findings.yaml: %v", err)
+	}
+	if !ok {
+		t.Fatal("round 1 findings.yaml missing")
+	}
+	if len(ff1.Findings) != 1 {
+		t.Fatalf("round 1 findings = %+v, want 1", ff1.Findings)
+	}
+	f1 := ff1.Findings[0]
+	if f1.Status != StatusOpen {
+		t.Errorf("round 1 finding status = %q, want open", f1.Status)
+	}
+	if f1.Workspace != "alpha" {
+		t.Errorf("round 1 finding workspace = %q, want alpha", f1.Workspace)
+	}
+	if f1.ID == "" {
+		t.Error("round 1 finding has no id")
+	}
+
+	mdPath := filepath.Join(gateRoundDir(d.Store, fx.Ticket, 1), "findings.md")
+	if md, err := os.ReadFile(mdPath); err != nil || len(md) == 0 {
+		t.Fatalf("round 1 findings.md: data=%q err=%v", md, err)
+	}
+
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 2: %v", err)
+	}
+	if report2.Verdict != "clean" {
+		t.Fatalf("round 2 Verdict = %q, want clean", report2.Verdict)
+	}
+	if report2.ReviewedSHA == nil || report2.ReviewedSHA["fixture-repo"] == "" {
+		t.Fatalf("round 2 ReviewedSHA = %+v, want a non-empty fixture-repo entry", report2.ReviewedSHA)
+	}
+
+	ff2, ok, err := readFindingsYAML(d.Store, fx.Ticket, 2)
+	if err != nil {
+		t.Fatalf("read round 2 findings.yaml: %v", err)
+	}
+	if !ok {
+		t.Fatal("round 2 findings.yaml missing")
+	}
+	if !equalStrings(ff2.Cleared, []string{f1.ID}) {
+		t.Fatalf("round 2 cleared = %v, want [%s]", ff2.Cleared, f1.ID)
+	}
+
+	cum, err := cumulativeFindings(d.Store, fx.Ticket, 3)
+	if err != nil {
+		t.Fatalf("cumulativeFindings: %v", err)
+	}
+	if !isClean(cum) {
+		t.Fatalf("cumulative state after round 2 = %+v, want clean", cum)
 	}
 }
 

@@ -390,8 +390,9 @@ type scopeDiff struct {
 }
 
 // computeScopeDiff runs the scope diff and builds must_review (Q5). openFiles
-// are the open-finding files findings bookkeeping (design 5, S2) supplies;
-// S1 has no bookkeeping yet, so callers before S2 pass nil.
+// are the open-finding files findings bookkeeping (design 5, findings.go)
+// supplies; a caller with no open findings yet (round 1, or the scripted
+// source) passes nil.
 func computeScopeDiff(leaseDir, base, head string, openFiles []string) (scopeDiff, error) {
 	changed, err := gitx.DiffNameOnly(leaseDir, base, head, "AMT")
 	if err != nil {
@@ -457,8 +458,8 @@ type RoundInput struct {
 	Model     string
 	BriefPath string
 	Manifest  manifest.Manifest
-	Open      []OpenFinding      // findings bookkeeping (S2) supplies this; nil until then
-	Dismissed []DismissedFinding // findings bookkeeping (S2) supplies this; nil until then
+	Open      []OpenFinding      // findings bookkeeping's cumulative fold, projected (findings.go)
+	Dismissed []DismissedFinding // findings bookkeeping's cumulative fold, projected (findings.go)
 }
 
 // reviewerGateSource dispatches a real, session-driven gate review for
@@ -474,12 +475,15 @@ func NewReviewerGateSource(b session.Backend) GateSource {
 }
 
 // Round writes review.json, dispatches the reviewer session, and validates
-// its result.json strictly (design 4). It never routes findings into fix
-// slices or applies bookkeeping across rounds (design 5); that is S2/S3's
-// job. The lease is restored pristine before dispatch (oracles run just
-// before this in Gate, and may have left tracked dirt) and always after,
-// success or failure, so a broken reviewer never leaves the lease for a
-// later operation to trip over.
+// its result.json strictly (design 4), or - when nothing is outstanding
+// and the scope diff changes nothing - skips dispatch entirely (design 5.4,
+// Q8). It never applies findings bookkeeping across rounds or routes
+// findings into fix slices (design 5, 6); Gate does the former with the
+// Review this returns, and a later stage does the latter. The lease is
+// restored pristine before dispatch (oracles run just before this in Gate,
+// and may have left tracked dirt) and always after, success or failure, so
+// a broken reviewer never leaves the lease for a later operation to trip
+// over.
 func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error) {
 	if err := resetLeasePristine(in.LeaseDir, "HEAD"); err != nil {
 		return Round{}, false, fmt.Errorf("verifydeliver: review: restore lease before round: %w", err)
@@ -511,6 +515,24 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 	diff, err := computeScopeDiff(in.LeaseDir, base, head, openFiles)
 	if err != nil {
 		return Round{}, false, err
+	}
+
+	// Clean without dispatch (design 5.4, Q8): must_review always includes
+	// every open finding's file (computeScopeDiff), so an empty
+	// must_review together with no open finding means the scope diff
+	// changes nothing and nothing is outstanding - the previous review
+	// already covers head, so there is nothing for a reviewer session to
+	// do.
+	if len(diff.MustReview) == 0 && len(in.Open) == 0 {
+		return Round{Review: &Review{
+			Scope:      scope,
+			BaseSHA:    base,
+			HeadSHA:    head,
+			Changed:    diff.Changed,
+			Deleted:    diff.Deleted,
+			MustReview: diff.MustReview,
+			Result:     ReviewResult{ReviewedPaths: []string{}},
+		}}, true, nil
 	}
 
 	oracleNames := sortedOracleNames(in.Manifest)

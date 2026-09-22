@@ -21,10 +21,11 @@ import (
 
 // Round is one gate round's content, whether played back by a fake source
 // (tests) or produced by a real reviewer session. Review is set only by the
-// reviewer source (review.go): its validated result plus scope data, ready
-// for findings bookkeeping (design 5) to apply. Until that lands, Gate
-// treats a reviewer round like any other: FixSlices stays empty, so no
-// finding is routed yet.
+// reviewer source (review.go): its validated result plus scope data, which
+// Gate applies through findings bookkeeping (design 5, findings.go) to
+// decide clean vs fix-slices and to persist findings.yaml/md. Routing a
+// finding into a fix slice (design 6) is a later stage's job: FixSlices
+// stays empty for a reviewer round until then, whatever the verdict.
 type Round struct {
 	FindingsMD string
 	FixSlices  []store.Slice
@@ -270,6 +271,17 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: round %d already exists", n)
 	}
 
+	// The cumulative fold over every earlier reviewer round (design 5.5):
+	// its open and dismissed findings become review.json's own open and
+	// dismissed lists (design 4.1). A ticket with no reviewer rounds yet,
+	// or one driven entirely by the scripted source, folds to nothing.
+	cum, err := cumulativeFindings(d.Store, ticket, n)
+	if err != nil {
+		return GateReport{}, fmt.Errorf("verifydeliver: gate: fold findings: %w", err)
+	}
+	openList := openFindingsList(cum)
+	dismissedList := dismissedFindingsList(cum)
+
 	round, ok, err := src.Round(RoundInput{
 		Store:     d.Store,
 		Ticket:    ticket,
@@ -280,6 +292,8 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		Model:     model,
 		BriefPath: filepath.Join(d.Store.TicketDir(ticket), "brief.md"),
 		Manifest:  man,
+		Open:      toOpenFindingList(openList),
+		Dismissed: toDismissedFindingList(dismissedList),
 	})
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: read round %d: %w", n, err)
@@ -291,7 +305,8 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	}
 
 	report := GateReport{Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA}}
-	if !ok {
+	switch {
+	case !ok:
 		report.Verdict = "clean"
 		if err := writeCleanRound(d, ticket, n, report); err != nil {
 			return GateReport{}, err
@@ -299,7 +314,39 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		if err := journal.Append(d.Store, ticket, journal.Line{Event: "gate-clean", Attempt: n}); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-clean: %w", err)
 		}
-	} else {
+	case round.Review != nil:
+		// Findings bookkeeping (design 5): apply this round onto the fold,
+		// then fold it in turn to see whether anything is still
+		// outstanding (design 5.4) - that, not whether the round dispatched
+		// a reviewer, decides clean vs fix-slices. Routing findings into
+		// fix slices (design 6) is a later stage's job; Round.FixSlices
+		// stays empty for a reviewer round until then.
+		reported, cleared := ApplyRound(n, cum, round.Review.Result, round.Review.Deleted, man)
+		updated := cloneFindings(cum)
+		foldFindings(updated, reported, cleared)
+		if isClean(updated) {
+			report.Verdict = "clean"
+		} else {
+			report.Verdict = "fix-slices"
+		}
+		// design 5.5: reviewed_sha is recorded on every reviewer round,
+		// clean or not, so the next round's scope can resolve a delta
+		// against it.
+		report.ReviewedSHA = map[string]string{repoName: round.Review.HeadSHA}
+		if err := writeReviewerRound(d, ticket, n, report, round.Review.Scope, round.Review.Result.ReviewedPaths, reported, cleared, round.Review.Result.Summary); err != nil {
+			return GateReport{}, err
+		}
+		event := "gate-round"
+		if report.Verdict == "clean" {
+			event = "gate-clean"
+		}
+		if err := journal.Append(d.Store, ticket, journal.Line{Event: event, Attempt: n}); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal %s: %w", event, err)
+		}
+		if err := appendFixSlices(d, ticket, n, round.FixSlices); err != nil {
+			return GateReport{}, err
+		}
+	default:
 		report.Verdict = "fix-slices"
 		if err := writeFixRound(d, ticket, n, report, round); err != nil {
 			return GateReport{}, err
@@ -307,19 +354,8 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		if err := journal.Append(d.Store, ticket, journal.Line{Event: "gate-round", Attempt: n}); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-round: %w", err)
 		}
-		for _, fs := range round.FixSlices {
-			if fs.FromGate == 0 {
-				fs.FromGate = n
-			}
-			if err := d.Store.AppendSlices(ticket, []store.Slice{fs}); err != nil {
-				return GateReport{}, fmt.Errorf("verifydeliver: gate: append fix slice %s: %w", fs.ID, err)
-			}
-			if err := d.Store.WriteSliceState(ticket, fs.ID, store.SliceState{State: "queued"}); err != nil {
-				return GateReport{}, fmt.Errorf("verifydeliver: gate: init fix slice %s state: %w", fs.ID, err)
-			}
-			if err := journal.Append(d.Store, ticket, journal.Line{Slice: fs.ID, Event: "fix-slice", Attempt: n}); err != nil {
-				return GateReport{}, fmt.Errorf("verifydeliver: gate: journal fix-slice %s: %w", fs.ID, err)
-			}
+		if err := appendFixSlices(d, ticket, n, round.FixSlices); err != nil {
+			return GateReport{}, err
 		}
 	}
 
@@ -501,6 +537,57 @@ func writeFixRound(d Deps, ticket string, n int, report GateReport, round Round)
 				return fmt.Errorf("verifydeliver: gate: write receipt %s: %w", name, err)
 			}
 		}
+	}
+	return nil
+}
+
+// appendFixSlices appends every fix slice a round routed, initializing
+// each to queued and journaling it. It is shared by the scripted source's
+// fix-slices path and the reviewer round path; for a reviewer round it is
+// currently always a no-op (round.FixSlices stays empty until routing,
+// design 6, lands).
+func appendFixSlices(d Deps, ticket string, n int, slices []store.Slice) error {
+	for _, fs := range slices {
+		if fs.FromGate == 0 {
+			fs.FromGate = n
+		}
+		if err := d.Store.AppendSlices(ticket, []store.Slice{fs}); err != nil {
+			return fmt.Errorf("verifydeliver: gate: append fix slice %s: %w", fs.ID, err)
+		}
+		if err := d.Store.WriteSliceState(ticket, fs.ID, store.SliceState{State: "queued"}); err != nil {
+			return fmt.Errorf("verifydeliver: gate: init fix slice %s state: %w", fs.ID, err)
+		}
+		if err := journal.Append(d.Store, ticket, journal.Line{Slice: fs.ID, Event: "fix-slice", Attempt: n}); err != nil {
+			return fmt.Errorf("verifydeliver: gate: journal fix-slice %s: %w", fs.ID, err)
+		}
+	}
+	return nil
+}
+
+// writeReviewerRound writes a reviewer round's files (design 5.5):
+// findings.yaml, findings.md rendered from it, report.yaml (with
+// ReviewedSHA), and diff-changelog.md.
+func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string) error {
+	dir := gateRoundDir(d.Store, ticket, n)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("verifydeliver: gate: create round dir: %w", err)
+	}
+	yamlData, err := marshalFindingsYAML(scope, reviewedPaths, findings, cleared, summary)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: gate: marshal findings.yaml: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "findings.yaml"), yamlData, 0o644); err != nil {
+		return fmt.Errorf("verifydeliver: gate: write findings.yaml: %w", err)
+	}
+	md := renderFindingsMD(n, summary, findings)
+	if err := os.WriteFile(filepath.Join(dir, "findings.md"), []byte(md), 0o644); err != nil {
+		return fmt.Errorf("verifydeliver: gate: write findings.md: %w", err)
+	}
+	if err := writeReportYAML(dir, report); err != nil {
+		return err
+	}
+	if err := writeDiffChangelog(d, ticket, dir, n); err != nil {
+		return err
 	}
 	return nil
 }

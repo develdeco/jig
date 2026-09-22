@@ -1074,3 +1074,86 @@ func TestReviewerGateSourceRoundWithFakeBackend(t *testing.T) {
 		t.Errorf("Result.Findings = %+v", rnd.Review.Result.Findings)
 	}
 }
+
+// TestReviewerGateSourceRoundCleanWithoutDispatchWhenNothingOutstanding
+// covers design 5.4/Q8: when the scope diff changes nothing and no
+// finding is open, the previous review already covers head, so Round
+// never dispatches a reviewer session at all.
+func TestReviewerGateSourceRoundCleanWithoutDispatchWhenNothingOutstanding(t *testing.T) {
+	dir := newReviewLease(t, "main") // HEAD already equals origin/main
+	st := newReviewStore(t)
+	head, err := gitx.RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+
+	called := false
+	backend := stubBackend{run: func(session.Dispatch) error {
+		called = true
+		return errors.New("must not dispatch")
+	}}
+
+	src := NewReviewerGateSource(backend)
+	rnd, ok, err := src.Round(RoundInput{
+		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
+		Manifest: oneOracleManifest(),
+	})
+	if err != nil {
+		t.Fatalf("Round: %v", err)
+	}
+	if !ok {
+		t.Fatal("Round: ok = false, want true (a clean round)")
+	}
+	if called {
+		t.Error("the backend was dispatched even though nothing was outstanding")
+	}
+	if rnd.Review == nil {
+		t.Fatal("Round.Review is nil")
+	}
+	if rnd.Review.HeadSHA != head {
+		t.Errorf("Review.HeadSHA = %q, want %q", rnd.Review.HeadSHA, head)
+	}
+	if len(rnd.Review.MustReview) != 0 {
+		t.Errorf("Review.MustReview = %v, want none", rnd.Review.MustReview)
+	}
+	if len(rnd.Review.Result.Findings) != 0 {
+		t.Errorf("Review.Result.Findings = %v, want none", rnd.Review.Result.Findings)
+	}
+	if rnd.Review.Result.ReviewedPaths == nil || len(rnd.Review.Result.ReviewedPaths) != 0 {
+		t.Errorf("Review.Result.ReviewedPaths = %v, want an empty (non-nil) slice", rnd.Review.Result.ReviewedPaths)
+	}
+}
+
+// TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding
+// covers the other half of Q8: even with an empty scope diff, an open
+// finding still outstanding from an earlier round means the reviewer must
+// look again, so Round dispatches as usual.
+func TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding(t *testing.T) {
+	dir := newReviewLease(t, "main")
+	st := newReviewStore(t)
+
+	called := false
+	backend := stubBackend{run: func(d session.Dispatch) error {
+		called = true
+		writeMustReviewResult(t, d)
+		return nil
+	}}
+
+	src := NewReviewerGateSource(backend)
+	_, ok, err := src.Round(RoundInput{
+		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
+		Manifest: oneOracleManifest(),
+		Open:     []OpenFinding{{ID: "r1-f1", File: "a.go", Title: "t", Action: ActionFix}},
+	})
+	if err != nil {
+		t.Fatalf("Round: %v", err)
+	}
+	if !ok {
+		t.Fatal("Round: ok = false, want true")
+	}
+	if !called {
+		t.Error("the backend was never dispatched despite an open finding")
+	}
+}
