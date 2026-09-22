@@ -109,7 +109,7 @@ func TestDefaultTriageLeavesAnAskWithNoResolvableOracleUndecided(t *testing.T) {
 	}
 }
 
-// --- routeRound: grouping (design 6.1) ------------------------------
+// --- routeRound: grouping ------------------------------------------------
 
 func TestRouteRoundGroupsFixesByWorkspaceAndOracle(t *testing.T) {
 	st := newReviewStore(t)
@@ -187,7 +187,7 @@ func TestRouteRoundGoalNamesEveryFindingAndDismissedFixIsExcluded(t *testing.T) 
 	}
 }
 
-// --- routeRound: kept asks (design 6.2) -------------------------------
+// --- routeRound: kept asks -------------------------------------------------
 
 func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 	st := newReviewStore(t)
@@ -214,7 +214,7 @@ func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 		t.Errorf("goal missing the human's decision:\n%s", slices[0].Goal)
 	}
 	f := findFinding(routed, "r2-f3")
-	// asked --> open: you keep it (design 3's state diagram).
+	// asked --> open: you keep it.
 	if f.Status != StatusOpen {
 		t.Errorf("kept ask Status = %q, want open", f.Status)
 	}
@@ -379,7 +379,7 @@ func TestRouteRoundOracleSuppliedByTriageBuildsTheSlice(t *testing.T) {
 	}
 }
 
-// --- notes are never triaged (design 6.3) ---------------------------------
+// --- notes are never triaged -----------------------------------------------
 
 func TestRouteRoundNotesPassThroughUntouched(t *testing.T) {
 	st := newReviewStore(t)

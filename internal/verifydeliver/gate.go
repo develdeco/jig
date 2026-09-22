@@ -22,10 +22,10 @@ import (
 // Round is one gate round's content, whether played back by a fake source
 // (tests) or produced by a real reviewer session. Review is set only by the
 // reviewer source (review.go): its validated result plus scope data, which
-// Gate applies through findings bookkeeping (design 5, findings.go) to
-// decide clean vs fix-slices and to persist findings.yaml/md, then routes
-// into fix slices (design 6, route.go) - those are appended directly from
-// routing's own return value, never stored back onto this struct. FixSlices
+// Gate applies through findings bookkeeping (findings.go) to decide clean
+// vs fix-slices and to persist findings.yaml/md, then routes into fix
+// slices (route.go) - those are appended directly from routing's own
+// return value, never stored back onto this struct. FixSlices
 // is the scripted source's own field instead: fakeGateSource.Round reads it
 // straight from a scenario's fix-slices.yaml, and Gate appends it unchanged
 // for that source.
@@ -111,7 +111,7 @@ type GateOpts struct {
 	BriefDoc string // spec-axis input when Branch is set
 	PRMode   bool
 	// Triage is the human seam for a reviewer round's fix batch and ask
-	// findings (design 6, route.go). nil means DefaultTriage: every fix is
+	// findings (route.go). nil means DefaultTriage: every fix is
 	// kept, every ask with a full build target is kept, one missing part
 	// of it stays undecided. Unused for a scripted (--scenario) round.
 	Triage Triage
@@ -123,25 +123,24 @@ type GateReport struct {
 	Verdict   string // clean|fix-slices
 	TargetSHA map[string]string
 	Model     string
-	// ReviewedSHA is repoName -> the head sha a reviewer round reviewed
-	// (design 5.5: "on every reviewer round, clean or not"), the anchor the
-	// next round's scope resolves against (review.go's resolveScopeBase).
-	// nil for a scripted round.
+	// ReviewedSHA is repoName -> the head sha a reviewer round reviewed, on
+	// every reviewer round, clean or not - the anchor the next round's
+	// scope resolves against (review.go's resolveScopeBase). nil for a
+	// scripted round.
 	ReviewedSHA map[string]string
 	// Scope is this round's scope diff kind (full|delta), "" for a
-	// scripted round (design 4.1).
+	// scripted round.
 	Scope string
 	// Findings is every finding this round reported, after routing and
-	// triage (design 6) set each one's final Status/Triage/Decision/
+	// triage set each one's final Status/Triage/Decision/
 	// RoutedAs. nil for a scripted round.
 	Findings []Finding
-	// FixSlices is the ids of the fix slices this round appended (design
-	// 6.1, 6.2), in the order they were built.
+	// FixSlices is the ids of the fix slices this round appended, in the
+	// order they were built.
 	FixSlices []string
 	// NeedsHuman is every asked finding still undecided after this round
-	// (across every round, not only this one's own): design 6.4's "needs a
-	// human" list, the exit-2 signal. Empty when nothing is waiting on a
-	// person.
+	// (across every round, not only this one's own): the "needs a human"
+	// list, the exit-2 signal. Empty when nothing is waiting on a person.
 	NeedsHuman []Finding
 }
 
@@ -290,10 +289,10 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: round %d already exists", n)
 	}
 
-	// The cumulative fold over every earlier reviewer round (design 5.5):
-	// its open and dismissed findings become review.json's own open and
-	// dismissed lists (design 4.1). A ticket with no reviewer rounds yet,
-	// or one driven entirely by the scripted source, folds to nothing.
+	// The cumulative fold over every earlier reviewer round: its open and
+	// dismissed findings become review.json's own open and dismissed lists.
+	// A ticket with no reviewer rounds yet, or one driven entirely by the
+	// scripted source, folds to nothing.
 	cum, err := cumulativeFindings(d.Store, ticket, n)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: fold findings: %w", err)
@@ -345,16 +344,16 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-clean: %w", err)
 		}
 	case round.Review != nil:
-		// Findings bookkeeping (design 5): apply this round onto the fold.
-		// Routing and triage (design 6, route.go) then turn kept fixes and
-		// asks into fix slices, mutating each reported finding's final
-		// Status/Triage/Decision/RoutedAs - entirely in memory, before
-		// anything is persisted or pushed. Rule 3's clearing runs only after
-		// that, against those final statuses: a finding dismissed at triage
-		// must not go on blocking an unrelated open finding in the same
-		// file. The post-round fold is then checked for what's still
-		// outstanding (design 5.4): that, not whether the round dispatched
-		// a reviewer, decides clean vs fix-slices.
+		// Findings bookkeeping: apply this round onto the fold. Routing and
+		// triage (route.go) then turn kept fixes and asks into fix slices,
+		// mutating each reported finding's final Status/Triage/Decision/
+		// RoutedAs - entirely in memory, before anything is persisted or
+		// pushed. Rule 3's clearing runs only after that, against those
+		// final statuses: a finding dismissed at triage must not go on
+		// blocking an unrelated open finding in the same file. The
+		// post-round fold is then checked for what's still outstanding:
+		// that, not whether the round dispatched a reviewer, decides clean
+		// vs fix-slices.
 		reviewHead := round.Review.HeadSHA
 		existsAtHead := func(file string) (bool, error) {
 			return gitx.FileExistsAtRev(lease.Dir, reviewHead, file)
@@ -385,17 +384,16 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		} else {
 			report.Verdict = "fix-slices"
 		}
-		// design 5.5: reviewed_sha is recorded on every reviewer round,
-		// clean or not, so the next round's scope can resolve a delta
-		// against it.
+		// reviewed_sha is recorded on every reviewer round, clean or not,
+		// so the next round's scope can resolve a delta against it.
 		report.ReviewedSHA = map[string]string{repoName: round.Review.HeadSHA}
 		report.Scope = round.Review.Scope
 		// Findings and NeedsHuman are sorted by risk, high first, then id
 		// (sortByRiskThenID, the same helper routing sorts the human seam
-		// with): design 6.4's "always shown sorted by risk, high first"
-		// applies to every place findings reach a human, not only the
-		// triage prompt - the gate report's own tables (cmd/jig) render
-		// these two lists as given, so the ordering has to be right here.
+		// with): "always shown sorted by risk, high first" applies to every
+		// place findings reach a human, not only the triage prompt - the
+		// gate report's own tables (cmd/jig) render these two lists as
+		// given, so the ordering has to be right here.
 		report.Findings = append([]Finding(nil), routed...)
 		sortByRiskThenID(report.Findings)
 		report.NeedsHuman = askedFindingsList(updated)
@@ -415,8 +413,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		}
 		// Routing and triage are already finished above; appending these
 		// slices and, at the end of Gate, pushing the store are the only
-		// on-disk/store-visible effects that follow (design 6's ordering
-		// rule).
+		// on-disk/store-visible effects that follow.
 		if err := appendFixSlices(d, ticket, n, fixSlices); err != nil {
 			return GateReport{}, err
 		}
@@ -637,8 +634,8 @@ func appendFixSlices(d Deps, ticket string, n int, slices []store.Slice) error {
 	return nil
 }
 
-// writeReviewerRound writes a reviewer round's files (design 5.5):
-// findings.yaml, findings.md rendered from it, report.yaml (with
+// writeReviewerRound writes a reviewer round's files: findings.yaml,
+// findings.md rendered from it, report.yaml (with
 // ReviewedSHA), and diff-changelog.md.
 func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string) error {
 	dir := gateRoundDir(d.Store, ticket, n)

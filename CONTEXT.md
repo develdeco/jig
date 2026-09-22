@@ -77,7 +77,7 @@ The files a reviewer actually read in a round, reported as `reviewed_paths`. jig
 _Avoid_: reviewed scope, read set
 
 **Triage**:
-The human seam for a gate round's `ask` findings and its `fix` batch: at a terminal, every `ask` is decided as keep (with an optional decision) or dismiss - undecided is never offered as a choice, only what an ask on a file in no declared workspace defaults to when no human is present to make that call. Every decision is recorded and becomes eval gold.
+The human seam for a gate round's `ask` findings and its `fix` batch: at a terminal, every `ask` is decided as keep (with an optional decision) or dismiss - undecided is never offered as a choice, only what an ask missing a workspace, an oracle, or both defaults to when no human is present to make that call. Every decision is recorded and becomes eval gold.
 _Avoid_: review comment triage, auto-dismiss
 
 **Staircase**:

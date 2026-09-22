@@ -136,9 +136,9 @@ prompt. `jig solve`'s own gate/fix-slice loop follows a narrower rule:
 `--scenario` always selects that same scripted source, whatever `--backend`
 says, so its reviewer only runs without `--scenario`. At a terminal, a
 dispatched reviewer round stops for a triage prompt over what it found:
-`--yes` skips it, keeping every fix and every ask that already has a
-workspace, and leaving an ask on a file in no declared workspace for a
-human to decide later.
+`--yes` skips it, keeping every fix and every ask whose build target
+already resolves in full (a workspace and an oracle), and leaving an ask
+missing a workspace, an oracle, or both for a human to decide later.
 
 ## Safety
 

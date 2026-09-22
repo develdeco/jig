@@ -111,9 +111,9 @@ was ambiguous, what was chosen, and why.
 
 ## Gate reviewer
 
-This section records the rework that replaced an earlier branch's (PR #8's)
-session-dispatched reviewer: see `docs/adr/0007-gate-reviewer-owns-bookkeeping-not-judgment.md`
-for why. None of that branch's `class`, `Closure` accounting, jig-side
+This section records the rework that replaced PR #8's session-dispatched
+reviewer: see `docs/adr/0007-gate-reviewer-owns-bookkeeping-not-judgment.md`
+for why. None of PR #8's `class`, `Closure` accounting, jig-side
 carry-forward, `normalizeTitle` auto-dismiss, `rung` pin, or silent oracle
 fallback survived into this design; `action` (fix/ask/note), `prior`, and
 `reviewed_paths` replace them respectively.
@@ -151,19 +151,25 @@ Design questions the code raised, and their resolution:
   error text says exactly that ("the manifest has no oracles"), and a
   different message, naming the finding and the manifest's current
   oracles, covers a manifest that does have oracles but none this finding
-  can use. At a terminal, keeping a no-workspace ask prompts for a
-  workspace; the equivalent oracle prompt is not implemented yet, so a
-  kept ask whose oracle cannot be resolved stays undecided even after an
-  explicit keep answer, the same as if stdin had closed before it could be
-  answered.
+  can use. At a terminal, keeping a fix or ask missing a workspace, an
+  oracle, or both is prompted for each missing part in turn - workspace
+  from the manifest's workspace ids, oracle from its oracle names - and the
+  answer is recorded on the finding and used for its fix slice; with
+  `--yes`, no terminal, or stdin closing before every missing part is
+  answered, it stays `asked` and is listed under `needs_a_human`. One
+  exported check (`verifydeliver.BuildTargetGaps`) decides which parts are
+  missing for `DefaultTriage`, `routeRound`'s kept-ask handling, and
+  `cmd/jig`'s terminal prompt and its stdin-closed count alike, so the four
+  can never drift apart on what counts as a full build target.
 - `findings.yaml` gains two additive fields beyond the design's base shape:
   `triage: human|auto` (who decided - a person at a terminal, or `--yes`/no
   terminal - absent for notes, dismissed repeats, and undecided asks) and
   `decision` (the human's text for a kept ask). `triage` is decided afresh
   every round, from that round's own routing; `decision` is the human's
-  judgment about the finding itself, so it persists on a later occurrence
-  of the same finding - a recurrence keeps it from its earlier occurrence
-  when the finding's file is unchanged. `routed_as` is written only when
+  judgment about the finding itself, so it persists on every later
+  occurrence of the same finding regardless of what else changes about
+  it - including its `file`, when the reviewer reports the same finding
+  (by `prior`) as having moved. `routed_as` is written only when
   jig routed a finding as `ask` although the reviewer's own `action` said
   otherwise (the recurrence bound, or a missing build target); the
   persisted `action` always stays the reviewer's label. A round's
@@ -178,18 +184,29 @@ Design questions the code raised, and their resolution:
   package-level `stdinIsTerminal` var overridden and a scripted stdin
   standing in for one; a smaller, genuinely subprocess-driven test in
   `e2e/` covers the actual non-terminal path (`DefaultTriage`).
-- Result validation (design 4.4): a `fix` or kept `ask` finding must name a
+- Result validation: a `fix` or kept `ask` finding must name a
   manifest oracle when the manifest declares more than one; with exactly
   one, an omitted oracle is that oracle; any oracle a finding does name
   must be a real manifest oracle. The parsed result itself decodes
-  strictly: an unknown field (top level or inside a finding), a
-  case-variant or literal duplicate of a known key, or a JSON `null` for
-  the whole document or for a non-object top level all fail the round; the
-  `findings` and `reviewed_paths` keys must be present, though either may
-  be an empty list, and a present-but-`null` value for either is still
-  accepted as empty (Go's own zero-value slice marshals that way, and
-  every test fixture that builds a result as a struct literal relies on
-  it).
+  strictly: a bare JSON `null`, any other non-object top level, or more
+  than one JSON value all fail the round outright. Every key, at the top
+  level and inside each finding, must be an exact, case-sensitive match of
+  a recognized field name: an unknown key fails the round the same as a
+  key that repeats an earlier key of the same object, exactly or only by
+  case (`"FINDINGS"` alongside `"findings"`), and so does a lone case
+  variant with no correctly-cased duplicate to catch (`"Oracle"` with no
+  plain `"oracle"` beside it) - encoding/json's own struct decode matches a
+  key to a field case-insensitively when no exact match exists, so without
+  this check that lone variant would decode silently instead of being
+  rejected. The `findings` and `reviewed_paths` keys must be present and
+  must not be JSON `null`; a genuinely absent key and an explicit `null`
+  are both rejected the same way, since only an actual empty list (`[]`)
+  means "reviewed nothing here." Every test fixture that builds a
+  `ReviewResult` as a struct literal has to fill a nil `Findings` or
+  `ReviewedPaths` with `[]` itself before marshaling it, for the same
+  reason `MarshalReviewRequest` fills its own nil slices: a struct
+  literal's zero-value slice marshals as `null`, which this validation now
+  rejects.
 - Coverage lists (`must_review`, and the scope diff feeding it) come from
   `git diff --name-only -z --no-renames --diff-filter=AMT|D`, so a rename
   counts as its new path under "changed" and its old path under "deleted".
@@ -266,11 +283,17 @@ Design questions the code raised, and their resolution:
   error, never kept with its raw, unvalidated value.
 - `gitx.FileExistsAtRev` resolves the rev first, so a bad rev is reported
   as an error rather than folded into "the path doesn't exist"; only then
-  does it check the path, returning true for a blob, false for a path
-  genuinely absent at that rev (read from git's own "does not exist in"
-  message), and, for any other `cat-file` failure, an error rather than
-  another false - a directory (a tree, not a blob) is `false`, matching
-  the doc's "exists as a file", not merely "exists".
+  does it check the path, structurally rather than by matching git's
+  message text: `git ls-tree -z --full-tree` for the exact path, which
+  exits 0 whether or not the path exists there and never consults the
+  working tree. Empty output is absent (`false, nil`); a `blob` entry is
+  `true`; a `tree` entry (a directory) or a `commit` entry (a submodule)
+  is `false`, matching the doc's "exists as a file", not merely "exists";
+  any other failure of the `ls-tree` call itself is an error. Because the
+  check never looks at the working tree, an ignored or untracked file that
+  happens to sit on disk at that path (for example an oracle regenerating
+  a build artifact in the gate lease) cannot make an absent path look
+  present.
 - Compatibility with the old scripted (`--scenario`) path: `jig gate` had
   no `--backend` flag before this rework, so its scripted source still
   runs exactly as before iff `--scenario` is set and `--backend` is not -
@@ -281,32 +304,30 @@ Design questions the code raised, and their resolution:
 Deviations recorded during the build, beyond what the design already
 covers:
 
-- `Gate`'s `RoundInput.BriefPath` was, for one stage of the build, always
-  the ticket's own `brief.md`; a `--branch --doc` round needs the `--doc`
-  file itself, absolute, matching PR #8's own recorded reasoning (pointing
-  at this round's own `gate/round-N/spec-input.md` would leave a partial
-  round dir if the reviewer then failed, since that file is written only
-  once the round succeeds). This was corrected before it shipped, the same
-  way `routed_as` and the `findings.md` verdict wording were below.
-- `findings.md` never prints "clean" for a round that is not clean (a
-  round with nothing new to report but something still open or asked from
-  an earlier round used to hit the same, always-wrong `len(findings) == 0`
-  shortcut): it prints the round's own recorded verdict, and "nothing new
-  this round" when that verdict isn't clean but nothing was reported. The
-  exact wording here is this build's own choice; only that "clean" never
-  appears for a non-clean round is required.
+- `Gate`'s `RoundInput.BriefPath` is the ticket's own `brief.md`, except in
+  `--branch --doc` mode, where it is the `--doc` file itself, absolute,
+  matching PR #8's own recorded reasoning: pointing at this round's own
+  `gate/round-N/spec-input.md` instead would leave a partial round dir on
+  disk if the reviewer then failed, since that file is written only once
+  the round succeeds.
+- `findings.md` never prints "clean" for a round that is not clean: it
+  prints the round's own recorded verdict, and "nothing new this round"
+  when that verdict isn't clean but nothing was reported this round -
+  never derived from `len(findings) == 0` alone, since a round can have
+  nothing new to report while something still open or asked from an
+  earlier round keeps it from being clean. The exact wording here is this
+  build's own choice; only that "clean" never appears for a non-clean
+  round is required.
 - The interactive triage prompt's exact wording is this build's own
   design: the behavior is specified (batch accept or dismiss by id, an
-  ask's keep-or-dismiss with an optional decision, the no-workspace
-  prompt, EOF semantics) but not literal strings. Each ask's answer syntax
-  is explicit rather than inferred from free text: `n`/`no`/`d`/`dismiss`
-  dismisses, and only `k`/`keep`/Enter keeps - an answer that is none of
-  these reprompts rather than being read as an implicit keep. A kept ask
-  is then asked for its decision text on a second, separate prompt (Enter
-  skips it). An earlier draft treated any answer that wasn't exactly
-  `d`/`dismiss` as an implicit keep, with the typed text becoming the
-  decision - so "no" kept the ask, with "no" itself recorded as the
-  human's decision. This was corrected: keep must now be said explicitly.
+  ask's keep-or-dismiss with an optional decision, the workspace and
+  oracle prompts, EOF semantics) but not literal strings. Each ask's
+  answer syntax is explicit rather than inferred from free text:
+  `n`/`no`/`d`/`dismiss` dismisses, and only `k`/`keep`/Enter keeps - any
+  other answer reprompts rather than being read as an implicit keep, so
+  free text typed for something else can never accidentally become the
+  kept decision. A kept ask is then asked for its decision text on a
+  second, separate prompt (Enter skips it).
 - Every place a finding reaches a human shows it with file:line, detail
   and risk rationale, sorted by risk high first, not the title alone: the
   ask prompt, the notes table, the fix batch table, and the gate report's
@@ -321,24 +342,23 @@ covers:
   own result leaves undecided (an ask id absent from its `Asks` map), not
   re-derived from the ask's `Workspace` field alone, so the message can
   never drift out of step with what `DefaultTriage` itself decides.
-- `TestGateReviewerRoundsThroughMain`'s round 2 assertions previously only
-  checked that the kept ask `r1-f3` was absent from round 2's own report
-  and findings table - true whether or not it actually cleared, since that
-  table lists only findings reported that round. The test now reads round
-  2's own `findings.yaml` `cleared` list directly and requires `r1-f3` in
-  it; confirmed to fail against a mutant that lets a dismissed repeat
-  block clearing, which the old assertion let through.
-- The `jig gate`/`jig solve` compatibility rule (above) had no test
-  pinning either half; unit tests on `gateSourceFor` and
-  `gateSourceForSolve` now assert the returned `GateSource`'s concrete
-  type (scripted vs. reviewer) for each flag combination, via `%T` rather
-  than reaching into verifydeliver's unexported types.
+- `TestGateReviewerRoundsThroughMain`'s round 2 assertions read round 2's
+  own `findings.yaml` `cleared` list directly and require the kept ask
+  `r1-f3` in it, rather than relying on its absence from round 2's report
+  and findings table alone: that table lists only findings reported that
+  round, so it cannot on its own distinguish a finding that cleared from
+  one that simply went unmentioned. A mutant that lets a dismissed repeat
+  block clearing fails this assertion.
+- Unit tests on `gateSourceFor` and `gateSourceForSolve` assert the
+  returned `GateSource`'s concrete type (scripted vs. reviewer) for each
+  flag combination, via `%T` rather than reaching into verifydeliver's
+  unexported types, pinning the `jig gate`/`jig solve` compatibility rule
+  above.
 - The scope base anchor for a full-scope round prefers `merge-base(origin/
   <target>, HEAD)` over the ticket's recorded start sha, falling back to
   the start sha only when the merge-base lookup itself fails (no such
-  ref). PR #8 tried the start sha first; this design's own wording puts
-  merge-base first, so the carried order was inverted rather than reused
-  as is.
+  ref); this design's own wording puts merge-base first, ahead of PR #8's
+  own order (the start sha first).
 - The decisive e2e test (three real gate rounds through the fake backend,
   in-process through `cmd/jig`'s `Main`) discards a failed round's leftover
   store changes with an explicit `git checkout -- .` / `git clean -fd` on
@@ -351,12 +371,12 @@ covers:
   to the store's working copy before validating a result and leaves those
   uncommitted the same way, but they are untracked cruft under the store's
   `work/` tree and do not by themselves block a rebase pull; a store whose
-  only leftover was untracked files would pull cleanly. The underlying gap -
-  `Store.Sync` not committing its own leftovers before it pulls - is a
-  separate, not-yet-landed fix, not this one's, and applies equally to any
-  oracle failure after `gate-open` on `main` today, not only to a reviewer
-  round; the test's workaround matches what an operator would do by hand
-  and becomes a no-op, not wrong, once that fix reaches this branch.
+  only leftover was untracked files would pull cleanly. `Store.Sync` does
+  not commit its own uncommitted leftovers before it pulls, on any branch
+  that lacks that fix; the gap applies equally to any oracle failure after
+  `gate-open`, not only to a reviewer round, and is outside this package's
+  own scope to fix. The test's workaround matches exactly what an operator
+  would do by hand in the same situation.
 
 ## CLI
 

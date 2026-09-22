@@ -12,8 +12,8 @@ import (
 )
 
 // sliceRecording returns an existingSlices stub with one slice, "fix-x",
-// whose Findings names id (design 6.1's structural link): the shape
-// findingHasGreenFixSlice looks for.
+// whose Findings names id (the structural link, not a parsed slice id):
+// the shape findingHasGreenFixSlice looks for.
 func sliceRecording(id string) []store.Slice {
 	return []store.Slice{{ID: "fix-x", Findings: []string{id}}}
 }
@@ -59,8 +59,7 @@ func TestWorkspaceForNestedPathsAndNoWorkspace(t *testing.T) {
 	}
 
 	// No root workspace declared at all: a file outside every declared
-	// workspace has no build target (design 5.5), so it derives no
-	// workspace.
+	// workspace has no build target, so it derives no workspace.
 	narrow := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "billing", Path: "billing"}}}
 	if got := workspaceFor("other/x.go", narrow); got != "" {
 		t.Errorf("workspaceFor with no matching workspace = %q, want \"\"", got)
@@ -69,8 +68,8 @@ func TestWorkspaceForNestedPathsAndNoWorkspace(t *testing.T) {
 
 // --- statusForAction ---------------------------------------------------------
 
-// TestStatusForActionRejectsUnknownAction: every action design 4.2
-// defines is handled explicitly, and an action outside that set (only
+// TestStatusForActionRejectsUnknownAction: every action jig recognizes is
+// handled explicitly, and an action outside that set (only
 // reachable if a caller skips ParseReviewResult's own validation) is a
 // programming error returned up the call chain, never silently folded into
 // StatusNoted.
@@ -132,7 +131,7 @@ func TestApplyRoundRule4NewFindingsRouteByAction(t *testing.T) {
 			t.Errorf("finding for %s recurrences = %d, want 0", f.File, f.Recurrences)
 		}
 	}
-	// Ids are distinct and follow the r<round>-f<k> shape (design 5.1).
+	// Ids are distinct and follow the r<round>-f<k> shape.
 	seen := map[string]bool{}
 	for _, f := range reported {
 		if seen[f.ID] {
@@ -402,10 +401,11 @@ func TestApplyRoundRecurrenceBoundFirstRoutesLikeNew(t *testing.T) {
 
 // TestApplyRoundRecurrenceNotCountedWithoutAFixSlice: a re-report with
 // prior naming an id that no existing slice has ever recorded is not a
-// genuine recurrence (design 5.3's premise needs a fix slice to have gone
-// green without resolving it) - it updates the finding without bumping
-// Recurrences. Covers both an undecided ask re-reported and an --early
-// round outrunning the frontier: neither has built a slice for the id yet.
+// genuine recurrence (the recurrence bound's premise needs a fix slice to
+// have gone green without resolving it) - it updates the finding without
+// bumping Recurrences. Covers both an undecided ask re-reported and an
+// --early round outrunning the frontier: neither has built a slice for the
+// id yet.
 func TestApplyRoundRecurrenceNotCountedWithoutAFixSlice(t *testing.T) {
 	man := oneOracleManifest()
 	known := map[string]Finding{
@@ -428,8 +428,9 @@ func TestApplyRoundRecurrenceNotCountedWithoutAFixSlice(t *testing.T) {
 
 // TestApplyRoundRecurrenceNotCountedWhenRecordingSliceIsNotGreen covers the
 // other half: a slice recording the id exists, but is still queued or
-// building (as under --early), which is not enough on its own - design
-// 5.3's premise is a slice that already went green without resolving it.
+// building (as under --early), which is not enough on its own - the
+// recurrence bound's premise is a slice that already went green without
+// resolving it.
 func TestApplyRoundRecurrenceNotCountedWhenRecordingSliceIsNotGreen(t *testing.T) {
 	man := oneOracleManifest()
 	known := map[string]Finding{
@@ -456,7 +457,7 @@ func TestApplyRoundRecurrenceBoundSecondForcesAsk(t *testing.T) {
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Recurrences: 1},
 	}
 	// The reviewer still labels it fix; the bound overrides it to ask
-	// anyway ("whatever the reviewer's label", design 5.3).
+	// anyway, whatever the reviewer's label.
 	result := ReviewResult{
 		Findings: []ResultFinding{
 			{File: "a.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test", Prior: "r1-f1"},
@@ -535,8 +536,7 @@ func TestClearingAfterTriageStaysOpenWhenNotReviewed(t *testing.T) {
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
 	}
 	// a.go is neither reviewed nor gone at head this round, and not
-	// reported again: it cannot clear (design 5.2 rule 3, "otherwise it
-	// stays open").
+	// reported again: it cannot clear (rule 3, "otherwise it stays open").
 	cleared, err := ClearingAfterTriage(known, nil, []string{"other.go"}, alwaysExists)
 	if err != nil {
 		t.Fatalf("ClearingAfterTriage: %v", err)

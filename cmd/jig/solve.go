@@ -34,7 +34,7 @@ func gateSourceForSolve(scenario string, backend session.Backend) verifydeliver.
 // and --answer, because solve's internal run steps need a session backend
 // exactly like `jig run` does; they are the closest working superset
 // (needed for the fake-backend e2e chain) rather than a redesign. --yes
-// also drives the finding triage (design 6.4): it skips the interactive
+// also drives the finding triage: it skips the interactive
 // publish confirm and keeps every fix and workspace ask without prompting.
 func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest0, err := requirePositional(args, "ticket")
@@ -99,11 +99,11 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		// An ask left undecided (no declared workspace, --yes or no
-		// terminal) needs a human, exactly like a builder's parked question -
-		// stop and report it rather than re-dispatching the reviewer on a
-		// decision nothing here can make. printGateReport already returns 2
-		// for this case.
+		// An ask left undecided (missing a workspace, an oracle, or both,
+		// with --yes or no terminal) needs a human, exactly like a builder's
+		// parked question - stop and report it rather than re-dispatching
+		// the reviewer on a decision nothing here can make. printGateReport
+		// already returns 2 for this case.
 		if len(gr.NeedsHuman) > 0 {
 			return printGateReport(stdout, st, ticket, gr)
 		}

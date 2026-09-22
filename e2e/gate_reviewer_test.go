@@ -9,7 +9,7 @@ import (
 )
 
 // TestGateReviewerNonTerminalTriage covers the non-terminal path of the
-// gate reviewer's triage (design 6.4): a real jig subprocess (runJig
+// gate reviewer's triage: a real jig subprocess (runJig
 // never sets cmd.Stdin, so the child's stdin is not a terminal) runs a
 // reviewer round through the fake backend and gets DefaultTriage - every
 // fix kept, every workspace ask kept (no decision text), notes only

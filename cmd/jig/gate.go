@@ -116,7 +116,7 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 		axi.Table("target_sha", []string{"repo", "sha"}, shaRows),
 	}
 	if report.Scope != "" {
-		// design 6.4: findings are always shown sorted by risk, high first,
+		// Findings are always shown sorted by risk, high first,
 		// each with its rationale - report.Findings and .NeedsHuman already
 		// come sorted that way (sortByRiskThenID, applied in Gate); this
 		// table adds the file:line and risk_rationale columns that carry it.
