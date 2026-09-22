@@ -61,6 +61,35 @@ func TestTriageForNonTerminalNeverPrompts(t *testing.T) {
 	}
 }
 
+// TestTriageForYesNothingToTriagePrintsNoNoteLine pins F16/N-6: a round
+// that routed no fix, ask or note at all (e.g. a dispatched reviewer round
+// with nothing new to report) must not print a triage note line - there
+// was nothing to triage.
+func TestTriageForYesNothingToTriagePrintsNoNoteLine(t *testing.T) {
+	var out bytes.Buffer
+	f := triageFor(true, strings.NewReader(""), &out)
+	f(verifydeliver.TriageInput{})
+	if strings.Contains(out.String(), "triage:") {
+		t.Fatalf("stdout has a triage note line for nothing to triage:\n%s", out.String())
+	}
+}
+
+// TestTriageForYesUndecidedAskDoesNotClaimKept pins F16/N-6: the note line
+// must never say every ask was kept when a no-workspace ask (Q1) was left
+// undecided; it says how many are left for a human instead.
+func TestTriageForYesUndecidedAskDoesNotClaimKept(t *testing.T) {
+	var out bytes.Buffer
+	f := triageFor(true, strings.NewReader(""), &out)
+	f(sampleTriageInput()) // r1-f4 has no workspace
+	line := out.String()
+	if strings.Contains(line, "kept every fix and workspace ask (--yes)") {
+		t.Fatalf("stdout falsely claims every ask was kept:\n%s", line)
+	}
+	if !strings.Contains(line, "1 ask(s) with no workspace left for a human") {
+		t.Fatalf("stdout missing the undecided-ask count:\n%s", line)
+	}
+}
+
 func TestTriageForTerminalScriptedReachesInteractivePath(t *testing.T) {
 	prev := stdinIsTerminal
 	stdinIsTerminal = func(r io.Reader) bool { return true }
@@ -129,7 +158,7 @@ func TestInteractiveTriageFixBatchEOFKeepsAllAsAuto(t *testing.T) {
 func TestInteractiveTriageAskKeepWithDecision(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
-	res := interactiveTriage(in, strings.NewReader("go ahead\n"), &out)
+	res := interactiveTriage(in, strings.NewReader("k\ngo ahead\n"), &out)
 	dec, ok := res.Asks["r1-f3"]
 	if !ok || !dec.Keep || dec.Decision != "go ahead" || !dec.Human {
 		t.Fatalf("Asks[r1-f3] = %+v, ok=%v, want kept with decision \"go ahead\", human", dec, ok)
@@ -146,6 +175,34 @@ func TestInteractiveTriageAskKeepWithNoDecisionText(t *testing.T) {
 	}
 }
 
+func TestInteractiveTriageAskEnterAloneKeeps(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
+	res := interactiveTriage(in, strings.NewReader("\n\n"), &out)
+	dec := res.Asks["r1-f3"]
+	if !dec.Keep {
+		t.Fatalf("Asks[r1-f3] = %+v, want kept (bare Enter is an explicit keep)", dec)
+	}
+}
+
+// TestInteractiveTriageAskShowsFileLineDetailAndRationale pins F10b (design
+// 6.4: "each with its rationale"): the ask prompt must show enough to
+// decide on, not the title alone.
+func TestInteractiveTriageAskShowsFileLineDetailAndRationale(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{
+		ID: "r1-f3", Workspace: "alpha", File: "beta/beta.go", Line: 4,
+		Title: "ASK-TITLE", Detail: "ASK-DETAIL", Risk: "high", RiskRationale: "ASK-RATIONALE",
+	}}}
+	interactiveTriage(in, strings.NewReader("d\n"), &out)
+	text := out.String()
+	for _, want := range []string{"beta/beta.go:4", "ASK-DETAIL", "ASK-RATIONALE"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("ask prompt missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestInteractiveTriageAskDismiss(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
@@ -156,13 +213,45 @@ func TestInteractiveTriageAskDismiss(t *testing.T) {
 	}
 }
 
+// TestInteractiveTriageAskNoDismisses pins F17/N-10: "n" and "no" must
+// dismiss, not silently keep with "n"/"no" as the decision text.
+func TestInteractiveTriageAskNoDismisses(t *testing.T) {
+	for _, word := range []string{"n", "no", "No", "N"} {
+		t.Run(word, func(t *testing.T) {
+			var out bytes.Buffer
+			in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
+			res := interactiveTriage(in, strings.NewReader(word+"\n"), &out)
+			dec, ok := res.Asks["r1-f3"]
+			if !ok || dec.Keep {
+				t.Fatalf("Asks[r1-f3] answered %q = %+v, ok=%v, want dismissed", word, dec, ok)
+			}
+		})
+	}
+}
+
+// TestInteractiveTriageAskUnrecognizedAnswerReprompts pins F17: free text
+// that is not one of the keep/dismiss tokens is never read as an implicit
+// keep-with-decision; it reprompts until a real answer arrives.
+func TestInteractiveTriageAskUnrecognizedAnswerReprompts(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
+	res := interactiveTriage(in, strings.NewReader("go ahead\nd\n"), &out)
+	dec, ok := res.Asks["r1-f3"]
+	if !ok || dec.Keep {
+		t.Fatalf("Asks[r1-f3] = %+v, ok=%v, want dismissed after the reprompt", dec, ok)
+	}
+	if !strings.Contains(out.String(), "please answer keep") {
+		t.Fatalf("stdout missing the reprompt message:\n%s", out.String())
+	}
+}
+
 func TestInteractiveTriageAskWorkspacePromptForQ1(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks:     []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}}, // no Workspace
 		Manifest: manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "alpha", Path: "alpha"}, {ID: "beta", Path: "beta"}}},
 	}
-	res := interactiveTriage(in, strings.NewReader("keep it\nbeta\n"), &out)
+	res := interactiveTriage(in, strings.NewReader("k\nkeep it\nbeta\n"), &out)
 	dec, ok := res.Asks["r1-f4"]
 	if !ok || !dec.Keep || dec.Workspace != "beta" || dec.Decision != "keep it" {
 		t.Fatalf("Asks[r1-f4] = %+v, ok=%v, want kept in workspace beta with decision \"keep it\"", dec, ok)
@@ -178,7 +267,7 @@ func TestInteractiveTriageAskWorkspacePromptRejectsUnknownID(t *testing.T) {
 		Asks:     []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}},
 		Manifest: manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "alpha", Path: "alpha"}}},
 	}
-	res := interactiveTriage(in, strings.NewReader("k\nbogus\nalpha\n"), &out)
+	res := interactiveTriage(in, strings.NewReader("k\n\nbogus\nalpha\n"), &out)
 	dec := res.Asks["r1-f4"]
 	if !dec.Keep || dec.Workspace != "alpha" {
 		t.Fatalf("Asks[r1-f4] = %+v, want kept in workspace alpha after the reprompt", dec)
@@ -219,10 +308,13 @@ func TestInteractiveTriageAskEOFKeepsRemainingWorkspaceAsksAsAuto(t *testing.T) 
 
 func TestInteractiveTriageListsNotes(t *testing.T) {
 	var out bytes.Buffer
-	in := verifydeliver.TriageInput{Notes: []verifydeliver.Finding{{ID: "r1-f5", Risk: "low", Title: "just fyi"}}}
+	in := verifydeliver.TriageInput{Notes: []verifydeliver.Finding{{ID: "r1-f5", File: "alpha/percent.go", Line: 3, Risk: "low", Title: "just fyi", RiskRationale: "NOTE-RATIONALE"}}}
 	interactiveTriage(in, strings.NewReader(""), &out)
-	if !strings.Contains(out.String(), "just fyi") {
-		t.Fatalf("stdout missing the note:\n%s", out.String())
+	text := out.String()
+	for _, want := range []string{"just fyi", "alpha/percent.go:3", "NOTE-RATIONALE"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("notes table missing %q:\n%s", want, text)
+		}
 	}
 }
 

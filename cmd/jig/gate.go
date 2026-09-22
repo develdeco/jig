@@ -115,18 +115,22 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 		axi.Table("target_sha", []string{"repo", "sha"}, shaRows),
 	}
 	if report.Scope != "" {
+		// design 6.4: findings are always shown sorted by risk, high first,
+		// each with its rationale - report.Findings and .NeedsHuman already
+		// come sorted that way (sortByRiskThenID, applied in Gate); this
+		// table adds the file:line and risk_rationale columns that carry it.
 		var findingRows [][]string
 		for _, f := range report.Findings {
-			findingRows = append(findingRows, []string{f.ID, f.Status, f.RoutedAs, f.Title})
+			findingRows = append(findingRows, []string{f.ID, f.Status, f.RoutedAs, fileLine(f), f.Title, f.Risk, f.RiskRationale})
 		}
-		blocks = append(blocks, axi.Table("findings", []string{"id", "status", "routed_as", "title"}, findingRows))
+		blocks = append(blocks, axi.Table("findings", []string{"id", "status", "routed_as", "file:line", "title", "risk", "risk_rationale"}, findingRows))
 		blocks = append(blocks, axi.Table("fix_slices", []string{"id"}, idRows(report.FixSlices)))
 		if len(report.NeedsHuman) > 0 {
 			var needsRows [][]string
 			for _, f := range report.NeedsHuman {
-				needsRows = append(needsRows, []string{f.ID, f.Risk, f.Title})
+				needsRows = append(needsRows, []string{f.ID, f.Risk, fileLine(f), f.Title, f.RiskRationale})
 			}
-			blocks = append(blocks, axi.Table("needs_a_human", []string{"id", "risk", "title"}, needsRows))
+			blocks = append(blocks, axi.Table("needs_a_human", []string{"id", "risk", "file:line", "title", "risk_rationale"}, needsRows))
 		}
 	}
 	blocks = append(blocks, axi.Help(hintOrFallback(st, ticket)))
