@@ -99,6 +99,14 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
+		// Q1: an ask left undecided (no declared workspace, --yes or no
+		// terminal) needs a human, exactly like a builder's parked question -
+		// stop and report it rather than re-dispatching the reviewer on a
+		// decision nothing here can make. printGateReport already returns 2
+		// for this case.
+		if len(gr.NeedsHuman) > 0 {
+			return printGateReport(stdout, st, ticket, gr)
+		}
 		lastVerdict = gr.Verdict
 		if gr.Verdict == "clean" {
 			break

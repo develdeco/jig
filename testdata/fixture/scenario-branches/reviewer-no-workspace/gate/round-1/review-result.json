@@ -1,0 +1,26 @@
+{
+  "findings": [
+    {
+      "file": "go.mod",
+      "line": 1,
+      "title": "go.mod's Go directive was bumped without recording why",
+      "detail": "The go directive changed; whether that minimum version is intentional is a call only a human can make, and go.mod lies in no declared workspace.",
+      "action": "ask",
+      "risk": "medium",
+      "risk_rationale": "a wrong minimum Go version breaks every future build",
+      "oracle": "test"
+    }
+  ],
+  "reviewed_paths": [
+    "alpha/alpha.go",
+    "alpha/alpha_test.go",
+    "alpha/percent.go",
+    "alpha/percent_test.go",
+    "beta/beta.go",
+    "beta/beta_test.go",
+    "beta/version.go",
+    "go.mod",
+    ".claude/jig.yaml"
+  ],
+  "summary": "round 1: one ask on a file in no declared workspace (Q1)"
+}
