@@ -505,7 +505,9 @@ func TestFileExistsAtRev(t *testing.T) {
 		{head, "gone.txt", false},
 		{head, "never.txt", false},
 		{base, "gone.txt", true},
-		{head, "sub", false}, // a directory is a tree, not a blob
+		{head, "sub", false},           // a directory is a tree, not a blob
+		{head, "sub/f.txt", true},      // a nested path
+		{head, "sub/never.txt", false}, // a missing path under an existing directory
 	}
 	for _, c := range cases {
 		got, err := FileExistsAtRev(dir, c.rev, c.path)
@@ -522,25 +524,43 @@ func TestFileExistsAtRev(t *testing.T) {
 	}
 }
 
-// TestMissingPathError checks the message match FileExistsAtRev relies on
-// to tell a missing path (returned as false, nil) apart from any other
-// "cat-file -t" failure (returned as an error): both exit the same way once
-// rev itself is already confirmed to resolve, so the distinction has to
-// come from git's own message text, not the exit code.
-func TestMissingPathError(t *testing.T) {
-	cases := []struct {
-		stderr string
-		want   bool
-	}{
-		{"fatal: path 'missing.txt' does not exist in 'HEAD'", true},
-		{"fatal: path 'a/b.go' does not exist in '1234abcd'", true},
-		{"fatal: bad object HEAD", false},
-		{"fatal: not a tree object", false},
-		{"", false},
-	}
-	for _, c := range cases {
-		if got := missingPathError(c.stderr); got != c.want {
-			t.Errorf("missingPathError(%q) = %v, want %v", c.stderr, got, c.want)
+// TestFileExistsAtRevIgnoresTheWorkingTree checks the wedge scenario a
+// message-text match on git's cat-file output used to fall into: a path
+// that git ignores, so it is never tracked at any rev, but that happens to
+// sit on disk right now (for example an oracle regenerated it in a lease).
+// The working tree must never make an absent path look present, or the
+// reverse.
+func TestFileExistsAtRevIgnoresTheWorkingTree(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := Run(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
 		}
+		return out
+	}
+	run("init", "-b", "main")
+	run("config", "user.name", "jig-fixture")
+	run("config", "user.email", "fixture@example.invalid")
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("gen.txt\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	run("add", "-A")
+	run("commit", "-m", "c1")
+	head, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse head: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gen.txt"), []byte("regenerated"), 0o644); err != nil {
+		t.Fatalf("write gen.txt: %v", err)
+	}
+
+	got, err := FileExistsAtRev(dir, head, "gen.txt")
+	if err != nil {
+		t.Fatalf("FileExistsAtRev(gen.txt), ignored on disk: %v", err)
+	}
+	if got {
+		t.Error("FileExistsAtRev(gen.txt) = true, want false: it is untracked at head regardless of the working tree")
 	}
 }
