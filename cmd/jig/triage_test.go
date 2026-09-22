@@ -12,6 +12,15 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
+// oneOracleManifest is the manifest most interactiveTriage ask tests use
+// unless they specifically exercise the oracle-prompt rule: a single oracle
+// resolves automatically (there is no choice to make), so these tests can
+// focus on the keep/dismiss/decision/workspace mechanics without also
+// having to answer an oracle prompt.
+func oneOracleManifest() manifest.Manifest {
+	return manifest.Manifest{Oracles: map[string]string{"test": "true"}}
+}
+
 func sampleTriageInput() verifydeliver.TriageInput {
 	return verifydeliver.TriageInput{
 		Fixes: []verifydeliver.Finding{
@@ -78,7 +87,7 @@ func TestTriageForYesNothingToTriagePrintsNoNoteLine(t *testing.T) {
 }
 
 // TestTriageForYesNotesOnlyPrintsNoNoteLine pins the rule that a note is
-// never triaged (design 6.3): a round that routed only notes, no fix or
+// never triaged: a round that routed only notes, no fix or
 // ask, must not print a triage note line either, even though its input is
 // non-empty.
 func TestTriageForYesNotesOnlyPrintsNoNoteLine(t *testing.T) {
@@ -119,7 +128,7 @@ func TestTriageForTerminalScriptedReachesInteractivePath(t *testing.T) {
 	}
 }
 
-// --- interactiveTriage: fix batch prompt (D-2) ------------------------------
+// --- interactiveTriage: fix batch prompt ------------------------------------
 
 func TestInteractiveTriageFixBatchEnterAcceptsAll(t *testing.T) {
 	var out bytes.Buffer
@@ -173,7 +182,7 @@ func TestInteractiveTriageFixBatchEOFKeepsAllAsAuto(t *testing.T) {
 
 func TestInteractiveTriageAskKeepWithDecision(t *testing.T) {
 	var out bytes.Buffer
-	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
+	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
 	res := interactiveTriage(in, strings.NewReader("k\ngo ahead\n"), &out)
 	dec, ok := res.Asks["r1-f3"]
 	if !ok || !dec.Keep || dec.Decision != "go ahead" || !dec.Human {
@@ -183,7 +192,7 @@ func TestInteractiveTriageAskKeepWithDecision(t *testing.T) {
 
 func TestInteractiveTriageAskKeepWithNoDecisionText(t *testing.T) {
 	var out bytes.Buffer
-	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
+	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
 	res := interactiveTriage(in, strings.NewReader("k\n"), &out)
 	dec := res.Asks["r1-f3"]
 	if !dec.Keep || dec.Decision != "" {
@@ -193,7 +202,7 @@ func TestInteractiveTriageAskKeepWithNoDecisionText(t *testing.T) {
 
 func TestInteractiveTriageAskEnterAloneKeeps(t *testing.T) {
 	var out bytes.Buffer
-	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
+	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
 	res := interactiveTriage(in, strings.NewReader("\n\n"), &out)
 	dec := res.Asks["r1-f3"]
 	if !dec.Keep {
@@ -264,8 +273,11 @@ func TestInteractiveTriageAskUnrecognizedAnswerReprompts(t *testing.T) {
 func TestInteractiveTriageAskWorkspacePromptForNoWorkspaceAsk(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
-		Asks:     []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}}, // no Workspace
-		Manifest: manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "alpha", Path: "alpha"}, {ID: "beta", Path: "beta"}}},
+		Asks: []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}}, // no Workspace
+		Manifest: manifest.Manifest{
+			Oracles:    map[string]string{"test": "true"},
+			Workspaces: []manifest.Workspace{{ID: "alpha", Path: "alpha"}, {ID: "beta", Path: "beta"}},
+		},
 	}
 	res := interactiveTriage(in, strings.NewReader("k\nkeep it\nbeta\n"), &out)
 	dec, ok := res.Asks["r1-f4"]
@@ -280,8 +292,11 @@ func TestInteractiveTriageAskWorkspacePromptForNoWorkspaceAsk(t *testing.T) {
 func TestInteractiveTriageAskWorkspacePromptRejectsUnknownID(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
-		Asks:     []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}},
-		Manifest: manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "alpha", Path: "alpha"}}},
+		Asks: []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}},
+		Manifest: manifest.Manifest{
+			Oracles:    map[string]string{"test": "true"},
+			Workspaces: []manifest.Workspace{{ID: "alpha", Path: "alpha"}},
+		},
 	}
 	res := interactiveTriage(in, strings.NewReader("k\n\nbogus\nalpha\n"), &out)
 	dec := res.Asks["r1-f4"]
@@ -290,6 +305,82 @@ func TestInteractiveTriageAskWorkspacePromptRejectsUnknownID(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `unknown workspace "bogus"`) {
 		t.Fatalf("stdout missing the unknown-workspace message:\n%s", out.String())
+	}
+}
+
+// TestInteractiveTriageAskOraclePromptForStaleOracle covers the oracle half
+// of the build-target rule at a terminal: a kept ask whose recorded oracle
+// is no longer a manifest oracle (the manifest changed between rounds) is
+// prompted for one from the manifest's current oracle names, the same way a
+// no-workspace ask is prompted for a workspace, and the chosen oracle
+// reaches the triage result.
+func TestInteractiveTriageAskOraclePromptForStaleOracle(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{
+		Asks: []verifydeliver.Finding{{ID: "r1-f4", Workspace: "alpha", Oracle: "old", Title: "t"}},
+		Manifest: manifest.Manifest{
+			Oracles: map[string]string{"test": "true", "lint": "true"}, // "old" is neither
+		},
+	}
+	res := interactiveTriage(in, strings.NewReader("k\nkeep it\nlint\n"), &out)
+	dec, ok := res.Asks["r1-f4"]
+	if !ok || !dec.Keep || dec.Oracle != "lint" || dec.Decision != "keep it" {
+		t.Fatalf("Asks[r1-f4] = %+v, ok=%v, want kept with oracle lint and decision \"keep it\"", dec, ok)
+	}
+	if !strings.Contains(out.String(), "oracle is missing or no longer in the manifest") {
+		t.Fatalf("stdout missing the oracle prompt:\n%s", out.String())
+	}
+}
+
+func TestInteractiveTriageAskOraclePromptRejectsUnknownName(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{
+		Asks: []verifydeliver.Finding{{ID: "r1-f4", Workspace: "alpha", Title: "t"}},
+		Manifest: manifest.Manifest{
+			Oracles: map[string]string{"test": "true", "lint": "true"},
+		},
+	}
+	res := interactiveTriage(in, strings.NewReader("k\n\nbogus\nlint\n"), &out)
+	dec := res.Asks["r1-f4"]
+	if !dec.Keep || dec.Oracle != "lint" {
+		t.Fatalf("Asks[r1-f4] = %+v, want kept with oracle lint after the reprompt", dec)
+	}
+	if !strings.Contains(out.String(), `unknown oracle "bogus"`) {
+		t.Fatalf("stdout missing the unknown-oracle message:\n%s", out.String())
+	}
+}
+
+func TestInteractiveTriageAskEOFOnOraclePromptLeavesItUndecided(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{
+		Asks: []verifydeliver.Finding{{ID: "r1-f4", Workspace: "alpha", Title: "t"}},
+		Manifest: manifest.Manifest{
+			Oracles: map[string]string{"test": "true", "lint": "true"},
+		},
+	}
+	res := interactiveTriage(in, strings.NewReader("k\n"), &out) // EOF right at the oracle prompt
+	if _, ok := res.Asks["r1-f4"]; ok {
+		t.Errorf("Asks[r1-f4] decided, want undecided (EOF cannot supply an oracle judgment)")
+	}
+}
+
+// TestInteractiveTriageAskBothPromptsForAFindingMissingWorkspaceAndOracle
+// covers an ask missing both parts of its build target at once: the human
+// is prompted for the workspace first, then the oracle, and a kept answer
+// to both reaches the triage result.
+func TestInteractiveTriageAskBothPromptsForAFindingMissingWorkspaceAndOracle(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{
+		Asks: []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}}, // no Workspace, no Oracle
+		Manifest: manifest.Manifest{
+			Oracles:    map[string]string{"test": "true", "lint": "true"},
+			Workspaces: []manifest.Workspace{{ID: "alpha", Path: "alpha"}},
+		},
+	}
+	res := interactiveTriage(in, strings.NewReader("k\n\nalpha\nlint\n"), &out)
+	dec, ok := res.Asks["r1-f4"]
+	if !ok || !dec.Keep || dec.Workspace != "alpha" || dec.Oracle != "lint" {
+		t.Fatalf("Asks[r1-f4] = %+v, ok=%v, want kept in workspace alpha with oracle lint", dec, ok)
 	}
 }
 
@@ -310,13 +401,36 @@ func TestInteractiveTriageAskEOFKeepsRemainingWorkspaceAsksAsAuto(t *testing.T) 
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{
 		{ID: "r1-f3", Workspace: "alpha", Title: "t1"},
 		{ID: "r1-f4", Workspace: "beta", Title: "t2"},
-	}}
+	}, Manifest: oneOracleManifest()}
 	res := interactiveTriage(in, strings.NewReader(""), &out) // EOF immediately
 	for _, id := range []string{"r1-f3", "r1-f4"} {
 		dec, ok := res.Asks[id]
 		if !ok || !dec.Keep || dec.Human {
 			t.Errorf("Asks[%s] = %+v, ok=%v, want kept/auto", id, dec, ok)
 		}
+	}
+}
+
+// TestInteractiveTriageAskEOFDoesNotAutoKeepAStaleOracleAsk pins the other
+// half of the same rule: stdin closing auto-keeps only an ask whose build
+// target already resolves in full. A workspace alone is not enough once the
+// oracle rule matters too - a stale oracle must leave the ask undecided at
+// EOF the same way a missing workspace already does, not be silently
+// dropped as though the human had agreed with a default nobody chose.
+func TestInteractiveTriageAskEOFDoesNotAutoKeepAStaleOracleAsk(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{
+		Asks: []verifydeliver.Finding{{ID: "r1-f4", Workspace: "alpha", Oracle: "old", Title: "t"}},
+		Manifest: manifest.Manifest{
+			Oracles: map[string]string{"test": "true", "lint": "true"}, // "old" is neither
+		},
+	}
+	res := interactiveTriage(in, strings.NewReader(""), &out) // EOF immediately
+	if _, ok := res.Asks["r1-f4"]; ok {
+		t.Error("Asks[r1-f4] decided, want undecided (a stale oracle needs a human's choice, EOF cannot supply it)")
+	}
+	if !strings.Contains(out.String(), "1 ask(s) missing a workspace or oracle left for a human") {
+		t.Fatalf("stdout missing the EOF count naming the oracle-caused gap:\n%s", out.String())
 	}
 }
 

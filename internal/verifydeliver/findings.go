@@ -12,12 +12,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Finding status vocabulary (design 5.5): a finding's place in jig's own
-// bookkeeping, distinct from the reviewer's action label. open and asked
-// together are "the open set" (design 5.2): findings still outstanding
-// across rounds. dismissed and noted are terminal for this bookkeeping;
-// only a human dismissal (routing, design 6) or a repeat of an already
-// dismissed finding (rule 2) produces dismissed.
+// Finding status vocabulary: a finding's place in jig's own bookkeeping,
+// distinct from the reviewer's action label. open and asked together are
+// "the open set": findings still outstanding across rounds. dismissed and
+// noted are terminal for this bookkeeping; only a human dismissal (routing)
+// or a repeat of an already dismissed finding (rule 2) produces dismissed.
 const (
 	StatusOpen      = "open"
 	StatusAsked     = "asked"
@@ -25,18 +24,18 @@ const (
 	StatusNoted     = "noted"
 )
 
-// Triage vocabulary (design 5.5): who decided a finding's outcome - a
-// person at a terminal, or --yes / no terminal.
+// Triage vocabulary: who decided a finding's outcome - a person at a
+// terminal, or --yes / no terminal.
 const (
 	TriageHuman = "human"
 	TriageAuto  = "auto"
 )
 
-// Finding is one persisted entry of gate/round-N/findings.yaml (design
-// 5.5), plus its additive triage fields (triage, decision, routed_as). It
-// is jig's own bookkeeping record: the reviewer never sees it directly,
-// only the subset review.json's open and dismissed lists project
-// (OpenFinding, DismissedFinding).
+// Finding is one persisted entry of gate/round-N/findings.yaml, plus its
+// additive triage fields (triage, decision, routed_as). It is jig's own
+// bookkeeping record: the reviewer never sees it directly, only the subset
+// review.json's open and dismissed lists project (OpenFinding,
+// DismissedFinding).
 type Finding struct {
 	ID            string `yaml:"id"`
 	File          string `yaml:"file"`
@@ -61,8 +60,8 @@ type Finding struct {
 	RoutedAs string `yaml:"routed_as,omitempty"`
 }
 
-// findingsYAML is gate/round-<n>/findings.yaml's exact on-disk shape
-// (design 5.5, plus the round's own summary).
+// findingsYAML is gate/round-<n>/findings.yaml's exact on-disk shape, plus
+// the round's own summary.
 type findingsYAML struct {
 	Scope         string    `yaml:"scope"`
 	ReviewedPaths []string  `yaml:"reviewed_paths"`
@@ -71,15 +70,15 @@ type findingsYAML struct {
 	Summary       string    `yaml:"summary,omitempty"`
 }
 
-// statusForAction maps a reviewer's action label to jig's own status
-// (design 5.2, 5.5): fix queues toward a fix slice (open), ask needs a
-// human (asked), note is recorded only and leaves the open set (noted).
-// Every action design 4.2 defines is handled explicitly; ParseReviewResult
-// already rejects any other action before a result ever reaches ApplyRound,
-// so an unrecognized one here is a programming error, not a case to guess
-// at silently (design 1) - it is returned up the call chain rather than
-// folded into note, which would let an unvalidated caller's mistake reach
-// the open set as if it were a harmless, non-blocking record.
+// statusForAction maps a reviewer's action label to jig's own status: fix
+// queues toward a fix slice (open), ask needs a human (asked), note is
+// recorded only and leaves the open set (noted). Every action jig
+// recognizes is handled explicitly; ParseReviewResult already rejects any
+// other action before a result ever reaches ApplyRound, so an unrecognized
+// one here is a programming error, not a case to guess at silently - it is
+// returned up the call chain rather than folded into note, which would let
+// an unvalidated caller's mistake reach the open set as if it were a
+// harmless, non-blocking record.
 func statusForAction(action string) (string, error) {
 	switch action {
 	case ActionFix:
@@ -93,8 +92,8 @@ func statusForAction(action string) (string, error) {
 	}
 }
 
-// workspaceFor derives a finding's workspace (design 5.5): the manifest
-// workspace whose path is the longest prefix of file, matched by path
+// workspaceFor derives a finding's workspace: the manifest workspace whose
+// path is the longest prefix of file, matched by path
 // segment rather than raw string prefix (so "billing" matches
 // "billing/x.go" but not "billingx/y.go"). "." (or an empty path) is the
 // root workspace and matches every file. The empty string means file lies
@@ -119,12 +118,12 @@ func workspaceFor(file string, man manifest.Manifest) string {
 }
 
 // findingHasGreenFixSlice reports whether any slice in existingSlices both
-// records id in its own Findings (design 6.1's structural link) and is
-// green: the premise the recurrence bound (5.3) counts on is that a
-// recurrence means that finding's fix slice went green without resolving
-// it, which can only be true once such a slice has actually finished, not
-// merely while it is still queued or building (as under --early).
-// sliceGreen reports one slice's live state by id.
+// records id in its own Findings (the structural link, not a parsed slice
+// id) and is green: the recurrence bound's premise is that a recurrence
+// means that finding's fix slice went green without resolving it, which can
+// only be true once such a slice has actually finished, not merely while it
+// is still queued or building (as under --early). sliceGreen reports one
+// slice's live state by id.
 func findingHasGreenFixSlice(id string, existingSlices []store.Slice, sliceGreen func(sliceID string) (bool, error)) (bool, error) {
 	for _, s := range existingSlices {
 		for _, fid := range s.Findings {
@@ -144,10 +143,10 @@ func findingHasGreenFixSlice(id string, existingSlices []store.Slice, sliceGreen
 }
 
 // ApplyRound applies one validated reviewer round's result onto known, the
-// cumulative fold of every earlier round (design 5.2 rules 1, 2 and 4): it
+// cumulative fold of every earlier round (rules 1, 2 and 4 below): it
 // assigns ids to new findings and resolves recurrences and the recurrence
-// bound. It returns this round's own reported findings (design 5.5's
-// "every finding reported this round") with a provisional Status - routing
+// bound. It returns this round's own reported findings - every finding
+// reported this round - with a provisional Status - routing
 // and triage (route.go) still have to run on it, dismissing some and
 // keeping others, before it is final. known is untouched. Rule 3's
 // clearing is not decided here: ClearingAfterTriage needs reported's final,
@@ -164,7 +163,7 @@ func findingHasGreenFixSlice(id string, existingSlices []store.Slice, sliceGreen
 // round run with --early).
 func ApplyRound(round int, known map[string]Finding, result ReviewResult, existingSlices []store.Slice, sliceGreen func(sliceID string) (bool, error), man manifest.Manifest) (reported []Finding, err error) {
 	seq := 0
-	oracleNames := sortedOracleNames(man)
+	oracleNames := SortedOracleNames(man)
 
 	for _, rf := range result.Findings {
 		file, ferr := normalizeRepoRelPath(rf.File)
@@ -261,7 +260,7 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 		// workspace for its file, or no oracle jig can resolve against the
 		// current manifest (an oracle recorded before the manifest changed,
 		// say) - can never become a fix slice on its own; jig routes it to
-		// the human as an ask instead (design 5.5). A zero-oracle manifest
+		// the human as an ask instead. A zero-oracle manifest
 		// is not this case: routeRound fails the whole round with
 		// GATE_NO_ORACLE before triage ever runs, so nothing here needs to
 		// force individual findings to ask over it.
@@ -284,8 +283,8 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 	return reported, nil
 }
 
-// ClearingAfterTriage computes design 5.2 rule 3's clearing set: known's
-// open/asked findings not present in reported (id-wise) clear when this
+// ClearingAfterTriage computes rule 3's clearing set: known's open/asked
+// findings not present in reported (id-wise) clear when this
 // round reviewed their file, or their file no longer exists at head
 // (existsAtHead checks the lease directly, whatever the scope diff says -
 // a file gone before this round's base, or never in a full-scope diff
@@ -343,7 +342,7 @@ func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedP
 }
 
 // foldFindings applies one round's findings.yaml content onto cum in
-// place (design 5.5): the latest occurrence of each id wins, and cleared
+// place: the latest occurrence of each id wins, and cleared
 // removes an id. It is the single operation both the historical fold
 // (cumulativeFindings) and a round just applied (ApplyRound's result) use,
 // so the two always agree.
@@ -366,8 +365,8 @@ func cloneFindings(cum map[string]Finding) map[string]Finding {
 	return out
 }
 
-// isClean reports whether cum has no finding open or asked (design 5.4):
-// a round is clean when, after applying it, nothing is outstanding. Notes,
+// isClean reports whether cum has no finding open or asked: a round is
+// clean when, after applying it, nothing is outstanding. Notes,
 // dismissed findings and cleared findings never block it.
 func isClean(cum map[string]Finding) bool {
 	for _, f := range cum {
@@ -378,8 +377,8 @@ func isClean(cum map[string]Finding) bool {
 	return true
 }
 
-// openFindingsList returns cum's open and asked findings (design 5.2's
-// open set), sorted by id for determinism.
+// openFindingsList returns cum's open and asked findings (the open set),
+// sorted by id for determinism.
 func openFindingsList(cum map[string]Finding) []Finding {
 	var out []Finding
 	for _, f := range cum {
@@ -405,8 +404,8 @@ func dismissedFindingsList(cum map[string]Finding) []Finding {
 }
 
 // askedFindingsList returns cum's asked findings, sorted by id for
-// determinism: design 6.4's "needs a human" list (the exit-2 signal),
-// across every round, not only the one just applied.
+// determinism: the "needs a human" list (the exit-2 signal), across every
+// round, not only the one just applied.
 func askedFindingsList(cum map[string]Finding) []Finding {
 	var out []Finding
 	for _, f := range cum {
@@ -419,7 +418,7 @@ func askedFindingsList(cum map[string]Finding) []Finding {
 }
 
 // toOpenFindingList projects fs (cum's open/asked findings) onto
-// review.json's open shape (design 4.1). Building fs from the cumulative
+// review.json's open shape. Building fs from the cumulative
 // fold, and calling this before every reviewer round, is what keeps
 // review.json's open list honest.
 func toOpenFindingList(fs []Finding) []OpenFinding {
@@ -431,7 +430,7 @@ func toOpenFindingList(fs []Finding) []OpenFinding {
 }
 
 // toDismissedFindingList projects fs (cum's dismissed findings) onto
-// review.json's dismissed shape (design 4.1).
+// review.json's dismissed shape.
 func toDismissedFindingList(fs []Finding) []DismissedFinding {
 	out := make([]DismissedFinding, 0, len(fs))
 	for _, f := range fs {
@@ -459,8 +458,8 @@ func readFindingsYAML(st *store.Store, ticket string, round int) (findingsYAML, 
 }
 
 // cumulativeFindings folds every gate/round-<n>/findings.yaml for ticket,
-// from round 1 up to (not including) upToRound, into one map (design 5.5):
-// the latest occurrence of each id wins, and a round's cleared list
+// from round 1 up to (not including) upToRound, into one map: the latest
+// occurrence of each id wins, and a round's cleared list
 // removes it. A round with no findings.yaml (a scripted round, or one that
 // hasn't happened yet) contributes nothing.
 func cumulativeFindings(st *store.Store, ticket string, upToRound int) (map[string]Finding, error) {
@@ -478,8 +477,8 @@ func cumulativeFindings(st *store.Store, ticket string, upToRound int) (map[stri
 	return cum, nil
 }
 
-// marshalFindingsYAML renders one round's findings.yaml (design 5.5),
-// marshaling nil reviewedPaths/findings as [] rather than null.
+// marshalFindingsYAML renders one round's findings.yaml, marshaling nil
+// reviewedPaths/findings as [] rather than null.
 func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string) ([]byte, error) {
 	if reviewedPaths == nil {
 		reviewedPaths = []string{}
@@ -496,18 +495,18 @@ func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Findin
 	})
 }
 
-// riskRank orders findings.md's sections, high risk first (design 5.5).
+// riskRank orders findings.md's sections, high risk first.
 var riskRank = map[string]int{RiskHigh: 0, RiskMedium: 1, RiskLow: 2}
 
-// renderFindingsMD renders one round's findings.md (design 5.5), sorted by
-// risk, high first. verdict is the round's own verdict (clean|fix-slices,
+// renderFindingsMD renders one round's findings.md, sorted by risk, high
+// first. verdict is the round's own verdict (clean|fix-slices,
 // GateReport.Verdict): the word "clean" is only ever printed when verdict
 // itself is clean, never merely because this round reported nothing new -
 // an earlier round's finding can still be open or asked with nothing new
 // reported against it this round. cleared lists the ids this round cleared
-// (design 5.2 rule 3); findings is every finding this round reported
-// (ApplyRound's "reported"), after routing and triage (design 6) have set
-// each one's final Status, Triage, Decision and RoutedAs.
+// (rule 3); findings is every finding this round reported (ApplyRound's
+// "reported"), after routing and triage have set each one's final Status,
+// Triage, Decision and RoutedAs.
 func renderFindingsMD(round int, verdict, summary string, findings []Finding, cleared []string) string {
 	sorted := make([]Finding, len(findings))
 	copy(sorted, findings)

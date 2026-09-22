@@ -148,15 +148,16 @@ func TestMarshalReviewRequestPreservesPopulatedLists(t *testing.T) {
 
 // --- RenderReviewPrompt -----------------------------------------------------
 
-// TestRenderReviewPromptMatchesDesignGolden: the rendered prompt is
-// pinned to design.md section 4.3's reference text verbatim (transcribed
-// independently here, not derived from reviewPromptTemplate), with only the
-// per-round fields and the schema filled in. A word denylist only catches
-// coaching text an editor happened to spell one of a few ways; a golden
-// catches any addition at all - an enumerated problem kind, a rule patching
-// a past model mistake, or reworded prose that drifts from the design -
-// since every one of those changes the byte-for-byte output design 1 and
-// 4.3 require.
+// TestRenderReviewPromptMatchesDesignGolden: the rendered prompt is pinned
+// to a golden text transcribed independently here, not derived from
+// reviewPromptTemplate, with only the per-round fields and the schema
+// filled in. A word denylist only catches coaching text an editor happened
+// to spell one of a few ways; a golden catches any addition at all - an
+// enumerated problem kind, a rule patching a past model mistake, or
+// reworded prose that drifts from the contract - since every one of those
+// changes the byte-for-byte output the prompt must never gain: it states
+// the job and the output contract, and never coaches behavior or patches a
+// past model mistake.
 func TestRenderReviewPromptMatchesDesignGolden(t *testing.T) {
 	req := ReviewRequest{Ticket: "JIG-1", Round: 2, Scope: "delta", BaseSHA: "aaa", HeadSHA: "bbb"}
 	prompt := RenderReviewPrompt(req, "/abs/review.json", "/abs/result.json")
@@ -172,7 +173,7 @@ reviewed_paths: every file you read. jig rejects a result that does not include 
 When finished, write result.json at /abs/result.json with exactly one JSON object: ` + schema
 
 	if prompt != golden {
-		t.Errorf("prompt does not match design 4.3's golden text.\ngot:\n%s\nwant:\n%s", prompt, golden)
+		t.Errorf("prompt does not match the golden text.\ngot:\n%s\nwant:\n%s", prompt, golden)
 	}
 }
 
@@ -273,6 +274,17 @@ func TestParseReviewResultRejectsEveryInvalidRule(t *testing.T) {
 		{"duplicate key inside a finding", validResultJSONRaw(t, func(m map[string]any) {
 			f := m["findings"].([]any)[0].(map[string]any)
 			f["Title"] = "a different title"
+		})},
+		// A lone case variant with no duplicate to catch (the correctly-cased
+		// key is absent, not repeated) must still be rejected: exact key
+		// names are required, not merely no-duplicates, since
+		// encoding/json's own struct decode matches a key to a field
+		// case-insensitively and would otherwise accept it silently.
+		{"lone case-variant top-level key", []byte(`{"findings": [], "reviewed_paths": [], "Summary": "x"}`)},
+		{"lone case-variant finding key", validResultJSONRaw(t, func(m map[string]any) {
+			f := m["findings"].([]any)[0].(map[string]any)
+			delete(f, "oracle")
+			f["Oracle"] = "test"
 		})},
 	}
 	for _, c := range cases {
@@ -1146,7 +1158,7 @@ func TestReviewerGateSourceRoundWithFakeBackend(t *testing.T) {
 }
 
 // TestReviewerGateSourceRoundCleanWithoutDispatchWhenNothingOutstanding
-// covers design 5.4: when the scope diff changes nothing and no
+// covers clean without dispatch: when the scope diff changes nothing and no
 // finding is open, the previous review already covers head, so Round
 // never dispatches a reviewer session at all.
 func TestReviewerGateSourceRoundCleanWithoutDispatchWhenNothingOutstanding(t *testing.T) {
@@ -1196,9 +1208,9 @@ func TestReviewerGateSourceRoundCleanWithoutDispatchWhenNothingOutstanding(t *te
 }
 
 // TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding
-// covers the other half of design 5.4: even with an empty scope diff, an open
-// finding still outstanding from an earlier round means the reviewer must
-// look again, so Round dispatches as usual.
+// covers the other half of clean without dispatch: even with an empty
+// scope diff, an open finding still outstanding from an earlier round means
+// the reviewer must look again, so Round dispatches as usual.
 func TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding(t *testing.T) {
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
