@@ -86,7 +86,7 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question})
 
 		if ss.State == "needs-input" {
-			parkedRows = append(parkedRows, []string{sl.ID, ss.Question, resumeCommand(ticket, ss)})
+			parkedRows = append(parkedRows, []string{sl.ID, ss.Question, resumeCommand(ticket, sl, ss)})
 		}
 		if ss.State == "stalled" {
 			signature := ss.Signature
@@ -145,14 +145,20 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 }
 
 // resumeCommand returns the exact command that clears a parked (needs-input)
-// slice's custody: a flawed-brief question is remediated by amending the
-// brief and requeuing, everything else by answering the open question
-// directly.
-func resumeCommand(ticket string, ss store.SliceState) string {
-	if ss.Reason == "flawed-brief" {
+// slice's custody, chosen from the slice's own structure rather than the
+// state's Reason alone: a slice with brief sections to amend (FromBrief
+// non-empty) is remediated by amending the brief and requeuing - the only
+// command that can ever touch it, since frontier.Requeue's --from-brief-diff
+// keys off FromBrief hashes. A slice with none (for example a gate fix
+// slice, which routeQuestion can still mark Reason "flawed-brief" the same
+// way) has no brief section for --from-brief-diff to ever notice, so it is
+// remediated by answering the open question directly - the only command
+// that works for it.
+func resumeCommand(ticket string, sl store.Slice, ss store.SliceState) string {
+	if len(sl.FromBrief) > 0 {
 		return fmt.Sprintf("jig requeue %s --from-brief-diff", ticket)
 	}
-	return fmt.Sprintf("jig run %s --answer %s \"<text>\"", ticket, ss.Question)
+	return fmt.Sprintf("jig run %s --answer %s '<text>'", ticket, ss.Question)
 }
 
 // joinPlus joins ids with "+", the wire format for a slice's blocked_by
@@ -163,6 +169,17 @@ func joinPlus(ids []string) string {
 		out += "+" + id
 	}
 	return out
+}
+
+// sliceByID returns the slice with the given id from slices, and whether it
+// was found.
+func sliceByID(slices []store.Slice, id string) (store.Slice, bool) {
+	for _, sl := range slices {
+		if sl.ID == id {
+			return sl, true
+		}
+	}
+	return store.Slice{}, false
 }
 
 // nextStepHint computes the single contextual next-step hint for ticket:
@@ -188,13 +205,17 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if ss.Reason == "flawed-brief" {
+		sl, ok := sliceByID(slices, q.Slice)
+		if !ok {
+			return "", fmt.Errorf("nextStepHint: question %s names unknown slice %s", q.ID, q.Slice)
+		}
+		if len(sl.FromBrief) > 0 {
 			// Same resume command as the parked table's "resume" column
 			// (resumeCommand): the hint and the table must never disagree
 			// about how to get unstuck.
-			return fmt.Sprintf("Run `%s` to amend the brief and resume", resumeCommand(ticket, ss)), nil
+			return fmt.Sprintf("Run `%s` to amend the brief and resume", resumeCommand(ticket, sl, ss)), nil
 		}
-		return fmt.Sprintf("Run `jig run %s --answer %s \"<text>\"` to answer and resume", ticket, q.ID), nil
+		return fmt.Sprintf("Run `%s` to answer and resume", resumeCommand(ticket, sl, ss)), nil
 	}
 
 	if len(slices) == 0 {

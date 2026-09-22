@@ -1,0 +1,4 @@
+{
+  "outcome": "flawed-brief",
+  "summary": "The gate finding names a doc comment that does not exist in this workspace; the finding itself needs correcting, not the code."
+}
