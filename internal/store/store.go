@@ -89,28 +89,34 @@ func (s *Store) refuseIfMidRebaseOrMerge() error {
 	return &axi.Error{
 		Msg:  fmt.Sprintf("the store at %s has an unfinished rebase or merge, or unresolved conflicts", s.Root),
 		Code: "STORE_CONFLICT",
-		Help: []string{"Resolve it in the store with `git status`, then rerun."},
+		Help: []string{"Check the store's state there with `git status`, resolve it, then rerun."},
 	}
 }
 
 // inProgressRebaseOrMerge reports whether dir has an unfinished rebase (git
 // leaves a rebase-merge or rebase-apply directory under .git for the
-// duration of one), an unresolved merge (MERGE_HEAD), or unmerged index
-// entries left by something other than an in-progress rebase or merge - a
-// conflicted `git stash pop`, `git cherry-pick` or `git revert` leaves the
-// index with conflict markers on disk but none of those three markers (a
-// cherry-pick sets CHERRY_PICK_HEAD, not MERGE_HEAD). The three git-path
-// markers are read with one `rev-parse` call rather than three, since this
-// runs on every Sync and every Push. The unmerged-index check uses
-// `git ls-files -u`, which only reads the index, rather than `git diff
-// --diff-filter=U`, which opportunistically rewrites .git/index as a side
-// effect - a write this read-only guard, called on every Sync and Push,
-// must not make.
+// duration of one), an unresolved merge (MERGE_HEAD), an unfinished
+// cherry-pick or revert (CHERRY_PICK_HEAD or REVERT_HEAD - git keeps these
+// set even once the conflict is resolved and staged, until `--continue` or
+// `--abort` runs), a multi-commit cherry-pick or revert sequence (the
+// sequencer directory), an unfinished bisect (BISECT_LOG), or unmerged
+// index entries left by something other than any of those - a conflicted
+// `git stash pop` leaves the index with conflict markers on disk but none
+// of these markers. The git-path markers are read with one `rev-parse` call
+// rather than one per marker, since this runs on every Sync and every Push.
+// The unmerged-index check uses `git ls-files -u`, which only reads the
+// index, rather than `git diff --diff-filter=U`, which opportunistically
+// rewrites .git/index as a side effect - a write this read-only guard,
+// called on every Sync and Push, must not make.
 func inProgressRebaseOrMerge(dir string) (bool, error) {
 	out, err := gitx.Run(dir, "rev-parse",
 		"--git-path", "rebase-merge",
 		"--git-path", "rebase-apply",
 		"--git-path", "MERGE_HEAD",
+		"--git-path", "CHERRY_PICK_HEAD",
+		"--git-path", "REVERT_HEAD",
+		"--git-path", "sequencer",
+		"--git-path", "BISECT_LOG",
 	)
 	if err != nil {
 		return false, err

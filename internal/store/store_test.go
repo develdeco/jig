@@ -746,6 +746,52 @@ func leaveConflictedCherryPick(t *testing.T, work string) {
 	}
 }
 
+// leaveResolvedCherryPick leaves work with a conflicting `git cherry-pick`
+// already resolved and staged (no unmerged index entries) but not concluded
+// with `--continue`: CHERRY_PICK_HEAD is still set. Without CHERRY_PICK_HEAD
+// in inProgressRebaseOrMerge's marker list, and with the index already
+// clean, nothing catches this state: Sync would `add -A` and commit the
+// user's resolved pick as "jig: record uncommitted store state" under the
+// original author, and Push would publish it.
+func leaveResolvedCherryPick(t *testing.T, work string) {
+	t.Helper()
+	leaveConflictedCherryPick(t, work)
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\nx: resolved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "project.yaml")
+	if unmerged := runGit(t, work, "diff", "--name-only", "--diff-filter=U"); strings.TrimSpace(unmerged) != "" {
+		t.Fatalf("fixture setup left unmerged paths after resolving: %q", unmerged)
+	}
+}
+
+// leaveResolvedRevert leaves work with a conflicting `git revert` already
+// resolved and staged (no unmerged index entries) but not concluded with
+// `--continue`: REVERT_HEAD is still set, and neither of the other two
+// pre-existing markers (rebase-merge, rebase-apply, MERGE_HEAD) is.
+func leaveResolvedRevert(t *testing.T, work string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\nx: a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "commit", "-am", "add x=a")
+	addSHA := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\nx: b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "commit", "-am", "change x=b")
+	if _, err := gitx.Run(work, "revert", "--no-edit", addSHA); err == nil {
+		t.Fatal("expected the revert to conflict; test setup is wrong")
+	}
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\nx: resolved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "project.yaml")
+	if unmerged := runGit(t, work, "diff", "--name-only", "--diff-filter=U"); strings.TrimSpace(unmerged) != "" {
+		t.Fatalf("fixture setup left unmerged paths after resolving: %q", unmerged)
+	}
+}
+
 // leaveRebaseApplyInProgress leaves work mid-rebase under the "apply"
 // backend, which uses .git/rebase-apply rather than .git/rebase-merge, with
 // the conflict already resolved and staged (no unmerged index entries):
@@ -845,6 +891,30 @@ func TestSyncAndPushRefuseAfterConflictedCherryPick(t *testing.T) {
 			leaveConflictedCherryPick(t, work)
 			assertRefusesStoreConflict(t, st, work, remote, which)
 		})
+	}
+}
+
+// TestSyncAndPushRefuseAfterResolvedCherryPickOrRevert: a conflicting
+// cherry-pick or revert that the user has resolved and staged (no unmerged
+// index entries left) still has CHERRY_PICK_HEAD or REVERT_HEAD set until
+// `--continue` or `--abort` runs. Before those two joined
+// inProgressRebaseOrMerge's marker list, this state slipped past both the
+// marker check and the (by-then-clean) unmerged-index check, so Sync would
+// commit the user's resolved pick or revert as "jig: record uncommitted
+// store state" under jig's own identity and Push would publish it.
+func TestSyncAndPushRefuseAfterResolvedCherryPickOrRevert(t *testing.T) {
+	fixtures := map[string]func(*testing.T, string){
+		"CherryPick": leaveResolvedCherryPick,
+		"Revert":     leaveResolvedRevert,
+	}
+	for name, fixture := range fixtures {
+		for _, which := range []string{"Sync", "Push"} {
+			t.Run(name+"/"+which, func(t *testing.T) {
+				st, work, remote := newTestRemoteStore(t)
+				fixture(t, work)
+				assertRefusesStoreConflict(t, st, work, remote, which)
+			})
+		}
 	}
 }
 
