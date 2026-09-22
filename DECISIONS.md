@@ -58,6 +58,44 @@ was ambiguous, what was chosen, and why.
 - Slice work files (`slice.json`, `result.json`) live under the store's ticket
   directory (`work/`), not the build lease, so that the lease's `git add -A` never
   sweeps dispatch plumbing into slice commits.
+- `Store.Sync` stages and commits any uncommitted leftovers (a gate-open
+  journal line, in-progress `work/` files from a command that failed after
+  writing to the store - an oracle failure or a SLICE_ID_DUPLICATE after a
+  round was written, or a run interrupted mid-dispatch) with jig's identity
+  before it pulls. Without this, the next command's `pull --rebase` fails on
+  the dirty tree with "cannot pull with rebase: you have unstaged changes",
+  wedging the store until someone commits by hand. This does not retry the
+  failed command's round: the leftovers become an ordinary jig commit and
+  the next command proceeds, but a partial gate round directory still counts
+  as a round, so the next `jig gate` opens round N+1 rather than replaying
+  the failed one. `Push` shares the same stage-and-commit step.
+- `Sync` and `Push` both refuse with `STORE_CONFLICT`, without touching the
+  index, when the store already has an unfinished rebase or merge in progress
+  (`.git/rebase-merge`, `.git/rebase-apply`, or `MERGE_HEAD`, read with one
+  `git rev-parse --git-path` call), or when the index itself has unmerged
+  entries with none of those three markers present - a conflicted `git stash
+  pop` or `git cherry-pick` leaves unmerged entries this way (cherry-pick
+  sets `CHERRY_PICK_HEAD`, not `MERGE_HEAD`). An unconditional `git add -A`
+  would stage unresolved conflict markers as ordinary content, and a later
+  commit (or `rebase --continue`) would finalize them onto the store branch,
+  corrupting whatever file conflicted for every later reader. The check
+  lives in the shared `stageAndCommit` step, so it also guards a command that
+  only ever `Push`es, such as `jig requeue`, not only the ones that `Sync` first.
+- A failed `pull --rebase` is aborted and wrapped as `STORE_CONFLICT` only when
+  it actually left a rebase in progress; jig's own conflicts never leave the
+  store mid-rebase for the guard above to catch on the next command, unless
+  the best-effort `rebase --abort` itself fails, in which case the message
+  says so plainly (naming the abort's own error) instead of falsely claiming
+  the rebase was aborted. It then points the operator at the store to
+  resolve directly there: as still mid-rebase, when the rebase state was
+  read successfully first; as an unknown state to check with `git status`,
+  when that read itself had failed - a failed read never lets the message
+  assert mid-rebase, since that was never confirmed. A pull that failed
+  before rebasing (an unreachable or moved remote, an auth failure) left
+  nothing to abort, so its error is returned unchanged rather than
+  misreported as a conflict. When the rebase state itself can't be read,
+  the abort is still attempted, best effort, rather than trusting a read
+  that just failed.
 
 ## Build loop
 
@@ -122,6 +160,33 @@ was ambiguous, what was chosen, and why.
 - `jig validate` prints a brief section-hash table so a calling skill can fill
   `from_brief` without needing a new CLI verb, keeping the CLI surface exhaustive
   without growing it.
+- `jig status` distinguishes a slice parked on an open human question from one
+  that is genuinely stalled, replacing the old single `paused` state value.
+  The state: line precedence is stalled > parked > env-blocked > green >
+  building: a stuck slice outranks one merely waiting, so it is reported the
+  moment it is found rather than waited out. (The help hint's own priority
+  is the opposite: an open question comes first there, matching how a
+  supervising agent should triage a paused fleet - answer it, then unstick
+  what's actually stuck - since answering is the one action that can also
+  unblock other slices queued behind it.) A needs-input slice renders in its
+  own parked table with the exact resume command (`--answer` for a normal
+  question, `requeue --from-brief-diff` when the reason is a flawed brief);
+  a stalled slice renders in its own stalled table with the stall signature
+  that triggered it. `store.SliceState` gains an additive `Signature` field
+  so the table can show it without recomputing; frontier's `routeFailure`
+  records it on both stalled paths (repeat-failure stall and attempt-cap),
+  and every route that clears a stalled signature does so alongside
+  `Reason`: the green route clears it as part of turning the slice green,
+  and requeue and answer-and-requeue clear it while taking the slice out
+  of the stalled state without turning it green, so a stale signature
+  never survives a slice's eventual recovery. The status help hint is routed through the
+  same resume-command logic the parked table uses, so the hint and the
+  table can never disagree about how to get unstuck on a flawed brief. The
+  stalled hint only offers its `requeue --from-brief-diff` remedy when the
+  slice's `FromBrief` is non-empty, since `Requeue` only touches a slice
+  whose `FromBrief` cites a hash that is gone and a gate fix slice has none;
+  otherwise the hint says it has no brief section to amend and names no
+  command.
 
 ## Fixture and tests
 
@@ -183,6 +248,11 @@ was ambiguous, what was chosen, and why.
   test step went from 44-48 s to 38-42 s, and macOS takes 52 s.
 - CI actions are on v7; the test matrix runs Windows, Linux, and macOS on
   every push to main and every pull request; govulncheck runs on the Linux leg.
+- `lint/workflow_test.go` parses `.github/workflows/{ci,release,smoke}.yml` with
+  `yaml.v3` and asserts the invariants that have already bitten or must hold,
+  checking shape (triggers, job dependencies, matrix legs, key steps present)
+  rather than exact string content, so a routine workflow edit does not churn
+  the test.
 - Windows Defender exclusions were considered for Windows CI time and dropped: GitHub's
   Windows runner images already turn real-time scanning off and exclude the C: and D: drives.
 
