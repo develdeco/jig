@@ -455,8 +455,9 @@ func TestDiffNameOnly(t *testing.T) {
 	}
 }
 
-// TestFileExistsAtRev checks a present file, an absent one, and a deleted
-// one (present at base, gone at head).
+// TestFileExistsAtRev checks a present file, an absent one, a deleted one
+// (present at base, gone at head), a directory (a tree, not a blob), and a
+// rev that does not resolve to a commit.
 func TestFileExistsAtRev(t *testing.T) {
 	dir := t.TempDir()
 	run := func(args ...string) string {
@@ -470,8 +471,14 @@ func TestFileExistsAtRev(t *testing.T) {
 	run("init", "-b", "main")
 	run("config", "user.name", "jig-fixture")
 	run("config", "user.email", "fixture@example.invalid")
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "gone.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write gone.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "f.txt"), []byte("z"), 0o644); err != nil {
+		t.Fatalf("write sub/f.txt: %v", err)
 	}
 	run("add", "-A")
 	run("commit", "-m", "c1")
@@ -498,6 +505,7 @@ func TestFileExistsAtRev(t *testing.T) {
 		{head, "gone.txt", false},
 		{head, "never.txt", false},
 		{base, "gone.txt", true},
+		{head, "sub", false}, // a directory is a tree, not a blob
 	}
 	for _, c := range cases {
 		got, err := FileExistsAtRev(dir, c.rev, c.path)
@@ -507,5 +515,9 @@ func TestFileExistsAtRev(t *testing.T) {
 		if got != c.want {
 			t.Errorf("FileExistsAtRev(%s, %s) = %v, want %v", c.rev, c.path, got, c.want)
 		}
+	}
+
+	if _, err := FileExistsAtRev(dir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "here.txt"); err == nil {
+		t.Error("FileExistsAtRev with a bad rev: want an error, got nil")
 	}
 }

@@ -139,21 +139,29 @@ func DiffNameOnly(dir, base, head, diffFilter string) ([]string, error) {
 	return strings.Split(raw, "\x00"), nil
 }
 
-// FileExistsAtRev reports whether path exists as a blob in dir's tree at
-// rev. Any git failure other than "no such object" (an unreadable repo, a
-// bad rev) is returned as an error rather than folded into false.
+// FileExistsAtRev reports whether path exists as a blob (not a tree) in
+// dir's tree at rev. rev is resolved first: a rev that does not name a
+// commit (a bad sha, an unknown ref) is returned as an error. Once rev is
+// known good, "git cat-file -t" and "not a valid object name" both exit
+// non-zero for a missing path, indistinguishable from a bad rev by exit
+// code alone, so that check comes only after rev is confirmed to resolve;
+// any remaining failure there is returned as an error too, rather than
+// folded into false.
 func FileExistsAtRev(dir, rev, path string) (bool, error) {
-	args := []string{"cat-file", "-e", rev + ":" + path}
+	if _, err := Run(dir, "rev-parse", "--verify", "--quiet", rev+"^{commit}"); err != nil {
+		return false, fmt.Errorf("gitx: file exists at rev: rev %q does not resolve to a commit: %w", rev, err)
+	}
+	args := []string{"cat-file", "-t", rev + ":" + path}
 	var stdout, stderr bytes.Buffer
 	err := run(dir, nil, &stdout, &stderr, args)
-	if err == nil {
-		return true, nil
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return false, nil
+		}
+		return false, callError(args, stderr.String(), err)
 	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return false, nil
-	}
-	return false, callError(args, stderr.String(), err)
+	return strings.TrimSpace(stdout.String()) == "blob", nil
 }
 
 // CommitOnAnyRemote reports whether sha is reachable from any remote-
