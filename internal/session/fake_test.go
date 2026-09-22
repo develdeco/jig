@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
@@ -191,5 +192,70 @@ func TestFakeBackendNeedsInputPassesThrough(t *testing.T) {
 	}
 	if res.Question != "Formal or casual greeting?" {
 		t.Errorf("question = %q, want preserved verbatim", res.Question)
+	}
+}
+
+// TestFakeBackendGatePlayback checks the gate-review dispatch path: it
+// copies the scenario's review-result.json verbatim into ResultJSON and
+// never touches the worktree.
+func TestFakeBackendGatePlayback(t *testing.T) {
+	worktree := newWorktree(t)
+	before, err := gitx.Run(worktree, "log", "--format=%H")
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+
+	scenarioDir := t.TempDir()
+	roundDir := filepath.Join(scenarioDir, "gate", "round-1")
+	if err := os.MkdirAll(roundDir, 0o755); err != nil {
+		t.Fatalf("mkdir round dir: %v", err)
+	}
+	want := []byte(`{"findings":[{"file":"billing/invoices.go","line":42,"title":"x","detail":"y","action":"fix","risk":"high","risk_rationale":"z","oracle":"test"}],"reviewed_paths":["billing/invoices.go"],"summary":"s"}`)
+	if err := os.WriteFile(filepath.Join(roundDir, "review-result.json"), want, 0o644); err != nil {
+		t.Fatalf("write review-result.json: %v", err)
+	}
+
+	backend := newFakeBackend(Options{ScenarioDir: scenarioDir})
+	resultPath := filepath.Join(t.TempDir(), "result.json")
+	d := Dispatch{Ticket: "JIG-1", Slice: "gate", Attempt: 1, Worktree: worktree, ResultJSON: resultPath}
+	if err := backend.Run(d); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read result.json: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("result.json = %s, want verbatim %s", got, want)
+	}
+
+	after, err := gitx.Run(worktree, "log", "--format=%H")
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	if before != after {
+		t.Errorf("worktree history changed by a gate dispatch: before %q after %q", before, after)
+	}
+}
+
+// TestFakeBackendGateMissingRoundErrors checks that a gate round the
+// scenario has no coverage for fails loudly instead of a silent clean.
+func TestFakeBackendGateMissingRoundErrors(t *testing.T) {
+	worktree := newWorktree(t)
+	scenarioDir := t.TempDir() // no gate/ at all
+
+	backend := newFakeBackend(Options{ScenarioDir: scenarioDir})
+	resultPath := filepath.Join(t.TempDir(), "result.json")
+	d := Dispatch{Ticket: "JIG-1", Slice: "gate", Attempt: 2, Worktree: worktree, ResultJSON: resultPath}
+	err := backend.Run(d)
+	if err == nil {
+		t.Fatal("Run: expected an error for a missing gate round, got nil")
+	}
+	if !strings.Contains(err.Error(), "scenario has no gate round 2 review-result.json") {
+		t.Errorf("error = %v, want it to name the missing gate round", err)
+	}
+	if _, statErr := os.Stat(resultPath); statErr == nil {
+		t.Error("ResultJSON was written despite the error")
 	}
 }

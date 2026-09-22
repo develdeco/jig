@@ -20,17 +20,23 @@ import (
 )
 
 // Round is one gate round's content, whether played back by a fake source
-// (tests) or produced by a real reviewer session (a future version).
+// (tests) or produced by a real reviewer session. Review is set only by the
+// reviewer source (review.go): its validated result plus scope data, ready
+// for findings bookkeeping (design 5) to apply. Until that lands, Gate
+// treats a reviewer round like any other: FixSlices stays empty, so no
+// finding is routed yet.
 type Round struct {
 	FindingsMD string
 	FixSlices  []store.Slice
 	Receipts   map[string][]byte
+	Review     *Review
 }
 
-// GateSource supplies one gate round's content. Round(n) returns ok=false
-// for a clean round (no round directory, or an empty one).
+// GateSource supplies one gate round's content. Round returns ok=false for
+// a clean round (no round directory, or an empty one, for the scripted
+// source; findings bookkeeping decides this for the reviewer source).
 type GateSource interface {
-	Round(n int) (Round, bool, error)
+	Round(in RoundInput) (Round, bool, error)
 }
 
 // fakeGateSource reads gate rounds from a materialized fixture scenario
@@ -46,7 +52,8 @@ func NewFakeGateSource(scenarioDir string) GateSource {
 	return &fakeGateSource{scenarioDir: scenarioDir}
 }
 
-func (f *fakeGateSource) Round(n int) (Round, bool, error) {
+func (f *fakeGateSource) Round(in RoundInput) (Round, bool, error) {
+	n := in.Round
 	dir := filepath.Join(f.scenarioDir, "gate", fmt.Sprintf("round-%d", n))
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -107,14 +114,23 @@ type GateReport struct {
 	Verdict   string // clean|fix-slices
 	TargetSHA map[string]string
 	Model     string
+	// ReviewedSHA is repoName -> the head sha a reviewer round reviewed
+	// (design 5.5: "on every reviewer round, clean or not"), the anchor the
+	// next round's scope resolves against (review.go's resolveScopeBase).
+	// nil for a scripted round. Writing it on a real reviewer round is
+	// findings bookkeeping's job (design 5, S2); reportYAML carries the
+	// field now so review.go's own tests, and S2, can read and write it
+	// without another on-disk shape change.
+	ReviewedSHA map[string]string
 }
 
 // reportYAML is gate/round-<n>/report.yaml's exact on-disk shape.
 type reportYAML struct {
-	Round     int               `yaml:"round"`
-	Verdict   string            `yaml:"verdict"`
-	Model     string            `yaml:"model"`
-	TargetSHA map[string]string `yaml:"target_sha"`
+	Round       int               `yaml:"round"`
+	Verdict     string            `yaml:"verdict"`
+	Model       string            `yaml:"model"`
+	TargetSHA   map[string]string `yaml:"target_sha"`
+	ReviewedSHA map[string]string `yaml:"reviewed_sha,omitempty"`
 }
 
 // Gate runs one gate round for ticket: it re-verifies every manifest
@@ -254,7 +270,17 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: round %d already exists", n)
 	}
 
-	round, ok, err := src.Round(n)
+	round, ok, err := src.Round(RoundInput{
+		Store:     d.Store,
+		Ticket:    ticket,
+		Round:     n,
+		LeaseDir:  lease.Dir,
+		RepoName:  repoName,
+		Target:    target,
+		Model:     model,
+		BriefPath: filepath.Join(d.Store.TicketDir(ticket), "brief.md"),
+		Manifest:  man,
+	})
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: read round %d: %w", n, err)
 	}
@@ -481,10 +507,11 @@ func writeFixRound(d Deps, ticket string, n int, report GateReport, round Round)
 
 func writeReportYAML(dir string, report GateReport) error {
 	out, err := yaml.Marshal(reportYAML{
-		Round:     report.Round,
-		Verdict:   report.Verdict,
-		Model:     report.Model,
-		TargetSHA: report.TargetSHA,
+		Round:       report.Round,
+		Verdict:     report.Verdict,
+		Model:       report.Model,
+		TargetSHA:   report.TargetSHA,
+		ReviewedSHA: report.ReviewedSHA,
 	})
 	if err != nil {
 		return fmt.Errorf("verifydeliver: gate: marshal report.yaml: %w", err)

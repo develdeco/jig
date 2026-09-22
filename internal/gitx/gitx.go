@@ -7,6 +7,7 @@ package gitx
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -99,6 +100,60 @@ func CommitsIn(dir, rangeSpec string) ([]string, error) {
 		return nil, nil
 	}
 	return strings.Split(out, "\n"), nil
+}
+
+// IsAncestor reports whether ancestor is an ancestor of (or equal to)
+// descendant in dir, via "git merge-base --is-ancestor": exit 0 is true,
+// exit 1 is false (not an ancestor, not an error), and any other outcome
+// (e.g. an unknown object after a rebase) is an error.
+func IsAncestor(dir, ancestor, descendant string) (bool, error) {
+	args := []string{"merge-base", "--is-ancestor", ancestor, descendant}
+	var stdout, stderr bytes.Buffer
+	err := run(dir, nil, &stdout, &stderr, args)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, callError(args, stderr.String(), err)
+}
+
+// DiffNameOnly returns the files base..head touches in dir, restricted to
+// diffFilter (git's --diff-filter letters, e.g. "AMT" for added/modified/
+// type-changed, or "D" for deleted) with renames off, so a renamed file
+// counts as its new path under "A" and its old path under "D". Paths come
+// back exactly as git prints them: repo-relative with forward slashes,
+// tree order (not sorted).
+func DiffNameOnly(dir, base, head, diffFilter string) ([]string, error) {
+	args := []string{"diff", "--name-only", "-z", "--no-renames", "--diff-filter=" + diffFilter, base, head}
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, nil, &stdout, &stderr, args); err != nil {
+		return nil, callError(args, stderr.String(), err)
+	}
+	raw := strings.TrimSuffix(stdout.String(), "\x00")
+	if raw == "" {
+		return nil, nil
+	}
+	return strings.Split(raw, "\x00"), nil
+}
+
+// FileExistsAtRev reports whether path exists as a blob in dir's tree at
+// rev. Any git failure other than "no such object" (an unreadable repo, a
+// bad rev) is returned as an error rather than folded into false.
+func FileExistsAtRev(dir, rev, path string) (bool, error) {
+	args := []string{"cat-file", "-e", rev + ":" + path}
+	var stdout, stderr bytes.Buffer
+	err := run(dir, nil, &stdout, &stderr, args)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, callError(args, stderr.String(), err)
 }
 
 // CommitOnAnyRemote reports whether sha is reachable from any remote-

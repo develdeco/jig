@@ -20,7 +20,7 @@ import (
 // real reviewer is future work (see the README Roadmap).
 type noopGateSource struct{}
 
-func (noopGateSource) Round(n int) (verifydeliver.Round, bool, error) {
+func (noopGateSource) Round(verifydeliver.RoundInput) (verifydeliver.Round, bool, error) {
 	return verifydeliver.Round{}, false, nil
 }
 
