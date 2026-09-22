@@ -127,8 +127,9 @@ and write the same `result.json`; see
 [ARCHITECTURE.md](ARCHITECTURE.md#session-backends).
 
 `jig gate` re-runs every manifest oracle on a fresh lease, then dispatches a
-reviewer session on the backend `--backend` names (default `herdr`, or
-`fake` when `--scenario` is also set). `--scenario` alone, with no
+reviewer session on the backend `--backend` names (default `herdr`;
+unlike `jig run`, `--scenario` alone does not switch this default to
+`fake` - see below). `--scenario` alone, with no
 `--backend`, keeps the old scripted gate source instead, for compatibility
 with the pre-reviewer path: no reviewer session runs and there is no triage
 prompt. `jig solve`'s own gate/fix-slice loop follows a narrower rule:

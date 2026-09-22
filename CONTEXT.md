@@ -73,7 +73,7 @@ Who acts on a gate finding, reported by the reviewer itself: `fix` means jig que
 _Avoid_: class, severity, category
 
 **Coverage**:
-The files a reviewer actually read in a round, reported as `reviewed_paths`. jig accepts a round only when coverage includes every changed file and every open finding's file, and clears an open finding only from it.
+The files a reviewer actually read in a round, reported as `reviewed_paths`. jig accepts a round only when coverage includes every changed file and every open finding's file, and clears an open finding from it (or, whatever coverage says, when the finding's file no longer exists at head at all).
 _Avoid_: reviewed scope, read set
 
 **Triage**:

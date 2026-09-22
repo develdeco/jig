@@ -129,60 +129,148 @@ Design questions the code raised, and their resolution:
   builder's pending question). `jig solve`'s own gate/fix-slice loop checks
   the same `NeedsHuman` list after every round and stops the same way,
   rather than re-dispatching the reviewer on a decision nothing in that
-  loop can make - fixed in fix round 1 (F3): before the fix, `jig solve`
-  read only the round's verdict, so an undecided ask kept the loop
-  re-dispatching a full reviewer session every round up to
-  `maxSolveRounds`, each one repeating the same unresolved ask, before
-  failing `GATE_ROUNDS_EXHAUSTED` without ever printing what needed a
-  human.
+  loop can make: before this, `jig solve` read only the round's verdict, so
+  an undecided ask kept the loop re-dispatching a full reviewer session
+  every round up to `maxSolveRounds`, each one repeating the same
+  unresolved ask, before failing `GATE_ROUNDS_EXHAUSTED` without ever
+  printing what needed a human.
+- The same missing-build-target rule covers a missing or stale oracle, not
+  only a missing workspace: a `fix` or kept `ask` finding whose recorded
+  oracle is empty or no longer one of the manifest's current oracle names
+  (the manifest changed between rounds) has no build target jig can
+  derive, and is routed as an ask the same way, whichever part is missing
+  (`routed_as: ask` when the reviewer called it a fix). When the reviewer
+  omits `oracle` and the manifest currently has exactly one, jig resolves
+  it to that oracle itself (there is no choice to make), so a finding
+  never records an empty oracle when the manifest has any oracle at all; a
+  recurrence keeps its earlier occurrence's resolved oracle when this
+  round names none. A manifest with zero oracles can never build any fix
+  slice at all, so that case is checked once, before triage, whenever the
+  round has a fix or ask to route (a human is never asked to triage
+  findings that were already going to fail regardless of the answer); its
+  error text says exactly that ("the manifest has no oracles"), and a
+  different message, naming the finding and the manifest's current
+  oracles, covers a manifest that does have oracles but none this finding
+  can use. At a terminal, keeping a no-workspace ask prompts for a
+  workspace; the equivalent oracle prompt is not implemented yet, so a
+  kept ask whose oracle cannot be resolved stays undecided even after an
+  explicit keep answer, the same as if stdin had closed before it could be
+  answered.
 - `findings.yaml` gains two additive fields beyond the design's base shape:
   `triage: human|auto` (who decided - a person at a terminal, or `--yes`/no
   terminal - absent for notes, dismissed repeats, and undecided asks) and
-  `decision` (the human's text for a kept ask). `routed_as` is written only
-  when jig routed a finding as `ask` although the reviewer's own `action`
-  said otherwise (the recurrence bound, or a no-workspace fix); the
-  persisted `action` always stays the reviewer's label. A round's `summary`
-  is persisted too. These fields exist so a later PR's eval gold can derive
-  from jig's own records instead of matching model prose.
+  `decision` (the human's text for a kept ask). `triage` is decided afresh
+  every round, from that round's own routing; `decision` is the human's
+  judgment about the finding itself, so it persists on a later occurrence
+  of the same finding - a recurrence keeps it from its earlier occurrence
+  when the finding's file is unchanged. `routed_as` is written only when
+  jig routed a finding as `ask` although the reviewer's own `action` said
+  otherwise (the recurrence bound, or a missing build target); the
+  persisted `action` always stays the reviewer's label. A round's
+  `summary` is persisted too. A repeat of an already-dismissed finding
+  carries none of this forward: `triage`, `decision` and `routed_as` reset
+  to empty, since that finding is not routed or triaged this round at
+  all. These fields exist so a later eval rework's gold can derive from
+  jig's own records instead of matching model prose.
 - The e2e case "an ask kept with a decision" needs a real terminal, which a
   subprocess pipe correctly is not. The decisive e2e test instead runs the
   full chain in-process through `cmd/jig`'s own `Main`, with the
   package-level `stdinIsTerminal` var overridden and a scripted stdin
   standing in for one; a smaller, genuinely subprocess-driven test in
   `e2e/` covers the actual non-terminal path (`DefaultTriage`).
-- Oracle rules: a `fix` or kept `ask` finding must name a manifest oracle
-  when the manifest declares more than one; with exactly one, an omitted
-  oracle is that oracle, since there is no choice to make; any oracle a
-  finding does name must be a real manifest oracle; a manifest with none
-  can never build a fix slice (`GATE_NO_ORACLE`) - there is no fallback.
+- Result validation (design 4.4): a `fix` or kept `ask` finding must name a
+  manifest oracle when the manifest declares more than one; with exactly
+  one, an omitted oracle is that oracle; any oracle a finding does name
+  must be a real manifest oracle. The parsed result itself decodes
+  strictly: an unknown field (top level or inside a finding), a
+  case-variant or literal duplicate of a known key, or a JSON `null` for
+  the whole document or for a non-object top level all fail the round; the
+  `findings` and `reviewed_paths` keys must be present, though either may
+  be an empty list, and a present-but-`null` value for either is still
+  accepted as empty (Go's own zero-value slice marshals that way, and
+  every test fixture that builds a result as a struct literal relies on
+  it).
 - Coverage lists (`must_review`, and the scope diff feeding it) come from
   `git diff --name-only -z --no-renames --diff-filter=AMT|D`, so a rename
   counts as its new path under "changed" and its old path under "deleted".
   `must_review` is the sorted, deduplicated union of the changed files and
   the files of open findings still present at head. Every path is
-  repo-relative with forward slashes; comparison normalizes a backslash
-  separator and a leading `./`, and rejects an empty path, an absolute
-  path (leading `/` or a drive letter), and any `..` segment.
+  repo-relative with forward slashes. A finding's own `file` is checked
+  strictly: comparison normalizes a backslash separator and a leading
+  `./`, and rejects an empty path, an absolute path (leading `/` or a
+  drive letter), and any `..` segment. Checking whether `reviewed_paths`
+  covers `must_review` is more forgiving, since it reads the reviewer's
+  own words rather than validating a finding's own field: an absolute
+  path that happens to fall inside the lease worktree is relativized to
+  it and counted as covering that file; any other entry that can't be
+  normalized this way (an absolute path outside the worktree, a `..`
+  segment, a path to something outside the diff entirely, such as the
+  brief) is ignored rather than failing the round - only a `must_review`
+  path left genuinely uncovered fails it.
 - Clearing (an open finding whose file was reviewed and not reported
-  again): only this round's *routed* findings (status `open` or `asked`)
-  in the same file block it from clearing. A dismissed repeat and a note
-  never block, so a dismissed finding re-reported in the same file as an
-  unrelated open finding cannot keep that open finding alive.
+  again): only this round's *routed* findings, in their final post-triage
+  status (`open` or `asked` - a finding the human dismisses at triage no
+  longer blocks anything), in the same file block it from clearing. A
+  dismissed repeat and a note never block, so a dismissed finding
+  re-reported in the same file as an unrelated open finding cannot keep
+  that open finding alive. An unreported open finding also clears outright
+  when its file no longer exists at head at all - checked directly against
+  the lease, not merely inferred from this round's own scope-diff deleted
+  list, so a file deleted in an earlier round still clears a finding
+  reported in a later delta round that never mentions it.
 - A finding recurs only through the reviewer's own `prior`, never by title
-  matching. The first recurrence routes like a new finding, with the
-  previous fix slice named in the new slice's goal (by id, plus its last
-  attempt's own recorded summary when one exists). The second recurrence
-  always routes to a human as `ask`, whatever the reviewer's label - the
-  same failure surviving one fix slice already is jig's stall concept
-  applied to review.
-- Clean without dispatch: when the scope diff touches nothing and no
-  finding is outstanding, jig writes a clean round without ever
-  dispatching a reviewer session, since the previous review already
-  covers head.
+  matching. A recurrence is counted - its recurrence count goes up, and
+  the bound below can trigger - only once a fix slice that already
+  records the finding's id (the structural `findings:` link, not a parsed
+  slice id) has gone green; a finding re-reported while its fix slice is
+  still queued or building (or while none exists for it yet at all, as an
+  undecided ask re-reported, or a round run with `--early`, can both
+  produce) updates in place at its current count instead. The first
+  counted recurrence routes like a new finding, with the previous fix
+  slice named in the new slice's goal (by id, plus its last attempt's own
+  recorded summary when one exists). The second counted recurrence always
+  routes to a human as `ask`, whatever the reviewer's label - the same
+  failure surviving one fix slice already is jig's stall concept applied
+  to review. A `note` label on a recurring finding does not exempt it
+  from the bound: a finding whose earlier occurrence was `open` or `asked`
+  can legitimately recur as a `note` ("still there but harmless now") and
+  still be forced to `ask` on its second counted recurrence, so rule 1
+  always carries the earlier occurrence's `oracle` forward when this
+  round's own report names none - otherwise a recurrence forced to `ask`
+  by the bound could have nothing to build a fix slice with even after a
+  human keeps it. What can never happen is `prior` naming a *noted*
+  finding as its target: a note leaves the open set on its very first
+  occurrence, and `prior` may only legitimately name an id under `open`,
+  `asked`, or `dismissed` (validated).
+- Clean without dispatch: when the scope diff changes no file at all (none
+  added, modified, or deleted) and no finding is outstanding, jig writes a
+  clean round without ever dispatching a reviewer session, since the
+  previous review already covers head. A deletion-only diff is not this
+  case: it still dispatches, since a deleted file can itself be worth
+  reviewing (whether removing it broke something that depended on it, for
+  instance).
 - Slice ids: a fix batch is `fix-<round>-<workspace>-<oracle>`, a kept ask
   is `fix-<round>-<finding id>`; both are sanitized to
   `[A-Za-z0-9._-]` and, on a collision, disambiguated with the lowest
   unused `-2`, `-3`, ... suffix.
+- A kept ask's fix-slice goal states plainly whether a person actually
+  decided it: "kept by the human" only when the finding's own recorded
+  `triage` field says a person at a terminal did, and "kept with no human
+  decision (--yes or no terminal)" otherwise - read from that field rather
+  than hardcoded, so an auto-kept ask never tells the builder session a
+  human made a call that nobody actually made.
+- A reviewer-reported `action` outside `fix`/`ask`/`note` is a programming
+  error, surfaced as an error up the call chain, the same as any other
+  malformed result; it is never silently treated as `note`. Likewise, a
+  finding `file` jig cannot normalize to a repo-relative path is an
+  error, never kept with its raw, unvalidated value.
+- `gitx.FileExistsAtRev` resolves the rev first, so a bad rev is reported
+  as an error rather than folded into "the path doesn't exist"; only then
+  does it check the path, returning true for a blob, false for a path
+  genuinely absent at that rev (read from git's own "does not exist in"
+  message), and, for any other `cat-file` failure, an error rather than
+  another false - a directory (a tree, not a blob) is `false`, matching
+  the doc's "exists as a file", not merely "exists".
 - Compatibility with the old scripted (`--scenario`) path: `jig gate` had
   no `--backend` flag before this rework, so its scripted source still
   runs exactly as before iff `--scenario` is set and `--backend` is not -
@@ -190,47 +278,26 @@ Design questions the code raised, and their resolution:
   `--backend`, so its own rule differs: the scripted source runs iff
   `--scenario` is set, whatever `--backend` says.
 
-Deviations recorded during the build, beyond what the design and digest
-already called out (their own rationale is in `reports/B1-S*.md` in the
-run's own records):
+Deviations recorded during the build, beyond what the design already
+covers:
 
-- `Gate`'s `RoundInput.BriefPath` was, for one stage, always the ticket's
-  own `brief.md`; a `--branch --doc` round needs the `--doc` file itself,
-  absolute, matching PR #8's own recorded reasoning (pointing at this
-  round's own `gate/round-N/spec-input.md` would leave a partial round dir
-  if the reviewer then failed, since that file is written only once the
-  round succeeds). Caught by a main-loop review between stages and fixed
-  the same stage `routed_as` and the `findings.md` verdict wording were.
-- `findings.md` no longer prints "clean" for a round that is not clean
-  (a round with nothing new to report but something still open or asked
-  from an earlier round used to hit the same, always-wrong `len(findings)
-  == 0` shortcut); it now prints the round's own recorded verdict, and
-  "nothing new this round" when that verdict isn't clean but nothing was
-  reported. The exact wording is this build's own choice; the design and
-  digest specify only that "clean" must never appear for a non-clean
-  round.
-- The recurrence bound (second recurrence forces `ask`) is applied
-  unconditionally once `recurrences >= 2`, whatever this round's own label
-  is (design 5.3: "whatever the reviewer's label"), including `note`: a
-  finding whose earlier occurrence was `open` or `asked` can legitimately
-  recur as a `note` ("still there but harmless now") and still be forced to
-  `ask` on its second recurrence. What can never happen is `prior` naming a
-  *noted* finding as its target: a note leaves the open set on its very
-  first occurrence, and `prior` may only legitimately name an id under
-  `open`, `asked`, or `dismissed` (validated). Rule 1 carries the earlier
-  occurrence's `oracle` forward when this round's finding names none, so a
-  recurrence forced to `ask` by the bound still has one to build a fix
-  slice with even when the reviewer's own report this round is a bare
-  `note`.
-- `Gate`'s clean-vs-fix-slices verdict for a reviewer round is derived
-  from findings bookkeeping's own post-round fold, not from whether a
-  reviewer session actually dispatched. This is required for the "clean
-  without dispatch" shortcut to report correctly (that shortcut always
-  succeeds, so a verdict keyed on "did a session run" would call every
-  such round fix-slices).
-- The interactive triage prompt's exact wording is this build's own design:
-  the design and digest specify the *behavior* (batch accept or dismiss by
-  id, an ask's keep-or-dismiss with an optional decision, the no-workspace
+- `Gate`'s `RoundInput.BriefPath` was, for one stage of the build, always
+  the ticket's own `brief.md`; a `--branch --doc` round needs the `--doc`
+  file itself, absolute, matching PR #8's own recorded reasoning (pointing
+  at this round's own `gate/round-N/spec-input.md` would leave a partial
+  round dir if the reviewer then failed, since that file is written only
+  once the round succeeds). This was corrected before it shipped, the same
+  way `routed_as` and the `findings.md` verdict wording were below.
+- `findings.md` never prints "clean" for a round that is not clean (a
+  round with nothing new to report but something still open or asked from
+  an earlier round used to hit the same, always-wrong `len(findings) == 0`
+  shortcut): it prints the round's own recorded verdict, and "nothing new
+  this round" when that verdict isn't clean but nothing was reported. The
+  exact wording here is this build's own choice; only that "clean" never
+  appears for a non-clean round is required.
+- The interactive triage prompt's exact wording is this build's own
+  design: the behavior is specified (batch accept or dismiss by id, an
+  ask's keep-or-dismiss with an optional decision, the no-workspace
   prompt, EOF semantics) but not literal strings. Each ask's answer syntax
   is explicit rather than inferred from free text: `n`/`no`/`d`/`dismiss`
   dismisses, and only `k`/`keep`/Enter keeps - an answer that is none of
@@ -239,36 +306,33 @@ run's own records):
   skips it). An earlier draft treated any answer that wasn't exactly
   `d`/`dismiss` as an implicit keep, with the typed text becoming the
   decision - so "no" kept the ask, with "no" itself recorded as the
-  human's decision. Fixed in fix round 1 (F17): keep must now be said
-  explicitly.
-- Design 6.4 ("Findings are always shown sorted by risk, high first, each
-  with its rationale") applies to every place a finding reaches a human,
-  not only the fix batch table: fixed in fix round 1 (F10b) to also cover
-  the notes table, the ask prompt (file:line, detail and risk rationale,
-  not the title alone), and the gate report's own findings and
-  needs_a_human tables (already sorted by risk then id; F10b adds the
-  missing file:line and risk_rationale columns).
+  human's decision. This was corrected: keep must now be said explicitly.
+- Every place a finding reaches a human shows it with file:line, detail
+  and risk rationale, sorted by risk high first, not the title alone: the
+  ask prompt, the notes table, the fix batch table, and the gate report's
+  own findings and needs_a_human tables (already sorted by risk then id).
 - `--yes`/non-terminal triage's one-line note (`DefaultTriage`, run by
-  `triageFor`) printed unconditionally, including for a dispatched reviewer
-  round that routed nothing at all, and always claimed "kept every fix and
-  workspace ask" even when a no-workspace ask (Q1) was left undecided -
-  fixed in fix round 1 (F16): the note is now printed only when there was
-  something to triage, and states how many no-workspace asks were left for
-  a human instead of claiming they were kept.
-- `TestGateReviewerRoundsThroughMain`'s round 2 previously only asserted
-  that the kept ask `r1-f3` was absent from round 2's own report and
-  findings table - true whether or not it actually cleared, since that
-  table lists only findings reported that round. Fixed in fix round 1
-  (F6): the test now reads round 2's own `findings.yaml` `cleared` list
-  directly and requires `r1-f3` in it; confirmed to fail against a Q6
-  mutant (a dismissed repeat blocking clearing) that the old assertion let
-  through.
-- Q10's `jig gate`/`jig solve` compatibility rule (above) had no test
-  pinning either half - fixed in fix round 1 (F18) with unit tests on
-  `gateSourceFor` and `gateSourceForSolve` asserting the returned
-  `GateSource`'s concrete type (scripted vs. reviewer) for each flag
-  combination, via `%T` rather than reaching into verifydeliver's
-  unexported types.
+  `triageFor`) is printed only when this round actually had a fix or ask
+  to triage; a note is never triaged, so a notes-only round prints none
+  either, and a round that routed nothing at all (e.g. a dispatched
+  reviewer round with nothing new to report) prints none. It never claims
+  an ask was kept when it was actually left undecided: the count of how
+  many are left for a human is read straight from what `DefaultTriage`'s
+  own result leaves undecided (an ask id absent from its `Asks` map), not
+  re-derived from the ask's `Workspace` field alone, so the message can
+  never drift out of step with what `DefaultTriage` itself decides.
+- `TestGateReviewerRoundsThroughMain`'s round 2 assertions previously only
+  checked that the kept ask `r1-f3` was absent from round 2's own report
+  and findings table - true whether or not it actually cleared, since that
+  table lists only findings reported that round. The test now reads round
+  2's own `findings.yaml` `cleared` list directly and requires `r1-f3` in
+  it; confirmed to fail against a mutant that lets a dismissed repeat
+  block clearing, which the old assertion let through.
+- The `jig gate`/`jig solve` compatibility rule (above) had no test
+  pinning either half; unit tests on `gateSourceFor` and
+  `gateSourceForSolve` now assert the returned `GateSource`'s concrete
+  type (scripted vs. reviewer) for each flag combination, via `%T` rather
+  than reaching into verifydeliver's unexported types.
 - The scope base anchor for a full-scope round prefers `merge-base(origin/
   <target>, HEAD)` over the ticket's recorded start sha, falling back to
   the start sha only when the merge-base lookup itself fails (no such
@@ -281,19 +345,18 @@ run's own records):
   the store before retrying that round. The actual blocker is the tracked
   `journal.ndjson`: `Gate` appends its `gate-open` line before dispatching
   the round at all, and a `REVIEW_INVALID` result returns before `Gate`'s
-  own `Store.Push`, so that line is left committed to the working tree but
-  not pushed - the store's next `Sync` (`git pull --rebase`) then refuses
-  over it once a remote exists. `Gate` also writes `work/gate.round-N.*.json`
+  own `Store.Push`, so that line is left written to the working tree but
+  not committed - the store's next `Sync` (`git pull --rebase`) then
+  refuses over it once a remote exists. `Gate` also writes `work/gate.round-N.*.json`
   to the store's working copy before validating a result and leaves those
   uncommitted the same way, but they are untracked cruft under the store's
   `work/` tree and do not by themselves block a rebase pull; a store whose
   only leftover was untracked files would pull cleanly. The underlying gap -
   `Store.Sync` not committing its own leftovers before it pulls - is a
-  separate branch's fix (`gate-split`), not this one's, and applies equally
-  to any oracle failure after `gate-open` on `main` today, not only to a
-  reviewer round; the test's workaround matches what an operator would do
-  by hand and becomes a no-op, not wrong, once that fix reaches this
-  branch.
+  separate, not-yet-landed fix, not this one's, and applies equally to any
+  oracle failure after `gate-open` on `main` today, not only to a reviewer
+  round; the test's workaround matches what an operator would do by hand
+  and becomes a no-op, not wrong, once that fix reaches this branch.
 
 ## CLI
 

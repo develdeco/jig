@@ -166,18 +166,21 @@ round loudly rather than falling back to a partial result.
 Findings bookkeeping (`findings.go`) then folds the round onto the
 cumulative state: a finding's identity across rounds lives only in its own
 `prior` field, an open finding clears when its file was reviewed and
-nothing routed reported it again, and a finding recurring for the second
-time is routed to a human regardless of the reviewer's own label. Routing
-(`route.go`) first runs triage over this round's `fix` batch and `ask`
-findings - a human at a terminal decides the batch (accept all, or list
-ids to dismiss) and each `ask` (keep, with an optional decision, or
-dismiss); `--yes` or a non-terminal stdin runs `DefaultTriage` instead
-(every fix kept, every `ask` with a derived workspace kept, one left
-undecided when its file lies in no declared workspace) - then turns every
-kept finding into a fix slice: one per workspace and oracle for the kept
-fixes, one each for a kept `ask`. Routing and triage both finish, and
-every fix slice from them is appended, before `Gate` pushes the store - so
-a round is never partially applied.
+nothing routed reported it again, or when its file no longer exists at
+head at all (checked directly against the lease, whatever this round's
+own scope diff says), and a finding recurring for the second time - once
+a fix slice built for it has actually gone green - is routed to a human
+regardless of the reviewer's own label. Routing (`route.go`) first runs
+triage over this round's `fix` batch and `ask` findings - a human at a
+terminal decides the batch (accept all, or list ids to dismiss) and each
+`ask` (keep, with an optional decision, or dismiss); `--yes` or a
+non-terminal stdin runs `DefaultTriage` instead (every fix kept, every
+`ask` with a full build target - a derived workspace and a resolvable
+oracle - kept, one left undecided when either part is missing) - then
+turns every kept finding into a fix slice: one per workspace and oracle
+for the kept fixes, one each for a kept `ask`. Routing and triage both
+finish, and every fix slice from them is appended, before `Gate` pushes
+the store - so a round is never partially applied.
 
 ## Safety
 
