@@ -205,6 +205,34 @@ func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 	}
 }
 
+// TestRouteRoundAutoKeptAskGoalDoesNotClaimAHumanDecided is F8: DefaultTriage
+// keeps a workspace ask with no human involved (Triage: auto), and the fix
+// slice goal it builds must say so rather than "kept by the human".
+func TestRouteRoundAutoKeptAskGoalDoesNotClaimAHumanDecided(t *testing.T) {
+	st := newReviewStore(t)
+	man := oneOracleManifest()
+	reported := []Finding{
+		{ID: "r1-f1", File: "a.go", Title: "needs a call", RiskRationale: "r", Action: ActionAsk, Workspace: "root", Status: StatusAsked},
+	}
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, man) // nil = DefaultTriage
+	if err != nil {
+		t.Fatalf("routeRound: %v", err)
+	}
+	if len(slices) != 1 {
+		t.Fatalf("slices = %v, want 1", sliceIDs(slices))
+	}
+	f := findFinding(routed, "r1-f1")
+	if f.Triage != TriageAuto {
+		t.Fatalf("Triage = %q, want auto", f.Triage)
+	}
+	if contains(slices[0].Goal, "kept by the human") {
+		t.Errorf("goal claims a human decided an auto-kept ask:\n%s", slices[0].Goal)
+	}
+	if !contains(slices[0].Goal, "no human decision") {
+		t.Errorf("goal does not say a human did not decide:\n%s", slices[0].Goal)
+	}
+}
+
 func TestRouteRoundDismissedAskNeverBuildsASlice(t *testing.T) {
 	st := newReviewStore(t)
 	man := oneOracleManifest()
@@ -326,6 +354,51 @@ func TestRouteRoundNoOracleManifestFailsGateNoOracle(t *testing.T) {
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "GATE_NO_ORACLE" {
 		t.Fatalf("err = %v, want *axi.Error GATE_NO_ORACLE", err)
+	}
+}
+
+// TestRouteRoundNoOracleManifestFailsBeforeTriage is F9's second half: a
+// zero-oracle manifest fails GATE_NO_ORACLE before the triage hook ever
+// runs, so a human at a terminal is never asked to decide a fix or ask that
+// can never build a slice - and never has their answer discarded when
+// routing then fails anyway.
+func TestRouteRoundNoOracleManifestFailsBeforeTriage(t *testing.T) {
+	st := newReviewStore(t)
+	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}} // zero oracles
+	reported := []Finding{
+		{ID: "r1-f1", File: "a.go", Title: "t", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
+		{ID: "r1-f2", File: "b.go", Title: "t2", RiskRationale: "r", Action: ActionAsk, Workspace: "root", Status: StatusAsked},
+	}
+	called := false
+	triage := func(TriageInput) TriageResult {
+		called = true
+		return TriageResult{}
+	}
+	_, _, err := routeRound(1, st, "T-1", nil, reported, triage, man)
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "GATE_NO_ORACLE" {
+		t.Fatalf("err = %v, want *axi.Error GATE_NO_ORACLE", err)
+	}
+	if called {
+		t.Error("the triage hook ran despite a zero-oracle manifest that can never route anything")
+	}
+}
+
+// TestRouteRoundNoOracleManifestWithOnlyNotesDoesNotFail is the other half:
+// a zero-oracle manifest with nothing to route (only notes) has nothing
+// GATE_NO_ORACLE needs to protect, so it must not fail the round at all.
+func TestRouteRoundNoOracleManifestWithOnlyNotesDoesNotFail(t *testing.T) {
+	st := newReviewStore(t)
+	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}} // zero oracles
+	reported := []Finding{
+		{ID: "r1-f1", File: "a.go", Title: "t", RiskRationale: "r", Action: ActionNote, Status: StatusNoted},
+	}
+	_, slices, err := routeRound(1, st, "T-1", nil, reported, nil, man)
+	if err != nil {
+		t.Fatalf("routeRound: %v, want no error (nothing to route)", err)
+	}
+	if len(slices) != 0 {
+		t.Fatalf("slices = %v, want none", sliceIDs(slices))
 	}
 }
 

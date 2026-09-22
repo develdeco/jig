@@ -59,7 +59,7 @@ type TriageResult struct {
 // (design 6.1-6.4, D-1, D-2): it decides which fix findings to keep, and
 // keeps or dismisses each ask. It performs no IO of its own - cmd wires
 // stdin/stdout through a closure it builds. A nil Triage means
-// defaultTriage.
+// DefaultTriage.
 type Triage func(TriageInput) TriageResult
 
 // DefaultTriage is what runs when a GateOpts.Triage hook is nil, and what
@@ -123,6 +123,22 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 	sortByRiskThenID(asks)
 	sortByRiskThenID(notes)
 
+	// GATE_NO_ORACLE (Q4) is checked before triage, not after: a manifest
+	// with zero oracles can never build a fix slice for anything, so asking
+	// a human to keep or dismiss a fix or ask first - only to discard every
+	// answer once building the slice fails - wastes their judgment on a
+	// round that was already going to fail. "The manifest has no oracles"
+	// is reserved for exactly this case; a finding that individually lacks
+	// an oracle in a manifest that does have some is a different, narrower
+	// failure inside buildFixSlices (oracleForFinding).
+	oracleNames := sortedOracleNames(man)
+	if len(oracleNames) == 0 && (len(fixes) > 0 || len(asks) > 0) {
+		return nil, nil, &axi.Error{
+			Msg:  "cannot build a fix slice, the manifest has no oracles",
+			Code: "GATE_NO_ORACLE",
+		}
+	}
+
 	result := triage(TriageInput{Fixes: fixes, Asks: asks, Notes: notes, Manifest: man})
 
 	fixTriage := TriageAuto
@@ -173,7 +189,7 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 		keptAsks = append(keptAsks, reported[i])
 	}
 
-	slices, err := buildFixSlices(round, st, ticket, existingSlices, keptFixes, keptAsks, man)
+	slices, err := buildFixSlices(round, st, ticket, existingSlices, keptFixes, keptAsks, oracleNames)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -233,6 +249,19 @@ func previousFixSliceSummary(st *store.Store, ticket, sliceID string) string {
 		return ""
 	}
 	return res.Summary
+}
+
+// keptAskHeader phrases a kept ask's fix-slice goal from its recorded
+// Triage (design 6.2, Q2): the builder must never be told a person decided
+// when nobody did, since that is exactly the guessing the ask label exists
+// to prevent (design 1). "kept by the human" only when a person at a
+// terminal actually decided it; a plain, named default otherwise (--yes or
+// no terminal, B1's interim keep, design 6.2).
+func keptAskHeader(triage string) string {
+	if triage == TriageHuman {
+		return "kept by the human"
+	}
+	return "kept with no human decision (--yes or no terminal)"
 }
 
 // findingGoalBlock renders one finding's contribution to a fix slice's
@@ -309,10 +338,10 @@ func disambiguateFixSliceIDs(slices []store.Slice) {
 // 6.1, 6.2, Q9): keptFixes group one slice per (workspace, oracle);
 // keptAsks each become their own slice, carrying the human's decision.
 // existingSlices is the ticket's slices.yaml as of before this round, used
-// only to look up a recurrence's previous fix slice (Q7).
-func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []store.Slice, keptFixes, keptAsks []Finding, man manifest.Manifest) ([]store.Slice, error) {
-	oracleNames := sortedOracleNames(man)
-
+// only to look up a recurrence's previous fix slice (Q7). oracleNames is
+// the manifest's sorted oracle names, computed once by the caller (Q4's
+// zero-oracle check already ran on it before triage).
+func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []store.Slice, keptFixes, keptAsks []Finding, oracleNames []string) ([]store.Slice, error) {
 	type groupKey struct{ workspace, oracle string }
 	groups := map[groupKey][]Finding{}
 	var order []groupKey
@@ -361,7 +390,7 @@ func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []
 		if err != nil {
 			return nil, err
 		}
-		goal := fmt.Sprintf("Gate finding %s, kept by the human:\n\n%s", f.ID, findingGoalBlock(f, st, ticket, existingSlices))
+		goal := fmt.Sprintf("Gate finding %s, %s:\n\n%s", f.ID, keptAskHeader(f.Triage), findingGoalBlock(f, st, ticket, existingSlices))
 		out = append(out, store.Slice{
 			ID:        sanitizeSliceID(fmt.Sprintf("fix-%d-%s", round, f.ID)),
 			Workspace: f.Workspace,
