@@ -45,7 +45,7 @@ func TestTriageForYesKeepsEverythingWithoutTouchingStdin(t *testing.T) {
 		t.Errorf("Asks[r1-f3] = %+v, want kept (has a workspace)", res.Asks["r1-f3"])
 	}
 	if _, ok := res.Asks["r1-f4"]; ok {
-		t.Errorf("Asks[r1-f4] decided, want undecided (Q1: no workspace)")
+		t.Errorf("Asks[r1-f4] decided, want undecided (no workspace)")
 	}
 	if !strings.Contains(out.String(), "--yes") {
 		t.Fatalf("stdout missing the --yes note line:\n%s", out.String())
@@ -64,10 +64,10 @@ func TestTriageForNonTerminalNeverPrompts(t *testing.T) {
 	}
 }
 
-// TestTriageForYesNothingToTriagePrintsNoNoteLine pins F16/N-6: a round
-// that routed no fix, ask or note at all (e.g. a dispatched reviewer round
-// with nothing new to report) must not print a triage note line - there
-// was nothing to triage.
+// TestTriageForYesNothingToTriagePrintsNoNoteLine pins the rule that a
+// round that routed no fix, ask or note at all (e.g. a dispatched reviewer
+// round with nothing new to report) must not print a triage note line -
+// there was nothing to triage.
 func TestTriageForYesNothingToTriagePrintsNoNoteLine(t *testing.T) {
 	var out bytes.Buffer
 	f := triageFor(true, strings.NewReader(""), &out)
@@ -77,8 +77,21 @@ func TestTriageForYesNothingToTriagePrintsNoNoteLine(t *testing.T) {
 	}
 }
 
-// TestTriageForYesUndecidedAskDoesNotClaimKept pins F16/N-6: the note line
-// must never say every ask was kept when a no-workspace ask (Q1) was left
+// TestTriageForYesNotesOnlyPrintsNoNoteLine pins the rule that a note is
+// never triaged (design 6.3): a round that routed only notes, no fix or
+// ask, must not print a triage note line either, even though its input is
+// non-empty.
+func TestTriageForYesNotesOnlyPrintsNoNoteLine(t *testing.T) {
+	var out bytes.Buffer
+	f := triageFor(true, strings.NewReader(""), &out)
+	f(verifydeliver.TriageInput{Notes: []verifydeliver.Finding{{ID: "r1-f5", Risk: "low", Title: "just fyi"}}})
+	if strings.Contains(out.String(), "triage:") {
+		t.Fatalf("stdout has a triage note line for a notes-only round:\n%s", out.String())
+	}
+}
+
+// TestTriageForYesUndecidedAskDoesNotClaimKept pins the rule that the note
+// line must never say every ask was kept when a no-workspace ask was left
 // undecided; it says how many are left for a human instead.
 func TestTriageForYesUndecidedAskDoesNotClaimKept(t *testing.T) {
 	var out bytes.Buffer
@@ -88,7 +101,7 @@ func TestTriageForYesUndecidedAskDoesNotClaimKept(t *testing.T) {
 	if strings.Contains(line, "kept every fix and workspace ask (--yes)") {
 		t.Fatalf("stdout falsely claims every ask was kept:\n%s", line)
 	}
-	if !strings.Contains(line, "1 ask(s) with no workspace left for a human") {
+	if !strings.Contains(line, "1 ask(s) left for a human") {
 		t.Fatalf("stdout missing the undecided-ask count:\n%s", line)
 	}
 }
@@ -188,9 +201,9 @@ func TestInteractiveTriageAskEnterAloneKeeps(t *testing.T) {
 	}
 }
 
-// TestInteractiveTriageAskShowsFileLineDetailAndRationale pins F10b (design
-// 6.4: "each with its rationale"): the ask prompt must show enough to
-// decide on, not the title alone.
+// TestInteractiveTriageAskShowsFileLineDetailAndRationale pins the rule
+// that a finding is always shown with its rationale: the ask prompt must
+// show enough to decide on, not the title alone.
 func TestInteractiveTriageAskShowsFileLineDetailAndRationale(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{
@@ -216,7 +229,7 @@ func TestInteractiveTriageAskDismiss(t *testing.T) {
 	}
 }
 
-// TestInteractiveTriageAskNoDismisses pins F17/N-10: "n" and "no" must
+// TestInteractiveTriageAskNoDismisses pins the rule that "n" and "no" must
 // dismiss, not silently keep with "n"/"no" as the decision text.
 func TestInteractiveTriageAskNoDismisses(t *testing.T) {
 	for _, word := range []string{"n", "no", "No", "N"} {
@@ -232,9 +245,9 @@ func TestInteractiveTriageAskNoDismisses(t *testing.T) {
 	}
 }
 
-// TestInteractiveTriageAskUnrecognizedAnswerReprompts pins F17: free text
-// that is not one of the keep/dismiss tokens is never read as an implicit
-// keep-with-decision; it reprompts until a real answer arrives.
+// TestInteractiveTriageAskUnrecognizedAnswerReprompts pins the rule that
+// free text that is not one of the keep/dismiss tokens is never read as an
+// implicit keep-with-decision; it reprompts until a real answer arrives.
 func TestInteractiveTriageAskUnrecognizedAnswerReprompts(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
@@ -248,7 +261,7 @@ func TestInteractiveTriageAskUnrecognizedAnswerReprompts(t *testing.T) {
 	}
 }
 
-func TestInteractiveTriageAskWorkspacePromptForQ1(t *testing.T) {
+func TestInteractiveTriageAskWorkspacePromptForNoWorkspaceAsk(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks:     []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}}, // no Workspace
@@ -288,7 +301,7 @@ func TestInteractiveTriageAskEOFOnWorkspacePromptLeavesItUndecided(t *testing.T)
 	}
 	res := interactiveTriage(in, strings.NewReader("k\n"), &out) // EOF right at the workspace prompt
 	if _, ok := res.Asks["r1-f4"]; ok {
-		t.Errorf("Asks[r1-f4] decided, want undecided (Q1: EOF cannot supply a workspace judgment)")
+		t.Errorf("Asks[r1-f4] decided, want undecided (EOF cannot supply a workspace judgment)")
 	}
 }
 

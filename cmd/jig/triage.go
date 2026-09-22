@@ -55,29 +55,32 @@ func triageFor(yes bool, stdin io.Reader, stdout io.Writer) verifydeliver.Triage
 }
 
 // defaultTriageWithNote runs verifydeliver.DefaultTriage and, only when this
-// round actually had a fix, ask or note to triage, prints one line saying
-// why nothing was prompted for (why is "--yes" or "stdin is not a
-// terminal"). A round that routed nothing (e.g. a dispatched reviewer round
-// that turned up nothing new) prints no note at all. It never claims a
-// no-workspace ask was kept: DefaultTriage leaves those undecided (Q1), so
-// the line instead says how many are left for a human to decide.
+// round actually had a fix or ask to triage, prints one line saying why
+// nothing was prompted for (why is "--yes" or "stdin is not a terminal").
+// A note is never triaged, so a notes-only round prints no note either,
+// and a round that routed nothing at all (e.g. a dispatched reviewer round
+// that turned up nothing new) prints none. It never claims an ask was
+// kept when DefaultTriage actually left it undecided: undecided is
+// counted straight from what DefaultTriage's own result leaves out of
+// Asks, rather than re-deriving DefaultTriage's own workspace/oracle rule
+// here, so the two can never drift apart.
 func defaultTriageWithNote(in verifydeliver.TriageInput, stdout io.Writer, why string) verifydeliver.TriageResult {
-	total := len(in.Fixes) + len(in.Asks) + len(in.Notes)
-	if total == 0 {
+	if len(in.Fixes) == 0 && len(in.Asks) == 0 {
 		return verifydeliver.DefaultTriage(in)
 	}
+	result := verifydeliver.DefaultTriage(in)
 	undecided := 0
 	for _, f := range in.Asks {
-		if f.Workspace == "" {
+		if _, decided := result.Asks[f.ID]; !decided {
 			undecided++
 		}
 	}
 	if undecided > 0 {
-		fmt.Fprintf(stdout, "triage: kept every fix and workspace ask; %d ask(s) with no workspace left for a human (%s)\n", undecided, why)
+		fmt.Fprintf(stdout, "triage: kept every fix and workspace ask; %d ask(s) left for a human (%s)\n", undecided, why)
 	} else {
 		fmt.Fprintf(stdout, "triage: kept every fix and workspace ask (%s)\n", why)
 	}
-	return verifydeliver.DefaultTriage(in)
+	return result
 }
 
 // interactiveTriage runs design 6.4's terminal flow over a single
@@ -90,11 +93,12 @@ func defaultTriageWithNote(in verifydeliver.TriageInput, stdout io.Writer, why s
 //     "d"/"dismiss" dismisses it; only an explicit "k"/"keep"/Enter keeps
 //     it, and a kept ask is then asked for its decision text on its own
 //     prompt (optional, Enter skips it). A no-workspace ask additionally
-//     prompts for a manifest workspace id before it can be kept (Q1).
+//     prompts for a manifest workspace id before it can be kept.
 //   - stdin closing at any point keeps every remaining fix and every
 //     remaining ask that already has a workspace (auto, not human); a
-//     remaining no-workspace ask stays undecided (Q1), since keeping it
-//     needs a judgment nothing here can supply once stdin is gone.
+//     remaining no-workspace ask stays undecided, since keeping it
+//     needs a judgment nothing here can supply once stdin is gone. The
+//     stdin-closed note names how many such asks were left for a human.
 func interactiveTriage(in verifydeliver.TriageInput, stdin io.Reader, stdout io.Writer) verifydeliver.TriageResult {
 	r := bufio.NewReader(stdin)
 	result := verifydeliver.TriageResult{
@@ -128,7 +132,7 @@ func interactiveTriage(in verifydeliver.TriageInput, stdin io.Reader, stdout io.
 			trimmed := strings.TrimSpace(line)
 			if err != nil && trimmed == "" {
 				eof = true
-				fmt.Fprintln(stdout, "triage: stdin closed; keeping every remaining fix and workspace ask")
+				eofNote(stdout, in.Asks)
 				break
 			}
 			if trimmed == "" {
@@ -156,7 +160,7 @@ func interactiveTriage(in verifydeliver.TriageInput, stdin io.Reader, stdout io.
 	}
 
 askLoop:
-	for _, f := range in.Asks {
+	for i, f := range in.Asks {
 		if eof {
 			if f.Workspace != "" {
 				result.Asks[f.ID] = verifydeliver.AskOutcome{Keep: true, Workspace: f.Workspace}
@@ -179,7 +183,7 @@ askLoop:
 			trimmed := strings.TrimSpace(line)
 			if err != nil && trimmed == "" {
 				eof = true
-				fmt.Fprintln(stdout, "triage: stdin closed; keeping every remaining fix and workspace ask")
+				eofNote(stdout, in.Asks[i:])
 				if f.Workspace != "" {
 					result.Asks[f.ID] = verifydeliver.AskOutcome{Keep: true, Workspace: f.Workspace}
 				}
@@ -211,10 +215,10 @@ askLoop:
 			got, wsEOF := promptWorkspace(in.Manifest, r, stdout)
 			if wsEOF {
 				eof = true
-				fmt.Fprintln(stdout, "triage: stdin closed; keeping every remaining fix and workspace ask")
-				// f cannot be kept without a workspace judgment (Q1);
-				// leave it undecided rather than build a slice with no
-				// build target.
+				eofNote(stdout, in.Asks[i:])
+				// f cannot be kept without a workspace judgment; leave it
+				// undecided rather than build a slice with no build
+				// target.
 				continue askLoop
 			}
 			ws = got
@@ -225,9 +229,35 @@ askLoop:
 	return result
 }
 
-// promptWorkspace asks for one of man's declared workspace ids (Q1: a kept
+// undecidedAskCount reports how many of asks would be left for a human
+// after stdin closes: one that already has a declared workspace is kept
+// automatically, the same way DefaultTriage keeps it; one with no
+// declared workspace cannot be, since that judgment needs a human and
+// none is left to ask.
+func undecidedAskCount(asks []verifydeliver.Finding) int {
+	n := 0
+	for _, f := range asks {
+		if f.Workspace == "" {
+			n++
+		}
+	}
+	return n
+}
+
+// eofNote prints the stdin-closed note, naming how many of the not-yet-
+// decided asks in remaining are left for a human because they have no
+// declared workspace.
+func eofNote(stdout io.Writer, remaining []verifydeliver.Finding) {
+	if n := undecidedAskCount(remaining); n > 0 {
+		fmt.Fprintf(stdout, "triage: stdin closed; keeping every remaining fix and workspace ask; %d ask(s) with no workspace left for a human\n", n)
+	} else {
+		fmt.Fprintln(stdout, "triage: stdin closed; keeping every remaining fix and workspace ask")
+	}
+}
+
+// promptWorkspace asks for one of man's declared workspace ids: a kept
 // ask whose file lies in no declared workspace needs the human's choice
-// before it can become a fix slice). eof is true when stdin closed before
+// before it can become a fix slice. eof is true when stdin closed before
 // a valid id arrived.
 func promptWorkspace(man manifest.Manifest, r *bufio.Reader, stdout io.Writer) (id string, eof bool) {
 	ids := make([]string, len(man.Workspaces))
