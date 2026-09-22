@@ -420,7 +420,7 @@ func TestRenderFindingsMDSortsByRiskHighFirst(t *testing.T) {
 		{ID: "r1-f2", Title: "high one", Risk: RiskHigh, RiskRationale: "r", Status: StatusOpen},
 		{ID: "r1-f3", Title: "medium one", Risk: RiskMedium, RiskRationale: "r", Status: StatusOpen},
 	}
-	md := renderFindingsMD(1, "a summary", findings)
+	md := renderFindingsMD(1, "fix-slices", "a summary", findings, nil)
 	first := indexOf(md, "high one")
 	second := indexOf(md, "medium one")
 	third := indexOf(md, "low one")
@@ -433,9 +433,40 @@ func TestRenderFindingsMDSortsByRiskHighFirst(t *testing.T) {
 }
 
 func TestRenderFindingsMDCleanWhenNoFindings(t *testing.T) {
-	md := renderFindingsMD(2, "", nil)
+	md := renderFindingsMD(2, "clean", "", nil, nil)
 	if indexOf(md, "clean") < 0 {
 		t.Errorf("findings.md = %q, want it to say clean", md)
+	}
+}
+
+// TestRenderFindingsMDNeverSaysCleanForANonCleanRound guards the main-loop
+// review's finding on S2: a round that reports nothing new must not render
+// "clean" when its own verdict is fix-slices (an earlier round's finding is
+// still open or asked, just not reported against again this round).
+func TestRenderFindingsMDNeverSaysCleanForANonCleanRound(t *testing.T) {
+	md := renderFindingsMD(3, "fix-slices", "", nil, nil)
+	if indexOf(md, "clean") >= 0 {
+		t.Errorf("findings.md = %q, must not say clean for a fix-slices round", md)
+	}
+	if indexOf(md, "verdict: fix-slices") < 0 {
+		t.Errorf("findings.md = %q, want it to record verdict: fix-slices", md)
+	}
+}
+
+// TestRenderFindingsMDShowsTriageDecisionRoutedAsAndCleared covers Q2's
+// additive fields and the cleared-ids line.
+func TestRenderFindingsMDShowsTriageDecisionRoutedAsAndCleared(t *testing.T) {
+	findings := []Finding{
+		{ID: "r2-f1", Title: "kept ask", Risk: RiskHigh, RiskRationale: "r", Status: StatusOpen,
+			Action: ActionAsk, Triage: TriageHuman, Decision: "go ahead"},
+		{ID: "r2-f2", Title: "recurrence bound", Risk: RiskMedium, RiskRationale: "r", Status: StatusAsked,
+			Action: ActionFix, Triage: TriageAuto, RoutedAs: ActionAsk},
+	}
+	md := renderFindingsMD(2, "fix-slices", "", findings, []string{"r1-f9"})
+	for _, want := range []string{"triage: human", "decision: go ahead", "triage: auto", "routed as: ask", "cleared: r1-f9"} {
+		if indexOf(md, want) < 0 {
+			t.Errorf("findings.md missing %q:\n%s", want, md)
+		}
 	}
 }
 
@@ -500,8 +531,8 @@ func TestFindingsSortStable(t *testing.T) {
 		{ID: "r1-f1", Title: "a", Risk: RiskHigh, RiskRationale: "r"},
 		{ID: "r1-f2", Title: "b", Risk: RiskHigh, RiskRationale: "r"},
 	}
-	a := renderFindingsMD(1, "", findings)
-	b := renderFindingsMD(1, "", findings)
+	a := renderFindingsMD(1, "fix-slices", "", findings, nil)
+	b := renderFindingsMD(1, "fix-slices", "", findings, nil)
 	if a != b {
 		t.Fatalf("renderFindingsMD is not deterministic:\n%s\n---\n%s", a, b)
 	}

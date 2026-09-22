@@ -14,14 +14,29 @@ import (
 // rounds before handing back to the human (see solveShouldPublish).
 const maxSolveRounds = 5
 
+// gateSourceForSolve picks the GateSource for `jig solve`'s own gate/fix-
+// slice loop. The compatibility rule (design Q10): `jig solve` always had
+// --backend, so unlike jig gate its scripted-source decision does not look
+// at it - the old scripted source runs iff --scenario is set, whatever
+// --backend says; otherwise the real reviewer runs on solve's own backend
+// (the same one its frontier.Run steps use).
+func gateSourceForSolve(scenario string, backend session.Backend) verifydeliver.GateSource {
+	if scenario != "" {
+		return verifydeliver.NewFakeGateSource(scenario)
+	}
+	return verifydeliver.NewReviewerGateSource(backend)
+}
+
 // cmdSolve implements `jig solve <ticket> [--yes] [--answer <qid> <text>]
 // [--backend <name>] [--scenario <dir>]`.
 //
 // NOTE: --backend/--scenario are accepted here, beyond solve's own --yes
 // and --answer, because solve's internal run steps need a session backend
 // exactly like `jig run` does; they are the closest working superset
-// (needed for the fake-backend e2e chain) rather than a redesign.
-func cmdSolve(args []string, stdout io.Writer) int {
+// (needed for the fake-backend e2e chain) rather than a redesign. --yes
+// also drives the finding triage (design 6.4): it skips the interactive
+// publish confirm and keeps every fix and workspace ask without prompting.
+func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest0, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -32,7 +47,7 @@ func cmdSolve(args []string, stdout io.Writer) int {
 	}
 
 	fs := newFlagSet("solve")
-	yes := fs.Bool("yes", false, "skip the interactive publish confirm")
+	yes := fs.Bool("yes", false, "skip the interactive publish confirm and finding triage")
 	backendFlag := fs.String("backend", "", "session backend: fake, headless, or herdr")
 	scenario := fs.String("scenario", "", "scenario dir for the fake backend")
 	storeFlag := fs.String("store", "", "explicit store path")
@@ -61,7 +76,8 @@ func cmdSolve(args []string, stdout io.Writer) int {
 
 	fdeps := frontierDeps(st, cfg, mp, backend, ticket)
 	vdeps := verifydeliverDeps(st, cfg, mp)
-	src := gateSourceFor(*scenario)
+	src := gateSourceForSolve(*scenario, backend)
+	triage := triageFor(*yes, stdin, stdout)
 
 	// Check identity before any session or gate round runs, not only at
 	// publish.
@@ -79,7 +95,7 @@ func cmdSolve(args []string, stdout io.Writer) int {
 
 	var lastVerdict string
 	for round := 0; round < maxSolveRounds; round++ {
-		gr, err := verifydeliver.Gate(vdeps, src, verifydeliver.GateOpts{Ticket: ticket})
+		gr, err := verifydeliver.Gate(vdeps, src, verifydeliver.GateOpts{Ticket: ticket, Triage: triage})
 		if err != nil {
 			return renderErr(stdout, err)
 		}

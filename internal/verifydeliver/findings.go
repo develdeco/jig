@@ -192,6 +192,21 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, delete
 		if recurrences >= 2 {
 			status = StatusAsked
 		}
+		workspace := workspaceFor(file, man)
+		// Q1: a fix finding whose file lies in no declared workspace has
+		// no build target, so it can never become a fix slice on its own;
+		// jig routes it to the human as an ask instead (design 5.5).
+		if status == StatusOpen && workspace == "" {
+			status = StatusAsked
+		}
+		// routed_as (Q2): written whenever jig's own status ends up asked
+		// although the reviewer labeled this finding something else
+		// (fix, via the recurrence bound or the no-workspace rule above);
+		// the persisted action always stays the reviewer's own label.
+		var routedAs string
+		if status == StatusAsked && rf.Action != ActionAsk {
+			routedAs = ActionAsk
+		}
 		if status == StatusOpen || status == StatusAsked {
 			blocking[file] = true
 		}
@@ -199,8 +214,8 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, delete
 		reported = append(reported, Finding{
 			ID: id, File: file, Line: rf.Line, Title: rf.Title, Detail: rf.Detail,
 			Action: rf.Action, Risk: rf.Risk, RiskRationale: rf.RiskRationale,
-			Oracle: rf.Oracle, Workspace: workspaceFor(file, man),
-			Status: status, Recurrences: recurrences,
+			Oracle: rf.Oracle, Workspace: workspace,
+			Status: status, Recurrences: recurrences, RoutedAs: routedAs,
 		})
 	}
 
@@ -290,6 +305,29 @@ func dismissedFindingsList(cum map[string]Finding) []Finding {
 	return out
 }
 
+// askedFindingsList returns cum's asked findings, sorted by id for
+// determinism: design 6.4's "needs a human" list (Q1's exit-2 signal),
+// across every round, not only the one just applied.
+func askedFindingsList(cum map[string]Finding) []Finding {
+	var out []Finding
+	for _, f := range cum {
+		if f.Status == StatusAsked {
+			out = append(out, f)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// sortedFindingsByID returns a copy of fs sorted by id, for deterministic
+// display (GateReport.Findings).
+func sortedFindingsByID(fs []Finding) []Finding {
+	out := make([]Finding, len(fs))
+	copy(out, fs)
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 // toOpenFindingList projects fs (cum's open/asked findings) onto
 // review.json's open shape (design 4.1). Building fs from the cumulative
 // fold, and calling this before every reviewer round, is what keeps
@@ -371,9 +409,16 @@ func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Findin
 // riskRank orders findings.md's sections, high risk first (design 5.5).
 var riskRank = map[string]int{RiskHigh: 0, RiskMedium: 1, RiskLow: 2}
 
-// renderFindingsMD renders one round's findings.md from its findings.yaml
-// content (design 5.5), sorted by risk, high first.
-func renderFindingsMD(round int, summary string, findings []Finding) string {
+// renderFindingsMD renders one round's findings.md (design 5.5), sorted by
+// risk, high first. verdict is the round's own verdict (clean|fix-slices,
+// GateReport.Verdict): the word "clean" is only ever printed when verdict
+// itself is clean, never merely because this round reported nothing new -
+// an earlier round's finding can still be open or asked with nothing new
+// reported against it this round. cleared lists the ids this round cleared
+// (design 5.2 rule 3); findings is every finding this round reported
+// (ApplyRound's "reported"), after routing and triage (design 6) have set
+// each one's final Status, Triage, Decision and RoutedAs.
+func renderFindingsMD(round int, verdict, summary string, findings []Finding, cleared []string) string {
 	sorted := make([]Finding, len(findings))
 	copy(sorted, findings)
 	sort.SliceStable(sorted, func(i, j int) bool {
@@ -383,14 +428,22 @@ func renderFindingsMD(round int, summary string, findings []Finding) string {
 		}
 		return sorted[i].ID < sorted[j].ID
 	})
+	clearedSorted := make([]string, len(cleared))
+	copy(clearedSorted, cleared)
+	sort.Strings(clearedSorted)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Gate round %d\n\n", round)
+	fmt.Fprintf(&b, "verdict: %s\n\n", verdict)
 	if summary != "" {
 		fmt.Fprintf(&b, "%s\n\n", summary)
 	}
-	if len(sorted) == 0 {
-		b.WriteString("clean\n")
+	if len(sorted) == 0 && len(clearedSorted) == 0 {
+		if verdict == "clean" {
+			b.WriteString("clean\n")
+		} else {
+			b.WriteString("nothing new this round\n")
+		}
 		return b.String()
 	}
 	for _, f := range sorted {
@@ -406,10 +459,22 @@ func renderFindingsMD(round int, summary string, findings []Finding) string {
 		if f.Recurrences > 0 {
 			fmt.Fprintf(&b, "- recurrences: %d\n", f.Recurrences)
 		}
+		if f.Triage != "" {
+			fmt.Fprintf(&b, "- triage: %s\n", f.Triage)
+		}
+		if f.Decision != "" {
+			fmt.Fprintf(&b, "- decision: %s\n", f.Decision)
+		}
+		if f.RoutedAs != "" {
+			fmt.Fprintf(&b, "- routed as: %s\n", f.RoutedAs)
+		}
 		fmt.Fprintf(&b, "- risk rationale: %s\n\n", f.RiskRationale)
 		if f.Detail != "" {
 			fmt.Fprintf(&b, "%s\n\n", f.Detail)
 		}
+	}
+	if len(clearedSorted) > 0 {
+		fmt.Fprintf(&b, "cleared: %s\n", strings.Join(clearedSorted, ", "))
 	}
 	return b.String()
 }

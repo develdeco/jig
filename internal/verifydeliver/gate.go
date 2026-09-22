@@ -107,6 +107,11 @@ type GateOpts struct {
 	Branch   string // validate this branch instead of jig/<ticket>
 	BriefDoc string // spec-axis input when Branch is set
 	PRMode   bool
+	// Triage is the human seam for a reviewer round's fix batch and ask
+	// findings (design 6, route.go). nil means DefaultTriage: every fix
+	// is kept, every ask with a workspace is kept, a no-workspace ask
+	// stays undecided (Q1). Unused for a scripted (--scenario) round.
+	Triage Triage
 }
 
 // GateReport is Gate's result.
@@ -123,6 +128,21 @@ type GateReport struct {
 	// field now so review.go's own tests, and S2, can read and write it
 	// without another on-disk shape change.
 	ReviewedSHA map[string]string
+	// Scope is this round's scope diff kind (full|delta), "" for a
+	// scripted round (design 4.1).
+	Scope string
+	// Findings is every finding this round reported, after routing and
+	// triage (design 6) set each one's final Status/Triage/Decision/
+	// RoutedAs. nil for a scripted round.
+	Findings []Finding
+	// FixSlices is the ids of the fix slices this round appended (design
+	// 6.1, 6.2), in the order they were built.
+	FixSlices []string
+	// NeedsHuman is every asked finding still undecided after this round
+	// (across every round, not only this one's own): design 6.4's "needs a
+	// human" list, Q1's exit-2 signal. Empty when nothing is waiting on a
+	// person.
+	NeedsHuman []Finding
 }
 
 // reportYAML is gate/round-<n>/report.yaml's exact on-disk shape.
@@ -282,6 +302,17 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	openList := openFindingsList(cum)
 	dismissedList := dismissedFindingsList(cum)
 
+	// The reviewer's brief_path is the ticket's own brief.md, except in
+	// --branch mode with --doc: there it must be the --doc file itself,
+	// absolute (PR #8's recorded decision) - pointing at this round's own
+	// gate/round-<n>/spec-input.md instead would leave a partial round dir
+	// on disk if the reviewer then fails, since that file is written only
+	// after the round succeeds (see briefDocContent below).
+	briefPath := filepath.Join(d.Store.TicketDir(ticket), "brief.md")
+	if o.Branch != "" && o.BriefDoc != "" {
+		briefPath = o.BriefDoc
+	}
+
 	round, ok, err := src.Round(RoundInput{
 		Store:     d.Store,
 		Ticket:    ticket,
@@ -290,7 +321,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		RepoName:  repoName,
 		Target:    target,
 		Model:     model,
-		BriefPath: filepath.Join(d.Store.TicketDir(ticket), "brief.md"),
+		BriefPath: briefPath,
 		Manifest:  man,
 		Open:      toOpenFindingList(openList),
 		Dismissed: toDismissedFindingList(dismissedList),
@@ -315,15 +346,21 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-clean: %w", err)
 		}
 	case round.Review != nil:
-		// Findings bookkeeping (design 5): apply this round onto the fold,
-		// then fold it in turn to see whether anything is still
-		// outstanding (design 5.4) - that, not whether the round dispatched
-		// a reviewer, decides clean vs fix-slices. Routing findings into
-		// fix slices (design 6) is a later stage's job; Round.FixSlices
-		// stays empty for a reviewer round until then.
+		// Findings bookkeeping (design 5): apply this round onto the fold.
+		// Routing and triage (design 6, route.go) then turn kept fixes and
+		// asks into fix slices, mutating each reported finding's final
+		// Status/Triage/Decision/RoutedAs - entirely in memory, before
+		// anything is persisted or pushed. Only then is the post-round fold
+		// checked for what's still outstanding (design 5.4): that, not
+		// whether the round dispatched a reviewer, decides clean vs
+		// fix-slices.
 		reported, cleared := ApplyRound(n, cum, round.Review.Result, round.Review.Deleted, man)
+		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, o.Triage, man)
+		if err != nil {
+			return GateReport{}, err
+		}
 		updated := cloneFindings(cum)
-		foldFindings(updated, reported, cleared)
+		foldFindings(updated, routed, cleared)
 		if isClean(updated) {
 			report.Verdict = "clean"
 		} else {
@@ -333,7 +370,13 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		// clean or not, so the next round's scope can resolve a delta
 		// against it.
 		report.ReviewedSHA = map[string]string{repoName: round.Review.HeadSHA}
-		if err := writeReviewerRound(d, ticket, n, report, round.Review.Scope, round.Review.Result.ReviewedPaths, reported, cleared, round.Review.Result.Summary); err != nil {
+		report.Scope = round.Review.Scope
+		report.Findings = sortedFindingsByID(routed)
+		report.NeedsHuman = askedFindingsList(updated)
+		for _, fs := range fixSlices {
+			report.FixSlices = append(report.FixSlices, fs.ID)
+		}
+		if err := writeReviewerRound(d, ticket, n, report, round.Review.Scope, round.Review.Result.ReviewedPaths, routed, cleared, round.Review.Result.Summary); err != nil {
 			return GateReport{}, err
 		}
 		event := "gate-round"
@@ -343,7 +386,11 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		if err := journal.Append(d.Store, ticket, journal.Line{Event: event, Attempt: n}); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal %s: %w", event, err)
 		}
-		if err := appendFixSlices(d, ticket, n, round.FixSlices); err != nil {
+		// Routing and triage are already finished above; appending these
+		// slices and, at the end of Gate, pushing the store are the only
+		// on-disk/store-visible effects that follow (design 6's ordering
+		// rule).
+		if err := appendFixSlices(d, ticket, n, fixSlices); err != nil {
 			return GateReport{}, err
 		}
 	default:
@@ -579,7 +626,7 @@ func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope s
 	if err := os.WriteFile(filepath.Join(dir, "findings.yaml"), yamlData, 0o644); err != nil {
 		return fmt.Errorf("verifydeliver: gate: write findings.yaml: %w", err)
 	}
-	md := renderFindingsMD(n, summary, findings)
+	md := renderFindingsMD(n, report.Verdict, summary, findings, cleared)
 	if err := os.WriteFile(filepath.Join(dir, "findings.md"), []byte(md), 0o644); err != nil {
 		return fmt.Errorf("verifydeliver: gate: write findings.md: %w", err)
 	}

@@ -630,9 +630,16 @@ type stubBackend struct {
 func (s stubBackend) Run(d session.Dispatch) error { return s.run(d) }
 
 // oneOracleManifest is the manifest every reviewerGateSource.Round test
-// uses unless it specifically wants to exercise the multi-oracle rule.
+// uses unless it specifically wants to exercise the multi-oracle rule: a
+// single oracle, with a root workspace (".") matching a real project's
+// default manifest (Q1: "main's default manifest has a root workspace
+// `.`") so every file a test hands it derives a non-empty workspace unless
+// the test builds a narrower manifest itself.
 func oneOracleManifest() manifest.Manifest {
-	return manifest.Manifest{Oracles: map[string]string{"test": "go test ./..."}}
+	return manifest.Manifest{
+		Oracles:    map[string]string{"test": "go test ./..."},
+		Workspaces: []manifest.Workspace{{ID: "root", Path: "."}},
+	}
 }
 
 // writeMustReviewResult writes a clean (no findings) result.json to

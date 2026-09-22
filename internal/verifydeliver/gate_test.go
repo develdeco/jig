@@ -345,6 +345,58 @@ func TestGateBranchMissingDocErrors(t *testing.T) {
 	}
 }
 
+// TestGateBranchModeBriefPathIsTheDocItself guards a regression: in
+// --branch mode with --doc, review.json's brief_path must be the absolute
+// path of the --doc file itself, not the ticket's own brief.md and not
+// this round's own gate/round-<n>/spec-input.md (PR #8's recorded
+// decision: pointing at spec-input.md would leave a partial round dir on
+// disk if the reviewer then failed, since that file is written only after
+// the round succeeds).
+func TestGateBranchModeBriefPathIsTheDocItself(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+	buildDir := buildLeaseDir(t, fx)
+	if _, err := gitx.Run(buildDir, "push", "origin", ticketBranch(fx.Ticket)); err != nil {
+		t.Fatalf("push build branch: %v", err)
+	}
+
+	briefDoc := filepath.Join(t.TempDir(), "spec-axis-input.md")
+	if err := os.WriteFile(briefDoc, []byte("# spec axis input\n"), 0o644); err != nil {
+		t.Fatalf("write brief doc: %v", err)
+	}
+	wantPath, err := filepath.Abs(briefDoc)
+	if err != nil {
+		t.Fatalf("abs briefDoc: %v", err)
+	}
+
+	d := newDeps(t, fx)
+	var gotBriefPath string
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		data, err := os.ReadFile(sd.SliceJSON)
+		if err != nil {
+			t.Fatalf("read review.json: %v", err)
+		}
+		var req ReviewRequest
+		if err := json.Unmarshal(data, &req); err != nil {
+			t.Fatalf("parse review.json: %v", err)
+		}
+		gotBriefPath = req.BriefPath
+		writeMustReviewResult(t, sd)
+		return nil
+	}}
+
+	_, err = Gate(d, NewReviewerGateSource(backend), GateOpts{
+		Ticket: fx.Ticket, Branch: ticketBranch(fx.Ticket), BriefDoc: briefDoc, Early: true,
+	})
+	if err != nil {
+		t.Fatalf("Gate --branch --doc: %v", err)
+	}
+	if gotBriefPath != wantPath {
+		t.Fatalf("review.json brief_path = %q, want the --doc file itself: %q", gotBriefPath, wantPath)
+	}
+}
+
 // TestGateWipesLeftoverLeaseDirtBeforeOracles reproduces NM2 scenario A: a
 // reviewer that outlived a killed jig (no signal handler reaches a future
 // reviewer source's own defer restore) can leave an untracked failing test
@@ -750,13 +802,39 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 	if f1.ID == "" {
 		t.Error("round 1 finding has no id")
 	}
+	if len(report1.FixSlices) != 1 {
+		t.Fatalf("round 1 FixSlices = %v, want 1 (routing, design 6, kept the fix)", report1.FixSlices)
+	}
+	sliceID := report1.FixSlices[0]
+	fixSlices, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("read slices: %v", err)
+	}
+	var fs *store.Slice
+	for i := range fixSlices {
+		if fixSlices[i].ID == sliceID {
+			fs = &fixSlices[i]
+		}
+	}
+	if fs == nil {
+		t.Fatalf("appended fix slice %q not found in slices.yaml", sliceID)
+	}
+	if !equalStrings(fs.Findings, []string{f1.ID}) {
+		t.Errorf("fix slice %s Findings = %v, want [%s]", sliceID, fs.Findings, f1.ID)
+	}
+	if fs.Workspace != "alpha" || fs.Oracle != "test" {
+		t.Errorf("fix slice %s = %+v, want workspace alpha, oracle test", sliceID, fs)
+	}
 
 	mdPath := filepath.Join(gateRoundDir(d.Store, fx.Ticket, 1), "findings.md")
 	if md, err := os.ReadFile(mdPath); err != nil || len(md) == 0 {
 		t.Fatalf("round 1 findings.md: data=%q err=%v", md, err)
 	}
 
-	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	// Round 2 runs --early: the fix slice routing just appended is still
+	// queued, and driving it green belongs to frontier, not this test
+	// (which only exercises Gate's own findings bookkeeping/routing).
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Early: true})
 	if err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}
