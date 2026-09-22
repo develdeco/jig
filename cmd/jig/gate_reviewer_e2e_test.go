@@ -9,11 +9,33 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
+
+// findingsYAMLCleared reads only the "cleared" list out of a gate round's
+// findings.yaml, for asserting what a round actually cleared (F6/M-6): the
+// round's own report/findings tables list only findings reported that
+// round, so they can never show whether an unreported open finding cleared
+// or merely went unmentioned.
+func findingsYAMLCleared(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var doc struct {
+		Cleared []string `yaml:"cleared"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return doc.Cleared
+}
 
 // runMain runs Main in-process with a scripted stdin and returns its stdout
 // and exit code. It never fails the test on a non-zero code: several steps
@@ -161,7 +183,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	// wrote nothing to gate/round-1/): the real triage script - dismiss
 	// fix r1-f2 at the batch prompt, keep ask r1-f3 with a decision.
 	writeReviewResultAt(t, round1Path, correct)
-	out, code = runMain(t, "r1-f2\nUse a warm, casual tone; no exclamation marks.\n", gateArgs()...)
+	out, code = runMain(t, "r1-f2\nk\nUse a warm, casual tone; no exclamation marks.\n", gateArgs()...)
 	if code != 0 {
 		t.Fatalf("round 1 (corrected) exit = %d, want 0\n%s", code, out)
 	}
@@ -232,6 +254,24 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	}
 	if !strings.Contains(out, "fix-2-alpha-test") {
 		t.Fatalf("round 2 report missing the recurrence's new fix slice fix-2-alpha-test:\n%s", out)
+	}
+
+	// F6/M-6: the round 2 report and findings table only ever list findings
+	// reported that round, so r1-f3's absence from them (checked above)
+	// proves nothing on its own - it is exactly as absent whether it
+	// cleared or simply went unmentioned. Read the round's own findings.yaml
+	// cleared list, which is the only place that distinguishes the two, and
+	// which the Q6 convergence mutant (a dismissed repeat blocking
+	// clearing) actually breaks.
+	cleared2 := findingsYAMLCleared(t, filepath.Join(fx.StoreDir, ticket, "gate", "round-2", "findings.yaml"))
+	foundCleared := false
+	for _, id := range cleared2 {
+		if id == "r1-f3" {
+			foundCleared = true
+		}
+	}
+	if !foundCleared {
+		t.Fatalf("round 2 findings.yaml cleared = %v, want it to contain r1-f3 (the kept ask, cleared)", cleared2)
 	}
 
 	slices2, err := st.ReadSlices(ticket)
