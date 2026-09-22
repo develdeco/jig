@@ -671,7 +671,11 @@ func TestPushRefusesWhileMidRebase(t *testing.T) {
 // pull --rebase conflicts (not a pre-existing mid-rebase state, but a
 // conflict Sync's own retry causes), Sync still aborts it - dropping that
 // abort leaves the store mid-rebase for the next command to trip over - and
-// returns STORE_CONFLICT instead of git's raw, by-then-stale pull error.
+// returns STORE_CONFLICT instead of git's raw, by-then-stale pull error. The
+// message must name the conflicting path and the pre-pull commit the store
+// landed back on, built from state jig itself read, and must never carry
+// git's own stderr hint text ("git rebase --continue"/"--skip"/"--abort"),
+// which fails once jig's own abort has already run.
 func TestSyncOwnConflictingPullAbortsAndWraps(t *testing.T) {
 	st, work, remote := newTestRemoteStore(t)
 
@@ -693,6 +697,21 @@ func TestSyncOwnConflictingPullAbortsAndWraps(t *testing.T) {
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "STORE_CONFLICT" {
 		t.Fatalf("Sync with its own conflicting pull: err = %v, want *axi.Error STORE_CONFLICT", err)
+	}
+	if !strings.Contains(ae.Msg, "project.yaml") {
+		t.Fatalf("Sync conflict Msg = %q, want the conflicting path named", ae.Msg)
+	}
+	// The abort resets the branch to the commit Sync's own stageAndCommit
+	// made just before the pull (its "record uncommitted store state"
+	// commit, not the fixture's original init commit), which is where HEAD
+	// now sits.
+	backAt := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+	if !strings.Contains(ae.Msg, backAt) {
+		t.Fatalf("Sync conflict Msg = %q, want the pre-pull commit %s (HEAD after the abort) named", ae.Msg, backAt)
+	}
+	full := ae.Msg + " " + strings.Join(ae.Help, " ")
+	if strings.Contains(full, "hint:") || strings.Contains(full, "--skip") || strings.Contains(full, "--continue`") {
+		t.Fatalf("Sync conflict message carries git's raw stderr hint text: %q", full)
 	}
 
 	mid, ierr := inProgressRebaseOrMerge(work)
@@ -939,11 +958,16 @@ func TestSyncAndPushRefuseWhileRebaseApplyInProgress(t *testing.T) {
 // placeholder. When the rebase state could not even be read before that
 // abort failed, the message must not assert the store is mid-rebase either
 // (that was never confirmed) and must instead say the state is unknown and
-// point at `git status` in the store.
+// point at `git status` in the store. The successful-abort case must name
+// the conflicting paths and the pre-pull commit it landed back on, and must
+// never carry git's own stderr hint text ("rebase --continue"/"--skip"),
+// which fails once jig's own abort has already run.
 func TestWrapAbortedPullConflict(t *testing.T) {
 	st := &Store{Root: "/store"}
+	gitHint := `hint: Resolve all conflicts, then run "git rebase --continue".` +
+		`hint: Or skip: "git rebase --skip". hint: Or abort: "git rebase --abort".`
 
-	ok := st.wrapAbortedPullConflict(errors.New("pull failed"), nil, nil, "main")
+	ok := st.wrapAbortedPullConflict(nil, nil, []string{"internal/store/store.go"}, "abc123", "main")
 	var aeOK *axi.Error
 	if !errors.As(ok, &aeOK) || aeOK.Code != "STORE_CONFLICT" {
 		t.Fatalf("abort ok: err = %v, want *axi.Error STORE_CONFLICT", ok)
@@ -951,11 +975,21 @@ func TestWrapAbortedPullConflict(t *testing.T) {
 	if !strings.Contains(aeOK.Msg, "was aborted") {
 		t.Fatalf("abort ok: Msg = %q, want it to say the rebase was aborted", aeOK.Msg)
 	}
+	if !strings.Contains(aeOK.Msg, "internal/store/store.go") {
+		t.Fatalf("abort ok: Msg = %q, want the conflicting path named", aeOK.Msg)
+	}
+	if !strings.Contains(aeOK.Msg, "abc123") {
+		t.Fatalf("abort ok: Msg = %q, want the pre-pull commit sha named", aeOK.Msg)
+	}
+	full := aeOK.Msg + " " + strings.Join(aeOK.Help, " ")
+	if strings.Contains(full, "hint:") || strings.Contains(full, gitHint) {
+		t.Fatalf("abort ok: message carries git's raw stderr hint text: %q", full)
+	}
 	if len(aeOK.Help) == 0 || !strings.Contains(aeOK.Help[0], "origin main") || strings.Contains(aeOK.Help[0], "<branch>") {
 		t.Fatalf("abort ok: Help = %v, want the real branch name (not a <branch> placeholder)", aeOK.Help)
 	}
 
-	failed := st.wrapAbortedPullConflict(errors.New("pull failed"), errors.New("could not detach HEAD"), nil, "main")
+	failed := st.wrapAbortedPullConflict(errors.New("could not detach HEAD"), nil, nil, "", "main")
 	var aeFailed *axi.Error
 	if !errors.As(failed, &aeFailed) || aeFailed.Code != "STORE_CONFLICT" {
 		t.Fatalf("abort failed: err = %v, want *axi.Error STORE_CONFLICT", failed)
@@ -973,14 +1007,18 @@ func TestWrapAbortedPullConflict(t *testing.T) {
 	// The rebase-state read itself failed (for example the git-path lookup
 	// errored), and the abort then failed too: the message must not claim
 	// the store is mid-rebase, since that was never actually confirmed - it
-	// must say the state is unknown instead.
-	unknown := st.wrapAbortedPullConflict(errors.New("pull failed"), errors.New("no rebase in progress"), errors.New("could not read git state"), "main")
+	// must say the state is unknown instead, and it must not assert the
+	// pull "conflicted" either, since that too was never confirmed.
+	unknown := st.wrapAbortedPullConflict(errors.New("no rebase in progress"), errors.New("could not read git state"), nil, "", "main")
 	var aeUnknown *axi.Error
 	if !errors.As(unknown, &aeUnknown) || aeUnknown.Code != "STORE_CONFLICT" {
 		t.Fatalf("state unknown: err = %v, want *axi.Error STORE_CONFLICT", unknown)
 	}
 	if strings.Contains(aeUnknown.Msg, "was aborted") {
 		t.Fatalf("state unknown: Msg = %q, want it not to claim the rebase was aborted", aeUnknown.Msg)
+	}
+	if strings.Contains(aeUnknown.Msg, "conflicted") {
+		t.Fatalf("state unknown: Msg = %q, want it not to claim a conflict that was never confirmed", aeUnknown.Msg)
 	}
 	if !strings.Contains(aeUnknown.Msg, "could not read git state") {
 		t.Fatalf("state unknown: Msg = %q, want the state read's own error included", aeUnknown.Msg)
