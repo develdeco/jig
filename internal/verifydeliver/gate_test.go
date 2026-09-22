@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
@@ -799,7 +802,7 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 		t.Error("round 1 finding has no id")
 	}
 	if len(report1.FixSlices) != 1 {
-		t.Fatalf("round 1 FixSlices = %v, want 1 (routing, design 6, kept the fix)", report1.FixSlices)
+		t.Fatalf("round 1 FixSlices = %v, want 1 (routing kept the fix)", report1.FixSlices)
 	}
 	sliceID := report1.FixSlices[0]
 	fixSlices, err := d.Store.ReadSlices(fx.Ticket)
@@ -858,6 +861,455 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 	}
 	if !isClean(cum) {
 		t.Fatalf("cumulative state after round 2 = %+v, want clean", cum)
+	}
+}
+
+// TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerated
+// reproduces the wedge a text match on git's cat-file message used to fall
+// into: an open finding's file is later untracked and gitignored on the
+// ticket branch, but an oracle regenerates it on disk in the gate lease
+// before the next round's review. FileExistsAtRev must report it absent at
+// head from the tree alone, never from what happens to sit in the working
+// tree, or every later round fails the same way and no dismissal can get
+// past it.
+func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerated(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+	buildDir := buildLeaseDir(t, fx)
+	branch := ticketBranch(fx.Ticket)
+
+	// Round 1 needs a tracked file for its open finding to point at.
+	if err := os.WriteFile(filepath.Join(buildDir, "alpha", "gen.txt"), []byte("committed\n"), 0o644); err != nil {
+		t.Fatalf("write gen.txt: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
+		t.Fatalf("git add gen.txt: %v", err)
+	}
+	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "add tracked gen.txt"); err != nil {
+		t.Fatalf("commit gen.txt: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
+		t.Fatalf("push branch: %v", err)
+	}
+
+	d := newDeps(t, fx)
+	round := 0
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		round++
+		reviewData, err := os.ReadFile(sd.SliceJSON)
+		if err != nil {
+			t.Fatalf("read review.json: %v", err)
+		}
+		var req ReviewRequest
+		if err := json.Unmarshal(reviewData, &req); err != nil {
+			t.Fatalf("parse review.json: %v", err)
+		}
+
+		var result ReviewResult
+		switch round {
+		case 1:
+			result = ReviewResult{
+				Findings: []ResultFinding{{
+					File: "alpha/gen.txt", Line: 1, Title: "a generated file was committed",
+					Detail: "gen.txt should not be tracked", Action: ActionFix,
+					Risk: RiskLow, RiskRationale: "build artifact churn", Oracle: "test",
+				}},
+				ReviewedPaths: req.MustReview,
+				Summary:       "round 1 summary",
+			}
+		case 2:
+			// gen.txt is untracked and gitignored as of this round's head, so
+			// it no longer belongs in must_review; nothing to report on it.
+			if containsString(req.MustReview, "alpha/gen.txt") {
+				t.Fatalf("round 2 must_review = %v, want it to exclude alpha/gen.txt (absent at head)", req.MustReview)
+			}
+			result = ReviewResult{ReviewedPaths: req.MustReview, Summary: "round 2 summary"}
+		default:
+			t.Fatalf("unexpected round %d", round)
+		}
+
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
+	}}
+	src := NewReviewerGateSource(backend)
+
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+	if report1.Verdict != "fix-slices" {
+		t.Fatalf("round 1 Verdict = %q, want fix-slices", report1.Verdict)
+	}
+	ff1, ok, err := readFindingsYAML(d.Store, fx.Ticket, 1)
+	if err != nil || !ok {
+		t.Fatalf("read round 1 findings.yaml: ok=%v err=%v", ok, err)
+	}
+	if len(ff1.Findings) != 1 || ff1.Findings[0].Status != StatusOpen {
+		t.Fatalf("round 1 findings = %+v, want one open finding", ff1.Findings)
+	}
+	findingID := ff1.Findings[0].ID
+
+	// Advance the ticket branch: untrack gen.txt, ignore it, and make the
+	// alpha oracle regenerate it as a build artifact, exactly as a real
+	// generated-artifact test would leave it sitting in the lease.
+	if _, err := gitx.Run(buildDir, "rm", "--cached", "alpha/gen.txt"); err != nil {
+		t.Fatalf("git rm --cached gen.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, ".gitignore"), []byte("alpha/gen.txt\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	alphaTest, err := os.ReadFile(filepath.Join(buildDir, "alpha", "alpha_test.go"))
+	if err != nil {
+		t.Fatalf("read alpha_test.go: %v", err)
+	}
+	regen := strings.Replace(string(alphaTest), "import \"testing\"",
+		"import (\n\t\"os\"\n\t\"testing\"\n)", 1)
+	regen += "\nfunc TestZZRegenGen(t *testing.T) {\n" +
+		"\tif err := os.WriteFile(\"gen.txt\", []byte(\"regenerated\\n\"), 0o644); err != nil {\n" +
+		"\t\tt.Fatalf(\"write gen.txt: %v\", err)\n" +
+		"\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(buildDir, "alpha", "alpha_test.go"), []byte(regen), 0o644); err != nil {
+		t.Fatalf("write regenerating alpha_test.go: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "untrack and regenerate gen.txt"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
+		t.Fatalf("push branch: %v", err)
+	}
+
+	// The fix slice routed from round 1 is still queued; this round only
+	// exercises the reviewer path, not frontier's own build loop.
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Early: true})
+	if err != nil {
+		t.Fatalf("Gate round 2: %v", err)
+	}
+	if report2.Verdict != "clean" {
+		t.Fatalf("round 2 Verdict = %q, want clean (the ignored, regenerated file must clear, not wedge the round)", report2.Verdict)
+	}
+	ff2, ok, err := readFindingsYAML(d.Store, fx.Ticket, 2)
+	if err != nil || !ok {
+		t.Fatalf("read round 2 findings.yaml: ok=%v err=%v", ok, err)
+	}
+	if !equalStrings(ff2.Cleared, []string{findingID}) {
+		t.Fatalf("round 2 cleared = %v, want [%s]", ff2.Cleared, findingID)
+	}
+
+	// A third round must proceed too: the round after the wedge is not a
+	// one-time reprieve, the file stays absent at head for good.
+	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Early: true})
+	if err != nil {
+		t.Fatalf("Gate round 3: %v", err)
+	}
+	if report3.Verdict != "clean" {
+		t.Fatalf("round 3 Verdict = %q, want clean", report3.Verdict)
+	}
+}
+
+// containsString reports whether s contains v.
+func containsString(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// addSecondOracle adds a "vet" oracle to buildDir's checked-out manifest
+// (a second command over the same go binary the fixture's own "test"
+// oracle already resolved to), commits it on branch, and pushes it to
+// origin, so a Gate round resolving the manifest from that branch sees two
+// oracles instead of one.
+func addSecondOracle(t *testing.T, buildDir, branch string) {
+	t.Helper()
+	yamlPath := filepath.Join(buildDir, ".claude", "jig.yaml")
+	raw, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatalf("read jig.yaml: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse jig.yaml: %v", err)
+	}
+	oracles, ok := doc["oracles"].(map[string]any)
+	if !ok {
+		t.Fatalf("jig.yaml oracles = %+v, want a map", doc["oracles"])
+	}
+	testCmd, ok := oracles["test"].(string)
+	if !ok {
+		t.Fatalf("jig.yaml oracles.test = %+v, want a string", oracles["test"])
+	}
+	oracles["vet"] = strings.Replace(testCmd, " test ", " vet ", 1)
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal jig.yaml: %v", err)
+	}
+	if err := os.WriteFile(yamlPath, out, 0o644); err != nil {
+		t.Fatalf("write jig.yaml: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
+		t.Fatalf("git add jig.yaml: %v", err)
+	}
+	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "add a second manifest oracle"); err != nil {
+		t.Fatalf("commit jig.yaml: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
+		t.Fatalf("push branch: %v", err)
+	}
+}
+
+// renameOracle renames a manifest oracle (its declared name, not its
+// command) on buildDir's checked-out branch and pushes it to origin,
+// reproducing a manifest change between gate rounds: a finding whose
+// recorded oracle was from before this becomes stale.
+func renameOracle(t *testing.T, buildDir, branch, from, to string) {
+	t.Helper()
+	yamlPath := filepath.Join(buildDir, ".claude", "jig.yaml")
+	raw, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatalf("read jig.yaml: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse jig.yaml: %v", err)
+	}
+	oracles, ok := doc["oracles"].(map[string]any)
+	if !ok {
+		t.Fatalf("jig.yaml oracles = %+v, want a map", doc["oracles"])
+	}
+	cmd, ok := oracles[from].(string)
+	if !ok {
+		t.Fatalf("jig.yaml oracles.%s = %+v, want a string", from, oracles[from])
+	}
+	delete(oracles, from)
+	oracles[to] = cmd
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal jig.yaml: %v", err)
+	}
+	if err := os.WriteFile(yamlPath, out, 0o644); err != nil {
+		t.Fatalf("write jig.yaml: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
+		t.Fatalf("git add jig.yaml: %v", err)
+	}
+	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "rename a manifest oracle"); err != nil {
+		t.Fatalf("commit jig.yaml: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
+		t.Fatalf("push branch: %v", err)
+	}
+}
+
+// setupStaleOracleThroughRoundTwo drives a fixture through two green gate
+// rounds recording the same open finding on a two-oracle manifest with an
+// explicit oracle ("vet"), then renames that oracle to "lint" on the ticket
+// branch: a fix slice recorded a valid oracle, went green twice, and the
+// manifest changed between rounds so that recorded oracle no longer
+// resolves. round3 supplies round 3's own review
+// result (a recurrence of the same finding via Prior, reported as a note
+// with its oracle omitted so validation's "must name one of the manifest's
+// oracles" rule does not apply - the same way the real scenario reaches jig
+// with a stale, carried-forward oracle instead of a freshly named one) and
+// gets req (round 3's review.json request) to build it from. It returns the
+// deps, fixture and reviewer source with rounds 1 and 2 already applied,
+// ready for the caller to run round 3 through Gate.
+func setupStaleOracleThroughRoundTwo(t *testing.T, round3 func(req ReviewRequest) ReviewResult) (Deps, *fixture.Fixture, GateSource) {
+	t.Helper()
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+	buildDir := buildLeaseDir(t, fx)
+	branch := ticketBranch(fx.Ticket)
+	addSecondOracle(t, buildDir, branch)
+
+	d := newDeps(t, fx)
+	round := 0
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		round++
+		reviewData, err := os.ReadFile(sd.SliceJSON)
+		if err != nil {
+			t.Fatalf("read review.json: %v", err)
+		}
+		var req ReviewRequest
+		if err := json.Unmarshal(reviewData, &req); err != nil {
+			t.Fatalf("parse review.json: %v", err)
+		}
+
+		var result ReviewResult
+		switch round {
+		case 1:
+			result = ReviewResult{
+				Findings: []ResultFinding{{
+					File: "alpha/alpha.go", Line: 1, Title: "needs a fix",
+					Detail: "d", Action: ActionFix, Risk: RiskMedium, RiskRationale: "r",
+					Oracle: "vet",
+				}},
+				ReviewedPaths: req.MustReview,
+				Summary:       "round 1",
+			}
+		case 2:
+			if len(req.Open) != 1 || req.Open[0].ID != "r1-f1" {
+				t.Fatalf("round 2 review.json Open = %+v, want r1-f1 fed back", req.Open)
+			}
+			result = ReviewResult{
+				Findings: []ResultFinding{{
+					File: "alpha/alpha.go", Line: 1, Title: "needs a fix",
+					Detail: "d", Action: ActionFix, Risk: RiskMedium, RiskRationale: "r",
+					Oracle: "vet", Prior: "r1-f1",
+				}},
+				ReviewedPaths: req.MustReview,
+				Summary:       "round 2",
+			}
+		case 3:
+			if len(req.Open) != 1 || req.Open[0].ID != "r1-f1" || req.Open[0].Recurrences != 1 {
+				t.Fatalf("round 3 review.json Open = %+v, want r1-f1 at 1 recurrence", req.Open)
+			}
+			result = round3(req)
+		default:
+			t.Fatalf("unexpected round %d", round)
+		}
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
+	}}
+	src := NewReviewerGateSource(backend)
+
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+	if len(report1.FixSlices) != 1 {
+		t.Fatalf("round 1 FixSlices = %v, want exactly one", report1.FixSlices)
+	}
+	if err := d.Store.WriteSliceState(fx.Ticket, report1.FixSlices[0], store.SliceState{State: "green"}); err != nil {
+		t.Fatalf("mark round 1 fix slice green: %v", err)
+	}
+	if err := d.Store.Push(fx.Ticket + ": mark " + report1.FixSlices[0] + " green"); err != nil {
+		t.Fatalf("push round 1 fix slice state: %v", err)
+	}
+
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 2: %v", err)
+	}
+	if len(report2.FixSlices) != 1 {
+		t.Fatalf("round 2 FixSlices = %v, want exactly one", report2.FixSlices)
+	}
+	if err := d.Store.WriteSliceState(fx.Ticket, report2.FixSlices[0], store.SliceState{State: "green"}); err != nil {
+		t.Fatalf("mark round 2 fix slice green: %v", err)
+	}
+	if err := d.Store.Push(fx.Ticket + ": mark " + report2.FixSlices[0] + " green"); err != nil {
+		t.Fatalf("push round 2 fix slice state: %v", err)
+	}
+
+	// Advance the branch: the oracle both green fix slices recorded no
+	// longer exists in the manifest by round 3.
+	renameOracle(t, buildDir, branch, "vet", "lint")
+
+	return d, fx, src
+}
+
+// TestGateStaleOracleRecurrenceNeedsAHumanUnattended proves the unattended
+// half of the build-target rule for an oracle, not only a workspace: a
+// second recurrence forces the finding to a human decision
+// regardless of its own reported action, and once forced, the oracle it
+// carries forward from a manifest that has since changed cannot resolve
+// on its own, so it stays asked and is listed under needs_a_human (the
+// exit-2 signal) - never silently rebuilt on some other oracle.
+func TestGateStaleOracleRecurrenceNeedsAHumanUnattended(t *testing.T) {
+	d, fx, src := setupStaleOracleThroughRoundTwo(t, func(req ReviewRequest) ReviewResult {
+		return ReviewResult{
+			Findings: []ResultFinding{{
+				File: "alpha/alpha.go", Line: 1, Title: "still there", Detail: "d",
+				Action: ActionNote, Risk: RiskLow, RiskRationale: "r", Prior: "r1-f1",
+			}},
+			ReviewedPaths: req.MustReview,
+			Summary:       "round 3",
+		}
+	})
+
+	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket}) // nil Triage: DefaultTriage, unattended
+	if err != nil {
+		t.Fatalf("Gate round 3: %v", err)
+	}
+	if len(report3.NeedsHuman) != 1 || report3.NeedsHuman[0].ID != "r1-f1" {
+		t.Fatalf("NeedsHuman = %+v, want exactly [r1-f1] (the stale-oracle recurrence)", report3.NeedsHuman)
+	}
+	f := report3.NeedsHuman[0]
+	if f.Status != StatusAsked || f.Oracle != "vet" || f.Triage != "" {
+		t.Fatalf("needs_a_human finding = %+v, want asked, the stale oracle vet still recorded, no triage decided", f)
+	}
+}
+
+// TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle
+// proves the terminal half of the same rule: a human keeping the same
+// finding supplies the missing oracle (exactly what cmd/jig's
+// interactiveTriage prompt gathers once BuildTargetGaps reports it
+// missing), and routing builds the fix slice on that chosen oracle, not the
+// stale one the finding carried forward.
+func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *testing.T) {
+	d, fx, src := setupStaleOracleThroughRoundTwo(t, func(req ReviewRequest) ReviewResult {
+		return ReviewResult{
+			Findings: []ResultFinding{{
+				File: "alpha/alpha.go", Line: 1, Title: "still there", Detail: "d",
+				Action: ActionNote, Risk: RiskLow, RiskRationale: "r", Prior: "r1-f1",
+			}},
+			ReviewedPaths: req.MustReview,
+			Summary:       "round 3",
+		}
+	})
+
+	// The triage hook stands in for cmd/jig's interactiveTriage: a human at
+	// a terminal keeping this finding and being prompted for an oracle
+	// (its own, "vet", no longer resolves) answers "lint".
+	triage := func(in TriageInput) TriageResult {
+		if len(in.Asks) != 1 || in.Asks[0].ID != "r1-f1" {
+			t.Fatalf("TriageInput.Asks = %+v, want exactly [r1-f1]", in.Asks)
+		}
+		return TriageResult{Asks: map[string]AskOutcome{
+			"r1-f1": {Keep: true, Decision: "use lint here", Oracle: "lint", Human: true},
+		}}
+	}
+
+	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Triage: triage})
+	if err != nil {
+		t.Fatalf("Gate round 3: %v", err)
+	}
+	if len(report3.NeedsHuman) != 0 {
+		t.Fatalf("NeedsHuman = %+v, want none (the human decided)", report3.NeedsHuman)
+	}
+	if len(report3.FixSlices) != 1 {
+		t.Fatalf("FixSlices = %v, want exactly one", report3.FixSlices)
+	}
+	slices, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadSlices: %v", err)
+	}
+	var fs *store.Slice
+	for i := range slices {
+		if slices[i].ID == report3.FixSlices[0] {
+			fs = &slices[i]
+		}
+	}
+	if fs == nil {
+		t.Fatalf("appended fix slice %q not found in slices.yaml", report3.FixSlices[0])
+	}
+	if fs.Oracle != "lint" {
+		t.Fatalf("fix slice oracle = %q, want lint (the human's chosen oracle, not the stale one)", fs.Oracle)
+	}
+	if !strings.Contains(fs.Goal, "use lint here") {
+		t.Fatalf("fix slice goal missing the human's decision text:\n%s", fs.Goal)
+	}
+
+	ff, ok, err := readFindingsYAML(d.Store, fx.Ticket, 3)
+	if err != nil || !ok {
+		t.Fatalf("read round 3 findings.yaml: ok=%v err=%v", ok, err)
+	}
+	if len(ff.Findings) != 1 || ff.Findings[0].Status != StatusOpen || ff.Findings[0].Oracle != "lint" || ff.Findings[0].Triage != TriageHuman {
+		t.Fatalf("round 3 finding = %+v, want open, oracle lint, triage human", ff.Findings[0])
 	}
 }
 
