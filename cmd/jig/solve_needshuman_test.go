@@ -10,14 +10,14 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 )
 
-// TestSolveStopsOnNeedsHumanInsteadOfRedispatching pins F3 (digest Q1,
-// lens1 M-3/lens3 M2/lens2 N5): `jig solve` must stop and report exit 2 the
+// TestSolveStopsOnNeedsHumanInsteadOfRedispatching pins the rule that
+// `jig solve` must stop and report exit 2 the
 // first time a gate round leaves an ask undecided (a finding on a file in
 // no declared workspace, kept neither by --yes/no-terminal DefaultTriage
-// nor by a human, per Q1), rather than re-dispatching the reviewer every
+// nor by a human), rather than re-dispatching the reviewer every
 // remaining round up to the cap.
 //
-// Q10's compatibility rule ties `jig solve`'s scripted-source decision to
+// The compatibility rule ties `jig solve`'s scripted-source decision to
 // --scenario alone, ignoring --backend (unlike `jig gate`): passing
 // --scenario always selects the old scripted GateSource for solve, which
 // can never produce NeedsHuman. To drive solve's real reviewer wiring
@@ -50,18 +50,7 @@ func TestSolveStopsOnNeedsHumanInsteadOfRedispatching(t *testing.T) {
 		t.Fatalf("run (answer) exit = %d, want 0\n%s", code, out)
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("os.Getwd: %v", err)
-	}
-	if err := os.Chdir(fx.ScenarioDir); err != nil {
-		t.Fatalf("chdir to scenario dir: %v", err)
-	}
-	defer func() {
-		if err := os.Chdir(cwd); err != nil {
-			t.Fatalf("restore cwd: %v", err)
-		}
-	}()
+	t.Chdir(fx.ScenarioDir)
 
 	solveArgs := []string{"solve", ticket, "--yes", "--backend", "fake", "--store", fx.StoreDir}
 	out, code = runMain(t, "", solveArgs...)

@@ -18,7 +18,7 @@ import (
 )
 
 // findingsYAMLCleared reads only the "cleared" list out of a gate round's
-// findings.yaml, for asserting what a round actually cleared (F6/M-6): the
+// findings.yaml, for asserting what a round actually cleared: the
 // round's own report/findings tables list only findings reported that
 // round, so they can never show whether an unreported open finding cleared
 // or merely went unmentioned.
@@ -35,6 +35,34 @@ func findingsYAMLCleared(t *testing.T, path string) []string {
 		t.Fatalf("parse %s: %v", path, err)
 	}
 	return doc.Cleared
+}
+
+// findingsYAMLEntry reads one finding's Triage and Decision fields from a
+// gate round's findings.yaml, for asserting that a human's actual keep
+// decision at the triage prompt - not merely its downstream effect on the
+// finding's status - reached the persisted record.
+func findingsYAMLEntry(t *testing.T, path, id string) (triage, decision string, found bool) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var doc struct {
+		Findings []struct {
+			ID       string `yaml:"id"`
+			Triage   string `yaml:"triage"`
+			Decision string `yaml:"decision"`
+		} `yaml:"findings"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	for _, f := range doc.Findings {
+		if f.ID == id {
+			return f.Triage, f.Decision, true
+		}
+	}
+	return "", "", false
 }
 
 // runMain runs Main in-process with a scripted stdin and returns its stdout
@@ -84,8 +112,8 @@ func withoutPrefix(paths []string, prefix string) []string {
 	return out
 }
 
-// TestGateReviewerRoundsThroughMain is S4's decisive test (digest B1-S4,
-// design Q3): the real reviewer path (`--backend fake`, playing back
+// TestGateReviewerRoundsThroughMain is the decisive end-to-end test for the
+// reviewer path: the real reviewer path (`--backend fake`, playing back
 // testdata/fixture/scenario-branches/reviewer/), driven entirely through
 // cmd/jig's own Main with stdinIsTerminal forced true and a scripted stdin,
 // exactly as a real terminal session would answer the triage prompts.
@@ -167,7 +195,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	// The failed attempt above still wrote review.json to the store's
 	// working copy (verifydeliver.Gate returns before its own Push, so
 	// nothing was committed or pushed). Store.Sync's leftover-commit fix
-	// lives in PR A, not this branch (digest commit map, a02e1d9), so a
+	// (commit a02e1d9) is not on this branch, so a
 	// dirty local store here would otherwise fail the retry's own Sync
 	// with "cannot pull with rebase: you have unstaged changes" - discard
 	// it directly, exactly as an operator would with `git checkout .`
@@ -203,6 +231,21 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	}
 	if strings.Contains(out, "needs_a_human[") && !strings.Contains(out, "needs_a_human[0]") {
 		t.Fatalf("round 1 must leave nothing needing a human (the ask was decided):\n%s", out)
+	}
+
+	// The round's own report table only ever shows a finding's status, not
+	// how it got there - assert directly against findings.yaml that the
+	// kept ask's decision text and its human triage actually reached the
+	// store, not merely that it ended up open.
+	triage, decision, found := findingsYAMLEntry(t, filepath.Join(fx.StoreDir, ticket, "gate", "round-1", "findings.yaml"), "r1-f3")
+	if !found {
+		t.Fatalf("round 1 findings.yaml missing r1-f3")
+	}
+	if triage != "human" {
+		t.Fatalf("round 1 findings.yaml r1-f3 triage = %q, want human", triage)
+	}
+	if decision != "Use a warm, casual tone; no exclamation marks." {
+		t.Fatalf("round 1 findings.yaml r1-f3 decision = %q, want the scripted decision text", decision)
 	}
 
 	slices1, err := st.ReadSlices(ticket)
@@ -256,13 +299,13 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 		t.Fatalf("round 2 report missing the recurrence's new fix slice fix-2-alpha-test:\n%s", out)
 	}
 
-	// F6/M-6: the round 2 report and findings table only ever list findings
+	// The round 2 report and findings table only ever list findings
 	// reported that round, so r1-f3's absence from them (checked above)
 	// proves nothing on its own - it is exactly as absent whether it
 	// cleared or simply went unmentioned. Read the round's own findings.yaml
 	// cleared list, which is the only place that distinguishes the two, and
-	// which the Q6 convergence mutant (a dismissed repeat blocking
-	// clearing) actually breaks.
+	// which a mutant that lets a dismissed repeat block clearing actually
+	// breaks.
 	cleared2 := findingsYAMLCleared(t, filepath.Join(fx.StoreDir, ticket, "gate", "round-2", "findings.yaml"))
 	foundCleared := false
 	for _, id := range cleared2 {

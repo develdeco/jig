@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// TestGateSourceForCompatibilityRule pins Q10's `jig gate` half (F18): the
-// old scripted source (NewFakeGateSource) runs iff --scenario is set and
+// TestGateSourceForCompatibilityRule pins `jig gate`'s half of the
+// compatibility rule: the old scripted source (NewFakeGateSource) runs iff --scenario is set and
 // --backend is not; any other combination, including --backend fake
 // together with --scenario, dispatches the reviewer (NewReviewerGateSource).
 // It asserts on the concrete type name via %T rather than reaching into
@@ -34,8 +34,8 @@ func TestGateSourceForCompatibilityRule(t *testing.T) {
 	}
 }
 
-// TestGateSourceForSolveCompatibilityRule pins Q10's `jig solve` half
-// (F18): unlike `jig gate`, solve's scripted-source decision never looks at
+// TestGateSourceForSolveCompatibilityRule pins `jig solve`'s half of the
+// compatibility rule: unlike `jig gate`, solve's scripted-source decision never looks at
 // --backend - the scripted source runs iff --scenario is set, whatever
 // --backend says; the reviewer runs only without --scenario.
 func TestGateSourceForSolveCompatibilityRule(t *testing.T) {
