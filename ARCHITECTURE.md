@@ -17,10 +17,11 @@ run(frontier)  dispatch queued, unblocked slices to a build session
   │            writes: slices/<id>.state, work/<id>.attempt-N.{slice,result}.json,
   │                    journal.ndjson, questions/q-NNN.md, start.<repo>.sha
   ▼
-gate           review + re-verification round over the ticket's branch
-  │            reads:  journal.ndjson, slices.yaml
-  │            writes: gate/round-N/{findings.md,report.yaml,diff-changelog.md},
-  │                    evidence/round-N/*, slices.yaml (fix slices, from_gate: N)
+gate           re-verification round: oracles, then a reviewer session's find/route/triage
+  │            reads:  brief.md, slices.yaml, journal.ndjson, gate/round-N/findings.yaml (cumulative fold)
+  │            writes: work/gate.round-N.{review,result}.json,
+  │                    gate/round-N/{findings.yaml,findings.md,report.yaml,diff-changelog.md},
+  │                    evidence/round-N/*, slices.yaml (fix slices, findings, from_gate: N)
   ▼
 publish        reconcile, revalidate, docs, squash, route → open the PR
                reads:  gate/round-N/*, journal.ndjson
@@ -70,11 +71,15 @@ ledger.md
   work/
     <id>.attempt-N.slice.json
     <id>.attempt-N.result.json
+    gate.round-N.review.json
+    gate.round-N.result.json
   gate/
     round-N/
+      findings.yaml
       findings.md
       diff-changelog.md
       report.yaml
+      spec-input.md   # --branch --doc only
   evidence/
     round-N/
   changelog/
@@ -105,7 +110,7 @@ exists.
 | `internal/fixture/` | `Generate` | test `Opts` → a temp fixture repo, its store, and a scripted attempt scenario |
 | `internal/frontier/` | `Run`, `Requeue`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, paused, or stalled) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
-| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
+| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `DiffNameOnly`, `FileExistsAtRev`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
 | `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `internal/home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → per-machine paths |
 | `internal/journal/` | `Append`, `Read`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs |
@@ -138,6 +143,41 @@ Screens attach only where the backend's tool-call surface allows a
 PreToolUse hook, which today is `headless` alone; `fake` has no tool calls
 to screen, and `herdr`'s tool calls run inside the remote agent it drives,
 outside jig's own process.
+
+## Gate reviewer contract
+
+A gate round's reviewer dispatch (`internal/verifydeliver/review.go`) is the
+same disk-only contract as a build session, narrowed to read-only: jig
+writes `work/gate.round-N.review.json` (the ticket, round, scope, base and
+head sha, brief/slices/journal paths, manifest oracles, and the cumulative
+`open`/`dismissed` findings folded from every earlier round), the backend
+runs a session against `must_review` - every file the scope diff touched
+plus every still-open finding's file - and jig reads back
+`work/gate.round-N.result.json` (findings, `reviewed_paths`, a summary). The
+reviewer edits, commits, and pushes nothing; jig checks this itself (HEAD
+and the tracked tree unchanged after dispatch) rather than trusting the
+session, and rejects the round (`REVIEW_INVALID`) if either moved, or if
+`result.json` fails strict structural validation - an unknown `action` or
+`risk`, a finding whose file is neither present at head nor deleted in the
+scope diff, an oracle that isn't a manifest oracle, a `prior` naming no
+known finding, or `reviewed_paths` missing a `must_review` path all fail the
+round loudly rather than falling back to a partial result.
+
+Findings bookkeeping (`findings.go`) then folds the round onto the
+cumulative state: a finding's identity across rounds lives only in its own
+`prior` field, an open finding clears when its file was reviewed and
+nothing routed reported it again, and a finding recurring for the second
+time is routed to a human regardless of the reviewer's own label. Routing
+(`route.go`) first runs triage over this round's `fix` batch and `ask`
+findings - a human at a terminal decides the batch (accept all, or list
+ids to dismiss) and each `ask` (keep, with an optional decision, or
+dismiss); `--yes` or a non-terminal stdin runs `DefaultTriage` instead
+(every fix kept, every `ask` with a derived workspace kept, one left
+undecided when its file lies in no declared workspace) - then turns every
+kept finding into a fix slice: one per workspace and oracle for the kept
+fixes, one each for a kept `ask`. Routing and triage both finish, and
+every fix slice from them is appended, before `Gate` pushes the store - so
+a round is never partially applied.
 
 ## Safety
 

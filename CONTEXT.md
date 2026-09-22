@@ -14,7 +14,7 @@ _Avoid_: database, state dir
 
 **Intake**:
 The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several.
-_Avoid_: onboarding, triage
+_Avoid_: onboarding
 
 **Shape**:
 A ticket's intent, one of feature, bug, or refactor.
@@ -67,6 +67,18 @@ _Avoid_: checkout, sandbox
 **Gate**:
 Out-of-band verification of a ticket's branch, run on its own lease, under a different model, with fresh context.
 _Avoid_: code review, QA pass
+
+**Finding action**:
+Who acts on a gate finding, reported by the reviewer itself: `fix` means jig queues a fix slice, `ask` means a human decides, `note` means it is recorded only.
+_Avoid_: class, severity, category
+
+**Coverage**:
+The files a reviewer actually read in a round, reported as `reviewed_paths`. jig accepts a round only when coverage includes every changed file and every open finding's file, and clears an open finding only from it.
+_Avoid_: reviewed scope, read set
+
+**Triage**:
+The human seam for a gate round's `ask` findings and its `fix` batch: keep, dismiss, or (asks only) leave undecided. Every decision is recorded and becomes eval gold.
+_Avoid_: review comment triage, auto-dismiss
 
 **Staircase**:
 The per-dispatch model ladder: cheapest model first, climbing with volume, with invariants floored to the dearest model.
