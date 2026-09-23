@@ -20,9 +20,13 @@ lease sandbox: they deny specific destructive or history-rewriting git
 subcommands and credential-shaped paths for the `headless` backend's tool
 calls; they do not confine a session's shell to its lease, and ordinary git
 commands (commit, checkout, fetch, and the like) are still allowed. A
-`headless` session's shell and file-read tools run only when the screen
-passes them, and its file-edit tools are granted only inside the lease and
-on its own `result.json`. See the Safety section of
+`headless` session's shell and file-read tools are granted only by a passing
+screen, and its file-edit tools only inside the lease and on its own
+`result.json`. jig checks that the screen still answers before each screened
+session starts, because the CLI's own classifier would otherwise leave a
+read-only shell behind a screen that had stopped working. The lease's own
+`.claude` settings are not loaded, since they are part of the code under
+review. See the Safety section of
 [ARCHITECTURE.md](../ARCHITECTURE.md#safety) for how each one works.
 
 In scope:
@@ -31,13 +35,19 @@ In scope:
   allow a `git push`, or any other banned subcommand, that it's meant to
   deny - disguised through quoting, path tricks, or otherwise.
 - A path shaped like a live credential (`.env*`, `*_key*`, `id_rsa*`,
-  `*.pem`, `~/.aws/**`, `~/.config/gh/**`, and the like) that the
-  secret-path screen (`internal/screen.SecretPath`) fails to deny.
+  `*.pem`, `~/.aws/**`, `~/.config/gh/**`, `~/.ssh/**`, `.netrc`, `.npmrc`,
+  and the like) that the secret-path screen
+  (`internal/screen.SecretPath`) fails to deny, including one named in a
+  tool-call argument the screen does not check.
 - A `headless` session that runs its shell or file-read tools without the
-  screen hook passing the call (for example, when the hook cannot run), or
-  whose file-edit tools write outside its lease and its own `result.json`,
-  through jig's generated settings rather than the operator's own Claude
-  Code settings.
+  screen hook passing the call (for example, when the hook stops working
+  after the pre-dispatch check), or whose file-edit tools write outside its
+  lease and its own `result.json`, through jig's generated settings rather
+  than the operator's own Claude Code settings.
+- Anything in the code under review that reaches the session or the machine
+  through jig's own dispatch: a file in the lease that is loaded as
+  configuration, a hook it can cause to run, or a way to widen the
+  session's grants.
 - A guarded-push bypass: a push of the ticket branch to a non-local remote
   that goes through without the `publish` command's confirmed step (its
   interactive confirm, or `--yes`) having run. (Every jig command pushes

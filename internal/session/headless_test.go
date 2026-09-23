@@ -2,12 +2,16 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/outcome"
 )
 
@@ -119,7 +123,7 @@ func TestHeadlessSettings(t *testing.T) {
 		t.Fatalf("settings are not JSON: %v\n%s", err, raw)
 	}
 	want = map[string]any{
-		"permissions": map[string]any{"allow": toAny(append(edits, "Bash", "PowerShell", "Read", "Glob", "Grep"))},
+		"permissions": map[string]any{"allow": toAny(append(edits, "Bash", "Read", "Glob", "Grep"))},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("unscreened settings =\n%s\nwant\n%v", raw, want)
@@ -153,8 +157,9 @@ func TestHeadlessArgs(t *testing.T) {
 		"-p", "--output-format", "json",
 		"--model", "claude-haiku-4-5",
 		"--permission-mode", "dontAsk",
-		"--tools", "Bash,PowerShell,Read,Glob,Grep,Edit,Write,NotebookEdit",
+		"--tools", "Bash,Read,Glob,Grep,Edit,Write,NotebookEdit",
 		"--strict-mcp-config",
+		"--setting-sources", "user",
 		"--settings", settings,
 		"--", "-do the slice",
 	}
@@ -245,7 +250,7 @@ func runClaudeStub(t *testing.T, env map[string]string) claudeStubRun {
 		t.Setenv("CLAUDE_STUB_WRITE_PATH", d.ResultJSON)
 	}
 
-	b := &headlessBackend{goos: "linux", screenBinary: "/opt/jig/bin/jig"}
+	b := &headlessBackend{goos: "linux", screenBinary: builtJigBinary(t)}
 	runErr := b.Run(d)
 
 	data, err := os.ReadFile(logFile)
@@ -400,4 +405,89 @@ func readResult(t *testing.T, path string) outcome.Result {
 		t.Fatalf("read result.json: %v", err)
 	}
 	return outcome.ParseJSON("slice", data)
+}
+
+// builtJigBinary builds cmd/jig once per test binary and returns the path
+// to it. A screened dispatch runs the real `jig _screen` hook, so the tests
+// that drive one exercise the same binary production resolves through build
+// info rather than a stand-in.
+func builtJigBinary(t *testing.T) string {
+	t.Helper()
+	dir := buildBinary(t, filepath.Join("cmd", "jig"), "jig")
+	name := "jig"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(dir, name)
+}
+
+// TestHeadlessScreenProbeRefusesABrokenHook pins the precondition behind
+// the model's central claim. Claude Code skips a hook it cannot launch, and
+// its own read-only classifier still grants part of the shell, so a screened
+// session whose hook is missing, fails, says nothing, or answers "allow" to
+// a call the screen must deny would run with no screen and nothing saying
+// so. Each broken state must stop the dispatch before the CLI is started.
+func TestHeadlessScreenProbeRefusesABrokenHook(t *testing.T) {
+	stubDir := buildBinary(t, filepath.Join("testdata", "fixture", "screenstub"), "screenstub")
+	stub := filepath.Join(stubDir, "screenstub")
+	if runtime.GOOS == "windows" {
+		stub += ".exe"
+	}
+
+	cases := []struct {
+		name string
+		bin  string
+		mode string
+		want string
+	}{
+		{"missing binary", filepath.Join(t.TempDir(), "not-jig"), "", "unusable"},
+		{"exits non-zero", stub, "exit1", "it failed"},
+		{"prints no decision", stub, "garbage", "not the hook's JSON decision"},
+		{"prints nothing", stub, "silent", "not the hook's JSON decision"},
+		{"allows a call it must deny", stub, "allow", `answered "allow"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("SCREEN_STUB_MODE", c.mode)
+			claudeDir := buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude")
+			t.Setenv("PATH", claudeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			logFile := filepath.Join(t.TempDir(), "claude.log")
+			t.Setenv("CLAUDE_STUB_LOG", logFile)
+
+			b := &headlessBackend{goos: runtime.GOOS, screenBinary: c.bin}
+			err := b.Run(missingDispatch(t, true))
+			if err == nil {
+				t.Fatal("Run with a broken screen hook succeeded, want a refusal")
+			}
+			var ax *axi.Error
+			if !errors.As(err, &ax) || ax.Code != "SCREEN_UNAVAILABLE" {
+				t.Fatalf("Run error = %v, want an axi.Error with code SCREEN_UNAVAILABLE", err)
+			}
+			if !strings.Contains(ax.Msg, c.want) {
+				t.Errorf("Msg = %q, want it to say %q", ax.Msg, c.want)
+			}
+			if _, statErr := os.Stat(logFile); statErr == nil {
+				t.Error("the claude CLI was started even though the screen hook was broken")
+			}
+		})
+	}
+}
+
+// TestHeadlessTimeoutBound pins that a session runs under a deadline and
+// that JIG_HEADLESS_TIMEOUT sets it, so a hung CLI or hook cannot wedge an
+// unattended run forever.
+func TestHeadlessTimeoutBound(t *testing.T) {
+	if got := headlessTimeout(); got != defaultHeadlessTimeout {
+		t.Errorf("headlessTimeout() = %v, want the default %v", got, defaultHeadlessTimeout)
+	}
+	t.Setenv("JIG_HEADLESS_TIMEOUT", "45m")
+	if got := headlessTimeout(); got != 45*time.Minute {
+		t.Errorf("headlessTimeout() with an override = %v, want 45m", got)
+	}
+	for _, bad := range []string{"nonsense", "-5m", "0"} {
+		t.Setenv("JIG_HEADLESS_TIMEOUT", bad)
+		if got := headlessTimeout(); got != defaultHeadlessTimeout {
+			t.Errorf("headlessTimeout() with %q = %v, want the default", bad, got)
+		}
+	}
 }

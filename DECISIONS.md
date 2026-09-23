@@ -113,6 +113,28 @@ was ambiguous, what was chosen, and why.
   user settings would also drop their deny rules and hooks, widening the session as often
   as narrowing it; the `--permission-mode` flag already beats any `defaultMode` there,
   checked against a user-level `bypassPermissions`.
+- Granting through the screen is not fail-closed on its own, so jig proves the screen
+  before every screened dispatch: one `jig _screen` run with a push, which must come back
+  denied. Claude Code skips a hook it cannot launch and its own read-only classifier
+  still allows `echo`, `ls`, `git show` and the like, so a missing, failing, silent or
+  wrong-answering hook would otherwise leave a session reading the machine with nothing
+  saying the screen was gone. The probe binds the start of a session, not its whole life.
+- The screen takes a tool's file-selecting arguments from the tool, not from one shared
+  key list: `Grep` filters with `glob` and `Glob` selects with `pattern`, and a
+  credential named in either came back in full while a `Read` of the same path was
+  denied. A tool the screen has no entry for is denied rather than guessed at, which is
+  also what a tool a future CLI adds should get until it is considered.
+- `--setting-sources user`: project and local settings live in the lease, which is the
+  code under review. A `.claude/settings.json` on the ticket branch ran its own
+  PreToolUse hook on this machine, and a `.claude/settings.local.json` granted writes
+  outside the lease. The operator's own user settings still load, for the reason above.
+- `PowerShell` left the granted surface: the CLI this backend drives has no such tool, so
+  naming it in `--tools` and in `screen.Granted` described a grant that never existed.
+- A session runs under `JIG_HEADLESS_TIMEOUT` (90 minutes by default). The bound is for a
+  session or hook that has stopped making progress at all; a real slice can legitimately
+  take a long time, so it is deliberately generous rather than tuned.
+- The live contract test asserts the structured `is_error` flag for a refusal the CLI
+  words itself, and matches text only where the text is jig's own (the screen's reason).
 - The gate reviewer's dispatch (Slice "gate") gets the same grants as a build, worktree
   edits included: its forward-only guard already rejects a round that changed the lease.
   A read-only dispatch flag would turn such an edit into a denial the reviewer can work

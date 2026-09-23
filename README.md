@@ -136,10 +136,13 @@ pattern-matching it, so quoting or a `-C <path>` trick can't hide a `git
 push` from it, and a secret-path screen that denies any tool-call path
 shaped like a live credential (`.env*`, `*_key*`, `id_rsa*`, `~/.aws/**`, and
 the like). A `headless` session gets nothing it doesn't need: its shell and
-file reads run only once the screens pass them, so a screen that fails to
-run blocks them instead of waving them through, and its file edits are
-confined to the lease and its own `result.json`. The shell itself is not
-confined to the lease. `herdr` sessions are not screened yet. Every command
+file reads are granted only by a passing screen, its file edits are confined
+to the lease and its own `result.json`, and the lease's own
+`.claude/settings.json` is not loaded, since that file is part of the code
+under review. Before each screened session starts, jig checks that the
+screen still answers, and refuses to run one behind a screen that is
+missing or broken. The shell is not confined to the lease, and neither are
+its file reads: what limits those is the credential screen. `herdr` sessions are not screened yet. Every command
 pushes the ticket store's own bookkeeping commits to the store's remote as
 it works; only the ticket branch push is guarded, and only `jig publish`
 makes it, after its interactive confirm (or `--yes`) has run - it refuses to

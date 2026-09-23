@@ -159,15 +159,26 @@ every tool call, not just git's.
 anything, so the headless backend grants every tool it needs up front and
 runs in `dontAsk` mode, which denies everything else. In a screened
 dispatch (every dispatch jig makes), the shell and file-read tools are
-granted only by the screen hook's allow (`screen.Granted`): Claude Code
-skips a hook that cannot launch, so a screen that only denied would fail
-open, while this one fails closed - no screen, no shell. The edit tools
-are granted by path-scoped permission
-rules for the lease worktree and the dispatch's `result.json`, nothing else
-in the store. Web access, subagents, skills and MCP servers are left out of
-the session entirely. Rules and hook travel as one inline `--settings`
-object, so no settings file lands in the lease. It is not a sandbox: a
-granted shell is not confined to the lease. See
+granted only by the screen hook's allow (`screen.Granted`), so jig itself
+grants them nothing without a passing screen. That is not the whole story:
+Claude Code treats a hook it cannot launch as no decision, and its own
+read-only classifier still lets part of the shell through, so a dead screen
+would leave a session reading the machine with nothing saying so. jig
+therefore proves the hook before every screened dispatch: it runs
+`jig _screen` once with a call the screen must deny, and a hook that is
+missing, fails, answers nothing, or allows it stops the dispatch with
+`SCREEN_UNAVAILABLE` instead of starting the session. The edit tools are
+granted by path-scoped permission rules for the lease worktree and the
+dispatch's `result.json`, nothing else in the store. Web access, subagents,
+skills and MCP servers are left out of the session entirely. Rules and hook
+travel as one inline `--settings` object, and `--setting-sources user`
+keeps the lease's own `.claude/settings.json` out: that file is content
+under review, and loading it would run a hook the ticket branch chose and
+could widen what the session may edit. A session is bounded by
+`JIG_HEADLESS_TIMEOUT` (90 minutes by default), so a wedged CLI or hook
+fails rather than hangs. It is not a sandbox: a granted shell is not
+confined to the lease, and neither are `Read`, `Glob` and `Grep`, whose
+only limit is the credential denylist. See
 [ADR 0008](docs/adr/0008-headless-permission-model.md); `JIG_LIVE_CLAUDE=1
 go test ./internal/session -run Live` checks the model against the
 installed CLI through a local mock of the Messages API.

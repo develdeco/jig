@@ -101,12 +101,60 @@ func TestCommandScreenTable(t *testing.T) {
 	}
 }
 
-func TestPowerShellToolScreened(t *testing.T) {
-	if _, ok := ToolCall("PowerShell", map[string]any{"command": `git -C D:\wt push`}); ok {
-		t.Fatalf("expected PowerShell git push to be denied")
+// TestUnknownToolDenied pins that a tool this screen has no path rules for
+// is denied rather than judged on a guess: the screen is the grant, so a
+// tool it cannot reason about gets nothing. PowerShell is one such name:
+// the CLI this backend drives has no PowerShell tool.
+func TestUnknownToolDenied(t *testing.T) {
+	for _, tool := range []string{"PowerShell", "WebFetch", "Task", "mcp__x__y", ""} {
+		reason, ok := ToolCall(tool, map[string]any{"command": "echo hi"})
+		if ok {
+			t.Errorf("ToolCall(%q) allowed, want denied", tool)
+		}
+		if !strings.Contains(reason, "does not know") {
+			t.Errorf("ToolCall(%q) reason = %q, want it to say the tool is unknown", tool, reason)
+		}
 	}
-	if _, ok := ToolCall("PowerShell", map[string]any{"command": `git -C D:\wt commit -m x`}); !ok {
-		t.Fatalf("expected PowerShell git commit to be allowed")
+}
+
+// TestBashToolScreened pins that the shell tool still routes its command
+// through Command.
+func TestBashToolScreened(t *testing.T) {
+	if _, ok := ToolCall("Bash", map[string]any{"command": `git -C D:\wt push`}); ok {
+		t.Fatalf("expected Bash git push to be denied")
+	}
+	if _, ok := ToolCall("Bash", map[string]any{"command": `git -C D:\wt commit -m x`}); !ok {
+		t.Fatalf("expected Bash git commit to be allowed")
+	}
+}
+
+// TestSecretPathThroughEveryToolArgument pins the argument each tool picks
+// files with, not one shared key list: Grep filters with "glob" and Glob
+// selects with "pattern", so a credential file named there is what comes
+// back in the transcript when nothing checks it.
+func TestSecretPathThroughEveryToolArgument(t *testing.T) {
+	cases := []struct {
+		tool  string
+		input map[string]any
+	}{
+		{"Grep", map[string]any{"pattern": "SECRET", "path": ".", "glob": ".env*", "output_mode": "content"}},
+		{"Grep", map[string]any{"pattern": "KEY", "path": ".", "glob": "*.pem"}},
+		{"Glob", map[string]any{"pattern": "**/*.pem"}},
+		{"Glob", map[string]any{"pattern": "**/.env*"}},
+		{"Read", map[string]any{"file_path": "/home/op/.ssh/id_ed25519"}},
+		{"Read", map[string]any{"file_path": "/home/op/.netrc"}},
+		{"Read", map[string]any{"file_path": "/home/op/.npmrc"}},
+		{"Grep", map[string]any{"pattern": "x", "path": "~/.ssh"}},
+	}
+	for _, c := range cases {
+		if reason, ok := ToolCall(c.tool, c.input); ok {
+			t.Errorf("ToolCall(%q, %v) allowed, want denied", c.tool, c.input)
+		} else if !strings.Contains(reason, "credentials") {
+			t.Errorf("ToolCall(%q, %v) reason = %q, want a credential denial", c.tool, c.input, reason)
+		}
+	}
+	if _, ok := ToolCall("Grep", map[string]any{"pattern": "func main", "path": ".", "glob": "*.go"}); !ok {
+		t.Fatalf("an ordinary Grep was denied")
 	}
 }
 
@@ -168,12 +216,12 @@ func TestSecretReadTable(t *testing.T) {
 // the headless backend's path-scoped permission rule - and neither is a tool
 // outside the headless session's surface.
 func TestGrants(t *testing.T) {
-	for _, tool := range []string{"Bash", "PowerShell", "Read", "Glob", "Grep"} {
+	for _, tool := range []string{"Bash", "Read", "Glob", "Grep"} {
 		if !Grants(tool) {
 			t.Errorf("Grants(%q) = false, want true", tool)
 		}
 	}
-	for _, tool := range []string{"Edit", "Write", "NotebookEdit", "WebFetch", "Task", "Skill", "mcp__x__y", ""} {
+	for _, tool := range []string{"Edit", "Write", "NotebookEdit", "PowerShell", "WebFetch", "Task", "Skill", "mcp__x__y", ""} {
 		if Grants(tool) {
 			t.Errorf("Grants(%q) = true, want false", tool)
 		}

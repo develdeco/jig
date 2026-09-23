@@ -2,6 +2,7 @@ package session
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/outcome"
@@ -47,6 +49,76 @@ func (b *headlessBackend) hookBinary() (string, error) {
 		return b.screenBinary, nil
 	}
 	return selfJigBinary()
+}
+
+// defaultHeadlessTimeout bounds one headless session. It is generous: a
+// real slice can take a long time, and the bound exists for a session or a
+// hook that has stopped making progress at all, not to hurry one along.
+const defaultHeadlessTimeout = 90 * time.Minute
+
+// headlessTimeout is defaultHeadlessTimeout, or the Go duration in
+// JIG_HEADLESS_TIMEOUT when that parses to a positive value.
+func headlessTimeout() time.Duration {
+	if raw := os.Getenv("JIG_HEADLESS_TIMEOUT"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return d
+		}
+	}
+	return defaultHeadlessTimeout
+}
+
+// screenProbe is the tool call verifyScreen sends the hook: a push, which
+// the command screen always denies.
+var screenProbe = []byte(`{"tool_name":"Bash","tool_input":{"command":"git push"}}`)
+
+// hookDecision is the part of the hook's stdout verifyScreen reads.
+type hookDecision struct {
+	HookSpecificOutput struct {
+		PermissionDecision string `json:"permissionDecision"`
+	} `json:"hookSpecificOutput"`
+}
+
+// verifyScreen proves the screen hook answers before a screened session
+// starts. Claude Code skips a hook it cannot launch, and its own read-only
+// classifier still grants part of the shell, so a hook that is missing,
+// exits non-zero, or prints nothing would leave a session running with no
+// screen in front of it and nothing saying so. One probe per dispatch
+// settles it: the hook must come back denying a push.
+func (b *headlessBackend) verifyScreen() error {
+	bin, err := b.hookBinary()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "_screen")
+	cmd.Stdin = bytes.NewReader(screenProbe)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+
+	unusable := func(why string) error {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("the screen hook %q is unusable (%s), so a screened session would run unscreened", bin, why),
+			Code: "SCREEN_UNAVAILABLE",
+			Help: []string{"Check that the jig binary the hook names exists and runs `jig _screen`, then rerun."},
+		}
+	}
+	if ctx.Err() != nil {
+		return unusable("it did not answer within 30s")
+	}
+	if runErr != nil {
+		return unusable(fmt.Sprintf("it failed: %s: %s", exitStatus(runErr), outputTail(stderr.String(), stdout.String())))
+	}
+	var decision hookDecision
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &decision); err != nil {
+		return unusable("its answer was not the hook's JSON decision")
+	}
+	if decision.HookSpecificOutput.PermissionDecision != "deny" {
+		return unusable(fmt.Sprintf("it answered %q to a call it must deny", decision.HookSpecificOutput.PermissionDecision))
+	}
+	return nil
 }
 
 // selfJigBinary returns this process's executable when this process is the
@@ -110,16 +182,31 @@ func (b *headlessBackend) Run(d Dispatch) error {
 		}
 	}
 
+	if d.Screen {
+		if err := b.verifyScreen(); err != nil {
+			return err
+		}
+	}
+
 	args, err := b.args(d)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(claudePath, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), headlessTimeout())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, claudePath, args...)
 	cmd.Dir = d.Worktree
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
+	if ctx.Err() != nil {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("the headless session did not finish within %s and was stopped", headlessTimeout()),
+			Code: "SESSION_TIMEOUT",
+			Help: []string{"Raise the bound with JIG_HEADLESS_TIMEOUT (a Go duration, e.g. 3h), or rerun."},
+		}
+	}
 
 	if _, err := os.Stat(d.ResultJSON); err == nil {
 		return nil
@@ -163,6 +250,14 @@ func (b *headlessBackend) args(d Dispatch) ([]string, error) {
 		"--permission-mode", "dontAsk",
 		"--tools", strings.Join(headlessTools(), ","),
 		"--strict-mcp-config",
+		// Only the operator's own settings load on top of this session's
+		// own --settings. Project and local settings live inside the lease
+		// worktree, which is the content under review: a `.claude/
+		// settings.json` committed on the ticket branch would otherwise run
+		// its own PreToolUse hook on this machine, and a
+		// `.claude/settings.local.json` could grant edits outside the
+		// lease.
+		"--setting-sources", "user",
 		"--settings", settings,
 		"--", d.Prompt,
 	)

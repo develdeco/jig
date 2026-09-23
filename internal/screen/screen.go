@@ -52,8 +52,30 @@ var conditionalGit = []conditionalRule{
 	{"stash", map[string]bool{"drop": true, "clear": true}, "dropping stashes can lose work"},
 }
 
-// pathKeys are the ToolCall input keys checked against SecretPath.
-var pathKeys = []string{"file_path", "path", "notebook_path", "filePath"}
+// toolPathArgs maps every tool a headless session is given to the input
+// keys that select files for it. A tool selects files under more than one
+// key - Grep filters with "glob" and Glob selects with "pattern" - so a
+// fixed key list shared by every tool misses the ones it has not heard of,
+// and a Grep whose "glob" names a credential file returns that file's
+// contents while a Read of the same path is denied.
+//
+// A tool that is not in this map is one this screen cannot reason about.
+// ToolCall denies it: the screen is the grant, so what it cannot judge it
+// does not allow. Adding a tool to the session's surface means adding it
+// here, with the keys that pick what it reads or writes.
+var toolPathArgs = map[string][]string{
+	"Bash":         {},
+	"Read":         {"file_path"},
+	"Write":        {"file_path"},
+	"Edit":         {"file_path"},
+	"NotebookEdit": {"notebook_path", "file_path"},
+	"Glob":         {"pattern", "path"},
+	"Grep":         {"glob", "path"},
+}
+
+// legacyPathKeys are checked on every known tool on top of its own keys, so
+// a key renamed between CLI versions still reaches SecretPath.
+var legacyPathKeys = []string{"file_path", "path", "notebook_path", "filePath"}
 
 // unquote strips surrounding whitespace, then any leading/trailing single or
 // double quote characters. It is not shell-grade quote parsing: a quoted
@@ -156,7 +178,8 @@ func checkGitArgv(argv []string) (string, bool) {
 // Case-insensitive. Denies when the basename starts with ".env", contains
 // "_key", or starts with "id_rsa"; when the extension is ".pem"; or when the
 // path contains "/.aws/" or "\.aws\" (or has a "~/.aws" prefix), or contains
-// "/.config/gh/" or "\.config\gh\" (or has a "~/.config/gh" prefix).
+// "/.config/gh/" or "\.config\gh\" (or has a "~/.config/gh" prefix); and
+// the same for "/.ssh/", ".netrc", "_netrc" and ".npmrc".
 //
 // The checks operate on the literal string, so a glob token such as
 // ".env*", "*.pem", "*_key*" or "~/.aws/*" is denied whenever its fixed
@@ -188,6 +211,12 @@ func SecretPath(s string) bool {
 		return true
 	}
 	if strings.Contains(norm, "/.config/gh/") || strings.HasPrefix(norm, "~/.config/gh") {
+		return true
+	}
+	if strings.Contains(norm, "/.ssh/") || strings.HasPrefix(norm, "~/.ssh") || strings.HasPrefix(norm, ".ssh/") {
+		return true
+	}
+	if strings.HasPrefix(base, ".netrc") || strings.HasPrefix(base, "_netrc") || strings.HasPrefix(base, ".npmrc") {
 		return true
 	}
 	return false
@@ -229,14 +258,17 @@ func Command(cmd string) (string, bool) {
 	return "", true
 }
 
-// ToolCall screens a tool-call hook input: input["command"] (any tool) is
-// routed to Command, and each of input["file_path"], input["path"],
-// input["notebook_path"], input["filePath"] is checked against SecretPath.
-// The tool name is accepted for signature compatibility with the hook layer
-// but does not gate which checks run. It returns ("", true) when allowed, or
-// (reason, false) when denied.
+// ToolCall screens a tool-call hook input. The tool name decides which
+// input keys name files (toolPathArgs), and a tool that is not in that map
+// is denied outright rather than judged on a guess. input["command"] is
+// routed to Command, and every path-like argument of the tool, plus the
+// legacy key names, is checked against SecretPath. It returns ("", true)
+// when allowed, or (reason, false) when denied.
 func ToolCall(tool string, input map[string]any) (string, bool) {
-	_ = tool
+	keys, known := toolPathArgs[tool]
+	if !known {
+		return fmt.Sprintf("Blocked: `%s` is a tool this screen does not know, so it cannot be judged.", tool), false
+	}
 	if cmdVal, ok := input["command"]; ok {
 		if s, ok := cmdVal.(string); ok && s != "" {
 			if reason, allowed := Command(s); !allowed {
@@ -244,7 +276,7 @@ func ToolCall(tool string, input map[string]any) (string, bool) {
 			}
 		}
 	}
-	for _, key := range pathKeys {
+	for _, key := range append(append([]string{}, keys...), legacyPathKeys...) {
 		v, ok := input[key]
 		if !ok {
 			continue
@@ -266,7 +298,7 @@ func ToolCall(tool string, input map[string]any) (string, bool) {
 // stay denied (docs/adr/0008-headless-permission-model.md). File-edit tools
 // are deliberately absent: the headless backend grants them through
 // path-scoped permission rules, and the screen only ever denies them.
-var Granted = []string{"Bash", "PowerShell", "Read", "Glob", "Grep"}
+var Granted = []string{"Bash", "Read", "Glob", "Grep"}
 
 // Grants reports whether a passing screen is tool's grant, i.e. whether
 // tool is in Granted.

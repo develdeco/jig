@@ -84,9 +84,9 @@ func liveBuildSession(t *testing.T, jig string) {
 	api := &mockMessagesAPI{steps: []mockStep{
 		{name: "screen denies a push", call: bash("git push origin HEAD"), wantErr: "Blocked `git push`"},
 		{name: "read slice.json outside the lease", call: fixed("Read", map[string]any{"file_path": d.SliceJSON}), wantOut: `"goal":"say hello"`},
-		{name: "write outside the lease", call: write(outsideFile, "x"), wantErr: "denied"},
+		{name: "write outside the lease", call: write(outsideFile, "x"), wantDenied: true},
 		{name: "write in the lease", call: write(filepath.Join(worktree, "hello.txt"), "hello\n")},
-		{name: "write a sibling of result.json", call: write(sibling, "x"), wantErr: "denied"},
+		{name: "write a sibling of result.json", call: write(sibling, "x"), wantDenied: true},
 		{name: "commit", call: bash("git add -A && git -c user.name=jig-test -c user.email=test@example.invalid commit -q -m hello && git rev-parse HEAD")},
 		{name: "write result.json", call: func(prior []mockToolResult) mockToolCall {
 			sha := regexp.MustCompile(`[0-9a-f]{40}`).FindString(prior[5].Content)
@@ -242,6 +242,14 @@ func runLive(t *testing.T, jig string, api *mockMessagesAPI, d Dispatch) {
 	for i, step := range api.steps {
 		r := results[i]
 		switch {
+		case step.wantDenied:
+			// The permission system's own refusal text is the CLI's, and
+			// it reads differently per mode and version, so the assertion
+			// is the structured flag plus the file staying absent, which
+			// the caller checks.
+			if !r.IsError {
+				t.Errorf("step %d (%s): got no error, want the call refused", i, step.name)
+			}
 		case step.wantErr != "":
 			if !r.IsError || !strings.Contains(r.Content, step.wantErr) {
 				t.Errorf("step %d (%s): got error=%v %q, want an error containing %q", i, step.name, r.IsError, r.Content, step.wantErr)
@@ -270,10 +278,14 @@ type mockToolResult struct {
 // the steps before it, and the result must contain wantOut, or be an error
 // containing wantErr.
 type mockStep struct {
-	name    string
-	call    func(prior []mockToolResult) mockToolCall
-	wantOut string
-	wantErr string
+	name string
+	call func(prior []mockToolResult) mockToolCall
+	// wantOut and wantErr match text jig itself owns: the session's own
+	// output, and the screen's deny reason. wantDenied is for a refusal the
+	// CLI words, where only the structured flag is jig's to rely on.
+	wantOut    string
+	wantErr    string
+	wantDenied bool
 }
 
 func fixed(name string, input map[string]any) func([]mockToolResult) mockToolCall {
