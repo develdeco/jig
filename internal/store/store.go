@@ -85,36 +85,37 @@ func (s *Store) Sync() error {
 // a command that only ever Pushes (e.g. `jig requeue`) too - not only the
 // commands that Sync first.
 func (s *Store) refuseIfMidRebaseOrMerge() error {
-	mid, err := inProgressRebaseOrMerge(s.Root)
+	what, err := inProgressRebaseOrMerge(s.Root)
 	if err != nil {
 		return err
 	}
-	if !mid {
+	if what == "" {
 		return nil
 	}
 	return &axi.Error{
-		Msg:  fmt.Sprintf("the store at %s has an unfinished rebase or merge, or unresolved conflicts", s.Root),
+		Msg:  fmt.Sprintf("the store at %s has %s", s.Root, what),
 		Code: "STORE_CONFLICT",
 		Help: []string{"Check the store's state there with `git status`, resolve it, then rerun."},
 	}
 }
 
-// inProgressRebaseOrMerge reports whether dir has an unfinished rebase (git
-// leaves a rebase-merge or rebase-apply directory under .git for the
-// duration of one), an unresolved merge (MERGE_HEAD), an unfinished
-// cherry-pick or revert (CHERRY_PICK_HEAD or REVERT_HEAD - git keeps these
-// set even once the conflict is resolved and staged, until `--continue` or
-// `--abort` runs), a multi-commit cherry-pick or revert sequence (the
-// sequencer directory), an unfinished bisect (BISECT_LOG), or unmerged
-// index entries left by something other than any of those - a conflicted
-// `git stash pop` leaves the index with conflict markers on disk but none
-// of these markers. The git-path markers are read with one `rev-parse` call
-// rather than one per marker, since this runs on every Sync and every Push.
-// The unmerged-index check uses `git ls-files -u`, which only reads the
-// index, rather than `git diff --diff-filter=U`, which opportunistically
+// inProgressRebaseOrMerge reports which of an unfinished rebase (git leaves
+// a rebase-merge or rebase-apply directory under .git for the duration of
+// one), an unresolved merge (MERGE_HEAD), an unfinished cherry-pick or
+// revert (CHERRY_PICK_HEAD or REVERT_HEAD - git keeps these set even once
+// the conflict is resolved and staged, until `--continue` or `--abort`
+// runs), a multi-commit cherry-pick or revert sequence (the sequencer
+// directory), an unfinished bisect (BISECT_LOG), or unmerged index entries
+// left by something other than any of those - a conflicted `git stash pop`
+// leaves the index with conflict markers on disk but none of these markers
+// - dir is in, as a short description naming the one that matched, or ""
+// when none is present. The git-path markers are read with one `rev-parse`
+// call rather than one per marker, since this runs on every Sync and every
+// Push. The unmerged-index check uses `git ls-files -u`, which only reads
+// the index, rather than `git diff --diff-filter=U`, which opportunistically
 // rewrites .git/index as a side effect - a write this read-only guard,
 // called on every Sync and Push, must not make.
-func inProgressRebaseOrMerge(dir string) (bool, error) {
+func inProgressRebaseOrMerge(dir string) (string, error) {
 	out, err := gitx.Run(dir, "rev-parse",
 		"--git-path", "rebase-merge",
 		"--git-path", "rebase-apply",
@@ -125,9 +126,19 @@ func inProgressRebaseOrMerge(dir string) (bool, error) {
 		"--git-path", "BISECT_LOG",
 	)
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	for _, line := range strings.Split(out, "\n") {
+	// In the same order as the --git-path flags above.
+	descriptions := []string{
+		"an unfinished rebase",
+		"an unfinished rebase",
+		"an unfinished merge",
+		"an unfinished cherry-pick",
+		"an unfinished revert",
+		"a cherry-pick or revert sequence",
+		"an unfinished bisect",
+	}
+	for i, line := range strings.Split(out, "\n") {
 		p := strings.TrimSpace(line)
 		if p == "" {
 			continue
@@ -136,16 +147,19 @@ func inProgressRebaseOrMerge(dir string) (bool, error) {
 			p = filepath.Join(dir, p)
 		}
 		if _, err := os.Stat(p); err == nil {
-			return true, nil
+			return descriptions[i], nil
 		} else if !os.IsNotExist(err) {
-			return false, err
+			return "", err
 		}
 	}
 	unmerged, err := gitx.Run(dir, "ls-files", "-u")
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	return unmerged != "", nil
+	if unmerged != "" {
+		return "unresolved (unmerged) index entries", nil
+	}
+	return "", nil
 }
 
 // stageAndCommit refuses while the store has an unfinished rebase or merge,
@@ -221,7 +235,7 @@ func (s *Store) Push(msg string) error {
 // the wrapped message rather than assumed away.
 func (s *Store) abortFailedPull(pullErr error, branch string) error {
 	mid, stateErr := inProgressRebaseOrMerge(s.Root)
-	if stateErr == nil && !mid {
+	if stateErr == nil && mid == "" {
 		return pullErr
 	}
 	paths, _ := conflictedPaths(s.Root)

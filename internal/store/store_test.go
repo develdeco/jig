@@ -503,7 +503,7 @@ func TestPushLeavesNoMidRebaseOnConflict(t *testing.T) {
 	if ierr != nil {
 		t.Fatalf("inProgressRebaseOrMerge: %v", ierr)
 	}
-	if mid {
+	if mid != "" {
 		t.Fatal("Push left the store mid-rebase after a failed retry pull")
 	}
 }
@@ -538,7 +538,7 @@ func TestSyncRefusesWhileMidRebase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inProgressRebaseOrMerge: %v", err)
 	}
-	if !mid {
+	if mid == "" {
 		t.Fatal("fixture did not leave the repo mid-rebase; test setup is wrong")
 	}
 
@@ -558,7 +558,7 @@ func TestSyncRefusesWhileMidRebase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inProgressRebaseOrMerge after Sync: %v", err)
 	}
-	if !midAfter {
+	if midAfter == "" {
 		t.Fatal("Sync must not touch the rebase state; only the operator resolves it")
 	}
 }
@@ -594,7 +594,7 @@ func TestPushRefusesWhileMidMerge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inProgressRebaseOrMerge: %v", err)
 	}
-	if !mid {
+	if mid == "" {
 		t.Fatal("fixture did not leave the repo mid-merge; test setup is wrong")
 	}
 
@@ -648,7 +648,7 @@ func TestPushRefusesWhileMidRebase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inProgressRebaseOrMerge: %v", err)
 	}
-	if !mid {
+	if mid == "" {
 		t.Fatal("fixture did not leave the repo mid-rebase; test setup is wrong")
 	}
 
@@ -662,7 +662,7 @@ func TestPushRefusesWhileMidRebase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inProgressRebaseOrMerge after Push: %v", err)
 	}
-	if !midAfter {
+	if midAfter == "" {
 		t.Fatal("Push must not touch the rebase state; only the operator resolves it")
 	}
 }
@@ -728,7 +728,7 @@ func TestSyncOwnConflictingPullAbortsAndWraps(t *testing.T) {
 	if ierr != nil {
 		t.Fatalf("inProgressRebaseOrMerge: %v", ierr)
 	}
-	if mid {
+	if mid != "" {
 		t.Fatal("Sync left the store mid-rebase after its own conflicting pull")
 	}
 }
@@ -890,8 +890,46 @@ func assertRefusesStoreConflict(t *testing.T, st *Store, work, remote, which str
 	if ierr != nil {
 		t.Fatalf("inProgressRebaseOrMerge: %v", ierr)
 	}
-	if !stillBroken {
+	if stillBroken == "" {
 		t.Fatalf("%s: the fixture's broken state is gone after the call, so this run proved nothing", which)
+	}
+}
+
+// TestRefuseIfMidRebaseOrMergeNamesTheState pins the refusal message's
+// wording for individual states. Before this, inProgressRebaseOrMerge read
+// exactly which marker fired and refuseIfMidRebaseOrMerge threw it away,
+// reporting every one of these as "an unfinished rebase or merge, or
+// unresolved conflicts" even though a staged cherry-pick, a staged revert
+// and unmerged index entries from a conflicted stash pop are none of those.
+// The message must name what jig itself found, the way abortFailedPull's
+// message already does one function below.
+func TestRefuseIfMidRebaseOrMergeNamesTheState(t *testing.T) {
+	cases := []struct {
+		name  string
+		leave func(t *testing.T, work string)
+		want  string
+	}{
+		{"CherryPick", leaveConflictedCherryPick, "an unfinished cherry-pick"},
+		{"Revert", leaveResolvedRevert, "an unfinished revert"},
+		{"StashPop", leaveConflictedStashPop, "unresolved (unmerged) index entries"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			st, work, _ := newTestRemoteStore(t)
+			c.leave(t, work)
+
+			err := st.Sync()
+			var ae *axi.Error
+			if !errors.As(err, &ae) || ae.Code != "STORE_CONFLICT" {
+				t.Fatalf("Sync: err = %v, want *axi.Error STORE_CONFLICT", err)
+			}
+			if !strings.Contains(ae.Msg, c.want) {
+				t.Fatalf("Sync refusal Msg = %q, want it to name %q", ae.Msg, c.want)
+			}
+			if strings.Contains(ae.Msg, "unfinished rebase or merge, or unresolved conflicts") {
+				t.Fatalf("Sync refusal Msg = %q, still uses the old generic wording", ae.Msg)
+			}
+		})
 	}
 }
 
@@ -1179,7 +1217,7 @@ func TestUnreachableRemoteIsNotReportedAsConflict(t *testing.T) {
 		if ierr != nil {
 			t.Fatalf("inProgressRebaseOrMerge: %v", ierr)
 		}
-		if mid {
+		if mid != "" {
 			t.Fatalf("%s left the store mid-rebase", name)
 		}
 	}
