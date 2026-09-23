@@ -156,7 +156,7 @@ func TestRenderStatusSurvivesAnUnreadableFindingsFile(t *testing.T) {
 	if !strings.Contains(got, "slices[4]") {
 		t.Errorf("status did not render the slices table:\n%s", got)
 	}
-	if !strings.Contains(got, "unreadable_gate_rounds: 2 (any asks they recorded are not listed below)") {
+	if !strings.Contains(got, "unreadable_gate_rounds[1]{round}:\n  2\n") {
 		t.Errorf("status did not name the round it could not read:\n%s", got)
 	}
 	if !strings.Contains(got, "r1-f1") {
@@ -198,7 +198,7 @@ func TestRenderStatusSurvivesAnUnreadableReportFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderStatus: %v, want a rendered status despite the corrupt report", err)
 	}
-	if !strings.Contains(got, "unreadable_gate_rounds: 1") {
+	if !strings.Contains(got, "unreadable_gate_rounds[1]{round}:\n  1\n") {
 		t.Errorf("status did not name the round it could not read:\n%s", got)
 	}
 	if strings.Contains(got, "jig publish") {

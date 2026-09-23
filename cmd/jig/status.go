@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -135,11 +134,15 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		}
 	}
 	if len(unreadableRounds) > 0 {
-		rounds := make([]string, 0, len(unreadableRounds))
+		rows := make([][]string, 0, len(unreadableRounds))
 		for _, r := range unreadableRounds {
-			rounds = append(rounds, strconv.Itoa(r))
+			rows = append(rows, []string{strconv.Itoa(r)})
 		}
-		blocks = append(blocks, "unreadable_gate_rounds: "+strings.Join(rounds, ",")+" (any asks they recorded are not listed below)")
+		// A table, like every other block, so the number before the colon
+		// is a count and the round numbers are rows - a bare
+		// "unreadable_gate_rounds: 2" reads as two rounds, not round two.
+		blocks = append(blocks, "note: asks recorded by an unreadable round are not listed")
+		blocks = append(blocks, axi.Table("unreadable_gate_rounds", []string{"round"}, rows))
 	}
 	if len(outstanding) > 0 {
 		var askRows [][]string
@@ -211,9 +214,9 @@ func joinPlus(ids []string) string {
 
 // nextStepHint computes the single contextual next-step hint for ticket:
 // an open question takes priority; otherwise, once every slice is green,
-// the hint points at gate (no rounds yet), publish (last round clean), or
-// run (a fix-slice round is queued); otherwise it points at run to work
-// the frontier.
+// the hint points at gate (no rounds yet, or a last round that was not
+// clean, whose fix slices are green by now) or publish (last round clean);
+// otherwise it points at run to work the frontier.
 func nextStepHint(st *store.Store, ticket string) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
@@ -255,7 +258,13 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		case verdict == "clean":
 			return fmt.Sprintf("Run `jig publish %s` to open the PR", ticket), nil
 		default:
-			return fmt.Sprintf("Run `jig run %s` to work the fix-slice round", ticket), nil
+			// Every slice is green and the last round was not clean, so
+			// its fix slices are already built: what moves the ticket is
+			// the next round, not `jig run`, which would find nothing to
+			// do and reprint this same line. A verdict jig could not read
+			// lands here too, and the next round is the right step there
+			// as well.
+			return fmt.Sprintf("Run `jig gate %s` to open the next gate round", ticket), nil
 		}
 	}
 	return fmt.Sprintf("Run `jig run %s` to work the frontier", ticket), nil
@@ -303,7 +312,10 @@ func latestGateRound(st *store.Store, ticket string) (rounds int, verdict string
 
 	data, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("round-%d", max), "report.yaml"))
 	if err != nil {
-		return max, "", true, nil
+		// A round with no report.yaml at all has not finished writing
+		// one; that is a round in progress, not a corrupt one, so it is
+		// not reported as unreadable. Anything else is.
+		return max, "", !os.IsNotExist(err), nil
 	}
 	var rep struct {
 		Verdict string `yaml:"verdict"`

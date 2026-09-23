@@ -410,11 +410,14 @@ above:
   slices are one way to be short of green, and a fix-slice count read as
   the whole story printed a refused command after `jig gate --early`, which
   reviews an unfinished frontier and can leave an ask undecided having
-  queued nothing. Short of green, both surfaces name the order instead:
-  work the frontier first with `jig run <ticket>`, then `jig gate
-  <ticket>` at a terminal to decide the asks. This is the same rule the
-  printed resume commands follow - a command jig prints as a next step runs
-  as printed.
+  queued nothing. Short of green, both surfaces name the order instead,
+  and the first step is the ticket's own next-step hint rather than a
+  fixed `jig run <ticket>`: a frontier parked on an unanswered question
+  does not advance on that command at all, only on the answer, and the
+  two surfaces share one hint so they cannot disagree about it. The gate
+  at a terminal follows as the second step. This is the same rule the
+  printed resume commands follow - a command jig prints as a next step
+  runs as printed.
 - `--yes`/non-terminal triage's one-line note (`DefaultTriage`, run by
   `triageFor`) is printed only when this round actually had a fix or ask
   to triage; a note is never triaged, so a notes-only round prints none
