@@ -454,8 +454,8 @@ func jigBinaryToken(tok string) bool {
 	return base == "jig" || base == "jig.exe"
 }
 
-// unquoteShellWord strips one layer of surrounding '"' or '\” from tok, if
-// both ends have it.
+// unquoteShellWord strips one layer of surrounding double or single quotes
+// (" or '), from tok, if both ends have it.
 func unquoteShellWord(tok string) string {
 	if len(tok) >= 2 {
 		if (tok[0] == '"' && tok[len(tok)-1] == '"') || (tok[0] == '\'' && tok[len(tok)-1] == '\'') {
@@ -466,7 +466,7 @@ func unquoteShellWord(tok string) string {
 }
 
 // shellWords splits line into words the way a real shell tokenizes one: a
-// '"'- or '\”-quoted run (which may itself contain whitespace, e.g. an
+// double- or single-quoted run (which may itself contain whitespace, e.g. an
 // echo message) is one word, and an unquoted command separator (|, ||,
 // &&, ;, &) is always its own word, even glued to an adjacent word with
 // no space (a;b, x|y, p&&q) - the one piece of structure splitShellCommands

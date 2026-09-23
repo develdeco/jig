@@ -59,8 +59,8 @@ func TestRenderStatus(t *testing.T) {
 // requeue form applies instead). The parked cell also renders with no
 // quoting: resumeCommand's placeholder is single-quoted so the whole value
 // contains no character axi.Quote must escape, unlike the double-quoted
-// form this replaced (see the render test package's unescaped-cell
-// assertion).
+// form this replaced (see internal/axi's TestQuoteUnchangedWhenPlain and
+// TestTableQuotesCells assertions).
 func TestRenderStatusParked(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	fx := fixture.Generate(t, fixture.Opts{})

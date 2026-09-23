@@ -20,9 +20,10 @@ type SliceState struct {
 	// tripped a stalled state, set on both stalled paths - repeat-failure
 	// stall and attempt-cap - and cleared on every route out of that state:
 	// green, `jig requeue --from-brief-diff` and `--slice`, and answering
-	// the slice's question. Additive field: absent on states an older jig
-	// wrote, which read back as the zero value ("-" in `jig status`'s
-	// stalled table's matching-key column).
+	// the slice's question. Recorded for parity with StallSummary but never
+	// rendered: `jig status`'s stalled table (cmd/jig/status.go) has no
+	// column for it, only for StallSummary. Additive field: absent on
+	// states an older jig wrote, which read back as the zero value ("").
 	Signature string `yaml:"signature,omitempty"`
 
 	// StallSummary is the human-readable result summary (outcome.Result's
