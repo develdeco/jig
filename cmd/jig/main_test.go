@@ -52,15 +52,15 @@ func TestRenderStatus(t *testing.T) {
 // TestRenderStatusParked exercises the needs-input path: an open question
 // should drive the "parked" state, the parked custody table with its resume
 // command, and the matching hint. Slice c has FromBrief sections (see
-// testdata/fixture/slices.yaml), so - regardless of the open question's own
-// Reason - the resume command is the amend-brief-then-requeue form: that is
-// the only command that can ever clear it, since frontier.Requeue's
-// --from-brief-diff keys off FromBrief hashes and store.Answer alone would
-// leave nothing to notice the amendment. The parked cell also renders with
-// no quoting: resumeCommand's placeholder is single-quoted so the whole
-// value contains no character axi.Quote must escape, unlike the
-// double-quoted form this replaced (see the render test package's
-// unescaped-cell assertion).
+// testdata/fixture/slices.yaml), but this question carries no
+// "flawed-brief" Reason, so resumeCommand's other requirement is unmet and
+// the resume command is the plain --answer form (TestRenderStatusParkedFlawedBrief
+// covers the same slice with that Reason set, where the amend-brief-then-
+// requeue form applies instead). The parked cell also renders with no
+// quoting: resumeCommand's placeholder is single-quoted so the whole value
+// contains no character axi.Quote must escape, unlike the double-quoted
+// form this replaced (see the render test package's unescaped-cell
+// assertion).
 func TestRenderStatusParked(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	fx := fixture.Generate(t, fixture.Opts{})

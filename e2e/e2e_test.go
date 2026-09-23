@@ -62,8 +62,9 @@ func runEndToEndOnce(t *testing.T) {
 	storeRevBaseline := gitLog(t, fx.StoreRemote, "rev-list", "--count", "main")
 
 	// --- 1. run to first pause: a, b (retried), d green; c paused on q-001.
-	// Slice c has a brief section (FromBrief), so the printed remedy is the
-	// amend-brief-then-requeue form, not q-001 itself (see resumeCommand);
+	// Slice c has a brief section (FromBrief), but this question carries no
+	// "flawed-brief" Reason, so the printed remedy is the plain --answer
+	// form, not the amend-brief-then-requeue one (see resumeCommand);
 	// `jig status` still names q-001 in its questions table (checked via
 	// the status-run1-parked.txt golden below).
 	r1 := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
