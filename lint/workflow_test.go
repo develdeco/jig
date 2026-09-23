@@ -465,15 +465,25 @@ func unquoteShellWord(tok string) string {
 	return tok
 }
 
-// shellWords splits line into whitespace-separated words, treating a
+// shellWords splits line into words the way a real shell tokenizes one: a
 // '"'- or '\”-quoted run (which may itself contain whitespace, e.g. an
-// echo message) as one word - just enough structure to tell an actual
-// command's argv apart from prose inside a quoted string, without a real
-// shell parser.
+// echo message) is one word, and an unquoted command separator (|, ||,
+// &&, ;, &) is always its own word, even glued to an adjacent word with
+// no space (a;b, x|y, p&&q) - the one piece of structure splitShellCommands
+// needs to find a command boundary without a real shell parser. A
+// separator character inside a quoted string is never treated as one,
+// since it is still consumed by the quote branch above the separator
+// check.
 func shellWords(line string) []string {
 	var words []string
 	var b strings.Builder
 	var quote byte
+	flush := func() {
+		if b.Len() > 0 {
+			words = append(words, b.String())
+			b.Reset()
+		}
+	}
 	for i := 0; i < len(line); i++ {
 		c := line[i]
 		switch {
@@ -486,17 +496,23 @@ func shellWords(line string) []string {
 			quote = c
 			b.WriteByte(c)
 		case c == ' ' || c == '\t':
-			if b.Len() > 0 {
-				words = append(words, b.String())
-				b.Reset()
+			flush()
+		case c == '|' || c == '&':
+			flush()
+			if i+1 < len(line) && line[i+1] == c {
+				words = append(words, line[i:i+2])
+				i++
+			} else {
+				words = append(words, string(c))
 			}
+		case c == ';':
+			flush()
+			words = append(words, ";")
 		default:
 			b.WriteByte(c)
 		}
 	}
-	if b.Len() > 0 {
-		words = append(words, b.String())
-	}
+	flush()
 	return words
 }
 
@@ -546,18 +562,22 @@ func jigVersionInvocation(run string) bool {
 }
 
 // shellSeparatorWords are the shell command separators splitShellCommands
-// splits on, once shellWords has already tokenized the line.
+// splits on, once shellWords has already tokenized the line into words and
+// standalone separator tokens.
 var shellSeparatorWords = map[string]bool{
 	"|": true, "||": true, "&&": true, ";": true, "&": true,
 }
 
 // splitShellCommands splits one shell line into the commands a shell would
 // run, on its own separators (|, ||, &&, ;, &), so a command's program is
-// always its own first word. It tokenizes the whole line into words first
-// (shellWords, which already tracks quoting) and only then splits on a word
-// that is exactly one of those separators, so a separator character
-// sitting inside a quoted string - for example prose inside an echo
-// message - is never mistaken for a command boundary.
+// always its own first word. shellWords does the actual scanning - quote
+// tracking and all - and always emits an unquoted separator as its own
+// token, whether or not it sits glued to an adjacent word (a;b, x|y,
+// p&&q); splitShellCommands only groups the words shellWords already
+// produced between those separator tokens. A separator character sitting
+// inside a quoted string - for example prose inside an echo message - is
+// never mistaken for a command boundary, since shellWords never emits one
+// from inside its quote branch.
 func splitShellCommands(line string) []string {
 	var out []string
 	var cur []string
@@ -648,6 +668,11 @@ func TestJigVersionInvocation(t *testing.T) {
 		{"quoted separator, semicolon", `echo "ask an admin to run; jig version yourself and compare"`, false},
 		{"quoted separator, pipe", `echo "compare output | jig version | by hand"`, false},
 		{"quoted separator, ampersand", `echo "run the installer & jig version afterwards"`, false},
+		{"pipe glued to the preceding word", `"$JIG_INSTALL_DIR/jig" version|grep -Fxq "  version: $JIG_TAG"`, true},
+		{"semicolon glued to the preceding word", `set -eu; "$JIG_INSTALL_DIR/jig" version`, true},
+		{"double ampersand glued to the preceding word", `"$JIG_INSTALL_DIR/jig" version&&echo ok`, true},
+		{"double ampersand with spaces, control case", `"$JIG_INSTALL_DIR/jig" version && echo ok`, true},
+		{"semicolon inside a quoted echo message, glued", `echo "run;jig version now"`, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
