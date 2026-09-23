@@ -99,8 +99,8 @@ func BuildTargetGaps(f Finding, man manifest.Manifest) (workspace, oracle bool) 
 }
 
 // sortByRiskThenID sorts fs by risk (high first) then id, in place, for
-// deterministic display and deterministic slice-building order (design
-// 6.4: "always shown sorted by risk, high first").
+// deterministic display and deterministic slice-building order: a human
+// always sees findings sorted by risk, high first.
 func sortByRiskThenID(fs []Finding) {
 	sort.SliceStable(fs, func(i, j int) bool {
 		ri, rj := riskRank[fs[i].Risk], riskRank[fs[j].Risk]
@@ -236,16 +236,17 @@ func validOracle(oracle string, oracleNames []string) bool {
 }
 
 // resolveOracle resolves a finding's recorded oracle against the manifest's
-// current oracle names: an already-valid oracle is returned unchanged; an
-// empty one defaults to the sole manifest oracle when there is exactly one
-// (there is no choice to make); anything else (empty with more than one
-// manifest oracle, or a name the manifest no longer has) is unresolved, ok
-// false.
+// current oracle names: an already-valid oracle is returned unchanged; when
+// the manifest has exactly one oracle that one is used, whether the finding
+// names none or names an oracle the manifest no longer has, because there
+// is no choice to make either way; anything else (no usable name with more
+// than one manifest oracle) is unresolved, ok false, and the choice belongs
+// to a human.
 func resolveOracle(oracle string, oracleNames []string) (string, bool) {
 	if validOracle(oracle, oracleNames) {
 		return oracle, true
 	}
-	if oracle == "" && len(oracleNames) == 1 {
+	if len(oracleNames) == 1 {
 		return oracleNames[0], true
 	}
 	return "", false
@@ -388,8 +389,8 @@ func disambiguateFixSliceIDs(slices []store.Slice) {
 	}
 }
 
-// buildFixSlices turns this round's kept findings into fix slices (design
-// 6.1, 6.2): keptFixes group one slice per (workspace, oracle); keptAsks
+// buildFixSlices turns this round's kept findings into fix slices:
+// keptFixes group one slice per (workspace, oracle); keptAsks
 // each become their own slice, carrying the human's decision. existingSlices
 // is the ticket's slices.yaml as of before this round, used only to look up
 // a recurrence's previous fix slice. oracleNames is the manifest's sorted

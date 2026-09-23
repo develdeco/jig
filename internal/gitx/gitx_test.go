@@ -506,8 +506,12 @@ func TestFileExistsAtRev(t *testing.T) {
 		{head, "never.txt", false},
 		{base, "gone.txt", true},
 		{head, "sub", false},           // a directory is a tree, not a blob
+		{head, "sub/", false},          // a directory lists its children; it is still not a file
 		{head, "sub/f.txt", true},      // a nested path
 		{head, "sub/never.txt", false}, // a missing path under an existing directory
+		{head, ".", false},             // the repo root is a tree
+		{head, ":/here.txt", false},    // pathspec magic stays a literal path, which does not exist
+		{head, "he*.txt", false},       // a glob stays a literal path, which does not exist
 	}
 	for _, c := range cases {
 		got, err := FileExistsAtRev(dir, c.rev, c.path)

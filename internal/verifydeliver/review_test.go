@@ -249,6 +249,7 @@ func TestParseReviewResultRejectsEveryInvalidRule(t *testing.T) {
 		{"absolute unix file", validResultJSON(t, func(r *ReviewResult) { r.Findings[0].File = "/etc/passwd" })},
 		{"absolute windows file", validResultJSON(t, func(r *ReviewResult) { r.Findings[0].File = `C:\etc\passwd` })},
 		{"dot-dot segment", validResultJSON(t, func(r *ReviewResult) { r.Findings[0].File = "../secret.go" })},
+		{"directory file", validResultJSON(t, func(r *ReviewResult) { r.Findings[0].File = "alpha/" })},
 		// A bare JSON null, misnamed top-level and finding keys, and any
 		// non-object top level must all be rejected, never silently
 		// accepted as a clean (zero-finding) result.
@@ -1240,9 +1241,9 @@ func TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding(t *test
 	}
 }
 
-// TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff covers design
-// 5.4's other edge: must_review never lists a deleted file, so a scope diff
-// that only deletes a file must not look like "nothing changed".
+// TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff covers the other
+// edge of skipping a dispatch: must_review never lists a deleted file, so a
+// scope diff that only deletes a file must not look like "nothing changed".
 // Round 1 has no previous review to fall back on, so skipping dispatch here
 // would let a deletion-only change through with no review at all.
 func TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff(t *testing.T) {

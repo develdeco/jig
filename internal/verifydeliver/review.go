@@ -372,13 +372,17 @@ func walkArrayForDuplicateKey(dec *json.Decoder) (string, error) {
 
 // normalizeRepoRelPath normalizes p for comparison: backslash to slash, a
 // leading "./" stripped, then rejects an empty path, an
-// absolute path (a leading "/" or a Windows drive letter), and any ".."
-// segment.
+// absolute path (a leading "/" or a Windows drive letter), any ".."
+// segment, and a trailing "/" (a directory, never a file a finding can
+// name or a reviewer can read).
 func normalizeRepoRelPath(p string) (string, error) {
 	q := strings.ReplaceAll(p, "\\", "/")
 	q = strings.TrimPrefix(q, "./")
 	if q == "" {
 		return "", fmt.Errorf("empty path")
+	}
+	if strings.HasSuffix(q, "/") {
+		return "", fmt.Errorf("path %q is a directory, not a file", p)
 	}
 	if strings.HasPrefix(q, "/") {
 		return "", fmt.Errorf("path %q is absolute", p)

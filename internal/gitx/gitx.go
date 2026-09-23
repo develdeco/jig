@@ -146,42 +146,50 @@ func DiffNameOnly(dir, base, head, diffFilter string) ([]string, error) {
 // "git ls-tree -z --full-tree" for the exact path exits 0 whether or not the
 // path exists there, and never consults the working tree, so an ignored or
 // untracked file that happens to sit on disk at that path cannot make an
-// absent path look present (or a present one fail). Empty output is an
-// absent path (false, nil); an entry of type "blob" is true; "tree" or
-// "commit" (a directory, or a submodule) is false; any other failure of the
-// ls-tree call itself is returned as an error.
+// absent path look present (or a present one fail). Only an entry whose own
+// path is exactly path counts, and only when it is a blob: a directory
+// lists its children rather than itself, so "a/" or "a" for a directory is
+// false, not the type of whichever child git prints first.
+// --literal-pathspecs keeps a name like "a*b.go" or ":/x" a plain path
+// rather than a glob or pathspec magic. Any other failure of the ls-tree
+// call itself is returned as an error.
 func FileExistsAtRev(dir, rev, path string) (bool, error) {
 	if _, err := Run(dir, "rev-parse", "--verify", "--quiet", rev+"^{commit}"); err != nil {
 		return false, fmt.Errorf("gitx: file exists at rev: rev %q does not resolve to a commit: %w", rev, err)
 	}
-	args := []string{"ls-tree", "-z", "--full-tree", rev, "--", path}
+	args := []string{"--literal-pathspecs", "ls-tree", "-z", "--full-tree", rev, "--", path}
 	var stdout, stderr bytes.Buffer
 	if err := run(dir, nil, &stdout, &stderr, args); err != nil {
 		return false, callError(args, stderr.String(), err)
 	}
-	raw := strings.TrimSuffix(stdout.String(), "\x00")
-	if raw == "" {
-		return false, nil
+	for _, entry := range strings.Split(stdout.String(), "\x00") {
+		if entry == "" {
+			continue
+		}
+		entryType, entryPath, err := lsTreeEntry(entry)
+		if err != nil {
+			return false, fmt.Errorf("gitx: file exists at rev: %w (ls-tree %q)", err, entry)
+		}
+		if entryPath == path {
+			return entryType == "blob", nil
+		}
 	}
-	entryType, err := lsTreeEntryType(raw)
-	if err != nil {
-		return false, fmt.Errorf("gitx: file exists at rev: %w (ls-tree %q)", err, raw)
-	}
-	return entryType == "blob", nil
+	return false, nil
 }
 
-// lsTreeEntryType extracts the object type ("blob", "tree" or "commit")
-// from one "git ls-tree" line: "<mode> SP <type> SP <object> TAB <path>".
-func lsTreeEntryType(line string) (string, error) {
-	meta, _, found := strings.Cut(line, "\t")
+// lsTreeEntry splits one "git ls-tree -z" entry,
+// "<mode> SP <type> SP <object> TAB <path>", into its object type ("blob",
+// "tree" or "commit") and its path.
+func lsTreeEntry(entry string) (entryType, path string, err error) {
+	meta, path, found := strings.Cut(entry, "\t")
 	if !found {
-		return "", fmt.Errorf("no tab-separated path")
+		return "", "", fmt.Errorf("no tab-separated path")
 	}
 	fields := strings.Fields(meta)
 	if len(fields) != 3 {
-		return "", fmt.Errorf("unexpected entry metadata")
+		return "", "", fmt.Errorf("unexpected entry metadata")
 	}
-	return fields[1], nil
+	return fields[1], path, nil
 }
 
 // CommitOnAnyRemote reports whether sha is reachable from any remote-

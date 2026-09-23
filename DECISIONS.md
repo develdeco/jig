@@ -139,12 +139,14 @@ Design questions the code raised, and their resolution:
   oracle is empty or no longer one of the manifest's current oracle names
   (the manifest changed between rounds) has no build target jig can
   derive, and is routed as an ask the same way, whichever part is missing
-  (`routed_as: ask` when the reviewer called it a fix). When the reviewer
-  omits `oracle` and the manifest currently has exactly one, jig resolves
-  it to that oracle itself (there is no choice to make), so a finding
-  never records an empty oracle when the manifest has any oracle at all; a
-  recurrence keeps its earlier occurrence's resolved oracle when this
-  round names none. A manifest with zero oracles can never build any fix
+  (`routed_as: ask` when the reviewer called it a fix). A manifest with
+  exactly one oracle leaves no choice to make, so jig resolves to that
+  oracle itself whether the finding names none or names an oracle the
+  manifest no longer has, and a finding never records an empty oracle when
+  the manifest has any oracle at all; a recurrence keeps its earlier
+  occurrence's resolved oracle when this round names none. Only a manifest
+  with several oracles and a finding with no usable name among them leaves
+  the choice to a human. A manifest with zero oracles can never build any fix
   slice at all, so that case is checked once, before triage, whenever the
   round has a fix or ask to route (a human is never asked to triage
   findings that were already going to fail regardless of the answer); its
@@ -284,12 +286,17 @@ Design questions the code raised, and their resolution:
 - `gitx.FileExistsAtRev` resolves the rev first, so a bad rev is reported
   as an error rather than folded into "the path doesn't exist"; only then
   does it check the path, structurally rather than by matching git's
-  message text: `git ls-tree -z --full-tree` for the exact path, which
-  exits 0 whether or not the path exists there and never consults the
-  working tree. Empty output is absent (`false, nil`); a `blob` entry is
-  `true`; a `tree` entry (a directory) or a `commit` entry (a submodule)
-  is `false`, matching the doc's "exists as a file", not merely "exists";
-  any other failure of the `ls-tree` call itself is an error. Because the
+  message text: `git --literal-pathspecs ls-tree -z --full-tree` for the
+  path, which exits 0 whether or not the path exists there and never
+  consults the working tree. Only an entry whose own path is exactly the
+  path asked about counts, and only when it is a `blob`: a directory lists
+  its children instead of itself, so `alpha` or `alpha/` is `false` rather
+  than the type of whichever child git happens to print first, and
+  `--literal-pathspecs` keeps a name like `a*b.go` or `:/x` a plain path
+  rather than a glob or pathspec magic. No matching entry is absent
+  (`false, nil`); any other failure of the `ls-tree` call itself is an
+  error. A finding `file` that ends in `/` is rejected at validation as a
+  directory rather than a file. Because the
   check never looks at the working tree, an ignored or untracked file that
   happens to sit on disk at that path (for example an oracle regenerating
   a build artifact in the gate lease) cannot make an absent path look

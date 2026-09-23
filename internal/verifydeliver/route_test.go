@@ -109,6 +109,32 @@ func TestDefaultTriageLeavesAnAskWithNoResolvableOracleUndecided(t *testing.T) {
 	}
 }
 
+// TestResolveOracleWithOneManifestOracle pins the other half of the same
+// rule: with exactly one manifest oracle there is no choice to make, so a
+// finding that records none, or records a name the manifest no longer has
+// (the manifest changed between rounds), resolves to that one oracle in
+// every mode. Only a manifest with several oracles leaves the choice to a
+// human.
+func TestResolveOracleWithOneManifestOracle(t *testing.T) {
+	one := []string{"test"}
+	for _, recorded := range []string{"", "vet"} {
+		got, ok := resolveOracle(recorded, one)
+		if !ok || got != "test" {
+			t.Errorf("resolveOracle(%q, [test]) = (%q, %v), want (test, true)", recorded, got, ok)
+		}
+	}
+
+	man := oneOracleManifest()
+	f := Finding{ID: "r1-f1", Workspace: "root", Oracle: "vet"}
+	if noWorkspace, noOracle := BuildTargetGaps(f, man); noWorkspace || noOracle {
+		t.Errorf("BuildTargetGaps with a stale oracle and one manifest oracle = (%v, %v), want (false, false)", noWorkspace, noOracle)
+	}
+	out := DefaultTriage(TriageInput{Asks: []Finding{f}, Manifest: man})
+	if d, ok := out.Asks["r1-f1"]; !ok || !d.Keep {
+		t.Errorf("Asks[r1-f1] = (%+v, %v), want kept: one manifest oracle leaves no choice", d, ok)
+	}
+}
+
 // --- routeRound: grouping ------------------------------------------------
 
 func TestRouteRoundGroupsFixesByWorkspaceAndOracle(t *testing.T) {
