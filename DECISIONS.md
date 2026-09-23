@@ -142,8 +142,9 @@ Design questions the code raised, and their resolution:
   (`routed_as: ask` when the reviewer called it a fix). A manifest with
   exactly one oracle leaves no choice to make, so jig resolves to that
   oracle itself whether the finding names none or names an oracle the
-  manifest no longer has, and a finding never records an empty oracle when
-  the manifest has any oracle at all; a recurrence keeps its earlier
+  manifest no longer has, and a fix or ask finding never records an empty
+  oracle when the manifest has any oracle at all (a note, which is never
+  routed and needs no build target, may); a recurrence keeps its earlier
   occurrence's resolved oracle when this round names none. Only a manifest
   with several oracles and a finding with no usable name among them leaves
   the choice to a human. A manifest with zero oracles can never build any fix
@@ -379,8 +380,8 @@ covers:
   uncommitted the same way, but they are untracked cruft under the store's
   `work/` tree and do not by themselves block a rebase pull; a store whose
   only leftover was untracked files would pull cleanly. `Store.Sync` does
-  not commit its own uncommitted leftovers before it pulls, on any branch
-  that lacks that fix; the gap applies equally to any oracle failure after
+  not commit its own uncommitted leftovers before it pulls; the gap applies
+  equally to any oracle failure after
   `gate-open`, not only to a reviewer round, and is outside this package's
   own scope to fix. The test's workaround matches exactly what an operator
   would do by hand in the same situation.
