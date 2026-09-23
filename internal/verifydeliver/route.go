@@ -112,15 +112,20 @@ func sortByRiskThenID(fs []Finding) {
 }
 
 // routeRound runs triage over reported (findings.go's ApplyRound output for
-// this round) and turns the outcome into fix slices. It mutates and
-// returns reported's own Status/Triage/Decision entries in place (a
-// dismissed fix or ask becomes Status dismissed; a kept ask becomes Status
-// open, carrying the human's decision and, for a no-workspace ask, the
-// chosen workspace) and returns the fix slices to append. Notes are left
+// this round) plus outstanding (cum's still-asked findings this round's
+// reviewer did not report again, findings.go's outstandingAsks) and turns
+// the outcome into fix slices. It mutates and returns reported's own
+// Status/Triage/Decision entries in place (a dismissed fix or ask becomes
+// Status dismissed; a kept ask becomes Status open, carrying the human's
+// decision and, for a no-workspace ask, the chosen workspace), appends a
+// decided outstanding ask to the returned list (so this round's
+// findings.yaml records the decision), and returns the fix slices to
+// append. An outstanding ask left undecided is not appended: it stays
+// exactly as cum already has it, offered again next round. Notes are left
 // exactly as ApplyRound reported them: a note is never triaged. Routing
 // and triage finish entirely inside this call, before Gate appends any
 // slice or pushes the store.
-func routeRound(round int, st *store.Store, ticket string, existingSlices []store.Slice, reported []Finding, triage Triage, man manifest.Manifest) ([]Finding, []store.Slice, error) {
+func routeRound(round int, st *store.Store, ticket string, existingSlices []store.Slice, reported []Finding, outstanding []Finding, triage Triage, man manifest.Manifest) ([]Finding, []store.Slice, error) {
 	if triage == nil {
 		triage = DefaultTriage
 	}
@@ -138,6 +143,10 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 			notes = append(notes, f)
 		}
 	}
+	// Outstanding asks are not in reported (idx has no entry for their id):
+	// they are offered to triage the same as this round's own asks, but
+	// only a decided one is folded back into the returned list below.
+	asks = append(asks, outstanding...)
 	sortByRiskThenID(fixes)
 	sortByRiskThenID(asks)
 	sortByRiskThenID(notes)
@@ -177,44 +186,59 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 	}
 
 	var keptAsks []Finding
+	var decidedOutstanding []Finding
 	for _, f := range asks {
-		i := idx[f.ID]
 		decision, decided := result.Asks[f.ID]
 		if !decided {
 			continue // undecided: stays asked, Triage left empty
 		}
+		// wf is the working copy to decide: reported[i] for a finding this
+		// round's reviewer reported, or a copy of the outstanding cum
+		// finding (not reported this round, only decided) otherwise.
+		i, isReported := idx[f.ID]
+		wf := f
+		if isReported {
+			wf = reported[i]
+		}
+
 		askTriage := TriageAuto
 		if decision.Human {
 			askTriage = TriageHuman
 		}
-		reported[i].Triage = askTriage
+		wf.Triage = askTriage
 		if !decision.Keep {
-			reported[i].Status = StatusDismissed
-			continue
+			wf.Status = StatusDismissed
+		} else {
+			noWorkspace, noOracle := BuildTargetGaps(wf, man)
+			ws := wf.Workspace
+			if noWorkspace {
+				ws = decision.Workspace
+			}
+			oracle, ok := resolveOracle(wf.Oracle, oracleNames)
+			if noOracle {
+				oracle, ok = resolveOracle(decision.Oracle, oracleNames)
+			}
+			if ws == "" || !ok {
+				// The hook kept an ask without resolving every missing part
+				// of its build target (a workspace, an oracle, or both);
+				// defensively leave this ask undecided rather than build a
+				// slice with no build target.
+				continue
+			}
+			wf.Status = StatusOpen
+			wf.Decision = decision.Decision
+			wf.Workspace = ws
+			wf.Oracle = oracle
+			keptAsks = append(keptAsks, wf)
 		}
-		noWorkspace, noOracle := BuildTargetGaps(reported[i], man)
-		ws := reported[i].Workspace
-		if noWorkspace {
-			ws = decision.Workspace
+
+		if isReported {
+			reported[i] = wf
+		} else {
+			decidedOutstanding = append(decidedOutstanding, wf)
 		}
-		oracle, ok := resolveOracle(reported[i].Oracle, oracleNames)
-		if noOracle {
-			oracle, ok = resolveOracle(decision.Oracle, oracleNames)
-		}
-		if ws == "" || !ok {
-			// The hook kept an ask without resolving every missing part of
-			// its build target (a workspace, an oracle, or both);
-			// defensively leave this ask undecided rather than build a
-			// slice with no build target.
-			reported[i].Triage = ""
-			continue
-		}
-		reported[i].Status = StatusOpen
-		reported[i].Decision = decision.Decision
-		reported[i].Workspace = ws
-		reported[i].Oracle = oracle
-		keptAsks = append(keptAsks, reported[i])
 	}
+	reported = append(reported, decidedOutstanding...)
 
 	slices, err := buildFixSlices(round, st, ticket, existingSlices, keptFixes, keptAsks, oracleNames)
 	if err != nil {

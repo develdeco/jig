@@ -341,6 +341,28 @@ func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedP
 	return cleared, nil
 }
 
+// outstandingAsks returns cum's still-asked findings that this round's
+// reviewer did not report again (by id), sorted by risk then id for
+// deterministic triage ordering. routeRound offers these to triage
+// alongside this round's own asks, so an outstanding ask is decidable
+// every round it stays undecided, not only when the reviewer happens to
+// report it again.
+func outstandingAsks(cum map[string]Finding, reported []Finding) []Finding {
+	reportedIDs := make(map[string]bool, len(reported))
+	for _, f := range reported {
+		reportedIDs[f.ID] = true
+	}
+	var out []Finding
+	for id, f := range cum {
+		if f.Status != StatusAsked || reportedIDs[id] {
+			continue
+		}
+		out = append(out, f)
+	}
+	sortByRiskThenID(out)
+	return out
+}
+
 // foldFindings applies one round's findings.yaml content onto cum in
 // place: the latest occurrence of each id wins, and cleared
 // removes an id. It is the single operation both the historical fold
@@ -475,6 +497,26 @@ func cumulativeFindings(st *store.Store, ticket string, upToRound int) (map[stri
 		foldFindings(cum, ff.Findings, ff.Cleared)
 	}
 	return cum, nil
+}
+
+// OutstandingAsks returns ticket's cumulative still-asked findings, sorted
+// by risk then id, across every gate round recorded so far. It is the
+// state `jig status` shows between rounds so a waiting decision is
+// visible even when no gate round is running: the same cumulative fold
+// Gate itself uses (cumulativeFindings), read one round past the last one
+// recorded.
+func OutstandingAsks(st *store.Store, ticket string) ([]Finding, error) {
+	n, err := existingGateRounds(st, ticket)
+	if err != nil {
+		return nil, fmt.Errorf("verifydeliver: findings: count rounds: %w", err)
+	}
+	cum, err := cumulativeFindings(st, ticket, n+1)
+	if err != nil {
+		return nil, err
+	}
+	asks := askedFindingsList(cum)
+	sortByRiskThenID(asks)
+	return asks, nil
 }
 
 // marshalFindingsYAML renders one round's findings.yaml, marshaling nil

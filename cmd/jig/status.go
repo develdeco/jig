@@ -13,6 +13,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/store"
+	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // cmdStatus implements `jig status [<ticket>]`.
@@ -105,6 +106,18 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 			qrows = append(qrows, []string{q.ID, q.Slice, q.Status})
 		}
 		blocks = append(blocks, axi.Table("questions", []string{"id", "slice", "status"}, qrows))
+	}
+
+	outstanding, err := verifydeliver.OutstandingAsks(st, ticket)
+	if err != nil {
+		return "", err
+	}
+	if len(outstanding) > 0 {
+		var askRows [][]string
+		for _, f := range outstanding {
+			askRows = append(askRows, []string{f.ID, f.Risk, fileLine(f), f.Title, fmt.Sprintf("jig gate %s", ticket)})
+		}
+		blocks = append(blocks, axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title", "decide"}, askRows))
 	}
 
 	hint, err := nextStepHint(st, ticket)

@@ -134,7 +134,7 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 			blocks = append(blocks, axi.Table("needs_a_human", []string{"id", "risk", "file:line", "title", "risk_rationale"}, needsRows))
 		}
 	}
-	blocks = append(blocks, axi.Help(gateReportHint(st, ticket, report)))
+	blocks = append(blocks, axi.Help(gateReportHint(st, ticket, report)...))
 	axi.Render(stdout, blocks...)
 	if len(report.NeedsHuman) > 0 {
 		return 2
@@ -143,13 +143,21 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 }
 
 // gateReportHint names the way forward after this round: when it leaves
-// any ask undecided, that is always a human decision at a terminal, not
-// more fix-slice work, whatever this round's own fix slices were (there
-// may be none at all, when every routed finding was an undecided ask).
-// Otherwise it falls back to the ticket's general next-step hint.
-func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateReport) string {
+// any ask undecided, that is always a human decision at a terminal. This
+// round's own fix slices, when it queued any, are appended as "queued"
+// (checkFrontier refuses the next `jig gate` until they are green), so the
+// hint names the order: work them with `jig run` first, then `jig gate` at
+// a terminal to decide the asks. Otherwise it falls back to the ticket's
+// general next-step hint.
+func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateReport) []string {
 	if len(report.NeedsHuman) > 0 {
-		return fmt.Sprintf("Run `jig gate %s` at a terminal to decide the listed asks", ticket)
+		if len(report.FixSlices) > 0 {
+			return []string{
+				fmt.Sprintf("Run `jig run %s` first to work this round's fix slices", ticket),
+				fmt.Sprintf("Then run `jig gate %s` at a terminal to decide the listed asks", ticket),
+			}
+		}
+		return []string{fmt.Sprintf("Run `jig gate %s` at a terminal to decide the listed asks", ticket)}
 	}
-	return hintOrFallback(st, ticket)
+	return []string{hintOrFallback(st, ticket)}
 }

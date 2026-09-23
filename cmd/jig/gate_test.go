@@ -69,11 +69,47 @@ func TestGateReportHintNamesDecidingAsksNotFixSlices(t *testing.T) {
 		},
 	}
 
-	hint := gateReportHint(st, fx.Ticket, report)
+	hint := strings.Join(gateReportHint(st, fx.Ticket, report), "\n")
 	if strings.Contains(hint, "fix-slice round") {
 		t.Fatalf("hint = %q, must not point at fix-slice work when only an ask is undecided", hint)
 	}
 	if !strings.Contains(hint, "jig gate "+fx.Ticket) || !strings.Contains(hint, "decide the listed asks") {
 		t.Fatalf("hint = %q, want it to point at a terminal `jig gate` to decide the listed asks", hint)
+	}
+}
+
+// TestGateReportHintNamesTheOrderWhenFixSlicesAreQueuedToo pins the rule
+// that when the same round both queues fix slices (which checkFrontier
+// refuses the next `jig gate` until green) and leaves an ask undecided, the
+// hint names the order: work the fix slices first, then gate at a
+// terminal. The printed `jig gate <ticket>` command alone cannot work in
+// this state, since checkFrontier would refuse it.
+func TestGateReportHintNamesTheOrderWhenFixSlicesAreQueuedToo(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+
+	report := verifydeliver.GateReport{
+		Round:   1,
+		Verdict: "fix-slices",
+		Scope:   "full",
+		NeedsHuman: []verifydeliver.Finding{
+			{ID: "r1-f1", File: "beta/beta.go", Line: 4, Title: "ASK-TITLE", Status: verifydeliver.StatusAsked, Risk: "medium", RiskRationale: "ASK-RATIONALE"},
+		},
+		FixSlices: []string{"fix-1-alpha-test"},
+	}
+
+	lines := gateReportHint(st, fx.Ticket, report)
+	joined := strings.Join(lines, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("hint = %v, want several lines naming the order", lines)
+	}
+	runIdx := strings.Index(joined, "jig run "+fx.Ticket)
+	gateIdx := strings.Index(joined, "jig gate "+fx.Ticket)
+	if runIdx < 0 || gateIdx < 0 || runIdx > gateIdx {
+		t.Fatalf("hint = %q, want `jig run` named before `jig gate`", joined)
 	}
 }

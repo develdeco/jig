@@ -369,7 +369,8 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		if err != nil {
 			return GateReport{}, err
 		}
-		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, o.Triage, man)
+		outstanding := outstandingAsks(cum, reported)
+		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, outstanding, o.Triage, man)
 		if err != nil {
 			return GateReport{}, err
 		}
