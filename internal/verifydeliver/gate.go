@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -379,6 +380,26 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	report = GateReport{Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA}}
 	switch {
 	case !ok:
+		// No round ran at all: the scripted source has nothing for this
+		// round number, or the reviewer source found head already covered
+		// with nothing outstanding. That says nothing about what earlier
+		// rounds left behind, so the verdict comes from the fold, exactly
+		// as the reviewer arm's does below. Writing "clean" here without
+		// consulting it declared a ticket clean over an undecided ask,
+		// and `jig publish` gates on that verdict: the ticket shipped
+		// with the question never answered, while `jig status`, which
+		// reads the fold, said otherwise the whole time.
+		if !isClean(cum) {
+			report.Verdict = "fix-slices"
+			report.Findings = openFindingsList(cum)
+			sortByRiskThenID(report.Findings)
+			report.NeedsHuman = askedFindingsList(cum)
+			sortByRiskThenID(report.NeedsHuman)
+			if err := writeNoRound(d, ticket, n, report); err != nil {
+				return GateReport{}, err
+			}
+			break
+		}
 		report.Verdict = "clean"
 		if err := writeCleanRound(d, ticket, n, report); err != nil {
 			return GateReport{}, err
@@ -596,6 +617,37 @@ func runOracleSuite(dir string, man manifest.Manifest) error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// writeNoRound writes the files for a round that never ran while something
+// was still outstanding: the source had nothing to review for this round
+// number, but the fold still holds an open or asked finding. It records
+// what is outstanding rather than the word "clean", so the stored round
+// agrees with the report and with `jig status`.
+func writeNoRound(d Deps, ticket string, n int, report GateReport) error {
+	dir := gateRoundDir(d.Store, ticket, n)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("verifydeliver: gate: create round dir: %w", err)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Gate round %d\n", n)
+	fmt.Fprintf(&b, "\nNo review ran this round. Still outstanding from earlier rounds:\n\n")
+	for _, f := range report.Findings {
+		fmt.Fprintf(&b, "- %s (%s) %s:%d %s\n", f.ID, f.Status, f.File, f.Line, f.Title)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "findings.md"), []byte(b.String()), 0o644); err != nil {
+		return fmt.Errorf("verifydeliver: gate: write findings.md: %w", err)
+	}
+	if err := writeReportYAML(dir, report); err != nil {
+		return err
+	}
+	if err := writeDiffChangelog(d, ticket, dir, n); err != nil {
+		return err
+	}
+	if err := journal.Append(d.Store, ticket, journal.Line{Event: "gate-round", Attempt: n}); err != nil {
+		return fmt.Errorf("verifydeliver: gate: journal gate-round: %w", err)
 	}
 	return nil
 }

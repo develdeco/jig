@@ -1703,3 +1703,64 @@ func TestGatePRModeNotImplemented(t *testing.T) {
 		t.Fatalf("err = %v, want *axi.Error NOT_IMPLEMENTED", err)
 	}
 }
+
+// TestGateNoRoundKeepsAnOutstandingAskFromGoingClean pins the one path no
+// test covered: a source with nothing to review for this round, while the
+// cumulative fold still holds an undecided ask.
+//
+// The round used to be declared clean without consulting the fold at all.
+// `jig publish` gates on that verdict, so the ticket squashed, pushed and
+// opened its PR with the question never answered - while `jig status`,
+// which reads the fold, listed it as outstanding the whole time. Whether
+// a source happened to script a round says nothing about what earlier
+// rounds left behind.
+func TestGateNoRoundKeepsAnOutstandingAskFromGoingClean(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+
+	d := newDeps(t, fx)
+	// Round 1 is recorded directly: an ask nobody decided, exactly the
+	// state a real round 1 leaves when no human is at the terminal.
+	roundDir := filepath.Join(d.Store.TicketDir(fx.Ticket), "gate", "round-1")
+	if err := os.MkdirAll(roundDir, 0o755); err != nil {
+		t.Fatalf("mkdir round 1: %v", err)
+	}
+	body, err := marshalFindingsYAML("full", []string{"alpha/alpha.go"}, []Finding{{
+		ID: "r1-f1", File: "alpha/alpha.go", Line: 4, Title: "is this rename intended",
+		Detail: "d", Action: ActionAsk, Risk: RiskHigh, RiskRationale: "callers depend on it",
+		Status: StatusAsked,
+	}}, nil, "round 1")
+	if err != nil {
+		t.Fatalf("marshal findings.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(roundDir, "findings.yaml"), body, 0o644); err != nil {
+		t.Fatalf("write findings.yaml: %v", err)
+	}
+
+	// alwaysCleanSource stands in for any source with nothing to review
+	// for round 2: the scripted source with no round-2 directory behaves
+	// identically, which is the documented --scenario compatibility path.
+	report, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if report.Verdict == "clean" {
+		t.Fatalf("Verdict = clean with r1-f1 still asked; publish gates on this verdict and would ship the ticket")
+	}
+	if report.Verdict != "fix-slices" {
+		t.Fatalf("Verdict = %q, want fix-slices", report.Verdict)
+	}
+	if len(report.NeedsHuman) != 1 || report.NeedsHuman[0].ID != "r1-f1" {
+		t.Fatalf("NeedsHuman = %+v, want the outstanding ask r1-f1 (the exit-2 signal)", report.NeedsHuman)
+	}
+
+	// The stored round must say the same thing the report does.
+	data, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "gate", "round-2", "report.yaml"))
+	if err != nil {
+		t.Fatalf("read round 2 report.yaml: %v", err)
+	}
+	if strings.Contains(string(data), "verdict: clean") {
+		t.Fatalf("round 2 report.yaml records a clean verdict:\n%s", data)
+	}
+}
