@@ -28,6 +28,15 @@ was ambiguous, what was chosen, and why.
 - Divergence checking lands as a lite version: reconcile journals the integrated-diff
   file count, and publish refuses an empty integration diff as a stale-overwrite
   signal. The symbol-grep half of the check stays deferred.
+- `Store.Sync` and `Store.Push` do not serialize against a concurrent Sync or Push
+  from another process on the same store: `refuseIfMidRebaseOrMerge` refuses a rebase
+  or merge it finds already in progress, but two processes can still race between that
+  check and the pull/push that follows, and `abortFailedPull`'s best-effort
+  `rebase --abort` can then abort a rebase the other process is mid-resolving rather
+  than one this process itself started. `store.Lock` (`internal/store/lock.go`) exists
+  and already serializes single-file writes (journal, tracker, render output), but
+  wiring it around Sync/Push's whole pull/push sequence is its own change, deferred by
+  the owner rather than folded into this one.
 
 ## Safety
 
