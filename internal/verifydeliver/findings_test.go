@@ -547,23 +547,34 @@ func TestClearingAfterTriageClearsUnreportedFindingWhenFileReviewed(t *testing.T
 	}
 }
 
-// TestClearingAfterTriageClearsAnUndecidedAskWhenFileReviewed pins a
-// deliberate design call, not an oversight: an ask nobody has decided
-// clears the same way an open finding does, once a later round reads its
-// file and reports nothing actionable there - the question the ask asked
-// no longer has anything to be asked about, so it is moot rather than
-// still pending. A human never affirmatively decided this ask; that is
-// the whole point of "moot", not a bug.
-func TestClearingAfterTriageClearsAnUndecidedAskWhenFileReviewed(t *testing.T) {
-	known := map[string]Finding{
-		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusAsked},
-	}
-	cleared, err := ClearingAfterTriage(known, nil, []string{"a.go"}, alwaysExists)
-	if err != nil {
-		t.Fatalf("ClearingAfterTriage: %v", err)
-	}
-	if !equalStrings(cleared, []string{"r1-f1"}) {
-		t.Fatalf("cleared = %v, want [r1-f1] (an undecided ask clears by coverage, same as an open finding)", cleared)
+// TestClearingAfterTriageKeepsAnUndecidedAsk pins that an ask nobody has
+// decided never clears on its own - not when a later round reads its file
+// and reports nothing there, and not when the file is gone at head. An ask
+// is a question put to a person, and nothing the reviewer reports answers
+// it. Letting coverage clear one would mean an unattended run drops the
+// question, reports the round clean and points at publish, shipping the
+// ticket with the decision never made; an undecided ask is exactly what
+// an unattended run is supposed to park on.
+func TestClearingAfterTriageKeepsAnUndecidedAsk(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		exists func(string) (bool, error)
+	}{
+		{"file reviewed with nothing reported", alwaysExists},
+		{"file gone at head", func(string) (bool, error) { return false, nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			known := map[string]Finding{
+				"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusAsked},
+			}
+			cleared, err := ClearingAfterTriage(known, nil, []string{"a.go"}, tc.exists)
+			if err != nil {
+				t.Fatalf("ClearingAfterTriage: %v", err)
+			}
+			if len(cleared) != 0 {
+				t.Fatalf("cleared = %v, want none: only a human decision resolves an ask", cleared)
+			}
+		})
 	}
 }
 

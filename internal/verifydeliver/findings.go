@@ -324,7 +324,15 @@ func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedP
 	}
 
 	for id, f := range known {
-		if f.Status != StatusOpen && f.Status != StatusAsked {
+		// Only an open finding clears by coverage. An asked one is a
+		// question put to a person, and nothing a reviewer reports (or
+		// declines to report) answers it: clearing it here would let an
+		// unattended run drop the question, call the round clean and
+		// point at publish, shipping the ticket with the decision never
+		// made. An ask leaves the outstanding set exactly two ways - a
+		// human keeps it, or a human dismisses it - and until then the
+		// round is not clean and `jig gate` exits 2.
+		if f.Status != StatusOpen {
 			continue
 		}
 		if reportedIDs[id] {
