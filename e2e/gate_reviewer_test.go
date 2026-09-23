@@ -60,4 +60,26 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 			t.Fatalf("expected slice %s from default (non-terminal) triage; got %+v", want, slices)
 		}
 	}
+
+	// The documented default path (no --yes, no terminal) keeps every fix,
+	// so fix-1-beta-test is not merely appended to slices.yaml, it is the
+	// ticket's own queued work: `jig run` must actually be able to drive it
+	// to green through this fixture, the same as fix-1-alpha-test and
+	// fix-1-r1-f3. Without a scripted attempt for it, the fake backend has
+	// nothing to play back and the slice can only fail every rung and end
+	// up stalled, wedging the ticket - a clean gate is then unreachable no
+	// matter how many more rounds run.
+	r4 := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	if r4.Code != 0 {
+		t.Fatalf("run (fix-1 slices) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r4.Code, r4.Stdout, r4.Stderr)
+	}
+	for _, s := range []string{"fix-1-alpha-test", "fix-1-beta-test", "fix-1-r1-f3"} {
+		state, err := st.ReadSliceState(ticket, s)
+		if err != nil {
+			t.Fatalf("read slice state %s: %v", s, err)
+		}
+		if state.State != "green" {
+			t.Fatalf("slice %s state = %q, want green (the default path must not stall)", s, state.State)
+		}
+	}
 }
