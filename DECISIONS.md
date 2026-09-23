@@ -180,9 +180,11 @@ was ambiguous, what was chosen, and why.
   found. (The help hint's own priority is the opposite: an open question
   comes first there, since answering it is the one action that can also
   unblock other slices queued behind it.) A needs-input slice renders in
-  its own parked table with the exact resume command; a stalled slice
-  renders in its own stalled table with a human-readable summary of what
-  tripped it.
+  its own parked table with a resume column: the exact resume command for
+  the common case, or, for a slice parked on a flawed brief with brief
+  sections to amend, prose telling the operator to amend the brief first
+  (the command alone would requeue nothing); a stalled slice renders in
+  its own stalled table with a human-readable summary of what tripped it.
 - The resume command a parked slice is offered is the one that can actually
   clear it. Amending the brief and requeuing with `--from-brief-diff` is
   offered only when the slice was parked for a flawed brief AND has brief
@@ -190,9 +192,12 @@ was ambiguous, what was chosen, and why.
   those hashes, so it does nothing for a slice without them, and a plain
   question is not a brief problem even on a slice that has them. Every
   other parked slice, which is the common case, is resumed by answering its
-  question. A stalled or env-blocked slice is resumed by
-  `jig requeue <ticket> --slice <id>`, unless it has brief sections, where
-  amending the brief and `--from-brief-diff` is offered instead. `store.SliceState`
+  question. A stalled slice is resumed by `jig requeue <ticket> --slice <id>`,
+  unless it has brief sections, where amending the brief and
+  `--from-brief-diff` is offered instead. An env-blocked slice is always
+  resumed by `jig requeue <ticket> --slice <id>`, with no brief-sections
+  check: that branch exists only in the stalled loop, deliberately, since
+  bringing an env back up is never a brief problem. `store.SliceState`
   gains two additive fields: `Signature` (the stall-matching key, not shown)
   and `StallSummary` (the human-readable text the stalled table shows,
   `-` when absent), both set on both stall paths (repeat-failure stall and
