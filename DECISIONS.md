@@ -164,7 +164,9 @@ Design questions the code raised, and their resolution:
   missing for `DefaultTriage`, `routeRound`'s kept-ask handling, and
   `cmd/jig`'s terminal prompt and its stdin-closed count alike, so the four
   can never drift apart on what counts as a full build target.
-- `findings.yaml` gains two additive fields beyond the design's base shape:
+- `findings.yaml` gains two additive fields beyond a finding's core ones
+  (id, file, line, title, detail, action, risk, risk_rationale, oracle,
+  workspace, status, recurrences):
   `triage: human|auto` (who decided - a person at a terminal, or `--yes`/no
   terminal - absent for notes, dismissed repeats, and undecided asks) and
   `decision` (the human's text for a kept ask). `triage` is decided afresh
@@ -309,8 +311,8 @@ Design questions the code raised, and their resolution:
   `--backend`, so its own rule differs: the scripted source runs iff
   `--scenario` is set, whatever `--backend` says.
 
-Deviations recorded during the build, beyond what the design already
-covers:
+Deviations recorded during the build, beyond what is already described
+above:
 
 - `Gate`'s `RoundInput.BriefPath` is the ticket's own `brief.md`, except in
   `--branch --doc` mode, where it is the `--doc` file itself, absolute,
@@ -327,19 +329,22 @@ covers:
   build's own choice; only that "clean" never appears for a non-clean
   round is required.
 - The interactive triage prompt's exact wording is this build's own
-  design: the behavior is specified (batch accept or dismiss by id, an
-  ask's keep-or-dismiss with an optional decision, the workspace and
-  oracle prompts, EOF semantics) but not literal strings. Each ask's
+  choice: the behavior described above in this document (batch accept or
+  dismiss by id, an ask's keep-or-dismiss with an optional decision, the
+  workspace and oracle prompts, EOF semantics) is fixed; the literal
+  prompt strings are not. Each ask's
   answer syntax is explicit rather than inferred from free text:
   `n`/`no`/`d`/`dismiss` dismisses, and only `k`/`keep`/Enter keeps - any
   other answer reprompts rather than being read as an implicit keep, so
   free text typed for something else can never accidentally become the
   kept decision. A kept ask is then asked for its decision text on a
   second, separate prompt (Enter skips it).
-- Every place a finding reaches a human shows it with file:line, detail
-  and risk rationale, sorted by risk high first, not the title alone: the
-  ask prompt, the notes table, the fix batch table, and the gate report's
-  own findings and needs_a_human tables (already sorted by risk then id).
+- Every place a finding reaches a human shows it with file:line and risk
+  rationale, sorted by risk high first, not the title alone: the ask
+  prompt, the notes table, the fix batch table, and the gate report's own
+  findings and needs_a_human tables (already sorted by risk then id).
+  `detail` reaches a human at the per-ask prompt only; the four tables
+  carry file:line, title, risk and risk rationale, not detail.
 - `--yes`/non-terminal triage's one-line note (`DefaultTriage`, run by
   `triageFor`) is printed only when this round actually had a fix or ask
   to triage; a note is never triaged, so a notes-only round prints none
