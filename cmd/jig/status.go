@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -109,19 +110,36 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		blocks = append(blocks, axi.Table("questions", []string{"id", "slice", "status"}, qrows))
 	}
 
-	// A gate round whose bookkeeping cannot be read is named rather than
-	// passed over: status would otherwise be quietly missing a waiting
-	// decision, which is exactly what this block exists to show.
+	// A gate round whose bookkeeping cannot be read is named, with what
+	// that costs: status would otherwise be quietly missing a waiting
+	// decision, which is exactly what the block below exists to show, and
+	// when the unreadable round is the only one there is nothing in that
+	// block to hint at the gap. The line says the asks are not shown
+	// rather than leaving a round number to be interpreted.
 	outstanding, unreadableRounds, err := verifydeliver.OutstandingAsks(st, ticket)
 	if err != nil {
 		return "", err
+	}
+	// A round's report.yaml is the other file status reads per round, and
+	// it fails the same way, so it joins the same list.
+	if n, _, reportUnreadable, lerr := latestGateRound(st, ticket); lerr == nil && reportUnreadable && n > 0 {
+		found := false
+		for _, r := range unreadableRounds {
+			if r == n {
+				found = true
+			}
+		}
+		if !found {
+			unreadableRounds = append(unreadableRounds, n)
+			sort.Ints(unreadableRounds)
+		}
 	}
 	if len(unreadableRounds) > 0 {
 		rounds := make([]string, 0, len(unreadableRounds))
 		for _, r := range unreadableRounds {
 			rounds = append(rounds, strconv.Itoa(r))
 		}
-		blocks = append(blocks, "unreadable_gate_rounds: "+strings.Join(rounds, ","))
+		blocks = append(blocks, "unreadable_gate_rounds: "+strings.Join(rounds, ",")+" (any asks they recorded are not listed below)")
 	}
 	if len(outstanding) > 0 {
 		var askRows [][]string
@@ -227,7 +245,7 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 	}
 
 	if allGreen {
-		rounds, verdict, err := latestGateRound(st, ticket)
+		rounds, verdict, _, err := latestGateRound(st, ticket)
 		if err != nil {
 			return "", err
 		}
@@ -248,14 +266,22 @@ var gateRoundDirRE = regexp.MustCompile(`^round-(\d+)$`)
 // latestGateRound returns the highest gate round number recorded for
 // ticket, and that round's verdict (from its report.yaml). rounds is 0 when
 // no gate round has run yet.
-func latestGateRound(st *store.Store, ticket string) (rounds int, verdict string, err error) {
+//
+// A report.yaml that cannot be read or parsed yields an empty verdict
+// rather than an error, for the same reason the outstanding-ask fold skips
+// a round it cannot read: this feeds `jig status`, the command a person
+// runs when something is already wrong, and an unreadable round is not a
+// reason to refuse to show the ticket at all. An empty verdict reads as
+// "not clean", so the hint points at the frontier rather than at publish -
+// the safe direction when jig cannot tell.
+func latestGateRound(st *store.Store, ticket string) (rounds int, verdict string, unreadable bool, err error) {
 	dir := filepath.Join(st.TicketDir(ticket), "gate")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, "", nil
+			return 0, "", false, nil
 		}
-		return 0, "", err
+		return 0, "", false, err
 	}
 
 	max := 0
@@ -272,18 +298,18 @@ func latestGateRound(st *store.Store, ticket string) (rounds int, verdict string
 		}
 	}
 	if max == 0 {
-		return 0, "", nil
+		return 0, "", false, nil
 	}
 
 	data, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("round-%d", max), "report.yaml"))
 	if err != nil {
-		return max, "", err
+		return max, "", true, nil
 	}
 	var rep struct {
 		Verdict string `yaml:"verdict"`
 	}
 	if err := yaml.Unmarshal(data, &rep); err != nil {
-		return max, "", err
+		return max, "", true, nil
 	}
-	return max, rep.Verdict, nil
+	return max, rep.Verdict, false, nil
 }

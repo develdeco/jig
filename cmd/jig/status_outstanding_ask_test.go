@@ -156,7 +156,7 @@ func TestRenderStatusSurvivesAnUnreadableFindingsFile(t *testing.T) {
 	if !strings.Contains(got, "slices[4]") {
 		t.Errorf("status did not render the slices table:\n%s", got)
 	}
-	if !strings.Contains(got, "unreadable_gate_rounds: 2") {
+	if !strings.Contains(got, "unreadable_gate_rounds: 2 (any asks they recorded are not listed below)") {
 		t.Errorf("status did not name the round it could not read:\n%s", got)
 	}
 	if !strings.Contains(got, "r1-f1") {
@@ -164,5 +164,47 @@ func TestRenderStatusSurvivesAnUnreadableFindingsFile(t *testing.T) {
 	}
 	if strings.Contains(got, "verifydeliver") {
 		t.Errorf("status leaked an internal package name into user-facing text:\n%s", got)
+	}
+}
+
+// TestRenderStatusSurvivesAnUnreadableReportFile is the other per-round
+// file status reads. A corrupt report.yaml used to fail the whole command
+// through the next-step hint, the same way a corrupt findings.yaml did.
+// The verdict it could not read is treated as "not clean", so the hint
+// points at the frontier rather than at publish: the safe direction when
+// jig cannot tell.
+func TestRenderStatusSurvivesAnUnreadableReportFile(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	for _, id := range []string{"a", "b", "c", "d"} {
+		if err := st.WriteSliceState(fx.Ticket, id, store.SliceState{State: "green", Attempts: 1}); err != nil {
+			t.Fatalf("write slice state %s: %v", id, err)
+		}
+	}
+	dir := filepath.Join(fx.StoreDir, fx.Ticket, "gate", "round-1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir round 1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "report.yaml"), []byte("{verdict: [unterminated"), 0o644); err != nil {
+		t.Fatalf("write corrupt report.yaml: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v, want a rendered status despite the corrupt report", err)
+	}
+	if !strings.Contains(got, "unreadable_gate_rounds: 1") {
+		t.Errorf("status did not name the round it could not read:\n%s", got)
+	}
+	if strings.Contains(got, "jig publish") {
+		t.Errorf("status pointed at publish on a verdict it could not read:\n%s", got)
+	}
+	if strings.Contains(got, "verifydeliver") {
+		t.Errorf("status leaked an internal package name:\n%s", got)
 	}
 }
