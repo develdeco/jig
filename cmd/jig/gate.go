@@ -143,21 +143,32 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 }
 
 // gateReportHint names the way forward after this round: when it leaves
-// any ask undecided, that is always a human decision at a terminal. The
-// next `jig gate` is refused while the frontier is short of green, so the
-// hint asks the frontier itself (frontierGreen, the condition the check
-// applies) rather than a proxy for it, and names the order when it is not
-// green: work it with `jig run` first, then `jig gate` at a terminal to
-// decide the asks. This round's own fix slices are one way to be short of
-// green and not the only one - `jig gate --early` runs on an unfinished
-// frontier and can leave an ask with no fix slice queued at all, which a
-// fix-slice count reads as "green" and the check does not. Otherwise it
-// falls back to the ticket's general next-step hint.
+// any ask undecided, that is always a human decision at a terminal.
+//
+// The next `jig gate` is refused while the frontier is short of green, so
+// the hint reads the frontier itself (frontierGreen, the condition the
+// check applies) rather than a proxy for it: this round's own fix slices
+// are one way to be short of green and not the only one, and `jig gate
+// --early` runs on an unfinished frontier and can leave an ask with no fix
+// slice queued at all, which a fix-slice count reads as green and the
+// check does not.
+//
+// Short of green, the first line is the ticket's own next step, exactly
+// what `jig status` would print (hintOrFallback), because that is what
+// actually moves the frontier: one parked on an unanswered question does
+// not advance on a bare `jig run <ticket>`, only on `jig run <ticket>
+// --answer ...`. The gate follows it as the second step. With nothing
+// undecided the hint is that same next-step line alone.
 func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateReport) []string {
 	if len(report.NeedsHuman) > 0 {
 		if !frontierGreen(st, ticket) {
+			// What actually moves the frontier is the ticket's own
+			// next step, the same one `jig status` prints: a frontier
+			// parked on an unanswered question does not advance on
+			// `jig run <ticket>` at all, it advances on
+			// `jig run <ticket> --answer ...`.
 			return []string{
-				fmt.Sprintf("Run `jig run %s` first to work the frontier", ticket),
+				hintOrFallback(st, ticket),
 				fmt.Sprintf("Then run `jig gate %s` at a terminal to decide the listed asks", ticket),
 			}
 		}

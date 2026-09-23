@@ -157,6 +157,38 @@ func TestGateReportHintReadsTheFrontierNotTheFixSliceCount(t *testing.T) {
 		}
 	})
 
+	// A frontier parked on an unanswered question does not advance on a
+	// bare `jig run <ticket>`: what frees it is the answer, which is what
+	// `jig status` prints for the same state. The gate's hint must not
+	// send a person to a command that cannot move anything.
+	t.Run("frontier parked on a question names the answer", func(t *testing.T) {
+		t.Setenv("JIG_HOME", t.TempDir())
+		fx := fixture.Generate(t, fixture.Opts{})
+		st, err := store.Open(fx.StoreDir)
+		if err != nil {
+			t.Fatalf("store.Open: %v", err)
+		}
+		if err := st.WriteSliceState(fx.Ticket, "c", store.SliceState{State: "needs-input", Attempts: 1, Question: "q-001"}); err != nil {
+			t.Fatalf("write slice state c: %v", err)
+		}
+		if err := st.WriteQuestion(fx.Ticket, store.Question{ID: "q-001", Slice: "c", Status: "open", Body: "casual or formal?"}); err != nil {
+			t.Fatalf("write question: %v", err)
+		}
+
+		lines := gateReportHint(st, fx.Ticket, report)
+		joined := strings.Join(lines, "\n")
+		if !strings.Contains(joined, "--answer q-001") {
+			t.Fatalf("hint = %q, want the answer that actually frees the frontier", joined)
+		}
+		want, err := nextStepHint(st, fx.Ticket)
+		if err != nil {
+			t.Fatalf("nextStepHint: %v", err)
+		}
+		if lines[0] != want {
+			t.Fatalf("hint first line = %q, want the same next step `jig status` prints (%q)", lines[0], want)
+		}
+	})
+
 	t.Run("green frontier names the gate directly", func(t *testing.T) {
 		t.Setenv("JIG_HOME", t.TempDir())
 		fx := fixture.Generate(t, fixture.Opts{})
