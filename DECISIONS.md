@@ -174,23 +174,25 @@ was ambiguous, what was chosen, and why.
   its own parked table with the exact resume command; a stalled slice
   renders in its own stalled table with a human-readable summary of what
   tripped it.
-- The resume command a parked or stalled slice is offered is chosen from
-  the slice's own structure, not from the state's Reason: a slice with
-  brief sections to amend (`FromBrief` non-empty) is remediated by amending
-  the brief and requeuing with `--from-brief-diff` - the only command that
-  can ever touch it; one with none (for example a gate fix slice, which
-  `routeQuestion`/`routeFailure` can still mark with the same Reason a
-  brief-derived slice gets) is remediated by answering the question
-  directly, or by `jig requeue <ticket> --slice <id>` for a stalled or
-  env-blocked slice - the only commands that work for it. `store.SliceState`
+- The resume command a parked slice is offered is the one that can actually
+  clear it. Amending the brief and requeuing with `--from-brief-diff` is
+  offered only when the slice was parked for a flawed brief AND has brief
+  sections for requeue to notice (`FromBrief` non-empty): requeue keys off
+  those hashes, so it does nothing for a slice without them, and a plain
+  question is not a brief problem even on a slice that has them. Every
+  other parked slice, which is the common case, is resumed by answering its
+  question. A stalled or env-blocked slice is resumed by
+  `jig requeue <ticket> --slice <id>`, unless it has brief sections, where
+  amending the brief and `--from-brief-diff` is offered instead. `store.SliceState`
   gains two additive fields: `Signature` (the stall-matching key, not shown)
   and `StallSummary` (the human-readable text the stalled table shows,
   `-` when absent), both set on both stall paths (repeat-failure stall and
   attempt-cap) and cleared on every route out of a stalled or needs-input
   state - green, both requeue forms, and answering - so neither survives a
-  slice's eventual recovery. Every resume command jig prints carries the
-  invocation's own `--store`/`--project`, so it still works wherever it is
-  run next.
+  slice's eventual recovery. A printed command never carries the invocation's own
+  `--store`/`--project`: a path with a space breaks the command as printed,
+  and quoting it differs between shells, so a store selected by flag is the
+  caller's to repeat.
 
 ## Fixture and tests
 
