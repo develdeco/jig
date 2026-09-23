@@ -131,7 +131,7 @@ func interactiveTriage(in verifydeliver.TriageInput, stdin io.Reader, stdout io.
 			validIDs[f.ID] = true
 		}
 		for {
-			fmt.Fprintf(stdout, "fixes: press Enter to accept all %d, or list ids to dismiss: ", len(in.Fixes))
+			fmt.Fprintf(stdout, "fixes: press Enter to accept all %d and queue their fix slices, or list ids to dismiss - a dismissed finding is never raised again: ", len(in.Fixes))
 			line, err := r.ReadString('\n')
 			trimmed := strings.TrimSpace(line)
 			if err != nil && trimmed == "" {
@@ -182,7 +182,7 @@ askLoop:
 
 		keep := false
 		for {
-			fmt.Fprint(stdout, "keep or dismiss? [k/keep/Enter=keep, n/no/d/dismiss=dismiss]: ")
+			fmt.Fprint(stdout, "keep or dismiss? keeping queues a fix slice and asks for your decision text; dismissing means this finding is never raised again. [k/keep/Enter=keep, n/no/d/dismiss=dismiss]: ")
 			line, err := r.ReadString('\n')
 			trimmed := strings.TrimSpace(line)
 			if err != nil && trimmed == "" {

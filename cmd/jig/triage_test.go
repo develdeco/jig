@@ -178,6 +178,22 @@ func TestInteractiveTriageFixBatchEOFKeepsAllAsAuto(t *testing.T) {
 	}
 }
 
+// TestInteractiveTriageFixBatchPromptExplainsConsequences pins the rule
+// that the fix batch prompt says what each answer does, not only its
+// syntax: accepting queues the fix slices, dismissing means the finding is
+// never raised again.
+func TestInteractiveTriageFixBatchPromptExplainsConsequences(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
+	interactiveTriage(in, strings.NewReader("\n"), &out)
+	text := out.String()
+	for _, want := range []string{"queue their fix slices", "never raised again"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("fix batch prompt missing %q:\n%s", want, text)
+		}
+	}
+}
+
 // --- interactiveTriage: per-ask prompt --------------------------------------
 
 func TestInteractiveTriageAskKeepWithDecision(t *testing.T) {
@@ -222,6 +238,22 @@ func TestInteractiveTriageAskShowsFileLineDetailAndRationale(t *testing.T) {
 	interactiveTriage(in, strings.NewReader("d\n"), &out)
 	text := out.String()
 	for _, want := range []string{"beta/beta.go:4", "ASK-DETAIL", "ASK-RATIONALE"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("ask prompt missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// TestInteractiveTriageAskPromptExplainsConsequences pins the rule that the
+// per-ask prompt says what each answer does, not only its syntax: keeping
+// queues a fix slice and asks for a decision, dismissing means the finding
+// is never raised again.
+func TestInteractiveTriageAskPromptExplainsConsequences(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
+	interactiveTriage(in, strings.NewReader("k\n\n"), &out)
+	text := out.String()
+	for _, want := range []string{"queues a fix slice", "decision text", "never raised again"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("ask prompt missing %q:\n%s", want, text)
 		}
