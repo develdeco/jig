@@ -165,6 +165,7 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 		return nil, nil, &axi.Error{
 			Msg:  "cannot build a fix slice, the manifest has no oracles",
 			Code: "GATE_NO_ORACLE",
+			Help: []string{"Add an oracle to the manifest, then rerun `jig gate` for this ticket."},
 		}
 	}
 

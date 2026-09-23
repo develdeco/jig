@@ -953,6 +953,229 @@ func TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath(t *testing.T) {
 	}
 }
 
+// TestGateFailedRoundPushesStoreBestEffortSoARerunNeedsNoCleanup reproduces
+// the review finding that a round failing after its gate-open journal line
+// (REVIEW_INVALID here; a REVIEW_FAILED or a routing error take the exact
+// same path) left the store's working copy with a tracked, uncommitted
+// change: the round returns before Gate's own end-of-round Store.Push, so
+// the journal line jig itself just appended sits uncommitted, and the very
+// next command's Store.Sync (git pull --rebase) refuses against it - the
+// documented recovery ("the operator reruns") did not actually work
+// without a manual `git checkout`/`git clean` on the store first.
+func TestGateFailedRoundPushesStoreBestEffortSoARerunNeedsNoCleanup(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+
+	attempt := 0
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		attempt++
+		result := ReviewResult{Summary: "round 1"}
+		if attempt == 1 {
+			// Missing coverage: REVIEW_INVALID, after the gate-open
+			// journal line has already been appended.
+			result.ReviewedPaths = nil
+		} else {
+			reviewData, err := os.ReadFile(sd.SliceJSON)
+			if err != nil {
+				t.Fatalf("read review.json: %v", err)
+			}
+			var req ReviewRequest
+			if err := json.Unmarshal(reviewData, &req); err != nil {
+				t.Fatalf("parse review.json: %v", err)
+			}
+			result.ReviewedPaths = req.MustReview
+		}
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
+	}}
+	src := NewReviewerGateSource(backend)
+
+	_, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err == nil {
+		t.Fatal("Gate: want an error (missing must_review coverage)")
+	}
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "REVIEW_INVALID" {
+		t.Fatalf("err = %v, want *axi.Error REVIEW_INVALID", err)
+	}
+
+	// The store's working copy must already be clean and pushed: no
+	// leftover tracked change from the failed round's own gate-open
+	// journal line, review.json or result.json.
+	status, err := gitx.Run(d.Store.Root, "status", "--porcelain")
+	if err != nil {
+		t.Fatalf("store status: %v", err)
+	}
+	if status != "" {
+		t.Fatalf("store working copy is dirty after the failed round:\n%s", status)
+	}
+
+	// A plain rerun (no manual cleanup) must actually work: Sync must not
+	// refuse, and the corrected round must succeed as round 1 (the failed
+	// attempt above wrote no gate/round-1/ directory).
+	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate rerun: %v", err)
+	}
+	if report.Round != 1 {
+		t.Fatalf("rerun Round = %d, want 1", report.Round)
+	}
+}
+
+// TestGateRecurrenceBoundSurvivesANoteInBetween reproduces the review
+// finding that labeling a recurrence "note" reset its identity: a noted
+// finding left review.json's open list entirely, so no later round could
+// ever cite it as `prior` again, and the same underlying problem reported
+// afterward became a brand new id at recurrences 0 - the recurrence bound
+// (two) was evadable just by alternating fix and note.
+//
+// Round 1 reports a fix (r1-f1, recurrences 0). Its fix slice is marked
+// green directly (frontier's own job, not this test's). Round 2 cites
+// prior: r1-f1 as a note: recurrences 1, status noted. Round 3 must still
+// be able to cite prior: r1-f1 (proving it stayed a citable id although
+// noted) and report it as a fix again: recurrences 2 forces it to asked
+// (routed_as: ask) whatever this round's own label, exactly like an
+// uninterrupted fix/fix recurrence would - visible here in its own
+// per-finding fix slice, since the finding's build target already
+// resolves in full and DefaultTriage auto-keeps it.
+func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+
+	round := 0
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		round++
+		reviewData, err := os.ReadFile(sd.SliceJSON)
+		if err != nil {
+			t.Fatalf("read review.json: %v", err)
+		}
+		var req ReviewRequest
+		if err := json.Unmarshal(reviewData, &req); err != nil {
+			t.Fatalf("parse review.json: %v", err)
+		}
+
+		var result ReviewResult
+		switch round {
+		case 1:
+			result = ReviewResult{
+				Findings: []ResultFinding{{
+					File: "alpha/alpha.go", Line: 1, Title: "needs a fix",
+					Detail: "d", Action: ActionFix, Risk: RiskMedium, RiskRationale: "r",
+					Oracle: "test",
+				}},
+				ReviewedPaths: req.MustReview,
+				Summary:       "round 1",
+			}
+		case 2:
+			if len(req.Open) != 1 || req.Open[0].ID != "r1-f1" || req.Open[0].Recurrences != 0 {
+				t.Fatalf("round 2 review.json Open = %+v, want r1-f1 at 0 recurrences", req.Open)
+			}
+			result = ReviewResult{
+				Findings: []ResultFinding{{
+					File: "alpha/alpha.go", Line: 1, Title: "still there, harmless now",
+					Detail: "d", Action: ActionNote, Risk: RiskLow, RiskRationale: "r",
+					Oracle: "test", Prior: "r1-f1",
+				}},
+				ReviewedPaths: req.MustReview,
+				Summary:       "round 2",
+			}
+		case 3:
+			// The finding jig's own round-2 bookkeeping recorded as noted
+			// must still be offered as a citable id: the fix.
+			if len(req.Open) != 1 || req.Open[0].ID != "r1-f1" || req.Open[0].Recurrences != 1 || req.Open[0].Action != ActionNote {
+				t.Fatalf("round 3 review.json Open = %+v, want r1-f1 (noted, 1 recurrence) fed back", req.Open)
+			}
+			result = ReviewResult{
+				Findings: []ResultFinding{{
+					File: "alpha/alpha.go", Line: 1, Title: "back again",
+					Detail: "d", Action: ActionFix, Risk: RiskMedium, RiskRationale: "r",
+					Oracle: "test", Prior: "r1-f1",
+				}},
+				ReviewedPaths: req.MustReview,
+				Summary:       "round 3",
+			}
+		default:
+			t.Fatalf("unexpected round %d", round)
+		}
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
+	}}
+	src := NewReviewerGateSource(backend)
+
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+	if len(report1.FixSlices) != 1 {
+		t.Fatalf("round 1 FixSlices = %v, want exactly one", report1.FixSlices)
+	}
+	if err := d.Store.WriteSliceState(fx.Ticket, report1.FixSlices[0], store.SliceState{State: "green"}); err != nil {
+		t.Fatalf("mark round 1 fix slice green: %v", err)
+	}
+	if err := d.Store.Push(fx.Ticket + ": mark " + report1.FixSlices[0] + " green"); err != nil {
+		t.Fatalf("push round 1 fix slice state: %v", err)
+	}
+
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 2: %v", err)
+	}
+	if len(report2.FixSlices) != 0 {
+		t.Fatalf("round 2 FixSlices = %v, want none (a note is never routed)", report2.FixSlices)
+	}
+	ff2, ok, err := readFindingsYAML(d.Store, fx.Ticket, 2)
+	if err != nil || !ok {
+		t.Fatalf("read round 2 findings.yaml: ok=%v err=%v", ok, err)
+	}
+	if len(ff2.Findings) != 1 || ff2.Findings[0].Status != StatusNoted || ff2.Findings[0].Recurrences != 1 {
+		t.Fatalf("round 2 findings = %+v, want [r1-f1 noted, 1 recurrence]", ff2.Findings)
+	}
+
+	// A noted finding is not outstanding work, so it no longer forces a
+	// round to dispatch on its own (Q8's clean-without-dispatch shortcut):
+	// a trivial, unrelated commit gives round 3 a reason to dispatch,
+	// exactly like a real ticket branch that keeps advancing.
+	buildDir := buildLeaseDir(t, fx)
+	branch := ticketBranch(fx.Ticket)
+	if err := os.WriteFile(filepath.Join(buildDir, "beta", "unrelated.txt"), []byte("unrelated\n"), 0o644); err != nil {
+		t.Fatalf("write unrelated.txt: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
+		t.Fatalf("git add unrelated.txt: %v", err)
+	}
+	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "add unrelated.txt"); err != nil {
+		t.Fatalf("commit unrelated.txt: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
+		t.Fatalf("push branch: %v", err)
+	}
+
+	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 3: %v", err)
+	}
+	// r1-f1's file (alpha/alpha.go, oracle test) already has a full build
+	// target, so DefaultTriage - unattended, no terminal - auto-keeps the
+	// forced ask rather than leaving it for a human: that is what proves
+	// the bound actually fired here, distinctly from an ordinary fix. A
+	// fix routes into the round's grouped fix-<n>-<workspace>-<oracle>
+	// slice; only a (kept) ask gets its own per-finding
+	// fix-<n>-<finding-id> slice (route.go's Q9 id scheme), and
+	// routed_as/recurrences on the persisted finding confirm it directly.
+	if len(report3.Findings) != 1 || report3.Findings[0].ID != "r1-f1" {
+		t.Fatalf("round 3 Findings = %+v, want exactly [r1-f1]", report3.Findings)
+	}
+	f := report3.Findings[0]
+	if f.RoutedAs != ActionAsk || f.Recurrences != 2 {
+		t.Fatalf("round 3 finding = %+v, want routed_as ask, 2 recurrences (the bound reached)", f)
+	}
+	if len(report3.FixSlices) != 1 || report3.FixSlices[0] != "fix-3-r1-f1" {
+		t.Fatalf("round 3 FixSlices = %v, want exactly [fix-3-r1-f1] (the ask's own per-finding slice)", report3.FixSlices)
+	}
+}
+
 // TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerated
 // reproduces the wedge a text match on git's cat-file message used to fall
 // into: an open finding's file is later untracked and gitignored on the

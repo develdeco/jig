@@ -412,6 +412,28 @@ func openFindingsList(cum map[string]Finding) []Finding {
 	return out
 }
 
+// openAndNotedFindingsList returns cum's open, asked and noted findings,
+// sorted by id for determinism: review.json's own Open list (built from
+// this, not openFindingsList). A noted finding left the open set (it is
+// not outstanding work and never blocks clean or forces its file into
+// must_review - review.go's Round filters this list back down to
+// open/asked for both), but it must stay a citable `prior` target, or its
+// identity and recurrence count are lost the moment a round notes it:
+// prior is the only structural channel a later round has to continue the
+// same finding, and the recurrence bound (ApplyRound's rule 1) must apply
+// to that finding whatever label it wore in between, not reset because a
+// note interrupted it.
+func openAndNotedFindingsList(cum map[string]Finding) []Finding {
+	var out []Finding
+	for _, f := range cum {
+		if f.Status == StatusOpen || f.Status == StatusAsked || f.Status == StatusNoted {
+			out = append(out, f)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 // dismissedFindingsList returns cum's dismissed findings, sorted by id for
 // determinism.
 func dismissedFindingsList(cum map[string]Finding) []Finding {
@@ -439,10 +461,10 @@ func askedFindingsList(cum map[string]Finding) []Finding {
 	return out
 }
 
-// toOpenFindingList projects fs (cum's open/asked findings) onto
-// review.json's open shape. Building fs from the cumulative
-// fold, and calling this before every reviewer round, is what keeps
-// review.json's open list honest.
+// toOpenFindingList projects fs (cum's open/asked/noted findings, per
+// openAndNotedFindingsList) onto review.json's open shape. Building fs from
+// the cumulative fold, and calling this before every reviewer round, is
+// what keeps review.json's open list honest.
 func toOpenFindingList(fs []Finding) []OpenFinding {
 	out := make([]OpenFinding, 0, len(fs))
 	for _, f := range fs {

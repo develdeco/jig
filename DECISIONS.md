@@ -260,10 +260,17 @@ Design questions the code raised, and their resolution:
   always carries the earlier occurrence's `oracle` forward when this
   round's own report names none - otherwise a recurrence forced to `ask`
   by the bound could have nothing to build a fix slice with even after a
-  human keeps it. What can never happen is `prior` naming a *noted*
-  finding as its target: a note leaves the open set on its very first
-  occurrence, and `prior` may only legitimately name an id under `open`,
-  `asked`, or `dismissed` (validated).
+  human keeps it. `prior` legitimately names a *noted* finding too: a
+  noted finding leaves the open set (it is not outstanding work - it
+  never blocks clean, and its file is not forced into `must_review`) but
+  review.json's `open` list still carries it (`Action: "note"`,
+  `openAndNotedFindingsList`), so it stays a citable `prior` target and
+  its recurrence count keeps climbing across a note occurrence exactly as
+  it would across a fix or ask one. Without this, the bound above would
+  be evadable: a reviewer alternating `fix` and `note` on the same
+  problem would get a fresh id at `recurrences: 0` every time the label
+  flips back, since the noted occurrence would otherwise be unreachable
+  by any later round's `prior`.
 - Clean without dispatch: when the scope diff changes no file at all (none
   added, modified, or deleted) and no finding is outstanding, jig writes a
   clean round without ever dispatching a reviewer session, since the
@@ -370,26 +377,31 @@ above:
 - The scope base anchor for a full-scope round prefers `merge-base(origin/
   <target>, HEAD)` over the ticket's recorded start sha, falling back to
   the start sha only when the merge-base lookup itself fails (no such
-  ref); this design's own wording puts merge-base first, ahead of PR #8's
-  own order (the start sha first).
-- The decisive e2e test (three real gate rounds through the fake backend,
-  in-process through `cmd/jig`'s `Main`) discards a failed round's leftover
-  store changes with an explicit `git checkout -- .` / `git clean -fd` on
-  the store before retrying that round. The actual blocker is the tracked
-  `journal.ndjson`: `Gate` appends its `gate-open` line before dispatching
-  the round at all, and a `REVIEW_INVALID` result returns before `Gate`'s
-  own `Store.Push`, so that line is left written to the working tree but
-  not committed - the store's next `Sync` (`git pull --rebase`) then
-  refuses over it once a remote exists. `Gate` also writes `work/gate.round-N.*.json`
-  to the store's working copy before validating a result and leaves those
-  uncommitted the same way, but they are untracked cruft under the store's
-  `work/` tree and do not by themselves block a rebase pull; a store whose
-  only leftover was untracked files would pull cleanly. `Store.Sync` does
-  not commit its own uncommitted leftovers before it pulls; the gap applies
-  equally to any oracle failure after
-  `gate-open`, not only to a reviewer round, and is outside this package's
-  own scope to fix. The test's workaround matches exactly what an operator
-  would do by hand in the same situation.
+  ref) - merge-base first, ahead of PR #8's own order (the start sha
+  first): the recorded start sha can predate a rebase that moved the
+  target branch, while merge-base always anchors at the ticket branch's
+  actual point of divergence.
+- `Gate` appends its `gate-open` journal line before dispatching the round
+  at all, and writes `work/gate.round-N.*.json` to the store's working
+  copy before validating a result, both before its own end-of-round
+  `Store.Push`. A round that fails after that journal line (`REVIEW_INVALID`,
+  `REVIEW_FAILED`, `GATE_NO_ORACLE`, an oracle failure, a routing error)
+  used to return before that `Push`, leaving the journal line tracked but
+  uncommitted - the store's next `Sync` (`git pull --rebase`) then refused
+  over it once a remote existed, and only a manual `git checkout -- .` /
+  `git clean -fd` on the store recovered it. `Gate` now runs a deferred,
+  best-effort `Store.Push` (a message naming the ticket, the round and the
+  failure) on any error once the `gate-open` journal line has been
+  appended, whatever the failure, so the store is always clean and pushed
+  by the time the error reaches the caller and a plain rerun works with no
+  manual cleanup. The decisive e2e test (three real gate rounds through
+  the fake backend, in-process through `cmd/jig`'s `Main`) asserts the
+  store is clean right after its deliberately broken round 1 attempt,
+  instead of discarding leftovers by hand before retrying.
+- Every error a reviewer round can return after the `gate-open` journal
+  line (`REVIEW_INVALID`, `REVIEW_FAILED`, `GATE_NO_ORACLE`) carries a
+  `Help` line naming the recovery (fix the input, or add an oracle, then
+  rerun `jig gate` for the ticket), on top of the best-effort push above.
 
 ## CLI
 

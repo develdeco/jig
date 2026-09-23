@@ -193,18 +193,15 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	}
 
 	// The failed attempt above still wrote review.json to the store's
-	// working copy (verifydeliver.Gate returns before its own Push, so
-	// nothing was committed or pushed). Store.Sync does not commit its own
-	// leftovers before pulling, so a
-	// dirty local store here would otherwise fail the retry's own Sync
-	// with "cannot pull with rebase: you have unstaged changes" - discard
-	// it directly, exactly as an operator would with `git checkout .`
-	// before rerunning a failed command.
-	if _, err := gitx.Run(fx.StoreDir, "checkout", "--", "."); err != nil {
-		t.Fatalf("discard the failed round's leftover store changes: %v", err)
-	}
-	if _, err := gitx.Run(fx.StoreDir, "clean", "-fd"); err != nil {
-		t.Fatalf("clean the failed round's leftover untracked store files: %v", err)
+	// working copy and appended this round's gate-open journal line before
+	// failing. Gate's own best-effort push on any error after that journal
+	// line means the store must already be clean and pushed - no manual
+	// `git checkout`/`git clean` needed before the retry below, unlike the
+	// wedge this once left behind.
+	if status, err := gitx.Run(fx.StoreDir, "status", "--porcelain"); err != nil {
+		t.Fatalf("store status after the failed round: %v", err)
+	} else if status != "" {
+		t.Fatalf("store working copy is dirty after the failed round (the store push on error did not run):\n%s", status)
 	}
 
 	// --- round 1, corrected retry (still round 1: the failed attempt above

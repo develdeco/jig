@@ -117,11 +117,17 @@ func MarshalReviewRequest(req ReviewRequest) ([]byte, error) {
 	return json.MarshalIndent(req, "", "  ")
 }
 
+// reviewInvalidHelp is REVIEW_INVALID and REVIEW_FAILED's shared help line:
+// the round already committed and pushed its own gate-open journal line
+// (Gate's best-effort push on any error after that line), so a plain rerun
+// works without any manual store cleanup.
+var reviewInvalidHelp = []string{"Fix the reviewer result (or the backend) and rerun `jig gate` for this ticket."}
+
 // reviewInvalid wraps msg as the *axi.Error ParseReviewResult and the
 // reviewer round return for a malformed or out-of-contract result: the
 // round fails loudly, never a silent default.
 func reviewInvalid(msg string) error {
-	return &axi.Error{Msg: "gate reviewer result.json is invalid: " + msg, Code: "REVIEW_INVALID"}
+	return &axi.Error{Msg: "gate reviewer result.json is invalid: " + msg, Code: "REVIEW_INVALID", Help: reviewInvalidHelp}
 }
 
 // reviewResultWire is ParseReviewResult's strict decode target, used only
@@ -767,9 +773,20 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 	if err != nil {
 		return Round{}, false, err
 	}
+	// in.Open (findings.go's openAndNotedFindingsList) carries a noted
+	// finding too, so it stays a citable prior target, but a noted finding
+	// is not outstanding work: it must not force its file into must_review
+	// coverage, and it must not by itself keep this round from taking the
+	// clean-without-dispatch shortcut below. openOutstanding is in.Open
+	// filtered back down to open/asked for exactly those two uses.
 	var openFiles []string
+	openOutstanding := 0
 	for _, f := range in.Open {
+		if f.Action == ActionNote {
+			continue
+		}
 		openFiles = append(openFiles, f.File)
+		openOutstanding++
 	}
 	diff, err := computeScopeDiff(in.LeaseDir, base, head, openFiles)
 	if err != nil {
@@ -783,7 +800,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 	// in for this: it never lists a deleted file, so a deletion-only diff
 	// would otherwise look empty and skip review on a round that has never
 	// been reviewed at all.
-	if len(diff.Changed) == 0 && len(diff.Deleted) == 0 && len(in.Open) == 0 {
+	if len(diff.Changed) == 0 && len(diff.Deleted) == 0 && openOutstanding == 0 {
 		return Round{Review: &Review{
 			Scope:      scope,
 			BaseSHA:    base,
@@ -845,6 +862,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		return Round{}, false, &axi.Error{
 			Msg:  fmt.Sprintf("gate reviewer dispatch failed: %v", err),
 			Code: "REVIEW_FAILED",
+			Help: reviewInvalidHelp,
 		}
 	}
 	resultData, err := os.ReadFile(resultPath)
@@ -852,6 +870,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		return Round{}, false, &axi.Error{
 			Msg:  fmt.Sprintf("gate reviewer wrote no result.json at %s", resultPath),
 			Code: "REVIEW_FAILED",
+			Help: reviewInvalidHelp,
 		}
 	}
 
@@ -869,6 +888,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		return Round{}, false, &axi.Error{
 			Msg:  "the reviewer changed the gate lease; reviewers never edit",
 			Code: "REVIEW_INVALID",
+			Help: reviewInvalidHelp,
 		}
 	}
 

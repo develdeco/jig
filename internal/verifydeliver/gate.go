@@ -156,12 +156,38 @@ type reportYAML struct {
 // Gate runs one gate round for ticket: it re-verifies every manifest
 // oracle in a fresh gate lease checked out to the ticket's branch, then
 // asks src for this round's review content.
-func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
+func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	if o.PRMode {
 		return GateReport{}, &axi.Error{Msg: "gate pr-mode ships in v0.2", Code: "NOT_IMPLEMENTED"}
 	}
 
 	ticket := o.Ticket
+	// journaled and roundNum back the deferred best-effort push below: once
+	// this round's own gate-open journal line has been appended (a tracked
+	// change to the store's working copy), any later error in this
+	// function - REVIEW_INVALID, REVIEW_FAILED, GATE_NO_ORACLE, an oracle
+	// failure, a routing error - would otherwise return before Gate's own
+	// end-of-round Store.Push, leaving that journal line (and any
+	// review.json/result.json this round wrote) committed nowhere: tracked
+	// but uncommitted. The store's own Sync (git pull --rebase) then
+	// refuses on the very next command, on this ticket or any other,
+	// wedging the whole store until an operator runs git by hand. Pushing
+	// here, whatever the failure, is what makes a plain rerun documented
+	// as the recovery actually work.
+	var (
+		journaled bool
+		roundNum  int
+	)
+	defer func() {
+		if err == nil || !journaled {
+			return
+		}
+		// Best-effort: if this push itself fails, the original error is
+		// still the one that reaches the caller; there is nothing more to
+		// do here but try.
+		_ = d.Store.Push(fmt.Sprintf("%s: gate round %d failed: %v", ticket, roundNum, err))
+	}()
+
 	if err := d.Store.Sync(); err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: sync store: %w", err)
 	}
@@ -269,6 +295,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	if err := journal.Append(d.Store, ticket, journal.Line{Slice: "", Event: "gate-open", Model: model}); err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-open: %w", err)
 	}
+	journaled = true
 
 	man, err := manifest.Resolve(lease.Dir)
 	if err != nil {
@@ -284,20 +311,23 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: count rounds: %w", err)
 	}
 	n++
+	roundNum = n
 	roundDir := gateRoundDir(d.Store, ticket, n)
 	if _, err := os.Stat(roundDir); err == nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: round %d already exists", n)
 	}
 
-	// The cumulative fold over every earlier reviewer round: its open and
-	// dismissed findings become review.json's own open and dismissed lists.
-	// A ticket with no reviewer rounds yet, or one driven entirely by the
-	// scripted source, folds to nothing.
+	// The cumulative fold over every earlier reviewer round: its open,
+	// asked and noted findings become review.json's own open list (a noted
+	// finding stays a citable prior target, findings.go's
+	// openAndNotedFindingsList), and its dismissed findings become
+	// review.json's dismissed list. A ticket with no reviewer rounds yet,
+	// or one driven entirely by the scripted source, folds to nothing.
 	cum, err := cumulativeFindings(d.Store, ticket, n)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: fold findings: %w", err)
 	}
-	openList := openFindingsList(cum)
+	openList := openAndNotedFindingsList(cum)
 	dismissedList := dismissedFindingsList(cum)
 
 	// The reviewer's brief_path is the ticket's own brief.md, except in
@@ -333,7 +363,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: resolve origin/%s: %w", target, err)
 	}
 
-	report := GateReport{Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA}}
+	report = GateReport{Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA}}
 	switch {
 	case !ok:
 		report.Verdict = "clean"
