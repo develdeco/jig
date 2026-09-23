@@ -502,15 +502,15 @@ func shellWords(line string) []string {
 
 // jigVersionInvocation reports whether run - one step's shell script (sh,
 // bash or powershell; smoke.yml's steps use all three) - structurally
-// invokes the installed jig binary with "version" as an argument: some
-// line's words contain a (program, "version") adjacent pair whose program
-// word names the binary (jigBinaryToken) or, for the bash steps that
-// assign it to a variable first ("jig_bin=.../jig.exe", later "$jig_bin
-// version"), a simple same-script alias resolved back to it. Walking words
-// this way, rather than matching "jig" and "version" anywhere in the
-// script's text, means a step whose only mention of either word is inside
-// an unrelated echo or Write-Error message (both appear in these scripts,
-// right next to the real invocation) does not count.
+// invokes the installed jig binary with "version" as its argument. Each
+// line is split into commands on the shell's own separators (|, &&, ||,
+// ;), and only a command whose PROGRAM word names the binary
+// (jigBinaryToken), or a simple same-script alias of it, with "version"
+// as its first argument, counts. Checking the program position, rather
+// than any adjacent ("jig", "version") word pair anywhere in the text,
+// means an unrelated echo or Write-Error message that happens to contain
+// both words - which these scripts print right next to the real
+// invocation - cannot stand in for the check itself.
 func jigVersionInvocation(run string) bool {
 	aliases := map[string]bool{}
 	for _, raw := range strings.Split(run, "\n") {
@@ -524,12 +524,16 @@ func jigVersionInvocation(run string) bool {
 			}
 			continue
 		}
-		words := shellWords(line)
-		for i := 0; i+1 < len(words); i++ {
-			if words[i+1] != "version" {
+		for _, command := range splitShellCommands(line) {
+			words := shellWords(command)
+			// PowerShell's call operator is not the program itself.
+			if len(words) > 0 && words[0] == "&" {
+				words = words[1:]
+			}
+			if len(words) < 2 || words[1] != "version" {
 				continue
 			}
-			prog := unquoteShellWord(words[i])
+			prog := unquoteShellWord(words[0])
 			if jigBinaryToken(prog) {
 				return true
 			}
@@ -539,6 +543,23 @@ func jigVersionInvocation(run string) bool {
 		}
 	}
 	return false
+}
+
+// splitShellCommands splits one shell line into the commands a shell would
+// run, on its own separators (|, && , ||, ;), so a command's program is
+// always its own first word. Deliberately simple: these workflow scripts
+// contain no quoted separators.
+func splitShellCommands(line string) []string {
+	fields := strings.FieldsFunc(line, func(r rune) bool {
+		return r == '|' || r == ';' || r == '&'
+	})
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // TestSmokeWorkflowChecksVersion asserts at least one step actually
@@ -598,6 +619,7 @@ func TestJigVersionInvocation(t *testing.T) {
 		{"powershell call operator", `$out = & "$env:JIG_INSTALL_DIR\jig.exe" version`, true},
 		{"bash variable alias resolved same script", "jig_bin=\"$gopath/bin/jig.exe\"\n\"$jig_bin\" version", true},
 		{"bare jig", "jig version", true},
+		{"echo prose alone, the mutation a word-pair check misses", `echo skipping the jig version check for now`, false},
 		{"echo prose only, no real invocation on any line", `echo "installed jig version does not match $JIG_TAG"`, false},
 		{"Write-Error prose only", `Write-Error "installed jig version does not match $env:JIG_TAG"`, false},
 		{"go install, not a version check", `go install "github.com/develdeco/jig/cmd/jig@$JIG_TAG"`, false},
