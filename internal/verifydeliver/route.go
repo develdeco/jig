@@ -388,15 +388,21 @@ func sanitizeSliceID(id string) string {
 
 // disambiguateFixSliceIDs breaks ties between two synthesized slices that
 // computed the same id - in practice, two workspace/oracle names that
-// sanitizeSliceID maps to the same string. AppendSlices refuses a
-// duplicate id outright, which would otherwise leave the round
-// half-applied (some fix slices already appended, the rest rejected). The
-// first occurrence of an id, in build order, keeps it; each later
-// duplicate gets the lowest "-2", "-3", ... suffix not already taken by
-// any id in the batch (original or already disambiguated), so this can
-// never itself produce a new collision.
-func disambiguateFixSliceIDs(slices []store.Slice) {
-	used := make(map[string]bool, len(slices))
+// sanitizeSliceID maps to the same string - and against any id the
+// ticket's slices.yaml already has (existingSlices, as of before this
+// round): AppendSlices refuses a duplicate id outright, which would
+// otherwise leave the round half-applied (some fix slices already
+// appended, the rest rejected), whether the collision is within this
+// batch or against a slice that already exists. The first occurrence of
+// an id, in build order, keeps it; each later duplicate gets the lowest
+// "-2", "-3", ... suffix not already taken by any id in the batch
+// (original or already disambiguated) or by an existing slice, so this
+// can never itself produce a new collision.
+func disambiguateFixSliceIDs(slices []store.Slice, existingSlices []store.Slice) {
+	used := make(map[string]bool, len(slices)+len(existingSlices))
+	for _, s := range existingSlices {
+		used[s.ID] = true
+	}
 	for i := range slices {
 		id := slices[i].ID
 		if !used[id] {
@@ -481,6 +487,6 @@ func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []
 		})
 	}
 
-	disambiguateFixSliceIDs(out)
+	disambiguateFixSliceIDs(out, existingSlices)
 	return out, nil
 }

@@ -579,12 +579,32 @@ func TestRouteRoundRecurrenceGoalNamesOnlyIDWhenResultMissing(t *testing.T) {
 
 func TestDisambiguateFixSliceIDsBreaksTies(t *testing.T) {
 	slices := []store.Slice{{ID: "fix-1-a"}, {ID: "fix-1-a"}, {ID: "fix-1-a"}}
-	disambiguateFixSliceIDs(slices)
+	disambiguateFixSliceIDs(slices, nil)
 	got := sliceIDs(slices)
 	sort.Strings(got)
 	want := []string{"fix-1-a", "fix-1-a-2", "fix-1-a-3"}
 	if !equalStrings(got, want) {
 		t.Fatalf("ids = %v, want %v", got, want)
+	}
+}
+
+// TestDisambiguateFixSliceIDsAvoidsAnExistingSliceID pins the fix for the
+// review finding that disambiguation seeded its used-id set from the
+// batch only, never from the ticket's existing slices.yaml: a batch id
+// that collides with an id already on the ticket (hand-written, or
+// carried in from a chart) used to go through unchanged and would fail
+// AppendSlices with SLICE_ID_DUPLICATE mid-batch, leaving the round
+// half-applied - some slices already appended, the rest rejected, after
+// this round's own findings.yaml (with the human's triage decisions) was
+// already persisted.
+func TestDisambiguateFixSliceIDsAvoidsAnExistingSliceID(t *testing.T) {
+	existing := []store.Slice{{ID: "fix-1-a"}}
+	slices := []store.Slice{{ID: "fix-1-a"}, {ID: "fix-1-b"}}
+	disambiguateFixSliceIDs(slices, existing)
+	got := sliceIDs(slices)
+	want := []string{"fix-1-a-2", "fix-1-b"}
+	if !equalStrings(got, want) {
+		t.Fatalf("ids = %v, want %v (the batch's fix-1-a must yield to the existing slice)", got, want)
 	}
 }
 
