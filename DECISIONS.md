@@ -120,6 +120,14 @@ fallback survived into this design; `action` (fix/ask/note), `prior`, and
 
 Design questions the code raised, and their resolution:
 
+- "Lies in no manifest workspace" is decided after normalizing the
+  manifest's own workspace path to the form a finding's file already has
+  (backslashes to `/`, no trailing `/`, no leading `./`), and matched by
+  path segment rather than raw string prefix. A workspace path is written
+  by hand, where `./billing`, `billing\` and `billing` all name the same
+  directory; comparing them literally would put every finding in that
+  workspace in the no-build-target case below, turning ordinary fixes into
+  questions for a human over a manifest's punctuation.
 - A kept `ask` whose file lies in no manifest workspace has no build
   target, so the workspace it needs is the human's judgment, never a silent
   default. At a terminal, keeping such an `ask` prompts for a workspace id.

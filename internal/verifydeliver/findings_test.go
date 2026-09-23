@@ -66,6 +66,35 @@ func TestWorkspaceForNestedPathsAndNoWorkspace(t *testing.T) {
 	}
 }
 
+// TestWorkspaceForNormalizesDeclaredPath pins that a workspace path is read
+// in the same normalized form a finding's file already has. A manifest path
+// is written by hand, and "./billing" or "billing\" names the same
+// directory as "billing"; matching them literally would leave every finding
+// in that workspace with no derivable build target, routing each one to a
+// human as an unbuildable ask.
+func TestWorkspaceForNormalizesDeclaredPath(t *testing.T) {
+	man := manifest.Manifest{Workspaces: []manifest.Workspace{
+		{ID: "root", Path: "./"},
+		{ID: "billing", Path: "./billing"},
+		{ID: "billing-invoices", Path: ".\\billing\\invoices\\"},
+	}}
+
+	cases := []struct {
+		file string
+		want string
+	}{
+		{"main.go", "root"},
+		{"billing/report.go", "billing"},
+		{"billing/invoices/list.go", "billing-invoices"},
+		{"billingx/foo.go", "root"},
+	}
+	for _, c := range cases {
+		if got := workspaceFor(c.file, man); got != c.want {
+			t.Errorf("workspaceFor(%q) = %q, want %q", c.file, got, c.want)
+		}
+	}
+}
+
 // --- statusForAction ---------------------------------------------------------
 
 // TestStatusForActionRejectsUnknownAction: every action jig recognizes is

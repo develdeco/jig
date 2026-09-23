@@ -98,10 +98,19 @@ func statusForAction(action string) (string, error) {
 // "billing/x.go" but not "billingx/y.go"). "." (or an empty path) is the
 // root workspace and matches every file. The empty string means file lies
 // in no declared workspace.
+//
+// A workspace path is written by hand, so it is normalized to the form a
+// finding's file already has (ParseReviewResult's normalizeRepoRelPath):
+// backslashes to "/", no trailing "/", and no leading "./". Without that
+// last one a manifest that says "./billing" matches no file at all, and
+// every finding in that workspace becomes an ask jig cannot build.
 func workspaceFor(file string, man manifest.Manifest) string {
 	best, bestLen := "", -1
 	for _, ws := range man.Workspaces {
 		p := strings.TrimSuffix(strings.ReplaceAll(ws.Path, "\\", "/"), "/")
+		for strings.HasPrefix(p, "./") {
+			p = strings.TrimPrefix(p, "./")
+		}
 		var match bool
 		var length int
 		switch {
