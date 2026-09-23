@@ -86,7 +86,7 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question})
 
 		if ss.State == "needs-input" {
-			parkedRows = append(parkedRows, []string{sl.ID, ss.Question, resumeCommand(ticket, sl, ss)})
+			parkedRows = append(parkedRows, []string{sl.ID, ss.Question, resumeCell(ticket, sl, ss)})
 		}
 		if ss.State == "stalled" {
 			summary := ss.StallSummary
@@ -159,6 +159,21 @@ func resumeCommand(ticket string, sl store.Slice, ss store.SliceState) string {
 	return fmt.Sprintf("jig run %s --answer %s '<text>'", ticket, ss.Question)
 }
 
+// resumeCell returns the parked table's "resume" column text. For the
+// common case, that is resumeCommand's raw command: running it is the whole
+// remedy. For the amend-brief-then-requeue case, the raw command alone is
+// not the whole remedy - it requeues nothing, and the next `jig status` is
+// byte-identical, until the brief has actually been amended - so the cell
+// says so, the same way the stalled hint already does ("amend the brief,
+// then run `jig requeue <ticket> --from-brief-diff`").
+func resumeCell(ticket string, sl store.Slice, ss store.SliceState) string {
+	cmd := resumeCommand(ticket, sl, ss)
+	if ss.Reason == "flawed-brief" && len(sl.FromBrief) > 0 {
+		return fmt.Sprintf("amend the brief, then run %s", cmd)
+	}
+	return cmd
+}
+
 // joinPlus joins ids with "+", the wire format for a slice's blocked_by
 // column.
 func joinPlus(ids []string) string {
@@ -212,7 +227,11 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		// about how to get unstuck.
 		cmd := resumeCommand(ticket, sl, ss)
 		if ss.Reason == "flawed-brief" && len(sl.FromBrief) > 0 {
-			return fmt.Sprintf("Run `%s` to amend the brief and resume", cmd), nil
+			// The brief must be amended before this command does anything:
+			// run as printed with no amendment, it requeues nothing and the
+			// next status is byte-identical. Say so in that order, the way
+			// the stalled hint below already does.
+			return fmt.Sprintf("Amend the brief, then run `%s` to resume", cmd), nil
 		}
 		return fmt.Sprintf("Run `%s` to answer and resume", cmd), nil
 	}

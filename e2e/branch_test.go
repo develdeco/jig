@@ -100,6 +100,19 @@ func TestFlawedBriefRequeue(t *testing.T) {
 	if r1.Code != 2 {
 		t.Fatalf("first jig run exit = %d, want 2 (paused: flawed-brief question)\nstdout:\n%s\nstderr:\n%s", r1.Code, r1.Stdout, r1.Stderr)
 	}
+	// Slice c has a brief section (FromBrief) and just parked with reason
+	// flawed-brief, so `jig requeue <ticket> --from-brief-diff` alone is not
+	// the whole remedy: run as printed with no brief amendment, it requeues
+	// nothing and the next status is byte-identical. The hint must say the
+	// brief is amended first, not last.
+	if !strings.Contains(r1.Stdout, "Amend the brief, then run `jig requeue "+fx.Ticket+" --from-brief-diff` to resume") {
+		t.Fatalf("run stdout missing the amend-first flawed-brief hint:\n%s", r1.Stdout)
+	}
+
+	statusR1 := runJig(t, fx.StoreDir, "status", fx.Ticket)
+	if !strings.Contains(statusR1.Stdout, "amend the brief, then run jig requeue "+fx.Ticket+" --from-brief-diff") {
+		t.Fatalf("status stdout missing the amend-first flawed-brief parked cell:\n%s", statusR1.Stdout)
+	}
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {

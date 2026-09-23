@@ -171,14 +171,17 @@ func TestRenderStatusParkedFlawedBrief(t *testing.T) {
 	}
 
 	wantParked := "parked[1]{slice,question,resume}:\n" +
-		"  c,q-001,jig requeue JIG-1 --from-brief-diff\n"
+		"  c,q-001,\"amend the brief, then run jig requeue JIG-1 --from-brief-diff\"\n"
 	if !strings.Contains(got, wantParked) {
 		t.Errorf("expected flawed-brief parked table %q, got:\n%s", wantParked, got)
 	}
 	// The help hint must offer the exact same resume command as the parked
 	// table's "resume" column, not the generic --answer form: the question
-	// is not going to be answered with text, the brief needs amending.
-	wantHint := "  Run `jig requeue JIG-1 --from-brief-diff` to amend the brief and resume\n"
+	// is not going to be answered with text, the brief needs amending. Both
+	// say the brief is amended first, not last: run as printed with no
+	// amendment, `jig requeue --from-brief-diff` requeues nothing and the
+	// next status is byte-identical.
+	wantHint := "  Amend the brief, then run `jig requeue JIG-1 --from-brief-diff` to resume\n"
 	if !strings.HasSuffix(got, wantHint) {
 		t.Errorf("expected flawed-brief hint suffix %q, got:\n%s", wantHint, got)
 	}
