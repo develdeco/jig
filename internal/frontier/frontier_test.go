@@ -1,12 +1,14 @@
 package frontier
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
@@ -542,6 +544,32 @@ func TestRequeueSliceRefusesOtherStates(t *testing.T) {
 				t.Fatalf("a state after refused RequeueSlice = %q, want unchanged %q", after.State, state)
 			}
 		})
+	}
+}
+
+// TestRequeueSliceUnknownID: RequeueSlice on an id that names no slice in
+// the ticket's own slices.yaml refuses with its own code naming the unknown
+// id, rather than reading the absent state file's zero value as a real
+// "queued" slice and reporting a wrong-state refusal for a slice that was
+// never there.
+func TestRequeueSliceUnknownID(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	d, _ := newDeps(t, fx)
+
+	err := RequeueSlice(d, fx.Ticket, "no-such-slice")
+	if err == nil {
+		t.Fatal("RequeueSlice on an unknown id: err = nil, want a refusal")
+	}
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "SLICE_NOT_FOUND" {
+		t.Fatalf("RequeueSlice on an unknown id: err = %v, want *axi.Error SLICE_NOT_FOUND", err)
+	}
+	if !strings.Contains(ae.Msg, "no-such-slice") {
+		t.Fatalf("RequeueSlice on an unknown id: Msg = %q, want it to name the unknown id", ae.Msg)
+	}
+	if strings.Contains(ae.Msg, "queued") {
+		t.Fatalf("RequeueSlice on an unknown id: Msg = %q, still claims a state", ae.Msg)
 	}
 }
 

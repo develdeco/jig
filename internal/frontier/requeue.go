@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -83,10 +84,31 @@ func Requeue(d Deps, ticket string, fromBriefDiff bool) ([]string, error) {
 // up: state back to queued, attempts kept (so the attempt log and cap carry
 // over), reason, stall signature and stall summary cleared. It refuses any
 // other state - a slice with a brief section to amend goes through Requeue
-// (--from-brief-diff) instead, and a needs-input slice through Answer -
-// since RequeueSlice on its own cannot tell whether a queued, building or
-// green slice reaching it is a caller's mistake or a stale id.
+// (--from-brief-diff) instead, and a needs-input slice through Answer. It
+// first checks sliceID against the ticket's own slices.yaml: an absent
+// state file reads as the zero-value "queued" SliceState, which would
+// otherwise report a typo'd or stale id as a real slice caught in the wrong
+// state, so a caller's mistake is told apart from a queued, building or
+// green slice by that membership check rather than left ambiguous.
 func RequeueSlice(d Deps, ticket, sliceID string) error {
+	slices, err := d.Store.ReadSlices(ticket)
+	if err != nil {
+		return fmt.Errorf("frontier: read slices: %w", err)
+	}
+	known := false
+	for _, sl := range slices {
+		if sl.ID == sliceID {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("ticket %s has no slice %s", ticket, sliceID),
+			Code: "SLICE_NOT_FOUND",
+		}
+	}
+
 	st, err := d.Store.ReadSliceState(ticket, sliceID)
 	if err != nil {
 		return fmt.Errorf("frontier: read slice state %s: %w", sliceID, err)
