@@ -176,6 +176,14 @@ call `gitx.MaintenanceAuto`, a foreground `git maintenance run --auto` with
 `gc.autoDetach=false`. It is best-effort; a failure never fails the push or
 the acquire.
 
+**One session per store clone.** While a jig session is running, do not run
+a second one against the same store clone, and do not start or resolve a
+rebase or merge there by hand: `abortFailedPull` (`internal/store/store.go`)
+aborts any rebase it finds there after its own pull fails, with no record of
+whether it was the one that started it, so a hand-started or hand-resolved
+rebase or merge in that window is lost exactly like a second jig session
+racing the first would be.
+
 ## Testing
 
 ```sh
