@@ -239,7 +239,13 @@ Design questions the code raised, and their resolution:
   when its file no longer exists at head at all - checked directly against
   the lease, not merely inferred from this round's own scope-diff deleted
   list, so a file deleted in an earlier round still clears a finding
-  reported in a later delta round that never mentions it.
+  reported in a later delta round that never mentions it. This applies to
+  an `asked` finding exactly as it does to `open`: an ask nobody has
+  decided clears the same way once its file is reviewed with nothing
+  reported there, deliberately, not as an oversight - the question is moot
+  once the file no longer has anything to ask about, and requiring a human
+  to affirmatively dismiss a moot ask would leave it pending forever for
+  no reason a person could act on.
 - A finding recurs only through the reviewer's own `prior`, never by title
   matching. A recurrence is counted - its recurrence count goes up, and
   the bound below can trigger - only once a fix slice that already

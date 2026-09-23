@@ -518,6 +518,26 @@ func TestClearingAfterTriageClearsUnreportedFindingWhenFileReviewed(t *testing.T
 	}
 }
 
+// TestClearingAfterTriageClearsAnUndecidedAskWhenFileReviewed pins a
+// deliberate design call, not an oversight: an ask nobody has decided
+// clears the same way an open finding does, once a later round reads its
+// file and reports nothing actionable there - the question the ask asked
+// no longer has anything to be asked about, so it is moot rather than
+// still pending. A human never affirmatively decided this ask; that is
+// the whole point of "moot", not a bug.
+func TestClearingAfterTriageClearsAnUndecidedAskWhenFileReviewed(t *testing.T) {
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusAsked},
+	}
+	cleared, err := ClearingAfterTriage(known, nil, []string{"a.go"}, alwaysExists)
+	if err != nil {
+		t.Fatalf("ClearingAfterTriage: %v", err)
+	}
+	if !equalStrings(cleared, []string{"r1-f1"}) {
+		t.Fatalf("cleared = %v, want [r1-f1] (an undecided ask clears by coverage, same as an open finding)", cleared)
+	}
+}
+
 func TestClearingAfterTriageClearsFindingWhoseFileIsGoneAtHead(t *testing.T) {
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
