@@ -864,6 +864,95 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 	}
 }
 
+// TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath reproduces the
+// review finding: a reviewer session whose file-read tool hands back
+// absolute paths (the ordinary case for a headless backend) must still
+// clear an open finding once its file is covered, and findings.yaml must
+// record the coverage as repo-relative paths only, never a host path.
+func TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+
+	round := 0
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		round++
+		reviewData, err := os.ReadFile(sd.SliceJSON)
+		if err != nil {
+			t.Fatalf("read review.json: %v", err)
+		}
+		var req ReviewRequest
+		if err := json.Unmarshal(reviewData, &req); err != nil {
+			t.Fatalf("parse review.json: %v", err)
+		}
+
+		var result ReviewResult
+		switch round {
+		case 1:
+			result = ReviewResult{
+				Findings: []ResultFinding{{
+					File: "alpha/alpha.go", Line: 1, Title: "needs a fix",
+					Detail: "leaks a tenant id", Action: ActionFix,
+					Risk: RiskHigh, RiskRationale: "customer data", Oracle: "test",
+				}},
+				ReviewedPaths: req.MustReview,
+				Summary:       "round 1 summary",
+			}
+		case 2:
+			// Every entry is the lease-absolute form, as a headless backend's
+			// file-read tool would echo back.
+			abs := make([]string, len(req.MustReview))
+			for i, p := range req.MustReview {
+				abs[i] = filepath.Join(sd.Worktree, filepath.FromSlash(p))
+			}
+			result = ReviewResult{ReviewedPaths: abs, Summary: "round 2 summary"}
+		default:
+			t.Fatalf("unexpected round %d", round)
+		}
+
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
+	}}
+
+	src := NewReviewerGateSource(backend)
+
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+	if report1.Verdict != "fix-slices" {
+		t.Fatalf("round 1 Verdict = %q, want fix-slices", report1.Verdict)
+	}
+	ff1, ok, err := readFindingsYAML(d.Store, fx.Ticket, 1)
+	if err != nil || !ok {
+		t.Fatalf("read round 1 findings.yaml: ok=%v err=%v", ok, err)
+	}
+	f1 := ff1.Findings[0]
+
+	// --early: driving the fix slice green belongs to frontier, not this
+	// test, which only exercises the reviewer's clearing/coverage path.
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Early: true})
+	if err != nil {
+		t.Fatalf("Gate round 2: %v", err)
+	}
+	if report2.Verdict != "clean" {
+		t.Fatalf("round 2 Verdict = %q, want clean (the absolute-path reviewed_paths should clear %s)", report2.Verdict, f1.ID)
+	}
+
+	ff2, ok, err := readFindingsYAML(d.Store, fx.Ticket, 2)
+	if err != nil || !ok {
+		t.Fatalf("read round 2 findings.yaml: ok=%v err=%v", ok, err)
+	}
+	if !equalStrings(ff2.Cleared, []string{f1.ID}) {
+		t.Fatalf("round 2 cleared = %v, want [%s]", ff2.Cleared, f1.ID)
+	}
+	for _, p := range ff2.ReviewedPaths {
+		if filepath.IsAbs(p) || strings.Contains(p, "\\") {
+			t.Errorf("round 2 findings.yaml reviewed_paths entry %q is not repo-relative", p)
+		}
+	}
+}
+
 // TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerated
 // reproduces the wedge a text match on git's cat-file message used to fall
 // into: an open finding's file is later untracked and gitignored on the

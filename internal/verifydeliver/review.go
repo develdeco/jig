@@ -431,6 +431,27 @@ func relativizeReviewedPath(leaseDir, p string) (string, bool) {
 	return norm, true
 }
 
+// normalizeReviewedPaths relativizes and normalizes every reviewed_paths
+// entry exactly once, right after validateReviewResult has accepted the
+// result. Coverage, clearing and persistence all read this one normalized
+// list afterward, so an absolute in-lease path that counted as coverage
+// also counts as clearing evidence and is never written to findings.yaml
+// as a host path. An entry that cannot be normalized was already ignored
+// by validateReviewResult's coverage check, so it is dropped here too.
+func normalizeReviewedPaths(leaseDir string, paths []string) []string {
+	out := make([]string, 0, len(paths))
+	seen := map[string]bool{}
+	for _, p := range paths {
+		norm, ok := relativizeReviewedPath(leaseDir, p)
+		if !ok || seen[norm] {
+			continue
+		}
+		seen[norm] = true
+		out = append(out, norm)
+	}
+	return out
+}
+
 // validateReviewResult checks result against req and the lease's head, the
 // rules ParseReviewResult cannot check on its own: a finding's file exists
 // at head or was deleted in the scope diff; an oracle, when
@@ -866,6 +887,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 	if err := validateReviewResult(req, result, in.LeaseDir, atHead, deletedSet, oracleNames); err != nil {
 		return Round{}, false, err
 	}
+	result.ReviewedPaths = normalizeReviewedPaths(in.LeaseDir, result.ReviewedPaths)
 
 	return Round{Review: &Review{
 		Scope:      scope,
