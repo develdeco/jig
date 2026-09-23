@@ -417,7 +417,7 @@ func TestSync(t *testing.T) {
 // tracked file plus an untracked attempt work file) at the same time as a
 // divergent remote commit: Sync must stage and commit the leftovers with
 // jig's identity, then still pull the other writer's commit, instead of
-// failing "cannot pull with rebase: you have unstaged changes".
+// failing "cannot pull with rebase: You have unstaged changes.".
 func TestSyncCommitsUncommittedLeftoversBeforeRebase(t *testing.T) {
 	st, work, remote := newTestRemoteStore(t)
 
@@ -709,9 +709,19 @@ func TestSyncOwnConflictingPullAbortsAndWraps(t *testing.T) {
 	if !strings.Contains(ae.Msg, backAt) {
 		t.Fatalf("Sync conflict Msg = %q, want the pre-pull commit %s (HEAD after the abort) named", ae.Msg, backAt)
 	}
+	// git's own stderr must not be passed through: its hint lines tell the
+	// operator to continue, skip or abort the rebase jig has just aborted,
+	// which fails if followed. jig's Help gives its own recovery sequence,
+	// which does name `git rebase --continue` - after a fresh pull the
+	// operator starts themselves, where it works.
 	full := ae.Msg + " " + strings.Join(ae.Help, " ")
-	if strings.Contains(full, "hint:") || strings.Contains(full, "--skip") || strings.Contains(full, "--continue`") {
-		t.Fatalf("Sync conflict message carries git's raw stderr hint text: %q", full)
+	for _, gitText := range []string{"hint:", "--skip", "Could not apply", "CONFLICT ("} {
+		if strings.Contains(full, gitText) {
+			t.Fatalf("Sync conflict message carries git's raw stderr (%q): %q", gitText, full)
+		}
+	}
+	if !strings.Contains(strings.Join(ae.Help, " "), "git add") {
+		t.Fatalf("Sync conflict Help = %q, want the full manual recovery sequence", ae.Help)
 	}
 
 	mid, ierr := inProgressRebaseOrMerge(work)

@@ -301,7 +301,7 @@ func (s *Store) wrapAbortedPullConflict(abortErr, stateErr error, paths []string
 	return &axi.Error{
 		Msg:  fmt.Sprintf("the store at %s: pull --rebase of origin/%s conflicted in %s and was aborted by jig; the store is back at its pre-pull commit %s", s.Root, branch, where, at),
 		Code: "STORE_CONFLICT",
-		Help: []string{fmt.Sprintf("Resolve the divergence in the store: `git pull --rebase origin %s` there, fix the conflict in %s, then rerun.", branch, where)},
+		Help: []string{fmt.Sprintf("In the store at %s: `git pull --rebase origin %s`, fix the conflict in %s, `git add` it, `git rebase --continue`, then rerun this command.", s.Root, branch, where)},
 	}
 }
 

@@ -65,7 +65,7 @@ was ambiguous, what was chosen, and why.
   directory from a SLICE_ID_DUPLICATE failure after the round itself was
   written, or in-progress `work/` files from a run interrupted mid-dispatch.
   Without this, the next command's `pull --rebase` fails on
-  the dirty tree with "cannot pull with rebase: you have unstaged changes",
+  the dirty tree with "cannot pull with rebase: You have unstaged changes.",
   wedging the store until someone commits by hand. This does not retry the
   failed command's round: the leftovers become an ordinary jig commit and
   the next command proceeds, but a partial gate round directory still counts
@@ -73,11 +73,12 @@ was ambiguous, what was chosen, and why.
   the failed one. `Push` shares the same stage-and-commit step.
 - `Sync` and `Push` both refuse with `STORE_CONFLICT`, without touching the
   index, when the store already has an unfinished rebase or merge in progress
-  (`.git/rebase-merge`, `.git/rebase-apply`, or `MERGE_HEAD`, read with one
-  `git rev-parse --git-path` call), or when the index itself has unmerged
-  entries with none of those three markers present - a conflicted `git stash
-  pop` or `git cherry-pick` leaves unmerged entries this way (cherry-pick
-  sets `CHERRY_PICK_HEAD`, not `MERGE_HEAD`). An unconditional `git add -A`
+  (`rebase-merge`, `rebase-apply`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`,
+  `REVERT_HEAD`, `sequencer` or `BISECT_LOG`, all read with one
+  `git rev-parse --git-path` call), when HEAD is detached (a bisect, say, so
+  a commit would land where `git bisect reset` drops it), or when the index
+  has unmerged entries, which is what a conflicted `git stash pop` leaves
+  behind on its own. An unconditional `git add -A`
   would stage unresolved conflict markers as ordinary content, and a later
   commit (or `rebase --continue`) would finalize them onto the store branch,
   corrupting whatever file conflicted for every later reader. The check
