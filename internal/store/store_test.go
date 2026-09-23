@@ -933,6 +933,63 @@ func TestRefuseIfMidRebaseOrMergeNamesTheState(t *testing.T) {
 	}
 }
 
+// TestInProgressRebaseOrMergeMarkers pins the description
+// inProgressRebaseOrMerge reports for every git-path marker it checks, one
+// at a time, independent of rebaseOrMergeMarkers's own literal strings: the
+// guard runs on every Sync and Push, so a marker silently losing its
+// description, or reporting the wrong one, must fail here rather than only
+// panic the day someone adds a marker with no matching entry.
+func TestInProgressRebaseOrMergeMarkers(t *testing.T) {
+	cases := []struct {
+		gitPath     string
+		isDir       bool
+		description string
+	}{
+		{"rebase-merge", true, "an unfinished rebase"},
+		{"rebase-apply", true, "an unfinished rebase"},
+		{"MERGE_HEAD", false, "an unfinished merge"},
+		{"CHERRY_PICK_HEAD", false, "an unfinished cherry-pick"},
+		{"REVERT_HEAD", false, "an unfinished revert"},
+		{"sequencer", true, "a cherry-pick or revert sequence"},
+		{"BISECT_LOG", false, "an unfinished bisect"},
+	}
+	for _, c := range cases {
+		t.Run(c.gitPath, func(t *testing.T) {
+			dir := t.TempDir()
+			runGit(t, "", "init", "-b", "main", dir)
+
+			marker := filepath.Join(dir, ".git", c.gitPath)
+			if c.isDir {
+				if err := os.MkdirAll(marker, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(marker, []byte("deadbeef\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := inProgressRebaseOrMerge(dir)
+			if err != nil {
+				t.Fatalf("inProgressRebaseOrMerge: %v", err)
+			}
+			if got != c.description {
+				t.Errorf("inProgressRebaseOrMerge with %s present = %q, want %q", c.gitPath, got, c.description)
+			}
+		})
+	}
+
+	t.Run("clean", func(t *testing.T) {
+		dir := t.TempDir()
+		runGit(t, "", "init", "-b", "main", dir)
+		got, err := inProgressRebaseOrMerge(dir)
+		if err != nil {
+			t.Fatalf("inProgressRebaseOrMerge: %v", err)
+		}
+		if got != "" {
+			t.Errorf("inProgressRebaseOrMerge on a clean repo = %q, want \"\"", got)
+		}
+	})
+}
+
 // TestSyncAndPushRefuseAfterConflictedStashPop: a conflicted `git stash
 // pop` leaves unmerged index entries with none of
 // refuseIfMidRebaseOrMerge's three marker files. Without the

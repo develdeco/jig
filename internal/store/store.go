@@ -99,6 +99,25 @@ func (s *Store) refuseIfMidRebaseOrMerge() error {
 	}
 }
 
+// rebaseOrMergeMarkers pairs each git-path marker inProgressRebaseOrMerge
+// checks for with the description it reports when that marker is present.
+// Keeping flag and description in one table, rather than two indexed in
+// parallel, means the two cannot drift apart: a marker added here without
+// a description is a compile error, not an index-out-of-range panic inside
+// a guard that runs on every Sync and Push.
+var rebaseOrMergeMarkers = []struct {
+	gitPath     string
+	description string
+}{
+	{"rebase-merge", "an unfinished rebase"},
+	{"rebase-apply", "an unfinished rebase"},
+	{"MERGE_HEAD", "an unfinished merge"},
+	{"CHERRY_PICK_HEAD", "an unfinished cherry-pick"},
+	{"REVERT_HEAD", "an unfinished revert"},
+	{"sequencer", "a cherry-pick or revert sequence"},
+	{"BISECT_LOG", "an unfinished bisect"},
+}
+
 // inProgressRebaseOrMerge reports which of an unfinished rebase (git leaves
 // a rebase-merge or rebase-apply directory under .git for the duration of
 // one), an unresolved merge (MERGE_HEAD), an unfinished cherry-pick or
@@ -109,36 +128,27 @@ func (s *Store) refuseIfMidRebaseOrMerge() error {
 // left by something other than any of those - a conflicted `git stash pop`
 // leaves the index with conflict markers on disk but none of these markers
 // - dir is in, as a short description naming the one that matched, or ""
-// when none is present. The git-path markers are read with one `rev-parse`
-// call rather than one per marker, since this runs on every Sync and every
-// Push. The unmerged-index check uses `git ls-files -u`, which only reads
-// the index, rather than `git diff --diff-filter=U`, which opportunistically
-// rewrites .git/index as a side effect - a write this read-only guard,
-// called on every Sync and Push, must not make.
+// when none is present. The git-path markers (rebaseOrMergeMarkers) are
+// read with one `rev-parse` call rather than one per marker, since this
+// runs on every Sync and every Push. The unmerged-index check uses
+// `git ls-files -u`, which only reads the index, rather than
+// `git diff --diff-filter=U`, which opportunistically rewrites .git/index
+// as a side effect - a write this read-only guard, called on every Sync
+// and Push, must not make.
 func inProgressRebaseOrMerge(dir string) (string, error) {
-	out, err := gitx.Run(dir, "rev-parse",
-		"--git-path", "rebase-merge",
-		"--git-path", "rebase-apply",
-		"--git-path", "MERGE_HEAD",
-		"--git-path", "CHERRY_PICK_HEAD",
-		"--git-path", "REVERT_HEAD",
-		"--git-path", "sequencer",
-		"--git-path", "BISECT_LOG",
-	)
+	args := make([]string, 0, 1+2*len(rebaseOrMergeMarkers))
+	args = append(args, "rev-parse")
+	for _, m := range rebaseOrMergeMarkers {
+		args = append(args, "--git-path", m.gitPath)
+	}
+	out, err := gitx.Run(dir, args...)
 	if err != nil {
 		return "", err
 	}
-	// In the same order as the --git-path flags above.
-	descriptions := []string{
-		"an unfinished rebase",
-		"an unfinished rebase",
-		"an unfinished merge",
-		"an unfinished cherry-pick",
-		"an unfinished revert",
-		"a cherry-pick or revert sequence",
-		"an unfinished bisect",
-	}
 	for i, line := range strings.Split(out, "\n") {
+		if i >= len(rebaseOrMergeMarkers) {
+			break
+		}
 		p := strings.TrimSpace(line)
 		if p == "" {
 			continue
@@ -147,7 +157,7 @@ func inProgressRebaseOrMerge(dir string) (string, error) {
 			p = filepath.Join(dir, p)
 		}
 		if _, err := os.Stat(p); err == nil {
-			return descriptions[i], nil
+			return rebaseOrMergeMarkers[i].description, nil
 		} else if !os.IsNotExist(err) {
 			return "", err
 		}
