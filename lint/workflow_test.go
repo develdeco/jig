@@ -545,20 +545,36 @@ func jigVersionInvocation(run string) bool {
 	return false
 }
 
+// shellSeparatorWords are the shell command separators splitShellCommands
+// splits on, once shellWords has already tokenized the line.
+var shellSeparatorWords = map[string]bool{
+	"|": true, "||": true, "&&": true, ";": true, "&": true,
+}
+
 // splitShellCommands splits one shell line into the commands a shell would
-// run, on its own separators (|, && , ||, ;), so a command's program is
-// always its own first word. Deliberately simple: these workflow scripts
-// contain no quoted separators.
+// run, on its own separators (|, ||, &&, ;, &), so a command's program is
+// always its own first word. It tokenizes the whole line into words first
+// (shellWords, which already tracks quoting) and only then splits on a word
+// that is exactly one of those separators, so a separator character
+// sitting inside a quoted string - for example prose inside an echo
+// message - is never mistaken for a command boundary.
 func splitShellCommands(line string) []string {
-	fields := strings.FieldsFunc(line, func(r rune) bool {
-		return r == '|' || r == ';' || r == '&'
-	})
-	out := make([]string, 0, len(fields))
-	for _, f := range fields {
-		if f = strings.TrimSpace(f); f != "" {
-			out = append(out, f)
+	var out []string
+	var cur []string
+	flush := func() {
+		if len(cur) > 0 {
+			out = append(out, strings.Join(cur, " "))
+			cur = nil
 		}
 	}
+	for _, w := range shellWords(line) {
+		if shellSeparatorWords[w] {
+			flush()
+			continue
+		}
+		cur = append(cur, w)
+	}
+	flush()
 	return out
 }
 
@@ -603,11 +619,15 @@ func TestSmokeWorkflowChecksVersion(t *testing.T) {
 }
 
 // TestJigVersionInvocation pins jigVersionInvocation's structural check
-// against both real script fragments from smoke.yml/ci.yml and the exact
-// false positive the prose regex it replaced was vulnerable to: an
-// unrelated echo/Write-Error line that happens to contain both "jig" and
-// "version" as separate words, right next to the real invocation these
-// scripts always pair it with.
+// against both real script fragments from smoke.yml/ci.yml, the exact false
+// positive the prose regex it replaced was vulnerable to (an unrelated
+// echo/Write-Error line that happens to contain both "jig" and "version" as
+// separate words, right next to the real invocation these scripts always
+// pair it with), and prose whose quoted argument itself contains a shell
+// separator character (;, | or &): before splitShellCommands tokenized the
+// line before splitting, that character split the quoted string apart,
+// landing "jig version" at a command's start and reporting a real
+// invocation that was never there.
 func TestJigVersionInvocation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -625,6 +645,9 @@ func TestJigVersionInvocation(t *testing.T) {
 		{"go install, not a version check", `go install "github.com/develdeco/jig/cmd/jig@$JIG_TAG"`, false},
 		{"version not the adjacent word", `jig --version-check`, false},
 		{"unrelated binary named version", `versioner check`, false},
+		{"quoted separator, semicolon", `echo "ask an admin to run; jig version yourself and compare"`, false},
+		{"quoted separator, pipe", `echo "compare output | jig version | by hand"`, false},
+		{"quoted separator, ampersand", `echo "run the installer & jig version afterwards"`, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
