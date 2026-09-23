@@ -366,6 +366,32 @@ above:
   findings and needs_a_human tables (already sorted by risk then id).
   `detail` reaches a human at the per-ask prompt only; the four tables
   carry file:line, title, risk and risk rationale, not detail.
+- Triage is offered every outstanding ask each round, not just the asks
+  this round's reviewer happened to report. Routing takes the cumulative
+  fold's still-`asked` findings, so an ask left undecided in round N is
+  put to the human again in round N+1 whether or not the reviewer
+  mentions it; a decision taken this round updates that finding and is
+  recorded in this round's own `findings.yaml`, which is why a
+  `findings.yaml` can carry a decided finding no reviewer reported that
+  round. Without this an ask nobody re-reports sat under `needs_a_human`
+  with nothing ever prompting for it - the only ways out were the
+  reviewer coincidentally raising it again or the moot-ask clearing
+  above, neither of which is a decision.
+- `jig status` lists those outstanding asks between rounds, in an
+  `outstanding_asks` block (id, risk, file:line, title) read from the same
+  cumulative fold: a waiting decision is jig's own pending state, so it is
+  visible without running a gate round, exactly as an open question is.
+  What decides them - `jig gate <ticket>` at a terminal - is named once in
+  the help rather than repeated in a per-row cell, because it is the same
+  command for every ask and a table cell cannot carry the ordering below.
+- Neither that help nor `jig gate`'s own report hint ever prints `jig gate
+  <ticket>` as a step to run while the frontier check would refuse it. The
+  check refuses a gate while any slice is short of green, and a round that
+  queues fix slices and leaves an ask undecided is the ordinary case, so
+  both surfaces name the order instead: work the frontier first with `jig
+  run <ticket>`, then `jig gate <ticket>` at a terminal to decide the
+  asks. This is the same rule the printed resume commands follow - a
+  command jig prints as a next step runs as printed.
 - `--yes`/non-terminal triage's one-line note (`DefaultTriage`, run by
   `triageFor`) is printed only when this round actually had a fix or ask
   to triage; a note is never triaged, so a notes-only round prints none

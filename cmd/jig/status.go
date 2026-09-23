@@ -115,16 +115,33 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 	if len(outstanding) > 0 {
 		var askRows [][]string
 		for _, f := range outstanding {
-			askRows = append(askRows, []string{f.ID, f.Risk, fileLine(f), f.Title, fmt.Sprintf("jig gate %s", ticket)})
+			askRows = append(askRows, []string{f.ID, f.Risk, fileLine(f), f.Title})
 		}
-		blocks = append(blocks, axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title", "decide"}, askRows))
+		blocks = append(blocks, axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title"}, askRows))
 	}
 
-	hint, err := nextStepHint(st, ticket)
-	if err != nil {
-		return "", err
+	// What decides an outstanding ask is `jig gate <ticket>` at a
+	// terminal, named once here rather than in a per-row cell because it
+	// is the same command for every ask. The frontier check refuses that
+	// gate while any slice is short of green, and a round that queues fix
+	// slices and leaves an ask undecided is the ordinary case, so while
+	// the frontier is not green the ticket's own next step comes first and
+	// the gate is named as the step after it - the order `jig gate`'s own
+	// report hint prints.
+	var helpLines []string
+	if len(outstanding) > 0 && (allGreen || len(slices) == 0) {
+		helpLines = []string{fmt.Sprintf("Run `jig gate %s` at a terminal to decide the outstanding asks", ticket)}
+	} else {
+		hint, err := nextStepHint(st, ticket)
+		if err != nil {
+			return "", err
+		}
+		helpLines = []string{hint}
+		if len(outstanding) > 0 {
+			helpLines = append(helpLines, fmt.Sprintf("Then run `jig gate %s` at a terminal to decide the outstanding asks", ticket))
+		}
 	}
-	blocks = append(blocks, axi.Help(hint))
+	blocks = append(blocks, axi.Help(helpLines...))
 
 	var buf bytes.Buffer
 	axi.Render(&buf, blocks...)
