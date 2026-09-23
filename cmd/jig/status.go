@@ -129,7 +129,7 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 	// the gate is named as the step after it - the order `jig gate`'s own
 	// report hint prints.
 	var helpLines []string
-	if len(outstanding) > 0 && (allGreen || len(slices) == 0) {
+	if len(outstanding) > 0 && frontierGreen(st, ticket) {
 		helpLines = []string{fmt.Sprintf("Run `jig gate %s` at a terminal to decide the outstanding asks", ticket)}
 	} else {
 		hint, err := nextStepHint(st, ticket)
@@ -146,6 +146,28 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 	var buf bytes.Buffer
 	axi.Render(&buf, blocks...)
 	return buf.String(), nil
+}
+
+// frontierGreen reports whether every slice of ticket is green: the exact
+// condition verifydeliver's own frontier check applies before it will open
+// a gate round, with a ticket that has no slices yet nothing to block.
+// Both `jig status` and `jig gate`'s report hint decide from this rather
+// than from a proxy, so neither ever prints a `jig gate <ticket>` the
+// check would refuse. A state jig cannot read counts as not green: naming
+// the frontier first is sound advice in every case, naming the gate is
+// not.
+func frontierGreen(st *store.Store, ticket string) bool {
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		return false
+	}
+	for _, sl := range slices {
+		ss, err := st.ReadSliceState(ticket, sl.ID)
+		if err != nil || ss.State != "green" {
+			return false
+		}
+	}
+	return true
 }
 
 // joinPlus joins ids with "+", the wire format for a slice's blocked_by

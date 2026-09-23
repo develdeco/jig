@@ -143,17 +143,21 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 }
 
 // gateReportHint names the way forward after this round: when it leaves
-// any ask undecided, that is always a human decision at a terminal. This
-// round's own fix slices, when it queued any, are appended as "queued"
-// (checkFrontier refuses the next `jig gate` until they are green), so the
-// hint names the order: work them with `jig run` first, then `jig gate` at
-// a terminal to decide the asks. Otherwise it falls back to the ticket's
-// general next-step hint.
+// any ask undecided, that is always a human decision at a terminal. The
+// next `jig gate` is refused while the frontier is short of green, so the
+// hint asks the frontier itself (frontierGreen, the condition the check
+// applies) rather than a proxy for it, and names the order when it is not
+// green: work it with `jig run` first, then `jig gate` at a terminal to
+// decide the asks. This round's own fix slices are one way to be short of
+// green and not the only one - `jig gate --early` runs on an unfinished
+// frontier and can leave an ask with no fix slice queued at all, which a
+// fix-slice count reads as "green" and the check does not. Otherwise it
+// falls back to the ticket's general next-step hint.
 func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateReport) []string {
 	if len(report.NeedsHuman) > 0 {
-		if len(report.FixSlices) > 0 {
+		if !frontierGreen(st, ticket) {
 			return []string{
-				fmt.Sprintf("Run `jig run %s` first to work this round's fix slices", ticket),
+				fmt.Sprintf("Run `jig run %s` first to work the frontier", ticket),
 				fmt.Sprintf("Then run `jig gate %s` at a terminal to decide the listed asks", ticket),
 			}
 		}

@@ -247,13 +247,16 @@ Design questions the code raised, and their resolution:
   when its file no longer exists at head at all - checked directly against
   the lease, not merely inferred from this round's own scope-diff deleted
   list, so a file deleted in an earlier round still clears a finding
-  reported in a later delta round that never mentions it. This applies to
-  an `asked` finding exactly as it does to `open`: an ask nobody has
-  decided clears the same way once its file is reviewed with nothing
-  reported there, deliberately, not as an oversight - the question is moot
-  once the file no longer has anything to ask about, and requiring a human
-  to affirmatively dismiss a moot ask would leave it pending forever for
-  no reason a person could act on.
+  reported in a later delta round that never mentions it. None of this
+  applies to an `asked` finding: only an `open` one clears this way. An ask
+  is a question put to a person, and nothing the reviewer reports - or
+  declines to report - answers it, so neither coverage nor the file's
+  disappearance resolves one. An ask leaves the outstanding set exactly two
+  ways, a human keeping it or a human dismissing it, and it is offered
+  again every round until then. Clearing one automatically would let an
+  unattended run drop the question, call the round clean and point at
+  publish, shipping the ticket with the decision never made - the opposite
+  of parking on it, which is what an unattended run is for.
 - A finding recurs only through the reviewer's own `prior`, never by title
   matching. A recurrence is counted - its recurrence count goes up, and
   the bound below can trigger - only once a fix slice that already
@@ -385,13 +388,17 @@ above:
   the help rather than repeated in a per-row cell, because it is the same
   command for every ask and a table cell cannot carry the ordering below.
 - Neither that help nor `jig gate`'s own report hint ever prints `jig gate
-  <ticket>` as a step to run while the frontier check would refuse it. The
-  check refuses a gate while any slice is short of green, and a round that
-  queues fix slices and leaves an ask undecided is the ordinary case, so
-  both surfaces name the order instead: work the frontier first with `jig
-  run <ticket>`, then `jig gate <ticket>` at a terminal to decide the
-  asks. This is the same rule the printed resume commands follow - a
-  command jig prints as a next step runs as printed.
+  <ticket>` as a step to run while the frontier check would refuse it. Both
+  decide that by reading the frontier itself (`frontierGreen`, the same
+  condition the check applies), never a proxy for it: a round's own fix
+  slices are one way to be short of green, and a fix-slice count read as
+  the whole story printed a refused command after `jig gate --early`, which
+  reviews an unfinished frontier and can leave an ask undecided having
+  queued nothing. Short of green, both surfaces name the order instead:
+  work the frontier first with `jig run <ticket>`, then `jig gate
+  <ticket>` at a terminal to decide the asks. This is the same rule the
+  printed resume commands follow - a command jig prints as a next step runs
+  as printed.
 - `--yes`/non-terminal triage's one-line note (`DefaultTriage`, run by
   `triageFor`) is printed only when this round actually had a fix or ask
   to triage; a note is never triaged, so a notes-only round prints none

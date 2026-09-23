@@ -113,3 +113,72 @@ func TestGateReportHintNamesTheOrderWhenFixSlicesAreQueuedToo(t *testing.T) {
 		t.Fatalf("hint = %q, want `jig run` named before `jig gate`", joined)
 	}
 }
+
+// TestGateReportHintReadsTheFrontierNotTheFixSliceCount pins that the hint
+// decides from the same frontier state checkFrontier applies, not from a
+// proxy for it. A round queuing fix slices is only one way for the frontier
+// to be short of green: `jig gate --early` reviews an unfinished frontier
+// and can leave an ask undecided having queued nothing at all, which a
+// fix-slice count reads as green while the check does not. The bare
+// `jig gate <ticket>` the old hint printed there was refused with
+// GATE_NOT_GREEN the moment anyone ran it.
+func TestGateReportHintReadsTheFrontierNotTheFixSliceCount(t *testing.T) {
+	report := verifydeliver.GateReport{
+		Round:   1,
+		Verdict: "fix-slices",
+		Scope:   "full",
+		NeedsHuman: []verifydeliver.Finding{
+			{ID: "r1-f1", File: "beta/beta.go", Line: 4, Title: "ASK-TITLE", Status: verifydeliver.StatusAsked, Risk: "medium", RiskRationale: "ASK-RATIONALE"},
+		},
+		// No fix slices this round: the only thing holding the frontier
+		// back is the unfinished slice below.
+	}
+
+	t.Run("frontier short of green names the order", func(t *testing.T) {
+		t.Setenv("JIG_HOME", t.TempDir())
+		fx := fixture.Generate(t, fixture.Opts{})
+		st, err := store.Open(fx.StoreDir)
+		if err != nil {
+			t.Fatalf("store.Open: %v", err)
+		}
+		if err := st.WriteSliceState(fx.Ticket, "c", store.SliceState{State: "needs-input", Attempts: 1, Question: "q-001"}); err != nil {
+			t.Fatalf("write slice state c: %v", err)
+		}
+
+		lines := gateReportHint(st, fx.Ticket, report)
+		joined := strings.Join(lines, "\n")
+		if len(lines) < 2 {
+			t.Fatalf("hint = %v, want several lines naming the order", lines)
+		}
+		runIdx := strings.Index(joined, "jig run "+fx.Ticket)
+		gateIdx := strings.Index(joined, "jig gate "+fx.Ticket)
+		if runIdx < 0 || gateIdx < 0 || runIdx > gateIdx {
+			t.Fatalf("hint = %q, want `jig run` named before `jig gate`", joined)
+		}
+	})
+
+	t.Run("green frontier names the gate directly", func(t *testing.T) {
+		t.Setenv("JIG_HOME", t.TempDir())
+		fx := fixture.Generate(t, fixture.Opts{})
+		st, err := store.Open(fx.StoreDir)
+		if err != nil {
+			t.Fatalf("store.Open: %v", err)
+		}
+		for _, id := range []string{"a", "b", "c", "d"} {
+			if err := st.WriteSliceState(fx.Ticket, id, store.SliceState{State: "green", Attempts: 1}); err != nil {
+				t.Fatalf("write slice state %s: %v", id, err)
+			}
+		}
+
+		lines := gateReportHint(st, fx.Ticket, report)
+		if len(lines) != 1 {
+			t.Fatalf("hint = %v, want one line: the gate runs now", lines)
+		}
+		if strings.Contains(lines[0], "jig run ") {
+			t.Fatalf("hint = %q, must not send a person to the frontier when it is already green", lines[0])
+		}
+		if !strings.Contains(lines[0], "jig gate "+fx.Ticket) {
+			t.Fatalf("hint = %q, want the deciding command", lines[0])
+		}
+	})
+}
