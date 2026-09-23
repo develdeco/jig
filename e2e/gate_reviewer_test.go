@@ -82,4 +82,36 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 			t.Fatalf("slice %s state = %q, want green (the default path must not stall)", s, state.State)
 		}
 	}
+
+	// The same obligation holds for every later round this scenario
+	// scripts, not only the first: round 2 re-reports both fix findings,
+	// so it queues fix-2-alpha-test and fix-2-beta-test, and a scenario
+	// missing an attempt for either one stalls the ticket exactly as a
+	// missing round 1 attempt would. Round 3 is clean, so the default path
+	// ends where the scenario says it ends.
+	r5 := runJig(t, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	if r5.Code != 0 {
+		t.Fatalf("gate (round 2) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r5.Code, r5.Stdout, r5.Stderr)
+	}
+	r6 := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	if r6.Code != 0 {
+		t.Fatalf("run (fix-2 slices) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r6.Code, r6.Stdout, r6.Stderr)
+	}
+	for _, s := range []string{"fix-2-alpha-test", "fix-2-beta-test"} {
+		state, err := st.ReadSliceState(ticket, s)
+		if err != nil {
+			t.Fatalf("read slice state %s: %v", s, err)
+		}
+		if state.State != "green" {
+			t.Fatalf("slice %s state = %q, want green (the default path must not stall)", s, state.State)
+		}
+	}
+
+	r7 := runJig(t, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	if r7.Code != 0 {
+		t.Fatalf("gate (round 3) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r7.Code, r7.Stdout, r7.Stderr)
+	}
+	if !strings.Contains(r7.Stdout, "verdict: clean") {
+		t.Fatalf("round 3 is the scenario's clean round, but the default path never reached it:\n%s", r7.Stdout)
+	}
 }
