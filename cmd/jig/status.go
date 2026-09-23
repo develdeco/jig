@@ -38,29 +38,12 @@ func cmdStatus(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	out, err := RenderStatus(st, ticket, *storeFlag, *projectFlag)
+	out, err := RenderStatus(st, ticket)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 	fmt.Fprint(stdout, out)
 	return 0
-}
-
-// resumeFlags returns the "--store <path>"/"--project <name>" suffix (with
-// a leading space) that reproduces this invocation's store selection on a
-// command printed for the person to run later, so a resume command works
-// as printed even when the store cannot be resolved the same way from
-// wherever they run it next. Empty when neither flag was given. --project
-// wins when both are, matching resolveStoreForProject's own precedence.
-func resumeFlags(storeFlag, projectFlag string) string {
-	switch {
-	case projectFlag != "":
-		return fmt.Sprintf(" --project %s", projectFlag)
-	case storeFlag != "":
-		return fmt.Sprintf(" --store %s", storeFlag)
-	default:
-		return ""
-	}
 }
 
 // RenderStatus renders the exact `jig status` golden format for ticket:
@@ -69,12 +52,8 @@ func resumeFlags(storeFlag, projectFlag string) string {
 // stalled table (present only while a slice is stalled), and a contextual
 // help hint. The parked and stalled tables are the custody surface: they
 // make "awaiting a human" (parked) and "stuck" (stalled) unmistakable and
-// distinct from each other and from ordinary in-progress work. storeFlag
-// and projectFlag are this invocation's own --store/--project (each may be
-// empty); every command this renders carries them, so it still works as
-// printed wherever the person runs it next.
-func RenderStatus(st *store.Store, ticket, storeFlag, projectFlag string) (string, error) {
-	flags := resumeFlags(storeFlag, projectFlag)
+// distinct from each other and from ordinary in-progress work.
+func RenderStatus(st *store.Store, ticket string) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		return "", err
@@ -107,7 +86,7 @@ func RenderStatus(st *store.Store, ticket, storeFlag, projectFlag string) (strin
 		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question})
 
 		if ss.State == "needs-input" {
-			parkedRows = append(parkedRows, []string{sl.ID, ss.Question, resumeCommand(ticket, sl, ss, flags)})
+			parkedRows = append(parkedRows, []string{sl.ID, ss.Question, resumeCommand(ticket, sl, ss)})
 		}
 		if ss.State == "stalled" {
 			summary := ss.StallSummary
@@ -154,7 +133,7 @@ func RenderStatus(st *store.Store, ticket, storeFlag, projectFlag string) (strin
 		blocks = append(blocks, axi.Table("stalled", []string{"slice", "reason", "summary"}, stalledRows))
 	}
 
-	hint, err := nextStepHint(st, ticket, storeFlag, projectFlag)
+	hint, err := nextStepHint(st, ticket)
 	if err != nil {
 		return "", err
 	}
@@ -165,22 +144,19 @@ func RenderStatus(st *store.Store, ticket, storeFlag, projectFlag string) (strin
 	return buf.String(), nil
 }
 
-// resumeCommand returns the exact command that clears a parked (needs-input)
-// slice's custody, chosen from the slice's own structure rather than the
-// state's Reason alone: a slice with brief sections to amend (FromBrief
-// non-empty) is remediated by amending the brief and requeuing - the only
-// command that can ever touch it, since frontier.Requeue's --from-brief-diff
-// keys off FromBrief hashes. A slice with none (for example a gate fix
-// slice, which routeQuestion can still mark Reason "flawed-brief" the same
-// way) has no brief section for --from-brief-diff to ever notice, so it is
-// remediated by answering the open question directly - the only command
-// that works for it. flags is resumeFlags' output, appended so the printed
-// command carries the store selection the caller resolved this ticket with.
-func resumeCommand(ticket string, sl store.Slice, ss store.SliceState, flags string) string {
-	if len(sl.FromBrief) > 0 {
-		return fmt.Sprintf("jig requeue %s --from-brief-diff%s", ticket, flags)
+// resumeCommand returns the exact command that clears a parked
+// (needs-input) slice's custody. Amending the brief and requeuing is the
+// remedy only when the slice was parked for a flawed brief AND has brief
+// sections for --from-brief-diff to notice (frontier.Requeue keys off
+// FromBrief hashes): a gate fix slice carries the same "flawed-brief"
+// reason but no FromBrief, and a plain question on a slice that does have
+// brief sections is not a brief problem at all. Every other parked slice,
+// which is the common case, is resumed by answering its open question.
+func resumeCommand(ticket string, sl store.Slice, ss store.SliceState) string {
+	if ss.Reason == "flawed-brief" && len(sl.FromBrief) > 0 {
+		return fmt.Sprintf("jig requeue %s --from-brief-diff", ticket)
 	}
-	return fmt.Sprintf("jig run %s --answer %s '<text>'%s", ticket, ss.Question, flags)
+	return fmt.Sprintf("jig run %s --answer %s '<text>'", ticket, ss.Question)
 }
 
 // joinPlus joins ids with "+", the wire format for a slice's blocked_by
@@ -205,14 +181,12 @@ func sliceByID(slices []store.Slice, id string) (store.Slice, bool) {
 }
 
 // nextStepHint computes the single contextual next-step hint for ticket:
-// an open question takes priority; next, a stalled slice points at
-// requeuing with an amended brief; otherwise, once every slice is green,
-// the hint points at gate (no rounds yet), publish (last round clean), or
-// run (a fix-slice round is queued); otherwise it points at run to work
-// the frontier. storeFlag and projectFlag are RenderStatus's own (see its
-// doc comment); every command this prints carries them via resumeFlags.
-func nextStepHint(st *store.Store, ticket, storeFlag, projectFlag string) (string, error) {
-	flags := resumeFlags(storeFlag, projectFlag)
+// an open question takes priority; next, a stalled slice points at the
+// command that can actually reset it; otherwise, once every slice is
+// green, the hint points at gate (no rounds yet), publish (last round
+// clean), or run (a fix-slice round is queued); otherwise it points at run
+// to work the frontier.
+func nextStepHint(st *store.Store, ticket string) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		return "", err
@@ -233,13 +207,14 @@ func nextStepHint(st *store.Store, ticket, storeFlag, projectFlag string) (strin
 		if !ok {
 			return "", fmt.Errorf("nextStepHint: question %s names unknown slice %s", q.ID, q.Slice)
 		}
-		if len(sl.FromBrief) > 0 {
-			// Same resume command as the parked table's "resume" column
-			// (resumeCommand): the hint and the table must never disagree
-			// about how to get unstuck.
-			return fmt.Sprintf("Run `%s` to amend the brief and resume", resumeCommand(ticket, sl, ss, flags)), nil
+		// Same resume command as the parked table's "resume" column
+		// (resumeCommand): the hint and the table must never disagree
+		// about how to get unstuck.
+		cmd := resumeCommand(ticket, sl, ss)
+		if ss.Reason == "flawed-brief" && len(sl.FromBrief) > 0 {
+			return fmt.Sprintf("Run `%s` to amend the brief and resume", cmd), nil
 		}
-		return fmt.Sprintf("Run `%s` to answer and resume", resumeCommand(ticket, sl, ss, flags)), nil
+		return fmt.Sprintf("Run `%s` to answer and resume", cmd), nil
 	}
 
 	if len(slices) == 0 {
@@ -273,13 +248,13 @@ func nextStepHint(st *store.Store, ticket, storeFlag, projectFlag string) (strin
 		}
 		if len(sl.FromBrief) > 0 {
 			return fmt.Sprintf(
-				"Slice %s is stalled (%s): amend the brief, then run `jig requeue %s --from-brief-diff%s`",
-				sl.ID, ss.Reason, ticket, flags,
+				"Slice %s is stalled (%s): amend the brief, then run `jig requeue %s --from-brief-diff`",
+				sl.ID, ss.Reason, ticket,
 			), nil
 		}
 		return fmt.Sprintf(
-			"Slice %s is stalled (%s): run `jig requeue %s --slice %s%s`",
-			sl.ID, ss.Reason, ticket, sl.ID, flags,
+			"Slice %s is stalled (%s): run `jig requeue %s --slice %s`",
+			sl.ID, ss.Reason, ticket, sl.ID,
 		), nil
 	}
 	for _, sl := range slices {
@@ -288,8 +263,8 @@ func nextStepHint(st *store.Store, ticket, storeFlag, projectFlag string) (strin
 			continue
 		}
 		return fmt.Sprintf(
-			"Slice %s is env-blocked (%s): bring the env up, then run `jig requeue %s --slice %s%s`",
-			sl.ID, ss.Reason, ticket, sl.ID, flags,
+			"Slice %s is env-blocked (%s): bring the env up, then run `jig requeue %s --slice %s`",
+			sl.ID, ss.Reason, ticket, sl.ID,
 		), nil
 	}
 
@@ -307,14 +282,14 @@ func nextStepHint(st *store.Store, ticket, storeFlag, projectFlag string) (strin
 		}
 		switch {
 		case rounds == 0:
-			return fmt.Sprintf("Run `jig gate %s%s` to open a gate round", ticket, flags), nil
+			return fmt.Sprintf("Run `jig gate %s` to open a gate round", ticket), nil
 		case verdict == "clean":
-			return fmt.Sprintf("Run `jig publish %s%s` to open the PR", ticket, flags), nil
+			return fmt.Sprintf("Run `jig publish %s` to open the PR", ticket), nil
 		default:
-			return fmt.Sprintf("Run `jig run %s%s` to work the fix-slice round", ticket, flags), nil
+			return fmt.Sprintf("Run `jig run %s` to work the fix-slice round", ticket), nil
 		}
 	}
-	return fmt.Sprintf("Run `jig run %s%s` to work the frontier", ticket, flags), nil
+	return fmt.Sprintf("Run `jig run %s` to work the frontier", ticket), nil
 }
 
 var gateRoundDirRE = regexp.MustCompile(`^round-(\d+)$`)

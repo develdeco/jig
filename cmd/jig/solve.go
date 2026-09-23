@@ -113,7 +113,7 @@ func cmdSolve(args []string, stdout io.Writer) int {
 	axi.Render(stdout,
 		axi.KV("solve", [][2]string{{"ticket", ticket}, {"tier", preport.Tier}}),
 		axi.Table("squashed", []string{"repo", "sha"}, squashRows),
-		axi.Help("Run `jig status "+ticket+resumeFlags(*storeFlag, *projectFlag)+"` to confirm the ticket is fully green"),
+		axi.Help("Run `jig status "+ticket+"` to confirm the ticket is fully green"),
 	)
 	return 0
 }

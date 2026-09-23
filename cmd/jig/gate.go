@@ -99,7 +99,7 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 			{"model", report.Model},
 		}),
 		axi.Table("target_sha", []string{"repo", "sha"}, shaRows),
-		axi.Help(hintOrFallback(st, ticket, storeFlag, projectFlag)),
+		axi.Help(hintOrFallback(st, ticket)),
 	)
 	return 0
 }

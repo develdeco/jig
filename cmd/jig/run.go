@@ -91,7 +91,7 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 		}
 		axi.Render(stdout,
 			axi.Table("requeued", []string{"id"}, idRows([]string{*sliceFlag})),
-			axi.Help(hintOrFallback(st, ticket, *storeFlag, *projectFlag)),
+			axi.Help(hintOrFallback(st, ticket)),
 		)
 		return 0
 	}
@@ -103,7 +103,7 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 
 	axi.Render(stdout,
 		axi.Table("requeued", []string{"id"}, idRows(touched)),
-		axi.Help(hintOrFallback(st, ticket, *storeFlag, *projectFlag)),
+		axi.Help(hintOrFallback(st, ticket)),
 	)
 	return 0
 }
@@ -123,7 +123,7 @@ func printRunReport(stdout io.Writer, st *store.Store, ticket string, report fro
 	if report.StopReason != "" {
 		blocks = append(blocks, axi.KV("stopped", [][2]string{{"reason", report.StopReason}}))
 	}
-	blocks = append(blocks, axi.Help(hintOrFallback(st, ticket, storeFlag, projectFlag)))
+	blocks = append(blocks, axi.Help(hintOrFallback(st, ticket)))
 	axi.Render(stdout, blocks...)
 
 	switch {

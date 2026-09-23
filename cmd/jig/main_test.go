@@ -28,7 +28,7 @@ func TestRenderStatus(t *testing.T) {
 		t.Fatalf("write slice state a: %v", err)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket, "", "")
+	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestRenderStatusParked(t *testing.T) {
 		t.Fatalf("write question: %v", err)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket, "", "")
+	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
@@ -91,13 +91,13 @@ func TestRenderStatusParked(t *testing.T) {
 		t.Errorf("expected questions table, got:\n%s", got)
 	}
 	wantParked := "parked[1]{slice,question,resume}:\n" +
-		"  c,q-001,jig requeue JIG-1 --from-brief-diff\n"
+		"  c,q-001,jig run JIG-1 --answer q-001 '<text>'\n"
 	if !strings.Contains(got, wantParked) {
 		t.Errorf("expected parked table %q, got:\n%s", wantParked, got)
 	}
-	wantHint := "  Run `jig requeue JIG-1 --from-brief-diff` to amend the brief and resume\n"
+	wantHint := "  Run `jig run JIG-1 --answer q-001 '<text>'` to answer and resume\n"
 	if !strings.HasSuffix(got, wantHint) {
-		t.Errorf("expected amend-brief hint suffix %q, got:\n%s", wantHint, got)
+		t.Errorf("expected answer hint suffix %q, got:\n%s", wantHint, got)
 	}
 }
 
@@ -130,7 +130,7 @@ func TestRenderStatusParkedNoFromBrief(t *testing.T) {
 		t.Fatalf("write question: %v", err)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket, "", "")
+	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestRenderStatusParkedFlawedBrief(t *testing.T) {
 		t.Fatalf("write question: %v", err)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket, "", "")
+	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestGateFixSliceFlawedBriefResumesWithAnswer(t *testing.T) {
 		t.Fatalf("fix-1 state = %+v, want needs-input/flawed-brief (test setup is wrong)", fix1State)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket, "", "")
+	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestRenderStatusStalled(t *testing.T) {
 		t.Fatalf("write question: %v", err)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket, "", "")
+	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
@@ -306,12 +306,12 @@ func TestRenderStatusStalled(t *testing.T) {
 		t.Errorf("expected the parked table to still render alongside stalled, got:\n%s", got)
 	}
 	// The hint keeps the open question's priority even though the state
-	// line reports "stalled" (see nextStepHint's doc comment). Slice c has
-	// FromBrief sections, so the resume command is the amend-brief form
-	// (see TestRenderStatusParked).
-	wantHint := "  Run `jig requeue JIG-1 --from-brief-diff` to amend the brief and resume\n"
+	// line reports "stalled" (see nextStepHint's doc comment). The open
+	// question is a plain one, so it is answered rather than requeued (see
+	// TestRenderStatusParked).
+	wantHint := "  Run `jig run JIG-1 --answer q-001 '<text>'` to answer and resume\n"
 	if !strings.HasSuffix(got, wantHint) {
-		t.Errorf("expected amend-brief hint suffix %q, got:\n%s", wantHint, got)
+		t.Errorf("expected answer hint suffix %q, got:\n%s", wantHint, got)
 	}
 }
 
@@ -329,7 +329,7 @@ func TestRenderStatusStalledHint(t *testing.T) {
 		t.Fatalf("write slice state a: %v", err)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket, "", "")
+	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestRenderStatusStalledHintFromGate(t *testing.T) {
 		t.Fatalf("write slice state fix-1: %v", err)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket, "", "")
+	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
@@ -409,7 +409,7 @@ func TestRenderStatusEnvBlocked(t *testing.T) {
 		t.Fatalf("write slice state d: %v", err)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket, "", "")
+	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
@@ -449,7 +449,7 @@ func TestRenderStatusParkedOutranksEnvBlocked(t *testing.T) {
 		t.Fatalf("write slice state d: %v", err)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket, "", "")
+	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestRenderStatusStalledOutranksEnvBlockedHint(t *testing.T) {
 		t.Fatalf("write slice state d: %v", err)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket, "", "")
+	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
@@ -496,51 +496,31 @@ func TestRenderStatusStalledOutranksEnvBlockedHint(t *testing.T) {
 	}
 }
 
-// TestRenderStatusResumeCommandsCarryStoreProjectFlags checks that every
-// resume command RenderStatus prints - the parked table's resume cell and
-// the help hint - carries this invocation's own --store (or --project)
-// flag, so copy-pasting it works from anywhere, not only from a directory
-// that resolves the same store by cwd.
-func TestRenderStatusResumeCommandsCarryStoreProjectFlags(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
-
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
+// TestResumeCommandChoosesFromReasonAndBriefSections pins which command
+// clears a parked slice's custody. Amending the brief and requeuing is the
+// remedy only when the slice was parked for a flawed brief and has brief
+// sections for --from-brief-diff to notice; every other parked slice, which
+// is the common case, is resumed by answering its open question.
+func TestResumeCommandChoosesFromReasonAndBriefSections(t *testing.T) {
+	cases := []struct {
+		name      string
+		reason    string
+		fromBrief []string
+		want      string
+	}{
+		{"flawed brief with sections", "flawed-brief", []string{"abc"}, "jig requeue T-1 --from-brief-diff"},
+		{"flawed brief without sections", "flawed-brief", nil, "jig run T-1 --answer q-001 '<text>'"},
+		{"plain question with sections", "", []string{"abc"}, "jig run T-1 --answer q-001 '<text>'"},
+		{"plain question without sections", "", nil, "jig run T-1 --answer q-001 '<text>'"},
 	}
-	if err := st.AppendSlices(fx.Ticket, []store.Slice{{
-		ID: "fix-1", Workspace: "alpha", Goal: "g", Oracle: "test", FromGate: 1,
-	}}); err != nil {
-		t.Fatalf("AppendSlices: %v", err)
-	}
-	if err := st.WriteSliceState(fx.Ticket, "fix-1", store.SliceState{State: "needs-input", Attempts: 1, Question: "q-001"}); err != nil {
-		t.Fatalf("write slice state fix-1: %v", err)
-	}
-	if err := st.WriteQuestion(fx.Ticket, store.Question{ID: "q-001", Slice: "fix-1", Status: "open", Body: "Which env?"}); err != nil {
-		t.Fatalf("write question: %v", err)
-	}
-
-	gotStore, err := RenderStatus(st, fx.Ticket, fx.StoreDir, "")
-	if err != nil {
-		t.Fatalf("RenderStatus (--store): %v", err)
-	}
-	wantStoreResume := fmt.Sprintf("jig run %s --answer q-001 '<text>' --store %s", fx.Ticket, fx.StoreDir)
-	if !strings.Contains(gotStore, wantStoreResume) {
-		t.Errorf("expected resume command %q to carry --store, got:\n%s", wantStoreResume, gotStore)
-	}
-	wantStoreHintSuffix := fmt.Sprintf("Run `%s` to answer and resume\n", wantStoreResume)
-	if !strings.HasSuffix(gotStore, wantStoreHintSuffix) {
-		t.Errorf("expected hint suffix %q to carry --store, got:\n%s", wantStoreHintSuffix, gotStore)
-	}
-
-	gotProject, err := RenderStatus(st, fx.Ticket, "", "fixture")
-	if err != nil {
-		t.Fatalf("RenderStatus (--project): %v", err)
-	}
-	wantProjectResume := fmt.Sprintf("jig run %s --answer q-001 '<text>' --project fixture", fx.Ticket)
-	if !strings.Contains(gotProject, wantProjectResume) {
-		t.Errorf("expected resume command %q to carry --project, got:\n%s", wantProjectResume, gotProject)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sl := store.Slice{ID: "a", FromBrief: c.fromBrief}
+			ss := store.SliceState{State: "needs-input", Question: "q-001", Reason: c.reason}
+			if got := resumeCommand("T-1", sl, ss); got != c.want {
+				t.Errorf("resumeCommand = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 
