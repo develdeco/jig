@@ -380,10 +380,13 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	report = GateReport{Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA}}
 	switch {
 	case !ok:
-		// No round ran at all: the scripted source has nothing for this
-		// round number, or the reviewer source found head already covered
-		// with nothing outstanding. That says nothing about what earlier
-		// rounds left behind, so the verdict comes from the fold, exactly
+		// No round ran at all. The reviewer source reaches this only when
+		// it has already established that nothing is outstanding, so it
+		// is the scripted source - no round directory for this number, or
+		// an empty one - that can arrive here with the fold still holding
+		// something. Either way, a source having nothing to play says
+		// nothing about what earlier rounds left behind, so the verdict
+		// comes from the fold, exactly
 		// as the reviewer arm's does below. Writing "clean" here without
 		// consulting it declared a ticket clean over an undecided ask,
 		// and `jig publish` gates on that verdict: the ticket shipped

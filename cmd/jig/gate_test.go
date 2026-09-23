@@ -214,3 +214,42 @@ func TestGateReportHintReadsTheFrontierNotTheFixSliceCount(t *testing.T) {
 		}
 	})
 }
+
+// TestPrintGateReportListsWhatTheHintPointsAt pins that the tables print
+// whenever they hold anything, not only on a round that recorded a scope.
+// A round with no review to run sets no scope, so gating all three tables
+// on it left a round that exits 2 telling the reader to "decide the listed
+// asks" with nothing listed, while `jig status` and the stored round both
+// named the ask.
+func TestPrintGateReportListsWhatTheHintPointsAt(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+
+	ask := verifydeliver.Finding{
+		ID: "r1-f1", File: "alpha/alpha.go", Line: 4, Title: "ASK-TITLE",
+		Status: verifydeliver.StatusAsked, Risk: "high", RiskRationale: "ASK-RATIONALE",
+	}
+	report := verifydeliver.GateReport{
+		Round:      2,
+		Verdict:    "fix-slices",
+		Findings:   []verifydeliver.Finding{ask},
+		NeedsHuman: []verifydeliver.Finding{ask},
+		// No Scope: nothing was reviewed this round.
+	}
+
+	var buf bytes.Buffer
+	code := printGateReport(&buf, st, fx.Ticket, report)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (an ask is undecided)", code)
+	}
+	out := buf.String()
+	for _, want := range []string{"needs_a_human[1]", "findings[1]", "r1-f1", "ASK-TITLE", "ASK-RATIONALE"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("gate report is missing %q; the hint points at findings it never listed:\n%s", want, out)
+		}
+	}
+}

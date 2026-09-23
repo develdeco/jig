@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -109,18 +110,24 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		blocks = append(blocks, axi.Table("questions", []string{"id", "slice", "status"}, qrows))
 	}
 
-	// A gate round whose bookkeeping cannot be read is named, with what
-	// that costs: status would otherwise be quietly missing a waiting
-	// decision, which is exactly what the block below exists to show, and
-	// when the unreadable round is the only one there is nothing in that
-	// block to hint at the gap. The line says the asks are not shown
-	// rather than leaving a round number to be interpreted.
+	// A gate round whose bookkeeping cannot be read is named, along with
+	// what that costs: status would otherwise be quietly missing a waiting
+	// decision, which is exactly what the outstanding-asks block exists to
+	// show, and when the unreadable round is the only one there is nothing
+	// left in that block to hint at the gap. Hence the note line beside
+	// the table below.
 	outstanding, unreadableRounds, err := verifydeliver.OutstandingAsks(st, ticket)
 	if err != nil {
 		return "", err
 	}
+	// The findings files are the ones a gate round itself must read, so an
+	// unreadable one is also what stops the next round; keep that list
+	// apart from the report file below, which only status reads, so the
+	// help can name the repair without claiming a refusal that would not
+	// happen.
+	blockedRounds := append([]int(nil), unreadableRounds...)
 	// A round's report.yaml is the other file status reads per round, and
-	// it fails the same way, so it joins the same list.
+	// it fails the same way, so it joins the same table.
 	if n, _, reportUnreadable, lerr := latestGateRound(st, ticket); lerr == nil && reportUnreadable && n > 0 {
 		found := false
 		for _, r := range unreadableRounds {
@@ -152,8 +159,10 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		blocks = append(blocks, axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title"}, askRows))
 	}
 
-	// What decides an outstanding ask is `jig gate <ticket>` at a
-	// terminal, named once here rather than in a per-row cell because it
+	// The help names one way forward, in this order of precedence: a
+	// round jig cannot read blocks everything, so the repair comes first;
+	// otherwise what decides an outstanding ask is `jig gate <ticket>` at
+	// a terminal, named once here rather than in a per-row cell because it
 	// is the same command for every ask. The frontier check refuses that
 	// gate while any slice is short of green, and a round that queues fix
 	// slices and leaves an ask undecided is the ordinary case, so while
@@ -161,7 +170,19 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 	// the gate is named as the step after it - the order `jig gate`'s own
 	// report hint prints.
 	var helpLines []string
-	if len(outstanding) > 0 && frontierGreen(st, ticket) {
+	if len(blockedRounds) > 0 {
+		// A gate round folds every earlier round's findings file, so it
+		// refuses outright while one cannot be read. Naming the next
+		// command here would name one that cannot run; the step is the
+		// repair, and the file is in the store beside this ticket.
+		rounds := make([]string, 0, len(blockedRounds))
+		for _, r := range blockedRounds {
+			rounds = append(rounds, "round-"+strconv.Itoa(r))
+		}
+		helpLines = []string{fmt.Sprintf(
+			"Repair or remove %s/gate/{%s}/findings.yaml in the store: `jig gate` cannot open a round until it reads them",
+			ticket, strings.Join(rounds, ","))}
+	} else if len(outstanding) > 0 && frontierGreen(st, ticket) {
 		helpLines = []string{fmt.Sprintf("Run `jig gate %s` at a terminal to decide the outstanding asks", ticket)}
 	} else {
 		hint, err := nextStepHint(st, ticket)

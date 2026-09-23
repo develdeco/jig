@@ -208,3 +208,81 @@ func TestRenderStatusSurvivesAnUnreadableReportFile(t *testing.T) {
 		t.Errorf("status leaked an internal package name:\n%s", got)
 	}
 }
+
+// TestRenderStatusAfterAFixSliceRoundPointsAtTheNextRound covers the arm
+// that had no test at all: every slice green, the last round not clean.
+// Its fix slices are green by now, so telling a person to run `jig run`
+// names a command that finds nothing to do and reprints this same line.
+// The step that moves the ticket is the next gate round.
+func TestRenderStatusAfterAFixSliceRoundPointsAtTheNextRound(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	for _, id := range []string{"a", "b", "c", "d"} {
+		if err := st.WriteSliceState(fx.Ticket, id, store.SliceState{State: "green", Attempts: 1}); err != nil {
+			t.Fatalf("write slice state %s: %v", id, err)
+		}
+	}
+	dir := filepath.Join(fx.StoreDir, fx.Ticket, "gate", "round-1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir round 1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "report.yaml"), []byte("round: 1\nverdict: fix-slices\n"), 0o644); err != nil {
+		t.Fatalf("write report.yaml: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v", err)
+	}
+	wantHelp := "help[1]:\n  Run `jig gate JIG-1` to open the next gate round\n"
+	if !strings.HasSuffix(got, wantHelp) {
+		t.Errorf("status help does not point at the next round:\n--- got ---\n%s--- want suffix ---\n%s", got, wantHelp)
+	}
+	if strings.Contains(got, "jig run ") {
+		t.Errorf("status points at `jig run` with the frontier already green:\n%s", got)
+	}
+}
+
+// TestRenderStatusNamesTheRepairForAnUnreadableRound pins that status does
+// not name a next command that cannot run. A gate round folds every
+// earlier round's findings file, so it refuses outright while one is
+// unreadable: the step is the repair, and the help names the file.
+func TestRenderStatusNamesTheRepairForAnUnreadableRound(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	for _, id := range []string{"a", "b", "c", "d"} {
+		if err := st.WriteSliceState(fx.Ticket, id, store.SliceState{State: "green", Attempts: 1}); err != nil {
+			t.Fatalf("write slice state %s: %v", id, err)
+		}
+	}
+	dir := filepath.Join(fx.StoreDir, fx.Ticket, "gate", "round-1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir round 1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "findings.yaml"), []byte("{not: valid: yaml"), 0o644); err != nil {
+		t.Fatalf("write corrupt findings.yaml: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v", err)
+	}
+	if !strings.Contains(got, "findings.yaml") || !strings.Contains(got, "round-1") {
+		t.Errorf("status help does not name the file to repair:\n%s", got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "Run `jig gate") {
+			t.Errorf("status names a gate that refuses while a round is unreadable: %q", line)
+		}
+	}
+}
