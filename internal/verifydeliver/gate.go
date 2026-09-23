@@ -184,8 +184,16 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		}
 		// Best-effort: if this push itself fails, the original error is
 		// still the one that reaches the caller; there is nothing more to
-		// do here but try.
-		_ = d.Store.Push(fmt.Sprintf("%s: gate round %d failed: %v", ticket, roundNum, err))
+		// do here but try. The subject carries only the error's own code,
+		// never its message: the message can hold an absolute host path or
+		// other detail that has no business in a commit subject that gets
+		// pushed to a remote. jig already prints the full error on stdout.
+		code := "INTERNAL"
+		var ae *axi.Error
+		if errors.As(err, &ae) && ae.Code != "" {
+			code = ae.Code
+		}
+		_ = d.Store.Push(fmt.Sprintf("%s: gate round %d failed: %s", ticket, roundNum, code))
 	}()
 
 	if err := d.Store.Sync(); err != nil {
@@ -287,6 +295,17 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		}
 	}
 
+	// Resolved before the journal line below (not after, as manifest
+	// resolution and oracle runs once were) so roundNum is always this
+	// round's real number, never the zero value, by the time journaled
+	// becomes true and the deferred push above can fire.
+	n, err := existingGateRounds(d.Store, ticket)
+	if err != nil {
+		return GateReport{}, fmt.Errorf("verifydeliver: gate: count rounds: %w", err)
+	}
+	n++
+	roundNum = n
+
 	lines, err := journal.Read(d.Store, ticket)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: read journal: %w", err)
@@ -306,12 +325,6 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		return GateReport{}, err
 	}
 
-	n, err := existingGateRounds(d.Store, ticket)
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: count rounds: %w", err)
-	}
-	n++
-	roundNum = n
 	roundDir := gateRoundDir(d.Store, ticket, n)
 	if _, err := os.Stat(roundDir); err == nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: round %d already exists", n)

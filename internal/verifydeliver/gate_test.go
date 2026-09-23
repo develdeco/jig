@@ -1023,6 +1023,77 @@ func TestGateFailedRoundPushesStoreBestEffortSoARerunNeedsNoCleanup(t *testing.T
 	}
 }
 
+// TestGateFailedRoundBeforeRoundKnownRecordsRealRoundAndNoRawError
+// reproduces the review finding that a failure between the gate-open
+// journal line and the old roundNum assignment (manifest.Resolve,
+// runGateOracles, or existingGateRounds itself) committed a permanent,
+// pushed store subject reading "gate round 0" - roundNum's zero value,
+// never actually resolved - and interpolated the raw error with %v, which
+// for a manifest parse failure includes the gate lease's absolute host
+// path. This forces the failure to land on round 2 (not round 1) so a
+// wrong zero cannot be mistaken for a coincidentally-correct round number,
+// and breaks manifest.Resolve specifically so the raw error would carry an
+// absolute path if it leaked.
+func TestGateFailedRoundBeforeRoundKnownRecordsRealRoundAndNoRawError(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+
+	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+
+	// Push an unparsable .claude/jig.yaml onto the ticket branch: round 2's
+	// manifest.Resolve(lease.Dir) then fails after the gate-open journal
+	// line, naming the gate lease's own absolute path in its error text.
+	buildDir := buildLeaseDir(t, fx)
+	claudeDir := filepath.Join(buildDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "jig.yaml"), []byte("workspaces: [this is not valid yaml"), 0o644); err != nil {
+		t.Fatalf("write broken jig.yaml: %v", err)
+	}
+	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
+		t.Fatalf("git add jig.yaml: %v", err)
+	}
+	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "break manifest"); err != nil {
+		t.Fatalf("commit jig.yaml: %v", err)
+	}
+	branch := ticketBranch(fx.Ticket)
+	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
+		t.Fatalf("push branch: %v", err)
+	}
+
+	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket+"-gate")
+	if err != nil {
+		t.Fatalf("reacquire gate lease: %v", err)
+	}
+
+	_, err = Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+	if err == nil {
+		t.Fatal("Gate round 2: want an error (broken manifest)")
+	}
+
+	subject, gerr := gitx.Run(d.Store.Root, "log", "-1", "--format=%s")
+	if gerr != nil {
+		t.Fatalf("read store log: %v", gerr)
+	}
+	if strings.Contains(subject, "round 0") {
+		t.Fatalf("push subject = %q, round was never actually resolved before journaling", subject)
+	}
+	if !strings.Contains(subject, "round 2") {
+		t.Fatalf("push subject = %q, want it to name the real round 2", subject)
+	}
+	if strings.Contains(subject, gateLease.Dir) {
+		t.Fatalf("push subject = %q, leaked the gate lease's absolute host path", subject)
+	}
+	if strings.Contains(subject, "yaml") {
+		t.Fatalf("push subject = %q, leaked the raw manifest parse error instead of a code", subject)
+	}
+}
+
 // TestGateRecurrenceBoundSurvivesANoteInBetween reproduces the review
 // finding that labeling a recurrence "note" reset its identity: a noted
 // finding left review.json's open list entirely, so no later round could
