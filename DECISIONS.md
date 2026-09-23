@@ -255,8 +255,24 @@ Design questions the code raised, and their resolution:
   ways, a human keeping it or a human dismissing it, and it is offered
   again every round until then. Clearing one automatically would let an
   unattended run drop the question, call the round clean and point at
-  publish, shipping the ticket with the decision never made - the opposite
-  of parking on it, which is what an unattended run is for.
+  publish, shipping the ticket with the decision never made.
+- The same rule governs a re-reported ask, and for the same reason it
+  governs a re-reported dismissal (rule 2 below): once a finding's status
+  is `asked`, a later occurrence replaces its file, line, title, detail,
+  action and risk, but only a person changes its status. Deciding it from
+  this round's label instead retired the question without an answer - the
+  same finding re-reported as `note` became a record, the round went clean
+  and publish unlocked; re-reported as `fix` it became queued work with no
+  decision recorded anywhere. `routed_as` records the disagreement whenever
+  the reviewer's label is not `ask`.
+- What an undecided ask does to an unattended run at this stage is hold it:
+  the round is not clean, `jig gate` exits 2, and the ask is listed under
+  needs-a-human and in `jig status`. It is deliberately not yet a parked
+  question in the builder's sense - no `questions.yaml` entry, no `--answer`
+  to clear it - so an unattended run stops rather than parking in the way a
+  builder's question parks. Turning an ask into a real parked question is
+  its own change, and the vocabulary here should not be read as claiming
+  that already ships.
 - A finding recurs only through the reviewer's own `prior`, never by title
   matching. A recurrence is counted - its recurrence count goes up, and
   the bound below can trigger - only once a fix slice that already
@@ -449,6 +465,21 @@ above:
   line (`REVIEW_INVALID`, `REVIEW_FAILED`, `GATE_NO_ORACLE`) carries a
   `Help` line naming the recovery (fix the input, or add an oracle, then
   rerun `jig gate` for the ticket), on top of the best-effort push above.
+- Known gap, deliberately left for its own change: `Publish` journals in
+  several places and pushes once at the end, with no equivalent deferred
+  push, so any exit after its first journal line leaves the store dirty
+  and the next `Sync` refuses - reachable simply by declining at publish's
+  own confirmation prompt, not only by an outage. The fix belongs with
+  `Publish`'s own error paths rather than widened into the reviewer's
+  change, and until it lands the manual recovery is the one named above.
+- That failure commit's subject is built from the error's `axi` code plus
+  the ticket and round, never the error text: the message is permanent
+  store history and gets pushed, and a raw error carries whatever the
+  failure happened to contain, including absolute paths on the machine
+  that ran it. The full error still goes to stdout, where it is read once
+  and not kept. The round number is resolved before the `gate-open`
+  journal line for the same reason: a failure between journaling and
+  resolving it used to record "round 0", a round that never existed.
 
 ## CLI
 

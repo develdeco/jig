@@ -926,3 +926,49 @@ func TestFindingsSortStable(t *testing.T) {
 		t.Fatalf("sanity check failed: %v", ids)
 	}
 }
+
+// TestApplyRoundAnUndecidedAskStaysAskedWhateverTheLabel pins the rule a
+// dismissed finding already has, for asked: once a question is put to a
+// person, only that person moves it out of asked. A later occurrence
+// replaces the finding's text, file, line, action and risk, but never its
+// status.
+//
+// Without this the reviewer's own label retired the question. Re-reported
+// as `note` the ask became a record, the round went clean and publish
+// unlocked with nobody having answered it; re-reported as `fix` it became
+// queued work with no decision recorded anywhere.
+func TestApplyRoundAnUndecidedAskStaysAskedWhateverTheLabel(t *testing.T) {
+	man := oneOracleManifest()
+	for _, action := range []string{ActionNote, ActionFix, ActionAsk} {
+		t.Run(action, func(t *testing.T) {
+			known := map[string]Finding{
+				"r1-f1": {ID: "r1-f1", File: "a.go", Line: 7, Title: "old", Status: StatusAsked, Action: ActionAsk, Risk: RiskLow, RiskRationale: "old"},
+			}
+			result := ReviewResult{
+				Findings: []ResultFinding{
+					{File: "a.go", Line: 9, Title: "new title", Detail: "d", Action: action, Risk: RiskHigh, RiskRationale: "new", Oracle: "test", Prior: "r1-f1"},
+				},
+				ReviewedPaths: []string{"a.go"},
+			}
+			reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
+			if err != nil {
+				t.Fatalf("ApplyRound: %v", err)
+			}
+			if len(reported) != 1 {
+				t.Fatalf("reported = %+v, want 1 finding", reported)
+			}
+			f := reported[0]
+			if f.Status != StatusAsked {
+				t.Errorf("status = %q, want %q: only a person decides an ask", f.Status, StatusAsked)
+			}
+			// The rest of the occurrence is this round's, as for any
+			// recurrence: the question is unanswered, not frozen.
+			if f.Line != 9 || f.Title != "new title" || f.Risk != RiskHigh || f.Action != action {
+				t.Errorf("finding = %+v, want this round's line, title, risk and label", f)
+			}
+			if action != ActionAsk && f.RoutedAs != ActionAsk {
+				t.Errorf("routed_as = %q, want %q recorded when the label disagrees with the status", f.RoutedAs, ActionAsk)
+			}
+		})
+	}
+}
