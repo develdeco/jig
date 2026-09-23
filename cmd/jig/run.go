@@ -53,7 +53,7 @@ func cmdRun(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	return printRunReport(stdout, st, ticket, report, *storeFlag, *projectFlag)
+	return printRunReport(stdout, st, ticket, report)
 }
 
 // cmdRequeue implements `jig requeue <ticket> --from-brief-diff` and
@@ -110,9 +110,8 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 
 // printRunReport prints the outcome of a frontier.Run call and returns the
 // exit code its report implies: 2 on a pending question, 1 when the run
-// stopped (stall or attempt-cap), else 0. storeFlag and projectFlag are the
-// calling command's own (each may be empty); the printed hint carries them.
-func printRunReport(stdout io.Writer, st *store.Store, ticket string, report frontier.RunReport, storeFlag, projectFlag string) int {
+// stopped (stall or attempt-cap), else 0.
+func printRunReport(stdout io.Writer, st *store.Store, ticket string, report frontier.RunReport) int {
 	blocks := []string{
 		axi.KV("run", [][2]string{{"ticket", ticket}}),
 		axi.Table("green", []string{"id"}, idRows(report.Green)),

@@ -74,7 +74,7 @@ func cmdSolve(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 	if code := reportExitCode(report); code != 0 {
-		return printRunReport(stdout, st, ticket, report, *storeFlag, *projectFlag)
+		return printRunReport(stdout, st, ticket, report)
 	}
 
 	var lastVerdict string
@@ -93,7 +93,7 @@ func cmdSolve(args []string, stdout io.Writer) int {
 			return renderErr(stdout, err)
 		}
 		if code := reportExitCode(report); code != 0 {
-			return printRunReport(stdout, st, ticket, report, *storeFlag, *projectFlag)
+			return printRunReport(stdout, st, ticket, report)
 		}
 	}
 	if err := solveShouldPublish(lastVerdict); err != nil {
