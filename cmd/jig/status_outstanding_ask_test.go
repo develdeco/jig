@@ -120,3 +120,49 @@ func TestRenderStatusOutstandingAskWithGreenFrontier(t *testing.T) {
 		t.Errorf("status help does not name the deciding command:\n--- got ---\n%s--- want suffix ---\n%s", got, wantHelp)
 	}
 }
+
+// TestRenderStatusSurvivesAnUnreadableFindingsFile pins that one corrupt
+// gate round does not take down `jig status`. Status is the command a
+// person runs when something is already wrong, so it renders the ticket,
+// its slices and its questions regardless, names the round it could not
+// read, and never leaks an internal package name into user-facing text.
+// A gate round itself still refuses to run on bookkeeping it cannot read;
+// only this read-only view degrades.
+func TestRenderStatusSurvivesAnUnreadableFindingsFile(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "a", store.SliceState{State: "green", Attempts: 1}); err != nil {
+		t.Fatalf("write slice state a: %v", err)
+	}
+	// Round 1 holds a real outstanding ask; round 2's file is corrupt.
+	writeAskedFindingsYAML(t, fx.StoreDir, fx.Ticket)
+	corrupt := filepath.Join(fx.StoreDir, fx.Ticket, "gate", "round-2")
+	if err := os.MkdirAll(corrupt, 0o755); err != nil {
+		t.Fatalf("mkdir round 2: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(corrupt, "findings.yaml"), []byte("{not: valid: yaml"), 0o644); err != nil {
+		t.Fatalf("write corrupt findings.yaml: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v, want a rendered status despite the corrupt round", err)
+	}
+	if !strings.Contains(got, "slices[4]") {
+		t.Errorf("status did not render the slices table:\n%s", got)
+	}
+	if !strings.Contains(got, "unreadable_gate_rounds: 2") {
+		t.Errorf("status did not name the round it could not read:\n%s", got)
+	}
+	if !strings.Contains(got, "r1-f1") {
+		t.Errorf("status dropped the ask recorded by the round it could read:\n%s", got)
+	}
+	if strings.Contains(got, "verifydeliver") {
+		t.Errorf("status leaked an internal package name into user-facing text:\n%s", got)
+	}
+}

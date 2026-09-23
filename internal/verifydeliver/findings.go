@@ -541,21 +541,36 @@ func cumulativeFindings(st *store.Store, ticket string, upToRound int) (map[stri
 // OutstandingAsks returns ticket's cumulative still-asked findings, sorted
 // by risk then id, across every gate round recorded so far. It is the
 // state `jig status` shows between rounds so a waiting decision is
-// visible even when no gate round is running: the same cumulative fold
-// Gate itself uses (cumulativeFindings), read one round past the last one
-// recorded.
-func OutstandingAsks(st *store.Store, ticket string) ([]Finding, error) {
+// visible even when no gate round is running: the same fold Gate itself
+// uses, read one round past the last one recorded.
+//
+// Unlike Gate's own fold (cumulativeFindings), a round whose findings.yaml
+// cannot be read or parsed is skipped rather than failing the call, and its
+// round number is returned in unreadable. A gate round must refuse to run
+// on bookkeeping it cannot read, but `jig status` is the command a person
+// runs when something is already wrong, and refusing to show a ticket's
+// slices because one round's file is corrupt helps nobody. Skipping is not
+// hiding: the caller is handed the rounds it skipped and says so.
+func OutstandingAsks(st *store.Store, ticket string) (asks []Finding, unreadable []int, err error) {
 	n, err := existingGateRounds(st, ticket)
 	if err != nil {
-		return nil, fmt.Errorf("verifydeliver: findings: count rounds: %w", err)
+		return nil, nil, fmt.Errorf("verifydeliver: findings: count rounds: %w", err)
 	}
-	cum, err := cumulativeFindings(st, ticket, n+1)
-	if err != nil {
-		return nil, err
+	cum := map[string]Finding{}
+	for r := 1; r <= n; r++ {
+		ff, ok, rerr := readFindingsYAML(st, ticket, r)
+		if rerr != nil {
+			unreadable = append(unreadable, r)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		foldFindings(cum, ff.Findings, ff.Cleared)
 	}
-	asks := askedFindingsList(cum)
+	asks = askedFindingsList(cum)
 	sortByRiskThenID(asks)
-	return asks, nil
+	return asks, unreadable, nil
 }
 
 // marshalFindingsYAML renders one round's findings.yaml, marshaling nil

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -108,9 +109,19 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		blocks = append(blocks, axi.Table("questions", []string{"id", "slice", "status"}, qrows))
 	}
 
-	outstanding, err := verifydeliver.OutstandingAsks(st, ticket)
+	// A gate round whose bookkeeping cannot be read is named rather than
+	// passed over: status would otherwise be quietly missing a waiting
+	// decision, which is exactly what this block exists to show.
+	outstanding, unreadableRounds, err := verifydeliver.OutstandingAsks(st, ticket)
 	if err != nil {
 		return "", err
+	}
+	if len(unreadableRounds) > 0 {
+		rounds := make([]string, 0, len(unreadableRounds))
+		for _, r := range unreadableRounds {
+			rounds = append(rounds, strconv.Itoa(r))
+		}
+		blocks = append(blocks, "unreadable_gate_rounds: "+strings.Join(rounds, ","))
 	}
 	if len(outstanding) > 0 {
 		var askRows [][]string
