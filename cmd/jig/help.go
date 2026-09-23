@@ -62,7 +62,7 @@ var commandTable = []cmdSpec{
 		{"branch", "validate this branch instead of jig/<ticket>", false},
 		{"doc", "brief doc path, used together with --branch", false},
 		{"pr", "pr number (not implemented in v0.1)", true},
-		{"yes", "keep every fix and workspace ask without the triage prompt", false},
+		{"yes", "keep every finding jig can route on its own, without the triage prompt", false},
 		{"backend", "session backend for the reviewer: fake, headless, or herdr", false},
 		{"scenario", "scenario dir for the fake gate source", false},
 		{"store", "explicit store path", false},

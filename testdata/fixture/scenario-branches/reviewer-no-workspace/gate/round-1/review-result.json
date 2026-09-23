@@ -22,5 +22,5 @@
     "go.mod",
     ".claude/jig.yaml"
   ],
-  "summary": "round 1: one ask on a file in no declared workspace (Q1)"
+  "summary": "round 1: one ask on a file in no declared workspace"
 }

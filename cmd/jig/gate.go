@@ -47,7 +47,7 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 	branch := fs.String("branch", "", "validate this branch instead of jig/<ticket>")
 	doc := fs.String("doc", "", "brief doc path, used together with --branch")
 	prNum := fs.Int("pr", 0, "pr number (not implemented in v0.1)")
-	yes := fs.Bool("yes", false, "keep every fix and workspace ask without the triage prompt")
+	yes := fs.Bool("yes", false, "keep every finding jig can route on its own, without the triage prompt")
 	backendFlag := fs.String("backend", "", "session backend for the reviewer: fake, headless, or herdr")
 	scenario := fs.String("scenario", "", "scenario dir for the fake gate source")
 	storeFlag := fs.String("store", "", "explicit store path")

@@ -35,7 +35,9 @@ func gateSourceForSolve(scenario string, backend session.Backend) verifydeliver.
 // exactly like `jig run` does; they are the closest working superset
 // (needed for the fake-backend e2e chain) rather than a redesign. --yes
 // also drives the finding triage: it skips the interactive
-// publish confirm and keeps every fix and workspace ask without prompting.
+// publish confirm and keeps every finding jig can route on its own, without
+// prompting; an ask whose workspace or oracle jig cannot derive still waits
+// for a human.
 func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest0, err := requirePositional(args, "ticket")
 	if err != nil {

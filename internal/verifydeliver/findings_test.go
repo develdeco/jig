@@ -377,7 +377,7 @@ func TestApplyRoundRule1CarriesDecisionAndWorkspaceWhenFileUnchanged(t *testing.
 	}
 }
 
-// --- ApplyRound: recurrence bound (5.3) --------------------------------
+// --- ApplyRound: recurrence bound ---------------------------------------
 
 func TestApplyRoundRecurrenceBoundFirstRoutesLikeNew(t *testing.T) {
 	man := oneOracleManifest()

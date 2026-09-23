@@ -104,7 +104,7 @@ jig solve T-1 --backend headless --yes    # runs run, gate, and publish as one c
 
 `jig solve` dispatches slices, gates the branch, and publishes in one
 chain. `--yes` skips the publish confirm and every gate round's triage
-prompt (keeping every fix and workspace ask): when a session asks a
+prompt (keeping every finding jig can route on its own): when a session asks a
 question, `jig solve` stops, and you resume it with
 `jig solve T-1 --yes --answer <qid> "<text>"`. With the standalone store above (`tracker: local`), publish
 pushes `jig/T-1` and writes the PR body into the store instead of opening a

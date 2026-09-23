@@ -202,8 +202,8 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 		// survives - most notably Oracle (kept when this round names none)
 		// and Decision (the human's decision for an earlier kept ask, kept
 		// so a fix slice built from this recurrence can still cite it).
-		// Triage and RoutedAs are always this round's own routing (design
-		// 6), decided afresh below and by routeRound, never carried.
+		// Triage and RoutedAs are always this round's own routing, decided
+		// afresh below and by routeRound, never carried.
 		var f Finding
 		recurrences := 0
 		if hasPrior {
@@ -244,7 +244,7 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 			f.Workspace = newWorkspace
 		}
 
-		// Recurrence bound (5.3): the second recurrence comes to the human
+		// Recurrence bound: the second recurrence comes to the human
 		// as an ask, whatever this round's label - including note, which is
 		// exactly the case that forces an already-oracled finding (rule 1
 		// above) to a human decision instead of silently dropping it from

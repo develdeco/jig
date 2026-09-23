@@ -194,8 +194,8 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 
 	// The failed attempt above still wrote review.json to the store's
 	// working copy (verifydeliver.Gate returns before its own Push, so
-	// nothing was committed or pushed). Store.Sync's leftover-commit fix
-	// (commit a02e1d9) is not on this branch, so a
+	// nothing was committed or pushed). Store.Sync does not commit its own
+	// leftovers before pulling, so a
 	// dirty local store here would otherwise fail the retry's own Sync
 	// with "cannot pull with rebase: you have unstaged changes" - discard
 	// it directly, exactly as an operator would with `git checkout .`
