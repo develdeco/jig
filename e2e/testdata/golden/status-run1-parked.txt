@@ -8,6 +8,6 @@ slices[4]{id,state,attempts,blocked_by,question}:
 questions[1]{id,slice,status}:
   q-001,c,open
 parked[1]{slice,question,resume}:
-  c,q-001,jig requeue JIG-1 --from-brief-diff
+  c,q-001,jig run JIG-1 --answer q-001 '<text>'
 help[1]:
-  Run `jig requeue JIG-1 --from-brief-diff` to amend the brief and resume
+  Run `jig run JIG-1 --answer q-001 '<text>'` to answer and resume

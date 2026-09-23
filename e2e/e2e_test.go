@@ -73,8 +73,10 @@ func runEndToEndOnce(t *testing.T) {
 	if !strings.Contains(r1.Stdout, "needs_input[1]{id}:\n  c\n") {
 		t.Fatalf("run 1 stdout missing slice c in needs_input:\n%s", r1.Stdout)
 	}
-	if !strings.Contains(r1.Stdout, "--from-brief-diff") {
-		t.Fatalf("run 1 stdout missing the amend-brief remedy:\n%s", r1.Stdout)
+	// Slice c is parked on a plain question, so the remedy is answering it:
+	// requeue --from-brief-diff would not touch a slice parked this way.
+	if !strings.Contains(r1.Stdout, "--answer q-001") {
+		t.Fatalf("run 1 stdout missing the answer remedy:\n%s", r1.Stdout)
 	}
 
 	st, err := store.Open(fx.StoreDir)
