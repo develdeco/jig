@@ -351,7 +351,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		Model:     model,
 		BriefPath: briefPath,
 		Manifest:  man,
-		Open:      toOpenFindingList(openList),
+		Open:      openList,
 		Dismissed: toDismissedFindingList(dismissedList),
 	})
 	if err != nil {

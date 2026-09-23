@@ -723,7 +723,12 @@ type RoundInput struct {
 	Model     string
 	BriefPath string
 	Manifest  manifest.Manifest
-	Open      []OpenFinding      // findings bookkeeping's cumulative fold, projected (findings.go)
+	// Open is findings bookkeeping's cumulative fold (findings.go's
+	// openAndNotedFindingsList), carried whole rather than projected: it
+	// is jig's own Status that says what is outstanding, and the wire
+	// shape review.json sends the reviewer does not carry one. The
+	// projection happens where the request is built, below.
+	Open      []Finding
 	Dismissed []DismissedFinding // findings bookkeeping's cumulative fold, projected (findings.go)
 }
 
@@ -779,10 +784,17 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 	// coverage, and it must not by itself keep this round from taking the
 	// clean-without-dispatch shortcut below. openOutstanding is in.Open
 	// filtered back down to open/asked for exactly those two uses.
+	//
+	// What is outstanding is jig's own status, never the reviewer's last
+	// `action` label: the two part company whenever jig overrides the
+	// label, as the recurrence bound does when it escalates a finding to
+	// `asked` whose latest occurrence the reviewer called `note`. Reading
+	// the label there would drop a finding jig itself holds open from
+	// must_review, so it could never be covered and never clear.
 	var openFiles []string
 	openOutstanding := 0
 	for _, f := range in.Open {
-		if f.Action == ActionNote {
+		if f.Status != StatusOpen && f.Status != StatusAsked {
 			continue
 		}
 		openFiles = append(openFiles, f.File)
@@ -823,7 +835,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		SlicesPath:  absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "slices.yaml")),
 		JournalPath: absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "journal.ndjson")),
 		Oracles:     oracleNames,
-		Open:        in.Open,
+		Open:        toOpenFindingList(in.Open),
 		Dismissed:   in.Dismissed,
 		MustReview:  diff.MustReview,
 	}

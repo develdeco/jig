@@ -1228,7 +1228,7 @@ func TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding(t *test
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
 		Manifest: oneOracleManifest(),
-		Open:     []OpenFinding{{ID: "r1-f1", File: "a.go", Title: "t", Action: ActionFix}},
+		Open:     []Finding{{ID: "r1-f1", File: "a.go", Title: "t", Action: ActionFix, Status: StatusOpen}},
 	})
 	if err != nil {
 		t.Fatalf("Round: %v", err)
@@ -1281,5 +1281,87 @@ func TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff(t *testing.T) {
 	}
 	if rnd.Review == nil || len(rnd.Review.Deleted) != 1 || rnd.Review.Deleted[0] != "seed.txt" {
 		t.Errorf("Review.Deleted = %v, want [seed.txt]", rnd.Review)
+	}
+}
+
+// TestReviewerGateSourceRoundReadsStatusNotTheReviewersLabel pins that what
+// counts as outstanding is jig's own Status, never the reviewer's last
+// `action` label. The two part company whenever jig overrides the label -
+// the recurrence bound escalates a finding to asked while its latest
+// occurrence was reported `note`, and a kept ask becomes open with whatever
+// label the reviewer wrote. Reading the label instead left such a finding
+// out of must_review and out of the outstanding count, so its file was
+// never re-reviewed, it could never clear, and with an empty scope diff the
+// round skipped the reviewer session entirely: the gate could not converge
+// and no command a person could run would move it.
+func TestReviewerGateSourceRoundReadsStatusNotTheReviewersLabel(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		finding Finding
+		want    bool
+	}{
+		{
+			name:    "escalated to asked while labeled note",
+			finding: Finding{ID: "r1-f1", File: "seed.txt", Title: "t", Action: ActionNote, Status: StatusAsked, Recurrences: 2},
+			want:    true,
+		},
+		{
+			name:    "kept as open while labeled note",
+			finding: Finding{ID: "r1-f1", File: "seed.txt", Title: "t", Action: ActionNote, Status: StatusOpen},
+			want:    true,
+		},
+		{
+			name:    "genuinely noted: recorded only, not outstanding",
+			finding: Finding{ID: "r1-f1", File: "seed.txt", Title: "t", Action: ActionNote, Status: StatusNoted},
+			want:    false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := newReviewLease(t, "main")
+			st := newReviewStore(t)
+
+			var mustReview []string
+			dispatched := false
+			backend := stubBackend{run: func(d session.Dispatch) error {
+				dispatched = true
+				reviewData, err := os.ReadFile(d.SliceJSON)
+				if err != nil {
+					t.Fatalf("read review.json: %v", err)
+				}
+				var req ReviewRequest
+				if err := json.Unmarshal(reviewData, &req); err != nil {
+					t.Fatalf("parse review.json: %v", err)
+				}
+				mustReview = req.MustReview
+				writeMustReviewResult(t, d)
+				return nil
+			}}
+
+			src := NewReviewerGateSource(backend)
+			_, ok, err := src.Round(RoundInput{
+				Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+				RepoName: "fixture-repo", Target: "main", Model: "rung-a",
+				Manifest: oneOracleManifest(),
+				Open:     []Finding{tc.finding},
+			})
+			if err != nil {
+				t.Fatalf("Round: %v", err)
+			}
+			if !ok {
+				t.Fatal("Round: ok = false, want true")
+			}
+			if dispatched != tc.want {
+				t.Fatalf("reviewer dispatched = %v, want %v", dispatched, tc.want)
+			}
+			covered := false
+			for _, p := range mustReview {
+				if p == "seed.txt" {
+					covered = true
+				}
+			}
+			if covered != tc.want {
+				t.Fatalf("must_review = %v, want seed.txt present = %v", mustReview, tc.want)
+			}
+		})
 	}
 }
