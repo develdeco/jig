@@ -109,21 +109,23 @@ was ambiguous, what was chosen, and why.
   harmless. The session's instructions are its prompt, the dispatch inputs, and the
   repo's CLAUDE.md; skills and subagents would pull in unrelated user-level skills and
   models the staircase never chose, and fetched pages are an injection path.
-- The operator's own Claude Code settings still load (no `--setting-sources`). Dropping
-  user settings would also drop their deny rules and hooks, widening the session as often
-  as narrowing it; the `--permission-mode` flag already beats any `defaultMode` there,
-  checked against a user-level `bypassPermissions`.
-- Granting through the screen is not fail-closed on its own, so jig proves the screen
-  before every screened dispatch: one `jig _screen` run with a push, which must come back
+- The operator's own Claude Code settings still load (project and local sources are
+  dropped, the user source is kept: `--setting-sources user`). Dropping user settings too
+  would also drop their deny rules and hooks, widening the session as often as narrowing
+  it; the `--permission-mode` flag already beats any `defaultMode` there, checked against
+  a user-level `bypassPermissions`.
+- Granting through the screen is not fail-closed on its own, so jig proves its own
+  binary's screen before every screened dispatch: one `jig _screen` run directly, not
+  through the hook wiring Claude Code itself launches, with a push, which must come back
   denied. Claude Code skips a hook it cannot launch and its own read-only classifier
   still allows `echo`, `ls`, `git show` and the like, so a missing, failing, silent or
   wrong-answering hook would otherwise leave a session reading the machine with nothing
   saying the screen was gone. The probe binds the start of a session, not its whole life.
-- The credential screen judges where a path resolves, not how it is spelled: a symlink
-  in the lease pointing at `~/.aws` and a search root that is a credential directory
-  rather than a file are the same read by another name. A credential directory counts
-  as much as a file in it, since a tool given a root reads everything under it. What
-  this is not is confinement: a content search over an ordinary directory holding a
+- The credential screen judges both how a path is spelled and where a symlink lands: a
+  symlink in the lease pointing at `~/.aws` and a search root that is a credential
+  directory rather than a file are the same read by another name. A credential directory
+  counts as much as a file in it, since a tool given a root reads everything under it.
+  What this is not is confinement: a content search over an ordinary directory holding a
   `.env` still returns it, and only a sandbox would change that.
 - The lease's `CLAUDE.md` is passed with `--append-system-prompt-file`, because dropping
   the project setting source drops that file too (checked against the installed CLI: the
@@ -134,7 +136,8 @@ was ambiguous, what was chosen, and why.
 - The session's bound kills the process tree and sets `WaitDelay`, because killing the
   CLI alone left `Wait` blocked on pipes a surviving grandchild still held: the bound
   did not bound the call. A child the CLI leaves behind after exiting normally still
-  outlives it on Windows; what jig guarantees is that it stops waiting.
+  outlives it; what jig guarantees is that it stops waiting, not that it kills that
+  child too - that is not jig's to kill on any OS.
 - A session that wrote its result before the bound is honored, since the disk contract
   is what decides an attempt, not how the process ended.
 - A `JIG_HEADLESS_TIMEOUT` that does not parse is refused rather than ignored: an
@@ -156,10 +159,10 @@ was ambiguous, what was chosen, and why.
 - The live contract test asserts the structured `is_error` flag for a refusal the CLI
   words itself, and matches text only where the text is jig's own (the screen's reason).
 - The gate reviewer's dispatch (Slice "gate") gets the same grants as a build, worktree
-  edits included: its forward-only guard already rejects a round that changed the lease.
-  A read-only dispatch flag would turn such an edit into a denial the reviewer can work
-  around instead of a failed round; it was left out of this change, which does not touch
-  the reviewer's own code.
+  edits included: main's read-only guard already rejects a round that moved HEAD or
+  changed a tracked file. A read-only dispatch flag would turn such an edit into a
+  denial the reviewer can work around instead of a failed round; it was left out of this
+  change, which does not touch the reviewer's own code.
 - The screen hook runs this process's own executable only when build info says it is the
   jig binary. Inside `go test` the executable is the test binary, which `_screen` would
   rerun tests in on every tool call, so a test or another program running screened
