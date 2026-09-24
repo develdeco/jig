@@ -172,6 +172,66 @@ func TestScreenDenyAllow(t *testing.T) {
 	}
 }
 
+// TestScreenDeniesUnreadableInput drives the _screen hook handler - the
+// same runScreen the real `jig _screen` binary runs on its stdin/stdout -
+// with the exact payloads round 3 found allowed (attack.md F4 / refute.md
+// F4, gate-reviewer-rework/review/pr11-round3): a known tool whose
+// required argument is missing or wrong-typed must get a deny decision
+// instead of silently falling through to the session's permission rules.
+func TestScreenDeniesUnreadableInput(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"Bash command under the wrong key", `{"tool_name":"Bash","tool_input":{"cmd":"git push"}}`},
+		{"Bash empty tool_input", `{"tool_name":"Bash","tool_input":{}}`},
+		{"Bash no tool_input at all", `{"tool_name":"Bash"}`},
+		{"Bash command is a list", `{"tool_name":"Bash","tool_input":{"command":["git","push"]}}`},
+		{"Read file_path is missing", `{"tool_name":"Read","tool_input":{}}`},
+		{"Read file_path is a number", `{"tool_name":"Read","tool_input":{"file_path":7}}`},
+		{"Glob pattern is missing", `{"tool_name":"Glob","tool_input":{"path":"."}}`},
+		{"Grep path is a number", `{"tool_name":"Grep","tool_input":{"pattern":"x","path":7}}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var out bytes.Buffer
+			runScreen(strings.NewReader(c.input), &out)
+			if !strings.Contains(out.String(), `"permissionDecision":"deny"`) {
+				t.Fatalf("runScreen(%s) = %q, want a deny decision", c.input, out.String())
+			}
+			if !strings.Contains(out.String(), "cannot be judged") {
+				t.Errorf("runScreen(%s) = %q, want a reason saying the call cannot be judged", c.input, out.String())
+			}
+		})
+	}
+}
+
+// TestScreenGrantsEveryToolWithValidInput drives the _screen hook handler
+// for every tool a passing screen grants (screen.Granted), pinning that a
+// well-formed call to each still gets its allow decision through the real
+// hook path, not only Bash and Read.
+func TestScreenGrantsEveryToolWithValidInput(t *testing.T) {
+	cases := []struct {
+		tool  string
+		input string
+	}{
+		{"Bash", `{"command":"git status"}`},
+		{"Read", `{"file_path":"/store/T-1/work/a.attempt-1.slice.json"}`},
+		{"Glob", `{"pattern":"**/*.go"}`},
+		{"Grep", `{"pattern":"func main"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.tool, func(t *testing.T) {
+			var out bytes.Buffer
+			runScreen(strings.NewReader(`{"tool_name":"`+c.tool+`","tool_input":`+c.input+`}`), &out)
+			want := `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"screened by jig"}}` + "\n"
+			if out.String() != want {
+				t.Fatalf("runScreen(%s %s) = %q, want %q", c.tool, c.input, out.String(), want)
+			}
+		})
+	}
+}
+
 // TestHelpContainsCommands checks that bare `jig` help output names every
 // non-hidden command and flag in commandTable, and that hidden ones (the
 // _screen command, gate's --pr flag) are absent from it.

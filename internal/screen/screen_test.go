@@ -1,10 +1,14 @@
 package screen
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // commandCase describes one Command() table row.
@@ -279,8 +283,8 @@ func TestSecretTargetResolvesSymlinks(t *testing.T) {
 	if SecretPath(through) {
 		t.Fatalf("this case is only meaningful when the literal path looks innocent: %q", through)
 	}
-	if !SecretTarget(through) {
-		t.Errorf("SecretTarget(%q) = false, want true: it resolves into a credential directory", through)
+	if !secretTarget(through) {
+		t.Errorf("secretTarget(%q) = false, want true: it resolves into a credential directory", through)
 	}
 	if _, ok := ToolCall("Read", map[string]any{"file_path": through}); ok {
 		t.Error("ToolCall(Read) through a symlink into .aws was allowed")
@@ -304,6 +308,278 @@ func TestToolPathArgsCoverTheGrantedSurface(t *testing.T) {
 	for _, tool := range append(append([]string{}, Granted...), "Edit", "Write", "NotebookEdit") {
 		if _, ok := toolPathArgs[tool]; !ok {
 			t.Errorf("tool %q is in the session's surface but has no toolPathArgs entry", tool)
+		}
+	}
+}
+
+// TestToolCallDeniesUnreadableInput pins round-3's F4: a known tool whose
+// required argument is missing, or whose command or path argument is
+// present with a type SecretPath cannot read, is denied rather than let
+// through on a guess - a call the screen cannot read cannot be judged.
+// These include the exact payloads round 3 found allowed against the real
+// hook binary; cmd/jig's TestScreenDenyAllow drives the same shapes
+// through the hook end to end.
+func TestToolCallDeniesUnreadableInput(t *testing.T) {
+	cases := []struct {
+		name  string
+		tool  string
+		input map[string]any
+	}{
+		{"Bash: command under the wrong key", "Bash", map[string]any{"cmd": "git push"}},
+		{"Bash: empty tool_input", "Bash", map[string]any{}},
+		{"Bash: nil tool_input", "Bash", nil},
+		{"Bash: command is a list", "Bash", map[string]any{"command": []any{"git", "push"}}},
+		{"Bash: command is a number", "Bash", map[string]any{"command": 7.0}},
+		{"Bash: command is null", "Bash", map[string]any{"command": nil}},
+
+		{"Read: no file_path", "Read", map[string]any{}},
+		{"Read: file_path is a number", "Read", map[string]any{"file_path": 7.0}},
+		{"Read: file_path is an object", "Read", map[string]any{"file_path": map[string]any{"path": "/repo/.env"}}},
+		{"Read: file_path is null", "Read", map[string]any{"file_path": nil}},
+		{"Read: file_path is a nested list", "Read", map[string]any{"file_path": []any{[]any{"/repo/.env"}}}},
+
+		{"Write: no file_path", "Write", map[string]any{"content": "x"}},
+		{"Write: file_path is a bool", "Write", map[string]any{"file_path": true, "content": "x"}},
+		{"Edit: no file_path", "Edit", map[string]any{"old_string": "a", "new_string": "b"}},
+		{"NotebookEdit: no notebook_path", "NotebookEdit", map[string]any{"new_source": "x"}},
+		{"NotebookEdit: notebook_path is a number", "NotebookEdit", map[string]any{"notebook_path": 1.0}},
+		{"Glob: no pattern", "Glob", map[string]any{"path": "."}},
+		{"Glob: pattern is a number", "Glob", map[string]any{"pattern": 1.0}},
+
+		{"Grep: path is a number, pattern present", "Grep", map[string]any{"pattern": "x", "path": 1.0}},
+		{"Grep: glob is an object", "Grep", map[string]any{"pattern": "x", "glob": map[string]any{}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			reason, ok := ToolCall(c.tool, c.input)
+			if ok {
+				t.Fatalf("ToolCall(%q, %v) allowed, want denied", c.tool, c.input)
+			}
+			if !strings.Contains(reason, "cannot be judged") {
+				t.Errorf("ToolCall(%q, %v) reason = %q, want it to say the call cannot be judged", c.tool, c.input, reason)
+			}
+		})
+	}
+}
+
+// TestToolCallAllowsOptionalArgsAndUnknownKeys pins the other side of F4:
+// an argument that is genuinely optional (Grep's glob and path, Glob's
+// path) may be absent, and a key the screen has no rule for - an extra one
+// the CLI adds, such as Bash's "description" - is not inspected and does
+// not affect the decision.
+func TestToolCallAllowsOptionalArgsAndUnknownKeys(t *testing.T) {
+	cases := []struct {
+		name  string
+		tool  string
+		input map[string]any
+	}{
+		{"Grep with only pattern", "Grep", map[string]any{"pattern": "func main"}},
+		{"Glob with only pattern", "Glob", map[string]any{"pattern": "**/*.go"}},
+		{"Bash with an unknown extra key", "Bash", map[string]any{"command": "git status", "description": "check status"}},
+		{"Bash with every benign extra key", "Bash", map[string]any{"command": "git status", "timeout": 5.0, "run_in_background": false, "dangerouslyDisableSandbox": false}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if reason, ok := ToolCall(c.tool, c.input); !ok {
+				t.Fatalf("ToolCall(%q, %v) denied (%q), want allowed", c.tool, c.input, reason)
+			}
+		})
+	}
+}
+
+// TestSecretTargetSkipsNetworkAndDevicePaths pins round-3's F6/B3: a UNC
+// share or a device path is judged by its literal spelling only.
+// Resolving it (Abs/EvalSymlinks) can dial a remote host - 192.0.2.1 is a
+// TEST-NET-1 address, reserved and unroutable, and a live resolution
+// attempt against it was measured at about 21 seconds - so secretTarget
+// must return well within that, with no filesystem or network access for
+// these spellings. Restoring resolution for them fails this test on
+// Windows, where EvalSymlinks actually reaches out to try.
+func TestSecretTargetSkipsNetworkAndDevicePaths(t *testing.T) {
+	cases := []string{
+		`\\192.0.2.1\share\x`,
+		`//192.0.2.1/share/x`,
+		`\\?\C:\some\path`,
+		`\\.\PhysicalDrive0`,
+	}
+	for _, p := range cases {
+		t.Run(p, func(t *testing.T) {
+			start := time.Now()
+			got := secretTarget(p)
+			if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+				t.Fatalf("secretTarget(%q) took %v, want well under a second: resolution must be skipped for a network/device path", p, elapsed)
+			}
+			if got {
+				t.Errorf("secretTarget(%q) = true, want false: it names no credential directory by spelling, and must not be resolved to find out otherwise", p)
+			}
+		})
+	}
+}
+
+// TestUNCCredentialPathJudgedBySpellingNotResolution pins that a UNC token
+// whose literal spelling names a credential directory is still denied - by
+// SecretPath, not by resolving it - and that judging it costs no real
+// time. Host 192.0.2.1 is unroutable; a resolution attempt against it
+// would itself reproduce the bug this test guards against.
+func TestUNCCredentialPathJudgedBySpellingNotResolution(t *testing.T) {
+	tok := `\\192.0.2.1\share\.aws\credentials`
+	start := time.Now()
+	reason, ok := Command("cat " + tok)
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("Command(%q) took %v, want well under a second", tok, elapsed)
+	}
+	if ok {
+		t.Fatalf("Command(%q) = (%q, true), want denied", tok, reason)
+	}
+	if !strings.Contains(reason, "credentials") {
+		t.Errorf("Command(%q) reason = %q, want a credential denial", tok, reason)
+	}
+}
+
+// TestCommandBashResolvesSymlinks pins the Bash side of "judge where a
+// path lands" (round-3 F8/M5): a token in a shell command that is a
+// symlink pointing into a credential directory is denied by where it
+// resolves, not only a tool's file_path/path argument. Removing
+// `|| secretTarget(tok)` from Command leaves this the only failure in the
+// suite.
+func TestCommandBashResolvesSymlinks(t *testing.T) {
+	creds := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(creds, ".aws"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(creds, ".aws", "credentials"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lease := t.TempDir()
+	link := filepath.Join(lease, "vendor")
+	if err := os.Symlink(filepath.Join(creds, ".aws"), link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	target := filepath.Join(link, "credentials")
+	if SecretPath(target) {
+		t.Fatalf("this case is only meaningful when the literal path looks innocent: %q", target)
+	}
+	if reason, ok := Command("cat " + target); ok {
+		t.Fatalf("Command(%q) = (%q, true), want denied: a Bash token through a symlink into .aws must resolve", target, reason)
+	}
+}
+
+// TestCredentialFiles pins round-3's F9: the credential stores the
+// denylist still missed, most pointedly the two tools jig itself drives -
+// git's own push token and the credential cache of the CLI the session
+// runs in - plus, beside each one, a near-miss that must stay allowed: an
+// ordinary file is not a credential store just because it shares a
+// directory with one.
+func TestCredentialFiles(t *testing.T) {
+	cases := []struct {
+		name     string
+		denied   string
+		nearMiss string
+	}{
+		{"git push token", "/home/op/.git-credentials", "/home/op/project/git-credentials-helper.go"},
+		{"claude CLI token", "/home/op/.claude/.credentials.json", "/home/op/.claude/settings.json"},
+		{"claude CLI state", "/home/op/.claude.json", "/home/op/project/claude.json"},
+		{"git config credential store", "/home/op/.config/git/credentials", "/home/op/.config/git/config"},
+		{"azure token cache", "/home/op/.azure/msal_token_cache.json", "/home/op/.azure/azureProfile.json"},
+		{"gcloud credential db", "/home/op/.config/gcloud/credentials.db", "/home/op/.config/gcloud/active_config"},
+		{"rubygems credentials", "/home/op/.gem/credentials", "/home/op/.gem/specs.4.8"},
+		{"pypi credentials", "/home/op/.pypirc", "/home/op/project/pypirc-notes.md"},
+		{"terraform credentials", "/home/op/.terraform.d/credentials.tfrc.json", "/home/op/.terraform.d/plugin-cache/registry.json"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if !SecretPath(c.denied) {
+				t.Errorf("SecretPath(%q) = false, want true", c.denied)
+			}
+			if _, ok := ToolCall("Read", map[string]any{"file_path": c.denied}); ok {
+				t.Errorf("ToolCall(Read, %q) allowed, want denied", c.denied)
+			}
+			if SecretPath(c.nearMiss) {
+				t.Errorf("SecretPath(%q) = true, want false: an ordinary file beside the credential store must stay readable", c.nearMiss)
+			}
+			if _, ok := ToolCall("Read", map[string]any{"file_path": c.nearMiss}); !ok {
+				t.Errorf("ToolCall(Read, %q) denied, want allowed", c.nearMiss)
+			}
+		})
+	}
+
+	// A lease's own .claude directory carries readable files beside the
+	// credential cache: settings.json and skills must never be swept in.
+	leaseFiles := []string{
+		"/wt/T-1/.claude/settings.json",
+		"/wt/T-1/.claude/skills/plan-ticket/SKILL.md",
+	}
+	for _, p := range leaseFiles {
+		if _, ok := ToolCall("Read", map[string]any{"file_path": p}); !ok {
+			t.Errorf("ToolCall(Read, %q) denied, want allowed: an ordinary lease file", p)
+		}
+	}
+}
+
+// TestExportedSurface pins round-3's N1: SecretTarget was exported but had
+// no caller outside this package, while ARCHITECTURE.md's screen row lists
+// exact entry points. This parses the package's own non-test source and
+// fails if it exports anything outside the list below - SecretTarget
+// coming back included - so a doc/code mismatch is caught here instead of
+// by a reviewer. Update both this list and the ARCHITECTURE.md row
+// together if the package's public surface is meant to change.
+func TestExportedSurface(t *testing.T) {
+	want := map[string]bool{
+		"Command":    true,
+		"SecretPath": true,
+		"ToolCall":   true,
+		"Granted":    true,
+		"Grants":     true,
+	}
+
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parse internal/screen: %v", err)
+	}
+	pkg, ok := pkgs["screen"]
+	if !ok {
+		t.Fatalf("package %q not found among parsed packages %v", "screen", pkgs)
+	}
+
+	got := map[string]bool{}
+	for _, f := range pkg.Files {
+		for _, decl := range f.Decls {
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if d.Recv == nil && d.Name.IsExported() {
+					got[d.Name.Name] = true
+				}
+			case *ast.GenDecl:
+				for _, spec := range d.Specs {
+					switch s := spec.(type) {
+					case *ast.ValueSpec:
+						for _, name := range s.Names {
+							if name.IsExported() {
+								got[name.Name] = true
+							}
+						}
+					case *ast.TypeSpec:
+						if s.Name.IsExported() {
+							got[s.Name.Name] = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for name := range got {
+		if !want[name] {
+			t.Errorf("package screen exports %q, which ARCHITECTURE.md's screen row does not list - unexport it, or update the doc", name)
+		}
+	}
+	for name := range want {
+		if !got[name] {
+			t.Errorf("package screen no longer exports %q, which ARCHITECTURE.md's screen row lists", name)
 		}
 	}
 }

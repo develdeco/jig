@@ -78,6 +78,23 @@ var toolPathArgs = map[string][]string{
 // a key renamed between CLI versions still reaches SecretPath.
 var legacyPathKeys = []string{"file_path", "path", "notebook_path", "filePath"}
 
+// requiredPathArg names, for a tool that must always say what it acts on,
+// the one input key that names it: the path a file tool reads or writes,
+// or the pattern Glob searches with. A known tool whose required key is
+// absent, or present with a type SecretPath cannot read, is denied outright
+// by ToolCall - a call the screen cannot read cannot be judged, and a
+// silent skip there is exactly the fail-open gap this closes. Grep has no
+// entry: its required "pattern" is a search term, not a path, and its
+// path-shaped keys (glob, path) are legitimately optional - a rooted Grep
+// with no path searches the cwd.
+var requiredPathArg = map[string]string{
+	"Read":         "file_path",
+	"Write":        "file_path",
+	"Edit":         "file_path",
+	"NotebookEdit": "notebook_path",
+	"Glob":         "pattern",
+}
+
 // unquote strips surrounding whitespace, then any leading/trailing single or
 // double quote characters. It is not shell-grade quote parsing: a quoted
 // value containing whitespace still arrives pre-split into separate tokens.
@@ -178,10 +195,12 @@ func checkGitArgv(argv []string) (string, bool) {
 // whitespace token of a command) looks like it names a live-credential file.
 // Case-insensitive. Denies when the basename starts with ".env", contains
 // "_key", or starts with "id_rsa"; when the extension is ".pem"; when the
-// basename is a ".netrc", "_netrc" or ".npmrc"; or when any segment of the
-// path is a credential directory (credentialDirs: ".aws", ".ssh", ".gnupg",
-// ".config/gh", ".docker", ".kube"). A directory counts as much as a file
-// under it, since a tool given a search root reads everything beneath it.
+// basename is a ".netrc", "_netrc" or ".npmrc"; when any segment of the path
+// is a credential directory (credentialDirs: ".aws", ".ssh", ".gnupg",
+// ".config/gh", ".docker", ".kube") - a directory counts as much as a file
+// under it, since a tool given a search root reads everything beneath it;
+// or when the path's final segments exactly name a single credential file
+// that sits in an otherwise ordinary directory (credentialFiles below).
 //
 // The checks operate on the literal string, so a glob token such as
 // ".env*", "*.pem", "*_key*" or "~/.aws/*" is denied whenever its fixed
@@ -213,6 +232,9 @@ func SecretPath(s string) bool {
 		return true
 	}
 	if strings.HasPrefix(base, ".netrc") || strings.HasPrefix(base, "_netrc") || strings.HasPrefix(base, ".npmrc") {
+		return true
+	}
+	if inCredentialFile(norm) {
 		return true
 	}
 	return inCredentialDir(norm)
@@ -255,7 +277,70 @@ func inCredentialDir(norm string) bool {
 	return false
 }
 
-// SecretTarget reports whether p, resolved against the filesystem, names a
+// credentialFiles are exact path-segment sequences naming one specific
+// credential file that sits in an otherwise ordinary directory: git's own
+// config lives beside its stored push token in ".config/git", and a
+// lease's ".claude" directory holds its readable settings.json and skills
+// beside the CLI's own credential cache. Unlike credentialDirs, nothing
+// legitimately sits under one of these, so inCredentialFile matches only
+// at the end of the path - a project's own directory that happens to share
+// a segment name is not swept in.
+var credentialFiles = [][]string{
+	{".git-credentials"},
+	{".claude", ".credentials.json"},
+	{".claude.json"},
+	{".config", "git", "credentials"},
+	{".azure", "msal_token_cache.json"},
+	{".config", "gcloud", "credentials.db"},
+	{".gem", "credentials"},
+	{".pypirc"},
+	{".terraform.d", "credentials.tfrc.json"},
+}
+
+// inCredentialFile reports whether a slash-normalized, lowercased path's
+// final segments exactly match one of credentialFiles.
+func inCredentialFile(norm string) bool {
+	segs := strings.Split(strings.Trim(norm, "/"), "/")
+	for _, want := range credentialFiles {
+		if len(want) > len(segs) {
+			continue
+		}
+		tail := segs[len(segs)-len(want):]
+		match := true
+		for j, w := range want {
+			if tail[j] != w {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// isNetworkOrDevicePath reports whether p is a UNC share (\\host\share or
+// //host/share) or a Windows device/extended-length path (\\?\..., \\.\...).
+// filepath.VolumeName recognizes the backslash UNC form (and, on the
+// platform that has volumes, the device forms); the explicit prefix check
+// on top catches the forward-slash UNC spelling, which VolumeName does not,
+// and keeps the check meaningful when this package is built for a GOOS
+// where VolumeName always returns "". Judged on the literal string alone -
+// this function does no filesystem I/O, which is the point of calling it.
+func isNetworkOrDevicePath(p string) bool {
+	if vol := filepath.VolumeName(p); len(vol) >= 2 && isSlash(vol[0]) && isSlash(vol[1]) {
+		return true
+	}
+	slashed := strings.ReplaceAll(p, "\\", "/")
+	return strings.HasPrefix(slashed, "//")
+}
+
+func isSlash(b byte) bool {
+	return b == '\\' || b == '/'
+}
+
+// secretTarget reports whether p, resolved against the filesystem, names a
 // credential location. SecretPath judges the literal string, which is what
 // a command token or a glob gives it; this judges what a tool call would
 // actually open, so a symlink in the lease pointing at "~/.aws", or a
@@ -263,13 +348,22 @@ func inCredentialDir(norm string) bool {
 // than by how it is written.
 //
 // Resolution is best effort: a path that does not exist yet is judged by
-// its literal form alone, which SecretPath already covers.
-func SecretTarget(p string) bool {
-	if p == "" {
+// its literal form alone, which SecretPath already covers. A network share
+// or a device path (isNetworkOrDevicePath) is never resolved, stat'd or
+// opened here: doing so can dial a remote host - an unroutable address
+// blocks the call for tens of seconds - or touch a device, and the screen
+// has no business paying that cost, or making that connection, on the
+// ticket's say-so. Such a token is judged by its spelling alone, which
+// SecretPath already covers; secretTarget just declines to look further.
+func secretTarget(p string) bool {
+	if p == "" || isNetworkOrDevicePath(p) {
 		return false
 	}
 	abs, err := filepath.Abs(p)
 	if err != nil {
+		return false
+	}
+	if isNetworkOrDevicePath(abs) {
 		return false
 	}
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
@@ -301,7 +395,7 @@ func Command(cmd string) (string, bool) {
 			if tok == "" {
 				continue
 			}
-			if SecretPath(tok) || SecretTarget(tok) {
+			if SecretPath(tok) || secretTarget(tok) {
 				return secretReason(tok), false
 			}
 		}
@@ -320,29 +414,60 @@ func Command(cmd string) (string, bool) {
 
 // ToolCall screens a tool-call hook input. The tool name decides which
 // input keys name files (toolPathArgs), and a tool that is not in that map
-// is denied outright rather than judged on a guess. input["command"] is
-// routed to Command, and every path-like argument of the tool, plus the
-// legacy key names, is checked against SecretPath. It returns ("", true)
-// when allowed, or (reason, false) when denied.
+// is denied outright rather than judged on a guess. Bash's "command" and,
+// for a tool listed in requiredPathArg, that tool's required key must both
+// be present with a type SecretPath can read (a string, or a list of
+// strings) - missing, or present as a list where a string is expected, a
+// number, an object or null, denies the call outright: a screen that
+// cannot read an argument cannot judge it, and granting by default on an
+// unreadable argument is the fail-open gap this closes. Every path-like
+// argument of the tool, plus the legacy key names, is then checked against
+// SecretPath. It returns ("", true) when allowed, or (reason, false) when
+// denied. An extra key the tool sends that the screen has no rule for
+// (a benign one, such as Bash's "description") is not inspected and does
+// not affect the decision.
 func ToolCall(tool string, input map[string]any) (string, bool) {
 	keys, known := toolPathArgs[tool]
 	if !known {
 		return fmt.Sprintf("Blocked: `%s` is a tool this screen does not know, so it cannot be judged.", tool), false
 	}
-	if cmdVal, ok := input["command"]; ok {
-		if s, ok := cmdVal.(string); ok && s != "" {
+
+	if tool == "Bash" {
+		cmdVal, present := input["command"]
+		if !present {
+			return "Blocked: Bash call has no `command`, so it cannot be judged.", false
+		}
+		s, isStr := cmdVal.(string)
+		if !isStr {
+			return "Blocked: Bash call's `command` is not a string, so it cannot be judged.", false
+		}
+		if s != "" {
 			if reason, allowed := Command(s); !allowed {
 				return reason, false
 			}
 		}
 	}
+
+	if req, ok := requiredPathArg[tool]; ok {
+		v, present := input[req]
+		if !present {
+			return fmt.Sprintf("Blocked: `%s` call has no `%s`, so it cannot be judged.", tool, req), false
+		}
+		if unreadablePath(v) {
+			return fmt.Sprintf("Blocked: `%s` call's `%s` cannot be read, so it cannot be judged.", tool, req), false
+		}
+	}
+
 	for _, key := range append(append([]string{}, keys...), legacyPathKeys...) {
 		v, ok := input[key]
 		if !ok {
 			continue
 		}
+		if unreadablePath(v) {
+			return fmt.Sprintf("Blocked: `%s` call's `%s` cannot be read, so it cannot be judged.", tool, key), false
+		}
 		for _, s := range stringValues(v) {
-			if SecretPath(s) || SecretTarget(s) {
+			if SecretPath(s) || secretTarget(s) {
 				return secretReason(s), false
 			}
 		}
@@ -350,9 +475,33 @@ func ToolCall(tool string, input map[string]any) (string, bool) {
 	return "", true
 }
 
+// unreadablePath reports whether v cannot be read as a path or a list of
+// paths: anything other than a string, or a list whose elements are all
+// strings, is a type SecretPath cannot judge - a number, a bool, an
+// object, null, or a list holding a non-string element (nested lists
+// included).
+func unreadablePath(v any) bool {
+	switch t := v.(type) {
+	case string:
+		return false
+	case []any:
+		for _, e := range t {
+			if _, ok := e.(string); !ok {
+				return true
+			}
+		}
+		return false
+	case []string:
+		return false
+	default:
+		return true
+	}
+}
+
 // stringValues returns v as the strings it holds: the value itself, or the
 // string elements of a list, since a tool may take one path or several
-// under the same key.
+// under the same key. Called only after unreadablePath(v) is false, so the
+// type switch here always finds one of these three shapes.
 func stringValues(v any) []string {
 	switch t := v.(type) {
 	case string:
