@@ -21,7 +21,7 @@ func TestRulePath(t *testing.T) {
 		goos, path, want string
 	}{
 		{"windows", `C:\Users\a\lease`, "//c/Users/a/lease"},
-		{"windows", `D:\DECO\store\T-1\work\a.attempt-1.result.json`, "//d/DECO/store/T-1/work/a.attempt-1.result.json"},
+		{"windows", `D:\work\store\T-1\work\a.attempt-1.result.json`, "//d/work/store/T-1/work/a.attempt-1.result.json"},
 		{"windows", `c:\w [1] (x) y`, `//c/w \[1\] (x) y`},
 		{"linux", "/home/a/lease", "//home/a/lease"},
 		{"linux", "/tmp/a*b?c[d]", `//tmp/a\*b\?c\[d\]`},
