@@ -62,12 +62,22 @@ func runEndToEndOnce(t *testing.T) {
 	storeRevBaseline := gitLog(t, fx.StoreRemote, "rev-list", "--count", "main")
 
 	// --- 1. run to first pause: a, b (retried), d green; c paused on q-001.
+	// Slice c has a brief section (FromBrief), but this question carries no
+	// "flawed-brief" Reason, so the printed remedy is the plain --answer
+	// form, not the amend-brief-then-requeue one (see resumeCommand);
+	// `jig status` still names q-001 in its questions table (checked via
+	// the status-run1-parked.txt golden below).
 	r1 := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r1.Code != 2 {
 		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\nstdout:\n%s\nstderr:\n%s", r1.Code, r1.Stdout, r1.Stderr)
 	}
-	if !strings.Contains(r1.Stdout, "q-001") {
-		t.Fatalf("run 1 stdout missing q-001:\n%s", r1.Stdout)
+	if !strings.Contains(r1.Stdout, "needs_input[1]{id}:\n  c\n") {
+		t.Fatalf("run 1 stdout missing slice c in needs_input:\n%s", r1.Stdout)
+	}
+	// Slice c is parked on a plain question, so the remedy is answering it:
+	// requeue --from-brief-diff would not touch a slice parked this way.
+	if !strings.Contains(r1.Stdout, "--answer q-001") {
+		t.Fatalf("run 1 stdout missing the answer remedy:\n%s", r1.Stdout)
 	}
 
 	st, err := store.Open(fx.StoreDir)
@@ -80,7 +90,7 @@ func runEndToEndOnce(t *testing.T) {
 	assertSliceState(t, st, ticket, "d", "green", 1)
 
 	statusR1 := runJig(t, fx.StoreDir, "status", ticket)
-	assertGolden(t, "status-run1-paused.txt", statusR1.Stdout)
+	assertGolden(t, "status-run1-parked.txt", statusR1.Stdout)
 
 	// --- 2. answer q-001: c goes green, ticket fully green.
 	r2 := runJig(t, fx.StoreDir, "run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)

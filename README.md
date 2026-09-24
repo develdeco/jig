@@ -110,10 +110,11 @@ question, `jig solve` stops, and you resume it with
 pushes `jig/T-1` and writes the PR body into the store instead of opening a
 PR - set `tracker: github` in `project.yaml` and have `gh` on PATH to get
 an opened PR. Run `jig run T-1` and `jig gate T-1` on their own as slices
-need another attempt or a brief gets amended (`jig requeue
---from-brief-diff`). `jig status T-1` prints the ticket's slice and
-question state at any point, and `jig <command> -h` prints that command's
-flags.
+need another attempt or a brief gets amended (`jig requeue T-1
+--from-brief-diff`), or to clear one stalled or env-blocked slice by id
+(`jig requeue T-1 --slice <id>`). `jig status T-1` prints the ticket's
+slice and question state at any point, and `jig <command> -h` prints that
+command's flags.
 
 ## Session backends
 

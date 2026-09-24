@@ -52,8 +52,9 @@ var commandTable = []cmdSpec{
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},
-	{"requeue", "requeue slices touched by a brief edit", []flagSpec{
+	{"requeue", "requeue slices touched by a brief edit, or one stalled/env-blocked slice", []flagSpec{
 		{"from-brief-diff", "requeue slices whose brief section hash changed", false},
+		{"slice", "requeue one stalled or env-blocked slice by id", false},
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},

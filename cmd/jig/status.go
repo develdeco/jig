@@ -51,7 +51,11 @@ func cmdStatus(args []string, stdout io.Writer) int {
 
 // RenderStatus renders the exact `jig status` golden format for ticket:
 // ticket/state lines, a slices table, a questions table (or "questions:
-// none"), and a contextual help hint.
+// none"), a parked table (present only while a slice is needs-input) and a
+// stalled table (present only while a slice is stalled), and a contextual
+// help hint. The parked and stalled tables are the custody surface: they
+// make "awaiting a human" (parked) and "stuck" (stalled) unmistakable and
+// distinct from each other and from ordinary in-progress work.
 func RenderStatus(st *store.Store, ticket string) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
@@ -62,7 +66,7 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		return "", err
 	}
 
-	var rows [][]string
+	var rows, parkedRows, stalledRows [][]string
 	counts := map[string]int{}
 	allGreen := len(slices) > 0
 	for _, sl := range slices {
@@ -83,16 +87,32 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 			question = ss.Question
 		}
 		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question})
+
+		if ss.State == "needs-input" {
+			parkedRows = append(parkedRows, []string{sl.ID, ss.Question, resumeCell(ticket, sl, ss)})
+		}
+		if ss.State == "stalled" {
+			summary := ss.StallSummary
+			if summary == "" {
+				summary = "-"
+			}
+			stalledRows = append(stalledRows, []string{sl.ID, ss.Reason, summary})
+		}
 	}
 
+	// Precedence: a stalled slice is worse than one merely parked awaiting a
+	// human, which is worse than one blocked on its env coming up, which
+	// beats "green" only once every slice is; "building" is the fallback.
 	overall := "building"
 	switch {
-	case allGreen:
-		overall = "green"
 	case counts["stalled"] > 0:
 		overall = "stalled"
-	case counts["needs-input"] > 0 || counts["env-blocked"] > 0:
-		overall = "paused"
+	case counts["needs-input"] > 0:
+		overall = "parked"
+	case counts["env-blocked"] > 0:
+		overall = "env-blocked"
+	case allGreen:
+		overall = "green"
 	}
 
 	blocks := []string{
@@ -108,6 +128,12 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 			qrows = append(qrows, []string{q.ID, q.Slice, q.Status})
 		}
 		blocks = append(blocks, axi.Table("questions", []string{"id", "slice", "status"}, qrows))
+	}
+	if len(parkedRows) > 0 {
+		blocks = append(blocks, axi.Table("parked", []string{"slice", "question", "resume"}, parkedRows))
+	}
+	if len(stalledRows) > 0 {
+		blocks = append(blocks, axi.Table("stalled", []string{"slice", "reason", "summary"}, stalledRows))
 	}
 
 	// A gate round whose bookkeeping cannot be read is named, along with
@@ -201,6 +227,36 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 	return buf.String(), nil
 }
 
+// resumeCommand returns the exact command that clears a parked
+// (needs-input) slice's custody. Amending the brief and requeuing is the
+// remedy only when the slice was parked for a flawed brief AND has brief
+// sections for --from-brief-diff to notice (frontier.Requeue keys off
+// FromBrief hashes): a gate fix slice carries the same "flawed-brief"
+// reason but no FromBrief, and a plain question on a slice that does have
+// brief sections is not a brief problem at all. Every other parked slice,
+// which is the common case, is resumed by answering its open question.
+func resumeCommand(ticket string, sl store.Slice, ss store.SliceState) string {
+	if ss.Reason == "flawed-brief" && len(sl.FromBrief) > 0 {
+		return fmt.Sprintf("jig requeue %s --from-brief-diff", ticket)
+	}
+	return fmt.Sprintf("jig run %s --answer %s '<text>'", ticket, ss.Question)
+}
+
+// resumeCell returns the parked table's "resume" column text. For the
+// common case, that is resumeCommand's raw command: running it is the whole
+// remedy. For the amend-brief-then-requeue case, the raw command alone is
+// not the whole remedy - it requeues nothing, and the next `jig status` is
+// byte-identical, until the brief has actually been amended - so the cell
+// says so, the same way the stalled hint already does ("amend the brief,
+// then run `jig requeue <ticket> --from-brief-diff`").
+func resumeCell(ticket string, sl store.Slice, ss store.SliceState) string {
+	cmd := resumeCommand(ticket, sl, ss)
+	if ss.Reason == "flawed-brief" && len(sl.FromBrief) > 0 {
+		return fmt.Sprintf("amend the brief, then run %s", cmd)
+	}
+	return cmd
+}
+
 // frontierGreen reports whether every slice of ticket is green: the exact
 // condition verifydeliver's own frontier check applies before it will open
 // a gate round, with a ticket that has no slices yet nothing to block.
@@ -233,11 +289,23 @@ func joinPlus(ids []string) string {
 	return out
 }
 
+// sliceByID returns the slice with the given id from slices, and whether it
+// was found.
+func sliceByID(slices []store.Slice, id string) (store.Slice, bool) {
+	for _, sl := range slices {
+		if sl.ID == id {
+			return sl, true
+		}
+	}
+	return store.Slice{}, false
+}
+
 // nextStepHint computes the single contextual next-step hint for ticket:
-// an open question takes priority; otherwise, once every slice is green,
-// the hint points at gate (no rounds yet, or a last round that was not
-// clean, whose fix slices are green by now) or publish (last round clean);
-// otherwise it points at run to work the frontier.
+// an open question takes priority; next, a stalled slice points at the
+// command that can actually reset it; otherwise, once every slice is
+// green, the hint points at gate (no rounds yet, or a last round that was
+// not clean, whose fix slices are green by now) or publish (last round
+// clean); otherwise it points at run to work the frontier.
 func nextStepHint(st *store.Store, ticket string) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
@@ -248,23 +316,86 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		return "", err
 	}
 	for _, q := range questions {
-		if q.Status == "open" {
-			return fmt.Sprintf("Run `jig run %s --answer %s \"<text>\"` to answer and resume", ticket, q.ID), nil
+		if q.Status != "open" {
+			continue
 		}
+		ss, err := st.ReadSliceState(ticket, q.Slice)
+		if err != nil {
+			return "", err
+		}
+		sl, ok := sliceByID(slices, q.Slice)
+		if !ok {
+			return "", fmt.Errorf("nextStepHint: question %s names unknown slice %s", q.ID, q.Slice)
+		}
+		// Same resume command as the parked table's "resume" column
+		// (resumeCommand): the hint and the table must never disagree
+		// about how to get unstuck.
+		cmd := resumeCommand(ticket, sl, ss)
+		if ss.Reason == "flawed-brief" && len(sl.FromBrief) > 0 {
+			// The brief must be amended before this command does anything:
+			// run as printed with no amendment, it requeues nothing and the
+			// next status is byte-identical. Say so in that order, the way
+			// the stalled hint below already does.
+			return fmt.Sprintf("Amend the brief, then run `%s` to resume", cmd), nil
+		}
+		return fmt.Sprintf("Run `%s` to answer and resume", cmd), nil
 	}
 
 	if len(slices) == 0 {
 		return intakeHint(ticket), nil
 	}
-	allGreen := true
+	states := make(map[string]store.SliceState, len(slices))
 	for _, sl := range slices {
 		ss, err := st.ReadSliceState(ticket, sl.ID)
 		if err != nil {
 			return "", err
 		}
-		if ss.State != "green" {
+		states[sl.ID] = ss
+	}
+
+	// A stalled slice outranks every hint below except an open question
+	// (checked above), and env-blocked in turn outranks everything but
+	// stalled (matching the state: line's own precedence in RenderStatus):
+	// both are stuck, not merely unfinished, so the worse of the two is
+	// reported the moment it is found rather than waited out - checked in
+	// two full passes, not one combined pass, so a stalled slice later in
+	// slices.yaml still outranks an env-blocked one earlier in it. The
+	// --from-brief-diff remedy only ever works for a stalled slice with a
+	// brief section to amend (FromBrief non-empty); a fix slice from a gate
+	// round has none, and it can never touch it, so that slice's only way
+	// out is `jig requeue --slice`, the same command an env-blocked slice
+	// resumes with once its env is back up.
+	for _, sl := range slices {
+		ss := states[sl.ID]
+		if ss.State != "stalled" {
+			continue
+		}
+		if len(sl.FromBrief) > 0 {
+			return fmt.Sprintf(
+				"Slice %s is stalled (%s): amend the brief, then run `jig requeue %s --from-brief-diff`",
+				sl.ID, ss.Reason, ticket,
+			), nil
+		}
+		return fmt.Sprintf(
+			"Slice %s is stalled (%s): run `jig requeue %s --slice %s`",
+			sl.ID, ss.Reason, ticket, sl.ID,
+		), nil
+	}
+	for _, sl := range slices {
+		ss := states[sl.ID]
+		if ss.State != "env-blocked" {
+			continue
+		}
+		return fmt.Sprintf(
+			"Slice %s is env-blocked (%s): bring the env up, then run `jig requeue %s --slice %s`",
+			sl.ID, ss.Reason, ticket, sl.ID,
+		), nil
+	}
+
+	allGreen := true
+	for _, sl := range slices {
+		if states[sl.ID].State != "green" {
 			allGreen = false
-			break
 		}
 	}
 
