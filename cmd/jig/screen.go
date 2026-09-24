@@ -42,9 +42,9 @@ func cmdScreen(stdin io.Reader, stdout io.Writer) int {
 // runScreen does the actual work of cmdScreen, factored out so tests can
 // drive it directly against in-memory readers/writers. A denied call gets a
 // deny decision. A passing call to a tool in screen.Granted gets an allow
-// decision, which is that tool's only grant in a headless session; any
-// other passing call gets no decision, leaving it to the session's
-// permission rules (docs/adr/0008-headless-permission-model.md).
+// decision, which is jig's own only grant for that tool in a headless
+// session; any other passing call gets no decision, leaving it to the
+// session's permission rules (docs/adr/0008-headless-permission-model.md).
 func runScreen(stdin io.Reader, stdout io.Writer) {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
@@ -53,9 +53,12 @@ func runScreen(stdin io.Reader, stdout io.Writer) {
 
 	var call screenHookInput
 	if err := json.Unmarshal(data, &call); err != nil {
-		// Malformed hook input gets no decision. That fails closed for
-		// every tool screen.Granted covers, since only this hook's allow
-		// grants them; an edit tool still falls to the session's
+		// Malformed hook input gets no decision: jig itself grants nothing
+		// for a call it cannot even parse. That is not the same as denied
+		// outright - Claude Code's own read-only classifier can still let
+		// part of the shell through with no rule from jig involved, which
+		// is why verifyScreen proves the hook works rather than trusting
+		// this alone; an edit tool still falls to the session's
 		// path-scoped permission rules.
 		return
 	}

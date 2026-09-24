@@ -31,9 +31,12 @@ const jigMainPackage = "github.com/develdeco/jig/cmd/jig"
 var headlessEditTools = []string{"Edit", "Write", "NotebookEdit"}
 
 // headlessBackend drives a local `claude -p` subprocess under jig's
-// fail-closed permission model (docs/adr/0008-headless-permission-model.md).
-// Its hermetic tests run a stub `claude`; the opt-in contract test in
-// headless_live_test.go runs the real CLI against a local mock API.
+// permission model (docs/adr/0008-headless-permission-model.md): `dontAsk`
+// mode denies anything not granted, but granting through the screen is not
+// by itself fail-closed - see verifyScreen for why jig proves the screen
+// before it relies on it. Its hermetic tests run a stub `claude`; the
+// opt-in contract test in headless_live_test.go runs the real CLI against a
+// local mock API.
 type headlessBackend struct {
 	goos         string // runtime.GOOS, injectable so rule paths are testable per OS
 	screenBinary string // Options.ScreenBinary; see hookBinary
@@ -317,8 +320,10 @@ func (b *headlessBackend) args(d Dispatch) (argv []string, cleanup func(), err e
 // grant the edit tools inside the lease worktree and on d.ResultJSON
 // itself, nowhere else. With d.Screen set, a PreToolUse hook runs
 // `<hookBinary> _screen` (exec form, so no shell parses the path) on every
-// tool call, and its allow is the only grant for the screen.Granted tools.
-// Without d.Screen those tools get plain allow rules instead, unscreened.
+// tool call, and its allow is this settings object's only grant for the
+// screen.Granted tools - the operator's own user settings, loaded on top,
+// can still grant more. Without d.Screen those tools get plain allow rules
+// instead, unscreened.
 func (b *headlessBackend) settings(d Dispatch) (string, error) {
 	worktree, err := filepath.Abs(d.Worktree)
 	if err != nil {
@@ -485,13 +490,15 @@ func describeDenials(denials []cliDenial) string {
 }
 
 // leaseMemoryCap bounds the lease's CLAUDE.md as carried into a headless
-// session's system prompt. 64 KiB is generous for hand-written project
-// memory - this repo's own CLAUDE.md/AGENTS.md pair sits under 4 KiB - while
-// keeping one dispatch's request body from growing by megabytes on every
-// call just because a branch happened to carry a huge one; see F10 in
-// docs/adr/0008-headless-permission-model.md's review trail. A lease that
-// genuinely needs more should point the session at a file it reads for
-// itself instead of paying the cost on every dispatch.
+// session's system prompt. Exceeding it fails the dispatch with the
+// LEASE_MEMORY_TOO_LARGE error (see leaseMemory) rather than sending a
+// truncated file or paying an unbounded cost silently. 64 KiB is generous
+// for hand-written project memory - this repo's own CLAUDE.md/AGENTS.md
+// pair sits under 4 KiB - while keeping one dispatch's request body from
+// growing by megabytes on every call just because a branch happened to
+// carry a huge one. A lease that genuinely needs more should point the
+// session at a file it reads for itself instead of paying the cost on
+// every dispatch.
 const leaseMemoryCap = 64 * 1024
 
 // sessionWaitDelay is cmd.WaitDelay: how long a dispatch keeps reading a
@@ -529,11 +536,16 @@ func sessionTimeoutError(bound time.Duration) *axi.Error {
 // filesystem read of "CLAUDE.md" would follow either one into whatever file
 // it names, screen or no screen, since jig would be the one reading it, not
 // a tool call the screen ever sees. Only a regular-file blob (git mode
-// 100644 or 100755) counts. A symlink entry (mode 120000), no CLAUDE.md at
-// HEAD, or a worktree that is not a git repository (or has no commit yet)
-// all mean nothing to append - the same as a lease with no CLAUDE.md at
-// all, not an error. An oversized blob is the one case that is an error:
-// refusing loudly beats silently sending a truncated or absent memory file.
+// 100644 or 100755) counts, matched by the exact name "CLAUDE.md" - git's
+// own pathspec is case-sensitive on every platform, so a committed
+// "claude.md" is not found even on a case-insensitive filesystem. A symlink
+// entry (mode 120000), no CLAUDE.md at HEAD, or a worktree that is not a
+// git repository (or has no commit yet) all mean nothing to append - the
+// same as a lease with no CLAUDE.md at all, not an error; headTreeEntry
+// folds a transient git failure into the same silent skip. An oversized
+// blob refuses the dispatch outright (LEASE_MEMORY_TOO_LARGE): refusing
+// loudly beats silently sending a truncated or absent memory file. Reading
+// or writing the temp file can also fail, and is reported as an error too.
 func leaseMemory(worktree string) (path string, cleanup func(), err error) {
 	noop := func() {}
 	mode, hash, size, ok := headTreeEntry(worktree, "CLAUDE.md")

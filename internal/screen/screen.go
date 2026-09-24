@@ -420,9 +420,11 @@ func Command(cmd string) (string, bool) {
 // strings) - missing, or present as a list where a string is expected, a
 // number, an object or null, denies the call outright: a screen that
 // cannot read an argument cannot judge it, and granting by default on an
-// unreadable argument is the fail-open gap this closes. Every path-like
-// argument of the tool, plus the legacy key names, is then checked against
-// SecretPath. It returns ("", true) when allowed, or (reason, false) when
+// unreadable argument is the fail-open gap this closes. unreadablePath is
+// not only for the required key: every path-like argument of the tool,
+// plus the legacy key names, gets the same unreadable-type check before it
+// is checked against SecretPath and, resolved against the filesystem,
+// secretTarget. It returns ("", true) when allowed, or (reason, false) when
 // denied. An extra key the tool sends that the screen has no rule for
 // (a benign one, such as Bash's "description") is not inspected and does
 // not affect the decision.
@@ -523,12 +525,16 @@ func stringValues(v any) []string {
 	return nil
 }
 
-// Granted lists the tools a passing screen grants outright: a headless
-// session reaches its shell and file-read tools only through the screen
-// hook's "allow", so a hook that never runs grants nothing and those tools
-// stay denied (docs/adr/0008-headless-permission-model.md). File-edit tools
-// are deliberately absent: the headless backend grants them through
-// path-scoped permission rules, and the screen only ever denies them.
+// Granted lists the tools a passing screen grants outright: jig's own
+// settings grant a headless session's shell and file-read tools only
+// through the screen hook's "allow" (docs/adr/0008-headless-permission-model.md).
+// A hook that never runs gets no such grant from jig, but that is not the
+// same as denied outright: Claude Code's own read-only classifier still
+// lets part of the shell through with no rule from jig involved, which is
+// why verifyScreen proves the hook before every screened dispatch instead
+// of relying on this grant alone. File-edit tools are deliberately absent:
+// the headless backend grants them through path-scoped permission rules,
+// and the screen only ever denies them.
 var Granted = []string{"Bash", "Read", "Glob", "Grep"}
 
 // Grants reports whether a passing screen is tool's grant, i.e. whether
