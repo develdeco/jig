@@ -18,8 +18,8 @@ import (
 // jigHookBin is the once-built path to a real cmd/jig binary, shared by
 // every test in this file. TestScreenHookBinary* drive it as a subprocess
 // fed a JSON payload on stdin exactly as Claude Code's PreToolUse hook
-// does, so round-3's F4 fix is proven against the actual `jig _screen`
-// production binary, not only the in-process runScreen call
+// does, so the unreadable-input deny fix is proven against the actual
+// `jig _screen` production binary, not only the in-process runScreen call
 // TestScreenDenyAllow and TestScreenDeniesUnreadableInput already cover.
 var (
 	jigHookBinOnce sync.Once
@@ -76,11 +76,12 @@ func runJigScreenHook(t *testing.T, bin, input string) string {
 	return out.String()
 }
 
-// TestScreenHookBinaryF4Payloads drives the real, compiled `jig _screen`
-// binary - not runScreen in-process - with the exact payloads round 3
-// found allowed (attack.md/refute.md F4): a known tool whose required
-// argument is missing or wrong-typed must come back denied.
-func TestScreenHookBinaryF4Payloads(t *testing.T) {
+// TestScreenHookBinaryDeniesUnreadableInput drives the real, compiled
+// `jig _screen` binary - not runScreen in-process - with payload shapes an
+// adversarial review found allowed: a known tool whose required argument
+// is missing, sent under the wrong key, or sent with a type SecretPath
+// cannot read must come back denied.
+func TestScreenHookBinaryDeniesUnreadableInput(t *testing.T) {
 	bin := builtJigHookBinary(t)
 	cases := []struct {
 		name     string

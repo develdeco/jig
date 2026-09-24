@@ -312,13 +312,13 @@ func TestToolPathArgsCoverTheGrantedSurface(t *testing.T) {
 	}
 }
 
-// TestToolCallDeniesUnreadableInput pins round-3's F4: a known tool whose
-// required argument is missing, or whose command or path argument is
-// present with a type SecretPath cannot read, is denied rather than let
-// through on a guess - a call the screen cannot read cannot be judged.
-// These include the exact payloads round 3 found allowed against the real
-// hook binary; cmd/jig's TestScreenDenyAllow drives the same shapes
-// through the hook end to end.
+// TestToolCallDeniesUnreadableInput pins a fix from an earlier adversarial
+// review: a known tool whose required argument is missing, or whose
+// command or path argument is present with a type SecretPath cannot read,
+// is denied rather than let through on a guess - a call the screen cannot
+// read cannot be judged. These include the exact payloads that review
+// found allowed against the real hook binary; cmd/jig's TestScreenDenyAllow
+// drives the same shapes through the hook end to end.
 func TestToolCallDeniesUnreadableInput(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -362,11 +362,11 @@ func TestToolCallDeniesUnreadableInput(t *testing.T) {
 	}
 }
 
-// TestToolCallAllowsOptionalArgsAndUnknownKeys pins the other side of F4:
-// an argument that is genuinely optional (Grep's glob and path, Glob's
-// path) may be absent, and a key the screen has no rule for - an extra one
-// the CLI adds, such as Bash's "description" - is not inspected and does
-// not affect the decision.
+// TestToolCallAllowsOptionalArgsAndUnknownKeys pins the other side of the
+// unreadable-input fix: an argument that is genuinely optional (Grep's
+// glob and path, Glob's path) may be absent, and a key the screen has no
+// rule for - an extra one the CLI adds, such as Bash's "description" - is
+// not inspected and does not affect the decision.
 func TestToolCallAllowsOptionalArgsAndUnknownKeys(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -387,8 +387,9 @@ func TestToolCallAllowsOptionalArgsAndUnknownKeys(t *testing.T) {
 	}
 }
 
-// TestSecretTargetSkipsNetworkAndDevicePaths pins round-3's F6/B3: a UNC
-// share or a device path is judged by its literal spelling only.
+// TestSecretTargetSkipsNetworkAndDevicePaths pins a fix from an earlier
+// adversarial review: a UNC share or a device path is judged by its
+// literal spelling only.
 // Resolving it (Abs/EvalSymlinks) can dial a remote host - 192.0.2.1 is a
 // TEST-NET-1 address, reserved and unroutable, and a live resolution
 // attempt against it was measured at about 21 seconds - so secretTarget
@@ -437,11 +438,10 @@ func TestUNCCredentialPathJudgedBySpellingNotResolution(t *testing.T) {
 }
 
 // TestCommandBashResolvesSymlinks pins the Bash side of "judge where a
-// path lands" (round-3 F8/M5): a token in a shell command that is a
-// symlink pointing into a credential directory is denied by where it
-// resolves, not only a tool's file_path/path argument. Removing
-// `|| secretTarget(tok)` from Command leaves this the only failure in the
-// suite.
+// path lands": a token in a shell command that is a symlink pointing into
+// a credential directory is denied by where it resolves, not only a
+// tool's file_path/path argument. Removing `|| secretTarget(tok)` from
+// Command leaves this the only failure in the suite.
 func TestCommandBashResolvesSymlinks(t *testing.T) {
 	creds := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(creds, ".aws"), 0o755); err != nil {
@@ -465,12 +465,12 @@ func TestCommandBashResolvesSymlinks(t *testing.T) {
 	}
 }
 
-// TestCredentialFiles pins round-3's F9: the credential stores the
-// denylist still missed, most pointedly the two tools jig itself drives -
-// git's own push token and the credential cache of the CLI the session
-// runs in - plus, beside each one, a near-miss that must stay allowed: an
-// ordinary file is not a credential store just because it shares a
-// directory with one.
+// TestCredentialFiles pins a fix from an earlier adversarial review: the
+// credential stores the denylist still missed, most pointedly the two
+// tools jig itself drives - git's own push token and the credential cache
+// of the CLI the session runs in - plus, beside each one, a near-miss that
+// must stay allowed: an ordinary file is not a credential store just
+// because it shares a directory with one.
 func TestCredentialFiles(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -517,20 +517,54 @@ func TestCredentialFiles(t *testing.T) {
 	}
 }
 
-// TestExportedSurface pins round-3's N1: SecretTarget was exported but had
-// no caller outside this package, while ARCHITECTURE.md's screen row lists
-// exact entry points. This parses the package's own non-test source and
-// fails if it exports anything outside the list below - SecretTarget
-// coming back included - so a doc/code mismatch is caught here instead of
-// by a reviewer. Update both this list and the ARCHITECTURE.md row
-// together if the package's public surface is meant to change.
+// architectureScreenRow parses this package's row from ARCHITECTURE.md's
+// "## Module responsibilities" table and returns its Entry points cell,
+// split into names. It is the doc's own claim about this package's
+// surface, read fresh on every run rather than copied into a second list a
+// future edit could update on only one side.
+func architectureScreenRow(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "ARCHITECTURE.md"))
+	if err != nil {
+		t.Fatalf("read ARCHITECTURE.md: %v", err)
+	}
+	const prefix = "| `internal/screen/` |"
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		cells := strings.Split(line, "|")
+		if len(cells) < 3 {
+			t.Fatalf("ARCHITECTURE.md: internal/screen row has too few columns: %q", line)
+		}
+		var names []string
+		for _, tok := range strings.Split(cells[2], ",") {
+			if name := strings.Trim(strings.TrimSpace(tok), "`"); name != "" {
+				names = append(names, name)
+			}
+		}
+		if len(names) == 0 {
+			t.Fatalf("ARCHITECTURE.md: internal/screen row's entry points cell is empty: %q", line)
+		}
+		return names
+	}
+	t.Fatalf("ARCHITECTURE.md: no internal/screen row in the Module responsibilities table")
+	return nil
+}
+
+// TestExportedSurface pins a fix from an earlier adversarial review:
+// SecretTarget was exported but had no caller outside this package. It
+// parses the package's own non-test source and ARCHITECTURE.md's
+// internal/screen row (architectureScreenRow), and fails if the two
+// disagree in either direction - an export the row
+// does not list, or a listed name the package no longer exports - so a
+// doc/code mismatch is caught here instead of by a reviewer. There is
+// deliberately no second, hand-written list to keep in step: the row is
+// the one source both sides are checked against.
 func TestExportedSurface(t *testing.T) {
-	want := map[string]bool{
-		"Command":    true,
-		"SecretPath": true,
-		"ToolCall":   true,
-		"Granted":    true,
-		"Grants":     true,
+	want := map[string]bool{}
+	for _, name := range architectureScreenRow(t) {
+		want[name] = true
 	}
 
 	fset := token.NewFileSet()

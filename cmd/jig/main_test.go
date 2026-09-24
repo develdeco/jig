@@ -174,10 +174,11 @@ func TestScreenDenyAllow(t *testing.T) {
 
 // TestScreenDeniesUnreadableInput drives the _screen hook handler - the
 // same runScreen the real `jig _screen` binary runs on its stdin/stdout -
-// with the exact payloads round 3 found allowed (attack.md F4 / refute.md
-// F4, gate-reviewer-rework/review/pr11-round3): a known tool whose
-// required argument is missing or wrong-typed must get a deny decision
-// instead of silently falling through to the session's permission rules.
+// with payload shapes an adversarial review found allowed: a known tool
+// whose required argument is missing, sent under the wrong key, or sent
+// with a type SecretPath cannot read (a list instead of a string, and the
+// like) must get a deny decision instead of silently falling through to
+// the session's permission rules.
 func TestScreenDeniesUnreadableInput(t *testing.T) {
 	cases := []struct {
 		name  string

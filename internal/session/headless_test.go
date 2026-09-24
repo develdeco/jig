@@ -535,10 +535,11 @@ func TestHeadlessTimeoutParsing(t *testing.T) {
 
 // TestSessionTimeoutMessageStatesTheDrain pins the SESSION_TIMEOUT message's
 // honesty: it must name both the bound jig enforced and the WaitDelay drain
-// that can run past it, not just the bound alone. A 3s bound can return at
-// just over 13s (see TestHeadlessTimeoutEndsAWedgedSession's "a child
-// outlives the CLI" case), and a message that only says "3s" reads as a bug
-// report waiting to happen.
+// that can run past it, not just the bound alone. In
+// TestHeadlessTimeoutEndsAWedgedSession's "a child outlives the CLI" case
+// the stub exits right away and the WaitDelay timer starts at that exit, so
+// Run returns at about 10s regardless of the 3s bound, and a message that
+// only says "3s" reads as a bug report waiting to happen.
 func TestSessionTimeoutMessageStatesTheDrain(t *testing.T) {
 	err := sessionTimeoutError(3 * time.Second)
 	if err.Code != "SESSION_TIMEOUT" {
