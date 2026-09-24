@@ -1,6 +1,8 @@
 package screen
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -224,6 +226,84 @@ func TestGrants(t *testing.T) {
 	for _, tool := range []string{"Edit", "Write", "NotebookEdit", "PowerShell", "WebFetch", "Task", "Skill", "mcp__x__y", ""} {
 		if Grants(tool) {
 			t.Errorf("Grants(%q) = true, want false", tool)
+		}
+	}
+}
+
+// TestCredentialDirectories pins that a credential location is denied
+// however it is spelled: a directory as much as a file under it, with or
+// without a trailing separator, since a tool given a search root reads
+// everything beneath it.
+func TestCredentialDirectories(t *testing.T) {
+	denied := []string{
+		"/home/op/.ssh", "/home/op/.ssh/", "/home/op/.ssh/id_ed25519",
+		"~/.aws", `C:\Users\op\.aws`, `C:\Users\op\.aws\credentials`,
+		"/home/op/.config/gh", "/home/op/.gnupg", "/home/op/.kube/config",
+		"/home/op/.docker/config.json",
+	}
+	for _, p := range denied {
+		if !SecretPath(p) {
+			t.Errorf("SecretPath(%q) = false, want true", p)
+		}
+	}
+	allowed := []string{
+		"/home/op/project/src/main.go", "alpha/alpha.go", "./README.md",
+		"/home/op/.config/jig/project.yaml", "/home/op/sshfs/notes.txt",
+	}
+	for _, p := range allowed {
+		if SecretPath(p) {
+			t.Errorf("SecretPath(%q) = true, want false", p)
+		}
+	}
+}
+
+// TestSecretTargetResolvesSymlinks pins that the screen decides on what a
+// call would open, not on how the path is written: a link inside the lease
+// pointing at a credential directory is denied by where it lands.
+func TestSecretTargetResolvesSymlinks(t *testing.T) {
+	home := t.TempDir()
+	creds := filepath.Join(home, ".aws")
+	if err := os.MkdirAll(creds, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(creds, "credentials"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lease := t.TempDir()
+	link := filepath.Join(lease, "vendor")
+	if err := os.Symlink(creds, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	through := filepath.Join(link, "credentials")
+	if SecretPath(through) {
+		t.Fatalf("this case is only meaningful when the literal path looks innocent: %q", through)
+	}
+	if !SecretTarget(through) {
+		t.Errorf("SecretTarget(%q) = false, want true: it resolves into a credential directory", through)
+	}
+	if _, ok := ToolCall("Read", map[string]any{"file_path": through}); ok {
+		t.Error("ToolCall(Read) through a symlink into .aws was allowed")
+	}
+	if _, ok := ToolCall("Grep", map[string]any{"pattern": "x", "path": link}); ok {
+		t.Error("ToolCall(Grep) rooted at a symlink into .aws was allowed")
+	}
+	ordinary := filepath.Join(lease, "src")
+	if err := os.MkdirAll(ordinary, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ToolCall("Grep", map[string]any{"pattern": "x", "path": ordinary}); !ok {
+		t.Error("an ordinary in-lease directory was denied")
+	}
+}
+
+// TestToolPathArgsCoverTheGrantedSurface pins that every tool a headless
+// session is given has an entry here, so adding one to the surface without
+// telling the screen how it names files fails loudly rather than silently.
+func TestToolPathArgsCoverTheGrantedSurface(t *testing.T) {
+	for _, tool := range append(append([]string{}, Granted...), "Edit", "Write", "NotebookEdit") {
+		if _, ok := toolPathArgs[tool]; !ok {
+			t.Errorf("tool %q is in the session's surface but has no toolPathArgs entry", tool)
 		}
 	}
 }

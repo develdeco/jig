@@ -473,21 +473,166 @@ func TestHeadlessScreenProbeRefusesABrokenHook(t *testing.T) {
 	}
 }
 
-// TestHeadlessTimeoutBound pins that a session runs under a deadline and
-// that JIG_HEADLESS_TIMEOUT sets it, so a hung CLI or hook cannot wedge an
-// unattended run forever.
-func TestHeadlessTimeoutBound(t *testing.T) {
-	if got := headlessTimeout(); got != defaultHeadlessTimeout {
-		t.Errorf("headlessTimeout() = %v, want the default %v", got, defaultHeadlessTimeout)
+// realDispatch returns a dispatch whose worktree and work directory exist,
+// for the tests that actually start the stub CLI. The directories are not
+// t.TempDir's: a case that deliberately leaves a child running would fail
+// the test on cleanup, and what that case is about is jig returning inside
+// its bound, not the orphan's lifetime.
+func realDispatch(t *testing.T, screen bool) Dispatch {
+	t.Helper()
+	root, err := os.MkdirTemp("", "jig-headless-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	worktree := filepath.Join(root, "lease")
+	work := filepath.Join(root, "store", "T-1", "work")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return Dispatch{
+		Ticket:     "T-1",
+		Slice:      "a",
+		Attempt:    1,
+		Worktree:   worktree,
+		SliceJSON:  filepath.Join(work, "a.attempt-1.slice.json"),
+		ResultJSON: filepath.Join(work, "a.attempt-1.result.json"),
+		Model:      "claude-haiku-4-5",
+		Prompt:     "do the slice",
+		Screen:     screen,
+	}
+}
+
+// TestHeadlessTimeoutParsing pins how the bound is read: the default when
+// unset, the operator's value when it parses, and a loud refusal when it
+// does not, since silently falling back to 90 minutes would only show up as
+// a wait.
+func TestHeadlessTimeoutParsing(t *testing.T) {
+	got, err := headlessTimeout()
+	if err != nil || got != defaultHeadlessTimeout {
+		t.Errorf("headlessTimeout() = %v, %v, want the default and no error", got, err)
 	}
 	t.Setenv("JIG_HEADLESS_TIMEOUT", "45m")
-	if got := headlessTimeout(); got != 45*time.Minute {
-		t.Errorf("headlessTimeout() with an override = %v, want 45m", got)
+	if got, err := headlessTimeout(); err != nil || got != 45*time.Minute {
+		t.Errorf("headlessTimeout() with an override = %v, %v, want 45m", got, err)
 	}
-	for _, bad := range []string{"nonsense", "-5m", "0"} {
+	for _, bad := range []string{"nonsense", "-5m", "0", "90"} {
 		t.Setenv("JIG_HEADLESS_TIMEOUT", bad)
-		if got := headlessTimeout(); got != defaultHeadlessTimeout {
-			t.Errorf("headlessTimeout() with %q = %v, want the default", bad, got)
+		got, err := headlessTimeout()
+		var ax *axi.Error
+		if !errors.As(err, &ax) || ax.Code != "BAD_TIMEOUT" {
+			t.Errorf("headlessTimeout() with %q = %v, %v, want a BAD_TIMEOUT error", bad, got, err)
+		}
+	}
+}
+
+// TestHeadlessTimeoutEndsAWedgedSession drives the bound itself, which is
+// the part that has to hold: a CLI that stops making progress, and one that
+// stops while a child it started keeps running and keeps jig's pipes open.
+// Both must return inside the bound rather than hanging the dispatch.
+func TestHeadlessTimeoutEndsAWedgedSession(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+	}{
+		{"the CLI wedges", map[string]string{"CLAUDE_STUB_HANG": "90s"}},
+		{"a child outlives the CLI", map[string]string{"CLAUDE_STUB_CHILD_HANG": "90s"}},
+		{"both wedge", map[string]string{"CLAUDE_STUB_HANG": "90s", "CLAUDE_STUB_CHILD_HANG": "90s"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			stubDir := buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude")
+			t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			for _, k := range []string{"CLAUDE_STUB_LOG", "CLAUDE_STUB_WRITE_PATH", "CLAUDE_STUB_WRITE_BODY", "CLAUDE_STUB_STDOUT", "CLAUDE_STUB_STDERR", "CLAUDE_STUB_EXIT", "CLAUDE_STUB_HANG", "CLAUDE_STUB_CHILD_HANG"} {
+				t.Setenv(k, c.env[k])
+			}
+			t.Setenv("JIG_HEADLESS_TIMEOUT", "3s")
+
+			b := &headlessBackend{goos: runtime.GOOS, screenBinary: builtJigBinary(t)}
+			start := time.Now()
+			err := b.Run(realDispatch(t, true))
+			elapsed := time.Since(start)
+
+			var ax *axi.Error
+			if !errors.As(err, &ax) || ax.Code != "SESSION_TIMEOUT" {
+				t.Fatalf("Run = %v after %v, want a SESSION_TIMEOUT error", err, elapsed)
+			}
+			if elapsed > 30*time.Second {
+				t.Errorf("Run returned after %v, well past the 3s bound: the bound does not bound the call", elapsed)
+			}
+			// A child the CLI leaves behind after exiting normally is not
+			// jig's to kill on every OS; what must hold is that jig stops
+			// waiting on it, which the elapsed check above pins.
+		})
+	}
+}
+
+// TestHeadlessTimeoutKeepsFinishedWork pins that a session which wrote its
+// result is honored even if the process then had to be stopped: the disk
+// contract is what decides, not how the process ended.
+func TestHeadlessTimeoutKeepsFinishedWork(t *testing.T) {
+	stubDir := buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude")
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	work := filepath.Join(t.TempDir(), "T-1", "work")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result := filepath.Join(work, "a.attempt-1.result.json")
+	for _, k := range []string{"CLAUDE_STUB_LOG", "CLAUDE_STUB_STDOUT", "CLAUDE_STUB_STDERR", "CLAUDE_STUB_EXIT", "CLAUDE_STUB_CHILD_HANG"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("CLAUDE_STUB_WRITE_PATH", result)
+	t.Setenv("CLAUDE_STUB_WRITE_BODY", `{"outcome":"green","summary":"finished before the bound"}`)
+	t.Setenv("CLAUDE_STUB_HANG", "90s")
+	t.Setenv("JIG_HEADLESS_TIMEOUT", "3s")
+
+	d := realDispatch(t, true)
+	d.ResultJSON = result
+	b := &headlessBackend{goos: runtime.GOOS, screenBinary: builtJigBinary(t)}
+	if err := b.Run(d); err != nil {
+		t.Fatalf("Run = %v, want the written result to be honored", err)
+	}
+}
+
+// TestHeadlessCarriesTheLeaseMemory pins that the lease's CLAUDE.md still
+// reaches the session. Dropping the project setting source keeps the code
+// under review from registering hooks or widening permissions, and it also
+// drops that file from the CLI's own discovery, so jig passes it itself.
+func TestHeadlessCarriesTheLeaseMemory(t *testing.T) {
+	b := &headlessBackend{goos: "linux", screenBinary: "/opt/jig/bin/jig"}
+
+	d := realDispatch(t, true)
+	args, err := b.args(d)
+	if err != nil {
+		t.Fatalf("args: %v", err)
+	}
+	if strings.Contains(strings.Join(args, " "), "--append-system-prompt-file") {
+		t.Errorf("args carry a memory file when the lease has none:\n%q", args)
+	}
+
+	memory := filepath.Join(d.Worktree, "CLAUDE.md")
+	if err := os.WriteFile(memory, []byte("# conventions\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args, err = b.args(d)
+	if err != nil {
+		t.Fatalf("args: %v", err)
+	}
+	var found bool
+	for i, a := range args {
+		if a == "--append-system-prompt-file" && i+1 < len(args) && args[i+1] == memory {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("args do not carry the lease's CLAUDE.md:\n%q", args)
+	}
+	for i, a := range args {
+		if a == "--setting-sources" && (i+1 >= len(args) || args[i+1] != "user") {
+			t.Errorf("args do not keep the lease's own settings out:\n%q", args)
 		}
 	}
 }

@@ -133,23 +133,28 @@ its own yet (see Roadmap).
 The `headless` backend is wrapped by two screens before a tool call runs: a
 structural command screen that parses each shell command instead of
 pattern-matching it, so quoting or a `-C <path>` trick can't hide a `git
-push` from it, and a secret-path screen that denies any tool-call path
-shaped like a live credential (`.env*`, `*_key*`, `id_rsa*`, `~/.aws/**`, and
-the like). A `headless` session gets nothing it doesn't need: its shell and
-file reads are granted only by a passing screen, its file edits are confined
-to the lease and its own `result.json`, and the lease's own
-`.claude/settings.json` is not loaded, since that file is part of the code
-under review. Before each screened session starts, jig checks that the
-screen still answers, and refuses to run one behind a screen that is
-missing or broken. The shell is not confined to the lease, and neither are
-its file reads: what limits those is the credential screen. `herdr` sessions are not screened yet. Every command
-pushes the ticket store's own bookkeeping commits to the store's remote as
-it works; only the ticket branch push is guarded, and only `jig publish`
-makes it, after its interactive confirm (or `--yes`) has run - it refuses to
-push a branch to a remote that isn't a local file path without one. Product
-commits - the ones that land on your PR branch - use your own git identity,
-not jig's. See [ARCHITECTURE.md](ARCHITECTURE.md#safety) for the full
-model.
+push` from it, and a secret-path screen that denies a tool call naming a
+live credential (`.env*`, `*_key*`, `id_rsa*`, `~/.aws/**`, `~/.ssh/**`, and
+the like), judged by where the path resolves rather than how it is spelled.
+A `headless` session gets nothing it doesn't need: its shell and file reads
+are granted only by a passing screen, and its file edits are confined to the
+lease and its own `result.json`. The lease's `.claude/settings.json` is not
+loaded, since that file is part of the code under review, while its
+`CLAUDE.md` is carried in, since that is the repo telling the session how it
+works. Before each screened session starts, jig checks that the screen still
+answers, and refuses to run one behind a screen that is missing or broken. A
+session is bounded in time, so a wedged one fails instead of hanging. The
+shell is not confined to the lease, and neither are its file reads: what
+limits those is the credential screen. `herdr` sessions are not screened
+yet.
+
+Every command pushes the ticket store's own bookkeeping commits to the
+store's remote as it works; only the ticket branch push is guarded, and only
+`jig publish` makes it, after its interactive confirm (or `--yes`) has run -
+it refuses to push a branch to a remote that isn't a local file path without
+one. Product commits - the ones that land on your PR branch - use your own
+git identity, not jig's. See [ARCHITECTURE.md](ARCHITECTURE.md#safety) for
+the full model.
 
 ## Docs
 

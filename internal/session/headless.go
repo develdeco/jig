@@ -57,14 +57,23 @@ func (b *headlessBackend) hookBinary() (string, error) {
 const defaultHeadlessTimeout = 90 * time.Minute
 
 // headlessTimeout is defaultHeadlessTimeout, or the Go duration in
-// JIG_HEADLESS_TIMEOUT when that parses to a positive value.
-func headlessTimeout() time.Duration {
-	if raw := os.Getenv("JIG_HEADLESS_TIMEOUT"); raw != "" {
-		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
-			return d
+// JIG_HEADLESS_TIMEOUT. A value that does not parse, or is not positive, is
+// refused rather than ignored: an operator who set a bound and got the
+// default silently would only find out by waiting for it.
+func headlessTimeout() (time.Duration, error) {
+	raw := os.Getenv("JIG_HEADLESS_TIMEOUT")
+	if raw == "" {
+		return defaultHeadlessTimeout, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 0, &axi.Error{
+			Msg:  fmt.Sprintf("JIG_HEADLESS_TIMEOUT is %q, which is not a positive Go duration", raw),
+			Code: "BAD_TIMEOUT",
+			Help: []string{"Set it to a duration such as 45m or 3h, or unset it for the default."},
 		}
 	}
-	return defaultHeadlessTimeout
+	return d, nil
 }
 
 // screenProbe is the tool call verifyScreen sends the hook: a push, which
@@ -192,24 +201,39 @@ func (b *headlessBackend) Run(d Dispatch) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), headlessTimeout())
+	bound, err := headlessTimeout()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 	cmd.Dir = d.Worktree
+	newProcessGroup(cmd)
+	// A session spawns children - a shell per Bash call, a test runner,
+	// whatever those start - and they inherit these pipes. Killing the CLI
+	// alone would leave Wait blocked on a pipe a surviving grandchild still
+	// holds, so the bound would not bound anything: Cancel ends the whole
+	// tree, and WaitDelay stops waiting on the pipes regardless.
+	cmd.Cancel = func() error { return killTree(cmd) }
+	cmd.WaitDelay = 10 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
-	if ctx.Err() != nil {
-		return &axi.Error{
-			Msg:  fmt.Sprintf("the headless session did not finish within %s and was stopped", headlessTimeout()),
-			Code: "SESSION_TIMEOUT",
-			Help: []string{"Raise the bound with JIG_HEADLESS_TIMEOUT (a Go duration, e.g. 3h), or rerun."},
-		}
-	}
 
+	// A session that wrote its result honored the disk contract, whatever
+	// happened to the process afterwards - including a timeout while it was
+	// shutting down - so the result is read before the bound is reported.
 	if _, err := os.Stat(d.ResultJSON); err == nil {
 		return nil
+	}
+	if ctx.Err() != nil {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("the headless session did not finish within %s and was stopped, with no result written", bound),
+			Code: "SESSION_TIMEOUT",
+			Help: []string{fmt.Sprintf("Raise the bound with JIG_HEADLESS_TIMEOUT (a Go duration, currently %s), or rerun.", bound)},
+		}
 	}
 
 	res, ok := parseCLIResult(stdout.Bytes())
@@ -258,6 +282,18 @@ func (b *headlessBackend) args(d Dispatch) ([]string, error) {
 		// `.claude/settings.local.json` could grant edits outside the
 		// lease.
 		"--setting-sources", "user",
+	)
+	// Dropping the project source also drops the lease's CLAUDE.md, which
+	// the CLI discovers through it, so jig carries that file itself. The
+	// distinction is capability against instructions: a settings file grants
+	// what a session may do and must not come from the code under review,
+	// while CLAUDE.md only tells the session how this repo works, which is
+	// the repo's job. Imports inside it are not resolved, since this passes
+	// the file's own text.
+	if memory := filepath.Join(d.Worktree, "CLAUDE.md"); fileExists(memory) {
+		args = append(args, "--append-system-prompt-file", memory)
+	}
+	args = append(args,
 		"--settings", settings,
 		"--", d.Prompt,
 	)
@@ -433,4 +469,10 @@ func describeDenials(denials []cliDenial) string {
 		parts = append(parts, part)
 	}
 	return "denied tool calls: " + strings.Join(parts, ", ")
+}
+
+// fileExists reports whether path names an existing regular file.
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
 }

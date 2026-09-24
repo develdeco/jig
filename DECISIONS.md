@@ -119,6 +119,26 @@ was ambiguous, what was chosen, and why.
   still allows `echo`, `ls`, `git show` and the like, so a missing, failing, silent or
   wrong-answering hook would otherwise leave a session reading the machine with nothing
   saying the screen was gone. The probe binds the start of a session, not its whole life.
+- The credential screen judges where a path resolves, not how it is spelled: a symlink
+  in the lease pointing at `~/.aws` and a search root that is a credential directory
+  rather than a file are the same read by another name. A credential directory counts
+  as much as a file in it, since a tool given a root reads everything under it. What
+  this is not is confinement: a content search over an ordinary directory holding a
+  `.env` still returns it, and only a sandbox would change that.
+- The lease's `CLAUDE.md` is passed with `--append-system-prompt-file`, because dropping
+  the project setting source drops that file too (checked against the installed CLI: the
+  marker appears without the flag and disappears with it). Capability and instructions
+  part company here - a settings file says what a session may do and must not come from
+  the code under review, while `CLAUDE.md` says how the repo works, which is the repo's
+  to say. Imports inside it are not resolved.
+- The session's bound kills the process tree and sets `WaitDelay`, because killing the
+  CLI alone left `Wait` blocked on pipes a surviving grandchild still held: the bound
+  did not bound the call. A child the CLI leaves behind after exiting normally still
+  outlives it on Windows; what jig guarantees is that it stops waiting.
+- A session that wrote its result before the bound is honored, since the disk contract
+  is what decides an attempt, not how the process ended.
+- A `JIG_HEADLESS_TIMEOUT` that does not parse is refused rather than ignored: an
+  operator who set a bound and silently got the default would find out by waiting.
 - The screen takes a tool's file-selecting arguments from the tool, not from one shared
   key list: `Grep` filters with `glob` and `Glob` selects with `pattern`, and a
   credential named in either came back in full while a `Read` of the same path was

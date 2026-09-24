@@ -152,8 +152,15 @@ push from the screen the way they can from a regex.
 
 **Secret-read screen.** `screen.SecretPath` denies any tool-call path shaped
 like a live credential - `.env*`, `*_key*`, `id_rsa*`, `*.pem`,
-`~/.aws/**`, `~/.config/gh/**` - checked against every path-like argument of
-every tool call, not just git's.
+`~/.aws/**`, `~/.config/gh/**`, `~/.ssh/**`, `.netrc`, `.npmrc` - checked
+against the arguments each tool names files with, which the screen takes
+from the tool itself rather than from one shared key list, and against what
+those arguments resolve to on disk, so a symlink in the lease pointing at a
+credential directory is denied by where it lands. A credential directory
+counts as much as a file inside it, since a tool given a search root reads
+everything under it. What this does not do is confine a session: a content
+search over an ordinary directory that happens to hold a credential file
+still returns it.
 
 **Headless permission model.** A `claude -p` session can't be asked
 anything, so the headless backend grants every tool it needs up front and
@@ -174,9 +181,16 @@ skills and MCP servers are left out of the session entirely. Rules and hook
 travel as one inline `--settings` object, and `--setting-sources user`
 keeps the lease's own `.claude/settings.json` out: that file is content
 under review, and loading it would run a hook the ticket branch chose and
-could widen what the session may edit. A session is bounded by
-`JIG_HEADLESS_TIMEOUT` (90 minutes by default), so a wedged CLI or hook
-fails rather than hangs. It is not a sandbox: a granted shell is not
+could widen what the session may edit. That source also carries the lease's
+`CLAUDE.md`, which the repo is meant to have, so jig passes that file itself
+(`--append-system-prompt-file`): a settings file grants capability, while
+`CLAUDE.md` only tells a session how the repo works. A session is bounded by
+`JIG_HEADLESS_TIMEOUT` (90 minutes by default): the bound ends jig's wait
+and kills the session's process tree, so an unattended run fails instead of
+hanging. A child the CLI leaves behind after exiting normally outlives that
+on Windows; jig stops waiting on it either way. A session that wrote its
+result before the bound is honored, since the disk contract is what
+decides. It is not a sandbox: a granted shell is not
 confined to the lease, and neither are `Read`, `Glob` and `Grep`, whose
 only limit is the credential denylist. See
 [ADR 0008](docs/adr/0008-headless-permission-model.md); `JIG_LIVE_CLAUDE=1

@@ -9,6 +9,7 @@ package screen
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -176,10 +177,11 @@ func checkGitArgv(argv []string) (string, bool) {
 // SecretPath reports whether s (a path-like string: a bare path, or one
 // whitespace token of a command) looks like it names a live-credential file.
 // Case-insensitive. Denies when the basename starts with ".env", contains
-// "_key", or starts with "id_rsa"; when the extension is ".pem"; or when the
-// path contains "/.aws/" or "\.aws\" (or has a "~/.aws" prefix), or contains
-// "/.config/gh/" or "\.config\gh\" (or has a "~/.config/gh" prefix); and
-// the same for "/.ssh/", ".netrc", "_netrc" and ".npmrc".
+// "_key", or starts with "id_rsa"; when the extension is ".pem"; when the
+// basename is a ".netrc", "_netrc" or ".npmrc"; or when any segment of the
+// path is a credential directory (credentialDirs: ".aws", ".ssh", ".gnupg",
+// ".config/gh", ".docker", ".kube"). A directory counts as much as a file
+// under it, since a tool given a search root reads everything beneath it.
 //
 // The checks operate on the literal string, so a glob token such as
 // ".env*", "*.pem", "*_key*" or "~/.aws/*" is denied whenever its fixed
@@ -210,16 +212,74 @@ func SecretPath(s string) bool {
 	if strings.Contains(norm, "/.aws/") || strings.HasPrefix(norm, "~/.aws") {
 		return true
 	}
-	if strings.Contains(norm, "/.config/gh/") || strings.HasPrefix(norm, "~/.config/gh") {
-		return true
-	}
-	if strings.Contains(norm, "/.ssh/") || strings.HasPrefix(norm, "~/.ssh") || strings.HasPrefix(norm, ".ssh/") {
-		return true
-	}
 	if strings.HasPrefix(base, ".netrc") || strings.HasPrefix(base, "_netrc") || strings.HasPrefix(base, ".npmrc") {
 		return true
 	}
+	return inCredentialDir(norm)
+}
+
+// credentialDirs are directories whose contents are credentials. A path is
+// denied when it is one of them, is inside one, or would create one: the
+// directory itself is as much a credential location as the files in it,
+// since a tool that takes a directory (a search root, a glob root) reads
+// everything under it.
+var credentialDirs = [][]string{
+	{".aws"},
+	{".ssh"},
+	{".gnupg"},
+	{".config", "gh"},
+	{".docker"},
+	{".kube"},
+}
+
+// inCredentialDir reports whether a slash-normalized, lowercased path has a
+// credential directory among its segments, whatever it is spelled with: a
+// trailing separator or not, "~" or an absolute root, the directory itself
+// or a file under it.
+func inCredentialDir(norm string) bool {
+	segs := strings.Split(strings.Trim(norm, "/"), "/")
+	for _, dir := range credentialDirs {
+		for i := 0; i+len(dir) <= len(segs); i++ {
+			match := true
+			for j, want := range dir {
+				if segs[i+j] != want {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+	}
 	return false
+}
+
+// SecretTarget reports whether p, resolved against the filesystem, names a
+// credential location. SecretPath judges the literal string, which is what
+// a command token or a glob gives it; this judges what a tool call would
+// actually open, so a symlink in the lease pointing at "~/.aws", or a
+// relative path that climbs out of it, is denied by where it lands rather
+// than by how it is written.
+//
+// Resolution is best effort: a path that does not exist yet is judged by
+// its literal form alone, which SecretPath already covers.
+func SecretTarget(p string) bool {
+	if p == "" {
+		return false
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	norm := strings.ToLower(strings.ReplaceAll(abs, "\\", "/"))
+	if inCredentialDir(norm) {
+		return true
+	}
+	return SecretPath(norm)
 }
 
 // secretReason builds a deny reason mentioning the offending token.
@@ -241,7 +301,7 @@ func Command(cmd string) (string, bool) {
 			if tok == "" {
 				continue
 			}
-			if SecretPath(tok) {
+			if SecretPath(tok) || SecretTarget(tok) {
 				return secretReason(tok), false
 			}
 		}
@@ -281,15 +341,37 @@ func ToolCall(tool string, input map[string]any) (string, bool) {
 		if !ok {
 			continue
 		}
-		s, ok := v.(string)
-		if !ok || s == "" {
-			continue
-		}
-		if SecretPath(s) {
-			return secretReason(s), false
+		for _, s := range stringValues(v) {
+			if SecretPath(s) || SecretTarget(s) {
+				return secretReason(s), false
+			}
 		}
 	}
 	return "", true
+}
+
+// stringValues returns v as the strings it holds: the value itself, or the
+// string elements of a list, since a tool may take one path or several
+// under the same key.
+func stringValues(v any) []string {
+	switch t := v.(type) {
+	case string:
+		if t == "" {
+			return nil
+		}
+		return []string{t}
+	case []any:
+		var out []string
+		for _, e := range t {
+			if s, ok := e.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []string:
+		return t
+	}
+	return nil
 }
 
 // Granted lists the tools a passing screen grants outright: a headless
