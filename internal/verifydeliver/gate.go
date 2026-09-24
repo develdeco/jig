@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -20,17 +21,27 @@ import (
 )
 
 // Round is one gate round's content, whether played back by a fake source
-// (tests) or produced by a real reviewer session (a future version).
+// (tests) or produced by a real reviewer session. Review is set only by the
+// reviewer source (review.go): its validated result plus scope data, which
+// Gate applies through findings bookkeeping (findings.go) to decide clean
+// vs fix-slices and to persist findings.yaml/md, then routes into fix
+// slices (route.go) - those are appended directly from routing's own
+// return value, never stored back onto this struct. FixSlices
+// is the scripted source's own field instead: fakeGateSource.Round reads it
+// straight from a scenario's fix-slices.yaml, and Gate appends it unchanged
+// for that source.
 type Round struct {
 	FindingsMD string
 	FixSlices  []store.Slice
 	Receipts   map[string][]byte
+	Review     *Review
 }
 
-// GateSource supplies one gate round's content. Round(n) returns ok=false
-// for a clean round (no round directory, or an empty one).
+// GateSource supplies one gate round's content. Round returns ok=false for
+// a clean round (no round directory, or an empty one, for the scripted
+// source; findings bookkeeping decides this for the reviewer source).
 type GateSource interface {
-	Round(n int) (Round, bool, error)
+	Round(in RoundInput) (Round, bool, error)
 }
 
 // fakeGateSource reads gate rounds from a materialized fixture scenario
@@ -46,7 +57,8 @@ func NewFakeGateSource(scenarioDir string) GateSource {
 	return &fakeGateSource{scenarioDir: scenarioDir}
 }
 
-func (f *fakeGateSource) Round(n int) (Round, bool, error) {
+func (f *fakeGateSource) Round(in RoundInput) (Round, bool, error) {
+	n := in.Round
 	dir := filepath.Join(f.scenarioDir, "gate", fmt.Sprintf("round-%d", n))
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -99,6 +111,11 @@ type GateOpts struct {
 	Branch   string // validate this branch instead of jig/<ticket>
 	BriefDoc string // spec-axis input when Branch is set
 	PRMode   bool
+	// Triage is the human seam for a reviewer round's fix batch and ask
+	// findings (route.go). nil means DefaultTriage: every fix is
+	// kept, every ask with a full build target is kept, one missing part
+	// of it stays undecided. Unused for a scripted (--scenario) round.
+	Triage Triage
 }
 
 // GateReport is Gate's result.
@@ -107,25 +124,79 @@ type GateReport struct {
 	Verdict   string // clean|fix-slices
 	TargetSHA map[string]string
 	Model     string
+	// ReviewedSHA is repoName -> the head sha a reviewer round reviewed, on
+	// every reviewer round, clean or not - the anchor the next round's
+	// scope resolves against (review.go's resolveScopeBase). nil for a
+	// scripted round.
+	ReviewedSHA map[string]string
+	// Scope is this round's scope diff kind (full|delta), "" for a
+	// scripted round.
+	Scope string
+	// Findings is every finding this round reported, after routing and
+	// triage set each one's final Status/Triage/Decision/
+	// RoutedAs. nil for a scripted round.
+	Findings []Finding
+	// FixSlices is the ids of the fix slices this round appended, in the
+	// order they were built.
+	FixSlices []string
+	// NeedsHuman is every asked finding still undecided after this round
+	// (across every round, not only this one's own): the "needs a human"
+	// list, the exit-2 signal. Empty when nothing is waiting on a person.
+	NeedsHuman []Finding
 }
 
 // reportYAML is gate/round-<n>/report.yaml's exact on-disk shape.
 type reportYAML struct {
-	Round     int               `yaml:"round"`
-	Verdict   string            `yaml:"verdict"`
-	Model     string            `yaml:"model"`
-	TargetSHA map[string]string `yaml:"target_sha"`
+	Round       int               `yaml:"round"`
+	Verdict     string            `yaml:"verdict"`
+	Model       string            `yaml:"model"`
+	TargetSHA   map[string]string `yaml:"target_sha"`
+	ReviewedSHA map[string]string `yaml:"reviewed_sha,omitempty"`
 }
 
 // Gate runs one gate round for ticket: it re-verifies every manifest
 // oracle in a fresh gate lease checked out to the ticket's branch, then
 // asks src for this round's review content.
-func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
+func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	if o.PRMode {
 		return GateReport{}, &axi.Error{Msg: "gate pr-mode ships in v0.2", Code: "NOT_IMPLEMENTED"}
 	}
 
 	ticket := o.Ticket
+	// journaled and roundNum back the deferred best-effort push below: once
+	// this round's own gate-open journal line has been appended (a tracked
+	// change to the store's working copy), any later error in this
+	// function - REVIEW_INVALID, REVIEW_FAILED, GATE_NO_ORACLE, an oracle
+	// failure, a routing error - would otherwise return before Gate's own
+	// end-of-round Store.Push, leaving that journal line (and any
+	// review.json/result.json this round wrote) committed nowhere: tracked
+	// but uncommitted. The store's own Sync (git pull --rebase) then
+	// refuses on the very next command, on this ticket or any other,
+	// wedging the whole store until an operator runs git by hand. Pushing
+	// here, whatever the failure, is what makes a plain rerun documented
+	// as the recovery actually work.
+	var (
+		journaled bool
+		roundNum  int
+	)
+	defer func() {
+		if err == nil || !journaled {
+			return
+		}
+		// Best-effort: if this push itself fails, the original error is
+		// still the one that reaches the caller; there is nothing more to
+		// do here but try. The subject carries only the error's own code,
+		// never its message: the message can hold an absolute host path or
+		// other detail that has no business in a commit subject that gets
+		// pushed to a remote. jig already prints the full error on stdout.
+		code := "INTERNAL"
+		var ae *axi.Error
+		if errors.As(err, &ae) && ae.Code != "" {
+			code = ae.Code
+		}
+		_ = d.Store.Push(fmt.Sprintf("%s: gate round %d failed: %s", ticket, roundNum, code))
+	}()
+
 	if err := d.Store.Sync(); err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: sync store: %w", err)
 	}
@@ -142,8 +213,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	branch := ticketBranch(ticket)
 	// --branch: validate a hand-written branch fetched from origin instead
 	// of the ticket's own jig/<ticket>. Its spec axis reads opts.BriefDoc
-	// instead of the brief; report.yaml's shape stays fixed by contract to
-	// {round,verdict,model,target_sha} (BriefDoc is not recorded there), but
+	// instead of the brief; report.yaml never records BriefDoc itself, but
 	// the doc's content is copied into this round's own
 	// gate/round-<n>/spec-input.md so the spec-axis-input swap is real
 	// rather than an accepted, no-op flag.
@@ -162,16 +232,80 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		}
 	}
 	leaseKey := ticket + "-gate"
+	// Restore an existing gate lease pristine at its current HEAD before
+	// Acquire ever touches it. A reviewer that outlived a killed jig, or an
+	// oracle rewrite left over from an earlier attempt, can leave tracked
+	// dirt in the lease; if the ticket branch later advances past whatever
+	// file that dirt touched, Acquire's own `git checkout` (and, in normal
+	// mode, fetchTicketBranchFromBuildLease's checkout right after) refuses
+	// with "local changes ... would be overwritten" before the restore below
+	// ever runs, wedging every later attempt at the same point. This restore
+	// is best-effort: if the pool dir cannot be resolved, or the lease is not
+	// yet its own git working copy with a commit checked out (a key never
+	// acquired, or a clone killed before its first checkout), Acquire runs
+	// unchanged and surfaces its own error.
+	if poolDir, perr := home.PoolDir(); perr == nil {
+		leaseDir := filepath.Join(poolDir, repoName, leaseKey)
+		if isOwnGitRepoWithHead(leaseDir) {
+			if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
+				return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
+			}
+		}
+	}
 	lease, err := pool.Acquire(repoName, repo.Remote, target, branch, leaseKey)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: acquire lease: %w", err)
 	}
 
+	// Restore the gate lease to a pristine, known-correct head right after
+	// acquire and before any oracle runs. pool.Acquire never resets an
+	// existing local branch (a deliberate rule so a same-run slice's commits
+	// on it survive later acquires), so without this, a reviewer or an
+	// oracle that left the lease dirty or ahead on an earlier, killed jig
+	// has its leftovers reviewed by this round's own oracles, or in
+	// --branch mode makes this gate review the stale local copy instead of
+	// origin's current branch tip.
 	if o.Branch == "" {
 		if err := fetchTicketBranchFromBuildLease(lease.Dir, repoName, ticket); err != nil {
 			return GateReport{}, err
 		}
+		if err := resetLeasePristine(lease.Dir, "HEAD"); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease before oracles: %w", err)
+		}
+	} else {
+		// pool.Acquire's own fetch has no --prune, so a branch deleted on
+		// origin since an earlier gate on this same lease would otherwise
+		// leave refs/remotes/origin/<branch> stale, and the check below
+		// would pass against the last-fetched tip instead of catching the
+		// deletion. Prune here so a deleted branch is always caught.
+		if _, err := gitx.Run(lease.Dir, "fetch", "--prune", "origin"); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: fetch --prune origin: %w", err)
+		}
+		// refs/remotes/origin/<branch> is now current. The gate lease never
+		// commits (reviewers and oracles are always undone), so it must
+		// always equal origin/<branch> exactly.
+		if _, err := gitx.RevParse(lease.Dir, "refs/remotes/origin/"+branch); err != nil {
+			return GateReport{}, &axi.Error{
+				Msg:  fmt.Sprintf("branch %q does not exist on origin", branch),
+				Code: "BRANCH_NOT_FOUND",
+				Help: []string{"Push the branch to origin, then rerun."},
+			}
+		}
+		if err := resetLeasePristine(lease.Dir, "origin/"+branch); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease to origin/%s: %w", branch, err)
+		}
 	}
+
+	// Resolved before the journal line below (not after, as manifest
+	// resolution and oracle runs once were) so roundNum is always this
+	// round's real number, never the zero value, by the time journaled
+	// becomes true and the deferred push above can fire.
+	n, err := existingGateRounds(d.Store, ticket)
+	if err != nil {
+		return GateReport{}, fmt.Errorf("verifydeliver: gate: count rounds: %w", err)
+	}
+	n++
+	roundNum = n
 
 	lines, err := journal.Read(d.Store, ticket)
 	if err != nil {
@@ -181,6 +315,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 	if err := journal.Append(d.Store, ticket, journal.Line{Slice: "", Event: "gate-open", Model: model}); err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-open: %w", err)
 	}
+	journaled = true
 
 	man, err := manifest.Resolve(lease.Dir)
 	if err != nil {
@@ -191,17 +326,48 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		return GateReport{}, err
 	}
 
-	n, err := existingGateRounds(d.Store, ticket)
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: count rounds: %w", err)
-	}
-	n++
 	roundDir := gateRoundDir(d.Store, ticket, n)
 	if _, err := os.Stat(roundDir); err == nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: round %d already exists", n)
 	}
 
-	round, ok, err := src.Round(n)
+	// The cumulative fold over every earlier reviewer round: its open,
+	// asked and noted findings become review.json's own open list (a noted
+	// finding stays a citable prior target, findings.go's
+	// openAndNotedFindingsList), and its dismissed findings become
+	// review.json's dismissed list. A ticket with no reviewer rounds yet,
+	// or one driven entirely by the scripted source, folds to nothing.
+	cum, err := cumulativeFindings(d.Store, ticket, n)
+	if err != nil {
+		return GateReport{}, fmt.Errorf("verifydeliver: gate: fold findings: %w", err)
+	}
+	openList := openAndNotedFindingsList(cum)
+	dismissedList := dismissedFindingsList(cum)
+
+	// The reviewer's brief_path is the ticket's own brief.md, except in
+	// --branch mode with --doc: there it must be the --doc file itself,
+	// absolute (PR #8's recorded decision) - pointing at this round's own
+	// gate/round-<n>/spec-input.md instead would leave a partial round dir
+	// on disk if the reviewer then fails, since that file is written only
+	// after the round succeeds (see briefDocContent below).
+	briefPath := filepath.Join(d.Store.TicketDir(ticket), "brief.md")
+	if o.Branch != "" && o.BriefDoc != "" {
+		briefPath = o.BriefDoc
+	}
+
+	round, ok, err := src.Round(RoundInput{
+		Store:     d.Store,
+		Ticket:    ticket,
+		Round:     n,
+		LeaseDir:  lease.Dir,
+		RepoName:  repoName,
+		Target:    target,
+		Model:     model,
+		BriefPath: briefPath,
+		Manifest:  man,
+		Open:      openList,
+		Dismissed: toDismissedFindingList(dismissedList),
+	})
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: read round %d: %w", n, err)
 	}
@@ -211,8 +377,32 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: resolve origin/%s: %w", target, err)
 	}
 
-	report := GateReport{Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA}}
-	if !ok {
+	report = GateReport{Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA}}
+	switch {
+	case !ok:
+		// No round ran at all. The reviewer source reaches this only when
+		// it has already established that nothing is outstanding, so it
+		// is the scripted source - no round directory for this number, or
+		// an empty one - that can arrive here with the fold still holding
+		// something. Either way, a source having nothing to play says
+		// nothing about what earlier rounds left behind, so the verdict
+		// comes from the fold, exactly
+		// as the reviewer arm's does below. Writing "clean" here without
+		// consulting it declared a ticket clean over an undecided ask,
+		// and `jig publish` gates on that verdict: the ticket shipped
+		// with the question never answered, while `jig status`, which
+		// reads the fold, said otherwise the whole time.
+		if !isClean(cum) {
+			report.Verdict = "fix-slices"
+			report.Findings = openFindingsList(cum)
+			sortByRiskThenID(report.Findings)
+			report.NeedsHuman = askedFindingsList(cum)
+			sortByRiskThenID(report.NeedsHuman)
+			if err := writeNoRound(d, ticket, n, report); err != nil {
+				return GateReport{}, err
+			}
+			break
+		}
 		report.Verdict = "clean"
 		if err := writeCleanRound(d, ticket, n, report); err != nil {
 			return GateReport{}, err
@@ -220,7 +410,82 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		if err := journal.Append(d.Store, ticket, journal.Line{Event: "gate-clean", Attempt: n}); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-clean: %w", err)
 		}
-	} else {
+	case round.Review != nil:
+		// Findings bookkeeping: apply this round onto the fold. Routing and
+		// triage (route.go) then turn kept fixes and asks into fix slices,
+		// mutating each reported finding's final Status/Triage/Decision/
+		// RoutedAs - entirely in memory, before anything is persisted or
+		// pushed. Rule 3's clearing runs only after that, against those
+		// final statuses: a finding dismissed at triage must not go on
+		// blocking an unrelated open finding in the same file. The
+		// post-round fold is then checked for what's still outstanding:
+		// that, not whether the round dispatched a reviewer, decides clean
+		// vs fix-slices.
+		reviewHead := round.Review.HeadSHA
+		existsAtHead := func(file string) (bool, error) {
+			return gitx.FileExistsAtRev(lease.Dir, reviewHead, file)
+		}
+		sliceGreen := func(sliceID string) (bool, error) {
+			st, err := d.Store.ReadSliceState(ticket, sliceID)
+			if err != nil {
+				return false, err
+			}
+			return st.State == "green", nil
+		}
+		reported, err := ApplyRound(n, cum, round.Review.Result, slices, sliceGreen, man)
+		if err != nil {
+			return GateReport{}, err
+		}
+		outstanding := outstandingAsks(cum, reported)
+		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, outstanding, o.Triage, man)
+		if err != nil {
+			return GateReport{}, err
+		}
+		cleared, err := ClearingAfterTriage(cum, routed, round.Review.Result.ReviewedPaths, existsAtHead)
+		if err != nil {
+			return GateReport{}, err
+		}
+		updated := cloneFindings(cum)
+		foldFindings(updated, routed, cleared)
+		if isClean(updated) {
+			report.Verdict = "clean"
+		} else {
+			report.Verdict = "fix-slices"
+		}
+		// reviewed_sha is recorded on every reviewer round, clean or not,
+		// so the next round's scope can resolve a delta against it.
+		report.ReviewedSHA = map[string]string{repoName: round.Review.HeadSHA}
+		report.Scope = round.Review.Scope
+		// Findings and NeedsHuman are sorted by risk, high first, then id
+		// (sortByRiskThenID, the same helper routing sorts the human seam
+		// with): "always shown sorted by risk, high first" applies to every
+		// place findings reach a human, not only the triage prompt - the
+		// gate report's own tables (cmd/jig) render these two lists as
+		// given, so the ordering has to be right here.
+		report.Findings = append([]Finding(nil), routed...)
+		sortByRiskThenID(report.Findings)
+		report.NeedsHuman = askedFindingsList(updated)
+		sortByRiskThenID(report.NeedsHuman)
+		for _, fs := range fixSlices {
+			report.FixSlices = append(report.FixSlices, fs.ID)
+		}
+		if err := writeReviewerRound(d, ticket, n, report, round.Review.Scope, round.Review.Result.ReviewedPaths, routed, cleared, round.Review.Result.Summary); err != nil {
+			return GateReport{}, err
+		}
+		event := "gate-round"
+		if report.Verdict == "clean" {
+			event = "gate-clean"
+		}
+		if err := journal.Append(d.Store, ticket, journal.Line{Event: event, Attempt: n}); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal %s: %w", event, err)
+		}
+		// Routing and triage are already finished above; appending these
+		// slices and, at the end of Gate, pushing the store are the only
+		// on-disk/store-visible effects that follow.
+		if err := appendFixSlices(d, ticket, n, fixSlices); err != nil {
+			return GateReport{}, err
+		}
+	default:
 		report.Verdict = "fix-slices"
 		if err := writeFixRound(d, ticket, n, report, round); err != nil {
 			return GateReport{}, err
@@ -228,19 +493,8 @@ func Gate(d Deps, src GateSource, o GateOpts) (GateReport, error) {
 		if err := journal.Append(d.Store, ticket, journal.Line{Event: "gate-round", Attempt: n}); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-round: %w", err)
 		}
-		for _, fs := range round.FixSlices {
-			if fs.FromGate == 0 {
-				fs.FromGate = n
-			}
-			if err := d.Store.AppendSlices(ticket, []store.Slice{fs}); err != nil {
-				return GateReport{}, fmt.Errorf("verifydeliver: gate: append fix slice %s: %w", fs.ID, err)
-			}
-			if err := d.Store.WriteSliceState(ticket, fs.ID, store.SliceState{State: "queued"}); err != nil {
-				return GateReport{}, fmt.Errorf("verifydeliver: gate: init fix slice %s state: %w", fs.ID, err)
-			}
-			if err := journal.Append(d.Store, ticket, journal.Line{Slice: fs.ID, Event: "fix-slice", Attempt: n}); err != nil {
-				return GateReport{}, fmt.Errorf("verifydeliver: gate: journal fix-slice %s: %w", fs.ID, err)
-			}
+		if err := appendFixSlices(d, ticket, n, round.FixSlices); err != nil {
+			return GateReport{}, err
 		}
 	}
 
@@ -370,6 +624,37 @@ func runOracleSuite(dir string, man manifest.Manifest) error {
 	return nil
 }
 
+// writeNoRound writes the files for a round that never ran while something
+// was still outstanding: the source had nothing to review for this round
+// number, but the fold still holds an open or asked finding. It records
+// what is outstanding rather than the word "clean", so the stored round
+// agrees with the report and with `jig status`.
+func writeNoRound(d Deps, ticket string, n int, report GateReport) error {
+	dir := gateRoundDir(d.Store, ticket, n)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("verifydeliver: gate: create round dir: %w", err)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Gate round %d\n", n)
+	fmt.Fprintf(&b, "\nNo review ran this round. Still outstanding from earlier rounds:\n\n")
+	for _, f := range report.Findings {
+		fmt.Fprintf(&b, "- %s (%s) %s:%d %s\n", f.ID, f.Status, f.File, f.Line, f.Title)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "findings.md"), []byte(b.String()), 0o644); err != nil {
+		return fmt.Errorf("verifydeliver: gate: write findings.md: %w", err)
+	}
+	if err := writeReportYAML(dir, report); err != nil {
+		return err
+	}
+	if err := writeDiffChangelog(d, ticket, dir, n); err != nil {
+		return err
+	}
+	if err := journal.Append(d.Store, ticket, journal.Line{Event: "gate-round", Attempt: n}); err != nil {
+		return fmt.Errorf("verifydeliver: gate: journal gate-round: %w", err)
+	}
+	return nil
+}
+
 // writeCleanRound writes a clean round's files: findings.md declares it
 // clean, report.yaml records the verdict, and diff-changelog.md is the
 // pure journal render of what landed since the previous round.
@@ -426,12 +711,63 @@ func writeFixRound(d Deps, ticket string, n int, report GateReport, round Round)
 	return nil
 }
 
+// appendFixSlices appends every fix slice a round routed, initializing
+// each to queued and journaling it. It is shared by the scripted source's
+// own fix-slices (round.FixSlices) and a reviewer round's routing output
+// (routeRound's slices, passed by Gate).
+func appendFixSlices(d Deps, ticket string, n int, slices []store.Slice) error {
+	for _, fs := range slices {
+		if fs.FromGate == 0 {
+			fs.FromGate = n
+		}
+		if err := d.Store.AppendSlices(ticket, []store.Slice{fs}); err != nil {
+			return fmt.Errorf("verifydeliver: gate: append fix slice %s: %w", fs.ID, err)
+		}
+		if err := d.Store.WriteSliceState(ticket, fs.ID, store.SliceState{State: "queued"}); err != nil {
+			return fmt.Errorf("verifydeliver: gate: init fix slice %s state: %w", fs.ID, err)
+		}
+		if err := journal.Append(d.Store, ticket, journal.Line{Slice: fs.ID, Event: "fix-slice", Attempt: n}); err != nil {
+			return fmt.Errorf("verifydeliver: gate: journal fix-slice %s: %w", fs.ID, err)
+		}
+	}
+	return nil
+}
+
+// writeReviewerRound writes a reviewer round's files: findings.yaml,
+// findings.md rendered from it, report.yaml (with
+// ReviewedSHA), and diff-changelog.md.
+func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string) error {
+	dir := gateRoundDir(d.Store, ticket, n)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("verifydeliver: gate: create round dir: %w", err)
+	}
+	yamlData, err := marshalFindingsYAML(scope, reviewedPaths, findings, cleared, summary)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: gate: marshal findings.yaml: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "findings.yaml"), yamlData, 0o644); err != nil {
+		return fmt.Errorf("verifydeliver: gate: write findings.yaml: %w", err)
+	}
+	md := renderFindingsMD(n, report.Verdict, summary, findings, cleared)
+	if err := os.WriteFile(filepath.Join(dir, "findings.md"), []byte(md), 0o644); err != nil {
+		return fmt.Errorf("verifydeliver: gate: write findings.md: %w", err)
+	}
+	if err := writeReportYAML(dir, report); err != nil {
+		return err
+	}
+	if err := writeDiffChangelog(d, ticket, dir, n); err != nil {
+		return err
+	}
+	return nil
+}
+
 func writeReportYAML(dir string, report GateReport) error {
 	out, err := yaml.Marshal(reportYAML{
-		Round:     report.Round,
-		Verdict:   report.Verdict,
-		Model:     report.Model,
-		TargetSHA: report.TargetSHA,
+		Round:       report.Round,
+		Verdict:     report.Verdict,
+		Model:       report.Model,
+		TargetSHA:   report.TargetSHA,
+		ReviewedSHA: report.ReviewedSHA,
 	})
 	if err != nil {
 		return fmt.Errorf("verifydeliver: gate: marshal report.yaml: %w", err)
@@ -452,4 +788,53 @@ func writeDiffChangelog(d Deps, ticket, dir string, n int) error {
 		return fmt.Errorf("verifydeliver: gate: write diff-changelog.md: %w", err)
 	}
 	return nil
+}
+
+// resetLeasePristine hard-resets leaseDir to head and removes every
+// untracked file and directory. It never uses `clean -x`, so ignored build
+// caches (e.g. node_modules) survive; only content git itself would track or
+// that a reviewer left behind is wiped.
+func resetLeasePristine(leaseDir, head string) error {
+	if _, err := gitx.Run(leaseDir, "reset", "--hard", head); err != nil {
+		return err
+	}
+	if _, err := gitx.Run(leaseDir, "clean", "-fd"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// isGitLeaseDir reports whether dir looks like an existing pool lease
+// checkout (a git working copy), as opposed to a key never acquired yet.
+func isGitLeaseDir(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
+// isOwnGitRepoWithHead reports whether dir is itself the top level of a git
+// working copy whose HEAD resolves to a commit. A `.git` entry alone is not
+// enough before a destructive reset: when that entry is not a repository
+// git can open, git's upward discovery would resolve an enclosing repo
+// (JIG_HOME inside a dotfiles checkout, say) and the reset would discard
+// that repo's uncommitted work; and a clone killed before its first
+// checkout has an unborn HEAD that `reset --hard HEAD` cannot resolve,
+// which would wedge every later gate instead of letting Acquire recover.
+func isOwnGitRepoWithHead(dir string) bool {
+	if !isGitLeaseDir(dir) {
+		return false
+	}
+	top, err := gitx.Run(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false
+	}
+	topInfo, err := os.Stat(top)
+	if err != nil {
+		return false
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil || !os.SameFile(topInfo, dirInfo) {
+		return false
+	}
+	_, err = gitx.Run(dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	return err == nil
 }

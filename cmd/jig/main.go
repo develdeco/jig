@@ -41,13 +41,13 @@ func Main(args []string, stdout io.Writer, stdin io.Reader) int {
 	case "ticket":
 		return cmdTicket(rest, stdout)
 	case "solve":
-		return cmdSolve(rest, stdout)
+		return cmdSolve(rest, stdout, stdin)
 	case "run":
 		return cmdRun(rest, stdout)
 	case "requeue":
 		return cmdRequeue(rest, stdout)
 	case "gate":
-		return cmdGate(rest, stdout)
+		return cmdGate(rest, stdout, stdin)
 	case "publish":
 		return cmdPublish(rest, stdout)
 	case "status":

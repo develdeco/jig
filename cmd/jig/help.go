@@ -38,7 +38,7 @@ var commandTable = []cmdSpec{
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},
 	{"solve", "run the full chain: run, gate, publish", []flagSpec{
-		{"yes", "skip the interactive publish confirm", false},
+		{"yes", "skip the interactive publish confirm and finding triage", false},
 		{"answer", "answer a pending question: --answer <qid> <text>", false},
 		{"backend", "session backend: fake, headless, or herdr", false},
 		{"scenario", "scenario dir for the fake backend", false},
@@ -52,8 +52,9 @@ var commandTable = []cmdSpec{
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},
-	{"requeue", "requeue slices touched by a brief edit", []flagSpec{
+	{"requeue", "requeue slices touched by a brief edit, or one stalled/env-blocked slice", []flagSpec{
 		{"from-brief-diff", "requeue slices whose brief section hash changed", false},
+		{"slice", "requeue one stalled or env-blocked slice by id", false},
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},
@@ -62,6 +63,8 @@ var commandTable = []cmdSpec{
 		{"branch", "validate this branch instead of jig/<ticket>", false},
 		{"doc", "brief doc path, used together with --branch", false},
 		{"pr", "pr number (not implemented in v0.1)", true},
+		{"yes", "keep every finding jig can route on its own, without the triage prompt", false},
+		{"backend", "session backend for the reviewer: fake, headless, or herdr", false},
 		{"scenario", "scenario dir for the fake gate source", false},
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},

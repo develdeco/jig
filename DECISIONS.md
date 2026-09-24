@@ -28,6 +28,15 @@ was ambiguous, what was chosen, and why.
 - Divergence checking lands as a lite version: reconcile journals the integrated-diff
   file count, and publish refuses an empty integration diff as a stale-overwrite
   signal. The symbol-grep half of the check stays deferred.
+- `Store.Sync` and `Store.Push` do not serialize against a concurrent Sync or Push
+  from another process on the same store: `refuseIfMidRebaseOrMerge` refuses a rebase
+  or merge it finds already in progress, but two processes can still race between that
+  check and the pull/push that follows, and `abortFailedPull`'s best-effort
+  `rebase --abort` can then abort a rebase the other process is mid-resolving rather
+  than one this process itself started. `store.Lock` (`internal/store/lock.go`) exists
+  and already serializes single-file writes (journal, tracker, render output), but
+  wiring it around Sync/Push's whole pull/push sequence is its own change, deferred by
+  the owner rather than folded into this one.
 
 ## Safety
 
@@ -58,6 +67,47 @@ was ambiguous, what was chosen, and why.
 - Slice work files (`slice.json`, `result.json`) live under the store's ticket
   directory (`work/`), not the build lease, so that the lease's `git add -A` never
   sweeps dispatch plumbing into slice commits.
+- `Store.Sync` stages and commits any uncommitted leftovers with jig's
+  identity before it pulls: a gate-open journal line from a gate that then
+  failed at an oracle (no round directory is ever written in that case -
+  the oracle suite runs before the round is computed), a partial gate round
+  directory from a SLICE_ID_DUPLICATE failure after the round itself was
+  written, or in-progress `work/` files from a run interrupted mid-dispatch.
+  Without this, the next command's `pull --rebase` fails on
+  the dirty tree with "cannot pull with rebase: You have unstaged changes.",
+  wedging the store until someone commits by hand. This does not retry the
+  failed command's round: the leftovers become an ordinary jig commit and
+  the next command proceeds, but a partial gate round directory still counts
+  as a round, so the next `jig gate` opens round N+1 rather than replaying
+  the failed one. `Push` shares the same stage-and-commit step.
+- `Sync` and `Push` both refuse with `STORE_CONFLICT`, without touching the
+  index, when the store already has an unfinished rebase or merge in progress
+  (`rebase-merge`, `rebase-apply`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`,
+  `REVERT_HEAD`, `sequencer` or `BISECT_LOG`, all read with one
+  `git rev-parse --git-path` call), when HEAD is detached (a bisect, say, so
+  a commit would land where `git bisect reset` drops it), or when the index
+  has unmerged entries, which is what a conflicted `git stash pop` leaves
+  behind on its own. An unconditional `git add -A`
+  would stage unresolved conflict markers as ordinary content, and a later
+  commit (or `rebase --continue`) would finalize them onto the store branch,
+  corrupting whatever file conflicted for every later reader. The check
+  lives in the shared `stageAndCommit` step, so it also guards a command that
+  only ever `Push`es, such as `jig requeue`, not only the ones that `Sync` first.
+- A failed `pull --rebase` is aborted and wrapped as `STORE_CONFLICT` only when
+  it actually left a rebase in progress; jig's own conflicts never leave the
+  store mid-rebase for the guard above to catch on the next command, unless
+  the best-effort `rebase --abort` itself fails, in which case the message
+  says so plainly (naming the abort's own error) instead of falsely claiming
+  the rebase was aborted. It then points the operator at the store to
+  resolve directly there: as still mid-rebase, when the rebase state was
+  read successfully first; as an unknown state to check with `git status`,
+  when that read itself had failed - a failed read never lets the message
+  assert mid-rebase, since that was never confirmed. A pull that failed
+  before rebasing (an unreachable or moved remote, an auth failure) left
+  nothing to abort, so its error is returned unchanged rather than
+  misreported as a conflict. When the rebase state itself can't be read,
+  the abort is still attempted, best effort, rather than trusting a read
+  that just failed.
 
 ## Build loop
 
@@ -233,6 +283,381 @@ was ambiguous, what was chosen, and why.
   `gh pr create`, while local/command trackers keep the PR body file as the artifact
   instead.
 
+## Gate reviewer
+
+This section records the rework that replaced PR #8's session-dispatched
+reviewer: see `docs/adr/0007-gate-reviewer-owns-bookkeeping-not-judgment.md`
+for why. None of PR #8's `class`, `Closure` accounting, jig-side
+carry-forward, `normalizeTitle` auto-dismiss, `rung` pin, or silent oracle
+fallback survived into this design; `action` (fix/ask/note), `prior`, and
+`reviewed_paths` replace them respectively.
+
+Design questions the code raised, and their resolution:
+
+- "Lies in no manifest workspace" is decided after normalizing the
+  manifest's own workspace path to the form a finding's file already has
+  (backslashes to `/`, no trailing `/`, no leading `./`), and matched by
+  path segment rather than raw string prefix. A workspace path is written
+  by hand, where `./billing`, `billing\` and `billing` all name the same
+  directory; comparing them literally would put every finding in that
+  workspace in the no-build-target case below, turning ordinary fixes into
+  questions for a human over a manifest's punctuation.
+- A kept `ask` whose file lies in no manifest workspace has no build
+  target, so the workspace it needs is the human's judgment, never a silent
+  default. At a terminal, keeping such an `ask` prompts for a workspace id.
+  With `--yes` or no terminal, it cannot be kept without that judgment and
+  stays `asked`: the round is not clean, and `jig gate` lists it under
+  "needs a human" and exits 2 (the same code `jig solve` already uses for a
+  builder's pending question). `jig solve`'s own gate/fix-slice loop checks
+  the same `NeedsHuman` list after every round and stops the same way,
+  rather than re-dispatching the reviewer on a decision nothing in that
+  loop can make: before this, `jig solve` read only the round's verdict, so
+  an undecided ask kept the loop re-dispatching a full reviewer session
+  every round up to `maxSolveRounds`, each one repeating the same
+  unresolved ask, before failing `GATE_ROUNDS_EXHAUSTED` without ever
+  printing what needed a human.
+- The same missing-build-target rule covers a missing or stale oracle, not
+  only a missing workspace: a `fix` or kept `ask` finding whose recorded
+  oracle is empty or no longer one of the manifest's current oracle names
+  (the manifest changed between rounds) has no build target jig can
+  derive, and is routed as an ask the same way, whichever part is missing
+  (`routed_as: ask` when the reviewer called it a fix). A manifest with
+  exactly one oracle leaves no choice to make, so jig resolves to that
+  oracle itself whether the finding names none or names an oracle the
+  manifest no longer has, and a fix or ask finding never records an empty
+  oracle when the manifest has any oracle at all (a note, which is never
+  routed and needs no build target, may); a recurrence keeps its earlier
+  occurrence's resolved oracle when this round names none. Only a manifest
+  with several oracles and a finding with no usable name among them leaves
+  the choice to a human. A manifest with zero oracles can never build any fix
+  slice at all, so that case is checked once, before triage, whenever the
+  round has a fix or ask to route (a human is never asked to triage
+  findings that were already going to fail regardless of the answer); its
+  error text says exactly that ("the manifest has no oracles"), and a
+  different message, naming the finding and the manifest's current
+  oracles, covers a manifest that does have oracles but none this finding
+  can use. At a terminal, keeping a fix or ask missing a workspace, an
+  oracle, or both is prompted for each missing part in turn - workspace
+  from the manifest's workspace ids, oracle from its oracle names - and the
+  answer is recorded on the finding and used for its fix slice; with
+  `--yes`, no terminal, or stdin closing before every missing part is
+  answered, it stays `asked` and is listed under `needs_a_human`. One
+  exported check (`verifydeliver.BuildTargetGaps`) decides which parts are
+  missing for `DefaultTriage`, `routeRound`'s kept-ask handling, and
+  `cmd/jig`'s terminal prompt and its stdin-closed count alike, so the four
+  can never drift apart on what counts as a full build target.
+- `findings.yaml` gains two additive fields beyond a finding's core ones
+  (id, file, line, title, detail, action, risk, risk_rationale, oracle,
+  workspace, status, recurrences):
+  `triage: human|auto` (who decided - a person at a terminal, or `--yes`/no
+  terminal - absent for notes, dismissed repeats, and undecided asks) and
+  `decision` (the human's text for a kept ask). `triage` is decided afresh
+  every round, from that round's own routing; `decision` is the human's
+  judgment about the finding itself, so it persists on every later
+  occurrence of the same finding regardless of what else changes about
+  it - including its `file`, when the reviewer reports the same finding
+  (by `prior`) as having moved. `routed_as` is written only when
+  jig routed a finding as `ask` although the reviewer's own `action` said
+  otherwise (the recurrence bound, or a missing build target); the
+  persisted `action` always stays the reviewer's label. A round's
+  `summary` is persisted too. A repeat of an already-dismissed finding
+  carries none of this forward: `triage`, `decision` and `routed_as` reset
+  to empty, since that finding is not routed or triaged this round at
+  all. These fields exist so a later eval rework's gold can derive from
+  jig's own records instead of matching model prose.
+- The e2e case "an ask kept with a decision" needs a real terminal, which a
+  subprocess pipe correctly is not. The decisive e2e test instead runs the
+  full chain in-process through `cmd/jig`'s own `Main`, with the
+  package-level `stdinIsTerminal` var overridden and a scripted stdin
+  standing in for one; a smaller, genuinely subprocess-driven test in
+  `e2e/` covers the actual non-terminal path (`DefaultTriage`).
+- Result validation: a `fix` or kept `ask` finding must name a
+  manifest oracle when the manifest declares more than one; with exactly
+  one, an omitted oracle is that oracle; any oracle a finding does name
+  must be a real manifest oracle. The parsed result itself decodes
+  strictly: a bare JSON `null`, any other non-object top level, or more
+  than one JSON value all fail the round outright. Every key, at the top
+  level and inside each finding, must be an exact, case-sensitive match of
+  a recognized field name: an unknown key fails the round the same as a
+  key that repeats an earlier key of the same object, exactly or only by
+  case (`"FINDINGS"` alongside `"findings"`), and so does a lone case
+  variant with no correctly-cased duplicate to catch (`"Oracle"` with no
+  plain `"oracle"` beside it) - encoding/json's own struct decode matches a
+  key to a field case-insensitively when no exact match exists, so without
+  this check that lone variant would decode silently instead of being
+  rejected. The `findings` and `reviewed_paths` keys must be present and
+  must not be JSON `null`; a genuinely absent key and an explicit `null`
+  are both rejected the same way, since only an actual empty list (`[]`)
+  means "reviewed nothing here." Every test fixture that builds a
+  `ReviewResult` as a struct literal has to fill a nil `Findings` or
+  `ReviewedPaths` with `[]` itself before marshaling it, for the same
+  reason `MarshalReviewRequest` fills its own nil slices: a struct
+  literal's zero-value slice marshals as `null`, which this validation now
+  rejects.
+- Coverage lists (`must_review`, and the scope diff feeding it) come from
+  `git diff --name-only -z --no-renames --diff-filter=AMT|D`, so a rename
+  counts as its new path under "changed" and its old path under "deleted".
+  `must_review` is the sorted, deduplicated union of the changed files and
+  the files of open findings still present at head. Every path is
+  repo-relative with forward slashes. A finding's own `file` is checked
+  strictly: comparison normalizes a backslash separator and a leading
+  `./`, and rejects an empty path, an absolute path (leading `/` or a
+  drive letter), and any `..` segment. Checking whether `reviewed_paths`
+  covers `must_review` is more forgiving, since it reads the reviewer's
+  own words rather than validating a finding's own field: an absolute
+  path that happens to fall inside the lease worktree is relativized to
+  it and counted as covering that file; any other entry that can't be
+  normalized this way (an absolute path outside the worktree, a `..`
+  segment, a path to something outside the diff entirely, such as the
+  brief) is ignored rather than failing the round - only a `must_review`
+  path left genuinely uncovered fails it.
+- Clearing (an open finding whose file was reviewed and not reported
+  again): only this round's *routed* findings, in their final post-triage
+  status (`open` or `asked` - a finding the human dismisses at triage no
+  longer blocks anything), in the same file block it from clearing. A
+  dismissed repeat and a note never block, so a dismissed finding
+  re-reported in the same file as an unrelated open finding cannot keep
+  that open finding alive. An unreported open finding also clears outright
+  when its file no longer exists at head at all - checked directly against
+  the lease, not merely inferred from this round's own scope-diff deleted
+  list, so a file deleted in an earlier round still clears a finding
+  reported in a later delta round that never mentions it. None of this
+  applies to an `asked` finding: only an `open` one clears this way. An ask
+  is a question put to a person, and nothing the reviewer reports - or
+  declines to report - answers it, so neither coverage nor the file's
+  disappearance resolves one. An ask leaves the outstanding set exactly two
+  ways, a human keeping it or a human dismissing it, and it is offered
+  again every round until then. Clearing one automatically would let an
+  unattended run drop the question, call the round clean and point at
+  publish, shipping the ticket with the decision never made.
+- The same rule governs a re-reported ask, and for the same reason it
+  governs a re-reported dismissal (rule 2 below): once a finding's status
+  is `asked`, a later occurrence replaces its file, line, title, detail,
+  action and risk, but only a person changes its status. Deciding it from
+  this round's label instead retired the question without an answer - the
+  same finding re-reported as `note` became a record, the round went clean
+  and publish unlocked; re-reported as `fix` it became queued work with no
+  decision recorded anywhere. `routed_as` records the disagreement whenever
+  the reviewer's label is not `ask`.
+- What an undecided ask does to an unattended run at this stage is hold it:
+  the round is not clean, `jig gate` exits 2, and the ask is listed under
+  needs-a-human and in `jig status`. It is deliberately not yet a parked
+  question in the builder's sense - no `questions.yaml` entry, no `--answer`
+  to clear it - so an unattended run stops rather than parking in the way a
+  builder's question parks. Turning an ask into a real parked question is
+  its own change, and the vocabulary here should not be read as claiming
+  that already ships.
+- A finding recurs only through the reviewer's own `prior`, never by title
+  matching. A recurrence is counted - its recurrence count goes up, and
+  the bound below can trigger - only once a fix slice that already
+  records the finding's id (the structural `findings:` link, not a parsed
+  slice id) has gone green; a finding re-reported while its fix slice is
+  still queued or building (or while none exists for it yet at all, as an
+  undecided ask re-reported, or a round run with `--early`, can both
+  produce) updates in place at its current count instead. The first
+  counted recurrence routes like a new finding, with the previous fix
+  slice named in the new slice's goal (by id, plus its last attempt's own
+  recorded summary when one exists). The second counted recurrence always
+  routes to a human as `ask`, whatever the reviewer's label - the same
+  failure surviving one fix slice already is jig's stall concept applied
+  to review. A `note` label on a recurring finding does not exempt it
+  from the bound: a finding whose earlier occurrence was `open` or `asked`
+  can legitimately recur as a `note` ("still there but harmless now") and
+  still be forced to `ask` on its second counted recurrence, so rule 1
+  always carries the earlier occurrence's `oracle` forward when this
+  round's own report names none - otherwise a recurrence forced to `ask`
+  by the bound could have nothing to build a fix slice with even after a
+  human keeps it. `prior` legitimately names a *noted* finding too: a
+  noted finding leaves the open set (it is not outstanding work - it
+  never blocks clean, and its file is not forced into `must_review`) but
+  review.json's `open` list still carries it (`Action: "note"`,
+  `openAndNotedFindingsList`), so it stays a citable `prior` target and
+  its recurrence count keeps climbing across a note occurrence exactly as
+  it would across a fix or ask one. Without this, the bound above would
+  be evadable: a reviewer alternating `fix` and `note` on the same
+  problem would get a fresh id at `recurrences: 0` every time the label
+  flips back, since the noted occurrence would otherwise be unreachable
+  by any later round's `prior`.
+- Clean without dispatch: when the scope diff changes no file at all (none
+  added, modified, or deleted) and no finding is outstanding, jig writes a
+  clean round without ever dispatching a reviewer session, since the
+  previous review already covers head. A deletion-only diff is not this
+  case: it still dispatches, since a deleted file can itself be worth
+  reviewing (whether removing it broke something that depended on it, for
+  instance).
+- Slice ids: a fix batch is `fix-<round>-<workspace>-<oracle>`, a kept ask
+  is `fix-<round>-<finding id>`; both are sanitized to
+  `[A-Za-z0-9._-]` and, on a collision, disambiguated with the lowest
+  unused `-2`, `-3`, ... suffix.
+- A kept ask's fix-slice goal states plainly whether a person actually
+  decided it: "kept by the human" only when the finding's own recorded
+  `triage` field says a person at a terminal did, and "kept with no human
+  decision (--yes or no terminal)" otherwise - read from that field rather
+  than hardcoded, so an auto-kept ask never tells the builder session a
+  human made a call that nobody actually made.
+- A reviewer-reported `action` outside `fix`/`ask`/`note` is a programming
+  error, surfaced as an error up the call chain, the same as any other
+  malformed result; it is never silently treated as `note`. Likewise, a
+  finding `file` jig cannot normalize to a repo-relative path is an
+  error, never kept with its raw, unvalidated value.
+- `gitx.FileExistsAtRev` resolves the rev first, so a bad rev is reported
+  as an error rather than folded into "the path doesn't exist"; only then
+  does it check the path, structurally rather than by matching git's
+  message text: `git --literal-pathspecs ls-tree -z --full-tree` for the
+  path, which exits 0 whether or not the path exists there and never
+  consults the working tree. Only an entry whose own path is exactly the
+  path asked about counts, and only when it is a `blob`: a directory lists
+  its children instead of itself, so `alpha` or `alpha/` is `false` rather
+  than the type of whichever child git happens to print first, and
+  `--literal-pathspecs` keeps a name like `a*b.go` or `:/x` a plain path
+  rather than a glob or pathspec magic. No matching entry is absent
+  (`false, nil`); any other failure of the `ls-tree` call itself is an
+  error. A finding `file` that ends in `/` is rejected at validation as a
+  directory rather than a file. Because the
+  check never looks at the working tree, an ignored or untracked file that
+  happens to sit on disk at that path (for example an oracle regenerating
+  a build artifact in the gate lease) cannot make an absent path look
+  present.
+- Compatibility with the old scripted (`--scenario`) path: `jig gate` had
+  no `--backend` flag before this rework, so its scripted source still
+  runs exactly as before iff `--scenario` is set and `--backend` is not -
+  every existing invocation is unchanged. `jig solve` already had
+  `--backend`, so its own rule differs: the scripted source runs iff
+  `--scenario` is set, whatever `--backend` says.
+
+Deviations recorded during the build, beyond what is already described
+above:
+
+- `Gate`'s `RoundInput.BriefPath` is the ticket's own `brief.md`, except in
+  `--branch --doc` mode, where it is the `--doc` file itself, absolute,
+  matching PR #8's own recorded reasoning: pointing at this round's own
+  `gate/round-N/spec-input.md` instead would leave a partial round dir on
+  disk if the reviewer then failed, since that file is written only once
+  the round succeeds.
+- `findings.md` never prints "clean" for a round that is not clean: it
+  prints the round's own recorded verdict, and "nothing new this round"
+  when that verdict isn't clean but nothing was reported this round -
+  never derived from `len(findings) == 0` alone, since a round can have
+  nothing new to report while something still open or asked from an
+  earlier round keeps it from being clean. The exact wording here is this
+  build's own choice; only that "clean" never appears for a non-clean
+  round is required.
+- The interactive triage prompt's exact wording is this build's own
+  choice: the behavior described above in this document (batch accept or
+  dismiss by id, an ask's keep-or-dismiss with an optional decision, the
+  workspace and oracle prompts, EOF semantics) is fixed; the literal
+  prompt strings are not. Each ask's
+  answer syntax is explicit rather than inferred from free text:
+  `n`/`no`/`d`/`dismiss` dismisses, and only `k`/`keep`/Enter keeps - any
+  other answer reprompts rather than being read as an implicit keep, so
+  free text typed for something else can never accidentally become the
+  kept decision. A kept ask is then asked for its decision text on a
+  second, separate prompt (Enter skips it).
+- Every place a finding reaches a human shows it with file:line and risk
+  rationale, sorted by risk high first, not the title alone: the ask
+  prompt, the notes table, the fix batch table, and the gate report's own
+  findings and needs_a_human tables (already sorted by risk then id).
+  `detail` reaches a human at the per-ask prompt only; the four tables
+  carry file:line, title, risk and risk rationale, not detail.
+- Triage is offered every outstanding ask each round, not just the asks
+  this round's reviewer happened to report. Routing takes the cumulative
+  fold's still-`asked` findings, so an ask left undecided in round N is
+  put to the human again in round N+1 whether or not the reviewer
+  mentions it; a decision taken this round updates that finding and is
+  recorded in this round's own `findings.yaml`, which is why a
+  `findings.yaml` can carry a decided finding no reviewer reported that
+  round. Without this an ask nobody re-reports sat under `needs_a_human`
+  with nothing ever prompting for it - the only ways out were the
+  reviewer coincidentally raising it again or the moot-ask clearing
+  above, neither of which is a decision.
+- `jig status` lists those outstanding asks between rounds, in an
+  `outstanding_asks` block (id, risk, file:line, title) read from the same
+  cumulative fold: a waiting decision is jig's own pending state, so it is
+  visible without running a gate round, exactly as an open question is.
+  What decides them - `jig gate <ticket>` at a terminal - is named once in
+  the help rather than repeated in a per-row cell, because it is the same
+  command for every ask and a table cell cannot carry the ordering below.
+- Neither that help nor `jig gate`'s own report hint ever prints `jig gate
+  <ticket>` as a step to run while the frontier check would refuse it. Both
+  decide that by reading the frontier itself (`frontierGreen`, the same
+  condition the check applies), never a proxy for it: a round's own fix
+  slices are one way to be short of green, and a fix-slice count read as
+  the whole story printed a refused command after `jig gate --early`, which
+  reviews an unfinished frontier and can leave an ask undecided having
+  queued nothing. Short of green, both surfaces name the order instead,
+  and the first step is the ticket's own next-step hint rather than a
+  fixed `jig run <ticket>`: a frontier parked on an unanswered question
+  does not advance on that command at all, only on the answer, and the
+  two surfaces share one hint so they cannot disagree about it. The gate
+  at a terminal follows as the second step. This is the same rule the
+  printed resume commands follow - a command jig prints as a next step
+  runs as printed.
+- `--yes`/non-terminal triage's one-line note (`DefaultTriage`, run by
+  `triageFor`) is printed only when this round actually had a fix or ask
+  to triage; a note is never triaged, so a notes-only round prints none
+  either, and a round that routed nothing at all (e.g. a dispatched
+  reviewer round with nothing new to report) prints none. It never claims
+  an ask was kept when it was actually left undecided: the count of how
+  many are left for a human is read straight from what `DefaultTriage`'s
+  own result leaves undecided (an ask id absent from its `Asks` map), not
+  re-derived from the ask's `Workspace` field alone, so the message can
+  never drift out of step with what `DefaultTriage` itself decides.
+- `TestGateReviewerRoundsThroughMain`'s round 2 assertions read round 2's
+  own `findings.yaml` `cleared` list directly and require the kept ask
+  `r1-f3` in it, rather than relying on its absence from round 2's report
+  and findings table alone: that table lists only findings reported that
+  round, so it cannot on its own distinguish a finding that cleared from
+  one that simply went unmentioned. A mutant that lets a dismissed repeat
+  block clearing fails this assertion.
+- Unit tests on `gateSourceFor` and `gateSourceForSolve` assert the
+  returned `GateSource`'s concrete type (scripted vs. reviewer) for each
+  flag combination, via `%T` rather than reaching into verifydeliver's
+  unexported types, pinning the `jig gate`/`jig solve` compatibility rule
+  above.
+- The scope base anchor for a full-scope round prefers `merge-base(origin/
+  <target>, HEAD)` over the ticket's recorded start sha, falling back to
+  the start sha only when the merge-base lookup itself fails (no such
+  ref) - merge-base first, ahead of PR #8's own order (the start sha
+  first): the recorded start sha can predate a rebase that moved the
+  target branch, while merge-base always anchors at the ticket branch's
+  actual point of divergence.
+- `Gate` appends its `gate-open` journal line before dispatching the round
+  at all, and writes `work/gate.round-N.*.json` to the store's working
+  copy before validating a result, both before its own end-of-round
+  `Store.Push`. A round that fails after that journal line (`REVIEW_INVALID`,
+  `REVIEW_FAILED`, `GATE_NO_ORACLE`, an oracle failure, a routing error)
+  used to return before that `Push`, leaving the journal line tracked but
+  uncommitted - the store's next `Sync` (`git pull --rebase`) then refused
+  over it once a remote existed, and only a manual `git checkout -- .` /
+  `git clean -fd` on the store recovered it. `Gate` now runs a deferred,
+  best-effort `Store.Push` (a message naming the ticket, the round and the
+  failure) on any error once the `gate-open` journal line has been
+  appended, whatever the failure, so the store is always clean and pushed
+  by the time the error reaches the caller and a plain rerun works with no
+  manual cleanup. The decisive e2e test (three real gate rounds through
+  the fake backend, in-process through `cmd/jig`'s `Main`) asserts the
+  store is clean right after its deliberately broken round 1 attempt,
+  instead of discarding leftovers by hand before retrying.
+- Every error a reviewer round can return after the `gate-open` journal
+  line (`REVIEW_INVALID`, `REVIEW_FAILED`, `GATE_NO_ORACLE`) carries a
+  `Help` line naming the recovery (fix the input, or add an oracle, then
+  rerun `jig gate` for the ticket), on top of the best-effort push above.
+- Known gap, deliberately left for its own change: `Publish` journals in
+  several places and pushes once at the end, with no equivalent deferred
+  push, so any exit after its first journal line leaves the store dirty
+  and the next `Sync` refuses - reachable simply by declining at publish's
+  own confirmation prompt, not only by an outage. The fix belongs with
+  `Publish`'s own error paths rather than widened into the reviewer's
+  change, and until it lands the manual recovery is the one named above.
+- That failure commit's subject is built from the error's `axi` code plus
+  the ticket and round, never the error text: the message is permanent
+  store history and gets pushed, and a raw error carries whatever the
+  failure happened to contain, including absolute paths on the machine
+  that ran it. The full error still goes to stdout, where it is read once
+  and not kept. The round number is resolved before the `gate-open`
+  journal line for the same reason: a failure between journaling and
+  resolving it used to record "round 0", a round that never existed.
+
 ## CLI
 
 - `jig init` takes `--store <path>` for the project form, while the end-to-end fixture
@@ -246,6 +671,41 @@ was ambiguous, what was chosen, and why.
 - `jig validate` prints a brief section-hash table so a calling skill can fill
   `from_brief` without needing a new CLI verb, keeping the CLI surface exhaustive
   without growing it.
+- `jig status` distinguishes a slice parked on an open human question from one
+  that is genuinely stalled, replacing the old single `paused` state value,
+  and further from one merely blocked on its env coming up. The state: line
+  precedence is stalled > parked > env-blocked > green > building: a stuck
+  slice outranks one merely waiting, so it is reported the moment it is
+  found. (The help hint's own priority is the opposite: an open question
+  comes first there, since answering it is the one action that can also
+  unblock other slices queued behind it.) A needs-input slice renders in
+  its own parked table with a resume column: the exact resume command for
+  the common case, or, for a slice parked on a flawed brief with brief
+  sections to amend, prose telling the operator to amend the brief first
+  (the command alone would requeue nothing); a stalled slice renders in
+  its own stalled table with a human-readable summary of what tripped it.
+- The resume command a parked slice is offered is the one that can actually
+  clear it. Amending the brief and requeuing with `--from-brief-diff` is
+  offered only when the slice was parked for a flawed brief AND has brief
+  sections for requeue to notice (`FromBrief` non-empty): requeue keys off
+  those hashes, so it does nothing for a slice without them, and a plain
+  question is not a brief problem even on a slice that has them. Every
+  other parked slice, which is the common case, is resumed by answering its
+  question. A stalled slice is resumed by `jig requeue <ticket> --slice <id>`,
+  unless it has brief sections, where amending the brief and
+  `--from-brief-diff` is offered instead. An env-blocked slice is always
+  resumed by `jig requeue <ticket> --slice <id>`, with no brief-sections
+  check: that branch exists only in the stalled loop, deliberately, since
+  bringing an env back up is never a brief problem. `store.SliceState`
+  gains two additive fields: `Signature` (the stall-matching key, not shown)
+  and `StallSummary` (the human-readable text the stalled table shows,
+  `-` when absent), both set on both stall paths (repeat-failure stall and
+  attempt-cap) and cleared on every route out of a stalled or needs-input
+  state - green, both requeue forms, and answering - so neither survives a
+  slice's eventual recovery. A printed command never carries the invocation's own
+  `--store`/`--project`: a path with a space breaks the command as printed,
+  and quoting it differs between shells, so a store selected by flag is the
+  caller's to repeat.
 
 ## Fixture and tests
 
@@ -307,6 +767,11 @@ was ambiguous, what was chosen, and why.
   test step went from 44-48 s to 38-42 s, and macOS takes 52 s.
 - CI actions are on v7; the test matrix runs Windows, Linux, and macOS on
   every push to main and every pull request; govulncheck runs on the Linux leg.
+- `lint/workflow_test.go` parses `.github/workflows/{ci,release,smoke}.yml` with
+  `yaml.v3` and asserts the invariants that have already bitten or must hold,
+  checking shape (triggers, job dependencies, matrix legs, key steps present)
+  rather than exact string content, so a routine workflow edit does not churn
+  the test.
 - Windows Defender exclusions were considered for Windows CI time and dropped: GitHub's
   Windows runner images already turn real-time scanning off and exclude the C: and D: drives.
 

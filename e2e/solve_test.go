@@ -9,8 +9,8 @@ import (
 
 // TestSolveOneProcess drives `jig solve` end to end in exactly two process
 // invocations: the first pauses once on slice c's scripted question, the
-// second answers it and rides the chain (run -> gate -> fix round -> gate
-// clean -> publish) to completion in one call.
+// second answers it and rides the chain (run -> gate -> a fix-slice round
+// -> gate clean -> publish) to completion in one call.
 //
 // NOTE: this test threads the fake backend through solve's internal
 // run/gate calls the same way the run and gate subcommands take them

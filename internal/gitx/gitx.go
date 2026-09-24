@@ -7,6 +7,7 @@ package gitx
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -99,6 +100,96 @@ func CommitsIn(dir, rangeSpec string) ([]string, error) {
 		return nil, nil
 	}
 	return strings.Split(out, "\n"), nil
+}
+
+// IsAncestor reports whether ancestor is an ancestor of (or equal to)
+// descendant in dir, via "git merge-base --is-ancestor": exit 0 is true,
+// exit 1 is false (not an ancestor, not an error), and any other outcome
+// (e.g. an unknown object after a rebase) is an error.
+func IsAncestor(dir, ancestor, descendant string) (bool, error) {
+	args := []string{"merge-base", "--is-ancestor", ancestor, descendant}
+	var stdout, stderr bytes.Buffer
+	err := run(dir, nil, &stdout, &stderr, args)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, callError(args, stderr.String(), err)
+}
+
+// DiffNameOnly returns the files base..head touches in dir, restricted to
+// diffFilter (git's --diff-filter letters, e.g. "AMT" for added/modified/
+// type-changed, or "D" for deleted) with renames off, so a renamed file
+// counts as its new path under "A" and its old path under "D". Paths come
+// back exactly as git prints them: repo-relative with forward slashes,
+// tree order (not sorted).
+func DiffNameOnly(dir, base, head, diffFilter string) ([]string, error) {
+	args := []string{"diff", "--name-only", "-z", "--no-renames", "--diff-filter=" + diffFilter, base, head}
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, nil, &stdout, &stderr, args); err != nil {
+		return nil, callError(args, stderr.String(), err)
+	}
+	raw := strings.TrimSuffix(stdout.String(), "\x00")
+	if raw == "" {
+		return nil, nil
+	}
+	return strings.Split(raw, "\x00"), nil
+}
+
+// FileExistsAtRev reports whether path exists as a blob (not a tree) in
+// dir's tree at rev. rev is resolved first: a rev that does not name a
+// commit (a bad sha, an unknown ref) is returned as an error. Once rev is
+// known good, the check is structural, never a match on git's message text:
+// "git ls-tree -z --full-tree" for the exact path exits 0 whether or not the
+// path exists there, and never consults the working tree, so an ignored or
+// untracked file that happens to sit on disk at that path cannot make an
+// absent path look present (or a present one fail). Only an entry whose own
+// path is exactly path counts, and only when it is a blob: a directory
+// lists its children rather than itself, so "a/" or "a" for a directory is
+// false, not the type of whichever child git prints first.
+// --literal-pathspecs keeps a name like "a*b.go" or ":/x" a plain path
+// rather than a glob or pathspec magic. Any other failure of the ls-tree
+// call itself is returned as an error.
+func FileExistsAtRev(dir, rev, path string) (bool, error) {
+	if _, err := Run(dir, "rev-parse", "--verify", "--quiet", rev+"^{commit}"); err != nil {
+		return false, fmt.Errorf("gitx: file exists at rev: rev %q does not resolve to a commit: %w", rev, err)
+	}
+	args := []string{"--literal-pathspecs", "ls-tree", "-z", "--full-tree", rev, "--", path}
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, nil, &stdout, &stderr, args); err != nil {
+		return false, callError(args, stderr.String(), err)
+	}
+	for _, entry := range strings.Split(stdout.String(), "\x00") {
+		if entry == "" {
+			continue
+		}
+		entryType, entryPath, err := lsTreeEntry(entry)
+		if err != nil {
+			return false, fmt.Errorf("gitx: file exists at rev: %w (ls-tree %q)", err, entry)
+		}
+		if entryPath == path {
+			return entryType == "blob", nil
+		}
+	}
+	return false, nil
+}
+
+// lsTreeEntry splits one "git ls-tree -z" entry,
+// "<mode> SP <type> SP <object> TAB <path>", into its object type ("blob",
+// "tree" or "commit") and its path.
+func lsTreeEntry(entry string) (entryType, path string, err error) {
+	meta, path, found := strings.Cut(entry, "\t")
+	if !found {
+		return "", "", fmt.Errorf("no tab-separated path")
+	}
+	fields := strings.Fields(meta)
+	if len(fields) != 3 {
+		return "", "", fmt.Errorf("unexpected entry metadata")
+	}
+	return fields[1], path, nil
 }
 
 // CommitOnAnyRemote reports whether sha is reachable from any remote-

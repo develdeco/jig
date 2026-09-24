@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -48,9 +49,19 @@ func TestRenderStatus(t *testing.T) {
 	}
 }
 
-// TestRenderStatusPaused exercises the needs-input path: an open question
-// should drive both the "paused" state and the answer hint.
-func TestRenderStatusPaused(t *testing.T) {
+// TestRenderStatusParked exercises the needs-input path: an open question
+// should drive the "parked" state, the parked custody table with its resume
+// command, and the matching hint. Slice c has FromBrief sections (see
+// testdata/fixture/slices.yaml), but this question carries no
+// "flawed-brief" Reason, so resumeCommand's other requirement is unmet and
+// the resume command is the plain --answer form (TestRenderStatusParkedFlawedBrief
+// covers the same slice with that Reason set, where the amend-brief-then-
+// requeue form applies instead). The parked cell also renders with no
+// quoting: resumeCommand's placeholder is single-quoted so the whole value
+// contains no character axi.Quote must escape, unlike the double-quoted
+// form this replaced (see internal/axi's TestQuoteUnchangedWhenPlain and
+// TestTableQuotesCells assertions).
+func TestRenderStatusParked(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	fx := fixture.Generate(t, fixture.Opts{})
 
@@ -73,15 +84,446 @@ func TestRenderStatusPaused(t *testing.T) {
 		t.Fatalf("RenderStatus: %v", err)
 	}
 
-	if !strings.Contains(got, "state: paused\n") {
-		t.Errorf("expected paused state, got:\n%s", got)
+	if !strings.Contains(got, "state: parked\n") {
+		t.Errorf("expected parked state, got:\n%s", got)
 	}
 	if !strings.Contains(got, "questions[1]{id,slice,status}:\n  q-001,c,open\n") {
 		t.Errorf("expected questions table, got:\n%s", got)
 	}
-	wantHint := "  Run `jig run JIG-1 --answer q-001 \"<text>\"` to answer and resume\n"
+	wantParked := "parked[1]{slice,question,resume}:\n" +
+		"  c,q-001,jig run JIG-1 --answer q-001 '<text>'\n"
+	if !strings.Contains(got, wantParked) {
+		t.Errorf("expected parked table %q, got:\n%s", wantParked, got)
+	}
+	wantHint := "  Run `jig run JIG-1 --answer q-001 '<text>'` to answer and resume\n"
 	if !strings.HasSuffix(got, wantHint) {
 		t.Errorf("expected answer hint suffix %q, got:\n%s", wantHint, got)
+	}
+}
+
+// TestRenderStatusParkedNoFromBrief checks resumeCommand's other branch: a
+// needs-input slice with no FromBrief section (a hand-written slice, or a
+// gate fix slice) resumes with --answer, since --from-brief-diff could never
+// touch it. The parked cell also renders with no quoting, for the same
+// reason TestRenderStatusParked notes.
+func TestRenderStatusParkedNoFromBrief(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.AppendSlices(fx.Ticket, []store.Slice{{
+		ID:        "fix-1",
+		Workspace: "alpha",
+		Goal:      "Fix the thing the gate flagged.",
+		Oracle:    "test",
+		FromGate:  1,
+	}}); err != nil {
+		t.Fatalf("AppendSlices: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "fix-1", store.SliceState{State: "needs-input", Attempts: 1, Question: "q-001"}); err != nil {
+		t.Fatalf("write slice state fix-1: %v", err)
+	}
+	if err := st.WriteQuestion(fx.Ticket, store.Question{ID: "q-001", Slice: "fix-1", Status: "open", Body: "Which workspace should absorb this fix?"}); err != nil {
+		t.Fatalf("write question: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v", err)
+	}
+
+	wantParked := "parked[1]{slice,question,resume}:\n" +
+		"  fix-1,q-001,jig run JIG-1 --answer q-001 '<text>'\n"
+	if !strings.Contains(got, wantParked) {
+		t.Errorf("expected parked table %q, got:\n%s", wantParked, got)
+	}
+	wantHint := "  Run `jig run JIG-1 --answer q-001 '<text>'` to answer and resume\n"
+	if !strings.HasSuffix(got, wantHint) {
+		t.Errorf("expected answer hint suffix %q, got:\n%s", wantHint, got)
+	}
+}
+
+// TestRenderStatusParkedFlawedBrief checks the parked table's other resume
+// form: a needs-input slice whose reason is "flawed-brief" resumes via
+// requeue --from-brief-diff, not --answer, since the way out is amending the
+// brief and requeuing the slice, not answering the question with text.
+func TestRenderStatusParkedFlawedBrief(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "c", store.SliceState{State: "needs-input", Attempts: 1, Question: "q-001", Reason: "flawed-brief"}); err != nil {
+		t.Fatalf("write slice state c: %v", err)
+	}
+	if err := st.WriteQuestion(fx.Ticket, store.Question{ID: "q-001", Slice: "c", Status: "open", Body: "brief.md section(s) foo look wrong"}); err != nil {
+		t.Fatalf("write question: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v", err)
+	}
+
+	wantParked := "parked[1]{slice,question,resume}:\n" +
+		"  c,q-001,\"amend the brief, then run jig requeue JIG-1 --from-brief-diff\"\n"
+	if !strings.Contains(got, wantParked) {
+		t.Errorf("expected flawed-brief parked table %q, got:\n%s", wantParked, got)
+	}
+	// The help hint must offer the exact same resume command as the parked
+	// table's "resume" column, not the generic --answer form: the question
+	// is not going to be answered with text, the brief needs amending. Both
+	// say the brief is amended first, not last: run as printed with no
+	// amendment, `jig requeue --from-brief-diff` requeues nothing and the
+	// next status is byte-identical.
+	wantHint := "  Amend the brief, then run `jig requeue JIG-1 --from-brief-diff` to resume\n"
+	if !strings.HasSuffix(got, wantHint) {
+		t.Errorf("expected flawed-brief hint suffix %q, got:\n%s", wantHint, got)
+	}
+}
+
+// TestGateFixSliceFlawedBriefResumesWithAnswer drives a real gate round
+// through `jig run`/`jig gate` (fake backend, scripted gate source) until a
+// gate fix slice - which never has FromBrief - is parked on a flawed-brief
+// question. Before resumeCommand keyed off the slice's own structure, this
+// was the exact regression the review caught: routeQuestion sets Reason
+// "flawed-brief" from the build session's outcome alone, so a fix slice
+// landed on the same Reason as a brief-derived slice, and the old
+// Reason-keyed resumeCommand printed `jig requeue ... --from-brief-diff` -
+// a command that can never touch a slice with no FromBrief hash to
+// recompute, wedging the ticket forever.
+func TestGateFixSliceFlawedBriefResumesWithAnswer(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "fix-flawed-brief"})
+
+	runArgs := func(extra ...string) []string {
+		return append([]string{"run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}, extra...)
+	}
+
+	// 1. a, b, d green; c parks on q-001 (see testdata/fixture/scenario).
+	var buf1 bytes.Buffer
+	if code := Main(runArgs(), &buf1, strings.NewReader("")); code != 2 {
+		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\n%s", code, buf1.String())
+	}
+
+	// 2. answer q-001: every base slice reaches green.
+	var buf2 bytes.Buffer
+	if code := Main(runArgs("--answer", "q-001", "Casual."), &buf2, strings.NewReader("")); code != 0 {
+		t.Fatalf("run 2 (answer) exit = %d, want 0\n%s", code, buf2.String())
+	}
+
+	// 3. gate round 1 appends fix-1 (see testdata/fixture/scenario/gate).
+	var buf3 bytes.Buffer
+	gateCode := Main([]string{"gate", fx.Ticket, "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}, &buf3, strings.NewReader(""))
+	if gateCode != 0 {
+		t.Fatalf("gate exit = %d, want 0\n%s", gateCode, buf3.String())
+	}
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	slices, err := st.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadSlices: %v", err)
+	}
+	fix1, ok := sliceByID(slices, "fix-1")
+	if !ok {
+		t.Fatalf("expected gate round 1 to append fix-1; got %+v", slices)
+	}
+	if len(fix1.FromBrief) != 0 {
+		t.Fatalf("fix-1.FromBrief = %v, want none (test setup is wrong)", fix1.FromBrief)
+	}
+
+	// 4. run again: fix-1 dispatches to the scripted flawed-brief outcome
+	// (testdata/fixture/scenario-branches/fix-flawed-brief) and parks.
+	var buf4 bytes.Buffer
+	if code := Main(runArgs(), &buf4, strings.NewReader("")); code != 2 {
+		t.Fatalf("run 3 (fix-1) exit = %d, want 2 (paused)\n%s", code, buf4.String())
+	}
+	fix1State, err := st.ReadSliceState(fx.Ticket, "fix-1")
+	if err != nil {
+		t.Fatalf("ReadSliceState fix-1: %v", err)
+	}
+	if fix1State.State != "needs-input" || fix1State.Reason != "flawed-brief" {
+		t.Fatalf("fix-1 state = %+v, want needs-input/flawed-brief (test setup is wrong)", fix1State)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v", err)
+	}
+	wantResume := fmt.Sprintf("jig run %s --answer %s '<text>'", fx.Ticket, fix1State.Question)
+	if !strings.Contains(got, wantResume) {
+		t.Errorf("expected fix-1's resume command %q, got:\n%s", wantResume, got)
+	}
+	if strings.Contains(got, "--from-brief-diff") {
+		t.Errorf("fix-1 (no FromBrief) was offered --from-brief-diff, which can never touch it, got:\n%s", got)
+	}
+}
+
+// TestRenderStatusStalled exercises the stalled path: a stalled slice should
+// drive the "stalled" state (outranking a simultaneously parked slice), the
+// stalled custody table with its human-readable stall summary (not the
+// normalized signature, which stays the matching key underneath), and the
+// stalled remediation hint - even while another slice is separately parked,
+// proving stalled beats parked for the state line without hiding the parked
+// table.
+func TestRenderStatusStalled(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "a", store.SliceState{State: "stalled", Attempts: 2, Reason: "stall", Signature: "a|code-bug|nil pointer", StallSummary: "nil pointer dereference in Clamp"}); err != nil {
+		t.Fatalf("write slice state a: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "c", store.SliceState{State: "needs-input", Attempts: 1, Question: "q-001"}); err != nil {
+		t.Fatalf("write slice state c: %v", err)
+	}
+	if err := st.WriteQuestion(fx.Ticket, store.Question{ID: "q-001", Slice: "c", Status: "open", Body: "Formal or casual greeting?"}); err != nil {
+		t.Fatalf("write question: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v", err)
+	}
+
+	if !strings.Contains(got, "state: stalled\n") {
+		t.Errorf("expected stalled state (outranking parked), got:\n%s", got)
+	}
+	wantStalled := "stalled[1]{slice,reason,summary}:\n" +
+		"  a,stall,nil pointer dereference in Clamp\n"
+	if !strings.Contains(got, wantStalled) {
+		t.Errorf("expected stalled table %q, got:\n%s", wantStalled, got)
+	}
+	if !strings.Contains(got, "parked[1]{slice,question,resume}:\n") {
+		t.Errorf("expected the parked table to still render alongside stalled, got:\n%s", got)
+	}
+	// The hint keeps the open question's priority even though the state
+	// line reports "stalled" (see nextStepHint's doc comment). The open
+	// question is a plain one, so it is answered rather than requeued (see
+	// TestRenderStatusParked).
+	wantHint := "  Run `jig run JIG-1 --answer q-001 '<text>'` to answer and resume\n"
+	if !strings.HasSuffix(got, wantHint) {
+		t.Errorf("expected answer hint suffix %q, got:\n%s", wantHint, got)
+	}
+}
+
+// TestRenderStatusStalledHint checks the stalled hint text itself, with no
+// open question in the way.
+func TestRenderStatusStalledHint(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "a", store.SliceState{State: "stalled", Attempts: 3, Reason: "attempt-cap"}); err != nil {
+		t.Fatalf("write slice state a: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v", err)
+	}
+
+	wantHint := "  Slice a is stalled (attempt-cap): amend the brief, then run `jig requeue JIG-1 --from-brief-diff`\n"
+	if !strings.HasSuffix(got, wantHint) {
+		t.Errorf("expected stalled hint suffix %q, got:\n%s", wantHint, got)
+	}
+	wantStalled := "stalled[1]{slice,reason,summary}:\n  a,attempt-cap,-\n"
+	if !strings.Contains(got, wantStalled) {
+		t.Errorf("expected stalled table with '-' summary %q, got:\n%s", wantStalled, got)
+	}
+}
+
+// TestRenderStatusStalledHintFromGate: a stalled slice with no FromBrief
+// (every gate fix slice) must not be offered the `--from-brief-diff`
+// remedy, since frontier.Requeue only touches a slice whose FromBrief
+// cites a hash that is gone - a fix slice has none, so that requeue would
+// silently do nothing and the hint would repeat forever. Its way out is
+// `jig requeue --slice`, the only command that can ever touch it, and the
+// hint must not claim where the slice came from (a hand-written slice with
+// no FromBrief looks identical to this fixture).
+func TestRenderStatusStalledHintFromGate(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.AppendSlices(fx.Ticket, []store.Slice{{
+		ID:        "fix-1",
+		Workspace: "alpha",
+		Goal:      "Fix the thing the gate flagged.",
+		Oracle:    "test",
+		FromGate:  1,
+	}}); err != nil {
+		t.Fatalf("AppendSlices: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "fix-1", store.SliceState{State: "stalled", Attempts: 3, Reason: "attempt-cap"}); err != nil {
+		t.Fatalf("write slice state fix-1: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v", err)
+	}
+
+	if strings.Contains(got, "--from-brief-diff") {
+		t.Errorf("hint offers --from-brief-diff for a slice with no FromBrief, which can never touch it, got:\n%s", got)
+	}
+	if strings.Contains(got, "gate round") {
+		t.Errorf("hint claims where the slice came from, want no origin claim, got:\n%s", got)
+	}
+	wantHint := "  Slice fix-1 is stalled (attempt-cap): run `jig requeue JIG-1 --slice fix-1`\n"
+	if !strings.HasSuffix(got, wantHint) {
+		t.Errorf("expected stalled-from-gate hint suffix %q, got:\n%s", wantHint, got)
+	}
+}
+
+// TestRenderStatusEnvBlocked checks the state: line's third precedence tier:
+// a ticket with no needs-input or stalled slice but at least one env-blocked
+// slice reports "env-blocked", the old combined "paused" value's other half
+// now that parked means needs-input specifically.
+func TestRenderStatusEnvBlocked(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "a", store.SliceState{State: "green", Attempts: 1}); err != nil {
+		t.Fatalf("write slice state a: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "d", store.SliceState{State: "env-blocked", Attempts: 1, Reason: "blocked-by-env"}); err != nil {
+		t.Fatalf("write slice state d: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v", err)
+	}
+	if !strings.Contains(got, "state: env-blocked\n") {
+		t.Errorf("expected env-blocked state, got:\n%s", got)
+	}
+	// No parked or stalled table: env-blocked is neither.
+	if strings.Contains(got, "parked[") || strings.Contains(got, "stalled[") {
+		t.Errorf("env-blocked slice must not render a parked or stalled table, got:\n%s", got)
+	}
+	wantHint := "  Slice d is env-blocked (blocked-by-env): bring the env up, then run `jig requeue JIG-1 --slice d`\n"
+	if !strings.HasSuffix(got, wantHint) {
+		t.Errorf("expected env-blocked hint suffix %q, got:\n%s", wantHint, got)
+	}
+}
+
+// TestRenderStatusParkedOutranksEnvBlocked checks the state: line's own
+// precedence between needs-input and env-blocked directly: with one slice
+// of each, the overall state must report "parked" (a human is needed),
+// never "env-blocked" - matching the doc comment on RenderStatus's
+// precedence switch (parked outranks env-blocked, which outranks green).
+func TestRenderStatusParkedOutranksEnvBlocked(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "c", store.SliceState{State: "needs-input", Attempts: 1, Question: "q-001"}); err != nil {
+		t.Fatalf("write slice state c: %v", err)
+	}
+	if err := st.WriteQuestion(fx.Ticket, store.Question{ID: "q-001", Slice: "c", Status: "open", Body: "Formal or casual greeting?"}); err != nil {
+		t.Fatalf("write question: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "d", store.SliceState{State: "env-blocked", Attempts: 1, Reason: "blocked-by-env"}); err != nil {
+		t.Fatalf("write slice state d: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v", err)
+	}
+	if !strings.Contains(got, "state: parked\n") {
+		t.Errorf("expected parked to outrank env-blocked on the state: line, got:\n%s", got)
+	}
+}
+
+// TestRenderStatusStalledOutranksEnvBlockedHint checks nextStepHint's
+// precedence between the two stuck states directly: slice c (env-blocked)
+// sorts before slice d (stalled) in testdata/fixture/slices.yaml, so the
+// hint must still report the stalled slice, not the env-blocked one -
+// matching the state: line's own stalled-beats-env-blocked precedence in
+// RenderStatus, not just the order slices.yaml happens to list them in
+// (which a single combined loop would get wrong here).
+func TestRenderStatusStalledOutranksEnvBlockedHint(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	// c sorts between a and d in testdata/fixture/slices.yaml, so marking it
+	// env-blocked while d (later) is stalled proves the precedence is a
+	// real two-pass check, not an accident of iteration order.
+	if err := st.WriteSliceState(fx.Ticket, "c", store.SliceState{State: "env-blocked", Attempts: 1, Reason: "blocked-by-env"}); err != nil {
+		t.Fatalf("write slice state c: %v", err)
+	}
+	if err := st.WriteSliceState(fx.Ticket, "d", store.SliceState{State: "stalled", Attempts: 3, Reason: "attempt-cap"}); err != nil {
+		t.Fatalf("write slice state d: %v", err)
+	}
+
+	got, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("RenderStatus: %v", err)
+	}
+	if !strings.Contains(got, "state: stalled\n") {
+		t.Errorf("expected stalled to outrank env-blocked on the state: line, got:\n%s", got)
+	}
+	wantHint := "  Slice d is stalled (attempt-cap): amend the brief, then run `jig requeue JIG-1 --from-brief-diff`\n"
+	if !strings.HasSuffix(got, wantHint) {
+		t.Errorf("expected the stalled slice's hint, not the env-blocked one's, suffix %q, got:\n%s", wantHint, got)
+	}
+}
+
+// TestResumeCommandChoosesFromReasonAndBriefSections pins which command
+// clears a parked slice's custody. Amending the brief and requeuing is the
+// remedy only when the slice was parked for a flawed brief and has brief
+// sections for --from-brief-diff to notice; every other parked slice, which
+// is the common case, is resumed by answering its open question.
+func TestResumeCommandChoosesFromReasonAndBriefSections(t *testing.T) {
+	cases := []struct {
+		name      string
+		reason    string
+		fromBrief []string
+		want      string
+	}{
+		{"flawed brief with sections", "flawed-brief", []string{"abc"}, "jig requeue T-1 --from-brief-diff"},
+		{"flawed brief without sections", "flawed-brief", nil, "jig run T-1 --answer q-001 '<text>'"},
+		{"plain question with sections", "", []string{"abc"}, "jig run T-1 --answer q-001 '<text>'"},
+		{"plain question without sections", "", nil, "jig run T-1 --answer q-001 '<text>'"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sl := store.Slice{ID: "a", FromBrief: c.fromBrief}
+			ss := store.SliceState{State: "needs-input", Question: "q-001", Reason: c.reason}
+			if got := resumeCommand("T-1", sl, ss); got != c.want {
+				t.Errorf("resumeCommand = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 
