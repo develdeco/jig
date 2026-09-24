@@ -172,6 +172,44 @@ was ambiguous, what was chosen, and why.
 - The CLI contract test is opt-in (`JIG_LIVE_CLAUDE=1`), not part of `go test ./...`: it
   runs whichever CLI version is installed, so its result is not reproducible run to run,
   and CI has no `claude` binary.
+- Direction taken after three adversarial review rounds each patched around the same
+  shape of hole (a glob, then a junction, then a parent search root): the `headless`
+  backend is stated as not a security boundary, and no further denylist patch is made
+  for that class. The screen stays for what it is good at - an accident guard, a push
+  blocker, a plainly spelled credential deny - and real confinement is separate future
+  work, not a bigger denylist. See ADR 0008.
+- The lease's `CLAUDE.md` moved from a working-tree read to `git ls-tree`/`cat-file`
+  through `internal/gitx`, so a symlink or hard link a screened session leaves in the
+  lease can no longer carry a file from outside it into the next dispatch's system
+  prompt; a blob over 64 KiB refuses the dispatch instead of forwarding it uncapped.
+- The secret screen's resolution step (`secretTarget`) never follows a network share or
+  a device path (`\\host\share\...`, `\\?\...`): `filepath.EvalSymlinks` on an unroutable
+  UNC address was blocking the whole screen for tens of seconds per fresh address. Such
+  a token is judged by spelling alone, which the screen already checks first.
+- `ToolCall` denies a call it cannot read outright - a missing or non-string Bash
+  `command`, a required path argument that is absent, or any path argument shaped as
+  something `SecretPath` can't compare (a number, an object, null, a list holding a
+  non-string) - instead of the previous fail-open default on an unreadable argument.
+- The denylist grew nine exact credential files that sit beside ordinary config in the
+  same directory (`.git-credentials`, `.claude/.credentials.json`, `.claude.json`,
+  `.config/git/credentials`, `.azure/msal_token_cache.json`,
+  `.config/gcloud/credentials.db`, `.gem/credentials`, `.pypirc`,
+  `.terraform.d/credentials.tfrc.json`), matched by exact trailing path segments so a
+  lease's own `.claude/settings.json` and skills stay readable.
+- `killTree` on Windows now runs `%SystemRoot%\System32\taskkill.exe` by absolute path
+  under its own 5s deadline, falling back to `Process.Kill` on failure or timeout,
+  instead of a bare `"taskkill"` resolved through PATH - which a session's own commands
+  can shadow - with no deadline of its own.
+- `SecretTarget` was exported with no caller outside `internal/screen`; unexported to
+  `secretTarget`, with a test that parses the package's own source and pins its
+  exported surface against ARCHITECTURE.md's row, so the two cannot drift apart silently
+  again.
+- `SESSION_TIMEOUT`'s message now names both halves of the ceiling jig actually
+  enforces - the bound and the drain `WaitDelay` can still spend - instead of only the
+  shorter number.
+- `JIG_HEADLESS_TIMEOUT` is now parsed before the screen probe runs, so a bad bound
+  fails as `BAD_TIMEOUT` immediately instead of first paying for a screen check that was
+  never going to matter.
 
 ## Gate and publish
 

@@ -113,7 +113,7 @@ exists.
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire` | repo/remote/target/branch/key → a `Lease` (a full clone, re-pointed to its start point) |
 | `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping → a `Config` |
-| `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
+| `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` + `Config` → a model rung, disjoint from rungs already in use |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices` | ticket-folder reads/writes → the truth-repo tree described above |
@@ -131,7 +131,7 @@ question). Nothing crosses in memory.
 Three backends implement that same narrow interface:
 
 - **fake** - replays a scripted scenario directory; no session, no network. The CI and fixture path.
-- **headless** - runs a local `claude -p` subprocess in `dontAsk` permission mode; the command/secret screens attach as a PreToolUse hook (`jig _screen`) whose allow is the only grant for the session's shell and read tools, and its edits are granted only inside the lease and on the dispatch's own `result.json` (see Safety).
+- **headless** - runs a local `claude -p` subprocess in `dontAsk` permission mode; the command/secret screens attach as a PreToolUse hook (`jig _screen`) whose allow is the only grant for the session's shell and read tools, and its edits are granted only inside the lease and on the dispatch's own `result.json` (see Safety). The shell it grants is the operator's own and is not confined to the lease, so this backend is not a security boundary.
 - **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); it has no PreToolUse hook to attach a screen to, so herdr sessions are not screened.
 
 Screens attach only where the backend's tool-call surface allows a
@@ -152,19 +152,31 @@ push from the screen the way they can from a regex.
 
 **Secret-read screen.** `screen.SecretPath` denies any tool-call path shaped
 like a live credential - `.env*`, `*_key*`, `id_rsa*`, `*.pem`,
-`~/.aws/**`, `~/.config/gh/**`, `~/.ssh/**`, `.netrc`, `.npmrc` - checked
-against the arguments each tool names files with, which the screen takes
-from the tool itself rather than from one shared key list, and against what
-those arguments resolve to on disk, so a symlink in the lease pointing at a
-credential directory is denied by where it lands. A credential directory
-counts as much as a file inside it, since a tool given a search root reads
-everything under it. What this does not do is confine a session: a content
-search over an ordinary directory that happens to hold a credential file
-still returns it.
+`~/.aws/**`, `~/.config/gh/**`, `~/.ssh/**`, `.netrc`, `.npmrc`, plus a
+fixed list of exact credential files that sit beside ordinary config in the
+same directory (`.git-credentials`, `.claude/.credentials.json`, and the
+like) - checked against the arguments each tool names files with, which the
+screen takes from the tool itself rather than from one shared key list, and
+against what those arguments resolve to on disk, so a symlink in the lease
+pointing at a credential directory is denied by where it lands. A network
+share or a Windows device path is judged by its spelling alone and never
+resolved, since resolving one can dial a remote host. A credential
+directory counts as much as a file inside it, since a tool given a search
+root reads everything under it. This is an accident guard, not
+confinement: a shell glob, a variable, a junction, or a hard link the
+resolution step doesn't see can still reach a credential the literal check
+would have caught, and a content search over an ordinary directory that
+happens to hold a credential file still returns it. See
+[ADR 0008](docs/adr/0008-headless-permission-model.md) for why a denylist
+of path spellings cannot close that gap.
 
-**Headless permission model.** A `claude -p` session can't be asked
-anything, so the headless backend grants every tool it needs up front and
-runs in `dontAsk` mode, which denies everything else. In a screened
+**Headless permission model.** This model is not a security boundary: a
+`headless` session's shell runs with the operator's own user rights and is
+not confined to the lease, so it is only as safe as running that shell
+yourself would be. What it does guarantee is disclosed below, and is
+narrower than "safe to run against anything." A `claude -p` session can't
+be asked anything, so the headless backend grants every tool it needs up
+front and runs in `dontAsk` mode, which denies everything else. In a screened
 dispatch (every dispatch jig makes), the shell and file-read tools are
 granted only by the screen hook's allow (`screen.Granted`), so jig itself
 grants them nothing without a passing screen. That is not the whole story:
@@ -184,7 +196,11 @@ under review, and loading it would run a hook the ticket branch chose and
 could widen what the session may edit. That source also carries the lease's
 `CLAUDE.md`, which the repo is meant to have, so jig passes that file itself
 (`--append-system-prompt-file`): a settings file grants capability, while
-`CLAUDE.md` only tells a session how the repo works. A session is bounded by
+`CLAUDE.md` only tells a session how the repo works. That file is read from
+the lease's committed HEAD tree, not its working tree, and capped in size:
+a working-tree read would follow a symlink or hard link a screened session
+left behind straight into the next dispatch's system prompt, with no cap on
+what it carried. A session is bounded by
 `JIG_HEADLESS_TIMEOUT` (90 minutes by default): the bound ends jig's wait
 and kills the session's process tree, so an unattended run fails instead of
 hanging. A child the CLI leaves behind after exiting normally outlives that
