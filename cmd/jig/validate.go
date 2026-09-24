@@ -67,15 +67,15 @@ func cmdValidate(args []string, stdout io.Writer) int {
 }
 
 // validateTicket checks that ticket's brief, slices.yaml, and manifest
-// agree, returning every problem found (nil means valid). Two of those
-// problems are ids jig reserves for its own machinery around a ticket: the
-// ticket id itself, which names the ticket's pool leases (pool.CheckTicket
-// refuses one ending in a role suffix like "-gate" or "-publish"), and the
-// slice id "gate", which the reviewer dispatch uses as its own journal and
-// frontier entry (checked below, alongside every other slice id).
+// agree, returning every problem found (nil means valid). Two ids around a
+// ticket are reserved by jig's own machinery and reported as problems on
+// their own: the ticket id, which names the ticket's pool leases (see
+// pool.CheckTicket for the suffixes it refuses), and the slice id "gate",
+// which the gate reviewer's dispatch uses as its own session slice name
+// (checked below, alongside every other slice id).
 func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProject, ticket string) ([]string, error) {
-	// The ticket id is the only problem worth reporting on its own: every
-	// path below is derived from it.
+	// An id that cannot name its leases is the only problem worth reporting
+	// on its own: every path below is derived from it.
 	if err := pool.CheckTicket(ticket); err != nil {
 		return []string{err.Error()}, nil
 	}
@@ -114,7 +114,7 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	}
 	for _, sl := range slices {
 		if sl.ID == "gate" {
-			problems = append(problems, `slice id "gate" is reserved for the gate reviewer dispatch, the way a ticket id ending in "-gate" or "-publish" is reserved for its pool leases`)
+			problems = append(problems, `slice id "gate" is reserved for the gate reviewer's own dispatch, which uses it as the session's slice name`)
 		}
 	}
 

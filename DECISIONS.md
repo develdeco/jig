@@ -364,6 +364,12 @@ was ambiguous, what was chosen, and why.
   straight to the move-aside branch without ever asking git. It now Stats
   the path first, resolving a link the way git itself would, so `ownRepo`
   decides (`TestAcquireReusesSymlinkedLease`).
+- The ticket-id and slice-id "gate" reservations are reported as two
+  independent problems: `validateTicket`'s doc comment states once that
+  both are reserved and points to `pool.CheckTicket` for the ticket
+  suffixes, and each problem message names only its own id and why it is
+  reserved, so the slice-id message no longer repeats `pool.Role`'s suffix
+  literals where they could drift from it.
 
 ## Gate and publish
 
