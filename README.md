@@ -143,19 +143,43 @@ missing a workspace, an oracle, or both for a human to decide later.
 
 ## Safety
 
-The `headless` backend is wrapped by two screens before a tool call runs: a
-structural command screen that parses each shell command instead of
-pattern-matching it, so quoting or a `-C <path>` trick can't hide a `git
-push` from it, and a secret-path screen that denies any tool-call path
-shaped like a live credential (`.env*`, `*_key*`, `id_rsa*`, `~/.aws/**`, and
-the like). `herdr` sessions are not screened yet. Every command pushes the
-ticket store's own bookkeeping commits to the store's remote as it works;
-only the ticket branch push is guarded, and only `jig publish` makes it,
-after its interactive confirm (or `--yes`) has run - it refuses to push a
-branch to a remote that isn't a local file path without one. Product
-commits - the ones that land on your PR branch - use your own git identity,
-not jig's. See [ARCHITECTURE.md](ARCHITECTURE.md#safety) for the full
-model.
+The `headless` backend is not a security boundary: a granted session's
+shell and file reads run with the operator's own rights, unconfined to the
+lease, so run jig only against code - and on a machine - you would already
+hand that same shell. It is wrapped by two screens before a tool call runs:
+a structural command screen that parses each shell command instead of
+pattern-matching it, so quoting or a `-C <path>` trick can't hide a plainly
+spelled `git push` from it, and a secret-path screen that denies a tool
+call naming a live credential (`.env*`, `*_key*`, `id_rsa*`, `~/.aws/**`,
+`~/.ssh/**`, and the like), by its spelling and by where it resolves on
+disk. Both screens are an accident guard, not confinement: a shell glob, a
+variable, a junction, or a hard link can still reach a credential the
+literal check would have caught, a git alias or a variable (`-c
+alias.x=push`, `$(echo git) push`) can still reach a push the command
+screen would have caught, and the resolution step deliberately never
+follows a network share or a device path, since doing so can dial a remote
+host. See [ADR 0008](docs/adr/0008-headless-permission-model.md) for why a
+denylist of path spellings can't close that gap, and what would. A
+`headless` session gets nothing else it doesn't need: jig's own settings
+grant its shell and file reads only through a passing screen, and its file
+edits only inside the lease and its own `result.json` - though the
+operator's own user settings, which still load on top, can grant more. The
+lease's `.claude/settings.json` is not loaded, since that file is part of
+the code under review, while its `CLAUDE.md` is carried in from the lease's
+committed tree, with a 64 KiB size cap, since that is the repo telling the
+session how it works. Before each screened session starts, jig checks that
+the screen still answers, and refuses to run one behind a screen that is
+missing or broken - though that check only binds the start of a session,
+not its whole life. A session is bounded in time, so a wedged one fails
+instead of hanging. `herdr` sessions are not screened yet.
+
+Every command pushes the ticket store's own bookkeeping commits to the
+store's remote as it works; only the ticket branch push is guarded, and only
+`jig publish` makes it, after its interactive confirm (or `--yes`) has run -
+it refuses to push a branch to a remote that isn't a local file path without
+one. Product commits - the ones that land on your PR branch - use your own
+git identity, not jig's. See [ARCHITECTURE.md](ARCHITECTURE.md#safety) for
+the full model.
 
 ## Docs
 

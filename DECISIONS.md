@@ -131,14 +131,138 @@ was ambiguous, what was chosen, and why.
 - The invariant-floor regex keeps its verbatim v0.1 form (no word boundaries, literal
   single spaces, a reduced alternative set) rather than a richer regex considered
   during review, because that verbatim v0.1 form was intentional, not an oversight.
-- The headless backend's exactly-one-fenced-block text parse is the v0.1 rule; the
-  known risk is a transcript containing a stray fence, which is documented rather than
-  guarded against in v0.1.
+- The headless backend's exactly-one-fenced-block text parse runs over the session's
+  final message only (the CLI result object's `result`), so a fence in tool output
+  elsewhere in the transcript can no longer count as the result block.
 - Staircase signals measure the lease's whole diff against its start point, not
   just the latest attempt's changes.
 - graphify's `Plane.Affected` derives `--graph <repo>/graphify-out/graph.json --depth
   2` itself, since the interface carries no graph/depth parameters and these are
   reasonable defaults.
+
+## Headless backend
+
+- The permission model itself is ADR 0008. Found on Claude Code CLI 2.1.232: print mode
+  rejected `--output-format stream-json` without `--verbose`, so every headless dispatch
+  failed before a session ran; and even with it, print mode denied the edits, the commit,
+  and the result.json write outside the lease that the disk contract needs.
+- `--output-format json`, not `stream-json --verbose`: jig reads only the final result
+  object (the session's final message, `is_error`, the denied tool calls), so the event
+  stream bought nothing but a whole transcript buffered in memory. Claude Code keeps the
+  transcript in its own session store anyway.
+- A CLI that ran no session (a rejected flag), or whose session ended in error (expired
+  credentials, an API failure), is an infrastructure error carrying the CLI's own message.
+  It used to become a synthesized "no result block" result, which hid the cause. A
+  completed session that wrote no result.json still gets one from its final message, and
+  when that parse fails the summary names the denied tool calls.
+- The tool surface leaves out Skill, subagents, and web access even though some would be
+  harmless. The session's instructions are its prompt, the dispatch inputs, and the
+  repo's CLAUDE.md; skills and subagents would pull in unrelated user-level skills and
+  models the staircase never chose, and fetched pages are an injection path.
+- The operator's own Claude Code settings still load (project and local sources are
+  dropped, the user source is kept: `--setting-sources user`). Dropping user settings too
+  would also drop their deny rules and hooks, widening the session as often as narrowing
+  it; the `--permission-mode` flag already beats any `defaultMode` there, checked against
+  a user-level `bypassPermissions`.
+- Granting through the screen is not fail-closed on its own, so jig proves its own
+  binary's screen before every screened dispatch: one `jig _screen` run directly, not
+  through the hook wiring Claude Code itself launches, with a push, which must come back
+  denied. Claude Code skips a hook it cannot launch and its own read-only classifier
+  still allows `echo`, `ls`, `git show` and the like, so a missing, failing, silent or
+  wrong-answering hook would otherwise leave a session reading the machine with nothing
+  saying the screen was gone. The probe binds the start of a session, not its whole life.
+- The credential screen judges both how a path is spelled and where a symlink lands: a
+  symlink in the lease pointing at `~/.aws` and a search root that is a credential
+  directory rather than a file are the same read by another name. A credential directory
+  counts as much as a file in it, since a tool given a root reads everything under it.
+  What this is not is confinement: a content search over an ordinary directory holding a
+  `.env` still returns it, and only a sandbox would change that.
+- The lease's `CLAUDE.md` is passed with `--append-system-prompt-file`, because dropping
+  the project setting source drops that file too (checked against the installed CLI: the
+  marker appears without the flag and disappears with it). Capability and instructions
+  part company here - a settings file says what a session may do and must not come from
+  the code under review, while `CLAUDE.md` says how the repo works, which is the repo's
+  to say. Imports inside it are not resolved.
+- The session's bound kills the process tree and sets `WaitDelay`, because killing the
+  CLI alone left `Wait` blocked on pipes a surviving grandchild still held: the bound
+  did not bound the call. A child the CLI leaves behind after exiting normally still
+  outlives it; what jig guarantees is that it stops waiting, not that it kills that
+  child too - that is not jig's to kill on any OS.
+- A session that wrote its result before the bound is honored, since the disk contract
+  is what decides an attempt, not how the process ended.
+- A `JIG_HEADLESS_TIMEOUT` that does not parse is refused rather than ignored: an
+  operator who set a bound and silently got the default would find out by waiting.
+- The screen takes a tool's file-selecting arguments from the tool, not from one shared
+  key list: `Grep` filters with `glob` and `Glob` selects with `pattern`, and a
+  credential named in either came back in full while a `Read` of the same path was
+  denied. A tool the screen has no entry for is denied rather than guessed at, which is
+  also what a tool a future CLI adds should get until it is considered.
+- `--setting-sources user`: project and local settings live in the lease, which is the
+  code under review. A `.claude/settings.json` on the ticket branch ran its own
+  PreToolUse hook on this machine, and a `.claude/settings.local.json` granted writes
+  outside the lease. The operator's own user settings still load, for the reason above.
+- `PowerShell` left the granted surface: the CLI this backend drives has no such tool, so
+  naming it in `--tools` and in `screen.Granted` described a grant that never existed.
+- A session runs under `JIG_HEADLESS_TIMEOUT` (90 minutes by default). The bound is for a
+  session or hook that has stopped making progress at all; a real slice can legitimately
+  take a long time, so it is deliberately generous rather than tuned.
+- The live contract test asserts the structured `is_error` flag for a refusal the CLI
+  words itself, and matches text only where the text is jig's own (the screen's reason).
+- The gate reviewer's dispatch (Slice "gate") gets the same grants as a build, worktree
+  edits included: main's read-only guard already rejects a round that moved HEAD or
+  changed a tracked file. A read-only dispatch flag would turn such an edit into a
+  denial the reviewer can work around instead of a failed round; it was left out of this
+  change, which does not touch the reviewer's own code.
+- The screen hook runs this process's own executable only when build info says it is the
+  jig binary. Inside `go test` the executable is the test binary, which `_screen` would
+  rerun tests in on every tool call, so a test or another program running screened
+  dispatches must pass `Options.ScreenBinary`. The check runs per screened dispatch,
+  not in `New`: an unscreened dispatch runs no hook and needs no jig binary.
+- Rule paths take the POSIX drive form Claude Code matches Windows paths in
+  (`C:\a` is `//c/a`), with gitignore characters escaped, plus the symlink-resolved form
+  when it differs. Checked against the CLI: native backslash paths, lowercased paths, and
+  a directory named `w [1] (x) y` all match, and a look-alike sibling does not.
+- The CLI contract test is opt-in (`JIG_LIVE_CLAUDE=1`), not part of `go test ./...`: it
+  runs whichever CLI version is installed, so its result is not reproducible run to run,
+  and CI has no `claude` binary.
+- Direction taken after three adversarial review rounds each patched around the same
+  shape of hole (a glob, then a junction, then a parent search root): the `headless`
+  backend is stated as not a security boundary, and no further denylist patch is made
+  for that class. The screen stays for what it is good at - an accident guard, a push
+  blocker, a plainly spelled credential deny - and real confinement is separate future
+  work, not a bigger denylist. See ADR 0008.
+- The lease's `CLAUDE.md` moved from a working-tree read to `git ls-tree`/`cat-file`
+  through `internal/gitx`, so a symlink or hard link a screened session leaves in the
+  lease can no longer carry a file from outside it into the next dispatch's system
+  prompt; a blob over 64 KiB refuses the dispatch instead of forwarding it uncapped.
+- The secret screen's resolution step (`secretTarget`) never follows a network share or
+  a device path (`\\host\share\...`, `\\?\...`): `filepath.EvalSymlinks` on an unroutable
+  UNC address was blocking the whole screen for tens of seconds per fresh address. Such
+  a token is judged by spelling alone, which the screen already checks first.
+- `ToolCall` denies a call it cannot read outright - a missing or non-string Bash
+  `command`, a required path argument that is absent, or any path argument shaped as
+  something `SecretPath` can't compare (a number, an object, null, a list holding a
+  non-string) - instead of the previous fail-open default on an unreadable argument.
+- The denylist grew nine exact credential files that sit beside ordinary config in the
+  same directory (`.git-credentials`, `.claude/.credentials.json`, `.claude.json`,
+  `.config/git/credentials`, `.azure/msal_token_cache.json`,
+  `.config/gcloud/credentials.db`, `.gem/credentials`, `.pypirc`,
+  `.terraform.d/credentials.tfrc.json`), matched by exact trailing path segments so a
+  lease's own `.claude/settings.json` and skills stay readable.
+- `killTree` on Windows now runs `%SystemRoot%\System32\taskkill.exe` by absolute path
+  under its own 5s deadline, falling back to `Process.Kill` on failure or timeout,
+  instead of a bare `"taskkill"` resolved through PATH - which a session's own commands
+  can shadow - with no deadline of its own.
+- `SecretTarget` was exported with no caller outside `internal/screen`; unexported to
+  `secretTarget`, with a test that parses the package's own source and pins its
+  exported surface against ARCHITECTURE.md's row, so the two cannot drift apart silently
+  again.
+- `SESSION_TIMEOUT`'s message now names both halves of the ceiling jig actually
+  enforces - the bound and the drain `WaitDelay` can still spend - instead of only the
+  shorter number.
+- `JIG_HEADLESS_TIMEOUT` is now parsed before the screen probe runs, so a bad bound
+  fails as `BAD_TIMEOUT` immediately instead of first paying for a screen check that was
+  never going to matter.
 
 ## Gate and publish
 

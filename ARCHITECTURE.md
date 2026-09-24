@@ -118,7 +118,7 @@ exists.
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire` | repo/remote/target/branch/key → a `Lease` (a full clone, re-pointed to its start point) |
 | `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping → a `Config` |
-| `internal/screen/` | `Command`, `SecretPath`, `ToolCall` | a shell command, path, or tool-call input → allow, or deny with a reason |
+| `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` + `Config` → a model rung, disjoint from rungs already in use |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices` | ticket-folder reads/writes → the truth-repo tree described above |
@@ -136,7 +136,14 @@ question). Nothing crosses in memory.
 Three backends implement that same narrow interface:
 
 - **fake** - replays a scripted scenario directory; no session, no network. The CI and fixture path.
-- **headless** - runs a local `claude -p` subprocess; the command/secret screens attach as a PreToolUse hook (`jig _screen`).
+- **headless** - runs a local `claude -p` subprocess in `dontAsk` permission
+  mode. The command/secret screens attach as a PreToolUse hook
+  (`jig _screen`); its allow is jig's own only grant for the session's shell
+  and read tools, though the operator's own user settings (which still
+  load) can grant more on top. Edits are granted only inside the lease and
+  on the dispatch's own `result.json` (see Safety). The shell and reads it
+  grants are the operator's own and are not confined to the lease, so this
+  backend is not a security boundary.
 - **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); it has no PreToolUse hook to attach a screen to, so herdr sessions are not screened.
 
 Screens attach only where the backend's tool-call surface allows a
@@ -190,18 +197,85 @@ in the store's working copy, where it would block the next command's
 ## Safety
 
 **Structural command screen.** A regex over the whole command line is not
-enough to catch a disguised `git push`: `git -C <path> push` is a plain push
-once `-C <path>` is consumed as a global option, and quoting or extra
-whitespace defeats a pattern match without changing what git executes.
-`screen.Command` instead parses each shell segment structurally - split,
-tokenize, unquote, match the git binary, consume global options - and checks
-the *resulting* subcommand and flags, so path or quoting tricks can't hide a
-push from the screen the way they can from a regex.
+enough to catch a plainly-spelled but oddly-quoted `git push`: `git -C
+<path> push` is a plain push once `-C <path>` is consumed as a global
+option, and quoting or extra whitespace defeats a pattern match without
+changing what git executes. `screen.Command` instead parses each shell
+segment structurally - split, tokenize, unquote, match the git binary,
+consume global options - and checks the *resulting* subcommand and flags,
+so a quoting trick can't hide a push from the screen the way it can from a
+regex. This is a per-token accident guard, not confinement: an indirection
+the shell itself resolves - a git alias (`-c alias.x=push`), a shell
+variable, or command substitution - still runs `push` once the shell
+expands it, after the screen already judged the unexpanded tokens. See
+[ADR 0008](docs/adr/0008-headless-permission-model.md).
 
 **Secret-read screen.** `screen.SecretPath` denies any tool-call path shaped
-like a live credential - `.env*`, `*_key*`, `id_rsa*`, `*.pem`,
-`~/.aws/**`, `~/.config/gh/**` - checked against every path-like argument of
-every tool call, not just git's.
+like a live credential - `.env*`, `*_key*`, `id_rsa*`, `*.pem`, `.netrc`,
+`_netrc`, `.npmrc`, plus a fixed list of exact credential files that sit
+beside ordinary config in the same directory (`.git-credentials`,
+`.claude/.credentials.json`, and the like) - or that has a credential
+directory anywhere among its path segments, not only at the root:
+`.aws`, `.ssh`, `.gnupg`, `.config/gh`, `.docker`, `.kube` - checked
+against the arguments each tool names files with, which the
+screen takes from the tool itself rather than from one shared key list, and
+against what those arguments resolve to on disk, so a symlink in the lease
+pointing at a credential directory is denied by where it lands. A network
+share or a Windows device path is judged by its spelling alone and never
+resolved, since resolving one can dial a remote host. A credential
+directory counts as much as a file inside it, since a tool given a search
+root reads everything under it. This is an accident guard, not
+confinement: a shell glob, a variable, a junction, or a hard link the
+resolution step doesn't see can still reach a credential the literal check
+would have caught, and a content search over an ordinary directory that
+happens to hold a credential file still returns it. See
+[ADR 0008](docs/adr/0008-headless-permission-model.md) for why a denylist
+of path spellings cannot close that gap.
+
+**Headless permission model.** This model is not a security boundary: a
+`headless` session's shell runs with the operator's own user rights and is
+not confined to the lease, so it is only as safe as running that shell
+yourself would be. What it does guarantee is disclosed below, and is
+narrower than "safe to run against anything." A `claude -p` session can't
+be asked anything, so the headless backend grants every tool it needs up
+front and runs in `dontAsk` mode, which denies everything else. In a screened
+dispatch (every dispatch jig makes), the shell and file-read tools are
+granted only by the screen hook's allow (`screen.Granted`), so jig itself
+grants them nothing without a passing screen. That is not the whole story:
+Claude Code treats a hook it cannot launch as no decision, and its own
+read-only classifier still lets part of the shell through, so a dead screen
+would leave a session reading the machine with nothing saying so. jig
+therefore proves its own binary's screen before every screened dispatch: it
+runs `jig _screen` once, directly rather than through the hook wiring
+Claude Code itself launches, with a call the screen must deny, and a hook
+that is missing, fails, answers nothing, or allows it stops the dispatch
+with `SCREEN_UNAVAILABLE` instead of starting the session. The edit tools are
+granted by path-scoped permission rules for the lease worktree and the
+dispatch's `result.json`, nothing else in the store. Web access, subagents,
+skills and MCP servers are left out of the session entirely. Rules and hook
+travel as one inline `--settings` object, and `--setting-sources user`
+keeps the lease's own `.claude/settings.json` out: that file is content
+under review, and loading it would run a hook the ticket branch chose and
+could widen what the session may edit. That source also carries the lease's
+`CLAUDE.md`, which the repo is meant to have, so jig passes that file itself
+(`--append-system-prompt-file`): a settings file grants capability, while
+`CLAUDE.md` only tells a session how the repo works. That file is read from
+the lease's committed HEAD tree, not its working tree, so an uncommitted
+symlink or hard link a screened session left behind cannot carry an outside
+file into the next dispatch's system prompt this way - only committed
+content ever reaches it - and it is capped at 64 KiB, refusing the dispatch
+(`LEASE_MEMORY_TOO_LARGE`) rather than forwarding an oversized blob. A
+session is bounded by `JIG_HEADLESS_TIMEOUT` (90 minutes by default): the
+bound ends jig's wait and kills the session's process tree, so an
+unattended run fails instead of hanging. A child the CLI leaves behind
+after exiting normally is not jig's to kill either way; jig simply stops
+waiting on it once `WaitDelay` elapses. A session that wrote its result
+before the bound is honored, since the disk contract is what decides. It
+is not a sandbox: a granted shell is not confined to the lease, and neither
+are `Read`, `Glob` and `Grep`, whose only limit is the credential denylist.
+See [ADR 0008](docs/adr/0008-headless-permission-model.md); `JIG_LIVE_CLAUDE=1
+go test ./internal/session -run Live` checks the model against the
+installed CLI through a local mock of the Messages API.
 
 **Guarded push.** `gitx.GuardedPush` refuses to push to a remote that is not
 a local file path unless the caller has confirmed. `publish` is the only
