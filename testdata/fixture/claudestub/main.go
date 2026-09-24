@@ -10,6 +10,9 @@
 // $CLAUDE_STUB_CHILD_HANG first starts a copy of itself that sleeps for
 // that duration and outlives it, standing in for the shells and test
 // runners a real session leaves behind holding jig's pipes.
+// $CLAUDE_STUB_CHILD_PID_FILE, with $CLAUDE_STUB_CHILD_HANG set, writes that
+// child's pid to the named file once it has started, so a test can check
+// afterward whether the tree kill actually reached it.
 package main
 
 import (
@@ -42,6 +45,13 @@ func main() {
 		if err := child.Start(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(4)
+		}
+		if pidFile := os.Getenv("CLAUDE_STUB_CHILD_PID_FILE"); pidFile != "" {
+			pid := strconv.Itoa(child.Process.Pid)
+			if err := os.WriteFile(pidFile, []byte(pid), 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(5)
+			}
 		}
 	}
 	if d := os.Getenv("CLAUDE_STUB_HANG"); d != "" {

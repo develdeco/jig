@@ -11,10 +11,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/outcome"
 	"github.com/develdeco/jig/internal/screen"
 )
@@ -191,20 +193,27 @@ func (b *headlessBackend) Run(d Dispatch) error {
 		}
 	}
 
+	// Parsed before verifyScreen spawns the probe subprocess: a bound that
+	// does not parse should cost nothing and fail as BAD_TIMEOUT, not spend
+	// the probe's budget and come back as SCREEN_UNAVAILABLE (or a working
+	// screen's few hundred milliseconds) before anyone finds out the bound
+	// itself was bad.
+	bound, err := headlessTimeout()
+	if err != nil {
+		return err
+	}
+
 	if d.Screen {
 		if err := b.verifyScreen(); err != nil {
 			return err
 		}
 	}
 
-	args, err := b.args(d)
+	args, cleanup, err := b.args(d)
 	if err != nil {
 		return err
 	}
-	bound, err := headlessTimeout()
-	if err != nil {
-		return err
-	}
+	defer cleanup()
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, claudePath, args...)
@@ -216,7 +225,7 @@ func (b *headlessBackend) Run(d Dispatch) error {
 	// holds, so the bound would not bound anything: Cancel ends the whole
 	// tree, and WaitDelay stops waiting on the pipes regardless.
 	cmd.Cancel = func() error { return killTree(cmd) }
-	cmd.WaitDelay = 10 * time.Second
+	cmd.WaitDelay = sessionWaitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -229,11 +238,7 @@ func (b *headlessBackend) Run(d Dispatch) error {
 		return nil
 	}
 	if ctx.Err() != nil {
-		return &axi.Error{
-			Msg:  fmt.Sprintf("the headless session did not finish within %s and was stopped, with no result written", bound),
-			Code: "SESSION_TIMEOUT",
-			Help: []string{fmt.Sprintf("Raise the bound with JIG_HEADLESS_TIMEOUT (a Go duration, currently %s), or rerun.", bound)},
-		}
+		return sessionTimeoutError(bound)
 	}
 
 	res, ok := parseCLIResult(stdout.Bytes())
@@ -259,12 +264,16 @@ func (b *headlessBackend) Run(d Dispatch) error {
 	return writeResultBytes(d.ResultJSON, data)
 }
 
-// args renders the full `claude` argv for d. The prompt goes last, after
-// "--", so no prompt text can ever parse as a flag.
-func (b *headlessBackend) args(d Dispatch) ([]string, error) {
+// args renders the full `claude` argv for d, plus a cleanup func the caller
+// must run once the session is done with it (it removes the lease-memory
+// temp file args may have created; a no-op when there was none to make).
+// The prompt goes last, after "--", so no prompt text can ever parse as a
+// flag.
+func (b *headlessBackend) args(d Dispatch) (argv []string, cleanup func(), err error) {
+	noop := func() {}
 	settings, err := b.settings(d)
 	if err != nil {
-		return nil, fmt.Errorf("session/headless: render settings: %w", err)
+		return nil, noop, fmt.Errorf("session/headless: render settings: %w", err)
 	}
 	args := []string{"-p", "--output-format", "json"}
 	if d.Model != "" {
@@ -290,14 +299,18 @@ func (b *headlessBackend) args(d Dispatch) ([]string, error) {
 	// while CLAUDE.md only tells the session how this repo works, which is
 	// the repo's job. Imports inside it are not resolved, since this passes
 	// the file's own text.
-	if memory := filepath.Join(d.Worktree, "CLAUDE.md"); fileExists(memory) {
+	memory, memoryCleanup, err := leaseMemory(d.Worktree)
+	if err != nil {
+		return nil, noop, err
+	}
+	if memory != "" {
 		args = append(args, "--append-system-prompt-file", memory)
 	}
 	args = append(args,
 		"--settings", settings,
 		"--", d.Prompt,
 	)
-	return args, nil
+	return args, memoryCleanup, nil
 }
 
 // settings renders the session's `--settings` JSON. Its permission rules
@@ -471,8 +484,118 @@ func describeDenials(denials []cliDenial) string {
 	return "denied tool calls: " + strings.Join(parts, ", ")
 }
 
-// fileExists reports whether path names an existing regular file.
-func fileExists(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && fi.Mode().IsRegular()
+// leaseMemoryCap bounds the lease's CLAUDE.md as carried into a headless
+// session's system prompt. 64 KiB is generous for hand-written project
+// memory - this repo's own CLAUDE.md/AGENTS.md pair sits under 4 KiB - while
+// keeping one dispatch's request body from growing by megabytes on every
+// call just because a branch happened to carry a huge one; see F10 in
+// docs/adr/0008-headless-permission-model.md's review trail. A lease that
+// genuinely needs more should point the session at a file it reads for
+// itself instead of paying the cost on every dispatch.
+const leaseMemoryCap = 64 * 1024
+
+// sessionWaitDelay is cmd.WaitDelay: how long a dispatch keeps reading a
+// session's stdout/stderr pipes after its context is done, for a child the
+// CLI leaves running and still holding them. It is also named in
+// sessionTimeoutError, since a bound alone understates how long a timed-out
+// dispatch can actually take.
+const sessionWaitDelay = 10 * time.Second
+
+// sessionTimeoutError renders the SESSION_TIMEOUT error for a dispatch that
+// did not finish within bound. It names both halves of the ceiling jig
+// actually enforced: the bound, and the drain it can then spend waiting for
+// a child that outlived the CLI to let go of the pipes. A message that only
+// says the bound reads like a bug the first time someone times a 3s bound
+// returning at 10s.
+func sessionTimeoutError(bound time.Duration) *axi.Error {
+	return &axi.Error{
+		Msg: fmt.Sprintf(
+			"the headless session did not finish within %s (plus up to %s to drain its output, if a child it started was still holding the pipes) and was stopped, with no result written",
+			bound, sessionWaitDelay,
+		),
+		Code: "SESSION_TIMEOUT",
+		Help: []string{fmt.Sprintf("Raise the bound with JIG_HEADLESS_TIMEOUT (a Go duration, currently %s), or rerun.", bound)},
+	}
+}
+
+// leaseMemory resolves worktree's committed CLAUDE.md, if it has one, into a
+// jig-owned temp file (mode 0600, as os.CreateTemp makes it) ready for
+// --append-system-prompt-file, and returns its path plus a cleanup func that
+// removes it. cleanup is always safe to call, including when path is "".
+//
+// The content comes from worktree's HEAD tree through gitx, never from the
+// working directory: the lease is the code under review, it can write
+// anything through Edit/Write including a symlink or a hard link, and a
+// filesystem read of "CLAUDE.md" would follow either one into whatever file
+// it names, screen or no screen, since jig would be the one reading it, not
+// a tool call the screen ever sees. Only a regular-file blob (git mode
+// 100644 or 100755) counts. A symlink entry (mode 120000), no CLAUDE.md at
+// HEAD, or a worktree that is not a git repository (or has no commit yet)
+// all mean nothing to append - the same as a lease with no CLAUDE.md at
+// all, not an error. An oversized blob is the one case that is an error:
+// refusing loudly beats silently sending a truncated or absent memory file.
+func leaseMemory(worktree string) (path string, cleanup func(), err error) {
+	noop := func() {}
+	mode, hash, size, ok := headTreeEntry(worktree, "CLAUDE.md")
+	if !ok || (mode != "100644" && mode != "100755") {
+		return "", noop, nil
+	}
+	if size > leaseMemoryCap {
+		return "", noop, &axi.Error{
+			Msg:  fmt.Sprintf("the lease's CLAUDE.md is %d bytes, over the %d-byte cap, so the dispatch was refused rather than sending it anyway", size, leaseMemoryCap),
+			Code: "LEASE_MEMORY_TOO_LARGE",
+			Help: []string{"Trim CLAUDE.md below the cap, or move the excess into a file the session reads for itself."},
+		}
+	}
+	// RunRaw, not Run: Run trims stdout, which would drop meaningful
+	// leading or trailing bytes of the file's own content.
+	content, err := gitx.RunRaw(worktree, "cat-file", "-p", hash)
+	if err != nil {
+		return "", noop, fmt.Errorf("session/headless: read the lease's CLAUDE.md blob: %w", err)
+	}
+	f, err := os.CreateTemp("", "jig-lease-memory-*.md")
+	if err != nil {
+		return "", noop, fmt.Errorf("session/headless: create a temp file for the lease's CLAUDE.md: %w", err)
+	}
+	remove := func() { _ = os.Remove(f.Name()) }
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
+		remove()
+		return "", noop, fmt.Errorf("session/headless: write the lease memory temp file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		remove()
+		return "", noop, fmt.Errorf("session/headless: close the lease memory temp file: %w", err)
+	}
+	return f.Name(), remove, nil
+}
+
+// headTreeEntry looks up path in worktree's HEAD tree via `git ls-tree -l`
+// and returns its mode, blob hash and byte size. ok is false for every shape
+// of "nothing there" a caller following the disk contract needs to treat as
+// a silent skip rather than a hard failure: worktree is not a git
+// repository, HEAD has no commit yet, or HEAD's tree simply has no entry at
+// path. None of those is distinguished from the others; the caller does not
+// need to.
+func headTreeEntry(worktree, path string) (mode, hash string, size int64, ok bool) {
+	out, err := gitx.Run(worktree, "ls-tree", "-l", "HEAD", "--", path)
+	if err != nil || out == "" {
+		return "", "", 0, false
+	}
+	// "<mode> SP <type> SP <hash> SP <size>\t<path>"; only the part before
+	// the tab is field data, and the size column is space-padded for
+	// alignment, so Fields (not a fixed split) is what parses it.
+	head, _, cut := strings.Cut(out, "\t")
+	if !cut {
+		return "", "", 0, false
+	}
+	fields := strings.Fields(head)
+	if len(fields) != 4 {
+		return "", "", 0, false
+	}
+	n, err := strconv.ParseInt(fields[3], 10, 64)
+	if err != nil {
+		return "", "", 0, false
+	}
+	return fields[0], fields[2], n, true
 }
