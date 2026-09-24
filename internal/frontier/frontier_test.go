@@ -1,12 +1,14 @@
 package frontier
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
@@ -149,6 +151,68 @@ func TestAnswerResume(t *testing.T) {
 	}
 }
 
+// TestAnswerAndRequeueClearsStalledSignature: answering a question and
+// requeuing its slice must clear that slice's stall Signature and
+// StallSummary alongside Reason, not just Reason - a stale signature or
+// summary left behind by an earlier stall must not survive an
+// answer-and-requeue. Signature and StallSummary are seeded directly onto
+// the parked slice (independent of how it reached its needs-input state),
+// and answerAndRequeue is called directly rather than through a second Run:
+// driving a full Run risks the slice landing green in that same call, whose
+// own green-route clear (a separate, already pinned mutant) would then mask
+// a regression in answerAndRequeue's own clear.
+func TestAnswerAndRequeueClearsStalledSignature(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	d, st := newDeps(t, fx)
+
+	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	qs, err := st.ReadQuestions(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadQuestions: %v", err)
+	}
+	var q *store.Question
+	for i := range qs {
+		if qs[i].Status == "open" {
+			q = &qs[i]
+		}
+	}
+	if q == nil {
+		t.Fatalf("no open question after first Run")
+	}
+
+	parked, err := st.ReadSliceState(fx.Ticket, q.Slice)
+	if err != nil {
+		t.Fatalf("ReadSliceState(%s): %v", q.Slice, err)
+	}
+	parked.Signature = q.Slice + "|code-bug|stale signature from a previous stall"
+	parked.StallSummary = "stale summary from a previous stall"
+	if err := st.WriteSliceState(fx.Ticket, q.Slice, parked); err != nil {
+		t.Fatalf("write slice state: %v", err)
+	}
+
+	if err := answerAndRequeue(d, fx.Ticket, q.ID, "Casual."); err != nil {
+		t.Fatalf("answerAndRequeue: %v", err)
+	}
+
+	after, err := st.ReadSliceState(fx.Ticket, q.Slice)
+	if err != nil {
+		t.Fatalf("ReadSliceState(%s) after answer: %v", q.Slice, err)
+	}
+	if after.State != "queued" {
+		t.Fatalf("%s State = %q, want queued", q.Slice, after.State)
+	}
+	if after.Signature != "" {
+		t.Fatalf("%s Signature = %q, want cleared by answerAndRequeue", q.Slice, after.Signature)
+	}
+	if after.StallSummary != "" {
+		t.Fatalf("%s StallSummary = %q, want cleared by answerAndRequeue", q.Slice, after.StallSummary)
+	}
+}
+
 func TestScheduleUsedByRunSingleRepoFixture(t *testing.T) {
 	// The default fixture is a single-repo project, so Run's own use of
 	// Schedule always exercises the serial (one-group) path; TestSchedule*
@@ -185,6 +249,12 @@ func TestAttemptCapExhaustion(t *testing.T) {
 	if aState.State != "stalled" || aState.Reason != "attempt-cap" || aState.Attempts != 3 {
 		t.Fatalf("a state = %+v, want stalled/attempt-cap after 3 attempts", aState)
 	}
+	if aState.Signature == "" {
+		t.Fatalf("a state = %+v, want a non-empty stall signature on the attempt-cap path", aState)
+	}
+	if aState.StallSummary == "" {
+		t.Fatalf("a state = %+v, want a non-empty stall summary on the attempt-cap path", aState)
+	}
 
 	bState, err := st.ReadSliceState(fx.Ticket, "b")
 	if err != nil {
@@ -218,6 +288,12 @@ func TestStallStops(t *testing.T) {
 	}
 	if aState.State != "stalled" || aState.Reason != "stall" {
 		t.Fatalf("a state = %+v, want stalled/stall", aState)
+	}
+	if aState.Signature == "" {
+		t.Fatalf("a state = %+v, want a non-empty stall signature on the repeat-failure stall path", aState)
+	}
+	if aState.StallSummary == "" {
+		t.Fatalf("a state = %+v, want a non-empty stall summary on the repeat-failure stall path", aState)
 	}
 
 	bState, err := st.ReadSliceState(fx.Ticket, "b")
@@ -302,6 +378,198 @@ func TestRequeueFromBriefDiff(t *testing.T) {
 	}
 	if cState.Attempts != 2 {
 		t.Fatalf("c attempts = %d, want 2 (attempt-2 landed it green)", cState.Attempts)
+	}
+}
+
+// TestRequeueClearsStalledSignature: Requeue must clear a touched slice's
+// stall Signature and StallSummary alongside Reason, not just Reason - a
+// stale signature or summary left behind by an earlier stall must not
+// survive a requeue driven by Requeue itself. Signature and StallSummary
+// are seeded directly (independent of how c reached its flawed-brief state)
+// so this fails on its own if Requeue's own clear is removed.
+func TestRequeueClearsStalledSignature(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "flawed-brief"})
+	d, st := newDeps(t, fx)
+
+	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	cState, err := st.ReadSliceState(fx.Ticket, "c")
+	if err != nil {
+		t.Fatalf("ReadSliceState(c): %v", err)
+	}
+	cState.Signature = "c|code-bug|stale signature from a previous stall"
+	cState.StallSummary = "stale summary from a previous stall"
+	if err := st.WriteSliceState(fx.Ticket, "c", cState); err != nil {
+		t.Fatalf("write slice state: %v", err)
+	}
+
+	amended, err := os.ReadFile(filepath.Join(fixture.RepoRoot(t), "testdata", "fixture", "scenario-branches", "flawed-brief", "brief-amended.md"))
+	if err != nil {
+		t.Fatalf("read brief-amended.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(st.TicketDir(fx.Ticket), "brief.md"), amended, 0o644); err != nil {
+		t.Fatalf("write amended brief.md: %v", err)
+	}
+
+	touched, err := Requeue(d, fx.Ticket, true)
+	if err != nil {
+		t.Fatalf("Requeue: %v", err)
+	}
+	if len(touched) != 1 || touched[0] != "c" {
+		t.Fatalf("Requeue touched = %v, want exactly [c]", touched)
+	}
+
+	after, err := st.ReadSliceState(fx.Ticket, "c")
+	if err != nil {
+		t.Fatalf("ReadSliceState(c) after requeue: %v", err)
+	}
+	if after.Signature != "" {
+		t.Fatalf("c Signature = %q, want cleared by Requeue", after.Signature)
+	}
+	if after.StallSummary != "" {
+		t.Fatalf("c StallSummary = %q, want cleared by Requeue", after.StallSummary)
+	}
+}
+
+// TestRequeueSliceStalled: RequeueSlice on a stalled slice (no brief section
+// involved - the "stall" branch stalls slice a on a repeat code-bug, not a
+// brief question) puts it back to queued with its attempts kept and its
+// reason, signature and stall summary cleared, and a second Run then
+// dispatches it again.
+func TestRequeueSliceStalled(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "stall"})
+	d, st := newDeps(t, fx)
+
+	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	before, err := st.ReadSliceState(fx.Ticket, "a")
+	if err != nil {
+		t.Fatalf("ReadSliceState(a): %v", err)
+	}
+	if before.State != "stalled" {
+		t.Fatalf("a state = %+v, want stalled (test setup is wrong)", before)
+	}
+
+	if err := RequeueSlice(d, fx.Ticket, "a"); err != nil {
+		t.Fatalf("RequeueSlice: %v", err)
+	}
+
+	after, err := st.ReadSliceState(fx.Ticket, "a")
+	if err != nil {
+		t.Fatalf("ReadSliceState(a) after RequeueSlice: %v", err)
+	}
+	if after.State != "queued" || after.Attempts != before.Attempts {
+		t.Fatalf("a after RequeueSlice = %+v, want queued/attempts=%d (kept)", after, before.Attempts)
+	}
+	if after.Reason != "" || after.Signature != "" || after.StallSummary != "" {
+		t.Fatalf("a after RequeueSlice = %+v, want reason/signature/stall summary cleared", after)
+	}
+
+	lines, err := journal.Read(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("journal.Read: %v", err)
+	}
+	sawRequeue := false
+	for _, l := range lines {
+		if l.Slice == "a" && l.Event == "requeue" {
+			sawRequeue = true
+		}
+	}
+	if !sawRequeue {
+		t.Fatalf("no requeue journal line for slice a; journal:\n%+v", lines)
+	}
+}
+
+// TestRequeueSliceEnvBlocked: RequeueSlice on an env-blocked slice puts it
+// back to queued the same way it does for stalled.
+func TestRequeueSliceEnvBlocked(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{EnvFail: true})
+	d, st := newDeps(t, fx)
+
+	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	before, err := st.ReadSliceState(fx.Ticket, "d")
+	if err != nil {
+		t.Fatalf("ReadSliceState(d): %v", err)
+	}
+	if before.State != "env-blocked" {
+		t.Fatalf("d state = %+v, want env-blocked (test setup is wrong)", before)
+	}
+
+	if err := RequeueSlice(d, fx.Ticket, "d"); err != nil {
+		t.Fatalf("RequeueSlice: %v", err)
+	}
+
+	after, err := st.ReadSliceState(fx.Ticket, "d")
+	if err != nil {
+		t.Fatalf("ReadSliceState(d) after RequeueSlice: %v", err)
+	}
+	if after.State != "queued" || after.Attempts != before.Attempts {
+		t.Fatalf("d after RequeueSlice = %+v, want queued/attempts=%d (kept)", after, before.Attempts)
+	}
+	if after.Reason != "" {
+		t.Fatalf("d after RequeueSlice = %+v, want reason cleared", after)
+	}
+}
+
+// TestRequeueSliceRefusesOtherStates: RequeueSlice refuses a slice that is
+// neither stalled nor env-blocked (queued, building, green or needs-input),
+// since it cannot tell a caller's mistake from a stale id, and it must not
+// silently repark an unrelated slice.
+func TestRequeueSliceRefusesOtherStates(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	d, st := newDeps(t, fx)
+
+	for _, state := range []string{"queued", "building", "green", "needs-input"} {
+		t.Run(state, func(t *testing.T) {
+			if err := st.WriteSliceState(fx.Ticket, "a", store.SliceState{State: state, Attempts: 1}); err != nil {
+				t.Fatalf("write slice state: %v", err)
+			}
+			if err := RequeueSlice(d, fx.Ticket, "a"); err == nil {
+				t.Fatalf("RequeueSlice on a %s slice: err = nil, want a refusal", state)
+			}
+			after, err := st.ReadSliceState(fx.Ticket, "a")
+			if err != nil {
+				t.Fatalf("ReadSliceState(a): %v", err)
+			}
+			if after.State != state {
+				t.Fatalf("a state after refused RequeueSlice = %q, want unchanged %q", after.State, state)
+			}
+		})
+	}
+}
+
+// TestRequeueSliceUnknownID: RequeueSlice on an id that names no slice in
+// the ticket's own slices.yaml refuses with its own code naming the unknown
+// id, rather than reading the absent state file's zero value as a real
+// "queued" slice and reporting a wrong-state refusal for a slice that was
+// never there.
+func TestRequeueSliceUnknownID(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	d, _ := newDeps(t, fx)
+
+	err := RequeueSlice(d, fx.Ticket, "no-such-slice")
+	if err == nil {
+		t.Fatal("RequeueSlice on an unknown id: err = nil, want a refusal")
+	}
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "SLICE_NOT_FOUND" {
+		t.Fatalf("RequeueSlice on an unknown id: err = %v, want *axi.Error SLICE_NOT_FOUND", err)
+	}
+	if !strings.Contains(ae.Msg, "no-such-slice") {
+		t.Fatalf("RequeueSlice on an unknown id: Msg = %q, want it to name the unknown id", ae.Msg)
+	}
+	if strings.Contains(ae.Msg, "queued") {
+		t.Fatalf("RequeueSlice on an unknown id: Msg = %q, still claims a state", ae.Msg)
 	}
 }
 
@@ -503,6 +771,60 @@ func TestVerifyGreenRejectsStartSHAItself(t *testing.T) {
 	}
 	if aState.State != "stalled" || aState.Reason != "attempt-cap" {
 		t.Fatalf("a state = %+v, want stalled/attempt-cap (verify-green failure routed as a normal failure)", aState)
+	}
+}
+
+// TestRouteGreenClearsStalledSignature: a slice that was stalled (and so
+// carries a stall signature and summary), then requeued and dispatched
+// again, must have both cleared once it lands green - a stale signature or
+// summary must never survive a slice's eventual recovery. Driven through
+// runCtx.route with the state seeded exactly as a stalled-then-requeued
+// slice would look on disk (queued, no Reason, but still a Signature and
+// StallSummary from before the requeue), so this fails on its own if the
+// green route ever stops clearing them, independent of
+// Requeue's/answerAndRequeue's own clearing.
+func TestRouteGreenClearsStalledSignature(t *testing.T) {
+	dir := t.TempDir()
+	startSHA := initTestGitRepo(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGitT(t, dir, "commit", "-am", "second")
+	commit := runGitT(t, dir, "rev-parse", "HEAD")
+
+	st := newTestStore(t)
+	if err := st.WriteSliceState("T", "a", store.SliceState{
+		State:        "queued",
+		Attempts:     1,
+		Signature:    "a|code-bug|stale signature from a previous stall",
+		StallSummary: "stale summary from a previous stall",
+	}); err != nil {
+		t.Fatalf("write slice state: %v", err)
+	}
+
+	rc := &runCtx{
+		d:           Deps{Store: st, Journal: func(journal.Line) error { return nil }},
+		ticket:      "T",
+		maxAttempts: 3,
+	}
+	sl := store.Slice{ID: "a"}
+	lease := pool.Lease{Dir: dir}
+	res := outcome.Result{Outcome: outcome.Green, Commit: commit}
+
+	rc.route(sl, lease, 2, res, startSHA)
+
+	aState, err := st.ReadSliceState("T", "a")
+	if err != nil {
+		t.Fatalf("ReadSliceState: %v", err)
+	}
+	if aState.State != "green" {
+		t.Fatalf("a state = %+v, want green", aState)
+	}
+	if aState.Signature != "" {
+		t.Fatalf("a Signature = %q, want cleared on the green route", aState.Signature)
+	}
+	if aState.StallSummary != "" {
+		t.Fatalf("a StallSummary = %q, want cleared on the green route", aState.StallSummary)
 	}
 }
 

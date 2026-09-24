@@ -56,7 +56,8 @@ func cmdRun(args []string, stdout io.Writer) int {
 	return printRunReport(stdout, st, ticket, report)
 }
 
-// cmdRequeue implements `jig requeue <ticket> --from-brief-diff`.
+// cmdRequeue implements `jig requeue <ticket> --from-brief-diff` and
+// `jig requeue <ticket> --slice <id>`.
 func cmdRequeue(args []string, stdout io.Writer) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
@@ -65,6 +66,7 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 
 	fs := newFlagSet("requeue")
 	fromBriefDiff := fs.Bool("from-brief-diff", false, "requeue slices whose brief section hash changed")
+	sliceFlag := fs.String("slice", "", "requeue one stalled or env-blocked slice by id")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -82,6 +84,18 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 	}
 
 	deps := frontierDeps(st, cfg, mp, nil, ticket)
+
+	if *sliceFlag != "" {
+		if err := frontier.RequeueSlice(deps, ticket, *sliceFlag); err != nil {
+			return renderErr(stdout, err)
+		}
+		axi.Render(stdout,
+			axi.Table("requeued", []string{"id"}, idRows([]string{*sliceFlag})),
+			axi.Help(hintOrFallback(st, ticket)),
+		)
+		return 0
+	}
+
 	touched, err := frontier.Requeue(deps, ticket, *fromBriefDiff)
 	if err != nil {
 		return renderErr(stdout, err)
