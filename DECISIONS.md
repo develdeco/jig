@@ -346,6 +346,24 @@ was ambiguous, what was chosen, and why.
 - `pool.Dir` returns an absolute lease path. `Acquire` runs the clone from the
   lease's parent directory, so a relative `JIG_HOME` used to resolve the lease
   path twice and fail every Acquire (`TestAcquireRelativeJIGHome`).
+- `ownRepo`'s prefix check trusted any probe that did not fail outright. A
+  `.git` with everything a repository needs but a HEAD git refuses to read
+  (a crash can truncate it) makes the probe still succeed: git walks past
+  the broken `.git` and answers for an enclosing repository instead, prefix
+  and all, which read as "not a repository of its own" and moved committed,
+  unpushed slice work aside while the run reported it green. The check now
+  requires the probe to answer exactly `true` with an empty prefix; anything
+  else - a failure, a non-empty prefix, a bare repository's `false` - falls
+  to the same HEAD/objects/refs shape check a genuine git failure already
+  took, so a lease git merely disagrees with, rather than refuses outright,
+  still stops `Acquire` with git's error instead of being discarded
+  (`TestAcquireRefusesCorruptHEADLeaseInsideEnclosingRepo`, e2e
+  `TestRunRefusesCorruptHEADBuildLeaseInsideEnclosingRepo`). Separately,
+  `prepare` Lstat'd the lease path: a symlink or Windows junction to a
+  healthy lease Lstats as its own mode, never a directory, so it went
+  straight to the move-aside branch without ever asking git. It now Stats
+  the path first, resolving a link the way git itself would, so `ownRepo`
+  decides (`TestAcquireReusesSymlinkedLease`).
 
 ## Gate and publish
 

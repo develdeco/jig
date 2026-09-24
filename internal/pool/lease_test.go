@@ -2,7 +2,9 @@ package pool
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -421,4 +423,107 @@ func TestAcquireIgnoresInheritedGitDir(t *testing.T) {
 		assertOwnClone(t, lease.Dir, remote, "jig/T-1")
 	}
 	assertEnclosingUntouched(t, enclosing)
+}
+
+// TestAcquireRefusesCorruptHEADLeaseInsideEnclosingRepo covers the gap
+// TestAcquireRefusesLeaseGitCannotOpen only pins standalone: JIG_HOME inside
+// an enclosing working copy, and the lease's own .git has a HEAD git
+// refuses to read (here, truncated to empty, as a crash mid-write can leave
+// it) but otherwise everything a repository needs (objects/, refs/). Git's
+// own upward discovery does not fail on this - it walks past the broken
+// .git and answers for the enclosing repository instead, prefix and all -
+// so ownRepo must fall through to the same shape check that the standalone
+// case takes, rather than reading that answer as "dir is not a repository
+// of its own". Getting this wrong moves the lease aside and clones over its
+// unpushed commit while the enclosing repository is spared only because
+// nothing here also touches it.
+func TestAcquireRefusesCorruptHEADLeaseInsideEnclosingRepo(t *testing.T) {
+	enclosing := newEnclosingRepo(t)
+	home := filepath.Join(enclosing, "jig-home")
+	t.Setenv("JIG_HOME", home)
+	remote := newSourceAndRemote(t)
+
+	lease, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	writeFile(t, filepath.Join(lease.Dir, "g.txt"), "unpushed work\n")
+	run(t, lease.Dir, "add", "-A")
+	commit(t, lease.Dir, "unpushed work")
+	unpushed := run(t, lease.Dir, "rev-parse", "HEAD")
+
+	writeFile(t, filepath.Join(lease.Dir, ".git", "HEAD"), "")
+	writeFile(t, filepath.Join(enclosing, "notes.txt"), "uncommitted work\n")
+
+	_, err = Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+	if err == nil || !strings.Contains(err.Error(), "cannot open lease") {
+		t.Fatalf("Acquire over a lease with a corrupt HEAD inside an enclosing repo = %v, want git's own error naming the lease", err)
+	}
+	assertEnclosingUntouched(t, enclosing)
+	if asides, _ := filepath.Glob(lease.Dir + ".broken-*"); len(asides) != 0 {
+		t.Fatalf("a lease git refuses was moved aside: %v", asides)
+	}
+
+	// Repair HEAD by hand, as the error tells a person to, and confirm the
+	// unpushed commit was never touched.
+	writeFile(t, filepath.Join(lease.Dir, ".git", "HEAD"), "ref: refs/heads/jig/T-1\n")
+	if got := run(t, lease.Dir, "rev-parse", "refs/heads/jig/T-1"); got != unpushed {
+		t.Fatalf("lease branch = %s, want the unpushed commit %s preserved", got, unpushed)
+	}
+}
+
+// TestAcquireReusesSymlinkedLease covers a lease directory that is itself a
+// symlink or a Windows junction pointing at a healthy lease with unpushed
+// work: prepare used to Lstat the lease path, so a link's own mode (never a
+// directory to Lstat) sent it straight to the move-aside branch without
+// ever asking git, discarding the far side's unpushed commit on the next
+// clone. Stat resolves the link first, so ownRepo decides exactly as it
+// would for the real directory, and a lease reached through a link that
+// git can open is reused in place.
+func TestAcquireReusesSymlinkedLease(t *testing.T) {
+	for _, kind := range []string{"symlink", "junction"} {
+		t.Run(kind, func(t *testing.T) {
+			realHome := t.TempDir()
+			t.Setenv("JIG_HOME", realHome)
+			remote := newSourceAndRemote(t)
+			real, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+			if err != nil {
+				t.Fatalf("Acquire: %v", err)
+			}
+			writeFile(t, filepath.Join(real.Dir, "g.txt"), "unpushed work\n")
+			run(t, real.Dir, "add", "-A")
+			commit(t, real.Dir, "unpushed work")
+			unpushed := run(t, real.Dir, "rev-parse", "HEAD")
+
+			home := t.TempDir()
+			t.Setenv("JIG_HOME", home)
+			link := filepath.Join(home, "pool", "fixture", "T-1")
+			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "symlink":
+				if err := os.Symlink(real.Dir, link); err != nil {
+					t.Skipf("symlink: %v", err)
+				}
+			case "junction":
+				if runtime.GOOS != "windows" {
+					t.Skip("windows only")
+				}
+				if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, real.Dir).CombinedOutput(); err != nil {
+					t.Skipf("mklink /J: %v %s", err, out)
+				}
+			}
+
+			if _, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build); err != nil {
+				t.Fatalf("Acquire over the %s lease: %v", kind, err)
+			}
+			if asides, _ := filepath.Glob(link + ".broken-*"); len(asides) != 0 {
+				t.Fatalf("a usable lease reached through a %s was moved aside: %v", kind, asides)
+			}
+			if got := run(t, link, "rev-parse", "HEAD"); got != unpushed {
+				t.Fatalf("lease HEAD through the %s = %s, want the unpushed commit %s kept", kind, got, unpushed)
+			}
+		})
+	}
 }

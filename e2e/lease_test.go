@@ -102,6 +102,62 @@ func TestRunRecoversBrokenLeaseInsideEnclosingRepo(t *testing.T) {
 	}
 }
 
+// TestRunRefusesCorruptHEADBuildLeaseInsideEnclosingRepo reproduces the same
+// enclosing-repository hazard as TestRunRecoversBrokenLeaseInsideEnclosingRepo,
+// for a build lease whose .git has everything a repository needs except a
+// HEAD git can read (truncated to empty, as a crash mid-write can leave it)
+// after slices a, b and d are already committed there and the run is paused
+// on a question. Git's own upward discovery does not fail on this: from the
+// lease it walks past the broken .git and answers for the enclosing
+// repository instead. `jig run --answer` must stop with an error rather
+// than read that answer as "the lease is not a repository of its own":
+// moving it aside would drop a, b and d from the ticket branch while the
+// store still calls them green.
+func TestRunRefusesCorruptHEADBuildLeaseInsideEnclosingRepo(t *testing.T) {
+	enclosing := newEnclosingRepo(t)
+	home := filepath.Join(enclosing, "jig-home")
+	t.Setenv("JIG_HOME", home)
+	fx := fixture.Generate(t, fixture.Opts{})
+
+	lease := poolBuildLeaseDir(home, "fixture-repo", fx.Ticket)
+	r1 := runJig(t, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	if r1.Code != 2 {
+		t.Fatalf("run 1 exit %d, want 2 (paused on a question with a, b, d green)\nstdout:\n%s\nstderr:\n%s", r1.Code, r1.Stdout, r1.Stderr)
+	}
+	before := gitLog(t, lease, "log", "--format=%s", "jig/"+fx.Ticket)
+
+	if err := os.WriteFile(filepath.Join(lease, ".git", "HEAD"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	notes := filepath.Join(enclosing, "notes.txt")
+	if err := os.WriteFile(notes, []byte("uncommitted work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r2 := runJig(t, fx.StoreDir, "run", fx.Ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
+	if r2.Code == 0 {
+		t.Fatalf("run 2 (continuing over a corrupt-HEAD lease) exit 0, want an error\nstdout:\n%s\nstderr:\n%s", r2.Stdout, r2.Stderr)
+	}
+	if asides, _ := filepath.Glob(lease + ".broken-*"); len(asides) != 0 {
+		t.Fatalf("a lease git refuses was moved aside: %v", asides)
+	}
+	if got := gitLog(t, enclosing, "symbolic-ref", "--short", "HEAD"); got != "main" {
+		t.Errorf("enclosing repo HEAD = %q, want main: jig checked out a branch in it", got)
+	}
+	if got, err := os.ReadFile(notes); err != nil || string(got) != "uncommitted work\n" {
+		t.Errorf("enclosing repo's uncommitted edit = %q, %v; want it untouched", got, err)
+	}
+
+	// Repair HEAD by hand, as a person would, and confirm a, b and d were
+	// never touched.
+	if err := os.WriteFile(filepath.Join(lease, ".git", "HEAD"), []byte("ref: refs/heads/jig/"+fx.Ticket+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if after := gitLog(t, lease, "log", "--format=%s", "jig/"+fx.Ticket); after != before {
+		t.Fatalf("build lease log after repair = %q, want unchanged from before the corruption:\n%q", after, before)
+	}
+}
+
 // TestReservedLeaseSuffixTicketRefused reproduces the lease-key collision:
 // ticket X's gate lease is pool/<repo>/X-gate and its publish lease is
 // pool/<repo>/X-publish, so a ticket named X-gate would build in the

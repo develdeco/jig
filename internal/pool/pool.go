@@ -186,7 +186,9 @@ func Acquire(repoName, remote, target, branch, ticket string, role Role) (Lease,
 // Usable reports whether dir is a lease the gate may reset in place: git
 // opens it as its own repository (see ownRepo) and HEAD resolves to a
 // commit. A reset anywhere else would act on an enclosing repository or
-// fail on an unborn HEAD.
+// fail on an unborn HEAD. probe trusts dir's owner, so a lease git refuses
+// as another user's still passes; the gate's own reset then fails with
+// that same ownership error instead of Acquire's fetch.
 func Usable(dir string) bool {
 	own, err := ownRepo(dir)
 	if err != nil || !own {
@@ -201,21 +203,31 @@ func Usable(dir string) bool {
 // when git shows dir is not a lease: .git is not a directory (a .git file
 // could name any repository's git dir); git resolved an enclosing working
 // copy or bare repository instead (a working copy prints a non-empty
-// prefix, a bare repository "false"); or git found no repository and .git
-// lacks HEAD, objects/ or refs/, which git requires of one. When git fails
-// on a .git that has all three (an extension this git does not know, a
-// corrupt config, git itself missing), the lease may still hold unpushed
-// work, so it returns git's error for a person to act on.
+// prefix, a bare repository "false") and .git itself lacks HEAD, objects/ or
+// refs/, which git requires of one; or git found no repository at all and
+// .git lacks the same three. When dir's own .git has all three but git
+// still would not use it - it fails outright, or (a corrupt HEAD, one a
+// crash can leave truncated) it answers for an enclosing repository instead
+// of dir - the lease may still hold unpushed work, so it returns git's
+// error for a person to act on rather than trusting an answer that came
+// from somewhere else.
 func ownRepo(dir string) (bool, error) {
 	gitDir := filepath.Join(dir, ".git")
 	if fi, err := os.Lstat(gitDir); err != nil || !fi.IsDir() {
 		return false, nil
 	}
 	// The prefix test compares no paths, so it holds whatever path spelling
-	// git prints.
+	// git prints. Only an empty prefix confirms dir is itself the top level
+	// git resolved; a non-empty prefix or "false" means git walked past
+	// dir's own .git to answer for an enclosing repository, which must still
+	// fall to the shape check below rather than being read as "not a
+	// repository of its own".
 	out, err := probe(dir, "rev-parse", "--is-inside-work-tree", "--show-prefix")
+	if err == nil && out == "true" {
+		return true, nil
+	}
 	if err == nil {
-		return out == "true", nil
+		err = fmt.Errorf("git resolved another repository from %s (rev-parse printed %q)", dir, out)
 	}
 	for _, name := range []string{"HEAD", "objects", "refs"} {
 		fi, serr := os.Lstat(filepath.Join(gitDir, name))
@@ -240,9 +252,13 @@ func probe(dir string, args ...string) (string, error) {
 // reuse. A missing or empty directory is left for the clone. Anything else
 // that git shows is not a repository of its own (see ownRepo) is moved
 // aside to a timestamped sibling, <key>.broken-<UTC time>, so whatever it
-// holds survives for inspection; the pool never deletes it.
+// holds survives for inspection; the pool never deletes it. dir is Stat'd,
+// not Lstat'd, so a lease reached through a symlink or a Windows junction
+// resolves to its target before ownRepo asks git about it, the way git
+// itself would open it; only that resolved shape decides reuse or aside, so
+// a link is renamed aside itself only once git also rejects its target.
 func prepare(dir string) (bool, error) {
-	fi, err := os.Lstat(dir)
+	fi, err := os.Stat(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
