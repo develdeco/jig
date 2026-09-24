@@ -100,6 +100,11 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	for _, sl := range slices {
 		ids[sl.ID] = true
 	}
+	for _, sl := range slices {
+		if sl.ID == "gate" {
+			problems = append(problems, `slice id "gate" is reserved for the gate reviewer dispatch`)
+		}
+	}
 
 	var m manifest.Manifest
 	manifestOK := false

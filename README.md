@@ -11,8 +11,9 @@ one dispatch loop over small, provable slices of work.
   proves it done.
 - Dispatches the frontier of ready slices to a build session, and resumes
   where a session left off.
-- Re-verifies the branch's oracles in its own gate round before anything
-  ships (session-driven review is on the roadmap).
+- Re-verifies the branch's oracles in its own gate round, then a reviewer
+  session finds, routes, and (with you, at a triage prompt) decides what
+  becomes forward work before anything ships.
 - Reconciles, revalidates, and opens the pull request itself, evidence
   attached.
 - Keeps every ticket's state in a plain git repo, so progress survives any
@@ -102,7 +103,8 @@ jig solve T-1 --backend headless --yes    # runs run, gate, and publish as one c
 ```
 
 `jig solve` dispatches slices, gates the branch, and publishes in one
-chain. `--yes` skips only the publish confirm: when a session asks a
+chain. `--yes` skips the publish confirm and every gate round's triage
+prompt (keeping every finding jig can route on its own): when a session asks a
 question, `jig solve` stops, and you resume it with
 `jig solve T-1 --yes --answer <qid> "<text>"`. With the standalone store above (`tracker: local`), publish
 pushes `jig/T-1` and writes the PR body into the store instead of opening a
@@ -125,9 +127,19 @@ natively off Windows, and on Windows inside a WSL login shell
 and write the same `result.json`; see
 [ARCHITECTURE.md](ARCHITECTURE.md#session-backends).
 
-`jig gate` has no `--backend` flag: without `--scenario` it re-runs every
-manifest oracle on a fresh lease and reports clean, with no review step of
-its own yet (see Roadmap).
+`jig gate` re-runs every manifest oracle on a fresh lease, then dispatches a
+reviewer session on the backend `--backend` names (default `herdr`;
+unlike `jig run`, `--scenario` alone does not switch this default to
+`fake` - see below). `--scenario` alone, with no
+`--backend`, keeps the old scripted gate source instead, for compatibility
+with the pre-reviewer path: no reviewer session runs and there is no triage
+prompt. `jig solve`'s own gate/fix-slice loop follows a narrower rule:
+`--scenario` always selects that same scripted source, whatever `--backend`
+says, so its reviewer only runs without `--scenario`. At a terminal, a
+dispatched reviewer round stops for a triage prompt over what it found:
+`--yes` skips it, keeping every fix and every ask whose build target
+already resolves in full (a workspace and an oracle), and leaving an ask
+missing a workspace, an oracle, or both for a human to decide later.
 
 ## Safety
 
@@ -161,8 +173,10 @@ model.
 
 ## Roadmap
 
-Coming in v0.2: a session-driven gate reviewer, Jira and Linear tracker
-adapters, `gate`'s `--pr` mode for reviewing a PR someone else opened, the
-`fleet` and `retro` binary verbs for working many tickets and mining
-repeated failures, and design-facet oracles. Later: more than one repo per
-project, and nix packaging.
+Coming in v0.2: `ask` findings parked as questions instead of left kept by
+`--yes` or a non-terminal run, a review guide rendered into PR evidence
+from recorded rounds, review-eval scoring from recorded triage decisions,
+Jira and Linear tracker adapters, `gate`'s `--pr` mode for reviewing a PR
+someone else opened, the `fleet` and `retro` binary verbs for working many
+tickets and mining repeated failures, and design-facet oracles. Later:
+more than one repo per project, and nix packaging.

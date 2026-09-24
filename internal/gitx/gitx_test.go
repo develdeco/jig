@@ -314,3 +314,257 @@ func TestGuardedPush(t *testing.T) {
 		}
 	})
 }
+
+// TestIsAncestor exercises all three outcomes: true, false (a valid but
+// unrelated commit), and error (an unknown object).
+func TestIsAncestor(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := Run(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return out
+	}
+	run("init", "-b", "main")
+	run("config", "user.name", "jig-fixture")
+	run("config", "user.email", "fixture@example.invalid")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("1"), 0o644); err != nil {
+		t.Fatalf("write f.txt: %v", err)
+	}
+	run("add", "-A")
+	run("commit", "-m", "c1")
+	c1, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse c1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("2"), 0o644); err != nil {
+		t.Fatalf("write f.txt: %v", err)
+	}
+	run("add", "-A")
+	run("commit", "-m", "c2")
+	c2, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse c2: %v", err)
+	}
+
+	t.Run("true", func(t *testing.T) {
+		ok, err := IsAncestor(dir, c1, c2)
+		if err != nil {
+			t.Fatalf("IsAncestor: %v", err)
+		}
+		if !ok {
+			t.Fatal("IsAncestor(c1, c2) = false, want true")
+		}
+	})
+
+	t.Run("false", func(t *testing.T) {
+		ok, err := IsAncestor(dir, c2, c1)
+		if err != nil {
+			t.Fatalf("IsAncestor: %v", err)
+		}
+		if ok {
+			t.Fatal("IsAncestor(c2, c1) = true, want false")
+		}
+	})
+
+	t.Run("error on unknown object", func(t *testing.T) {
+		_, err := IsAncestor(dir, "0000000000000000000000000000000000000000", c2)
+		if err == nil {
+			t.Fatal("IsAncestor with an unknown object: expected an error, got nil")
+		}
+	})
+}
+
+// TestDiffNameOnly checks the changed/deleted split a rename produces under
+// --no-renames (the old path deleted, the new path added), and that an
+// unrestricted, unmodified range returns nothing.
+func TestDiffNameOnly(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := Run(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return out
+	}
+	run("init", "-b", "main")
+	run("config", "user.name", "jig-fixture")
+	run("config", "user.email", "fixture@example.invalid")
+	writeFile := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	writeFile("keep.txt", "1")
+	writeFile("old.txt", "will be renamed")
+	run("add", "-A")
+	run("commit", "-m", "c1")
+	base, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse base: %v", err)
+	}
+
+	if err := os.Rename(filepath.Join(dir, "old.txt"), filepath.Join(dir, "new.txt")); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	writeFile("keep.txt", "2")
+	writeFile("added.txt", "brand new")
+	run("add", "-A")
+	run("commit", "-m", "c2")
+	head, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse head: %v", err)
+	}
+
+	changed, err := DiffNameOnly(dir, base, head, "AMT")
+	if err != nil {
+		t.Fatalf("DiffNameOnly AMT: %v", err)
+	}
+	wantChanged := map[string]bool{"keep.txt": true, "added.txt": true, "new.txt": true}
+	if len(changed) != len(wantChanged) {
+		t.Fatalf("changed = %v, want exactly %v", changed, wantChanged)
+	}
+	for _, f := range changed {
+		if !wantChanged[f] {
+			t.Errorf("unexpected changed file %q", f)
+		}
+	}
+
+	deleted, err := DiffNameOnly(dir, base, head, "D")
+	if err != nil {
+		t.Fatalf("DiffNameOnly D: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0] != "old.txt" {
+		t.Fatalf("deleted = %v, want [old.txt]", deleted)
+	}
+
+	same, err := DiffNameOnly(dir, head, head, "AMT")
+	if err != nil {
+		t.Fatalf("DiffNameOnly on an empty range: %v", err)
+	}
+	if len(same) != 0 {
+		t.Fatalf("DiffNameOnly on an empty range = %v, want none", same)
+	}
+}
+
+// TestFileExistsAtRev checks a present file, an absent one, a deleted one
+// (present at base, gone at head), a directory (a tree, not a blob), and a
+// rev that does not resolve to a commit.
+func TestFileExistsAtRev(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := Run(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return out
+	}
+	run("init", "-b", "main")
+	run("config", "user.name", "jig-fixture")
+	run("config", "user.email", "fixture@example.invalid")
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gone.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write gone.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "f.txt"), []byte("z"), 0o644); err != nil {
+		t.Fatalf("write sub/f.txt: %v", err)
+	}
+	run("add", "-A")
+	run("commit", "-m", "c1")
+	base, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse base: %v", err)
+	}
+	run("rm", "gone.txt")
+	if err := os.WriteFile(filepath.Join(dir, "here.txt"), []byte("y"), 0o644); err != nil {
+		t.Fatalf("write here.txt: %v", err)
+	}
+	run("add", "-A")
+	run("commit", "-m", "c2")
+	head, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse head: %v", err)
+	}
+
+	cases := []struct {
+		rev, path string
+		want      bool
+	}{
+		{head, "here.txt", true},
+		{head, "gone.txt", false},
+		{head, "never.txt", false},
+		{base, "gone.txt", true},
+		{head, "sub", false},           // a directory is a tree, not a blob
+		{head, "sub/", false},          // a directory lists its children; it is still not a file
+		{head, "sub/f.txt", true},      // a nested path
+		{head, "sub/never.txt", false}, // a missing path under an existing directory
+		{head, ".", false},             // the repo root is a tree
+		{head, ":/here.txt", false},    // pathspec magic stays a literal path, which does not exist
+		{head, "he*.txt", false},       // a glob stays a literal path, which does not exist
+	}
+	for _, c := range cases {
+		got, err := FileExistsAtRev(dir, c.rev, c.path)
+		if err != nil {
+			t.Fatalf("FileExistsAtRev(%s, %s): %v", c.rev, c.path, err)
+		}
+		if got != c.want {
+			t.Errorf("FileExistsAtRev(%s, %s) = %v, want %v", c.rev, c.path, got, c.want)
+		}
+	}
+
+	if _, err := FileExistsAtRev(dir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "here.txt"); err == nil {
+		t.Error("FileExistsAtRev with a bad rev: want an error, got nil")
+	}
+}
+
+// TestFileExistsAtRevIgnoresTheWorkingTree checks the wedge scenario a
+// message-text match on git's cat-file output used to fall into: a path
+// that git ignores, so it is never tracked at any rev, but that happens to
+// sit on disk right now (for example an oracle regenerated it in a lease).
+// The working tree must never make an absent path look present, or the
+// reverse.
+func TestFileExistsAtRevIgnoresTheWorkingTree(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := Run(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return out
+	}
+	run("init", "-b", "main")
+	run("config", "user.name", "jig-fixture")
+	run("config", "user.email", "fixture@example.invalid")
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("gen.txt\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	run("add", "-A")
+	run("commit", "-m", "c1")
+	head, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse head: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gen.txt"), []byte("regenerated"), 0o644); err != nil {
+		t.Fatalf("write gen.txt: %v", err)
+	}
+
+	got, err := FileExistsAtRev(dir, head, "gen.txt")
+	if err != nil {
+		t.Fatalf("FileExistsAtRev(gen.txt), ignored on disk: %v", err)
+	}
+	if got {
+		t.Error("FileExistsAtRev(gen.txt) = true, want false: it is untracked at head regardless of the working tree")
+	}
+}
