@@ -560,6 +560,11 @@ func TestSessionTimeoutMessageStatesTheDrain(t *testing.T) {
 // does not exist at all, which would normally surface as SCREEN_UNAVAILABLE;
 // getting BAD_TIMEOUT instead proves the probe never ran.
 func TestHeadlessBadTimeoutFailsBeforeTheScreenProbe(t *testing.T) {
+	// The stub stands in for the CLI so Run gets past its PATH lookup on a
+	// machine without Claude Code installed, such as CI: without it this
+	// test only exercised the ordering where the real CLI happened to exist.
+	stubDir := buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude")
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("JIG_HEADLESS_TIMEOUT", "nonsense")
 	b := &headlessBackend{goos: runtime.GOOS, screenBinary: filepath.Join(t.TempDir(), "not-jig")}
 	err := b.Run(missingDispatch(t, true))
@@ -646,6 +651,13 @@ func TestHeadlessTimeoutKillsTheChildTree(t *testing.T) {
 	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
 	if err != nil {
 		t.Fatalf("parse child pid %q: %v", pidData, err)
+	}
+	// SIGKILL and the reaping of the orphaned child are asynchronous, so
+	// give the tree a moment to finish dying. A child the kill missed is
+	// still sleeping out its 90s here, so the wait cannot mask a miss.
+	deadline := time.Now().Add(5 * time.Second)
+	for processAlive(pid) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
 	}
 	if processAlive(pid) {
 		t.Errorf("child pid %d is still running after the timeout, want killTree to have ended the whole tree", pid)
