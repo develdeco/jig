@@ -7,7 +7,7 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/home"
+	"github.com/develdeco/jig/internal/pool"
 )
 
 // commitOneFile initializes dir as a git repo with a single committed file.
@@ -27,44 +27,12 @@ func commitOneFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-// TestIsOwnGitRepoWithHead pins the guard in front of the pre-Acquire
-// restore: only a directory that is itself a git top level with a commit
-// checked out may be reset. A `.git` entry git cannot open (it would resolve
-// an enclosing repo) and an unborn HEAD (a clone killed before checkout)
-// must both be left alone.
-func TestIsOwnGitRepoWithHead(t *testing.T) {
-	enclosing := t.TempDir()
-	commitOneFile(t, enclosing, "keep.txt", "keep\n")
-	if !isOwnGitRepoWithHead(enclosing) {
-		t.Fatalf("a committed repo at its own top level must qualify")
-	}
-
-	broken := filepath.Join(enclosing, "pool", "repo", "T-1-gate")
-	if err := os.MkdirAll(filepath.Join(broken, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if isOwnGitRepoWithHead(broken) {
-		t.Fatalf("a .git entry git cannot open resolves the enclosing repo; it must not qualify")
-	}
-
-	unborn := t.TempDir()
-	if _, err := gitx.Run(unborn, "init", "-b", "main"); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
-	if isOwnGitRepoWithHead(unborn) {
-		t.Fatalf("a repo with an unborn HEAD must not qualify")
-	}
-
-	if isOwnGitRepoWithHead(t.TempDir()) {
-		t.Fatalf("a plain directory must not qualify")
-	}
-}
-
 // TestGateBrokenLeaseNeverResetsEnclosingRepo reproduces the data-loss path
 // where JIG_HOME sits inside another git working copy, and a gate lease
-// whose .git entry is not a repository. The pre-Acquire restore must not
-// run in the enclosing repo, so its uncommitted edit survives whatever the
-// gate does next.
+// whose .git entry is not a repository. Neither the pre-Acquire restore nor
+// pool.Acquire may run in the enclosing repo, so its branch and its
+// uncommitted edit survive; Acquire moves the broken lease aside and clones
+// afresh, so the gate completes its round.
 func TestGateBrokenLeaseNeverResetsEnclosingRepo(t *testing.T) {
 	enclosing := t.TempDir()
 	commitOneFile(t, enclosing, "notes.txt", "committed\n")
@@ -74,11 +42,10 @@ func TestGateBrokenLeaseNeverResetsEnclosingRepo(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{})
 	driveBuild(t, fx, "rung-a")
 
-	poolDir, err := home.PoolDir()
+	gateLease, err := pool.Dir("fixture-repo", fx.Ticket, pool.Gate)
 	if err != nil {
-		t.Fatalf("PoolDir: %v", err)
+		t.Fatalf("pool.Dir: %v", err)
 	}
-	gateLease := filepath.Join(poolDir, "fixture-repo", fx.Ticket+"-gate")
 	if err := os.MkdirAll(filepath.Join(gateLease, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -88,9 +55,7 @@ func TestGateBrokenLeaseNeverResetsEnclosingRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The gate itself may fail here (pool.Acquire meets the broken lease);
-	// what must hold is that nothing reset or cleaned the enclosing repo.
-	_, _ = Gate(newDeps(t, fx), alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+	report, gateErr := Gate(newDeps(t, fx), alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
 
 	got, err := os.ReadFile(notes)
 	if err != nil {
@@ -99,22 +64,31 @@ func TestGateBrokenLeaseNeverResetsEnclosingRepo(t *testing.T) {
 	if string(got) != "uncommitted work\n" {
 		t.Fatalf("enclosing repo's uncommitted edit was discarded: %q", got)
 	}
+	if head, err := gitx.Run(enclosing, "symbolic-ref", "--short", "HEAD"); err != nil || head != "main" {
+		t.Fatalf("enclosing repo HEAD = %q (%v), want main", head, err)
+	}
+	if gateErr != nil {
+		t.Fatalf("Gate over a broken gate lease should recover, got: %v", gateErr)
+	}
+	if report.Round != 1 || report.Verdict != "clean" {
+		t.Fatalf("report = %+v, want round 1 clean", report)
+	}
 }
 
 // TestGateRecoversFromUnbornLease reproduces the wedge left by a gate
 // lease from a clone killed before its first checkout (origin configured,
-// HEAD unborn). The pre-Acquire restore must skip it, so Acquire fetches
-// and checks out as usual and the gate completes its round.
+// HEAD unborn). The pre-Acquire restore must skip it (pool.Usable needs a
+// commit), Acquire reuses it in place, where its checkout repairs HEAD, and
+// the gate completes its round.
 func TestGateRecoversFromUnbornLease(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	fx := fixture.Generate(t, fixture.Opts{})
 	driveBuild(t, fx, "rung-a")
 
-	poolDir, err := home.PoolDir()
+	gateLease, err := pool.Dir("fixture-repo", fx.Ticket, pool.Gate)
 	if err != nil {
-		t.Fatalf("PoolDir: %v", err)
+		t.Fatalf("pool.Dir: %v", err)
 	}
-	gateLease := filepath.Join(poolDir, "fixture-repo", fx.Ticket+"-gate")
 	if err := os.MkdirAll(gateLease, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -131,5 +105,8 @@ func TestGateRecoversFromUnbornLease(t *testing.T) {
 	}
 	if report.Round != 1 || report.Verdict != "clean" {
 		t.Fatalf("report = %+v, want round 1 clean", report)
+	}
+	if asides, _ := filepath.Glob(gateLease + ".broken-*"); len(asides) != 0 {
+		t.Fatalf("a gate lease with an unborn HEAD was moved aside: %v", asides)
 	}
 }

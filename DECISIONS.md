@@ -295,6 +295,54 @@ was ambiguous, what was chosen, and why.
   `TestReservedLeaseSuffixTicketRefused` pin it. Ticket ids that
   differ only in case still share one store folder, and so one set of leases,
   on a case-insensitive filesystem; that predates this and is unchanged.
+- `pool.Acquire` reuses a lease only when git opens it as its own repository:
+  `.git` is a directory, and `git rev-parse --is-inside-work-tree
+  --show-prefix` prints exactly `true` (inside a working tree, at its top). It
+  used to trust any `.git` entry, so with `JIG_HOME` inside another working
+  copy (the default `~/.config/jig` inside a dotfiles checkout) a `.git` git
+  cannot open - a lease deleted by hand and stopped by a locked pack file, a
+  clone killed mid-write - sent its `fetch` and `checkout -B jig/<ticket>` to
+  the enclosing repository. A `.git` file is refused as well: it can name any
+  repository's git dir, and one naming the enclosing repository moved that
+  repository's `HEAD` the same way. The prefix test compares no paths, so no
+  spelling of the lease path (8.3 names, forward slashes, a POSIX-style git)
+  can make a healthy lease look broken. The gate's pre-Acquire restore
+  (`internal/verifydeliver/gate.go`) uses the same check through
+  `pool.Usable`, which adds `HEAD^{commit}` for its `reset --hard HEAD`,
+  instead of keeping its own private copy of it.
+  `TestAcquireRecoversBrokenLease`, `TestUsable` and the end-to-end
+  `TestRunRecoversBrokenLeaseInsideEnclosingRepo` pin it.
+- A lease is moved aside only when git shows it is not a repository of its
+  own: `.git` is not a directory, git resolved an enclosing working copy (a
+  non-empty prefix) or bare repository (`false`), or git found no repository
+  and `.git` lacks `HEAD`, `objects/` or `refs/`, which git requires of one. A
+  build lease holds committed but unpushed slice work, and moving it aside
+  lets the run continue on a fresh clone without that work while the store
+  still calls those slices green, so anything git can still open, however
+  oddly, is left alone. When git fails on a `.git` that has all three (an
+  extension this git does not know, a corrupt config, git itself missing),
+  `Acquire` stops with git's error and leaves the lease alone
+  (`TestAcquireRefusesLeaseGitCannotOpen`). The probe runs with `-c
+  safe.directory=*`, so a healthy lease git refuses as another user's (a
+  `JIG_HOME` on exFAT or a network share, or one left behind by `sudo`) is
+  kept and its fetch fails with git's own explanation
+  (`TestAcquireKeepsLeaseGitRefusesByOwner`); ownership stays git's own check
+  on every real command. An unborn `HEAD` does not count against a lease
+  either: the checkout in `Acquire` repairs it, and an orphan checkout can
+  leave one in front of a ticket branch that still holds work
+  (`TestAcquireReusesLeaseWithUnbornHEAD`).
+- What is moved aside is renamed to a timestamped sibling,
+  `<key>.broken-<UTC time>`, and cloned afresh, with one stderr line naming
+  both paths; a missing lease or an empty directory is simply cloned into.
+  The pool still deletes nothing: what a hand deletion left behind may be
+  worth inspecting, and a rename never reaches outside the lease's own repo
+  directory. The rename stops `Acquire` with an error, touching neither
+  directory, when the aside name is already taken or a process still holds a
+  file inside it (Windows) (`TestAcquireNeverOverwritesAnAside`).
+  `GIT_CEILING_DIRECTORIES` was considered instead and not used: it stops the
+  upward walk but not a `.git` file naming another repository, and it
+  protects only the git calls it is threaded through, while every git call in
+  a lease runs after one check.
 
 ## Gate and publish
 

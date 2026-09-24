@@ -238,12 +238,12 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	// mode, fetchTicketBranchFromBuildLease's checkout right after) refuses
 	// with "local changes ... would be overwritten" before the restore below
 	// ever runs, wedging every later attempt at the same point. This restore
-	// is best-effort: if the lease path cannot be resolved (a bad ticket id,
-	// which Acquire then refuses), or the lease is not yet its own git
-	// working copy with a commit checked out (a key never acquired, or a
-	// clone killed before its first checkout), Acquire runs unchanged and
-	// surfaces its own error.
-	if leaseDir, derr := pool.Dir(repoName, ticket, pool.Gate); derr == nil && isOwnGitRepoWithHead(leaseDir) {
+	// is best-effort and runs only in a pool.Usable lease: a reset where git
+	// resolves an enclosing repository would discard that repository's work,
+	// and one on an unborn HEAD would fail. Anything else is left to Acquire,
+	// which refuses a bad ticket id, clones where there is no lease yet, and
+	// moves aside anything git shows is not a repository of its own.
+	if leaseDir, derr := pool.Dir(repoName, ticket, pool.Gate); derr == nil && pool.Usable(leaseDir) {
 		if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
 		}
@@ -797,39 +797,4 @@ func resetLeasePristine(leaseDir, head string) error {
 		return err
 	}
 	return nil
-}
-
-// isGitLeaseDir reports whether dir looks like an existing pool lease
-// checkout (a git working copy), as opposed to a key never acquired yet.
-func isGitLeaseDir(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, ".git"))
-	return err == nil
-}
-
-// isOwnGitRepoWithHead reports whether dir is itself the top level of a git
-// working copy whose HEAD resolves to a commit. A `.git` entry alone is not
-// enough before a destructive reset: when that entry is not a repository
-// git can open, git's upward discovery would resolve an enclosing repo
-// (JIG_HOME inside a dotfiles checkout, say) and the reset would discard
-// that repo's uncommitted work; and a clone killed before its first
-// checkout has an unborn HEAD that `reset --hard HEAD` cannot resolve,
-// which would wedge every later gate instead of letting Acquire recover.
-func isOwnGitRepoWithHead(dir string) bool {
-	if !isGitLeaseDir(dir) {
-		return false
-	}
-	top, err := gitx.Run(dir, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return false
-	}
-	topInfo, err := os.Stat(top)
-	if err != nil {
-		return false
-	}
-	dirInfo, err := os.Stat(dir)
-	if err != nil || !os.SameFile(topInfo, dirInfo) {
-		return false
-	}
-	_, err = gitx.Run(dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
-	return err == nil
 }

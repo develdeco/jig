@@ -7,9 +7,11 @@ package pool
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
@@ -120,13 +122,25 @@ func Dir(repoName, ticket string, role Role) (string, error) {
 //   - otherwise branch is created fresh with `checkout -B`, off
 //     origin/<branch> if that ref exists (continue a branch pushed by an
 //     earlier run) or else origin/<target>.
+//
+// A lease is reused only when git opens it as its own repository. What git
+// shows is not one (a .git that is not a directory, that resolves an
+// enclosing repository, or that lacks HEAD, objects/ or refs/; leftover
+// files; a file at the lease path) is moved aside, never deleted, and
+// cloned afresh. A .git git refuses although it looks like a repository
+// stops Acquire with git's error and is left as it is. See ownRepo and
+// prepare.
 func Acquire(repoName, remote, target, branch, ticket string, role Role) (Lease, error) {
 	dir, err := Dir(repoName, ticket, role)
 	if err != nil {
 		return Lease{}, err
 	}
 
-	if isGitRepo(dir) {
+	reuse, err := prepare(dir)
+	if err != nil {
+		return Lease{}, err
+	}
+	if reuse {
 		if _, err := gitx.Run(dir, "fetch", "origin"); err != nil {
 			return Lease{}, fmt.Errorf("pool: fetch %s: %w", dir, err)
 		}
@@ -163,11 +177,104 @@ func Acquire(repoName, remote, target, branch, ticket string, role Role) (Lease,
 	return Lease{Dir: dir, Repo: repoName, Branch: branch}, nil
 }
 
-// isGitRepo reports whether dir looks like an existing git working copy.
-func isGitRepo(dir string) bool {
-	fi, err := os.Stat(filepath.Join(dir, ".git"))
-	return err == nil && (fi.IsDir() || fi.Mode().IsRegular())
+// Usable reports whether dir is a lease the gate may reset in place: git
+// opens it as its own repository (see ownRepo) and HEAD resolves to a
+// commit. A reset anywhere else would act on an enclosing repository or
+// fail on an unborn HEAD.
+func Usable(dir string) bool {
+	own, err := ownRepo(dir)
+	if err != nil || !own {
+		return false
+	}
+	_, err = probe(dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+	return err == nil
 }
+
+// ownRepo reports whether git opens dir's own .git directory as the
+// repository for dir, at its top level. It returns false with no error only
+// when git shows dir is not a lease: .git is not a directory (a .git file
+// could name any repository's git dir); git resolved an enclosing working
+// copy or bare repository instead (a working copy prints a non-empty
+// prefix, a bare repository "false"); or git found no repository and .git
+// lacks HEAD, objects/ or refs/, which git requires of one. When git fails
+// on a .git that has all three (an extension this git does not know, a
+// corrupt config, git itself missing), the lease may still hold unpushed
+// work, so it returns git's error for a person to act on.
+func ownRepo(dir string) (bool, error) {
+	gitDir := filepath.Join(dir, ".git")
+	if fi, err := os.Lstat(gitDir); err != nil || !fi.IsDir() {
+		return false, nil
+	}
+	// The prefix test compares no paths, so it holds whatever path spelling
+	// git prints.
+	out, err := probe(dir, "rev-parse", "--is-inside-work-tree", "--show-prefix")
+	if err == nil {
+		return out == "true", nil
+	}
+	for _, name := range []string{"HEAD", "objects", "refs"} {
+		fi, serr := os.Lstat(filepath.Join(gitDir, name))
+		if serr != nil || fi.IsDir() != (name != "HEAD") {
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("pool: git cannot open lease %s, whose .git looks like a repository; repair or remove it by hand: %w", dir, err)
+}
+
+// probe runs a read-only git query in dir that trusts dir's owner.
+// Ownership is git's own check on every real command in the lease, so a
+// lease git refuses as another user's (a JIG_HOME on exFAT or a network
+// share, or one left behind by sudo) counts as a repository here and the
+// fetch that follows fails with git's own explanation, instead of the lease
+// being moved aside as broken.
+func probe(dir string, args ...string) (string, error) {
+	return gitx.Run(dir, append([]string{"-c", "safe.directory=*"}, args...)...)
+}
+
+// prepare readies dir for Acquire, reporting whether it holds a lease to
+// reuse. A missing or empty directory is left for the clone. Anything else
+// that git shows is not a repository of its own (see ownRepo) is moved
+// aside to a timestamped sibling, <key>.broken-<UTC time>, so whatever it
+// holds survives for inspection; the pool never deletes it.
+func prepare(dir string) (bool, error) {
+	fi, err := os.Lstat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("pool: inspect %s: %w", dir, err)
+	}
+	if fi.IsDir() {
+		own, err := ownRepo(dir)
+		if err != nil {
+			return false, err
+		}
+		if own {
+			return true, nil
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return false, fmt.Errorf("pool: inspect %s: %w", dir, err)
+		}
+		if len(entries) == 0 {
+			return false, nil
+		}
+	}
+
+	aside := dir + ".broken-" + now().UTC().Format("20060102T150405Z")
+	if _, err := os.Lstat(aside); err == nil {
+		return false, fmt.Errorf("pool: lease %s is not a git repository of its own, and %s already exists; move or remove one of them by hand", dir, aside)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return false, fmt.Errorf("pool: inspect %s: %w", aside, err)
+	}
+	if err := os.Rename(dir, aside); err != nil {
+		return false, fmt.Errorf("pool: lease %s is not a git repository of its own and could not be moved aside (a process may still hold a file in it): %w", dir, err)
+	}
+	fmt.Fprintf(os.Stderr, "jig: lease %s was not a git repository of its own; moved it to %s and cloning afresh\n", dir, aside)
+	return false, nil
+}
+
+// now is time.Now, swapped by tests that need a fixed aside name.
+var now = time.Now
 
 // refExists reports whether ref resolves to a commit in dir.
 func refExists(dir, ref string) bool {
