@@ -62,17 +62,20 @@ func assertNoLeak(t *testing.T, label, caseName, text string) {
 	}
 }
 
-// assertNoLeakInWorktree walks worktree (tracked and untracked files alike
-// - a plain directory walk sees both) and checks every file's own relative
-// path and content, skipping .git entirely: nothing under a real reviewer
-// or judge session's own worktree read tool could reach is exempt.
-func assertNoLeakInWorktree(t *testing.T, label, caseName, worktree string) {
+// assertNoLeakUnder walks root (tracked and untracked files alike - a
+// plain directory walk sees both) and checks every file's own path
+// relative to root and its content, skipping every .git directory: nothing
+// a session's read tools could reach under root is exempt. A session's
+// reads are not bounded to its worktree, so the test walks the whole work
+// root too - the store beside it (project.yaml, the ticket's brief,
+// slices, journal and seeded gate records) and the judge's own inputs.
+func assertNoLeakUnder(t *testing.T, label, caseName, root, what string) {
 	t.Helper()
-	err := filepath.WalkDir(worktree, func(p string, de fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, de fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, rerr := filepath.Rel(worktree, p)
+		rel, rerr := filepath.Rel(root, p)
 		if rerr != nil {
 			return rerr
 		}
@@ -80,42 +83,21 @@ func assertNoLeakInWorktree(t *testing.T, label, caseName, worktree string) {
 			return nil
 		}
 		if de.IsDir() {
-			if rel == ".git" {
+			if de.Name() == ".git" {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		assertNoLeak(t, label+" worktree path "+rel, caseName, rel)
+		assertNoLeak(t, label+" "+what+" path "+rel, caseName, rel)
 		data, rerr := os.ReadFile(p)
 		if rerr != nil {
 			return rerr
 		}
-		assertNoLeak(t, label+" worktree file "+rel, caseName, string(data))
+		assertNoLeak(t, label+" "+what+" file "+rel, caseName, string(data))
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("%s: walk worktree: %v", label, err)
-	}
-}
-
-// assertNoLeakInTicketDir checks the store ticket dir's own files the
-// request points at (BriefPath, SlicesPath, JournalPath): brief.md,
-// slices.yaml, journal.ndjson. A missing one (journal.ndjson could in
-// principle be absent) is not itself a failure here - only its content,
-// when present, is checked.
-func assertNoLeakInTicketDir(t *testing.T, label, caseName, workDir, ticket string) {
-	t.Helper()
-	ticketDir := filepath.Join(workDir, "store", ticket)
-	for _, name := range []string{"brief.md", "slices.yaml", "journal.ndjson"} {
-		p := filepath.Join(ticketDir, name)
-		data, err := os.ReadFile(p)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			t.Fatalf("%s: read %s: %v", label, p, err)
-		}
-		assertNoLeak(t, label+" store "+name, caseName, string(data))
+		t.Fatalf("%s: walk %s: %v", label, what, err)
 	}
 }
 
@@ -148,8 +130,8 @@ type leakVerdictsFile struct {
 // set and a "judge" dispatch by confirming every candidate Same, checking
 // every surface a session can read before it answers either: the prompt, the
 // dispatch paths relative to workDir, the dispatched slice file's own
-// content, every file in the dispatch's own worktree, the store's ticket
-// dir files, and the worktree's git log.
+// content, every file in the dispatch's own worktree and under the whole
+// work root, and the worktree's git log.
 type leakCapturingBackend struct {
 	t          *testing.T
 	caseName   string
@@ -177,8 +159,8 @@ func (b leakCapturingBackend) Run(d session.Dispatch) error {
 	}
 	assertNoLeak(t, label+" "+filepath.Base(d.SliceJSON)+" content", b.caseName, string(sliceData))
 
-	assertNoLeakInWorktree(t, label, b.caseName, d.Worktree)
-	assertNoLeakInTicketDir(t, label, b.caseName, b.workDir, d.Ticket)
+	assertNoLeakUnder(t, label, b.caseName, d.Worktree, "worktree")
+	assertNoLeakUnder(t, label, b.caseName, b.workDir, "work root")
 	assertNoLeakInGitLog(t, label, b.caseName, d.Worktree)
 
 	switch d.Slice {
@@ -249,7 +231,7 @@ func TestRunCaseNeverLeaksTheCorpusVocabulary(t *testing.T) {
 			backend := leakCapturingBackend{t: t, caseName: c.Name, workDir: workDir, fixtureDir: resultsDir("perfect")}
 			judge := &ModelJudge{Backend: backend, Model: "fixture-model"}
 
-			cs, err := RunCase(workDir, c, backend, judge, "fixture-model")
+			cs, err := RunCase(workDir, c, backend, judge, "model-a")
 			if err != nil {
 				t.Fatalf("RunCase: %v", err)
 			}

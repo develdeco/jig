@@ -403,16 +403,6 @@ func TestFixtureReportRendersTotals(t *testing.T) {
 	}
 }
 
-// fixtureIdentityEnv pins the git author/committer identity for the
-// throwaway repos TestCorpusSpansLieInsideTheirFiles builds - the same
-// values runner.go's own identityEnv uses, reproduced here rather than
-// imported (that var is package-private to production code, not this
-// test-only materialization).
-var fixtureIdentityEnv = []string{
-	"GIT_AUTHOR_NAME=jig-fixture", "GIT_AUTHOR_EMAIL=fixture@example.invalid",
-	"GIT_COMMITTER_NAME=jig-fixture", "GIT_COMMITTER_EMAIL=fixture@example.invalid",
-}
-
 // fileLineCount counts path's lines the way a 1-based "lines: [from, to]"
 // span counts them: one per newline, plus one more when the file's last
 // line has no trailing newline (so a span pointing at that last line still
@@ -475,7 +465,7 @@ func TestCorpusSpansLieInsideTheirFiles(t *testing.T) {
 				if _, aerr := gitx.Run(repoDir, "add", "-A"); aerr != nil {
 					t.Fatalf("round %d: git add: %v", r.N, aerr)
 				}
-				if _, cerr := gitx.RunEnv(repoDir, fixtureIdentityEnv, "commit", "-q", "-m", fmt.Sprintf("round %d", r.N)); cerr != nil {
+				if _, cerr := gitx.RunEnv(repoDir, identityEnv, "commit", "-q", "-m", fmt.Sprintf("round %d", r.N)); cerr != nil {
 					t.Fatalf("round %d: git commit: %v", r.N, cerr)
 				}
 

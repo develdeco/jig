@@ -20,7 +20,7 @@ import (
 // (internal/session/headless_live_test.go builds the same way).
 func buildJigBinary(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "jig-revieweval-bin")
+	dir, err := os.MkdirTemp("", "jig-bin")
 	if err != nil {
 		t.Fatalf("revieweval: create build dir: %v", err)
 	}

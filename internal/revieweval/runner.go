@@ -63,9 +63,11 @@ const baseManifestYAML = "workspaces:\n  - id: root\n    path: .\noracles:\n  te
 const baseGoModContent = "module example.com/project\n\ngo 1.22\n"
 
 // evalRepoName and evalTarget name the eval repo the way RoundInput and
-// report.yaml's reviewed_sha need: a repo id and its target branch.
+// report.yaml's reviewed_sha need: a repo id and its target branch. The id
+// is written into the store's seeded report.yaml, which a session can read,
+// so it is as neutral as everything else a session sees.
 const (
-	evalRepoName = "eval"
+	evalRepoName = "project"
 	evalTarget   = "main"
 )
 

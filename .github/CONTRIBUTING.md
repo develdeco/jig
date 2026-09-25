@@ -80,8 +80,10 @@ ticket's builders have already used the cheapest rung),
 `JIG_REVIEWEVAL_CORPUS` (default `testdata/revieweval`), and
 `JIG_REVIEWEVAL_REPORT` (the text report's path; the JSON report is
 written beside it with a `.json` suffix). Left unset, the report still
-lands on disk, under `os.TempDir()/jig-revieweval/report.txt` - the run
-logs that path once at the start, so it never has to be found by guessing.
+lands on disk, under the user cache dir (`os.UserCacheDir()`, then
+`jig/revieweval/report.txt`, falling back to `os.TempDir()` only when there
+is no cache dir) - the run logs that path once at the start, so it never
+has to be found by guessing.
 
 ## Reporting a bug
 
