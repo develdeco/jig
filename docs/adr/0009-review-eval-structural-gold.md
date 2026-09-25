@@ -62,13 +62,13 @@ occurrence, which a re-report could have moved. The loader bounds every
 link at load time: it rejects a `recorded` line outside the decision's own
 span widened by `lineWindow`, and a second decision anywhere in the case
 naming a record another decision already claimed. A finding whose own
-`prior` names a dismissed fold point in the same file is a candidate for
-it whatever its line, line 0 included - citing an id is itself location
-evidence - surviving on anything but an explicit judge Different, without
-the extra burden of an explicit Same a line-0 finding otherwise needs. A
-prior naming a point in a different file, or one the judge rejects, is
-simply no edge, so the wrong-prior rule below catches it like any other
-unsupported citation.
+`prior` names a fold point in the same file - open, asked, noted or
+dismissed - is a candidate for it whatever its line, line 0 included -
+citing an id is itself location evidence - surviving on anything but an
+explicit judge Different, without the extra burden of an explicit Same a
+line-0 finding otherwise needs. A prior naming a point in a different
+file, or one the judge rejects, is simply no edge, so the wrong-prior
+rule below catches it like any other unsupported citation.
 
 Seeded gold findings are matched to candidates one to one by an exact
 maximum-weight assignment (`bestMatching`, the Hungarian algorithm), not
@@ -123,6 +123,13 @@ finding rests on structure alone just the same and is not marked, so a
 run with no judge is a structural check. The live path always runs the
 model judge.
 
+The five cases ported from the earlier corpus kept their code, but
+`clean`, `loopvar-trap` and `tenant-leak` lost sentences that gave the
+reviewer the verdict: a brief saying the diff is correct, a brief
+explaining the rule the trap tests, and a comment arguing the trap is
+safe. A case must not tell the reviewer what it is testing, so this is a
+deliberate content change, not only a translation to the new gold shape.
+
 Seeded gold is written into a case when the case is built, not discovered
 by eyeballing a review afterward - `gold.yaml`'s findings and traps are
 the problems, and the tempting-but-correct code, `patch.diff` seeded on
@@ -174,7 +181,8 @@ the denominator; a refused round still only measures, and a judge error
 still leaves that round's findings in `RenderJSON`. The live path
 controls what its sessions see: each child gets an environment built
 from the test process's own minus every `JIG_` variable, the git test
-scaffolding and any stale `PWD` (`session.Options.Env`), and the judge's
+scaffolding, launch-context entries and any stale `PWD`
+(`session.Options.Env`, which a backend that cannot apply it refuses), and the judge's
 scratch lives in its own temp root outside the case work root. A test
 drives a case through the real headless backend with a stub CLI and
 checks the environment, working directory and surroundings every child

@@ -84,6 +84,10 @@ _Avoid_: review comment triage, auto-dismiss
 A review-eval case's seeded truth: the findings a correct review must report and the traps it must not flag, both written into the case when it is built, not read off a review after the fact. A finding beyond it is labeled from a recorded human decision instead: kept, dismissed, or, when nobody decided, pending.
 _Avoid_: ground truth, expected output
 
+**Round verdict**:
+A review-eval round's result: FAIL when it was refused or failed or any failure list is non-empty (a miss, a lost finding, a dropped question, a misattributed or wrong prior, a false alarm, a re-litigation); PROVISIONAL when nothing failed but some finding is still pending a label; PASS otherwise. A case takes its worst round's verdict.
+_Avoid_: pass/fail, score
+
 **Staircase**:
 The per-dispatch model ladder: cheapest model first, climbing with volume, with invariants floored to the dearest model.
 _Avoid_: model tiering, escalation policy

@@ -926,10 +926,10 @@ above:
   rung after the cheapest - the pick `Gate` itself makes
   (`staircase.Disjoint(d.Rungs, journal.BuilderModels(lines))`) once an
   unattended ticket's builders have already used the cheapest rung, the
-  common case an unattended eval run matches. The earlier
-  `Disjoint(cfg, nil)` returned the cheapest rung itself, which is only
-  what `Gate` picks before any builder has dispatched at all - the wrong
-  default for a reviewer round running after a ticket's slices.
+  common case an unattended eval run matches. The cheapest rung itself is
+  only what `Gate` picks before any builder has dispatched at all, which
+  is never the case for a reviewer round that runs after a ticket's
+  slices.
 - `RoundScore` carries `FalsePositiveGold` (whether a round's own gold
   could produce a false alarm at all: a trap, a dismissed decision, or an
   exhaustive round) and every reported finding as a `ScoredFinding`, so
@@ -947,8 +947,12 @@ above:
   comparator fails fast instead of hanging a test run.
 - `session.Options.Env` lets a caller fix a headless child's environment;
   the live eval passes its own environment minus every `JIG_` variable,
-  `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`, `PWD` and `OLDPWD`, and the
-  backend sets `PWD` to the worktree. It is a denylist of what jig and its
+  `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`, `PWD` and `OLDPWD`, and any
+  launch-context entry (a name that is empty or starts with `=`, such as
+  Windows' per-drive working directories, plus `_` and `GOCOVERDIR`), and
+  the backend sets `PWD` to the worktree. Setting `Env` on a backend that
+  cannot apply it (fake, herdr) fails at construction instead of being
+  silently ignored. It is a denylist of what jig and its
   test scaffolding own, not an allowlist of what the CLI needs, so the CLI
   keeps whatever else it relies on. The claude stub records its
   environment and surroundings, and a test runs a case through the real

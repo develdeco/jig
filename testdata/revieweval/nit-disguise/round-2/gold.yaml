@@ -4,5 +4,5 @@ findings:
     file: limits/range.go
     lines: [3, 5]
     action: fix
-    description: InBounds now returns v >= min && v < max, excluding max, although its doc comment still says inclusive; the boundary flipped from <= to < inside an otherwise cosmetic rename.
+    description: InBounds now returns v >= low && v < high, excluding high, although its doc comment still says inclusive; the boundary flipped from <= to < inside an otherwise cosmetic rename.
 traps: []
