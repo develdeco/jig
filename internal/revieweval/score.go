@@ -8,6 +8,48 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
+// RoundVerdict is a round's or a case's three-valued outcome, worst wins:
+// FAIL when a failure list is non-empty or the round was refused or
+// failed outright (the same bit RoundScore.Passed already carries, negated
+// - Passed keeps meaning "no failure" so existing callers reading it are
+// unaffected); PROVISIONAL when nothing failed but a finding still sits in
+// Pending, unlabeled - noise a reviewer could pass off as thoroughness
+// must not read as a clean pass; PASS otherwise. A case's own verdict is
+// the worst of its rounds'.
+type RoundVerdict string
+
+const (
+	VerdictFail        RoundVerdict = "FAIL"
+	VerdictProvisional RoundVerdict = "PROVISIONAL"
+	VerdictPass        RoundVerdict = "PASS"
+)
+
+// verdictRank orders RoundVerdict worst-first, for combining a case's
+// rounds into the case's own verdict.
+func verdictRank(v RoundVerdict) int {
+	switch v {
+	case VerdictFail:
+		return 2
+	case VerdictProvisional:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// verdictFor turns a round's own Passed bit and how many of its findings
+// still await a person's label into the three-valued verdict.
+func verdictFor(passed bool, pending int) RoundVerdict {
+	switch {
+	case !passed:
+		return VerdictFail
+	case pending > 0:
+		return VerdictProvisional
+	default:
+		return VerdictPass
+	}
+}
+
 // RoundScore is one round's scoring result.
 type RoundScore struct {
 	Round            int
@@ -25,15 +67,19 @@ type RoundScore struct {
 	Relitigated      []string // finding titles
 	ExtraTrue        []string // finding titles matched to a kept decision
 	Pending          []string // finding titles no one has labeled
-	// WrongPriors is every finding whose jig-assigned status is dismissed
-	// (it cited an already-dismissed prior) but carries no surviving
-	// structural edge to the dismissed fold point that prior names: the
-	// citation is not a real repeat, and it fails the round.
+	// WrongPriors is every finding whose own Prior cites a fold point but
+	// carries no surviving structural edge to the point it names -
+	// whatever that point's own status, or jig's resulting status for
+	// this finding: the citation is not a real repeat, and it fails the
+	// round.
 	WrongPriors     []string // finding titles
 	TriagePrompts   int      // 1 for the fix batch when any fate is open, plus 1 per fate asked
 	Refused, Failed bool
 	Reason          string
 	Passed          bool
+	// Verdict is Passed plus Pending folded into the three-valued outcome
+	// (verdictFor); RenderReport and RenderJSON carry it alongside Passed.
+	Verdict RoundVerdict
 	// FalsePositiveGold is true when this round's gold could produce a
 	// false alarm on its own - a trap, a dismissed decision, or an
 	// exhaustive round. RenderReport's precision line needs it to tell "no
@@ -69,6 +115,10 @@ type CaseScore struct {
 	Name   string
 	Rounds []RoundScore
 	Passed bool
+	// Verdict is the worst (verdictRank) of every round's own Verdict:
+	// FAIL if any round failed, else PROVISIONAL if any round is, else
+	// PASS.
+	Verdict RoundVerdict
 }
 
 // hasDismissedDecision reports whether decisions holds any dismissed
@@ -196,17 +246,19 @@ func ScoreRound(round int, gold Gold, decisions []Decision, findings []verifydel
 	sc.Passed = len(sc.Missed) == 0 && len(sc.Lost) == 0 && len(sc.DroppedQuestions) == 0 &&
 		len(sc.Misattributed) == 0 && len(sc.FalseAlarms) == 0 && len(sc.Relitigated) == 0 &&
 		len(sc.WrongPriors) == 0
+	sc.Verdict = verdictFor(sc.Passed, len(sc.Pending))
 
 	return sc
 }
 
 // RenderReport renders scores as a text report: one line per case round
-// (PASS or FAIL, its non-zero counts, and any reason), then totals across
-// every round.
+// (its verdict word, its non-zero counts, and any reason), then totals
+// across every round.
 func RenderReport(scores []CaseScore) string {
 	var b strings.Builder
 
 	var casesPassed, roundsTotal, roundsPassed int
+	var casesByVerdict, roundsByVerdict [3]int // indexed by verdictRank: pass, provisional, fail
 	var totalFound, totalGold int
 	var totalLost, totalForgotten, totalDropped, totalMisattributed int
 	var totalFalseAlarms, totalRelitigated, totalExtraTrue, totalWrongPriors int
@@ -221,15 +273,15 @@ func RenderReport(scores []CaseScore) string {
 		if s.Passed {
 			casesPassed++
 		}
+		casesByVerdict[verdictRank(s.Verdict)]++
 		for _, r := range s.Rounds {
 			roundsTotal++
-			status := "FAIL"
 			if r.Passed {
 				roundsPassed++
-				status = "PASS"
 			}
+			roundsByVerdict[verdictRank(r.Verdict)]++
 			gold := len(r.Found) + len(r.Missed)
-			fmt.Fprintf(&b, "%s round %d: %s found=%d/%d", s.Name, r.Round, status, len(r.Found), gold)
+			fmt.Fprintf(&b, "%s round %d: %s found=%d/%d pending=%d", s.Name, r.Round, r.Verdict, len(r.Found), gold, len(r.Pending))
 			for _, part := range []struct {
 				label string
 				n     int
@@ -299,6 +351,9 @@ func RenderReport(scores []CaseScore) string {
 	}
 
 	fmt.Fprintf(&b, "\ntotals: cases passed %d/%d, rounds passed %d/%d, recall %s\n", casesPassed, len(scores), roundsPassed, roundsTotal, recall)
+	fmt.Fprintf(&b, "cases: %s %d, %s %d, %s %d; rounds: %s %d, %s %d, %s %d\n",
+		VerdictPass, casesByVerdict[verdictRank(VerdictPass)], VerdictProvisional, casesByVerdict[verdictRank(VerdictProvisional)], VerdictFail, casesByVerdict[verdictRank(VerdictFail)],
+		VerdictPass, roundsByVerdict[verdictRank(VerdictPass)], VerdictProvisional, roundsByVerdict[verdictRank(VerdictProvisional)], VerdictFail, roundsByVerdict[verdictRank(VerdictFail)])
 	fmt.Fprintf(&b, "lost %d, forgotten %d, dropped questions %d, misattributed %d, false alarms %d, re-litigated %d, wrong priors %d, refused %d, failed %d\n",
 		totalLost, totalForgotten, totalDropped, totalMisattributed, totalFalseAlarms, totalRelitigated, totalWrongPriors, totalRefused, totalFailed)
 	fmt.Fprintf(&b, "prior citation rate %s, action agreement %s, triage prompts per case %.2f\n", priorRate, actionRate, triagePerCase)
@@ -327,31 +382,33 @@ func RenderReport(scores []CaseScore) string {
 // Pending above all, since that is the one bucket this package could not
 // resolve on its own.
 type jsonRoundReport struct {
-	Round            int      `json:"round"`
-	Refused          bool     `json:"refused,omitempty"`
-	Failed           bool     `json:"failed,omitempty"`
-	Reason           string   `json:"reason,omitempty"`
-	Found            []string `json:"found,omitempty"`
-	Missed           []string `json:"missed,omitempty"`
-	Unconfirmed      []string `json:"unconfirmed,omitempty"`
-	Lost             []string `json:"lost,omitempty"`
-	Forgotten        []string `json:"forgotten,omitempty"`
-	DroppedQuestions []string `json:"dropped_questions,omitempty"`
-	Misattributed    []string `json:"misattributed,omitempty"`
-	FalseAlarms      []string `json:"false_alarms,omitempty"`
-	Relitigated      []string `json:"relitigated,omitempty"`
-	ExtraTrue        []string `json:"extra_true,omitempty"`
-	Pending          []string `json:"pending,omitempty"`
-	WrongPriors      []string `json:"wrong_priors,omitempty"`
+	Round            int          `json:"round"`
+	Verdict          RoundVerdict `json:"verdict"`
+	Refused          bool         `json:"refused,omitempty"`
+	Failed           bool         `json:"failed,omitempty"`
+	Reason           string       `json:"reason,omitempty"`
+	Found            []string     `json:"found,omitempty"`
+	Missed           []string     `json:"missed,omitempty"`
+	Unconfirmed      []string     `json:"unconfirmed,omitempty"`
+	Lost             []string     `json:"lost,omitempty"`
+	Forgotten        []string     `json:"forgotten,omitempty"`
+	DroppedQuestions []string     `json:"dropped_questions,omitempty"`
+	Misattributed    []string     `json:"misattributed,omitempty"`
+	FalseAlarms      []string     `json:"false_alarms,omitempty"`
+	Relitigated      []string     `json:"relitigated,omitempty"`
+	ExtraTrue        []string     `json:"extra_true,omitempty"`
+	Pending          []string     `json:"pending,omitempty"`
+	WrongPriors      []string     `json:"wrong_priors,omitempty"`
 	// Findings is every reported finding with its scoring, the part a
 	// person labels from.
 	Findings []ScoredFinding `json:"findings,omitempty"`
 }
 
 type jsonCaseReport struct {
-	Name   string            `json:"name"`
-	Passed bool              `json:"passed"`
-	Rounds []jsonRoundReport `json:"rounds"`
+	Name    string            `json:"name"`
+	Passed  bool              `json:"passed"`
+	Verdict RoundVerdict      `json:"verdict"`
+	Rounds  []jsonRoundReport `json:"rounds"`
 }
 
 // RenderJSON renders scores as indented JSON: every round's findings with
@@ -361,10 +418,10 @@ type jsonCaseReport struct {
 func RenderJSON(scores []CaseScore) ([]byte, error) {
 	out := make([]jsonCaseReport, 0, len(scores))
 	for _, s := range scores {
-		jc := jsonCaseReport{Name: s.Name, Passed: s.Passed}
+		jc := jsonCaseReport{Name: s.Name, Passed: s.Passed, Verdict: s.Verdict}
 		for _, r := range s.Rounds {
 			jc.Rounds = append(jc.Rounds, jsonRoundReport{
-				Round: r.Round, Refused: r.Refused, Failed: r.Failed, Reason: r.Reason,
+				Round: r.Round, Verdict: r.Verdict, Refused: r.Refused, Failed: r.Failed, Reason: r.Reason,
 				Found: r.Found, Missed: r.Missed, Unconfirmed: r.Unconfirmed,
 				Lost: r.Lost, Forgotten: r.Forgotten, DroppedQuestions: r.DroppedQuestions, Misattributed: r.Misattributed,
 				FalseAlarms: r.FalseAlarms, Relitigated: r.Relitigated, ExtraTrue: r.ExtraTrue, Pending: r.Pending,

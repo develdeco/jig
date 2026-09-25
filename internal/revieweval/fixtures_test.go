@@ -138,7 +138,9 @@ func TestFixtureLoadCorpusLoadsAllTenCases(t *testing.T) {
 // through RunCorpus against the "perfect" fixture set with no judge
 // (structural matching alone, since every perfect finding sits on its
 // gold's own line): every round of every case must pass, with nothing
-// missed, lost, dropped, misattributed, a false alarm or re-litigated.
+// missed, lost, dropped, misattributed, a false alarm or re-litigated, and
+// no finding left pending - a perfect round has nothing for a person to
+// label, so its verdict must be a clean PASS, never PROVISIONAL.
 func TestFixturePerfectPassesEveryCaseEveryRound(t *testing.T) {
 	cases, err := LoadCorpus(evalCorpusRoot(t))
 	if err != nil {
@@ -155,11 +157,20 @@ func TestFixturePerfectPassesEveryCaseEveryRound(t *testing.T) {
 		if !cs.Passed {
 			t.Errorf("case %s: Passed = false, want true", cs.Name)
 		}
+		if cs.Verdict != VerdictPass {
+			t.Errorf("case %s: Verdict = %q, want %q", cs.Name, cs.Verdict, VerdictPass)
+		}
 		for _, rs := range cs.Rounds {
 			roundCount++
 			if !rs.Passed {
 				t.Errorf("case %s round %d: Passed = false (missed=%v lost=%v forgotten=%v dropped=%v misattributed=%v false-alarms=%v relitigated=%v reason=%q)",
 					cs.Name, rs.Round, rs.Missed, rs.Lost, rs.Forgotten, rs.DroppedQuestions, rs.Misattributed, rs.FalseAlarms, rs.Relitigated, rs.Reason)
+			}
+			if len(rs.Pending) != 0 {
+				t.Errorf("case %s round %d: Pending = %v, want none: a perfect round has nothing left for a person to label", cs.Name, rs.Round, rs.Pending)
+			}
+			if rs.Verdict != VerdictPass {
+				t.Errorf("case %s round %d: Verdict = %q, want %q", cs.Name, rs.Round, rs.Verdict, VerdictPass)
 			}
 		}
 	}
@@ -570,24 +581,26 @@ func TestFixtureProbesEachDesignedOutcome(t *testing.T) {
 				recordedLinks[d.Recorded] = d
 			}
 		}
-		var dismissed []verifydeliver.Finding
+		fold := map[string]verifydeliver.Finding{}
+		var dismissedCount int
 		for _, f := range round1.Recorded.Findings {
+			fold[f.ID] = f
 			if f.Status == verifydeliver.StatusDismissed {
-				dismissed = append(dismissed, f)
+				dismissedCount++
 			}
 		}
-		if len(dismissed) != 1 || dismissed[0].ID != "r1-f1" {
-			t.Fatalf("title-collision round 1's recorded findings = %+v, want exactly r1-f1 dismissed", dismissed)
+		if dismissedCount != 1 || fold["r1-f1"].Status != verifydeliver.StatusDismissed {
+			t.Fatalf("title-collision round 1's recorded findings = %+v, want exactly r1-f1 dismissed", fold)
 		}
 
-		rf := verifydeliver.ResultFinding{File: dismissed[0].File, Line: 0, Title: "repeat, no line", Prior: "r1-f1"}
+		rf := verifydeliver.ResultFinding{File: fold["r1-f1"].File, Line: 0, Title: "repeat, no line", Prior: "r1-f1"}
 		// ApplyRound's own rule 2 (findings.go): a repeat of a dismissed
 		// finding keeps that finding's id and status, whatever line the
 		// reviewer gave it - reproduced by hand here, since this probe
 		// skips ApplyRound to skip the wire-level check alongside it.
 		reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}
 
-		m, err := MatchRound(c.Name, round2.N, "", "", round2.Gold, round2.Decisions, recordedLinks, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
+		m, err := MatchRound(c.Name, round2.N, "", "", round2.Gold, round2.Decisions, recordedLinks, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
 		if err != nil {
 			t.Fatalf("MatchRound: %v", err)
 		}

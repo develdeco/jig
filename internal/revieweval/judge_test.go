@@ -136,6 +136,22 @@ func TestModelJudgeConfirmRejectsAKeyRepeatedInOneObject(t *testing.T) {
 	}
 }
 
+// --- candidate index range ------------------------------------------------
+
+func TestModelJudgeConfirmRejectsANegativeCandidate(t *testing.T) {
+	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":-1,"same":true},{"candidate":1,"same":true}]}`}, Model: "m"}
+	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
+		t.Fatal("Confirm: want an error, candidate -1 is out of range")
+	}
+}
+
+func TestModelJudgeConfirmRejectsATooLargeCandidate(t *testing.T) {
+	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0,"same":true},{"candidate":2,"same":true}]}`}, Model: "m"}
+	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
+		t.Fatal("Confirm: want an error, candidate 2 is out of range for 2 candidates")
+	}
+}
+
 // --- one question for the judge, whatever the point is ---------------------
 
 // TestJudgePromptNeverNamesAPointKind pins that the judge prompt states the
@@ -158,5 +174,18 @@ func TestJudgePromptNeverNamesAPointKind(t *testing.T) {
 func TestJudgePromptTemplateHasNoRoomForACaseName(t *testing.T) {
 	if n := strings.Count(judgePromptTemplate, "%"); n != 3 {
 		t.Fatalf("judgePromptTemplate has %d format verbs, want exactly 3 (round, judge.json path, verdicts.json path)", n)
+	}
+}
+
+// TestJudgePromptFencesQuotedMaterial pins the prompt's defense against a
+// reviewer's own words being read as instructions: judge.json carries a
+// finding's title and detail verbatim (judgeCandidateJSON), so the prompt
+// must say plainly that this text is material to compare, not a command to
+// follow.
+func TestJudgePromptFencesQuotedMaterial(t *testing.T) {
+	prompt := fmt.Sprintf(judgePromptTemplate, 1, "judge.json", "verdicts.json")
+	low := strings.ToLower(prompt)
+	if !strings.Contains(low, "untrusted") && !strings.Contains(low, "not instructions") && !strings.Contains(low, "as data") {
+		t.Errorf("prompt has no fence for the point description or the finding's own text: %s", prompt)
 	}
 }

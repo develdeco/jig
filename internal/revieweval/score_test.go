@@ -2,6 +2,7 @@ package revieweval
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -165,6 +166,65 @@ func TestScoreWrongPriorFailsTheRound(t *testing.T) {
 	}
 	if sc.Passed {
 		t.Error("Passed = true, want false: a wrong prior must fail the round")
+	}
+	if sc.Verdict != VerdictFail {
+		t.Errorf("Verdict = %q, want %q", sc.Verdict, VerdictFail)
+	}
+}
+
+// TestScoreRoundIsProvisionalWithUnlabeledNoise pins the three-valued
+// verdict's middle state: a round whose one seeded gold is matched, plus a
+// pile of findings nothing classified as a failure, is not a plain pass -
+// nothing failed, but nobody has said the extra findings are right or
+// wrong, so a person still has to look. This is the shape a reviewer that
+// spams noise alongside a real finding produces: every extra finding lands
+// in Pending (no structural edge to anything, a non-exhaustive round), and
+// Passed alone could not tell that shotgun apart from a clean round.
+func TestScoreRoundIsProvisionalWithUnlabeledNoise(t *testing.T) {
+	gold := Gold{Findings: []GoldFinding{{ID: "g1", Action: verifydeliver.ActionFix}}}
+	const junk = 18
+	findings := make([]verifydeliver.ResultFinding, junk+1)
+	reported := make([]verifydeliver.Finding, junk+1)
+	classification := map[int]Fate{}
+	for i := range findings {
+		findings[i] = verifydeliver.ResultFinding{Title: fmt.Sprintf("f%d", i)}
+		reported[i] = verifydeliver.Finding{ID: fmt.Sprintf("r%d", i), Status: verifydeliver.StatusOpen}
+		if i > 0 {
+			classification[i] = FatePending
+		}
+	}
+	match := RoundMatch{MatchedFinding: []int{0}, StructureOnly: []bool{false}, Classification: classification}
+
+	sc := ScoreRound(1, gold, nil, findings, reported, nil, match)
+	if !sc.Passed {
+		t.Errorf("Passed = false, want true: nothing in this round failed")
+	}
+	if sc.Verdict != VerdictProvisional {
+		t.Errorf("Verdict = %q, want %q: %d findings are still unlabeled", sc.Verdict, VerdictProvisional, junk)
+	}
+	if len(sc.Pending) != junk {
+		t.Fatalf("Pending = %d, want %d", len(sc.Pending), junk)
+	}
+}
+
+// TestScoreRoundVerdictThreeValued pins verdictFor's own three cases
+// directly, isolated from ScoreRound's own field wiring.
+func TestScoreRoundVerdictThreeValued(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		passed  bool
+		pending int
+		want    RoundVerdict
+	}{
+		{"failed-beats-pending", false, 3, VerdictFail},
+		{"no-failure-no-pending-is-a-clean-pass", true, 0, VerdictPass},
+		{"no-failure-with-pending-is-provisional", true, 1, VerdictProvisional},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := verdictFor(tc.passed, tc.pending); got != tc.want {
+				t.Errorf("verdictFor(%v, %d) = %q, want %q", tc.passed, tc.pending, got, tc.want)
+			}
+		})
 	}
 }
 

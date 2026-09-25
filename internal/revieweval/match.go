@@ -3,6 +3,7 @@ package revieweval
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/develdeco/jig/internal/verifydeliver"
@@ -41,10 +42,10 @@ type Candidate struct {
 	Finding int  // index into the round's result.Findings
 	Line0   bool // the finding gave line 0 (unknown)
 	// CitedPrior is true for the one extra candidate buildCandidates adds
-	// per finding whose own Prior names a dismissed fold point in the same
-	// file: a citation is itself location evidence, so this candidate
-	// survives the way any non-line0 edge does - on anything but Different
-	// - even when Line0 is also true.
+	// per finding whose own Prior names a fold point in the same file,
+	// whatever that point's status: a citation is itself location
+	// evidence, so this candidate survives the way any non-line0 edge
+	// does - on anything but Different - even when Line0 is also true.
 	CitedPrior bool
 }
 
@@ -82,14 +83,14 @@ type Judge interface {
 type Fate string
 
 const (
-	// FateSkip is rule 1: jig's own status is dismissed (it cited an
-	// already-dismissed prior) and that citation is structurally
-	// supported - a permitted repeat, counted nowhere.
+	// FateSkip is rule 1: the finding cited a fold point (its own Prior)
+	// and that citation is structurally supported - a permitted repeat,
+	// counted nowhere.
 	FateSkip Fate = "skip"
-	// FateWrongPrior is also rule 1: jig's own status is dismissed but
-	// the finding carries no surviving edge to the dismissed fold point
-	// its own prior names, so the citation is not a real repeat. It
-	// fails the round (RoundScore.WrongPriors).
+	// FateWrongPrior is also rule 1: the finding cited a fold point but
+	// carries no surviving edge to the point its own prior names, so the
+	// citation is not a real repeat, whatever jig's own status ended up
+	// being. It fails the round (RoundScore.WrongPriors).
 	FateWrongPrior Fate = "wrong-prior"
 	// FatePending is rules 2 and 7: a note (never a false alarm) or an
 	// otherwise unlabeled finding, both left for a person to label.
@@ -129,8 +130,9 @@ func normalizeFile(p string) string {
 	return strings.TrimPrefix(p, "./")
 }
 
-// candKind tags which of the four point sources one candidate came
-// from, so classifyUnmatched can tell a trap's edge from a decision's.
+// candKind tags which point source one candidate came from, so
+// classifyUnmatched can tell a trap's edge from a decision's - and, for
+// kindCited, a plain citation from a real structural one.
 type candKind int
 
 const (
@@ -138,6 +140,14 @@ const (
 	kindTrap
 	kindDecision
 	kindDismissed
+	// kindCited is a candidate buildCandidates added only because a
+	// finding's own Prior named a fold point that is not (or not yet)
+	// dismissed - open, asked or noted. It carries no structural window
+	// evidence of its own (addPoint never runs over these statuses), only
+	// the citation itself, so classifyUnmatched reads it for the wrong-
+	// prior check alone, never for relitigation or a false alarm - those
+	// stay reserved for a point the fold actually dismissed.
+	kindCited
 )
 
 // candMeta is the bookkeeping buildCandidates keeps alongside each public
@@ -160,10 +170,13 @@ func recordedDescription(f verifydeliver.Finding) string {
 	return f.Title + ": " + f.Detail
 }
 
-// dismissedPoint builds one dismissed fold finding's Point. Ordinarily its
-// span is just its own one line and its description its bare title and
-// detail (recordedDescription) - both read from the fold's own current
-// occurrence, f. When recordedLinks names a decision for it
+// foldPoint builds one fold finding's Point, whatever its current status -
+// open, asked, noted or dismissed: buildCandidates' ordinary window pass
+// only ever calls it for a dismissed one, but the cited-prior pass
+// (below) calls it for any status a finding's own Prior might name.
+// Ordinarily its span is just its own one line and its description its
+// bare title and detail (recordedDescription) - both read from the fold's
+// own current occurrence, f. When recordedLinks names a decision for it
 // (Decision.Recorded) and that decision's own file still matches the
 // fold's current one - a later round could have re-reported the same id
 // under a different file, which the loader never saw and the decision
@@ -174,7 +187,7 @@ func recordedDescription(f verifydeliver.Finding) string {
 // could have moved that line anywhere since, but the human judged the line
 // that was actually on record when they decided it, and that is the only
 // one a decision's own span was ever checked against.
-func dismissedPoint(f verifydeliver.Finding, recordedLinks map[string]Decision) Point {
+func foldPoint(f verifydeliver.Finding, recordedLinks map[string]Decision) Point {
 	if link, ok := recordedLinks[f.ID]; ok && normalizeFile(link.File) == normalizeFile(f.File) {
 		from, to := min(link.From, link.RecordedLine), max(link.To, link.RecordedLine)
 		return Point{ID: f.ID, File: f.File, Description: link.Description, From: from, To: to}
@@ -194,21 +207,33 @@ type dismissedCandKey struct {
 // buildCandidates builds every structural candidate of one round: for each
 // point in gold's findings and traps, decisions, and the fold's dismissed
 // findings, every result finding whose normalized file matches and whose
-// line is 0 or falls in the point's span widened by lineWindow.
+// line is 0 or falls in the point's span widened by lineWindow. fold is
+// every earlier round's known finding (verifydeliver.Fold.Known, every
+// status), so the cited-prior pass below can look any of it up by id; the
+// ordinary window pass above only ever runs over its dismissed subset -
+// an open, asked or noted point earns a candidate solely by being cited
+// (see below), never by a finding merely landing near it, or a stray
+// nearby report would read as a false alarm or a re-litigation of a point
+// nobody has decided yet.
 //
-// It then marks one candidate per finding whose own Prior names a
-// dismissed fold point in the same file: a cited prior is itself location
-// evidence, so that candidate's CitedPrior flag is set whatever the
-// finding's line - even 0, where the ordinary structural pass above
-// already treats every point in the file as a candidate too, needing an
-// explicit Same to survive (edgeSurvives) - so that it needs no explicit
-// Same, only not Different, the way a normal in-window edge already does.
-// A finding whose line sits outside the point's window gets no structural
-// candidate at all above, so this adds one from scratch. A prior naming a
-// point in a different file, or one the judge rejects, is then simply no
-// edge: classifyUnmatched's rule 1 fails it as a wrong prior exactly as it
-// would any other unsupported citation.
-func buildCandidates(gold Gold, decisions []Decision, recordedLinks map[string]Decision, dismissed []verifydeliver.Finding, findings []verifydeliver.ResultFinding) ([]Candidate, []candMeta) {
+// It then marks one candidate per finding whose own Prior names any fold
+// point in the same file, whatever that point's status: a cited prior is
+// itself location evidence, so that candidate's CitedPrior flag is set
+// whatever the finding's line - even 0, where the ordinary structural pass
+// above already treats every point in the file as a candidate too, needing
+// an explicit Same to survive (edgeSurvives) - so that it needs no
+// explicit Same, only not Different, the way a normal in-window edge
+// already does. A finding whose line sits outside the point's window gets
+// no structural candidate at all above, so this adds one from scratch,
+// upgrading an existing dismissed-point candidate in place rather than
+// duplicating it when the window already built one. A cited point that is
+// not dismissed never had a window candidate to upgrade (addPoint never
+// runs over it), so it always adds a fresh one, tagged kindCited rather
+// than kindDismissed so classifyUnmatched never reads it as a relitigation
+// or a false alarm. A prior naming a point in a different file, or one the
+// judge rejects, is then simply no edge: classifyUnmatched's rule 1 fails
+// it as a wrong prior exactly as it would any other unsupported citation.
+func buildCandidates(gold Gold, decisions []Decision, recordedLinks map[string]Decision, fold map[string]verifydeliver.Finding, findings []verifydeliver.ResultFinding) ([]Candidate, []candMeta) {
 	var cands []Candidate
 	var meta []candMeta
 
@@ -236,10 +261,19 @@ func buildCandidates(gold Gold, decisions []Decision, recordedLinks map[string]D
 	for _, d := range decisions {
 		addPoint(Point{ID: d.ID, File: d.File, Description: d.Description, From: d.From, To: d.To}, kindDecision, d.Decision, -1)
 	}
-	dismissedByID := make(map[string]verifydeliver.Finding, len(dismissed))
-	for _, f := range dismissed {
-		dismissedByID[f.ID] = f
-		addPoint(dismissedPoint(f, recordedLinks), kindDismissed, "", -1)
+	// dismissedIDs, sorted: fold is a map, so its own range order is not
+	// stable across runs, and the window pass's candidate order must be -
+	// the same reason dismissedFold (runner.go) used to sort before this
+	// pass moved in-package.
+	var dismissedIDs []string
+	for id, f := range fold {
+		if f.Status == verifydeliver.StatusDismissed {
+			dismissedIDs = append(dismissedIDs, id)
+		}
+	}
+	sort.Strings(dismissedIDs)
+	for _, id := range dismissedIDs {
+		addPoint(foldPoint(fold[id], recordedLinks), kindDismissed, "", -1)
 	}
 
 	// dismissedIdx maps a (point, finding) pair already built above (by
@@ -256,15 +290,20 @@ func buildCandidates(gold Gold, decisions []Decision, recordedLinks map[string]D
 		if f.Prior == "" {
 			continue
 		}
-		d, ok := dismissedByID[f.Prior]
+		d, ok := fold[f.Prior]
 		if !ok || normalizeFile(d.File) != normalizeFile(f.File) {
+			continue
+		}
+		if d.Status != verifydeliver.StatusDismissed {
+			cands = append(cands, Candidate{Point: foldPoint(d, recordedLinks), Finding: j, Line0: f.Line == 0, CitedPrior: true})
+			meta = append(meta, candMeta{kind: kindCited, goldIndex: -1})
 			continue
 		}
 		if idx, exists := dismissedIdx[dismissedCandKey{d.ID, j}]; exists {
 			cands[idx].CitedPrior = true
 			continue
 		}
-		cands = append(cands, Candidate{Point: dismissedPoint(d, recordedLinks), Finding: j, Line0: f.Line == 0, CitedPrior: true})
+		cands = append(cands, Candidate{Point: foldPoint(d, recordedLinks), Finding: j, Line0: f.Line == 0, CitedPrior: true})
 		meta = append(meta, candMeta{kind: kindDismissed, goldIndex: -1})
 	}
 
@@ -388,14 +427,19 @@ func optionScore(o matchOption, nFindings int) matchScore {
 // else costing the ceiling itself. Every row takes exactly one column, so
 // minimizing the summed cost is exactly maximizing the summed score. It is
 // exact, and polynomial: a round with many seeded findings stays cheap.
-func bestMatching(optionsByGold [][]matchOption, nFindings int) []int {
+//
+// The augmenting-path search below assumes matchScore.better is a strict
+// total order (the potentials method's own precondition); when it is not,
+// bestMatching returns an error instead of the wrong answer, or worse, an
+// inner loop that never terminates - see the per-row loop's own comment.
+func bestMatching(optionsByGold [][]matchOption, nFindings int) ([]int, error) {
 	n := len(optionsByGold)
 	best := make([]int, n)
 	for i := range best {
 		best[i] = -1
 	}
 	if n == 0 || nFindings == 0 {
-		return best
+		return best, nil
 	}
 
 	ceiling := matchScore{matched: 1, same: 1, prior: 1, closeness: closenessInside, early: nFindings}
@@ -438,7 +482,19 @@ func bestMatching(optionsByGold [][]matchOption, nFindings int) []int {
 			minv[j] = inf
 		}
 		used := make([]bool, m+1)
-		for {
+		// Each step below marks exactly one more column used (the scan
+		// only ever proposes an unused j1), so a real run visits at most m
+		// distinct columns before reaching the unmatched sentinel; m+1 is
+		// that bound with one step of slack, never tight enough to reject
+		// a real matching. More steps than that, or a step whose scan
+		// proposes no column at all (j1 stays 0), only happens when
+		// matchScore.better is not the strict total order the potentials
+		// method requires - this turns that broken invariant into an
+		// error instead of a loop with no exit.
+		for step := 0; ; step++ {
+			if step > m+1 {
+				return nil, fmt.Errorf("bestMatching: augmenting path for gold %d ran past %d steps: matchScore.better is not a total order", i-1, m+1)
+			}
 			used[j0] = true
 			i0, delta, j1 := p[j0], inf, 0
 			for j := 1; j <= m; j++ {
@@ -452,6 +508,9 @@ func bestMatching(optionsByGold [][]matchOption, nFindings int) []int {
 				if delta.better(minv[j]) {
 					delta, j1 = minv[j], j
 				}
+			}
+			if j1 == 0 {
+				return nil, fmt.Errorf("bestMatching: augmenting path for gold %d found no unused column: matchScore.better is not a total order", i-1)
 			}
 			for j := 0; j <= m; j++ {
 				if used[j] {
@@ -478,27 +537,33 @@ func bestMatching(optionsByGold [][]matchOption, nFindings int) []int {
 			best[i-1] = j - 1
 		}
 	}
-	return best
+	return best, nil
 }
 
 // classifyUnmatched decides one unmatched finding's Fate: the rules below,
 // in order, the first that applies. reportedStatus is this finding's own
 // jig-assigned status (ApplyRound's reported[j].Status, not the reviewer's
-// own action label): rule 1 and rule 2 read jig's bookkeeping outcome, not
-// the reviewer's word, because a recurrence or the recurrence bound can
-// move a finding's status away from what its action alone would suggest.
+// own action label): rule 2 reads jig's bookkeeping outcome, not the
+// reviewer's word, because a recurrence or the recurrence bound can move a
+// finding's status away from what its action alone would suggest.
 //
-// Rule 1 splits in two: a dismissed status is a permitted repeat only
-// when the finding also carries a surviving structural edge to the
-// dismissed fold point its own prior names (citedDismissedEdge); otherwise
-// it is a wrong prior - the finding cited a dismissal that, structurally,
-// is not what it is actually about - and the round fails.
-func classifyUnmatched(reportedStatus string, citedDismissedEdge, dismissedFoldEdge, trapEdge, decisionDismissedEdge, decisionKeptEdge, exhaustive bool) Fate {
+// Rule 1 reads hasPrior - whether this finding cited a fold point at all -
+// rather than reportedStatus: a citation with no surviving structural edge
+// to the fold point it names (citedFoldEdge), whatever that point's own
+// status - open, asked, noted or dismissed - is a wrong prior, and the
+// round fails; jig would move that point's identity onto code it is not
+// about. Rule 2 is the one permitted silence: a citation of a dismissed
+// point that does have that edge is a repeat jig keeps dismissed
+// (ApplyRound's own rule), so it reaches no person and counts nowhere. A
+// well-cited repeat of an open, asked or noted point is still a finding
+// like any other and goes on through the rules below: citing a prior never
+// excuses a false alarm.
+func classifyUnmatched(reportedStatus string, hasPrior, citedFoldEdge, dismissedFoldEdge, trapEdge, decisionDismissedEdge, decisionKeptEdge, exhaustive bool) Fate {
 	switch {
-	case reportedStatus == verifydeliver.StatusDismissed && citedDismissedEdge:
-		return FateSkip
-	case reportedStatus == verifydeliver.StatusDismissed:
+	case hasPrior && !citedFoldEdge:
 		return FateWrongPrior
+	case reportedStatus == verifydeliver.StatusDismissed:
+		return FateSkip
 	case reportedStatus == verifydeliver.StatusNoted:
 		return FatePending
 	case dismissedFoldEdge:
@@ -525,13 +590,17 @@ func classifyUnmatched(reportedStatus string, citedDismissedEdge, dismissedFoldE
 // reads status or action at all, only the judge's verdict, prior agreement
 // and line closeness. recordedLinks is every earlier round's decisions
 // keyed by the finding id each one's "recorded" names; a nil map is the
-// common case (no round has used it yet).
-func MatchRound(caseName string, round int, repoDir, workDir string, gold Gold, decisions []Decision, recordedLinks map[string]Decision, dismissed []verifydeliver.Finding, findings []verifydeliver.ResultFinding, reported []verifydeliver.Finding, judge Judge) (RoundMatch, error) {
+// common case (no round has used it yet). fold is every earlier round's
+// known finding, keyed by id (verifydeliver.Fold.Known) - buildCandidates
+// reads its dismissed subset for structural matching and the whole of it
+// for the cited-prior check, so callers pass the fold as-is rather than
+// filtering it down themselves.
+func MatchRound(caseName string, round int, repoDir, workDir string, gold Gold, decisions []Decision, recordedLinks map[string]Decision, fold map[string]verifydeliver.Finding, findings []verifydeliver.ResultFinding, reported []verifydeliver.Finding, judge Judge) (RoundMatch, error) {
 	if len(reported) != len(findings) {
 		return RoundMatch{}, fmt.Errorf("revieweval: match: %d reported findings for %d result findings, want equal", len(reported), len(findings))
 	}
 
-	cands, meta := buildCandidates(gold, decisions, recordedLinks, dismissed, findings)
+	cands, meta := buildCandidates(gold, decisions, recordedLinks, fold, findings)
 
 	verdicts := make([]Verdict, len(cands))
 	if judge != nil && len(cands) > 0 {
@@ -570,7 +639,10 @@ func MatchRound(caseName string, round int, repoDir, workDir string, gold Gold, 
 			closeness:  lineCloseness(c.Line0, f.Line, g.From, g.To),
 		})
 	}
-	matchGold := bestMatching(optionsByGold, len(findings))
+	matchGold, berr := bestMatching(optionsByGold, len(findings))
+	if berr != nil {
+		return RoundMatch{}, fmt.Errorf("revieweval: match: %w", berr)
+	}
 
 	structureOnly := make([]bool, len(gold.Findings))
 	matchedFinding := make([]bool, len(findings))
@@ -592,7 +664,7 @@ func MatchRound(caseName string, round int, repoDir, workDir string, gold Gold, 
 		if matchedFinding[j] {
 			continue
 		}
-		var citedDismissedEdge, dismissedEdge, trapEdge, decDismissed, decKept bool
+		var citedFoldEdge, dismissedEdge, trapEdge, decDismissed, decKept bool
 		for i, c := range cands {
 			if c.Finding != j || !survives[i] {
 				continue
@@ -601,8 +673,13 @@ func MatchRound(caseName string, round int, repoDir, workDir string, gold Gold, 
 			case kindDismissed:
 				dismissedEdge = true
 				if c.Point.ID == reported[j].ID {
-					citedDismissedEdge = true
+					citedFoldEdge = true
 				}
+			case kindCited:
+				// Built only for this finding's own citation (see
+				// buildCandidates), so its point is always the one
+				// reported[j].ID names - no id check needed here.
+				citedFoldEdge = true
 			case kindTrap:
 				trapEdge = true
 			case kindDecision:
@@ -614,7 +691,8 @@ func MatchRound(caseName string, round int, repoDir, workDir string, gold Gold, 
 				}
 			}
 		}
-		classification[j] = classifyUnmatched(reported[j].Status, citedDismissedEdge, dismissedEdge, trapEdge, decDismissed, decKept, gold.Exhaustive)
+		hasPrior := findings[j].Prior != ""
+		classification[j] = classifyUnmatched(reported[j].Status, hasPrior, citedFoldEdge, dismissedEdge, trapEdge, decDismissed, decKept, gold.Exhaustive)
 	}
 
 	return RoundMatch{MatchedFinding: matchGold, StructureOnly: structureOnly, Classification: classification}, nil

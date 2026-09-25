@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
@@ -77,24 +76,11 @@ const (
 // (but unresolving) fix slice would explain.
 func alwaysNotGreen(string) (bool, error) { return false, nil }
 
-// dismissedFold returns known's dismissed findings, sorted by id for
-// determinism: match.go's fourth candidate source.
-func dismissedFold(known map[string]verifydeliver.Finding) []verifydeliver.Finding {
-	var out []verifydeliver.Finding
-	for _, f := range known {
-		if f.Status == verifydeliver.StatusDismissed {
-			out = append(out, f)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
 // missedRoundScore builds the RoundScore for a round that never produced a
 // scoreable result: every seeded gold finding counts as missed, never left
 // out of the denominator.
 func missedRoundScore(n int, gold Gold, decisions []Decision, reason string) RoundScore {
-	rs := RoundScore{Round: n, Reason: reason, FalsePositiveGold: falsePositiveGold(gold, decisions)}
+	rs := RoundScore{Round: n, Reason: reason, FalsePositiveGold: falsePositiveGold(gold, decisions), Verdict: VerdictFail}
 	for _, g := range gold.Findings {
 		rs.Missed = append(rs.Missed, g.ID)
 	}
@@ -415,12 +401,18 @@ func runRound(workDir string, st *store.Store, c Case, ticket string, idx int, r
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: apply round: %w", c.Name, n, aerr)
 	}
 	existsAtHead := func(file string) (bool, error) { return gitx.FileExistsAtRev(repoDir, head, file) }
+	// Called with reported straight from ApplyRound, no routing or triage
+	// in between, on purpose: this package never runs that hook
+	// (revieweval.go's own doc comment), so the clearing set this line
+	// computes is exactly what an unattended round records - the fate a
+	// human triage step never got to change - which is what a review-
+	// quality measurement needs, not jig's own triage defaults.
 	cleared, clerr := verifydeliver.ClearingAfterTriage(fold.Known, reported, result.ReviewedPaths, existsAtHead)
 	if clerr != nil {
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: clearing: %w", c.Name, n, clerr)
 	}
 
-	match, matchErr := MatchRound(c.Name, n, repoDir, judgeWorkDir, r.Gold, r.Decisions, recordedLinks, dismissedFold(fold.Known), result.Findings, reported, judge)
+	match, matchErr := MatchRound(c.Name, n, repoDir, judgeWorkDir, r.Gold, r.Decisions, recordedLinks, fold.Known, result.Findings, reported, judge)
 
 	// Whatever MatchRound did, the judge (if any) dispatched a session
 	// against this same case repo - check it changed nothing, then restore
@@ -472,7 +464,7 @@ func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model
 	}
 	briefPath := filepath.Join(st.TicketDir(ticket), "brief.md")
 
-	cs := CaseScore{Name: c.Name, Passed: true}
+	cs := CaseScore{Name: c.Name, Passed: true, Verdict: VerdictPass}
 	var prevHead string
 	recordedLinks := map[string]Decision{}
 	for idx, r := range c.Rounds {
@@ -482,6 +474,9 @@ func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model
 		}
 		if !rs.Passed {
 			cs.Passed = false
+		}
+		if verdictRank(rs.Verdict) > verdictRank(cs.Verdict) {
+			cs.Verdict = rs.Verdict
 		}
 		cs.Rounds = append(cs.Rounds, rs)
 		for _, d := range r.Decisions {

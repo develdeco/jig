@@ -316,7 +316,10 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 // asked - must reflect what a human actually kept, not merely what the
 // reviewer reported before triage dismissed some of it (a finding the
 // human dismisses at triage must not go on blocking an unrelated open
-// finding in the same file from clearing).
+// finding in the same file from clearing). revieweval's own runner calls
+// this with reported straight from ApplyRound, no routing or triage in
+// between, on purpose - that package never runs the triage hook at all -
+// so that caller is not a bug to fix either.
 func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedPaths []string, existsAtHead func(file string) (bool, error)) (cleared []string, err error) {
 	reviewedSet := map[string]bool{}
 	for _, p := range reviewedPaths {

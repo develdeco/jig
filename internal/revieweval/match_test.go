@@ -157,31 +157,44 @@ func TestClassifyUnmatchedRulesInOrder(t *testing.T) {
 		dismis = verifydeliver.StatusDismissed
 		noted  = verifydeliver.StatusNoted
 	)
+	// Column order in every row below: hasPrior, citedFoldEdge,
+	// dismissedFoldEdge, trapEdge, decisionDismissedEdge, decisionKeptEdge,
+	// exhaustive.
 	cases := []struct {
-		name                                                                                          string
-		status                                                                                        string
-		citedDismissedEdge, dismissedFoldEdge, trapEdge, decisionDismissedEdge, decisionKeptEdge, exh bool
-		want                                                                                          Fate
+		name                                                                                               string
+		status                                                                                             string
+		hasPrior, citedFoldEdge, dismissedFoldEdge, trapEdge, decisionDismissedEdge, decisionKeptEdge, exh bool
+		want                                                                                               Fate
 	}{
-		{"rule1-dismissed-status-with-cited-edge-is-a-permitted-repeat", dismis, true, true, false, false, false, false, FateSkip},
-		{"rule1-wins-even-with-a-trap-edge", dismis, true, true, true, false, false, false, FateSkip},
-		{"rule1-dismissed-status-without-cited-edge-is-a-wrong-prior", dismis, false, false, false, false, false, false, FateWrongPrior},
-		{"rule1-wrong-prior-even-with-a-general-dismissed-edge", dismis, false, true, false, false, false, false, FateWrongPrior},
-		{"rule1-wrong-prior-wins-over-a-trap-edge", dismis, false, false, true, false, false, false, FateWrongPrior},
-		{"rule2-noted-status-is-pending", noted, false, false, false, false, false, false, FatePending},
-		{"rule2-wins-over-a-trap-edge", noted, false, false, true, false, false, false, FatePending},
-		{"rule3-dismissed-fold-edge-is-relitigated", open, false, true, false, false, false, false, FateRelitigated},
-		{"rule3-wins-over-exhaustive", open, false, true, false, false, false, true, FateRelitigated},
-		{"rule4-trap-edge-is-a-false-alarm", open, false, false, true, false, false, false, FateFalseAlarm},
-		{"rule4-dismissed-decision-edge-is-a-false-alarm", open, false, false, false, true, false, false, FateFalseAlarm},
-		{"rule5-kept-decision-edge-is-extra-true", open, false, false, false, false, true, false, FateExtraTrue},
-		{"rule5-wins-over-exhaustive", open, false, false, false, false, true, true, FateExtraTrue},
-		{"rule6-exhaustive-with-no-edge-is-a-false-alarm", open, false, false, false, false, false, true, FateFalseAlarm},
-		{"rule7-non-exhaustive-with-no-edge-is-pending", open, false, false, false, false, false, false, FatePending},
+		// Rule 1 reads hasPrior/citedFoldEdge, never reportedStatus: a
+		// citation with no edge to its point is a wrong prior whatever
+		// jig's own bookkeeping status ended up being.
+		{"rule1-no-cited-edge-is-a-wrong-prior-whatever-the-status", dismis, true, false, false, false, false, false, false, FateWrongPrior},
+		// Rule 2: only a well-cited repeat of a dismissed point is silent.
+		{"rule2-cited-dismissed-repeat-is-permitted", dismis, true, true, false, false, false, false, false, FateSkip},
+		{"rule2-dismissed-repeat-wins-over-a-trap-edge", dismis, true, true, false, true, false, false, false, FateSkip},
+		// A well-cited repeat of an open point is a finding like any other.
+		{"cited-open-repeat-goes-on-through-the-rules", open, true, true, false, false, false, false, false, FatePending},
+		{"cited-open-repeat-on-a-trap-is-a-false-alarm", open, true, true, false, true, false, false, false, FateFalseAlarm},
+		{"cited-open-repeat-in-an-exhaustive-round-is-a-false-alarm", open, true, true, false, false, false, false, true, FateFalseAlarm},
+		{"rule1-wrong-prior-even-with-a-general-dismissed-fold-edge", open, true, false, true, false, false, false, false, FateWrongPrior},
+		{"rule1-wrong-prior-wins-over-a-trap-edge", open, true, false, false, true, false, false, false, FateWrongPrior},
+		{"rule3-noted-status-is-pending", noted, false, false, false, false, false, false, false, FatePending},
+		{"rule3-noted-wins-over-a-trap-edge", noted, false, false, false, true, false, false, false, FatePending},
+		{"rule3-dismissed-fold-edge-is-relitigated", open, false, false, true, false, false, false, false, FateRelitigated},
+		{"rule3-wins-over-exhaustive", open, false, false, true, false, false, false, true, FateRelitigated},
+		{"rule3-wins-over-a-trap-edge-when-both-co-occur", open, false, false, true, true, false, false, false, FateRelitigated},
+		{"rule3-wins-over-a-dismissed-decision-edge-when-both-co-occur", open, false, false, true, false, true, false, false, FateRelitigated},
+		{"rule4-trap-edge-is-a-false-alarm", open, false, false, false, true, false, false, false, FateFalseAlarm},
+		{"rule4-dismissed-decision-edge-is-a-false-alarm", open, false, false, false, false, true, false, false, FateFalseAlarm},
+		{"rule5-kept-decision-edge-is-extra-true", open, false, false, false, false, false, true, false, FateExtraTrue},
+		{"rule5-wins-over-exhaustive", open, false, false, false, false, false, true, true, FateExtraTrue},
+		{"rule6-exhaustive-with-no-edge-is-a-false-alarm", open, false, false, false, false, false, false, true, FateFalseAlarm},
+		{"rule7-non-exhaustive-with-no-edge-is-pending", open, false, false, false, false, false, false, false, FatePending},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := classifyUnmatched(c.status, c.citedDismissedEdge, c.dismissedFoldEdge, c.trapEdge, c.decisionDismissedEdge, c.decisionKeptEdge, c.exh)
+			got := classifyUnmatched(c.status, c.hasPrior, c.citedFoldEdge, c.dismissedFoldEdge, c.trapEdge, c.decisionDismissedEdge, c.decisionKeptEdge, c.exh)
 			if got != c.want {
 				t.Errorf("classifyUnmatched(...) = %q, want %q", got, c.want)
 			}
@@ -205,11 +218,11 @@ func (j *capturingJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 }
 
 func TestMatchUnlinkedDismissedDescriptionIsTitleAndDetailTogether(t *testing.T) {
-	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "a.go", Line: 5, Title: "Loop rebuilds string", Detail: "Highest iterates and concatenates.", Status: verifydeliver.StatusDismissed}}
+	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 5, Title: "Loop rebuilds string", Detail: "Highest iterates and concatenates.", Status: verifydeliver.StatusDismissed}}
 	rf, f := openFinding("a.go", 5, "same spot again")
 
 	judge := &capturingJudge{}
-	_, err := MatchRound("case", 1, "", "", Gold{}, nil, nil, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, judge)
+	_, err := MatchRound("case", 1, "", "", Gold{}, nil, nil, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, judge)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
@@ -231,14 +244,14 @@ func TestMatchLinkedDismissedSpanIsUnionAndUsesDecisionDescription(t *testing.T)
 	// apart - TestMatchLinkedDismissedUsesTheRecordedLineNotTheFoldsLatest
 	// below pins that RecordedLine, not f.Line, is what the union actually
 	// reads.
-	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "a.go", Line: 5, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 5, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	links := map[string]Decision{
 		"r1-f1": {ID: "dec1", File: "a.go", From: 8, To: 9, RecordedLine: 5, Description: "the whole loop, a defensible style choice", Decision: DecisionDismissed, Recorded: "r1-f1"},
 	}
 
 	judge := &capturingJudge{}
 	rf, f := openFinding("a.go", 9, "re-raise")
-	_, err := MatchRound("case", 2, "", "", Gold{}, nil, links, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, judge)
+	_, err := MatchRound("case", 2, "", "", Gold{}, nil, links, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, judge)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
@@ -253,7 +266,7 @@ func TestMatchLinkedDismissedSpanIsUnionAndUsesDecisionDescription(t *testing.T)
 		t.Errorf("description = %q, want the linked decision's own description", p.Description)
 	}
 
-	m, err := MatchRound("case", 2, "", "", Gold{}, nil, links, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, nil)
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, links, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, nil)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
@@ -269,14 +282,14 @@ func TestMatchLinkedDismissedSpanIsUnionAndUsesDecisionDescription(t *testing.T)
 // line), so the union must read Decision.RecordedLine, not f.Line, or the
 // span would silently drift with whatever the fold happens to say now.
 func TestMatchLinkedDismissedUsesTheRecordedLineNotTheFoldsLatest(t *testing.T) {
-	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "a.go", Line: 50, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 50, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	links := map[string]Decision{
 		"r1-f1": {ID: "dec1", File: "a.go", From: 8, To: 9, RecordedLine: 5, Description: "d", Decision: DecisionDismissed, Recorded: "r1-f1"},
 	}
 
 	judge := &capturingJudge{}
 	rf, f := openFinding("a.go", 9, "re-raise")
-	_, err := MatchRound("case", 2, "", "", Gold{}, nil, links, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, judge)
+	_, err := MatchRound("case", 2, "", "", Gold{}, nil, links, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, judge)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
@@ -293,14 +306,14 @@ func TestMatchLinkedDismissedUsesTheRecordedLineNotTheFoldsLatest(t *testing.T) 
 // an unlinked dismissed finding - its own bare one-line span and title -
 // rather than trusting a link the loader could not have validated.
 func TestMatchLinkedDismissedSkipsTheLinkOnAFileMismatch(t *testing.T) {
-	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "b.go", Line: 5, Title: "moved", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "b.go", Line: 5, Title: "moved", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	links := map[string]Decision{
 		"r1-f1": {ID: "dec1", File: "a.go", From: 8, To: 9, RecordedLine: 5, Description: "the linked description", Decision: DecisionDismissed, Recorded: "r1-f1"},
 	}
 
 	judge := &capturingJudge{}
 	rf, f := openFinding("b.go", 5, "re-raise")
-	_, err := MatchRound("case", 2, "", "", Gold{}, nil, links, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, judge)
+	_, err := MatchRound("case", 2, "", "", Gold{}, nil, links, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, judge)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
@@ -338,11 +351,11 @@ func (j byPointJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 // point, and a nil judge (Undecided) keeps it: the citation is itself
 // location evidence, so it needs no explicit Same, only not Different.
 func TestMatchCitedPriorSurvivesOutsideTheWindow(t *testing.T) {
-	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	rf := verifydeliver.ResultFinding{File: "a.go", Line: 15, Title: "repeat", Prior: "r1-f1"} // 5 lines off r1-f1's own line
 	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}      // ApplyRound's rule 2: id becomes the cited prior
 
-	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
@@ -358,11 +371,11 @@ func TestMatchCitedPriorSurvivesOutsideTheWindow(t *testing.T) {
 // which needs the judge's explicit Same, since here the citation is
 // itself the location evidence.
 func TestMatchCitedPriorSurvivesAtLineZero(t *testing.T) {
-	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	rf := verifydeliver.ResultFinding{File: "a.go", Line: 0, Title: "repeat, no line", Prior: "r1-f1"}
 	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}
 
-	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
@@ -376,12 +389,12 @@ func TestMatchCitedPriorSurvivesAtLineZero(t *testing.T) {
 // Different on the cited pair: the citation is rejected, so it is a wrong
 // prior, not a permitted repeat.
 func TestMatchCitedPriorJudgeDifferentIsWrongPrior(t *testing.T) {
-	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	rf := verifydeliver.ResultFinding{File: "a.go", Line: 15, Title: "repeat", Prior: "r1-f1"}
 	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}
 
 	judge := byPointJudge{"r1-f1": Different}
-	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, judge)
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, judge)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
@@ -396,11 +409,11 @@ func TestMatchCitedPriorJudgeDifferentIsWrongPrior(t *testing.T) {
 // touch, so no candidate is built for it at all (same-file
 // requirement) and no structural window reaches it either.
 func TestMatchCitedPriorInAnotherFileIsWrongPrior(t *testing.T) {
-	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "other.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "other.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	rf := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "repeat", Prior: "r1-f1"}
 	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}
 
-	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
@@ -413,25 +426,83 @@ func TestMatchCitedPriorInAnotherFileIsWrongPrior(t *testing.T) {
 // pins the id equality: a finding sits structurally on dismissed point X
 // (a surviving edge exists to it) while its own Prior cites a different
 // dismissed point Y in the same file; the judge answers Different only on
-// Y. The general dismissed edge to X survives, but citedDismissedEdge must
+// Y. The general dismissed edge to X survives, but citedFoldEdge must
 // still require the exact point id the finding cited, not merely any
 // surviving dismissed edge - so this stays a wrong prior even though a
 // dismissed edge (to X) did survive.
 func TestMatchCitedPriorPinsIDEqualityAgainstAnotherDismissedPointInTheSameFile(t *testing.T) {
-	dismissed := []verifydeliver.Finding{
-		{ID: "X", File: "a.go", Line: 5, Title: "x", Detail: "d", Status: verifydeliver.StatusDismissed},
-		{ID: "Y", File: "a.go", Line: 20, Title: "y", Detail: "d", Status: verifydeliver.StatusDismissed},
+	fold := map[string]verifydeliver.Finding{
+		"X": {ID: "X", File: "a.go", Line: 5, Title: "x", Detail: "d", Status: verifydeliver.StatusDismissed},
+		"Y": {ID: "Y", File: "a.go", Line: 20, Title: "y", Detail: "d", Status: verifydeliver.StatusDismissed},
 	}
 	rf := verifydeliver.ResultFinding{File: "a.go", Line: 5, Title: "sits on X, cites Y", Prior: "Y"}
 	reported := verifydeliver.Finding{ID: "Y", Status: verifydeliver.StatusDismissed} // ApplyRound's rule 2: id becomes the cited prior, Y
 
 	judge := byPointJudge{"Y": Different}
-	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, judge)
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, judge)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
 	if m.Classification[0] != FateWrongPrior {
 		t.Errorf("Classification[0] = %q, want %q: citing Y, not X, is what must decide this, and the judge rejected Y", m.Classification[0], FateWrongPrior)
+	}
+}
+
+// --- a citation is location evidence whatever the point's own status -----
+
+// TestMatchOpenPriorSurvivesOutsideTheWindow is the open-fold counterpart
+// of TestMatchCitedPriorSurvivesOutsideTheWindow: a finding citing a still-
+// open fold point, in the same file but well past the window, still gets a
+// candidate for that exact point - the cited-prior mechanism is not
+// special to a dismissed point - and a nil judge (Undecided) keeps it.
+func TestMatchOpenPriorSurvivesOutsideTheWindow(t *testing.T) {
+	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusOpen}}
+	rf := verifydeliver.ResultFinding{File: "a.go", Line: 15, Title: "repeat", Prior: "r1-f1"} // 5 lines off r1-f1's own line
+	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusOpen}
+
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	// The citation is location evidence, so this is no wrong prior; and a
+	// repeat of an open point is still a finding like any other, so with
+	// no gold, trap or decision near it and a round that is not
+	// exhaustive, it is left for a person to label.
+	if m.Classification[0] != FatePending {
+		t.Errorf("Classification[0] = %q, want %q: an open point's own citation is location evidence too, and the repeat then goes on through the rules", m.Classification[0], FatePending)
+	}
+}
+
+// TestMatchOpenPriorOnUnrelatedFindingIsAWrongPrior is the open-fold
+// counterpart of TestMatchCitedPriorInAnotherFileIsWrongPrior: a finding
+// cites an open fold point that lives in a different file from where the
+// finding itself landed. The citation names a real fold point, but an
+// open, asked or noted point needs the same surviving edge a dismissed one
+// does - it is not exempt from the wrong-prior check just because nobody
+// has decided it yet, and jig's own bookkeeping status for this finding
+// (open here, a plain recurrence, ApplyRound's rule 1) never says the
+// citation itself was right.
+func TestMatchOpenPriorOnUnrelatedFindingIsAWrongPrior(t *testing.T) {
+	fold := map[string]verifydeliver.Finding{
+		"r1-f2": {ID: "r1-f2", File: "inventory/report.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusOpen},
+	}
+	rf := verifydeliver.ResultFinding{File: "inventory/count.go", Line: 3, Title: "unrelated", Prior: "r1-f2"}
+	reported := verifydeliver.Finding{ID: "r1-f2", File: "inventory/count.go", Status: verifydeliver.StatusOpen}
+
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, fold, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	if m.Classification[0] != FateWrongPrior {
+		t.Errorf("Classification[0] = %q, want %q: r1-f2 is open, in a different file, so citing it on unrelated code is no edge at all", m.Classification[0], FateWrongPrior)
+	}
+
+	sc := ScoreRound(2, Gold{}, nil, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil, m)
+	if sc.Passed {
+		t.Error("Passed = true, want false: a wrong prior on unrelated code must fail the round, whatever jig's own status for it")
+	}
+	if len(sc.WrongPriors) != 1 || sc.WrongPriors[0] != "unrelated" {
+		t.Errorf("WrongPriors = %v, want [\"unrelated\"]", sc.WrongPriors)
 	}
 }
 
@@ -710,9 +781,8 @@ func TestApplyRoundThenMatchWrongPriorFailsTheRound(t *testing.T) {
 	}
 
 	gold := Gold{Exhaustive: true, Traps: []GoldTrap{{ID: "trap1", File: "a.go", From: 10, To: 10, Description: "correct code near the finding"}}}
-	dismissed := []verifydeliver.Finding{known["r1-f1"]}
 
-	m, err := MatchRound("case", 2, "", "", gold, nil, nil, dismissed, result.Findings, reported, nil)
+	m, err := MatchRound("case", 2, "", "", gold, nil, nil, known, result.Findings, reported, nil)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
@@ -813,7 +883,10 @@ func TestBestMatchingAgreesWithExhaustiveSearch(t *testing.T) {
 				})
 			}
 		}
-		got := bestMatching(options, nFindings)
+		got, err := bestMatching(options, nFindings)
+		if err != nil {
+			t.Fatalf("instance %d: bestMatching: %v", iter, err)
+		}
 		if gotScore, want := matchingScore(t, options, nFindings, got), exhaustiveBest(options, nFindings); gotScore != want {
 			t.Fatalf("instance %d: bestMatching %v scores %+v, exhaustive best is %+v; options: %+v", iter, got, gotScore, want, options)
 		}
@@ -840,7 +913,10 @@ func TestBestMatchingStaysPolynomialOnALargeRound(t *testing.T) {
 			options[gi] = append(options[gi], matchOption{finding: j, closeness: closeness})
 		}
 	}
-	got := bestMatching(options, nFindings)
+	got, err := bestMatching(options, nFindings)
+	if err != nil {
+		t.Fatalf("bestMatching: %v", err)
+	}
 	matchingScore(t, options, nFindings, got)
 	for gi, j := range got {
 		if j != gi {
