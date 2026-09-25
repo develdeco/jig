@@ -783,6 +783,71 @@ func TestCumulativeFindingsFoldsAcrossRoundsAndSkipsMissingOnes(t *testing.T) {
 	}
 }
 
+// --- FoldBefore (store-backed fold, projected) ------------------------------
+
+// TestFoldBeforeProjectsOpenNotedAndDismissed pins Fold's three views of the
+// same cumulative state: a noted finding is a citable prior target (Open)
+// but never a false alarm (findings.go's isClean, elsewhere), a dismissed
+// finding appears only in Dismissed, a later round's cleared id is gone from
+// Known, Open and Dismissed alike, and the latest occurrence of a
+// recurring id wins.
+func TestFoldBeforeProjectsOpenNotedAndDismissed(t *testing.T) {
+	st := newReviewStore(t)
+	ticket := "JIG-1"
+
+	write := func(round int, ff findingsYAML) {
+		t.Helper()
+		dir := gateRoundDir(st, ticket, round)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir round %d: %v", round, err)
+		}
+		data, err := marshalFindingsYAML(ff.Scope, ff.ReviewedPaths, ff.Findings, ff.Cleared, ff.Summary)
+		if err != nil {
+			t.Fatalf("marshal round %d: %v", round, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "findings.yaml"), data, 0o644); err != nil {
+			t.Fatalf("write round %d: %v", round, err)
+		}
+	}
+
+	write(1, findingsYAML{Scope: "full", Findings: []Finding{
+		{ID: "r1-f1", File: "a.go", Status: StatusOpen},
+		{ID: "r1-f2", File: "b.go", Status: StatusNoted},
+		{ID: "r1-f3", File: "c.go", Status: StatusDismissed},
+		{ID: "r1-f4", File: "d.go", Status: StatusOpen},
+	}})
+	write(2, findingsYAML{Scope: "delta", Findings: []Finding{
+		{ID: "r1-f1", File: "a.go", Status: StatusOpen, Recurrences: 1},
+	}, Cleared: []string{"r1-f4"}})
+
+	fold, err := FoldBefore(st, ticket, 3)
+	if err != nil {
+		t.Fatalf("FoldBefore: %v", err)
+	}
+
+	if len(fold.Known) != 3 {
+		t.Fatalf("Known = %+v, want 3 ids (r1-f4 cleared)", fold.Known)
+	}
+	if _, ok := fold.Known["r1-f4"]; ok {
+		t.Errorf("Known still has r1-f4, want it cleared")
+	}
+	if fold.Known["r1-f1"].Recurrences != 1 {
+		t.Errorf("r1-f1 = %+v, want round 2's occurrence (recurrences 1)", fold.Known["r1-f1"])
+	}
+
+	openIDs := map[string]bool{}
+	for _, f := range fold.Open {
+		openIDs[f.ID] = true
+	}
+	if !openIDs["r1-f1"] || !openIDs["r1-f2"] || len(openIDs) != 2 {
+		t.Errorf("Open ids = %+v, want exactly r1-f1 (open) and r1-f2 (noted)", openIDs)
+	}
+
+	if len(fold.Dismissed) != 1 || fold.Dismissed[0].ID != "r1-f3" {
+		t.Fatalf("Dismissed = %+v, want only r1-f3", fold.Dismissed)
+	}
+}
+
 // --- rendering ---------------------------------------------------------------
 
 func TestRenderFindingsMDSortsByRiskHighFirst(t *testing.T) {

@@ -551,6 +551,31 @@ func cumulativeFindings(st *store.Store, ticket string, upToRound int) (map[stri
 	return cum, nil
 }
 
+// Fold is the cumulative findings state a gate round starts from: every
+// earlier round's findings folded together (Known), then projected the two
+// ways a round consumes it - review.json's own Open and Dismissed shapes.
+// Gate and the eval package both build a round's RoundInput from one Fold
+// (FoldBefore), so they always agree on what a round starts from.
+type Fold struct {
+	Known     map[string]Finding // every earlier round's findings: latest occurrence wins, cleared ids removed
+	Open      []Finding          // open, asked and noted, sorted by id: RoundInput.Open
+	Dismissed []DismissedFinding // dismissed, sorted by id: RoundInput.Dismissed
+}
+
+// FoldBefore folds every gate/round-<n>/findings.yaml for ticket with
+// n < round (cumulativeFindings) and projects it into a Fold.
+func FoldBefore(st *store.Store, ticket string, round int) (Fold, error) {
+	known, err := cumulativeFindings(st, ticket, round)
+	if err != nil {
+		return Fold{}, fmt.Errorf("verifydeliver: findings: fold before round %d: %w", round, err)
+	}
+	return Fold{
+		Known:     known,
+		Open:      openAndNotedFindingsList(known),
+		Dismissed: toDismissedFindingList(dismissedFindingsList(known)),
+	}, nil
+}
+
 // OutstandingAsks returns ticket's cumulative still-asked findings, sorted
 // by risk then id, across every gate round recorded so far. It is the
 // state `jig status` shows between rounds so a waiting decision is
