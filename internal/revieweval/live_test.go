@@ -111,7 +111,16 @@ func TestEvalLive(t *testing.T) {
 	}
 
 	jigBin := buildJigBinary(t)
-	backend, err := session.New(backendName, session.Options{ScreenBinary: jigBin})
+	// Env is built from this test process's own environment, with
+	// everything jig or this package owns (JIG_ vars), the gittest.Run
+	// test scaffolding (GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM) and
+	// PWD/OLDPWD dropped: the one backend both the reviewer and the judge
+	// dispatch through (ModelJudge below shares it), so a live session -
+	// which can run its own Bash and read its own environment - never sees
+	// JIG_REVIEWEVAL_BACKEND naming this measurement, or anything else this
+	// process happens to be running with that names it.
+	env := dispatchEnv(runtime.GOOS, os.Environ())
+	backend, err := session.New(backendName, session.Options{ScreenBinary: jigBin, Env: env})
 	if err != nil {
 		t.Fatalf("revieweval: construct backend %s: %v", backendName, err)
 	}

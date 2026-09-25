@@ -42,35 +42,45 @@ func leakTokens(s string) []string {
 	return pieces
 }
 
-// assertNoLeak fails t when text contains caseName as a literal substring
-// (case-insensitive: the hyphenated case name itself, exactly as a session
-// reading its own dispatch or worktree would see it) or any token equal to
-// leakVocabulary. label names what text is, for a failure a person can
-// place without re-running the test.
-func assertNoLeak(t *testing.T, label, caseName, text string) {
-	t.Helper()
+// leakHits returns one line per leak in text: caseName as a literal
+// substring (case-insensitive: the hyphenated case name itself, exactly
+// as a session reading its own dispatch or worktree would see it) or any
+// token equal to leakVocabulary. label names what text is, so a failure
+// can be placed without re-running the test.
+func leakHits(label, caseName, text string) []string {
 	if text == "" {
-		return
+		return nil
 	}
+	var hits []string
 	if strings.Contains(strings.ToLower(text), strings.ToLower(caseName)) {
-		t.Errorf("%s: contains the case name %q", label, caseName)
+		hits = append(hits, fmt.Sprintf("%s: contains the case name %q", label, caseName))
 	}
 	for _, tok := range leakTokens(text) {
 		if leakVocabulary[tok] {
-			t.Errorf("%s: contains leak token %q", label, tok)
+			hits = append(hits, fmt.Sprintf("%s: contains leak token %q", label, tok))
 		}
+	}
+	return hits
+}
+
+// assertNoLeak fails t for every leak leakHits finds in text.
+func assertNoLeak(t *testing.T, label, caseName, text string) {
+	t.Helper()
+	for _, h := range leakHits(label, caseName, text) {
+		t.Error(h)
 	}
 }
 
-// assertNoLeakUnder walks root (tracked and untracked files alike - a
-// plain directory walk sees both) and checks every file's own path
-// relative to root and its content, skipping every .git directory: nothing
-// a session's read tools could reach under root is exempt. A session's
-// reads are not bounded to its worktree, so the test walks the whole work
-// root too - the store beside it (project.yaml, the ticket's brief,
-// slices, journal and seeded gate records) and the judge's own inputs.
-func assertNoLeakUnder(t *testing.T, label, caseName, root, what string) {
-	t.Helper()
+// leakHitsUnder walks root (tracked and untracked files alike - a plain
+// directory walk sees both) and returns every leak in a directory's name, a
+// file's path relative to root, or a file's content, skipping every .git
+// directory: nothing a session's read tools could reach under root is
+// exempt, and a directory's name is visible even when it is empty. A
+// session's reads are not bounded to its worktree, so callers walk the
+// whole work root too - the store beside it (project.yaml, the ticket's
+// brief, slices, journal and seeded gate records).
+func leakHitsUnder(caseName, root, what string) ([]string, error) {
+	var hits []string
 	err := filepath.WalkDir(root, func(p string, de fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -86,18 +96,51 @@ func assertNoLeakUnder(t *testing.T, label, caseName, root, what string) {
 			if de.Name() == ".git" {
 				return filepath.SkipDir
 			}
+			hits = append(hits, leakHits(what+" dir "+rel, caseName, rel)...)
 			return nil
 		}
-		assertNoLeak(t, label+" "+what+" path "+rel, caseName, rel)
+		hits = append(hits, leakHits(what+" path "+rel, caseName, rel)...)
 		data, rerr := os.ReadFile(p)
 		if rerr != nil {
 			return rerr
 		}
-		assertNoLeak(t, label+" "+what+" file "+rel, caseName, string(data))
+		hits = append(hits, leakHits(what+" file "+rel, caseName, string(data))...)
 		return nil
 	})
+	return hits, err
+}
+
+// assertNoLeakUnder fails t for every leak leakHitsUnder finds under root.
+func assertNoLeakUnder(t *testing.T, label, caseName, root, what string) {
+	t.Helper()
+	hits, err := leakHitsUnder(caseName, root, what)
 	if err != nil {
 		t.Fatalf("%s: walk %s: %v", label, what, err)
+	}
+	for _, h := range hits {
+		t.Error(label + " " + h)
+	}
+}
+
+// TestLeakWalkChecksDirectoryNames pins that the walk reads directory
+// names, not only files: an empty directory with a telling name is still
+// something a session listing its surroundings would see.
+func TestLeakWalkChecksDirectoryNames(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"gold", filepath.Join("a", "seeded")} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hits, err := leakHitsUnder("nil-deref", root, "root")
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	joined := strings.Join(hits, "; ")
+	for _, want := range []string{`"gold"`, `"seeded"`} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("no hit for the empty directory token %s; hits: %s", want, joined)
+		}
 	}
 }
 

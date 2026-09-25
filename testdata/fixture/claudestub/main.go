@@ -1,9 +1,12 @@
 // Command claudestub is a fake `claude` binary used only by session's
-// headless backend tests. It never runs a session: it records its argv and
-// working directory to $CLAUDE_STUB_LOG (one JSON object per line), writes
-// $CLAUDE_STUB_WRITE_BODY to $CLAUDE_STUB_WRITE_PATH when the path is set
-// (a session honoring its disk contract), prints $CLAUDE_STUB_STDOUT and
-// $CLAUDE_STUB_STDERR, and exits with $CLAUDE_STUB_EXIT (default 0).
+// headless backend tests. It never runs a session: it records its argv,
+// working directory, own environment and the names of its working
+// directory's parent's own entries to $CLAUDE_STUB_LOG (one JSON object per
+// line - what a real live child could see, for a test that drives it
+// through the real headless backend), writes $CLAUDE_STUB_WRITE_BODY to
+// $CLAUDE_STUB_WRITE_PATH when the path is set (a session honoring its disk
+// contract), prints $CLAUDE_STUB_STDOUT and $CLAUDE_STUB_STDERR, and exits
+// with $CLAUDE_STUB_EXIT (default 0).
 //
 // $CLAUDE_STUB_HANG makes it sleep for that Go duration instead of exiting,
 // standing in for a session that has stopped making progress.
@@ -20,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -70,7 +74,18 @@ func logCall(path string) {
 		return
 	}
 	cwd, _ := os.Getwd()
-	data, err := json.Marshal(map[string]any{"argv": os.Args, "cwd": cwd})
+	// parentEntries is exactly what a real child could see with a plain
+	// directory listing of its own cwd's parent - the surface a "judge"
+	// directory sitting beside a reviewer's own worktree would show up on.
+	var parentEntries []string
+	if entries, err := os.ReadDir(filepath.Dir(cwd)); err == nil {
+		for _, e := range entries {
+			parentEntries = append(parentEntries, e.Name())
+		}
+	}
+	data, err := json.Marshal(map[string]any{
+		"argv": os.Args, "cwd": cwd, "env": os.Environ(), "parent_entries": parentEntries,
+	})
 	if err != nil {
 		return
 	}

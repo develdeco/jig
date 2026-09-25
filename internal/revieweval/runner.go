@@ -328,7 +328,13 @@ func retireRoundWork(st *store.Store, ticket string, n int, judgeWorkDir string)
 // and RoundInput.Ticket - never c.Name, which stays for error text and
 // MatchRound's own caseName parameter only. recordedLinks is every earlier
 // round's decisions keyed by the finding id each one's "recorded" names;
-// prevHead is the previous round's own head, "" for round 1.
+// prevHead is the previous round's own head, "" for round 1. judgeRoot is
+// RunCase's own judge scratch root (a fresh os.MkdirTemp, entirely outside
+// workDir): this round's own judge work dir is judgeRoot/round-N, never
+// workDir/judge/round-N - workDir/repo is a live reviewer's own worktree,
+// and a later round's reviewer can list its worktree's parent with
+// nothing stopping it, so workDir itself must hold nothing but "repo" and
+// "store", ever.
 //
 // It always retires the round's store-side work dir and this round's own
 // judge scratch dir before returning (deferred so every return path runs
@@ -336,7 +342,7 @@ func retireRoundWork(st *store.Store, ticket string, n int, judgeWorkDir string)
 // the case repo to this round's own head before returning, since a later
 // round's git apply must never see anything a live reviewer or judge
 // dispatch left behind.
-func runRound(workDir string, st *store.Store, c Case, ticket string, idx int, repoDir, briefPath string, backend session.Backend, judge Judge, model, prevHead string, recordedLinks map[string]Decision) (rs RoundScore, head string, err error) {
+func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string, idx int, repoDir, briefPath string, backend session.Backend, judge Judge, model, prevHead string, recordedLinks map[string]Decision) (rs RoundScore, head string, err error) {
 	r := c.Rounds[idx]
 	n := r.N
 
@@ -358,7 +364,7 @@ func runRound(workDir string, st *store.Store, c Case, ticket string, idx int, r
 		return RoundScore{}, "", fmt.Errorf("revieweval: case %s round %d: resolve head: %w", c.Name, n, herr)
 	}
 
-	judgeWorkDir := filepath.Join(workDir, "judge", fmt.Sprintf("round-%d", n))
+	judgeWorkDir := filepath.Join(judgeRoot, fmt.Sprintf("round-%d", n))
 	defer func() {
 		if rerr := retireRoundWork(st, ticket, n, judgeWorkDir); rerr != nil && err == nil {
 			err = fmt.Errorf("revieweval: case %s round %d: %w", c.Name, n, rerr)
@@ -452,7 +458,7 @@ func runRound(workDir string, st *store.Store, c Case, ticket string, idx int, r
 // case: teacher-forcing means the next round's fold comes from the case's
 // recorded history, never from this run's own result, so it is
 // unaffected. Any other error is infrastructure and is returned.
-func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model string) (CaseScore, error) {
+func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model string) (cs CaseScore, err error) {
 	ticket := runID(c.Name)
 	st, err := initEvalStore(workDir, c, ticket)
 	if err != nil {
@@ -464,13 +470,30 @@ func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model
 	}
 	briefPath := filepath.Join(st.TicketDir(ticket), "brief.md")
 
-	cs := CaseScore{Name: c.Name, Passed: true, Verdict: VerdictPass}
+	// The judge's own scratch dir - judge.json/verdicts.json per round -
+	// is a fresh OS temp directory of its own, never under workDir:
+	// workDir holds only "repo" (the reviewer's own worktree) and "store",
+	// and a later round's reviewer can list its worktree's parent with
+	// nothing stopping it (leak_test.go's own comment on this) - a "judge"
+	// entry sitting there is exactly what it would see. Removed once the
+	// case ends, whatever round it stopped at.
+	judgeRoot, jerr := os.MkdirTemp("", "jig-")
+	if jerr != nil {
+		return CaseScore{}, fmt.Errorf("revieweval: create judge scratch root: %w", jerr)
+	}
+	defer func() {
+		if rerr := os.RemoveAll(judgeRoot); rerr != nil && err == nil {
+			err = fmt.Errorf("revieweval: remove judge scratch root: %w", rerr)
+		}
+	}()
+
+	cs = CaseScore{Name: c.Name, Passed: true, Verdict: VerdictPass}
 	var prevHead string
 	recordedLinks := map[string]Decision{}
 	for idx, r := range c.Rounds {
-		rs, head, err := runRound(workDir, st, c, ticket, idx, repoDir, briefPath, backend, judge, model, prevHead, recordedLinks)
-		if err != nil {
-			return CaseScore{}, err
+		rs, head, rerr := runRound(workDir, judgeRoot, st, c, ticket, idx, repoDir, briefPath, backend, judge, model, prevHead, recordedLinks)
+		if rerr != nil {
+			return CaseScore{}, rerr
 		}
 		if !rs.Passed {
 			cs.Passed = false

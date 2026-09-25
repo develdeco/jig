@@ -42,7 +42,7 @@ type Backend interface {
 }
 
 // Options configures backend construction. ScenarioDir is used by "fake"
-// only, ScreenBinary by "headless" only.
+// only, ScreenBinary and Env by "headless" only.
 type Options struct {
 	ScenarioDir string // fake
 
@@ -52,6 +52,18 @@ type Options struct {
 	// is the jig binary itself: a test binary or another program running
 	// screened dispatches must pass a built jig.
 	ScreenBinary string // headless
+
+	// Env, when non-nil, is the exact environment a headless dispatch's
+	// `claude` child process gets: this list, with any PWD or OLDPWD entry
+	// dropped and PWD then set to the dispatch's own worktree (cmd.Dir) -
+	// never a mix with this process's own environment. Nil, the default,
+	// means the child inherits this process's full environment unchanged. A caller that dispatches against a corpus or
+	// other content it does not fully trust - internal/revieweval's live
+	// path above all - should build this from a filtered copy of its own
+	// environment, never pass its own os.Environ() through untouched: a nil
+	// Env hands a live child everything this process happens to be running
+	// with, including anything naming what is being measured.
+	Env []string // headless
 }
 
 // New constructs a Backend by name: "fake", "headless", or "herdr".

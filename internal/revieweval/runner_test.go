@@ -221,36 +221,72 @@ func (b workDirLeakBackend) Run(d session.Dispatch) error {
 	return os.WriteFile(d.ResultJSON, data, 0o644)
 }
 
+// recordingJudge delegates every Confirm to inner but first records
+// q.WorkDir: the judge's own scratch dir is otherwise unobservable from
+// outside MatchRound/runRound, since RunCase never returns it.
+type recordingJudge struct {
+	inner    Judge
+	workDirs *[]string
+}
+
+func (j recordingJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
+	*j.workDirs = append(*j.workDirs, q.WorkDir)
+	return j.inner.Confirm(q)
+}
+
 // TestRunCaseDeletesWorkAndJudgeDirsAfterScoring: once a round is
-// scored, its store-side work dir and its own judge scratch dir are gone
-// entirely - not moved to an archive elsewhere under the work root, since
-// no later session poking around under workDir should find a live result
-// anywhere.
+// scored, its store-side work dir is gone entirely - not moved to an
+// archive elsewhere under the work root, since no later session poking
+// around under workDir should find a live result anywhere - and the
+// judge's own scratch dir, which must sit entirely outside workDir in the
+// first place (nothing named "judge" ever appears there, beside the
+// reviewer's own worktree), is gone too once the case ends.
 func TestRunCaseDeletesWorkAndJudgeDirsAfterScoring(t *testing.T) {
 	c := loadEvalCase(t, "nil-deref")
 	backend := scriptedReviewerBackend{dir: resultsDir("perfect")}
 	workDir := t.TempDir()
 
-	cs, err := RunCase(workDir, c, backend, fixtureJudge{dir: resultsDir("perfect")}, "fixture-model")
+	var judgeWorkDirs []string
+	judge := recordingJudge{inner: fixtureJudge{dir: resultsDir("perfect")}, workDirs: &judgeWorkDirs}
+
+	cs, err := RunCase(workDir, c, backend, judge, "fixture-model")
 	if err != nil {
 		t.Fatalf("RunCase: %v", err)
 	}
 	if len(cs.Rounds) != 1 || !cs.Rounds[0].Passed {
 		t.Fatalf("RunCase: want one passed round, got %+v", cs.Rounds)
 	}
+	if len(judgeWorkDirs) != 1 || judgeWorkDirs[0] == "" {
+		t.Fatalf("the judge was not dispatched with its own work dir: %v", judgeWorkDirs)
+	}
+	judgeDir := judgeWorkDirs[0]
+
+	if rel, rerr := filepath.Rel(workDir, judgeDir); rerr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Errorf("judge scratch dir %s sits under the case work root %s (rel=%s), want it entirely outside", judgeDir, workDir, rel)
+	}
 
 	workGone := filepath.Join(workDir, "store", runID(c.Name), "work")
 	if _, err := os.Stat(workGone); !os.IsNotExist(err) {
 		t.Errorf("store work dir %s still exists (err=%v), want it deleted after scoring", workGone, err)
 	}
-	judgeGone := filepath.Join(workDir, "judge", "round-1")
-	if _, err := os.Stat(judgeGone); !os.IsNotExist(err) {
-		t.Errorf("judge dir %s still exists (err=%v), want it deleted after scoring", judgeGone, err)
+	if _, err := os.Stat(judgeDir); !os.IsNotExist(err) {
+		t.Errorf("judge scratch dir %s still exists (err=%v), want it deleted once the case ends", judgeDir, err)
 	}
-	// Nothing was archived anywhere else under workDir - the
-	// old behavior moved it to <workDir>/rounds/round-N/work.
-	if _, err := os.Stat(filepath.Join(workDir, "rounds")); !os.IsNotExist(err) {
-		t.Error("a \"rounds\" archive dir exists under workDir, want deletion, not archiving")
+
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		t.Fatalf("read work dir: %v", err)
+	}
+	got := map[string]bool{}
+	for _, e := range entries {
+		got[e.Name()] = true
+	}
+	if len(got) != 2 || !got["repo"] || !got["store"] {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("work dir %s holds %v, want exactly [repo store]: nothing named \"judge\" beside the reviewer's worktree", workDir, names)
 	}
 }
 
