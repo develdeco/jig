@@ -3,6 +3,7 @@ package revieweval
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,13 +42,46 @@ func TestLoadCaseRejectsMissingPatch(t *testing.T) {
 	}
 }
 
+// TestLoadCaseRejectsMissingGold checks not only that a missing gold.yaml
+// errors, but that the error actually says so: a loader that only
+// wrapped loadGold's own read error would still fail this test's setup
+// (os.ReadFile on a missing path fails too), silently losing the dedicated
+// "missing gold.yaml" message the specific os.Stat check below produces.
 func TestLoadCaseRejectsMissingGold(t *testing.T) {
 	dir := newMinimalCase(t, "c", validGoldYAML)
 	if err := os.Remove(filepath.Join(dir, "round-1", "gold.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadCase(dir); err == nil {
+	_, loadErr := LoadCase(dir)
+	if loadErr == nil {
 		t.Fatal("LoadCase: want an error for a missing gold.yaml")
+	}
+	if !strings.Contains(loadErr.Error(), "missing gold.yaml") {
+		t.Errorf("LoadCase error = %q, want it to name gold.yaml as missing", loadErr)
+	}
+}
+
+// TestLoadCaseDistinguishesAGoldReadErrorFromAMissingFile is the other
+// half of that same check: gold.yaml exists (os.Stat succeeds, so the
+// dedicated missing-file message must not fire) but is unreadable as a
+// file - a directory in its place - so only loadGold's own generic read
+// error can be the one that fires. Telling the two apart means neither
+// message is written to cover both cases.
+func TestLoadCaseDistinguishesAGoldReadErrorFromAMissingFile(t *testing.T) {
+	dir := newMinimalCase(t, "c", validGoldYAML)
+	goldPath := filepath.Join(dir, "round-1", "gold.yaml")
+	if err := os.Remove(goldPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(goldPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadCase(dir)
+	if err == nil {
+		t.Fatal("LoadCase: want an error, gold.yaml is a directory, not a file")
+	}
+	if strings.Contains(err.Error(), "missing gold.yaml") {
+		t.Errorf("LoadCase error = %q, want a read error, not the missing-file message: the path exists", err)
 	}
 }
 
@@ -320,6 +354,177 @@ func TestLoadCorpusRejectsAnEmptyRoot(t *testing.T) {
 	root := t.TempDir()
 	if _, err := LoadCorpus(root); err == nil {
 		t.Fatal("LoadCorpus: want an error for a root with no case directories")
+	}
+}
+
+// --- a recorded decision locates the finding it decided --------------------
+
+// twoRoundCaseWithFindings builds a two-round case dir: round-1 has a
+// findings.yaml with one dismissed finding "r1-f1" in file b.go and one
+// open finding "r1-f2" in file c.go, decisions.yaml given verbatim (a test
+// mutates its recorded-link body), and round-2 is a minimal last round
+// with no findings.yaml (recorded needs a round that has one, so the round
+// under test is always round-1 here).
+func twoRoundCaseWithFindings(t *testing.T, name, decisions string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	writeFile(t, filepath.Join(dir, "brief.md"), "# brief\n")
+	writeFile(t, filepath.Join(dir, "round-1", "patch.diff"), "diff\n")
+	writeFile(t, filepath.Join(dir, "round-1", "gold.yaml"), validGoldYAML)
+	writeFile(t, filepath.Join(dir, "round-1", "findings.yaml"), `scope: full
+reviewed_paths: []
+findings:
+  - id: r1-f1
+    file: b.go
+    line: 5
+    title: t
+    detail: d
+    action: fix
+    risk: low
+    risk_rationale: r
+    status: dismissed
+    recurrences: 0
+    triage: human
+  - id: r1-f2
+    file: c.go
+    line: 9
+    title: t2
+    detail: d2
+    action: fix
+    risk: low
+    risk_rationale: r
+    status: open
+    recurrences: 0
+    triage: auto
+`)
+	if decisions != "" {
+		writeFile(t, filepath.Join(dir, "round-1", "decisions.yaml"), decisions)
+	}
+	writeFile(t, filepath.Join(dir, "round-2", "patch.diff"), "diff\n")
+	writeFile(t, filepath.Join(dir, "round-2", "gold.yaml"), validGoldYAML)
+	return dir
+}
+
+func TestLoadCaseAcceptsARecordedLinkToADismissedFinding(t *testing.T) {
+	dir := twoRoundCaseWithFindings(t, "c", `decisions:
+  - id: dec1
+    file: b.go
+    lines: [4, 6]
+    description: the whole thing, a defensible choice
+    decision: dismissed
+    recorded: r1-f1
+`)
+	c, err := LoadCase(dir)
+	if err != nil {
+		t.Fatalf("LoadCase: %v", err)
+	}
+	if len(c.Rounds[0].Decisions) != 1 || c.Rounds[0].Decisions[0].Recorded != "r1-f1" {
+		t.Fatalf("LoadCase decisions = %+v, want round 1's decision to carry Recorded \"r1-f1\"", c.Rounds[0].Decisions)
+	}
+}
+
+func TestLoadCaseRejectsARecordedLinkOnARoundWithNoFindingsYAML(t *testing.T) {
+	dir := newMinimalCase(t, "c", validGoldYAML) // single round: the last round, so no findings.yaml
+	writeFile(t, filepath.Join(dir, "round-1", "decisions.yaml"), `decisions:
+  - id: dec1
+    file: a.go
+    lines: [1, 1]
+    description: d
+    decision: dismissed
+    recorded: r1-f1
+`)
+	if _, err := LoadCase(dir); err == nil {
+		t.Fatal("LoadCase: want an error, this round has no findings.yaml for \"recorded\" to name")
+	}
+}
+
+func TestLoadCaseRejectsARecordedIDNotInFindingsYAML(t *testing.T) {
+	dir := twoRoundCaseWithFindings(t, "c", `decisions:
+  - id: dec1
+    file: b.go
+    lines: [4, 6]
+    description: d
+    decision: dismissed
+    recorded: r1-f99
+`)
+	if _, err := LoadCase(dir); err == nil {
+		t.Fatal("LoadCase: want an error, r1-f99 is not a finding in round 1's findings.yaml")
+	}
+}
+
+func TestLoadCaseRejectsARecordedFileMismatch(t *testing.T) {
+	dir := twoRoundCaseWithFindings(t, "c", `decisions:
+  - id: dec1
+    file: other.go
+    lines: [4, 6]
+    description: d
+    decision: dismissed
+    recorded: r1-f1
+`)
+	if _, err := LoadCase(dir); err == nil {
+		t.Fatal("LoadCase: want an error, the decision's file does not match r1-f1's own file (b.go)")
+	}
+}
+
+func TestLoadCaseRejectsADismissedDecisionRecordingAnOpenFinding(t *testing.T) {
+	dir := twoRoundCaseWithFindings(t, "c", `decisions:
+  - id: dec1
+    file: c.go
+    lines: [8, 10]
+    description: d
+    decision: dismissed
+    recorded: r1-f2
+`)
+	if _, err := LoadCase(dir); err == nil {
+		t.Fatal("LoadCase: want an error, r1-f2's status is open, not dismissed")
+	}
+}
+
+func TestLoadCaseAcceptsAKeptDecisionRecordingAnOpenFinding(t *testing.T) {
+	dir := twoRoundCaseWithFindings(t, "c", `decisions:
+  - id: dec1
+    file: c.go
+    lines: [8, 10]
+    description: d
+    decision: kept
+    recorded: r1-f2
+`)
+	if _, err := LoadCase(dir); err != nil {
+		t.Fatalf("LoadCase: %v", err)
+	}
+}
+
+func TestLoadCaseRejectsAKeptDecisionRecordingADismissedFinding(t *testing.T) {
+	dir := twoRoundCaseWithFindings(t, "c", `decisions:
+  - id: dec1
+    file: b.go
+    lines: [4, 6]
+    description: d
+    decision: kept
+    recorded: r1-f1
+`)
+	if _, err := LoadCase(dir); err == nil {
+		t.Fatal("LoadCase: want an error, r1-f1's status is dismissed, not open or asked")
+	}
+}
+
+func TestLoadCaseRejectsTwoDecisionsNamingTheSameRecord(t *testing.T) {
+	dir := twoRoundCaseWithFindings(t, "c", `decisions:
+  - id: dec1
+    file: b.go
+    lines: [4, 6]
+    description: d1
+    decision: dismissed
+    recorded: r1-f1
+  - id: dec2
+    file: b.go
+    lines: [4, 6]
+    description: d2
+    decision: dismissed
+    recorded: r1-f1
+`)
+	if _, err := LoadCase(dir); err == nil {
+		t.Fatal("LoadCase: want an error, two decisions both name recorded r1-f1")
 	}
 }
 

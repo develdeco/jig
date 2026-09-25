@@ -11,7 +11,7 @@
     },
     {
       "file": "inventory/report.go",
-      "line": 7,
+      "line": 10,
       "title": "WriteReport swallows os.Create's error",
       "detail": "The error from os.Create is discarded with the blank identifier, so a failed create surfaces only a nil-pointer failure later, never the real cause.",
       "action": "fix",

@@ -3,5 +3,5 @@ findings: []
 traps:
   - id: loopvar-capture
     file: worker/pool.go
-    lines: [8, 12]
-    description: job is range-scoped per iteration in Go 1.22+, so each goroutine captures its own copy; this is not the pre-1.22 loop variable bug.
+    lines: [7, 11]
+    description: Every goroutine's closure captures job from the enclosing range scope, the same variable each iteration would reassign in the pre-1.22 loop var rule.

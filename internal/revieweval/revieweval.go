@@ -87,13 +87,18 @@ type Gold struct {
 
 // Decision is one recorded human decision on a finding beyond the seeded
 // gold: a real reviewer round raised it and a person decided it, kept (a
-// true positive) or dismissed (a false positive).
+// true positive) or dismissed (a false positive). Recorded, when set,
+// names the id of a finding in this same round's findings.yaml this
+// decision locates: match.go's dismissed-fold point for that finding then
+// takes its span and description from here rather than from the fold
+// finding's own bare one line and title.
 type Decision struct {
 	ID          string
 	File        string
 	From, To    int
 	Description string
 	Decision    string // DecisionKept | DecisionDismissed
+	Recorded    string // optional: a finding id in this round's findings.yaml
 }
 
 // recordedRoundYAML is gate/round-N/findings.yaml's on-disk shape: the
@@ -235,6 +240,7 @@ type decisionWire struct {
 	Lines       []int  `yaml:"lines"`
 	Description string `yaml:"description"`
 	Decision    string `yaml:"decision"`
+	Recorded    string `yaml:"recorded"`
 }
 
 // checkUniqueEntryID validates one gold finding's, trap's or decision's id:
@@ -350,9 +356,55 @@ func loadGold(name string, n int, goldPath string, fold map[string]verifydeliver
 	return g, nil
 }
 
+// checkRecordedLink validates one decision's optional "recorded" key:
+// it may only be used on a round that has findings.yaml (rec != nil); the
+// id it names must exist there; that record's file must equal the
+// decision's own file; a dismissed decision needs that record's status
+// dismissed, a kept decision needs open or asked; and no two decisions in
+// the round may name the same record (seenRecorded).
+func checkRecordedLink(name string, n int, dw decisionWire, rec *recordedRoundYAML, seenRecorded map[string]bool) error {
+	if dw.Recorded == "" {
+		return nil
+	}
+	if rec == nil {
+		return caseErrorf(name, n, "decision %s: recorded %q needs this round's findings.yaml, which this round does not have", dw.ID, dw.Recorded)
+	}
+	if seenRecorded[dw.Recorded] {
+		return caseErrorf(name, n, "recorded %q is named by more than one decision", dw.Recorded)
+	}
+	seenRecorded[dw.Recorded] = true
+
+	var found *verifydeliver.Finding
+	for i, f := range rec.Findings {
+		if f.ID == dw.Recorded {
+			found = &rec.Findings[i]
+			break
+		}
+	}
+	if found == nil {
+		return caseErrorf(name, n, "decision %s: recorded %q is not a finding in this round's findings.yaml", dw.ID, dw.Recorded)
+	}
+	if found.File != dw.File {
+		return caseErrorf(name, n, "decision %s: recorded %q has file %q, the decision says %q", dw.ID, dw.Recorded, found.File, dw.File)
+	}
+	switch dw.Decision {
+	case DecisionDismissed:
+		if found.Status != verifydeliver.StatusDismissed {
+			return caseErrorf(name, n, "decision %s: dismissed but recorded %q has status %q, not dismissed", dw.ID, dw.Recorded, found.Status)
+		}
+	case DecisionKept:
+		if found.Status != verifydeliver.StatusOpen && found.Status != verifydeliver.StatusAsked {
+			return caseErrorf(name, n, "decision %s: kept but recorded %q has status %q, not open or asked", dw.ID, dw.Recorded, found.Status)
+		}
+	}
+	return nil
+}
+
 // loadDecisions reads and strictly validates round n's optional
-// decisions.yaml; absent is not an error (nil, nil).
-func loadDecisions(name string, n int, decisionsPath string, seen map[string]bool) ([]Decision, error) {
+// decisions.yaml; absent is not an error (nil, nil). rec is this round's
+// own parsed findings.yaml (nil when the round has none), needed only to
+// validate a decision's optional "recorded" link (checkRecordedLink).
+func loadDecisions(name string, n int, decisionsPath string, seen map[string]bool, rec *recordedRoundYAML) ([]Decision, error) {
 	data, err := os.ReadFile(decisionsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -364,6 +416,7 @@ func loadDecisions(name string, n int, decisionsPath string, seen map[string]boo
 	if err := yamlKnownFields(data, &wire); err != nil {
 		return nil, caseErrorf(name, n, "parse decisions.yaml: %v", err)
 	}
+	seenRecorded := map[string]bool{}
 	var out []Decision
 	for _, dw := range wire.Decisions {
 		if err := checkUniqueEntryID(name, n, seen, "decision", dw.ID); err != nil {
@@ -384,7 +437,10 @@ func loadDecisions(name string, n int, decisionsPath string, seen map[string]boo
 		if err := validCaseFile(dw.File); err != nil {
 			return nil, caseErrorf(name, n, "decision %s: %v", dw.ID, err)
 		}
-		out = append(out, Decision{ID: dw.ID, File: dw.File, From: from, To: to, Description: dw.Description, Decision: dw.Decision})
+		if err := checkRecordedLink(name, n, dw, rec, seenRecorded); err != nil {
+			return nil, err
+		}
+		out = append(out, Decision{ID: dw.ID, File: dw.File, From: from, To: to, Description: dw.Description, Decision: dw.Decision, Recorded: dw.Recorded})
 	}
 	return out, nil
 }
@@ -455,18 +511,6 @@ func LoadCase(dir string) (Case, error) {
 			return Case{}, err
 		}
 
-		seenIDs := map[string]bool{}
-		for _, g := range gold.Findings {
-			seenIDs[g.ID] = true
-		}
-		for _, t := range gold.Traps {
-			seenIDs[t.ID] = true
-		}
-		decisions, err := loadDecisions(name, n, filepath.Join(roundDir, "decisions.yaml"), seenIDs)
-		if err != nil {
-			return Case{}, err
-		}
-
 		isLast := n == nums[len(nums)-1]
 		findingsPath := filepath.Join(roundDir, "findings.yaml")
 		_, statErr := os.Stat(findingsPath)
@@ -478,7 +522,7 @@ func LoadCase(dir string) (Case, error) {
 			return Case{}, caseErrorf(name, n, "findings.yaml is missing (required on every round but the last)")
 		}
 
-		r := Round{N: n, Dir: roundDir, PatchPath: patchPath, Gold: gold, Decisions: decisions}
+		r := Round{N: n, Dir: roundDir, PatchPath: patchPath, Gold: gold}
 		if hasFindings {
 			data, err := os.ReadFile(findingsPath)
 			if err != nil {
@@ -491,6 +535,20 @@ func LoadCase(dir string) (Case, error) {
 			r.FindingsPath = findingsPath
 			r.Recorded = &rec
 		}
+
+		seenIDs := map[string]bool{}
+		for _, g := range gold.Findings {
+			seenIDs[g.ID] = true
+		}
+		for _, t := range gold.Traps {
+			seenIDs[t.ID] = true
+		}
+		decisions, err := loadDecisions(name, n, filepath.Join(roundDir, "decisions.yaml"), seenIDs, r.Recorded)
+		if err != nil {
+			return Case{}, err
+		}
+		r.Decisions = decisions
+
 		c.Rounds = append(c.Rounds, r)
 	}
 
@@ -498,7 +556,9 @@ func LoadCase(dir string) (Case, error) {
 }
 
 // LoadCorpus loads every case directory directly under root, in name
-// order, failing if root has none.
+// order, failing if root has none. No separate sort is needed: os.ReadDir
+// itself is documented to return entries sorted by filename, so appending
+// in that order already yields cases in name order.
 func LoadCorpus(root string) ([]Case, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -515,7 +575,6 @@ func LoadCorpus(root string) ([]Case, error) {
 		}
 		cases = append(cases, c)
 	}
-	sort.Slice(cases, func(i, j int) bool { return cases[i].Name < cases[j].Name })
 	if len(cases) == 0 {
 		return nil, fmt.Errorf("revieweval: corpus root %s has no case directories", root)
 	}

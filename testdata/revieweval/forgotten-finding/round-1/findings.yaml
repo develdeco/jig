@@ -18,12 +18,12 @@ findings:
     triage: auto
   - id: r1-f2
     file: inventory/report.go
-    line: 7
+    line: 10
     title: WriteReport ignores the error from os.Create
-    detail: "f, _ := os.Create(path) discards the error, so a failed create is reported only as a generic error from the nil file, never the real cause."
+    detail: "f, _ := os.Create(path) discards the error, so a failed create is never reported; the write that follows then runs against a nil file instead of surfacing the real cause."
     action: fix
     risk: low
-    risk_rationale: The report is never written, with a confusing error in place of the real one.
+    risk_rationale: The report is never written, with a nil-file failure in place of the real cause.
     oracle: test
     workspace: root
     status: open

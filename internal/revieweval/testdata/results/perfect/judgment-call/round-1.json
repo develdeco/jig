@@ -2,9 +2,9 @@
   "findings": [
     {
       "file": "netutil/retry.go",
-      "line": 11,
+      "line": 16,
       "title": "Retry retries a possibly non-idempotent request",
-      "detail": "Retry retries every failure the same way, including one where send may have already taken effect before returning an error; the brief leaves open whether that is safe.",
+      "detail": "Retry retries every failure the same way, including one where send may have already taken effect before returning an error, such as a call that creates a record; that needs a human call, not a silent default.",
       "action": "ask",
       "risk": "medium",
       "risk_rationale": "Retrying a request that already succeeded server-side can duplicate its effect."

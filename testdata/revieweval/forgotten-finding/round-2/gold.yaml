@@ -2,7 +2,7 @@ exhaustive: false
 findings:
   - id: report-ignored-error
     file: inventory/report.go
-    lines: [7, 9]
+    lines: [10, 11]
     action: fix
     prior: r1-f2
     description: WriteReport still ignores the error from os.Create; this round's patch fixed the count loop but never touched report.go, so the create error is still swallowed.
@@ -10,4 +10,4 @@ traps:
   - id: count-boundary-fixed
     file: inventory/count.go
     lines: [11, 12]
-    description: The loop bound is now i < len(items); this is round 1's finding, already corrected, not a new bug.
+    description: The loop bound now reads i < len(items), the same shape of comparison that produced the earlier out-of-range index.

@@ -2,8 +2,10 @@ package revieweval
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/session"
@@ -80,5 +82,71 @@ func TestModelJudgeConfirmReturnsADispatchError(t *testing.T) {
 	_, err := judge.Confirm(twoCandidateQuery(t))
 	if err == nil || !errors.Is(err, wantErr) {
 		t.Fatalf("Confirm error = %v, want it to wrap %v", err, wantErr)
+	}
+}
+
+// --- strict verdicts ------------------------------------------------------
+
+func TestModelJudgeConfirmRejectsAnEntryMissingTheCandidateKey(t *testing.T) {
+	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"same":true},{"candidate":1,"same":true}]}`}, Model: "m"}
+	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
+		t.Fatal("Confirm: want an error, one entry has no \"candidate\" key at all")
+	}
+}
+
+func TestModelJudgeConfirmRejectsANullCandidate(t *testing.T) {
+	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":null,"same":true},{"candidate":1,"same":true}]}`}, Model: "m"}
+	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
+		t.Fatal("Confirm: want an error, \"candidate\" is null")
+	}
+}
+
+func TestModelJudgeConfirmRejectsAnEntryMissingTheSameKey(t *testing.T) {
+	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0},{"candidate":1,"same":true}]}`}, Model: "m"}
+	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
+		t.Fatal("Confirm: want an error, one entry has no \"same\" key at all")
+	}
+}
+
+func TestModelJudgeConfirmRejectsANullSame(t *testing.T) {
+	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0,"same":null},{"candidate":1,"same":true}]}`}, Model: "m"}
+	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
+		t.Fatal("Confirm: want an error, \"same\" is null")
+	}
+}
+
+func TestModelJudgeConfirmRejectsACaseVariantKey(t *testing.T) {
+	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"Candidate":0,"same":true},{"candidate":1,"same":true}]}`}, Model: "m"}
+	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
+		t.Fatal("Confirm: want an error, \"Candidate\" is a case variant of \"candidate\", not a match")
+	}
+}
+
+func TestModelJudgeConfirmRejectsATopLevelCaseVariantKey(t *testing.T) {
+	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"Verdicts":[{"candidate":0,"same":true},{"candidate":1,"same":true}]}`}, Model: "m"}
+	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
+		t.Fatal("Confirm: want an error, \"Verdicts\" is a case variant of \"verdicts\", not a match")
+	}
+}
+
+func TestModelJudgeConfirmRejectsAKeyRepeatedInOneObject(t *testing.T) {
+	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0,"same":true,"same":false},{"candidate":1,"same":true}]}`}, Model: "m"}
+	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
+		t.Fatal("Confirm: want an error, \"same\" is repeated within one verdict entry")
+	}
+}
+
+// --- one question for the judge, whatever the point is ---------------------
+
+// TestJudgePromptNeverNamesAPointKind pins that the judge prompt states the
+// job and the output contract only: it must never name or hint at which of
+// gold/trap/decision/dismissed a candidate's point is, since the judge is
+// asked the same one question for every candidate.
+func TestJudgePromptNeverNamesAPointKind(t *testing.T) {
+	prompt := fmt.Sprintf(judgePromptTemplate, 1, "case", "judge.json", "verdicts.json")
+	for _, word := range []string{"seeded", "trap", "decision", "dismissed", "gold"} {
+		if strings.Contains(strings.ToLower(prompt), word) {
+			t.Errorf("prompt contains %q: the judge must not be told which kind of point a candidate is", word)
+		}
 	}
 }

@@ -11,6 +11,7 @@
     }
   ],
   "reviewed_paths": [
+    "go.mod",
     "worker/pool.go"
   ],
   "summary": "The per-goroutine closure over job looks unsafe."

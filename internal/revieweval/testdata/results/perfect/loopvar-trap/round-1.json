@@ -1,6 +1,7 @@
 {
   "findings": [],
   "reviewed_paths": [
+    "go.mod",
     "worker/pool.go"
   ],
   "summary": "RunAll's goroutine closures are fine: Go 1.22+ scopes job per iteration."

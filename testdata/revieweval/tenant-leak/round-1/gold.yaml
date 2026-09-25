@@ -8,5 +8,5 @@ findings:
 traps:
   - id: summarize-filtered
     file: billing/report.go
-    lines: [9, 16]
-    description: Summarize filters by tenantID inside its own loop, so ranging over the package-level invoices slice here cannot leak another tenant's data.
+    lines: [6, 13]
+    description: Summarize ranges over the shared package-level invoices slice, the same slice ForTenant returns unfiltered, to build its per-tenant count.

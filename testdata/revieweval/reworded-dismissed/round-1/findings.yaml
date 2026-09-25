@@ -6,10 +6,10 @@ findings:
     file: queue/labels.go
     line: 5
     title: Labels concatenates strings with += in a loop
-    detail: strings.Builder would avoid the repeated allocation, but for typical queue sizes this is a style point, not a real cost; dismissed as not worth the churn.
+    detail: Using += in a loop reallocates the growing string on every iteration instead of using strings.Builder, which appends without repeated copies.
     action: fix
     risk: low
-    risk_rationale: Purely a style point with no measured cost at expected queue sizes.
+    risk_rationale: Each append reallocates and copies the string built so far, adding avoidable garbage-collection pressure as the task list grows.
     oracle: test
     workspace: root
     status: dismissed

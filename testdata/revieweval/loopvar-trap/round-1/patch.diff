@@ -1,14 +1,22 @@
+diff --git a/go.mod b/go.mod
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/go.mod
+@@ -0,0 +1,3 @@
++module revieweval-loopvar-trap
++
++go 1.22
 diff --git a/worker/pool.go b/worker/pool.go
 new file mode 100644
 index 0000000..6b7c314
 --- /dev/null
 +++ b/worker/pool.go
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,16 @@
 +package worker
 +
 +// RunAll starts task(job) for every job in jobs, one goroutine per job, and
-+// waits for all of them to finish before returning. Written for Go 1.22+,
-+// where each range iteration binds a fresh copy of job.
++// waits for all of them to finish before returning.
 +func RunAll(jobs []string, task func(string)) {
 +	done := make(chan struct{}, len(jobs))
 +	for _, job := range jobs {

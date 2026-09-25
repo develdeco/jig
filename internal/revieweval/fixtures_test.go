@@ -179,6 +179,7 @@ type regressedWant struct {
 	Misattributed    []string
 	FalseAlarms      []string
 	Relitigated      []string
+	WrongPriors      []string
 }
 
 // TestFixtureRegressedFailsExactlyAsDesigned drives the whole real corpus
@@ -211,7 +212,7 @@ func TestFixtureRegressedFailsExactlyAsDesigned(t *testing.T) {
 		{Case: "nil-deref", Round: 1, Missed: []string{"nil-entry"}},
 		{Case: "tenant-leak", Round: 1, FalseAlarms: []string{"Summarize leaks tenant data across the shared slice"}},
 		{Case: "loopvar-trap", Round: 1, FalseAlarms: []string{"job is captured by reference across goroutines"}},
-		{Case: "mechanical-batch", Round: 1, Missed: []string{"dead-code", "missing-doc"}},
+		{Case: "mechanical-batch", Round: 1, Missed: []string{"doc-typo", "missing-doc"}},
 		{Case: "clean", Round: 1, FalseAlarms: []string{"Reverse allocates unnecessarily"}},
 		{Case: "forgotten-finding", Round: 1}, // copies perfect: passes
 		{Case: "forgotten-finding", Round: 2, Missed: []string{"report-ignored-error"}, Forgotten: []string{"report-ignored-error"}},
@@ -235,9 +236,21 @@ func TestFixtureRegressedFailsExactlyAsDesigned(t *testing.T) {
 		}
 		wantPassed := len(w.Missed) == 0 && len(w.Lost) == 0 && len(w.Forgotten) == 0 &&
 			len(w.DroppedQuestions) == 0 && len(w.Misattributed) == 0 &&
-			len(w.FalseAlarms) == 0 && len(w.Relitigated) == 0
+			len(w.FalseAlarms) == 0 && len(w.Relitigated) == 0 && len(w.WrongPriors) == 0
 		if rs.Passed != wantPassed {
 			t.Errorf("case %s round %d: Passed = %v, want %v", w.Case, w.Round, rs.Passed, wantPassed)
+		}
+		// Every regressed row's designed failure is an ordinary scoring
+		// mismatch (a missed, lost, dropped, misattributed, false-alarm,
+		// re-litigated or wrong-prior finding), never a round the reviewer's
+		// own contract refused or that infrastructure failed - pinning that
+		// here catches a regression that turned one of these into a refusal
+		// or a failure instead of the designed scoring shape.
+		if rs.Refused {
+			t.Errorf("case %s round %d: Refused = true, want false", w.Case, w.Round)
+		}
+		if rs.Failed {
+			t.Errorf("case %s round %d: Failed = true, want false", w.Case, w.Round)
 		}
 		checkStringList(t, w.Case, w.Round, "Missed", rs.Missed, w.Missed)
 		checkStringList(t, w.Case, w.Round, "Lost", rs.Lost, w.Lost)
@@ -246,6 +259,7 @@ func TestFixtureRegressedFailsExactlyAsDesigned(t *testing.T) {
 		checkStringList(t, w.Case, w.Round, "Misattributed", rs.Misattributed, w.Misattributed)
 		checkStringList(t, w.Case, w.Round, "FalseAlarms", rs.FalseAlarms, w.FalseAlarms)
 		checkStringList(t, w.Case, w.Round, "Relitigated", rs.Relitigated, w.Relitigated)
+		checkStringList(t, w.Case, w.Round, "WrongPriors", rs.WrongPriors, w.WrongPriors)
 	}
 }
 
@@ -381,7 +395,7 @@ func TestFixtureReportRendersTotals(t *testing.T) {
 	if !strings.Contains(report, "cases passed 10/10, rounds passed 14/14, recall 1.00") {
 		t.Errorf("report totals line missing or wrong; got:\n%s", report)
 	}
-	if !strings.Contains(report, "lost 0, forgotten 0, dropped questions 0, misattributed 0, false alarms 0, re-litigated 0, refused 0, failed 0") {
+	if !strings.Contains(report, "lost 0, forgotten 0, dropped questions 0, misattributed 0, false alarms 0, re-litigated 0, wrong priors 0, refused 0, failed 0") {
 		t.Errorf("report zero-failure line missing or wrong; got:\n%s", report)
 	}
 }

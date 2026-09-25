@@ -89,30 +89,36 @@ func TestScoreMisattributedWhenTheFindingsPriorDiffersFromGold(t *testing.T) {
 	}
 }
 
+// TestScorePriorCitationCounting uses two correctly-cited gold findings and
+// one wrongly-cited one (want PriorCited=2): with only one of each (as an
+// earlier version of this test had it), negating the equality gate
+// (f.Prior == g.Prior) would lose the one correct match but gain the one
+// wrong one, leaving PriorCited unchanged at 1 and the mutation undetected.
+// Two correct against one wrong breaks that symmetry.
 func TestScorePriorCitationCounting(t *testing.T) {
 	gold := Gold{Findings: []GoldFinding{
 		{ID: "g1", Prior: "r1-f1", Action: verifydeliver.ActionFix}, // cited correctly
-		{ID: "g2", Prior: "r1-f2", Action: verifydeliver.ActionFix}, // not cited
-		{ID: "g3", Action: verifydeliver.ActionFix},                 // no prior expected
+		{ID: "g2", Prior: "r1-f2", Action: verifydeliver.ActionFix}, // cited correctly
+		{ID: "g3", Prior: "r1-f3", Action: verifydeliver.ActionFix}, // not cited
 	}}
 	findings := []verifydeliver.ResultFinding{
 		{Title: "t1", Prior: "r1-f1"},
-		{Title: "t2", Prior: ""},
-		{Title: "t3"},
+		{Title: "t2", Prior: "r1-f2"},
+		{Title: "t3", Prior: "r1-f9"}, // wrongly cites something else
 	}
 	reported := []verifydeliver.Finding{
 		{ID: "r1-f1", Status: verifydeliver.StatusOpen},
-		{ID: "r2-f1", Status: verifydeliver.StatusOpen},
-		{ID: "r2-f2", Status: verifydeliver.StatusOpen},
+		{ID: "r1-f2", Status: verifydeliver.StatusOpen},
+		{ID: "r1-f9", Status: verifydeliver.StatusOpen},
 	}
 	match := RoundMatch{MatchedFinding: []int{0, 1, 2}, StructureOnly: []bool{false, false, false}, Classification: map[int]Fate{}}
 
 	sc := ScoreRound(2, gold, nil, findings, reported, nil, match)
-	if sc.PriorExpected != 2 {
-		t.Errorf("PriorExpected = %d, want 2 (g1 and g2 have a prior, g3 does not)", sc.PriorExpected)
+	if sc.PriorExpected != 3 {
+		t.Errorf("PriorExpected = %d, want 3 (g1, g2 and g3 all have a prior)", sc.PriorExpected)
 	}
-	if sc.PriorCited != 1 {
-		t.Errorf("PriorCited = %d, want 1 (only g1's finding cited it)", sc.PriorCited)
+	if sc.PriorCited != 2 {
+		t.Errorf("PriorCited = %d, want 2 (g1 and g2's findings cited it, g3's finding cited something else)", sc.PriorCited)
 	}
 }
 
@@ -141,6 +147,40 @@ func TestScoreTriagePromptsOneForTheFixBatchPlusOnePerAsk(t *testing.T) {
 				t.Errorf("TriagePrompts = %d, want %d", sc.TriagePrompts, tc.want)
 			}
 		})
+	}
+}
+
+// TestScoreWrongPriorFailsTheRound pins ScoreRound's own wiring of
+// FateWrongPrior into RoundScore: a finding classified with it lands in
+// WrongPriors by title and fails the round, the same way a false alarm or
+// a re-litigation would.
+func TestScoreWrongPriorFailsTheRound(t *testing.T) {
+	findings := []verifydeliver.ResultFinding{{Title: "cites the wrong dismissal"}}
+	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusDismissed}}
+	match := RoundMatch{Classification: map[int]Fate{0: FateWrongPrior}}
+
+	sc := ScoreRound(2, Gold{}, nil, findings, reported, nil, match)
+	if len(sc.WrongPriors) != 1 || sc.WrongPriors[0] != "cites the wrong dismissal" {
+		t.Errorf("WrongPriors = %v, want [\"cites the wrong dismissal\"]", sc.WrongPriors)
+	}
+	if sc.Passed {
+		t.Error("Passed = true, want false: a wrong prior must fail the round")
+	}
+}
+
+func TestRenderReportPrecisionNAWithZeroDenominator(t *testing.T) {
+	// FalsePositiveGold is true (a trap or exhaustive round could have
+	// produced a false alarm) but nothing was found, extra-true or a false
+	// alarm: 0/0 must read n/a, not a misleading 0.00.
+	scores := []CaseScore{{Name: "c1", Rounds: []RoundScore{
+		{Round: 1, Missed: []string{"g1"}, FalsePositiveGold: true},
+	}}}
+	report := RenderReport(scores)
+	if !strings.Contains(report, "precision n/a") {
+		t.Errorf("report = %q, want \"precision n/a\" (found=0, extra-true=0, false alarms=0)", report)
+	}
+	if strings.Contains(report, "precision 0.") {
+		t.Errorf("report = %q, want no numeric precision line", report)
 	}
 }
 

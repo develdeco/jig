@@ -2,7 +2,7 @@ exhaustive: false
 findings:
   - id: retry-non-idempotent
     file: netutil/retry.go
-    lines: [11, 18]
+    lines: [10, 20]
     action: ask
-    description: Retry retries every failure without distinguishing a request that may already have taken effect before it failed; the brief leaves this choice open, so it needs a human decision rather than a silent default.
+    description: Retry retries every failure without distinguishing a request that may already have taken effect before it failed, such as one that creates a record; this needs a human decision on whether repeating it automatically is safe, not a silent default.
 traps: []

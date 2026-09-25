@@ -1,6 +1,6 @@
 decisions:
   - id: reader-close-ignored
     file: store/reader.go
-    lines: [11, 11]
-    description: ReadAll ignores the error from f.Close(); the file is opened read-only, so a failed close cannot lose data.
+    lines: [14, 14]
+    description: ReadAll ignores the error returned by f.Close(), discarding any signal that the close did not complete cleanly.
     decision: dismissed

@@ -2,7 +2,7 @@
   "findings": [
     {
       "file": "netutil/retry.go",
-      "line": 11,
+      "line": 16,
       "title": "Retry should just retry every failure",
       "detail": "Retrying send on any error is the simplest robust behavior here.",
       "action": "fix",

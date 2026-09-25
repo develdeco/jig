@@ -1,17 +1,26 @@
 diff --git a/queue/priority.go b/queue/priority.go
 new file mode 100644
-index 0000000..5b94679
+index 0000000..1c2d3e4
 --- /dev/null
 +++ b/queue/priority.go
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,24 @@
 +package queue
 +
++import "sort"
++
 +// Highest returns the task with the highest priority, or "" when tasks is
-+// empty.
++// empty. Ties are broken by the lexicographically smallest task name.
 +func Highest(tasks map[string]int) string {
++	names := make([]string, 0, len(tasks))
++	for name := range tasks {
++		names = append(names, name)
++	}
++	sort.Strings(names)
++
 +	best := ""
 +	bestPriority := 0
-+	for name, priority := range tasks {
++	for _, name := range names {
++		priority := tasks[name]
 +		if priority > bestPriority {
 +			best = name
 +			bestPriority = priority

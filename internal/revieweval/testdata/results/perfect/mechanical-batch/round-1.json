@@ -11,7 +11,7 @@
     },
     {
       "file": "mathutil/mathutil.go",
-      "line": 15,
+      "line": 14,
       "title": "unusedHelper is dead code",
       "detail": "unusedHelper is defined but never called anywhere in this package.",
       "action": "fix",

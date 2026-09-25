@@ -23,18 +23,22 @@ index 0000000..c70a379
 +}
 diff --git a/inventory/report.go b/inventory/report.go
 new file mode 100644
-index 0000000..5469302
+index 0000000..6a8c1f2
 --- /dev/null
 +++ b/inventory/report.go
-@@ -0,0 +1,11 @@
+@@ -0,0 +1,15 @@
 +package inventory
 +
-+import "os"
++import (
++	"fmt"
++	"os"
++)
 +
 +// WriteReport writes a one-line summary of items to path.
 +func WriteReport(path string, items []Item) error {
 +	f, _ := os.Create(path)
-+	defer f.Close()
-+	_, err := f.WriteString("items processed")
-+	return err
++	if _, err := fmt.Fprintf(f, "%d items processed\n", len(items)); err != nil {
++		return err
++	}
++	return f.Close()
 +}

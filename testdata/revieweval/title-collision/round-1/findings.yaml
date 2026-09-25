@@ -4,12 +4,12 @@ reviewed_paths:
 findings:
   - id: r1-f1
     file: store/reader.go
-    line: 11
+    line: 14
     title: ReadAll ignores the error from f.Close()
-    detail: The file is opened read-only, so a failed close cannot lose data; dismissed as harmless here.
+    detail: "f.Close()'s return value is discarded, so a failed close after reading raises no error to the caller."
     action: fix
     risk: low
-    risk_rationale: No data loss is possible on a read-only file's close.
+    risk_rationale: A close failure on this path is silently dropped instead of surfacing to the caller.
     oracle: test
     workspace: root
     status: dismissed

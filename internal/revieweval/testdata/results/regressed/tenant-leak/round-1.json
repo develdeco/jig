@@ -11,7 +11,7 @@
     },
     {
       "file": "billing/report.go",
-      "line": 10,
+      "line": 8,
       "title": "Summarize leaks tenant data across the shared slice",
       "detail": "Summarize ranges over the package-level invoices slice, which holds every tenant's invoices.",
       "action": "fix",

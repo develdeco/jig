@@ -28,15 +28,12 @@ new file mode 100644
 index 0000000..8bc9dfd
 --- /dev/null
 +++ b/billing/report.go
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,14 @@
 +package billing
 +
 +import "fmt"
 +
-+// Summarize reports tenantID's invoice count for logging. It shares no
-+// state with ForTenant: this loop filters by tenantID itself, so ranging
-+// over the same package-level invoices slice never leaks another
-+// tenant's data.
++// Summarize reports tenantID's invoice count for logging.
 +func Summarize(tenantID string) string {
 +	count := 0
 +	for _, inv := range invoices {

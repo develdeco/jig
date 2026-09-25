@@ -2,7 +2,7 @@
   "findings": [
     {
       "file": "queue/priority.go",
-      "line": 7,
+      "line": 15,
       "title": "Highest can't select a non-positive priority",
       "detail": "bestPriority starts at 0, so a task whose priority is 0 or negative never replaces it; when every priority is non-positive, Highest returns \"\".",
       "action": "fix",

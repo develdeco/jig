@@ -64,14 +64,20 @@ annotation.
 It is opt-in, since CI has no `claude` CLI:
 
 ```sh
-JIG_REVIEWEVAL_BACKEND=headless go test ./internal/revieweval -run Live
+JIG_REVIEWEVAL_BACKEND=headless go test -count=1 -timeout 0 -v -run TestEvalLive ./internal/revieweval
 ```
 
-It is report-only: a case's result is a measurement, not a pass/fail gate
-on the build. Environment variables: `JIG_REVIEWEVAL_MODEL` (reviewer
-model; default is the same rung `jig gate` itself falls back to when a
-ticket has no builder model recorded yet), `JIG_REVIEWEVAL_JUDGE_MODEL`
-(judge model; default the reviewer model), `JIG_REVIEWEVAL_CORPUS`
+A case's result is a measurement, not a pass/fail gate on the build - a
+refused round stays a measurement - except a round that comes back Failed
+(a dispatch failure, a judge error, or the judge changing the case repo)
+is infrastructure trouble and fails the test. Cases run one at a time and
+the report is rewritten after each one, so the command above (`-timeout
+0` disables Go's own default) keeps whatever finished on disk if the run
+is interrupted. Environment variables: `JIG_REVIEWEVAL_MODEL` (reviewer
+model; default the rung `jig gate` itself picks once an unattended
+ticket's builders have already used the cheapest rung),
+`JIG_REVIEWEVAL_JUDGE_MODEL` (judge model; default the reviewer model),
+`JIG_REVIEWEVAL_CORPUS`
 (default `testdata/revieweval`), and `JIG_REVIEWEVAL_REPORT` (when set,
 writes the text report there and the JSON report beside it with a `.json`
 suffix).

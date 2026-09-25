@@ -2,7 +2,7 @@
   "findings": [
     {
       "file": "inventory/report.go",
-      "line": 7,
+      "line": 10,
       "title": "os.Create's failure still vanishes here",
       "detail": "Nothing about this round's patch touched report.go; f, _ := os.Create(path) still throws the real error away.",
       "action": "fix",

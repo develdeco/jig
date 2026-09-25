@@ -25,10 +25,15 @@ type RoundScore struct {
 	Relitigated      []string // finding titles
 	ExtraTrue        []string // finding titles matched to a kept decision
 	Pending          []string // finding titles no one has labeled
-	TriagePrompts    int      // 1 for the fix batch when any fate is open, plus 1 per fate asked
-	Refused, Failed  bool
-	Reason           string
-	Passed           bool
+	// WrongPriors is every finding whose jig-assigned status is dismissed
+	// (it cited an already-dismissed prior) but carries no surviving
+	// structural edge to the dismissed fold point that prior names: the
+	// citation is not a real repeat, and it fails the round.
+	WrongPriors     []string // finding titles
+	TriagePrompts   int      // 1 for the fix batch when any fate is open, plus 1 per fate asked
+	Refused, Failed bool
+	Reason          string
+	Passed          bool
 	// FalsePositiveGold is true when this round's gold could produce a
 	// false alarm on its own - a trap, a dismissed decision, or an
 	// exhaustive round. RenderReport's precision line needs it to tell "no
@@ -147,6 +152,8 @@ func ScoreRound(round int, gold Gold, decisions []Decision, findings []verifydel
 			sc.ExtraTrue = append(sc.ExtraTrue, title)
 		case FatePending:
 			sc.Pending = append(sc.Pending, title)
+		case FateWrongPrior:
+			sc.WrongPriors = append(sc.WrongPriors, title)
 		}
 	}
 
@@ -187,7 +194,8 @@ func ScoreRound(round int, gold Gold, decisions []Decision, findings []verifydel
 	sc.FalsePositiveGold = falsePositiveGold(gold, decisions)
 
 	sc.Passed = len(sc.Missed) == 0 && len(sc.Lost) == 0 && len(sc.DroppedQuestions) == 0 &&
-		len(sc.Misattributed) == 0 && len(sc.FalseAlarms) == 0 && len(sc.Relitigated) == 0
+		len(sc.Misattributed) == 0 && len(sc.FalseAlarms) == 0 && len(sc.Relitigated) == 0 &&
+		len(sc.WrongPriors) == 0
 
 	return sc
 }
@@ -201,7 +209,7 @@ func RenderReport(scores []CaseScore) string {
 	var casesPassed, roundsTotal, roundsPassed int
 	var totalFound, totalGold int
 	var totalLost, totalForgotten, totalDropped, totalMisattributed int
-	var totalFalseAlarms, totalRelitigated, totalExtraTrue int
+	var totalFalseAlarms, totalRelitigated, totalExtraTrue, totalWrongPriors int
 	var totalRefused, totalFailed int
 	var priorExpected, priorCited int
 	var actionAgreed int
@@ -228,6 +236,7 @@ func RenderReport(scores []CaseScore) string {
 			}{
 				{"lost", len(r.Lost)}, {"forgotten", len(r.Forgotten)}, {"dropped", len(r.DroppedQuestions)},
 				{"misattributed", len(r.Misattributed)}, {"false-alarms", len(r.FalseAlarms)}, {"relitigated", len(r.Relitigated)},
+				{"wrong-priors", len(r.WrongPriors)},
 			} {
 				if part.n > 0 {
 					fmt.Fprintf(&b, " %s=%d", part.label, part.n)
@@ -253,6 +262,7 @@ func RenderReport(scores []CaseScore) string {
 			totalFalseAlarms += len(r.FalseAlarms)
 			totalRelitigated += len(r.Relitigated)
 			totalExtraTrue += len(r.ExtraTrue)
+			totalWrongPriors += len(r.WrongPriors)
 			if r.Refused {
 				totalRefused++
 			}
@@ -289,17 +299,22 @@ func RenderReport(scores []CaseScore) string {
 	}
 
 	fmt.Fprintf(&b, "\ntotals: cases passed %d/%d, rounds passed %d/%d, recall %.2f\n", casesPassed, len(scores), roundsPassed, roundsTotal, recall)
-	fmt.Fprintf(&b, "lost %d, forgotten %d, dropped questions %d, misattributed %d, false alarms %d, re-litigated %d, refused %d, failed %d\n",
-		totalLost, totalForgotten, totalDropped, totalMisattributed, totalFalseAlarms, totalRelitigated, totalRefused, totalFailed)
+	fmt.Fprintf(&b, "lost %d, forgotten %d, dropped questions %d, misattributed %d, false alarms %d, re-litigated %d, wrong priors %d, refused %d, failed %d\n",
+		totalLost, totalForgotten, totalDropped, totalMisattributed, totalFalseAlarms, totalRelitigated, totalWrongPriors, totalRefused, totalFailed)
 	fmt.Fprintf(&b, "prior citation rate %s, action agreement %s, triage prompts per case %.2f\n", priorRate, actionRate, triagePerCase)
 	fmt.Fprintf(&b, "unconfirmed %d, pending %d\n", totalUnconfirmed, totalPending)
 	if fpGoldRounds > 0 {
+		// n/a with a zero denominator, like the other rates - a round
+		// can hold false-positive gold (a trap, say) yet produce neither a
+		// found match nor a false alarm (an entirely missed or refused
+		// round), and 0/0 is not a meaningful 0.00.
 		denom := totalFound + totalExtraTrue + totalFalseAlarms
-		precision := 0.0
 		if denom > 0 {
-			precision = float64(totalFound+totalExtraTrue) / float64(denom)
+			precision := float64(totalFound+totalExtraTrue) / float64(denom)
+			fmt.Fprintf(&b, "precision %.2f\n", precision)
+		} else {
+			b.WriteString("precision n/a\n")
 		}
-		fmt.Fprintf(&b, "precision %.2f\n", precision)
 	} else {
 		b.WriteString("precision withheld: no scored round has false-positive gold\n")
 	}
@@ -327,6 +342,7 @@ type jsonRoundReport struct {
 	Relitigated      []string `json:"relitigated,omitempty"`
 	ExtraTrue        []string `json:"extra_true,omitempty"`
 	Pending          []string `json:"pending,omitempty"`
+	WrongPriors      []string `json:"wrong_priors,omitempty"`
 	// Findings is every reported finding with its scoring, the part a
 	// person labels from.
 	Findings []ScoredFinding `json:"findings,omitempty"`
@@ -352,7 +368,8 @@ func RenderJSON(scores []CaseScore) ([]byte, error) {
 				Found: r.Found, Missed: r.Missed, Unconfirmed: r.Unconfirmed,
 				Lost: r.Lost, Forgotten: r.Forgotten, DroppedQuestions: r.DroppedQuestions, Misattributed: r.Misattributed,
 				FalseAlarms: r.FalseAlarms, Relitigated: r.Relitigated, ExtraTrue: r.ExtraTrue, Pending: r.Pending,
-				Findings: r.Findings,
+				WrongPriors: r.WrongPriors,
+				Findings:    r.Findings,
 			})
 		}
 		out = append(out, jc)

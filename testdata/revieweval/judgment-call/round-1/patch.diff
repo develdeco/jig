@@ -1,9 +1,9 @@
 diff --git a/netutil/retry.go b/netutil/retry.go
 new file mode 100644
-index 0000000..71989d9
+index 0000000..8a4e6c1
 --- /dev/null
 +++ b/netutil/retry.go
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,21 @@
 +package netutil
 +
 +// Send is one attempt at delivering a request; it returns an error on
@@ -12,9 +12,11 @@ index 0000000..71989d9
 +
 +// Retry calls send up to attempts times, stopping at the first success. It
 +// retries every failure, including one from a request that may already
-+// have taken effect before it failed; the brief leaves open whether that
-+// is safe to repeat automatically.
++// have taken effect before it failed.
 +func Retry(send Send, attempts int) error {
++	if attempts < 1 {
++		attempts = 1
++	}
 +	var err error
 +	for i := 0; i < attempts; i++ {
 +		if err = send(); err == nil {

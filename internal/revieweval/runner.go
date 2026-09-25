@@ -71,6 +71,36 @@ func missedRoundScore(n int, gold Gold, decisions []Decision, reason string) Rou
 	return rs
 }
 
+// scoredFindingsNoMatch builds RoundScore.Findings for a round that reached
+// a live reviewer result but never finished matching (a judge error, or the
+// judge changing the case repo): every reported finding, with jig's own
+// status, but no gold match and no fate - matching never ran far enough to
+// say either, and RenderJSON should still show what the reviewer said
+// rather than nothing at all.
+func scoredFindingsNoMatch(findings []verifydeliver.ResultFinding, reported []verifydeliver.Finding) []ScoredFinding {
+	out := make([]ScoredFinding, 0, len(findings))
+	for j, f := range findings {
+		out = append(out, ScoredFinding{
+			File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail,
+			Action: f.Action, Risk: f.Risk, Prior: f.Prior, Status: reported[j].Status,
+		})
+	}
+	return out
+}
+
+// failedRoundScore builds the RoundScore for a round whose reviewer result
+// was live but whose matching never finished (a judge error, or the judge
+// changing the case repo): every seeded gold finding counts as missed, the
+// round is Failed with reason, and the reviewer's own findings are
+// preserved (scoredFindingsNoMatch) so RenderJSON still shows what it
+// said.
+func failedRoundScore(n int, gold Gold, decisions []Decision, findings []verifydeliver.ResultFinding, reported []verifydeliver.Finding, reason string) RoundScore {
+	rs := missedRoundScore(n, gold, decisions, reason)
+	rs.Failed = true
+	rs.Findings = scoredFindingsNoMatch(findings, reported)
+	return rs
+}
+
 // reviewerRoundFailure turns a Round() error into a refused or failed
 // RoundScore when it is a REVIEW_INVALID/REVIEW_FAILED *axi.Error, or
 // reports ok=false for any other (infrastructure) error, which the caller
@@ -90,6 +120,42 @@ func reviewerRoundFailure(n int, gold Gold, decisions []Decision, err error) (Ro
 		return RoundScore{}, false
 	}
 	return rs, true
+}
+
+// checkJudgeReadOnly reports an error unless repoDir's HEAD is still head
+// and no tracked file changed since: the same read-only guard the
+// reviewer's own dispatch is held to (verifydeliver/review.go's "the
+// reviewer changed the gate lease" check), extended to the judge's
+// dispatch, since a judge session's Worktree is this same case repo.
+func checkJudgeReadOnly(repoDir, head string) error {
+	headAfter, err := gitx.RevParse(repoDir, "HEAD")
+	if err != nil {
+		return fmt.Errorf("revieweval: check judge read-only: resolve HEAD: %w", err)
+	}
+	statusOut, err := gitx.Run(repoDir, "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return fmt.Errorf("revieweval: check judge read-only: git status: %w", err)
+	}
+	if headAfter != head || statusOut != "" {
+		return fmt.Errorf("the judge changed the case repo")
+	}
+	return nil
+}
+
+// restoreCaseRepo hard-resets repoDir to head and removes every untracked
+// file and directory, the same restoration verifydeliver's own
+// resetLeasePristine performs on the reviewer's lease - mirrored here
+// rather than imported (that helper is package-private), since the next
+// round's own patch apply must start from a pristine head whatever a judge
+// dispatch left behind, tracked or not.
+func restoreCaseRepo(repoDir, head string) error {
+	if _, err := gitx.Run(repoDir, "reset", "--hard", head); err != nil {
+		return fmt.Errorf("revieweval: restore case repo: reset --hard: %w", err)
+	}
+	if _, err := gitx.Run(repoDir, "clean", "-fd"); err != nil {
+		return fmt.Errorf("revieweval: restore case repo: clean -fd: %w", err)
+	}
+	return nil
 }
 
 // initEvalStore builds workDir/store: project.yaml, and the ticket dir
@@ -193,17 +259,160 @@ func seedRoundHistory(st *store.Store, caseName string, prev Round, prevHead str
 	return nil
 }
 
-// RunCase runs every round of c in order, under workDir: a store (once)
-// and a repo (once), then per round, applies that round's patch, seeds the
-// store with the previous round's recorded history, dispatches the real
-// reviewer round, applies findings bookkeeping (verifydeliver.ApplyRound,
-// verifydeliver.ClearingAfterTriage), and scores it (match.go, score.go).
+// caseWorkDir is <ticket>/work under the eval store: verifydeliver's own
+// gateWorkDir convention (internal/verifydeliver/review.go, package-
+// private there), reconstructed here rather than imported since it is a
+// store-side path convention, not a call. Every review dispatch's
+// review.json and result.json for a case live there, one pair per round,
+// filenames never reused across rounds.
+func caseWorkDir(st *store.Store, caseName string) string {
+	return filepath.Join(st.TicketDir(caseName), "work")
+}
+
+// retireRoundWork moves the case's whole work dir out from under the store
+// to workDir/rounds/round-N/work, once round n is fully done, so no later
+// round's dispatch (reviewer or judge) can find an earlier round's
+// live review.json/result.json still sitting under the ticket dir and read
+// a result that disagrees with the case's own recorded history -
+// teacher-forcing's whole point. A round with nothing dispatched yet (an
+// early infrastructure error before any file was written) leaves nothing
+// to move, which is not an error. The store itself recreates the work dir
+// on demand (os.MkdirAll before it writes review.json), so an empty
+// store-side work dir for the next round is never a problem.
+func retireRoundWork(workDir string, st *store.Store, caseName string, n int) error {
+	src := caseWorkDir(st, caseName)
+	if _, err := os.Stat(src); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("revieweval: stat case work dir: %w", err)
+	}
+	dstParent := filepath.Join(workDir, "rounds", fmt.Sprintf("round-%d", n))
+	if err := os.MkdirAll(dstParent, 0o755); err != nil {
+		return fmt.Errorf("revieweval: create round %d archive dir: %w", n, err)
+	}
+	if err := os.Rename(src, filepath.Join(dstParent, "work")); err != nil {
+		return fmt.Errorf("revieweval: move case work dir for round %d: %w", n, err)
+	}
+	return nil
+}
+
+// runRound runs c.Rounds[idx] (whose number is n) against the case's
+// already-initialized store and repo: applies the round's patch, seeds the
+// store with the previous round's recorded history (n > 1), folds,
+// dispatches the reviewer, applies findings bookkeeping, matches and
+// scores. recordedLinks is every earlier round's decisions keyed by the
+// finding id each one's "recorded" names; prevHead is the previous round's
+// own head, "" for round 1.
 //
-// A round's own REVIEW_INVALID/REVIEW_FAILED result scores that round
+// It always retires the round's store-side work dir before returning
+// (deferred so every return path runs it), and, once a live result exists
+// to match at all, always restores the case repo to this round's own head
+// before returning, since a later round's git apply must never see
+// anything a live reviewer or judge dispatch left behind.
+func runRound(workDir string, st *store.Store, c Case, idx int, repoDir, briefPath string, backend session.Backend, judge Judge, model, prevHead string, recordedLinks map[string]Decision) (rs RoundScore, head string, err error) {
+	r := c.Rounds[idx]
+	n := r.N
+
+	absPatch, perr := filepath.Abs(r.PatchPath)
+	if perr != nil {
+		return RoundScore{}, "", fmt.Errorf("revieweval: case %s round %d: resolve patch path: %w", c.Name, n, perr)
+	}
+	if _, aerr := gitx.Run(repoDir, "apply", absPatch); aerr != nil {
+		return RoundScore{}, "", fmt.Errorf("revieweval: case %s round %d: apply patch: %w", c.Name, n, aerr)
+	}
+	if _, aerr := gitx.Run(repoDir, "add", "-A"); aerr != nil {
+		return RoundScore{}, "", fmt.Errorf("revieweval: case %s round %d: git add: %w", c.Name, n, aerr)
+	}
+	if _, cerr := gitx.RunEnv(repoDir, identityEnv, "commit", "-q", "-m", fmt.Sprintf("revieweval: round %d", n)); cerr != nil {
+		return RoundScore{}, "", fmt.Errorf("revieweval: case %s round %d: commit: %w", c.Name, n, cerr)
+	}
+	head, herr := gitx.RevParse(repoDir, "HEAD")
+	if herr != nil {
+		return RoundScore{}, "", fmt.Errorf("revieweval: case %s round %d: resolve head: %w", c.Name, n, herr)
+	}
+
+	defer func() {
+		if rerr := retireRoundWork(workDir, st, c.Name, n); rerr != nil && err == nil {
+			err = fmt.Errorf("revieweval: case %s round %d: %w", c.Name, n, rerr)
+		}
+	}()
+
+	if n > 1 {
+		if serr := seedRoundHistory(st, c.Name, c.Rounds[idx-1], prevHead); serr != nil {
+			return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: %w", c.Name, n, serr)
+		}
+	}
+
+	fold, ferr := verifydeliver.FoldBefore(st, c.Name, n)
+	if ferr != nil {
+		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: fold: %w", c.Name, n, ferr)
+	}
+	man, merr := manifest.Resolve(repoDir)
+	if merr != nil {
+		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: resolve manifest: %w", c.Name, n, merr)
+	}
+
+	rnd, ok, rerr := verifydeliver.NewReviewerGateSource(backend).Round(verifydeliver.RoundInput{
+		Store: st, Ticket: c.Name, Round: n, LeaseDir: repoDir, RepoName: evalRepoName, Target: evalTarget,
+		Model: model, BriefPath: briefPath, Manifest: man, Open: fold.Open, Dismissed: fold.Dismissed,
+	})
+	if rerr != nil {
+		rs, handled := reviewerRoundFailure(n, r.Gold, r.Decisions, rerr)
+		if !handled {
+			return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: dispatch round: %w", c.Name, n, rerr)
+		}
+		return rs, head, nil
+	}
+	if !ok || rnd.Review == nil {
+		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: reviewer source returned no review content", c.Name, n)
+	}
+	result := rnd.Review.Result
+
+	reported, aerr := verifydeliver.ApplyRound(n, fold.Known, result, nil, alwaysNotGreen, man)
+	if aerr != nil {
+		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: apply round: %w", c.Name, n, aerr)
+	}
+	existsAtHead := func(file string) (bool, error) { return gitx.FileExistsAtRev(repoDir, head, file) }
+	cleared, clerr := verifydeliver.ClearingAfterTriage(fold.Known, reported, result.ReviewedPaths, existsAtHead)
+	if clerr != nil {
+		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: clearing: %w", c.Name, n, clerr)
+	}
+
+	judgeWorkDir := filepath.Join(workDir, "judge", fmt.Sprintf("round-%d", n))
+	match, matchErr := MatchRound(c.Name, n, repoDir, judgeWorkDir, r.Gold, r.Decisions, recordedLinks, dismissedFold(fold.Known), result.Findings, reported, judge)
+
+	// Whatever MatchRound did, the judge (if any) dispatched a session
+	// against this same case repo - check it changed nothing, then restore
+	// it to this round's head regardless, so a later round's patch apply
+	// never sees anything a live judge session left behind, tracked or not.
+	roErr := checkJudgeReadOnly(repoDir, head)
+	if restoreErr := restoreCaseRepo(repoDir, head); restoreErr != nil {
+		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: %w", c.Name, n, restoreErr)
+	}
+	if roErr != nil {
+		return failedRoundScore(n, r.Gold, r.Decisions, result.Findings, reported, "the judge changed the case repo"), head, nil
+	}
+	if matchErr != nil {
+		return failedRoundScore(n, r.Gold, r.Decisions, result.Findings, reported, matchErr.Error()), head, nil
+	}
+
+	return ScoreRound(n, r.Gold, r.Decisions, result.Findings, reported, cleared, match), head, nil
+}
+
+// RunCase runs every round of c in order, under workDir: a store (once)
+// and a repo (once), then per round (runRound), applies that round's
+// patch, seeds the store with the previous round's recorded history,
+// dispatches the real reviewer round, applies findings bookkeeping
+// (verifydeliver.ApplyRound, verifydeliver.ClearingAfterTriage), and scores
+// it (match.go, score.go).
+//
+// A round's own REVIEW_INVALID/REVIEW_FAILED result, or a judge failure (a
+// judge error, or the judge changing the case repo), scores that round
 // refused/failed (every seeded gold finding missed) but does not stop the
 // case: teacher-forcing means the next round's fold comes from the case's
-// recorded history, never from this run's own result, so it is unaffected.
-// Any other error is infrastructure and is returned.
+// recorded history, never from this run's own result, so it is
+// unaffected. Any other error is infrastructure and is returned.
 func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model string) (CaseScore, error) {
 	st, err := initEvalStore(workDir, c)
 	if err != nil {
@@ -217,87 +426,21 @@ func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model
 
 	cs := CaseScore{Name: c.Name, Passed: true}
 	var prevHead string
+	recordedLinks := map[string]Decision{}
 	for idx, r := range c.Rounds {
-		n := r.N
-
-		absPatch, err := filepath.Abs(r.PatchPath)
+		rs, head, err := runRound(workDir, st, c, idx, repoDir, briefPath, backend, judge, model, prevHead, recordedLinks)
 		if err != nil {
-			return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: resolve patch path: %w", c.Name, n, err)
+			return CaseScore{}, err
 		}
-		if _, err := gitx.Run(repoDir, "apply", absPatch); err != nil {
-			return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: apply patch: %w", c.Name, n, err)
-		}
-		if _, err := gitx.Run(repoDir, "add", "-A"); err != nil {
-			return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: git add: %w", c.Name, n, err)
-		}
-		if _, err := gitx.RunEnv(repoDir, identityEnv, "commit", "-q", "-m", fmt.Sprintf("revieweval: round %d", n)); err != nil {
-			return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: commit: %w", c.Name, n, err)
-		}
-		head, err := gitx.RevParse(repoDir, "HEAD")
-		if err != nil {
-			return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: resolve head: %w", c.Name, n, err)
-		}
-
-		if n > 1 {
-			if err := seedRoundHistory(st, c.Name, c.Rounds[idx-1], prevHead); err != nil {
-				return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: %w", c.Name, n, err)
-			}
-		}
-
-		fold, err := verifydeliver.FoldBefore(st, c.Name, n)
-		if err != nil {
-			return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: fold: %w", c.Name, n, err)
-		}
-		man, err := manifest.Resolve(repoDir)
-		if err != nil {
-			return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: resolve manifest: %w", c.Name, n, err)
-		}
-
-		rnd, ok, rerr := verifydeliver.NewReviewerGateSource(backend).Round(verifydeliver.RoundInput{
-			Store: st, Ticket: c.Name, Round: n, LeaseDir: repoDir, RepoName: evalRepoName, Target: evalTarget,
-			Model: model, BriefPath: briefPath, Manifest: man, Open: fold.Open, Dismissed: fold.Dismissed,
-		})
-		if rerr != nil {
-			rs, handled := reviewerRoundFailure(n, r.Gold, r.Decisions, rerr)
-			if !handled {
-				return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: dispatch round: %w", c.Name, n, rerr)
-			}
-			cs.Rounds = append(cs.Rounds, rs)
-			cs.Passed = false
-			prevHead = head
-			continue
-		}
-		if !ok || rnd.Review == nil {
-			return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: reviewer source returned no review content", c.Name, n)
-		}
-		result := rnd.Review.Result
-
-		reported, err := verifydeliver.ApplyRound(n, fold.Known, result, nil, alwaysNotGreen, man)
-		if err != nil {
-			return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: apply round: %w", c.Name, n, err)
-		}
-		existsAtHead := func(file string) (bool, error) { return gitx.FileExistsAtRev(repoDir, head, file) }
-		cleared, err := verifydeliver.ClearingAfterTriage(fold.Known, reported, result.ReviewedPaths, existsAtHead)
-		if err != nil {
-			return CaseScore{}, fmt.Errorf("revieweval: case %s round %d: clearing: %w", c.Name, n, err)
-		}
-
-		judgeWorkDir := filepath.Join(workDir, "judge", fmt.Sprintf("round-%d", n))
-		match, err := MatchRound(c.Name, n, repoDir, judgeWorkDir, r.Gold, r.Decisions, dismissedFold(fold.Known), result.Findings, reported, judge)
-		if err != nil {
-			rs := missedRoundScore(n, r.Gold, r.Decisions, err.Error())
-			rs.Failed = true
-			cs.Rounds = append(cs.Rounds, rs)
-			cs.Passed = false
-			prevHead = head
-			continue
-		}
-
-		rs := ScoreRound(n, r.Gold, r.Decisions, result.Findings, reported, cleared, match)
 		if !rs.Passed {
 			cs.Passed = false
 		}
 		cs.Rounds = append(cs.Rounds, rs)
+		for _, d := range r.Decisions {
+			if d.Recorded != "" {
+				recordedLinks[d.Recorded] = d
+			}
+		}
 		prevHead = head
 	}
 

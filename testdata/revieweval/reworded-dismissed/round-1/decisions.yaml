@@ -2,5 +2,6 @@ decisions:
   - id: labels-string-concat
     file: queue/labels.go
     lines: [5, 11]
-    description: Labels builds its result with += in a loop instead of strings.Builder; for typical queue sizes this is a defensible style choice, not a performance bug.
+    description: Labels builds its result with += inside a loop instead of strings.Builder, reallocating the growing string on every append.
     decision: dismissed
+    recorded: r1-f1
