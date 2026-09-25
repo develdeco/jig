@@ -207,6 +207,73 @@ func TestScoreRoundIsProvisionalWithUnlabeledNoise(t *testing.T) {
 	}
 }
 
+// findingIndexJudge answers Same for the finding indexes listed in same,
+// Different for every other candidate: a stand-in for a judge that
+// actively rejects noise, rather than merely staying silent (Undecided)
+// about it.
+type findingIndexJudge struct{ same map[int]bool }
+
+func (j findingIndexJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
+	out := make([]Verdict, len(q.Candidates))
+	for i, c := range q.Candidates {
+		if j.same[c.Finding] {
+			out[i] = Same
+		} else {
+			out[i] = Different
+		}
+	}
+	return out, nil
+}
+
+// TestMatchRoundThenScoreIsProvisionalWithAnHonestJudgeRejectingNoise
+// drives the same shape TestScoreRoundIsProvisionalWithUnlabeledNoise pins
+// against a hand-built RoundMatch - one real finding plus a pile nothing
+// has labeled - through the real matcher (MatchRound) and a judge that
+// actively rejects every junk candidate, rather than staying silent about
+// it: junk sitting inside the real finding's own structural window is
+// still told apart from it (Different), never stealing the gold match or
+// landing as a false alarm, and the round still reads PROVISIONAL, never a
+// clean PASS - an honest judge that rejects noise cannot make a shotgun
+// round look clean.
+func TestMatchRoundThenScoreIsProvisionalWithAnHonestJudgeRejectingNoise(t *testing.T) {
+	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "the real problem"}}}
+
+	var findings []verifydeliver.ResultFinding
+	var reported []verifydeliver.Finding
+	const realIdx = 0
+	for i, line := range []int{10, 7, 8, 9, 11, 12, 13} { // all within lineWindow (3) of the gold's line 10
+		title := fmt.Sprintf("junk at line %d", line)
+		if i == realIdx {
+			title = "the real problem"
+		}
+		findings = append(findings, verifydeliver.ResultFinding{File: "a.go", Line: line, Title: title, Action: verifydeliver.ActionFix, Risk: verifydeliver.RiskLow, RiskRationale: "r"})
+		reported = append(reported, verifydeliver.Finding{ID: fmt.Sprintf("r1-f%d", i), Status: verifydeliver.StatusOpen})
+	}
+	judge := findingIndexJudge{same: map[int]bool{realIdx: true}}
+
+	m, err := MatchRound("case", 1, "", "", gold, nil, nil, nil, findings, reported, judge)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	sc := ScoreRound(1, gold, nil, findings, reported, nil, m)
+
+	if len(sc.Found) != 1 || sc.Found[0] != "g1" {
+		t.Fatalf("Found = %v, want [g1]: the real finding must still match despite the surrounding noise", sc.Found)
+	}
+	if !sc.Passed {
+		t.Errorf("Passed = false, want true: nothing here is a false alarm, a relitigation or a wrong prior")
+	}
+	if sc.Verdict != VerdictProvisional {
+		t.Errorf("Verdict = %q, want %q: 6 findings the judge explicitly rejected are still unlabeled noise, not a clean pass", sc.Verdict, VerdictProvisional)
+	}
+	if len(sc.Pending) != 6 {
+		t.Fatalf("Pending = %d, want 6", len(sc.Pending))
+	}
+	if len(sc.FalseAlarms) != 0 {
+		t.Errorf("FalseAlarms = %v, want none: a Different verdict against a gold candidate is not a false alarm", sc.FalseAlarms)
+	}
+}
+
 // TestScoreRoundVerdictThreeValued pins verdictFor's own three cases
 // directly, isolated from ScoreRound's own field wiring.
 func TestScoreRoundVerdictThreeValued(t *testing.T) {
@@ -228,6 +295,50 @@ func TestScoreRoundVerdictThreeValued(t *testing.T) {
 	}
 }
 
+// TestRenderHeadlineNeverCountsProvisionalAsPassed pins the headline
+// against conflating "no failure" with "PASS": a case whose only round is
+// PROVISIONAL (CaseScore.Passed and RoundScore.Passed are both true - no
+// failure happened, but a finding is still unlabeled) must not be counted
+// as passed in RenderReport's totals line, and RenderJSON's "passed" field
+// must be false for it, whatever the older Passed bit still says.
+func TestRenderHeadlineNeverCountsProvisionalAsPassed(t *testing.T) {
+	cs := CaseScore{Name: "c", Passed: true, Verdict: VerdictProvisional, Rounds: []RoundScore{
+		{Round: 1, Found: []string{"g"}, Pending: []string{"junk"}, Passed: true, Verdict: VerdictProvisional},
+	}}
+
+	report := RenderReport([]CaseScore{cs})
+	if strings.Contains(report, "cases passed 1/1") || strings.Contains(report, "rounds passed 1/1") {
+		t.Errorf("report totals count a PROVISIONAL-only run as passed:\n%s", report)
+	}
+	if !strings.Contains(report, "cases passed 0/1, rounds passed 0/1") {
+		t.Errorf("report totals do not read 0/1 for a run with no PASS verdict:\n%s", report)
+	}
+	if !strings.Contains(report, "cases: PASS 0, PROVISIONAL 1, FAIL 0; rounds: PASS 0, PROVISIONAL 1, FAIL 0") {
+		t.Errorf("report verdict breakdown missing the PROVISIONAL count:\n%s", report)
+	}
+
+	data, err := RenderJSON([]CaseScore{cs})
+	if err != nil {
+		t.Fatalf("RenderJSON: %v", err)
+	}
+	var out []struct {
+		Passed  bool         `json:"passed"`
+		Verdict RoundVerdict `json:"verdict"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("parse RenderJSON output: %v\n%s", err, data)
+	}
+	if len(out) != 1 {
+		t.Fatalf("want 1 case, got %d", len(out))
+	}
+	if out[0].Passed {
+		t.Errorf(`RenderJSON: passed=true for a PROVISIONAL verdict, want false - "passed" means verdict == PASS`)
+	}
+	if out[0].Verdict != VerdictProvisional {
+		t.Errorf("RenderJSON: verdict=%q, want PROVISIONAL", out[0].Verdict)
+	}
+}
+
 // TestRenderReportRecallNAWithZeroSeededGold: a corpus round with
 // no seeded gold at all (an exhaustive round with nothing to find, say)
 // must not render "recall 0.00" - there was nothing to recall, n/a, the
@@ -242,6 +353,19 @@ func TestRenderReportRecallNAWithZeroSeededGold(t *testing.T) {
 	}
 	if strings.Contains(report, "recall 0.") {
 		t.Errorf("report = %q, want no numeric recall", report)
+	}
+}
+
+// TestRenderReportRoundLineShowsPendingCount pins that every round line
+// carries its own pending count, not only the totals: a person scanning
+// per-round lines must be able to see which round has unlabeled findings.
+func TestRenderReportRoundLineShowsPendingCount(t *testing.T) {
+	scores := []CaseScore{{Name: "c1", Passed: true, Verdict: VerdictProvisional, Rounds: []RoundScore{
+		{Round: 1, Found: []string{"g1"}, Pending: []string{"junk1", "junk2"}, Passed: true, Verdict: VerdictProvisional},
+	}}}
+	report := RenderReport(scores)
+	if !strings.Contains(report, "c1 round 1: PROVISIONAL found=1/1 pending=2") {
+		t.Errorf("round line missing its own pending count; got:\n%s", report)
 	}
 }
 

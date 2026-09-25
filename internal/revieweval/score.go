@@ -257,7 +257,7 @@ func ScoreRound(round int, gold Gold, decisions []Decision, findings []verifydel
 func RenderReport(scores []CaseScore) string {
 	var b strings.Builder
 
-	var casesPassed, roundsTotal, roundsPassed int
+	var roundsTotal int
 	var casesByVerdict, roundsByVerdict [3]int // indexed by verdictRank: pass, provisional, fail
 	var totalFound, totalGold int
 	var totalLost, totalForgotten, totalDropped, totalMisattributed int
@@ -270,15 +270,9 @@ func RenderReport(scores []CaseScore) string {
 	var fpGoldRounds int
 
 	for _, s := range scores {
-		if s.Passed {
-			casesPassed++
-		}
 		casesByVerdict[verdictRank(s.Verdict)]++
 		for _, r := range s.Rounds {
 			roundsTotal++
-			if r.Passed {
-				roundsPassed++
-			}
 			roundsByVerdict[verdictRank(r.Verdict)]++
 			gold := len(r.Found) + len(r.Missed)
 			fmt.Fprintf(&b, "%s round %d: %s found=%d/%d pending=%d", s.Name, r.Round, r.Verdict, len(r.Found), gold, len(r.Pending))
@@ -350,7 +344,11 @@ func RenderReport(scores []CaseScore) string {
 		triagePerCase = float64(totalTriagePrompts) / float64(len(scores))
 	}
 
-	fmt.Fprintf(&b, "\ntotals: cases passed %d/%d, rounds passed %d/%d, recall %s\n", casesPassed, len(scores), roundsPassed, roundsTotal, recall)
+	// "passed" here means verdict == PASS, never Passed alone: a
+	// PROVISIONAL round or case has no failure either, but the headline a
+	// person reads first must not call unlabeled noise a pass.
+	fmt.Fprintf(&b, "\ntotals: cases passed %d/%d, rounds passed %d/%d, recall %s\n",
+		casesByVerdict[verdictRank(VerdictPass)], len(scores), roundsByVerdict[verdictRank(VerdictPass)], roundsTotal, recall)
 	fmt.Fprintf(&b, "cases: %s %d, %s %d, %s %d; rounds: %s %d, %s %d, %s %d\n",
 		VerdictPass, casesByVerdict[verdictRank(VerdictPass)], VerdictProvisional, casesByVerdict[verdictRank(VerdictProvisional)], VerdictFail, casesByVerdict[verdictRank(VerdictFail)],
 		VerdictPass, roundsByVerdict[verdictRank(VerdictPass)], VerdictProvisional, roundsByVerdict[verdictRank(VerdictProvisional)], VerdictFail, roundsByVerdict[verdictRank(VerdictFail)])
@@ -405,7 +403,13 @@ type jsonRoundReport struct {
 }
 
 type jsonCaseReport struct {
-	Name    string            `json:"name"`
+	Name string `json:"name"`
+	// Passed means Verdict == PASS, not CaseScore.Passed's own "no
+	// failure" bit: a consumer reading this field alone must not read a
+	// PROVISIONAL case (a failure-free case that still has unlabeled
+	// findings) as a pass. Verdict is the field to read for the
+	// three-valued outcome; Passed exists as the plain-bool shape some
+	// consumers want, derived from it.
 	Passed  bool              `json:"passed"`
 	Verdict RoundVerdict      `json:"verdict"`
 	Rounds  []jsonRoundReport `json:"rounds"`
@@ -418,7 +422,7 @@ type jsonCaseReport struct {
 func RenderJSON(scores []CaseScore) ([]byte, error) {
 	out := make([]jsonCaseReport, 0, len(scores))
 	for _, s := range scores {
-		jc := jsonCaseReport{Name: s.Name, Passed: s.Passed, Verdict: s.Verdict}
+		jc := jsonCaseReport{Name: s.Name, Passed: s.Verdict == VerdictPass, Verdict: s.Verdict}
 		for _, r := range s.Rounds {
 			jc.Rounds = append(jc.Rounds, jsonRoundReport{
 				Round: r.Round, Verdict: r.Verdict, Refused: r.Refused, Failed: r.Failed, Reason: r.Reason,

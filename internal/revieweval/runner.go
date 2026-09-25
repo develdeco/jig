@@ -445,6 +445,20 @@ func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string,
 	return ScoreRound(n, r.Gold, r.Decisions, result.Findings, reported, cleared, match), head, nil
 }
 
+// accumulateCaseVerdict folds one just-scored round into the case's own
+// running Passed and Verdict: Passed goes false on any round's own failure
+// and never back to true once it does, and Verdict takes the worst
+// (verdictRank) of every round seen so far, whatever order they ran in - a
+// case takes its worst round, never merely its last one.
+func accumulateCaseVerdict(cs *CaseScore, rs RoundScore) {
+	if !rs.Passed {
+		cs.Passed = false
+	}
+	if verdictRank(rs.Verdict) > verdictRank(cs.Verdict) {
+		cs.Verdict = rs.Verdict
+	}
+}
+
 // RunCase runs every round of c in order, under workDir: a store (once)
 // and a repo (once), then per round (runRound), applies that round's
 // patch, seeds the store with the previous round's recorded history,
@@ -495,12 +509,7 @@ func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model
 		if rerr != nil {
 			return CaseScore{}, rerr
 		}
-		if !rs.Passed {
-			cs.Passed = false
-		}
-		if verdictRank(rs.Verdict) > verdictRank(cs.Verdict) {
-			cs.Verdict = rs.Verdict
-		}
+		accumulateCaseVerdict(&cs, rs)
 		cs.Rounds = append(cs.Rounds, rs)
 		for _, d := range r.Decisions {
 			if d.Recorded != "" {

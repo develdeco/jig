@@ -66,18 +66,39 @@ type Options struct {
 	Env []string // headless
 }
 
-// New constructs a Backend by name: "fake", "headless", or "herdr".
+// New constructs a Backend by name: "fake", "headless", or "herdr". Only
+// "headless" ever applies Options.Env to a dispatched child (childEnv); a
+// non-nil Env given to a backend that cannot apply it fails closed here,
+// rather than silently dispatching that backend's child under whatever
+// environment it would otherwise inherit - the exact silent drop herdr's
+// own Run demonstrated before this check existed (newHerdrBackend accepted
+// Options but had no env field at all). A caller that filters its own
+// environment before handing it to session.New (internal/revieweval's live
+// path above all) can trust that its filtering either reaches the child or
+// the construction fails, never that it was quietly ignored.
 func New(name string, opts Options) (Backend, error) {
 	switch name {
 	case "fake":
+		if opts.Env != nil {
+			return nil, envUnsupportedError(name)
+		}
 		return newFakeBackend(opts), nil
 	case "headless":
 		return newHeadlessBackend(opts), nil
 	case "herdr":
+		if opts.Env != nil {
+			return nil, envUnsupportedError(name)
+		}
 		return newHerdrBackend(opts), nil
 	default:
 		return nil, fmt.Errorf("session: unknown backend %q", name)
 	}
+}
+
+// envUnsupportedError names both the option and the backend that cannot
+// apply it, for New's own fail-closed check above.
+func envUnsupportedError(backend string) error {
+	return fmt.Errorf("session: Options.Env is set, but backend %q cannot apply it; leave Env nil or dispatch through a backend that supports it (headless)", backend)
 }
 
 // Available reports whether the program the named backend runs is on PATH,

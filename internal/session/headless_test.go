@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -473,6 +474,36 @@ func TestHeadlessRunGivenEnvIsExact(t *testing.T) {
 		if !got[kv] {
 			t.Errorf("child env missing %q, got %v", kv, call.Env)
 		}
+	}
+}
+
+// TestChildEnvDropsPWDCaseInsensitivelyOnWindows pins childEnv's own goos
+// distinction directly (a unit test of the function itself, so it runs
+// the same on every host this package's tests run on, rather than
+// depending on the real runtime.GOOS the New/Run path would use): on
+// windows a differently-cased Pwd/OldPwd entry is still dropped before
+// the dispatch's own PWD is appended, exactly like a canonical PWD/OLDPWD
+// (TestHeadlessRunGivenEnvIsExact); off windows only an exact-case match
+// is, so a mixed-case Pwd/OldPwd instead survives untouched alongside the
+// appended PWD.
+func TestChildEnvDropsPWDCaseInsensitivelyOnWindows(t *testing.T) {
+	worktree := filepath.Join("some", "worktree")
+	in := []string{"FOO=bar", "Pwd=" + filepath.Join("stale", "pwd"), "OldPwd=" + filepath.Join("stale", "oldpwd")}
+
+	got := childEnv("windows", in, worktree)
+	want := []string{"FOO=bar", "PWD=" + worktree}
+	sort.Strings(got)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("childEnv(windows, ...) = %v, want %v: a mixed-case Pwd/OldPwd must be dropped like a canonical one", got, want)
+	}
+
+	gotLinux := childEnv("linux", in, worktree)
+	wantLinux := []string{"FOO=bar", "Pwd=" + filepath.Join("stale", "pwd"), "OldPwd=" + filepath.Join("stale", "oldpwd"), "PWD=" + worktree}
+	sort.Strings(gotLinux)
+	sort.Strings(wantLinux)
+	if !reflect.DeepEqual(gotLinux, wantLinux) {
+		t.Errorf("childEnv(linux, ...) = %v, want %v: only an exact-case PWD/OLDPWD is dropped off windows", gotLinux, wantLinux)
 	}
 }
 

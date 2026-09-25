@@ -7,8 +7,109 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/session"
 )
+
+// --- a case's own verdict is its worst round's, never its last's -----------
+
+// TestAccumulateCaseVerdictTakesTheWorstRoundNotTheLast pins
+// accumulateCaseVerdict's own contract directly: folding a FAIL (or
+// PROVISIONAL) round followed by a PASS round must leave the case's own
+// Verdict at the worse of the two, in either order - "last round wins"
+// would leave PASS after this exact sequence.
+func TestAccumulateCaseVerdictTakesTheWorstRoundNotTheLast(t *testing.T) {
+	// passedFor mirrors verdictFor's own contract (score.go): a round's
+	// Passed bit is false exactly when its Verdict is FAIL, true for PASS
+	// and PROVISIONAL alike - so each synthetic RoundScore below is an
+	// internally consistent round, the same shape runRound ever actually
+	// produces.
+	passedFor := func(v RoundVerdict) bool { return v != VerdictFail }
+
+	for _, tc := range []struct {
+		name           string
+		first, second  RoundVerdict
+		wantVerdict    RoundVerdict
+		wantCasePassed bool
+	}{
+		{"fail-then-pass-stays-fail", VerdictFail, VerdictPass, VerdictFail, false},
+		{"provisional-then-pass-stays-provisional", VerdictProvisional, VerdictPass, VerdictProvisional, true},
+		{"pass-then-fail-becomes-fail", VerdictPass, VerdictFail, VerdictFail, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := CaseScore{Verdict: VerdictPass, Passed: true}
+			accumulateCaseVerdict(&cs, RoundScore{Round: 1, Verdict: tc.first, Passed: passedFor(tc.first)})
+			accumulateCaseVerdict(&cs, RoundScore{Round: 2, Verdict: tc.second, Passed: passedFor(tc.second)})
+			if cs.Verdict != tc.wantVerdict {
+				t.Errorf("Verdict = %q, want %q", cs.Verdict, tc.wantVerdict)
+			}
+			if cs.Passed != tc.wantCasePassed {
+				t.Errorf("Passed = %v, want %v", cs.Passed, tc.wantCasePassed)
+			}
+		})
+	}
+}
+
+// --- verdictRank orders worst-first: FAIL > PROVISIONAL > PASS -------------
+
+// TestVerdictRankOrdersWorstFirst pins the numeric order
+// accumulateCaseVerdict and RenderReport's totals both depend on: swapping
+// FAIL's and PROVISIONAL's own ranks would flip which one a mixed case or
+// report line keeps.
+func TestVerdictRankOrdersWorstFirst(t *testing.T) {
+	if verdictRank(VerdictFail) <= verdictRank(VerdictProvisional) {
+		t.Errorf("verdictRank(FAIL) = %d, want it to outrank verdictRank(PROVISIONAL) = %d", verdictRank(VerdictFail), verdictRank(VerdictProvisional))
+	}
+	if verdictRank(VerdictProvisional) <= verdictRank(VerdictPass) {
+		t.Errorf("verdictRank(PROVISIONAL) = %d, want it to outrank verdictRank(PASS) = %d", verdictRank(VerdictProvisional), verdictRank(VerdictPass))
+	}
+}
+
+// --- a failed or refused round is scored FAIL, never PASS ------------------
+
+// TestMissedRoundScoreVerdictIsFail pins missedRoundScore's own Verdict:
+// every path that never reached a scoreable result (a dispatch error, a
+// judge failure, the judge changing the repo) builds its RoundScore through
+// this helper, and none of them may read as a pass.
+func TestMissedRoundScoreVerdictIsFail(t *testing.T) {
+	rs := missedRoundScore(1, Gold{Findings: []GoldFinding{{ID: "g1"}}}, nil, "some reason")
+	if rs.Verdict != VerdictFail {
+		t.Errorf("Verdict = %q, want %q", rs.Verdict, VerdictFail)
+	}
+	if rs.Passed {
+		t.Errorf("Passed = true, want false: RoundScore.Passed is never set true by missedRoundScore")
+	}
+}
+
+// TestReviewerRoundFailureRefusedAndFailedBothScoreFail: a REVIEW_INVALID
+// result (Refused) and a REVIEW_FAILED one (Failed) are two different
+// reasons a round never produced a scoreable review, but both must land on
+// the same FAIL verdict - the round line's Refused/Failed flags are for a
+// person to tell them apart, not the verdict a program reads.
+func TestReviewerRoundFailureRefusedAndFailedBothScoreFail(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		code                    string
+		wantRefused, wantFailed bool
+	}{
+		{"review-invalid-is-refused", "REVIEW_INVALID", true, false},
+		{"review-failed-is-failed", "REVIEW_FAILED", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := &axi.Error{Code: tc.code, Msg: "boom"}
+			rs, handled := reviewerRoundFailure(1, Gold{}, nil, err)
+			if !handled {
+				t.Fatal("reviewerRoundFailure: want handled=true for a review-outcome error")
+			}
+			if rs.Verdict != VerdictFail {
+				t.Errorf("Verdict = %q, want %q", rs.Verdict, VerdictFail)
+			}
+			if rs.Refused != tc.wantRefused || rs.Failed != tc.wantFailed {
+				t.Errorf("Refused=%v Failed=%v, want Refused=%v Failed=%v", rs.Refused, rs.Failed, tc.wantRefused, tc.wantFailed)
+			}
+		})
+	}
+}
 
 // repoMutatingJudge confirms every candidate Undecided (survives any
 // non-line0 structural edge, which is all the tests below need) but first
@@ -271,6 +372,16 @@ func TestRunCaseDeletesWorkAndJudgeDirsAfterScoring(t *testing.T) {
 	}
 	if _, err := os.Stat(judgeDir); !os.IsNotExist(err) {
 		t.Errorf("judge scratch dir %s still exists (err=%v), want it deleted once the case ends", judgeDir, err)
+	}
+	// judgeDir is judgeRoot/round-1, which retireRoundWork already deletes
+	// per round; the root itself (RunCase's own os.MkdirTemp) is a
+	// separate removal (its own defer), so it must be checked on its own -
+	// an empty judgeRoot left behind is not caught by judgeDir's own check
+	// above, or by the "exactly [repo store]" listing below, since
+	// judgeRoot never sits under workDir at all.
+	judgeRoot := filepath.Dir(judgeDir)
+	if _, err := os.Stat(judgeRoot); !os.IsNotExist(err) {
+		t.Errorf("judge scratch root %s still exists (err=%v), want it deleted after RunCase returns", judgeRoot, err)
 	}
 
 	entries, err := os.ReadDir(workDir)

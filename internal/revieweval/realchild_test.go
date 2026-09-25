@@ -18,12 +18,15 @@ import (
 // buildClaudeStub compiles testdata/fixture/claudestub (repo root) - the
 // same fake `claude` internal/session's own hermetic tests drive - into a
 // temp dir and returns that dir, ready to prepend to PATH so it is found
-// under its own, unremarkable name: nothing about this stub names this
-// package or any case. Built once per call; the one test below that needs
-// it calls this once.
+// under its own, unremarkable name: nothing about this stub, or the dir it
+// builds into, names this package or any case - "jig-claude-stub", not
+// "jig-revieweval-bin", so PATH itself carries no leak-vocabulary token
+// once this dir is prepended to it (the real-child leak test below scans
+// PATH along with everything else in the child's env). Built once per
+// call; the one test below that needs it calls this once.
 func buildClaudeStub(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "jig-revieweval-bin")
+	dir, err := os.MkdirTemp("", "jig-claude-stub")
 	if err != nil {
 		t.Fatalf("revieweval: create build dir: %v", err)
 	}
@@ -211,15 +214,9 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 		t.Fatalf("test bug: recorded %d worktrees for %d calls", len(worktrees), len(calls))
 	}
 
-	testEnv := map[string]string{}
-	for _, kv := range os.Environ() {
-		name, val, _ := strings.Cut(kv, "=")
-		testEnv[name] = val
-	}
-
 	for i, call := range calls {
 		for _, kv := range call.Env {
-			name, val, _ := strings.Cut(kv, "=")
+			name, _, _ := strings.Cut(kv, "=")
 			upper := strings.ToUpper(name)
 			if strings.HasPrefix(upper, "JIG_") {
 				t.Errorf("call %d: child env carries a JIG_-prefixed variable %q", i, kv)
@@ -230,12 +227,16 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 			if strings.HasPrefix(name, "CLAUDE_STUB_") {
 				continue // the stub's own knobs, test scaffolding for itself
 			}
-			if tv, ok := testEnv[name]; ok && tv == val {
-				continue // unchanged from this test process's own value
-			}
+			// Every other value is scanned, whether or not it happens to
+			// equal this test process's own: a value already present,
+			// unchanged, before dispatchEnv ever ran (PATH's own stub-dir
+			// prefix aside, which prepending the stub changes) is exactly
+			// as visible to the real child as a value dispatchEnv itself
+			// altered, and a regression that leaked one through would go
+			// uncaught by a check that only looked at what changed.
 			for _, tok := range leakTokens(kv) {
 				if leakVocabulary[tok] {
-					t.Errorf("call %d: child env variable %q (changed from this process's own) contains leak token %q", i, kv, tok)
+					t.Errorf("call %d: child env variable %q contains leak token %q", i, kv, tok)
 				}
 			}
 		}
@@ -247,7 +248,9 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 				pwd, hasPWD = val, true
 			}
 		}
-		if hasPWD && !sameDirOrFatal(t, pwd, worktrees[i]) {
+		if !hasPWD {
+			t.Errorf("call %d: child env carries no PWD, want it set to the dispatch worktree %q", i, worktrees[i])
+		} else if !sameDirOrFatal(t, pwd, worktrees[i]) {
 			t.Errorf("call %d: PWD=%q, want the dispatch worktree %q", i, pwd, worktrees[i])
 		}
 		if !sameDirOrFatal(t, call.Cwd, worktrees[i]) {
