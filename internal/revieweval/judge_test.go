@@ -143,10 +143,20 @@ func TestModelJudgeConfirmRejectsAKeyRepeatedInOneObject(t *testing.T) {
 // gold/trap/decision/dismissed a candidate's point is, since the judge is
 // asked the same one question for every candidate.
 func TestJudgePromptNeverNamesAPointKind(t *testing.T) {
-	prompt := fmt.Sprintf(judgePromptTemplate, 1, "case", "judge.json", "verdicts.json")
+	prompt := fmt.Sprintf(judgePromptTemplate, 1, "judge.json", "verdicts.json")
 	for _, word := range []string{"seeded", "trap", "decision", "dismissed", "gold"} {
 		if strings.Contains(strings.ToLower(prompt), word) {
 			t.Errorf("prompt contains %q: the judge must not be told which kind of point a candidate is", word)
 		}
+	}
+}
+
+// TestJudgePromptTemplateHasNoRoomForACaseName pins the prompt template
+// itself: judgePromptTemplate takes exactly round, the
+// judge.json path and the verdicts.json path - three verbs, no fourth slot
+// a case name could ever be threaded through, however the caller changed.
+func TestJudgePromptTemplateHasNoRoomForACaseName(t *testing.T) {
+	if n := strings.Count(judgePromptTemplate, "%"); n != 3 {
+		t.Fatalf("judgePromptTemplate has %d format verbs, want exactly 3 (round, judge.json path, verdicts.json path)", n)
 	}
 }

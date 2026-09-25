@@ -108,11 +108,24 @@ func TestEvalLive(t *testing.T) {
 		t.Fatalf("revieweval: load corpus: %v", err)
 	}
 
+	// A report always lands on disk: JIG_REVIEWEVAL_REPORT unset falls
+	// back to a stable default under os.TempDir(), never t.TempDir() (which
+	// vanishes the moment this test ends, so nobody could ever find it
+	// afterward).
 	reportPath := os.Getenv("JIG_REVIEWEVAL_REPORT")
+	if reportPath == "" {
+		reportDir := filepath.Join(os.TempDir(), "jig-revieweval")
+		if err := os.MkdirAll(reportDir, 0o755); err != nil {
+			t.Fatalf("revieweval: create default report dir: %v", err)
+		}
+		reportPath = filepath.Join(reportDir, "report.txt")
+	}
+	t.Logf("revieweval: writing the report to %s (and %s.json)", reportPath, reportPath)
+
 	workRoot := t.TempDir()
 	scores := make([]CaseScore, 0, len(cases))
 	for _, c := range cases {
-		dir := filepath.Join(workRoot, c.Name)
+		dir := filepath.Join(workRoot, runID(c.Name))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("revieweval: create work dir for %s: %v", c.Name, err)
 		}
@@ -121,22 +134,27 @@ func TestEvalLive(t *testing.T) {
 			t.Fatalf("revieweval: run case %s: %v", c.Name, err)
 		}
 		scores = append(scores, sc)
+		// This case's own lines only, as it finishes - the full report
+		// (below, once, after the loop) would otherwise be logged once per
+		// case and grow unreadable well before the corpus finishes.
+		t.Log(RenderReport([]CaseScore{sc}))
 
+		// Rewritten after every case, not only at the end, so a timeout or
+		// panic partway through the corpus still leaves a report for
+		// whatever finished.
 		report := RenderReport(scores)
-		t.Log(report)
-		if reportPath != "" {
-			if err := os.WriteFile(reportPath, []byte(report), 0o644); err != nil {
-				t.Fatalf("revieweval: write report to %s: %v", reportPath, err)
-			}
-			jsonData, err := RenderJSON(scores)
-			if err != nil {
-				t.Fatalf("revieweval: render JSON report: %v", err)
-			}
-			if err := os.WriteFile(reportPath+".json", jsonData, 0o644); err != nil {
-				t.Fatalf("revieweval: write JSON report to %s.json: %v", reportPath, err)
-			}
+		if err := os.WriteFile(reportPath, []byte(report), 0o644); err != nil {
+			t.Fatalf("revieweval: write report to %s: %v", reportPath, err)
+		}
+		jsonData, err := RenderJSON(scores)
+		if err != nil {
+			t.Fatalf("revieweval: render JSON report: %v", err)
+		}
+		if err := os.WriteFile(reportPath+".json", jsonData, 0o644); err != nil {
+			t.Fatalf("revieweval: write JSON report to %s.json: %v", reportPath, err)
 		}
 	}
+	t.Log(RenderReport(scores))
 
 	// A Failed round is infrastructure trouble (dispatch failure, judge
 	// failure, the judge changing the case repo), not a review-quality

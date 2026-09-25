@@ -45,8 +45,10 @@ type judgeFileJSON struct {
 // with (a seeded finding, a trap, a decision, or an earlier dismissed
 // finding) - the prompt never names or distinguishes those kinds, so the
 // judge cannot use which kind a point is as a shortcut for whether it
-// matches.
-const judgePromptTemplate = `You are judging round %d of case %s. Your input is %s: a list of candidates, each a point (a problem description) paired with one of this round's reported findings that structurally sits near it.
+// matches. It never names the case either: the round number alone
+// identifies this dispatch, so the live measurement is never primed with
+// which case is under judgment.
+const judgePromptTemplate = `You are judging round %d of a code review. Your input is %s: a list of candidates, each a point (a problem description) paired with one of this round's reported findings that structurally sits near it.
 For each candidate, decide whether the finding raises the SAME problem as the point's description, or a DIFFERENT one that merely sits near it in the file.
 When finished, write %s with exactly one JSON object: {"verdicts": [{"candidate": 0, "same": true}]}, exactly one entry per candidate index, in any order, no unknown keys.`
 
@@ -85,9 +87,15 @@ func (j *ModelJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 		return nil, fmt.Errorf("revieweval: judge: remove stale verdicts.json: %w", err)
 	}
 
-	prompt := fmt.Sprintf(judgePromptTemplate, q.Round, q.Case, judgePath, verdictsPath)
+	prompt := fmt.Sprintf(judgePromptTemplate, q.Round, judgePath, verdictsPath)
 	dispatch := session.Dispatch{
-		Ticket:     q.Case,
+		// Ticket is the case's own opaque run id (runID), never q.Case:
+		// this is a real dispatch, and nothing it carries may name the
+		// case, the same as the reviewer's own RoundInput.Ticket. q.Case
+		// itself is left alone - JudgeQuery.Case still carries the real
+		// name for anything that is not a live dispatch (a test fixture
+		// locating its own file by case name, say).
+		Ticket:     runID(q.Case),
 		Slice:      "judge",
 		Attempt:    q.Round,
 		Worktree:   q.RepoDir,

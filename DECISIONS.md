@@ -767,17 +767,15 @@ above:
 
 ## Review eval
 
-- `internal/verifydeliver` gains one exported function beyond the reviewer
-  contract itself: `Fold` and `FoldBefore(st, ticket, round)`, replacing the
-  three unexported helpers `Gate` wired together inline
+- `internal/verifydeliver` gains one type and one function beyond the
+  reviewer contract itself: `Fold` and `FoldBefore(st, ticket, round)`,
+  replacing the three unexported helpers `Gate` wired together inline
   (`cumulativeFindings`, `openAndNotedFindingsList`,
   `dismissedFindingsList`/`toDismissedFindingList`). `Gate`'s own behavior
   is otherwise unchanged: a fold error now carries one more wrap
-  (`FoldBefore`'s own, under `Gate`'s existing one), since the helper
-  that used to return `cumulativeFindings`'s error straight through now
-  wraps it itself; the eval package calls the same `FoldBefore` a real
-  gate round does, so the two can never quietly disagree about what a
-  round's history is.
+  (`FoldBefore`'s own, under `Gate`'s existing one); the eval package
+  calls the same `FoldBefore` a real gate round does, so the two can
+  never quietly disagree about what a round's history is.
 - The eval never calls jig's routing or triage step (`route.go`'s
   `routeRound`, `DefaultTriage`): a round's score comes straight from
   `verifydeliver.ApplyRound`'s own status assignment and
@@ -785,47 +783,57 @@ above:
   finding carries before any human, or `--yes`, decides it. Calling triage
   too would fold jig's own default-approval policy into a review-quality
   number, which is a property of jig's config, not of the reviewer.
-- `ApplyRound`'s `sliceGreen` callback always answers false for every
-  eval round: the eval never builds a fix slice, so no finding's earlier
-  attempt can ever have actually gone green, and every re-reported finding
+- `ApplyRound`'s `sliceGreen` callback always answers false for every eval
+  round: the eval never builds a fix slice, so every re-reported finding
   is scored as a fresh occurrence rather than a counted recurrence a
-  finished fix slice would explain. A case that wants to test the
-  recurrence bound itself seeds that directly in a round's own
-  `findings.yaml` (its `recurrences` field; `gold.yaml` has none), not by
-  faking a green slice.
-- A `decisions.yaml` entry may carry an optional `recorded: <id>` naming a
-  finding in that same round's own `findings.yaml`: the loader checks the
-  id exists there, has the decision's own `file`, and a status consistent
-  with the decision (`dismissed` needs `dismissed`, `kept` needs `open` or
-  `asked`), and rejects two decisions naming the same record. A later
-  round's dismissed-fold point for that finding then takes the union of
-  its one recorded line and the decision's own span, described by the
-  decision rather than the bare stored title, since the person who
-  dismissed it judged the span the decision names, not just the one line
-  the store kept.
-- Seeded gold findings are matched to a round's reported findings by a
-  maximum bipartite matching (Kuhn's augmenting-path algorithm), not a
-  first-fit greedy pairing: a greedy match can leave two mutually
-  satisfiable findings starving each other depending on the order it
-  happens to consider them in, understating recall on exactly the cases
-  most worth catching (two real bugs seeded close together in the same
-  file). A matcher test pins a case a greedy matcher gets wrong and this
-  one does not. Among the maximum matchings Kuhn's algorithm could return,
-  findings are augmented in order of their own best-supported edge (the
-  judge said Same, then the finding's status agrees with the gold action,
-  then its line sits inside the span itself, then result order), so which
-  finding claims a gold entry two of them could both satisfy depends on
-  how well-supported each pairing is, not on the order results happened to
-  come back in.
-- The judge is asked once per round with every candidate of that round's
-  whole batch, not once per candidate: a per-candidate dispatch would
-  multiply session count and latency by the candidate count for no
-  accuracy gain, since nothing about one candidate's verdict depends on
-  another's. Every candidate is asked the identical question regardless of
-  which of the four point sources it came from, and the prompt never
-  names or distinguishes them: the judge's only signal is each `Point`'s
-  own description, so it has no kind-based shortcut around actually
-  comparing the finding to the problem the point describes.
+  finished fix slice would explain.
+- Every case runs under an opaque id, `runID(name)` ("c-" plus the first 8
+  hex characters of a sha256 of the case name), never the case name
+  itself: the store ticket, `RoundInput.Ticket` (which the reviewer's own
+  prompt embeds verbatim), the judge's own dispatch ticket, and every path
+  under a run's work root are named after the id, and the case repo's
+  commit messages stay neutral ("base", "round N") for the same reason -
+  nothing a live reviewer or judge session reads may say which case it is
+  looking at, or that it is a case at all. `CaseScore.Name`,
+  `JudgeQuery.Case` and every error message still carry the real name,
+  since only what a live dispatch itself reads or is keyed by may never
+  see it.
+- A finding whose own `prior` names a dismissed fold point in the same
+  file is a structural candidate for that point regardless of its line,
+  line 0 included: citing the id is itself location evidence, so that one
+  candidate survives on anything but an explicit judge Different, without
+  the extra burden of an explicit Same a line-0 finding otherwise needs.
+  A prior naming a point in another file, or one the judge rejects, is
+  simply no edge, so the existing wrong-prior rule (below) still catches
+  it.
+- Seeded gold findings are matched to a round's reported findings by
+  `bestMatching`, the Hungarian algorithm run over lexicographic score
+  vectors rather than one packed integer (lexicographic order is a total
+  order addition preserves, so the potentials work unchanged and nothing
+  can overflow). It finds the exact maximum-weight matching among
+  maximum-cardinality matchings in polynomial time; an exhaustive search
+  would also be exact, but a captured case with a dozen seeded findings
+  would already take billions of steps. A test checks it against an
+  exhaustive reference on two thousand seeded random instances, and
+  another runs a round no exhaustive search could finish. Two matchings
+  are compared by a lexicographic tuple - cardinality first, then how many
+  edges the judge confirmed Same, then how many cite the gold's own
+  prior, then summed line closeness - and never by a finding's status or
+  action, since those are exactly what the score then measures. The last
+  field, how early the paired findings were reported, only decides
+  between matchings the evidence cannot tell apart.
+- A dismissed fold point's span and description ordinarily come from its
+  one recorded line and its recorded title and detail; when a decision
+  names it (`decisions.yaml`'s optional `recorded: <id>`) and that
+  decision's own file still matches the fold's current one, the point
+  instead takes the union of the decision's own span with the record's
+  own line as the loader captured it (`Decision.RecordedLine`), described
+  by the decision itself - never the fold's latest occurrence of that id,
+  which a re-report could have moved. A file mismatch skips the link
+  rather than trust a pairing the decision never actually judged. The
+  loader itself rejects a `recorded` line outside the decision's own span
+  widened by `lineWindow`, and a second decision anywhere in the case, not
+  only the same round, naming a record another decision already claimed.
 - Rule 1 of `classifyUnmatched` (a dismissed status is a permitted repeat)
   requires the finding to also carry a surviving structural edge to the
   dismissed fold point its own `prior` names; without one it is a new
@@ -833,43 +841,38 @@ above:
   `ApplyRound`'s own bookkeeping trusts a reported `prior` id without
   checking what it structurally points at, so a citation of the right id
   for the wrong reason must not silently score as a repeat.
-- After every round, the runner moves the case's store-side `work` dir
-  (every `review.json`/`result.json` a dispatch wrote) to
-  `<workDir>/rounds/round-N/work`, so a later round's reviewer or judge
-  dispatch can never read a live result still sitting where the store
-  would otherwise keep it - the file-level guarantee that makes
-  teacher-forcing actually hold rather than merely relying on the fold's
-  own read path.
-- `RoundScore` carries `FalsePositiveGold`: whether a round's own gold
-  could produce a false alarm at all (a trap, a dismissed decision, or an
-  exhaustive round). `RenderReport`'s precision line is withheld when no
-  scored round could ever have produced one, and that fact is not
-  otherwise derivable from a `RoundScore` once scoring has already reduced
-  a round's raw `Gold` to plain counts. It also carries every reported
-  finding as a `ScoredFinding`, so `RenderJSON` is enough for a person to
-  label a pending finding without the round's work dir. A round whose
-  matching never finished (a judge error, or the judge changing the case
-  repo) still keeps the reviewer's own reported findings this way (status
-  set, no gold match, no fate), so a person reading `RenderJSON` sees what
-  the reviewer said even when nothing could confirm it.
-- After every round's matching, the runner checks the case repo's HEAD and
-  tracked files against that round's own head
-  (`git status --porcelain --untracked-files=no`) - the same read-only
-  guard the reviewer's own lease dispatch is held to - and fails the round
-  ("the judge changed the case repo") on a violation; either way it then
-  hard-resets and cleans the repo (`git reset --hard`, `git clean -fd`)
-  before returning, since the next round's `git apply` must start from a
-  pristine head whatever a judge dispatch left behind, tracked or not.
+- `checkJudgeReadOnly` returns a violation and an error as two separate
+  results, not one: a `git rev-parse`/`git status` command itself failing
+  during the read-only check is ordinary infrastructure trouble, returned
+  as a real error, never folded into "the judge changed the case repo" -
+  only an actual difference from the round's own head is that. Either
+  way, the runner hard-resets and cleans the repo (`git reset --hard`,
+  `git clean -fd`) before returning, since the next round's `git apply`
+  must start from a pristine head whatever a judge dispatch left behind.
+- Once a round is fully scored, the runner deletes, rather than moves,
+  the case's store-side `work` dir and that round's own judge scratch dir
+  (`retireRoundWork`): the JSON report already keeps every finding a
+  round produced, so nothing is lost, and deleting them means no later
+  round's dispatch, and no later session poking around under the work
+  root, can find an earlier round's live
+  `review.json`/`result.json`/`judge.json`/`verdicts.json` anywhere and
+  read a result that disagrees with the case's own recorded history.
 - `live_test.go` fails the Go test itself on a round that comes back
   Failed (a dispatch failure, a judge error, or the judge changing the
   case repo): that is infrastructure trouble, not a review-quality number
   to report, and burying it in a text report nobody reads would let it go
-  unnoticed. A Refused round stays a measurement. Cases now run one at a
-  time through `RunCase` rather than `RunCorpus`, rewriting the text
-  report and JSON after every case, and the documented command adds
-  `-timeout 0`, so a long unattended run keeps whatever finished on disk
-  if it times out or panics partway through the corpus rather than losing
-  the whole run's report.
+  unnoticed. A Refused round stays a measurement, and a judge error still
+  keeps that round's `Findings` (status set, no gold match, no fate).
+  Cases run one at a time through `RunCase` rather than `RunCorpus`,
+  rewriting the text report and JSON after every case, and the documented
+  command adds `-timeout 0`, so a long unattended run keeps whatever
+  finished on disk if it times out or panics partway through the corpus.
+  When `JIG_REVIEWEVAL_REPORT` is unset, the report now falls back to a
+  stable path under `os.TempDir()` (a `jig-revieweval` directory,
+  `report.txt` and `report.txt.json`) rather than `t.TempDir()`, which
+  would vanish with the test itself, and logs that path once at the
+  start; each case's own report lines are logged as it finishes, and the
+  whole corpus's cumulative report once more after the loop.
 - The eval repo's per-round git identity and commit date
   (`GIT_AUTHOR_NAME=jig-fixture` and the rest, pinned in `runner.go`) are
   fixed, not the operator's own: two runs of the same corpus produce the
@@ -884,6 +887,13 @@ above:
   `Disjoint(cfg, nil)` returned the cheapest rung itself, which is only
   what `Gate` picks before any builder has dispatched at all - the wrong
   default for a reviewer round running after a ticket's slices.
+- `RoundScore` carries `FalsePositiveGold` (whether a round's own gold
+  could produce a false alarm at all: a trap, a dismissed decision, or an
+  exhaustive round) and every reported finding as a `ScoredFinding`, so
+  `RenderJSON` is enough for a person to label a pending finding without
+  the round's work dir.
+- `RenderReport`'s recall, like its other rates, is `n/a` with zero seeded
+  gold rather than a bare `0.00`.
 
 ## CLI
 

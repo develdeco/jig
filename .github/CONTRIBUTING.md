@@ -77,10 +77,11 @@ is interrupted. Environment variables: `JIG_REVIEWEVAL_MODEL` (reviewer
 model; default the rung `jig gate` itself picks once an unattended
 ticket's builders have already used the cheapest rung),
 `JIG_REVIEWEVAL_JUDGE_MODEL` (judge model; default the reviewer model),
-`JIG_REVIEWEVAL_CORPUS`
-(default `testdata/revieweval`), and `JIG_REVIEWEVAL_REPORT` (when set,
-writes the text report there and the JSON report beside it with a `.json`
-suffix).
+`JIG_REVIEWEVAL_CORPUS` (default `testdata/revieweval`), and
+`JIG_REVIEWEVAL_REPORT` (the text report's path; the JSON report is
+written beside it with a `.json` suffix). Left unset, the report still
+lands on disk, under `os.TempDir()/jig-revieweval/report.txt` - the run
+logs that path once at the start, so it never has to be found by guessing.
 
 ## Reporting a bug
 

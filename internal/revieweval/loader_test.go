@@ -508,6 +508,143 @@ func TestLoadCaseRejectsAKeptDecisionRecordingADismissedFinding(t *testing.T) {
 	}
 }
 
+// TestLoadCaseAcceptsARecordedLinkSetsRecordedLine pins Decision.RecordedLine
+// itself: the record's own line (5, from twoRoundCaseWithFindings' r1-f1),
+// not the decision's own span - match.go's union depends on this
+// field carrying the loader-validated line, not a re-derivation from the
+// decision's Lines.
+func TestLoadCaseAcceptsARecordedLinkSetsRecordedLine(t *testing.T) {
+	dir := twoRoundCaseWithFindings(t, "c", `decisions:
+  - id: dec1
+    file: b.go
+    lines: [4, 6]
+    description: the whole thing, a defensible choice
+    decision: dismissed
+    recorded: r1-f1
+`)
+	c, err := LoadCase(dir)
+	if err != nil {
+		t.Fatalf("LoadCase: %v", err)
+	}
+	if len(c.Rounds[0].Decisions) != 1 || c.Rounds[0].Decisions[0].RecordedLine != 5 {
+		t.Fatalf("LoadCase decisions = %+v, want RecordedLine 5 (r1-f1's own line)", c.Rounds[0].Decisions)
+	}
+}
+
+// TestLoadCaseRejectsARecordedLineOutsideTheSpanWidened pins a loader
+// rule: r1-f1 is recorded at line 5, and the decision's own span [10, 11]
+// widened by lineWindow (3) reaches only down to 7 - 5 is outside that,
+// so the link must be rejected at load time rather than silently accepted
+// and only ever discovered to be nonsensical at match time.
+func TestLoadCaseRejectsARecordedLineOutsideTheSpanWidened(t *testing.T) {
+	dir := twoRoundCaseWithFindings(t, "c", `decisions:
+  - id: dec1
+    file: b.go
+    lines: [10, 11]
+    description: d
+    decision: dismissed
+    recorded: r1-f1
+`)
+	if _, err := LoadCase(dir); err == nil {
+		t.Fatal("LoadCase: want an error, r1-f1's line 5 is outside span 10-11 widened by 3 (reaches down to 7)")
+	}
+}
+
+// TestLoadCaseAcceptsARecordedLineExactlyAtTheWidenedEdge is the same
+// shape one line inside the boundary: span [8, 11] widened by 3 reaches
+// down to 5, exactly r1-f1's own line, so this must load.
+func TestLoadCaseAcceptsARecordedLineExactlyAtTheWidenedEdge(t *testing.T) {
+	dir := twoRoundCaseWithFindings(t, "c", `decisions:
+  - id: dec1
+    file: b.go
+    lines: [8, 11]
+    description: d
+    decision: dismissed
+    recorded: r1-f1
+`)
+	if _, err := LoadCase(dir); err != nil {
+		t.Fatalf("LoadCase: %v", err)
+	}
+}
+
+// TestLoadCaseRejectsTwoDecisionsInDifferentRoundsNamingTheSameRecord pins
+// the other loader rule on links: a record id is unique to the round that wrote
+// it, but nothing about a second round's own decisions.yaml stops it from
+// also claiming to be the one that locates that same id - the case-wide
+// seenRecorded map (threaded across every round's loadDecisions call, not
+// reset per round) must reject that, the same way two decisions in one
+// round already do (TestLoadCaseRejectsTwoDecisionsNamingTheSameRecord).
+func TestLoadCaseRejectsTwoDecisionsInDifferentRoundsNamingTheSameRecord(t *testing.T) {
+	dir := t.TempDir()
+	dir = filepath.Join(dir, "c")
+	writeFile(t, filepath.Join(dir, "brief.md"), "# brief\n")
+	writeFile(t, filepath.Join(dir, "round-1", "patch.diff"), "diff\n")
+	writeFile(t, filepath.Join(dir, "round-1", "gold.yaml"), validGoldYAML)
+	writeFile(t, filepath.Join(dir, "round-1", "findings.yaml"), `scope: full
+reviewed_paths: []
+findings:
+  - id: r1-f1
+    file: b.go
+    line: 5
+    title: t
+    detail: d
+    action: fix
+    risk: low
+    risk_rationale: r
+    status: dismissed
+    recurrences: 0
+    triage: human
+`)
+	writeFile(t, filepath.Join(dir, "round-1", "decisions.yaml"), `decisions:
+  - id: dec1
+    file: b.go
+    lines: [4, 6]
+    description: the first decision to claim r1-f1
+    decision: dismissed
+    recorded: r1-f1
+`)
+	writeFile(t, filepath.Join(dir, "round-2", "patch.diff"), "diff\n")
+	writeFile(t, filepath.Join(dir, "round-2", "gold.yaml"), validGoldYAML)
+	writeFile(t, filepath.Join(dir, "round-2", "findings.yaml"), `scope: full
+reviewed_paths: []
+findings: []
+`)
+	// Round 2's own decisions.yaml recording r1-f1 again needs a finding
+	// named r1-f1 in round 2's own findings.yaml too (checkRecordedLink
+	// only ever looks at the round it is on), so this one is dismissed
+	// there as well - the point is that the id string "r1-f1" collides
+	// across rounds, not that it is the very same store record.
+	writeFile(t, filepath.Join(dir, "round-2", "findings.yaml"), `scope: full
+reviewed_paths: []
+findings:
+  - id: r1-f1
+    file: b.go
+    line: 5
+    title: t
+    detail: d
+    action: fix
+    risk: low
+    risk_rationale: r
+    status: dismissed
+    recurrences: 0
+    triage: human
+`)
+	writeFile(t, filepath.Join(dir, "round-2", "decisions.yaml"), `decisions:
+  - id: dec2
+    file: b.go
+    lines: [4, 6]
+    description: a second decision also claiming r1-f1
+    decision: dismissed
+    recorded: r1-f1
+`)
+	writeFile(t, filepath.Join(dir, "round-3", "patch.diff"), "diff\n")
+	writeFile(t, filepath.Join(dir, "round-3", "gold.yaml"), validGoldYAML)
+
+	if _, err := LoadCase(dir); err == nil {
+		t.Fatal("LoadCase: want an error, round 1 and round 2 both have a decision recording r1-f1")
+	}
+}
+
 func TestLoadCaseRejectsTwoDecisionsNamingTheSameRecord(t *testing.T) {
 	dir := twoRoundCaseWithFindings(t, "c", `decisions:
   - id: dec1

@@ -4,4 +4,4 @@ traps:
   - id: loopvar-capture
     file: worker/pool.go
     lines: [7, 11]
-    description: Every goroutine's closure captures job from the enclosing range scope, the same variable each iteration would reassign in the pre-1.22 loop var rule.
+    description: Every goroutine closes over the shared loop variable, so each one may see the last job.

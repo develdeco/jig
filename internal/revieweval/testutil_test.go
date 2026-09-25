@@ -45,18 +45,46 @@ func newMinimalCase(t *testing.T, name, gold string) string {
 	return dir
 }
 
+// caseNameForRunID reverses runID for the scripted backends' benefit: a
+// live dispatch carries only the opaque run id (Dispatch.Ticket is
+// RoundInput.Ticket, never the case name), but a fixture set is still laid
+// out on disk by the case's real name (testdata/results/<set>/<case>/...),
+// which the corpus agent's fixtures own and this package never renames.
+// Rather than thread a side-channel name mapping through every backend,
+// this recomputes runID over each entry already under dir and returns the
+// one that matches id - the same thing a person auditing a run id back to
+// a case would do, and the only approach that needs no change to how a
+// fixture set is laid out.
+func caseNameForRunID(dir, id string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("revieweval: caseNameForRunID: read %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() && runID(e.Name()) == id {
+			return e.Name(), nil
+		}
+	}
+	return "", fmt.Errorf("revieweval: caseNameForRunID: no case under %s maps to run id %s", dir, id)
+}
+
 // scriptedReviewerBackend plays back a scripted result.json for each
-// dispatch, keyed by Dispatch.Ticket (the case name) and Dispatch.Attempt
-// (the round): it reads "<dir>/<ticket>/round-<attempt>.json" and copies it
-// verbatim to d.ResultJSON. A missing fixture is an error, never a silent
-// empty result. It never touches the dispatch's worktree, matching a real
+// dispatch, keyed by the case name behind Dispatch.Ticket's own opaque run
+// id (caseNameForRunID) and Dispatch.Attempt (the round): it reads
+// "<dir>/<case>/round-<attempt>.json" and copies it verbatim to
+// d.ResultJSON. A missing fixture is an error, never a silent empty
+// result. It never touches the dispatch's worktree, matching a real
 // reviewer that makes no edits.
 type scriptedReviewerBackend struct {
 	dir string
 }
 
 func (b scriptedReviewerBackend) Run(d session.Dispatch) error {
-	path := filepath.Join(b.dir, d.Ticket, fmt.Sprintf("round-%d.json", d.Attempt))
+	caseName, err := caseNameForRunID(b.dir, d.Ticket)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(b.dir, caseName, fmt.Sprintf("round-%d.json", d.Attempt))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("revieweval: scriptedReviewerBackend: no scripted result at %s: %w", path, err)

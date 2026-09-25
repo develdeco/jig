@@ -1,6 +1,7 @@
 package revieweval
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/verifydeliver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -398,4 +401,230 @@ func TestFixtureReportRendersTotals(t *testing.T) {
 	if !strings.Contains(report, "lost 0, forgotten 0, dropped questions 0, misattributed 0, false alarms 0, re-litigated 0, wrong priors 0, refused 0, failed 0") {
 		t.Errorf("report zero-failure line missing or wrong; got:\n%s", report)
 	}
+}
+
+// fixtureIdentityEnv pins the git author/committer identity for the
+// throwaway repos TestCorpusSpansLieInsideTheirFiles builds - the same
+// values runner.go's own identityEnv uses, reproduced here rather than
+// imported (that var is package-private to production code, not this
+// test-only materialization).
+var fixtureIdentityEnv = []string{
+	"GIT_AUTHOR_NAME=jig-fixture", "GIT_AUTHOR_EMAIL=fixture@example.invalid",
+	"GIT_COMMITTER_NAME=jig-fixture", "GIT_COMMITTER_EMAIL=fixture@example.invalid",
+}
+
+// fileLineCount counts path's lines the way a 1-based "lines: [from, to]"
+// span counts them: one per newline, plus one more when the file's last
+// line has no trailing newline (so a span pointing at that last line still
+// counts as inside the file).
+func fileLineCount(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	if len(data) == 0 {
+		return 0, nil
+	}
+	n := bytes.Count(data, []byte("\n"))
+	if data[len(data)-1] != '\n' {
+		n++
+	}
+	return n, nil
+}
+
+// TestCorpusSpansLieInsideTheirFiles materializes every real case's rounds
+// into a throwaway git repo, patch.diff applied in order the same way
+// RunCase does, and checks that every gold finding's, trap's and decision's
+// span (From..To) actually lies inside its file's own line count at that
+// round's head. A span reaching past end-of-file could never be hit by a
+// real finding - a gold entry unmatchable by construction, or a trap no
+// finding could ever land inside - and a hand-edited patch.diff is exactly
+// the kind of change that could silently leave one behind.
+func TestCorpusSpansLieInsideTheirFiles(t *testing.T) {
+	cases, err := LoadCorpus(evalCorpusRoot(t))
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	for _, c := range cases {
+		t.Run(c.Name, func(t *testing.T) {
+			repoDir := t.TempDir()
+			if _, err := gitx.Run(repoDir, "init", "-q", "-b", "main"); err != nil {
+				t.Fatalf("git init: %v", err)
+			}
+
+			checkSpan := func(round int, kind, id, file string, from, to int) {
+				t.Helper()
+				n, err := fileLineCount(filepath.Join(repoDir, filepath.FromSlash(file)))
+				if err != nil {
+					t.Errorf("round %d: %s %s: file %s: %v", round, kind, id, file, err)
+					return
+				}
+				if to > n {
+					t.Errorf("round %d: %s %s: span %d-%d extends past %s's %d lines", round, kind, id, from, to, file, n)
+				}
+			}
+
+			for _, r := range c.Rounds {
+				absPatch, aerr := filepath.Abs(r.PatchPath)
+				if aerr != nil {
+					t.Fatalf("round %d: resolve patch path: %v", r.N, aerr)
+				}
+				if _, aerr := gitx.Run(repoDir, "apply", absPatch); aerr != nil {
+					t.Fatalf("round %d: git apply: %v", r.N, aerr)
+				}
+				if _, aerr := gitx.Run(repoDir, "add", "-A"); aerr != nil {
+					t.Fatalf("round %d: git add: %v", r.N, aerr)
+				}
+				if _, cerr := gitx.RunEnv(repoDir, fixtureIdentityEnv, "commit", "-q", "-m", fmt.Sprintf("round %d", r.N)); cerr != nil {
+					t.Fatalf("round %d: git commit: %v", r.N, cerr)
+				}
+
+				for _, g := range r.Gold.Findings {
+					checkSpan(r.N, "gold finding", g.ID, g.File, g.From, g.To)
+				}
+				for _, tr := range r.Gold.Traps {
+					checkSpan(r.N, "trap", tr.ID, tr.File, tr.From, tr.To)
+				}
+				for _, d := range r.Decisions {
+					checkSpan(r.N, "decision", d.ID, d.File, d.From, d.To)
+				}
+			}
+		})
+	}
+}
+
+// TestFixtureProbesEachDesignedOutcome runs three hand-picked probe rounds
+// against the real corpus's own cases (fixture set "probes"), each round's
+// earlier round an unmodified copy of the perfect fixture so only the probe
+// round's own added finding is new: a trap hit in a non-exhaustive round
+// other than tenant-leak (false alarm), a linked title-collision repeat off
+// the decision's own recorded line (Skip), and a finding in another file
+// citing a dismissed prior (wrong prior - the citation names a point, not a
+// place, but the point itself is bound to one file). A fourth designed
+// outcome - a repeat citing its dismissed prior at line 0 (Skip) - cannot
+// share a round with the wrong-prior probe above: jig's own reviewer
+// contract refuses two findings citing the same prior in one round
+// (verifydeliver's own "two findings share prior" rule), and the corpus has
+// only one round per case with a citable dismissed prior at all. It is
+// still tested on the real corpus, just one layer lower - MatchRound
+// directly, fed title-collision's own real round-2 gold and its real
+// round-1 recorded dismissal, exactly the round runRound would build,
+// skipping only the wire-level reviewer-result check that this probe was
+// never about.
+func TestFixtureProbesEachDesignedOutcome(t *testing.T) {
+	backend := scriptedReviewerBackend{dir: resultsDir("probes")}
+
+	t.Run("trap-hit-outside-tenant-leak-is-a-false-alarm", func(t *testing.T) {
+		c := loadEvalCase(t, "forgotten-finding")
+		cs, err := RunCase(t.TempDir(), c, backend, nil, "fixture-model")
+		if err != nil {
+			t.Fatalf("RunCase: %v", err)
+		}
+		if len(cs.Rounds) != 2 {
+			t.Fatalf("RunCase: %d rounds, want 2", len(cs.Rounds))
+		}
+		if !cs.Rounds[0].Passed {
+			t.Errorf("round 1 Passed = false, want true: it is an unmodified copy of perfect")
+		}
+		rs := cs.Rounds[1]
+		if len(rs.FalseAlarms) != 1 {
+			t.Errorf("round 2 FalseAlarms = %v, want exactly one (the already-fixed boundary, re-flagged)", rs.FalseAlarms)
+		}
+		if len(rs.Found) != 1 || rs.Found[0] != "report-ignored-error" {
+			t.Errorf("round 2 Found = %v, want [report-ignored-error]: the genuine repeat is unaffected", rs.Found)
+		}
+	})
+
+	t.Run("a-repeat-off-the-recorded-line-skips", func(t *testing.T) {
+		c := loadEvalCase(t, "title-collision")
+		cs, err := RunCase(t.TempDir(), c, backend, nil, "fixture-model")
+		if err != nil {
+			t.Fatalf("RunCase: %v", err)
+		}
+		if len(cs.Rounds) != 2 {
+			t.Fatalf("RunCase: %d rounds, want 2", len(cs.Rounds))
+		}
+		if !cs.Rounds[0].Passed {
+			t.Errorf("round 1 Passed = false, want true: it is an unmodified copy of perfect")
+		}
+		rs := cs.Rounds[1]
+		if len(rs.Found) != 1 || rs.Found[0] != "writer-close-ignored" {
+			t.Errorf("round 2 Found = %v, want [writer-close-ignored]", rs.Found)
+		}
+		if len(rs.FalseAlarms) != 0 {
+			t.Errorf("round 2 FalseAlarms = %v, want none: the repeat cites a real prior", rs.FalseAlarms)
+		}
+		if len(rs.Pending) != 0 {
+			t.Errorf("round 2 Pending = %v, want none: a cited prior is never left pending", rs.Pending)
+		}
+		if !rs.Passed {
+			t.Errorf("round 2 Passed = false, want true: a permitted repeat never fails the round (missed=%v lost=%v)", rs.Missed, rs.Lost)
+		}
+	})
+
+	t.Run("a-repeat-citing-its-dismissed-prior-at-line-zero-skips", func(t *testing.T) {
+		// One layer lower than the other three sub-tests, per the function
+		// doc comment: MatchRound fed title-collision's own real round-2
+		// gold and its real round-1 recorded dismissal (r1-f1), rather than
+		// a full RunCase - the corpus has nowhere left to put this as a
+		// fourth scripted round without two findings citing r1-f1 in one
+		// round, which the real reviewer contract itself refuses.
+		c := loadEvalCase(t, "title-collision")
+		round1, round2 := c.Rounds[0], c.Rounds[1]
+
+		recordedLinks := map[string]Decision{}
+		for _, d := range round1.Decisions {
+			if d.Recorded != "" {
+				recordedLinks[d.Recorded] = d
+			}
+		}
+		var dismissed []verifydeliver.Finding
+		for _, f := range round1.Recorded.Findings {
+			if f.Status == verifydeliver.StatusDismissed {
+				dismissed = append(dismissed, f)
+			}
+		}
+		if len(dismissed) != 1 || dismissed[0].ID != "r1-f1" {
+			t.Fatalf("title-collision round 1's recorded findings = %+v, want exactly r1-f1 dismissed", dismissed)
+		}
+
+		rf := verifydeliver.ResultFinding{File: dismissed[0].File, Line: 0, Title: "repeat, no line", Prior: "r1-f1"}
+		// ApplyRound's own rule 2 (findings.go): a repeat of a dismissed
+		// finding keeps that finding's id and status, whatever line the
+		// reviewer gave it - reproduced by hand here, since this probe
+		// skips ApplyRound to skip the wire-level check alongside it.
+		reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}
+
+		m, err := MatchRound(c.Name, round2.N, "", "", round2.Gold, round2.Decisions, recordedLinks, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
+		if err != nil {
+			t.Fatalf("MatchRound: %v", err)
+		}
+		if m.Classification[0] != FateSkip {
+			t.Errorf("Classification[0] = %q, want %q: a nil judge keeps a cited prior even at line 0", m.Classification[0], FateSkip)
+		}
+	})
+
+	t.Run("a-prior-in-another-file-is-a-wrong-prior", func(t *testing.T) {
+		c := loadEvalCase(t, "reworded-dismissed")
+		cs, err := RunCase(t.TempDir(), c, backend, nil, "fixture-model")
+		if err != nil {
+			t.Fatalf("RunCase: %v", err)
+		}
+		if len(cs.Rounds) != 2 {
+			t.Fatalf("RunCase: %d rounds, want 2", len(cs.Rounds))
+		}
+		if !cs.Rounds[0].Passed {
+			t.Errorf("round 1 Passed = false, want true: it is an unmodified copy of perfect")
+		}
+		rs := cs.Rounds[1]
+		if len(rs.WrongPriors) != 1 {
+			t.Errorf("round 2 WrongPriors = %v, want exactly one: the cited prior belongs to a different file", rs.WrongPriors)
+		}
+		if len(rs.Found) != 1 || rs.Found[0] != "highest-zero-floor" {
+			t.Errorf("round 2 Found = %v, want [highest-zero-floor]: the real gold is unaffected", rs.Found)
+		}
+		if rs.Passed {
+			t.Error("round 2 Passed = true, want false: a wrong prior fails the round")
+		}
+	})
 }

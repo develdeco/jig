@@ -168,6 +168,23 @@ func TestScoreWrongPriorFailsTheRound(t *testing.T) {
 	}
 }
 
+// TestRenderReportRecallNAWithZeroSeededGold: a corpus round with
+// no seeded gold at all (an exhaustive round with nothing to find, say)
+// must not render "recall 0.00" - there was nothing to recall, n/a, the
+// same way the other rates already read n/a with a zero denominator.
+func TestRenderReportRecallNAWithZeroSeededGold(t *testing.T) {
+	scores := []CaseScore{{Name: "c1", Passed: true, Rounds: []RoundScore{
+		{Round: 1, Passed: true},
+	}}}
+	report := RenderReport(scores)
+	if !strings.Contains(report, "recall n/a") {
+		t.Errorf("report = %q, want \"recall n/a\" (found=0, gold=0)", report)
+	}
+	if strings.Contains(report, "recall 0.") {
+		t.Errorf("report = %q, want no numeric recall", report)
+	}
+}
+
 func TestRenderReportPrecisionNAWithZeroDenominator(t *testing.T) {
 	// FalsePositiveGold is true (a trap or exhaustive round could have
 	// produced a false alarm) but nothing was found, extra-true or a false

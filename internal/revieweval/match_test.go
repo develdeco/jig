@@ -1,6 +1,8 @@
 package revieweval
 
 import (
+	"fmt"
+	"math/rand"
 	"strings"
 	"testing"
 
@@ -120,16 +122,17 @@ func TestMatchOneToOneOneLumpedFindingSatisfiesOnlyOneGold(t *testing.T) {
 	}
 }
 
-func TestMatchAugmentingPathFindsTheMaximumWhereGreedyWouldMiss(t *testing.T) {
+// TestMatchFindsTheMaximumWhereGreedyWouldMiss pins cardinality first: a
+// first-fit greedy pass over findings in result order would claim g1 for
+// finding 0 (the first gold entry it is compatible with) and leave finding
+// 1 (g1-only) unmatched. bestMatching finds the reassignment plain greedy
+// cannot: finding 0 to g2, freeing g1 for finding 1, so both gold entries
+// are found - the maximum cardinality, not merely a maximal one.
+func TestMatchFindsTheMaximumWhereGreedyWouldMiss(t *testing.T) {
 	gold := Gold{Findings: []GoldFinding{
 		{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d1"}, // window [7,13]
 		{ID: "g2", File: "a.go", From: 12, To: 12, Action: verifydeliver.ActionFix, Description: "d2"}, // window [9,15]
 	}}
-	// finding 0 (line 12) is compatible with BOTH g1 and g2; finding 1
-	// (line 8) is compatible with g1 only. A first-fit greedy processing
-	// finding 0 first claims g1 for it and leaves finding 1 (g1-only)
-	// unmatched; Kuhn's augmenting path instead reassigns finding 0 to g2,
-	// freeing g1 for finding 1, so both gold entries are found.
 	rf0, f0 := openFinding("a.go", 12, "dual")
 	rf1, f1 := openFinding("a.go", 8, "g1-only")
 
@@ -223,9 +226,14 @@ func TestMatchUnlinkedDismissedDescriptionIsTitleAndDetailTogether(t *testing.T)
 }
 
 func TestMatchLinkedDismissedSpanIsUnionAndUsesDecisionDescription(t *testing.T) {
+	// The fold's own current line (5) intentionally matches what the
+	// loader would have recorded, so this test alone cannot tell the two
+	// apart - TestMatchLinkedDismissedUsesTheRecordedLineNotTheFoldsLatest
+	// below pins that RecordedLine, not f.Line, is what the union actually
+	// reads.
 	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "a.go", Line: 5, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	links := map[string]Decision{
-		"r1-f1": {ID: "dec1", File: "a.go", From: 8, To: 9, Description: "the whole loop, a defensible style choice", Decision: DecisionDismissed, Recorded: "r1-f1"},
+		"r1-f1": {ID: "dec1", File: "a.go", From: 8, To: 9, RecordedLine: 5, Description: "the whole loop, a defensible style choice", Decision: DecisionDismissed, Recorded: "r1-f1"},
 	}
 
 	judge := &capturingJudge{}
@@ -254,48 +262,414 @@ func TestMatchLinkedDismissedSpanIsUnionAndUsesDecisionDescription(t *testing.T)
 	}
 }
 
-// --- prefer the best-supported pairing among maximum matchings ------------
+// TestMatchLinkedDismissedUsesTheRecordedLineNotTheFoldsLatest is
+// TestMatchLinkedDismissedSpanIsUnionAndUsesDecisionDescription's other
+// half: the fold's own current occurrence has since moved to a line the
+// decision never saw (a later round re-reported the same id at a new
+// line), so the union must read Decision.RecordedLine, not f.Line, or the
+// span would silently drift with whatever the fold happens to say now.
+func TestMatchLinkedDismissedUsesTheRecordedLineNotTheFoldsLatest(t *testing.T) {
+	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "a.go", Line: 50, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	links := map[string]Decision{
+		"r1-f1": {ID: "dec1", File: "a.go", From: 8, To: 9, RecordedLine: 5, Description: "d", Decision: DecisionDismissed, Recorded: "r1-f1"},
+	}
 
-// TestMatchPrefersBestSupportedEdgeRegardlessOfResultOrder pins a single
-// gold finding (fix, span 17-18) with two structurally compatible
-// candidates: a note at line 15 (outside the span itself, and its status
-// does not agree with the gold's fix action) and a fix at line 17 (inside
-// the span itself, status agrees). Whichever order the reviewer's result
-// lists them in, the better-supported edge - the fix at 17 - must be the
-// one matched.
-func TestMatchPrefersBestSupportedEdgeRegardlessOfResultOrder(t *testing.T) {
-	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 17, To: 18, Action: verifydeliver.ActionFix, Description: "d"}}}
-	note := verifydeliver.ResultFinding{File: "a.go", Line: 15, Title: "note-at-15", Action: verifydeliver.ActionNote}
-	fix := verifydeliver.ResultFinding{File: "a.go", Line: 17, Title: "fix-at-17", Action: verifydeliver.ActionFix}
+	judge := &capturingJudge{}
+	rf, f := openFinding("a.go", 9, "re-raise")
+	_, err := MatchRound("case", 2, "", "", Gold{}, nil, links, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, judge)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	p := judge.got.Candidates[0].Point
+	if p.From != 5 || p.To != 9 {
+		t.Errorf("span = [%d,%d], want [5,9]: the union of the decision's own span and RecordedLine (5), not the fold's current line (50)", p.From, p.To)
+	}
+}
 
-	t.Run("note-first", func(t *testing.T) {
-		findings := []verifydeliver.ResultFinding{note, fix}
-		reported := []verifydeliver.Finding{
-			{ID: "r1-f1", Status: verifydeliver.StatusNoted},
-			{ID: "r1-f2", Status: verifydeliver.StatusOpen},
-		}
-		m, err := MatchRound("case", 1, "", "", gold, nil, nil, nil, findings, reported, nil)
+// TestMatchLinkedDismissedSkipsTheLinkOnAFileMismatch covers the other
+// guard on links: a fold record whose file no longer matches the decision's
+// own file (a later round re-reported the same id under a different file,
+// which the loader never saw and the decision never judged) is treated as
+// an unlinked dismissed finding - its own bare one-line span and title -
+// rather than trusting a link the loader could not have validated.
+func TestMatchLinkedDismissedSkipsTheLinkOnAFileMismatch(t *testing.T) {
+	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "b.go", Line: 5, Title: "moved", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	links := map[string]Decision{
+		"r1-f1": {ID: "dec1", File: "a.go", From: 8, To: 9, RecordedLine: 5, Description: "the linked description", Decision: DecisionDismissed, Recorded: "r1-f1"},
+	}
+
+	judge := &capturingJudge{}
+	rf, f := openFinding("b.go", 5, "re-raise")
+	_, err := MatchRound("case", 2, "", "", Gold{}, nil, links, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{f}, judge)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	if len(judge.got.Candidates) != 1 {
+		t.Fatalf("candidates = %d, want 1", len(judge.got.Candidates))
+	}
+	p := judge.got.Candidates[0].Point
+	if p.From != 5 || p.To != 5 {
+		t.Errorf("span = [%d,%d], want [5,5]: the file mismatch must skip the link, keeping the fold record's own one-line span", p.From, p.To)
+	}
+	if p.Description != "moved: d" {
+		t.Errorf("description = %q, want %q: the fold record's own title and detail, not the mismatched link's description", p.Description, "moved: d")
+	}
+}
+
+// --- a cited prior is location evidence --------------------------------
+
+// byPointJudge answers MatchRound's candidates by the point id they pair
+// with, regardless of which finding or how many candidates carry that id:
+// simpler than a plain scriptedJudge for a test that cares about a
+// specific point's verdict, not the candidate array's own order.
+type byPointJudge map[string]Verdict
+
+func (j byPointJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
+	out := make([]Verdict, len(q.Candidates))
+	for i, c := range q.Candidates {
+		out[i] = j[c.Point.ID]
+	}
+	return out, nil
+}
+
+// TestMatchCitedPriorSurvivesOutsideTheWindow is the title-collision
+// shape: a repeat citing its dismissed prior 5 lines off the recorded
+// line - well past lineWindow (3) - still gets a candidate for that exact
+// point, and a nil judge (Undecided) keeps it: the citation is itself
+// location evidence, so it needs no explicit Same, only not Different.
+func TestMatchCitedPriorSurvivesOutsideTheWindow(t *testing.T) {
+	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	rf := verifydeliver.ResultFinding{File: "a.go", Line: 15, Title: "repeat", Prior: "r1-f1"} // 5 lines off r1-f1's own line
+	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}      // ApplyRound's rule 2: id becomes the cited prior
+
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	if m.Classification[0] != FateSkip {
+		t.Errorf("Classification[0] = %q, want %q: a nil judge keeps a cited prior that structure alone (window) would have missed", m.Classification[0], FateSkip)
+	}
+}
+
+// TestMatchCitedPriorSurvivesAtLineZero: a cited prior counts whatever
+// the lines, line 0 included: a finding that gave no line at all still gets the special
+// cited-prior candidate, and a nil judge (Undecided) still keeps it -
+// unlike a plain line-0 structural candidate (TestMatchLineZeroSurvivesOnlyWithJudgeSame),
+// which needs the judge's explicit Same, since here the citation is
+// itself the location evidence.
+func TestMatchCitedPriorSurvivesAtLineZero(t *testing.T) {
+	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	rf := verifydeliver.ResultFinding{File: "a.go", Line: 0, Title: "repeat, no line", Prior: "r1-f1"}
+	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}
+
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	if m.Classification[0] != FateSkip {
+		t.Errorf("Classification[0] = %q, want %q: a nil judge keeps a cited prior even at line 0", m.Classification[0], FateSkip)
+	}
+}
+
+// TestMatchCitedPriorJudgeDifferentIsWrongPrior is the same shape as
+// TestMatchCitedPriorSurvivesOutsideTheWindow, but the judge answers
+// Different on the cited pair: the citation is rejected, so it is a wrong
+// prior, not a permitted repeat.
+func TestMatchCitedPriorJudgeDifferentIsWrongPrior(t *testing.T) {
+	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	rf := verifydeliver.ResultFinding{File: "a.go", Line: 15, Title: "repeat", Prior: "r1-f1"}
+	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}
+
+	judge := byPointJudge{"r1-f1": Different}
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, judge)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	if m.Classification[0] != FateWrongPrior {
+		t.Errorf("Classification[0] = %q, want %q: the judge rejected the cited pair", m.Classification[0], FateWrongPrior)
+	}
+}
+
+// TestMatchCitedPriorInAnotherFileIsWrongPrior: a wrong prior is a cited
+// dismissed finding in another file (or one the judge rejects): the citation names
+// a real dismissed fold finding, but in a file this finding does not
+// touch, so no candidate is built for it at all (same-file
+// requirement) and no structural window reaches it either.
+func TestMatchCitedPriorInAnotherFileIsWrongPrior(t *testing.T) {
+	dismissed := []verifydeliver.Finding{{ID: "r1-f1", File: "other.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
+	rf := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "repeat", Prior: "r1-f1"}
+	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}
+
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, nil)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	if m.Classification[0] != FateWrongPrior {
+		t.Errorf("Classification[0] = %q, want %q: r1-f1 is in another file, so citing it is no edge at all", m.Classification[0], FateWrongPrior)
+	}
+}
+
+// TestMatchCitedPriorPinsIDEqualityAgainstAnotherDismissedPointInTheSameFile
+// pins the id equality: a finding sits structurally on dismissed point X
+// (a surviving edge exists to it) while its own Prior cites a different
+// dismissed point Y in the same file; the judge answers Different only on
+// Y. The general dismissed edge to X survives, but citedDismissedEdge must
+// still require the exact point id the finding cited, not merely any
+// surviving dismissed edge - so this stays a wrong prior even though a
+// dismissed edge (to X) did survive.
+func TestMatchCitedPriorPinsIDEqualityAgainstAnotherDismissedPointInTheSameFile(t *testing.T) {
+	dismissed := []verifydeliver.Finding{
+		{ID: "X", File: "a.go", Line: 5, Title: "x", Detail: "d", Status: verifydeliver.StatusDismissed},
+		{ID: "Y", File: "a.go", Line: 20, Title: "y", Detail: "d", Status: verifydeliver.StatusDismissed},
+	}
+	rf := verifydeliver.ResultFinding{File: "a.go", Line: 5, Title: "sits on X, cites Y", Prior: "Y"}
+	reported := verifydeliver.Finding{ID: "Y", Status: verifydeliver.StatusDismissed} // ApplyRound's rule 2: id becomes the cited prior, Y
+
+	judge := byPointJudge{"Y": Different}
+	m, err := MatchRound("case", 2, "", "", Gold{}, nil, nil, dismissed, []verifydeliver.ResultFinding{rf}, []verifydeliver.Finding{reported}, judge)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	if m.Classification[0] != FateWrongPrior {
+		t.Errorf("Classification[0] = %q, want %q: citing Y, not X, is what must decide this, and the judge rejected Y", m.Classification[0], FateWrongPrior)
+	}
+}
+
+// --- choose the pairing by evidence, exactly, never by outcome -------
+
+// TestMatchScoreBetterEachCriterionAlone pins matchScore.better's own
+// field order directly, one criterion at a time, everything else tied:
+// cardinality, then same, then prior, then closeness, then earliness. A mutation that
+// swapped two fields' priority, or compared a field with the wrong sign,
+// fails exactly one of these.
+func TestMatchScoreBetterEachCriterionAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		a, b matchScore
+		want bool
+	}{
+		{"more-matched-wins", matchScore{matched: 2}, matchScore{matched: 1, same: 9, prior: 9, closeness: 9}, true},
+		{"same-count-breaks-a-matched-tie", matchScore{matched: 1, same: 1}, matchScore{matched: 1, same: 0, prior: 9, closeness: 9}, true},
+		{"prior-count-breaks-a-same-tie", matchScore{matched: 1, same: 1, prior: 1}, matchScore{matched: 1, same: 1, prior: 0, closeness: 9}, true},
+		{"closeness-breaks-a-prior-tie", matchScore{matched: 1, same: 1, prior: 1, closeness: 4}, matchScore{matched: 1, same: 1, prior: 1, closeness: 1}, true},
+		{"early-breaks-a-closeness-tie", matchScore{matched: 1, same: 1, prior: 1, closeness: 4, early: 2}, matchScore{matched: 1, same: 1, prior: 1, closeness: 4, early: 1}, true},
+		{"exact-tie-is-not-better", matchScore{matched: 1, same: 1, prior: 1, closeness: 4}, matchScore{matched: 1, same: 1, prior: 1, closeness: 4}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.a.better(tc.b); got != tc.want {
+				t.Errorf("(%+v).better(%+v) = %v, want %v", tc.a, tc.b, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMatchPrefersJudgeSameOverEverythingButCardinality isolates the same
+// criterion: two candidates for one gold entry, tied on prior (both
+// unset) and on closeness (symmetric, one line off on each side), only one
+// confirmed Same by the judge. The judge's own confirmation must win.
+func TestMatchPrefersJudgeSameOverEverythingButCardinality(t *testing.T) {
+	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d"}}}
+	above := verifydeliver.ResultFinding{File: "a.go", Line: 9, Title: "above"}  // 1 off
+	below := verifydeliver.ResultFinding{File: "a.go", Line: 11, Title: "below"} // 1 off
+	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusOpen}, {ID: "r1-f2", Status: verifydeliver.StatusOpen}}
+
+	judge := scriptedJudge{verdicts: []Verdict{Undecided, Same}} // candidates are built gold-then-in-file-order: above, below
+	m, err := MatchRound("case", 1, "", "", gold, nil, nil, nil, []verifydeliver.ResultFinding{above, below}, reported, judge)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	if m.MatchedFinding[0] != 1 {
+		t.Errorf("MatchedFinding[0] = %d, want 1 (below, the one the judge confirmed Same)", m.MatchedFinding[0])
+	}
+}
+
+// TestMatchPrefersPriorAgreementOverCloseness isolates the prior
+// criterion: two candidates for one gold entry (prior r1-p), tied on same
+// (neither confirmed) and NOT tied on closeness in the wrong direction -
+// the one citing the gold's own prior sits further from the span than the
+// one that does not, so only the prior criterion can explain a preference
+// for it.
+func TestMatchPrefersPriorAgreementOverCloseness(t *testing.T) {
+	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Prior: "r1-p", Description: "d"}}}
+	closer := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "closer, no prior"}               // inside the span: closeness 4
+	citing := verifydeliver.ResultFinding{File: "a.go", Line: 13, Title: "cites the prior", Prior: "r1-p"} // 3 off: closeness 1
+	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusOpen}, {ID: "r1-f2", Status: verifydeliver.StatusOpen}}
+
+	m, err := MatchRound("case", 2, "", "", gold, nil, nil, nil, []verifydeliver.ResultFinding{closer, citing}, reported, nil)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	if m.MatchedFinding[0] != 1 {
+		t.Errorf("MatchedFinding[0] = %d, want 1 (the finding citing the gold's own prior, even though it sits further from the span)", m.MatchedFinding[0])
+	}
+}
+
+// TestMatchPrefersClosenessWhenSameAndPriorAreTied isolates the closeness
+// criterion, the last evidence criterion: two candidates, neither confirmed
+// Same, neither with a prior - one inside the span, one 2 lines off. The
+// closer one must win.
+func TestMatchPrefersClosenessWhenSameAndPriorAreTied(t *testing.T) {
+	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d"}}}
+	inside := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "inside"}
+	off := verifydeliver.ResultFinding{File: "a.go", Line: 12, Title: "2-off"}
+	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusOpen}, {ID: "r1-f2", Status: verifydeliver.StatusOpen}}
+
+	m, err := MatchRound("case", 1, "", "", gold, nil, nil, nil, []verifydeliver.ResultFinding{off, inside}, reported, nil)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	if m.MatchedFinding[0] != 1 {
+		t.Errorf("MatchedFinding[0] = %d, want 1 (inside the span, closer than 2 lines off)", m.MatchedFinding[0])
+	}
+}
+
+// TestMatchNeverRanksByStatusOrAction pins the negative rule: a
+// note sitting exactly inside the gold span beats a fix sitting outside
+// the window's reach of anything better, even though the note's own
+// status (noted) disagrees with the gold's fix action and the fix's
+// (open) agrees. Closeness alone decides it; status and action never
+// enter the comparison.
+func TestMatchNeverRanksByStatusOrAction(t *testing.T) {
+	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d"}}}
+	note := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "note-inside", Action: verifydeliver.ActionNote}
+	fix := verifydeliver.ResultFinding{File: "a.go", Line: 13, Title: "fix-3-off", Action: verifydeliver.ActionFix}
+	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusNoted}, {ID: "r1-f2", Status: verifydeliver.StatusOpen}}
+
+	m, err := MatchRound("case", 1, "", "", gold, nil, nil, nil, []verifydeliver.ResultFinding{note, fix}, reported, nil)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	if m.MatchedFinding[0] != 0 {
+		t.Errorf("MatchedFinding[0] = %d, want 0 (the note inside the span): status/action must never break this tie", m.MatchedFinding[0])
+	}
+}
+
+// TestMatchRealBugAsANoteInsideSpanStaysLost is the reviewer's repro (b):
+// the real bug reported as a note inside the span, plus a stray fix
+// elsewhere in the window, stays Lost - the note (closer) is what gets
+// matched, and ScoreRound marks a fix-action gold matched to a noted
+// finding Lost, exactly as it should: a nearby fix on something else is
+// not the same as actually fixing the seeded bug.
+func TestMatchRealBugAsANoteInsideSpanStaysLost(t *testing.T) {
+	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "the real bug"}}}
+	note := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "note-on-the-real-bug", Action: verifydeliver.ActionNote}
+	stray := verifydeliver.ResultFinding{File: "a.go", Line: 12, Title: "unrelated-stray-fix", Action: verifydeliver.ActionFix}
+	findings := []verifydeliver.ResultFinding{note, stray}
+	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusNoted}, {ID: "r1-f2", Status: verifydeliver.StatusOpen}}
+
+	m, err := MatchRound("case", 1, "", "", gold, nil, nil, nil, findings, reported, nil)
+	if err != nil {
+		t.Fatalf("MatchRound: %v", err)
+	}
+	sc := ScoreRound(1, gold, nil, findings, reported, nil, m)
+	if len(sc.Lost) != 1 || sc.Lost[0] != "g1" {
+		t.Errorf("Lost = %v, want [g1]: the note matched (closer to the span), and a fix gold matched to a noted finding is lost", sc.Lost)
+	}
+	if len(sc.Found) != 1 || sc.Found[0] != "g1" {
+		t.Errorf("Found = %v, want [g1]: matched, just lost", sc.Found)
+	}
+}
+
+// TestMatchCitedPriorsResolveWhichGoldRegardlessOfOrder is the reviewer's
+// repro (a): two gold findings whose own priors are r1-f1 and r1-f2, and
+// two findings each citing one of them, one line off its own gold's line -
+// both inside the other gold's window too, so structure alone could not
+// tell them apart without the prior criterion. Both result orders must
+// resolve to the same, correct pairing.
+func TestMatchCitedPriorsResolveWhichGoldRegardlessOfOrder(t *testing.T) {
+	gold := Gold{Findings: []GoldFinding{
+		{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Prior: "r1-f1", Description: "d1"},
+		{ID: "g2", File: "a.go", From: 12, To: 12, Action: verifydeliver.ActionFix, Prior: "r1-f2", Description: "d2"},
+	}}
+	forG1 := verifydeliver.ResultFinding{File: "a.go", Line: 11, Title: "cites r1-f1", Prior: "r1-f1"} // one off g1, inside g2's window too
+	forG2 := verifydeliver.ResultFinding{File: "a.go", Line: 11, Title: "cites r1-f2", Prior: "r1-f2"} // one off g2, inside g1's window too
+	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusOpen}, {ID: "r1-f2", Status: verifydeliver.StatusOpen}}
+
+	check := func(t *testing.T, findings []verifydeliver.ResultFinding, wantG1, wantG2 int) {
+		m, err := MatchRound("case", 2, "", "", gold, nil, nil, nil, findings, reported, nil)
 		if err != nil {
 			t.Fatalf("MatchRound: %v", err)
 		}
-		if m.MatchedFinding[0] != 1 {
-			t.Errorf("MatchedFinding[0] = %d, want 1 (the fix at line 17: inside the span and status-agreeing)", m.MatchedFinding[0])
+		if m.MatchedFinding[0] != wantG1 || m.MatchedFinding[1] != wantG2 {
+			t.Errorf("MatchedFinding = %v, want [%d %d]: each gold matched to the finding citing its own prior", m.MatchedFinding, wantG1, wantG2)
 		}
-	})
-	t.Run("fix-first", func(t *testing.T) {
-		findings := []verifydeliver.ResultFinding{fix, note}
-		reported := []verifydeliver.Finding{
-			{ID: "r1-f1", Status: verifydeliver.StatusOpen},
-			{ID: "r1-f2", Status: verifydeliver.StatusNoted},
+	}
+	t.Run("g1-finding-first", func(t *testing.T) { check(t, []verifydeliver.ResultFinding{forG1, forG2}, 0, 1) })
+	t.Run("g2-finding-first", func(t *testing.T) { check(t, []verifydeliver.ResultFinding{forG2, forG1}, 1, 0) })
+}
+
+// TestMatchOrderIndependencePermutation pins order independence:
+// every permutation of a set of findings with no exact tie among them
+// gives the same pairing. Four findings, each a distinct edge for one of
+// two gold entries, scored differently enough (one confirmed Same, one
+// citing the right prior, two at different closeness) that no two
+// orderings could tie.
+func TestMatchOrderIndependencePermutation(t *testing.T) {
+	gold := Gold{Findings: []GoldFinding{
+		{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d1"},
+		{ID: "g2", File: "a.go", From: 20, To: 20, Action: verifydeliver.ActionFix, Prior: "r1-p", Description: "d2"},
+	}}
+	// g1's own candidates: sameOne (judge Same, wins over insideOne) and
+	// insideOne (inside the span, no judge, no prior).
+	sameOne := verifydeliver.ResultFinding{File: "a.go", Line: 9, Title: "g1-same"}
+	insideOne := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "g1-inside"}
+	// g2's own candidates: priorOne (cites r1-p, 2 off) and farOne (no
+	// prior, 3 off - strictly worse than priorOne on both criteria
+	// ranked after same).
+	priorOne := verifydeliver.ResultFinding{File: "a.go", Line: 22, Title: "g2-prior", Prior: "r1-p"}
+	farOne := verifydeliver.ResultFinding{File: "a.go", Line: 23, Title: "g2-far"}
+
+	all := []verifydeliver.ResultFinding{sameOne, insideOne, priorOne, farOne}
+	indices := []int{0, 1, 2, 3}
+
+	var permute func([]int, int)
+	permute = func(a []int, k int) {
+		if k == len(a) {
+			findings := make([]verifydeliver.ResultFinding, len(a))
+			reported := make([]verifydeliver.Finding, len(a))
+			judgeVerdictByTitle := map[string]Verdict{"g1-same": Same}
+			for i, srcIdx := range a {
+				findings[i] = all[srcIdx]
+				reported[i] = verifydeliver.Finding{ID: fmt.Sprintf("r%d", srcIdx), Status: verifydeliver.StatusOpen}
+			}
+			judge := titleJudge(judgeVerdictByTitle)
+			m, err := MatchRound("case", 1, "", "", gold, nil, nil, nil, findings, reported, judge)
+			if err != nil {
+				t.Fatalf("MatchRound: %v", err)
+			}
+			g1Title, g2Title := "", ""
+			if m.MatchedFinding[0] != -1 {
+				g1Title = findings[m.MatchedFinding[0]].Title
+			}
+			if m.MatchedFinding[1] != -1 {
+				g2Title = findings[m.MatchedFinding[1]].Title
+			}
+			if g1Title != "g1-same" || g2Title != "g2-prior" {
+				t.Errorf("order %v: matched (%q, %q), want (g1-same, g2-prior)", a, g1Title, g2Title)
+			}
+			return
 		}
-		m, err := MatchRound("case", 1, "", "", gold, nil, nil, nil, findings, reported, nil)
-		if err != nil {
-			t.Fatalf("MatchRound: %v", err)
+		for i := k; i < len(a); i++ {
+			a[k], a[i] = a[i], a[k]
+			permute(a, k+1)
+			a[k], a[i] = a[i], a[k]
 		}
-		if m.MatchedFinding[0] != 0 {
-			t.Errorf("MatchedFinding[0] = %d, want 0 (the fix at line 17: inside the span and status-agreeing)", m.MatchedFinding[0])
-		}
-	})
+	}
+	permute(indices, 0)
+}
+
+// titleJudge answers by the finding's own title, the way
+// TestMatchOrderIndependencePermutation needs: a judge keyed by point id
+// (byPointJudge) or candidate order (scriptedJudge) would not survive
+// permuting which finding sits at which index.
+type titleJudge map[string]Verdict
+
+func (j titleJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
+	out := make([]Verdict, len(q.Candidates))
+	for i, c := range q.Candidates {
+		out[i] = j[q.Findings[c.Finding].Title]
+	}
+	return out, nil
 }
 
 // --- rule 1 only forgives a repeat that is one ------------------------------
@@ -347,5 +721,114 @@ func TestApplyRoundThenMatchWrongPriorFailsTheRound(t *testing.T) {
 	}
 	if len(sc.FalseAlarms) != 0 {
 		t.Errorf("FalseAlarms = %v, want none: it is scored as a wrong prior, not a false alarm", sc.FalseAlarms)
+	}
+}
+
+// exhaustiveBest is bestMatching's reference: every assignment of gold
+// entries to distinct findings (or to none), scored and compared the same
+// way. Exponential, so only for the small instances below.
+func exhaustiveBest(optionsByGold [][]matchOption, nFindings int) matchScore {
+	var best matchScore
+	used := map[int]bool{}
+	var walk func(gi int, score matchScore)
+	walk = func(gi int, score matchScore) {
+		if gi == len(optionsByGold) {
+			if score.better(best) {
+				best = score
+			}
+			return
+		}
+		walk(gi+1, score)
+		for _, o := range optionsByGold[gi] {
+			if used[o.finding] {
+				continue
+			}
+			used[o.finding] = true
+			walk(gi+1, score.plus(optionScore(o, nFindings)))
+			delete(used, o.finding)
+		}
+	}
+	walk(0, matchScore{})
+	return best
+}
+
+// matchingScore validates a bestMatching result as a one-to-one matching
+// over real edges and returns its summed score.
+func matchingScore(t *testing.T, optionsByGold [][]matchOption, nFindings int, got []int) matchScore {
+	t.Helper()
+	var total matchScore
+	seen := map[int]bool{}
+	for gi, j := range got {
+		if j == -1 {
+			continue
+		}
+		if seen[j] {
+			t.Fatalf("finding %d matched twice in %v", j, got)
+		}
+		seen[j] = true
+		found := false
+		for _, o := range optionsByGold[gi] {
+			if o.finding == j {
+				total = total.plus(optionScore(o, nFindings))
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("gold %d matched to finding %d with no edge between them, in %v", gi, j, got)
+		}
+	}
+	return total
+}
+
+// TestBestMatchingAgreesWithExhaustiveSearch checks bestMatching against
+// the exhaustive reference on many small instances, generated from a fixed
+// seed so a failure reproduces: every result must be a valid one-to-one
+// matching over real edges, and its summed score must equal the best any
+// assignment reaches. Scores can tie, so the scores are compared, not the
+// assignments.
+func TestBestMatchingAgreesWithExhaustiveSearch(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	for iter := 0; iter < 2000; iter++ {
+		nGold, nFindings := 1+rng.Intn(5), 1+rng.Intn(6)
+		options := make([][]matchOption, nGold)
+		for gi := range options {
+			for j := 0; j < nFindings; j++ {
+				if rng.Intn(3) == 0 {
+					continue
+				}
+				options[gi] = append(options[gi], matchOption{
+					finding:    j,
+					same:       rng.Intn(3) == 0,
+					priorMatch: rng.Intn(4) == 0,
+					closeness:  rng.Intn(closenessInside + 1),
+				})
+			}
+		}
+		got := bestMatching(options, nFindings)
+		if gotScore, want := matchingScore(t, options, nFindings, got), exhaustiveBest(options, nFindings); gotScore != want {
+			t.Fatalf("instance %d: bestMatching %v scores %+v, exhaustive best is %+v; options: %+v", iter, got, gotScore, want, options)
+		}
+	}
+}
+
+// TestBestMatchingStaysPolynomialOnALargeRound gives bestMatching a round
+// no exhaustive search could finish (40 gold entries, each with an edge to
+// every one of 60 findings): it must return a full matching, one finding
+// per gold entry.
+func TestBestMatchingStaysPolynomialOnALargeRound(t *testing.T) {
+	const nGold, nFindings = 40, 60
+	options := make([][]matchOption, nGold)
+	for gi := range options {
+		for j := 0; j < nFindings; j++ {
+			options[gi] = append(options[gi], matchOption{finding: j, closeness: (gi + j) % (closenessInside + 1)})
+		}
+	}
+	got := bestMatching(options, nFindings)
+	matchingScore(t, options, nFindings, got)
+	for gi, j := range got {
+		if j == -1 {
+			t.Fatalf("gold %d left unmatched in a complete bipartite round: %v", gi, got)
+		}
 	}
 }

@@ -1,6 +1,8 @@
 package revieweval
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +17,21 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 	"gopkg.in/yaml.v3"
 )
+
+// runID returns case name's opaque run id: "c-" plus the first 8 hex
+// characters of a sha256 of the name. Stable (the same name always yields
+// the same id) and reveals nothing about the name itself - this id, never
+// the case name, is what the store ticket, the reviewer's own dispatch
+// ticket (RoundInput.Ticket, which verifydeliver's review prompt embeds
+// verbatim) and every path under a run's own work root are named after, so
+// nothing the reviewer sees can prime it with which case this is
+// (CaseScore.Name and the reports still carry the real name - a person
+// reading a report needs it, a reviewer session reading its own dispatch
+// must never see it).
+func runID(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	return "c-" + hex.EncodeToString(sum[:])[:8]
+}
 
 // identityEnv pins the git author/committer identity and date for every
 // commit this package makes, so an eval repo's shas are stable across runs
@@ -122,24 +139,26 @@ func reviewerRoundFailure(n int, gold Gold, decisions []Decision, err error) (Ro
 	return rs, true
 }
 
-// checkJudgeReadOnly reports an error unless repoDir's HEAD is still head
-// and no tracked file changed since: the same read-only guard the
-// reviewer's own dispatch is held to (verifydeliver/review.go's "the
-// reviewer changed the gate lease" check), extended to the judge's
-// dispatch, since a judge session's Worktree is this same case repo.
-func checkJudgeReadOnly(repoDir, head string) error {
+// checkJudgeReadOnly reports whether the judge violated its read-only rule
+// - repoDir's HEAD is no longer head, or a tracked file changed since -
+// the same read-only guard the reviewer's own dispatch is held to
+// (verifydeliver/review.go's "the reviewer changed the gate lease" check),
+// extended to the judge's dispatch, since a judge session's Worktree is
+// this same case repo. A git command itself failing is a different thing
+// from the judge having changed anything, so it comes back as err
+// (infrastructure, for the caller to return as a real error), never folded
+// into violated - only an actual violation may fail the round with reason
+// "the judge changed the case repo".
+func checkJudgeReadOnly(repoDir, head string) (violated bool, err error) {
 	headAfter, err := gitx.RevParse(repoDir, "HEAD")
 	if err != nil {
-		return fmt.Errorf("revieweval: check judge read-only: resolve HEAD: %w", err)
+		return false, fmt.Errorf("revieweval: check judge read-only: resolve HEAD: %w", err)
 	}
 	statusOut, err := gitx.Run(repoDir, "status", "--porcelain", "--untracked-files=no")
 	if err != nil {
-		return fmt.Errorf("revieweval: check judge read-only: git status: %w", err)
+		return false, fmt.Errorf("revieweval: check judge read-only: git status: %w", err)
 	}
-	if headAfter != head || statusOut != "" {
-		return fmt.Errorf("the judge changed the case repo")
-	}
-	return nil
+	return headAfter != head || statusOut != "", nil
 }
 
 // restoreCaseRepo hard-resets repoDir to head and removes every untracked
@@ -158,11 +177,12 @@ func restoreCaseRepo(repoDir, head string) error {
 	return nil
 }
 
-// initEvalStore builds workDir/store: project.yaml, and the ticket dir
-// (named after the case) holding a copy of its brief.md, an empty
-// slices.yaml and an empty journal.ndjson - the minimum store.Open and
-// verifydeliver's own paths (TicketDir, gate/round-N/...) need.
-func initEvalStore(workDir string, c Case) (*store.Store, error) {
+// initEvalStore builds workDir/store: project.yaml, and the ticket dir -
+// named after id, the case's own opaque run id, never c.Name - holding
+// a copy of its brief.md, an empty slices.yaml and an empty journal.ndjson,
+// the minimum store.Open and verifydeliver's own paths (TicketDir,
+// gate/round-N/...) need.
+func initEvalStore(workDir string, c Case, id string) (*store.Store, error) {
 	storeRoot := filepath.Join(workDir, "store")
 	if err := os.MkdirAll(storeRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("revieweval: create store: %w", err)
@@ -171,7 +191,7 @@ func initEvalStore(workDir string, c Case) (*store.Store, error) {
 		return nil, fmt.Errorf("revieweval: write project.yaml: %w", err)
 	}
 
-	ticketDir := filepath.Join(storeRoot, c.Name)
+	ticketDir := filepath.Join(storeRoot, id)
 	if err := os.MkdirAll(ticketDir, 0o755); err != nil {
 		return nil, fmt.Errorf("revieweval: create ticket dir: %w", err)
 	}
@@ -213,7 +233,10 @@ func initEvalRepo(workDir string) (repoDir, base string, err error) {
 	if _, err := gitx.Run(repoDir, "add", "-A"); err != nil {
 		return "", "", fmt.Errorf("revieweval: git add base: %w", err)
 	}
-	if _, err := gitx.RunEnv(repoDir, identityEnv, "commit", "-q", "-m", "revieweval: base"); err != nil {
+	// The commit message names no run-record kind: nothing the reviewer or
+	// judge inspects with `git log` in this repo may say this is an
+	// evaluation, let alone which case.
+	if _, err := gitx.RunEnv(repoDir, identityEnv, "commit", "-q", "-m", "base"); err != nil {
 		return "", "", fmt.Errorf("revieweval: base commit: %w", err)
 	}
 	base, err = gitx.RevParse(repoDir, "HEAD")
@@ -228,12 +251,14 @@ func initEvalRepo(workDir string) (repoDir, base string, err error) {
 
 // seedRoundHistory copies prev's recorded findings.yaml (round N-1's own
 // ground truth, what the case says jig recorded) into
-// store/<case>/gate/round-(N-1)/findings.yaml, and writes that round's
+// store/<ticket>/gate/round-(N-1)/findings.yaml, and writes that round's
 // report.yaml, so verifydeliver.FoldBefore for round N reads exactly the
 // case's own recorded history - never this run's live result - the
-// teacher-forcing the package doc describes.
-func seedRoundHistory(st *store.Store, caseName string, prev Round, prevHead string) error {
-	gateDir := filepath.Join(st.TicketDir(caseName), "gate", fmt.Sprintf("round-%d", prev.N))
+// teacher-forcing the package doc describes. ticket is the case's own
+// opaque run id, the same one initEvalStore filed brief.md, etc.
+// under.
+func seedRoundHistory(st *store.Store, ticket string, prev Round, prevHead string) error {
+	gateDir := filepath.Join(st.TicketDir(ticket), "gate", fmt.Sprintf("round-%d", prev.N))
 	if err := os.MkdirAll(gateDir, 0o755); err != nil {
 		return fmt.Errorf("revieweval: create round %d gate dir: %w", prev.N, err)
 	}
@@ -265,34 +290,30 @@ func seedRoundHistory(st *store.Store, caseName string, prev Round, prevHead str
 // store-side path convention, not a call. Every review dispatch's
 // review.json and result.json for a case live there, one pair per round,
 // filenames never reused across rounds.
-func caseWorkDir(st *store.Store, caseName string) string {
-	return filepath.Join(st.TicketDir(caseName), "work")
+func caseWorkDir(st *store.Store, ticket string) string {
+	return filepath.Join(st.TicketDir(ticket), "work")
 }
 
-// retireRoundWork moves the case's whole work dir out from under the store
-// to workDir/rounds/round-N/work, once round n is fully done, so no later
-// round's dispatch (reviewer or judge) can find an earlier round's
-// live review.json/result.json still sitting under the ticket dir and read
-// a result that disagrees with the case's own recorded history -
-// teacher-forcing's whole point. A round with nothing dispatched yet (an
-// early infrastructure error before any file was written) leaves nothing
-// to move, which is not an error. The store itself recreates the work dir
-// on demand (os.MkdirAll before it writes review.json), so an empty
-// store-side work dir for the next round is never a problem.
-func retireRoundWork(workDir string, st *store.Store, caseName string, n int) error {
-	src := caseWorkDir(st, caseName)
-	if _, err := os.Stat(src); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("revieweval: stat case work dir: %w", err)
+// retireRoundWork deletes the case's store-side work dir and this round's
+// own judge scratch dir, once round n is fully scored: the JSON
+// report already keeps every finding a round produced, so nothing is
+// lost, and deleting rather than archiving them means no later round's
+// dispatch (reviewer or judge), and no later session poking around under
+// the work root, can find an earlier round's live
+// review.json/result.json/judge.json/verdicts.json anywhere - not merely
+// moved aside - and read a result that disagrees with the case's own
+// recorded history, teacher-forcing's whole point. A round with nothing
+// dispatched yet (an early infrastructure error before any file was
+// written) leaves nothing to delete, which is not an error. The store
+// itself recreates the work dir on demand (os.MkdirAll before it writes
+// review.json), so an empty store-side work dir for the next round is
+// never a problem.
+func retireRoundWork(st *store.Store, ticket string, n int, judgeWorkDir string) error {
+	if err := os.RemoveAll(caseWorkDir(st, ticket)); err != nil {
+		return fmt.Errorf("revieweval: delete case work dir for round %d: %w", n, err)
 	}
-	dstParent := filepath.Join(workDir, "rounds", fmt.Sprintf("round-%d", n))
-	if err := os.MkdirAll(dstParent, 0o755); err != nil {
-		return fmt.Errorf("revieweval: create round %d archive dir: %w", n, err)
-	}
-	if err := os.Rename(src, filepath.Join(dstParent, "work")); err != nil {
-		return fmt.Errorf("revieweval: move case work dir for round %d: %w", n, err)
+	if err := os.RemoveAll(judgeWorkDir); err != nil {
+		return fmt.Errorf("revieweval: delete round %d judge dir: %w", n, err)
 	}
 	return nil
 }
@@ -301,16 +322,19 @@ func retireRoundWork(workDir string, st *store.Store, caseName string, n int) er
 // already-initialized store and repo: applies the round's patch, seeds the
 // store with the previous round's recorded history (n > 1), folds,
 // dispatches the reviewer, applies findings bookkeeping, matches and
-// scores. recordedLinks is every earlier round's decisions keyed by the
-// finding id each one's "recorded" names; prevHead is the previous round's
-// own head, "" for round 1.
+// scores. ticket is the case's own opaque run id - the store ticket
+// and RoundInput.Ticket - never c.Name, which stays for error text and
+// MatchRound's own caseName parameter only. recordedLinks is every earlier
+// round's decisions keyed by the finding id each one's "recorded" names;
+// prevHead is the previous round's own head, "" for round 1.
 //
-// It always retires the round's store-side work dir before returning
-// (deferred so every return path runs it), and, once a live result exists
-// to match at all, always restores the case repo to this round's own head
-// before returning, since a later round's git apply must never see
-// anything a live reviewer or judge dispatch left behind.
-func runRound(workDir string, st *store.Store, c Case, idx int, repoDir, briefPath string, backend session.Backend, judge Judge, model, prevHead string, recordedLinks map[string]Decision) (rs RoundScore, head string, err error) {
+// It always retires the round's store-side work dir and this round's own
+// judge scratch dir before returning (deferred so every return path runs
+// it), and, once a live result exists to match at all, always restores
+// the case repo to this round's own head before returning, since a later
+// round's git apply must never see anything a live reviewer or judge
+// dispatch left behind.
+func runRound(workDir string, st *store.Store, c Case, ticket string, idx int, repoDir, briefPath string, backend session.Backend, judge Judge, model, prevHead string, recordedLinks map[string]Decision) (rs RoundScore, head string, err error) {
 	r := c.Rounds[idx]
 	n := r.N
 
@@ -324,7 +348,7 @@ func runRound(workDir string, st *store.Store, c Case, idx int, repoDir, briefPa
 	if _, aerr := gitx.Run(repoDir, "add", "-A"); aerr != nil {
 		return RoundScore{}, "", fmt.Errorf("revieweval: case %s round %d: git add: %w", c.Name, n, aerr)
 	}
-	if _, cerr := gitx.RunEnv(repoDir, identityEnv, "commit", "-q", "-m", fmt.Sprintf("revieweval: round %d", n)); cerr != nil {
+	if _, cerr := gitx.RunEnv(repoDir, identityEnv, "commit", "-q", "-m", fmt.Sprintf("round %d", n)); cerr != nil {
 		return RoundScore{}, "", fmt.Errorf("revieweval: case %s round %d: commit: %w", c.Name, n, cerr)
 	}
 	head, herr := gitx.RevParse(repoDir, "HEAD")
@@ -332,19 +356,20 @@ func runRound(workDir string, st *store.Store, c Case, idx int, repoDir, briefPa
 		return RoundScore{}, "", fmt.Errorf("revieweval: case %s round %d: resolve head: %w", c.Name, n, herr)
 	}
 
+	judgeWorkDir := filepath.Join(workDir, "judge", fmt.Sprintf("round-%d", n))
 	defer func() {
-		if rerr := retireRoundWork(workDir, st, c.Name, n); rerr != nil && err == nil {
+		if rerr := retireRoundWork(st, ticket, n, judgeWorkDir); rerr != nil && err == nil {
 			err = fmt.Errorf("revieweval: case %s round %d: %w", c.Name, n, rerr)
 		}
 	}()
 
 	if n > 1 {
-		if serr := seedRoundHistory(st, c.Name, c.Rounds[idx-1], prevHead); serr != nil {
+		if serr := seedRoundHistory(st, ticket, c.Rounds[idx-1], prevHead); serr != nil {
 			return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: %w", c.Name, n, serr)
 		}
 	}
 
-	fold, ferr := verifydeliver.FoldBefore(st, c.Name, n)
+	fold, ferr := verifydeliver.FoldBefore(st, ticket, n)
 	if ferr != nil {
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: fold: %w", c.Name, n, ferr)
 	}
@@ -354,7 +379,7 @@ func runRound(workDir string, st *store.Store, c Case, idx int, repoDir, briefPa
 	}
 
 	rnd, ok, rerr := verifydeliver.NewReviewerGateSource(backend).Round(verifydeliver.RoundInput{
-		Store: st, Ticket: c.Name, Round: n, LeaseDir: repoDir, RepoName: evalRepoName, Target: evalTarget,
+		Store: st, Ticket: ticket, Round: n, LeaseDir: repoDir, RepoName: evalRepoName, Target: evalTarget,
 		Model: model, BriefPath: briefPath, Manifest: man, Open: fold.Open, Dismissed: fold.Dismissed,
 	})
 	if rerr != nil {
@@ -379,18 +404,24 @@ func runRound(workDir string, st *store.Store, c Case, idx int, repoDir, briefPa
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: clearing: %w", c.Name, n, clerr)
 	}
 
-	judgeWorkDir := filepath.Join(workDir, "judge", fmt.Sprintf("round-%d", n))
 	match, matchErr := MatchRound(c.Name, n, repoDir, judgeWorkDir, r.Gold, r.Decisions, recordedLinks, dismissedFold(fold.Known), result.Findings, reported, judge)
 
 	// Whatever MatchRound did, the judge (if any) dispatched a session
 	// against this same case repo - check it changed nothing, then restore
 	// it to this round's head regardless, so a later round's patch apply
 	// never sees anything a live judge session left behind, tracked or not.
-	roErr := checkJudgeReadOnly(repoDir, head)
+	// checkJudgeReadOnly's own error (a git command failing) is
+	// infrastructure, returned as a real error, never scored as "the judge
+	// changed the case repo" - only violated=true, a genuine
+	// difference from head, is that.
+	violated, roErr := checkJudgeReadOnly(repoDir, head)
 	if restoreErr := restoreCaseRepo(repoDir, head); restoreErr != nil {
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: %w", c.Name, n, restoreErr)
 	}
 	if roErr != nil {
+		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: %w", c.Name, n, roErr)
+	}
+	if violated {
 		return failedRoundScore(n, r.Gold, r.Decisions, result.Findings, reported, "the judge changed the case repo"), head, nil
 	}
 	if matchErr != nil {
@@ -414,7 +445,8 @@ func runRound(workDir string, st *store.Store, c Case, idx int, repoDir, briefPa
 // recorded history, never from this run's own result, so it is
 // unaffected. Any other error is infrastructure and is returned.
 func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model string) (CaseScore, error) {
-	st, err := initEvalStore(workDir, c)
+	ticket := runID(c.Name)
+	st, err := initEvalStore(workDir, c, ticket)
 	if err != nil {
 		return CaseScore{}, err
 	}
@@ -422,13 +454,13 @@ func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model
 	if err != nil {
 		return CaseScore{}, err
 	}
-	briefPath := filepath.Join(st.TicketDir(c.Name), "brief.md")
+	briefPath := filepath.Join(st.TicketDir(ticket), "brief.md")
 
 	cs := CaseScore{Name: c.Name, Passed: true}
 	var prevHead string
 	recordedLinks := map[string]Decision{}
 	for idx, r := range c.Rounds {
-		rs, head, err := runRound(workDir, st, c, idx, repoDir, briefPath, backend, judge, model, prevHead, recordedLinks)
+		rs, head, err := runRound(workDir, st, c, ticket, idx, repoDir, briefPath, backend, judge, model, prevHead, recordedLinks)
 		if err != nil {
 			return CaseScore{}, err
 		}
@@ -448,11 +480,12 @@ func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model
 }
 
 // RunCorpus runs every case in cases under its own subdirectory of
-// workRoot and returns each case's score, in corpus order.
+// workRoot - named after the case's own opaque run id, never its
+// name - and returns each case's score, in corpus order.
 func RunCorpus(workRoot string, cases []Case, backend session.Backend, judge Judge, model string) ([]CaseScore, error) {
 	scores := make([]CaseScore, 0, len(cases))
 	for _, c := range cases {
-		dir := filepath.Join(workRoot, c.Name)
+		dir := filepath.Join(workRoot, runID(c.Name))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("revieweval: create work dir for %s: %w", c.Name, err)
 		}

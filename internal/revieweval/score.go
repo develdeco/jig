@@ -281,9 +281,9 @@ func RenderReport(scores []CaseScore) string {
 		}
 	}
 
-	recall := 0.0
+	recall := "n/a"
 	if totalGold > 0 {
-		recall = float64(totalFound) / float64(totalGold)
+		recall = fmt.Sprintf("%.2f", float64(totalFound)/float64(totalGold))
 	}
 	priorRate := "n/a"
 	if priorExpected > 0 {
@@ -298,7 +298,7 @@ func RenderReport(scores []CaseScore) string {
 		triagePerCase = float64(totalTriagePrompts) / float64(len(scores))
 	}
 
-	fmt.Fprintf(&b, "\ntotals: cases passed %d/%d, rounds passed %d/%d, recall %.2f\n", casesPassed, len(scores), roundsPassed, roundsTotal, recall)
+	fmt.Fprintf(&b, "\ntotals: cases passed %d/%d, rounds passed %d/%d, recall %s\n", casesPassed, len(scores), roundsPassed, roundsTotal, recall)
 	fmt.Fprintf(&b, "lost %d, forgotten %d, dropped questions %d, misattributed %d, false alarms %d, re-litigated %d, wrong priors %d, refused %d, failed %d\n",
 		totalLost, totalForgotten, totalDropped, totalMisattributed, totalFalseAlarms, totalRelitigated, totalWrongPriors, totalRefused, totalFailed)
 	fmt.Fprintf(&b, "prior citation rate %s, action agreement %s, triage prompts per case %.2f\n", priorRate, actionRate, triagePerCase)

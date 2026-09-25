@@ -1,0 +1,28 @@
+{
+  "findings": [
+    {
+      "file": "queue/priority.go",
+      "line": 15,
+      "title": "Highest can't select a non-positive priority",
+      "detail": "bestPriority starts at 0, so a task whose priority is 0 or negative never replaces it; when every priority is non-positive, Highest returns \"\".",
+      "action": "fix",
+      "risk": "medium",
+      "risk_rationale": "A queue of only non-positive priorities silently returns no winner."
+    },
+    {
+      "file": "queue/priority.go",
+      "line": 1,
+      "title": "priority.go could use strings.Builder too",
+      "detail": "Same style point as the dismissed one: building output without strings.Builder.",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "A style point, not a measured cost at expected queue sizes.",
+      "prior": "r1-f1"
+    }
+  ],
+  "reviewed_paths": [
+    "queue/priority.go",
+    "queue/labels.go"
+  ],
+  "summary": "Highest has a zero floor bug. A style note also cites the dismissed labels.go point, but against the wrong file."
+}

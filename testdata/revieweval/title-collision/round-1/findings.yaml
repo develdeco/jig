@@ -1,6 +1,7 @@
 scope: full
 reviewed_paths:
   - store/reader.go
+  - store/writer.go
 findings:
   - id: r1-f1
     file: store/reader.go

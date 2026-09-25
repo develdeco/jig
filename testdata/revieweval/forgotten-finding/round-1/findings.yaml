@@ -10,7 +10,7 @@ findings:
     detail: The loop condition is i <= len(items), so the final iteration indexes items[len(items)], one past the end of the slice.
     action: fix
     risk: medium
-    risk_rationale: A caller with a non-empty items slice panics on every call.
+    risk_rationale: Every call panics, even one with an empty items slice.
     oracle: test
     workspace: root
     status: open
@@ -20,10 +20,10 @@ findings:
     file: inventory/report.go
     line: 10
     title: WriteReport ignores the error from os.Create
-    detail: "f, _ := os.Create(path) discards the error, so a failed create is never reported; the write that follows then runs against a nil file instead of surfacing the real cause."
+    detail: "f, _ := os.Create(path) discards the error, so a failed create is never reported; the write that follows then returns only an invalid-argument error, never the real cause."
     action: fix
     risk: low
-    risk_rationale: The report is never written, with a nil-file failure in place of the real cause.
+    risk_rationale: The report is never written, with an invalid-argument write error in place of the real cause.
     oracle: test
     workspace: root
     status: open

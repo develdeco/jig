@@ -1,6 +1,7 @@
 scope: full
 reviewed_paths:
   - queue/labels.go
+  - queue/priority.go
 findings:
   - id: r1-f1
     file: queue/labels.go

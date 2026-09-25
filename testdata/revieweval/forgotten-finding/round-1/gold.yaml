@@ -4,10 +4,10 @@ findings:
     file: inventory/count.go
     lines: [11, 12]
     action: fix
-    description: CountAvailable loops with i <= len(items), so the last iteration indexes items[len(items)], one past the end of the slice.
+    description: CountAvailable loops with i <= len(items), so the last iteration indexes items[len(items)], one past the end of the slice; every call panics, even with an empty slice.
   - id: report-ignored-error
     file: inventory/report.go
     lines: [10, 11]
     action: fix
-    description: WriteReport ignores the error from os.Create with the blank identifier, so a failed create is never reported and the write that follows runs against a nil file.
+    description: WriteReport ignores the error from os.Create with the blank identifier, so a failed create is never reported; the write that follows then surfaces only an invalid-argument write error, never the real cause.
 traps: []

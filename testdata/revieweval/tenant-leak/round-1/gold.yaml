@@ -9,4 +9,4 @@ traps:
   - id: summarize-filtered
     file: billing/report.go
     lines: [6, 13]
-    description: Summarize ranges over the shared package-level invoices slice, the same slice ForTenant returns unfiltered, to build its per-tenant count.
+    description: Summarize reads the package-level slice with every tenant's invoices, so its count can include other tenants' data.
