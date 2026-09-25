@@ -80,6 +80,10 @@ _Avoid_: reviewed scope, read set
 The human seam for a gate round's `ask` findings and its `fix` batch: at a terminal, every `ask` is decided as keep (with an optional decision) or dismiss - undecided is never offered as a choice, only what an ask missing a workspace, an oracle, or both defaults to when no human is present to make that call. Every decision is recorded and becomes eval gold.
 _Avoid_: review comment triage, auto-dismiss
 
+**Gold**:
+A review-eval case's seeded truth: the findings a correct review must report and the traps it must not flag, both written into the case when it is built, not read off a review after the fact. A finding beyond it is labeled from a recorded human decision instead: kept, dismissed, or, when nobody decided, pending.
+_Avoid_: ground truth, expected output
+
 **Staircase**:
 The per-dispatch model ladder: cheapest model first, climbing with volume, with invariants floored to the dearest model.
 _Avoid_: model tiering, escalation policy

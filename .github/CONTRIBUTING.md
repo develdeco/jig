@@ -57,6 +57,25 @@ annotation.
 - Every test gets its own `t.TempDir()`, and `JIG_HOME` is always overridden
   with `t.Setenv` so a test run never touches a real machine's jig home.
 
+## Live review eval
+
+`internal/revieweval` scores the gate reviewer against a labeled corpus
+(`testdata/revieweval`) by dispatching a real reviewer session against it.
+It is opt-in, since CI has no `claude` CLI:
+
+```sh
+JIG_REVIEWEVAL_BACKEND=headless go test ./internal/revieweval -run Live
+```
+
+It is report-only: a case's result is a measurement, not a pass/fail gate
+on the build. Environment variables: `JIG_REVIEWEVAL_MODEL` (reviewer
+model; default is the same rung `jig gate` itself falls back to when a
+ticket has no builder model recorded yet), `JIG_REVIEWEVAL_JUDGE_MODEL`
+(judge model; default the reviewer model), `JIG_REVIEWEVAL_CORPUS`
+(default `testdata/revieweval`), and `JIG_REVIEWEVAL_REPORT` (when set,
+writes the text report there and the JSON report beside it with a `.json`
+suffix).
+
 ## Reporting a bug
 
 Open an issue with the command you ran, what you expected, and what happened

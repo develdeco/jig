@@ -765,6 +765,62 @@ above:
   journal line for the same reason: a failure between journaling and
   resolving it used to record "round 0", a round that never existed.
 
+## Review eval
+
+- `internal/verifydeliver` gains one exported function beyond the reviewer
+  contract itself: `Fold` and `FoldBefore(st, ticket, round)`, replacing the
+  three unexported helpers `Gate` wired together inline
+  (`cumulativeFindings`, `openAndNotedFindingsList`,
+  `dismissedFindingsList`/`toDismissedFindingList`). `Gate`'s own behavior
+  is unchanged, byte for byte; the eval package calls the same
+  `FoldBefore` a real gate round does, so the two can never quietly
+  disagree about what a round's history is.
+- The eval never calls jig's routing or triage step (`route.go`'s
+  `routeRound`, `DefaultTriage`): a round's score comes straight from
+  `verifydeliver.ApplyRound`'s own status assignment and
+  `verifydeliver.ClearingAfterTriage`, the same fate a freshly reported
+  finding carries before any human, or `--yes`, decides it. Calling triage
+  too would fold jig's own default-approval policy into a review-quality
+  number, which is a property of jig's config, not of the reviewer.
+- `ApplyRound`'s `sliceGreen` callback always answers false for every
+  eval round: the eval never builds a fix slice, so no finding's earlier
+  attempt can ever have actually gone green, and every re-reported finding
+  is scored as a fresh occurrence rather than a counted recurrence a
+  finished fix slice would explain. A case that wants to test the
+  recurrence bound itself seeds that directly in a round's own
+  `gold.yaml`/`findings.yaml`, not by faking a green slice.
+- Seeded gold findings are matched to a round's reported findings by a
+  maximum bipartite matching (Kuhn's augmenting-path algorithm), not a
+  first-fit greedy pairing: a greedy match can leave two mutually
+  satisfiable findings starving each other depending on the order it
+  happens to consider them in, understating recall on exactly the cases
+  most worth catching (two real bugs seeded close together in the same
+  file). A matcher test pins a case a greedy matcher gets wrong and this
+  one does not.
+- The judge is asked once per round with every candidate of that round's
+  whole batch, not once per candidate: a per-candidate dispatch would
+  multiply session count and latency by the candidate count for no
+  accuracy gain, since nothing about one candidate's verdict depends on
+  another's.
+- `RoundScore` carries `FalsePositiveGold`: whether a round's own gold
+  could produce a false alarm at all (a trap, a dismissed decision, or an
+  exhaustive round). `RenderReport`'s precision line is withheld when no
+  scored round could ever have produced one, and that fact is not
+  otherwise derivable from a `RoundScore` once scoring has already reduced
+  a round's raw `Gold` to plain counts. It also carries every reported
+  finding as a `ScoredFinding`, so `RenderJSON` is enough for a person to
+  label a pending finding without the round's work dir.
+- The eval repo's per-round git identity and commit date
+  (`GIT_AUTHOR_NAME=jig-fixture` and the rest, pinned in `runner.go`) are
+  fixed, not the operator's own: two runs of the same corpus produce the
+  same shas, which nothing yet depends on but which makes one run
+  reproducible to compare byte for byte against another.
+- The live path's default model is derived, not hardcoded:
+  `staircase.Disjoint(staircase.Default(), nil)`, the same rung `Gate`
+  itself falls back to when a ticket has no builder model recorded yet, so
+  the eval's own live default can never silently drift from what an actual
+  unattended gate round would pick.
+
 ## CLI
 
 - `jig init` takes `--store <path>` for the project form, while the end-to-end fixture
