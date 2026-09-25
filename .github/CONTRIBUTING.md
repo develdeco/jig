@@ -67,10 +67,12 @@ It is opt-in, since CI has no `claude` CLI:
 JIG_REVIEWEVAL_BACKEND=headless go test -count=1 -timeout 0 -v -run TestEvalLive ./internal/revieweval
 ```
 
-A case's result is a measurement, not a pass/fail gate on the build - a
-refused round stays a measurement - except a round that comes back Failed
-(a dispatch failure, a judge error, or the judge changing the case repo)
-is infrastructure trouble and fails the test. Cases run one at a time and
+A case's result is a measurement, not a pass/fail gate on the build: each
+round reads PASS, PROVISIONAL (nothing failed, but some findings still
+need a person's label) or FAIL, and a refused round stays a measurement.
+A round that comes back Failed fails the test itself: a dispatch failure,
+a judge error, the judge changing the case repo, or a reviewer that wrote
+no result at all, since the eval has nothing to score there. Cases run one at a time and
 the report is rewritten after each one, so the command above (`-timeout
 0` disables Go's own default) keeps whatever finished on disk if the run
 is interrupted. Environment variables: `JIG_REVIEWEVAL_MODEL` (reviewer

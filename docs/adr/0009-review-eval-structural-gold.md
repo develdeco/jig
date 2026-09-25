@@ -88,10 +88,14 @@ result every run, and a tie only the evidence itself cannot break, which a
 live judge normally would (an explicit Same or Different resolves most of
 what would otherwise tie). Every finding the match leaves over is then
 classified
-by one of seven rules in order (`classifyUnmatched`): jig's status is
-dismissed with a surviving edge to the dismissed point its prior names -
-a permitted repeat - or without one, a wrong prior that fails the round;
-a note; an edge to a fold finding already dismissed (re-litigated); an
+by the first of these rules that applies (`classifyUnmatched`): a
+finding whose prior names any fold point - open, asked, noted or
+dismissed - with no surviving edge to it is a wrong prior that fails the
+round, since jig would move that point's identity onto code it is not
+about; a well-cited repeat of a dismissed point is a permitted repeat
+jig keeps dismissed, and counts nowhere; a well-cited repeat of any
+other point goes on through the rules like any finding, so citing a
+prior never excuses a false alarm; then a note; an edge to a fold finding already dismissed (re-litigated); an
 edge to a trap or a dismissed decision (a false alarm); an edge to a kept
 decision (a true positive beyond gold); an exhaustive round's leftover
 (also a false alarm); or otherwise pending - run only on a finding the
@@ -113,7 +117,11 @@ line-0 finding never does. A round's `Unconfirmed` gold, found on
 structure alone, is a count in `RenderReport`; `RenderJSON` carries every
 reported finding with jig's status and either the gold id it matched or
 how it was classified, so a person can confirm an unconfirmed one or
-label a pending one from the report alone.
+label a pending one from the report alone. With no judge, only gold
+matches are marked unconfirmed: a false alarm, a re-litigation or a lost
+finding rests on structure alone just the same and is not marked, so a
+run with no judge is a structural check. The live path always runs the
+model judge.
 
 Seeded gold is written into a case when the case is built, not discovered
 by eyeballing a review afterward - `gold.yaml`'s findings and traps are
@@ -126,12 +134,15 @@ fold always comes from the case's own recorded
 `round-(N-1)/findings.yaml`, copied into the eval store before round N
 runs, never from what this run's reviewer said in round N-1, so a round
 that drifts off course cannot drag a later round down or inflate it, and
-free-running drift is left for later. A round passes when it is neither
-refused nor failed and `Missed`, `Lost`, `DroppedQuestions`,
-`Misattributed`, `FalseAlarms`, `Relitigated` and `WrongPriors` are all
-empty; `Unconfirmed`, `Pending`, prior citation, action agreement and
-triage prompts are counted but never fail a round - what the eval cannot
-resolve on its own, not evidence the reviewer did anything wrong.
+free-running drift is left for later. A round's verdict has three
+values. It is FAIL when it is refused or failed, or when `Missed`,
+`Lost`, `DroppedQuestions`, `Misattributed`, `FalseAlarms`,
+`Relitigated` or `WrongPriors` is not empty. Otherwise it is PROVISIONAL
+while any finding is still pending a label - a round cannot read as a
+pass while findings nobody has judged stand in it - and PASS once none
+is. A case takes its worst round's verdict. `Unconfirmed`, prior
+citation, action agreement and triage prompts are measurements, never
+part of the verdict.
 
 CI runs the structural path with a scripted reviewer backend, so the
 scorer has to prove it can fail as well as pass. `perfect`, `regressed`
@@ -154,16 +165,29 @@ window, rejects it. `refused` leaves a `must_review` path out of
 
 The live path (`live_test.go`, gated on `JIG_REVIEWEVAL_BACKEND`) is
 report-only - a measurement, not a build gate - except a round that comes
-back Failed (a dispatch failure, a judge error, or the judge changing the
-case repo), which is infrastructure trouble and fails the test; a refused
-round still only measures, and a judge error still leaves that round's
-findings in `RenderJSON`. A judge dispatch is held to the reviewer's own
+back Failed, which fails the test: a dispatch failure, a judge error, the
+judge changing the case repo, or a reviewer that wrote no `result.json`
+at all. That last one is the reviewer's own behavior rather than
+infrastructure, but it gives the eval nothing to score, so it is surfaced
+the same way. A failed round's gold counts as missed, never left out of
+the denominator; a refused round still only measures, and a judge error
+still leaves that round's findings in `RenderJSON`. The live path
+controls what its sessions see: each child gets an environment built
+from the test process's own minus every `JIG_` variable, the git test
+scaffolding and any stale `PWD` (`session.Options.Env`), and the judge's
+scratch lives in its own temp root outside the case work root. A test
+drives a case through the real headless backend with a stub CLI and
+checks the environment, working directory and surroundings every child
+actually saw. The live number still assumes a reviewer that does not go
+looking: the corpus and its `gold.yaml` sit on the same disk, and the
+headless backend is not a read boundary. A judge dispatch is held to the reviewer's own
 read-only rule: after every round the runner checks the case repo's HEAD
 and tracked files against that round's head and restores the repo
 regardless, keeping a git command failing during that check apart from an
 actual violation ("the judge changed the case repo"). Once scored, the
 runner deletes - never moves or archives - the round's store-side work
-dir and judge scratch dir, so no later round's own dispatch, reading only
+dir and judge scratch dir (and the judge's temp root when the case
+ends), so no later round's own dispatch, reading only
 what the store and the work root currently hold, can find an earlier
 round's live result disagreeing with the case's recorded history; this
 claim is scoped to that - a later session free to read wherever it likes

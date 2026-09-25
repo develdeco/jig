@@ -803,11 +803,9 @@ above:
   say "fixture" to it as plainly as the case's own name would), and the
   base commit now carries a neutral `go.mod` (`module example.com/project`,
   `go 1.22`) next to `.claude/jig.yaml`, so every case repo actually builds
-  and a live reviewer's own `go test ./...` can run - previously only
-  `loopvar-trap` carried a go.mod, seeded by its own round-1 patch, which
-  named this package in its module string; that case now gets its Go
-  version from the base commit like every other case, and its patch adds
-  only `worker/pool.go`. A dedicated test,
+  and a live reviewer's own `go test ./...` can run; `loopvar-trap` gets
+  the Go version its premise needs from that base commit like every other
+  case. A dedicated test,
   `TestRunCaseNeverLeaksTheCorpusVocabulary` (`leak_test.go`), runs the
   whole corpus through a capturing backend and judge and checks the prompt,
   the dispatch paths, the dispatched slice file, every worktree file
@@ -815,8 +813,9 @@ above:
   git log against both the case's own name and a fixed vocabulary
   (`eval`, `revieweval`, `fixture`, `trap`, `gold`, `seeded`), tokenized
   with `strings.FieldsFunc`, never `regexp`.
-- A finding whose own `prior` names a dismissed fold point in the same
-  file is a structural candidate for that point regardless of its line,
+- A finding whose own `prior` names a fold point in the same file, open,
+  asked, noted or dismissed, is a structural candidate for that point
+  regardless of its line,
   line 0 included: citing the id is itself location evidence, so that one
   candidate survives on anything but an explicit judge Different, without
   the extra burden of an explicit Same a line-0 finding otherwise needs.
@@ -860,13 +859,16 @@ above:
   loader itself rejects a `recorded` line outside the decision's own span
   widened by `lineWindow`, and a second decision anywhere in the case, not
   only the same round, naming a record another decision already claimed.
-- Rule 1 of `classifyUnmatched` (a dismissed status is a permitted repeat)
-  requires the finding to also carry a surviving structural edge to the
-  dismissed fold point its own `prior` names; without one it is a new
-  Fate, `FateWrongPrior` (`RoundScore.WrongPriors`), and fails the round.
-  `ApplyRound`'s own bookkeeping trusts a reported `prior` id without
-  checking what it structurally points at, so a citation of the right id
-  for the wrong reason must not silently score as a repeat.
+- Rule 1 of `classifyUnmatched`: an unmatched finding whose `prior`
+  names any fold point, whatever its status, needs a surviving structural
+  edge to that point; without one it is `FateWrongPrior`
+  (`RoundScore.WrongPriors`) and fails the round. `ApplyRound`'s own
+  bookkeeping trusts a reported `prior` id without checking what it
+  structurally points at, and would carry that point's identity onto
+  unrelated code. Only a well-cited repeat of a dismissed point is silent
+  (jig keeps it dismissed); any other well-cited repeat goes on through
+  the rules like any finding, so citing a prior never excuses a false
+  alarm.
 - `checkJudgeReadOnly` returns a violation and an error as two separate
   results, not one: a `git rev-parse`/`git status` command itself failing
   during the read-only check is ordinary infrastructure trouble, returned
@@ -875,9 +877,11 @@ above:
   way, the runner hard-resets and cleans the repo (`git reset --hard`,
   `git clean -fd`) before returning, since the next round's `git apply`
   must start from a pristine head whatever a judge dispatch left behind.
-- Once a round is fully scored, the runner deletes, rather than moves,
-  the case's store-side `work` dir and that round's own judge scratch dir
-  (`retireRoundWork`): the JSON report already keeps every finding a
+- The judge's scratch lives in its own temp root (`os.MkdirTemp`), outside
+  the case work root and removed when the case ends, so nothing beside
+  the reviewer's worktree says a judge exists. Once a round is fully
+  scored, the runner deletes, rather than moves, the case's store-side
+  `work` dir and that round's own judge scratch dir (`retireRoundWork`): the JSON report already keeps every finding a
   round produced, so nothing is lost, and deleting them means no later
   round's dispatch, and no later session poking around under the work
   root, can find an earlier round's live
@@ -889,10 +893,11 @@ above:
   either - the report's own default location moves outside the work tree
   for exactly that reason (below).
 - `live_test.go` fails the Go test itself on a round that comes back
-  Failed (a dispatch failure, a judge error, or the judge changing the
-  case repo): that is infrastructure trouble, not a review-quality number
-  to report, and burying it in a text report nobody reads would let it go
-  unnoticed. A Refused round stays a measurement, and a judge error still
+  Failed (a dispatch failure, a judge error, the judge changing the case
+  repo, or a reviewer that wrote no `result.json`): the eval has nothing
+  to score there, and burying it in a text report nobody reads would let
+  it go unnoticed. The last case is the reviewer's own behavior, not
+  infrastructure, and a failed round's gold counts as missed. A Refused round stays a measurement, and a judge error still
   keeps that round's `Findings` (status set, no gold match, no fate).
   Cases run one at a time through `RunCase` rather than `RunCorpus`,
   rewriting the text report and JSON after every case, and the documented
@@ -932,6 +937,27 @@ above:
   the round's work dir.
 - `RenderReport`'s recall, like its other rates, is `n/a` with zero seeded
   gold rather than a bare `0.00`.
+- A round's verdict is PASS, PROVISIONAL or FAIL. PROVISIONAL means nothing
+  failed but some findings are still pending a label: a round that reads
+  PASS with unjudged findings in it would overstate what was measured.
+  The alternative, marking more rounds exhaustive, was not taken: it would
+  turn every unforeseen but correct remark into a false alarm.
+- `bestMatching` bounds each augmenting search at m+1 steps, one per
+  column it can mark used, and returns an error past that, so a broken
+  comparator fails fast instead of hanging a test run.
+- `session.Options.Env` lets a caller fix a headless child's environment;
+  the live eval passes its own environment minus every `JIG_` variable,
+  `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`, `PWD` and `OLDPWD`, and the
+  backend sets `PWD` to the worktree. It is a denylist of what jig and its
+  test scaffolding own, not an allowlist of what the CLI needs, so the CLI
+  keeps whatever else it relies on. The claude stub records its
+  environment and surroundings, and a test runs a case through the real
+  headless backend to check what each child actually saw.
+- The five cases ported from the earlier corpus kept their code, but
+  `clean`, `loopvar-trap` and `tenant-leak` lost sentences that gave the
+  reviewer the verdict (a brief saying the diff is correct, a brief
+  explaining the rule the trap tests, a comment arguing the trap is safe).
+  That is a content change, not only a translation to the new gold shape.
 
 ## CLI
 
