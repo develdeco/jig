@@ -523,24 +523,28 @@ func TestMatchPrefersClosenessWhenSameAndPriorAreTied(t *testing.T) {
 	}
 }
 
-// TestMatchNeverRanksByStatusOrAction pins the negative rule: a
-// note sitting exactly inside the gold span beats a fix sitting outside
-// the window's reach of anything better, even though the note's own
-// status (noted) disagrees with the gold's fix action and the fix's
-// (open) agrees. Closeness alone decides it; status and action never
-// enter the comparison.
+// TestMatchNeverRanksByStatusOrAction pins the negative rule: a note
+// sitting exactly inside the gold span beats a fix sitting outside it,
+// even though the note's own status (noted) disagrees with the gold's fix
+// action and the fix's (open) agrees. The two candidates' closeness scores
+// are exactly one step apart (4 inside the span versus 3 one line out) -
+// close enough that a one-point action-agreement bonus for the finding
+// whose action matches the gold's would tie the two, and then flip the
+// winner to the wrong one on the "early" tiebreak (fix dispatched first).
+// Closeness alone decides it; status and action never enter the
+// comparison.
 func TestMatchNeverRanksByStatusOrAction(t *testing.T) {
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d"}}}
-	note := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "note-inside", Action: verifydeliver.ActionNote}
-	fix := verifydeliver.ResultFinding{File: "a.go", Line: 13, Title: "fix-3-off", Action: verifydeliver.ActionFix}
-	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusNoted}, {ID: "r1-f2", Status: verifydeliver.StatusOpen}}
+	fix := verifydeliver.ResultFinding{File: "a.go", Line: 11, Title: "fix-1-off", Action: verifydeliver.ActionFix}     // closeness 3, gold's own action
+	note := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "note-inside", Action: verifydeliver.ActionNote} // closeness 4, mismatched action
+	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusOpen}, {ID: "r1-f2", Status: verifydeliver.StatusNoted}}
 
-	m, err := MatchRound("case", 1, "", "", gold, nil, nil, nil, []verifydeliver.ResultFinding{note, fix}, reported, nil)
+	m, err := MatchRound("case", 1, "", "", gold, nil, nil, nil, []verifydeliver.ResultFinding{fix, note}, reported, nil)
 	if err != nil {
 		t.Fatalf("MatchRound: %v", err)
 	}
-	if m.MatchedFinding[0] != 0 {
-		t.Errorf("MatchedFinding[0] = %d, want 0 (the note inside the span): status/action must never break this tie", m.MatchedFinding[0])
+	if m.MatchedFinding[0] != 1 {
+		t.Errorf("MatchedFinding[0] = %d, want 1 (the note, one step closer): status/action must never break a real one-step closeness gap", m.MatchedFinding[0])
 	}
 }
 
@@ -549,13 +553,17 @@ func TestMatchNeverRanksByStatusOrAction(t *testing.T) {
 // elsewhere in the window, stays Lost - the note (closer) is what gets
 // matched, and ScoreRound marks a fix-action gold matched to a noted
 // finding Lost, exactly as it should: a nearby fix on something else is
-// not the same as actually fixing the seeded bug.
+// not the same as actually fixing the seeded bug. The stray fix is
+// reported first (the higher "early" field) and the note second (the
+// lower one), although the note's closeness is the higher of the two: a
+// mutant that let earliness outrank closeness, instead of only breaking a
+// tie closeness itself leaves standing, would pick the stray fix instead.
 func TestMatchRealBugAsANoteInsideSpanStaysLost(t *testing.T) {
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "the real bug"}}}
-	note := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "note-on-the-real-bug", Action: verifydeliver.ActionNote}
 	stray := verifydeliver.ResultFinding{File: "a.go", Line: 12, Title: "unrelated-stray-fix", Action: verifydeliver.ActionFix}
-	findings := []verifydeliver.ResultFinding{note, stray}
-	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusNoted}, {ID: "r1-f2", Status: verifydeliver.StatusOpen}}
+	note := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "note-on-the-real-bug", Action: verifydeliver.ActionNote}
+	findings := []verifydeliver.ResultFinding{stray, note}
+	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusOpen}, {ID: "r1-f2", Status: verifydeliver.StatusNoted}}
 
 	m, err := MatchRound("case", 1, "", "", gold, nil, nil, nil, findings, reported, nil)
 	if err != nil {
@@ -814,21 +822,29 @@ func TestBestMatchingAgreesWithExhaustiveSearch(t *testing.T) {
 
 // TestBestMatchingStaysPolynomialOnALargeRound gives bestMatching a round
 // no exhaustive search could finish (40 gold entries, each with an edge to
-// every one of 60 findings): it must return a full matching, one finding
-// per gold entry.
+// every one of 60 findings) and pins optimality, not only completeness:
+// each gold entry's own same-indexed finding carries the strongest possible
+// edge (closeness-4, inside the span itself), every other edge strictly
+// weaker (closeness 0-3), so the diagonal is the unique best matching - any
+// matching that used even one off-diagonal edge would score strictly lower,
+// since cardinality and every field ahead of closeness already tie.
 func TestBestMatchingStaysPolynomialOnALargeRound(t *testing.T) {
 	const nGold, nFindings = 40, 60
 	options := make([][]matchOption, nGold)
 	for gi := range options {
 		for j := 0; j < nFindings; j++ {
-			options[gi] = append(options[gi], matchOption{finding: j, closeness: (gi + j) % (closenessInside + 1)})
+			closeness := (gi + j) % closenessInside // 0..3: always weaker than the diagonal edge below
+			if j == gi {
+				closeness = closenessInside // gi's own finding: the strongest possible edge
+			}
+			options[gi] = append(options[gi], matchOption{finding: j, closeness: closeness})
 		}
 	}
 	got := bestMatching(options, nFindings)
 	matchingScore(t, options, nFindings, got)
 	for gi, j := range got {
-		if j == -1 {
-			t.Fatalf("gold %d left unmatched in a complete bipartite round: %v", gi, got)
+		if j != gi {
+			t.Errorf("gold %d matched to finding %d, want %d: the diagonal's closeness-%d edges are the unique optimum", gi, j, gi, closenessInside)
 		}
 	}
 }

@@ -399,6 +399,14 @@ func bestMatching(optionsByGold [][]matchOption, nFindings int) []int {
 	}
 
 	ceiling := matchScore{matched: 1, same: 1, prior: 1, closeness: closenessInside, early: nFindings}
+	// m is deliberately generous: one column per finding plus a full n-wide
+	// dummy block, one "unmatched" column per gold entry, though a smaller
+	// dummy block would still leave every row a column whenever nFindings >
+	// 0 (the only case reached here - n == 0 or nFindings == 0 returns
+	// above), since a real, non-edge column already costs the same ceiling
+	// as a dummy one and so already absorbs a leftover row exactly as a
+	// dummy column would. Shrinking the dummy block by one is therefore an
+	// equivalent mutant no test here could ever catch.
 	m := nFindings + n
 	cost := make([][]matchScore, n)
 	edge := make([][]bool, n)

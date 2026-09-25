@@ -9,23 +9,40 @@ fine. A round dispatches through the same call Gate itself makes,
 decide a finding's fate on a real ticket, and reads a round's starting
 history from the store's own `gate/round-N/findings.yaml`, folded the same
 way Gate folds it: `findings.go` exports that fold as one type and one
-function, `Fold` and `FoldBefore` - three unexported helpers wired
-together inline in `gate.go` before - and `Gate` itself now calls
-`FoldBefore`, so a corpus run and a real gate round can never disagree.
-The eval stops short of routing: a round's fate is exactly `ApplyRound`'s
-own status assignment, what a fresh finding carries before any human, or
-`--yes`, decides it, since folding jig's default triage into a
-review-quality measurement would score the repo's config, not the
-reviewer.
+function, `Fold` and `FoldBefore`, wrapping - not replacing - the four
+unexported helpers `gate.go` used to wire together inline
+(`cumulativeFindings`, `openAndNotedFindingsList`, `dismissedFindingsList`,
+`toDismissedFindingList`). `Gate` itself now calls `FoldBefore`, so a
+corpus run and a real gate round can never disagree. The eval stops short
+of routing: a round's fate is exactly `ApplyRound`'s own status assignment,
+what a fresh finding carries before any human, or `--yes`, decides it,
+since folding jig's default triage into a review-quality measurement would
+score the repo's config, not the reviewer.
 
 Nothing a live dispatch reads or is identified by may name the case under
-measurement. Every case gets an opaque run id, `runID(name)` - `c-` plus
-the first 8 hex characters of a sha256 of the name - and that id, never
-the name, is what the store ticket, `RoundInput.Ticket` (embedded
-verbatim in the reviewer's prompt), the judge's dispatch ticket, every
-work-root path, and the case repo's commit messages are named after.
-`CaseScore.Name`, `JudgeQuery.Case` and every error message still carry
-the real name; only a live dispatch may not.
+measurement, or even that this is a case at all. Every case gets an opaque
+run id, `runID(name)` - `c-` plus the first 8 hex characters of a sha256 of
+the name - and that id, never the name, is what the store ticket,
+`RoundInput.Ticket` (embedded verbatim in the reviewer's prompt), the
+judge's dispatch ticket, and every work-root path are named after; the
+case repo's own commit messages are neutral literals ("base", "round N"),
+not named after the id either. `CaseScore.Name`, `JudgeQuery.Case` and
+every error message still carry the real name; only a live dispatch may
+not. The eval repo's own git identity (`runner.go`'s `identityEnv`) and
+its store-side `project.yaml` are neutral for the same reason - a live
+session can run `git log` in its worktree, so nothing there may say
+"fixture" any more than it may say the case's name; the base commit itself
+carries a neutral `go.mod` (`module example.com/project`, `go 1.22`), so
+every case repo actually builds and a live reviewer's own `go test ./...`
+can run, whatever a round's diff touches. A dedicated test,
+`TestRunCaseNeverLeaksTheCorpusVocabulary` (`leak_test.go`), runs every
+corpus case through a capturing backend and a capturing judge and checks
+every surface a session with that dispatch could read - the prompt, the
+dispatch paths, the dispatched slice file, every worktree file tracked or
+not, the store's own ticket-dir files, and the worktree's git log - against
+both the case's own name and a fixed vocabulary this package must never
+use to describe itself (`eval`, `revieweval`, `fixture`, `trap`, `gold`,
+`seeded`), tokenized without regexp (`strings.FieldsFunc`).
 
 Matching what a round reports against what a case seeds is structural,
 never a pattern over the reviewer's prose, which reads a differently
@@ -62,9 +79,15 @@ matching covers, how many edges the judge confirmed Same, how many cite
 the gold's own prior, and the summed closeness of each matched line to
 its span - never a finding's status or action, which the score itself
 measures, so ranking the pairing by them would let the score choose its
-own inputs. Only when two matchings tie on all of that does report order
-decide, toward the earlier-reported findings, so the result is the same
-every run. Every finding the match leaves over is then classified
+own inputs. Only when two matchings tie on all of that does the summed
+earliness of the matched findings decide, toward the earlier-reported
+ones; the rare case where even that ties (more than one matching uses the
+same set of findings) falls to the assignment algorithm's own row order,
+deterministic for a given input but not itself a ranking field - the same
+result every run, and a tie only the evidence itself cannot break, which a
+live judge normally would (an explicit Same or Different resolves most of
+what would otherwise tie). Every finding the match leaves over is then
+classified
 by one of seven rules in order (`classifyUnmatched`): jig's status is
 dismissed with a surviving edge to the dismissed point its prior names -
 a permitted repeat - or without one, a wrong prior that fails the round;
@@ -116,10 +139,11 @@ and `refused` run with no judge, since each tests structural matching on
 its own; `gamed` also runs with a scripted judge, proving the judge stage
 itself, not the window, rejects a gamed finding. `perfect` passes every
 round of every case; `regressed` fails each case in exactly one designed
-way - a missed bug, a flagged trap, a lumped finding, a forgotten finding,
-a re-litigated dismissal, a matched finding scored on the wrong prior, a
-lost fix, a dropped question - never a bare wrong prior, since a matched
-finding scores against its gold entry regardless of what it cited;
+way - a missed bug, a flagged trap, a lumped finding, an exhaustive round's
+leftover false alarm (`clean`), a forgotten finding, a re-litigated
+dismissal, a matched finding scored on the wrong prior, a lost fix, a
+dropped question - never a bare wrong prior, since a matched finding
+scores against its gold entry regardless of what it cited;
 `probes` adds cases exercising the paths the standing corpus does not
 otherwise reach, among them an unmatched finding whose cited prior is
 never confirmed. `gamed` puts a finding at the seeded line arguing the
@@ -139,16 +163,24 @@ and tracked files against that round's head and restores the repo
 regardless, keeping a git command failing during that check apart from an
 actual violation ("the judge changed the case repo"). Once scored, the
 runner deletes - never moves or archives - the round's store-side work
-dir and judge scratch dir, so no later dispatch can find a live result
-disagreeing with the case's recorded history. Cases run one at a time
-through `RunCase`, rewriting the report and JSON after each one, so
+dir and judge scratch dir, so no later round's own dispatch, reading only
+what the store and the work root currently hold, can find an earlier
+round's live result disagreeing with the case's recorded history; this
+claim is scoped to that - a later session free to read wherever it likes
+could still find the standing report on disk, or the CLI's own session
+transcripts, neither of which this deletion touches. Cases run one at a
+time through `RunCase`, rewriting the report and JSON after each one, so
 `-timeout 0` in the documented command keeps whatever finished on disk if
 a long run times out or panics partway through the corpus. The report
-always lands on disk: unset, `JIG_REVIEWEVAL_REPORT` falls back to a
-stable path under `os.TempDir()` (`report.txt` and `report.txt.json`
-under a `jig-revieweval` directory) rather than `t.TempDir()`, logged once
-at the start; each case's own lines log as it finishes, the cumulative
-report once more after the loop.
+always lands on disk, and never under the work root the run itself
+deletes: unset, `JIG_REVIEWEVAL_REPORT` falls back to `defaultReportDir()`
+(`os.UserCacheDir()/jig/revieweval`, falling back to `os.TempDir()` only
+when `UserCacheDir` itself fails), never `t.TempDir()` (which the test
+removes the moment it ends) and never the work root (`os.MkdirTemp("",
+"jig-")`, also removed at the end - not `t.TempDir()`, whose own directory
+is named after the running test), logged once at the start; each case's
+own lines log as it finishes, the cumulative report once more after the
+loop.
 
 The eval repo's per-round git identity and commit date are fixed, so two
 runs of the same corpus produce comparable shas. The default model is

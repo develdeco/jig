@@ -1,12 +1,3 @@
-diff --git a/go.mod b/go.mod
-new file mode 100644
-index 0000000..a1b2c3d
---- /dev/null
-+++ b/go.mod
-@@ -0,0 +1,3 @@
-+module revieweval-loopvar-trap
-+
-+go 1.22
 diff --git a/worker/pool.go b/worker/pool.go
 new file mode 100644
 index 0000000..6b7c314

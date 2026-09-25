@@ -42,6 +42,33 @@ func buildJigBinary(t *testing.T) string {
 	return out
 }
 
+// defaultReportDir is the live report's default location:
+// os.UserCacheDir()/jig/revieweval, falling back to os.TempDir() only when
+// UserCacheDir itself fails (no $HOME, a locked-down environment). It is
+// never under the test's own temp work root, which TestEvalLive always
+// deletes once it finishes - the report must still be there afterward.
+func defaultReportDir() string {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "jig", "revieweval")
+}
+
+// TestDefaultReportDirUsesUserCacheDir pins defaultReportDir's normal path
+// (os.UserCacheDir() succeeds, as it does on every platform this package
+// targets) unconditionally, unlike TestEvalLive itself.
+func TestDefaultReportDirUsesUserCacheDir(t *testing.T) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		t.Skipf("os.UserCacheDir unavailable in this environment: %v", err)
+	}
+	want := filepath.Join(cacheDir, "jig", "revieweval")
+	if got := defaultReportDir(); got != want {
+		t.Errorf("defaultReportDir() = %q, want %q", got, want)
+	}
+}
+
 // defaultLiveModel is the model Gate itself picks when the builders used
 // the cheapest rung, the common unattended case: the rung after the
 // cheapest, not the cheapest itself. Gate's own model choice
@@ -108,13 +135,14 @@ func TestEvalLive(t *testing.T) {
 		t.Fatalf("revieweval: load corpus: %v", err)
 	}
 
-	// A report always lands on disk: JIG_REVIEWEVAL_REPORT unset falls
-	// back to a stable default under os.TempDir(), never t.TempDir() (which
+	// A report always lands on disk: JIG_REVIEWEVAL_REPORT unset falls back
+	// to a stable default (defaultReportDir), never t.TempDir() (which
 	// vanishes the moment this test ends, so nobody could ever find it
-	// afterward).
+	// afterward) and never the work root below (which this test removes
+	// itself, for the same reason).
 	reportPath := os.Getenv("JIG_REVIEWEVAL_REPORT")
 	if reportPath == "" {
-		reportDir := filepath.Join(os.TempDir(), "jig-revieweval")
+		reportDir := defaultReportDir()
 		if err := os.MkdirAll(reportDir, 0o755); err != nil {
 			t.Fatalf("revieweval: create default report dir: %v", err)
 		}
@@ -122,7 +150,21 @@ func TestEvalLive(t *testing.T) {
 	}
 	t.Logf("revieweval: writing the report to %s (and %s.json)", reportPath, reportPath)
 
-	workRoot := t.TempDir()
+	// The work root is its own os.MkdirTemp, not t.TempDir(): a case
+	// repo's every file, and every path a live dispatch reads or is keyed
+	// by, sits somewhere under here, and t.TempDir() names its directory
+	// after the running test ("TestEvalLive..."), which a session reading
+	// its own worktree path could then see. Removed once this test ends,
+	// the same lifetime t.TempDir() would have given it.
+	workRoot, err := os.MkdirTemp("", "jig-")
+	if err != nil {
+		t.Fatalf("revieweval: create work root: %v", err)
+	}
+	defer func() {
+		if rerr := os.RemoveAll(workRoot); rerr != nil {
+			t.Logf("revieweval: remove work root %s: %v", workRoot, rerr)
+		}
+	}()
 	scores := make([]CaseScore, 0, len(cases))
 	for _, c := range cases {
 		dir := filepath.Join(workRoot, runID(c.Name))

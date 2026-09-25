@@ -35,21 +35,32 @@ func runID(name string) string {
 
 // identityEnv pins the git author/committer identity and date for every
 // commit this package makes, so an eval repo's shas are stable across runs
-// of the same corpus.
+// of the same corpus. This identity is not merely internal bookkeeping: a
+// live reviewer or judge session can run `git log` in the case repo and
+// read it, so it stays as neutral as the rest of what a session can see -
+// nothing here or in the case repo may say "fixture" any more than it may
+// say "eval" or a case's own name.
 var identityEnv = []string{
-	"GIT_AUTHOR_NAME=jig-fixture",
-	"GIT_AUTHOR_EMAIL=fixture@example.invalid",
-	"GIT_COMMITTER_NAME=jig-fixture",
-	"GIT_COMMITTER_EMAIL=fixture@example.invalid",
+	"GIT_AUTHOR_NAME=dev",
+	"GIT_AUTHOR_EMAIL=dev@example.invalid",
+	"GIT_COMMITTER_NAME=dev",
+	"GIT_COMMITTER_EMAIL=dev@example.invalid",
 	"GIT_AUTHOR_DATE=2026-01-01T00:00:00Z",
 	"GIT_COMMITTER_DATE=2026-01-01T00:00:00Z",
 }
 
 // baseManifestYAML is the eval repo's base commit .claude/jig.yaml: one
 // root workspace and one oracle, so every case's manifest resolves the
-// same way whatever its diff touches - the base commit holds no go.mod, so
-// without a declared manifest, verifydeliver would see no oracle at all.
+// same way whatever its diff touches.
 const baseManifestYAML = "workspaces:\n  - id: root\n    path: .\noracles:\n  test: go test ./...\n"
+
+// baseGoModContent is the eval repo's base commit go.mod, alongside
+// .claude/jig.yaml: a neutral module name and the lowest Go version this
+// corpus depends on (loopvar-trap's own premise - per-iteration range
+// variable scoping - needs at least 1.22), so every case repo actually
+// builds and the manifest's "go test ./..." oracle can run, whatever a
+// round's own patch touches.
+const baseGoModContent = "module example.com/project\n\ngo 1.22\n"
 
 // evalRepoName and evalTarget name the eval repo the way RoundInput and
 // report.yaml's reviewed_sha need: a repo id and its target branch.
@@ -187,7 +198,7 @@ func initEvalStore(workDir string, c Case, id string) (*store.Store, error) {
 	if err := os.MkdirAll(storeRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("revieweval: create store: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(storeRoot, "project.yaml"), []byte("# revieweval store\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(storeRoot, "project.yaml"), []byte("# store\n"), 0o644); err != nil {
 		return nil, fmt.Errorf("revieweval: write project.yaml: %w", err)
 	}
 
@@ -213,9 +224,9 @@ func initEvalStore(workDir string, c Case, id string) (*store.Store, error) {
 }
 
 // initEvalRepo builds workDir/repo: an empty git repo whose base commit
-// holds only .claude/jig.yaml, with origin/main pointed at that same base
-// so round 1's scope resolves as a full diff from it (verifydeliver's own
-// resolveScopeBase).
+// holds .claude/jig.yaml and a neutral go.mod (baseGoModContent), with
+// origin/main pointed at that same base so round 1's scope resolves as a
+// full diff from it (verifydeliver's own resolveScopeBase).
 func initEvalRepo(workDir string) (repoDir, base string, err error) {
 	repoDir = filepath.Join(workDir, "repo")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
@@ -229,6 +240,9 @@ func initEvalRepo(workDir string) (repoDir, base string, err error) {
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, ".claude", "jig.yaml"), []byte(baseManifestYAML), 0o644); err != nil {
 		return "", "", fmt.Errorf("revieweval: write jig.yaml: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "go.mod"), []byte(baseGoModContent), 0o644); err != nil {
+		return "", "", fmt.Errorf("revieweval: write go.mod: %w", err)
 	}
 	if _, err := gitx.Run(repoDir, "add", "-A"); err != nil {
 		return "", "", fmt.Errorf("revieweval: git add base: %w", err)

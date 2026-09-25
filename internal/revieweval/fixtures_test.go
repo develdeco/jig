@@ -497,10 +497,12 @@ func TestCorpusSpansLieInsideTheirFiles(t *testing.T) {
 // against the real corpus's own cases (fixture set "probes"), each round's
 // earlier round an unmodified copy of the perfect fixture so only the probe
 // round's own added finding is new: a trap hit in a non-exhaustive round
-// other than tenant-leak (false alarm), a linked title-collision repeat off
-// the decision's own recorded line (Skip), and a finding in another file
-// citing a dismissed prior (wrong prior - the citation names a point, not a
-// place, but the point itself is bound to one file). A fourth designed
+// other than tenant-leak (false alarm), a title-collision repeat that cites
+// its dismissed prior from outside the point's own window (Skip - a cited
+// prior is location evidence on its own, no line proximity needed), and a
+// finding in another file citing a dismissed prior (wrong prior - the
+// citation names a point, not a place, but the point itself is bound to one
+// file). A fourth designed
 // outcome - a repeat citing its dismissed prior at line 0 (Skip) - cannot
 // share a round with the wrong-prior probe above: jig's own reviewer
 // contract refuses two findings citing the same prior in one round
@@ -535,7 +537,7 @@ func TestFixtureProbesEachDesignedOutcome(t *testing.T) {
 		}
 	})
 
-	t.Run("a-repeat-off-the-recorded-line-skips", func(t *testing.T) {
+	t.Run("a-cited-prior-outside-the-window-skips", func(t *testing.T) {
 		c := loadEvalCase(t, "title-collision")
 		cs, err := RunCase(t.TempDir(), c, backend, nil, "fixture-model")
 		if err != nil {
