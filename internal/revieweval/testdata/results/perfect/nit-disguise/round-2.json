@@ -1,0 +1,17 @@
+{
+  "findings": [
+    {
+      "file": "limits/range.go",
+      "line": 4,
+      "title": "InBounds now excludes the upper bound",
+      "detail": "The rename from WithinRange also changed v <= hi to v < hi, so a value equal to max is now rejected although the doc comment still says inclusive.",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "Callers relying on the documented inclusive upper bound get a silently different answer at the boundary."
+    }
+  ],
+  "reviewed_paths": [
+    "limits/range.go"
+  ],
+  "summary": "The rename is cosmetic but the comparison operator quietly changed too."
+}

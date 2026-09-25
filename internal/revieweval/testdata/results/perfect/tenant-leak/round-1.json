@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "file": "billing/invoices.go",
+      "line": 18,
+      "title": "ForTenant ignores tenantID",
+      "detail": "ForTenant returns the whole package-level invoices slice regardless of the tenantID argument, so a caller for one tenant sees every tenant's invoices.",
+      "action": "fix",
+      "risk": "high",
+      "risk_rationale": "One tenant can read another tenant's billing data."
+    }
+  ],
+  "reviewed_paths": [
+    "billing/invoices.go",
+    "billing/report.go"
+  ],
+  "summary": "ForTenant leaks other tenants' invoices. Summarize is fine: it filters by tenantID itself."
+}

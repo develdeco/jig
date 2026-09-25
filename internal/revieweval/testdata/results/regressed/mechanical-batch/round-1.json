@@ -1,0 +1,17 @@
+{
+  "findings": [
+    {
+      "file": "mathutil/mathutil.go",
+      "line": 3,
+      "title": "mathutil.go has a few small issues",
+      "detail": "The doc comment has a grammar mistake, there is an unused helper function, and Average is missing a doc comment.",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "Three small, independent cleanups bundled into one note."
+    }
+  ],
+  "reviewed_paths": [
+    "mathutil/mathutil.go"
+  ],
+  "summary": "A few small issues in mathutil.go."
+}

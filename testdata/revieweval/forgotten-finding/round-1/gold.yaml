@@ -1,0 +1,13 @@
+exhaustive: false
+findings:
+  - id: count-off-by-one
+    file: inventory/count.go
+    lines: [11, 12]
+    action: fix
+    description: CountAvailable loops with i <= len(items), so the last iteration indexes items[len(items)], one past the end of the slice.
+  - id: report-ignored-error
+    file: inventory/report.go
+    lines: [7, 9]
+    action: fix
+    description: WriteReport ignores the error from os.Create with the blank identifier, so a failed create surfaces only a generic nil-file error instead of the real cause.
+traps: []

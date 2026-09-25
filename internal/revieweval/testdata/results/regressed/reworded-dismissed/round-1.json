@@ -1,0 +1,7 @@
+{
+  "findings": [],
+  "reviewed_paths": [
+    "queue/labels.go"
+  ],
+  "summary": "Labels is correct as written; its string-building style is fine at this size."
+}

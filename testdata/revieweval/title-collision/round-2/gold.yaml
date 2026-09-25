@@ -1,0 +1,8 @@
+exhaustive: false
+findings:
+  - id: writer-close-ignored
+    file: store/writer.go
+    lines: [11, 13]
+    action: fix
+    description: WriteAll ignores the error from f.Close(); unlike the read-only reader, a failed close here can silently drop buffered writes, so it needs a real fix, not a dismissal.
+traps: []

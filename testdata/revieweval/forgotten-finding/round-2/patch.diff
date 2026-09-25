@@ -1,0 +1,13 @@
+diff --git a/inventory/count.go b/inventory/count.go
+index c70a379..c8b07e2 100644
+--- a/inventory/count.go
++++ b/inventory/count.go
+@@ -8,7 +8,7 @@ type Item struct {
+ // CountAvailable returns how many of items are not reserved.
+ func CountAvailable(items []Item) int {
+ 	n := 0
+-	for i := 0; i <= len(items); i++ {
++	for i := 0; i < len(items); i++ {
+ 		if !items[i].Reserved {
+ 			n++
+ 		}

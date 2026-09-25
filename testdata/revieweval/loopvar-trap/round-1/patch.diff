@@ -1,0 +1,23 @@
+diff --git a/worker/pool.go b/worker/pool.go
+new file mode 100644
+index 0000000..6b7c314
+--- /dev/null
++++ b/worker/pool.go
+@@ -0,0 +1,17 @@
++package worker
++
++// RunAll starts task(job) for every job in jobs, one goroutine per job, and
++// waits for all of them to finish before returning. Written for Go 1.22+,
++// where each range iteration binds a fresh copy of job.
++func RunAll(jobs []string, task func(string)) {
++	done := make(chan struct{}, len(jobs))
++	for _, job := range jobs {
++		go func() {
++			task(job)
++			done <- struct{}{}
++		}()
++	}
++	for range jobs {
++		<-done
++	}
++}

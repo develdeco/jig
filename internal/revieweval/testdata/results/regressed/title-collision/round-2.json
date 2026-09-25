@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "file": "store/writer.go",
+      "line": 11,
+      "title": "WriteAll ignores the error from f.Close()",
+      "detail": "Unlike a read-only close, a failed close after writes can silently drop buffered data that was never flushed to disk.",
+      "action": "fix",
+      "risk": "medium",
+      "risk_rationale": "A failed close after writing can silently lose data.",
+      "prior": "r1-f1"
+    }
+  ],
+  "reviewed_paths": [
+    "store/writer.go"
+  ],
+  "summary": "Same shape as the already-dismissed reader.go point."
+}

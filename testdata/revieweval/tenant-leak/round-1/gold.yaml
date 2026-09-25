@@ -1,0 +1,12 @@
+exhaustive: false
+findings:
+  - id: unfiltered-query
+    file: billing/invoices.go
+    lines: [17, 19]
+    action: fix
+    description: ForTenant returns every invoice unfiltered, so a caller for one tenant sees every other tenant's invoices too.
+traps:
+  - id: summarize-filtered
+    file: billing/report.go
+    lines: [9, 16]
+    description: Summarize filters by tenantID inside its own loop, so ranging over the package-level invoices slice here cannot leak another tenant's data.

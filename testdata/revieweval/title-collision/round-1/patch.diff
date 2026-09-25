@@ -1,0 +1,28 @@
+diff --git a/store/reader.go b/store/reader.go
+new file mode 100644
+index 0000000..a7a0104
+--- /dev/null
++++ b/store/reader.go
+@@ -0,0 +1,22 @@
++package store
++
++import "os"
++
++// ReadAll returns the full contents of the read-only file at path.
++func ReadAll(path string) ([]byte, error) {
++	f, err := os.Open(path)
++	if err != nil {
++		return nil, err
++	}
++	defer f.Close()
++	data := make([]byte, 0)
++	buf := make([]byte, 4096)
++	for {
++		n, rerr := f.Read(buf)
++		data = append(data, buf[:n]...)
++		if rerr != nil {
++			break
++		}
++	}
++	return data, nil
++}

@@ -1,0 +1,27 @@
+{
+  "findings": [
+    {
+      "file": "billing/invoices.go",
+      "line": 18,
+      "title": "ForTenant ignores tenantID",
+      "detail": "ForTenant returns the whole package-level invoices slice regardless of the tenantID argument, so a caller for one tenant sees every tenant's invoices.",
+      "action": "fix",
+      "risk": "high",
+      "risk_rationale": "One tenant can read another tenant's billing data."
+    },
+    {
+      "file": "billing/report.go",
+      "line": 10,
+      "title": "Summarize leaks tenant data across the shared slice",
+      "detail": "Summarize ranges over the package-level invoices slice, which holds every tenant's invoices.",
+      "action": "fix",
+      "risk": "high",
+      "risk_rationale": "Summarize's log line could include another tenant's counts."
+    }
+  ],
+  "reviewed_paths": [
+    "billing/invoices.go",
+    "billing/report.go"
+  ],
+  "summary": "Both ForTenant and Summarize touch the shared invoices slice without filtering."
+}

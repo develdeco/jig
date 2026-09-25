@@ -1,0 +1,35 @@
+{
+  "findings": [
+    {
+      "file": "mathutil/mathutil.go",
+      "line": 3,
+      "title": "Clamp's doc comment has a typo",
+      "detail": "The comment reads \"Clamp restrict v\" where it should read \"restricts\".",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "Cosmetic, but a doc comment should read correctly."
+    },
+    {
+      "file": "mathutil/mathutil.go",
+      "line": 15,
+      "title": "unusedHelper is dead code",
+      "detail": "unusedHelper is defined but never called anywhere in this package.",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "Dead code adds no risk on its own but should not ship."
+    },
+    {
+      "file": "mathutil/mathutil.go",
+      "line": 18,
+      "title": "Average has no doc comment",
+      "detail": "Average is exported but undocumented, unlike Clamp.",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "Every other exported function in this package is documented."
+    }
+  ],
+  "reviewed_paths": [
+    "mathutil/mathutil.go"
+  ],
+  "summary": "Three small, independent cleanups."
+}

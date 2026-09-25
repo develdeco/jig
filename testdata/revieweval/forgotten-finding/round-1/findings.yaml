@@ -1,0 +1,31 @@
+scope: full
+reviewed_paths:
+  - inventory/count.go
+  - inventory/report.go
+findings:
+  - id: r1-f1
+    file: inventory/count.go
+    line: 11
+    title: CountAvailable loops one past the end of items
+    detail: The loop condition is i <= len(items), so the final iteration indexes items[len(items)], one past the end of the slice.
+    action: fix
+    risk: medium
+    risk_rationale: A caller with a non-empty items slice panics on every call.
+    oracle: test
+    workspace: root
+    status: open
+    recurrences: 0
+    triage: auto
+  - id: r1-f2
+    file: inventory/report.go
+    line: 7
+    title: WriteReport ignores the error from os.Create
+    detail: "f, _ := os.Create(path) discards the error, so a failed create is reported only as a generic error from the nil file, never the real cause."
+    action: fix
+    risk: low
+    risk_rationale: The report is never written, with a confusing error in place of the real one.
+    oracle: test
+    workspace: root
+    status: open
+    recurrences: 0
+    triage: auto

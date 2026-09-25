@@ -1,0 +1,19 @@
+diff --git a/queue/labels.go b/queue/labels.go
+new file mode 100644
+index 0000000..5f92ac1
+--- /dev/null
++++ b/queue/labels.go
+@@ -0,0 +1,13 @@
++package queue
++
++// Labels formats task names into one comma-separated string for display.
++func Labels(tasks []string) string {
++	out := ""
++	for i, t := range tasks {
++		if i > 0 {
++			out += ", "
++		}
++		out += t
++	}
++	return out
++}

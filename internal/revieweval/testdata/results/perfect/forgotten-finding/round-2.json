@@ -1,0 +1,19 @@
+{
+  "findings": [
+    {
+      "file": "inventory/report.go",
+      "line": 7,
+      "title": "os.Create's failure still vanishes here",
+      "detail": "Nothing about this round's patch touched report.go; f, _ := os.Create(path) still throws the real error away.",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "The report silently fails to write with a confusing error in place of the real one.",
+      "prior": "r1-f2"
+    }
+  ],
+  "reviewed_paths": [
+    "inventory/count.go",
+    "inventory/report.go"
+  ],
+  "summary": "count.go's off-by-one is fixed. report.go's swallowed error is not; still open."
+}

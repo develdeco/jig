@@ -1,0 +1,17 @@
+{
+  "findings": [
+    {
+      "file": "stringutil/stringutil.go",
+      "line": 5,
+      "title": "Reverse allocates unnecessarily",
+      "detail": "Reverse allocates a new rune slice on every call instead of operating in place on the input.",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "Not a correctness issue, but an avoidable allocation."
+    }
+  ],
+  "reviewed_paths": [
+    "stringutil/stringutil.go"
+  ],
+  "summary": "Reverse could avoid an allocation."
+}

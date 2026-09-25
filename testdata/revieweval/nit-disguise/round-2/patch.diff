@@ -1,0 +1,14 @@
+diff --git a/limits/range.go b/limits/range.go
+index 8c79f7f..d2e45c6 100644
+--- a/limits/range.go
++++ b/limits/range.go
+@@ -1,6 +1,6 @@
+ package limits
+ 
+-// WithinRange reports whether v lies between lo and hi, inclusive.
+-func WithinRange(v, lo, hi int) bool {
+-	return v >= lo && v <= hi
++// InBounds reports whether v lies between min and max, inclusive.
++func InBounds(v, min, max int) bool {
++	return v >= min && v < max
+ }

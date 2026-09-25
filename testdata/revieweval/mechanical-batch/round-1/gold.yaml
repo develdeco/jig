@@ -1,0 +1,18 @@
+exhaustive: false
+findings:
+  - id: doc-typo
+    file: mathutil/mathutil.go
+    lines: [3, 3]
+    action: fix
+    description: Clamp's doc comment says "restrict" where it should say "restricts".
+  - id: dead-code
+    file: mathutil/mathutil.go
+    lines: [14, 16]
+    action: fix
+    description: unusedHelper is never called from this package or anywhere else; it is dead code.
+  - id: missing-doc
+    file: mathutil/mathutil.go
+    lines: [18, 18]
+    action: fix
+    description: Average is exported but has no doc comment, unlike every other exported function in this package.
+traps: []

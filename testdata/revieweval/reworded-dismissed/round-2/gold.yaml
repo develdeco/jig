@@ -1,0 +1,8 @@
+exhaustive: false
+findings:
+  - id: highest-zero-floor
+    file: queue/priority.go
+    lines: [7, 9]
+    action: fix
+    description: Highest initializes bestPriority to 0, so a task whose priority is 0 or negative can never be selected; when every priority is non-positive it silently returns "".
+traps: []

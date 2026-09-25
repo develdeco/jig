@@ -1,0 +1,17 @@
+scope: full
+reviewed_paths:
+  - queue/labels.go
+findings:
+  - id: r1-f1
+    file: queue/labels.go
+    line: 5
+    title: Labels concatenates strings with += in a loop
+    detail: strings.Builder would avoid the repeated allocation, but for typical queue sizes this is a style point, not a real cost; dismissed as not worth the churn.
+    action: fix
+    risk: low
+    risk_rationale: Purely a style point with no measured cost at expected queue sizes.
+    oracle: test
+    workspace: root
+    status: dismissed
+    recurrences: 0
+    triage: human

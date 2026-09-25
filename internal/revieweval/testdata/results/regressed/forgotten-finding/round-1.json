@@ -1,0 +1,27 @@
+{
+  "findings": [
+    {
+      "file": "inventory/count.go",
+      "line": 11,
+      "title": "CountAvailable indexes one past the end",
+      "detail": "The loop uses i <= len(items), so the last iteration reads items[len(items)], out of bounds.",
+      "action": "fix",
+      "risk": "medium",
+      "risk_rationale": "Any non-empty items slice panics."
+    },
+    {
+      "file": "inventory/report.go",
+      "line": 7,
+      "title": "WriteReport swallows os.Create's error",
+      "detail": "The error from os.Create is discarded with the blank identifier, so a failed create surfaces only a nil-pointer failure later, never the real cause.",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "The report silently fails to write with a confusing error in place of the real one."
+    }
+  ],
+  "reviewed_paths": [
+    "inventory/count.go",
+    "inventory/report.go"
+  ],
+  "summary": "Two independent bugs: an off-by-one loop and a swallowed error."
+}

@@ -1,0 +1,7 @@
+{
+  "findings": [],
+  "reviewed_paths": [
+    "users/lookup.go"
+  ],
+  "summary": "Nothing to report."
+}

@@ -1,0 +1,6 @@
+decisions:
+  - id: labels-string-concat
+    file: queue/labels.go
+    lines: [5, 11]
+    description: Labels builds its result with += in a loop instead of strings.Builder; for typical queue sizes this is a defensible style choice, not a performance bug.
+    decision: dismissed

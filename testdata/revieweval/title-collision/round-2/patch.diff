@@ -1,0 +1,20 @@
+diff --git a/store/writer.go b/store/writer.go
+new file mode 100644
+index 0000000..beef9be
+--- /dev/null
++++ b/store/writer.go
+@@ -0,0 +1,14 @@
++package store
++
++import "os"
++
++// WriteAll writes data to path, creating or truncating the file.
++func WriteAll(path string, data []byte) error {
++	f, err := os.Create(path)
++	if err != nil {
++		return err
++	}
++	defer f.Close()
++	_, err = f.Write(data)
++	return err
++}

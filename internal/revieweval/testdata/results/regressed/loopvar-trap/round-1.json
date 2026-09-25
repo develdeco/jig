@@ -1,0 +1,17 @@
+{
+  "findings": [
+    {
+      "file": "worker/pool.go",
+      "line": 9,
+      "title": "job is captured by reference across goroutines",
+      "detail": "Every goroutine closes over the same loop variable job, so by the time they run it may hold the last job's value.",
+      "action": "fix",
+      "risk": "medium",
+      "risk_rationale": "Jobs could run with the wrong argument."
+    }
+  ],
+  "reviewed_paths": [
+    "worker/pool.go"
+  ],
+  "summary": "The per-goroutine closure over job looks unsafe."
+}

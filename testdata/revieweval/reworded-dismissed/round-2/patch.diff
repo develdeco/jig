@@ -1,0 +1,21 @@
+diff --git a/queue/priority.go b/queue/priority.go
+new file mode 100644
+index 0000000..5b94679
+--- /dev/null
++++ b/queue/priority.go
+@@ -0,0 +1,15 @@
++package queue
++
++// Highest returns the task with the highest priority, or "" when tasks is
++// empty.
++func Highest(tasks map[string]int) string {
++	best := ""
++	bestPriority := 0
++	for name, priority := range tasks {
++		if priority > bestPriority {
++			best = name
++			bestPriority = priority
++		}
++	}
++	return best
++}
