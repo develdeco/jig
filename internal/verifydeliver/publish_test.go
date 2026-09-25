@@ -10,8 +10,8 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -122,7 +122,7 @@ func TestPublishFullChain(t *testing.T) {
 
 	// Memorize landed before the squash: the squash commit's tree
 	// contains the retrieval notes file.
-	show, err := gitx.Run(filepath.Join(mustPoolDir(t), "fixture-repo", fx.Ticket+"-publish"), "show", sha+":.claude/retrieval/"+fx.Ticket+".md")
+	show, err := gitx.Run(publishLeaseDir(t, fx), "show", sha+":.claude/retrieval/"+fx.Ticket+".md")
 	if err != nil {
 		t.Fatalf("show retrieval notes in squash commit: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestPublishFullChain(t *testing.T) {
 		t.Fatalf("retrieval notes content = %q, missing heading", show)
 	}
 
-	msg, err := gitx.Run(filepath.Join(mustPoolDir(t), "fixture-repo", fx.Ticket+"-publish"), "log", "-1", "--format=%s", sha)
+	msg, err := gitx.Run(publishLeaseDir(t, fx), "log", "-1", "--format=%s", sha)
 	if err != nil {
 		t.Fatalf("read squash commit message: %v", err)
 	}
@@ -525,11 +525,12 @@ func TestRouteCustomRoutesExcludeDiffChangelogs(t *testing.T) {
 	}
 }
 
-func mustPoolDir(t *testing.T) string {
+// publishLeaseDir returns the fixture ticket's publish lease directory.
+func publishLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	t.Helper()
-	dir, err := home.PoolDir()
+	dir, err := pool.Dir("fixture-repo", fx.Ticket, pool.Publish)
 	if err != nil {
-		t.Fatalf("resolve pool dir: %v", err)
+		t.Fatalf("resolve publish lease: %v", err)
 	}
 	return dir
 }

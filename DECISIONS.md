@@ -264,6 +264,113 @@ was ambiguous, what was chosen, and why.
   fails as `BAD_TIMEOUT` immediately instead of first paying for a screen check that was
   never going to matter.
 
+## Pool leases
+
+- Lease naming moved into the pool: callers pass a ticket and a role (`Build`,
+  `Gate`, `Publish`), and `pool.Dir` derives `<ticket>`, `<ticket>-gate` or
+  `<ticket>-publish`. Ticket ids were never validated, so ticket `X-gate`'s build
+  lease was ticket X's gate lease, which the gate resets and cleans, and
+  `X-publish` collided with X's publish lease the same way. `pool.CheckTicket`
+  now reserves both suffixes, ignoring case and trailing dots and spaces (a
+  case-insensitive filesystem, the Windows and macOS default, resolves `X-GATE`
+  to X's gate lease, and Windows drops trailing dots and spaces). Reserving the
+  suffixes won over moving the gate lease to a separator ticket ids cannot
+  contain: no character is absent from ids that are never validated, so that
+  option needs the same validation, and it would also orphan every existing
+  gate and publish clone. The same check requires a single path component
+  without a leading dot, since the id names a directory in both the store and
+  the pool: `../x` escapes both, `.` and `..` name the repo or pool directory
+  itself, and `.git` is the store's own git directory.
+- `pool.CheckTicket` runs at every entry point: the local tracker's mint,
+  before it writes anything, so a `ticket_format` that yields an unusable id
+  leaves nothing behind (`TestLocalMintRefusesUnusableID`); `jig ticket new`
+  after any other tracker mints, since that id is known only once the tracker
+  has created the ticket, so the refusal names the ticket to close there
+  (`TestTicketNewRefusesReservedIDFromCommandTracker`); `jig validate`
+  (reported as the only problem, since every other check reads paths derived
+  from the id); every ticket command through `requireTicket`/`requireSlices`;
+  and `pool.Dir`, so no caller can reach a lease path with a bad id.
+  `TestCheckTicket`, `TestAcquireRefusesReservedTicket`,
+  `TestTicketNewRefusesReservedID` and the end-to-end
+  `TestReservedLeaseSuffixTicketRefused` pin it. Ticket ids that
+  differ only in case still share one store folder, and so one set of leases,
+  on a case-insensitive filesystem; that predates this and is unchanged.
+- `pool.Acquire` reuses a lease only when git opens it as its own repository:
+  `.git` is a directory, and `git rev-parse --is-inside-work-tree
+  --show-prefix` prints exactly `true` (inside a working tree, at its top). It
+  used to trust any `.git` entry, so with `JIG_HOME` inside another working
+  copy (the default `~/.config/jig` inside a dotfiles checkout) a `.git` git
+  cannot open - a lease deleted by hand and stopped by a locked pack file, a
+  clone killed mid-write - sent its `fetch` and `checkout -B jig/<ticket>` to
+  the enclosing repository. A `.git` file is refused as well: it can name any
+  repository's git dir, and one naming the enclosing repository moved that
+  repository's `HEAD` the same way. The prefix test compares no paths, so no
+  spelling of the lease path (8.3 names, forward slashes, a POSIX-style git)
+  can make a healthy lease look broken. The gate's pre-Acquire restore
+  (`internal/verifydeliver/gate.go`) uses the same check through
+  `pool.Usable`, which adds `HEAD^{commit}` for its `reset --hard HEAD`,
+  instead of keeping its own private copy of it.
+  `TestAcquireRecoversBrokenLease`, `TestUsable` and the end-to-end
+  `TestRunRecoversBrokenLeaseInsideEnclosingRepo` pin it.
+- A lease is moved aside only when git shows it is not a repository of its
+  own: `.git` is not a directory, git resolved an enclosing working copy (a
+  non-empty prefix) or bare repository (`false`), or git found no repository
+  and `.git` lacks `HEAD`, `objects/` or `refs/`, which git requires of one. A
+  build lease holds committed but unpushed slice work, and moving it aside
+  lets the run continue on a fresh clone without that work while the store
+  still calls those slices green, so anything git can still open, however
+  oddly, is left alone. When git fails on a `.git` that has all three (an
+  extension this git does not know, a corrupt config, git itself missing),
+  `Acquire` stops with git's error and leaves the lease alone
+  (`TestAcquireRefusesLeaseGitCannotOpen`). The probe runs with `-c
+  safe.directory=*`, so a healthy lease git refuses as another user's (a
+  `JIG_HOME` on exFAT or a network share, or one left behind by `sudo`) is
+  kept and its fetch fails with git's own explanation
+  (`TestAcquireKeepsLeaseGitRefusesByOwner`); ownership stays git's own check
+  on every real command. An unborn `HEAD` does not count against a lease
+  either: the checkout in `Acquire` repairs it, and an orphan checkout can
+  leave one in front of a ticket branch that still holds work
+  (`TestAcquireReusesLeaseWithUnbornHEAD`).
+- What is moved aside is renamed to a timestamped sibling,
+  `<key>.broken-<UTC time>`, and cloned afresh, with one stderr line naming
+  both paths; a missing lease or an empty directory is simply cloned into.
+  The pool still deletes nothing: what a hand deletion left behind may be
+  worth inspecting, and a rename never reaches outside the lease's own repo
+  directory. The rename stops `Acquire` with an error, touching neither
+  directory, when the aside name is already taken or a process still holds a
+  file inside it (Windows) (`TestAcquireNeverOverwritesAnAside`).
+  `GIT_CEILING_DIRECTORIES` was considered instead and not used: it stops the
+  upward walk but not a `.git` file naming another repository, and it
+  protects only the git calls it is threaded through, while every git call in
+  a lease runs after one check.
+- `pool.Dir` returns an absolute lease path. `Acquire` runs the clone from the
+  lease's parent directory, so a relative `JIG_HOME` used to resolve the lease
+  path twice and fail every Acquire (`TestAcquireRelativeJIGHome`).
+- `ownRepo`'s prefix check trusted any probe that did not fail outright. A
+  `.git` with everything a repository needs but a HEAD git refuses to read
+  (a crash can truncate it) makes the probe still succeed: git walks past
+  the broken `.git` and answers for an enclosing repository instead, prefix
+  and all, which read as "not a repository of its own" and moved committed,
+  unpushed slice work aside while the run reported it green. The check now
+  requires the probe to answer exactly `true` with an empty prefix; anything
+  else - a failure, a non-empty prefix, a bare repository's `false` - falls
+  to the same HEAD/objects/refs shape check a genuine git failure already
+  took, so a lease git merely disagrees with, rather than refuses outright,
+  still stops `Acquire` with git's error instead of being discarded
+  (`TestAcquireRefusesCorruptHEADLeaseInsideEnclosingRepo`, e2e
+  `TestRunRefusesCorruptHEADBuildLeaseInsideEnclosingRepo`). Separately,
+  `prepare` Lstat'd the lease path: a symlink or Windows junction to a
+  healthy lease Lstats as its own mode, never a directory, so it went
+  straight to the move-aside branch without ever asking git. It now Stats
+  the path first, resolving a link the way git itself would, so `ownRepo`
+  decides (`TestAcquireReusesSymlinkedLease`).
+- The ticket-id and slice-id "gate" reservations are reported as two
+  independent problems: `validateTicket`'s doc comment states once that
+  both are reserved and points to `pool.CheckTicket` for the ticket
+  suffixes, and each problem message names only its own id and why it is
+  reserved, so the slice-id message no longer repeats `pool.Role`'s suffix
+  literals where they could drift from it.
+
 ## Gate and publish
 
 - Gate writes a machine-readable report (`gate/round-N/report.yaml`) with verdict,
@@ -754,6 +861,22 @@ above:
 - gitx is the single owner of git execution, enforced by a lint test. Every call passes
   `-c maintenance.auto=false` on its own argv instead of persisting config, so a
   user's own git keeps maintaining their repos.
+- gitx drops an inherited `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
+  `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` and `GIT_ALTERNATE_OBJECT_DIRECTORIES`
+  from every call (names matched case-insensitively, as Windows resolves them),
+  so git always finds its repository from the working directory jig names. A git
+  hook exports some of these (`GIT_INDEX_FILE`, and `GIT_DIR` in a bare or
+  server-side repository) and a user can export any of them; a jig started with
+  one set ran every call, a pool lease's `checkout -B` included, against that
+  other repository. A caller's own env entries still apply, and `GIT_CONFIG_*`
+  is kept, since users and CI set it on purpose. `cmd/jig` also clears the same
+  variables from its own process at startup (`gitx.ClearRepoEnv`), so a
+  session, an oracle or an env class command it starts inherits none of them:
+  a slice agent's own commits would otherwise land in the other repository and
+  the slice would fail with its commit missing from the lease. The per-call
+  filter stays for any caller that does not start from `main`, tests included.
+  `TestRunIgnoresInheritedRepoEnv`, `TestClearRepoEnv` and
+  `TestAcquireIgnoresInheritedGitDir` pin it.
 - Long-lived repos (the store after a push, a pool lease after a reuse fetch) get a
   foreground, best-effort `git maintenance run --auto`. The per-call flag only stops
   commands from spawning detached maintenance, not this explicit run;

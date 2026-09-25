@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/tracker"
 )
@@ -54,6 +55,19 @@ func cmdTicket(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	// The local tracker refuses an unusable id before writing anything; any
+	// other tracker's id is known only once it has created the ticket, so it
+	// is refused here, before anyone writes a brief under it.
+	if err := pool.CheckTicket(id); err != nil {
+		return renderErr(stdout, &axi.Error{
+			Msg:  fmt.Sprintf("the %s tracker minted %s, which jig cannot use: %v", adapter.Name(), id, err),
+			Code: "VALIDATION_ERROR",
+			Help: []string{
+				fmt.Sprintf("%s now exists in the %s tracker; close it there", id, adapter.Name()),
+				"Change the tracker's id scheme so new ids are usable, then mint again",
+			},
+		})
+	}
 
 	axi.Render(stdout,
 		axi.KV("ticket", [][2]string{{"id", id}, {"title", *title}}),
@@ -67,8 +81,22 @@ func intakeHint(ticket string) string {
 	return fmt.Sprintf("Write its brief.md and slices.yaml (the intake skill drafts both), then run `jig validate %s`", ticket)
 }
 
-// requireTicket fails when the store has no folder for ticket.
+// checkTicketID fails when ticket cannot name a ticket's pool leases (see
+// pool.CheckTicket): every command that works a ticket refuses such an id
+// before it reaches the store or the pool.
+func checkTicketID(ticket string) error {
+	if err := pool.CheckTicket(ticket); err != nil {
+		return &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"}
+	}
+	return nil
+}
+
+// requireTicket fails when ticket is not a usable id or the store has no
+// folder for it.
 func requireTicket(st *store.Store, ticket string) error {
+	if err := checkTicketID(ticket); err != nil {
+		return err
+	}
 	if fi, err := os.Stat(st.TicketDir(ticket)); err == nil && fi.IsDir() {
 		return nil
 	}
@@ -82,9 +110,12 @@ func requireTicket(st *store.Store, ticket string) error {
 	}
 }
 
-// requireSlices fails when ticket has no slices to work, which is also the
-// case for a ticket with no folder in the store yet.
+// requireSlices fails when ticket is not a usable id or has no slices to
+// work, which is also the case for a ticket with no folder in the store yet.
 func requireSlices(st *store.Store, ticket string) error {
+	if err := checkTicketID(ticket); err != nil {
+		return err
+	}
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		return err

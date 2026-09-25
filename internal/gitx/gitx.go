@@ -1,8 +1,10 @@
 // Package gitx owns git process execution: product and test code run git
 // only through this package (a lint test enforces it). Every call is
-// argv-based, scoped to a working directory, and runs with git's automatic
-// background maintenance off for that one process; nothing is persisted, so
-// a user's own git commands still maintain their repos.
+// argv-based, scoped to a working directory (an inherited GIT_DIR and the
+// like are dropped, so git finds its repository from that directory), and
+// runs with git's automatic background maintenance off for that one
+// process; nothing is persisted, so a user's own git commands still
+// maintain their repos.
 package gitx
 
 import (
@@ -14,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -47,16 +50,56 @@ func RunRaw(dir string, args ...string) (string, error) {
 }
 
 // run spawns git in dir with "-c maintenance.auto=false" ahead of args, so
-// no call leaves git's detached maintenance running after it returns.
+// no call leaves git's detached maintenance running after it returns. The
+// process environment is inherited without repoEnv, then env is appended.
 func run(dir string, env []string, stdout, stderr io.Writer, args []string) error {
 	cmd := exec.Command("git", append([]string{"-c", "maintenance.auto=false"}, args...)...)
 	cmd.Dir = dir
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
+	cmd.Env = append(inheritedEnv(), env...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
+}
+
+// repoEnv names the variables that point git at a repository, work tree,
+// index or object store other than the one it finds from its working
+// directory. A git hook exports some of them (GIT_INDEX_FILE, and GIT_DIR in
+// a bare or server-side repository), and a user can export any of them, so
+// a jig started with one set would otherwise run every call (a pool lease's
+// checkout included) against that other repository.
+var repoEnv = []string{
+	"GIT_DIR",
+	"GIT_WORK_TREE",
+	"GIT_COMMON_DIR",
+	"GIT_INDEX_FILE",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+}
+
+// inheritedEnv returns the process environment without repoEnv. Names match
+// case-insensitively, as Windows resolves them.
+func inheritedEnv() []string {
+	var kept []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if !slices.ContainsFunc(repoEnv, func(v string) bool { return strings.EqualFold(v, name) }) {
+			kept = append(kept, kv)
+		}
+	}
+	return kept
+}
+
+// ClearRepoEnv unsets repoEnv in this process, so every child jig starts
+// (a session, an oracle, an env class command), not only its own git calls,
+// finds its repository from its working directory. cmd/jig calls it once at
+// startup.
+func ClearRepoEnv() {
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if slices.ContainsFunc(repoEnv, func(v string) bool { return strings.EqualFold(v, name) }) {
+			_ = os.Unsetenv(name)
+		}
+	}
 }
 
 // callError formats a failed call as "git <args>: <output>: <exec error>",

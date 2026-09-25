@@ -416,7 +416,7 @@ func TestGateWipesLeftoverLeaseDirtBeforeOracles(t *testing.T) {
 		t.Fatalf("Gate round 1: %v", err)
 	}
 
-	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket+"-gate")
+	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Gate)
 	if err != nil {
 		t.Fatalf("reacquire gate lease: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 		t.Fatalf("Gate round 1: %v", err)
 	}
 
-	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket+"-gate")
+	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Gate)
 	if err != nil {
 		t.Fatalf("reacquire gate lease: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin(t *testing.T) 
 
 	// Simulate a killed reviewer's leftover commit in the gate lease: a
 	// local commit ahead of origin, never pushed.
-	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket+"-gate")
+	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Gate)
 	if err != nil {
 		t.Fatalf("reacquire gate lease: %v", err)
 	}
@@ -1066,7 +1066,7 @@ func TestGateFailedRoundBeforeRoundKnownRecordsRealRoundAndNoRawError(t *testing
 		t.Fatalf("push branch: %v", err)
 	}
 
-	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket+"-gate")
+	gateLease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Gate)
 	if err != nil {
 		t.Fatalf("reacquire gate lease: %v", err)
 	}

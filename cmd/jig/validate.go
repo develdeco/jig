@@ -10,6 +10,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/manifest"
+	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -66,8 +67,19 @@ func cmdValidate(args []string, stdout io.Writer) int {
 }
 
 // validateTicket checks that ticket's brief, slices.yaml, and manifest
-// agree, returning every problem found (nil means valid).
+// agree, returning every problem found (nil means valid). Two ids around a
+// ticket are reserved by jig's own machinery and reported as problems on
+// their own: the ticket id, which names the ticket's pool leases (see
+// pool.CheckTicket for the suffixes it refuses), and the slice id "gate",
+// which the gate reviewer's dispatch uses as its own session slice name
+// (checked below, alongside every other slice id).
 func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProject, ticket string) ([]string, error) {
+	// An id that cannot name its leases is the only problem worth reporting
+	// on its own: every path below is derived from it.
+	if err := pool.CheckTicket(ticket); err != nil {
+		return []string{err.Error()}, nil
+	}
+
 	var problems []string
 
 	briefData, briefErr := os.ReadFile(filepath.Join(st.TicketDir(ticket), "brief.md"))
@@ -102,7 +114,7 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	}
 	for _, sl := range slices {
 		if sl.ID == "gate" {
-			problems = append(problems, `slice id "gate" is reserved for the gate reviewer dispatch`)
+			problems = append(problems, `slice id "gate" is reserved for the gate reviewer's own dispatch, which uses it as the session's slice name`)
 		}
 	}
 
