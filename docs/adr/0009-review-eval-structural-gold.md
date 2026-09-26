@@ -188,7 +188,8 @@ root. A test drives a case through the real headless backend with a
 stub CLI and checks the environment, working directory and surroundings
 every child actually saw. Its parent environment is one planted value of
 every kind the scrub must drop, plus every variable the test harness
-itself added after launch, so the check is strict. What the operator
+itself added or changed after launch (for PATH, each entry the harness
+added is scanned directly), so the check is strict. What the operator
 brings is ambient and outside what the eval scrubs: the variables of the
 shell that launched the run pass through by design, and every path sits
 under the operator's temp root. The leak checks leave both out, and run

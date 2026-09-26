@@ -80,12 +80,15 @@ func withoutTempRoot(text string) string {
 	if windows {
 		text = strings.ToLower(text)
 	}
-	for _, r := range tempRootSpellings() {
+	// A space, never "", takes the root's place: removing it outright
+	// would glue the text on either side into one token ("eval" + "/tmp1"
+	// reading as "eval1"), hiding a leak word next to the root.
+	for _, r := range tempRootSpellings {
 		if windows {
 			r = strings.ToLower(r)
-			text = strings.ReplaceAll(text, strings.ReplaceAll(r, `\`, `\\`), "")
+			text = strings.ReplaceAll(text, strings.ReplaceAll(r, `\`, `\\`), " ")
 		}
-		text = strings.ReplaceAll(text, r, "")
+		text = strings.ReplaceAll(text, r, " ")
 	}
 	return text
 }
@@ -97,10 +100,14 @@ func withoutTempRoot(text string) string {
 // after launch is not the operator's, so a path under it stays in the
 // scanned text. The hostile root comes first because it sits under the
 // launch root, and removing the launch root first would leave its name
-// behind.
-func tempRootSpellings() []string {
+// behind. It is computed when either root is set, not on every check.
+var tempRootSpellings []string
+
+// spellingsOf returns roots, in order, each as given and with symlinks
+// resolved, skipping empty ones.
+func spellingsOf(roots ...string) []string {
 	var out []string
-	for _, root := range []string{hostileTempRoot, launchTempRoot} {
+	for _, root := range roots {
 		if root == "" {
 			continue
 		}
@@ -112,10 +119,6 @@ func tempRootSpellings() []string {
 	}
 	return out
 }
-
-// hostileTempRoot is the temp root useHostileTempRoot made for the running
-// test, "" outside one. Tests in this package never run in parallel.
-var hostileTempRoot string
 
 // useHostileTempRoot points the test's temp root (TMP, TEMP, TMPDIR) at a
 // fresh directory, directly under the operator's launch temp root, whose
@@ -129,9 +132,11 @@ func useHostileTempRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create hostile temp root: %v", err)
 	}
-	hostileTempRoot = dir
+	// Tests in this package never run in parallel, so one package-level
+	// list serves the running test.
+	tempRootSpellings = spellingsOf(dir, launchTempRoot)
 	t.Cleanup(func() {
-		hostileTempRoot = ""
+		tempRootSpellings = spellingsOf(launchTempRoot)
 		_ = os.RemoveAll(dir)
 	})
 	for _, k := range []string{"TMP", "TEMP", "TMPDIR"} {
@@ -359,5 +364,16 @@ func TestRunCaseNeverLeaksTheCorpusVocabulary(t *testing.T) {
 				t.Errorf("case %s: Passed = false, want true (perfect fixtures, a judge confirming every candidate Same): %+v", c.Name, cs.Rounds)
 			}
 		})
+	}
+}
+
+// TestLeakHitsNeverJoinsTokensAcrossTheTempRoot pins that stripping the
+// temp root leaves a separator behind: a leak word right before the root
+// and text right after it must still read as separate tokens.
+func TestLeakHitsNeverJoinsTokensAcrossTheTempRoot(t *testing.T) {
+	text := "eval" + filepath.Clean(launchTempRoot) + "1"
+	hits := leakHits("joined", "", text)
+	if len(hits) == 0 || !strings.Contains(strings.Join(hits, "; "), `"eval"`) {
+		t.Errorf("leakHits(%q) = %q, want a hit on \"eval\" once the temp root is stripped", text, hits)
 	}
 }

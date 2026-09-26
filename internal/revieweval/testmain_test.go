@@ -25,5 +25,6 @@ var (
 func TestMain(m *testing.M) {
 	launchEnv = os.Environ()
 	launchTempRoot = os.TempDir()
+	tempRootSpellings = spellingsOf(launchTempRoot)
 	os.Exit(gittest.Run(m))
 }

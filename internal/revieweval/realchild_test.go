@@ -138,21 +138,28 @@ func (b realChildScriptedBackend) Run(d session.Dispatch) error {
 	}
 }
 
-// harnessIntroducedEnv returns the entries of now that are not in launch
-// verbatim: a variable the test harness added, or one it changed, after
-// the binary started.
-func harnessIntroducedEnv(launch, now []string) []string {
+// harnessParentEnv splits what the test harness introduced after launch -
+// every entry of now that is not in launch verbatim, a variable it added
+// or changed - into what the real-child test feeds the scrub and the PATH
+// entries the harness added. PATH is the one list the host fills, so it is
+// never fed whole: only the entries missing from the launch PATH come
+// back, for the caller to scan, while the child keeps its own PATH.
+func harnessParentEnv(launch, now []string) (feed, addedPath []string) {
 	atLaunch := make(map[string]bool, len(launch))
 	for _, kv := range launch {
 		atLaunch[kv] = true
 	}
-	var out []string
 	for _, kv := range now {
-		if !atLaunch[kv] {
-			out = append(out, kv)
+		if atLaunch[kv] {
+			continue
 		}
+		if name, _, _ := strings.Cut(kv, "="); sameEnvName(name, "PATH") {
+			addedPath = addedPathEntries(envValue(launch, "PATH"), envValue(now, "PATH"))
+			continue
+		}
+		feed = append(feed, kv)
 	}
-	return out
+	return feed, addedPath
 }
 
 // sameEnvName compares two environment variable names the way the host
@@ -293,22 +300,16 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 	// what the eval scrubs. PATH is the one list the host fills, so for it
 	// only the entries the harness added are checked, here, while the
 	// child keeps the constant PATH above.
-	introduced := harnessIntroducedEnv(launchEnv, atStart)
-	if !hasEnvName(introduced, "GIT_CONFIG_GLOBAL") {
-		t.Fatalf("the harness diff misses GIT_CONFIG_GLOBAL, which gittest.Run always sets after launch: %q", introduced)
+	feed, addedPath := harnessParentEnv(launchEnv, atStart)
+	if !hasEnvName(feed, "GIT_CONFIG_GLOBAL") {
+		t.Fatalf("the harness diff misses GIT_CONFIG_GLOBAL, which gittest.Run always sets after launch: %q", feed)
 	}
-	for _, kv := range introduced {
-		name, _, _ := strings.Cut(kv, "=")
-		if sameEnvName(name, "PATH") {
-			for _, seg := range addedPathEntries(envValue(launchEnv, "PATH"), envValue(atStart, "PATH")) {
-				for _, h := range leakHits("PATH entry the harness added "+seg, "", seg) {
-					t.Error(h)
-				}
-			}
-			continue
+	for _, seg := range addedPath {
+		for _, h := range leakHits("PATH entry the harness added "+seg, "", seg) {
+			t.Error(h)
 		}
-		parentEnv = append(parentEnv, kv)
 	}
+	parentEnv = append(parentEnv, feed...)
 
 	jigBin := buildJigBinary(t)
 	real, err := liveBackend("headless", jigBin, parentEnv)
@@ -392,5 +393,47 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 		if len(parent) != 2 || !parent["repo"] || !parent["store"] {
 			t.Errorf("call %d: worktree's parent holds %v, want exactly [repo store]", i, call.ParentEntries)
 		}
+	}
+}
+
+// TestHarnessParentEnvFeedsChangesAndReturnsAddedPath pins how what the
+// harness introduced is split: a changed or added variable is fed to the
+// scrub, an unchanged or removed one is not, PATH is never fed whole, and
+// only the PATH entries the harness added come back.
+func TestHarnessParentEnvFeedsChangesAndReturnsAddedPath(t *testing.T) {
+	list := func(entries ...string) string { return strings.Join(entries, string(os.PathListSeparator)) }
+	launch := []string{"TMP=/t", "KEEP=1", "GONE=1", "PATH=" + list("/a", "/b")}
+
+	t.Run("changed-and-added-variables-are-fed", func(t *testing.T) {
+		feed, added := harnessParentEnv(launch, []string{"TMP=/other", "KEEP=1", "NEW=x", "PATH=" + list("/a", "/b")})
+		if strings.Join(feed, ",") != "TMP=/other,NEW=x" {
+			t.Errorf("feed = %q, want the changed TMP and the new NEW only", feed)
+		}
+		if len(added) != 0 {
+			t.Errorf("added PATH entries = %q, want none", added)
+		}
+	})
+	t.Run("an-added-path-entry-comes-back-and-path-is-never-fed", func(t *testing.T) {
+		feed, added := harnessParentEnv(launch, []string{"TMP=/t", "KEEP=1", "PATH=" + list("/revieweval-bin", "/a", "/b")})
+		if len(feed) != 0 {
+			t.Errorf("feed = %q, want nothing: PATH is scanned by entry, never fed", feed)
+		}
+		if strings.Join(added, ",") != "/revieweval-bin" {
+			t.Errorf("added PATH entries = %q, want [/revieweval-bin]", added)
+		}
+	})
+	t.Run("a-reordered-path-adds-nothing", func(t *testing.T) {
+		feed, added := harnessParentEnv(launch, []string{"TMP=/t", "KEEP=1", "PATH=" + list("/b", "/a")})
+		if len(feed) != 0 || len(added) != 0 {
+			t.Errorf("feed = %q, added = %q, want both empty", feed, added)
+		}
+	})
+	if runtime.GOOS == "windows" {
+		t.Run("path-under-another-case-is-still-path", func(t *testing.T) {
+			feed, added := harnessParentEnv([]string{"Path=" + list("/a")}, []string{"Path=" + list("/x", "/a")})
+			if len(feed) != 0 || strings.Join(added, ",") != "/x" {
+				t.Errorf("feed = %q, added = %q, want no feed and [/x]", feed, added)
+			}
+		})
 	}
 }
