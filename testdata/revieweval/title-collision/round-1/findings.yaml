@@ -1,0 +1,18 @@
+scope: full
+reviewed_paths:
+  - store/reader.go
+  - store/writer.go
+findings:
+  - id: r1-f1
+    file: store/reader.go
+    line: 14
+    title: ReadAll ignores the error from f.Close()
+    detail: "f.Close()'s return value is discarded, so a failed close after reading raises no error to the caller."
+    action: fix
+    risk: low
+    risk_rationale: A close failure on this path is silently dropped instead of surfacing to the caller.
+    oracle: test
+    workspace: root
+    status: dismissed
+    recurrences: 0
+    triage: human

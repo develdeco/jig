@@ -1,0 +1,20 @@
+diff --git a/queue/priority.go b/queue/priority.go
+index 20b04ad..19e9433 100644
+--- a/queue/priority.go
++++ b/queue/priority.go
+@@ -11,12 +11,9 @@ func Highest(tasks map[string]int) string {
+ 	}
+ 	sort.Strings(names)
+ 
+-	if len(names) == 0 {
+-		return ""
+-	}
+-	best := names[0]
+-	bestPriority := tasks[names[0]]
+-	for _, name := range names[1:] {
++	best := ""
++	bestPriority := 0
++	for _, name := range names {
+ 		priority := tasks[name]
+ 		if priority > bestPriority {
+ 			best = name

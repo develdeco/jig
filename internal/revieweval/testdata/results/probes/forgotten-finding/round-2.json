@@ -1,0 +1,28 @@
+{
+  "findings": [
+    {
+      "file": "inventory/report.go",
+      "line": 10,
+      "title": "os.Create's failure still vanishes here",
+      "detail": "Nothing about this round's patch touched report.go; f, _ := os.Create(path) still throws the real error away.",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "The report silently fails to write with a confusing error in place of the real one.",
+      "prior": "r1-f2"
+    },
+    {
+      "file": "inventory/count.go",
+      "line": 11,
+      "title": "CountAvailable still indexes past the end",
+      "detail": "The loop condition still lets i reach len(items), one past the last valid index.",
+      "action": "fix",
+      "risk": "medium",
+      "risk_rationale": "A non-empty items slice would panic."
+    }
+  ],
+  "reviewed_paths": [
+    "inventory/count.go",
+    "inventory/report.go"
+  ],
+  "summary": "report.go's swallowed error is still open. count.go's loop bound still looks wrong."
+}

@@ -333,12 +333,11 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	// openAndNotedFindingsList), and its dismissed findings become
 	// review.json's dismissed list. A ticket with no reviewer rounds yet,
 	// or one driven entirely by the scripted source, folds to nothing.
-	cum, err := cumulativeFindings(d.Store, ticket, n)
+	fold, err := FoldBefore(d.Store, ticket, n)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: fold findings: %w", err)
 	}
-	openList := openAndNotedFindingsList(cum)
-	dismissedList := dismissedFindingsList(cum)
+	cum := fold.Known
 
 	// The reviewer's brief_path is the ticket's own brief.md, except in
 	// --branch mode with --doc: there it must be the --doc file itself,
@@ -361,8 +360,8 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		Model:     model,
 		BriefPath: briefPath,
 		Manifest:  man,
-		Open:      openList,
-		Dismissed: toDismissedFindingList(dismissedList),
+		Open:      fold.Open,
+		Dismissed: fold.Dismissed,
 	})
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: read round %d: %w", n, err)

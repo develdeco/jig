@@ -316,7 +316,10 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 // asked - must reflect what a human actually kept, not merely what the
 // reviewer reported before triage dismissed some of it (a finding the
 // human dismisses at triage must not go on blocking an unrelated open
-// finding in the same file from clearing).
+// finding in the same file from clearing). revieweval's own runner calls
+// this with reported straight from ApplyRound, no routing or triage in
+// between, on purpose - that package never runs the triage hook at all -
+// so that caller is not a bug to fix either.
 func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedPaths []string, existsAtHead func(file string) (bool, error)) (cleared []string, err error) {
 	reviewedSet := map[string]bool{}
 	for _, p := range reviewedPaths {
@@ -549,6 +552,31 @@ func cumulativeFindings(st *store.Store, ticket string, upToRound int) (map[stri
 		foldFindings(cum, ff.Findings, ff.Cleared)
 	}
 	return cum, nil
+}
+
+// Fold is the cumulative findings state a gate round starts from: every
+// earlier round's findings folded together (Known), then projected the two
+// ways a round consumes it - review.json's own Open and Dismissed shapes.
+// Gate and the eval package both build a round's RoundInput from one Fold
+// (FoldBefore), so they always agree on what a round starts from.
+type Fold struct {
+	Known     map[string]Finding // every earlier round's findings: latest occurrence wins, cleared ids removed
+	Open      []Finding          // open, asked and noted, sorted by id: RoundInput.Open
+	Dismissed []DismissedFinding // dismissed, sorted by id: RoundInput.Dismissed
+}
+
+// FoldBefore folds every gate/round-<n>/findings.yaml for ticket with
+// n < round (cumulativeFindings) and projects it into a Fold.
+func FoldBefore(st *store.Store, ticket string, round int) (Fold, error) {
+	known, err := cumulativeFindings(st, ticket, round)
+	if err != nil {
+		return Fold{}, fmt.Errorf("verifydeliver: findings: fold before round %d: %w", round, err)
+	}
+	return Fold{
+		Known:     known,
+		Open:      openAndNotedFindingsList(known),
+		Dismissed: toDismissedFindingList(dismissedFindingsList(known)),
+	}, nil
 }
 
 // OutstandingAsks returns ticket's cumulative still-asked findings, sorted

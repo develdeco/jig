@@ -1,0 +1,31 @@
+scope: full
+reviewed_paths:
+  - inventory/count.go
+  - inventory/report.go
+findings:
+  - id: r1-f1
+    file: inventory/count.go
+    line: 11
+    title: CountAvailable loops one past the end of items
+    detail: The loop condition is i <= len(items), so the final iteration indexes items[len(items)], one past the end of the slice.
+    action: fix
+    risk: medium
+    risk_rationale: Every call panics, even one with an empty items slice.
+    oracle: test
+    workspace: root
+    status: open
+    recurrences: 0
+    triage: auto
+  - id: r1-f2
+    file: inventory/report.go
+    line: 10
+    title: WriteReport ignores the error from os.Create
+    detail: "f, _ := os.Create(path) discards the error, so a failed create is never reported; the write that follows then returns only an invalid-argument error, never the real cause."
+    action: fix
+    risk: low
+    risk_rationale: The report is never written, with an invalid-argument write error in place of the real cause.
+    oracle: test
+    workspace: root
+    status: open
+    recurrences: 0
+    triage: auto

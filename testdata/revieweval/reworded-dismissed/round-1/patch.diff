@@ -1,0 +1,52 @@
+diff --git a/queue/labels.go b/queue/labels.go
+new file mode 100644
+index 0000000..5f92ac1
+--- /dev/null
++++ b/queue/labels.go
+@@ -0,0 +1,13 @@
++package queue
++
++// Labels formats task names into one comma-separated string for display.
++func Labels(tasks []string) string {
++	out := ""
++	for i, t := range tasks {
++		if i > 0 {
++			out += ", "
++		}
++		out += t
++	}
++	return out
++}
+diff --git a/queue/priority.go b/queue/priority.go
+new file mode 100644
+index 0000000..20b04ad
+--- /dev/null
++++ b/queue/priority.go
+@@ -0,0 +1,27 @@
++package queue
++
++import "sort"
++
++// Highest returns the task with the highest priority, or "" when tasks is
++// empty. Ties are broken by the lexicographically smallest task name.
++func Highest(tasks map[string]int) string {
++	names := make([]string, 0, len(tasks))
++	for name := range tasks {
++		names = append(names, name)
++	}
++	sort.Strings(names)
++
++	if len(names) == 0 {
++		return ""
++	}
++	best := names[0]
++	bestPriority := tasks[names[0]]
++	for _, name := range names[1:] {
++		priority := tasks[name]
++		if priority > bestPriority {
++			best = name
++			bestPriority = priority
++		}
++	}
++	return best
++}

@@ -1,0 +1,12 @@
+exhaustive: false
+findings:
+  - id: unfiltered-query
+    file: billing/invoices.go
+    lines: [17, 19]
+    action: fix
+    description: ForTenant returns every invoice unfiltered, so a caller for one tenant sees every other tenant's invoices too.
+traps:
+  - id: summarize-filtered
+    file: billing/report.go
+    lines: [6, 13]
+    description: Summarize reads the package-level slice with every tenant's invoices, so its count can include other tenants' data.

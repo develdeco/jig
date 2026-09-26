@@ -1,0 +1,17 @@
+{
+  "findings": [
+    {
+      "file": "netutil/retry.go",
+      "line": 16,
+      "title": "Retry retries a possibly non-idempotent request",
+      "detail": "Retry retries every failure the same way, including one where send may have already taken effect before returning an error, such as a call that creates a record; the loop should skip retrying that case.",
+      "action": "fix",
+      "risk": "medium",
+      "risk_rationale": "Retrying a request that already succeeded server-side can duplicate its effect."
+    }
+  ],
+  "reviewed_paths": [
+    "netutil/retry.go"
+  ],
+  "summary": "Retry should not retry a non-idempotent request; fixing the loop to skip that case."
+}

@@ -38,12 +38,13 @@ var headlessEditTools = []string{"Edit", "Write", "NotebookEdit"}
 // opt-in contract test in headless_live_test.go runs the real CLI against a
 // local mock API.
 type headlessBackend struct {
-	goos         string // runtime.GOOS, injectable so rule paths are testable per OS
-	screenBinary string // Options.ScreenBinary; see hookBinary
+	goos         string   // runtime.GOOS, injectable so rule paths are testable per OS
+	screenBinary string   // Options.ScreenBinary; see hookBinary
+	env          []string // Options.Env; see childEnv. nil means the child inherits this process's environment.
 }
 
 func newHeadlessBackend(opts Options) Backend {
-	return &headlessBackend{goos: runtime.GOOS, screenBinary: opts.ScreenBinary}
+	return &headlessBackend{goos: runtime.GOOS, screenBinary: opts.ScreenBinary, env: opts.Env}
 }
 
 // hookBinary returns the jig binary a screened dispatch's PreToolUse hook
@@ -221,6 +222,9 @@ func (b *headlessBackend) Run(d Dispatch) error {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 	cmd.Dir = d.Worktree
+	if b.env != nil {
+		cmd.Env = childEnv(b.goos, b.env, d.Worktree)
+	}
 	newProcessGroup(cmd)
 	// A session spawns children - a shell per Bash call, a test runner,
 	// whatever those start - and they inherit these pipes. Killing the CLI
@@ -410,6 +414,39 @@ func rulePath(goos, p string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// childEnv renders a headless dispatch's exact child environment from env
+// (Options.Env, never nil here: Run only calls this when it is set) and
+// worktree (d.Worktree, the same directory cmd.Dir already names): env
+// verbatim, minus any PWD or OLDPWD entry, with PWD then appended as
+// worktree. Names are compared case-insensitively on goos == "windows",
+// where environment variable names are not case sensitive, and case-
+// sensitively elsewhere - the same distinction rulePath already makes for
+// this backend. An inherited PWD naming some other directory, or an OLDPWD
+// naming a directory that has nothing to do with this dispatch, would
+// either misreport the child's own cwd to a program that trusts PWD over
+// calling getcwd, or hand it a path the caller never intended it to see.
+//
+// On Windows, os/exec's own Env doc adds one more entry beyond this
+// function's control: SYSTEMROOT is always set on the child when the
+// given Env omits it, since Windows process creation depends on it. That
+// value is the same on every process on the machine, never anything
+// about this dispatch, so it is not filtered here.
+func childEnv(goos string, env []string, worktree string) []string {
+	sameName := func(a, b string) bool { return a == b }
+	if goos == "windows" {
+		sameName = strings.EqualFold
+	}
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if sameName(name, "PWD") || sameName(name, "OLDPWD") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "PWD="+worktree)
 }
 
 // parseCLIResult finds the CLI's final result object in its stdout: the

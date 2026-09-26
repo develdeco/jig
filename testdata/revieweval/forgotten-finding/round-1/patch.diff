@@ -1,0 +1,46 @@
+diff --git a/inventory/count.go b/inventory/count.go
+new file mode 100644
+index 0000000..c70a379
+--- /dev/null
++++ b/inventory/count.go
+@@ -0,0 +1,17 @@
++package inventory
++
++// Item is one stock item.
++type Item struct {
++	Reserved bool
++}
++
++// CountAvailable returns how many of items are not reserved.
++func CountAvailable(items []Item) int {
++	n := 0
++	for i := 0; i <= len(items); i++ {
++		if !items[i].Reserved {
++			n++
++		}
++	}
++	return n
++}
+diff --git a/inventory/report.go b/inventory/report.go
+new file mode 100644
+index 0000000..b70ed2e
+--- /dev/null
++++ b/inventory/report.go
+@@ -0,0 +1,17 @@
++package inventory
++
++import (
++	"fmt"
++	"os"
++)
++
++// WriteReport writes a one-line summary of items to path.
++func WriteReport(path string, items []Item) error {
++	f, _ := os.Create(path)
++	_, writeErr := fmt.Fprintf(f, "%d items processed\n", len(items))
++	closeErr := f.Close()
++	if writeErr != nil {
++		return writeErr
++	}
++	return closeErr
++}

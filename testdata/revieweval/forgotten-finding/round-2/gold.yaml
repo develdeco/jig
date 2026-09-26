@@ -1,0 +1,13 @@
+exhaustive: false
+findings:
+  - id: report-ignored-error
+    file: inventory/report.go
+    lines: [10, 11]
+    action: fix
+    prior: r1-f2
+    description: WriteReport still ignores the error from os.Create; this round's patch fixed the count loop but never touched report.go, so the write still surfaces only an invalid-argument error, never the real cause.
+traps:
+  - id: count-boundary-fixed
+    file: inventory/count.go
+    lines: [11, 12]
+    description: The loop still indexes past the end of items.

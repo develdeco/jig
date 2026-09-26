@@ -1,0 +1,27 @@
+{
+  "findings": [
+    {
+      "file": "queue/priority.go",
+      "line": 15,
+      "title": "Highest can't select a non-positive priority",
+      "detail": "bestPriority starts at 0, so a task whose priority is 0 or negative never replaces it; when every priority is non-positive, Highest returns \"\".",
+      "action": "fix",
+      "risk": "medium",
+      "risk_rationale": "A queue of only non-positive priorities silently returns no winner."
+    },
+    {
+      "file": "queue/labels.go",
+      "line": 10,
+      "title": "Labels rebuilds its string inefficiently",
+      "detail": "Using += in a loop reallocates the growing string on every iteration instead of using strings.Builder.",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "A style point worth a second look."
+    }
+  ],
+  "reviewed_paths": [
+    "queue/priority.go",
+    "queue/labels.go"
+  ],
+  "summary": "Highest has a zero floor bug. Labels' string-building style is worth flagging again."
+}

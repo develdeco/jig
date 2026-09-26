@@ -1,0 +1,7 @@
+exhaustive: true
+findings: []
+traps:
+  - id: loopvar-capture
+    file: worker/pool.go
+    lines: [7, 11]
+    description: Every goroutine closes over the shared loop variable, so each one may see the last job.

@@ -1,0 +1,17 @@
+{
+  "findings": [
+    {
+      "file": "users/lookup.go",
+      "line": 17,
+      "title": "Lookup dereferences a nil map entry",
+      "detail": "Lookup looks up id in store and calls u.Name without checking whether the map returned nil, so an unknown id panics on the nil pointer.",
+      "action": "fix",
+      "risk": "medium",
+      "risk_rationale": "An unknown id crashes the caller instead of returning an empty string."
+    }
+  ],
+  "reviewed_paths": [
+    "users/lookup.go"
+  ],
+  "summary": "Lookup panics on an unknown id."
+}

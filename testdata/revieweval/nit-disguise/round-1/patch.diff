@@ -1,0 +1,12 @@
+diff --git a/limits/range.go b/limits/range.go
+new file mode 100644
+index 0000000..8c79f7f
+--- /dev/null
++++ b/limits/range.go
+@@ -0,0 +1,6 @@
++package limits
++
++// WithinRange reports whether v lies between lo and hi, inclusive.
++func WithinRange(v, lo, hi int) bool {
++	return v >= lo && v <= hi
++}

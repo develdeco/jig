@@ -1,0 +1,56 @@
+diff --git a/store/reader.go b/store/reader.go
+new file mode 100644
+index 0000000..c2cd427
+--- /dev/null
++++ b/store/reader.go
+@@ -0,0 +1,28 @@
++package store
++
++import (
++	"io"
++	"os"
++)
++
++// ReadAll returns the full contents of the read-only file at path.
++func ReadAll(path string) ([]byte, error) {
++	f, err := os.Open(path)
++	if err != nil {
++		return nil, err
++	}
++	defer f.Close()
++	data := make([]byte, 0)
++	buf := make([]byte, 4096)
++	for {
++		n, rerr := f.Read(buf)
++		data = append(data, buf[:n]...)
++		if rerr != nil {
++			if rerr != io.EOF {
++				return nil, rerr
++			}
++			break
++		}
++	}
++	return data, nil
++}
+diff --git a/store/writer.go b/store/writer.go
+new file mode 100644
+index 0000000..8c4efb2
+--- /dev/null
++++ b/store/writer.go
+@@ -0,0 +1,16 @@
++package store
++
++import "os"
++
++// WriteAll writes data to path, creating or truncating the file.
++func WriteAll(path string, data []byte) error {
++	f, err := os.Create(path)
++	if err != nil {
++		return err
++	}
++	if _, err := f.Write(data); err != nil {
++		f.Close()
++		return err
++	}
++	return f.Close()
++}

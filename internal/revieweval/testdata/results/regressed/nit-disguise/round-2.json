@@ -1,0 +1,17 @@
+{
+  "findings": [
+    {
+      "file": "limits/range.go",
+      "line": 4,
+      "title": "InBounds' boundary is worth a note",
+      "detail": "The rename also tightened the upper bound from <= to <; flagging for awareness, not urgent.",
+      "action": "note",
+      "risk": "low",
+      "risk_rationale": "Cosmetic rename, minor behavior note."
+    }
+  ],
+  "reviewed_paths": [
+    "limits/range.go"
+  ],
+  "summary": "Mostly a cosmetic rename."
+}

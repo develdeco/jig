@@ -1,0 +1,8 @@
+exhaustive: false
+findings:
+  - id: nil-entry
+    file: users/lookup.go
+    lines: [17, 18]
+    action: fix
+    description: Lookup dereferences the map entry without checking that the id exists, so an unknown id panics on u.Name.
+traps: []

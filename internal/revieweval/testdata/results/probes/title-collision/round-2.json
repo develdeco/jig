@@ -1,0 +1,27 @@
+{
+  "findings": [
+    {
+      "file": "store/writer.go",
+      "line": 11,
+      "title": "WriteAll ignores the error from f.Close()",
+      "detail": "Unlike a read-only close, a failed close after writes can silently drop buffered data that was never flushed to disk.",
+      "action": "fix",
+      "risk": "medium",
+      "risk_rationale": "A failed close after writing can silently lose data."
+    },
+    {
+      "file": "store/reader.go",
+      "line": 19,
+      "title": "ReadAll still ignores the error from f.Close()",
+      "detail": "f.Close()'s return value is discarded, so a failed close after reading raises no error to the caller.",
+      "action": "fix",
+      "risk": "low",
+      "risk_rationale": "A close failure on this path is silently dropped instead of surfacing to the caller.",
+      "prior": "r1-f1"
+    }
+  ],
+  "reviewed_paths": [
+    "store/writer.go"
+  ],
+  "summary": "WriteAll's ignored Close error is real here, unlike ReadAll's. ReadAll's own point still stands, already dismissed."
+}

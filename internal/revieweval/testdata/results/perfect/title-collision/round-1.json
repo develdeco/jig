@@ -1,0 +1,8 @@
+{
+  "findings": [],
+  "reviewed_paths": [
+    "store/reader.go",
+    "store/writer.go"
+  ],
+  "summary": "ReadAll is correct; its ignored Close error cannot lose data on a read-only file. WriteAll checks its own Close error."
+}

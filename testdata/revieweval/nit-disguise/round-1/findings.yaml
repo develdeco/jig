@@ -1,0 +1,4 @@
+scope: full
+reviewed_paths:
+  - limits/range.go
+findings: []

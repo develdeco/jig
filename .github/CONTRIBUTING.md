@@ -57,6 +57,36 @@ annotation.
 - Every test gets its own `t.TempDir()`, and `JIG_HOME` is always overridden
   with `t.Setenv` so a test run never touches a real machine's jig home.
 
+## Live review eval
+
+`internal/revieweval` scores the gate reviewer against a labeled corpus
+(`testdata/revieweval`) by dispatching a real reviewer session against it.
+It is opt-in, since CI has no `claude` CLI:
+
+```sh
+JIG_REVIEWEVAL_BACKEND=headless go test -count=1 -timeout 0 -v -run TestEvalLive ./internal/revieweval
+```
+
+A case's result is a measurement, not a pass/fail gate on the build: each
+round reads PASS, PROVISIONAL (nothing failed, but some findings still
+need a person's label) or FAIL, and a refused round stays a measurement.
+A round that comes back Failed fails the test itself: a dispatch failure,
+a judge error, the judge changing the case repo, or a reviewer that wrote
+no result at all, since the eval has nothing to score there. Cases run one at a time and
+the report is rewritten after each one, so the command above (`-timeout
+0` disables Go's own default) keeps whatever finished on disk if the run
+is interrupted. Environment variables: `JIG_REVIEWEVAL_MODEL` (reviewer
+model; default the rung `jig gate` itself picks once an unattended
+ticket's builders have already used the cheapest rung),
+`JIG_REVIEWEVAL_JUDGE_MODEL` (judge model; default the reviewer model),
+`JIG_REVIEWEVAL_CORPUS` (default `testdata/revieweval`), and
+`JIG_REVIEWEVAL_REPORT` (the text report's path; the JSON report is
+written beside it with a `.json` suffix). Left unset, the report still
+lands on disk, under the user cache dir (`os.UserCacheDir()`, then
+`jig/revieweval/report.txt`, falling back to `os.TempDir()` only when there
+is no cache dir) - the run logs that path once at the start, so it never
+has to be found by guessing.
+
 ## Reporting a bug
 
 Open an issue with the command you ran, what you expected, and what happened

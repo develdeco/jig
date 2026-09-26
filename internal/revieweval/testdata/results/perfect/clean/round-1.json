@@ -1,0 +1,7 @@
+{
+  "findings": [],
+  "reviewed_paths": [
+    "stringutil/stringutil.go"
+  ],
+  "summary": "Reverse and TrimAndLower are both correct as written."
+}

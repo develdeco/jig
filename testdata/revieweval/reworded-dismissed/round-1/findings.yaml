@@ -1,0 +1,18 @@
+scope: full
+reviewed_paths:
+  - queue/labels.go
+  - queue/priority.go
+findings:
+  - id: r1-f1
+    file: queue/labels.go
+    line: 5
+    title: Labels concatenates strings with += in a loop
+    detail: Using += in a loop reallocates the growing string on every iteration instead of using strings.Builder, which appends without repeated copies.
+    action: fix
+    risk: low
+    risk_rationale: Each append reallocates and copies the string built so far, adding avoidable garbage-collection pressure as the task list grows.
+    oracle: test
+    workspace: root
+    status: dismissed
+    recurrences: 0
+    triage: human

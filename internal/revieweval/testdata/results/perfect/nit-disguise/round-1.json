@@ -1,0 +1,7 @@
+{
+  "findings": [],
+  "reviewed_paths": [
+    "limits/range.go"
+  ],
+  "summary": "WithinRange is correct as written."
+}

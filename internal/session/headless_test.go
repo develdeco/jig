@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -399,6 +400,110 @@ func TestHeadlessRunNoSession(t *testing.T) {
 	}
 	if _, err := os.Stat(run.d.ResultJSON); !os.IsNotExist(err) {
 		t.Errorf("result.json exists after a CLI that ran no session (stat: %v)", err)
+	}
+}
+
+// TestHeadlessRunGivenEnvIsExact pins Options.Env's own contract: when set,
+// the child's environment is exactly the given list - never a mix with
+// this test process's own environment, which every other test in this file
+// still inherits through a nil Options.Env - with any given PWD or OLDPWD
+// entry dropped and PWD then set to the dispatch worktree.
+func TestHeadlessRunGivenEnvIsExact(t *testing.T) {
+	stubDir := buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude")
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	logFile := filepath.Join(t.TempDir(), "claude.log")
+
+	d := realDispatch(t, true)
+	// CLAUDE_STUB_STDOUT carries a well-formed CLI result so the stub
+	// dispatch succeeds with no ResultJSON write: this test is about what
+	// Options.Env hands the child, not about the disk-contract fallback
+	// paths the tests above already cover.
+	stdout := strings.TrimSuffix(cliResultJSON(t, false, "done", nil), "\n")
+	given := []string{
+		"FOO=bar",
+		"PWD=" + filepath.Join(t.TempDir(), "stale-pwd"),
+		"OLDPWD=" + filepath.Join(t.TempDir(), "stale-oldpwd"),
+		"CLAUDE_STUB_LOG=" + logFile,
+		"CLAUDE_STUB_STDOUT=" + stdout,
+	}
+
+	backend, err := New("headless", Options{ScreenBinary: builtJigBinary(t), Env: given})
+	if err != nil {
+		t.Fatalf("New(headless, Env): %v", err)
+	}
+	if err := backend.Run(d); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read claude stub log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("claude stub ran %d times, want 1:\n%s", len(lines), data)
+	}
+	var call struct {
+		Env []string `json:"env"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &call); err != nil {
+		t.Fatalf("parse claude stub log: %v", err)
+	}
+
+	want := map[string]bool{
+		"FOO=bar": true, "CLAUDE_STUB_LOG=" + logFile: true, "CLAUDE_STUB_STDOUT=" + stdout: true,
+		"PWD=" + d.Worktree: true,
+	}
+	if runtime.GOOS == "windows" {
+		// os/exec's own documented contract: SYSTEMROOT is always added
+		// back when missing from a caller-supplied Env, because Windows
+		// process creation itself depends on it. This is stdlib behavior
+		// childEnv does not (and should not) fight, and it carries nothing
+		// about this dispatch: every process on the machine gets the same
+		// value.
+		want["SYSTEMROOT="+os.Getenv("SYSTEMROOT")] = true
+	}
+	got := map[string]bool{}
+	for _, kv := range call.Env {
+		got[kv] = true
+	}
+	if len(got) != len(want) {
+		t.Fatalf("child env = %v, want exactly %v", call.Env, want)
+	}
+	for kv := range want {
+		if !got[kv] {
+			t.Errorf("child env missing %q, got %v", kv, call.Env)
+		}
+	}
+}
+
+// TestChildEnvDropsPWDCaseInsensitivelyOnWindows pins childEnv's own goos
+// distinction directly (a unit test of the function itself, so it runs
+// the same on every host this package's tests run on, rather than
+// depending on the real runtime.GOOS the New/Run path would use): on
+// windows a differently-cased Pwd/OldPwd entry is still dropped before
+// the dispatch's own PWD is appended, exactly like a canonical PWD/OLDPWD
+// (TestHeadlessRunGivenEnvIsExact); off windows only an exact-case match
+// is, so a mixed-case Pwd/OldPwd instead survives untouched alongside the
+// appended PWD.
+func TestChildEnvDropsPWDCaseInsensitivelyOnWindows(t *testing.T) {
+	worktree := filepath.Join("some", "worktree")
+	in := []string{"FOO=bar", "Pwd=" + filepath.Join("stale", "pwd"), "OldPwd=" + filepath.Join("stale", "oldpwd")}
+
+	got := childEnv("windows", in, worktree)
+	want := []string{"FOO=bar", "PWD=" + worktree}
+	sort.Strings(got)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("childEnv(windows, ...) = %v, want %v: a mixed-case Pwd/OldPwd must be dropped like a canonical one", got, want)
+	}
+
+	gotLinux := childEnv("linux", in, worktree)
+	wantLinux := []string{"FOO=bar", "Pwd=" + filepath.Join("stale", "pwd"), "OldPwd=" + filepath.Join("stale", "oldpwd"), "PWD=" + worktree}
+	sort.Strings(gotLinux)
+	sort.Strings(wantLinux)
+	if !reflect.DeepEqual(gotLinux, wantLinux) {
+		t.Errorf("childEnv(linux, ...) = %v, want %v: only an exact-case PWD/OLDPWD is dropped off windows", gotLinux, wantLinux)
 	}
 }
 

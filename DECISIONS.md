@@ -765,6 +765,224 @@ above:
   journal line for the same reason: a failure between journaling and
   resolving it used to record "round 0", a round that never existed.
 
+## Review eval
+
+- `internal/verifydeliver` gains one type and one function beyond the
+  reviewer contract itself: `Fold` and `FoldBefore(st, ticket, round)`,
+  wrapping - not replacing - the four unexported helpers `Gate` wired
+  together inline (`cumulativeFindings`, `openAndNotedFindingsList`,
+  `dismissedFindingsList`, `toDismissedFindingList`). `Gate`'s own behavior
+  is otherwise unchanged: a fold error now carries one more wrap
+  (`FoldBefore`'s own, under `Gate`'s existing one); the eval package
+  calls the same `FoldBefore` a real gate round does, so the two can
+  never quietly disagree about what a round's history is.
+- The eval never calls jig's routing or triage step (`route.go`'s
+  `routeRound`, `DefaultTriage`): a round's score comes straight from
+  `verifydeliver.ApplyRound`'s own status assignment and
+  `verifydeliver.ClearingAfterTriage`, the same fate a freshly reported
+  finding carries before any human, or `--yes`, decides it. Calling triage
+  too would fold jig's own default-approval policy into a review-quality
+  number, which is a property of jig's config, not of the reviewer.
+- `ApplyRound`'s `sliceGreen` callback always answers false for every eval
+  round: the eval never builds a fix slice, so every re-reported finding
+  is scored as a fresh occurrence rather than a counted recurrence a
+  finished fix slice would explain.
+- Every case runs under an opaque id, `runID(name)` ("c-" plus the first 8
+  hex characters of a sha256 of the case name), never the case name
+  itself: the store ticket, `RoundInput.Ticket` (which the reviewer's own
+  prompt embeds verbatim), the judge's own dispatch ticket, and every path
+  under a run's work root are named after the id, and the case repo's
+  commit messages stay neutral literals ("base", "round N"), never the id
+  either, for the same reason - nothing a live reviewer or judge session
+  reads may say which case it is looking at, or that it is a case at all.
+  `CaseScore.Name`, `JudgeQuery.Case` and every error message still carry
+  the real name, since only what a live dispatch itself reads or is keyed
+  by may never see it. The eval repo's own git identity and its store-side
+  `project.yaml` comment are neutral for the same reason (a live session
+  can run `git log` in its worktree, so an author of "jig-fixture" would
+  say "fixture" to it as plainly as the case's own name would), and the
+  base commit now carries a neutral `go.mod` (`module example.com/project`,
+  `go 1.22`) next to `.claude/jig.yaml`, so every case repo actually builds
+  and a live reviewer's own `go test ./...` can run; `loopvar-trap` gets
+  the Go version its premise needs from that base commit like every other
+  case. A dedicated test,
+  `TestRunCaseNeverLeaksTheCorpusVocabulary` (`leak_test.go`), runs the
+  whole corpus through a capturing backend and judge and checks the prompt,
+  the dispatch paths, the dispatched slice file, every worktree file
+  (tracked or not), the store's own ticket-dir files and the worktree's
+  git log against both the case's own name and a fixed vocabulary
+  (`eval`, `revieweval`, `fixture`, `trap`, `gold`, `seeded`), tokenized
+  with `strings.FieldsFunc`, never `regexp`.
+- A finding whose own `prior` names a fold point in the same file, open,
+  asked, noted or dismissed, is a structural candidate for that point
+  regardless of its line,
+  line 0 included: citing the id is itself location evidence, so that one
+  candidate survives on anything but an explicit judge Different, without
+  the extra burden of an explicit Same a line-0 finding otherwise needs.
+  A prior naming a point in another file, or one the judge rejects, is
+  simply no edge, so the existing wrong-prior rule (below) still catches
+  it.
+- Seeded gold findings are matched to a round's reported findings by
+  `bestMatching`, the Hungarian algorithm run over lexicographic score
+  vectors rather than one packed integer (lexicographic order is a total
+  order addition preserves, so the potentials work unchanged and nothing
+  can overflow). It finds the exact maximum-weight matching among
+  maximum-cardinality matchings in polynomial time; an exhaustive search
+  would also be exact, but a captured case with a dozen seeded findings
+  would already take billions of steps. A test checks it against an
+  exhaustive reference on two thousand random instances, and another runs
+  a round no exhaustive search could finish (40 gold entries, 60 findings)
+  and pins the exact matching it must return, not only that it returns a
+  complete one: each gold entry's own same-indexed finding carries the
+  strongest possible edge and every other edge is strictly weaker, so the
+  diagonal is the unique optimum. Two matchings
+  are compared by a lexicographic tuple - cardinality first, then how many
+  edges the judge confirmed Same, then how many cite the gold's own
+  prior, then summed line closeness - and never by a finding's status or
+  action, since those are exactly what the score then measures. The next
+  field, the summed earliness of the paired findings, only decides between
+  matchings the evidence cannot tell apart; a tie surviving even that (more
+  than one matching using the same set of findings) falls to the
+  assignment algorithm's own row order - deterministic for a given input,
+  so the same result every run, but not itself a ranking field - a tie
+  only the evidence cannot break, which a live judge's own Same/Different
+  verdicts normally do resolve.
+- A dismissed fold point's span and description ordinarily come from its
+  one recorded line and its recorded title and detail; when a decision
+  names it (`decisions.yaml`'s optional `recorded: <id>`) and that
+  decision's own file still matches the fold's current one, the point
+  instead takes the union of the decision's own span with the record's
+  own line as the loader captured it (`Decision.RecordedLine`), described
+  by the decision itself - never the fold's latest occurrence of that id,
+  which a re-report could have moved. A file mismatch skips the link
+  rather than trust a pairing the decision never actually judged. The
+  loader itself rejects a `recorded` line outside the decision's own span
+  widened by `lineWindow`, and a second decision anywhere in the case, not
+  only the same round, naming a record another decision already claimed.
+- Rule 1 of `classifyUnmatched`: an unmatched finding whose `prior`
+  names any fold point, whatever its status, needs a surviving structural
+  edge to that point; without one it is `FateWrongPrior`
+  (`RoundScore.WrongPriors`) and fails the round. `ApplyRound`'s own
+  bookkeeping trusts a reported `prior` id without checking what it
+  structurally points at, and would carry that point's identity onto
+  unrelated code. Only a well-cited repeat of a dismissed point is silent
+  (jig keeps it dismissed); any other well-cited repeat goes on through
+  the rules like any finding, so citing a prior never excuses a false
+  alarm.
+- `checkJudgeReadOnly` returns a violation and an error as two separate
+  results, not one: a `git rev-parse`/`git status` command itself failing
+  during the read-only check is ordinary infrastructure trouble, returned
+  as a real error, never folded into "the judge changed the case repo" -
+  only an actual difference from the round's own head is that. Either
+  way, the runner hard-resets and cleans the repo (`git reset --hard`,
+  `git clean -fd`) before returning, since the next round's `git apply`
+  must start from a pristine head whatever a judge dispatch left behind.
+- The judge's scratch lives in its own temp root (`os.MkdirTemp`), outside
+  the case work root and removed when the case ends, so nothing beside
+  the reviewer's worktree says a judge exists. Once a round is fully
+  scored, the runner deletes, rather than moves, the case's store-side
+  `work` dir and that round's own judge scratch dir (`retireRoundWork`): the JSON report already keeps every finding a
+  round produced, so nothing is lost, and deleting them means no later
+  round's dispatch, and no later session poking around under the work
+  root, can find an earlier round's live
+  `review.json`/`result.json`/`judge.json`/`verdicts.json` anywhere and
+  read a result that disagrees with the case's own recorded history. This
+  claim is scoped to the work root: a later session free to read wherever
+  it likes could still find the standing text/JSON report on disk, or the
+  CLI's own session transcripts, and this deletion does nothing about
+  either - the report's own default location moves outside the work tree
+  for exactly that reason (below).
+- `live_test.go` fails the Go test itself on a round that comes back
+  Failed (a dispatch failure, a judge error, the judge changing the case
+  repo, or a reviewer that wrote no `result.json`): the eval has nothing
+  to score there, and burying it in a text report nobody reads would let
+  it go unnoticed. The last case is the reviewer's own behavior, not
+  infrastructure, and a failed round's gold counts as missed. A Refused round stays a measurement, and a judge error still
+  keeps that round's `Findings` (status set, no gold match, no fate).
+  Cases run one at a time through `RunCase` rather than `RunCorpus`,
+  rewriting the text report and JSON after every case, and the documented
+  command adds `-timeout 0`, so a long unattended run keeps whatever
+  finished on disk if it times out or panics partway through the corpus.
+  When `JIG_REVIEWEVAL_REPORT` is unset, the report now falls back to
+  `defaultReportDir()` (`os.UserCacheDir()/jig/revieweval`, falling back
+  to `os.TempDir()` only when `UserCacheDir` itself fails), never
+  `t.TempDir()` (which would vanish with the test itself) and never the
+  work root either (`report.txt` and `report.txt.json`), and logs that
+  path once at the start; each case's own report lines are logged as it
+  finishes, and the whole corpus's cumulative report once more after the
+  loop. The work root itself is now its own `os.MkdirTemp("", "jig-")`,
+  removed when the test ends, rather than `t.TempDir()`: `t.TempDir()`
+  names its own directory after the running test
+  (`TestEvalLive.../...`), which a live session reading its own worktree
+  path could otherwise see.
+- The eval repo's per-round git identity and commit date (pinned in
+  `runner.go`'s `identityEnv`) are fixed, not the operator's own: two runs
+  of the same corpus produce the same shas, which nothing yet depends on
+  but which makes one run reproducible to compare byte for byte against
+  another. The identity itself is neutral (no "fixture"), since a live
+  session's own `git log` can read it.
+- The live path's default model is derived, not hardcoded:
+  `staircase.Disjoint(staircase.Default(), []string{cfg.Rungs[0]})`, the
+  rung after the cheapest - the pick `Gate` itself makes
+  (`staircase.Disjoint(d.Rungs, journal.BuilderModels(lines))`) once an
+  unattended ticket's builders have already used the cheapest rung, the
+  common case an unattended eval run matches. The cheapest rung itself is
+  only what `Gate` picks before any builder has dispatched at all, which
+  is never the case for a reviewer round that runs after a ticket's
+  slices.
+- `RoundScore` carries `FalsePositiveGold` (whether a round's own gold
+  could produce a false alarm at all: a trap, a dismissed decision, or an
+  exhaustive round) and every reported finding as a `ScoredFinding`, so
+  `RenderJSON` is enough for a person to label a pending finding without
+  the round's work dir.
+- `RenderReport`'s recall, like its other rates, is `n/a` with zero seeded
+  gold rather than a bare `0.00`.
+- A round's verdict is PASS, PROVISIONAL or FAIL. PROVISIONAL means nothing
+  failed but some findings are still pending a label: a round that reads
+  PASS with unjudged findings in it would overstate what was measured.
+  The alternative, marking more rounds exhaustive, was not taken: it would
+  turn every unforeseen but correct remark into a false alarm.
+- `bestMatching` bounds each augmenting search at m+1 steps, one per
+  column it can mark used, and returns an error past that, so a broken
+  comparator fails fast instead of hanging a test run.
+- `session.Options.Env` lets a caller fix a headless child's environment;
+  the live eval passes its own environment minus every `JIG_` variable,
+  `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`, `PWD` and `OLDPWD`, and any
+  launch-context entry (an empty name, which is how a Windows per-drive
+  working-directory entry such as `=C:=C:\work` reads when cut at its
+  first `=`, plus `_` and `GOCOVERDIR`), and
+  the backend sets `PWD` to the worktree. Setting `Env` on a backend that
+  cannot apply it (fake, herdr) fails at construction instead of being
+  silently ignored. It is a denylist of what jig and its
+  test scaffolding own, not an allowlist of what the CLI needs, so the CLI
+  keeps whatever else it relies on. The claude stub records its
+  environment and surroundings, and a test runs a case through the real
+  headless backend to check what each child actually saw. That test feeds
+  the scrub a synthetic parent environment, one planted value of every
+  kind it must drop, plus every variable the test harness added or
+  changed after launch, PATH included, and compares each value the child
+  sees with exactly what it must be: the synthetic PATH, the stub's knob,
+  PWD on the worktree, and on Windows SYSTEMROOT at its launch value. A
+  surviving variable fails whatever its value, a harness-changed PATH
+  lands after the constant one and fails too, and no value is judged by
+  its words, so the result cannot depend on the host (a CI runner's
+  branch name, say). The operator's ambient environment, including the
+  temp root every path sits under, is outside what the eval scrubs; what
+  the harness adds is not. TestMain snapshots the launch environment and
+  temp root first thing, so harness setup belongs after the snapshot,
+  never in an `init` or a package-level initializer, which run before
+  TestMain; a missing snapshot fails the test at once. The corpus leak
+  test does judge text by its words, so it leaves out the launch temp
+  root and the hostile one it makes under it, and only where the root
+  ends a word, so a sibling that merely starts with the root's last
+  letters is read as the word it is, and a temp root the harness chose is
+  still scanned.
+- The five cases ported from the earlier corpus kept their code, but
+  `clean`, `loopvar-trap` and `tenant-leak` lost sentences that gave the
+  reviewer the verdict (a brief saying the diff is correct, a brief
+  explaining the rule the trap tests, a comment arguing the trap is safe).
+  That is a content change, not only a translation to the new gold shape.
+
 ## CLI
 
 - `jig init` takes `--store <path>` for the project form, while the end-to-end fixture

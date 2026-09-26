@@ -1,0 +1,33 @@
+diff --git a/mathutil/mathutil.go b/mathutil/mathutil.go
+new file mode 100644
+index 0000000..bb9611f
+--- /dev/null
++++ b/mathutil/mathutil.go
+@@ -0,0 +1,27 @@
++package mathutil
++
++// Clamp restrict v to lie between lo and hi.
++func Clamp(v, lo, hi int) int {
++	if v < lo {
++		return lo
++	}
++	if v > hi {
++		return hi
++	}
++	return v
++}
++
++func unusedHelper(x int) int {
++	return x * 2
++}
++
++func Average(nums []int) int {
++	if len(nums) == 0 {
++		return 0
++	}
++	total := 0
++	for _, n := range nums {
++		total += n
++	}
++	return total / len(nums)
++}
