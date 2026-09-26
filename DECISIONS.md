@@ -960,21 +960,23 @@ above:
   headless backend to check what each child actually saw. That test feeds
   the scrub a synthetic parent environment, one planted value of every
   kind it must drop, plus every variable the test harness added or
-  changed after launch, and scans the child's environment strictly.
-  PATH, the one list the host fills, is not fed whole: each entry the
-  harness added to it is scanned directly instead. Scanning a
-  real environment would judge whatever the machine running the test
-  happens to carry, such as a CI runner's branch name, and make the result
-  depend on the host. The operator's ambient environment, including the
+  changed after launch, PATH included, and compares each value the child
+  sees with exactly what it must be: the synthetic PATH, the stub's knob,
+  PWD on the worktree, and on Windows SYSTEMROOT at its launch value. A
+  surviving variable fails whatever its value, a harness-changed PATH
+  lands after the constant one and fails too, and no value is judged by
+  its words, so the result cannot depend on the host (a CI runner's
+  branch name, say). The operator's ambient environment, including the
   temp root every path sits under, is outside what the eval scrubs; what
   the harness adds is not. TestMain snapshots the launch environment and
   temp root first thing, so harness setup belongs after the snapshot,
   never in an `init` or a package-level initializer, which run before
-  TestMain. The leak checks leave out only the launch temp root and the
-  hostile one each leak test makes under it, so a temp root the harness
-  chose is still scanned, and each root is replaced with a space, never
-  removed outright, so the text on either side cannot merge into one
-  token that hides a leak word.
+  TestMain; a missing snapshot fails the test at once. The corpus leak
+  test does judge text by its words, so it leaves out the launch temp
+  root and the hostile one it makes under it, and only where the root
+  ends a word, so a sibling that merely starts with the root's last
+  letters is read as the word it is, and a temp root the harness chose is
+  still scanned.
 - The five cases ported from the earlier corpus kept their code, but
   `clean`, `loopvar-trap` and `tenant-leak` lost sentences that gave the
   reviewer the verdict (a brief saying the diff is correct, a brief

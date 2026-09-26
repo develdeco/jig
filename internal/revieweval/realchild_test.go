@@ -138,28 +138,25 @@ func (b realChildScriptedBackend) Run(d session.Dispatch) error {
 	}
 }
 
-// harnessParentEnv splits what the test harness introduced after launch -
-// every entry of now that is not in launch verbatim, a variable it added
-// or changed - into what the real-child test feeds the scrub and the PATH
-// entries the harness added. PATH is the one list the host fills, so it is
-// never fed whole: only the entries missing from the launch PATH come
-// back, for the caller to scan, while the child keeps its own PATH.
-func harnessParentEnv(launch, now []string) (feed, addedPath []string) {
+// harnessChanges returns every entry of now that launch does not hold
+// verbatim: a variable the test harness added, or one it changed, after
+// the binary started. The real-child test feeds all of it to the scrub,
+// PATH included: the live path passes the test binary's whole
+// environment on, and a harness PATH lands after the test's own constant
+// PATH, where os/exec keeps the last duplicate, so the exact comparison
+// fails on it.
+func harnessChanges(launch, now []string) []string {
 	atLaunch := make(map[string]bool, len(launch))
 	for _, kv := range launch {
 		atLaunch[kv] = true
 	}
+	var out []string
 	for _, kv := range now {
-		if atLaunch[kv] {
-			continue
+		if !atLaunch[kv] {
+			out = append(out, kv)
 		}
-		if name, _, _ := strings.Cut(kv, "="); sameEnvName(name, "PATH") {
-			addedPath = addedPathEntries(envValue(launch, "PATH"), envValue(now, "PATH"))
-			continue
-		}
-		feed = append(feed, kv)
 	}
-	return feed, addedPath
+	return out
 }
 
 // sameEnvName compares two environment variable names the way the host
@@ -191,22 +188,6 @@ func hasEnvName(env []string, name string) bool {
 	return false
 }
 
-// addedPathEntries returns the entries of the PATH list now that the PATH
-// list launch does not hold.
-func addedPathEntries(launch, now string) []string {
-	had := map[string]bool{}
-	for _, e := range filepath.SplitList(launch) {
-		had[e] = true
-	}
-	var out []string
-	for _, e := range filepath.SplitList(now) {
-		if e != "" && !had[e] {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
 func sameDirOrFatal(t *testing.T, a, b string) bool {
 	t.Helper()
 	ai, err := os.Stat(a)
@@ -232,22 +213,23 @@ func sameDirOrFatal(t *testing.T, a, b string) bool {
 // worktree.
 //
 // The parent environment dispatchEnv filters is synthetic, not this test
-// process's own: one value of every kind the live path must drop, each
-// spelled so it would also trip the leak vocabulary if it got through,
-// beside the one knob the stub itself reads. That keeps the check strict -
-// every value the child sees is scanned - and independent of the host: an
-// ambient variable of the machine running the test (a CI runner's branch
-// name, say) is the operator's own environment, which the eval passes
-// through by design and does not claim to scrub. What the test harness
-// itself adds after launch is not ambient, and is checked here as the live
-// path would pass it. The temp root every path here sits under is ambient
-// like the operator's variables: the test runs under a deliberately
-// hostile one (useHostileTempRoot), and the leak check leaves it out.
+// process's own: one value of every kind the live path must drop, beside
+// the one knob the stub itself reads, plus every variable the test harness
+// added or changed after launch, which the live path would pass on too.
+// The child's environment is then compared value by value with what it
+// must be - the synthetic PATH, the stub's knob, PWD on the worktree, and
+// on Windows the SYSTEMROOT os/exec adds - so any variable the scrub lets
+// through fails, whatever its value. Nothing here depends on the machine
+// running the test: an ambient variable of the host (a CI runner's branch
+// name, say) never enters the parent, and no value is judged by the words
+// in it, so the host's temp root does not matter either.
 func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
+	if launchEnv == nil {
+		t.Fatal("launchEnv is nil: TestMain must snapshot os.Environ() first thing, before gittest.Run or any other harness setup")
+	}
 	// Taken before this test changes anything itself, so the difference
 	// from the launch environment is exactly what the harness introduced.
 	atStart := os.Environ()
-	useHostileTempRoot(t)
 	claudeDir := buildClaudeStub(t)
 	// The backend finds the stub on this process's own PATH; the child's
 	// PATH is whatever the synthetic parent environment below says.
@@ -259,14 +241,12 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 	t.Setenv("CLAUDE_STUB_LOG", logFile)
 
 	// None of these paths has to exist; the child only ever sees them as
-	// strings. The PATH is a constant outside every temp root, so the one
-	// value this test chooses for the child depends on nothing about the
-	// host.
+	// strings.
 	pkgDir := filepath.FromSlash("/work/internal/revieweval")
+	childPath := filepath.FromSlash("/nonexistent/bin")
 
-	// planted holds one entry of every kind dispatchEnv must drop, each
-	// value naming the eval so a leak of it would also trip the
-	// vocabulary. PWD and OLDPWD are pinned where they are dropped
+	// planted holds one entry of every kind dispatchEnv must drop. PWD and
+	// OLDPWD are pinned where they are dropped
 	// (dispatchEnv's and childEnv's own tests): here the backend's own PWD
 	// replaces the planted one before the child starts, so this test only
 	// sees the combined result, which is that PWD is the worktree.
@@ -289,25 +269,18 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 			"Git_Config_Global="+filepath.Join(pkgDir, "revieweval-gittest", "gitconfig"))
 	}
 	parentEnv := append([]string{
-		"PATH=" + filepath.FromSlash("/nonexistent/bin"),
+		"PATH=" + childPath,
 		"CLAUDE_STUB_LOG=" + logFile,
 	}, planted...)
-	// Plus everything the test binary's harness introduced after launch
-	// (TestMain, gittest.Run, anything a later helper adds): the live path
-	// passes the test binary's whole environment through dispatchEnv, so
-	// each of these reaches a live session unless dispatchEnv drops it.
-	// The operator's launch environment stays out: it is ambient, outside
-	// what the eval scrubs. PATH is the one list the host fills, so for it
-	// only the entries the harness added are checked, here, while the
-	// child keeps the constant PATH above.
-	feed, addedPath := harnessParentEnv(launchEnv, atStart)
+	// Plus everything the test binary's harness added or changed after
+	// launch (TestMain, gittest.Run, anything a later helper adds): the
+	// live path passes the test binary's whole environment through
+	// dispatchEnv, so each of these reaches a live session unless
+	// dispatchEnv drops it. The operator's launch environment stays out: it
+	// is ambient, outside what the eval scrubs.
+	feed := harnessChanges(launchEnv, atStart)
 	if !hasEnvName(feed, "GIT_CONFIG_GLOBAL") {
 		t.Fatalf("the harness diff misses GIT_CONFIG_GLOBAL, which gittest.Run always sets after launch: %q", feed)
-	}
-	for _, seg := range addedPath {
-		for _, h := range leakHits("PATH entry the harness added "+seg, "", seg) {
-			t.Error(h)
-		}
 	}
 	parentEnv = append(parentEnv, feed...)
 
@@ -340,6 +313,9 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 		t.Fatalf("RunCase: want the case to pass (perfect fixtures, a judge confirming everything Same): %+v", cs.Rounds)
 	}
 
+	if _, err := os.Stat(logFile); err != nil {
+		t.Fatalf("the claude stub wrote no log at %s (%v): no child received CLAUDE_STUB_LOG, so either the stub never ran or the environment the backend gave it did not come from the parent environment passed to liveBackend", logFile, err)
+	}
 	calls := readRealChildLog(t, logFile)
 	const wantCalls = 4 // round 1 gate + judge, round 2 gate + judge
 	if len(calls) != wantCalls {
@@ -349,24 +325,22 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 		t.Fatalf("test bug: recorded %d worktrees for %d calls", len(worktrees), len(calls))
 	}
 
-	// What the child may carry: the synthetic PATH, the stub's own knob,
-	// the PWD the backend sets, and on Windows the SYSTEMROOT os/exec
-	// always adds when an explicit Env omits it.
-	allowed := map[string]bool{"PATH": true, "CLAUDE_STUB_LOG": true, "PWD": true}
+	// Exactly what the child may carry, at exactly these values: the
+	// synthetic PATH, the stub's own knob, and on Windows the SYSTEMROOT
+	// os/exec always adds when an explicit Env omits it. PWD is compared
+	// with the worktree below.
+	want := map[string]string{"PATH": childPath, "CLAUDE_STUB_LOG": logFile}
 	if runtime.GOOS == "windows" {
-		allowed["SYSTEMROOT"] = true
+		want["SYSTEMROOT"] = envValue(launchEnv, "SYSTEMROOT")
 	}
 	for i, call := range calls {
 		for _, kv := range call.Env {
-			name, _, _ := strings.Cut(kv, "=")
-			if !allowed[strings.ToUpper(name)] {
-				t.Errorf("call %d: child env carries %q, which the parent environment's scrub should have dropped or never had", i, kv)
+			name, val, _ := strings.Cut(kv, "=")
+			if strings.EqualFold(name, "PWD") {
+				continue
 			}
-			if strings.HasPrefix(name, "CLAUDE_STUB_") {
-				continue // the stub's own knob, test scaffolding for itself
-			}
-			for _, h := range leakHits(fmt.Sprintf("call %d: child env variable %q", i, kv), "", kv) {
-				t.Error(h)
+			if w, ok := want[strings.ToUpper(name)]; !ok || w != val {
+				t.Errorf("call %d: child env carries %q; want only PATH, CLAUDE_STUB_LOG and PWD (and SYSTEMROOT on Windows) at their exact values", i, kv)
 			}
 		}
 
@@ -396,44 +370,16 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 	}
 }
 
-// TestHarnessParentEnvFeedsChangesAndReturnsAddedPath pins how what the
-// harness introduced is split: a changed or added variable is fed to the
-// scrub, an unchanged or removed one is not, PATH is never fed whole, and
-// only the PATH entries the harness added come back.
-func TestHarnessParentEnvFeedsChangesAndReturnsAddedPath(t *testing.T) {
+// TestHarnessChangesIsTheVerbatimDiff pins what the real-child test
+// feeds the scrub from the harness: every variable added or changed since
+// launch, PATH included, and nothing unchanged or removed.
+func TestHarnessChangesIsTheVerbatimDiff(t *testing.T) {
 	list := func(entries ...string) string { return strings.Join(entries, string(os.PathListSeparator)) }
 	launch := []string{"TMP=/t", "KEEP=1", "GONE=1", "PATH=" + list("/a", "/b")}
-
-	t.Run("changed-and-added-variables-are-fed", func(t *testing.T) {
-		feed, added := harnessParentEnv(launch, []string{"TMP=/other", "KEEP=1", "NEW=x", "PATH=" + list("/a", "/b")})
-		if strings.Join(feed, ",") != "TMP=/other,NEW=x" {
-			t.Errorf("feed = %q, want the changed TMP and the new NEW only", feed)
-		}
-		if len(added) != 0 {
-			t.Errorf("added PATH entries = %q, want none", added)
-		}
-	})
-	t.Run("an-added-path-entry-comes-back-and-path-is-never-fed", func(t *testing.T) {
-		feed, added := harnessParentEnv(launch, []string{"TMP=/t", "KEEP=1", "PATH=" + list("/revieweval-bin", "/a", "/b")})
-		if len(feed) != 0 {
-			t.Errorf("feed = %q, want nothing: PATH is scanned by entry, never fed", feed)
-		}
-		if strings.Join(added, ",") != "/revieweval-bin" {
-			t.Errorf("added PATH entries = %q, want [/revieweval-bin]", added)
-		}
-	})
-	t.Run("a-reordered-path-adds-nothing", func(t *testing.T) {
-		feed, added := harnessParentEnv(launch, []string{"TMP=/t", "KEEP=1", "PATH=" + list("/b", "/a")})
-		if len(feed) != 0 || len(added) != 0 {
-			t.Errorf("feed = %q, added = %q, want both empty", feed, added)
-		}
-	})
-	if runtime.GOOS == "windows" {
-		t.Run("path-under-another-case-is-still-path", func(t *testing.T) {
-			feed, added := harnessParentEnv([]string{"Path=" + list("/a")}, []string{"Path=" + list("/x", "/a")})
-			if len(feed) != 0 || strings.Join(added, ",") != "/x" {
-				t.Errorf("feed = %q, added = %q, want no feed and [/x]", feed, added)
-			}
-		})
+	now := []string{"TMP=/other", "KEEP=1", "NEW=x", "PATH=" + list("/revieweval-bin", "/a", "/b")}
+	got := strings.Join(harnessChanges(launch, now), ",")
+	want := "TMP=/other,NEW=x,PATH=" + list("/revieweval-bin", "/a", "/b")
+	if got != want {
+		t.Errorf("harnessChanges = %q, want %q: the changed TMP, the new NEW and the changed PATH, never KEEP or GONE", got, want)
 	}
 }

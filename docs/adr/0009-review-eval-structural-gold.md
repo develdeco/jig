@@ -188,15 +188,17 @@ root. A test drives a case through the real headless backend with a
 stub CLI and checks the environment, working directory and surroundings
 every child actually saw. Its parent environment is one planted value of
 every kind the scrub must drop, plus every variable the test harness
-itself added or changed after launch (for PATH, each entry the harness
-added is scanned directly), so the check is strict. What the operator
-brings is ambient and outside what the eval scrubs: the variables of the
-shell that launched the run pass through by design, and every path sits
-under the operator's temp root. The leak checks leave both out, and run
-under a temp root deliberately named with a leak word, so they hold on
-any host. The live number still assumes a reviewer that does not go
-looking: the corpus and its `gold.yaml` sit on the same disk, and the
-headless backend is not a read boundary. A judge dispatch is held to the
+itself added or changed after launch, and it compares every value the
+child sees with exactly what it must be, so any variable the scrub lets
+through fails, whatever its value. What the operator brings is ambient
+and outside what the eval scrubs: the variables of the shell that
+launched the run pass through by design, and every path sits under the
+operator's temp root. The corpus leak test, which judges text by its
+words, leaves that temp root out wherever it ends a word, and runs under
+a temp root deliberately named with a leak word, so it holds on any
+host. The live number still assumes a reviewer that does not go looking:
+the corpus and its `gold.yaml` sit on the same disk, and the headless
+backend is not a read boundary. A judge dispatch is held to the
 reviewer's own read-only rule: after every round the runner checks the case repo's HEAD
 and tracked files against that round's head and restores the repo
 regardless, keeping a git command failing during that check apart from an

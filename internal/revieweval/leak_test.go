@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/session"
@@ -80,17 +81,47 @@ func withoutTempRoot(text string) string {
 	if windows {
 		text = strings.ToLower(text)
 	}
-	// A space, never "", takes the root's place: removing it outright
-	// would glue the text on either side into one token ("eval" + "/tmp1"
-	// reading as "eval1"), hiding a leak word next to the root.
 	for _, r := range tempRootSpellings {
 		if windows {
 			r = strings.ToLower(r)
-			text = strings.ReplaceAll(text, strings.ReplaceAll(r, `\`, `\\`), " ")
+			text = replaceAtWordEnd(text, strings.ReplaceAll(r, `\`, `\\`))
 		}
-		text = strings.ReplaceAll(text, r, " ")
+		text = replaceAtWordEnd(text, r)
 	}
 	return text
+}
+
+// replaceAtWordEnd replaces each occurrence of root in text with a space
+// where root ends a word for the leak tokenizer: the text ends there, or
+// the next character is neither a letter nor a digit. Anywhere else the
+// root and what follows it are one word, and are left whole for the
+// tokenizer to read as one: a root ending in a letter (macOS's ".../T")
+// must not cut a sibling "Trap" down to "rap", and "/opt/eval" + "/tmp1"
+// must not become "/opt/eval1". Since only a root followed by a non-word
+// character is replaced, the text on either side of it can never merge
+// into one token. Everything the eval writes under a temp root is the
+// root followed by a separator, so every one of its paths is stripped.
+func replaceAtWordEnd(text, root string) string {
+	if root == "" {
+		return text
+	}
+	var b strings.Builder
+	for {
+		i := strings.Index(text, root)
+		if i < 0 {
+			b.WriteString(text)
+			return b.String()
+		}
+		end := i + len(root)
+		b.WriteString(text[:i])
+		next, _ := utf8.DecodeRuneInString(text[end:])
+		if end == len(text) || !(unicode.IsLetter(next) || unicode.IsDigit(next)) {
+			b.WriteString(" ")
+		} else {
+			b.WriteString(root)
+		}
+		text = text[end:]
+	}
 }
 
 // tempRootSpellings lists the temp roots withoutTempRoot removes: the
@@ -367,13 +398,31 @@ func TestRunCaseNeverLeaksTheCorpusVocabulary(t *testing.T) {
 	}
 }
 
-// TestLeakHitsNeverJoinsTokensAcrossTheTempRoot pins that stripping the
-// temp root leaves a separator behind: a leak word right before the root
-// and text right after it must still read as separate tokens.
-func TestLeakHitsNeverJoinsTokensAcrossTheTempRoot(t *testing.T) {
-	text := "eval" + filepath.Clean(launchTempRoot) + "1"
-	hits := leakHits("joined", "", text)
-	if len(hits) == 0 || !strings.Contains(strings.Join(hits, "; "), `"eval"`) {
-		t.Errorf("leakHits(%q) = %q, want a hit on \"eval\" once the temp root is stripped", text, hits)
+// TestLeakHitsStripsTheTempRootOnlyWhereItEndsAWord pins how the temp
+// root is left out, with synthetic roots so every host runs the same
+// cases: a path under the root is scanned from the root on, a root that
+// itself names a leak word is dropped whole, a sibling that merely starts
+// with the root's last letters is read as the word it is, and removing a
+// root never glues the text around it into one token.
+func TestLeakHitsStripsTheTempRootOnlyWhereItEndsAWord(t *testing.T) {
+	saved := tempRootSpellings
+	t.Cleanup(func() { tempRootSpellings = saved })
+	for _, tc := range []struct {
+		name, root, text string
+		hit              bool
+	}{
+		{"a-path-under-the-root-is-scanned-after-it", "/tmp", "/tmp/eval-tmp-1/x", true},
+		{"a-clean-path-under-the-root-has-no-hit", "/tmp", "/tmp/jig-1/repo", false},
+		{"a-root-naming-a-leak-word-is-dropped-whole", "/tmp/eval-tmp-9", "/tmp/eval-tmp-9/jig-1/x", false},
+		{"a-sibling-sharing-the-roots-last-letters-is-its-own-word", "/var/folders/ab/xyz/T", "/var/folders/ab/xyz/Trap/notes.txt", true},
+		{"text-around-a-removed-root-never-merges", "/tmp", "/opt/eval/tmp1/x", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tempRootSpellings = []string{filepath.FromSlash(tc.root)}
+			text := filepath.FromSlash(tc.text)
+			if got := len(leakHits("t", "", text)) > 0; got != tc.hit {
+				t.Errorf("leakHits(%q) with root %q: hit = %v, want %v", text, tc.root, got, tc.hit)
+			}
+		})
 	}
 }
