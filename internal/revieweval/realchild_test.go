@@ -139,29 +139,63 @@ func (b realChildScriptedBackend) Run(d session.Dispatch) error {
 }
 
 // harnessIntroducedEnv returns the entries of now that are not in launch
-// verbatim - a variable the test harness added or changed after the binary
-// started - except those named in own, which the calling test set for
-// itself. Names compare case-insensitively on Windows.
-func harnessIntroducedEnv(launch, now []string, own ...string) []string {
+// verbatim: a variable the test harness added, or one it changed, after
+// the binary started.
+func harnessIntroducedEnv(launch, now []string) []string {
 	atLaunch := make(map[string]bool, len(launch))
 	for _, kv := range launch {
 		atLaunch[kv] = true
 	}
-	isOwn := func(name string) bool {
-		for _, o := range own {
-			if name == o || (runtime.GOOS == "windows" && strings.EqualFold(name, o)) {
-				return true
-			}
-		}
-		return false
-	}
 	var out []string
 	for _, kv := range now {
-		name, _, _ := strings.Cut(kv, "=")
-		if atLaunch[kv] || isOwn(name) {
-			continue
+		if !atLaunch[kv] {
+			out = append(out, kv)
 		}
-		out = append(out, kv)
+	}
+	return out
+}
+
+// sameEnvName compares two environment variable names the way the host
+// does: case-insensitively on Windows, exactly elsewhere.
+func sameEnvName(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+// envValue returns name's value in env, "" when it is absent.
+func envValue(env []string, name string) string {
+	for _, kv := range env {
+		if n, v, ok := strings.Cut(kv, "="); ok && sameEnvName(n, name) {
+			return v
+		}
+	}
+	return ""
+}
+
+// hasEnvName reports whether env holds a variable called name.
+func hasEnvName(env []string, name string) bool {
+	for _, kv := range env {
+		if n, _, _ := strings.Cut(kv, "="); sameEnvName(n, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// addedPathEntries returns the entries of the PATH list now that the PATH
+// list launch does not hold.
+func addedPathEntries(launch, now string) []string {
+	had := map[string]bool{}
+	for _, e := range filepath.SplitList(launch) {
+		had[e] = true
+	}
+	var out []string
+	for _, e := range filepath.SplitList(now) {
+		if e != "" && !had[e] {
+			out = append(out, e)
+		}
 	}
 	return out
 }
@@ -197,11 +231,15 @@ func sameDirOrFatal(t *testing.T, a, b string) bool {
 // every value the child sees is scanned - and independent of the host: an
 // ambient variable of the machine running the test (a CI runner's branch
 // name, say) is the operator's own environment, which the eval passes
-// through by design and does not claim to scrub. The temp root every path
-// here sits under is ambient in the same way: the test runs under a
-// deliberately hostile one (useHostileTempRoot), and the leak check leaves
-// it out.
+// through by design and does not claim to scrub. What the test harness
+// itself adds after launch is not ambient, and is checked here as the live
+// path would pass it. The temp root every path here sits under is ambient
+// like the operator's variables: the test runs under a deliberately
+// hostile one (useHostileTempRoot), and the leak check leaves it out.
 func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
+	// Taken before this test changes anything itself, so the difference
+	// from the launch environment is exactly what the harness introduced.
+	atStart := os.Environ()
 	useHostileTempRoot(t)
 	claudeDir := buildClaudeStub(t)
 	// The backend finds the stub on this process's own PATH; the child's
@@ -235,18 +273,42 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 		"_=" + filepath.Join(pkgDir, "revieweval.test"),
 		"GOCOVERDIR=" + filepath.Join(pkgDir, "revieweval-cover"),
 	}
+	if runtime.GOOS == "windows" {
+		// Windows names are not case sensitive, so an owned variable may
+		// arrive in any case; these prove the live wiring hands
+		// dispatchEnv the host's own rule.
+		planted = append(planted,
+			"Jig_Revieweval_Backend=headless",
+			"Git_Config_Global="+filepath.Join(pkgDir, "revieweval-gittest", "gitconfig"))
+	}
 	parentEnv := append([]string{
 		"PATH=" + filepath.FromSlash("/nonexistent/bin"),
 		"CLAUDE_STUB_LOG=" + logFile,
 	}, planted...)
-	// Plus everything this test binary's harness introduced after launch
+	// Plus everything the test binary's harness introduced after launch
 	// (TestMain, gittest.Run, anything a later helper adds): the live path
 	// passes the test binary's whole environment through dispatchEnv, so
 	// each of these reaches a live session unless dispatchEnv drops it.
-	// The operator's launch environment stays out (it is ambient, outside
-	// what the eval scrubs), and so do the variables this test sets for
-	// itself: the stub's PATH and log, and the hostile temp root.
-	parentEnv = append(parentEnv, harnessIntroducedEnv(launchEnv, os.Environ(), "PATH", "CLAUDE_STUB_LOG", "TMP", "TEMP", "TMPDIR")...)
+	// The operator's launch environment stays out: it is ambient, outside
+	// what the eval scrubs. PATH is the one list the host fills, so for it
+	// only the entries the harness added are checked, here, while the
+	// child keeps the constant PATH above.
+	introduced := harnessIntroducedEnv(launchEnv, atStart)
+	if !hasEnvName(introduced, "GIT_CONFIG_GLOBAL") {
+		t.Fatalf("the harness diff misses GIT_CONFIG_GLOBAL, which gittest.Run always sets after launch: %q", introduced)
+	}
+	for _, kv := range introduced {
+		name, _, _ := strings.Cut(kv, "=")
+		if sameEnvName(name, "PATH") {
+			for _, seg := range addedPathEntries(envValue(launchEnv, "PATH"), envValue(atStart, "PATH")) {
+				for _, h := range leakHits("PATH entry the harness added "+seg, "", seg) {
+					t.Error(h)
+				}
+			}
+			continue
+		}
+		parentEnv = append(parentEnv, kv)
+	}
 
 	jigBin := buildJigBinary(t)
 	real, err := liveBackend("headless", jigBin, parentEnv)

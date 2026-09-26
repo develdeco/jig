@@ -959,11 +959,17 @@ above:
   environment and surroundings, and a test runs a case through the real
   headless backend to check what each child actually saw. That test feeds
   the scrub a synthetic parent environment, one planted value of every
-  kind it must drop, and scans the child's environment strictly. Scanning
-  a real environment would judge whatever the machine running the test
+  kind it must drop, plus every variable the test harness introduced
+  after launch, and scans the child's environment strictly. Scanning a
+  real environment would judge whatever the machine running the test
   happens to carry, such as a CI runner's branch name, and make the result
-  depend on the host. The operator's ambient environment is outside what
-  the eval scrubs.
+  depend on the host. The operator's ambient environment, including the
+  temp root every path sits under, is outside what the eval scrubs; what
+  the harness adds is not. TestMain snapshots the launch environment and
+  temp root before anything else runs, so harness setup belongs after the
+  snapshot, never in an `init` or a package-level initializer. The leak
+  checks leave out only the launch temp root and the hostile one each leak
+  test makes under it, so a temp root the harness chose is still scanned.
 - The five cases ported from the earlier corpus kept their code, but
   `clean`, `loopvar-trap` and `tenant-leak` lost sentences that gave the
   reviewer the verdict (a brief saying the diff is correct, a brief

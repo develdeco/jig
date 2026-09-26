@@ -66,7 +66,7 @@ func leakHits(label, caseName, text string) []string {
 }
 
 // withoutTempRoot removes the operator's temp root from text before it is
-// scanned. Every path the eval makes sits under os.TempDir(), which is the
+// scanned. Every path the eval makes sits under the temp root, which is the
 // operator's own ambient environment, outside what the eval scrubs: a
 // temp root that happened to be named after a leak word would otherwise
 // fail every check on every path, whatever jig did. Each spelling a
@@ -80,13 +80,7 @@ func withoutTempRoot(text string) string {
 	if windows {
 		text = strings.ToLower(text)
 	}
-	var roots []string
-	tmp := filepath.Clean(os.TempDir())
-	roots = append(roots, tmp)
-	if resolved, err := filepath.EvalSymlinks(tmp); err == nil && resolved != tmp {
-		roots = append(roots, resolved)
-	}
-	for _, r := range roots {
+	for _, r := range tempRootSpellings() {
 		if windows {
 			r = strings.ToLower(r)
 			text = strings.ReplaceAll(text, strings.ReplaceAll(r, `\`, `\\`), "")
@@ -96,18 +90,50 @@ func withoutTempRoot(text string) string {
 	return text
 }
 
+// tempRootSpellings lists the temp roots withoutTempRoot removes: the
+// hostile root the running test chose (useHostileTempRoot), then the
+// operator's launch temp root (launchTempRoot), each as given and with
+// symlinks resolved. Only those two: a temp root anything else chose
+// after launch is not the operator's, so a path under it stays in the
+// scanned text. The hostile root comes first because it sits under the
+// launch root, and removing the launch root first would leave its name
+// behind.
+func tempRootSpellings() []string {
+	var out []string
+	for _, root := range []string{hostileTempRoot, launchTempRoot} {
+		if root == "" {
+			continue
+		}
+		root = filepath.Clean(root)
+		out = append(out, root)
+		if resolved, err := filepath.EvalSymlinks(root); err == nil && resolved != root {
+			out = append(out, resolved)
+		}
+	}
+	return out
+}
+
+// hostileTempRoot is the temp root useHostileTempRoot made for the running
+// test, "" outside one. Tests in this package never run in parallel.
+var hostileTempRoot string
+
 // useHostileTempRoot points the test's temp root (TMP, TEMP, TMPDIR) at a
-// fresh directory whose name holds a leak word, for the rest of the test.
-// Every path the eval makes then carries that word, so a leak test passes
-// only if its checks leave the operator's temp root out, on every host,
-// instead of passing only where the temp root happens to be harmless.
+// fresh directory, directly under the operator's launch temp root, whose
+// name holds a leak word, for the rest of the test. Every path the eval
+// makes then carries that word, so a leak test passes only if its checks
+// leave the temp root out, on every host, instead of passing only where
+// the temp root happens to be harmless.
 func useHostileTempRoot(t *testing.T) {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "eval-tmp-")
+	dir, err := os.MkdirTemp(launchTempRoot, "eval-tmp-")
 	if err != nil {
 		t.Fatalf("create hostile temp root: %v", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	hostileTempRoot = dir
+	t.Cleanup(func() {
+		hostileTempRoot = ""
+		_ = os.RemoveAll(dir)
+	})
 	for _, k := range []string{"TMP", "TEMP", "TMPDIR"} {
 		t.Setenv(k, dir)
 	}
