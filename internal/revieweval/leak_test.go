@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode"
@@ -51,8 +52,9 @@ func leakHits(label, caseName, text string) []string {
 	if text == "" {
 		return nil
 	}
+	text = withoutTempRoot(text)
 	var hits []string
-	if strings.Contains(strings.ToLower(text), strings.ToLower(caseName)) {
+	if caseName != "" && strings.Contains(strings.ToLower(text), strings.ToLower(caseName)) {
 		hits = append(hits, fmt.Sprintf("%s: contains the case name %q", label, caseName))
 	}
 	for _, tok := range leakTokens(text) {
@@ -61,6 +63,54 @@ func leakHits(label, caseName, text string) []string {
 		}
 	}
 	return hits
+}
+
+// withoutTempRoot removes the operator's temp root from text before it is
+// scanned. Every path the eval makes sits under os.TempDir(), which is the
+// operator's own ambient environment, outside what the eval scrubs: a
+// temp root that happened to be named after a leak word would otherwise
+// fail every check on every path, whatever jig did. Each spelling a
+// session could see is removed: the root as given, with symlinks
+// resolved, and on Windows each of those with its backslashes doubled, as
+// a JSON file such as review.json writes them. Windows compares paths
+// case-insensitively, so there the text is lowercased first; the leak
+// check lowercases every token anyway.
+func withoutTempRoot(text string) string {
+	windows := runtime.GOOS == "windows"
+	if windows {
+		text = strings.ToLower(text)
+	}
+	var roots []string
+	tmp := filepath.Clean(os.TempDir())
+	roots = append(roots, tmp)
+	if resolved, err := filepath.EvalSymlinks(tmp); err == nil && resolved != tmp {
+		roots = append(roots, resolved)
+	}
+	for _, r := range roots {
+		if windows {
+			r = strings.ToLower(r)
+			text = strings.ReplaceAll(text, strings.ReplaceAll(r, `\`, `\\`), "")
+		}
+		text = strings.ReplaceAll(text, r, "")
+	}
+	return text
+}
+
+// useHostileTempRoot points the test's temp root (TMP, TEMP, TMPDIR) at a
+// fresh directory whose name holds a leak word, for the rest of the test.
+// Every path the eval makes then carries that word, so a leak test passes
+// only if its checks leave the operator's temp root out, on every host,
+// instead of passing only where the temp root happens to be harmless.
+func useHostileTempRoot(t *testing.T) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "eval-tmp-")
+	if err != nil {
+		t.Fatalf("create hostile temp root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	for _, k := range []string{"TMP", "TEMP", "TMPDIR"} {
+		t.Setenv(k, dir)
+	}
 }
 
 // assertNoLeak fails t for every leak leakHits finds in text.
@@ -248,6 +298,7 @@ func (b leakCapturingBackend) Run(d session.Dispatch) error {
 // untracked, .git excluded; every file under the store's own ticket dir the
 // request points at; and the worktree's own git log.
 func TestRunCaseNeverLeaksTheCorpusVocabulary(t *testing.T) {
+	useHostileTempRoot(t)
 	cases, err := LoadCorpus(evalCorpusRoot(t))
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)

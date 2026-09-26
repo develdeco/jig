@@ -83,6 +83,16 @@ func defaultLiveModel() string {
 	return staircase.Disjoint(cfg, []string{cfg.Rungs[0]})
 }
 
+// liveBackend constructs the backend a live reviewer or judge dispatch
+// runs through: name's session backend, screened through screenBinary,
+// with the child environment dispatchEnv builds from environ. TestEvalLive
+// passes this process's own environment; TestRunCaseRealChildSeesNoLeak
+// passes a synthetic one and checks what a real child then sees, so the
+// wiring the live run relies on is the wiring that test proves.
+func liveBackend(name, screenBinary string, environ []string) (session.Backend, error) {
+	return session.New(name, session.Options{ScreenBinary: screenBinary, Env: dispatchEnv(runtime.GOOS, environ)})
+}
+
 // TestEvalLive runs the whole corpus through a real session backend,
 // gated behind JIG_REVIEWEVAL_BACKEND so it never runs unattended in CI:
 //
@@ -119,8 +129,7 @@ func TestEvalLive(t *testing.T) {
 	// which can run its own Bash and read its own environment - never sees
 	// JIG_REVIEWEVAL_BACKEND naming this measurement, or anything else this
 	// process happens to be running with that names it.
-	env := dispatchEnv(runtime.GOOS, os.Environ())
-	backend, err := session.New(backendName, session.Options{ScreenBinary: jigBin, Env: env})
+	backend, err := liveBackend(backendName, jigBin, os.Environ())
 	if err != nil {
 		t.Fatalf("revieweval: construct backend %s: %v", backendName, err)
 	}

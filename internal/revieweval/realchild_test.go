@@ -138,6 +138,34 @@ func (b realChildScriptedBackend) Run(d session.Dispatch) error {
 	}
 }
 
+// harnessIntroducedEnv returns the entries of now that are not in launch
+// verbatim - a variable the test harness added or changed after the binary
+// started - except those named in own, which the calling test set for
+// itself. Names compare case-insensitively on Windows.
+func harnessIntroducedEnv(launch, now []string, own ...string) []string {
+	atLaunch := make(map[string]bool, len(launch))
+	for _, kv := range launch {
+		atLaunch[kv] = true
+	}
+	isOwn := func(name string) bool {
+		for _, o := range own {
+			if name == o || (runtime.GOOS == "windows" && strings.EqualFold(name, o)) {
+				return true
+			}
+		}
+		return false
+	}
+	var out []string
+	for _, kv := range now {
+		name, _, _ := strings.Cut(kv, "=")
+		if atLaunch[kv] || isOwn(name) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 func sameDirOrFatal(t *testing.T, a, b string) bool {
 	t.Helper()
 	ai, err := os.Stat(a)
@@ -169,8 +197,12 @@ func sameDirOrFatal(t *testing.T, a, b string) bool {
 // every value the child sees is scanned - and independent of the host: an
 // ambient variable of the machine running the test (a CI runner's branch
 // name, say) is the operator's own environment, which the eval passes
-// through by design and does not claim to scrub.
+// through by design and does not claim to scrub. The temp root every path
+// here sits under is ambient in the same way: the test runs under a
+// deliberately hostile one (useHostileTempRoot), and the leak check leaves
+// it out.
 func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
+	useHostileTempRoot(t)
 	claudeDir := buildClaudeStub(t)
 	// The backend finds the stub on this process's own PATH; the child's
 	// PATH is whatever the synthetic parent environment below says.
@@ -181,35 +213,45 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 	// fail below on each variable it should never have had.
 	t.Setenv("CLAUDE_STUB_LOG", logFile)
 
-	neutralDir, err := os.MkdirTemp("", "jig-")
-	if err != nil {
-		t.Fatalf("create neutral dir: %v", err)
-	}
-	defer func() { _ = os.RemoveAll(neutralDir) }()
-	pkgDir := filepath.Join(neutralDir, "internal", "revieweval")
+	// None of these paths has to exist; the child only ever sees them as
+	// strings. The PATH is a constant outside every temp root, so the one
+	// value this test chooses for the child depends on nothing about the
+	// host.
+	pkgDir := filepath.FromSlash("/work/internal/revieweval")
 
-	// planted names every entry dispatchEnv must drop; each value names the
-	// eval, so a leak would show twice: by name and by vocabulary.
+	// planted holds one entry of every kind dispatchEnv must drop, each
+	// value naming the eval so a leak of it would also trip the
+	// vocabulary. PWD and OLDPWD are pinned where they are dropped
+	// (dispatchEnv's and childEnv's own tests): here the backend's own PWD
+	// replaces the planted one before the child starts, so this test only
+	// sees the combined result, which is that PWD is the worktree.
 	planted := []string{
 		"JIG_REVIEWEVAL_BACKEND=headless",
-		"GIT_CONFIG_GLOBAL=" + filepath.Join(neutralDir, "revieweval-gittest", "gitconfig"),
+		"GIT_CONFIG_GLOBAL=" + filepath.Join(pkgDir, "revieweval-gittest", "gitconfig"),
 		"GIT_CONFIG_NOSYSTEM=revieweval",
 		"PWD=" + pkgDir,
 		"OLDPWD=" + pkgDir,
 		"=C:=" + pkgDir,
 		"_=" + filepath.Join(pkgDir, "revieweval.test"),
-		"GOCOVERDIR=" + filepath.Join(neutralDir, "revieweval-cover"),
+		"GOCOVERDIR=" + filepath.Join(pkgDir, "revieweval-cover"),
 	}
 	parentEnv := append([]string{
-		"PATH=" + neutralDir,
+		"PATH=" + filepath.FromSlash("/nonexistent/bin"),
 		"CLAUDE_STUB_LOG=" + logFile,
 	}, planted...)
+	// Plus everything this test binary's harness introduced after launch
+	// (TestMain, gittest.Run, anything a later helper adds): the live path
+	// passes the test binary's whole environment through dispatchEnv, so
+	// each of these reaches a live session unless dispatchEnv drops it.
+	// The operator's launch environment stays out (it is ambient, outside
+	// what the eval scrubs), and so do the variables this test sets for
+	// itself: the stub's PATH and log, and the hostile temp root.
+	parentEnv = append(parentEnv, harnessIntroducedEnv(launchEnv, os.Environ(), "PATH", "CLAUDE_STUB_LOG", "TMP", "TEMP", "TMPDIR")...)
 
 	jigBin := buildJigBinary(t)
-	env := dispatchEnv(runtime.GOOS, parentEnv)
-	real, err := session.New("headless", session.Options{ScreenBinary: jigBin, Env: env})
+	real, err := liveBackend("headless", jigBin, parentEnv)
 	if err != nil {
-		t.Fatalf("session.New(headless): %v", err)
+		t.Fatalf("liveBackend(headless): %v", err)
 	}
 
 	var worktrees []string
@@ -260,10 +302,8 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 			if strings.HasPrefix(name, "CLAUDE_STUB_") {
 				continue // the stub's own knob, test scaffolding for itself
 			}
-			for _, tok := range leakTokens(kv) {
-				if leakVocabulary[tok] {
-					t.Errorf("call %d: child env variable %q contains leak token %q", i, kv, tok)
-				}
+			for _, h := range leakHits(fmt.Sprintf("call %d: child env variable %q", i, kv), "", kv) {
+				t.Error(h)
 			}
 		}
 

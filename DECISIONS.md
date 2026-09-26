@@ -948,8 +948,9 @@ above:
 - `session.Options.Env` lets a caller fix a headless child's environment;
   the live eval passes its own environment minus every `JIG_` variable,
   `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`, `PWD` and `OLDPWD`, and any
-  launch-context entry (a name that is empty or starts with `=`, such as
-  Windows' per-drive working directories, plus `_` and `GOCOVERDIR`), and
+  launch-context entry (an empty name, which is how a Windows per-drive
+  working-directory entry such as `=C:=C:\work` reads when cut at its
+  first `=`, plus `_` and `GOCOVERDIR`), and
   the backend sets `PWD` to the worktree. Setting `Env` on a backend that
   cannot apply it (fake, herdr) fails at construction instead of being
   silently ignored. It is a denylist of what jig and its

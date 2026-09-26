@@ -182,17 +182,21 @@ still leaves that round's findings in `RenderJSON`. The live path
 controls what its sessions see: each child gets an environment built
 from the test process's own minus every `JIG_` variable, the git test
 scaffolding, launch-context entries and any stale `PWD`
-(`session.Options.Env`, which a backend that cannot apply it refuses), and the judge's
-scratch lives in its own temp root outside the case work root. A test
-drives a case through the real headless backend with a stub CLI and
-checks the environment, working directory and surroundings every child
-actually saw. Its parent environment is synthetic, one value of every
-kind the scrub must drop, so the check is strict and does not depend on
-the machine running it. The operator's own ambient variables pass through
-by design: they are outside what the eval scrubs. The live number still assumes a reviewer that does not go
+(`session.Options.Env`, which a backend that cannot apply it refuses),
+and the judge's scratch lives in its own temp root outside the case work
+root. A test drives a case through the real headless backend with a
+stub CLI and checks the environment, working directory and surroundings
+every child actually saw. Its parent environment is one planted value of
+every kind the scrub must drop, plus every variable the test harness
+itself added after launch, so the check is strict. What the operator
+brings is ambient and outside what the eval scrubs: the variables of the
+shell that launched the run pass through by design, and every path sits
+under the operator's temp root. The leak checks leave both out, and run
+under a temp root deliberately named with a leak word, so they hold on
+any host. The live number still assumes a reviewer that does not go
 looking: the corpus and its `gold.yaml` sit on the same disk, and the
-headless backend is not a read boundary. A judge dispatch is held to the reviewer's own
-read-only rule: after every round the runner checks the case repo's HEAD
+headless backend is not a read boundary. A judge dispatch is held to the
+reviewer's own read-only rule: after every round the runner checks the case repo's HEAD
 and tracked files against that round's head and restores the repo
 regardless, keeping a git command failing during that check apart from an
 actual violation ("the judge changed the case repo"). Once scored, the

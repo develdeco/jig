@@ -32,7 +32,7 @@ func TestDispatchEnvDropsOwnedAndScaffoldingVariables(t *testing.T) {
 }
 
 // TestDispatchEnvDropsLaunchContextEntries pins the generic launch-context
-// rule: an empty name, a name starting "=" (Windows' own hidden per-drive
+// rule: an empty name (Windows' own hidden per-drive
 // current-directory entries, which cmd.exe sets and every process it
 // starts inherits - strings.Cut reads their own name as "" since they
 // hold a second "=" of their own), "_" (a shell's last-argument variable,
