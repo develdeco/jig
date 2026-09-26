@@ -155,28 +155,58 @@ func sameDirOrFatal(t *testing.T, a, b string) bool {
 // and judge dispatches in both rounds - forgotten-finding's own gold match
 // in round 1 and round 2 both give the judge at least one candidate)
 // through the real headless backend: a real `claude` subprocess, in its
-// own worktree, with Options.Env built the way the live path
-// (dispatchEnv, live_test.go) builds it. It checks every call the stub
-// logged against what a live session could actually read: the process's
-// own environment (leakCapturingBackend, leak_test.go, never execs a real
-// child and so never exercises env inheritance at all) and a "judge"
-// directory sitting beside the reviewer's worktree (also invisible to
-// leakCapturingBackend, which only ever hands the judge a scripted
-// in-process answer and never gives runRound a chance to make a real
-// scratch dir under the old, now-removed workDir/judge path).
+// own worktree, with Options.Env built by dispatchEnv, as the live path
+// builds it. It checks every call the stub logged against what a live
+// session could actually read: its own environment (leakCapturingBackend,
+// leak_test.go, never execs a real child and so never exercises env
+// inheritance at all), its working directory and the directory beside its
+// worktree.
+//
+// The parent environment dispatchEnv filters is synthetic, not this test
+// process's own: one value of every kind the live path must drop, each
+// spelled so it would also trip the leak vocabulary if it got through,
+// beside the one knob the stub itself reads. That keeps the check strict -
+// every value the child sees is scanned - and independent of the host: an
+// ambient variable of the machine running the test (a CI runner's branch
+// name, say) is the operator's own environment, which the eval passes
+// through by design and does not claim to scrub.
 func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 	claudeDir := buildClaudeStub(t)
+	// The backend finds the stub on this process's own PATH; the child's
+	// PATH is whatever the synthetic parent environment below says.
 	t.Setenv("PATH", claudeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	logFile := filepath.Join(t.TempDir(), "claude.log")
+	// Also on this process's own environment: if the backend ever ignored
+	// Options.Env, the child would inherit everything here, still log, and
+	// fail below on each variable it should never have had.
 	t.Setenv("CLAUDE_STUB_LOG", logFile)
-	// A JIG_-prefixed variable this test process happens to be running
-	// with: dispatchEnv must drop it before it ever reaches the child, the
-	// same as the real JIG_REVIEWEVAL_BACKEND/JIG_REVIEWEVAL_* variables a
-	// real `go test` invocation of TestEvalLive carries.
-	t.Setenv("JIG_REVIEWEVAL_TEST_MARKER", "should-never-reach-a-child")
+
+	neutralDir, err := os.MkdirTemp("", "jig-")
+	if err != nil {
+		t.Fatalf("create neutral dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(neutralDir) }()
+	pkgDir := filepath.Join(neutralDir, "internal", "revieweval")
+
+	// planted names every entry dispatchEnv must drop; each value names the
+	// eval, so a leak would show twice: by name and by vocabulary.
+	planted := []string{
+		"JIG_REVIEWEVAL_BACKEND=headless",
+		"GIT_CONFIG_GLOBAL=" + filepath.Join(neutralDir, "revieweval-gittest", "gitconfig"),
+		"GIT_CONFIG_NOSYSTEM=revieweval",
+		"PWD=" + pkgDir,
+		"OLDPWD=" + pkgDir,
+		"=C:=" + pkgDir,
+		"_=" + filepath.Join(pkgDir, "revieweval.test"),
+		"GOCOVERDIR=" + filepath.Join(neutralDir, "revieweval-cover"),
+	}
+	parentEnv := append([]string{
+		"PATH=" + neutralDir,
+		"CLAUDE_STUB_LOG=" + logFile,
+	}, planted...)
 
 	jigBin := buildJigBinary(t)
-	env := dispatchEnv(runtime.GOOS, os.Environ())
+	env := dispatchEnv(runtime.GOOS, parentEnv)
 	real, err := session.New("headless", session.Options{ScreenBinary: jigBin, Env: env})
 	if err != nil {
 		t.Fatalf("session.New(headless): %v", err)
@@ -214,26 +244,22 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 		t.Fatalf("test bug: recorded %d worktrees for %d calls", len(worktrees), len(calls))
 	}
 
+	// What the child may carry: the synthetic PATH, the stub's own knob,
+	// the PWD the backend sets, and on Windows the SYSTEMROOT os/exec
+	// always adds when an explicit Env omits it.
+	allowed := map[string]bool{"PATH": true, "CLAUDE_STUB_LOG": true, "PWD": true}
+	if runtime.GOOS == "windows" {
+		allowed["SYSTEMROOT"] = true
+	}
 	for i, call := range calls {
 		for _, kv := range call.Env {
 			name, _, _ := strings.Cut(kv, "=")
-			upper := strings.ToUpper(name)
-			if strings.HasPrefix(upper, "JIG_") {
-				t.Errorf("call %d: child env carries a JIG_-prefixed variable %q", i, kv)
-			}
-			if upper == "GIT_CONFIG_GLOBAL" || upper == "GIT_CONFIG_NOSYSTEM" {
-				t.Errorf("call %d: child env carries test scaffolding %q", i, kv)
+			if !allowed[strings.ToUpper(name)] {
+				t.Errorf("call %d: child env carries %q, which the parent environment's scrub should have dropped or never had", i, kv)
 			}
 			if strings.HasPrefix(name, "CLAUDE_STUB_") {
-				continue // the stub's own knobs, test scaffolding for itself
+				continue // the stub's own knob, test scaffolding for itself
 			}
-			// Every other value is scanned, whether or not it happens to
-			// equal this test process's own: a value already present,
-			// unchanged, before dispatchEnv ever ran (PATH's own stub-dir
-			// prefix aside, which prepending the stub changes) is exactly
-			// as visible to the real child as a value dispatchEnv itself
-			// altered, and a regression that leaked one through would go
-			// uncaught by a check that only looked at what changed.
 			for _, tok := range leakTokens(kv) {
 				if leakVocabulary[tok] {
 					t.Errorf("call %d: child env variable %q contains leak token %q", i, kv, tok)

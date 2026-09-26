@@ -956,7 +956,13 @@ above:
   test scaffolding own, not an allowlist of what the CLI needs, so the CLI
   keeps whatever else it relies on. The claude stub records its
   environment and surroundings, and a test runs a case through the real
-  headless backend to check what each child actually saw.
+  headless backend to check what each child actually saw. That test feeds
+  the scrub a synthetic parent environment, one planted value of every
+  kind it must drop, and scans the child's environment strictly. Scanning
+  a real environment would judge whatever the machine running the test
+  happens to carry, such as a CI runner's branch name, and make the result
+  depend on the host. The operator's ambient environment is outside what
+  the eval scrubs.
 - The five cases ported from the earlier corpus kept their code, but
   `clean`, `loopvar-trap` and `tenant-leak` lost sentences that gave the
   reviewer the verdict (a brief saying the diff is correct, a brief

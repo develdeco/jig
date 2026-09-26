@@ -186,7 +186,10 @@ scaffolding, launch-context entries and any stale `PWD`
 scratch lives in its own temp root outside the case work root. A test
 drives a case through the real headless backend with a stub CLI and
 checks the environment, working directory and surroundings every child
-actually saw. The live number still assumes a reviewer that does not go
+actually saw. Its parent environment is synthetic, one value of every
+kind the scrub must drop, so the check is strict and does not depend on
+the machine running it. The operator's own ambient variables pass through
+by design: they are outside what the eval scrubs. The live number still assumes a reviewer that does not go
 looking: the corpus and its `gold.yaml` sit on the same disk, and the
 headless backend is not a read boundary. A judge dispatch is held to the reviewer's own
 read-only rule: after every round the runner checks the case repo's HEAD
