@@ -1,0 +1,108 @@
+name: demo
+
+# Renders every demo/*.tape from the branch head and uploads the results as
+# a build artifact. Never a required check: a rendering failure (a missing
+# tool, a tape that no longer matches the binary's prompts) never blocks a
+# push or a PR, only the demo it would have produced.
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "demo/**"
+      - "skills/**"
+      - "testdata/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/demo.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned so a tape's timing and appearance never drift with an unrelated
+  # tool upgrade. Bump deliberately, in its own commit, when a tape needs a
+  # feature a newer VHS adds.
+  VHS_VERSION: v0.12.1
+  # apt's exact version pin for the Ubuntu 24.04 (noble) runner image this
+  # job pins itself to below; bump both together, deliberately, when the
+  # runner image moves.
+  TTYD_VERSION: 1.7.4-1build2
+  FFMPEG_VERSION: 7:6.1.1-3ubuntu5
+
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: short sha
+        id: vars
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: build jig and the fixture generator onto PATH
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/bin"
+          go build -o "$RUNNER_TEMP/bin/jig" ./cmd/jig
+          go build -o "$RUNNER_TEMP/bin/fixture" ./demo/fixture
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: install vhs
+        run: go install "github.com/charmbracelet/vhs@${VHS_VERSION}"
+
+      - name: install ttyd and ffmpeg
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y "ttyd=${TTYD_VERSION}" "ffmpeg=${FFMPEG_VERSION}"
+
+      - name: render tapes
+        run: |
+          set -e
+          mkdir -p demo/out
+          shopt -s nullglob
+          tapes=(demo/*.tape)
+          if [ ${#tapes[@]} -eq 0 ]; then
+            echo "no demo/*.tape files to render"
+            exit 0
+          fi
+          for tape in "${tapes[@]}"; do
+            echo "rendering $tape"
+            vhs "$tape"
+          done
+
+      # A GIF this job produces is meant to reach a PR description via
+      # `gh pr create/edit --attach` (.github/CONTRIBUTING.md), which enforces
+      # GitHub's 10 MiB cap on an attached image - fail here instead of at
+      # attach time.
+      - name: check GIF size
+        run: |
+          set -e
+          shopt -s nullglob
+          gifs=(demo/out/*.gif)
+          for gif in "${gifs[@]}"; do
+            size=$(stat -c %s "$gif")
+            if [ "$size" -gt 10485760 ]; then
+              echo "$gif is $size bytes, over GitHub's 10 MiB image-attachment cap"
+              exit 1
+            fi
+          done
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: demo-${{ steps.vars.outputs.sha }}
+          path: demo/out/**
+          retention-days: 14
+          if-no-files-found: warn
+          overwrite: true
