@@ -35,6 +35,27 @@ Testing rules below for what the suite does and doesn't touch.
   the top of that file. Correct a stale fact in place; record a new decision
   as a new entry.
 
+## Pull requests
+
+- Keep a pull request to one concern. If a reviewer would need a map to
+  follow the body, split the change instead of writing the map.
+- The body has three parts, and nothing else:
+  - **What**: a few bullets. The first one says why the change exists.
+  - **Demo**: when the change is visible, show it working. A screenshot
+    when one frame shows it; a GIF or a video when it is a flow, such as a
+    prompt and what follows it. Attach media with `gh pr create --attach` or
+    `gh pr edit --attach` (gh 2.99 or later) rather than committing it.
+    Leave the section out when nothing is visible, as with a docs-only or
+    purely internal change.
+  - **Verification**: the gates you ran, and anything you checked beyond
+    them.
+- Everything else a reviewer might want - contract changes, where to look,
+  what is safe to skim, decisions and deviations - goes in one "Reviewer
+  notes" comment posted when the pull request opens.
+- Answer each review round in a reply comment: each item, and the commit
+  that addressed it. Edit the body only to correct a statement that became
+  false, never to append review history.
+
 ## Session skills
 
 `skills/*/SKILL.md` are lint-enforced (`lint/skills_test.go`): each file must
