@@ -1098,6 +1098,17 @@ above:
   filter stays for any caller that does not start from `main`, tests included.
   `TestRunIgnoresInheritedRepoEnv`, `TestClearRepoEnv` and
   `TestAcquireIgnoresInheritedGitDir` pin it.
+- gitx searches PATH for git once per PATH, not once per call. `exec.Command("git")`
+  searches PATH on every call, and on Windows that search stats every PATH directory
+  once per PATHEXT extension until it reaches git: 31-39 ms a call on a 57-entry
+  developer PATH with git's directory 31 entries in, as long as git itself takes to run
+  a small command. A syscall profile of `internal/pool`'s tests there put 16 s of the
+  package's 41 s in that search. gitx reuses the path it found while PATH, PATHEXT,
+  `NoDefaultCurrentDirectoryInExePath` and the working directory are unchanged, as a
+  shell's command hash does, so a test that changes PATH is searched again
+  (`TestRunSearchesPATHAgainWhenItChanges`). On that machine `TestPublishFullChain`
+  went from 50-56 s to 27 s. A GitHub Windows runner's search costs 1.6-3.4 ms (git is
+  27 entries into its 74-entry PATH), so CI time there does not change measurably.
 - Long-lived repos (the store after a push, a pool lease after a reuse fetch) get a
   foreground, best-effort `git maintenance run --auto`. The per-call flag only stops
   commands from spawning detached maintenance, not this explicit run;

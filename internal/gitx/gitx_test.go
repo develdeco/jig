@@ -3,6 +3,7 @@ package gitx
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -606,6 +607,28 @@ func TestRunIgnoresInheritedRepoEnv(t *testing.T) {
 	}
 	if got, err := RunEnv(dir, []string{"GIT_DIR=" + filepath.Join(other, ".git")}, "rev-parse", "HEAD"); err != nil || got != otherHead {
 		t.Fatalf("rev-parse HEAD with an explicit GIT_DIR = %q, %v; want %s", got, err, otherHead)
+	}
+}
+
+// TestRunSearchesPATHAgainWhenItChanges covers the cached PATH search: a
+// PATH that no longer holds git must fail the next call as git's absence,
+// not reuse the path found under the old PATH, and restoring PATH must
+// find git again.
+func TestRunSearchesPATHAgainWhenItChanges(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Run(dir, "--version"); err != nil {
+		t.Fatalf("git --version: %v", err)
+	}
+	path := os.Getenv("PATH")
+
+	t.Setenv("PATH", t.TempDir())
+	if _, err := Run(dir, "--version"); !errors.Is(err, exec.ErrNotFound) {
+		t.Fatalf("git --version with git off PATH: err = %v, want exec.ErrNotFound", err)
+	}
+
+	t.Setenv("PATH", path)
+	if _, err := Run(dir, "--version"); err != nil {
+		t.Fatalf("git --version with PATH restored: %v", err)
 	}
 }
 

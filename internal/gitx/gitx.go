@@ -17,7 +17,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/develdeco/jig/internal/axi"
 )
@@ -53,12 +55,57 @@ func RunRaw(dir string, args ...string) (string, error) {
 // no call leaves git's detached maintenance running after it returns. The
 // process environment is inherited without repoEnv, then env is appended.
 func run(dir string, env []string, stdout, stderr io.Writer, args []string) error {
-	cmd := exec.Command("git", append([]string{"-c", "maintenance.auto=false"}, args...)...)
+	cmd := gitCommand(append([]string{"-c", "maintenance.auto=false"}, args...))
 	cmd.Dir = dir
 	cmd.Env = append(inheritedEnv(), env...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
+}
+
+// gitCommand returns exec.Command("git", args...) with the PATH search
+// already done: exec.Command searches PATH on every call, and on Windows
+// that search stats each PATH directory once per PATHEXT extension, tens of
+// milliseconds per call on a typical PATH - as long as git itself takes to
+// run a small command. Like a shell's command hash, the search's result is
+// reused for as long as its inputs are unchanged: PATH, PATHEXT,
+// NoDefaultCurrentDirectoryInExePath and the working directory (which
+// Windows searches too), so a changed PATH, such as a test hiding git, is
+// searched again on the next call. Only an absolute path found without
+// error is reused; anything else is left to exec.Command, which reports it
+// as it always has. argv[0] stays "git".
+func gitCommand(args []string) *exec.Cmd {
+	path := lookGit()
+	if path == "" {
+		return exec.Command("git", args...)
+	}
+	cmd := exec.Command(path, args...)
+	cmd.Args[0] = "git"
+	return cmd
+}
+
+// gitPath caches lookGit's search: key is the search inputs it ran with,
+// path its absolute result, or "" when it found none.
+var gitPath struct {
+	sync.Mutex
+	key, path string
+}
+
+// lookGit returns the absolute path exec.LookPath("git") resolves to under
+// the current search inputs, or "" when it resolves to none without error.
+func lookGit() string {
+	wd, _ := os.Getwd()
+	_, noDot := os.LookupEnv("NoDefaultCurrentDirectoryInExePath")
+	key := strings.Join([]string{os.Getenv("PATH"), os.Getenv("PATHEXT"), strconv.FormatBool(noDot), wd}, "\x00")
+	gitPath.Lock()
+	defer gitPath.Unlock()
+	if gitPath.key != key {
+		gitPath.key, gitPath.path = key, ""
+		if p, err := exec.LookPath("git"); err == nil && filepath.IsAbs(p) {
+			gitPath.path = p
+		}
+	}
+	return gitPath.path
 }
 
 // repoEnv names the variables that point git at a repository, work tree,
