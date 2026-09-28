@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
+  # Daily, for the claude-cli job below: the CLI release it tests can change
+  # with no change to jig at all.
+  schedule:
+    - cron: "37 9 * * *"
 
 concurrency:
   # Include the event so a manual run on a tag never shares a group with
@@ -57,6 +61,42 @@ jobs:
       # time, so the longest-running package goes first: listed in its
       # ./... place, it starts among the last, and the step waits on it alone.
       - run: go test -timeout 30m ./internal/verifydeliver ./...
+
+  # The test job's sessions run against a stub `claude` that accepts any
+  # argv. This job runs the real Claude Code CLI, at the latest release (the
+  # one users' CLIs update to), through jig's headless backend against a
+  # scripted Messages API on loopback: no credentials, and no network past
+  # the install. v0.1.1 shipped with an argv the CLI refuses, so none of its
+  # headless sessions ever started, and nothing before this job ran one.
+  claude-cli:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: install the Claude Code CLI
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash -s latest
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: install the Claude Code CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & ([scriptblock]::Create((Invoke-RestMethod https://claude.ai/install.ps1))) latest
+          Join-Path $env:USERPROFILE '.local\bin' | Add-Content -Path $env:GITHUB_PATH
+      - run: claude --version
+      - name: headless backend against the real CLI
+        env:
+          JIG_LIVE_CLAUDE: "1"
+        run: go test -count=1 -timeout 20m -run Live -v ./internal/session
 
   snapshot:
     if: github.event_name == 'workflow_dispatch'

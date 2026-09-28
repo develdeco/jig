@@ -29,6 +29,8 @@ import (
 //
 //	JIG_LIVE_CLAUDE=1 go test ./internal/session -run Live
 //
+// CI's claude-cli job runs it against the latest CLI release.
+//
 // Each scripted tool call probes one grant or one denial of the permission
 // model (docs/adr/0008-headless-permission-model.md), and the session ends
 // by writing result.json exactly as a real one must.

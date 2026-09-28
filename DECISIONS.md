@@ -255,8 +255,8 @@ was ambiguous, what was chosen, and why.
   when it differs. Checked against the CLI: native backslash paths, lowercased paths, and
   a directory named `w [1] (x) y` all match, and a look-alike sibling does not.
 - The CLI contract test is opt-in (`JIG_LIVE_CLAUDE=1`), not part of `go test ./...`: it
-  runs whichever CLI version is installed, so its result is not reproducible run to run,
-  and CI has no `claude` binary.
+  runs whichever CLI version is installed, so its result is not reproducible run to run.
+  CI runs it in a job of its own, which installs the CLI (under "Git execution and CI").
 - Direction taken after three adversarial review rounds each patched around the same
   shape of hole (a glob, then a junction, then a parent search root): the `headless`
   backend is stated as not a security boundary, and no further denylist patch is made
@@ -1218,6 +1218,17 @@ above:
   runs pwsh with MSYSTEM unset and no `%HOME%\bin`. Since most Windows users do run
   git through the launcher, `internal/gitx`'s own tests (argv, output, exit codes)
   still run through it first, on the same leg, before the PATH change.
+- ci.yml's `claude-cli` job installs the real Claude Code CLI with its official
+  installers, on all three platforms, and runs the live CLI tests (`JIG_LIVE_CLAUDE=1`)
+  against it. v0.1.1 passed CI and its release smoke test and still shipped a headless
+  backend that never started a session: it asked for `--output-format stream-json` in
+  print mode without `--verbose`, which the CLI refuses, the test job's stub `claude`
+  accepts any argv, and the smoke test checked only `jig version`. The job installs the
+  latest CLI release rather than a pinned one, since that is the release a user's CLI
+  updates to, and a CLI release can break jig with no jig change at all; a daily
+  scheduled run of ci.yml catches that between pushes. It is a job of its own rather
+  than steps of the test job, so the hermetic suite still runs with no `claude` on PATH
+  and the Windows leg's wall time does not grow.
 
 ## Release and install
 

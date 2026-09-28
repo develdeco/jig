@@ -164,12 +164,34 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	if !ok {
 		t.Fatalf("ci.yml: no \"test\" job, so there is nothing to run the cross-platform and gate checks below")
 	}
+	requireAllPlatforms(t, "test", job)
 
+	steps, ok := yamlSlice(job["steps"])
+	if !ok {
+		t.Fatalf("ci.yml: test job has no steps")
+	}
+
+	// go vet and go test must actually enforce on every matrix leg: no
+	// step-level "if" (which would silently confine either to a subset of
+	// the three OSes, the same failure mode the matrix check above guards
+	// against) and no "continue-on-error" (which would let either fail
+	// without failing the job). gofmt is deliberately scoped to one leg
+	// (running it three times over identical source would be redundant),
+	// so it is checked precisely against that leg instead of "every leg".
+	requireUnconditionalStep(t, steps, "go vet", "go vet ./...")
+	requireUnconditionalStep(t, steps, "go test", "go test ")
+	requireStepOnExactly(t, steps, "gofmt", "gofmt -l", "runner.os == 'Linux'")
+}
+
+// requireAllPlatforms asserts ci.yml's job name runs a strategy.matrix.os
+// leg on each of the three supported platforms.
+func requireAllPlatforms(t *testing.T, name string, job map[string]interface{}) {
+	t.Helper()
 	strategy, _ := yamlMap(job["strategy"])
 	matrix, _ := yamlMap(strategy["matrix"])
 	osList, ok := yamlSlice(matrix["os"])
 	if !ok {
-		t.Fatalf("ci.yml: test job has no strategy.matrix.os list, so it would not run cross-platform at all")
+		t.Fatalf("ci.yml: %s job has no strategy.matrix.os list, so it would not run cross-platform at all", name)
 	}
 	var haveUbuntu, haveWindows, haveMacos bool
 	for _, v := range osList {
@@ -189,30 +211,73 @@ func TestCIWorkflowTestJob(t *testing.T) {
 		}
 	}
 	if !haveUbuntu {
-		t.Errorf("ci.yml: test job matrix has no ubuntu-* leg, so a Linux-only regression would merge unnoticed")
+		t.Errorf("ci.yml: %s job matrix has no ubuntu-* leg, so a Linux-only regression would merge unnoticed", name)
 	}
 	if !haveWindows {
-		t.Errorf("ci.yml: test job matrix has no windows-* leg, so a Windows-only regression would merge unnoticed")
+		t.Errorf("ci.yml: %s job matrix has no windows-* leg, so a Windows-only regression would merge unnoticed", name)
 	}
 	if !haveMacos {
-		t.Errorf("ci.yml: test job matrix has no macos-* leg, so a macOS-only regression would merge unnoticed (it has shipped before, commit d920a72)")
+		t.Errorf("ci.yml: %s job matrix has no macos-* leg, so a macOS-only regression would merge unnoticed (it has shipped before, commit d920a72)", name)
 	}
+}
 
-	steps, ok := yamlSlice(job["steps"])
+// TestCIWorkflowClaudeCLIJob asserts ci.yml runs jig's sessions against the
+// real Claude Code CLI on all three platforms, on every run of the
+// workflow: a job with no job-level "if" installs the CLI with its official
+// installers, and a step with JIG_LIVE_CLAUDE set runs go test with no
+// step-level "if" and no continue-on-error. It has bitten: v0.1.1 shipped a
+// headless backend whose argv the CLI refuses, since the test job's stub
+// `claude` accepts any argv and nothing ran the real one.
+func TestCIWorkflowClaudeCLIJob(t *testing.T) {
+	root := repoRoot(t)
+	doc := loadWorkflow(t, root, "ci.yml")
+
+	jobs, ok := yamlMap(doc["jobs"])
 	if !ok {
-		t.Fatalf("ci.yml: test job has no steps")
+		t.Fatalf("ci.yml: no jobs mapping")
 	}
+	for _, name := range sortedKeys(jobs) {
+		job, ok := yamlMap(jobs[name])
+		if !ok {
+			continue
+		}
+		steps, _ := yamlSlice(job["steps"])
+		live, ok := findLiveClaudeStep(steps)
+		if !ok {
+			continue
+		}
+		if ifExpr, has := job["if"]; has {
+			t.Errorf("ci.yml: the %s job has a job-level if = %v, so some runs, a release's among them, could skip the real CLI", name, ifExpr)
+		}
+		requireAllPlatforms(t, name, job)
+		if _, hasIf := live["if"]; hasIf || hasContinueOnError(live) {
+			t.Errorf("ci.yml: the %s job's JIG_LIVE_CLAUDE step has a step-level \"if\" or continue-on-error, so it could skip or fail on some legs without failing the job", name)
+		}
+		for _, installer := range []string{"claude.ai/install.sh", "claude.ai/install.ps1"} {
+			if _, ok := findStepByRun(steps, installer); !ok {
+				t.Errorf("ci.yml: the %s job never runs %s, so a leg would run the live tests without the CLI a user installs", name, installer)
+			}
+		}
+		return
+	}
+	t.Errorf("ci.yml: no job runs go test with JIG_LIVE_CLAUDE set, so no session ever runs against the real Claude Code CLI before a release")
+}
 
-	// go vet and go test must actually enforce on every matrix leg: no
-	// step-level "if" (which would silently confine either to a subset of
-	// the three OSes, the same failure mode the matrix check above guards
-	// against) and no "continue-on-error" (which would let either fail
-	// without failing the job). gofmt is deliberately scoped to one leg
-	// (running it three times over identical source would be redundant),
-	// so it is checked precisely against that leg instead of "every leg".
-	requireUnconditionalStep(t, steps, "go vet", "go vet ./...")
-	requireUnconditionalStep(t, steps, "go test", "go test ")
-	requireStepOnExactly(t, steps, "gofmt", "gofmt -l", "runner.os == 'Linux'")
+// findLiveClaudeStep returns the first step in steps that runs go test with
+// JIG_LIVE_CLAUDE set in its own env, and whether one was found.
+func findLiveClaudeStep(steps []interface{}) (map[string]interface{}, bool) {
+	for _, sv := range steps {
+		step, ok := yamlMap(sv)
+		if !ok {
+			continue
+		}
+		env, _ := yamlMap(step["env"])
+		run, _ := yamlString(step["run"])
+		if _, set := env["JIG_LIVE_CLAUDE"]; set && strings.Contains(run, "go test") {
+			return step, true
+		}
+	}
+	return nil, false
 }
 
 // findStepByRun returns the first step in steps whose "run" field contains

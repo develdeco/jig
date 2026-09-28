@@ -83,11 +83,26 @@ annotation.
   a test that runs `cmd/jig` or the jig binary, which read `JIG_HOME`, sets
   it with `t.Setenv`.
 
+## Tests against the real Claude Code CLI
+
+`go test ./...` runs every session backend against a stub `claude`. The
+live CLI tests run jig's headless backend through the real `claude` on
+your PATH instead, against a scripted Messages API on loopback, so they
+need no sign-in and spend no tokens:
+
+```sh
+JIG_LIVE_CLAUDE=1 go test -count=1 -run Live ./internal/session
+```
+
+CI's `claude-cli` job runs them on all three platforms, on every push and
+pull request and once a day, with the latest CLI release installed.
+
 ## Live review eval
 
 `internal/revieweval` scores the gate reviewer against a labeled corpus
 (`testdata/revieweval`) by dispatching a real reviewer session against it.
-It is opt-in, since CI has no `claude` CLI:
+It is opt-in, since it runs real model sessions, which need a signed-in
+`claude` CLI and spend tokens:
 
 ```sh
 JIG_REVIEWEVAL_BACKEND=headless go test -count=1 -timeout 0 -v -run TestEvalLive ./internal/revieweval
