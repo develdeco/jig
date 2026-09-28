@@ -68,8 +68,9 @@ func advanceTarget(t *testing.T, fx *fixture.Fixture) {
 }
 
 func TestPublishFullChain(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 	advanceTarget(t, fx)
@@ -197,8 +198,9 @@ func TestPublishFullChain(t *testing.T) {
 }
 
 func TestPublishTierNone(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 	// No target move.
@@ -227,8 +229,9 @@ func TestPublishTierNone(t *testing.T) {
 }
 
 func TestSquashRefusesPushedRange(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 
@@ -266,6 +269,8 @@ func TestSquashRefusesPushedRange(t *testing.T) {
 // and that the journalled reconcile outcome still records the policy and
 // file count before the refusal.
 func TestRecordAndCheckDivergenceRefusesEmptyDiff(t *testing.T) {
+	t.Parallel()
+
 	_, remote := tinyRepo(t)
 
 	clone := cloneFrom(t, remote)
@@ -324,6 +329,8 @@ func TestRecordAndCheckDivergenceRefusesEmptyDiff(t *testing.T) {
 // path stays unblocked: a reconcile that actually integrates new content
 // against the target must not trip PUBLISH_NO_DIVERGENCE.
 func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
+	t.Parallel()
+
 	_, remote := tinyRepo(t)
 
 	clone := cloneFrom(t, remote)
@@ -367,8 +374,7 @@ func TestPublishConfirmWiring(t *testing.T) {
 
 	newPublishableFixture := func(t *testing.T) (*fixture.Fixture, Deps) {
 		t.Helper()
-		t.Setenv("JIG_HOME", t.TempDir())
-		fx := fixture.Generate(t, fixture.Opts{})
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		d := newDeps(t, fx)
 		gateToClean(t, fx, d)
 		return fx, d
@@ -431,8 +437,9 @@ func TestPublishConfirmWiring(t *testing.T) {
 // unrebutted fix-slices verdict from the latest gate round must refuse
 // publish rather than ship work whose review was never re-confirmed clean.
 func TestPublishRefusesWhenLatestGateNotClean(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	driveBuild(t, fx, "rung-a")
 
@@ -459,6 +466,8 @@ func TestPublishRefusesWhenLatestGateNotClean(t *testing.T) {
 // no commits beyond origin/target (merge-base == HEAD) is refused with
 // NOTHING_TO_PUBLISH rather than reaching squash's own bare git error.
 func TestCheckNonEmptyRangeRefusesEmptyRange(t *testing.T) {
+	t.Parallel()
+
 	_, remote := tinyRepo(t)
 	clone := cloneFrom(t, remote)
 	run(t, clone, "checkout", "-b", "jig/T-1")
@@ -474,6 +483,8 @@ func TestCheckNonEmptyRangeRefusesEmptyRange(t *testing.T) {
 // TestCheckNonEmptyRangeAllowsRealCommits is the non-empty-range control:
 // a branch with a real commit beyond the target must not be refused.
 func TestCheckNonEmptyRangeAllowsRealCommits(t *testing.T) {
+	t.Parallel()
+
 	_, remote := tinyRepo(t)
 	clone := cloneFrom(t, remote)
 	run(t, clone, "checkout", "-b", "jig/T-1")
@@ -491,8 +502,9 @@ func TestCheckNonEmptyRangeAllowsRealCommits(t *testing.T) {
 // must leave only the consolidated changelog behind, instead of the
 // hardcoded default (consolidated plus every gate round's diff changelog).
 func TestRouteCustomRoutesExcludeDiffChangelogs(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d) // two gate rounds, so the default would pick up two diff-changelog.md files
 

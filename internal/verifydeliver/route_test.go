@@ -71,6 +71,8 @@ func sliceIDs(ss []store.Slice) []string {
 // --- DefaultTriage -----------------------------------------------------
 
 func TestDefaultTriageKeepsFixesAndWorkspaceAsksLeavesNoWorkspaceAsksUndecided(t *testing.T) {
+	t.Parallel()
+
 	in := TriageInput{
 		Fixes: []Finding{{ID: "r1-f1"}},
 		Asks: []Finding{
@@ -97,6 +99,8 @@ func TestDefaultTriageKeepsFixesAndWorkspaceAsksLeavesNoWorkspaceAsksUndecided(t
 // nor defaultable (more than one manifest oracle, none recorded) stays
 // undecided even though it has a workspace.
 func TestDefaultTriageLeavesAnAskWithNoResolvableOracleUndecided(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	man.Oracles["lint"] = "true" // now two oracles: no single default
 	in := TriageInput{
@@ -116,6 +120,8 @@ func TestDefaultTriageLeavesAnAskWithNoResolvableOracleUndecided(t *testing.T) {
 // every mode. Only a manifest with several oracles leaves the choice to a
 // human.
 func TestResolveOracleWithOneManifestOracle(t *testing.T) {
+	t.Parallel()
+
 	one := []string{"test"}
 	for _, recorded := range []string{"", "vet"} {
 		got, ok := resolveOracle(recorded, one)
@@ -138,6 +144,8 @@ func TestResolveOracleWithOneManifestOracle(t *testing.T) {
 // --- routeRound: grouping ------------------------------------------------
 
 func TestRouteRoundGroupsFixesByWorkspaceAndOracle(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := twoWorkspaceManifest()
 	reported := []Finding{
@@ -176,6 +184,8 @@ func TestRouteRoundGroupsFixesByWorkspaceAndOracle(t *testing.T) {
 // while every kept fix's file:line/title/detail/risk rationale lands in
 // the group's goal.
 func TestRouteRoundGoalNamesEveryFindingAndDismissedFixIsExcluded(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
@@ -216,6 +226,8 @@ func TestRouteRoundGoalNamesEveryFindingAndDismissedFixIsExcluded(t *testing.T) 
 // --- routeRound: kept asks -------------------------------------------------
 
 func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
@@ -253,6 +265,8 @@ func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 // keeps a workspace ask with no human involved (Triage: auto), and the fix
 // slice goal it builds must say so rather than "kept by the human".
 func TestRouteRoundAutoKeptAskGoalDoesNotClaimAHumanDecided(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
@@ -278,6 +292,8 @@ func TestRouteRoundAutoKeptAskGoalDoesNotClaimAHumanDecided(t *testing.T) {
 }
 
 func TestRouteRoundDismissedAskNeverBuildsASlice(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
@@ -303,6 +319,8 @@ func TestRouteRoundDismissedAskNeverBuildsASlice(t *testing.T) {
 // case: a hook that declines to decide a no-workspace ask leaves it asked,
 // with no Triage value and no slice.
 func TestRouteRoundUndecidedNoWorkspaceAskStaysAskedWithNoTriage(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
@@ -328,6 +346,8 @@ func TestRouteRoundUndecidedNoWorkspaceAskStaysAskedWithNoTriage(t *testing.T) {
 // half: when the hook keeps a no-workspace ask and supplies a workspace,
 // routing builds its slice in that workspace.
 func TestRouteRoundWorkspaceSuppliedByTriageBuildsTheSlice(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := twoWorkspaceManifest()
 	reported := []Finding{
@@ -355,6 +375,8 @@ func TestRouteRoundWorkspaceSuppliedByTriageBuildsTheSlice(t *testing.T) {
 // oracle-side twin of the no-workspace case: a hook that declines to
 // resolve a missing oracle leaves the ask asked, with no slice built.
 func TestRouteRoundUndecidedInvalidOracleAskStaysAskedWithNoTriage(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	man.Oracles["lint"] = "true" // two oracles now, so "" cannot default
@@ -381,6 +403,8 @@ func TestRouteRoundUndecidedInvalidOracleAskStaysAskedWithNoTriage(t *testing.T)
 // half: when the hook keeps an ask whose recorded oracle is no longer valid
 // and supplies one, routing builds its slice with that oracle.
 func TestRouteRoundOracleSuppliedByTriageBuildsTheSlice(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	man.Oracles["lint"] = "true" // two oracles now: "old" is neither
@@ -408,6 +432,8 @@ func TestRouteRoundOracleSuppliedByTriageBuildsTheSlice(t *testing.T) {
 // --- notes are never triaged -----------------------------------------------
 
 func TestRouteRoundNotesPassThroughUntouched(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
@@ -443,6 +469,8 @@ func TestRouteRoundNotesPassThroughUntouched(t *testing.T) {
 // --- GATE_NO_ORACLE ----------------------------------------------------
 
 func TestRouteRoundNoOracleManifestFailsGateNoOracle(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}} // zero oracles
 	reported := []Finding{
@@ -459,6 +487,8 @@ func TestRouteRoundNoOracleManifestFailsGateNoOracle(t *testing.T) {
 // oracle twin of the zero-oracle GATE_NO_ORACLE message: it must not claim
 // the manifest has no oracles when it names several, and must name them.
 func TestOracleForFindingMultiOracleManifestNamesTheOracles(t *testing.T) {
+	t.Parallel()
+
 	_, err := oracleForFinding(Finding{ID: "r1-f1"}, []string{"lint", "test"})
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "GATE_NO_ORACLE" {
@@ -480,6 +510,8 @@ func TestOracleForFindingMultiOracleManifestNamesTheOracles(t *testing.T) {
 // build a slice - and never has their answer discarded when routing then
 // fails anyway.
 func TestRouteRoundNoOracleManifestFailsBeforeTriage(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}} // zero oracles
 	reported := []Finding{
@@ -505,6 +537,8 @@ func TestRouteRoundNoOracleManifestFailsBeforeTriage(t *testing.T) {
 // a zero-oracle manifest with nothing to route (only notes) has nothing
 // GATE_NO_ORACLE needs to protect, so it must not fail the round at all.
 func TestRouteRoundNoOracleManifestWithOnlyNotesDoesNotFail(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}} // zero oracles
 	reported := []Finding{
@@ -522,6 +556,8 @@ func TestRouteRoundNoOracleManifestWithOnlyNotesDoesNotFail(t *testing.T) {
 // --- recurrence names the previous fix slice --------------------------
 
 func TestRouteRoundRecurrenceGoalNamesPreviousFixSlice(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	ticket := "T-1"
 	man := oneOracleManifest()
@@ -556,6 +592,8 @@ func TestRouteRoundRecurrenceGoalNamesPreviousFixSlice(t *testing.T) {
 // TestRouteRoundRecurrenceGoalNamesOnlyIDWhenResultMissing covers the
 // "only its id is named when that file is absent".
 func TestRouteRoundRecurrenceGoalNamesOnlyIDWhenResultMissing(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	ticket := "T-1"
 	man := oneOracleManifest()
@@ -578,6 +616,8 @@ func TestRouteRoundRecurrenceGoalNamesOnlyIDWhenResultMissing(t *testing.T) {
 // --- disambiguation ----------------------------------------------------
 
 func TestDisambiguateFixSliceIDsBreaksTies(t *testing.T) {
+	t.Parallel()
+
 	slices := []store.Slice{{ID: "fix-1-a"}, {ID: "fix-1-a"}, {ID: "fix-1-a"}}
 	disambiguateFixSliceIDs(slices, nil)
 	got := sliceIDs(slices)
@@ -598,6 +638,8 @@ func TestDisambiguateFixSliceIDsBreaksTies(t *testing.T) {
 // this round's own findings.yaml (with the human's triage decisions) was
 // already persisted.
 func TestDisambiguateFixSliceIDsAvoidsAnExistingSliceID(t *testing.T) {
+	t.Parallel()
+
 	existing := []store.Slice{{ID: "fix-1-a"}}
 	slices := []store.Slice{{ID: "fix-1-a"}, {ID: "fix-1-b"}}
 	disambiguateFixSliceIDs(slices, existing)
@@ -609,6 +651,8 @@ func TestDisambiguateFixSliceIDsAvoidsAnExistingSliceID(t *testing.T) {
 }
 
 func TestSanitizeSliceIDReplacesUnsafeCharacters(t *testing.T) {
+	t.Parallel()
+
 	if got := sanitizeSliceID("fix-1-svc/a-test:x"); got != "fix-1-svc-a-test-x" {
 		t.Fatalf("sanitizeSliceID = %q, want fix-1-svc-a-test-x", got)
 	}

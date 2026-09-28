@@ -68,8 +68,7 @@ func identityRepo(t *testing.T, name, email string) string {
 // bug that motivated the fix.
 func TestPublishCommitsWithMappedCloneIdentity(t *testing.T) {
 	unsetIdentityEnvForTest(t)
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 
@@ -104,7 +103,6 @@ func TestPublishCommitsWithMappedCloneIdentity(t *testing.T) {
 // the ticket branch.
 func TestPublishFailsIdentityRequiredAndPushesNothing(t *testing.T) {
 	unsetIdentityEnvForTest(t)
-	t.Setenv("JIG_HOME", t.TempDir())
 
 	cfgPath := filepath.Join(t.TempDir(), "gitconfig-no-identity")
 	if err := os.WriteFile(cfgPath, []byte("[user]\n\tuseConfigOnly = true\n"), 0o644); err != nil {
@@ -113,7 +111,7 @@ func TestPublishFailsIdentityRequiredAndPushesNothing(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", cfgPath)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 	// d.Machine is left zero-valued: no mapped clone recorded for this
