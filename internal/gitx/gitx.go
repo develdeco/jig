@@ -12,12 +12,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/develdeco/jig/internal/axi"
 )
@@ -52,13 +55,91 @@ func RunRaw(dir string, args ...string) (string, error) {
 // run spawns git in dir with "-c maintenance.auto=false" ahead of args, so
 // no call leaves git's detached maintenance running after it returns. The
 // process environment is inherited without repoEnv, then env is appended.
+// When git fails to start because the path gitCommand reused no longer
+// exists (git was removed or moved while jig ran), run forgets that path and
+// tries once more, which searches PATH again. A missing dir fails the same
+// way and is returned as is: searching PATH again would not help.
 func run(dir string, env []string, stdout, stderr io.Writer, args []string) error {
-	cmd := exec.Command("git", append([]string{"-c", "maintenance.auto=false"}, args...)...)
+	err := runOnce(dir, env, stdout, stderr, args)
+	if errors.Is(err, fs.ErrNotExist) && dirExists(dir) && forgetGit() {
+		err = runOnce(dir, env, stdout, stderr, args)
+	}
+	return err
+}
+
+// dirExists reports whether dir names an existing directory; "" is the
+// process's own working directory, which always does.
+func dirExists(dir string) bool {
+	if dir == "" {
+		return true
+	}
+	fi, err := os.Stat(dir)
+	return err == nil && fi.IsDir()
+}
+
+// runOnce is one attempt of run.
+func runOnce(dir string, env []string, stdout, stderr io.Writer, args []string) error {
+	cmd := gitCommand(append([]string{"-c", "maintenance.auto=false"}, args...))
 	cmd.Dir = dir
 	cmd.Env = append(inheritedEnv(), env...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
+}
+
+// gitCommand returns exec.Command("git", args...) with the PATH search
+// already done: exec.Command searches PATH on every call, and on Windows
+// that search stats each PATH directory once per PATHEXT extension, tens of
+// milliseconds per call on a typical PATH - as long as git itself takes to
+// run a small command. Like a shell's command hash, the search's result is
+// reused for as long as its inputs are unchanged: PATH, PATHEXT,
+// NoDefaultCurrentDirectoryInExePath and the working directory (which
+// Windows searches too), so a changed PATH, such as a test hiding git, is
+// searched again on the next call. Only an absolute path found without
+// error is reused; anything else is left to exec.Command, which reports it
+// as it always has. argv[0] stays "git".
+func gitCommand(args []string) *exec.Cmd {
+	path := lookGit()
+	if path == "" {
+		return exec.Command("git", args...)
+	}
+	cmd := exec.Command(path, args...)
+	cmd.Args[0] = "git"
+	return cmd
+}
+
+// gitPath caches lookGit's search: key is the search inputs it ran with,
+// path its absolute result, or "" when it found none.
+var gitPath struct {
+	sync.Mutex
+	key, path string
+}
+
+// lookGit returns the absolute path exec.LookPath("git") resolves to under
+// the current search inputs, or "" when it resolves to none without error.
+func lookGit() string {
+	wd, _ := os.Getwd()
+	_, noDot := os.LookupEnv("NoDefaultCurrentDirectoryInExePath")
+	key := strings.Join([]string{os.Getenv("PATH"), os.Getenv("PATHEXT"), strconv.FormatBool(noDot), wd}, "\x00")
+	gitPath.Lock()
+	defer gitPath.Unlock()
+	if gitPath.key != key {
+		gitPath.key, gitPath.path = key, ""
+		if p, err := exec.LookPath("git"); err == nil && filepath.IsAbs(p) {
+			gitPath.path = p
+		}
+	}
+	return gitPath.path
+}
+
+// forgetGit drops lookGit's cached search, so the next call searches PATH
+// again, and reports whether there was a cached path to drop.
+func forgetGit() bool {
+	gitPath.Lock()
+	defer gitPath.Unlock()
+	had := gitPath.path != ""
+	gitPath.key, gitPath.path = "", ""
+	return had
 }
 
 // repoEnv names the variables that point git at a repository, work tree,

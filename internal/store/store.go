@@ -80,10 +80,9 @@ func (s *Store) Sync() error {
 // stage or commit over that: `git add -A` would pick up unresolved conflict
 // markers, and a later `rebase --continue` (or manual resolution) would
 // then commit them onto the store branch, corrupting whatever file
-// conflicted (e.g. journal.ndjson) for every later reader. It is called from
-// stageAndCommit, the shared first step of both Sync and Push, so it guards
-// a command that only ever Pushes (e.g. `jig requeue`) too - not only the
-// commands that Sync first.
+// conflicted (e.g. journal.ndjson) for every later reader. Both Sync and
+// Push call it before anything else, so it guards a command that only ever
+// Pushes (e.g. `jig requeue`) too - not only the commands that Sync first.
 func (s *Store) refuseIfMidRebaseOrMerge() error {
 	what, err := inProgressRebaseOrMerge(s.Root)
 	if err != nil {
@@ -172,13 +171,14 @@ func inProgressRebaseOrMerge(dir string) (string, error) {
 	return "", nil
 }
 
-// stageAndCommit refuses while the store has an unfinished rebase or merge,
-// then stages every change (`add -A`) and, when anything is staged, commits
-// it with jig's identity and msg. It reports whether a commit was made.
+// stageAndCommit stages every change (`add -A`) and, when anything is
+// staged, commits it with jig's identity and msg. It reports whether a
+// commit was made. Its callers, Sync and Push, have already run
+// refuseIfMidRebaseOrMerge, and only read-only git calls run between that
+// check and this one, so it does not repeat the check's two git calls.
+// Another process working on the same store can still slip in between, as
+// it always could between the check and `add -A`.
 func (s *Store) stageAndCommit(msg string) (bool, error) {
-	if err := s.refuseIfMidRebaseOrMerge(); err != nil {
-		return false, err
-	}
 	if _, err := gitx.Run(s.Root, "add", "-A"); err != nil {
 		return false, err
 	}
@@ -229,19 +229,20 @@ func (s *Store) Push(msg string) error {
 	return nil
 }
 
-// abortFailedPull handles jig's own failed `pull --rebase` on branch. A
-// pull that stopped on a conflict leaves a rebase in progress
-// (stageAndCommit refused any rebase or merge that was already there, so
-// this one is jig's own): the conflicting paths are read structurally
-// (`git ls-files -u`, before anything else touches the index) so the report
-// can name them, then the rebase is aborted with a best-effort `rebase
-// --abort`, and the result reported as STORE_CONFLICT either way, since the
-// store is still mid-rebase if the abort itself failed (for example a
-// Windows file lock) and needs the same manual resolution. A pull that
-// failed before rebasing (an unreachable or moved remote, an auth failure)
-// left nothing to abort, so its error is returned unchanged rather than
-// misreported as a conflict. When the state cannot be read, the abort is
-// still attempted (best effort), and the read's own error is carried into
+// abortFailedPull handles jig's own failed `pull --rebase` on branch. A pull
+// that stopped on a conflict leaves a rebase in progress (Sync and Push
+// refused any rebase or merge that was already there, so this one is jig's
+// own, unless another process working on the same store started one in
+// between, a race recorded in DECISIONS.md): the conflicting paths are read
+// structurally (`git ls-files -u`, before anything else touches the index)
+// so the report can name them, then the rebase is aborted with a best-effort
+// `rebase --abort`, and the result reported as STORE_CONFLICT either way,
+// since the store is still mid-rebase if the abort itself failed (for
+// example a Windows file lock) and needs the same manual resolution. A pull
+// that failed before rebasing (an unreachable or moved remote, an auth
+// failure) left nothing to abort, so its error is returned unchanged rather
+// than misreported as a conflict. When the state cannot be read, the abort
+// is still attempted (best effort), and the read's own error is carried into
 // the wrapped message rather than assumed away.
 func (s *Store) abortFailedPull(pullErr error, branch string) error {
 	mid, stateErr := inProgressRebaseOrMerge(s.Root)
@@ -359,4 +360,20 @@ func (s *Store) hasStagedChanges() (bool, error) {
 		return true, nil
 	}
 	return false, err
+}
+
+// Dirty reports whether the working tree has anything uncommitted - staged,
+// unstaged, or untracked - via "status --porcelain", without staging or
+// committing anything itself. A caller uses this to decide whether it is
+// worth calling Push at all: for example a command whose own write already
+// landed on disk in an earlier, failed run (Push having refused before its
+// stageAndCommit ever ran) can retry the commit only when there is one
+// still pending, rather than attempting a Push - and, when a remote exists,
+// its network round trip - on every call.
+func (s *Store) Dirty() (bool, error) {
+	out, err := gitx.Run(s.Root, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return out != "", nil
 }

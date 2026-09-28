@@ -33,6 +33,7 @@ func TestCommandTableFlagsMatchRegistration(t *testing.T) {
 
 	invoke("init")
 	invoke("ticket", "new")
+	invoke("graduate", "test-chart")
 	invoke("solve", "T-1")
 	invoke("run", "T-1")
 	invoke("requeue", "T-1")

@@ -3,7 +3,9 @@ package gitx
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -606,6 +608,88 @@ func TestRunIgnoresInheritedRepoEnv(t *testing.T) {
 	}
 	if got, err := RunEnv(dir, []string{"GIT_DIR=" + filepath.Join(other, ".git")}, "rev-parse", "HEAD"); err != nil || got != otherHead {
 		t.Fatalf("rev-parse HEAD with an explicit GIT_DIR = %q, %v; want %s", got, err, otherHead)
+	}
+}
+
+// TestRunSearchesPATHAgainWhenItChanges covers the cached PATH search: a
+// PATH that no longer holds git must fail the next call as git's absence,
+// not reuse the path found under the old PATH, and restoring PATH must
+// find git again.
+func TestRunSearchesPATHAgainWhenItChanges(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Run(dir, "--version"); err != nil {
+		t.Fatalf("git --version: %v", err)
+	}
+	path := os.Getenv("PATH")
+
+	t.Setenv("PATH", t.TempDir())
+	if _, err := Run(dir, "--version"); !errors.Is(err, exec.ErrNotFound) {
+		t.Fatalf("git --version with git off PATH: err = %v, want exec.ErrNotFound", err)
+	}
+
+	t.Setenv("PATH", path)
+	if _, err := Run(dir, "--version"); err != nil {
+		t.Fatalf("git --version with PATH restored: %v", err)
+	}
+}
+
+// TestRunSearchesAgainWhenTheGitItFoundIsGone covers run's retry: once the
+// git gitx found and reused is removed while PATH stays the same, the next
+// call must search PATH again and run the git it finds there, not fail to
+// start the removed one.
+func TestRunSearchesAgainWhenTheGitItFoundIsGone(t *testing.T) {
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	name, body := "git", "#!/bin/sh\nexec '"+real+"' \"$@\"\n"
+	if runtime.GOOS == "windows" {
+		name, body = "git.bat", "@\""+real+"\" %*\r\n"
+	}
+	wrapper := filepath.Join(bin, name)
+	if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	if _, err := Run(dir, "--version"); err != nil {
+		t.Fatalf("git --version through the wrapper: %v", err)
+	}
+	if got := lookGit(); got != wrapper {
+		t.Fatalf("gitx reuses %q, want the wrapper %q", got, wrapper)
+	}
+	if err := os.Remove(wrapper); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(dir, "--version"); err != nil {
+		t.Fatalf("git --version after the wrapper was removed: %v", err)
+	}
+}
+
+// TestRunKeepsTheGitItFoundWhenTheDirIsMissing: a call whose own working
+// directory does not exist fails to start too, but that says nothing about
+// git, so run returns the error without forgetting the path it reuses. On
+// Linux and macOS that failure is a not-exist error, the case the check is
+// for; Windows reports an invalid directory instead, so there the test
+// passes either way.
+func TestRunKeepsTheGitItFoundWhenTheDirIsMissing(t *testing.T) {
+	if _, err := Run(t.TempDir(), "--version"); err != nil {
+		t.Fatalf("git --version: %v", err)
+	}
+	found := lookGit()
+	if found == "" {
+		t.Fatal("setup: gitx found no git to reuse")
+	}
+	if _, err := Run(filepath.Join(t.TempDir(), "missing"), "--version"); err == nil {
+		t.Fatal("git in a missing directory: nil error, want a failure to start")
+	}
+	gitPath.Lock()
+	kept := gitPath.path
+	gitPath.Unlock()
+	if kept != found {
+		t.Fatalf("after a missing-dir failure gitx reuses %q, want %q still", kept, found)
 	}
 }
 
