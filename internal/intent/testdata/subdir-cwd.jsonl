@@ -1,0 +1,2 @@
+{"type":"user","cwd":"{{CWD}}","timestamp":"2026-01-01T00:00:00.000Z","message":{"role":"user","content":"Fix the bug in this subdirectory."}}
+{"type":"assistant","cwd":"{{CWD}}","timestamp":"2026-01-01T00:01:00.000Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"{{CWD_SLASH}}foo.go"}}]}}

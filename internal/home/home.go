@@ -33,3 +33,11 @@ func PoolDir(root string) string {
 func MachinePath(root string) string {
 	return filepath.Join(root, "projects.yaml")
 }
+
+// IntentExcerptDir returns the directory for gate intent-inference
+// excerpts under the jig home root: text jig extracted from a local agent
+// transcript to summarize. It lives under the jig home, never the store,
+// because a transcript can hold secrets a store commit must never carry.
+func IntentExcerptDir(root string) string {
+	return filepath.Join(root, "intent-excerpts")
+}

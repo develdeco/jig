@@ -1,0 +1,2 @@
+{"type":"user","cwd":"{{CWD}}","timestamp":"2025-12-30T00:00:00.000Z","message":{"role":"user","content":"An older pass at the same area."}}
+{"type":"assistant","cwd":"{{CWD}}","timestamp":"2025-12-30T00:01:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"I edited src/foo.go and src/bar.go."}]}}
