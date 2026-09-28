@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -14,7 +15,7 @@ import (
 )
 
 // remote is a bare repository at a local path that Push and Fetch work on
-// in process.
+// in process; done closes it, and may be called more than once.
 type remote struct {
 	repo *git.Repository
 	dir  string
@@ -70,7 +71,8 @@ func localRemote(repo *git.Repository, dir, name string) (*remote, error) {
 		done()
 		return nil, ErrUseCLI
 	}
-	return &remote{repo: rem, dir: path, done: done}, nil
+	var once sync.Once
+	return &remote{repo: rem, dir: path, done: func() { once.Do(done) }}, nil
 }
 
 // checksTransfers reports whether cfg asks the git program to check the
@@ -324,8 +326,10 @@ func (r *Repo) Push(remoteName, branch string) error {
 			return err
 		}
 		if autoGCOnReceive(rem.repo, rem.dir) {
-			// Best effort, as the store's own maintenance: a failure here
-			// must not fail a push that already landed.
+			// Closed first, so no pack this process holds open keeps the
+			// repack from removing it. Best effort, as the store's own
+			// maintenance: a failure here must not fail a push that landed.
+			rem.done()
 			_ = MaintenanceAuto(rem.dir)
 		}
 	}

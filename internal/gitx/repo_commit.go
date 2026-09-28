@@ -3,6 +3,7 @@ package gitx
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	git "github.com/go-git/go-git/v5"
@@ -37,11 +39,13 @@ import (
 //
 // It returns ErrUseCLI, having changed nothing, when a git process holds
 // either lock, HEAD is not on a branch, a pinned date does not parse, the
-// index cannot be read or tracks anything but regular files, or the work
-// tree has what the git program would stage differently: a symbolic link,
-// an executable file where the repository's core.fileMode counts it, an
-// embedded repository, a .gitattributes below the root, or a name that
-// core.ignoreCase or core.precomposeUnicode would match differently.
+// index cannot be read or written back as it was, tracks anything but
+// plain files or marks one assume-unchanged, or the work tree has what the
+// git program would stage differently: a symbolic link, an executable file
+// where the repository's core.fileMode counts it, an embedded repository, a
+// .gitattributes below the root, an ignore rule beyond plain globs (see
+// readPatterns), or names that core.ignoreCase or core.precomposeUnicode
+// would match differently.
 func (r *Repo) CommitAll(msg, name, email string) (bool, error) {
 	author, err := signature("AUTHOR", name, email)
 	if err != nil {
@@ -92,32 +96,38 @@ func (r *Repo) CommitAll(msg, name, email string) (bool, error) {
 		}
 		parentTree = c.TreeHash
 	}
-	idx, err := repo.Storer.Index()
+	idx, indexTime, err := readIndex(gitDir)
 	if err != nil {
-		return false, ErrUseCLI
+		return false, err
 	}
-	s, err := newScan(repo, r.dir, gitDir, cfg, idx)
+	s, err := newScan(repo, r.dir, cfg, idx, indexTime)
 	if err != nil {
 		return false, err
 	}
 	if err := s.run(); err != nil {
 		return false, err
 	}
-	var tree plumbing.Hash
-	if len(idx.Entries) > 0 {
-		sort.Slice(idx.Entries, func(i, j int) bool { return idx.Entries[i].Name < idx.Entries[j].Name })
-		root, err := buildTree(repo, idx.Entries, "")
-		if err != nil {
-			return false, err
-		}
-		if err := persistTree(repo, root, parentTree); err != nil {
-			return false, err
-		}
-		tree = root.hash
+	if parent.IsZero() && len(idx.Entries) == 0 {
+		return false, nil // an unborn branch and nothing to commit
 	}
-	if (parent.IsZero() && len(idx.Entries) == 0) || (!parent.IsZero() && tree == parentTree) {
+	sort.Slice(idx.Entries, func(i, j int) bool { return idx.Entries[i].Name < idx.Entries[j].Name })
+	root, err := buildTree(repo, idx.Entries, "")
+	if err != nil {
+		return false, err
+	}
+	if err := persistTree(repo, root, parentTree); err != nil {
+		return false, err
+	}
+	tree := root.hash
+	// Encoded before anything moves: an entry go-git cannot write (a time
+	// before 1970) leaves the whole commit to the git program.
+	indexData, err := encodeIndex(idx)
+	if err != nil {
+		return false, ErrUseCLI
+	}
+	if !parent.IsZero() && tree == parentTree {
 		if s.indexChanged {
-			return false, writeIndex(indexLock, idx)
+			return false, indexLock.commit(indexData)
 		}
 		return false, nil
 	}
@@ -142,23 +152,98 @@ func (r *Repo) CommitAll(msg, name, email string) (bool, error) {
 	if err := branchLock.commit([]byte(commit.String() + "\n")); err != nil {
 		return false, fmt.Errorf("gitx: update %s in %s: %w", branch, r.dir, err)
 	}
-	if err := writeIndex(indexLock, idx); err != nil {
+	if err := indexLock.commit(indexData); err != nil {
 		return true, fmt.Errorf("gitx: write index in %s: %w", r.dir, err)
 	}
 	return true, nil
 }
 
-// writeIndex writes idx into its held lock and renames it over the index.
-// go-git's encoder writes no extensions, so no cached tree survives to
-// disagree with the entries.
-func writeIndex(l *lockFile, idx *index.Index) error {
+// readIndex reads the index in gitDir, and its modification time; an empty
+// index when there is none. An index go-git cannot read (the git program
+// writes one under index.skipHash or core.splitIndex), or one with an entry
+// marked assume-unchanged, which go-git's decoder does not keep, returns
+// ErrUseCLI.
+func readIndex(gitDir string) (*index.Index, time.Time, error) {
+	path := filepath.Join(gitDir, "index")
+	fi, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return &index.Index{Version: 2}, time.Time{}, nil
+	}
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	if assumesUnchanged(data) {
+		return nil, time.Time{}, ErrUseCLI
+	}
+	idx := &index.Index{}
+	if err := index.NewDecoder(bytes.NewReader(data)).Decode(idx); err != nil {
+		return nil, time.Time{}, ErrUseCLI
+	}
+	return idx, fi.ModTime(), nil
+}
+
+// assumesUnchanged reports whether any entry in the index data carries the
+// assume-valid flag (`git update-index --assume-unchanged`); an index it
+// cannot walk counts as carrying one. Entries are laid out as git writes
+// them: 62 bytes of stat data, hash and flags, 2 more for extended flags,
+// then the NUL-terminated path, padded with NULs to a multiple of 8 before
+// version 4 and prefix-compressed behind a varint in version 4.
+func assumesUnchanged(data []byte) bool {
+	if len(data) < 12 || string(data[:4]) != "DIRC" {
+		return true
+	}
+	version := binary.BigEndian.Uint32(data[4:8])
+	count := binary.BigEndian.Uint32(data[8:12])
+	off := 12
+	for i := uint32(0); i < count; i++ {
+		start := off
+		if off+62 > len(data) {
+			return true
+		}
+		flags := binary.BigEndian.Uint16(data[off+60 : off+62])
+		if flags&0x8000 != 0 {
+			return true
+		}
+		off += 62
+		if flags&0x4000 != 0 {
+			off += 2
+		}
+		if version == 4 {
+			for off < len(data) && data[off]&0x80 != 0 {
+				off++
+			}
+			off++ // the varint's last byte
+		}
+		if off > len(data) {
+			return true
+		}
+		end := bytes.IndexByte(data[off:], 0)
+		if end < 0 {
+			return true
+		}
+		off += end + 1
+		if version != 4 {
+			off = start + (off-1-start+8)&^7
+		}
+	}
+	return false
+}
+
+// encodeIndex encodes idx as the git program writes it, sorted. go-git's
+// encoder writes no extensions, so no cached tree survives to disagree with
+// the entries.
+func encodeIndex(idx *index.Index) ([]byte, error) {
 	sort.Slice(idx.Entries, func(i, j int) bool { return idx.Entries[i].Name < idx.Entries[j].Name })
 	idx.Cache, idx.ResolveUndo, idx.EndOfIndexEntry = nil, nil, nil
 	var buf bytes.Buffer
 	if err := index.NewEncoder(&buf).Encode(idx); err != nil {
-		return err
+		return nil, err
 	}
-	return l.commit(buf.Bytes())
+	return buf.Bytes(), nil
 }
 
 // scan brings one index up to date with the work tree, as `git add -A`
@@ -179,25 +264,24 @@ type scan struct {
 	indexChanged bool
 }
 
-// newScan prepares a scan of idx against the work tree at dir. An index
-// entry that is not a plain tracked file (a conflict stage, an executable,
-// a symbolic link, a submodule, a sparse or intent-to-add entry) returns
-// ErrUseCLI.
-func newScan(repo *git.Repository, dir, gitDir string, cfg *config.Config, idx *index.Index) (*scan, error) {
+// newScan prepares a scan of idx, written at indexTime, against the work
+// tree at dir. An index entry that is not a plain tracked file (a conflict
+// stage, an executable, a symbolic link, a submodule, a sparse or
+// intent-to-add entry), or two tracked paths core.ignoreCase makes one,
+// returns ErrUseCLI.
+func newScan(repo *git.Repository, dir string, cfg *config.Config, idx *index.Index, indexTime time.Time) (*scan, error) {
 	core := cfg.Raw.Section("core")
 	s := &scan{
 		repo:       repo,
 		dir:        dir,
 		idx:        idx,
+		indexTime:  indexTime,
 		fileMode:   !core.HasOption("fileMode") || isTrue(core, "fileMode"),
 		ignoreCase: isTrue(core, "ignoreCase"),
 		precompose: isTrue(core, "precomposeUnicode"),
 		tracked:    make(map[string]*index.Entry, len(idx.Entries)),
 		folded:     map[string]bool{},
 		seen:       make(map[string]bool, len(idx.Entries)),
-	}
-	if fi, err := os.Stat(filepath.Join(gitDir, "index")); err == nil {
-		s.indexTime = fi.ModTime()
 	}
 	for _, e := range idx.Entries {
 		if e.Stage != 0 || e.Mode != filemode.Regular || e.SkipWorktree || e.IntentToAdd {
@@ -206,7 +290,11 @@ func newScan(repo *git.Repository, dir, gitDir string, cfg *config.Config, idx *
 		s.tracked[e.Name] = e
 		s.names = append(s.names, e.Name)
 		if s.ignoreCase {
-			s.folded[strings.ToLower(e.Name)] = true
+			key := strings.ToLower(e.Name)
+			if s.folded[key] {
+				return nil, ErrUseCLI // one file on a case-insensitive file system
+			}
+			s.folded[key] = true
 		}
 	}
 	sort.Strings(s.names)
@@ -218,14 +306,14 @@ func newScan(repo *git.Repository, dir, gitDir string, cfg *config.Config, idx *
 // listing carries them, so no file is opened or stat'ed on its own), and
 // hashed only when they differ or its time is not safely before the
 // index's; an untracked file the repository's ignore rules do not exclude
-// is added. Tracked files the walk did not find are removed.
+// is added. Tracked files the walk did not find are removed, unless the
+// path still names a file, as another spelling of a name the walk found does
+// on a case-insensitive file system; that is the git program's to stage.
 func (s *scan) run() error {
-	var ps []gitignore.Pattern
-	exclude, err := readPatterns(filepath.Join(s.dir, ".git", "info", "exclude"), nil)
+	ps, err := s.readPatterns(filepath.Join(s.dir, ".git", "info", "exclude"), nil)
 	if err != nil {
 		return err
 	}
-	ps = append(ps, exclude...)
 	if err := s.walk(nil, s.dir, ps, false); err != nil {
 		return err
 	}
@@ -233,9 +321,16 @@ func (s *scan) run() error {
 	for _, e := range s.idx.Entries {
 		if s.seen[e.Name] {
 			kept = append(kept, e)
-		} else {
-			s.indexChanged = true
+			continue
 		}
+		fi, err := os.Lstat(filepath.Join(s.dir, filepath.FromSlash(e.Name)))
+		if err == nil && !fi.IsDir() {
+			return ErrUseCLI
+		}
+		if err != nil && !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTDIR) {
+			return err
+		}
+		s.indexChanged = true // gone, or a directory now
 	}
 	s.idx.Entries = kept
 	return nil
@@ -251,7 +346,7 @@ func (s *scan) walk(parts []string, abs string, ps []gitignore.Pattern, ignored 
 	}
 	for _, e := range ents {
 		if e.Name() == ".gitignore" && e.Type().IsRegular() {
-			own, err := readPatterns(filepath.Join(abs, ".gitignore"), parts)
+			own, err := s.readPatterns(filepath.Join(abs, ".gitignore"), parts)
 			if err != nil {
 				return err
 			}
@@ -276,7 +371,7 @@ func (s *scan) walk(parts []string, abs string, ps []gitignore.Pattern, ignored 
 		p := append(parts[:len(parts):len(parts)], name)
 		rel := strings.Join(p, "/")
 		if e.IsDir() {
-			sub := ignored || m.Match(p, true)
+			sub := ignored || m.Match(s.key(p), true)
 			if sub && !s.tracksUnder(rel+"/") {
 				continue
 			}
@@ -286,7 +381,7 @@ func (s *scan) walk(parts []string, abs string, ps []gitignore.Pattern, ignored 
 			continue
 		}
 		entry, tracked := s.tracked[rel]
-		if !tracked && (ignored || m.Match(p, false)) {
+		if !tracked && (ignored || m.Match(s.key(p), false)) {
 			continue
 		}
 		if !tracked && s.ignoreCase && s.folded[strings.ToLower(rel)] {
@@ -318,6 +413,7 @@ func (s *scan) walk(parts []string, abs string, ps []gitignore.Pattern, ignored 
 			return err
 		}
 		entry.Hash, entry.ModifiedAt, entry.Size = h, info.ModTime(), uint32(info.Size())
+		fillStat(entry, info)
 		s.indexChanged = true
 	}
 	return nil
@@ -372,9 +468,13 @@ func storeObject(repo *git.Repository, obj plumbing.EncodedObject) (plumbing.Has
 	return repo.Storer.SetEncodedObject(obj)
 }
 
-// readPatterns reads a gitignore-format file for the directory at domain,
-// as go-git's own status does; a missing file has none.
-func readPatterns(path string, domain []string) ([]gitignore.Pattern, error) {
+// readPatterns reads a gitignore-format file for the directory at domain;
+// a missing file has none. gitx matches ignore rules with go-git's matcher
+// only where it agrees with the git program, on plain globs: a negation,
+// a "**", a bracket expression, a backslash escape or trailing whitespace
+// returns ErrUseCLI. Under core.ignoreCase patterns match case-insensitively,
+// as the git program matches them.
+func (s *scan) readPatterns(path string, domain []string) ([]gitignore.Pattern, error) {
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -387,11 +487,32 @@ func readPatterns(path string, domain []string) ([]gitignore.Pattern, error) {
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := sc.Text()
-		if !strings.HasPrefix(line, "#") && strings.TrimSpace(line) != "" {
-			ps = append(ps, gitignore.ParsePattern(line, domain))
+		if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
+			continue
 		}
+		if strings.HasPrefix(line, "!") || strings.Contains(line, "**") || strings.ContainsAny(line, "[\\") ||
+			strings.TrimRight(line, " \t") != line {
+			return nil, ErrUseCLI
+		}
+		if s.ignoreCase {
+			line = strings.ToLower(line)
+		}
+		ps = append(ps, gitignore.ParsePattern(line, s.key(domain)))
 	}
 	return ps, sc.Err()
+}
+
+// key is path as the ignore patterns see it: case-folded under
+// core.ignoreCase.
+func (s *scan) key(path []string) []string {
+	if !s.ignoreCase {
+		return path
+	}
+	folded := make([]string, len(path))
+	for i, p := range path {
+		folded[i] = strings.ToLower(p)
+	}
+	return folded
 }
 
 // isASCII reports whether s is plain ASCII.

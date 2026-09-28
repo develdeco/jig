@@ -19,10 +19,12 @@ every path it touches for symbolic links, so its cost grew with the
 store's history and size. A commit works from the index: a tracked file
 whose size and modification time still match its entry is not read, and
 one whose time is not safely before the index's is read again, as the git
-program's racy-git check does; only changed and new files are hashed;
-untracked files are filtered through the store's own `.gitignore` files
-and `info/exclude`; and trees are built from the index entries, written
-only along the paths that changed. A push to or fetch from a bare remote
+program's racy-git check does; only changed and new files are hashed, and
+their entries record the stat data git compares, so git does not read
+them again; untracked files are filtered through the store's own
+`.gitignore` files and `info/exclude`, case-insensitively under
+`core.ignoreCase` as git matches them; and trees are built from the index
+entries, written only along the paths that changed. A push to or fetch from a bare remote
 at a local path walks both histories back only to where they last met and
 copies what each new commit changed. So a store write costs what changed
 and one listing of each directory, never the length of the history, and
@@ -62,9 +64,12 @@ the default, objects checked on transfer, a remote that is not bare, a
 merge in the history, and a work tree or index the git program would
 stage differently from a plain file's bytes: a symbolic link, an
 executable where the store's `core.fileMode` counts it, an embedded
-repository, a name `core.ignoreCase` or `core.precomposeUnicode` would
-match differently, or an index go-git cannot read (the git program writes
-one when a machine's config sets `index.skipHash` or a split index).
+repository, an ignore rule beyond plain globs (a negation, `**`, a
+bracket expression, an escape), an entry marked assume-unchanged, names
+`core.ignoreCase` or `core.precomposeUnicode` would match differently, a
+file time before 1970, or an index go-git cannot read (the git program
+writes one when a machine's config sets `index.skipHash` or a split
+index).
 
 Conversion of file contents is part of this. A store is worked on in
 process only when its root `.gitattributes` is exactly

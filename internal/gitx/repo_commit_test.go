@@ -1,6 +1,7 @@
 package gitx
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -12,12 +13,12 @@ import (
 // a store, committed once in process and once by `git add -A && git
 // commit`, give the same tree: changed, added and deleted files, a file
 // replaced by a directory, a tracked file inside an ignored directory,
-// ignore rules from the root, from a subdirectory, negated (but not below
-// an excluded directory) and from info/exclude, and names that sort around
-// "/".
+// ignore rules from the root, from a subdirectory and from info/exclude,
+// matched case-insensitively under core.ignoreCase, and names that sort
+// around "/".
 func TestCommitAllMatchesTheGitProgram(t *testing.T) {
 	base := newStoreRepo(t)
-	writeFileT(t, base, ".gitignore", "*.lock\n!keep.lock\nvendor/\n!vendor/reincluded.txt\n")
+	writeFileT(t, base, ".gitignore", "*.lock\nvendor/\n")
 	for name, body := range map[string]string{
 		"a-b": "1\n", "a.b": "2\n", "a/x.txt": "3\n", "a0": "4\n",
 		"deep/er/est.txt": "5\n", "gone/soon.txt": "6\n", "file-to-dir": "7\n",
@@ -42,10 +43,9 @@ func TestCommitAllMatchesTheGitProgram(t *testing.T) {
 		writeFileT(t, dir, "file-to-dir/inner.txt", "now a directory\n")
 		writeFileT(t, dir, "vendor/kept.txt", "tracked though ignored, changed\n")
 		writeFileT(t, dir, "vendor/new.txt", "ignored\n")
-		writeFileT(t, dir, "vendor/reincluded.txt", "under an excluded directory, so still out\n")
 		writeFileT(t, dir, "new/deeper/n.txt", "new\n")
 		writeFileT(t, dir, "x.lock", "ignored\n")
-		writeFileT(t, dir, "keep.lock", "negated, so added\n")
+		writeFileT(t, dir, "Journal.LOCK", "ignored under core.ignoreCase\n")
 		writeFileT(t, dir, "deep/.gitignore", "*.tmp\n")
 		writeFileT(t, dir, "deep/er/junk.tmp", "ignored below\n")
 		writeFileT(t, dir, "deep/er/real.txt", "added below\n")
@@ -59,8 +59,10 @@ func TestCommitAllMatchesTheGitProgram(t *testing.T) {
 	program := filepath.Join(t.TempDir(), "program")
 	mustRun(t, "", "clone", "-q", base, inProcess)
 	mustRun(t, "", "clone", "-q", base, program)
-	change(t, inProcess)
-	change(t, program)
+	for _, dir := range []string{inProcess, program} {
+		mustRun(t, dir, "config", "core.ignoreCase", "true")
+		change(t, dir)
+	}
 
 	committed, err := openRepo(t, inProcess).CommitAll("jig: record", "jig", "jig@invalid")
 	if err != nil || !committed {
@@ -107,9 +109,38 @@ func TestCommitAllNothingToCommit(t *testing.T) {
 	if got := mustRun(t, dir, "rev-parse", "HEAD"); got != head {
 		t.Fatalf("HEAD moved to %s", got)
 	}
+	idx, _, err := readIndex(filepath.Join(dir, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range idx.Entries {
+		if e.Name == "project.yaml" && !e.ModifiedAt.Equal(later) {
+			t.Fatalf("project.yaml's index time = %v, want the touched %v", e.ModifiedAt, later)
+		}
+	}
 	if st := mustRun(t, dir, "status", "--porcelain"); st != "" {
 		t.Fatalf("git status = %q, want clean", st)
 	}
+}
+
+// TestCommitAllCommitsTheEmptyTree: with every tracked file gone, the
+// commit records git's empty tree, as `git add -A && git commit` does.
+func TestCommitAllCommitsTheEmptyTree(t *testing.T) {
+	dir := newStoreRepo(t)
+	r := openRepo(t, dir)
+	for _, name := range []string{".gitattributes", ".gitignore", "project.yaml"} {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	committed, err := r.CommitAll("empty", "jig", "jig@invalid")
+	if err != nil || !committed {
+		t.Fatalf("CommitAll = %v, %v; want a commit", committed, err)
+	}
+	if got := mustRun(t, dir, "rev-parse", "HEAD^{tree}"); got != "4b825dc642cb6eb9a060e54bf8d69288fbee4904" {
+		t.Fatalf("tree = %s, want the empty tree", got)
+	}
+	mustRun(t, dir, "fsck", "--strict")
 }
 
 // TestCommitAllCatchesARacilyCleanFile: a file whose size and time still
@@ -199,6 +230,56 @@ func TestCommitAllLeavesWhatTheGitProgramStagesDifferently(t *testing.T) {
 		{"a name core.precomposeUnicode would recompose", func(t *testing.T, dir string) {
 			mustRun(t, dir, "config", "core.precomposeUnicode", "true")
 			writeFileT(t, dir, "caf\u00e9.txt", "x\n")
+		}},
+		{"an ignore rule with a negation", func(t *testing.T, dir string) {
+			writeFileT(t, dir, ".gitignore", "*.lock\n!keep.lock\n")
+		}},
+		{"an ignore rule with **", func(t *testing.T, dir string) {
+			writeFileT(t, dir, ".gitignore", "cache/**\n")
+		}},
+		{"an ignore rule with a bracket expression", func(t *testing.T, dir string) {
+			writeFileT(t, dir, "T-1/.gitignore", "[Jj]ournal\n")
+		}},
+		{"an ignore rule with an escape", func(t *testing.T, dir string) {
+			writeFileT(t, dir, ".git/info/exclude", "\\#hash\n")
+		}},
+		{"an ignore rule with trailing whitespace", func(t *testing.T, dir string) {
+			writeFileT(t, dir, ".gitignore", "*.tmp \n")
+		}},
+		{"an assume-unchanged file", func(t *testing.T, dir string) {
+			mustRun(t, dir, "update-index", "--assume-unchanged", "project.yaml")
+			writeFileT(t, dir, "project.yaml", "schema_version: 2\n")
+		}},
+		{"an assume-unchanged file in a version 4 index", func(t *testing.T, dir string) {
+			mustRun(t, dir, "update-index", "--index-version", "4")
+			mustRun(t, dir, "update-index", "--assume-unchanged", "project.yaml")
+			writeFileT(t, dir, "project.yaml", "schema_version: 2\n")
+		}},
+		{"a file dated before 1970", func(t *testing.T, dir string) {
+			writeFileT(t, dir, "old.txt", "old\n")
+			when := time.Date(1960, 1, 1, 0, 0, 0, 0, time.UTC)
+			if err := os.Chtimes(filepath.Join(dir, "old.txt"), when, when); err != nil {
+				t.Skipf("no such time here: %v", err)
+			}
+		}},
+		{"two tracked names core.ignoreCase makes one", func(t *testing.T, dir string) {
+			mustRun(t, dir, "config", "core.ignoreCase", "true")
+			blob := mustRun(t, dir, "hash-object", "-w", "project.yaml")
+			mustRun(t, dir, "update-index", "--add", "--cacheinfo", "100644,"+blob+",NOTES.txt")
+			mustRun(t, dir, "update-index", "--add", "--cacheinfo", "100644,"+blob+",notes.txt")
+			writeFileT(t, dir, "notes.txt", "schema_version: 1\n")
+		}},
+		{"a tracked name another spelling still finds", func(t *testing.T, dir string) {
+			mustRun(t, dir, "config", "core.ignoreCase", "false")
+			if err := os.Rename(filepath.Join(dir, "project.yaml"), filepath.Join(dir, "p.tmp")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(filepath.Join(dir, "p.tmp"), filepath.Join(dir, "PROJECT.yaml")); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(filepath.Join(dir, "project.yaml")); err != nil {
+				t.Skip("a case-sensitive file system: the old name is gone")
+			}
 		}},
 		{"a name core.ignoreCase matches to a tracked one", func(t *testing.T, dir string) {
 			mustRun(t, dir, "config", "core.ignoreCase", "true")
@@ -303,5 +384,36 @@ func TestParseGitDate(t *testing.T) {
 		if ok && got.Format(time.RFC3339) != c.want {
 			t.Errorf("parseGitDate(%q) = %s, want %s", c.in, got.Format(time.RFC3339), c.want)
 		}
+	}
+}
+
+// TestCommitAllRecordsWhatTheGitProgramCompares: the stat data CommitAll
+// records for a file it hashed (change time, device, inode, owner, where the
+// platform has them) is what the git program compares, so a `git status`
+// afterwards finds the file unchanged without reading it and rewriting the
+// index.
+func TestCommitAllRecordsWhatTheGitProgramCompares(t *testing.T) {
+	dir := newStoreRepo(t)
+	writeFileT(t, dir, "T-1/journal.ndjson", "{}\n")
+	writeFileT(t, dir, "project.yaml", "schema_version: 2\n")
+	if _, err := openRepo(t, dir).CommitAll("record", "jig", "jig@invalid"); err != nil {
+		t.Fatalf("CommitAll: %v", err)
+	}
+	// Past the index's own time, so no entry is racily clean for git.
+	time.Sleep(50 * time.Millisecond)
+	path := filepath.Join(dir, ".git", "index")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := mustRun(t, dir, "status", "--porcelain"); st != "" {
+		t.Fatalf("git status = %q, want clean", st)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("git status rewrote the index: the stat data CommitAll recorded is not what git compares")
 	}
 }
