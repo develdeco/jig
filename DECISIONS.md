@@ -1160,7 +1160,9 @@ above:
   `%HOME%\bin` rather than ahead of it as the launcher does, so with MSYSTEM set and
   Git's directories off PATH a `#!/bin/sh` hook fails with "cannot spawn". A user's
   hooks, credential helper and LFS must get what their own git gives them. The CI leg
-  runs pwsh with MSYSTEM unset and no `%HOME%\bin`.
+  runs pwsh with MSYSTEM unset and no `%HOME%\bin`. Since most Windows users do run
+  git through the launcher, `internal/gitx`'s own tests (argv, output, exit codes)
+  still run through it first, on the same leg, before the PATH change.
 
 ## Release and install
 
