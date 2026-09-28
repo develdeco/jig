@@ -36,6 +36,15 @@ jobs:
       - name: actionlint
         if: runner.os == 'Linux'
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      # The runner's first git on PATH is Git for Windows' bin\git.exe, a
+      # launcher that starts git's own git.exe as a second process on every
+      # one of the suite's git calls. git --exec-path names the directory
+      # holding git's own binary; put it first. pwsh runs with MSYSTEM unset,
+      # so git.exe still adds its mingw64\bin and usr\bin to the PATH of the
+      # hooks and helpers it starts, as the launcher does.
+      - name: git's own binary first on PATH
+        if: runner.os == 'Windows'
+        run: (git --exec-path) -replace '/', '\' | Add-Content -Path $env:GITHUB_PATH
       # go test starts packages in the order it is given them, a few at a
       # time, so the longest-running package goes first: listed in its
       # ./... place, it starts among the last, and the step waits on it alone.

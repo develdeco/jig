@@ -1148,6 +1148,19 @@ above:
   (`home.PoolDir`, `home.MachinePath`) would have to take the home root explicitly
   instead of from the environment. Below that takes fewer git processes per test, or
   more vCPUs.
+- The Windows test leg puts `git --exec-path` first on PATH. The runner's first git is
+  Git for Windows' `bin\git.exe`, a launcher that starts git's own `git.exe` as a second
+  process on every call, the calls git makes itself during a local push included. On
+  the same runners (two runners, three rounds each, order rotated), verifydeliver's
+  publish tests took 123-170 s (mean 152 s) through the launcher and 96-144 s (mean
+  117 s) with git's own binary first, and `internal/store` 40.0 s against 27.5 s.
+  jig itself keeps running the first git on PATH. Running git's own binary from gitx
+  was tried, and it changes what git starts: Git for Windows' `git.exe` adds its
+  `mingw64\bin` and `usr\bin` to their PATH only when MSYSTEM is unset, and behind
+  `%HOME%\bin` rather than ahead of it as the launcher does, so with MSYSTEM set and
+  Git's directories off PATH a `#!/bin/sh` hook fails with "cannot spawn". A user's
+  hooks, credential helper and LFS must get what their own git gives them. The CI leg
+  runs pwsh with MSYSTEM unset and no `%HOME%\bin`.
 
 ## Release and install
 
