@@ -1120,8 +1120,8 @@ above:
   Windows runner images already turn real-time scanning off and exclude the C: and D: drives.
 - ci.yml's test step lists `internal/verifydeliver` ahead of `./...`. go test starts
   packages in the order it is given them, four at a time on a hosted runner, so
-  verifydeliver, the longest-running package, started last from its `./...` place and
-  the Windows step then waited on it alone. Run both ways on the same runner, with the
+  verifydeliver, the longest-running package, started among the last from its `./...`
+  place and the Windows step then waited on it alone. Run both ways on the same runner, with the
   order swapped on a second runner, the step took 1,004 s and 894 s in `./...` order
   and 948 s and 756 s with verifydeliver first: 10% less on average. Replaying the
   package times through go test's scheduling predicted 24%, but verifydeliver itself
@@ -1135,14 +1135,16 @@ above:
   the ones git starts itself for a local push, fetch or clone (a push takes about
   300 ms on the runner): 880-1,540 s of git time across five runners, against 61 s on
   Linux. With test binaries already compiled, the whole suite took 808-872 s on three
-  runners before gitx's PATH cache and core binary, the single store guard and this
-  order, and 546-564 s after, against 51-53 s on Linux. What remains is verifydeliver:
+  runners before gitx's PATH cache, running git's own binary rather than Git for
+  Windows' launcher, the single store guard and this order, and 546-564 s after,
+  against 51-53 s on Linux. What remains is verifydeliver:
   7,891 of those git calls, one test after another, so with it listed first it is the
   step's wall time. Split across four test processes beside the other packages, the
   same runners took 380-400 s, and the other packages ran 1.5-1.9x slower beside it,
   so every vCPU was busy: about the floor for a 4-vCPU runner. Getting there means
-  running verifydeliver's tests in parallel, and every one of them sets `JIG_HOME`
-  with `t.Setenv`, which `t.Parallel` forbids: the pool and machine-mapping paths
+  running verifydeliver's tests in parallel, and the ones that carry 97% of its git
+  time (gate, publish, identity, lease restore) each set `JIG_HOME` with `t.Setenv`,
+  which `t.Parallel` forbids: the pool and machine-mapping paths
   (`home.PoolDir`, `home.MachinePath`) would have to take the home root explicitly
   instead of from the environment. Below that takes fewer git processes per test, or
   more vCPUs.
