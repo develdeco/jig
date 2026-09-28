@@ -112,15 +112,40 @@ was ambiguous, what was chosen, and why.
   misreported as a conflict. When the rebase state itself can't be read,
   the abort is still attempted, best effort, rather than trusting a read
   that just failed.
+- `<ticket>/ticket.yaml` is now the ticket's one record, not only its blockers:
+  `title`, `branch` and `blocked_by`, all optional, under `schema_version: 1`.
+  A minted ticket's record is created whole, in one write, by
+  `Store.CreateTicketRecord`, which refuses an id that already has one
+  (`ErrTicketRecordExists`) instead of merging into whatever ticket claimed
+  it. Every later update goes through one read-modify-write under the store
+  lock (`Store.mutateTicket`), so `WriteTicketDeps` setting `blocked_by`
+  never drops a title or branch another writer already recorded, and vice
+  versa - the full-file replace the old `WriteTicketDeps` did would otherwise
+  silently lose whichever field the caller was not writing. Decoding is
+  strict (`yaml.Decoder.KnownFields`): an unknown key is refused rather than
+  silently dropped the next time anything on the ticket is written. The
+  refusal is an `*axi.Error` (`TICKET_RECORD_INVALID`) whose help names both
+  causes, since the read cannot tell them apart: upgrade jig if a newer
+  version wrote the key, fix it if it is a typo. Only keys are guarded: a
+  rewrite drops YAML comments and any second document, neither of which a
+  file jig wrote has. `ReadTicket` also refuses a `schema_version` greater
+  than `ticketSchemaVersion` (`TICKET_SCHEMA_UNSUPPORTED`, help: upgrade
+  jig): an unknown field alone would not catch a future jig repurposing an
+  existing key's meaning under a new version, and since every write reads the
+  file first, refusing here also stops a write from re-marshaling such a file
+  back out at today's `schema_version`, silently downgrading it. Both
+  refusals reach a build lease, gate round or publish unchanged through
+  `Store.TicketBranch`, with their own code and next step.
 
 ## Chart handover
 
 - `schema_version` stays 1 for both new files (`charts/<name>/tickets.yaml`,
   `<ticket>/ticket.yaml`): each is optional and purely additive, so a store
   written with them still reads exactly as before on an older jig, which
-  never looks for either file. Nothing checks the version against these
-  files yet - that check is left for whichever later change actually needs
-  it to gate compatibility.
+  never looks for either file. `ReadTicket` now checks `ticket.yaml`'s
+  version and refuses a newer one (see the ticket record entry under
+  "Store"); nothing checks `tickets.yaml`'s yet - that check is left for
+  whichever later change actually needs it to gate compatibility.
 - Duplicate-ref detection (`resolveChartEntryRefs`, "one entry must not list
   the same ticket twice") compares by resolved target identity, not by a
   ref's literal spelling: a direct ticket id and a `#k` that already

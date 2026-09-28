@@ -66,7 +66,7 @@ charts/
 <ticket>/
   brief.md
   slices.yaml
-  ticket.yaml       # optional: this ticket's own blockers, written by jig graduate
+  ticket.yaml       # optional: this ticket's own record - title, branch, blockers
   start.<repo>.sha
   slices/
     <id>.state
@@ -129,7 +129,7 @@ exists.
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` + `Config` → a model rung, disjoint from rungs already in use |
-| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicketDeps`, `WriteTicketDeps` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above |
+| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketDeps`, `WriteTicketTitle`, `WriteTicketBranch`, `TicketBranch` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above |
 | `internal/tracker/` | `New`, `Graduate` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and, when it has blockers, its `ticket.yaml` written |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport`, or a `PublishReport` with an opened PR |
 
