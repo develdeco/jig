@@ -15,13 +15,20 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// Blocker is one blocking reference on a Draft: the target ticket id (or,
+// during graduation, a "#k" placeholder for the k-th sibling in the same
+// Graduation.Tickets slice, 1-based) and its merge kind ("merged" or
+// "stacked").
+type Blocker struct {
+	Ref  string
+	Kind string
+}
+
 // Draft is a ticket to be minted: a title, a body, and blocking references.
-// BlockedBy entries are either existing tracker ids or, during graduation,
-// "#k" indices into the same Graduation.Tickets slice (1-based).
 type Draft struct {
 	Title     string
 	Body      string
-	BlockedBy []string
+	BlockedBy []Blocker
 }
 
 // Subtask is one slice/child projected under a ticket.
@@ -98,11 +105,11 @@ func (a notImplementedAdapter) Mint(Draft) (string, error)       { return "", a.
 func (a notImplementedAdapter) Project(string, Projection) error { return a.err() }
 func (a notImplementedAdapter) Comment(string, string) error     { return a.err() }
 
-// Graduation is a chart of tickets to mint together: an epic label plus the
+// Graduation is a chart of tickets to mint together: the chart's name plus the
 // ordered ticket drafts. A draft's BlockedBy may reference an earlier
 // sibling by its 1-based position ("#k").
 type Graduation struct {
-	Epic    string
+	Chart   string
 	Tickets []Draft
 }
 
@@ -111,61 +118,75 @@ type Graduation struct {
 var indexRefRE = regexp.MustCompile(`^#(\d+)$`)
 
 // Graduate mints every ticket in g.Tickets in order, resolving "#k"
-// BlockedBy references to the id minted for the k-th ticket, creates the
-// store's ticket folder for each minted id, and projects the resulting
-// blocking links onto each ticket. It returns the minted ids in order.
-func Graduate(a Adapter, st *store.Store, g Graduation) ([]string, error) {
+// BlockedBy references to the id minted for the k-th ticket, and creates the
+// store's ticket folder for each minted id. A minted ticket with at least
+// one resolved blocker gets its <ticket>/ticket.yaml written before the next
+// ticket in g.Tickets is minted. After each ticket is fully minted, onMinted
+// (when non-nil) is called with its 0-based position in g.Tickets and its
+// id, so a caller can record that ticket's id (e.g. write it back into a
+// chart entry) before the next ticket is minted: a failure partway through
+// then leaves every already-minted ticket recorded by the caller, and a
+// re-run continues where it stopped instead of minting duplicates. Graduate
+// returns the ids minted so far - complete on success, partial (with the
+// error) on a failure partway through.
+func Graduate(a Adapter, st *store.Store, g Graduation, onMinted func(i int, id string) error) ([]string, error) {
 	ids := make([]string, len(g.Tickets))
-	resolved := make([][]string, len(g.Tickets))
 
 	for i, d := range g.Tickets {
-		resolved[i] = resolveBlockedBy(d.BlockedBy, ids)
+		resolved, err := resolveBlockedBy(d.BlockedBy, ids)
+		if err != nil {
+			return ids, fmt.Errorf("tracker: graduate: ticket %d: %w", i+1, err)
+		}
 		draft := d
-		draft.BlockedBy = resolved[i]
+		draft.BlockedBy = resolved
 		id, err := a.Mint(draft)
 		if err != nil {
-			return nil, fmt.Errorf("tracker: graduate: mint ticket %d: %w", i+1, err)
+			return ids, fmt.Errorf("tracker: graduate: mint ticket %d: %w", i+1, err)
 		}
 		ids[i] = id
 		if err := os.MkdirAll(st.TicketDir(id), 0o755); err != nil {
-			return nil, fmt.Errorf("tracker: graduate: create store folder for %s: %w", id, err)
+			return ids, fmt.Errorf("tracker: graduate: create store folder for %s: %w", id, err)
+		}
+		if len(resolved) > 0 {
+			deps := make([]store.TicketBlockedBy, len(resolved))
+			for j, b := range resolved {
+				deps[j] = store.TicketBlockedBy{Ticket: b.Ref, Kind: b.Kind}
+			}
+			if err := st.WriteTicketDeps(id, deps); err != nil {
+				return ids, fmt.Errorf("tracker: graduate: write ticket.yaml for %s: %w", id, err)
+			}
+		}
+		if onMinted != nil {
+			if err := onMinted(i, id); err != nil {
+				return ids, err
+			}
 		}
 	}
 
-	for i, d := range g.Tickets {
-		p := Projection{
-			Description: d.Body,
-			Subtasks: []Subtask{{
-				ID:        ids[i],
-				Title:     d.Title,
-				State:     "queued",
-				BlockedBy: resolved[i],
-			}},
-		}
-		if err := a.Project(ids[i], p); err != nil {
-			return nil, fmt.Errorf("tracker: graduate: project ticket %s: %w", ids[i], err)
-		}
-	}
 	return ids, nil
 }
 
-// resolveBlockedBy replaces any "#k" reference in refs with ids[k-1] (the
-// id minted for the k-th ticket so far); anything else passes through
-// unchanged, treated as an existing tracker id.
-func resolveBlockedBy(refs []string, ids []string) []string {
+// resolveBlockedBy replaces any "#k" Ref in refs with ids[k-1] (the id
+// minted for the k-th ticket so far), keeping each Blocker's Kind; anything
+// else passes through unchanged, treated as an existing tracker id. It
+// errors on a "#k" that names no minted ticket - out of range, or a sibling
+// not minted yet - rather than writing the literal "#k" placeholder into the
+// store as if it were a ticket id.
+func resolveBlockedBy(refs []Blocker, ids []string) ([]Blocker, error) {
 	if refs == nil {
-		return nil
+		return nil, nil
 	}
-	out := make([]string, len(refs))
+	out := make([]Blocker, len(refs))
 	for i, r := range refs {
-		if m := indexRefRE.FindStringSubmatch(r); m != nil {
+		if m := indexRefRE.FindStringSubmatch(r.Ref); m != nil {
 			k, err := strconv.Atoi(m[1])
-			if err == nil && k >= 1 && k <= len(ids) && ids[k-1] != "" {
-				out[i] = ids[k-1]
-				continue
+			if err != nil || k < 1 || k > len(ids) || ids[k-1] == "" {
+				return nil, fmt.Errorf("blocked_by ref %q does not name an already-minted ticket", r.Ref)
 			}
+			out[i] = Blocker{Ref: ids[k-1], Kind: r.Kind}
+			continue
 		}
 		out[i] = r
 	}
-	return out
+	return out, nil
 }

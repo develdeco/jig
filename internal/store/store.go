@@ -361,3 +361,19 @@ func (s *Store) hasStagedChanges() (bool, error) {
 	}
 	return false, err
 }
+
+// Dirty reports whether the working tree has anything uncommitted - staged,
+// unstaged, or untracked - via "status --porcelain", without staging or
+// committing anything itself. A caller uses this to decide whether it is
+// worth calling Push at all: for example a command whose own write already
+// landed on disk in an earlier, failed run (Push having refused before its
+// stageAndCommit ever ran) can retry the commit only when there is one
+// still pending, rather than attempting a Push - and, when a remote exists,
+// its network round trip - on every call.
+func (s *Store) Dirty() (bool, error) {
+	out, err := gitx.Run(s.Root, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return out != "", nil
+}
