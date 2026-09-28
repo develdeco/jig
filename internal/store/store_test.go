@@ -362,6 +362,47 @@ func TestHasRemote(t *testing.T) {
 	}
 }
 
+// TestDirty covers a clean checkout (false), an untracked file (true, the
+// shape a Push that refused before its own stageAndCommit ran leaves
+// behind), and a staged-but-uncommitted change (true) - all without Dirty
+// itself staging or committing anything.
+func TestDirty(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+
+	if dirty, err := st.Dirty(); err != nil {
+		t.Fatal(err)
+	} else if dirty {
+		t.Fatal("Dirty = true, want false right after a clean checkout")
+	}
+
+	untracked := filepath.Join(work, "T-1")
+	if err := os.MkdirAll(untracked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(untracked, "ticket.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if dirty, err := st.Dirty(); err != nil {
+		t.Fatal(err)
+	} else if !dirty {
+		t.Fatal("Dirty = false, want true with an untracked ticket folder present")
+	}
+
+	runGit(t, work, "add", "-A")
+	staged, err := st.hasStagedChanges()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !staged {
+		t.Fatal("test setup did not stage the untracked file")
+	}
+	if dirty, err := st.Dirty(); err != nil {
+		t.Fatal(err)
+	} else if !dirty {
+		t.Fatal("Dirty = false, want true with a staged-but-uncommitted change")
+	}
+}
+
 func TestPush(t *testing.T) {
 	st, work, remote := newTestRemoteStore(t)
 

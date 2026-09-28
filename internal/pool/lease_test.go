@@ -172,17 +172,18 @@ func TestAcquireClonesIntoEmptyDir(t *testing.T) {
 	}
 }
 
-// TestAcquireRelativeJIGHome covers a relative JIG_HOME: git runs the clone
-// from the lease's parent directory, so a relative lease path would be
-// resolved twice and every later git call would miss the lease.
-func TestAcquireRelativeJIGHome(t *testing.T) {
+// TestAcquireRelativeJigHome covers a relative jig home (a relative JIG_HOME
+// reaches Acquire as is): git runs the clone from the lease's parent
+// directory, so a relative lease path would be resolved twice and every
+// later git call would miss the lease.
+func TestAcquireRelativeJigHome(t *testing.T) {
 	t.Chdir(t.TempDir())
 	jigHome := "jig-home"
 	remote := newSourceAndRemote(t)
 
 	lease, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err != nil {
-		t.Fatalf("Acquire with a relative JIG_HOME: %v", err)
+		t.Fatalf("Acquire with a relative jig home: %v", err)
 	}
 	if !filepath.IsAbs(lease.Dir) {
 		t.Fatalf("lease dir = %q, want an absolute path", lease.Dir)

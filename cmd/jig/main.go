@@ -43,6 +43,8 @@ func Main(args []string, stdout io.Writer, stdin io.Reader) int {
 		return cmdInit(rest, stdout)
 	case "ticket":
 		return cmdTicket(rest, stdout)
+	case "graduate":
+		return cmdGraduate(rest, stdout)
 	case "solve":
 		return cmdSolve(rest, stdout, stdin)
 	case "run":

@@ -247,19 +247,31 @@ func hasContinueOnError(step map[string]interface{}) bool {
 // requireUnconditionalStep asserts ci.yml's test job has a step running
 // substr (named label for the failure message) with no step-level "if" and
 // no continue-on-error, so it runs, and actually gates, every matrix leg.
+// Other steps may run substr too, for one leg only (the Windows leg's
+// launcher check runs a narrower go test first); one unconditional,
+// gating step is what counts.
 func requireUnconditionalStep(t *testing.T, steps []interface{}, label, substr string) {
 	t.Helper()
-	step, ok := findStepByRun(steps, substr)
-	if !ok {
+	found := false
+	for _, sv := range steps {
+		step, ok := yamlMap(sv)
+		if !ok {
+			continue
+		}
+		run, _ := yamlString(step["run"])
+		if !strings.Contains(run, substr) {
+			continue
+		}
+		found = true
+		if _, hasIf := step["if"]; !hasIf && !hasContinueOnError(step) {
+			return
+		}
+	}
+	if !found {
 		t.Errorf("ci.yml: test job has no step running %s, so a %s failure would merge", substr, label)
 		return
 	}
-	if _, hasIf := step["if"]; hasIf {
-		t.Errorf("ci.yml: the %s step has a step-level \"if\", so it could silently skip on some matrix legs instead of gating every one", label)
-	}
-	if hasContinueOnError(step) {
-		t.Errorf("ci.yml: the %s step has continue-on-error, so it could fail without failing the job", label)
-	}
+	t.Errorf("ci.yml: every %s step has a step-level \"if\" or continue-on-error, so %s could silently skip or fail on some matrix legs instead of gating every one", label, label)
 }
 
 // requireStepOnExactly asserts ci.yml's test job has a step running substr

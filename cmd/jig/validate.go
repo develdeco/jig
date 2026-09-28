@@ -89,6 +89,8 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 		problems = append(problems, `brief.md has no "## " sections`)
 	}
 
+	problems = append(problems, validateTicketDeps(st, ticket)...)
+
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		problems = append(problems, fmt.Sprintf("slices.yaml did not parse: %v", err))
@@ -224,5 +226,99 @@ func findBlockedByCycle(slices []store.Slice) string {
 			dfs(sl.ID)
 		}
 	}
+	return found
+}
+
+// validateTicketDeps checks ticket's optional ticket.yaml, returning every
+// problem found (nil means valid or absent). A ticket without the file
+// validates as before.
+func validateTicketDeps(st *store.Store, ticket string) []string {
+	deps, err := st.ReadTicketDeps(ticket)
+	if err != nil {
+		return []string{fmt.Sprintf("ticket.yaml could not be read: %v", err)}
+	}
+
+	var problems []string
+	for i, d := range deps {
+		if d.Ticket == "" {
+			problems = append(problems, fmt.Sprintf("ticket.yaml: entry %d has no ticket", i+1))
+			continue
+		}
+		if err := requireTicket(st, d.Ticket); err != nil {
+			problems = append(problems, fmt.Sprintf("ticket.yaml: blocked_by %q: %v", d.Ticket, err))
+		}
+		if d.Kind != "merged" && d.Kind != "stacked" {
+			problems = append(problems, fmt.Sprintf("ticket.yaml: blocked_by %q has kind %q; must be \"merged\" or \"stacked\"", d.Ticket, d.Kind))
+		}
+	}
+
+	if cyc := ticketDepsCycle(st, ticket); cyc != "" {
+		problems = append(problems, "ticket.yaml blocked_by cycle: "+cyc)
+	}
+	return problems
+}
+
+// ticketDepsCycle runs a DFS over blocked_by edges rooted at ticket, reading
+// each visited ticket's own ticket.yaml as it goes, and returns a description
+// of the first cycle found, or "" when none exists. A ticket id that cannot
+// name a store folder, or whose ticket.yaml does not parse, contributes no
+// further edges: that ticket's own validate reports the problem.
+func ticketDepsCycle(st *store.Store, ticket string) string {
+	cache := map[string][]store.TicketBlockedBy{}
+	deps := func(id string) []store.TicketBlockedBy {
+		if d, ok := cache[id]; ok {
+			return d
+		}
+		var d []store.TicketBlockedBy
+		if pool.CheckTicket(id) == nil {
+			d, _ = st.ReadTicketDeps(id)
+		}
+		cache[id] = d
+		return d
+	}
+
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	color := map[string]int{}
+	var path []string
+	var found string
+
+	var dfs func(n string)
+	dfs = func(n string) {
+		if found != "" {
+			return
+		}
+		color[n] = gray
+		path = append(path, n)
+		for _, b := range deps(n) {
+			if found != "" {
+				return
+			}
+			if b.Ticket == "" {
+				continue
+			}
+			switch color[b.Ticket] {
+			case gray:
+				idx := 0
+				for i, p := range path {
+					if p == b.Ticket {
+						idx = i
+						break
+					}
+				}
+				found = strings.Join(append(append([]string{}, path[idx:]...), b.Ticket), "->")
+				return
+			case white:
+				dfs(b.Ticket)
+			}
+		}
+		path = path[:len(path)-1]
+		color[n] = black
+	}
+
+	dfs(ticket)
 	return found
 }

@@ -90,9 +90,12 @@ was ambiguous, what was chosen, and why.
   behind on its own. An unconditional `git add -A`
   would stage unresolved conflict markers as ordinary content, and a later
   commit (or `rebase --continue`) would finalize them onto the store branch,
-  corrupting whatever file conflicted for every later reader. The check
-  lives in the shared `stageAndCommit` step, so it also guards a command that
-  only ever `Push`es, such as `jig requeue`, not only the ones that `Sync` first.
+  corrupting whatever file conflicted for every later reader. Both `Sync` and
+  `Push` run the check first, so it also guards a command that only ever
+  `Push`es, such as `jig requeue`, not only the ones that `Sync` first. It runs
+  once per call: their shared `stageAndCommit` step ran it again with only
+  reads in between, two more git processes per store write, 1,408 of the
+  suite's 17,776 git calls in a traced Linux run.
 - A failed `pull --rebase` is aborted and wrapped as `STORE_CONFLICT` only when
   it actually left a rebase in progress; jig's own conflicts never leave the
   store mid-rebase for the guard above to catch on the next command, unless
@@ -108,6 +111,35 @@ was ambiguous, what was chosen, and why.
   misreported as a conflict. When the rebase state itself can't be read,
   the abort is still attempted, best effort, rather than trusting a read
   that just failed.
+
+## Chart handover
+
+- `schema_version` stays 1 for both new files (`charts/<name>/tickets.yaml`,
+  `<ticket>/ticket.yaml`): each is optional and purely additive, so a store
+  written with them still reads exactly as before on an older jig, which
+  never looks for either file. Nothing checks the version against these
+  files yet - that check is left for whichever later change actually needs
+  it to gate compatibility.
+- Duplicate-ref detection (`resolveChartEntryRefs`, "one entry must not list
+  the same ticket twice") compares by resolved target identity, not by a
+  ref's literal spelling: a direct ticket id and a `#k` that already
+  resolves to that same id are the same target and both fail the check, the
+  same as two literal `#k`s repeating each other or two entries still
+  pending graduation that would end up pointing at each other. The brief's
+  own wording ("the same ticket") reads as identity, not text.
+- Every ref in an entry is checked for a bad `kind` before its shape (`#k`
+  range, self-reference, cross-chart existence, or a missing ticket id): a
+  ref that is both malformed and carries a bad kind is refused for the kind
+  first. The brief left the precedence open; kind is a property of the ref
+  regardless of what it resolves to, so it is the cheapest and most
+  ref-independent thing to check first.
+- The post-graduation drift advisory (comparing a chart entry's resolved
+  blockers against that ticket's own `ticket.yaml`) treats the two lists as
+  sets of (ticket, kind) pairs, order-insensitive: reordering `blocked_by`
+  entries in the chart file, or in `ticket.yaml` by hand, is not itself a
+  drift. The brief specifies "when they differ" without saying whether
+  order counts; nothing in either file's semantics makes blocker order
+  meaningful, so it was left out of the comparison.
 
 ## Build loop
 
@@ -1109,6 +1141,20 @@ above:
   filter stays for any caller that does not start from `main`, tests included.
   `TestRunIgnoresInheritedRepoEnv`, `TestClearRepoEnv` and
   `TestAcquireIgnoresInheritedGitDir` pin it.
+- gitx searches PATH for git once per PATH, not once per call. `exec.Command("git")`
+  searches PATH on every call, and on Windows that search stats every PATH directory
+  once per PATHEXT extension until it reaches git: 31-39 ms a call on a 57-entry
+  developer PATH with git's directory 31 entries in, as long as git itself takes to run
+  a small command. A syscall profile of `internal/pool`'s tests there put 16 s of the
+  package's 41 s in that search. gitx reuses the path it found while PATH, PATHEXT,
+  `NoDefaultCurrentDirectoryInExePath` and the working directory are unchanged, as a
+  shell's command hash does, so a test that changes PATH is searched again
+  (`TestRunSearchesPATHAgainWhenItChanges`). A reused path that no longer exists
+  (git removed or moved while jig runs) fails to start; gitx then forgets it and
+  tries once more (`TestRunSearchesAgainWhenTheGitItFoundIsGone`), unless the call's
+  own working directory is what is missing. On that machine `TestPublishFullChain`
+  went from 50-56 s to 27 s. A GitHub Windows runner's search costs 1.6-3.4 ms (git is
+  27 entries into its 74-entry PATH), so CI time there does not change measurably.
 - Long-lived repos (the store after a push, a pool lease after a reuse fetch) get a
   foreground, best-effort `git maintenance run --auto`. The per-call flag only stops
   commands from spawning detached maintenance, not this explicit run;
@@ -1129,6 +1175,51 @@ above:
   the test.
 - Windows Defender exclusions were considered for Windows CI time and dropped: GitHub's
   Windows runner images already turn real-time scanning off and exclude the C: and D: drives.
+- ci.yml's test step lists `internal/verifydeliver` ahead of `./...`. go test starts
+  packages in the order it is given them, four at a time on a hosted runner, so
+  verifydeliver, the longest-running package, started among the last from its `./...`
+  place and the Windows step then waited on it alone. Run both ways on the same runner, with the
+  order swapped on a second runner, the step took 1,004 s and 894 s in `./...` order
+  and 948 s and 756 s with verifydeliver first: 10% less on average. Replaying the
+  package times through go test's scheduling predicted 24%, but verifydeliver itself
+  runs 17-26% slower when it starts beside cmd/jig, e2e and frontier than when it
+  starts after them. go test still prints results in the order it was given, so
+  nothing prints until verifydeliver finishes.
+- What is left of Windows CI time, measured on GitHub's windows-2025 runners (4 vCPUs,
+  real-time scanning already off, so a Dev Drive for TEMP measured no faster): an empty
+  Go program takes 6-8 ms to start and a trivial git command 13-18 ms, against about
+  1 ms for either on Linux. A traced run of the suite starts 17,776 git processes, plus
+  the ones git starts itself for a local push, fetch or clone (a push takes about
+  300 ms on the runner): 880-1,540 s of git time across five runners, against 61 s on
+  Linux. With test binaries already compiled, the whole suite took 808-872 s on three
+  runners before gitx's PATH cache, running git's own binary rather than Git for
+  Windows' launcher, the single store guard and this order, and 546-564 s after,
+  against 51-53 s on Linux. What remains is verifydeliver:
+  7,891 of those git calls, one test after another, so with it listed first it is the
+  step's wall time. Split across four test processes beside the other packages, the
+  same runners took 380-400 s, and the other packages ran 1.5-1.9x slower beside it,
+  so every vCPU was busy: about the floor for a 4-vCPU runner. Getting there means
+  running verifydeliver's tests in parallel, and the ones that carry 97% of its git
+  time (gate, publish, identity, lease restore) each set `JIG_HOME` with `t.Setenv`,
+  which `t.Parallel` forbids: the pool and machine-mapping paths
+  (`home.PoolDir`, `home.MachinePath`) would have to take the home root explicitly
+  instead of from the environment. Below that takes fewer git processes per test, or
+  more vCPUs.
+- The Windows test leg puts `git --exec-path` first on PATH. The runner's first git is
+  Git for Windows' `bin\git.exe`, a launcher that starts git's own `git.exe` as a second
+  process on every call, the calls git makes itself during a local push included. On
+  the same runners (two runners, three rounds each, order rotated), verifydeliver's
+  publish tests took 123-170 s (mean 152 s) through the launcher and 96-144 s (mean
+  117 s) with git's own binary first, and `internal/store` 40.0 s against 27.5 s.
+  jig itself keeps running the first git on PATH. Running git's own binary from gitx
+  was tried, and it changes what git starts: Git for Windows' `git.exe` adds its
+  `mingw64\bin` and `usr\bin` to their PATH only when MSYSTEM is unset, and behind
+  `%HOME%\bin` rather than ahead of it as the launcher does, so with MSYSTEM set and
+  Git's directories off PATH a `#!/bin/sh` hook fails with "cannot spawn". A user's
+  hooks, credential helper and LFS must get what their own git gives them. The CI leg
+  runs pwsh with MSYSTEM unset and no `%HOME%\bin`. Since most Windows users do run
+  git through the launcher, `internal/gitx`'s own tests (argv, output, exit codes)
+  still run through it first, on the same leg, before the PATH change.
 
 ## Release and install
 

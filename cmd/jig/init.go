@@ -24,10 +24,6 @@ func cmdInit(args []string, stdout io.Writer) int {
 	} else if err != nil {
 		return renderErr(stdout, err)
 	}
-	jigHome, err := home.Root()
-	if err != nil {
-		return renderErr(stdout, err)
-	}
 
 	if *standalone {
 		cwd, err := os.Getwd()
@@ -44,6 +40,12 @@ func cmdInit(args []string, stdout io.Writer) int {
 				Code: "VALIDATION_ERROR",
 				Help: []string{"Run `jig ticket new --title \"...\"` to use the existing store"},
 			})
+		}
+		// Resolved before the store is created, so a home that cannot be
+		// resolved leaves nothing half-initialized behind.
+		jigHome, err := home.Root()
+		if err != nil {
+			return renderErr(stdout, err)
 		}
 		storeDir, err := project.InitStandalone(cwd)
 		if err != nil {
@@ -68,6 +70,10 @@ func cmdInit(args []string, stdout io.Writer) int {
 			Msg:  "jig init requires --standalone or --store",
 			Code: "VALIDATION_ERROR",
 		})
+	}
+	jigHome, err := home.Root()
+	if err != nil {
+		return renderErr(stdout, err)
 	}
 	cfg, err := project.InitProject(jigHome, *storeFlag, clones.m)
 	if err != nil {

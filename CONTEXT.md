@@ -101,8 +101,12 @@ A thin skill that classifies intent and hands off. It never judges granularity i
 _Avoid_: dispatcher, entry skill
 
 **Chart**:
-The wayfinder layer for work spanning tickets: a map plus decision tickets. The map decides what to build; it never builds anything itself.
+The wayfinder layer for work spanning tickets: `charts/<name>/` holds `map.md` (for people and sessions; jig never reads it) and `tickets.yaml` (the handover jig reads and writes). The map decides what to build; it never builds anything itself. `jig graduate <name>` creates the chart's tickets and writes their ids back into `tickets.yaml`.
 _Avoid_: roadmap, epic
+
+**Dependency**:
+A ticket's own blocker, recorded in its `ticket.yaml` after graduation: another ticket id plus a kind, always spelled out. `merged` means the child starts from the target branch once all of the parent's PRs have merged; `stacked` means the child starts from the parent's branch in each repo the two share. Code overlap and priority are not dependencies.
+_Avoid_: dep, edge
 
 **Ledger**:
 One store entry per ticket, ending in an Answers recall tail.
