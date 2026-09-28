@@ -1121,11 +1121,13 @@ above:
 - ci.yml's test step lists `internal/verifydeliver` ahead of `./...`. go test starts
   packages in the order it is given them, four at a time on a hosted runner, so
   verifydeliver, the longest-running package, started last from its `./...` place and
-  the Windows step then waited on it alone. Replaying one Windows run's measured
-  package times through that scheduling gives 687 s for the step in `./...` order and
-  524 s with verifydeliver first; the step took 706 s in that run. go test still
-  prints results in the order it was given, so nothing prints until verifydeliver
-  finishes.
+  the Windows step then waited on it alone. Run both ways on the same runner, with the
+  order swapped on a second runner, the step took 1,004 s and 894 s in `./...` order
+  and 948 s and 756 s with verifydeliver first: 10% less on average. Replaying the
+  package times through go test's scheduling predicted 24%, but verifydeliver itself
+  runs 17-26% slower when it starts beside cmd/jig, e2e and frontier than when it
+  starts after them. go test still prints results in the order it was given, so
+  nothing prints until verifydeliver finishes.
 - What is left of Windows CI time, measured on GitHub's windows-2025 runners (4 vCPUs,
   real-time scanning already off, so a Dev Drive for TEMP measured no faster): an empty
   Go program takes 6-8 ms to start and a trivial git command 13-18 ms, against about
