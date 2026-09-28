@@ -495,3 +495,22 @@ func TestBuildUnknownScenarioBranch(t *testing.T) {
 		t.Fatalf("stat JIG_HOME/projects.yaml = %v, want IsNotExist", err)
 	}
 }
+
+// TestGenerateNeverUsesTheRealHome: a test that passes no Home and has no
+// JIG_HOME must not get Build's fallback, the real home directory. The
+// user's home is faked here too, so even a broken Generate writes nowhere
+// real.
+func TestGenerateNeverUsesTheRealHome(t *testing.T) {
+	fakeUser := t.TempDir()
+	t.Setenv("HOME", fakeUser)
+	t.Setenv("USERPROFILE", fakeUser)
+	t.Setenv("JIG_HOME", "")
+
+	fx := Generate(t, Opts{})
+	if realHome := filepath.Join(fakeUser, ".config", "jig"); fx.Home == realHome {
+		t.Fatalf("Generate wrote the machine mapping under the user's home %s", realHome)
+	}
+	if _, err := os.Stat(filepath.Join(fx.Home, "projects.yaml")); err != nil {
+		t.Fatalf("no machine mapping under the fixture's own home %s: %v", fx.Home, err)
+	}
+}

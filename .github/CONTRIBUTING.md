@@ -78,9 +78,10 @@ annotation.
   program that resolves to `git`.
 - Every test gets its own `t.TempDir()`, and its own jig home, so a test
   run never touches a real machine's: packages take the jig home root as an
-  argument (`fixture.Opts.Home`, `verifydeliver.Deps.Home`, `pool.Acquire`),
-  and a test passes a `t.TempDir()`; a test that runs `cmd/jig` or the jig
-  binary, which read `JIG_HOME`, sets it with `t.Setenv`.
+  argument (`fixture.Opts.Home`, `verifydeliver.Deps.Home`,
+  `frontier.Deps.Home`, `pool.Acquire`), and a test passes a `t.TempDir()`;
+  a test that runs `cmd/jig` or the jig binary, which read `JIG_HOME`, sets
+  it with `t.Setenv`.
 
 ## Live review eval
 

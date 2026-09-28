@@ -237,9 +237,16 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 }
 
 // Generate materializes a fresh fixture into a new t.TempDir() and returns
-// it. It fails the test via t.Fatal on any setup error.
+// it. It fails the test via t.Fatal on any setup error. With neither
+// opts.Home nor JIG_HOME set, the machine mapping goes to another
+// t.TempDir(), never the real home directory Build would fall back to.
 func Generate(t *testing.T, opts Opts) *Fixture {
 	t.Helper()
+	if opts.Home == "" && os.Getenv("JIG_HOME") == "" {
+		// Build would fall back to the real home directory; a test never
+		// writes there.
+		opts.Home = t.TempDir()
+	}
 	fx, err := Build(t.TempDir(), opts)
 	if err != nil {
 		t.Fatal(err)

@@ -58,8 +58,7 @@ func containsID(ids []string, want string) bool {
 }
 
 func TestRunScenarioMainChain(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 
 	report, err := Run(d, RunOpts{Ticket: fx.Ticket})
@@ -120,8 +119,7 @@ func TestRunScenarioMainChain(t *testing.T) {
 }
 
 func TestAnswerResume(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 
 	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
@@ -163,8 +161,7 @@ func TestAnswerResume(t *testing.T) {
 // own green-route clear (a separate, already pinned mutant) would then mask
 // a regression in answerAndRequeue's own clear.
 func TestAnswerAndRequeueClearsStalledSignature(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 
 	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
@@ -218,8 +215,7 @@ func TestScheduleUsedByRunSingleRepoFixture(t *testing.T) {
 	// The default fixture is a single-repo project, so Run's own use of
 	// Schedule always exercises the serial (one-group) path; TestSchedule*
 	// above covers the concurrent path directly against the pure function.
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, _ := newDeps(t, fx)
 	if len(d.Cfg.Repos) != 1 {
 		t.Fatalf("fixture project has %d repos, want 1", len(d.Cfg.Repos))
@@ -227,8 +223,7 @@ func TestScheduleUsedByRunSingleRepoFixture(t *testing.T) {
 }
 
 func TestAttemptCapExhaustion(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "cap"})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "cap"})
 	d, st := newDeps(t, fx)
 
 	report, err := Run(d, RunOpts{Ticket: fx.Ticket})
@@ -267,8 +262,7 @@ func TestAttemptCapExhaustion(t *testing.T) {
 }
 
 func TestStallStops(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "stall"})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "stall"})
 	d, st := newDeps(t, fx)
 
 	report, err := Run(d, RunOpts{Ticket: fx.Ticket})
@@ -307,8 +301,7 @@ func TestStallStops(t *testing.T) {
 }
 
 func TestRequeueFromBriefDiff(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "flawed-brief"})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "flawed-brief"})
 	d, st := newDeps(t, fx)
 
 	report, err := Run(d, RunOpts{Ticket: fx.Ticket})
@@ -389,8 +382,7 @@ func TestRequeueFromBriefDiff(t *testing.T) {
 // are seeded directly (independent of how c reached its flawed-brief state)
 // so this fails on its own if Requeue's own clear is removed.
 func TestRequeueClearsStalledSignature(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "flawed-brief"})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "flawed-brief"})
 	d, st := newDeps(t, fx)
 
 	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
@@ -441,8 +433,7 @@ func TestRequeueClearsStalledSignature(t *testing.T) {
 // reason, signature and stall summary cleared, and a second Run then
 // dispatches it again.
 func TestRequeueSliceStalled(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "stall"})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "stall"})
 	d, st := newDeps(t, fx)
 
 	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
@@ -489,8 +480,7 @@ func TestRequeueSliceStalled(t *testing.T) {
 // TestRequeueSliceEnvBlocked: RequeueSlice on an env-blocked slice puts it
 // back to queued the same way it does for stalled.
 func TestRequeueSliceEnvBlocked(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{EnvFail: true})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), EnvFail: true})
 	d, st := newDeps(t, fx)
 
 	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
@@ -525,8 +515,7 @@ func TestRequeueSliceEnvBlocked(t *testing.T) {
 // since it cannot tell a caller's mistake from a stale id, and it must not
 // silently repark an unrelated slice.
 func TestRequeueSliceRefusesOtherStates(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 
 	for _, state := range []string{"queued", "building", "green", "needs-input"} {
@@ -554,8 +543,7 @@ func TestRequeueSliceRefusesOtherStates(t *testing.T) {
 // "queued" slice and reporting a wrong-state refusal for a slice that was
 // never there.
 func TestRequeueSliceUnknownID(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, _ := newDeps(t, fx)
 
 	err := RequeueSlice(d, fx.Ticket, "no-such-slice")
@@ -575,8 +563,7 @@ func TestRequeueSliceUnknownID(t *testing.T) {
 }
 
 func TestEnvPauseDeferCI(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{EnvFail: true})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), EnvFail: true})
 	d, st := newDeps(t, fx)
 
 	report, err := Run(d, RunOpts{Ticket: fx.Ticket})
@@ -615,8 +602,7 @@ func TestEnvPauseDeferCI(t *testing.T) {
 }
 
 func TestOracleWrongRoundTrip(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "oracle-wrong"})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "oracle-wrong"})
 	d, st := newDeps(t, fx)
 
 	report, err := Run(d, RunOpts{Ticket: fx.Ticket})
@@ -833,8 +819,7 @@ func TestRouteGreenClearsStalledSignature(t *testing.T) {
 // fail once with an identical summary must not stall the run - the stall
 // signature's unit must be the slice, not a shared literal context.
 func TestStallSignatureIsPerSlice(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "same-summary-stall"})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "same-summary-stall"})
 	d, st := newDeps(t, fx)
 
 	report, err := Run(d, RunOpts{Ticket: fx.Ticket})
@@ -870,8 +855,7 @@ func TestStallSignatureIsPerSlice(t *testing.T) {
 // pre-existed this call (this call's own frontier is empty, so it never
 // exercises the stall-detection path itself).
 func TestReportStoppedForPreExistingStall(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "stall"})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "stall"})
 	d, _ := newDeps(t, fx)
 
 	first, err := Run(d, RunOpts{Ticket: fx.Ticket})
