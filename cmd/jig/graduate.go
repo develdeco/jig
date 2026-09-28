@@ -154,7 +154,7 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 
 		g := tracker.Graduation{Chart: chart, Tickets: drafts}
 		if ids, err := tracker.Graduate(adapter, st, g, onMinted); err != nil {
-			return renderErr(stdout, graduateFailure(chart, toCreate, ids, recorded, err))
+			return renderErr(stdout, graduateFailure(st, adapter.Name(), chart, toCreate, ids, recorded, err))
 		}
 	}
 
@@ -182,10 +182,24 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 		resolved := finalizeRefs(refs[i], finalIDs)
 		existing, err := st.ReadTicketDeps(e.ID)
 		if err != nil {
-			advisories = append(advisories, fmt.Sprintf(
-				"entry %d (%q): %s/ticket.yaml could not be read: %v; edit %s/ticket.yaml to fix it",
-				i+1, e.Title, e.ID, err, e.ID,
-			))
+			// A refusal that carries its own next steps (an unknown key:
+			// upgrade jig or fix the key; a newer schema: upgrade jig) gives
+			// them, as `jig validate` does: to edit a newer jig's record by
+			// hand would be the wrong step. A read failure with none of its
+			// own (permission denied, a directory in the file's place) can
+			// only be pointed at the file.
+			var ae *axi.Error
+			if errors.As(err, &ae) && len(ae.Help) > 0 {
+				advisories = append(advisories, fmt.Sprintf(
+					"entry %d (%q): %s/ticket.yaml could not be read: %v", i+1, e.Title, e.ID, err,
+				))
+				advisories = append(advisories, ae.Help...)
+			} else {
+				advisories = append(advisories, fmt.Sprintf(
+					"entry %d (%q): %s/ticket.yaml could not be read: %v; edit %s/ticket.yaml to fix it",
+					i+1, e.Title, e.ID, err, e.ID,
+				))
+			}
 			continue
 		}
 		if !blockersEqual(resolved, existing) {
@@ -248,24 +262,30 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 }
 
 // graduateFailure turns a tracker.Graduate error into one the operator can
-// recover from. onMinted's own failure (a WriteChart error) already carries
-// Help naming the one entry it orphaned, so it passes through unchanged; any
-// other failure - Mint, the store-folder MkdirAll, or the ticket.yaml write,
-// none of which onMinted ever saw - is raw and would otherwise reach
-// renderErr as a bare "code: ERROR". ids and recorded are tracker.Graduate's
-// return value and this call's own write-back bookkeeping, both indexed like
-// toCreate: ids[di] is set for every entry that reached a successful Mint,
-// but recorded[di] is set only once onMinted's write-back for it actually
-// landed in the chart file. tracker.Graduate calls onMinted for entry di
-// before minting entry di+1, so at most one entry - the last one with a
-// non-empty id - can have a ticket minted but not recorded; that one is not
-// safe to re-run over; every other non-empty id is.
-func graduateFailure(chart string, toCreate []int, ids []string, recorded []bool, err error) error {
-	var ae *axi.Error
-	if errors.As(err, &ae) {
-		return ae
-	}
-
+// recover from. An error that already carries its own Help keeps it and
+// its code, and gains the entries this run already created and recorded:
+// onMinted's own failure (a WriteChart error) names the one entry it
+// orphaned, and an id jig cannot use (tracker.CheckMinted) names the tracker
+// ticket to close, and neither says what came before it. Any other failure -
+// Mint, the store-folder MkdirAll, or the ticket.yaml write, none of which
+// onMinted ever saw - is raw and would otherwise reach renderErr as a bare
+// "code: ERROR".
+//
+// A minted id that collides with a ticket.yaml already in the store
+// (store.ErrTicketRecordExists) is the one such failure whose folder is not
+// this run's to delete: it holds another ticket's record. It gets the
+// message and help jig ticket new gives the same collision
+// (mintedIDCollision), not the orphan help below.
+//
+// ids and recorded are tracker.Graduate's return value and this call's own
+// write-back bookkeeping, both indexed like toCreate: ids[di] is set for
+// every entry that reached a successful Mint, but recorded[di] is set only
+// once onMinted's write-back for it actually landed in the chart file.
+// tracker.Graduate calls onMinted for entry di before minting entry di+1, so
+// at most one entry - the last one with a non-empty id - can have a ticket
+// minted but not recorded; that one is not safe to re-run over; every other
+// non-empty id is.
+func graduateFailure(st *store.Store, trackerName, chart string, toCreate []int, ids []string, recorded []bool, err error) error {
 	var done []string
 	orphanDi := -1
 	for di, id := range ids {
@@ -278,11 +298,34 @@ func graduateFailure(chart string, toCreate []int, ids []string, recorded []bool
 			orphanDi = di
 		}
 	}
-
-	msg := err.Error()
-	if len(done) > 0 {
-		msg = fmt.Sprintf("%s (already created: %s)", msg, strings.Join(done, ", "))
+	// The entries this run already created and recorded, for a failure that
+	// strikes after some of them: a re-run continues after them.
+	alreadyCreated := func(msg string) string {
+		if len(done) == 0 {
+			return msg
+		}
+		return fmt.Sprintf("%s (already created: %s)", msg, strings.Join(done, ", "))
 	}
+
+	var ae *axi.Error
+	if errors.As(err, &ae) {
+		// A copy: the caller's error is not this function's to change.
+		withDone := *ae
+		withDone.Msg = alreadyCreated(ae.Msg)
+		return &withDone
+	}
+
+	if orphanDi >= 0 && errors.Is(err, store.ErrTicketRecordExists) {
+		id := ids[orphanDi]
+		collision := mintedIDCollision(trackerName, id, st.TicketFilePath(id), fmt.Sprintf(
+			"entry %d of charts/%s/tickets.yaml has no id, so re-running `jig graduate %s` before this is settled mints a second ticket for it",
+			toCreate[orphanDi]+1, chart, chart,
+		))
+		collision.Msg = alreadyCreated(collision.Msg)
+		return collision
+	}
+
+	msg := alreadyCreated(err.Error())
 
 	if orphanDi >= 0 {
 		id := ids[orphanDi]

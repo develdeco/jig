@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -117,54 +116,13 @@ func TestTicketNewRefusesReservedID(t *testing.T) {
 // that mints EXT-7-gate): jig cannot refuse the id before the mint, so it
 // refuses it after and says the ticket now exists in the tracker.
 func TestTicketNewRefusesReservedIDFromCommandTracker(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	repo := filepath.Join(t.TempDir(), "demo")
-	if err := os.MkdirAll(repo, 0o755); err != nil {
-		t.Fatalf("mkdir repo: %v", err)
-	}
-	if _, err := gitx.Run(repo, "init", "-b", "main"); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
-	t.Chdir(repo)
-
-	jig := func(args ...string) (int, string) {
-		var buf bytes.Buffer
-		code := Main(args, &buf, strings.NewReader(""))
-		return code, buf.String()
-	}
-	if code, out := jig("init", "--standalone"); code != 0 {
-		t.Fatalf("jig init --standalone: exit %d\n%s", code, out)
-	}
-	cfgs, err := filepath.Glob(filepath.Join(filepath.Dir(repo), "*", "project.yaml"))
-	if err != nil || len(cfgs) != 1 {
-		t.Fatalf("find the standalone store's project.yaml: %v, %v", cfgs, err)
-	}
-
-	// The stub reads its request from stdin, then answers with the id.
-	stubDir := t.TempDir()
-	script := filepath.Join(stubDir, "tracker.sh")
-	content := "#!/bin/sh\ncat > /dev/null\necho '{\"id\": \"EXT-7-gate\"}'\n"
-	if runtime.GOOS == "windows" {
-		script = filepath.Join(stubDir, "tracker.cmd")
-		content = "@echo off\r\nfindstr \"^\" > nul\r\necho {\"id\": \"EXT-7-gate\"}\r\n"
-	}
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
-		t.Fatalf("write tracker stub: %v", err)
-	}
-	data, err := os.ReadFile(cfgs[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	withCommand := strings.Replace(string(data), "tracker: local", "tracker:\n    command: '"+script+"'", 1)
-	if withCommand == string(data) {
-		t.Fatalf("project.yaml has no local tracker to replace:\n%s", data)
-	}
-	if err := os.WriteFile(cfgs[0], []byte(withCommand), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	jig, st := commandTrackerMinting(t, "EXT-7-gate")
 
 	code, out := jig("ticket", "new", "--title", "Fix the thing")
 	if code == 0 || !strings.Contains(out, "EXT-7-gate") || !strings.Contains(out, "reserves") || !strings.Contains(out, "close it there") {
 		t.Fatalf("jig ticket new with a tracker minting EXT-7-gate: exit %d, want a non-zero exit naming EXT-7-gate as reserved and the ticket to close:\n%s", code, out)
+	}
+	if _, err := os.Stat(st.TicketDir("EXT-7-gate")); !os.IsNotExist(err) {
+		t.Fatalf("the refused ticket EXT-7-gate left a store folder behind (stat err %v)", err)
 	}
 }

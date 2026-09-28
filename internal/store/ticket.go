@@ -58,8 +58,9 @@ const ticketSchemaVersion = 1
 // any other write failure with errors.Is.
 var ErrTicketRecordExists = errors.New("store: the ticket already has a ticket.yaml")
 
-// ticketFilePath returns the path to <ticket>/ticket.yaml.
-func (s *Store) ticketFilePath(ticket string) string {
+// TicketFilePath returns the path to <ticket>/ticket.yaml: the one place that
+// names the file, for a caller that has to point the operator at it.
+func (s *Store) TicketFilePath(ticket string) string {
 	return filepath.Join(s.TicketDir(ticket), "ticket.yaml")
 }
 
@@ -75,8 +76,8 @@ func (s *Store) ticketFilePath(ticket string) string {
 // caller that only wants to report the problem (jig graduate's drift
 // advisory, jig validate) already treats a ReadTicketDeps/ReadTicket error
 // that way; a caller that would otherwise write the file back
-// (WriteTicketDeps, WriteTicketTitle) must not get the chance to lose the
-// field it does not understand.
+// (WriteTicketBranch) must not get the chance to lose the field it does not
+// understand.
 //
 // A schema_version newer than ticketSchemaVersion is refused the same way,
 // as an *axi.Error TICKET_SCHEMA_UNSUPPORTED, for a subtler reason a new
@@ -90,7 +91,7 @@ func (s *Store) ticketFilePath(ticket string) string {
 // Any other failure (permission denied, a directory where the file should
 // be) is the filesystem's own error, returned as is.
 func (s *Store) ReadTicket(ticket string) (Ticket, error) {
-	path := s.ticketFilePath(ticket)
+	path := s.TicketFilePath(ticket)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -144,7 +145,7 @@ func (s *Store) ReadTicketDeps(ticket string) ([]TicketBlockedBy, error) {
 // directory first, so this is also what gives a ticket whose tracker's Mint
 // creates no store folder of its own (github, command) one.
 func (s *Store) CreateTicketRecord(ticket string, rec Ticket) error {
-	path := s.ticketFilePath(ticket)
+	path := s.TicketFilePath(ticket)
 	release, _, err := Lock(path, 30*time.Second)
 	if err != nil {
 		return err
@@ -162,12 +163,11 @@ func (s *Store) CreateTicketRecord(ticket string, rec Ticket) error {
 // mutateTicket reads <ticket>/ticket.yaml, applies fn to the decoded
 // record, and writes the whole record back - all under one hold of the
 // store lock. Every update of an existing ticket.yaml goes through this one
-// read-modify-write, so a caller that changes a single field (WriteTicketDeps'
-// blocked_by, WriteTicketTitle's title) never has to know or restate the
-// others, and never races another writer's own read-modify-write into
-// dropping whichever field it changed.
+// read-modify-write, so a caller that changes a single field (WriteTicketBranch's
+// branch) never has to know or restate the others, and never races another
+// writer's own read-modify-write into dropping whichever field it changed.
 func (s *Store) mutateTicket(ticket string, fn func(*Ticket)) error {
-	path := s.ticketFilePath(ticket)
+	path := s.TicketFilePath(ticket)
 	release, _, err := Lock(path, 30*time.Second)
 	if err != nil {
 		return err
@@ -197,27 +197,14 @@ func writeTicketFile(path string, t Ticket) error {
 	return AtomicWrite(path, out)
 }
 
-// WriteTicketDeps sets <ticket>/ticket.yaml's blocked_by to deps, leaving
-// any recorded title and branch untouched. It is the update for a record
-// that may already hold other fields; a ticket being minted gets its
-// blockers from CreateTicketRecord instead.
-func (s *Store) WriteTicketDeps(ticket string, deps []TicketBlockedBy) error {
-	return s.mutateTicket(ticket, func(t *Ticket) { t.BlockedBy = deps })
-}
-
-// WriteTicketTitle sets <ticket>/ticket.yaml's title to title, leaving any
-// recorded branch and blockers untouched. Like WriteTicketDeps it updates a
-// record that may already hold other fields; a ticket being minted gets its
-// title from CreateTicketRecord instead.
-func (s *Store) WriteTicketTitle(ticket string, title string) error {
-	return s.mutateTicket(ticket, func(t *Ticket) { t.Title = title })
-}
-
 // WriteTicketBranch sets <ticket>/ticket.yaml's branch to branch, leaving
-// any recorded title and blockers untouched. Nothing calls this yet in
-// v0.1: branch adoption is a later change; TicketBranch already resolves a
-// recorded branch, so the write side can land separately from the read
-// side that depends on it.
+// any recorded title and blockers untouched, and creating the record when
+// the ticket has none. It is the one update of a record that already exists:
+// a ticket's title and blockers are written once, whole, by
+// CreateTicketRecord when the ticket is minted, and nothing changes them
+// afterwards. Nothing calls this yet in v0.1: branch adoption is a later
+// change; TicketBranch already resolves a recorded branch, so the write side
+// can land separately from the read side that depends on it.
 func (s *Store) WriteTicketBranch(ticket string, branch string) error {
 	return s.mutateTicket(ticket, func(t *Ticket) { t.Branch = branch })
 }
@@ -250,19 +237,28 @@ func (s *Store) WriteTicketBranch(ticket string, branch string) error {
 // v0.1), so today this only guards a hand-edited or otherwise externally
 // written ticket.yaml, which `jig validate` checks the same way.
 func (s *Store) TicketBranch(ticket, target string) (string, error) {
-	t, err := s.ReadTicket(ticket)
+	rec, err := s.ReadTicket(ticket)
 	if err != nil {
 		return "", err
 	}
-	if t.Branch == "" {
+	return s.ResolveTicketBranch(ticket, rec, target)
+}
+
+// ResolveTicketBranch is TicketBranch's resolution and validation of a record
+// the caller has already read, for a command that needs something else from
+// the same ticket.yaml too (publish's title): one read then serves both, and
+// the record cannot change between them. rec must be ticket's own record, as
+// ReadTicket returned it.
+func (s *Store) ResolveTicketBranch(ticket string, rec Ticket, target string) (string, error) {
+	if rec.Branch == "" {
 		return "jig/" + ticket, nil
 	}
-	if t.Branch == target {
+	if rec.Branch == target {
 		return "", &axi.Error{
-			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which is also the target branch", ticket, t.Branch),
+			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which is also the target branch", ticket, rec.Branch),
 			Code: "TICKET_BRANCH_INVALID",
 			Help: []string{
-				fmt.Sprintf("Record a branch other than %q in %s, or remove the branch key to use the default jig/%s", target, s.ticketFilePath(ticket), ticket),
+				fmt.Sprintf("Record a branch other than %q in %s, or remove the branch key to use the default jig/%s", target, s.TicketFilePath(ticket), ticket),
 			},
 		}
 	}
@@ -271,24 +267,24 @@ func (s *Store) TicketBranch(ticket, target string) (string, error) {
 	// itself, so a name that is only shorthand for another (which one
 	// depends on the store's own checkout history, so on the machine) is
 	// refused instead of resolved differently from one machine to the next.
-	name, err := gitx.Run(s.Root, "check-ref-format", "--branch", t.Branch)
+	name, err := gitx.Run(s.Root, "check-ref-format", "--branch", rec.Branch)
 	if err != nil {
 		return "", &axi.Error{
-			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which git rejects as a branch name: %v", ticket, t.Branch, err),
+			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which git rejects as a branch name: %v", ticket, rec.Branch, err),
 			Code: "TICKET_BRANCH_INVALID",
 			Help: []string{
-				fmt.Sprintf("Fix the branch key in %s", s.ticketFilePath(ticket)),
+				fmt.Sprintf("Fix the branch key in %s", s.TicketFilePath(ticket)),
 			},
 		}
 	}
-	if name != t.Branch {
+	if name != rec.Branch {
 		return "", &axi.Error{
-			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which git reads as shorthand for %q, not as a branch name", ticket, t.Branch, name),
+			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which git reads as shorthand for %q, not as a branch name", ticket, rec.Branch, name),
 			Code: "TICKET_BRANCH_INVALID",
 			Help: []string{
-				fmt.Sprintf("Record the branch's own name in %s", s.ticketFilePath(ticket)),
+				fmt.Sprintf("Record the branch's own name in %s", s.TicketFilePath(ticket)),
 			},
 		}
 	}
-	return t.Branch, nil
+	return rec.Branch, nil
 }

@@ -1,6 +1,7 @@
 package tracker_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/tracker"
 )
@@ -69,9 +71,14 @@ func TestGraduation(t *testing.T) {
 		}
 	}
 
-	// Slice A has no blockers, so it gets no ticket.yaml at all.
-	if _, err := os.Stat(filepath.Join(st.TicketDir(ids[0]), "ticket.yaml")); !os.IsNotExist(err) {
-		t.Fatalf("ticket.yaml for %s: want absent, stat err = %v", ids[0], err)
+	// Slice A has no blockers, so its ticket.yaml records a title and no
+	// blocked_by.
+	gotA, err := st.ReadTicket(ids[0])
+	if err != nil {
+		t.Fatalf("ReadTicket(%s): %v", ids[0], err)
+	}
+	if gotA.Title != g.Tickets[0].Title || len(gotA.BlockedBy) != 0 {
+		t.Fatalf("ticket.yaml for %s = %+v, want title %q and no blockers", ids[0], gotA, g.Tickets[0].Title)
 	}
 
 	// Slice B and C get ticket.yaml with resolved ids and explicit kinds.
@@ -180,5 +187,103 @@ func TestGraduateRefusesUnresolvedIndexRef(t *testing.T) {
 	}
 	if ids[0] != "" {
 		t.Fatalf("ids[0] = %q, want empty: the ticket referencing an unresolved ref must never be minted", ids[0])
+	}
+}
+
+// fixedIDAdapter is an Adapter that mints the same id every time, like a
+// command tracker whose ids come from elsewhere and can collide with a
+// ticket the store already holds; the local tracker always mints the next
+// free id and so never can.
+type fixedIDAdapter struct{ id string }
+
+func (fixedIDAdapter) Name() string                             { return "fixed" }
+func (a fixedIDAdapter) Mint(tracker.Draft) (string, error)     { return a.id, nil }
+func (fixedIDAdapter) Project(string, tracker.Projection) error { return nil }
+func (fixedIDAdapter) Comment(string, string) error             { return nil }
+
+// TestGraduateRefusesAMintedIDThatAlreadyHasARecord covers a minted id whose
+// store folder already holds another ticket's ticket.yaml: Graduate refuses
+// (store.ErrTicketRecordExists) instead of merging the new chart entry into
+// it, which would overwrite the other ticket's title and give the new one
+// its unrelated blockers. The existing record is unchanged, and onMinted
+// never fires for a ticket whose record was refused.
+func TestGraduateRefusesAMintedIDThatAlreadyHasARecord(t *testing.T) {
+	st, _ := newTestStore(t, localCfg())
+	seed := store.Ticket{
+		Title:     "Pre-existing, unrelated",
+		BlockedBy: []store.TicketBlockedBy{{Ticket: "EXT-9", Kind: "merged"}},
+	}
+	if err := st.CreateTicketRecord("EXT-1", seed); err != nil {
+		t.Fatalf("seed EXT-1's record: %v", err)
+	}
+
+	g := tracker.Graduation{Tickets: []tracker.Draft{{Title: "New chart entry"}}}
+	onMinted := false
+	ids, err := tracker.Graduate(fixedIDAdapter{id: "EXT-1"}, st, g, func(int, string) error {
+		onMinted = true
+		return nil
+	})
+	if !errors.Is(err, store.ErrTicketRecordExists) {
+		t.Fatalf("Graduate over an existing EXT-1 record: err = %v, want it to wrap store.ErrTicketRecordExists", err)
+	}
+	if onMinted {
+		t.Fatal("onMinted fired for a ticket whose record was refused")
+	}
+	if len(ids) != 1 || ids[0] != "EXT-1" {
+		t.Fatalf("ids = %v, want the minted [EXT-1], so the caller can report the orphan", ids)
+	}
+
+	got, err := st.ReadTicket("EXT-1")
+	if err != nil {
+		t.Fatalf("ReadTicket: %v", err)
+	}
+	if !reflect.DeepEqual(got, seed) {
+		t.Fatalf("EXT-1's record after the refused graduate = %+v, want it unchanged: %+v", got, seed)
+	}
+}
+
+// TestGraduateRefusesAMintedIDJigCannotUse covers the same refusal jig ticket
+// new makes, on the other path that mints into the store: a tracker whose id
+// is known only once the ticket exists (github, a command) can mint one that
+// names a lease (a reserved suffix) or that is not a single directory. Graduate
+// refuses it after the mint, as an *axi.Error that names the tracker ticket to
+// close (tracker.CheckMinted), and writes nothing under it: no store folder
+// and no record, and for a path-like id no file outside the store either.
+// onMinted never fires, and the minted id is still returned so the caller can
+// say which ticket exists.
+func TestGraduateRefusesAMintedIDJigCannotUse(t *testing.T) {
+	for _, tc := range []struct{ name, id string }{
+		{name: "reserved suffix", id: "EXT-7-gate"},
+		{name: "path separator", id: "../escape"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, _ := newTestStore(t, localCfg())
+			g := tracker.Graduation{Tickets: []tracker.Draft{{Title: "New chart entry"}}}
+			onMinted := false
+			ids, err := tracker.Graduate(fixedIDAdapter{id: tc.id}, st, g, func(int, string) error {
+				onMinted = true
+				return nil
+			})
+
+			var ae *axi.Error
+			if !errors.As(err, &ae) {
+				t.Fatalf("Graduate over the unusable id %q: err = %v, want an *axi.Error", tc.id, err)
+			}
+			if !strings.Contains(ae.Msg, tc.id) || !strings.Contains(strings.Join(ae.Help, "\n"), "close it there") {
+				t.Fatalf("Graduate over %q: Msg %q, Help %q, want the id named and the tracker ticket to close", tc.id, ae.Msg, ae.Help)
+			}
+			if onMinted {
+				t.Fatal("onMinted fired for a ticket that was refused")
+			}
+			if len(ids) != 1 || ids[0] != tc.id {
+				t.Fatalf("ids = %v, want the minted [%s], so the caller can report the ticket that now exists", ids, tc.id)
+			}
+
+			for _, dir := range []string{st.TicketDir(tc.id), filepath.Join(filepath.Dir(st.Root), "escape")} {
+				if _, err := os.Stat(dir); !os.IsNotExist(err) {
+					t.Fatalf("the refused ticket %q left %s behind (stat err %v)", tc.id, dir, err)
+				}
+			}
+		})
 	}
 }

@@ -64,10 +64,17 @@ func CheckIdentity(d Deps) error {
 }
 
 // consolidatedTitle picks the ticket's headline title: the first slice's
-// goal, falling back to the ticket id when there are no slices yet.
-func consolidatedTitle(ticket string, slices []store.Slice) string {
+// goal, falling back - when there are no slices or the first has no goal -
+// to recorded, the ticket's own recorded title (jig ticket new and jig
+// graduate write one for every ticket they mint; empty when the record has
+// none), and then to the ticket id itself. The caller passes the title from
+// the record it already read, so choosing a title never touches the store.
+func consolidatedTitle(recorded, ticket string, slices []store.Slice) string {
 	if len(slices) > 0 && slices[0].Goal != "" {
 		return slices[0].Goal
+	}
+	if recorded != "" {
+		return recorded
 	}
 	return ticket
 }

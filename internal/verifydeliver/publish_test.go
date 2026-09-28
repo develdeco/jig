@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
@@ -320,6 +322,103 @@ func TestPublishRefusesARecordedBranchEqualToTheTarget(t *testing.T) {
 	}
 	if got := originRef(t, fx.RepoRemote, defaultBranch); got != defaultBefore {
 		t.Fatalf("origin %s = %q after the refused publish, want %q unchanged", defaultBranch, got, defaultBefore)
+	}
+}
+
+// TestPublishRefusesAnUnreadableTicketRecordBeforeWritingAnything covers a
+// ticket.yaml publish cannot read (here one a newer jig wrote): publish reads
+// the record once, up front, so it fails with the refusal's own code before
+// its first store write - no memorize journal line - and pushes nothing,
+// instead of publishing the ticket under the default branch and title as if
+// the record were not there.
+func TestPublishRefusesAnUnreadableTicketRecordBeforeWritingAnything(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	gateToClean(t, fx, d)
+	if err := os.WriteFile(d.Store.TicketFilePath(fx.Ticket), []byte("schema_version: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Store.Push(fx.Ticket + ": a newer jig's record"); err != nil {
+		t.Fatalf("push the unreadable record: %v", err)
+	}
+	if _, err := d.Store.ReadTicket(fx.Ticket); err == nil {
+		t.Fatal("test setup: a newer schema_version must be unreadable")
+	}
+	defaultBranch := "refs/heads/" + ticketBranch(fx.Ticket)
+	mainBefore := originRef(t, fx.RepoRemote, "refs/heads/main")
+	defaultBefore := originRef(t, fx.RepoRemote, defaultBranch)
+
+	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "TICKET_SCHEMA_UNSUPPORTED" {
+		t.Fatalf("Publish over a newer-schema ticket.yaml: err = %v, want an *axi.Error TICKET_SCHEMA_UNSUPPORTED", err)
+	}
+
+	lines, jerr := journal.Read(d.Store, fx.Ticket)
+	if jerr != nil {
+		t.Fatalf("journal.Read: %v", jerr)
+	}
+	for _, l := range lines {
+		if l.Event == "memorize" {
+			t.Fatalf("journal has a %q line after the refused publish: it wrote to the store before reading the record", l.Event)
+		}
+	}
+	if got := originRef(t, fx.RepoRemote, "refs/heads/main"); got != mainBefore {
+		t.Fatalf("origin main = %q after the refused publish, want %q unchanged", got, mainBefore)
+	}
+	if got := originRef(t, fx.RepoRemote, defaultBranch); got != defaultBefore {
+		t.Fatalf("origin %s = %q after the refused publish, want %q unchanged", defaultBranch, got, defaultBefore)
+	}
+}
+
+// TestPublishTitlesTheSquashWithTheRecordedTitle covers the title fallback
+// through publish itself (consolidatedTitle is only unit-tested with the title
+// handed to it): when no slice has a goal, the squash commit's subject carries
+// the title recorded in ticket.yaml, not the bare ticket id.
+func TestPublishTitlesTheSquashWithTheRecordedTitle(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	gateToClean(t, fx, d)
+
+	slices, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadSlices: %v", err)
+	}
+	for i := range slices {
+		slices[i].Goal = ""
+	}
+	data, err := yaml.Marshal(store.SliceFile{Slices: slices})
+	if err != nil {
+		t.Fatalf("marshal slices: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "slices.yaml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Store.CreateTicketRecord(fx.Ticket, store.Ticket{Title: "Recorded title"}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
+	}
+	if err := d.Store.Push(fx.Ticket + ": no slice goals, a recorded title"); err != nil {
+		t.Fatalf("push the recorded title: %v", err)
+	}
+
+	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	sha := report.Squashed["fixture-repo"]
+	if sha == "" {
+		t.Fatalf("Squashed[fixture-repo] missing, got %v", report.Squashed)
+	}
+	msg, err := gitx.Run(publishLeaseDir(t, fx), "log", "-1", "--format=%s", sha)
+	if err != nil {
+		t.Fatalf("read squash commit message: %v", err)
+	}
+	if want := fx.Ticket + ": Recorded title"; msg != want {
+		t.Fatalf("squash message = %q, want %q", msg, want)
 	}
 }
 

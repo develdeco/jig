@@ -31,8 +31,8 @@ func TestTicketDepsRoundTrip(t *testing.T) {
 		{Ticket: "T-4", Kind: "merged"},
 		{Ticket: "T-9", Kind: "stacked"},
 	}
-	if err := st.WriteTicketDeps("T-1", want); err != nil {
-		t.Fatalf("WriteTicketDeps: %v", err)
+	if err := st.CreateTicketRecord("T-1", Ticket{BlockedBy: want}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
 	}
 
 	got, err = st.ReadTicketDeps("T-1")
@@ -49,8 +49,8 @@ func TestTicketDepsRoundTrip(t *testing.T) {
 }
 
 // TestTicketRecordRoundTrip covers every field of the record together:
-// title, branch and blocked_by all survive a read after each is written in
-// turn, and none of the three writers clobbers a field it does not own.
+// title and blocked_by written whole by CreateTicketRecord, then branch added
+// by WriteTicketBranch, all survive a read.
 func TestTicketRecordRoundTrip(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
 
@@ -62,15 +62,12 @@ func TestTicketRecordRoundTrip(t *testing.T) {
 		t.Fatalf("ReadTicket on an absent file = %+v, want a zero Ticket", got)
 	}
 
-	if err := st.WriteTicketTitle("T-1", "Fix the thing"); err != nil {
-		t.Fatalf("WriteTicketTitle: %v", err)
+	deps := []TicketBlockedBy{{Ticket: "T-4", Kind: "merged"}}
+	if err := st.CreateTicketRecord("T-1", Ticket{Title: "Fix the thing", BlockedBy: deps}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
 	}
 	if err := st.WriteTicketBranch("T-1", "fix/T-1"); err != nil {
 		t.Fatalf("WriteTicketBranch: %v", err)
-	}
-	deps := []TicketBlockedBy{{Ticket: "T-4", Kind: "merged"}}
-	if err := st.WriteTicketDeps("T-1", deps); err != nil {
-		t.Fatalf("WriteTicketDeps: %v", err)
 	}
 
 	got, err = st.ReadTicket("T-1")
@@ -83,21 +80,19 @@ func TestTicketRecordRoundTrip(t *testing.T) {
 	}
 }
 
-// TestWriteTicketDepsPreservesTitleAndBranch pins the fix for the exact
-// bug a full-file WriteTicketDeps had: replacing ticket.yaml outright
-// meant a call for blocked_by alone silently dropped a title and branch
-// that had already been recorded.
-func TestWriteTicketDepsPreservesTitleAndBranch(t *testing.T) {
+// TestWriteTicketBranchPreservesTitleAndDeps pins the fix for the exact bug a
+// full-file replace had: writing the branch alone must not drop a title or
+// blockers that were already recorded. It also covers the record's first
+// write: a ticket with no ticket.yaml gets one holding just the branch.
+func TestWriteTicketBranchPreservesTitleAndDeps(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
-	if err := st.WriteTicketTitle("T-1", "Fix the thing"); err != nil {
-		t.Fatalf("WriteTicketTitle: %v", err)
-	}
-	if err := st.WriteTicketBranch("T-1", "fix/T-1"); err != nil {
-		t.Fatalf("WriteTicketBranch: %v", err)
+	deps := []TicketBlockedBy{{Ticket: "T-4", Kind: "merged"}}
+	if err := st.CreateTicketRecord("T-1", Ticket{Title: "Fix the thing", BlockedBy: deps}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
 	}
 
-	if err := st.WriteTicketDeps("T-1", []TicketBlockedBy{{Ticket: "T-4", Kind: "merged"}}); err != nil {
-		t.Fatalf("WriteTicketDeps: %v", err)
+	if err := st.WriteTicketBranch("T-1", "fix/T-1"); err != nil {
+		t.Fatalf("WriteTicketBranch: %v", err)
 	}
 
 	got, err := st.ReadTicket("T-1")
@@ -105,39 +100,17 @@ func TestWriteTicketDepsPreservesTitleAndBranch(t *testing.T) {
 		t.Fatalf("ReadTicket: %v", err)
 	}
 	if got.Title != "Fix the thing" {
-		t.Fatalf("title after WriteTicketDeps = %q, want %q", got.Title, "Fix the thing")
-	}
-	if got.Branch != "fix/T-1" {
-		t.Fatalf("branch after WriteTicketDeps = %q, want %q", got.Branch, "fix/T-1")
-	}
-}
-
-// TestWriteTicketTitlePreservesBranchAndDeps is the mirror of the above:
-// writing the title alone must not drop a branch or blockers that were
-// already recorded.
-func TestWriteTicketTitlePreservesBranchAndDeps(t *testing.T) {
-	st := &Store{Root: t.TempDir()}
-	if err := st.WriteTicketBranch("T-1", "fix/T-1"); err != nil {
-		t.Fatalf("WriteTicketBranch: %v", err)
-	}
-	deps := []TicketBlockedBy{{Ticket: "T-4", Kind: "merged"}}
-	if err := st.WriteTicketDeps("T-1", deps); err != nil {
-		t.Fatalf("WriteTicketDeps: %v", err)
-	}
-
-	if err := st.WriteTicketTitle("T-1", "Fix the thing"); err != nil {
-		t.Fatalf("WriteTicketTitle: %v", err)
-	}
-
-	got, err := st.ReadTicket("T-1")
-	if err != nil {
-		t.Fatalf("ReadTicket: %v", err)
-	}
-	if got.Branch != "fix/T-1" {
-		t.Fatalf("branch after WriteTicketTitle = %q, want %q", got.Branch, "fix/T-1")
+		t.Fatalf("title after WriteTicketBranch = %q, want %q", got.Title, "Fix the thing")
 	}
 	if !reflect.DeepEqual(got.BlockedBy, deps) {
-		t.Fatalf("blocked_by after WriteTicketTitle = %+v, want %+v", got.BlockedBy, deps)
+		t.Fatalf("blocked_by after WriteTicketBranch = %+v, want %+v", got.BlockedBy, deps)
+	}
+
+	if err := st.WriteTicketBranch("T-2", "fix/T-2"); err != nil {
+		t.Fatalf("WriteTicketBranch on a ticket with no record: %v", err)
+	}
+	if got, err := st.ReadTicket("T-2"); err != nil || !reflect.DeepEqual(got, Ticket{Branch: "fix/T-2"}) {
+		t.Fatalf("ReadTicket after the first write = %+v, %v, want just the branch", got, err)
 	}
 }
 
@@ -145,7 +118,7 @@ func TestWriteTicketTitlePreservesBranchAndDeps(t *testing.T) {
 // ticket.yaml key is refused rather than silently dropped on the next
 // rewrite: a field this jig version does not know about (a newer jig, or a
 // hand-edit typo) must fail the read loudly instead of quietly vanishing
-// the next time WriteTicketDeps or WriteTicketTitle rewrites the file. The
+// the next time WriteTicketBranch rewrites the file. The
 // refusal is an *axi.Error whose help names both causes, since the read
 // cannot tell them apart: upgrading jig is the fix for a key a newer jig
 // wrote, editing the file is the fix for a typo.
@@ -197,8 +170,8 @@ func TestReadTicketRefusesNewerSchemaVersion(t *testing.T) {
 		t.Fatalf("ReadTicket with schema_version 2 = %v, want *axi.Error TICKET_SCHEMA_UNSUPPORTED", err)
 	}
 
-	if err := st.WriteTicketTitle("T-1", "New title"); err == nil {
-		t.Fatal("WriteTicketTitle on a newer-schema ticket.yaml: want an error, got nil (would downgrade schema_version on rewrite)")
+	if err := st.WriteTicketBranch("T-1", "feature/x"); err == nil {
+		t.Fatal("WriteTicketBranch on a newer-schema ticket.yaml: want an error, got nil (would downgrade schema_version on rewrite)")
 	}
 	after, err := os.ReadFile(path)
 	if err != nil {
@@ -210,34 +183,32 @@ func TestReadTicketRefusesNewerSchemaVersion(t *testing.T) {
 }
 
 // TestTicketMutateConcurrentWritersSurviveTheLock covers mutateTicket's
-// store lock: three goroutines each writing a different field of the same
-// ticket concurrently (title, branch, blocked_by) must all survive, since
-// each is a read-modify-write over the whole record. Without the lock, two
-// of them can interleave their reads before either writes, so the second
-// write's read-modify-write is built on a stale copy and clobbers the
-// first writer's field on save - a lost update.
+// store lock: eight writers each add their own blocker to the same ticket
+// while WriteTicketBranch sets its branch, all concurrently, and every one
+// must survive, since each is a read-modify-write over the whole record.
+// Without the lock, two of them can interleave their reads before either
+// writes, so the second write's read-modify-write is built on a stale copy
+// and clobbers the first writer's change on save - a lost update.
 func TestTicketMutateConcurrentWritersSurviveTheLock(t *testing.T) {
+	const writers = 8
 	st := &Store{Root: t.TempDir()}
 
 	var wg sync.WaitGroup
-	wg.Add(3)
-	go func() {
-		defer wg.Done()
-		if err := st.WriteTicketTitle("T-1", "Fix the thing"); err != nil {
-			t.Errorf("WriteTicketTitle: %v", err)
-		}
-	}()
+	wg.Add(writers + 1)
+	for i := 0; i < writers; i++ {
+		go func() {
+			defer wg.Done()
+			blocker := TicketBlockedBy{Ticket: fmt.Sprintf("T-%d", i+2), Kind: "merged"}
+			err := st.mutateTicket("T-1", func(tk *Ticket) { tk.BlockedBy = append(tk.BlockedBy, blocker) })
+			if err != nil {
+				t.Errorf("mutateTicket: %v", err)
+			}
+		}()
+	}
 	go func() {
 		defer wg.Done()
 		if err := st.WriteTicketBranch("T-1", "feature/x"); err != nil {
 			t.Errorf("WriteTicketBranch: %v", err)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		deps := []TicketBlockedBy{{Ticket: "T-2", Kind: "merged"}}
-		if err := st.WriteTicketDeps("T-1", deps); err != nil {
-			t.Errorf("WriteTicketDeps: %v", err)
 		}
 	}()
 	wg.Wait()
@@ -246,16 +217,16 @@ func TestTicketMutateConcurrentWritersSurviveTheLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Title != "Fix the thing" || got.Branch != "feature/x" || len(got.BlockedBy) != 1 {
-		t.Fatalf("ticket after 3 concurrent writers = %+v, want all three fields set (lost update)", got)
+	if got.Branch != "feature/x" || len(got.BlockedBy) != writers {
+		t.Fatalf("ticket after %d concurrent writers = %+v, want the branch and all %d blockers (lost update)", writers+1, got, writers)
 	}
 }
 
 // TestTicketMutateRefusesUnreadableRecord covers mutateTicket's other rule
 // that survives mutation alongside the lock: a caller must never get the
 // chance to rewrite, and so lose the unknown key from, a ticket.yaml it
-// cannot read. WriteTicketTitle and WriteTicketDeps both refuse, and
-// ticket.yaml's bytes are unchanged after either refusal.
+// cannot read. WriteTicketBranch refuses, and ticket.yaml's bytes are
+// unchanged after the refusal.
 func TestTicketMutateRefusesUnreadableRecord(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
 	if err := os.MkdirAll(st.TicketDir("T-1"), 0o755); err != nil {
@@ -267,11 +238,8 @@ func TestTicketMutateRefusesUnreadableRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := st.WriteTicketTitle("T-1", "New title"); err == nil {
-		t.Fatal("WriteTicketTitle on an unreadable ticket.yaml: want an error, got nil")
-	}
-	if err := st.WriteTicketDeps("T-1", []TicketBlockedBy{{Ticket: "T-2", Kind: "merged"}}); err == nil {
-		t.Fatal("WriteTicketDeps on an unreadable ticket.yaml: want an error, got nil")
+	if err := st.WriteTicketBranch("T-1", "feature/x"); err == nil {
+		t.Fatal("WriteTicketBranch on an unreadable ticket.yaml: want an error, got nil")
 	}
 
 	after, err := os.ReadFile(path)
@@ -279,7 +247,7 @@ func TestTicketMutateRefusesUnreadableRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(after) != string(before) {
-		t.Fatalf("ticket.yaml changed after refused writes:\nbefore %q\nafter  %q", before, after)
+		t.Fatalf("ticket.yaml changed after the refused write:\nbefore %q\nafter  %q", before, after)
 	}
 }
 
@@ -297,8 +265,8 @@ func TestTicketBranchDefault(t *testing.T) {
 		t.Fatalf("TicketBranch = %q, want %q", got, "jig/T-1")
 	}
 
-	if err := st.WriteTicketTitle("T-2", "Fix the thing"); err != nil {
-		t.Fatalf("WriteTicketTitle: %v", err)
+	if err := st.CreateTicketRecord("T-2", Ticket{Title: "Fix the thing"}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
 	}
 	got, err = st.TicketBranch("T-2", "main")
 	if err != nil {
@@ -323,6 +291,32 @@ func TestTicketBranchRecorded(t *testing.T) {
 	}
 	if got != "feature/custom" {
 		t.Fatalf("TicketBranch = %q, want %q", got, "feature/custom")
+	}
+}
+
+// TestResolveTicketBranchWorksOnTheRecordItIsGiven covers the caller that has
+// already read the record for something else (publish's title): the branch
+// comes from the record it hands over, default and refusals included, not from
+// a second read of ticket.yaml, which here records another branch that would
+// pass every check.
+func TestResolveTicketBranchWorksOnTheRecordItIsGiven(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	if err := st.WriteTicketBranch("T-1", "on-disk"); err != nil {
+		t.Fatalf("WriteTicketBranch: %v", err)
+	}
+
+	got, err := st.ResolveTicketBranch("T-1", Ticket{Branch: "given"}, "main")
+	if err != nil || got != "given" {
+		t.Fatalf("ResolveTicketBranch(a record with a branch) = %q, %v, want %q", got, err, "given")
+	}
+	got, err = st.ResolveTicketBranch("T-1", Ticket{}, "main")
+	if err != nil || got != "jig/T-1" {
+		t.Fatalf("ResolveTicketBranch(a record with none) = %q, %v, want the default %q", got, err, "jig/T-1")
+	}
+	_, err = st.ResolveTicketBranch("T-1", Ticket{Branch: "main"}, "main")
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "TICKET_BRANCH_INVALID" {
+		t.Fatalf("ResolveTicketBranch(the target) = %v, want *axi.Error TICKET_BRANCH_INVALID", err)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -117,18 +118,47 @@ type Graduation struct {
 // minted sibling rather than an existing tracker id.
 var indexRefRE = regexp.MustCompile(`^#(\d+)$`)
 
+// CheckMinted refuses an id a tracker has just minted that jig cannot use (see
+// pool.CheckTicket): a reserved suffix, or something that is not a single
+// directory name. A tracker like github or a command tracker knows its id
+// only once the ticket exists, so it cannot be asked beforehand: the refusal
+// comes after the mint, and its help says the ticket now exists in the
+// tracker and must be closed there. Every command that mints a ticket into
+// the store (jig ticket new, jig graduate) runs this before it writes
+// anything under the id, so an unusable id never gets a store folder or
+// record, inside the store or, for a path-like id, outside it. It returns an
+// *axi.Error, which a caller passes on as is.
+func CheckMinted(a Adapter, id string) error {
+	if err := pool.CheckTicket(id); err != nil {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("the %s tracker minted %s, which jig cannot use: %v", a.Name(), id, err),
+			Code: "VALIDATION_ERROR",
+			Help: []string{
+				fmt.Sprintf("%s now exists in the %s tracker; close it there", id, a.Name()),
+				"Change the tracker's id scheme so new ids are usable, then run this command again",
+			},
+		}
+	}
+	return nil
+}
+
 // Graduate mints every ticket in g.Tickets in order, resolving "#k"
 // BlockedBy references to the id minted for the k-th ticket, and creates the
-// store's ticket folder for each minted id. A minted ticket with at least
-// one resolved blocker gets its <ticket>/ticket.yaml written before the next
-// ticket in g.Tickets is minted. After each ticket is fully minted, onMinted
-// (when non-nil) is called with its 0-based position in g.Tickets and its
-// id, so a caller can record that ticket's id (e.g. write it back into a
-// chart entry) before the next ticket is minted: a failure partway through
-// then leaves every already-minted ticket recorded by the caller, and a
-// re-run continues where it stopped instead of minting duplicates. Graduate
-// returns the ids minted so far - complete on success, partial (with the
-// error) on a failure partway through.
+// store's ticket folder for each minted id. An id jig cannot use is refused
+// (CheckMinted) before anything is written under it. Every minted ticket
+// gets its <ticket>/ticket.yaml - the title and its resolved blockers, if
+// any - written before the next ticket in g.Tickets is minted, the same
+// record jig ticket new creates for a directly minted ticket; an id that
+// already has a ticket.yaml is refused (store.ErrTicketRecordExists) rather
+// than merged into. After each ticket is fully minted, onMinted (when
+// non-nil) is called with its 0-based position in g.Tickets and its id, so a
+// caller can record that ticket's id (e.g. write it back into a chart entry)
+// before the next ticket is minted: a failure partway through then leaves
+// every already-minted ticket recorded by the caller, and a re-run continues
+// where it stopped instead of minting duplicates. Graduate returns the ids
+// minted so far - complete on success, partial (with the error) on a failure
+// partway through; an id is in the list as soon as the tracker minted it,
+// whether or not it was then refused or recorded.
 func Graduate(a Adapter, st *store.Store, g Graduation, onMinted func(i int, id string) error) ([]string, error) {
 	ids := make([]string, len(g.Tickets))
 
@@ -144,17 +174,23 @@ func Graduate(a Adapter, st *store.Store, g Graduation, onMinted func(i int, id 
 			return ids, fmt.Errorf("tracker: graduate: mint ticket %d: %w", i+1, err)
 		}
 		ids[i] = id
+		if err := CheckMinted(a, id); err != nil {
+			return ids, err
+		}
 		if err := os.MkdirAll(st.TicketDir(id), 0o755); err != nil {
 			return ids, fmt.Errorf("tracker: graduate: create store folder for %s: %w", id, err)
 		}
-		if len(resolved) > 0 {
-			deps := make([]store.TicketBlockedBy, len(resolved))
-			for j, b := range resolved {
-				deps[j] = store.TicketBlockedBy{Ticket: b.Ref, Kind: b.Kind}
-			}
-			if err := st.WriteTicketDeps(id, deps); err != nil {
-				return ids, fmt.Errorf("tracker: graduate: write ticket.yaml for %s: %w", id, err)
-			}
+		// Record the ticket the same way jig ticket new does for a directly
+		// minted one, so consolidatedTitle (internal/verifydeliver) finds a
+		// title for a graduated ticket too instead of falling all the way
+		// back to the bare id: nothing else reads a graduated ticket's title
+		// back from its tracker projection.
+		rec := store.Ticket{Title: d.Title}
+		for _, b := range resolved {
+			rec.BlockedBy = append(rec.BlockedBy, store.TicketBlockedBy{Ticket: b.Ref, Kind: b.Kind})
+		}
+		if err := st.CreateTicketRecord(id, rec); err != nil {
+			return ids, fmt.Errorf("tracker: graduate: write ticket.yaml for %s: %w", id, err)
 		}
 		if onMinted != nil {
 			if err := onMinted(i, id); err != nil {

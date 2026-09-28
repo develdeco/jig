@@ -22,6 +22,25 @@ func mustMkdirTicket(t *testing.T, st *store.Store, id string) {
 	}
 }
 
+// replaceTicketDeps stands in for a hand edit of ticket.yaml's blocked_by:
+// the record is rewritten with deps in place of whatever it held, keeping its
+// title, or created when the ticket had none. It goes through the store's own
+// record writer, so the file stays one jig would have written.
+func replaceTicketDeps(t *testing.T, st *store.Store, ticket string, deps []store.TicketBlockedBy) {
+	t.Helper()
+	rec, err := st.ReadTicket(ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(st.TicketDir(ticket), "ticket.yaml")); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	rec.BlockedBy = deps
+	if err := st.CreateTicketRecord(ticket, rec); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestValidateTicketDepsAbsent covers a ticket without ticket.yaml: it
 // validates as before, with no problems reported.
 func TestValidateTicketDepsAbsent(t *testing.T) {
@@ -102,9 +121,7 @@ func TestValidateTicketDepsMissingTicket(t *testing.T) {
 func TestValidateTicketDepsUnknownBlocker(t *testing.T) {
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
-	if err := st.WriteTicketDeps("T-1", []store.TicketBlockedBy{{Ticket: "T-999", Kind: "merged"}}); err != nil {
-		t.Fatal(err)
-	}
+	replaceTicketDeps(t, st, "T-1", []store.TicketBlockedBy{{Ticket: "T-999", Kind: "merged"}})
 
 	got := validateTicketDeps(st, "T-1")
 	if len(got) != 1 || !strings.Contains(got[0], "T-999") || !strings.Contains(got[0], "not found") {
@@ -117,9 +134,7 @@ func TestValidateTicketDepsBadKind(t *testing.T) {
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 	mustMkdirTicket(t, st, "T-2")
-	if err := st.WriteTicketDeps("T-1", []store.TicketBlockedBy{{Ticket: "T-2", Kind: "bogus"}}); err != nil {
-		t.Fatal(err)
-	}
+	replaceTicketDeps(t, st, "T-1", []store.TicketBlockedBy{{Ticket: "T-2", Kind: "bogus"}})
 
 	got := validateTicketDeps(st, "T-1")
 	if len(got) != 1 || !strings.Contains(got[0], `must be "merged" or "stacked"`) {
@@ -133,12 +148,8 @@ func TestValidateTicketDepsCycle(t *testing.T) {
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 	mustMkdirTicket(t, st, "T-2")
-	if err := st.WriteTicketDeps("T-1", []store.TicketBlockedBy{{Ticket: "T-2", Kind: "merged"}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.WriteTicketDeps("T-2", []store.TicketBlockedBy{{Ticket: "T-1", Kind: "merged"}}); err != nil {
-		t.Fatal(err)
-	}
+	replaceTicketDeps(t, st, "T-1", []store.TicketBlockedBy{{Ticket: "T-2", Kind: "merged"}})
+	replaceTicketDeps(t, st, "T-2", []store.TicketBlockedBy{{Ticket: "T-1", Kind: "merged"}})
 
 	got := validateTicketDeps(st, "T-1")
 	var cyc string
@@ -156,9 +167,7 @@ func TestValidateTicketDepsCycle(t *testing.T) {
 func TestValidateTicketDepsSelfCycle(t *testing.T) {
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
-	if err := st.WriteTicketDeps("T-1", []store.TicketBlockedBy{{Ticket: "T-1", Kind: "merged"}}); err != nil {
-		t.Fatal(err)
-	}
+	replaceTicketDeps(t, st, "T-1", []store.TicketBlockedBy{{Ticket: "T-1", Kind: "merged"}})
 
 	got := validateTicketDeps(st, "T-1")
 	found := false
@@ -327,12 +336,8 @@ func TestValidateCommandReportsTicketDepsProblem(t *testing.T) {
 	}
 	idA, idB := ids[0], ids[1]
 
-	if err := st.WriteTicketDeps(idA, []store.TicketBlockedBy{{Ticket: idB, Kind: "merged"}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.WriteTicketDeps(idB, []store.TicketBlockedBy{{Ticket: idA, Kind: "merged"}}); err != nil {
-		t.Fatal(err)
-	}
+	replaceTicketDeps(t, st, idA, []store.TicketBlockedBy{{Ticket: idB, Kind: "merged"}})
+	replaceTicketDeps(t, st, idB, []store.TicketBlockedBy{{Ticket: idA, Kind: "merged"}})
 
 	code, out := jig("validate", idA)
 	if code == 0 {
