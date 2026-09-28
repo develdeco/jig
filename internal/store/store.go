@@ -174,8 +174,10 @@ func inProgressRebaseOrMerge(dir string) (string, error) {
 // stageAndCommit stages every change (`add -A`) and, when anything is
 // staged, commits it with jig's identity and msg. It reports whether a
 // commit was made. Its callers, Sync and Push, have already run
-// refuseIfMidRebaseOrMerge, and nothing between that check and this call
-// changes the store, so it does not repeat the check's two git calls.
+// refuseIfMidRebaseOrMerge, and only read-only git calls run between that
+// check and this one, so it does not repeat the check's two git calls.
+// Another process working on the same store can still slip in between, as
+// it always could between the check and `add -A`.
 func (s *Store) stageAndCommit(msg string) (bool, error) {
 	if _, err := gitx.Run(s.Root, "add", "-A"); err != nil {
 		return false, err
@@ -229,7 +231,7 @@ func (s *Store) Push(msg string) error {
 
 // abortFailedPull handles jig's own failed `pull --rebase` on branch. A
 // pull that stopped on a conflict leaves a rebase in progress
-// (stageAndCommit refused any rebase or merge that was already there, so
+// (Sync and Push refused any rebase or merge that was already there, so
 // this one is jig's own): the conflicting paths are read structurally
 // (`git ls-files -u`, before anything else touches the index) so the report
 // can name them, then the rebase is aborted with a best-effort `rebase
