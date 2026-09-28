@@ -1137,7 +1137,8 @@ above:
   shell's command hash does, so a test that changes PATH is searched again
   (`TestRunSearchesPATHAgainWhenItChanges`). A reused path that no longer exists
   (git removed or moved while jig runs) fails to start; gitx then forgets it and
-  tries once more (`TestRunSearchesAgainWhenTheGitItFoundIsGone`). On that machine `TestPublishFullChain`
+  tries once more (`TestRunSearchesAgainWhenTheGitItFoundIsGone`), unless the call's
+  own working directory is what is missing. On that machine `TestPublishFullChain`
   went from 50-56 s to 27 s. A GitHub Windows runner's search costs 1.6-3.4 ms (git is
   27 entries into its 74-entry PATH), so CI time there does not change measurably.
 - Long-lived repos (the store after a push, a pool lease after a reuse fetch) get a

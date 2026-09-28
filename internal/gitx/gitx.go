@@ -57,13 +57,24 @@ func RunRaw(dir string, args ...string) (string, error) {
 // process environment is inherited without repoEnv, then env is appended.
 // When git fails to start because the path gitCommand reused no longer
 // exists (git was removed or moved while jig ran), run forgets that path and
-// tries once more, which searches PATH again.
+// tries once more, which searches PATH again. A missing dir fails the same
+// way and is returned as is: searching PATH again would not help.
 func run(dir string, env []string, stdout, stderr io.Writer, args []string) error {
 	err := runOnce(dir, env, stdout, stderr, args)
-	if errors.Is(err, fs.ErrNotExist) && forgetGit() {
+	if errors.Is(err, fs.ErrNotExist) && dirExists(dir) && forgetGit() {
 		err = runOnce(dir, env, stdout, stderr, args)
 	}
 	return err
+}
+
+// dirExists reports whether dir names an existing directory; "" is the
+// process's own working directory, which always does.
+func dirExists(dir string) bool {
+	if dir == "" {
+		return true
+	}
+	fi, err := os.Stat(dir)
+	return err == nil && fi.IsDir()
 }
 
 // runOnce is one attempt of run.

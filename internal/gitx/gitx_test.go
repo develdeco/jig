@@ -668,6 +668,31 @@ func TestRunSearchesAgainWhenTheGitItFoundIsGone(t *testing.T) {
 	}
 }
 
+// TestRunKeepsTheGitItFoundWhenTheDirIsMissing: a call whose own working
+// directory does not exist fails to start too, but that says nothing about
+// git, so run returns the error without forgetting the path it reuses. On
+// Linux and macOS that failure is a not-exist error, the case the check is
+// for; Windows reports an invalid directory instead, so there the test
+// passes either way.
+func TestRunKeepsTheGitItFoundWhenTheDirIsMissing(t *testing.T) {
+	if _, err := Run(t.TempDir(), "--version"); err != nil {
+		t.Fatalf("git --version: %v", err)
+	}
+	found := lookGit()
+	if found == "" {
+		t.Fatal("setup: gitx found no git to reuse")
+	}
+	if _, err := Run(filepath.Join(t.TempDir(), "missing"), "--version"); err == nil {
+		t.Fatal("git in a missing directory: nil error, want a failure to start")
+	}
+	gitPath.Lock()
+	kept := gitPath.path
+	gitPath.Unlock()
+	if kept != found {
+		t.Fatalf("after a missing-dir failure gitx reuses %q, want %q still", kept, found)
+	}
+}
+
 // TestClearRepoEnv covers the startup half of the same rule: cmd/jig clears
 // GIT_DIR and the like from its own process, so a session, an oracle or an
 // env class command it starts inherits none of them either. Other GIT_*
