@@ -1036,8 +1036,11 @@ above:
 
 - The fixture envtool is pre-built rather than invoked via `go run`, because it is a
   cross-platform Go program and the `go run` form would hang on PATH-less shells and
-  recompile on every lifecycle call. It is built once per test binary and shared by
-  every Generate call, since nothing about it varies between fixtures.
+  recompile on every lifecycle call. It is built once per process and cached outside
+  any fixture dir; each Build call then copies that cached binary into its own
+  dir/bin, so a fixture no longer references that shared, longer-lived cache. The
+  fixture's oracle command still runs the Go toolchain at `runtime.GOROOT()`, a path
+  outside dir.
 - e2e fails the whole run when the jig binary does not build, instead of skipping
   every test: a skipped suite reads as green.
 - Status goldens: state (a) ("A green, B blocked") is constructed directly via store
