@@ -120,7 +120,7 @@ func TestLocalProjection(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	id, err := a.Mint(tracker.Draft{Title: "Epic slice", Body: "Do the thing"})
+	id, err := a.Mint(tracker.Draft{Title: "Chart slice", Body: "Do the thing"})
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestLocalCommentConcurrentNumbering(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	id, err := a.Mint(tracker.Draft{Title: "Epic slice", Body: "Do the thing"})
+	id, err := a.Mint(tracker.Draft{Title: "Chart slice", Body: "Do the thing"})
 	if err != nil {
 		t.Fatalf("Mint: %v", err)
 	}

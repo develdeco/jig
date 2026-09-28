@@ -37,6 +37,10 @@ var commandTable = []cmdSpec{
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},
+	{"graduate", "create tickets from a chart: jig graduate <chart>", []flagSpec{
+		{"store", "explicit store path", false},
+		{"project", "project name, resolved via the machine mapping", false},
+	}, false},
 	{"solve", "run the full chain: run, gate, publish", []flagSpec{
 		{"yes", "skip the interactive publish confirm and finding triage", false},
 		{"answer", "answer a pending question: --answer <qid> <text>", false},
