@@ -136,6 +136,41 @@ was ambiguous, what was chosen, and why.
   back out at today's `schema_version`, silently downgrading it. Both
   refusals reach a build lease, gate round or publish unchanged through
   `Store.TicketBranch`, with their own code and next step.
+- `Store.TicketBranch` is the one place that resolves a ticket's working
+  branch: the recorded `branch`, or `jig/<ticket>` when none is recorded. It
+  replaces every hardcoded `"jig/"+ticket` across frontier, gate, reconcile
+  and publish (`internal/verifydeliver/verifydeliver.go`'s old `ticketBranch`
+  helper is gone; test files keep a same-named literal-only helper that names
+  the default branch in test setup and assertions). `Publish` and `Gate`
+  resolve it once, at the top, and hand the name to the lease, the fetch from
+  the build lease and `reconcile` (which takes the branch, not the store): a
+  `ticket.yaml` that changes while a command runs cannot make it reconcile
+  one branch and push another. `frontier.Run` does the same on its first
+  slice attempt (not up front, so a run with nothing on its frontier never
+  reads the record): every slice of one run, across its concurrent repo
+  groups, builds on that one branch. `Store.TicketBranch` also takes `target`
+  and refuses a recorded branch equal to it (a comparison of names:
+  `refs/heads/main` passes it, and git refuses the push later as ambiguous),
+  or one git itself would reject as a ref name (`git check-ref-format
+  --branch`), or one git only expands: `@{-1}` names the store's previously
+  checked-out branch, so the name `check-ref-format` prints must equal the
+  recorded one, or the same store content would pass on one machine and fail
+  on another. Both checks are of names, so a spelling git resolves on its own
+  terms passes them: `refs/heads/main` for the target, and `@`, which git
+  reads as `HEAD` wherever it parses a revision (a checkout of it stays
+  where it is), for the name check. Reconcile's merge and publish's
+  guardedPush both trust whatever this resolves, and landing straight on
+  target - skipping the PR - is the one failure mode worth refusing at the one
+  place every caller already goes through, rather than trusting it silently.
+  `jig validate` runs the same check against the primary repo's target, whose
+  "main" default now lives in one place, `project.Repo.TargetBranch`, instead
+  of the copies in frontier and verifydeliver and a third `validate` would
+  have added. A `ticket.yaml` it cannot read is reported once, with the
+  refusal's own next steps listed under it (`ReadTicket`'s help names the fix,
+  which the message alone does not). Nothing writes `branch` yet through this
+  path - `WriteTicketBranch` has no caller in v0.1, branch adoption is a later
+  change - so today this only guards a hand-edited or otherwise externally
+  written `ticket.yaml`.
 
 ## Chart handover
 

@@ -108,7 +108,13 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 
 	repo, repoName, target := primaryRepo(d.Cfg)
-	branch := ticketBranch(ticket)
+	// Resolved once: the lease, the fetch, the reconcile, the confirm prompt,
+	// the push and the PR all name this one branch, so a ticket.yaml that
+	// changes while publish runs cannot split them across two.
+	branch, err := d.Store.TicketBranch(ticket, target)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve ticket branch: %w", err)
+	}
 	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Publish)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
@@ -119,7 +125,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	if err := fetchTicketBranchFromBuildLease(d.Home, lease.Dir, repoName, ticket); err != nil {
+	if err := fetchTicketBranchFromBuildLease(d.Home, lease.Dir, repoName, ticket, branch); err != nil {
 		return PublishReport{}, err
 	}
 	if _, err := gitx.Run(lease.Dir, "fetch", "origin"); err != nil {
@@ -127,7 +133,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 
 	// Step 1: reconcile.
-	policy, err := reconcile(lease.Dir, ticket, target, identityEnv)
+	policy, err := reconcile(lease.Dir, branch, target, identityEnv)
 	if err != nil {
 		return PublishReport{}, err
 	}

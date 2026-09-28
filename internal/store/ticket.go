@@ -238,16 +238,17 @@ func (s *Store) WriteTicketBranch(ticket string, branch string) error {
 // round and publish would otherwise fail with no more than a bare message.
 //
 // A recorded branch equal to target, one git itself would refuse as a ref
-// name, or one git reads as shorthand for another ("@{-1}", the previously
-// checked-out branch, which depends on the store's own checkout history), is
-// never returned either: reconcile's merge and publish's guardedPush both
-// trust whatever TicketBranch resolves, and target is the one branch where
-// landing on it directly - skipping the PR - would matter. The comparison
-// with target is of names: a spelling that only git resolves to target
-// (refs/heads/main) passes it. Nothing writes branch yet (WriteTicketBranch
-// has no caller in v0.1), so today this only guards a hand-edited or
-// otherwise externally written ticket.yaml, which `jig validate` checks the
-// same way.
+// name, or one git expands against this store's own checkout history
+// ("@{-1}", the previously checked-out branch, which differs from one machine
+// to the next), is never returned either: reconcile's merge and publish's
+// guardedPush both trust whatever TicketBranch resolves, and target is the
+// one branch where landing on it directly - skipping the PR - would matter.
+// Both checks are of names, so a spelling git resolves on its own terms
+// passes them: "refs/heads/main" for target, and "@", which git reads as HEAD
+// wherever it parses a revision (a checkout of it stays where it is), for the
+// name check. Nothing writes branch yet (WriteTicketBranch has no caller in
+// v0.1), so today this only guards a hand-edited or otherwise externally
+// written ticket.yaml, which `jig validate` checks the same way.
 func (s *Store) TicketBranch(ticket, target string) (string, error) {
 	t, err := s.ReadTicket(ticket)
 	if err != nil {

@@ -39,15 +39,8 @@ type Deps struct {
 // to "main" when unset).
 func primaryRepo(cfg project.Config) (project.Repo, string, string) {
 	repo := cfg.Repos[0]
-	target := repo.Target
-	if target == "" {
-		target = "main"
-	}
-	return repo, repo.Name(), target
+	return repo, repo.Name(), repo.TargetBranch()
 }
-
-// ticketBranch is the ticket's working branch name.
-func ticketBranch(ticket string) string { return "jig/" + ticket }
 
 // identityDir returns where Publish resolves the operator's identity for
 // repoName: their mapped clone, or leaseDir when none is recorded.

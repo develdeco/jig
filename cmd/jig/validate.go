@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -90,6 +91,7 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	}
 
 	problems = append(problems, validateTicketDeps(st, ticket)...)
+	problems = append(problems, validateTicketBranch(st, cfg, ticket)...)
 
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
@@ -231,11 +233,19 @@ func findBlockedByCycle(slices []store.Slice) string {
 
 // validateTicketDeps checks ticket's optional ticket.yaml, returning every
 // problem found (nil means valid or absent). A ticket without the file
-// validates as before.
+// validates as before. A ticket.yaml that cannot be read is one problem, the
+// failure itself, followed by the next steps the refusal carries when it has
+// any (an unknown key: upgrade jig or fix the key; a newer schema: upgrade
+// jig), since the message alone names the problem but not what to do about it.
 func validateTicketDeps(st *store.Store, ticket string) []string {
 	deps, err := st.ReadTicketDeps(ticket)
 	if err != nil {
-		return []string{fmt.Sprintf("ticket.yaml could not be read: %v", err)}
+		problems := []string{fmt.Sprintf("ticket.yaml could not be read: %v", err)}
+		var ae *axi.Error
+		if errors.As(err, &ae) {
+			problems = append(problems, ae.Help...)
+		}
+		return problems
 	}
 
 	var problems []string
@@ -256,6 +266,28 @@ func validateTicketDeps(st *store.Store, ticket string) []string {
 		problems = append(problems, "ticket.yaml blocked_by cycle: "+cyc)
 	}
 	return problems
+}
+
+// validateTicketBranch checks ticket's optional recorded branch through the
+// same Store.TicketBranch validation every build lease, gate round and
+// publish runs, so a bad hand-edited branch (equal to the primary repo's
+// target, or not a name git itself would accept) is reported here, where it
+// is cheap to fix, before one of those fails on it. A record that cannot be
+// read at all is left to validateTicketDeps, which already reports it:
+// reporting it again here would duplicate the same "ticket.yaml could not be
+// read" problem.
+func validateTicketBranch(st *store.Store, cfg project.Config, ticket string) []string {
+	if _, err := st.ReadTicket(ticket); err != nil {
+		return nil
+	}
+	var primary project.Repo
+	if len(cfg.Repos) > 0 {
+		primary = cfg.Repos[0]
+	}
+	if _, err := st.TicketBranch(ticket, primary.TargetBranch()); err != nil {
+		return []string{err.Error()}
+	}
+	return nil
 }
 
 // ticketDepsCycle runs a DFS over blocked_by edges rooted at ticket, reading

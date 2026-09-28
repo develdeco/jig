@@ -23,6 +23,16 @@ type Repo struct {
 	Target string `yaml:"target,omitempty"`
 }
 
+// TargetBranch returns the branch a ticket's work lands on: Target, or
+// "main" when none is configured. Everything that needs the target asks
+// here, so the default has one owner.
+func (r Repo) TargetBranch() string {
+	if r.Target == "" {
+		return "main"
+	}
+	return r.Target
+}
+
 // Name returns the repo's short name: the basename of Remote with a
 // trailing ".git" removed. Works for both URLs and local filesystem paths.
 func (r Repo) Name() string {

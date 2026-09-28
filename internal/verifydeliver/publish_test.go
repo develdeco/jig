@@ -228,6 +228,101 @@ func TestPublishFullChain(t *testing.T) {
 	}
 }
 
+// TestPublishUsesRecordedBranch publishes a ticket whose ticket.yaml records
+// a branch, built and gated on that branch instead of the "jig/<ticket>"
+// default. Publish resolves the branch once and hands it to the lease, the
+// fetch from the build lease, reconcile, the push and the PR, so the squash
+// must land on origin under the recorded name. A branch under the default
+// name already sits on origin, as a stale one could: reconcile must not take
+// it for the ticket's own (which would make it merge, as it does for a pushed
+// branch, instead of rebasing), and publish must leave it alone. Every other
+// Publish test here records no branch, so a Publish that hardcoded
+// "jig/"+ticket, or resolved it separately in each step, would still pass
+// them.
+func TestPublishUsesRecordedBranch(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	recordBranch(t, d.Store, fx.Ticket, "feature/custom")
+	gateToClean(t, fx, d)
+	advanceTarget(t, fx)
+
+	decoy, err := gitx.Run(fx.RepoRemote, "rev-parse", "refs/heads/main")
+	if err != nil {
+		t.Fatalf("resolve origin's main: %v", err)
+	}
+	if _, err := gitx.Run(fx.RepoRemote, "branch", ticketBranch(fx.Ticket), decoy); err != nil {
+		t.Fatalf("create the stale %s on origin: %v", ticketBranch(fx.Ticket), err)
+	}
+
+	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	sha := report.Squashed["fixture-repo"]
+	if sha == "" {
+		t.Fatalf("Squashed[fixture-repo] missing, got %v", report.Squashed)
+	}
+
+	remoteHead, err := gitx.Run(fx.RepoRemote, "rev-parse", "refs/heads/feature/custom")
+	if err != nil {
+		t.Fatalf("resolve origin's recorded branch: %v", err)
+	}
+	if remoteHead != sha {
+		t.Fatalf("origin feature/custom = %s, want the squash sha %s", remoteHead, sha)
+	}
+	if got, err := gitx.Run(fx.RepoRemote, "rev-parse", "refs/heads/"+ticketBranch(fx.Ticket)); err != nil || got != decoy {
+		t.Fatalf("origin %s = %q (err %v), want the stale branch untouched at %s", ticketBranch(fx.Ticket), got, err, decoy)
+	}
+
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatalf("journal.Read: %v", err)
+	}
+	policy := ""
+	for _, l := range lines {
+		if l.Event == "reconcile" {
+			policy = l.Outcome
+		}
+	}
+	if !strings.HasPrefix(policy, policyLocalRebase+":") {
+		t.Fatalf("reconcile outcome = %q, want the %q policy: the recorded branch was never pushed, whatever sits under the default name", policy, policyLocalRebase)
+	}
+}
+
+// TestPublishRefusesARecordedBranchEqualToTheTarget is the other side of
+// TestPublishUsesRecordedBranch: a branch Store.TicketBranch refuses (here the
+// target itself, where a push would land without the PR) fails publish with
+// the refusal's code before it pushes anything. Origin's main and the
+// ticket's default branch, which the command must not fall back to, keep
+// their shas. The ticket is gated first, on the branch it had then: the gate
+// helper resolves the branch too, and would refuse it.
+func TestPublishRefusesARecordedBranchEqualToTheTarget(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	gateToClean(t, fx, d)
+	recordBranch(t, d.Store, fx.Ticket, "main")
+	if _, err := d.Store.TicketBranch(fx.Ticket, "main"); err == nil {
+		t.Fatal("test setup: a recorded branch equal to the target must be refused")
+	}
+	defaultBranch := "refs/heads/" + ticketBranch(fx.Ticket)
+	mainBefore := originRef(t, fx.RepoRemote, "refs/heads/main")
+	defaultBefore := originRef(t, fx.RepoRemote, defaultBranch)
+
+	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+	wantTicketBranchInvalid(t, err)
+
+	if got := originRef(t, fx.RepoRemote, "refs/heads/main"); got != mainBefore {
+		t.Fatalf("origin main = %q after the refused publish, want %q unchanged", got, mainBefore)
+	}
+	if got := originRef(t, fx.RepoRemote, defaultBranch); got != defaultBefore {
+		t.Fatalf("origin %s = %q after the refused publish, want %q unchanged", defaultBranch, got, defaultBefore)
+	}
+}
+
 func TestPublishTierNone(t *testing.T) {
 	t.Parallel()
 
@@ -355,7 +450,7 @@ func TestRecordAndCheckDivergenceRefusesEmptyDiff(t *testing.T) {
 	run(t, advance, "push", "origin", "main")
 
 	run(t, clone, "fetch", "origin")
-	policy, err := reconcile(clone, "T-1", "main", nil)
+	policy, err := reconcile(clone, ticketBranch("T-1"), "main", nil)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -411,7 +506,7 @@ func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
 	run(t, advance, "push", "origin", "main")
 
 	run(t, clone, "fetch", "origin")
-	policy, err := reconcile(clone, "T-1", "main", nil)
+	policy, err := reconcile(clone, ticketBranch("T-1"), "main", nil)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -437,7 +532,9 @@ func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
 // It checks that Publish threads an honest confirm value into guardedPush: a
 // declined interactive prompt must stop before any push is attempted, and
 // both --yes and an accepted prompt must pass confirmed=true - never a
-// hardcoded literal, and never proceeding past a decline. Its
+// hardcoded literal, and never proceeding past a decline. It also checks that
+// the prompt and the push both name the ticket's own branch: on a ticket that
+// records one, the recorded name, not the "jig/<ticket>" default. Its
 // declined_prompt_pushes_store_not_branch and push_error_axi_code_only
 // subtests also each call wantFailureCommit, pinning the deferred
 // best-effort push these reproduce: the store must end up clean, pushed,
@@ -452,16 +549,21 @@ func TestPublishConfirmWiring(t *testing.T) {
 	origConfirm := confirm
 	defer func() { guardedPush = origPush; confirm = origConfirm }()
 
-	newPublishableFixture := func(t *testing.T) (*fixture.Fixture, Deps) {
+	// newPublishableFixture generates a gated ticket, recording branch on it
+	// first when one is given.
+	newPublishableFixture := func(t *testing.T, branch string) (*fixture.Fixture, Deps) {
 		t.Helper()
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		d := newDeps(t, fx)
+		if branch != "" {
+			recordBranch(t, d.Store, fx.Ticket, branch)
+		}
 		gateToClean(t, fx, d)
 		return fx, d
 	}
 
 	t.Run("declined_prompt_pushes_store_not_branch", func(t *testing.T) {
-		fx, d := newPublishableFixture(t)
+		fx, d := newPublishableFixture(t, "")
 		called := false
 		guardedPush = func(string, string, string, bool) error {
 			called = true
@@ -486,7 +588,7 @@ func TestPublishConfirmWiring(t *testing.T) {
 	})
 
 	t.Run("push_error_axi_code_only", func(t *testing.T) {
-		fx, d := newPublishableFixture(t)
+		fx, d := newPublishableFixture(t, "")
 		guardedPush = func(string, string, string, bool) error {
 			return &axi.Error{Msg: "push rejected: /host/secret/abs/path", Code: "PUBLISH_PUSH_REJECTED"}
 		}
@@ -498,7 +600,7 @@ func TestPublishConfirmWiring(t *testing.T) {
 	})
 
 	t.Run("yes_flag_threads_confirmed_true", func(t *testing.T) {
-		fx, d := newPublishableFixture(t)
+		fx, d := newPublishableFixture(t, "")
 		var gotConfirmed bool
 		guardedPush = func(_, _, _ string, confirmed bool) error {
 			gotConfirmed = confirmed
@@ -513,19 +615,30 @@ func TestPublishConfirmWiring(t *testing.T) {
 	})
 
 	t.Run("accepted_prompt_threads_confirmed_true", func(t *testing.T) {
-		fx, d := newPublishableFixture(t)
+		fx, d := newPublishableFixture(t, "feature/custom")
 		var gotConfirmed bool
-		guardedPush = func(_, _, _ string, confirmed bool) error {
+		var pushed, prompted, promptedTicket string
+		guardedPush = func(_, _, branch string, confirmed bool) error {
 			gotConfirmed = confirmed
+			pushed = branch
 			return nil
 		}
-		confirm = func(string, string) bool { return true }
+		confirm = func(branch, ticket string) bool {
+			prompted, promptedTicket = branch, ticket
+			return true
+		}
 
 		if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: false}); err != nil {
 			t.Fatalf("Publish: %v", err)
 		}
 		if !gotConfirmed {
 			t.Fatal("guardedPush confirmed = false, want true after an accepted prompt")
+		}
+		if prompted != "feature/custom" || pushed != "feature/custom" {
+			t.Fatalf("prompt named branch %q and push named %q, want both to name the ticket's recorded branch %q", prompted, pushed, "feature/custom")
+		}
+		if promptedTicket != fx.Ticket {
+			t.Fatalf("prompt named ticket %q, want %q", promptedTicket, fx.Ticket)
 		}
 	})
 }

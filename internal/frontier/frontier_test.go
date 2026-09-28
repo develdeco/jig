@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -115,6 +116,183 @@ func TestRunScenarioMainChain(t *testing.T) {
 	}
 	if strings.TrimSpace(string(gotSHA)) != wantSHA {
 		t.Fatalf("start sha = %q, want origin/main sha %q", gotSHA, wantSHA)
+	}
+}
+
+// TestRunUsesRecordedBranchForBuildLease covers frontier's own
+// resolve-and-acquire call site (processSlice): with a branch recorded on
+// the ticket, the build lease pool.Acquire creates is checked out on that
+// branch, not the "jig/<ticket>" default - proof frontier's own
+// TicketBranch call site is exercised, since no other frontier test here
+// ever records one, so reverting that call site to a hardcoded
+// "jig/"+ticket would still leave every one of them green.
+func TestRunUsesRecordedBranchForBuildLease(t *testing.T) {
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d, st := newDeps(t, fx)
+	if err := st.WriteTicketBranch(fx.Ticket, "feature/custom"); err != nil {
+		t.Fatalf("WriteTicketBranch: %v", err)
+	}
+
+	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	repoName := d.Cfg.Repos[0].Name()
+	leaseDir, err := pool.Dir(d.Home, repoName, fx.Ticket, pool.Build)
+	if err != nil {
+		t.Fatalf("pool.Dir: %v", err)
+	}
+	head, err := gitx.Run(leaseDir, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		t.Fatalf("symbolic-ref: %v", err)
+	}
+	if head != "feature/custom" {
+		t.Fatalf("build lease branch = %q, want the recorded %q", head, "feature/custom")
+	}
+}
+
+// TestRunFailsWithTheRefusalOfTicketBranch covers the other side of
+// TestRunUsesRecordedBranchForBuildLease: whatever Store.TicketBranch refuses
+// is the run's own failure, with the refusal's code, and no build lease is
+// created for it. The two refusals a ticket.yaml can earn are a recorded
+// branch equal to the target (the one branch a build must never land on) and a
+// record jig cannot read (here one a newer jig wrote, which may name a branch
+// this jig does not understand). A Run that fell back to "jig/<ticket>" on
+// either would build there instead, which is the silent fallback the refusals
+// exist to prevent; a fallback that tells the two apart and keeps only one
+// refusal is still one.
+func TestRunFailsWithTheRefusalOfTicketBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		record   func(t *testing.T, st *store.Store, ticket string)
+		wantCode string
+	}{
+		{
+			name: "recorded branch equal to the target",
+			record: func(t *testing.T, st *store.Store, ticket string) {
+				if err := st.WriteTicketBranch(ticket, "main"); err != nil {
+					t.Fatalf("WriteTicketBranch: %v", err)
+				}
+			},
+			wantCode: "TICKET_BRANCH_INVALID",
+		},
+		{
+			// Written with os.WriteFile: WriteTicketBranch refuses a
+			// record of a schema this jig cannot read.
+			name: "record of a newer schema",
+			record: func(t *testing.T, st *store.Store, ticket string) {
+				if err := os.WriteFile(filepath.Join(st.TicketDir(ticket), "ticket.yaml"), []byte("schema_version: 2\n"), 0o644); err != nil {
+					t.Fatalf("write the newer-schema record: %v", err)
+				}
+			},
+			wantCode: "TICKET_SCHEMA_UNSUPPORTED",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+			d, st := newDeps(t, fx)
+			tc.record(t, st, fx.Ticket)
+			var ae *axi.Error
+			if _, err := st.TicketBranch(fx.Ticket, "main"); !errors.As(err, &ae) || ae.Code != tc.wantCode {
+				t.Fatalf("test setup: TicketBranch err = %v, want an *axi.Error %s", err, tc.wantCode)
+			}
+
+			_, err := Run(d, RunOpts{Ticket: fx.Ticket})
+			ae = nil
+			if !errors.As(err, &ae) || ae.Code != tc.wantCode {
+				t.Fatalf("Run over a ticket.yaml TicketBranch refuses: err = %v, want an *axi.Error %s", err, tc.wantCode)
+			}
+
+			leaseDir, err := pool.Dir(d.Home, d.Cfg.Repos[0].Name(), fx.Ticket, pool.Build)
+			if err != nil {
+				t.Fatalf("pool.Dir: %v", err)
+			}
+			if _, err := os.Stat(leaseDir); !os.IsNotExist(err) {
+				t.Fatalf("the refused Run left a build lease at %s (stat err %v), want none", leaseDir, err)
+			}
+		})
+	}
+}
+
+// TestRunResolvesTheBranchOncePerRun covers Store.TicketBranch's rule for a
+// command that names the branch more than once: one Run builds every slice
+// on the branch it resolved first, even when ticket.yaml records another
+// one mid-run (the first dispatch's journal line stands in for whatever
+// writes it). A Run that resolved the branch per slice attempt would put
+// the later slices, and the build lease's HEAD, on feature/mid-run.
+func TestRunResolvesTheBranchOncePerRun(t *testing.T) {
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d, st := newDeps(t, fx)
+	journalTo := d.Journal
+	var record sync.Once
+	d.Journal = func(l journal.Line) error {
+		if l.Event == "dispatch" {
+			record.Do(func() {
+				if err := st.WriteTicketBranch(fx.Ticket, "feature/mid-run"); err != nil {
+					t.Errorf("WriteTicketBranch mid-run: %v", err)
+				}
+			})
+		}
+		return journalTo(l)
+	}
+
+	report, err := Run(d, RunOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(report.Green) < 2 {
+		t.Fatalf("Green = %v, want at least two slices built, one before the branch was recorded and one after", report.Green)
+	}
+	if got, err := st.TicketBranch(fx.Ticket, "main"); err != nil || got != "feature/mid-run" {
+		t.Fatalf("TicketBranch after the run = %q, %v, want the branch recorded mid-run", got, err)
+	}
+
+	leaseDir, err := pool.Dir(d.Home, d.Cfg.Repos[0].Name(), fx.Ticket, pool.Build)
+	if err != nil {
+		t.Fatalf("pool.Dir: %v", err)
+	}
+	head, err := gitx.Run(leaseDir, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		t.Fatalf("symbolic-ref: %v", err)
+	}
+	if want := "jig/" + fx.Ticket; head != want {
+		t.Fatalf("build lease branch = %q, want %q, the branch the run resolved before it was recorded", head, want)
+	}
+	if got, err := gitx.Run(leaseDir, "branch", "--list", "feature/mid-run"); err != nil || got != "" {
+		t.Fatalf("build lease has branch %q (err %v), want none: no slice may have resolved the branch recorded mid-run", got, err)
+	}
+}
+
+// TestRunWithNothingToBuildNeverReadsTheTicketRecord covers the other half of
+// resolving the branch once: it happens on the first slice attempt, not up
+// front, so a Run whose frontier is empty (every slice already green, so
+// only a report is due) still succeeds over a ticket.yaml it cannot read.
+func TestRunWithNothingToBuildNeverReadsTheTicketRecord(t *testing.T) {
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d, st := newDeps(t, fx)
+	slices, err := st.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadSlices: %v", err)
+	}
+	for _, sl := range slices {
+		if err := st.WriteSliceState(fx.Ticket, sl.ID, store.SliceState{State: "green"}); err != nil {
+			t.Fatalf("WriteSliceState(%s): %v", sl.ID, err)
+		}
+	}
+	record := filepath.Join(st.TicketDir(fx.Ticket), "ticket.yaml")
+	if err := os.WriteFile(record, []byte("schema_version: 1\nfrobnicate: yes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ReadTicket(fx.Ticket); err == nil {
+		t.Fatal("test setup: ticket.yaml with an unknown key must be unreadable")
+	}
+
+	report, err := Run(d, RunOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Run with every slice green over an unreadable ticket.yaml: %v", err)
+	}
+	if len(report.Green) != len(slices) {
+		t.Fatalf("Green = %v, want all %d slices", report.Green, len(slices))
 	}
 }
 
