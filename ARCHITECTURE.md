@@ -195,12 +195,12 @@ oracle - kept, one left undecided when either part is missing) - then
 turns every kept finding into a fix slice: one per workspace and oracle
 for the kept fixes, one each for a kept `ask`. Routing and triage both
 finish, and every fix slice from them is appended, before `Gate` pushes
-the store at the end of a successful round. A round that fails partway
-is the exception, and a deliberate one: `Gate` commits and pushes
-best-effort on any error after its `gate-open` journal line, so what the
-round did get as far as writing is committed rather than left uncommitted
-in the store's working copy, where it would block the next command's
-`Sync` until someone ran git by hand.
+the store at the end of a successful round. A command that fails partway
+is the exception, and a deliberate one: `Gate` and `Publish` both commit
+and push best-effort on any error after their own first journal line -
+`Gate`'s `gate-open` line, `Publish`'s own `reconcile` line - under a
+subject naming the ticket and the failure, rather than leaving it for
+the next command's own `Sync` to sweep up anonymously.
 
 ## Safety
 

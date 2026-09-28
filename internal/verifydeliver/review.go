@@ -118,9 +118,9 @@ func MarshalReviewRequest(req ReviewRequest) ([]byte, error) {
 }
 
 // reviewInvalidHelp is REVIEW_INVALID and REVIEW_FAILED's shared help line:
-// the round already committed and pushed its own gate-open journal line
-// (Gate's best-effort push on any error after that line), so a plain rerun
-// works without any manual store cleanup.
+// the round already committed and pushed its own gate-open journal line,
+// under this failure's own name (Gate's best-effort push on any error
+// after that line).
 var reviewInvalidHelp = []string{"Fix the reviewer result (or the backend) and rerun `jig gate` for this ticket."}
 
 // reviewInvalid wraps msg as the *axi.Error ParseReviewResult and the
