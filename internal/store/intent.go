@@ -13,16 +13,23 @@ import (
 
 // Intent is the parsed content of a ticket's intent.md: a human's own
 // statement of what a change is meant to accomplish, recorded with the
-// provenance its front matter names. Only "explicit" (written by `jig gate
-// --intent`/`--doc`) is ever recorded today; inference (source "inferred")
-// is a planned addition, not yet built.
+// provenance its front matter names. Agent, Session and Score are set only
+// for source "inferred" (`internal/verifydeliver`'s summarizer dispatch):
+// which reader found the session, its own id, and the matcher's score -
+// all empty/zero for "explicit".
 type Intent struct {
-	Source string
-	Text   string
+	Source  string
+	Text    string
+	Agent   string
+	Session string
+	Score   float64
 }
 
 type intentFrontMatter struct {
-	Source string `yaml:"source"`
+	Source  string  `yaml:"source"`
+	Agent   string  `yaml:"agent,omitempty"`
+	Session string  `yaml:"session,omitempty"`
+	Score   float64 `yaml:"score,omitempty"`
 }
 
 // IntentPath returns ticket's intent.md path, rooted at Root.
@@ -45,7 +52,7 @@ func (s *Store) WriteIntent(ticket string, in Intent) error {
 }
 
 func renderIntent(in Intent) string {
-	fm := intentFrontMatter{Source: in.Source}
+	fm := intentFrontMatter{Source: in.Source, Agent: in.Agent, Session: in.Session, Score: in.Score}
 	fmYAML, _ := yaml.Marshal(fm)
 	var b strings.Builder
 	b.WriteString("---\n")
@@ -103,5 +110,8 @@ func ParseIntent(data []byte) (Intent, error) {
 	if err := dec.Decode(&fm); err != nil {
 		return Intent{}, fmt.Errorf("store: intent.md: %w", err)
 	}
-	return Intent{Source: fm.Source, Text: strings.TrimRight(body, "\n")}, nil
+	return Intent{
+		Source: fm.Source, Text: strings.TrimRight(body, "\n"),
+		Agent: fm.Agent, Session: fm.Session, Score: fm.Score,
+	}, nil
 }

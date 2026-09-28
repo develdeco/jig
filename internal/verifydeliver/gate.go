@@ -149,13 +149,19 @@ type GateReport struct {
 	// (across every round, not only this one's own): the "needs a human"
 	// list, the exit-2 signal. Empty when nothing is waiting on a person.
 	NeedsHuman []Finding
-	// Intent is this round's resolved intent binding (resolveIntent),
-	// resolved once before the round's source runs and the same whatever
-	// the round's own outcome.
+	// Intent is this round's resolved intent binding (resolveIntent), read
+	// once before the round's source runs; a reviewer round reports the one
+	// it handed the reviewer instead (Review.Intent), which is an
+	// inference the source ran during the round (review.go's inferIntent)
+	// when nothing was resolved.
 	Intent Intent
 	// IntentSHA256 is the sha256 hex of the exact bytes of the file at
 	// Intent.Path, "" for Intent.Source "none".
 	IntentSHA256 string
+	// IntentNote is a one-line reason this round's intent stayed "none"
+	// after an inference attempt (round.Review.IntentNote) - empty when
+	// inference was not attempted or it succeeded.
+	IntentNote string
 }
 
 // reportYAML is gate/round-<n>/report.yaml's exact on-disk shape.
@@ -378,20 +384,35 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	cum := fold.Known
 
 	round, ok, err := src.Round(RoundInput{
-		Store:     d.Store,
-		Ticket:    ticket,
-		Round:     n,
-		LeaseDir:  lease.Dir,
-		RepoName:  repoName,
-		Target:    target,
-		Model:     model,
-		Intent:    intent,
-		Manifest:  man,
-		Open:      fold.Open,
-		Dismissed: fold.Dismissed,
+		Store:         d.Store,
+		Ticket:        ticket,
+		Round:         n,
+		LeaseDir:      lease.Dir,
+		RepoName:      repoName,
+		Target:        target,
+		Model:         model,
+		Intent:        intent,
+		IntentText:    intentText,
+		OperatorClone: operatorClone(d, repoName),
+		Home:          d.Home,
+		UserHome:      d.UserHome,
+		Manifest:      man,
+		Open:          fold.Open,
+		Dismissed:     fold.Dismissed,
 	})
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: read round %d: %w", n, err)
+	}
+
+	// The reviewer source may have just inferred and recorded an intent.md
+	// before its dispatch (review.go's inferIntent), so this round's report
+	// carries the intent and the exact bytes the round itself handed the
+	// reviewer (round.Review), not the pre-dispatch resolution above -
+	// never a second read of brief.md or intent.md, which anything running
+	// during the round could have rewritten since. The scripted source runs
+	// no reviewer: its round keeps the resolution above.
+	if round.Review != nil {
+		intent, intentText = round.Review.Intent, round.Review.IntentText
 	}
 
 	targetSHA, err := gitx.RevParse(lease.Dir, "origin/"+target)
@@ -402,6 +423,9 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	report = GateReport{
 		Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA},
 		Intent: intent, IntentSHA256: intentSHA256(intent.Source, intentText),
+	}
+	if round.Review != nil {
+		report.IntentNote = round.Review.IntentNote
 	}
 	switch {
 	case !ok:

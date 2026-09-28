@@ -46,7 +46,7 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 	fs := newFlagSet("gate")
 	early := fs.Bool("early", false, "gate before the frontier is fully green")
 	branch := fs.String("branch", "", "validate this branch instead of the ticket's branch (jig/<ticket> unless one is recorded)")
-	intent := fs.String("intent", "", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md)")
+	intent := fs.String("intent", "", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md); with no brief, --intent or --doc, a reviewer round reads your local Claude Code sessions for this repo and has a model summarize the best match into intent.md")
 	doc := fs.String("doc", "", "doc file whose content becomes the ticket's explicit intent, recorded as intent.md (refused when the ticket has a brief.md)")
 	prNum := fs.Int("pr", 0, "pr number (not implemented in v0.1)")
 	yes := fs.Bool("yes", false, "keep every finding jig can route on its own, without the triage prompt")
@@ -147,12 +147,16 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	for repo, sha := range report.TargetSHA {
 		shaRows = append(shaRows, []string{repo, sha})
 	}
+	intentRow := report.Intent.Source
+	if report.IntentNote != "" {
+		intentRow = fmt.Sprintf("%s (%s)", report.Intent.Source, report.IntentNote)
+	}
 	kv := [][2]string{
 		{"ticket", ticket},
 		{"round", strconv.Itoa(report.Round)},
 		{"verdict", report.Verdict},
 		{"model", report.Model},
-		{"intent", report.Intent.Source},
+		{"intent", intentRow},
 	}
 	if report.Scope != "" {
 		kv = append(kv, [2]string{"scope", report.Scope})

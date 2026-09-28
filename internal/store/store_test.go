@@ -380,6 +380,25 @@ func TestIntentUnknownFrontMatterKeyRefused(t *testing.T) {
 	}
 }
 
+// TestIntentInferredRoundTrip asserts an inferred intent's Agent, Session
+// and Score front matter round-trip through WriteIntent/ReadIntent, and
+// through ParseIntent directly, exactly as source "explicit" already does
+// for Source/Text.
+func TestIntentInferredRoundTrip(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	want := Intent{Source: "inferred", Text: "fix the rounding bug", Agent: "claude-code", Session: "abc-123", Score: 0.75}
+	if err := st.WriteIntent("JIG-1", want); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := st.ReadIntent("JIG-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || got != want {
+		t.Fatalf("ReadIntent = %+v (ok=%v), want %+v", got, ok, want)
+	}
+}
+
 func TestBriefSectionHashes(t *testing.T) {
 	brief := "# Brief\n\n## Goal\nDo the thing.\n\n## Slice A - repro\nMake it fail first.   \n\n## Slice B\nThen fix it.\n"
 	got := BriefSectionHashes([]byte(brief))

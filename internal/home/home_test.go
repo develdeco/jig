@@ -31,4 +31,7 @@ func TestPathsDeriveFromTheRootGiven(t *testing.T) {
 	if e := IntentExcerptDir(root); e != filepath.Join(root, "intent-excerpts") {
 		t.Fatalf("IntentExcerptDir(%q) = %q", root, e)
 	}
+	if s := IntentScratchDir(root); s != filepath.Join(root, "intent-scratch") {
+		t.Fatalf("IntentScratchDir(%q) = %q", root, s)
+	}
 }

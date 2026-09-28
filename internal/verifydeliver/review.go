@@ -574,7 +574,7 @@ func validateReviewResult(req ReviewRequest, result ReviewResult, leaseDir strin
 // and says what jig will verify. It never lists kinds of problems, coaches
 // behavior, or patches a past model mistake.
 const reviewPromptTemplate = `You are reviewing round %d of ticket %s. Your inputs are in review.json at %s.
-Review the %s diff %s..%s in this worktree against the change's intent. review.json's intent names it and its source: "brief" or "explicit" is the human's own statement of what was asked for, "none" means nothing states it. Do not edit files, commit, or push.
+Review the %s diff %s..%s in this worktree against the change's intent. review.json's intent names it and its source: "brief" or "explicit" is the human's own statement of what was asked for; "inferred" is jig's own summary of the author's own agent session, a hint that may be partial or wrong; "none" means nothing states it. Do not edit files, commit, or push.
 Report every problem you find in the files you review, as they are now, including problems already listed as open. For each, give file, line (0 if unknown), title, detail, action, risk, risk_rationale and oracle, plus prior when it is a finding listed under open or dismissed. The human dismissed the findings listed under dismissed.
 action: "fix" when the fix is objective and does not change what the intent asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
 risk: "low", "medium" or "high": how much harm follows if this part of the change is wrong.
@@ -745,6 +745,20 @@ type Review struct {
 	Deleted    []string
 	MustReview []string
 	Result     ReviewResult
+	// Intent is the intent this round's reviewer was given - the one Gate
+	// resolved, or the one inferIntent recorded for it - and IntentText the
+	// exact bytes at its Path (resolveIntent's own second result), so Gate
+	// reports and hashes what the reviewer was actually pointed at, never a
+	// second read of files a session could have rewritten since. A round
+	// that dispatched no reviewer carries the intent it was handed.
+	Intent     Intent
+	IntentText string
+	// IntentNote is a one-line reason this round's intent stayed "none"
+	// after an inference attempt (inferIntent): empty when inference was
+	// never attempted (an intent was already resolved, or nothing was
+	// outstanding to dispatch a reviewer over) or when it succeeded - the
+	// reason then is intent.md's own record, not a note.
+	IntentNote string
 }
 
 // RoundInput is what Gate hands a GateSource for one round: the scripted
@@ -761,8 +775,25 @@ type RoundInput struct {
 	Model    string
 	// Intent is this round's resolved intent binding (intent.go's
 	// resolveIntent, which Gate calls), already absolute or "" for source
-	// "none".
-	Intent   Intent
+	// "none", and IntentText the exact bytes at its Path ("" for "none").
+	Intent     Intent
+	IntentText string
+	// OperatorClone is the operator's mapped clone directory for RepoName
+	// (verifydeliver.go's operatorClone), or "" when none is recorded. The
+	// reviewer source uses it, when Intent is still "none", to identify
+	// which local agent sessions belong to this repo - a session's own cwd
+	// must resolve to the same git common dir - before attempting intent
+	// inference; the scripted source never reads it.
+	OperatorClone string
+	// Home is the jig home root, under which inference writes the
+	// transcript excerpt it hands the summarizer (home.IntentExcerptDir):
+	// Deps.Home, passed down rather than read from the environment here.
+	Home string
+	// UserHome is the operator's own home directory, where local agent
+	// sessions keep their transcripts (Deps.UserHome), or "" when it could
+	// not be resolved. Inference reads it and nothing else in the round
+	// does.
+	UserHome string
 	Manifest manifest.Manifest
 	// Open is findings bookkeeping's cumulative fold (findings.go's
 	// openAndNotedFindingsList), carried whole rather than projected: it
@@ -862,7 +893,30 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 			Deleted:    diff.Deleted,
 			MustReview: diff.MustReview,
 			Result:     ReviewResult{ReviewedPaths: []string{}},
+			Intent:     in.Intent,
+			IntentText: in.IntentText,
 		}}, true, nil
+	}
+
+	// This round is about to dispatch a reviewer: when nothing already
+	// states an intent, try to infer one from the operator's own local
+	// agent sessions before that dispatch, so the same round's reviewer
+	// gets the hint too, not "none". inferIntent fails open to
+	// Intent{Source: IntentSourceNone} - the request below then carries
+	// exactly what in.Intent already held - with a note the caller surfaces
+	// in the round's own report. It returns a non-nil error only when it
+	// had to restore the lease after a summarizer changed it and that
+	// restore failed - a round cannot safely dispatch a reviewer onto a
+	// lease that might still be dirty, so that failure propagates instead
+	// of failing open.
+	reqIntent, reqIntentText := in.Intent, in.IntentText
+	var intentNote string
+	if in.Intent.Source == IntentSourceNone {
+		var ierr error
+		reqIntent, reqIntentText, intentNote, ierr = r.inferIntent(in, head, diff.Changed)
+		if ierr != nil {
+			return Round{}, false, ierr
+		}
 	}
 
 	oracleNames := SortedOracleNames(in.Manifest)
@@ -872,7 +926,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		Scope:       scope,
 		BaseSHA:     base,
 		HeadSHA:     head,
-		Intent:      in.Intent,
+		Intent:      reqIntent,
 		SlicesPath:  absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "slices.yaml")),
 		JournalPath: absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "journal.ndjson")),
 		Oracles:     oracleNames,
@@ -970,5 +1024,8 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		Deleted:    diff.Deleted,
 		MustReview: diff.MustReview,
 		Result:     result,
+		Intent:     reqIntent,
+		IntentText: reqIntentText,
+		IntentNote: intentNote,
 	}}, true, nil
 }

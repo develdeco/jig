@@ -193,10 +193,10 @@ func TestMarshalReviewRequestPreservesPopulatedLists(t *testing.T) {
 // changes the byte-for-byte output the prompt must never gain: it states
 // the job and the output contract, and never coaches behavior or patches a
 // past model mistake. The prompt is the same whatever this round's own
-// intent source actually is - it names what "brief", "explicit" and
-// "none" each mean once, generically, and points the reviewer at
-// review.json's own intent block for the value - so this one golden
-// covers every source; there is no per-source prompt text to pin
+// intent source actually is - it names what "brief", "explicit",
+// "inferred" and "none" each mean once, generically, and points the
+// reviewer at review.json's own intent block for the value - so this one
+// golden covers every source; there is no per-source prompt text to pin
 // separately.
 func TestRenderReviewPromptMatchesDesignGolden(t *testing.T) {
 	t.Parallel()
@@ -206,7 +206,7 @@ func TestRenderReviewPromptMatchesDesignGolden(t *testing.T) {
 
 	schema := `{"findings": [{"file": "...", "line": 0, "title": "...", "detail": "...", "action": "fix|ask|note", "risk": "low|medium|high", "risk_rationale": "...", "oracle": "...", "prior": "r1-f2"}], "reviewed_paths": ["..."], "summary": "..."}`
 	golden := `You are reviewing round 2 of ticket JIG-1. Your inputs are in review.json at /abs/review.json.
-Review the delta diff aaa..bbb in this worktree against the change's intent. review.json's intent names it and its source: "brief" or "explicit" is the human's own statement of what was asked for, "none" means nothing states it. Do not edit files, commit, or push.
+Review the delta diff aaa..bbb in this worktree against the change's intent. review.json's intent names it and its source: "brief" or "explicit" is the human's own statement of what was asked for; "inferred" is jig's own summary of the author's own agent session, a hint that may be partial or wrong; "none" means nothing states it. Do not edit files, commit, or push.
 Report every problem you find in the files you review, as they are now, including problems already listed as open. For each, give file, line (0 if unknown), title, detail, action, risk, risk_rationale and oracle, plus prior when it is a finding listed under open or dismissed. The human dismissed the findings listed under dismissed.
 action: "fix" when the fix is objective and does not change what the intent asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
 risk: "low", "medium" or "high": how much harm follows if this part of the change is wrong.

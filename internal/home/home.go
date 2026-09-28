@@ -41,3 +41,12 @@ func MachinePath(root string) string {
 func IntentExcerptDir(root string) string {
 	return filepath.Join(root, "intent-excerpts")
 }
+
+// IntentScratchDir returns the directory under the jig home root whose
+// subdirectories are the working directories of gate intent-inference
+// summarizer dispatches: one fresh, empty directory per dispatch, made and
+// removed by the caller. It lives under the jig home, never the lease (the
+// code under review) and never the store.
+func IntentScratchDir(root string) string {
+	return filepath.Join(root, "intent-scratch")
+}

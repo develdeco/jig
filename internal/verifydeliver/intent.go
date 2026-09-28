@@ -13,11 +13,13 @@ import (
 )
 
 // Intent source values. "brief" and "explicit" are binding: the human's
-// own statement of what was asked for. "none" means nothing states it.
-// Inference (source "inferred") is a planned addition, not yet built.
+// own statement of what was asked for. "inferred" is jig's own summary of
+// the author's local agent session - a hint that may be partial or wrong,
+// never binding. "none" means nothing states it.
 const (
 	IntentSourceBrief    = "brief"
 	IntentSourceExplicit = "explicit"
+	IntentSourceInferred = "inferred"
 	IntentSourceNone     = "none"
 )
 
@@ -67,15 +69,15 @@ func resolveIntent(st *store.Store, ticket string) (Intent, string, error) {
 			}
 		}
 		// intent.md may carry only the source values jig itself ever
-		// writes there - today, only "explicit". Anything else (a hand
+		// writes there - "explicit" or "inferred". Anything else (a hand
 		// edit, a stale value from a source jig no longer supports, or a
 		// missing source key parsed as "") is refused rather than trusted:
 		// an unrecognized source is not itself binding, and letting one
 		// through would let a hand-edited "brief" or "none" impersonate a
 		// provenance the human never actually gave.
-		if in.Source != IntentSourceExplicit {
+		if in.Source != IntentSourceExplicit && in.Source != IntentSourceInferred {
 			return Intent{}, "", &axi.Error{
-				Msg:  fmt.Sprintf("ticket %s's intent.md has an unsupported source %q; jig only ever records %q there", ticket, in.Source, IntentSourceExplicit),
+				Msg:  fmt.Sprintf("ticket %s's intent.md has an unsupported source %q; jig only ever records %q or %q there", ticket, in.Source, IntentSourceExplicit, IntentSourceInferred),
 				Code: "INTENT_INVALID_SOURCE",
 				Help: intentReplaceHelp(ticket),
 			}

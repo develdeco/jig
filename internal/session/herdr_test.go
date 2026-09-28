@@ -187,6 +187,9 @@ func TestHerdrBackendRunDirectExec(t *testing.T) {
 		Worktree:   worktree,
 		ResultJSON: resultJSON,
 		Prompt:     "do the thing",
+		// herdr accepts the field and ignores it: the agent it starts takes
+		// no such flag, so the calls below are what any dispatch makes.
+		NoSessionPersistence: true,
 	}
 	if err := b.Run(d); err != nil {
 		t.Fatalf("Run: %v", err)
