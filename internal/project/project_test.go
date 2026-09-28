@@ -177,8 +177,6 @@ func TestStandaloneStoreDir(t *testing.T) {
 }
 
 func TestInitStandalone(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-
 	parent := t.TempDir()
 	repoDir := filepath.Join(parent, "myrepo")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
@@ -228,8 +226,6 @@ func TestInitStandalone(t *testing.T) {
 // files and store.AtomicWrite's ".*.tmp" scratch files, and that a real
 // locked write (store.WriteSliceState) never shows up in `git status`.
 func TestInitStandaloneGitignoreKeepsLockFilesUntracked(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-
 	parent := t.TempDir()
 	repoDir := filepath.Join(parent, "myrepo")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
@@ -268,15 +264,15 @@ func TestInitStandaloneGitignoreKeepsLockFilesUntracked(t *testing.T) {
 }
 
 func TestMachineMappingRoundTrip(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	jigHome := t.TempDir()
 
 	in := map[string]MachineProject{
 		"demo": {Store: `C:\stores\demo`, Clones: map[string]string{"demo": `C:\repos\demo`}},
 	}
-	if err := SaveMachine(in); err != nil {
+	if err := SaveMachine(jigHome, in); err != nil {
 		t.Fatalf("SaveMachine: %v", err)
 	}
-	out, err := LoadMachine()
+	out, err := LoadMachine(jigHome)
 	if err != nil {
 		t.Fatalf("LoadMachine: %v", err)
 	}
@@ -286,8 +282,8 @@ func TestMachineMappingRoundTrip(t *testing.T) {
 }
 
 func TestLoadMachineMissingFileReturnsEmpty(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	m, err := LoadMachine()
+	jigHome := t.TempDir()
+	m, err := LoadMachine(jigHome)
 	if err != nil {
 		t.Fatalf("LoadMachine: %v", err)
 	}
@@ -297,7 +293,7 @@ func TestLoadMachineMissingFileReturnsEmpty(t *testing.T) {
 }
 
 func TestInitProject(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	jigHome := t.TempDir()
 
 	storeDir := t.TempDir()
 	writeFile(t, filepath.Join(storeDir, "project.yaml"), `
@@ -311,7 +307,7 @@ platform: platform/
 `)
 	cloneDir := t.TempDir()
 
-	cfg, err := InitProject(storeDir, map[string]string{"demo": cloneDir})
+	cfg, err := InitProject(jigHome, storeDir, map[string]string{"demo": cloneDir})
 	if err != nil {
 		t.Fatalf("InitProject: %v", err)
 	}
@@ -319,7 +315,7 @@ platform: platform/
 		t.Fatalf("cfg.Name = %q, want demo", cfg.Name)
 	}
 
-	machine, err := LoadMachine()
+	machine, err := LoadMachine(jigHome)
 	if err != nil {
 		t.Fatalf("LoadMachine: %v", err)
 	}
@@ -338,7 +334,7 @@ platform: platform/
 }
 
 func TestInitProjectRejectsUnknownClone(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	jigHome := t.TempDir()
 
 	storeDir := t.TempDir()
 	writeFile(t, filepath.Join(storeDir, "project.yaml"), `
@@ -350,14 +346,14 @@ repos:
   - remote: https://example.invalid/org/demo.git
 platform: platform/
 `)
-	_, err := InitProject(storeDir, map[string]string{"other": t.TempDir()})
+	_, err := InitProject(jigHome, storeDir, map[string]string{"other": t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error for unknown clone name")
 	}
 }
 
 func TestResolvePrecedence(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	jigHome := t.TempDir()
 
 	// 1. explicit --store flag wins over everything.
 	explicitStore := t.TempDir()
@@ -378,7 +374,7 @@ tracker: local
 repos: []
 platform: platform/
 `)
-	storePath, cfg, err := Resolve(cwdWithOwnStore, explicitStore)
+	storePath, cfg, err := Resolve(jigHome, cwdWithOwnStore, explicitStore)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -388,7 +384,7 @@ platform: platform/
 
 	// 2. cwd store (project.yaml in cwd) wins over machine mapping, when no
 	// --store flag is given.
-	storePath, cfg, err = Resolve(cwdWithOwnStore, "")
+	storePath, cfg, err = Resolve(jigHome, cwdWithOwnStore, "")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -414,10 +410,10 @@ platform: platform/
 	machine := map[string]MachineProject{
 		"mapped": {Store: mappedStore, Clones: map[string]string{"mapped": cloneRoot}},
 	}
-	if err := SaveMachine(machine); err != nil {
+	if err := SaveMachine(jigHome, machine); err != nil {
 		t.Fatalf("SaveMachine: %v", err)
 	}
-	storePath, cfg, err = Resolve(subdir, "")
+	storePath, cfg, err = Resolve(jigHome, subdir, "")
 	if err != nil {
 		t.Fatalf("Resolve via machine mapping: %v", err)
 	}
@@ -427,7 +423,7 @@ platform: platform/
 
 	// 4. nothing matches → error.
 	orphan := t.TempDir()
-	if _, _, err := Resolve(orphan, ""); err == nil {
+	if _, _, err := Resolve(jigHome, orphan, ""); err == nil {
 		t.Fatal("expected error when no store can be resolved")
 	}
 }
@@ -438,7 +434,7 @@ platform: platform/
 // bare-usage help (init --standalone, then jig ticket new, run, solve, all
 // run from the repo) fails on its very first command.
 func TestResolveFallsBackToSiblingStandaloneStore(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	jigHome := t.TempDir()
 
 	parent := t.TempDir()
 	repoDir := filepath.Join(parent, "myrepo")
@@ -450,7 +446,7 @@ func TestResolveFallsBackToSiblingStandaloneStore(t *testing.T) {
 		t.Fatalf("InitStandalone: %v", err)
 	}
 
-	storeDir, cfg, err := Resolve(repoDir, "")
+	storeDir, cfg, err := Resolve(jigHome, repoDir, "")
 	if err != nil {
 		t.Fatalf("Resolve(repoDir, \"\"): %v", err)
 	}
@@ -465,7 +461,18 @@ func TestResolveFallsBackToSiblingStandaloneStore(t *testing.T) {
 
 	// A cwd with neither its own project.yaml, a machine mapping, nor a
 	// sibling standalone store still refuses, same as before.
-	if _, _, err := Resolve(t.TempDir(), ""); err == nil {
+	if _, _, err := Resolve(jigHome, t.TempDir(), ""); err == nil {
 		t.Fatal("expected error when no store can be resolved")
+	}
+}
+
+// TestMachineMappingRefusesNoJigHome: an empty jig home would read or write
+// projects.yaml in the working directory, so both are refused.
+func TestMachineMappingRefusesNoJigHome(t *testing.T) {
+	if _, err := LoadMachine(""); err == nil {
+		t.Error("LoadMachine with no jig home = nil error, want a refusal")
+	}
+	if err := SaveMachine("", map[string]MachineProject{}); err == nil {
+		t.Error("SaveMachine with no jig home = nil error, want a refusal")
 	}
 }

@@ -32,7 +32,7 @@ func cmdRun(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -48,7 +48,7 @@ func cmdRun(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	deps := frontierDeps(st, cfg, mp, backend, ticket)
+	deps := frontierDeps(st, cfg, mp, jigHome, backend, ticket)
 	report, err := frontier.Run(deps, frontier.RunOpts{Ticket: ticket, AnswerQID: qid, AnswerText: text})
 	if err != nil {
 		return renderErr(stdout, err)
@@ -75,7 +75,7 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -83,7 +83,7 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	deps := frontierDeps(st, cfg, mp, nil, ticket)
+	deps := frontierDeps(st, cfg, mp, jigHome, nil, ticket)
 
 	if *sliceFlag != "" {
 		if err := frontier.RequeueSlice(deps, ticket, *sliceFlag); err != nil {

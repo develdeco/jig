@@ -60,7 +60,7 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -76,8 +76,8 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	fdeps := frontierDeps(st, cfg, mp, backend, ticket)
-	vdeps := verifydeliverDeps(st, cfg, mp)
+	fdeps := frontierDeps(st, cfg, mp, jigHome, backend, ticket)
+	vdeps := verifydeliverDeps(st, cfg, mp, jigHome)
 	src := gateSourceForSolve(*scenario, backend)
 	triage := triageFor(*yes, stdin, stdout)
 

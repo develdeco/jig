@@ -42,7 +42,7 @@ func TestGateBrokenLeaseNeverResetsEnclosingRepo(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{})
 	driveBuild(t, fx, "rung-a")
 
-	gateLease, err := pool.Dir("fixture-repo", fx.Ticket, pool.Gate)
+	gateLease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
 	if err != nil {
 		t.Fatalf("pool.Dir: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestGateRecoversFromUnbornLease(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{})
 	driveBuild(t, fx, "rung-a")
 
-	gateLease, err := pool.Dir("fixture-repo", fx.Ticket, pool.Gate)
+	gateLease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
 	if err != nil {
 		t.Fatalf("pool.Dir: %v", err)
 	}

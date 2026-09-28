@@ -113,17 +113,17 @@ exists.
 | `e2e/` | (tests only) | the fixture + fake backend → asserts the full brief→publish chain twice |
 | `internal/axi/` | `Render`, `Table`, `KV`, `Help`, `RenderError`, `ExitCode` | labelled data → jig's plain-text output register and process exit codes |
 | `internal/envrun/` | `Up`, `Shell` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable` |
-| `internal/fixture/` | `Build`, `Generate`, `RepoRoot` | a dir + `Opts` → a fixture repo, its store, and a scripted attempt scenario (plus the machine mapping under JIG_HOME); `Generate` builds into a `t.TempDir()`; `RepoRoot`: a caller's source file → the module root |
+| `internal/fixture/` | `Build`, `Generate`, `RepoRoot` | a dir + `Opts` → a fixture repo, its store, and a scripted attempt scenario (plus the machine mapping under `Opts.Home`, by default the jig home `home.Root` resolves); `Generate` builds into a `t.TempDir()`; `RepoRoot`: a caller's source file → the module root |
 | `internal/frontier/` | `Run`, `Requeue`, `RequeueSlice`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
 | `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `DiffNameOnly`, `FileExistsAtRev`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
 | `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
-| `internal/home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → per-machine paths |
+| `internal/home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths |
 | `internal/journal/` | `Append`, `Read`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs |
 | `internal/manifest/` | `Resolve` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
-| `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket` | repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point; anything git shows is not a repository of its own is moved aside and cloned afresh) |
-| `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping → a `Config` |
+| `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point; anything git shows is not a repository of its own is moved aside and cloned afresh) |
+| `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping under the jig home root → a `Config` |
 | `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `MatchRound`, `ScoreRound`, `RenderReport` | a labeled corpus (`testdata/revieweval`) + a session backend → a `CaseScore` per case, matched structurally against seeded gold through the real reviewer contract |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`) → `result.json` written to disk |
@@ -322,8 +322,10 @@ racing the first would be.
 go test ./...
 ```
 
-Every test gets its own `t.TempDir()`, `JIG_HOME` is always overridden via
-`t.Setenv` so a test run never touches a real machine's jig home, and every
+Every test gets its own `t.TempDir()` and its own jig home (passed as an
+argument to the packages that use one, or as `JIG_HOME` via `t.Setenv` to
+`cmd/jig` and the binary), so a test run never touches a real machine's jig
+home, and every
 remote used in tests is a bare, file-path repo - no test ever talks to a
 real git host.
 

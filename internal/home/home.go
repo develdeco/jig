@@ -1,6 +1,9 @@
-// Package home resolves jig's per-machine root. Every home-anchored path (the
-// machine mapping, the worktree pool) goes through Root, overridable via the
-// JIG_HOME environment variable so tests never touch the real home directory.
+// Package home resolves jig's per-machine root. Root reads it once, from the
+// JIG_HOME environment variable or the real home directory; every
+// home-anchored path (the machine mapping, the worktree pool) is derived
+// from a root its caller passes in, so the binary resolves the root once and
+// a test hands each package its own root instead of touching the
+// environment or the real home directory.
 package home
 
 import (
@@ -20,20 +23,13 @@ func Root() (string, error) {
 	return filepath.Join(h, ".config", "jig"), nil
 }
 
-// PoolDir returns the worktree pool root under the jig home.
-func PoolDir() (string, error) {
-	r, err := Root()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(r, "pool"), nil
+// PoolDir returns the worktree pool root under the jig home root.
+func PoolDir(root string) string {
+	return filepath.Join(root, "pool")
 }
 
-// MachinePath returns the per-machine project mapping file path.
-func MachinePath() (string, error) {
-	r, err := Root()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(r, "projects.yaml"), nil
+// MachinePath returns the per-machine project mapping file path under the
+// jig home root.
+func MachinePath(root string) string {
+	return filepath.Join(root, "projects.yaml")
 }

@@ -528,7 +528,7 @@ func TestRouteCustomRoutesExcludeDiffChangelogs(t *testing.T) {
 // publishLeaseDir returns the fixture ticket's publish lease directory.
 func publishLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	t.Helper()
-	dir, err := pool.Dir("fixture-repo", fx.Ticket, pool.Publish)
+	dir, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Publish)
 	if err != nil {
 		t.Fatalf("resolve publish lease: %v", err)
 	}

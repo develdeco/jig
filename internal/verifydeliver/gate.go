@@ -243,12 +243,12 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	// and one on an unborn HEAD would fail. Anything else is left to Acquire,
 	// which refuses a bad ticket id, clones where there is no lease yet, and
 	// moves aside anything git shows is not a repository of its own.
-	if leaseDir, derr := pool.Dir(repoName, ticket, pool.Gate); derr == nil && pool.Usable(leaseDir) {
+	if leaseDir, derr := pool.Dir(d.Home, repoName, ticket, pool.Gate); derr == nil && pool.Usable(leaseDir) {
 		if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
 		}
 	}
-	lease, err := pool.Acquire(repoName, repo.Remote, target, branch, ticket, pool.Gate)
+	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Gate)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: acquire lease: %w", err)
 	}
@@ -262,7 +262,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	// --branch mode makes this gate review the stale local copy instead of
 	// origin's current branch tip.
 	if o.Branch == "" {
-		if err := fetchTicketBranchFromBuildLease(lease.Dir, repoName, ticket); err != nil {
+		if err := fetchTicketBranchFromBuildLease(d.Home, lease.Dir, repoName, ticket); err != nil {
 			return GateReport{}, err
 		}
 		if err := resetLeasePristine(lease.Dir, "HEAD"); err != nil {
@@ -533,10 +533,11 @@ func checkFrontier(d Deps, ticket string, slices []store.Slice, early bool) erro
 }
 
 // fetchTicketBranchFromBuildLease points the lease's jig/<ticket> branch at
-// the build lease's copy: gate and publish leases are separate clones, and
-// the ticket branch exists only in the build lease until publish pushes it.
-func fetchTicketBranchFromBuildLease(leaseDir, repoName, ticket string) error {
-	buildLeaseDir, err := pool.Dir(repoName, ticket, pool.Build)
+// the build lease's copy, in the pool under the jig home root jigHome: gate
+// and publish leases are separate clones, and the ticket branch exists only
+// in the build lease until publish pushes it.
+func fetchTicketBranchFromBuildLease(jigHome, leaseDir, repoName, ticket string) error {
+	buildLeaseDir, err := pool.Dir(jigHome, repoName, ticket, pool.Build)
 	if err != nil {
 		return fmt.Errorf("verifydeliver: resolve build lease: %w", err)
 	}

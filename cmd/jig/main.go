@@ -14,6 +14,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/frontier"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/session"
@@ -206,43 +207,53 @@ func splitOnce(s string, sep byte) (before, after string, ok bool) {
 
 // resolveStore resolves the store, project config and this machine's clone
 // mapping for cfg's project, honoring an explicit --store flag over cwd
-// resolution.
-func resolveStore(storeFlag string) (*store.Store, project.Config, project.MachineProject, error) {
+// resolution, and returns the jig home root it read the mapping from, for
+// the packages that keep leases under it.
+func resolveStore(storeFlag string) (*store.Store, project.Config, project.MachineProject, string, error) {
+	jigHome, err := home.Root()
+	if err != nil {
+		return nil, project.Config{}, project.MachineProject{}, "", err
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, project.Config{}, project.MachineProject{}, err
+		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
-	storePath, cfg, err := project.Resolve(cwd, storeFlag)
+	storePath, cfg, err := project.Resolve(jigHome, cwd, storeFlag)
 	if err != nil {
-		return nil, project.Config{}, project.MachineProject{}, err
+		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
 	st, err := store.Open(storePath)
 	if err != nil {
-		return nil, project.Config{}, project.MachineProject{}, err
+		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
-	machine, err := project.LoadMachine()
+	machine, err := project.LoadMachine(jigHome)
 	if err != nil {
-		return nil, project.Config{}, project.MachineProject{}, err
+		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
-	return st, cfg, machine[cfg.Name], nil
+	return st, cfg, machine[cfg.Name], jigHome, nil
 }
 
 // resolveStoreForProject resolves the store, project config and machine
 // mapping the same way resolveStore does, except an explicit --project name
 // is tried first: it resolves the store path via the per-machine project
-// mapping (project.LoadMachine()[name].Store), ahead of the --store/cwd
-// fallback chain resolveStore falls through to when projectFlag is empty.
-func resolveStoreForProject(projectFlag, storeFlag string) (*store.Store, project.Config, project.MachineProject, error) {
+// mapping (project.LoadMachine(jigHome)[name].Store), ahead of the
+// --store/cwd fallback chain resolveStore falls through to when projectFlag
+// is empty.
+func resolveStoreForProject(projectFlag, storeFlag string) (*store.Store, project.Config, project.MachineProject, string, error) {
 	if projectFlag == "" {
 		return resolveStore(storeFlag)
 	}
-	machine, err := project.LoadMachine()
+	jigHome, err := home.Root()
 	if err != nil {
-		return nil, project.Config{}, project.MachineProject{}, err
+		return nil, project.Config{}, project.MachineProject{}, "", err
+	}
+	machine, err := project.LoadMachine(jigHome)
+	if err != nil {
+		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
 	mp, ok := machine[projectFlag]
 	if !ok || mp.Store == "" {
-		return nil, project.Config{}, project.MachineProject{}, &axi.Error{
+		return nil, project.Config{}, project.MachineProject{}, "", &axi.Error{
 			Msg:  fmt.Sprintf("no project %q in the machine mapping", projectFlag),
 			Code: "VALIDATION_ERROR",
 		}
@@ -280,7 +291,7 @@ func journalFunc(st *store.Store, ticket string) func(journal.Line) error {
 }
 
 // frontierDeps assembles frontier.Deps for one ticket.
-func frontierDeps(st *store.Store, cfg project.Config, mp project.MachineProject, backend session.Backend, ticket string) frontier.Deps {
+func frontierDeps(st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string, backend session.Backend, ticket string) frontier.Deps {
 	return frontier.Deps{
 		Store:   st,
 		Cfg:     cfg,
@@ -288,18 +299,20 @@ func frontierDeps(st *store.Store, cfg project.Config, mp project.MachineProject
 		Backend: backend,
 		Rungs:   rungs(cfg),
 		Journal: journalFunc(st, ticket),
+		Home:    jigHome,
 	}
 }
 
 // verifydeliverDeps assembles verifydeliver.Deps for one ticket. Unlike
 // frontier.Deps, verifydeliver.Deps carries no Backend or injected Journal
 // func: Gate and Publish journal internally, bound to d.Store.
-func verifydeliverDeps(st *store.Store, cfg project.Config, mp project.MachineProject) verifydeliver.Deps {
+func verifydeliverDeps(st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string) verifydeliver.Deps {
 	return verifydeliver.Deps{
 		Store:   st,
 		Cfg:     cfg,
 		Machine: mp,
 		Rungs:   rungs(cfg),
+		Home:    jigHome,
 	}
 }
 

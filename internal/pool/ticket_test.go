@@ -27,20 +27,20 @@ func TestCheckTicket(t *testing.T) {
 // lease, so Acquire refuses the id before touching the pool, and T-1's gate
 // lease keeps its branch and its uncommitted file.
 func TestAcquireRefusesReservedTicket(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	jigHome := t.TempDir()
 	remote := newSourceAndRemote(t)
 
-	gate, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Gate)
+	gate, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Gate)
 	if err != nil {
 		t.Fatalf("gate Acquire: %v", err)
 	}
 	writeFile(t, filepath.Join(gate.Dir, "in-flight.txt"), "gate work\n")
 
 	for _, id := range []string{"T-1-gate", "T-1-GATE", "T-1-gate."} {
-		if _, err := Acquire("fixture", remote, "main", "jig/"+id, id, Build); err == nil {
+		if _, err := Acquire(jigHome, "fixture", remote, "main", "jig/"+id, id, Build); err == nil {
 			t.Fatalf("Acquire(%q, Build) = nil error, want a refusal", id)
 		}
-		if _, err := Dir("fixture", id, Build); err == nil {
+		if _, err := Dir(jigHome, "fixture", id, Build); err == nil {
 			t.Fatalf("Dir(%q, Build) = nil error, want a refusal", id)
 		}
 	}
@@ -56,10 +56,18 @@ func TestAcquireRefusesReservedTicket(t *testing.T) {
 // a repo name must also be one directory, so no lease (and nothing Acquire
 // moves aside) can ever sit outside the pool.
 func TestDirRejectsRepoNameOutsidePool(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	jigHome := t.TempDir()
 	for _, name := range []string{"", ".", "..", "a/b", `a\b`} {
-		if _, err := Dir(name, "T-1", Build); err == nil {
+		if _, err := Dir(jigHome, name, "T-1", Build); err == nil {
 			t.Errorf("Dir(%q, ...) = nil error, want a refusal", name)
 		}
+	}
+}
+
+// TestDirRefusesNoJigHome: an empty jig home would put the pool in the
+// working directory, so a caller that forgot to pass one is refused.
+func TestDirRefusesNoJigHome(t *testing.T) {
+	if _, err := Dir("", "fixture", "T-1", Build); err == nil {
+		t.Fatal("Dir with no jig home = nil error, want a refusal")
 	}
 }
