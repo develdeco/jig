@@ -71,13 +71,12 @@ func (s *Store) Sync() error {
 // checkpoint is one Sync's or Push's hold on the store after its refusals
 // have run. It works on the store in process (gitx.Repo) and falls back to
 // the git program for any step the in-process repo declines with
-// gitx.ErrUseCLI: a linked worktree, a network remote, histories that
-// diverged, a pinned date it does not parse.
+// gitx.ErrUseCLI: a store that declares something gitx does not honor, a
+// network remote, histories that diverged, a lock another process holds.
 type checkpoint struct {
 	s      *Store
 	repo   *gitx.Repo // nil: the git program does every step
 	branch string
-	dirty  bool // in process only; the git program always stages to find out
 }
 
 // begin opens the store and runs the refusals every Sync and Push starts
@@ -88,16 +87,25 @@ func (s *Store) begin() (*checkpoint, error) {
 	if err != nil && !errors.Is(err, gitx.ErrUseCLI) {
 		return nil, err
 	}
-	if repo == nil {
-		if err := s.refuseIfMidRebaseOrMerge(); err != nil {
-			return nil, err
+	if repo != nil {
+		cp, err := s.beginInProcess(repo)
+		if !errors.Is(err, gitx.ErrUseCLI) {
+			return cp, err
 		}
-		branch, err := s.currentBranch()
-		if err != nil {
-			return nil, err
-		}
-		return &checkpoint{s: s, branch: branch, dirty: true}, nil
 	}
+	if err := s.refuseIfMidRebaseOrMerge(); err != nil {
+		return nil, err
+	}
+	branch, err := s.currentBranch()
+	if err != nil {
+		return nil, err
+	}
+	return &checkpoint{s: s, branch: branch}, nil
+}
+
+// beginInProcess runs begin's refusals through repo, or returns
+// gitx.ErrUseCLI for the git program to run them.
+func (s *Store) beginInProcess(repo *gitx.Repo) (*checkpoint, error) {
 	markers := make([]string, len(rebaseOrMergeMarkers))
 	for i, m := range rebaseOrMergeMarkers {
 		markers[i] = repo.GitPath(m.gitPath)
@@ -121,7 +129,7 @@ func (s *Store) begin() (*checkpoint, error) {
 	if st.Branch == "" {
 		return nil, s.detachedHEADError()
 	}
-	return &checkpoint{s: s, repo: repo, branch: st.Branch, dirty: st.Dirty}, nil
+	return &checkpoint{s: s, repo: repo, branch: st.Branch}, nil
 }
 
 // hasRemote reports whether the store has an origin remote.
@@ -135,9 +143,6 @@ func (cp *checkpoint) hasRemote() bool {
 // commit records every change with msg, when there is any.
 func (cp *checkpoint) commit(msg string) error {
 	if cp.repo != nil {
-		if !cp.dirty {
-			return nil
-		}
 		_, err := cp.repo.CommitAll(msg, "jig", "jig@invalid")
 		if !errors.Is(err, gitx.ErrUseCLI) {
 			return err
