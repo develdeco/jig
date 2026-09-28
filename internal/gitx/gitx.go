@@ -70,10 +70,10 @@ func run(dir string, env []string, stdout, stderr io.Writer, args []string) erro
 // run a small command. Like a shell's command hash, the search's result is
 // reused for as long as its inputs are unchanged: PATH, PATHEXT,
 // NoDefaultCurrentDirectoryInExePath and the working directory (which
-// Windows searches too), so a changed PATH, such as a test hiding git, is
-// searched again on the next call. Only an absolute path found without
-// error is reused; anything else is left to exec.Command, which reports it
-// as it always has. argv[0] stays "git".
+// Windows searches too), plus GIT_EXEC_PATH (see coreGit), so a changed
+// PATH, such as a test hiding git, is searched again on the next call. Only
+// an absolute path found without error is reused; anything else is left to
+// exec.Command, which reports it as it always has. argv[0] stays "git".
 func gitCommand(args []string) *exec.Cmd {
 	path := lookGit()
 	if path == "" {
@@ -91,21 +91,45 @@ var gitPath struct {
 	key, path string
 }
 
-// lookGit returns the absolute path exec.LookPath("git") resolves to under
-// the current search inputs, or "" when it resolves to none without error.
+// lookGit returns coreGit of the absolute path exec.LookPath("git")
+// resolves to under the current search inputs, or "" when it resolves to
+// none without error.
 func lookGit() string {
 	wd, _ := os.Getwd()
 	_, noDot := os.LookupEnv("NoDefaultCurrentDirectoryInExePath")
-	key := strings.Join([]string{os.Getenv("PATH"), os.Getenv("PATHEXT"), strconv.FormatBool(noDot), wd}, "\x00")
+	key := strings.Join([]string{os.Getenv("PATH"), os.Getenv("PATHEXT"), strconv.FormatBool(noDot), wd, os.Getenv("GIT_EXEC_PATH")}, "\x00")
 	gitPath.Lock()
 	defer gitPath.Unlock()
 	if gitPath.key != key {
 		gitPath.key, gitPath.path = key, ""
 		if p, err := exec.LookPath("git"); err == nil && filepath.IsAbs(p) {
-			gitPath.path = p
+			gitPath.path = coreGit(p)
 		}
 	}
 	return gitPath.path
+}
+
+// coreGit returns git's own binary for the git at found: the git in the
+// directory "found --exec-path" names, where every git install puts one
+// (git's Makefile links or copies it there). What PATH finds first can be a
+// launcher that starts that binary as a second process on every call, as
+// Git for Windows' cmd\git.exe and bin\git.exe do, about 10 ms a call.
+// Running the binary directly skips it, and git sets up its own
+// environment either way: Git for Windows' git.exe puts MSYSTEM, and its
+// mingw64\bin and usr\bin directories on PATH, for everything it starts,
+// as its launcher does. Where PATH's git is that binary already (Linux,
+// Homebrew), both name the same file. It returns found when the exec path
+// cannot be read or holds no git.
+func coreGit(found string) string {
+	out, err := exec.Command(found, "--exec-path").Output()
+	if err != nil {
+		return found
+	}
+	core, err := exec.LookPath(filepath.Join(filepath.FromSlash(strings.TrimSpace(string(out))), "git"))
+	if err != nil || !filepath.IsAbs(core) {
+		return found
+	}
+	return core
 }
 
 // repoEnv names the variables that point git at a repository, work tree,

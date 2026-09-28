@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -629,6 +630,52 @@ func TestRunSearchesPATHAgainWhenItChanges(t *testing.T) {
 	t.Setenv("PATH", path)
 	if _, err := Run(dir, "--version"); err != nil {
 		t.Fatalf("git --version with PATH restored: %v", err)
+	}
+}
+
+// TestRunRunsGitsOwnBinary covers coreGit: gitx runs the git in the
+// directory "git --exec-path" names, not a launcher PATH finds first (on a
+// Windows runner, PATH's git is Git for Windows' bin\git.exe launcher).
+func TestRunRunsGitsOwnBinary(t *testing.T) {
+	execPath, err := Run(t.TempDir(), "--exec-path")
+	if err != nil {
+		t.Fatalf("git --exec-path: %v", err)
+	}
+	core, err := exec.LookPath(filepath.Join(filepath.FromSlash(execPath), "git"))
+	if err != nil {
+		t.Skipf("this git's exec path %s holds no git (%v); TestRunFallsBackToTheGitPATHFinds covers that case", execPath, err)
+	}
+	assertSameFile(t, lookGit(), core)
+}
+
+// TestRunFallsBackToTheGitPATHFinds covers coreGit's fallback: a git whose
+// exec path holds no git is run as PATH found it.
+func TestRunFallsBackToTheGitPATHFinds(t *testing.T) {
+	bin, empty := t.TempDir(), t.TempDir()
+	name, body := "git", "#!/bin/sh\necho '"+empty+"'\n"
+	if runtime.GOOS == "windows" {
+		name, body = "git.bat", "@echo "+empty+"\r\n"
+	}
+	if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	assertSameFile(t, lookGit(), filepath.Join(bin, name))
+}
+
+// assertSameFile fails t unless got and want name the same file.
+func assertSameFile(t *testing.T, got, want string) {
+	t.Helper()
+	gotInfo, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("gitx runs %q: %v", got, err)
+	}
+	wantInfo, err := os.Stat(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		t.Fatalf("gitx runs %s, want %s", got, want)
 	}
 }
 

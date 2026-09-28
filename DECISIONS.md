@@ -1109,6 +1109,21 @@ above:
   (`TestRunSearchesPATHAgainWhenItChanges`). On that machine `TestPublishFullChain`
   went from 50-56 s to 27 s. A GitHub Windows runner's search costs 1.6-3.4 ms (git is
   27 entries into its 74-entry PATH), so CI time there does not change measurably.
+- gitx runs git's own binary: the git in the directory `git --exec-path` names, where
+  every git install puts one, rather than the first git on PATH, falling back to PATH's
+  git when that directory holds none. On Windows the first git on PATH is Git for
+  Windows' `cmd\git.exe` (a developer's shell) or `bin\git.exe` (a GitHub runner), a
+  launcher that starts `mingw64\bin\git.exe` as a second process on every call.
+  Traced over two runners, three rounds each of verifydeliver's publish tests with the
+  order rotated, simple commands (`rev-parse`, `ls-files`, `diff`, `symbolic-ref`)
+  took 25-27 ms a call through it and 16-18 ms direct, and a round took 124-164 s
+  (mean 145 s) on main against 118-142 s (mean 130 s) with the change. Locally
+  `git --version` takes 38 ms through `cmd\git.exe` and 26 ms direct. git.exe gives
+  what it starts the environment the launcher does (MSYSTEM, and `mingw64\bin` and
+  `usr\bin` on PATH) and reports the same exec path and system config, checked by
+  running each entry point. A wrapper named git that does more than start git is
+  bypassed for jig's own calls. On Linux, and on the macOS runner's Homebrew git, both
+  name the same file.
 - Long-lived repos (the store after a push, a pool lease after a reuse fetch) get a
   foreground, best-effort `git maintenance run --auto`. The per-call flag only stops
   commands from spawning detached maintenance, not this explicit run;
