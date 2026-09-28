@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,7 +55,19 @@ func RunRaw(dir string, args ...string) (string, error) {
 // run spawns git in dir with "-c maintenance.auto=false" ahead of args, so
 // no call leaves git's detached maintenance running after it returns. The
 // process environment is inherited without repoEnv, then env is appended.
+// When git fails to start because the path gitCommand reused no longer
+// exists (git was removed or moved while jig ran), run forgets that path and
+// tries once more, which searches PATH again.
 func run(dir string, env []string, stdout, stderr io.Writer, args []string) error {
+	err := runOnce(dir, env, stdout, stderr, args)
+	if errors.Is(err, fs.ErrNotExist) && forgetGit() {
+		err = runOnce(dir, env, stdout, stderr, args)
+	}
+	return err
+}
+
+// runOnce is one attempt of run.
+func runOnce(dir string, env []string, stdout, stderr io.Writer, args []string) error {
 	cmd := gitCommand(append([]string{"-c", "maintenance.auto=false"}, args...))
 	cmd.Dir = dir
 	cmd.Env = append(inheritedEnv(), env...)
@@ -106,6 +119,16 @@ func lookGit() string {
 		}
 	}
 	return gitPath.path
+}
+
+// forgetGit drops lookGit's cached search, so the next call searches PATH
+// again, and reports whether there was a cached path to drop.
+func forgetGit() bool {
+	gitPath.Lock()
+	defer gitPath.Unlock()
+	had := gitPath.path != ""
+	gitPath.key, gitPath.path = "", ""
+	return had
 }
 
 // repoEnv names the variables that point git at a repository, work tree,

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -629,6 +630,41 @@ func TestRunSearchesPATHAgainWhenItChanges(t *testing.T) {
 	t.Setenv("PATH", path)
 	if _, err := Run(dir, "--version"); err != nil {
 		t.Fatalf("git --version with PATH restored: %v", err)
+	}
+}
+
+// TestRunSearchesAgainWhenTheGitItFoundIsGone covers run's retry: once the
+// git gitx found and reused is removed while PATH stays the same, the next
+// call must search PATH again and run the git it finds there, not fail to
+// start the removed one.
+func TestRunSearchesAgainWhenTheGitItFoundIsGone(t *testing.T) {
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	name, body := "git", "#!/bin/sh\nexec '"+real+"' \"$@\"\n"
+	if runtime.GOOS == "windows" {
+		name, body = "git.bat", "@\""+real+"\" %*\r\n"
+	}
+	wrapper := filepath.Join(bin, name)
+	if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	if _, err := Run(dir, "--version"); err != nil {
+		t.Fatalf("git --version through the wrapper: %v", err)
+	}
+	if got := lookGit(); got != wrapper {
+		t.Fatalf("gitx reuses %q, want the wrapper %q", got, wrapper)
+	}
+	if err := os.Remove(wrapper); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(dir, "--version"); err != nil {
+		t.Fatalf("git --version after the wrapper was removed: %v", err)
 	}
 }
 
