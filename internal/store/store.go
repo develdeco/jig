@@ -55,21 +55,148 @@ func (s *Store) HasRemote() bool {
 // command rather than silently let through. Otherwise it is a silent no-op
 // when there is no remote. Callers run it at the start of every command.
 func (s *Store) Sync() error {
-	if err := s.refuseIfMidRebaseOrMerge(); err != nil {
-		return err
-	}
-	branch, err := s.currentBranch()
+	cp, err := s.begin()
 	if err != nil {
 		return err
 	}
-	if !s.HasRemote() {
+	if !cp.hasRemote() {
 		return nil
 	}
-	if _, err := s.stageAndCommit("jig: record uncommitted store state"); err != nil {
+	if err := cp.commit("jig: record uncommitted store state"); err != nil {
 		return err
 	}
-	if _, err := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); err != nil {
-		return s.abortFailedPull(err, branch)
+	return cp.pull()
+}
+
+// checkpoint is one Sync's or Push's hold on the store after its refusals
+// have run. It works on the store in process (gitx.Repo) and falls back to
+// the git program for any step the in-process repo declines with
+// gitx.ErrUseCLI: a linked worktree, a network remote, histories that
+// diverged, a pinned date it does not parse.
+type checkpoint struct {
+	s      *Store
+	repo   *gitx.Repo // nil: the git program does every step
+	branch string
+	dirty  bool // in process only; the git program always stages to find out
+}
+
+// begin opens the store and runs the refusals every Sync and Push starts
+// with, in this order: an unfinished rebase, merge, cherry-pick, revert,
+// sequence or bisect, then unmerged index entries, then a detached HEAD.
+func (s *Store) begin() (*checkpoint, error) {
+	repo, err := gitx.OpenRepo(s.Root)
+	if err != nil && !errors.Is(err, gitx.ErrUseCLI) {
+		return nil, err
+	}
+	if repo == nil {
+		if err := s.refuseIfMidRebaseOrMerge(); err != nil {
+			return nil, err
+		}
+		branch, err := s.currentBranch()
+		if err != nil {
+			return nil, err
+		}
+		return &checkpoint{s: s, branch: branch, dirty: true}, nil
+	}
+	markers := make([]string, len(rebaseOrMergeMarkers))
+	for i, m := range rebaseOrMergeMarkers {
+		markers[i] = repo.GitPath(m.gitPath)
+	}
+	what, err := markerPresent(markers)
+	if err != nil {
+		return nil, err
+	}
+	var st gitx.RepoState
+	if what == "" {
+		if st, err = repo.State(); err != nil {
+			return nil, err
+		}
+		if st.Unmerged {
+			what = unmergedDescription
+		}
+	}
+	if what != "" {
+		return nil, s.conflictError(what)
+	}
+	if st.Branch == "" {
+		return nil, s.detachedHEADError()
+	}
+	return &checkpoint{s: s, repo: repo, branch: st.Branch, dirty: st.Dirty}, nil
+}
+
+// hasRemote reports whether the store has an origin remote.
+func (cp *checkpoint) hasRemote() bool {
+	if cp.repo != nil {
+		return cp.repo.HasRemote("origin")
+	}
+	return cp.s.HasRemote()
+}
+
+// commit records every change with msg, when there is any.
+func (cp *checkpoint) commit(msg string) error {
+	if cp.repo != nil {
+		if !cp.dirty {
+			return nil
+		}
+		_, err := cp.repo.CommitAll(msg, "jig", "jig@invalid")
+		if !errors.Is(err, gitx.ErrUseCLI) {
+			return err
+		}
+	}
+	_, err := cp.s.stageAndCommit(msg)
+	return err
+}
+
+// pull brings origin's branch in, as `git pull --rebase` would: fetched in
+// process, then nothing more when the store is level with or ahead of it,
+// the git program's fast-forward when it is behind, and its rebase, with
+// its conflict handling (abortFailedPull), when the two diverged.
+func (cp *checkpoint) pull() error {
+	if cp.repo != nil {
+		rel, err := cp.repo.Fetch("origin", cp.branch)
+		switch {
+		case errors.Is(err, gitx.ErrUseCLI):
+		case err != nil:
+			return err
+		case rel == gitx.Same, rel == gitx.Ahead:
+			return nil
+		case rel == gitx.Behind:
+			_, err := gitx.Run(cp.s.Root, "merge", "--ff-only", "--quiet", "refs/remotes/origin/"+cp.branch)
+			return err
+		}
+	}
+	if _, err := gitx.Run(cp.s.Root, "pull", "--rebase", "origin", cp.branch); err != nil {
+		return cp.s.abortFailedPull(err, cp.branch)
+	}
+	return nil
+}
+
+// push pushes the branch to origin, and on a rejection pulls (rebasing onto
+// what moved on) and pushes once more.
+func (cp *checkpoint) push() error {
+	if cp.repo != nil {
+		err := cp.repo.Push("origin", cp.branch)
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, gitx.ErrPushRejected):
+			if err := cp.pull(); err != nil {
+				return err
+			}
+			if err := cp.repo.Push("origin", cp.branch); !errors.Is(err, gitx.ErrUseCLI) {
+				return err
+			}
+		case !errors.Is(err, gitx.ErrUseCLI):
+			return err
+		}
+	}
+	if _, err := gitx.Run(cp.s.Root, "push", "origin", cp.branch); err != nil {
+		if _, perr := gitx.Run(cp.s.Root, "pull", "--rebase", "origin", cp.branch); perr != nil {
+			return cp.s.abortFailedPull(perr, cp.branch)
+		}
+		if _, err2 := gitx.Run(cp.s.Root, "push", "origin", cp.branch); err2 != nil {
+			return err2
+		}
 	}
 	return nil
 }
@@ -91,6 +218,12 @@ func (s *Store) refuseIfMidRebaseOrMerge() error {
 	if what == "" {
 		return nil
 	}
+	return s.conflictError(what)
+}
+
+// conflictError is the STORE_CONFLICT for what (a rebaseOrMergeMarkers
+// description, or unmergedDescription).
+func (s *Store) conflictError(what string) error {
 	return &axi.Error{
 		Msg:  fmt.Sprintf("the store at %s has %s", s.Root, what),
 		Code: "STORE_CONFLICT",
@@ -144,29 +277,45 @@ func inProgressRebaseOrMerge(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	markers := make([]string, len(rebaseOrMergeMarkers))
 	for i, line := range strings.Split(out, "\n") {
-		if i >= len(rebaseOrMergeMarkers) {
+		if i >= len(markers) {
 			break
 		}
 		p := strings.TrimSpace(line)
-		if p == "" {
-			continue
-		}
-		if !filepath.IsAbs(p) {
+		if p != "" && !filepath.IsAbs(p) {
 			p = filepath.Join(dir, p)
 		}
-		if _, err := os.Stat(p); err == nil {
-			return rebaseOrMergeMarkers[i].description, nil
-		} else if !os.IsNotExist(err) {
-			return "", err
-		}
+		markers[i] = p
+	}
+	if what, err := markerPresent(markers); err != nil || what != "" {
+		return what, err
 	}
 	unmerged, err := gitx.Run(dir, "ls-files", "-u")
 	if err != nil {
 		return "", err
 	}
 	if unmerged != "" {
-		return "unresolved (unmerged) index entries", nil
+		return unmergedDescription, nil
+	}
+	return "", nil
+}
+
+// unmergedDescription is what a refusal reports for unmerged index entries.
+const unmergedDescription = "unresolved (unmerged) index entries"
+
+// markerPresent returns the description of the first rebaseOrMergeMarkers
+// entry whose path (markers, in table order; "" to skip) exists, or "".
+func markerPresent(markers []string) (string, error) {
+	for i, p := range markers {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			return rebaseOrMergeMarkers[i].description, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
 	}
 	return "", nil
 }
@@ -201,31 +350,26 @@ func (s *Store) stageAndCommit(msg string) (bool, error) {
 // or merge or a detached HEAD before doing anything else, whether or not a
 // remote exists.
 func (s *Store) Push(msg string) error {
-	if err := s.refuseIfMidRebaseOrMerge(); err != nil {
-		return err
-	}
-	branch, err := s.currentBranch()
+	cp, err := s.begin()
 	if err != nil {
 		return err
 	}
-	if _, err := s.stageAndCommit(msg); err != nil {
+	if err := cp.commit(msg); err != nil {
 		return err
 	}
-	if !s.HasRemote() {
+	if !cp.hasRemote() {
 		return nil
 	}
-	if _, err := gitx.Run(s.Root, "push", "origin", branch); err != nil {
-		if _, perr := gitx.Run(s.Root, "pull", "--rebase", "origin", branch); perr != nil {
-			return s.abortFailedPull(perr, branch)
-		}
-		if _, err2 := gitx.Run(s.Root, "push", "origin", branch); err2 != nil {
-			return err2
-		}
+	if err := cp.push(); err != nil {
+		return err
 	}
 	// Keep the long-lived store packed. Best-effort: a maintenance failure
 	// (for example a lock held by the user's own maintenance) must not fail
-	// a push that already succeeded.
-	_ = gitx.MaintenanceAuto(s.Root)
+	// a push that already succeeded. In process, the git program starts
+	// only once the loose objects may have passed git's own gc.auto limit.
+	if cp.repo == nil || cp.repo.LooseObjectsPastAutoGC() {
+		_ = gitx.MaintenanceAuto(s.Root)
+	}
 	return nil
 }
 
@@ -338,13 +482,19 @@ func (s *Store) wrapAbortedPullConflict(abortErr, stateErr error, paths []string
 func (s *Store) currentBranch() (string, error) {
 	branch, err := gitx.Run(s.Root, "symbolic-ref", "-q", "--short", "HEAD")
 	if err != nil {
-		return "", &axi.Error{
-			Msg:  fmt.Sprintf("the store at %s has a detached HEAD, not a branch", s.Root),
-			Code: "STORE_CONFLICT",
-			Help: []string{"Check the store's state there with `git status`, resolve it, then rerun."},
-		}
+		return "", s.detachedHEADError()
 	}
 	return branch, nil
+}
+
+// detachedHEADError is the STORE_CONFLICT for a HEAD that points at no
+// branch.
+func (s *Store) detachedHEADError() error {
+	return &axi.Error{
+		Msg:  fmt.Sprintf("the store at %s has a detached HEAD, not a branch", s.Root),
+		Code: "STORE_CONFLICT",
+		Help: []string{"Check the store's state there with `git status`, resolve it, then rerun."},
+	}
 }
 
 // hasStagedChanges reports whether the index differs from HEAD: "diff
