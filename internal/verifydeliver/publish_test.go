@@ -362,11 +362,13 @@ func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
 	}
 }
 
-// TestPublishConfirmWiring checks that Publish threads an honest confirm
-// value into guardedPush: a declined interactive prompt must stop before
-// any push is attempted, and both --yes and an accepted prompt must pass
-// confirmed=true - never a hardcoded literal, and never proceeding past a
-// decline.
+// TestPublishConfirmWiring must stay serial: it swaps the package-level
+// guardedPush and confirm hooks, which every parallel test's Publish reads.
+//
+// It checks that Publish threads an honest confirm value into guardedPush: a
+// declined interactive prompt must stop before any push is attempted, and
+// both --yes and an accepted prompt must pass confirmed=true - never a
+// hardcoded literal, and never proceeding past a decline.
 func TestPublishConfirmWiring(t *testing.T) {
 	origPush := guardedPush
 	origConfirm := confirm

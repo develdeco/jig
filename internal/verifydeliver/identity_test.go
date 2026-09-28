@@ -19,23 +19,19 @@ import (
 // A test that wants to prove identity resolves from somewhere other than
 // the ambient environment - a distinct operator identity, or no identity at
 // all - needs this: env always wins over any git config, pinned or not.
+// t.Setenv registers the restore and panics in a parallel test, so a test
+// using this can never be made parallel by accident; os.Unsetenv then
+// removes the variable, which t.Setenv alone cannot.
 func unsetIdentityEnvForTest(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
 		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE",
 	} {
-		old, had := os.LookupEnv(k)
+		t.Setenv(k, "")
 		if err := os.Unsetenv(k); err != nil {
 			t.Fatalf("unset %s: %v", k, err)
 		}
-		t.Cleanup(func() {
-			if had {
-				os.Setenv(k, old)
-			} else {
-				os.Unsetenv(k)
-			}
-		})
 	}
 }
 
