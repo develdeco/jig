@@ -1061,6 +1061,17 @@ above:
   named package directory actually exists.
 - CLAUDE.md consists of a single `@AGENTS.md` import line, so the two files share one
   content; AGENTS.md itself stays navigation pointers only.
+- verifydeliver's tests run in parallel. Its gate and publish tests make thousands of
+  git calls, and run one after another they were the Windows test step's wall time.
+  Each test now passes its own jig home through `fixture.Opts.Home` instead of setting
+  `JIG_HOME`, and calls `t.Parallel`. Three stay serial because they change
+  process-wide state: the two identity tests (git config and the identity
+  environment) and `TestPublishConfirmWiring` (swaps the package's push and confirm
+  hooks); go test runs them before any parallel test resumes. `go test -race` finds
+  no data race. On three GitHub Windows runners, test binaries precompiled and the
+  order rotated, the whole suite took 644-902 s on main, 453-659 s with the Windows
+  CI changes and gitx's PATH cache, and 306-403 s with this as well, with every vCPU
+  busy; Linux took 38-40 s for all three.
 
 ## Git execution and CI
 
