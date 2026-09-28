@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/project"
 )
 
@@ -21,6 +22,10 @@ func cmdInit(args []string, stdout io.Writer) int {
 	if handled, err := parseFlags(stdout, fs, args); handled {
 		return 0
 	} else if err != nil {
+		return renderErr(stdout, err)
+	}
+	jigHome, err := home.Root()
+	if err != nil {
 		return renderErr(stdout, err)
 	}
 
@@ -48,7 +53,7 @@ func cmdInit(args []string, stdout io.Writer) int {
 		// mapped to cwd) the same way the --store/--clone form does, so a
 		// later command in this repo (validate, run, gate, ...) resolves
 		// its manifest without a separate `jig init --store --clone` step.
-		if _, err := project.InitProject(storeDir, map[string]string{filepath.Base(cwd): cwd}); err != nil {
+		if _, err := project.InitProject(jigHome, storeDir, map[string]string{filepath.Base(cwd): cwd}); err != nil {
 			return renderErr(stdout, err)
 		}
 		axi.Render(stdout,
@@ -64,7 +69,7 @@ func cmdInit(args []string, stdout io.Writer) int {
 			Code: "VALIDATION_ERROR",
 		})
 	}
-	cfg, err := project.InitProject(*storeFlag, clones.m)
+	cfg, err := project.InitProject(jigHome, *storeFlag, clones.m)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

@@ -6,8 +6,8 @@
 // It never touches the caller's real home directory: JIG_HOME is read from
 // the environment when already set, and otherwise defaults to <out>/home, so
 // a tape that never sets JIG_HOME itself still builds a fixture rooted
-// entirely under -out. Either way the resolved value is exported, in-process
-// (for fixture.Build to see) and in shell form on stdout, so a tape's own env
+// entirely under -out. Either way the resolved value is handed to
+// fixture.Build and exported in shell form on stdout, so a tape's own env
 // never leaks a host path: it evals this command's output instead of naming
 // one itself.
 package main
@@ -54,14 +54,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		jigHome = filepath.Join(absOut, "home")
 	}
-	// fixture.Build never touches the environment itself; the caller sets
-	// JIG_HOME first, exactly as a test does with t.Setenv.
-	if err := os.Setenv("JIG_HOME", jigHome); err != nil {
-		fmt.Fprintf(stderr, "fixture: set JIG_HOME: %v\n", err)
-		return 1
-	}
-
-	fx, err := fixture.Build(*out, fixture.Opts{ScenarioBranch: *scenario})
+	fx, err := fixture.Build(*out, fixture.Opts{ScenarioBranch: *scenario, Home: jigHome})
 	if err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return 1

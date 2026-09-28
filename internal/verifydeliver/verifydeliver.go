@@ -28,6 +28,9 @@ type Deps struct {
 	Cfg     project.Config
 	Machine project.MachineProject
 	Rungs   staircase.Config
+	// Home is the jig home root whose pool holds the gate and publish
+	// leases: home.Root() for the binary, a test's own directory in tests.
+	Home string
 }
 
 // primaryRepo returns v0.1's single repo and its target branch (defaulting

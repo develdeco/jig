@@ -85,7 +85,7 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 
 	repo, repoName, target := primaryRepo(d.Cfg)
 	branch := ticketBranch(ticket)
-	lease, err := pool.Acquire(repoName, repo.Remote, target, branch, ticket, pool.Publish)
+	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Publish)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
 	}
@@ -95,7 +95,7 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	if err := fetchTicketBranchFromBuildLease(lease.Dir, repoName, ticket); err != nil {
+	if err := fetchTicketBranchFromBuildLease(d.Home, lease.Dir, repoName, ticket); err != nil {
 		return PublishReport{}, err
 	}
 	if _, err := gitx.Run(lease.Dir, "fetch", "origin"); err != nil {

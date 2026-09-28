@@ -43,6 +43,7 @@ func newDeps(t *testing.T, fx *fixture.Fixture) (Deps, *store.Store) {
 		Backend: backend,
 		Rungs:   staircase.Default(),
 		Journal: func(l journal.Line) error { return journal.Append(st, fx.Ticket, l) },
+		Home:    fx.Home,
 	}
 	return d, st
 }

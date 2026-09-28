@@ -42,7 +42,7 @@ func cmdTicket(args []string, stdout io.Writer) int {
 		return renderErr(stdout, &axi.Error{Msg: "jig ticket new requires --title", Code: "VALIDATION_ERROR"})
 	}
 
-	st, cfg, _, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, _, _, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

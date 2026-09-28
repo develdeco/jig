@@ -96,30 +96,31 @@ func CheckTicket(ticket string) error {
 }
 
 // Dir returns the absolute lease directory for ticket's role lease of
-// repoName, <pool>/<repoName>/<ticket><suffix>, after checking that both
-// name a single directory inside the pool.
-func Dir(repoName, ticket string, role Role) (string, error) {
+// repoName, <pool>/<repoName>/<ticket><suffix> in the pool under the jig
+// home root jigHome, after checking that both name a single directory
+// inside the pool.
+func Dir(jigHome, repoName, ticket string, role Role) (string, error) {
 	if repoName == "" || repoName == "." || repoName == ".." || strings.ContainsAny(repoName, `/\`) {
 		return "", fmt.Errorf("pool: repo name %q must name a single directory", repoName)
 	}
 	if err := CheckTicket(ticket); err != nil {
 		return "", fmt.Errorf("pool: %w", err)
 	}
-	poolDir, err := home.PoolDir()
-	if err != nil {
-		return "", fmt.Errorf("pool: resolve pool dir: %w", err)
+	if jigHome == "" {
+		return "", fmt.Errorf("pool: no jig home given")
 	}
 	// Git runs the clone from the lease's parent directory, so a relative
-	// JIG_HOME would otherwise be resolved twice.
-	poolDir, err = filepath.Abs(poolDir)
+	// jig home would otherwise be resolved twice.
+	poolDir, err := filepath.Abs(home.PoolDir(jigHome))
 	if err != nil {
 		return "", fmt.Errorf("pool: resolve pool dir: %w", err)
 	}
 	return filepath.Join(poolDir, repoName, ticket+role.suffix()), nil
 }
 
-// Acquire returns ticket's role lease of repoName, cloning it from remote on
-// first use or fetching on reuse, then making sure branch is checked out:
+// Acquire returns ticket's role lease of repoName in the pool under the jig
+// home root jigHome (see Dir), cloning it from remote on first use or
+// fetching on reuse, then making sure branch is checked out:
 //
 //   - if the local <branch> already exists in this lease, it is checked out
 //     as-is (a plain `checkout <branch>`, never `-B`): an existing local
@@ -136,8 +137,8 @@ func Dir(repoName, ticket string, role Role) (string, error) {
 // cloned afresh. A .git git refuses although it looks like a repository
 // stops Acquire with git's error and is left as it is. See ownRepo and
 // prepare.
-func Acquire(repoName, remote, target, branch, ticket string, role Role) (Lease, error) {
-	dir, err := Dir(repoName, ticket, role)
+func Acquire(jigHome, repoName, remote, target, branch, ticket string, role Role) (Lease, error) {
+	dir, err := Dir(jigHome, repoName, ticket, role)
 	if err != nil {
 		return Lease{}, err
 	}
