@@ -1227,6 +1227,10 @@ above:
   `vX.Y.(Z+1)-0.<timestamp>-<commit>` once one does), with `+dirty` appended by
   Go itself when the tree carried local modifications, and `(devel)` when build
   info is missing (a `-buildvcs=false` build, or `go run`).
+- v0.1.1 is retracted in `go.mod`: its headless backend cannot start a session, since
+  the CLI refuses its argv. `go install ...@latest` skips a retracted version, and Go
+  warns anyone who pins it. Its GitHub release stays as published, and the next
+  release replaces it as the one the installers fetch.
 - GoReleaser archives are named `jig_<os>_<arch>` with no version segment, so a
   "latest" download URL stays stable release over release instead of changing with
   every tag.
