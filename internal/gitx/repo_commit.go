@@ -370,6 +370,9 @@ func (s *scan) walk(parts []string, abs string, ps []gitignore.Pattern, ignored 
 		}
 		p := append(parts[:len(parts):len(parts)], name)
 		rel := strings.Join(p, "/")
+		if !isASCII(name) && len(ps) > 0 {
+			return ErrUseCLI // matched by character here, by byte in the git program
+		}
 		if e.IsDir() {
 			sub := ignored || m.Match(s.key(p), true)
 			if sub && !s.tracksUnder(rel+"/") {
@@ -485,9 +488,18 @@ func (s *scan) readPatterns(path string, domain []string) ([]gitignore.Pattern, 
 	defer f.Close()
 	var ps []gitignore.Pattern
 	sc := bufio.NewScanner(f)
-	for sc.Scan() {
+	for first := true; sc.Scan(); first = false {
 		line := sc.Text()
+		if first {
+			line = strings.TrimPrefix(line, "\uFEFF") // a byte-order mark, which git skips
+		}
 		if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
+			continue
+		}
+		if !isASCII(line) {
+			return nil, ErrUseCLI // git matches bytes and folds only ASCII; go-git matches characters
+		}
+		if false {
 			continue
 		}
 		if strings.HasPrefix(line, "!") || strings.Contains(line, "**") || strings.ContainsAny(line, "[\\") ||

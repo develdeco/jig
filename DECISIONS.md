@@ -83,8 +83,9 @@ was ambiguous, what was chosen, and why.
 - `Sync` and `Push` both refuse with `STORE_CONFLICT`, without touching the
   index, when the store already has an unfinished rebase or merge in progress
   (`rebase-merge`, `rebase-apply`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`,
-  `REVERT_HEAD`, `sequencer` or `BISECT_LOG`, all read with one
-  `git rev-parse --git-path` call), when HEAD is detached (a bisect, say, so
+  `REVERT_HEAD`, `sequencer` or `BISECT_LOG`, looked up in the store's git
+  directory in process, or with one `git rev-parse --git-path` call when
+  the store is on the git program), when HEAD is detached (a bisect, say, so
   a commit would land where `git bisect reset` drops it), or when the index
   has unmerged entries, which is what a conflicted `git stash pop` leaves
   behind on its own. An unconditional `git add -A`
