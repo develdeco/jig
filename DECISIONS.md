@@ -1134,12 +1134,18 @@ above:
   1 ms for either on Linux. A traced run of the suite starts 17,776 git processes, plus
   the ones git starts itself for a local push, fetch or clone (a push takes about
   300 ms on the runner): 880-1,540 s of git time across five runners, against 61 s on
-  Linux. verifydeliver makes 7,891 of those calls, one test after another, which puts
-  the package at 380-690 s on the runner, and with it listed first it is the step's
-  wall time. Going lower means running its tests in parallel, and every one of them
-  sets `JIG_HOME` with `t.Setenv`, which `t.Parallel` forbids: the pool and
-  machine-mapping paths (`home.PoolDir`, `home.MachinePath`) would have to take the
-  home root explicitly instead of from the environment.
+  Linux. With test binaries already compiled, the whole suite took 808-872 s on three
+  runners before gitx's PATH cache and core binary, the single store guard and this
+  order, and 546-564 s after, against 51-53 s on Linux. What remains is verifydeliver:
+  7,891 of those git calls, one test after another, so with it listed first it is the
+  step's wall time. Split across four test processes beside the other packages, the
+  same runners took 380-400 s, and the other packages ran 1.5-1.9x slower beside it,
+  so every vCPU was busy: about the floor for a 4-vCPU runner. Getting there means
+  running verifydeliver's tests in parallel, and every one of them sets `JIG_HOME`
+  with `t.Setenv`, which `t.Parallel` forbids: the pool and machine-mapping paths
+  (`home.PoolDir`, `home.MachinePath`) would have to take the home root explicitly
+  instead of from the environment. Below that takes fewer git processes per test, or
+  more vCPUs.
 
 ## Release and install
 
