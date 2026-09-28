@@ -229,19 +229,20 @@ func (s *Store) Push(msg string) error {
 	return nil
 }
 
-// abortFailedPull handles jig's own failed `pull --rebase` on branch. A
-// pull that stopped on a conflict leaves a rebase in progress
-// (Sync and Push refused any rebase or merge that was already there, so
-// this one is jig's own): the conflicting paths are read structurally
-// (`git ls-files -u`, before anything else touches the index) so the report
-// can name them, then the rebase is aborted with a best-effort `rebase
-// --abort`, and the result reported as STORE_CONFLICT either way, since the
-// store is still mid-rebase if the abort itself failed (for example a
-// Windows file lock) and needs the same manual resolution. A pull that
-// failed before rebasing (an unreachable or moved remote, an auth failure)
-// left nothing to abort, so its error is returned unchanged rather than
-// misreported as a conflict. When the state cannot be read, the abort is
-// still attempted (best effort), and the read's own error is carried into
+// abortFailedPull handles jig's own failed `pull --rebase` on branch. A pull
+// that stopped on a conflict leaves a rebase in progress (Sync and Push
+// refused any rebase or merge that was already there, so this one is jig's
+// own, unless another process working on the same store started one in
+// between, a race recorded in DECISIONS.md): the conflicting paths are read
+// structurally (`git ls-files -u`, before anything else touches the index)
+// so the report can name them, then the rebase is aborted with a best-effort
+// `rebase --abort`, and the result reported as STORE_CONFLICT either way,
+// since the store is still mid-rebase if the abort itself failed (for
+// example a Windows file lock) and needs the same manual resolution. A pull
+// that failed before rebasing (an unreachable or moved remote, an auth
+// failure) left nothing to abort, so its error is returned unchanged rather
+// than misreported as a conflict. When the state cannot be read, the abort
+// is still attempted (best effort), and the read's own error is carried into
 // the wrapped message rather than assumed away.
 func (s *Store) abortFailedPull(pullErr error, branch string) error {
 	mid, stateErr := inProgressRebaseOrMerge(s.Root)
