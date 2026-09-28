@@ -116,6 +116,19 @@ need another attempt or a brief gets amended (`jig requeue T-1
 slice and question state at any point, and `jig <command> -h` prints that
 command's flags.
 
+Work spanning tickets starts from a chart instead: the intake skill drafts
+`charts/<name>/map.md` and `charts/<name>/tickets.yaml`, then
+
+```sh
+jig graduate <name>    # creates the chart's tickets, writing their ids back into tickets.yaml
+```
+
+creates each entry that has no id yet, in file order, and records any
+blockers it declared into that ticket's own `ticket.yaml`. Each created
+ticket then gets its own `brief.md` and `slices.yaml` and follows the same
+`validate`/`solve` flow above; re-running `jig graduate <name>` after the
+chart's fog clears creates just the new entries.
+
 ## Session backends
 
 A build session (`jig run`) runs against one of three backends, picked with
