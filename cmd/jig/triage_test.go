@@ -61,6 +61,25 @@ func TestTriageForYesKeepsEverythingWithoutTouchingStdin(t *testing.T) {
 	}
 }
 
+// TestTriageForNoteNamesWhyWhenNothingIsLeft pins the note line for a
+// round with nothing left for a human: it still names why no prompt ran.
+func TestTriageForNoteNamesWhyWhenNothingIsLeft(t *testing.T) {
+	for _, tc := range []struct {
+		yes  bool
+		want string
+	}{
+		{true, "triage (--yes): kept every fix and buildable ask\n"},
+		{false, "triage (stdin is not a terminal): kept every fix and buildable ask\n"},
+	} {
+		var out bytes.Buffer
+		in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
+		triageFor(tc.yes, strings.NewReader(""), &out)(in)
+		if out.String() != tc.want {
+			t.Errorf("yes=%v: note = %q, want %q", tc.yes, out.String(), tc.want)
+		}
+	}
+}
+
 func TestTriageForNonTerminalNeverPrompts(t *testing.T) {
 	var out bytes.Buffer
 	f := triageFor(false, strings.NewReader("n\nn\nn\n"), &out)
@@ -76,12 +95,16 @@ func TestTriageForNonTerminalNeverPrompts(t *testing.T) {
 // TestTriageForYesNothingToTriagePrintsNoNoteLine pins the rule that a
 // round that routed no fix, ask or note at all (e.g. a dispatched reviewer
 // round with nothing new to report) must not print a triage note line -
-// there was nothing to triage.
+// there was nothing to triage. On this path triageFor writes nothing at
+// all, so the assertion is on stdout being empty, not on a substring: the
+// note's own "triage (<why>):" prefix is never a bare "triage:", so a
+// substring check for that text would pass here whether or not a note
+// line was actually printed.
 func TestTriageForYesNothingToTriagePrintsNoNoteLine(t *testing.T) {
 	var out bytes.Buffer
 	f := triageFor(true, strings.NewReader(""), &out)
 	f(verifydeliver.TriageInput{})
-	if strings.Contains(out.String(), "triage:") {
+	if out.Len() != 0 {
 		t.Fatalf("stdout has a triage note line for nothing to triage:\n%s", out.String())
 	}
 }
@@ -89,25 +112,31 @@ func TestTriageForYesNothingToTriagePrintsNoNoteLine(t *testing.T) {
 // TestTriageForYesNotesOnlyPrintsNoNoteLine pins the rule that a note is
 // never triaged: a round that routed only notes, no fix or
 // ask, must not print a triage note line either, even though its input is
-// non-empty.
+// non-empty. As above, triageFor writes nothing at all on this path, so
+// the assertion is on stdout being empty.
 func TestTriageForYesNotesOnlyPrintsNoNoteLine(t *testing.T) {
 	var out bytes.Buffer
 	f := triageFor(true, strings.NewReader(""), &out)
 	f(verifydeliver.TriageInput{Notes: []verifydeliver.Finding{{ID: "r1-f5", Risk: "low", Title: "just fyi"}}})
-	if strings.Contains(out.String(), "triage:") {
+	if out.Len() != 0 {
 		t.Fatalf("stdout has a triage note line for a notes-only round:\n%s", out.String())
 	}
 }
 
 // TestTriageForYesUndecidedAskDoesNotClaimKept pins the rule that the note
 // line must never say every ask was kept when a no-workspace ask was left
-// undecided; it says how many are left for a human instead.
+// undecided; it says how many are left for a human instead. The negative
+// check is against the note's own complete-without-a-count shape (what the
+// else branch below prints when nothing is undecided), not old wording:
+// that shape can never appear together with the undecided-count clause
+// this test also requires, so the two assertions can never both pass for a
+// note that falsely claims everything was kept.
 func TestTriageForYesUndecidedAskDoesNotClaimKept(t *testing.T) {
 	var out bytes.Buffer
 	f := triageFor(true, strings.NewReader(""), &out)
 	f(sampleTriageInput()) // r1-f4 has no workspace
 	line := out.String()
-	if strings.Contains(line, "kept every fix and workspace ask (--yes)") {
+	if strings.Contains(line, "kept every fix and buildable ask\n") {
 		t.Fatalf("stdout falsely claims every ask was kept:\n%s", line)
 	}
 	if !strings.Contains(line, "1 ask(s) left for a human") {
@@ -151,6 +180,22 @@ func TestInteractiveTriageFixBatchDismissByID(t *testing.T) {
 	}
 }
 
+// TestInteractiveTriageFixBatchDismissListSeparators pins that the batch
+// dismiss list accepts a comma, a space, or a comma-and-space between ids
+// alike (the prompt advertises "list ids", not one specific separator).
+func TestInteractiveTriageFixBatchDismissListSeparators(t *testing.T) {
+	for _, line := range []string{"r1-f1,r1-f2", "r1-f1 r1-f2", "r1-f1, r1-f2"} {
+		t.Run(line, func(t *testing.T) {
+			var out bytes.Buffer
+			in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
+			res := interactiveTriage(in, strings.NewReader(line+"\n"), &out)
+			if !res.DismissedFixIDs["r1-f1"] || !res.DismissedFixIDs["r1-f2"] {
+				t.Fatalf("input %q: DismissedFixIDs = %v, want both r1-f1 and r1-f2", line, res.DismissedFixIDs)
+			}
+		})
+	}
+}
+
 func TestInteractiveTriageFixBatchUnknownIDReprompts(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
@@ -181,16 +226,30 @@ func TestInteractiveTriageFixBatchEOFKeepsAllAsAuto(t *testing.T) {
 // TestInteractiveTriageFixBatchPromptExplainsConsequences pins the rule
 // that the fix batch prompt says what each answer does, not only its
 // syntax: accepting queues the fix slices, dismissing means the finding is
-// never raised again.
+// never raised again; it also carries the fix count and the id-list
+// syntax for a dismissal (DECISIONS.md frees the literal wording but not
+// this answer syntax).
 func TestInteractiveTriageFixBatchPromptExplainsConsequences(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
 	interactiveTriage(in, strings.NewReader("\n"), &out)
 	text := out.String()
-	for _, want := range []string{"queue their fix slices", "never raised again"} {
+	for _, want := range []string{"2 fix(es)", "Enter queues fix slice(s)", "list ids", "gone for good"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("fix batch prompt missing %q:\n%s", want, text)
 		}
+	}
+}
+
+// TestInteractiveTriageEOFNoteStartsItsOwnLine pins that the stdin-closed
+// note never runs on from the prompt whose read hit EOF: eofNote starts a
+// new line before it prints.
+func TestInteractiveTriageEOFNoteStartsItsOwnLine(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
+	interactiveTriage(in, strings.NewReader(""), &out)
+	if !strings.Contains(out.String(), "(gone for good): \ntriage (stdin closed)") {
+		t.Fatalf("EOF note does not start its own line:\n%q", out.String())
 	}
 }
 
@@ -216,13 +275,17 @@ func TestInteractiveTriageAskKeepWithNoDecisionText(t *testing.T) {
 	}
 }
 
+// The Human check matters as much as Keep here: if Enter stopped being an
+// explicit keep, the prompt would reprompt on the same blank line forever
+// and eventually hit EOF, which also keeps the ask (auto, not human) -
+// checking Keep alone cannot tell that apart from a real, explicit answer.
 func TestInteractiveTriageAskEnterAloneKeeps(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
 	res := interactiveTriage(in, strings.NewReader("\n\n"), &out)
 	dec := res.Asks["r1-f3"]
-	if !dec.Keep {
-		t.Fatalf("Asks[r1-f3] = %+v, want kept (bare Enter is an explicit keep)", dec)
+	if !dec.Keep || !dec.Human {
+		t.Fatalf("Asks[r1-f3] = %+v, want kept/human (bare Enter is an explicit keep)", dec)
 	}
 }
 
@@ -247,13 +310,17 @@ func TestInteractiveTriageAskShowsFileLineDetailAndRationale(t *testing.T) {
 // TestInteractiveTriageAskPromptExplainsConsequences pins the rule that the
 // per-ask prompt says what each answer does, not only its syntax: keeping
 // queues a fix slice and asks for a decision, dismissing means the finding
-// is never raised again.
+// is never raised again. It answers dismiss ("d") so no follow-up decision
+// prompt ever runs: with a keep answer, that second prompt's own "decision
+// for ... (optional, Enter to skip)" text would also satisfy a check for
+// "decision", so a mutant that dropped the word from the ask prompt itself
+// would go uncaught.
 func TestInteractiveTriageAskPromptExplainsConsequences(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
-	interactiveTriage(in, strings.NewReader("k\n\n"), &out)
+	interactiveTriage(in, strings.NewReader("d\n"), &out)
 	text := out.String()
-	for _, want := range []string{"queues a fix slice", "decision text", "never raised again"} {
+	for _, want := range []string{"fix slice + decision", "gone for good", "k/keep/Enter", "n/no/d/dismiss"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("ask prompt missing %q:\n%s", want, text)
 		}
@@ -281,6 +348,45 @@ func TestInteractiveTriageAskNoDismisses(t *testing.T) {
 			dec, ok := res.Asks["r1-f3"]
 			if !ok || dec.Keep {
 				t.Fatalf("Asks[r1-f3] answered %q = %+v, ok=%v, want dismissed", word, dec, ok)
+			}
+		})
+	}
+}
+
+// TestInteractiveTriageAskAllAdvertisedTokens pins every answer token the
+// ask prompt advertises ("[k/keep/Enter, n/no/d/dismiss]"), case
+// insensitively: each one decides the ask on the first read (no reprompt)
+// and records Human true, keep or dismiss as the token says.
+func TestInteractiveTriageAskAllAdvertisedTokens(t *testing.T) {
+	for _, tok := range []string{"k", "keep", "K", "KEEP", ""} {
+		name := tok
+		if name == "" {
+			name = "Enter"
+		}
+		t.Run("keep/"+name, func(t *testing.T) {
+			var out bytes.Buffer
+			in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
+			res := interactiveTriage(in, strings.NewReader(tok+"\n\n"), &out)
+			dec, ok := res.Asks["r1-f3"]
+			if !ok || !dec.Keep || !dec.Human {
+				t.Fatalf("token %q: Asks[r1-f3] = %+v, ok=%v, want kept/human", tok, dec, ok)
+			}
+			if strings.Contains(out.String(), "please answer keep") {
+				t.Fatalf("token %q: unexpected reprompt:\n%s", tok, out.String())
+			}
+		})
+	}
+	for _, tok := range []string{"n", "no", "d", "dismiss", "D", "DISMISS"} {
+		t.Run("dismiss/"+tok, func(t *testing.T) {
+			var out bytes.Buffer
+			in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
+			res := interactiveTriage(in, strings.NewReader(tok+"\n"), &out)
+			dec, ok := res.Asks["r1-f3"]
+			if !ok || dec.Keep || !dec.Human {
+				t.Fatalf("token %q: Asks[r1-f3] = %+v, ok=%v, want dismissed/human", tok, dec, ok)
+			}
+			if strings.Contains(out.String(), "please answer keep") {
+				t.Fatalf("token %q: unexpected reprompt:\n%s", tok, out.String())
 			}
 		})
 	}
@@ -461,8 +567,8 @@ func TestInteractiveTriageAskEOFDoesNotAutoKeepAStaleOracleAsk(t *testing.T) {
 	if _, ok := res.Asks["r1-f4"]; ok {
 		t.Error("Asks[r1-f4] decided, want undecided (a stale oracle needs a human's choice, EOF cannot supply it)")
 	}
-	if !strings.Contains(out.String(), "1 ask(s) missing a workspace or oracle left for a human") {
-		t.Fatalf("stdout missing the EOF count naming the oracle-caused gap:\n%s", out.String())
+	if !strings.Contains(out.String(), "1 ask(s) left for a human") {
+		t.Fatalf("stdout missing the EOF undecided count:\n%s", out.String())
 	}
 }
 
