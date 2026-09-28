@@ -36,7 +36,10 @@ jobs:
       - name: actionlint
         if: runner.os == 'Linux'
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-      - run: go test -timeout 30m ./...
+      # go test starts packages in the order it is given them, a few at a
+      # time, so the longest-running package goes first: listed in its
+      # ./... place, it starts among the last, and the step waits on it alone.
+      - run: go test -timeout 30m ./internal/verifydeliver ./...
 
   snapshot:
     if: github.event_name == 'workflow_dispatch'
