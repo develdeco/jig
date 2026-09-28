@@ -27,8 +27,9 @@ type alwaysCleanSource struct{}
 func (alwaysCleanSource) Round(RoundInput) (Round, bool, error) { return Round{}, false, nil }
 
 func TestGateRound1FixSlice(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
@@ -96,8 +97,9 @@ func TestGateRound1FixSlice(t *testing.T) {
 }
 
 func TestGateCleanRound2(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
@@ -170,8 +172,9 @@ func readDirBytes(t *testing.T, dir string) map[string][]byte {
 }
 
 func TestGateModelDisjoint(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
@@ -185,8 +188,9 @@ func TestGateModelDisjoint(t *testing.T) {
 }
 
 func TestGateEarlyAndFrontierGuard(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -230,8 +234,9 @@ func (duplicateFixSliceSource) Round(in RoundInput) (Round, bool, error) {
 // store.AppendSlices's duplicate-id refusal when a round's fix slice reuses
 // an id already present in slices.yaml.
 func TestGateSurfacesDuplicateFixSliceID(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
@@ -246,8 +251,9 @@ func TestGateSurfacesDuplicateFixSliceID(t *testing.T) {
 // merely "queued") also blocks gate without --early: any non-green state is
 // an incomplete delivery.
 func TestGateRefusesStalledSlice(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
@@ -269,8 +275,9 @@ func TestGateRefusesStalledSlice(t *testing.T) {
 // 0, appended by an earlier round) also blocks a later gate round: it used
 // to be exempted from the frontier check entirely.
 func TestGateRefusesQueuedFixSlice(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
@@ -295,8 +302,9 @@ func TestGateRefusesQueuedFixSlice(t *testing.T) {
 // gate/round-<n>/spec-input.md rather than being silently accepted and
 // dropped.
 func TestGateBranchCopiesBriefDoc(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	// --branch validates a hand-written branch's oracles for real, so it
 	// needs one where they actually pass: drive the ticket's own branch to
 	// green, then push it to origin so the (separate) gate lease this call
@@ -332,8 +340,9 @@ func TestGateBranchCopiesBriefDoc(t *testing.T) {
 // TestGateBranchMissingDocErrors checks that a --doc path that cannot be
 // read is refused with BRIEF_DOC_MISSING rather than silently ignored.
 func TestGateBranchMissingDocErrors(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 
 	d := newDeps(t, fx)
 	_, err := Gate(d, alwaysCleanSource{}, GateOpts{
@@ -356,8 +365,9 @@ func TestGateBranchMissingDocErrors(t *testing.T) {
 // disk if the reviewer then failed, since that file is written only after
 // the round succeeds).
 func TestGateBranchModeBriefPathIsTheDocItself(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	buildDir := buildLeaseDir(t, fx)
 	if _, err := gitx.Run(buildDir, "push", "origin", ticketBranch(fx.Ticket)); err != nil {
@@ -407,8 +417,9 @@ func TestGateBranchModeBriefPathIsTheDocItself(t *testing.T) {
 // must not have its oracles fail or get skewed by that leftover dirt - Gate
 // itself restores the lease to a pristine head before any oracle runs.
 func TestGateWipesLeftoverLeaseDirtBeforeOracles(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
@@ -473,8 +484,9 @@ func TestGateWipesLeftoverLeaseDirtBeforeOracles(t *testing.T) {
 // earlier failed attempt (detached, still dirty, its local branch ref
 // already fast-forwarded past the dirty file) recovers too.
 func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
@@ -584,8 +596,9 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 // pool.Acquire would otherwise reuse as-is (pool.Acquire never resets an
 // existing local branch).
 func TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	buildDir := buildLeaseDir(t, fx)
 	branch := ticketBranch(fx.Ticket)
@@ -667,8 +680,9 @@ func TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin(t *testing.T) 
 // fallback (origin/<target> as the start point for a brand-new local
 // branch) silently validating a branch that was never pushed.
 func TestGateBranchNotFoundOnOrigin(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 
 	d := newDeps(t, fx)
 	_, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: "no-such-branch", Early: true})
@@ -684,8 +698,9 @@ func TestGateBranchNotFoundOnOrigin(t *testing.T) {
 // pool.Acquire's own fetch (no --prune) leaves behind in
 // refs/remotes/origin/<branch>.
 func TestGateBranchDeletedOnOriginAfterEarlierGate(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	buildDir := buildLeaseDir(t, fx)
 	branch := "feature-x"
@@ -720,8 +735,9 @@ func TestGateBranchDeletedOnOriginAfterEarlierGate(t *testing.T) {
 // the verdict derived from applying the round, findings.yaml/md written to
 // disk, and reviewed_sha recorded - all agree with each other.
 func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	d := newDeps(t, fx)
 
@@ -870,8 +886,9 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 // clear an open finding once its file is covered, and findings.yaml must
 // record the coverage as repo-relative paths only, never a host path.
 func TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	d := newDeps(t, fx)
 
@@ -963,8 +980,9 @@ func TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath(t *testing.T) {
 // documented recovery ("the operator reruns") did not actually work
 // without a manual `git checkout`/`git clean` on the store first.
 func TestGateFailedRoundPushesStoreBestEffortSoARerunNeedsNoCleanup(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	d := newDeps(t, fx)
 
@@ -1035,8 +1053,9 @@ func TestGateFailedRoundPushesStoreBestEffortSoARerunNeedsNoCleanup(t *testing.T
 // and breaks manifest.Resolve specifically so the raw error would carry an
 // absolute path if it leaked.
 func TestGateFailedRoundBeforeRoundKnownRecordsRealRoundAndNoRawError(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	d := newDeps(t, fx)
 
@@ -1111,8 +1130,9 @@ func TestGateFailedRoundBeforeRoundKnownRecordsRealRoundAndNoRawError(t *testing
 // per-finding fix slice, since the finding's build target already
 // resolves in full and DefaultTriage auto-keeps it.
 func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	d := newDeps(t, fx)
 
@@ -1256,8 +1276,9 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 // tree, or every later round fails the same way and no dismissal can get
 // past it.
 func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerated(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	buildDir := buildLeaseDir(t, fx)
 	branch := ticketBranch(fx.Ticket)
@@ -1503,8 +1524,7 @@ func renameOracle(t *testing.T, buildDir, branch, from, to string) {
 // ready for the caller to run round 3 through Gate.
 func setupStaleOracleThroughRoundTwo(t *testing.T, round3 func(req ReviewRequest) ReviewResult) (Deps, *fixture.Fixture, GateSource) {
 	t.Helper()
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	buildDir := buildLeaseDir(t, fx)
 	branch := ticketBranch(fx.Ticket)
@@ -1603,6 +1623,8 @@ func setupStaleOracleThroughRoundTwo(t *testing.T, round3 func(req ReviewRequest
 // on its own, so it stays asked and is listed under needs_a_human (the
 // exit-2 signal) - never silently rebuilt on some other oracle.
 func TestGateStaleOracleRecurrenceNeedsAHumanUnattended(t *testing.T) {
+	t.Parallel()
+
 	d, fx, src := setupStaleOracleThroughRoundTwo(t, func(req ReviewRequest) ReviewResult {
 		return ReviewResult{
 			Findings: []ResultFinding{{
@@ -1634,6 +1656,8 @@ func TestGateStaleOracleRecurrenceNeedsAHumanUnattended(t *testing.T) {
 // missing), and routing builds the fix slice on that chosen oracle, not the
 // stale one the finding carried forward.
 func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *testing.T) {
+	t.Parallel()
+
 	d, fx, src := setupStaleOracleThroughRoundTwo(t, func(req ReviewRequest) ReviewResult {
 		return ReviewResult{
 			Findings: []ResultFinding{{
@@ -1697,6 +1721,8 @@ func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *te
 }
 
 func TestGatePRModeNotImplemented(t *testing.T) {
+	t.Parallel()
+
 	_, err := Gate(Deps{}, nil, GateOpts{PRMode: true})
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "NOT_IMPLEMENTED" {
@@ -1715,8 +1741,9 @@ func TestGatePRModeNotImplemented(t *testing.T) {
 // a source happened to script a round says nothing about what earlier
 // rounds left behind.
 func TestGateNoRoundKeepsAnOutstandingAskFromGoingClean(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)

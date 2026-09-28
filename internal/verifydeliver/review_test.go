@@ -107,6 +107,8 @@ func reviewInvalidCode(t *testing.T, err error) string {
 // --- MarshalReviewRequest --------------------------------------------------
 
 func TestMarshalReviewRequestEmptyListsAsBrackets(t *testing.T) {
+	t.Parallel()
+
 	data, err := MarshalReviewRequest(ReviewRequest{Ticket: "JIG-1", Round: 1})
 	if err != nil {
 		t.Fatalf("MarshalReviewRequest: %v", err)
@@ -124,6 +126,8 @@ func TestMarshalReviewRequestEmptyListsAsBrackets(t *testing.T) {
 }
 
 func TestMarshalReviewRequestPreservesPopulatedLists(t *testing.T) {
+	t.Parallel()
+
 	req := ReviewRequest{
 		Oracles:    []string{"test"},
 		Open:       []OpenFinding{{ID: "r1-f1", File: "a.go", Title: "t"}},
@@ -159,6 +163,8 @@ func TestMarshalReviewRequestPreservesPopulatedLists(t *testing.T) {
 // the job and the output contract, and never coaches behavior or patches a
 // past model mistake.
 func TestRenderReviewPromptMatchesDesignGolden(t *testing.T) {
+	t.Parallel()
+
 	req := ReviewRequest{Ticket: "JIG-1", Round: 2, Scope: "delta", BaseSHA: "aaa", HeadSHA: "bbb"}
 	prompt := RenderReviewPrompt(req, "/abs/review.json", "/abs/result.json")
 
@@ -223,6 +229,8 @@ func validResultJSONRaw(t *testing.T, mutate func(map[string]any)) []byte {
 }
 
 func TestParseReviewResultValid(t *testing.T) {
+	t.Parallel()
+
 	data := validResultJSON(t, nil)
 	res, err := ParseReviewResult(data)
 	if err != nil {
@@ -234,6 +242,8 @@ func TestParseReviewResultValid(t *testing.T) {
 }
 
 func TestParseReviewResultRejectsEveryInvalidRule(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		data []byte
@@ -302,6 +312,8 @@ func TestParseReviewResultRejectsEveryInvalidRule(t *testing.T) {
 }
 
 func TestParseReviewResultNormalizesWindowsSeparatorsButKeepsFileVerbatim(t *testing.T) {
+	t.Parallel()
+
 	data := validResultJSON(t, func(r *ReviewResult) { r.Findings[0].File = `billing\invoices.go` })
 	res, err := ParseReviewResult(data)
 	if err != nil {
@@ -313,6 +325,8 @@ func TestParseReviewResultNormalizesWindowsSeparatorsButKeepsFileVerbatim(t *tes
 }
 
 func TestParseReviewResultCleanNoFindings(t *testing.T) {
+	t.Parallel()
+
 	data := marshalReviewResult(t, ReviewResult{ReviewedPaths: []string{"a.go"}, Summary: "clean"})
 	res, err := ParseReviewResult(data)
 	if err != nil {
@@ -343,6 +357,8 @@ func validRequestAndResult() (ReviewRequest, ReviewResult) {
 }
 
 func TestValidateReviewResultRules(t *testing.T) {
+	t.Parallel()
+
 	leaseDir := t.TempDir()
 	present := func(path string) (bool, error) { return true, nil }
 	absent := func(path string) (bool, error) { return false, nil }
@@ -500,6 +516,8 @@ func TestValidateReviewResultRules(t *testing.T) {
 // --- computeScopeDiff --------------------------------------------------------
 
 func TestComputeScopeDiff(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	writeReviewFile(t, dir, "keep.go", "1")
 	writeReviewFile(t, dir, "old.go", "renamed")
@@ -556,6 +574,8 @@ func equalStrings(got, want []string) bool {
 // --- resolveScopeBase ---------------------------------------------------------
 
 func TestResolveScopeBaseRound1IsFullFromMergeBase(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "a.go", "1")
@@ -578,6 +598,8 @@ func TestResolveScopeBaseRound1IsFullFromMergeBase(t *testing.T) {
 }
 
 func TestResolveScopeBaseDeltaWhenPriorReviewedSHAIsAncestor(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "a.go", "1")
@@ -604,6 +626,8 @@ func TestResolveScopeBaseDeltaWhenPriorReviewedSHAIsAncestor(t *testing.T) {
 }
 
 func TestResolveScopeBaseFullWhenPriorReviewedSHAIsNotAncestor(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "a.go", "1")
@@ -637,6 +661,8 @@ func TestResolveScopeBaseFullWhenPriorReviewedSHAIsNotAncestor(t *testing.T) {
 }
 
 func TestResolveScopeBaseFallsBackToStartSHAWhenMergeBaseFails(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
@@ -678,6 +704,8 @@ func TestResolveScopeBaseFallsBackToStartSHAWhenMergeBaseFails(t *testing.T) {
 }
 
 func TestResolveScopeBaseErrorsWhenMergeBaseFailsAndNoStartSHA(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
@@ -749,6 +777,8 @@ func writeMustReviewResult(t *testing.T, d session.Dispatch) {
 }
 
 func TestReviewerGateSourceRoundHappyPath(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "brief.md", "brief")
@@ -837,6 +867,8 @@ func TestReviewerGateSourceRoundHappyPath(t *testing.T) {
 }
 
 func TestReviewerGateSourceRoundGuardRejectsACommit(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "a.go", "1")
@@ -877,6 +909,8 @@ func TestReviewerGateSourceRoundGuardRejectsACommit(t *testing.T) {
 }
 
 func TestReviewerGateSourceRoundGuardRejectsDirtyTree(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "a.go", "1")
@@ -910,6 +944,8 @@ func TestReviewerGateSourceRoundGuardRejectsDirtyTree(t *testing.T) {
 }
 
 func TestReviewerGateSourceRoundBackendFailure(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "a.go", "1")
@@ -934,6 +970,8 @@ func TestReviewerGateSourceRoundBackendFailure(t *testing.T) {
 }
 
 func TestReviewerGateSourceRoundNoResultWritten(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "a.go", "1")
@@ -956,6 +994,8 @@ func TestReviewerGateSourceRoundNoResultWritten(t *testing.T) {
 }
 
 func TestReviewerGateSourceRoundMissingCoverageIsInvalid(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "a.go", "1")
@@ -1001,6 +1041,8 @@ func TestReviewerGateSourceRoundMissingCoverageIsInvalid(t *testing.T) {
 }
 
 func TestReviewerGateSourceRoundPriorNamingNoKnownIDIsInvalid(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "a.go", "1")
@@ -1050,6 +1092,8 @@ func TestReviewerGateSourceRoundPriorNamingNoKnownIDIsInvalid(t *testing.T) {
 // report.yaml by hand) and checks round 2 resolves a delta scope anchored
 // on round 1's reviewed_sha.
 func TestReviewerGateSourceRoundDeltaScopeAcrossRounds(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "a.go", "1")
@@ -1110,6 +1154,8 @@ func TestReviewerGateSourceRoundDeltaScopeAcrossRounds(t *testing.T) {
 // together with session's fake backend (its gate playback path), the
 // combination a scripted end-to-end run exercises.
 func TestReviewerGateSourceRoundWithFakeBackend(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 	writeReviewFile(t, dir, "a.go", "1")
@@ -1163,6 +1209,8 @@ func TestReviewerGateSourceRoundWithFakeBackend(t *testing.T) {
 // finding is open, the previous review already covers head, so Round
 // never dispatches a reviewer session at all.
 func TestReviewerGateSourceRoundCleanWithoutDispatchWhenNothingOutstanding(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main") // HEAD already equals origin/main
 	st := newReviewStore(t)
 	head, err := gitx.RevParse(dir, "HEAD")
@@ -1213,6 +1261,8 @@ func TestReviewerGateSourceRoundCleanWithoutDispatchWhenNothingOutstanding(t *te
 // scope diff, an open finding still outstanding from an earlier round means
 // the reviewer must look again, so Round dispatches as usual.
 func TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main")
 	st := newReviewStore(t)
 
@@ -1247,6 +1297,8 @@ func TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding(t *test
 // Round 1 has no previous review to fall back on, so skipping dispatch here
 // would let a deletion-only change through with no review at all.
 func TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff(t *testing.T) {
+	t.Parallel()
+
 	dir := newReviewLease(t, "main") // HEAD == origin/main, seed.txt present
 	st := newReviewStore(t)
 
@@ -1295,6 +1347,8 @@ func TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff(t *testing.T) {
 // round skipped the reviewer session entirely: the gate could not converge
 // and no command a person could run would move it.
 func TestReviewerGateSourceRoundReadsStatusNotTheReviewersLabel(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name    string
 		finding Finding

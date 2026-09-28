@@ -1093,6 +1093,17 @@ above:
   named package directory actually exists.
 - CLAUDE.md consists of a single `@AGENTS.md` import line, so the two files share one
   content; AGENTS.md itself stays navigation pointers only.
+- verifydeliver's tests run in parallel. Its gate and publish tests make thousands of
+  git calls, and run one after another they were the Windows test step's wall time.
+  Each test now passes its own jig home through `fixture.Opts.Home` instead of setting
+  `JIG_HOME`, and calls `t.Parallel`. Three stay serial because they change
+  process-wide state: the two identity tests (git config and the identity
+  environment) and `TestPublishConfirmWiring` (swaps the package's push and confirm
+  hooks); go test runs them before any parallel test resumes. `go test -race` finds
+  no data race. On three GitHub Windows runners, test binaries precompiled and the
+  order rotated, the whole suite took 644-902 s on main, 453-659 s with the Windows
+  CI changes and gitx's PATH cache, and 306-403 s with this as well, with every vCPU
+  busy; Linux took 38-40 s for all three.
 
 ## Git execution and CI
 
@@ -1187,13 +1198,11 @@ above:
   7,891 of those git calls, one test after another, so with it listed first it is the
   step's wall time. Split across four test processes beside the other packages, the
   same runners took 380-400 s, and the other packages ran 1.5-1.9x slower beside it,
-  so every vCPU was busy: about the floor for a 4-vCPU runner. Getting there means
-  running verifydeliver's tests in parallel, and the ones that carry 97% of its git
-  time (gate, publish, identity, lease restore) each set `JIG_HOME` with `t.Setenv`,
-  which `t.Parallel` forbids: the pool and machine-mapping paths
-  (`home.PoolDir`, `home.MachinePath`) would have to take the home root explicitly
-  instead of from the environment. Below that takes fewer git processes per test, or
-  more vCPUs.
+  so every vCPU was busy: about the floor for a 4-vCPU runner. verifydeliver's tests
+  now run in parallel, which gets there (under "Fixture and tests"): the pool and
+  machine-mapping paths take the jig home root as an argument, so its tests no longer
+  set `JIG_HOME` with `t.Setenv`, which `t.Parallel` forbids. Below that takes fewer
+  git processes per test, or more vCPUs.
 - The Windows test leg puts `git --exec-path` first on PATH. The runner's first git is
   Git for Windows' `bin\git.exe`, a launcher that starts git's own `git.exe` as a second
   process on every call, the calls git makes itself during a local push included. On

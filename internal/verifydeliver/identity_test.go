@@ -19,23 +19,19 @@ import (
 // A test that wants to prove identity resolves from somewhere other than
 // the ambient environment - a distinct operator identity, or no identity at
 // all - needs this: env always wins over any git config, pinned or not.
+// t.Setenv registers the restore and panics in a parallel test, so a test
+// using this can never be made parallel by accident; os.Unsetenv then
+// removes the variable, which t.Setenv alone cannot.
 func unsetIdentityEnvForTest(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
 		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE",
 	} {
-		old, had := os.LookupEnv(k)
+		t.Setenv(k, "")
 		if err := os.Unsetenv(k); err != nil {
 			t.Fatalf("unset %s: %v", k, err)
 		}
-		t.Cleanup(func() {
-			if had {
-				os.Setenv(k, old)
-			} else {
-				os.Unsetenv(k)
-			}
-		})
 	}
 }
 
@@ -68,8 +64,7 @@ func identityRepo(t *testing.T, name, email string) string {
 // bug that motivated the fix.
 func TestPublishCommitsWithMappedCloneIdentity(t *testing.T) {
 	unsetIdentityEnvForTest(t)
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 
@@ -104,7 +99,6 @@ func TestPublishCommitsWithMappedCloneIdentity(t *testing.T) {
 // the ticket branch.
 func TestPublishFailsIdentityRequiredAndPushesNothing(t *testing.T) {
 	unsetIdentityEnvForTest(t)
-	t.Setenv("JIG_HOME", t.TempDir())
 
 	cfgPath := filepath.Join(t.TempDir(), "gitconfig-no-identity")
 	if err := os.WriteFile(cfgPath, []byte("[user]\n\tuseConfigOnly = true\n"), 0o644); err != nil {
@@ -113,7 +107,7 @@ func TestPublishFailsIdentityRequiredAndPushesNothing(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", cfgPath)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 	// d.Machine is left zero-valued: no mapped clone recorded for this

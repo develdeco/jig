@@ -35,6 +35,8 @@ func greenExcept(notGreen ...string) func(string) (bool, error) {
 // --- workspaceFor ---------------------------------------------------------
 
 func TestWorkspaceForNestedPathsAndNoWorkspace(t *testing.T) {
+	t.Parallel()
+
 	man := manifest.Manifest{Workspaces: []manifest.Workspace{
 		{ID: "root", Path: "."},
 		{ID: "billing", Path: "billing"},
@@ -73,6 +75,8 @@ func TestWorkspaceForNestedPathsAndNoWorkspace(t *testing.T) {
 // in that workspace with no derivable build target, routing each one to a
 // human as an unbuildable ask.
 func TestWorkspaceForNormalizesDeclaredPath(t *testing.T) {
+	t.Parallel()
+
 	man := manifest.Manifest{Workspaces: []manifest.Workspace{
 		{ID: "root", Path: "./"},
 		{ID: "billing", Path: "./billing"},
@@ -103,6 +107,8 @@ func TestWorkspaceForNormalizesDeclaredPath(t *testing.T) {
 // programming error returned up the call chain, never silently folded into
 // StatusNoted.
 func TestStatusForActionRejectsUnknownAction(t *testing.T) {
+	t.Parallel()
+
 	for _, action := range []string{ActionFix, ActionAsk, ActionNote} {
 		status, err := statusForAction(action)
 		if err != nil {
@@ -123,6 +129,8 @@ func TestStatusForActionRejectsUnknownAction(t *testing.T) {
 // --- ApplyRound: rule 4 (new findings) ------------------------------------
 
 func TestApplyRoundRule4NewFindingsRouteByAction(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	result := ReviewResult{
 		Findings: []ResultFinding{
@@ -175,6 +183,8 @@ func TestApplyRoundRule4NewFindingsRouteByAction(t *testing.T) {
 // that leaves oracle unset still gets it recorded - never left empty on a
 // manifest that does have one.
 func TestApplyRoundRecordsTheSoleOracleWhenTheReviewerOmitsIt(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	result := ReviewResult{
 		Findings: []ResultFinding{
@@ -197,6 +207,8 @@ func TestApplyRoundRecordsTheSoleOracleWhenTheReviewerOmitsIt(t *testing.T) {
 // derive, the same as a no-workspace fix, so it routes to the human as an
 // ask instead of silently becoming a fix slice with no oracle.
 func TestApplyRoundForcesAskWhenNoOracleCanBeResolved(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	man.Oracles["lint"] = "true" // two oracles now: no single default
 	result := ReviewResult{
@@ -221,6 +233,8 @@ func TestApplyRoundForcesAskWhenNoOracleCanBeResolved(t *testing.T) {
 // manifest oracle any more, so this is the same missing-build-target case,
 // not a silent pass-through.
 func TestApplyRoundStaleOracleAfterManifestChangeForcesAsk(t *testing.T) {
+	t.Parallel()
+
 	man := manifest.Manifest{
 		Oracles:    map[string]string{"test": "true", "vet": "true"},
 		Workspaces: []manifest.Workspace{{ID: "root", Path: "."}},
@@ -256,6 +270,8 @@ func TestApplyRoundStaleOracleAfterManifestChangeForcesAsk(t *testing.T) {
 // directly callable, so it must not silently keep an invalid path either)
 // is an error, the same as an unknown action, never kept as if valid.
 func TestApplyRoundRejectsAnUnnormalizableFindingFile(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	result := ReviewResult{
 		Findings: []ResultFinding{
@@ -271,6 +287,8 @@ func TestApplyRoundRejectsAnUnnormalizableFindingFile(t *testing.T) {
 // --- ApplyRound: rule 1 (open recurrence) ---------------------------------
 
 func TestApplyRoundRule1RecurrenceStaysOpenAndCountsUp(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Line: 1, Title: "old title", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "old", Recurrences: 0},
@@ -306,6 +324,8 @@ func TestApplyRoundRule1RecurrenceStaysOpenAndCountsUp(t *testing.T) {
 // --- ApplyRound: rule 2 (dismissed recurrence) -----------------------------
 
 func TestApplyRoundRule2DismissedRecurrenceStaysDismissed(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	known := map[string]Finding{
 		"r1-f3": {ID: "r1-f3", File: "a.go", Line: 7, Title: "old", Status: StatusDismissed, Action: ActionFix, Risk: RiskLow, RiskRationale: "old"},
@@ -333,6 +353,8 @@ func TestApplyRoundRule2DismissedRecurrenceStaysDismissed(t *testing.T) {
 // repeat must not restate an earlier round's human decision as if it were
 // made again this round.
 func TestApplyRoundRule2ResetsTriageFieldsOnADismissedRepeat(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	known := map[string]Finding{
 		"r1-f3": {ID: "r1-f3", File: "a.go", Status: StatusDismissed, Action: ActionFix, Risk: RiskLow, RiskRationale: "old",
@@ -357,6 +379,8 @@ func TestApplyRoundRule2ResetsTriageFieldsOnADismissedRepeat(t *testing.T) {
 // --- ApplyRound: rule 1 carries forward oracle, decision and workspace ---
 
 func TestApplyRoundRule1CarriesOracleWhenThisRoundNamesNone(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	man.Oracles["lint"] = "true" // now two oracles, so an omitted oracle is never a default
 	known := map[string]Finding{
@@ -379,6 +403,8 @@ func TestApplyRoundRule1CarriesOracleWhenThisRoundNamesNone(t *testing.T) {
 }
 
 func TestApplyRoundRule1CarriesDecisionAndWorkspaceWhenFileUnchanged(t *testing.T) {
+	t.Parallel()
+
 	man := manifest.Manifest{Oracles: map[string]string{"test": "true"}} // no workspaces declared
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "orphan.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "old",
@@ -409,6 +435,8 @@ func TestApplyRoundRule1CarriesDecisionAndWorkspaceWhenFileUnchanged(t *testing.
 // --- ApplyRound: recurrence bound ---------------------------------------
 
 func TestApplyRoundRecurrenceBoundFirstRoutesLikeNew(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Recurrences: 0},
@@ -436,6 +464,8 @@ func TestApplyRoundRecurrenceBoundFirstRoutesLikeNew(t *testing.T) {
 // --early round outrunning the frontier: neither has built a slice for the
 // id yet.
 func TestApplyRoundRecurrenceNotCountedWithoutAFixSlice(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusAsked, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Recurrences: 0},
@@ -461,6 +491,8 @@ func TestApplyRoundRecurrenceNotCountedWithoutAFixSlice(t *testing.T) {
 // recurrence bound's premise is a slice that already went green without
 // resolving it.
 func TestApplyRoundRecurrenceNotCountedWhenRecordingSliceIsNotGreen(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Recurrences: 0},
@@ -481,6 +513,8 @@ func TestApplyRoundRecurrenceNotCountedWhenRecordingSliceIsNotGreen(t *testing.T
 }
 
 func TestApplyRoundRecurrenceBoundSecondForcesAsk(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Recurrences: 1},
@@ -506,6 +540,8 @@ func TestApplyRoundRecurrenceBoundSecondForcesAsk(t *testing.T) {
 // scenario: a second recurrence reported as a bare note still carries
 // an oracle forward, so the ask it becomes can build a fix slice if kept.
 func TestApplyRoundRecurrenceBoundSecondAsNoteKeepsPriorOracle(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	man.Oracles["lint"] = "true"
 	known := map[string]Finding{
@@ -533,6 +569,8 @@ func TestApplyRoundRecurrenceBoundSecondAsNoteKeepsPriorOracle(t *testing.T) {
 // --- ClearingAfterTriage (rule 3) -------------------------------------------
 
 func TestClearingAfterTriageClearsUnreportedFindingWhenFileReviewed(t *testing.T) {
+	t.Parallel()
+
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
 	}
@@ -556,6 +594,8 @@ func TestClearingAfterTriageClearsUnreportedFindingWhenFileReviewed(t *testing.T
 // ticket with the decision never made; an undecided ask is exactly what
 // an unattended run is supposed to park on.
 func TestClearingAfterTriageKeepsAnUndecidedAsk(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name   string
 		exists func(string) (bool, error)
@@ -579,6 +619,8 @@ func TestClearingAfterTriageKeepsAnUndecidedAsk(t *testing.T) {
 }
 
 func TestClearingAfterTriageClearsFindingWhoseFileIsGoneAtHead(t *testing.T) {
+	t.Parallel()
+
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
 	}
@@ -592,6 +634,8 @@ func TestClearingAfterTriageClearsFindingWhoseFileIsGoneAtHead(t *testing.T) {
 }
 
 func TestClearingAfterTriageStaysOpenWhenNotReviewed(t *testing.T) {
+	t.Parallel()
+
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
 	}
@@ -610,6 +654,8 @@ func TestClearingAfterTriageStaysOpenWhenNotReviewed(t *testing.T) {
 // convergence test: a dismissed finding re-reported in the same file as an
 // open one must not keep that open one alive.
 func TestClearingAfterTriageDismissedRepeatDoesNotBlockOpenFinding(t *testing.T) {
+	t.Parallel()
+
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
 		"r1-f2": {ID: "r1-f2", File: "a.go", Status: StatusDismissed},
@@ -631,6 +677,8 @@ func TestClearingAfterTriageDismissedRepeatDoesNotBlockOpenFinding(t *testing.T)
 // asked) in the same file as an unreported open finding blocks that
 // finding from clearing.
 func TestClearingAfterTriageRoutedFindingBlocksClearing(t *testing.T) {
+	t.Parallel()
+
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
 	}
@@ -649,6 +697,8 @@ func TestClearingAfterTriageRoutedFindingBlocksClearing(t *testing.T) {
 // finding in the same file, because clearing runs against the final,
 // post-triage status, not what the reviewer reported before triage.
 func TestClearingAfterTriageDismissedAtTriageDoesNotBlock(t *testing.T) {
+	t.Parallel()
+
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
 	}
@@ -667,6 +717,8 @@ func TestClearingAfterTriageDismissedAtTriageDoesNotBlock(t *testing.T) {
 // --- fold / clean -----------------------------------------------------------
 
 func TestFoldFindingsWithCleared(t *testing.T) {
+	t.Parallel()
+
 	cum := map[string]Finding{}
 	foldFindings(cum, []Finding{
 		{ID: "r1-f1", Status: StatusOpen},
@@ -695,6 +747,8 @@ func TestFoldFindingsWithCleared(t *testing.T) {
 }
 
 func TestIsCleanWithNotesAndDismissedPresent(t *testing.T) {
+	t.Parallel()
+
 	cum := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", Status: StatusNoted},
 		"r1-f2": {ID: "r1-f2", Status: StatusDismissed},
@@ -714,6 +768,8 @@ func TestIsCleanWithNotesAndDismissedPresent(t *testing.T) {
 }
 
 func TestOpenAndDismissedFindingsListsSplitByStatus(t *testing.T) {
+	t.Parallel()
+
 	cum := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", Status: StatusOpen},
 		"r1-f2": {ID: "r1-f2", Status: StatusAsked},
@@ -733,6 +789,8 @@ func TestOpenAndDismissedFindingsListsSplitByStatus(t *testing.T) {
 // --- cumulativeFindings (store-backed fold) ---------------------------------
 
 func TestCumulativeFindingsFoldsAcrossRoundsAndSkipsMissingOnes(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	ticket := "JIG-1"
 
@@ -792,6 +850,8 @@ func TestCumulativeFindingsFoldsAcrossRoundsAndSkipsMissingOnes(t *testing.T) {
 // Known, Open and Dismissed alike, and the latest occurrence of a
 // recurring id wins.
 func TestFoldBeforeProjectsOpenNotedAndDismissed(t *testing.T) {
+	t.Parallel()
+
 	st := newReviewStore(t)
 	ticket := "JIG-1"
 
@@ -851,6 +911,8 @@ func TestFoldBeforeProjectsOpenNotedAndDismissed(t *testing.T) {
 // --- rendering ---------------------------------------------------------------
 
 func TestRenderFindingsMDSortsByRiskHighFirst(t *testing.T) {
+	t.Parallel()
+
 	findings := []Finding{
 		{ID: "r1-f1", Title: "low one", Risk: RiskLow, RiskRationale: "r", Status: StatusOpen},
 		{ID: "r1-f2", Title: "high one", Risk: RiskHigh, RiskRationale: "r", Status: StatusOpen},
@@ -869,6 +931,8 @@ func TestRenderFindingsMDSortsByRiskHighFirst(t *testing.T) {
 }
 
 func TestRenderFindingsMDCleanWhenNoFindings(t *testing.T) {
+	t.Parallel()
+
 	md := renderFindingsMD(2, "clean", "", nil, nil)
 	if indexOf(md, "clean") < 0 {
 		t.Errorf("findings.md = %q, want it to say clean", md)
@@ -880,6 +944,8 @@ func TestRenderFindingsMDCleanWhenNoFindings(t *testing.T) {
 // (an earlier round's finding is still open or asked, just not reported
 // against again this round).
 func TestRenderFindingsMDNeverSaysCleanForANonCleanRound(t *testing.T) {
+	t.Parallel()
+
 	md := renderFindingsMD(3, "fix-slices", "", nil, nil)
 	if indexOf(md, "clean") >= 0 {
 		t.Errorf("findings.md = %q, must not say clean for a fix-slices round", md)
@@ -892,6 +958,8 @@ func TestRenderFindingsMDNeverSaysCleanForANonCleanRound(t *testing.T) {
 // TestRenderFindingsMDShowsTriageDecisionRoutedAsAndCleared covers the
 // triage/decision/routed_as additive fields and the cleared-ids line.
 func TestRenderFindingsMDShowsTriageDecisionRoutedAsAndCleared(t *testing.T) {
+	t.Parallel()
+
 	findings := []Finding{
 		{ID: "r2-f1", Title: "kept ask", Risk: RiskHigh, RiskRationale: "r", Status: StatusOpen,
 			Action: ActionAsk, Triage: TriageHuman, Decision: "go ahead"},
@@ -929,6 +997,8 @@ func indexOf(s, sub string) int {
 }
 
 func TestMarshalFindingsYAMLEmptyListsAsBrackets(t *testing.T) {
+	t.Parallel()
+
 	data, err := marshalFindingsYAML("full", nil, nil, nil, "")
 	if err != nil {
 		t.Fatalf("marshalFindingsYAML: %v", err)
@@ -946,6 +1016,8 @@ func TestMarshalFindingsYAMLEmptyListsAsBrackets(t *testing.T) {
 }
 
 func TestMarshalFindingsYAMLRoundTripsTriageFields(t *testing.T) {
+	t.Parallel()
+
 	findings := []Finding{
 		{ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Triage: TriageHuman, Decision: "do it", RoutedAs: ActionAsk},
 	}
@@ -973,6 +1045,8 @@ func TestMarshalFindingsYAMLRoundTripsTriageFields(t *testing.T) {
 }
 
 func TestFindingsSortStable(t *testing.T) {
+	t.Parallel()
+
 	// Guard against a non-deterministic map iteration leaking into
 	// rendered output: two calls with the same input must render
 	// identically.
@@ -1003,6 +1077,8 @@ func TestFindingsSortStable(t *testing.T) {
 // unlocked with nobody having answered it; re-reported as `fix` it became
 // queued work with no decision recorded anywhere.
 func TestApplyRoundAnUndecidedAskStaysAskedWhateverTheLabel(t *testing.T) {
+	t.Parallel()
+
 	man := oneOracleManifest()
 	for _, action := range []string{ActionNote, ActionFix, ActionAsk} {
 		t.Run(action, func(t *testing.T) {

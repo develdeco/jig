@@ -56,6 +56,8 @@ func cloneFrom(t *testing.T, remote string) string {
 }
 
 func TestReconcilePoliciesLocalOnly(t *testing.T) {
+	t.Parallel()
+
 	_, remote := tinyRepo(t)
 
 	// A ticket branch created locally in a clone, never pushed, while
@@ -95,6 +97,8 @@ func TestReconcilePoliciesLocalOnly(t *testing.T) {
 }
 
 func TestReconcilePoliciesPrePushed(t *testing.T) {
+	t.Parallel()
+
 	_, remote := tinyRepo(t)
 
 	clone := cloneFrom(t, remote)
@@ -132,6 +136,8 @@ func TestReconcilePoliciesPrePushed(t *testing.T) {
 }
 
 func TestRebaseOnto(t *testing.T) {
+	t.Parallel()
+
 	_, remote := tinyRepo(t)
 	clone := cloneFrom(t, remote)
 
