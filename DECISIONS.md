@@ -90,9 +90,12 @@ was ambiguous, what was chosen, and why.
   behind on its own. An unconditional `git add -A`
   would stage unresolved conflict markers as ordinary content, and a later
   commit (or `rebase --continue`) would finalize them onto the store branch,
-  corrupting whatever file conflicted for every later reader. The check
-  lives in the shared `stageAndCommit` step, so it also guards a command that
-  only ever `Push`es, such as `jig requeue`, not only the ones that `Sync` first.
+  corrupting whatever file conflicted for every later reader. Both `Sync` and
+  `Push` run the check first, so it also guards a command that only ever
+  `Push`es, such as `jig requeue`, not only the ones that `Sync` first. It runs
+  once per call: their shared `stageAndCommit` step ran it again with only
+  reads in between, two more git processes per store write, 1,408 of the
+  suite's 17,776 git calls in a traced Linux run.
 - A failed `pull --rebase` is aborted and wrapped as `STORE_CONFLICT` only when
   it actually left a rebase in progress; jig's own conflicts never leave the
   store mid-rebase for the guard above to catch on the next command, unless
