@@ -1118,6 +1118,26 @@ above:
   the test.
 - Windows Defender exclusions were considered for Windows CI time and dropped: GitHub's
   Windows runner images already turn real-time scanning off and exclude the C: and D: drives.
+- ci.yml's test step lists `internal/verifydeliver` ahead of `./...`. go test starts
+  packages in the order it is given them, four at a time on a hosted runner, so
+  verifydeliver, the longest-running package, started last from its `./...` place and
+  the Windows step then waited on it alone. Replaying one Windows run's measured
+  package times through that scheduling gives 687 s for the step in `./...` order and
+  524 s with verifydeliver first; the step took 706 s in that run. go test still
+  prints results in the order it was given, so nothing prints until verifydeliver
+  finishes.
+- What is left of Windows CI time, measured on GitHub's windows-2025 runners (4 vCPUs,
+  real-time scanning already off, so a Dev Drive for TEMP measured no faster): an empty
+  Go program takes 6-8 ms to start and a trivial git command 13-18 ms, against about
+  1 ms for either on Linux. A traced run of the suite starts 17,776 git processes, plus
+  the ones git starts itself for a local push, fetch or clone (a push takes about
+  300 ms on the runner): 880-1,540 s of git time across five runners, against 61 s on
+  Linux. verifydeliver makes 7,891 of those calls, one test after another, which puts
+  the package at 380-690 s on the runner, and with it listed first it is the step's
+  wall time. Going lower means running its tests in parallel, and every one of them
+  sets `JIG_HOME` with `t.Setenv`, which `t.Parallel` forbids: the pool and
+  machine-mapping paths (`home.PoolDir`, `home.MachinePath`) would have to take the
+  home root explicitly instead of from the environment.
 
 ## Release and install
 
