@@ -80,10 +80,9 @@ func (s *Store) Sync() error {
 // stage or commit over that: `git add -A` would pick up unresolved conflict
 // markers, and a later `rebase --continue` (or manual resolution) would
 // then commit them onto the store branch, corrupting whatever file
-// conflicted (e.g. journal.ndjson) for every later reader. It is called from
-// stageAndCommit, the shared first step of both Sync and Push, so it guards
-// a command that only ever Pushes (e.g. `jig requeue`) too - not only the
-// commands that Sync first.
+// conflicted (e.g. journal.ndjson) for every later reader. Both Sync and
+// Push call it before anything else, so it guards a command that only ever
+// Pushes (e.g. `jig requeue`) too - not only the commands that Sync first.
 func (s *Store) refuseIfMidRebaseOrMerge() error {
 	what, err := inProgressRebaseOrMerge(s.Root)
 	if err != nil {
@@ -172,13 +171,12 @@ func inProgressRebaseOrMerge(dir string) (string, error) {
 	return "", nil
 }
 
-// stageAndCommit refuses while the store has an unfinished rebase or merge,
-// then stages every change (`add -A`) and, when anything is staged, commits
-// it with jig's identity and msg. It reports whether a commit was made.
+// stageAndCommit stages every change (`add -A`) and, when anything is
+// staged, commits it with jig's identity and msg. It reports whether a
+// commit was made. Its callers, Sync and Push, have already run
+// refuseIfMidRebaseOrMerge, and nothing between that check and this call
+// changes the store, so it does not repeat the check's two git calls.
 func (s *Store) stageAndCommit(msg string) (bool, error) {
-	if err := s.refuseIfMidRebaseOrMerge(); err != nil {
-		return false, err
-	}
 	if _, err := gitx.Run(s.Root, "add", "-A"); err != nil {
 		return false, err
 	}
