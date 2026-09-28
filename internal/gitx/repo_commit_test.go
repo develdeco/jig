@@ -263,8 +263,8 @@ func TestCommitAllHonorsTheIdentityEnvironment(t *testing.T) {
 	if _, err := openRepo(t, dir).CommitAll("pinned", "jig", "jig@invalid"); err != nil {
 		t.Fatalf("CommitAll: %v", err)
 	}
-	got := mustRun(t, dir, "log", "-1", "--format=%an <%ae> %aI|%cn <%ce> %cI")
-	want := "pinned author <author@example.invalid> 2026-01-01T00:00:00Z|pinned committer <committer@example.invalid> 2026-01-01T01:00:00+01:00"
+	got := mustRun(t, dir, "log", "-1", "--date=raw", "--format=%an <%ae> %ad|%cn <%ce> %cd")
+	want := "pinned author <author@example.invalid> 1767225600 +0000|pinned committer <committer@example.invalid> 1767225600 +0100"
 	if got != want {
 		t.Fatalf("identity = %q, want %q", got, want)
 	}
