@@ -318,8 +318,8 @@ func InitStandalone(repoDir string) (string, error) {
 	if err := os.WriteFile(filepath.Join(storeDir, ".gitignore"), []byte("*.lock\n.*.tmp\n"), 0o644); err != nil {
 		return "", fmt.Errorf("project: write .gitignore: %w", err)
 	}
-	// No line-ending conversion anywhere in the store: its files are jig's
-	// data, and it lets gitx work on the store in process (gitx.Repo).
+	// No conversion of any file in the store: its files are jig's data, and
+	// it lets gitx work on the store in process (gitx.Repo).
 	if err := os.WriteFile(filepath.Join(storeDir, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
 		return "", fmt.Errorf("project: write .gitattributes: %w", err)
 	}
