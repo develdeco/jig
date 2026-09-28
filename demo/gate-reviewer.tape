@@ -64,7 +64,7 @@ Set FontSize 14
 Set Columns 160
 Set Height 800
 Set Padding 20
-Set TypingSpeed 50ms
+Set TypingSpeed 30ms
 Set Framerate 30
 Set CursorBlink false
 
@@ -106,11 +106,12 @@ Show
 ## cmd/jig/triage.go's interactiveTriage renders it - two fixes (r1-f1
 ## high risk, r1-f2 low risk, sorted high first), one ask (r1-f3), one note
 ## (r1-f4, listed only, never prompted).
-Type `jig gate "$JIG_TICKET" --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
+Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 # triage.go:134 - "fixes: press Enter to accept all 2 and queue their fix
 # slices, or list ids to dismiss - a dismissed finding is never raised
 # again: " (trimmed tail: "again:")
 Wait+Line@15s /again:$/
+Sleep 3s
 # Dismiss the low-risk trim fix (r1-f2); keep the high-risk overflow-doc
 # fix (r1-f1) in the batch - the same split the e2e test scripts.
 Type "r1-f2" Enter
@@ -119,53 +120,56 @@ Type "r1-f2" Enter
 # again. [k/keep/Enter=keep, n/no/d/dismiss=dismiss]: " (trimmed tail:
 # "dismiss]:")
 Wait+Line@15s /dismiss\]:$/
+Sleep 3s
 Type "k" Enter
 # triage.go:213 - "decision for r1-f3 (optional, Enter to skip): "
 # (trimmed tail: "skip):")
 Wait+Line@15s /skip\):$/
+Sleep 2s
 Type "Use a warm, casual tone; no exclamation marks." Enter
 # The round's own report: "gate:\n  ticket: JIG-1\n  round: 1\n  verdict:
 # fix-slices\n  model: claude-sonnet-5\n  scope: full\n..." (axi.KV,
 # gate.go:105-115), then the findings and fix_slices tables, then the
 # command exits and the shell prompt returns.
 Wait@15s
-Sleep 1s
+Sleep 5s
 
 ## Build round 1's fix slices (fix-1-alpha-test, fix-1-r1-f3) to green.
-Type `jig run "$JIG_TICKET" --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
+Type `jig run JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 Wait@60s
-Sleep 1s
+Sleep 2s
 
 ## Round 2 (delta): the doc-comment fix (r1-f1) recurs as this round's only
 ## fix - Enter alone accepts the batch of one, the same as the e2e test's
 ## "\n". The tone ask already cleared and the trim fix's dismissal carried
 ## forward (routeRound never re-offers a dismissed prior to triage), so
 ## neither prompts again.
-Type `jig gate "$JIG_TICKET" --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
+Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 # triage.go:134 with len(in.Fixes)=1 - "...press Enter to accept all 1..."
 # (same trimmed tail as round 1's batch prompt: "again:")
 Wait+Line@15s /again:$/
+Sleep 3s
 Enter
 Wait@15s
-Sleep 1s
+Sleep 5s
 
 ## Build round 2's fix slice (fix-2-alpha-test) to green.
-Type `jig run "$JIG_TICKET" --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
+Type `jig run JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 Wait@60s
-Sleep 1s
+Sleep 2s
 
 ## Round 3: clean. The scenario's own round-3 review-result.json reports no
 ## findings, so routeRound's fixes/asks/notes are all empty and
 ## interactiveTriage prints, and asks, nothing at all - straight to the
 ## report and back to the shell prompt.
-Type `jig gate "$JIG_TICKET" --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
+Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 Wait@15s
-Sleep 1s
+Sleep 5s
 
 ## The ticket's final state: every slice green and nothing outstanding to
 ## decide. `jig status` prints slices, questions/parked/stalled and any
 ## outstanding asks (status.go) - never notes, so the round 1 note stays
 ## in the store without appearing here.
-Type `jig status "$JIG_TICKET" --store "$JIG_STORE_DIR"` Enter
+Type `jig status JIG-1 --store "$JIG_STORE_DIR"` Enter
 Wait@15s
-Sleep 2s
+Sleep 6s
