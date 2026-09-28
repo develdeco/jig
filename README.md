@@ -84,13 +84,22 @@ they start and say what to install if it is not.
 [`gh`](https://cli.github.com/) is needed for the GitHub tracker and
 opening pull requests.
 
-### Building from a clone
+### Installing an unreleased build
+
+`main` can carry fixes that no release has yet. It has no release
+archives, so it installs with Go 1.27 or newer, skills included:
 
 ```sh
-git clone https://github.com/develdeco/jig.git
-cd jig
-go build ./cmd/jig
+go install github.com/develdeco/jig/cmd/jig@main
+jig skills install
 ```
+
+From a clone, `go install ./cmd/jig` does the same for the checked-out
+tree. Either way `jig` lands in `$(go env GOPATH)/bin`, or `GOBIN` when
+set, which must be on your PATH, and `jig version` reports a Go
+pseudo-version such as `v0.1.2-0.20260928203114-640df78698ec` instead of a
+release tag. `main` has passed CI, but not the checks a release runs on its
+own installed binaries.
 
 ## Quickstart
 
