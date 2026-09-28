@@ -254,6 +254,16 @@ was ambiguous, what was chosen, and why.
   (`C:\a` is `//c/a`), with gitignore characters escaped, plus the symlink-resolved form
   when it differs. Checked against the CLI: native backslash paths, lowercased paths, and
   a directory named `w [1] (x) y` all match, and a look-alike sibling does not.
+- A Windows 8.3 short-name spelling (a runner's `RUNNER~1`) matches no rule, however
+  the rule itself is spelled: the CLI checks an edit against the rules as the session
+  spells its target, and denies every edit to such a path (2.1.232 locally, 2.1.284 on
+  GitHub's Windows runners), while it allows the same file spelled long and matches a
+  long name holding a literal `~` as usual (2.1.232). So the backend hands a session the
+  long spelling of what it grants (`sessionView`): its working directory, its input and
+  result paths, and the prompt's mentions of them. GitHub's Windows runners reach every
+  test through such a temp dir, and a machine whose store, jig home or working directory
+  goes through a short name would reach its sessions the same way. Only 8.3 names are
+  expanded; a symlink or junction keeps both of its spellings in the rules, as above.
 - The CLI contract test is opt-in (`JIG_LIVE_CLAUDE=1`), not part of `go test ./...`: it
   runs whichever CLI version is installed, so its result is not reproducible run to run,
   and CI has no `claude` binary.

@@ -80,17 +80,22 @@ func liveBuildSession(t *testing.T, jig string) {
 	}
 	sibling := filepath.Join(work, "a.attempt-1.other.json")
 	outsideFile := filepath.Join(outside, "x.txt")
+	// The model writes through the paths its session is given, spelled as
+	// sessionView spells them, as a real session reads them from its prompt
+	// and its working directory; the dispatch keeps the temp dir's own
+	// spelling, which on a CI runner goes through an 8.3 short name.
+	view := sessionView(d)
 
 	api := &mockMessagesAPI{steps: []mockStep{
 		{name: "screen denies a push", call: bash("git push origin HEAD"), wantErr: "Blocked `git push`"},
 		{name: "read slice.json outside the lease", call: fixed("Read", map[string]any{"file_path": d.SliceJSON}), wantOut: `"goal":"say hello"`},
 		{name: "write outside the lease", call: write(outsideFile, "x"), wantDenied: true},
-		{name: "write in the lease", call: write(filepath.Join(worktree, "hello.txt"), "hello\n")},
+		{name: "write in the lease", call: write(filepath.Join(view.Worktree, "hello.txt"), "hello\n")},
 		{name: "write a sibling of result.json", call: write(sibling, "x"), wantDenied: true},
 		{name: "commit", call: bash("git add -A && git -c user.name=jig-test -c user.email=test@example.invalid commit -q -m hello && git rev-parse HEAD")},
 		{name: "write result.json", call: func(prior []mockToolResult) mockToolCall {
 			sha := regexp.MustCompile(`[0-9a-f]{40}`).FindString(prior[5].Content)
-			return mockToolCall{"Write", map[string]any{"file_path": d.ResultJSON, "content": `{"outcome":"green","summary":"live contract","commit":"` + sha + `"}`}}
+			return mockToolCall{"Write", map[string]any{"file_path": view.ResultJSON, "content": `{"outcome":"green","summary":"live contract","commit":"` + sha + `"}`}}
 		}},
 	}}
 	runLive(t, jig, api, d)
@@ -166,11 +171,12 @@ func liveReviewerSession(t *testing.T, jig string) {
 		t.Fatal(err)
 	}
 	review := `{"verdict":"clean","findings":[],"closures":[],"summary":"live contract"}`
+	view := sessionView(d)
 
 	api := &mockMessagesAPI{steps: []mockStep{
 		{name: "read review.json", call: fixed("Read", map[string]any{"file_path": d.SliceJSON}), wantOut: `"scope":"full"`},
 		{name: "read the diff", call: bash("git diff --stat " + base + ".." + head), wantOut: "a.go"},
-		{name: "write result.json", call: write(d.ResultJSON, review)},
+		{name: "write result.json", call: write(view.ResultJSON, review)},
 	}}
 	runLive(t, jig, api, d)
 

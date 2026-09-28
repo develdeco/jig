@@ -272,7 +272,7 @@ func runClaudeStub(t *testing.T, env map[string]string) claudeStubRun {
 	if err := json.Unmarshal([]byte(lines[0]), &call); err != nil {
 		t.Fatalf("parse claude stub log: %v", err)
 	}
-	wantArgs, wantCleanup, err := b.args(d)
+	wantArgs, wantCleanup, err := b.args(sessionView(d))
 	if err != nil {
 		t.Fatalf("args: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestHeadlessRunGivenEnvIsExact(t *testing.T) {
 
 	want := map[string]bool{
 		"FOO=bar": true, "CLAUDE_STUB_LOG=" + logFile: true, "CLAUDE_STUB_STDOUT=" + stdout: true,
-		"PWD=" + d.Worktree: true,
+		"PWD=" + sessionView(d).Worktree: true,
 	}
 	if runtime.GOOS == "windows" {
 		// os/exec's own documented contract: SYSTEMROOT is always added
