@@ -1,6 +1,6 @@
 ---
 name: intake
-description: Runs the grilling round that turns fresh work or a rushed backlog ticket into a brief.md plus slices.yaml, or into an epics/ chart when the fog spans more than one ticket. Use when fresh work needs shape, a backlog ticket's quality is unknown, or granularity is undecided.
+description: Runs the grilling round that turns fresh work or a rushed backlog ticket into a brief.md plus slices.yaml, or into a chart when the fog spans more than one ticket. Use when fresh work needs shape, a backlog ticket's quality is unknown, or granularity is undecided.
 ---
 
 # intake
@@ -27,7 +27,7 @@ A round asks the whole **frontier** - every question whose prerequisites are set
 
 ## Chart output (fog spans tickets)
 
-`epics/<name>/map.md`, sectioned Destination · Notes · Decisions so far · Not yet specified (fog) · Out of scope. Decision tickets: one per grilling session. Graduation: a resolved fog entry mints a real ticket via `jig ticket new` - the map decides, it never builds.
+A chart is `charts/<name>/map.md` (for people; jig never reads it), sectioned Destination · Notes · Decisions so far · Not yet specified (fog) · Out of scope, plus `charts/<name>/tickets.yaml` (the handover jig reads and writes). Decision tickets: one per grilling session, entered into `tickets.yaml` as they resolve. Graduation: `jig graduate <name>` creates the entries without ids and writes the ids back, so re-running it after fog clears creates just the new tickets - the map decides, it never builds.
 
 ## Done when
 
