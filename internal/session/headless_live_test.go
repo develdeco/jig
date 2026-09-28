@@ -1,21 +1,16 @@
 package session
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/develdeco/jig/internal/claudetest"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/outcome"
 )
@@ -24,8 +19,9 @@ import (
 // real Claude Code CLI: the local `claude` binary runs a scripted session
 // through jig's generated settings, the CLI's own permission system, and
 // the real `jig _screen` hook, with a mock Messages API on loopback
-// standing in for the model - no credentials and no network. It is opt-in,
-// since its result depends on whichever CLI version is installed:
+// (claudetest) standing in for the model - no credentials and no network.
+// It is opt-in, since its result depends on whichever CLI version is
+// installed:
 //
 //	JIG_LIVE_CLAUDE=1 go test ./internal/session -run Live
 //
@@ -83,19 +79,19 @@ func liveBuildSession(t *testing.T, jig string) {
 	sibling := filepath.Join(work, "a.attempt-1.other.json")
 	outsideFile := filepath.Join(outside, "x.txt")
 
-	api := &mockMessagesAPI{steps: []mockStep{
-		{name: "screen denies a push", call: bash("git push origin HEAD"), wantErr: "Blocked `git push`"},
-		{name: "read slice.json outside the lease", call: fixed("Read", map[string]any{"file_path": d.SliceJSON}), wantOut: `"goal":"say hello"`},
-		{name: "write outside the lease", call: write(outsideFile, "x"), wantDenied: true},
-		{name: "write in the lease", call: write(filepath.Join(worktree, "hello.txt"), "hello\n")},
-		{name: "write a sibling of result.json", call: write(sibling, "x"), wantDenied: true},
-		{name: "commit", call: bash("git add -A && git -c user.name=jig-test -c user.email=test@example.invalid commit -q -m hello && git rev-parse HEAD")},
-		{name: "write result.json", call: func(prior []mockToolResult) mockToolCall {
+	sess := &claudetest.Session{Steps: []claudetest.Step{
+		{Name: "screen denies a push", Call: claudetest.Bash("git push origin HEAD"), WantErr: "Blocked `git push`"},
+		{Name: "read slice.json outside the lease", Call: claudetest.Tool("Read", map[string]any{"file_path": d.SliceJSON}), WantOut: `"goal":"say hello"`},
+		{Name: "write outside the lease", Call: claudetest.Write(outsideFile, "x"), WantDenied: true},
+		{Name: "write in the lease", Call: claudetest.Write(filepath.Join(worktree, "hello.txt"), "hello\n")},
+		{Name: "write a sibling of result.json", Call: claudetest.Write(sibling, "x"), WantDenied: true},
+		{Name: "commit", Call: claudetest.Bash("git add -A && git -c user.name=jig-test -c user.email=test@example.invalid commit -q -m hello && git rev-parse HEAD")},
+		{Name: "write result.json", Call: func(prior []claudetest.ToolResult) claudetest.ToolCall {
 			sha := regexp.MustCompile(`[0-9a-f]{40}`).FindString(prior[5].Content)
-			return mockToolCall{"Write", map[string]any{"file_path": d.ResultJSON, "content": `{"outcome":"green","summary":"live contract","commit":"` + sha + `"}`}}
+			return claudetest.ToolCall{Name: "Write", Input: map[string]any{"file_path": d.ResultJSON, "content": `{"outcome":"green","summary":"live contract","commit":"` + sha + `"}`}}
 		}},
 	}}
-	runLive(t, jig, api, d)
+	runLive(t, jig, sess, d)
 
 	for _, path := range []string{outsideFile, sibling} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -169,12 +165,12 @@ func liveReviewerSession(t *testing.T, jig string) {
 	}
 	review := `{"verdict":"clean","findings":[],"closures":[],"summary":"live contract"}`
 
-	api := &mockMessagesAPI{steps: []mockStep{
-		{name: "read review.json", call: fixed("Read", map[string]any{"file_path": d.SliceJSON}), wantOut: `"scope":"full"`},
-		{name: "read the diff", call: bash("git diff --stat " + base + ".." + head), wantOut: "a.go"},
-		{name: "write result.json", call: write(d.ResultJSON, review)},
+	sess := &claudetest.Session{Steps: []claudetest.Step{
+		{Name: "read review.json", Call: claudetest.Tool("Read", map[string]any{"file_path": d.SliceJSON}), WantOut: `"scope":"full"`},
+		{Name: "read the diff", Call: claudetest.Bash("git diff --stat " + base + ".." + head), WantOut: "a.go"},
+		{Name: "write result.json", Call: claudetest.Write(d.ResultJSON, review)},
 	}}
-	runLive(t, jig, api, d)
+	runLive(t, jig, sess, d)
 
 	if got, err := os.ReadFile(d.ResultJSON); err != nil || string(got) != review {
 		t.Errorf("result.json = %q (%v), want %q", got, err, review)
@@ -207,20 +203,13 @@ func liveRepo(t *testing.T, dir string) string {
 	return sha
 }
 
-// runLive points the CLI at api (with a throwaway config dir and a dummy
-// key, so no real account or setting is involved), runs d through the
-// headless backend with jig as the screen hook, and checks every scripted
-// step ran with the expected outcome.
-func runLive(t *testing.T, jig string, api *mockMessagesAPI, d Dispatch) {
+// runLive points the CLI at a mock Messages API scripted with sess, runs d
+// through the headless backend with jig as the screen hook, and checks
+// every scripted step ran with the expected outcome, stopping the test
+// there if one did not.
+func runLive(t *testing.T, jig string, sess *claudetest.Session, d Dispatch) {
 	t.Helper()
-	srv := httptest.NewServer(api)
-	defer srv.Close()
-	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
-	t.Setenv("ANTHROPIC_API_KEY", "jig-contract-test-not-a-key")
-	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
-	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
-	t.Setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
-	t.Setenv("DISABLE_AUTOUPDATER", "1")
+	claudetest.Serve(t, &claudetest.API{Route: func(string) *claudetest.Session { return sess }})
 
 	backend, err := New("headless", Options{ScreenBinary: jig})
 	if err != nil {
@@ -237,190 +226,8 @@ func runLive(t *testing.T, jig string, api *mockMessagesAPI, d Dispatch) {
 		t.Fatal("claude did not finish within 5 minutes")
 	}
 
-	results := api.lastResults()
-	if len(results) != len(api.steps) {
-		t.Fatalf("the session ran %d of %d scripted tool calls: %+v", len(results), len(api.steps), results)
+	sess.Check(t)
+	if t.Failed() {
+		t.FailNow()
 	}
-	for i, step := range api.steps {
-		r := results[i]
-		switch {
-		case step.wantDenied:
-			// The permission system's own refusal text is the CLI's, and
-			// it reads differently per mode and version, so the assertion
-			// is the structured flag plus the file staying absent, which
-			// the caller checks.
-			if !r.IsError {
-				t.Errorf("step %d (%s): got no error, want the call refused", i, step.name)
-			}
-		case step.wantErr != "":
-			if !r.IsError || !strings.Contains(r.Content, step.wantErr) {
-				t.Errorf("step %d (%s): got error=%v %q, want an error containing %q", i, step.name, r.IsError, r.Content, step.wantErr)
-			}
-		case r.IsError:
-			t.Errorf("step %d (%s): unexpected error %q", i, step.name, r.Content)
-		case !strings.Contains(r.Content, step.wantOut):
-			t.Errorf("step %d (%s): output %q does not contain %q", i, step.name, r.Content, step.wantOut)
-		}
-	}
-}
-
-// mockToolCall is one tool_use block the mock model emits.
-type mockToolCall struct {
-	Name  string
-	Input map[string]any
-}
-
-// mockToolResult is one tool_result block the CLI sent back.
-type mockToolResult struct {
-	Content string
-	IsError bool
-}
-
-// mockStep is one scripted tool call: call builds it from the results of
-// the steps before it, and the result must contain wantOut, or be an error
-// containing wantErr.
-type mockStep struct {
-	name string
-	call func(prior []mockToolResult) mockToolCall
-	// wantOut and wantErr match text jig itself owns: the session's own
-	// output, and the screen's deny reason. wantDenied is for a refusal the
-	// CLI words, where only the structured flag is jig's to rely on.
-	wantOut    string
-	wantErr    string
-	wantDenied bool
-}
-
-func fixed(name string, input map[string]any) func([]mockToolResult) mockToolCall {
-	return func([]mockToolResult) mockToolCall { return mockToolCall{name, input} }
-}
-
-func bash(command string) func([]mockToolResult) mockToolCall {
-	return fixed("Bash", map[string]any{"command": command, "description": "jig contract step"})
-}
-
-func write(path, content string) func([]mockToolResult) mockToolCall {
-	return fixed("Write", map[string]any{"file_path": path, "content": content})
-}
-
-// mockMessagesAPI is a minimal Anthropic Messages API. A request that
-// offers tools gets the next scripted tool call, chosen by how many tool
-// results its conversation already holds; any other request, or one past
-// the script, gets a final text message. Responses stream as server-sent
-// events when the request asks for a stream, as the CLI does.
-type mockMessagesAPI struct {
-	steps []mockStep
-
-	mu      sync.Mutex
-	results []mockToolResult // the longest conversation's tool results
-	seq     atomic.Int64
-}
-
-func (m *mockMessagesAPI) lastResults() []mockToolResult {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.results
-}
-
-func (m *mockMessagesAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/v1/messages") {
-		http.NotFound(w, r)
-		return
-	}
-	var req struct {
-		Stream   bool              `json:"stream"`
-		Tools    []json.RawMessage `json:"tools"`
-		Messages []struct {
-			Content json.RawMessage `json:"content"`
-		} `json:"messages"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	var results []mockToolResult
-	for _, msg := range req.Messages {
-		results = append(results, toolResultsOf(msg.Content)...)
-	}
-
-	block := map[string]any{"type": "text", "text": "done"}
-	stop := "end_turn"
-	if len(req.Tools) > 0 {
-		m.mu.Lock()
-		if len(results) >= len(m.results) {
-			m.results = results
-		}
-		m.mu.Unlock()
-		if n := len(results); n < len(m.steps) {
-			call := m.steps[n].call(results)
-			block = map[string]any{"type": "tool_use", "id": fmt.Sprintf("toolu_jig_%02d", n), "name": call.Name, "input": call.Input}
-			stop = "tool_use"
-		}
-	}
-	id := fmt.Sprintf("msg_jig_%d", m.seq.Add(1))
-	usage := map[string]int{"input_tokens": 1, "output_tokens": 1}
-
-	if !req.Stream {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"id": id, "type": "message", "role": "assistant", "model": "mock",
-			"content": []any{block}, "stop_reason": stop, "usage": usage,
-		})
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	event := func(name string, v any) {
-		data, _ := json.Marshal(v)
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, data)
-	}
-	event("message_start", map[string]any{"type": "message_start", "message": map[string]any{
-		"id": id, "type": "message", "role": "assistant", "model": "mock",
-		"content": []any{}, "stop_reason": nil, "usage": usage,
-	}})
-	if block["type"] == "tool_use" {
-		input, _ := json.Marshal(block["input"])
-		event("content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{
-			"type": "tool_use", "id": block["id"], "name": block["name"], "input": map[string]any{},
-		}})
-		event("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{
-			"type": "input_json_delta", "partial_json": string(input),
-		}})
-	} else {
-		event("content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}})
-		event("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": block["text"]}})
-	}
-	event("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
-	event("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stop}, "usage": map[string]int{"output_tokens": 1}})
-	event("message_stop", map[string]any{"type": "message_stop"})
-}
-
-// toolResultsOf extracts the tool_result blocks of one message's content,
-// which is either a plain string (no blocks) or an array of blocks whose
-// own content is a string or an array of text blocks.
-func toolResultsOf(content json.RawMessage) []mockToolResult {
-	var blocks []struct {
-		Type    string          `json:"type"`
-		Content json.RawMessage `json:"content"`
-		IsError bool            `json:"is_error"`
-	}
-	if json.Unmarshal(content, &blocks) != nil {
-		return nil
-	}
-	var out []mockToolResult
-	for _, b := range blocks {
-		if b.Type != "tool_result" {
-			continue
-		}
-		var text string
-		if json.Unmarshal(b.Content, &text) != nil {
-			var parts []struct {
-				Text string `json:"text"`
-			}
-			json.Unmarshal(b.Content, &parts)
-			for _, p := range parts {
-				text += p.Text
-			}
-		}
-		out = append(out, mockToolResult{Content: text, IsError: b.IsError})
-	}
-	return out
 }

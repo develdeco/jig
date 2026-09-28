@@ -1104,6 +1104,13 @@ above:
   order rotated, the whole suite took 644-902 s on main, 453-659 s with the Windows
   CI changes and gitx's PATH cache, and 306-403 s with this as well, with every vCPU
   busy; Linux took 38-40 s for all three.
+- The scripted Messages API the live CLI tests run the real `claude` against lives in
+  `internal/claudetest`, shared by the headless contract test and the e2e Quickstart
+  rather than copied into each. A conversation's session is picked from its prompt,
+  so one server can play every session a `jig solve` dispatches, and a scripted
+  session takes the paths it writes to from jig's own dispatch prompt, as a real one
+  must. The Quickstart's reviewer reads `review.json` and lists its `must_review`
+  paths rather than hardcoding the one file the build session adds.
 
 ## Git execution and CI
 
@@ -1251,6 +1258,20 @@ above:
   `go install` as a `needs:` job - a release published with the default
   `GITHUB_TOKEN` does not fire `release: published`, so the smoke test cannot be
   a separate trigger on that event.
-- The GoReleaser snapshot dry run and the installer checks against it run only on
-  manual dispatch of `ci.yml`, keeping every push and pull request fast while still
-  giving a way to validate the release pipeline before tagging.
+- The GoReleaser snapshot dry run and the installer checks against it run on a manual
+  dispatch of `ci.yml`, to validate the release pipeline before tagging, and in every
+  release before GoReleaser publishes (`release.yml` calls `ci.yml` with `release:
+  true`), never on a push or pull request, which they would slow down.
+- A release's own binaries run README's Quickstart through the real Claude Code CLI,
+  against a scripted Messages API on loopback, both before and after it is published:
+  the snapshot archives as the installers put them on disk (`ci.yml`'s installers job),
+  then the published ones from the installer and from `go install` (`smoke.yml`).
+  v0.1.1 installed and printed its version, the most either job checked, and failed at
+  its first dispatch. Checking before publishing is what keeps a broken release from
+  becoming the one every documented install path gets; checking after covers what only
+  publishing can break. The e2e suite runs against an installed binary through
+  `JIG_E2E_BINARY`.
+- `smoke.yml` checks out its own commit, not the tag it installs: in a release they are
+  the same commit, and a dispatch from a branch runs that branch's Quickstart against an
+  older release. Checked out at a tag from before the Quickstart test existed, `go test
+  -run` would match no test and pass.

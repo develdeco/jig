@@ -164,7 +164,7 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	if !ok {
 		t.Fatalf("ci.yml: no \"test\" job, so there is nothing to run the cross-platform and gate checks below")
 	}
-	requireAllPlatforms(t, "test", job)
+	requireAllPlatforms(t, "ci.yml", "test", job)
 
 	steps, ok := yamlSlice(job["steps"])
 	if !ok {
@@ -183,15 +183,15 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	requireStepOnExactly(t, steps, "gofmt", "gofmt -l", "runner.os == 'Linux'")
 }
 
-// requireAllPlatforms asserts ci.yml's job name runs a strategy.matrix.os
-// leg on each of the three supported platforms.
-func requireAllPlatforms(t *testing.T, name string, job map[string]interface{}) {
+// requireAllPlatforms asserts job name in workflow file runs a
+// strategy.matrix.os leg on each of the three supported platforms.
+func requireAllPlatforms(t *testing.T, file, name string, job map[string]interface{}) {
 	t.Helper()
 	strategy, _ := yamlMap(job["strategy"])
 	matrix, _ := yamlMap(strategy["matrix"])
 	osList, ok := yamlSlice(matrix["os"])
 	if !ok {
-		t.Fatalf("ci.yml: %s job has no strategy.matrix.os list, so it would not run cross-platform at all", name)
+		t.Fatalf("%s: %s job has no strategy.matrix.os list, so it would not run cross-platform at all", file, name)
 	}
 	var haveUbuntu, haveWindows, haveMacos bool
 	for _, v := range osList {
@@ -211,61 +211,172 @@ func requireAllPlatforms(t *testing.T, name string, job map[string]interface{}) 
 		}
 	}
 	if !haveUbuntu {
-		t.Errorf("ci.yml: %s job matrix has no ubuntu-* leg, so a Linux-only regression would merge unnoticed", name)
+		t.Errorf("%s: %s job matrix has no ubuntu-* leg, so a Linux-only regression would merge unnoticed", file, name)
 	}
 	if !haveWindows {
-		t.Errorf("ci.yml: %s job matrix has no windows-* leg, so a Windows-only regression would merge unnoticed", name)
+		t.Errorf("%s: %s job matrix has no windows-* leg, so a Windows-only regression would merge unnoticed", file, name)
 	}
 	if !haveMacos {
-		t.Errorf("ci.yml: %s job matrix has no macos-* leg, so a macOS-only regression would merge unnoticed (it has shipped before, commit d920a72)", name)
+		t.Errorf("%s: %s job matrix has no macos-* leg, so a macOS-only regression would merge unnoticed (it has shipped before, commit d920a72)", file, name)
 	}
+}
+
+// workflowJobs parses workflow file and returns its jobs mapping.
+func workflowJobs(t *testing.T, root, file string) map[string]interface{} {
+	t.Helper()
+	jobs, ok := yamlMap(loadWorkflow(t, root, file)["jobs"])
+	if !ok {
+		t.Fatalf("%s: no jobs mapping", file)
+	}
+	return jobs
 }
 
 // TestCIWorkflowClaudeCLIJob asserts ci.yml runs jig's sessions against the
 // real Claude Code CLI on all three platforms, on every run of the
-// workflow: a job with no job-level "if" installs the CLI with its official
-// installers, and a step with JIG_LIVE_CLAUDE set runs go test with no
-// step-level "if" and no continue-on-error. It has bitten: v0.1.1 shipped a
-// headless backend whose argv the CLI refuses, since the test job's stub
-// `claude` accepts any argv and nothing ran the real one.
+// workflow: a job with no job-level "if" runs them (requireLiveJob). It has
+// bitten: v0.1.1 shipped a headless backend whose argv the CLI refuses,
+// since the test job's stub `claude` accepts any argv and nothing ran the
+// real one.
 func TestCIWorkflowClaudeCLIJob(t *testing.T) {
 	root := repoRoot(t)
-	doc := loadWorkflow(t, root, "ci.yml")
-
-	jobs, ok := yamlMap(doc["jobs"])
-	if !ok {
-		t.Fatalf("ci.yml: no jobs mapping")
-	}
+	jobs := workflowJobs(t, root, "ci.yml")
 	for _, name := range sortedKeys(jobs) {
 		job, ok := yamlMap(jobs[name])
 		if !ok {
 			continue
 		}
+		if _, conditional := job["if"]; conditional {
+			continue
+		}
 		steps, _ := yamlSlice(job["steps"])
-		live, ok := findLiveClaudeStep(steps)
+		if _, ok := findLiveStep(steps, false); ok {
+			requireLiveJob(t, root, "ci.yml", name, job, false)
+			return
+		}
+	}
+	t.Errorf("ci.yml: no job without a job-level if runs go test with JIG_LIVE_CLAUDE set, so no session runs against the real Claude Code CLI on every change, or before a release")
+}
+
+// TestReleaseRunsQuickstartOnInstalledBinaries asserts a release's own
+// binaries, as its installers put them on disk, run README's Quickstart
+// through the real CLI (requireLiveJob with JIG_E2E_BINARY) both before
+// and after it is published: ci.yml's installers job, on the snapshot
+// archives, which release.yml's call turns on with release: true, and
+// smoke.yml, on the published ones. It has bitten: v0.1.1 installed and
+// printed its version, the most either checked, and failed at its first
+// dispatch.
+func TestReleaseRunsQuickstartOnInstalledBinaries(t *testing.T) {
+	root := repoRoot(t)
+
+	ciDoc := loadWorkflow(t, root, "ci.yml")
+	on, _ := yamlMap(ciDoc["on"])
+	call, _ := yamlMap(on["workflow_call"])
+	inputs, _ := yamlMap(call["inputs"])
+	if _, ok := inputs["release"]; !ok {
+		t.Errorf("ci.yml: workflow_call has no \"release\" input, so release.yml cannot ask for its archives to be installed and run before publishing")
+	}
+	ciJobs := workflowJobs(t, root, "ci.yml")
+	for _, name := range []string{"snapshot", "installers"} {
+		job, ok := yamlMap(ciJobs[name])
+		if !ok {
+			t.Fatalf("ci.yml: no %s job, so a release's archives are never installed and run before publishing", name)
+		}
+		if ifExpr, _ := yamlString(job["if"]); !strings.Contains(ifExpr, "inputs.release") {
+			t.Errorf("ci.yml: the %s job's if = %q does not read inputs.release, so it never runs in a release", name, ifExpr)
+		}
+	}
+	installers, _ := yamlMap(ciJobs["installers"])
+	requireLiveJob(t, root, "ci.yml", "installers", installers, true)
+
+	releaseJobs := workflowJobs(t, root, "release.yml")
+	for _, name := range sortedKeys(releaseJobs) {
+		job, _ := yamlMap(releaseJobs[name])
+		if uses, _ := yamlString(job["uses"]); !strings.Contains(uses, "ci.yml") {
+			continue
+		}
+		with, _ := yamlMap(job["with"])
+		if release, _ := with["release"].(bool); !release {
+			t.Errorf("release.yml: the %s job calls ci.yml without release: true, so a release publishes archives that were never installed and run", name)
+		}
+	}
+
+	smokeJobs := workflowJobs(t, root, "smoke.yml")
+	for _, name := range sortedKeys(smokeJobs) {
+		job, ok := yamlMap(smokeJobs[name])
 		if !ok {
 			continue
 		}
-		if ifExpr, has := job["if"]; has {
-			t.Errorf("ci.yml: the %s job has a job-level if = %v, so some runs, a release's among them, could skip the real CLI", name, ifExpr)
+		steps, _ := yamlSlice(job["steps"])
+		if _, ok := findLiveStep(steps, true); ok {
+			requireLiveJob(t, root, "smoke.yml", name, job, true)
+			return
 		}
-		requireAllPlatforms(t, name, job)
-		if _, hasIf := live["if"]; hasIf || hasContinueOnError(live) {
-			t.Errorf("ci.yml: the %s job's JIG_LIVE_CLAUDE step has a step-level \"if\" or continue-on-error, so it could skip or fail on some legs without failing the job", name)
-		}
-		for _, installer := range []string{"claude.ai/install.sh", "claude.ai/install.ps1"} {
-			if _, ok := findStepByRun(steps, installer); !ok {
-				t.Errorf("ci.yml: the %s job never runs %s, so a leg would run the live tests without the CLI a user installs", name, installer)
-			}
-		}
-		return
 	}
-	t.Errorf("ci.yml: no job runs go test with JIG_LIVE_CLAUDE set, so no session ever runs against the real Claude Code CLI before a release")
+	t.Errorf("smoke.yml: no step runs go test with JIG_LIVE_CLAUDE and JIG_E2E_BINARY set, so a published release is only checked for its version, as v0.1.1 was")
 }
 
-// findLiveClaudeStep returns the first step in steps that runs go test with
-// JIG_LIVE_CLAUDE set in its own env, and whether one was found.
-func findLiveClaudeStep(steps []interface{}) (map[string]interface{}, bool) {
+// requireLiveJob asserts job name in workflow file runs its live CLI tests
+// (findLiveStep) on all three platforms, gating every leg: the live step
+// has no step-level "if" and no continue-on-error, and the job installs the
+// CLI with both official installers. With installed set, the step names
+// the binary under test in JIG_E2E_BINARY and runs one e2e test by its
+// exact name, so a renamed test cannot turn the step into a run of nothing
+// that passes.
+func requireLiveJob(t *testing.T, root, file, name string, job map[string]interface{}, installed bool) {
+	t.Helper()
+	requireAllPlatforms(t, file, name, job)
+	steps, _ := yamlSlice(job["steps"])
+	live, ok := findLiveStep(steps, installed)
+	if !ok {
+		t.Errorf("%s: the %s job has no step running go test with JIG_LIVE_CLAUDE set (and JIG_E2E_BINARY, for an installed binary), so it never runs the real CLI", file, name)
+		return
+	}
+	if _, hasIf := live["if"]; hasIf || hasContinueOnError(live) {
+		t.Errorf("%s: the %s job's live CLI step has a step-level \"if\" or continue-on-error, so it could skip or fail on some legs without failing the job", file, name)
+	}
+	for _, installer := range []string{"claude.ai/install.sh", "claude.ai/install.ps1"} {
+		if _, ok := findStepByRun(steps, installer); !ok {
+			t.Errorf("%s: the %s job never runs %s, so a leg would run the live tests without the CLI a user installs", file, name, installer)
+		}
+	}
+	if !installed {
+		return
+	}
+	run, _ := yamlString(live["run"])
+	m := goTestRunFlag.FindStringSubmatch(run)
+	if m == nil || !e2eTestExists(t, root, m[1]) {
+		t.Errorf("%s: the %s job's JIG_E2E_BINARY step does not run an e2e test by a name that exists (%q), so it can pass having run nothing", file, name, run)
+	}
+}
+
+// goTestRunFlag matches a go test -run flag naming one test function.
+var goTestRunFlag = regexp.MustCompile(`-run[ =]\^?(Test\w+)\$?(\s|$)`)
+
+// e2eTestExists reports whether a test function named name is declared in
+// the e2e package.
+func e2eTestExists(t *testing.T, root, name string) bool {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(root, "e2e", "*_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decl := regexp.MustCompile(`(?m)^func ` + regexp.QuoteMeta(name) + `\(t \*testing\.T\)`)
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decl.Match(data) {
+			return true
+		}
+	}
+	return false
+}
+
+// findLiveStep returns the first step in steps that runs go test with
+// JIG_LIVE_CLAUDE set in its own env - and, with installed set,
+// JIG_E2E_BINARY too - and whether one was found.
+func findLiveStep(steps []interface{}, installed bool) (map[string]interface{}, bool) {
 	for _, sv := range steps {
 		step, ok := yamlMap(sv)
 		if !ok {
@@ -273,7 +384,9 @@ func findLiveClaudeStep(steps []interface{}) (map[string]interface{}, bool) {
 		}
 		env, _ := yamlMap(step["env"])
 		run, _ := yamlString(step["run"])
-		if _, set := env["JIG_LIVE_CLAUDE"]; set && strings.Contains(run, "go test") {
+		_, live := env["JIG_LIVE_CLAUDE"]
+		_, binary := env["JIG_E2E_BINARY"]
+		if live && (binary || !installed) && strings.Contains(run, "go test") {
 			return step, true
 		}
 	}

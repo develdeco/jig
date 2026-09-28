@@ -20,6 +20,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     env:
       JIG_TAG: ${{ inputs.tag }}
     steps:
@@ -81,9 +83,10 @@ jobs:
             exit 1
           }
 
+      # The workflow's own commit, whose e2e suite runs the Quickstart below:
+      # in a release, the tag itself; dispatched from a branch, that branch's
+      # harness against the installed tag.
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.JIG_TAG }}
 
       - uses: actions/setup-go@v7
         with:
@@ -108,3 +111,42 @@ jobs:
             echo "go-installed jig version does not match $JIG_TAG"
             exit 1
           }
+
+      # A release that installs and prints its version can still fail at the
+      # first thing a user does with it: v0.1.1 did. Run README's Quickstart
+      # with each installed binary and the real Claude Code CLI, against a
+      # scripted model on loopback.
+      - name: install the Claude Code CLI
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash -s latest
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: install the Claude Code CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & ([scriptblock]::Create((Invoke-RestMethod https://claude.ai/install.ps1))) latest
+          Join-Path $env:USERPROFILE '.local\bin' | Add-Content -Path $env:GITHUB_PATH
+
+      - run: claude --version
+
+      - name: Quickstart with the installer's jig
+        env:
+          JIG_LIVE_CLAUDE: "1"
+          JIG_E2E_BINARY: ${{ runner.temp }}/jig-install/jig${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: go test -count=1 -timeout 20m -run TestQuickstartLive -v ./e2e
+
+      - name: Quickstart with the go-installed jig
+        shell: bash
+        env:
+          JIG_LIVE_CLAUDE: "1"
+        run: |
+          set -eu
+          JIG_E2E_BINARY="$(go env GOPATH)/bin/jig"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            JIG_E2E_BINARY="$JIG_E2E_BINARY.exe"
+          fi
+          export JIG_E2E_BINARY
+          go test -count=1 -timeout 20m -run TestQuickstartLive -v ./e2e
