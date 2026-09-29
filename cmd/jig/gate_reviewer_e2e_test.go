@@ -369,6 +369,11 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	if !strings.Contains(out, "round: 3") || !strings.Contains(out, "verdict: clean") {
 		t.Fatalf("round 3 report missing round/verdict kv lines:\n%s", out)
 	}
+	// A clean reviewer round also runs its demo, which the scenario scripts
+	// for this round: it is recorded beside the verdict, not instead of it.
+	if !strings.Contains(out, "demo: recorded") {
+		t.Fatalf("round 3 report missing its recorded demo:\n%s", out)
+	}
 
 	// The round 1 note is never routed, never cleared, and never blocks
 	// clean: it must still be on record after round 3.

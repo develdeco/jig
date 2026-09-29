@@ -734,6 +734,7 @@ func reviewJSONIntent(t *testing.T, d Deps, ticket string, opts GateOpts) Intent
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
 	opts.Ticket = ticket
+	opts.NoDemo = true // the round under test is the reviewer's; a demo would dispatch this stub a second time
 	if _, err := Gate(d, NewReviewerGateSource(backend), opts); err != nil {
 		t.Fatalf("Gate: %v", err)
 	}
@@ -1397,7 +1398,7 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 
 	src := NewReviewerGateSource(backend)
 
-	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
 	if err != nil {
 		t.Fatalf("Gate round 1: %v", err)
 	}
@@ -1463,7 +1464,7 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 	// Round 2 runs --early: the fix slice routing just appended is still
 	// queued, and driving it green belongs to frontier, not this test
 	// (which only exercises Gate's own findings bookkeeping/routing).
-	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Early: true})
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true, Early: true})
 	if err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}
@@ -1547,7 +1548,7 @@ func TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath(t *testing.T) {
 
 	src := NewReviewerGateSource(backend)
 
-	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
 	if err != nil {
 		t.Fatalf("Gate round 1: %v", err)
 	}
@@ -1562,7 +1563,7 @@ func TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath(t *testing.T) {
 
 	// --early: driving the fix slice green belongs to frontier, not this
 	// test, which only exercises the reviewer's clearing/coverage path.
-	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Early: true})
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true, Early: true})
 	if err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}
@@ -1622,7 +1623,7 @@ func TestGateFailedRoundCommitsAndPushesStore(t *testing.T) {
 	}}
 	src := NewReviewerGateSource(backend)
 
-	_, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	_, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
 	if err == nil {
 		t.Fatal("Gate: want an error (missing must_review coverage)")
 	}
@@ -1642,7 +1643,7 @@ func TestGateFailedRoundCommitsAndPushesStore(t *testing.T) {
 	// sweeps any leftover uncommitted state on its own before it pulls,
 	// push or no push): the corrected round succeeds as round 1 (the
 	// failed attempt above wrote no gate/round-1/ directory).
-	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
 	if err != nil {
 		t.Fatalf("Gate rerun: %v", err)
 	}
@@ -1805,7 +1806,7 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 	}}
 	src := NewReviewerGateSource(backend)
 
-	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
 	if err != nil {
 		t.Fatalf("Gate round 1: %v", err)
 	}
@@ -1819,7 +1820,7 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 		t.Fatalf("push round 1 fix slice state: %v", err)
 	}
 
-	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
 	if err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}
@@ -1853,7 +1854,7 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 		t.Fatalf("push branch: %v", err)
 	}
 
-	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
 	if err != nil {
 		t.Fatalf("Gate round 3: %v", err)
 	}
@@ -1947,7 +1948,7 @@ func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerat
 	}}
 	src := NewReviewerGateSource(backend)
 
-	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
 	if err != nil {
 		t.Fatalf("Gate round 1: %v", err)
 	}
@@ -1997,7 +1998,7 @@ func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerat
 
 	// The fix slice routed from round 1 is still queued; this round only
 	// exercises the reviewer path, not frontier's own build loop.
-	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Early: true})
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true, Early: true})
 	if err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}
@@ -2014,7 +2015,7 @@ func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerat
 
 	// A third round must proceed too: the round after the wedge is not a
 	// one-time reprieve, the file stays absent at head for good.
-	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Early: true})
+	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true, Early: true})
 	if err != nil {
 		t.Fatalf("Gate round 3: %v", err)
 	}
@@ -2190,7 +2191,7 @@ func setupStaleOracleThroughRoundTwo(t *testing.T, round3 func(req ReviewRequest
 	}}
 	src := NewReviewerGateSource(backend)
 
-	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
 	if err != nil {
 		t.Fatalf("Gate round 1: %v", err)
 	}
@@ -2204,7 +2205,7 @@ func setupStaleOracleThroughRoundTwo(t *testing.T, round3 func(req ReviewRequest
 		t.Fatalf("push round 1 fix slice state: %v", err)
 	}
 
-	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
 	if err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}
@@ -2246,7 +2247,7 @@ func TestGateStaleOracleRecurrenceNeedsAHumanUnattended(t *testing.T) {
 		}
 	})
 
-	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket}) // nil Triage: DefaultTriage, unattended
+	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true}) // nil Triage: DefaultTriage, unattended
 	if err != nil {
 		t.Fatalf("Gate round 3: %v", err)
 	}
@@ -2291,7 +2292,7 @@ func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *te
 		}}
 	}
 
-	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Triage: triage})
+	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true, Triage: triage})
 	if err != nil {
 		t.Fatalf("Gate round 3: %v", err)
 	}

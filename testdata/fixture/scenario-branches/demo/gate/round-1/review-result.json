@@ -1,0 +1,11 @@
+{
+  "findings": [],
+  "reviewed_paths": [
+    "alpha/alpha.go",
+    "alpha/percent.go",
+    "alpha/percent_test.go",
+    "beta/beta.go",
+    "beta/version.go"
+  ],
+  "summary": "round 1: nothing to report; every changed file was read"
+}

@@ -27,9 +27,13 @@
 # Nothing on camera waits on an interactive prompt: the scenario's round-1
 # review-result.json (testdata/fixture/scenario-branches/inferred-intent/
 # gate/round-1/) reports no findings, so there is nothing to triage and the
-# report prints as soon as the round finishes. Every Wait below is a bare
-# Wait (VHS's own default prompt and pattern), never a Wait+Line anchored
-# on a prompt's own trailing text.
+# report prints as soon as the round finishes. The clean round is followed by
+# its demo, which the scenario scripts too (the same directory's
+# demo-result.json, with no media): an unscripted round would print a refused
+# demo on camera, so the report also carries a recorded demo and its summary
+# (ADR 0014, docs/adr/0014-demo-session-at-the-gate.md). Every Wait below is
+# a bare Wait (VHS's own default prompt and pattern), never a Wait+Line
+# anchored on a prompt's own trailing text.
 #
 # Nothing on screen is a host path, a user name, or a real repo: JIG_HOME,
 # the store, the scenario and the fixture repo's own working clone all live
@@ -164,10 +168,13 @@ Show
 ## scenario's round-1 reviewer finds nothing to report, so the round is
 ## clean with no triage prompt to wait on: "gate:\n  ticket: JIG-1\n
 ## round: 1\n  verdict: clean\n  model: claude-sonnet-5\n  intent:
-## inferred\n..." (axi.KV, gate.go:154-165).
+## inferred\n  scope: full\n  demo: recorded\n  demo_summary: ...\n..."
+## (axi.KV, gate.go:154-165, and demoRows beside them): the demo line is the
+## round's clean-round demo, scripted with no media, so there is no
+## demo_media table.
 Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 Wait@30s
-Sleep 5s
+Sleep 8s
 
 ## The file the round recorded, provenance and all: the front matter names
 ## the source the report just printed plus the agent, session and match

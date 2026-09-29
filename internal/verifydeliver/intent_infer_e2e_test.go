@@ -111,7 +111,12 @@ func TestGateInfersIntentThroughFakeBackend(t *testing.T) {
 	// gate dispatch (Slice "gate"), proving the inferred intent reached the
 	// reviewer's own request, not only GateReport.
 	var summarizerDir string
+	var demoIntent map[string]any
 	wrapped := stubBackend{run: func(sd session.Dispatch) error {
+		if sd.Slice == session.GateDemoSlice {
+			demoIntent, _ = readJSONMap(t, sd.SliceJSON)["intent"].(map[string]any)
+			return os.WriteFile(sd.ResultJSON, []byte(`{"media": [], "summary": "nothing to show"}`), 0o644)
+		}
 		if sd.Slice == "intent" {
 			summarizerDir = sd.Worktree
 		}
@@ -163,6 +168,10 @@ func TestGateInfersIntentThroughFakeBackend(t *testing.T) {
 	}
 	if gotReview.Intent.Path == "" {
 		t.Fatal("review.json intent.path is empty, want the recorded intent.md path")
+	}
+	// The demo is handed the very intent the reviewer was.
+	if demoIntent["source"] != gotReview.Intent.Source || demoIntent["path"] != gotReview.Intent.Path {
+		t.Fatalf("demo.json intent = %v, want the reviewer's %+v", demoIntent, gotReview.Intent)
 	}
 
 	in, ok, err := d.Store.ReadIntent(fx.Ticket)
