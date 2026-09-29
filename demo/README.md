@@ -21,7 +21,10 @@ and drives the real `jig` binary every time.
   exact source line (`cmd/jig/triage.go`, `cmd/jig/gate.go`) each typed line
   and each Wait+Line anchor depends on; a bare `Wait` depends on VHS's own
   prompt and pattern instead, not a jig source line. A drift in a cited line
-  shows up only as a failed or mismatched render, never as a failing test.
+  shows up as a failed or mismatched render, not as a failing end-to-end
+  test. (`cmd/jig/triage_test.go` separately pins what the fix batch, ask
+  and decision prompts say their answers do, so rewording that fails a
+  unit test as well.)
 
 ## Rule: fixture data only
 
@@ -109,8 +112,8 @@ they are a CI artifact, never committed.
    text. Pin the grid with `Set Columns` rather than `Set Width`, so the
    column count does not depend on the runner's fonts, and choose it so
    every `Wait+Line` anchor is the trimmed tail of the cursor's row: no
-   anchor split across rows, and no prompt that exactly fills a row (its
-   trailing space would wrap onto a blank cursor row).
+   anchor split across rows, and no prompt whose text up to its trailing
+   space exactly fills a row (the space would wrap onto a blank cursor row).
 4. Keep every typed command and every anchored `Wait+Line` checked against
    the real source (the command's own `_test.go`, and the command's own
    report-building code), not guessed - the way `gate-reviewer.tape`'s own

@@ -76,9 +76,9 @@ func defaultTriageWithNote(in verifydeliver.TriageInput, stdout io.Writer, why s
 		}
 	}
 	if undecided > 0 {
-		fmt.Fprintf(stdout, "triage: kept every fix and every ask with a workspace and oracle; %d ask(s) left for a human (%s)\n", undecided, why)
+		fmt.Fprintf(stdout, "triage (%s): kept every fix and buildable ask; %d ask(s) left for a human\n", why, undecided)
 	} else {
-		fmt.Fprintf(stdout, "triage: kept every fix and every ask with a workspace and oracle (%s)\n", why)
+		fmt.Fprintf(stdout, "triage (%s): kept every fix and buildable ask\n", why)
 	}
 	return result
 }
@@ -131,7 +131,7 @@ func interactiveTriage(in verifydeliver.TriageInput, stdin io.Reader, stdout io.
 			validIDs[f.ID] = true
 		}
 		for {
-			fmt.Fprintf(stdout, "fixes: press Enter to accept all %d and queue their fix slices, or list ids to dismiss - a dismissed finding is never raised again: ", len(in.Fixes))
+			fmt.Fprintf(stdout, "%d fix(es): Enter queues fix slice(s); list ids to dismiss (gone for good): ", len(in.Fixes))
 			line, err := r.ReadString('\n')
 			trimmed := strings.TrimSpace(line)
 			if err != nil && trimmed == "" {
@@ -182,7 +182,7 @@ askLoop:
 
 		keep := false
 		for {
-			fmt.Fprint(stdout, "keep or dismiss? keeping queues a fix slice and asks for your decision text; dismissing means this finding is never raised again. [k/keep/Enter=keep, n/no/d/dismiss=dismiss]: ")
+			fmt.Fprint(stdout, "keep (fix slice + decision) or dismiss (gone for good)? [k/keep/Enter, n/no/d/dismiss]: ")
 			line, err := r.ReadString('\n')
 			trimmed := strings.TrimSpace(line)
 			if err != nil && trimmed == "" {
@@ -265,12 +265,18 @@ func undecidedAskCount(asks []verifydeliver.Finding, man manifest.Manifest) int 
 
 // eofNote prints the stdin-closed note, naming how many of the not-yet-
 // decided asks in remaining are left for a human because they are missing a
-// workspace, an oracle, or both.
+// workspace, an oracle, or both. It always starts on its own line: every
+// caller reaches it right after a prompt whose read returned EOF with
+// nothing typed. On a POSIX tty the cursor is still at the end of that
+// prompt after Ctrl-D (Linux echoes nothing; macOS echoes ^D and backs over
+// it); a Windows console echoes the Enter that follows Ctrl-Z, so there the
+// note follows one blank row instead.
 func eofNote(stdout io.Writer, remaining []verifydeliver.Finding, man manifest.Manifest) {
+	fmt.Fprintln(stdout)
 	if n := undecidedAskCount(remaining, man); n > 0 {
-		fmt.Fprintf(stdout, "triage: stdin closed; keeping every remaining fix and every ask with a workspace and oracle; %d ask(s) missing a workspace or oracle left for a human\n", n)
+		fmt.Fprintf(stdout, "triage (stdin closed): kept every remaining fix and buildable ask; %d ask(s) left for a human\n", n)
 	} else {
-		fmt.Fprintln(stdout, "triage: stdin closed; keeping every remaining fix and every ask with a workspace and oracle")
+		fmt.Fprintln(stdout, "triage (stdin closed): kept every remaining fix and buildable ask")
 	}
 }
 

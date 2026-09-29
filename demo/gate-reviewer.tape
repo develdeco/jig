@@ -14,8 +14,8 @@
 # against the real binary in a Go test, but it checks the round's outcome
 # (the report, the findings table, the store), never the literal prompt
 # wording this tape types against and waits on: a wording change there
-# shows up only as a failed or mismatched render here, not as a failing
-# test. See demo/README.md for that caveat.
+# shows up here as a failed or mismatched render, not as a failing
+# end-to-end test. See demo/README.md for that caveat.
 #
 # Each command's completion is detected by waiting for the shell prompt to
 # return (VHS's own default bash prompt, a colored "> ", matched by its
@@ -44,21 +44,34 @@ Require fixture
 
 # The rule a Wait+Line anchor depends on: the anchor must be the trimmed
 # tail of the cursor's physical row. So no anchored text may straddle a
-# wrapped row, and no prompt may exactly fill a row: its trailing space
-# then wraps onto a new, blank cursor row and the wait times out. A plain
-# Width/FontSize pair leaves the column count to the runner's installed
-# fonts (VHS has no native pty; it fits xterm.js in a headless browser
-# against whichever font its FontFamily fallback list resolves to), and
-# several counts break an anchor below: columns 125-130 break "again:"
-# (triage.go:134's prompt) and columns 83-87 and 166-174 break
-# "dismiss]:" (triage.go:185's prompt). `Set Columns` pins the grid
-# directly instead: it is exclusive with `Set Width` (VHS command.go's
+# wrapped row, and no prompt's text up to its trailing space may exactly
+# fill a row: the space then wraps onto a new, blank cursor row and the
+# wait times out. (A whole prompt that fills a row, trailing space
+# included, is fine.) A plain Width/FontSize pair leaves the column count
+# to the runner's installed fonts (VHS has no native pty; it fits
+# xterm.js in a headless browser against whichever font its FontFamily
+# fallback list resolves to), so `Set Columns` pins the grid directly
+# instead: it is exclusive with `Set Width` (VHS command.go's
 # ExecuteSetWidth/ExecuteSetColumns), and it leaves `Set Height` alone to
-# size the render (Rows is the one that would conflict with Height). 160
-# is 6 columns below the nearest failing band and wide of the widest
-# report row this tape waits past (154 columns, gate.go's findings table
-# for r1-f4). Changing it needs re-checking every Wait+Line anchor below
-# against the new count.
+# size the render (Rows is the one that would conflict with Height).
+#
+# The three anchored prompts, at their current lengths: triage.go:134's
+# batch prompt is 75-77 characters (75 at a single-digit fix count, one
+# more per extra digit), triage.go:185's ask prompt is a fixed 88, and
+# triage.go:213's decision prompt is well under both (its length depends
+# on the finding id, "r1-f3" for every anchor below). A prompt can only
+# lose its Wait+Line anchor by wrapping the anchor's own trailing
+# characters onto the next row, or by its text up to the trailing space
+# exactly filling a row, so that the space wraps onto a new blank one -
+# both need Columns close to the prompt's own length or to a whole
+# fraction of it (a half, a third, ...), and none of the three breaks at
+# 88 columns or above. 160 clears all three prompts with 70+ columns of
+# margin, and is also wide of the widest report row this tape waits past
+# (154 columns, gate.go's findings table for r1-f4), so nothing here
+# wraps at this width. That margin is a property of the current prompt
+# text, not a fact about 160 itself: changing Columns, or the text of any
+# anchored prompt, needs every Wait+Line anchor below re-verified against
+# the tape's actual render, not inferred from a character count alone.
 Set Shell "bash"
 Set FontSize 14
 Set Columns 160
@@ -107,18 +120,15 @@ Show
 ## high risk, r1-f2 low risk, sorted high first), one ask (r1-f3), one note
 ## (r1-f4, listed only, never prompted).
 Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
-# triage.go:134 - "fixes: press Enter to accept all 2 and queue their fix
-# slices, or list ids to dismiss - a dismissed finding is never raised
-# again: " (trimmed tail: "again:")
-Wait+Line@15s /again:$/
+# triage.go:134 - "2 fix(es): Enter queues fix slice(s); list ids to
+# dismiss (gone for good): " (trimmed tail: "good):")
+Wait+Line@15s /good\):$/
 Sleep 3s
 # Dismiss the low-risk trim fix (r1-f2); keep the high-risk overflow-doc
 # fix (r1-f1) in the batch - the same split the e2e test scripts.
 Type "r1-f2" Enter
-# triage.go:185 - "keep or dismiss? keeping queues a fix slice and asks
-# for your decision text; dismissing means this finding is never raised
-# again. [k/keep/Enter=keep, n/no/d/dismiss=dismiss]: " (trimmed tail:
-# "dismiss]:")
+# triage.go:185 - "keep (fix slice + decision) or dismiss (gone for
+# good)? [k/keep/Enter, n/no/d/dismiss]: " (trimmed tail: "dismiss]:")
 Wait+Line@15s /dismiss\]:$/
 Sleep 3s
 Type "k" Enter
@@ -145,9 +155,9 @@ Sleep 2s
 ## forward (routeRound never re-offers a dismissed prior to triage), so
 ## neither prompts again.
 Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
-# triage.go:134 with len(in.Fixes)=1 - "...press Enter to accept all 1..."
-# (same trimmed tail as round 1's batch prompt: "again:")
-Wait+Line@15s /again:$/
+# triage.go:134 with len(in.Fixes)=1 - "1 fix(es): Enter queues..."
+# (same trimmed tail as round 1's batch prompt: "good):")
+Wait+Line@15s /good\):$/
 Sleep 3s
 Enter
 Wait@15s
