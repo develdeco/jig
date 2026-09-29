@@ -1280,6 +1280,24 @@ above:
   off after 60 days without repository activity. It is a job of its own rather
   than steps of the test job, so the hermetic suite still runs with no `claude` on PATH
   and the Windows leg's wall time does not grow.
+- Main's ruleset requires `ci ok` beside the test job's three legs, switched once this
+  landed. `ci ok` is ci.yml's gate job: it needs every job that runs on pull requests
+  and fails unless each of them succeeded. Before it, only the test legs were required,
+  so a pull request that broke the CLI contract showed a red `claude-cli` and could
+  still merge; a release could not, since release.yml waits on all of ci.yml. Requiring
+  `claude-cli`'s legs by name would have meant a ruleset edit for every further agent
+  CLI jig drives, each of which needs its own real-CLI contract job for the reason
+  `claude-cli` exists; such a job joins the gate's needs instead. The test legs stay
+  required because they run the lint test that keeps the gate honest, and a pull
+  request's own ci.yml defines the gate it is judged by: required alone, `ci ok` would
+  let a pull request that emptied the gate's needs or its failure merge. The lint test
+  fails when a job that runs on pull requests is missing from the needs, and runs the
+  gate's step with synthetic results, so it fails on a failed, cancelled or skipped job
+  and on no results at all. The gate runs with `if: always()`: GitHub counts a skipped
+  required check as passing. `claude-cli` installs the latest CLI from claude.ai, so a
+  CLI release that breaks jig, or an outage there, blocks merges until fixed or over. A
+  pull request that edits both the gate and its lint test still gets through checks
+  alone; review is what stops it.
 
 ## Release and install
 
