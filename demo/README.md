@@ -48,6 +48,24 @@ and drives the real `jig` binary every time.
   outcome-vs-wording split as `gate-reviewer.tape` above. The scenario's round
   reports no findings, so there is no triage prompt and every `Wait` is bare.
 
+- **`adopt-branch.tape`** - a branch built outside jig, fixed in place: a
+  branch of three commits the tape's hidden setup builds from the fixture's own
+  scenario patches and pushes, `jig ticket new` minting a ticket for it and
+  offering to adopt a branch, `jig gate --branch` adopting it and finding a
+  fix, `jig run` building that fix on it, a `git log` of the build lease
+  showing the fix commit sitting on top of the author's three (whose tip is
+  still origin's), the next `jig gate` reviewing the branch again and coming
+  back clean, and `jig status`, which names the adopted branch, no longer
+  suggests `jig publish`, and says to push the build lease (merging the branch
+  in first if it moved) before opening the pull request. It mirrors
+  `e2e/adopt_branch_test.go`'s `TestGateBranchRoundFixesBuildOnTheReviewedBranch`
+  command for command, with the same outcome-vs-wording split as the tapes
+  above, but that test hand-writes its branch and checks where the fix commit
+  landed and what the ticket recorded, not the tape's own typed lines. Nothing
+  here dispatches a reviewer, so there is no triage prompt and every `Wait` is
+  bare, and no intent is inferred: the reports say `intent: none`, where a
+  reviewer round on an adopted branch infers one like any brief-less ticket's.
+
 ## Rule: fixture data only
 
 A tape's terminal must never show a host path, a user name, or a real repo -
