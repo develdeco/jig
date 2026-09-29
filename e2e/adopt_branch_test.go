@@ -120,14 +120,18 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	if mint.Code != 0 || !strings.Contains(mint.Stdout, "id: "+ticket) {
 		t.Fatalf("jig ticket new exit = %d, want 0 minting %s\nstdout:\n%s\nstderr:\n%s", mint.Code, ticket, mint.Stdout, mint.Stderr)
 	}
+	// A branch built outside jig needs no brief, and the mint says so.
+	if !strings.Contains(mint.Stdout, "jig gate "+ticket+" --branch <name>") {
+		t.Fatalf("jig ticket new does not offer to adopt a branch\nstdout:\n%s", mint.Stdout)
+	}
 
 	// Round 1 over the author's branch: the scripted round queues fix-1.
 	g1 := runJig(t, fx.StoreDir, "gate", ticket, "--branch", branch, "--scenario", fx.ScenarioDir)
 	if g1.Code != 0 {
 		t.Fatalf("jig gate --branch exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", g1.Code, g1.Stdout, g1.Stderr)
 	}
-	if !strings.Contains(g1.Stdout, "verdict: fix-slices") {
-		t.Fatalf("round 1 did not queue a fix slice:\n%s", g1.Stdout)
+	if !strings.Contains(g1.Stdout, "verdict: fix-slices") || !strings.Contains(g1.Stdout, "branch: "+branch) {
+		t.Fatalf("round 1 did not queue a fix slice on the adopted branch:\n%s", g1.Stdout)
 	}
 
 	// The fix slice is built on the reviewed branch.
@@ -179,5 +183,24 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	}
 	if got, want := gitLog(t, gateLease, "rev-parse", "HEAD"), gitLog(t, lease, "rev-parse", "HEAD"); got != want {
 		t.Fatalf("round 2 reviewed %s, want the branch with the fix commit, %s", got, want)
+	}
+
+	// Publishing an adopted branch is not built, and neither status nor
+	// publish pretends it is. jig's fix commit is in the build lease and not
+	// on origin, so both say to push it before the pull request is opened: one
+	// opened from origin's branch would lack the fix the clean round reviewed.
+	s := runJig(t, fx.StoreDir, "status", ticket)
+	if s.Code != 0 || !strings.Contains(s.Stdout, "branch: "+branch) || strings.Contains(s.Stdout, "jig publish "+ticket) ||
+		!strings.Contains(s.Stdout, "does not ship an adopted branch yet") ||
+		!strings.Contains(s.Stdout, "push the build lease to "+branch+" (merge it in if it moved)") {
+		t.Fatalf("jig status exit = %d, want the branch named, no publish suggested, and jig's commits said to be pushed first\nstdout:\n%s\nstderr:\n%s", s.Code, s.Stdout, s.Stderr)
+	}
+	p := runJig(t, fx.StoreDir, "publish", ticket, "--yes")
+	if p.Code == 0 || !strings.Contains(p.Stdout, "code: PUBLISH_ADOPTED_BRANCH") ||
+		!strings.Contains(p.Stdout, "push the build lease at "+lease+" to "+branch+" (merge it in if it moved)") {
+		t.Fatalf("jig publish exit = %d, want PUBLISH_ADOPTED_BRANCH naming the build lease %s\nstdout:\n%s\nstderr:\n%s", p.Code, lease, p.Stdout, p.Stderr)
+	}
+	if got := gitLog(t, fx.RepoRemote, "rev-parse", "refs/heads/"+branch); got != authorTip {
+		t.Fatalf("origin's %s = %s after the refused publish, want the author's tip %s", branch, got, authorTip)
 	}
 }

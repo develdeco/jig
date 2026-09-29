@@ -28,7 +28,7 @@ func cmdPublish(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	if err := requireSlices(st, ticket); err != nil {
+	if err := requireWork(st, ticket); err != nil {
 		return renderErr(stdout, err)
 	}
 
