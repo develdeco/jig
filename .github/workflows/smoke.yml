@@ -93,8 +93,16 @@ jobs:
           go-version-file: go.mod
 
       - name: go install
+        id: go-install
         shell: bash
-        run: go install "github.com/develdeco/jig/cmd/jig@$JIG_TAG"
+        run: |
+          set -eu
+          go install "github.com/develdeco/jig/cmd/jig@$JIG_TAG"
+          bin="$(go env GOPATH)/bin/jig"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            bin="$bin.exe"
+          fi
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
 
       - name: verify go install version
         shell: bash
@@ -139,14 +147,7 @@ jobs:
         run: go test -count=1 -timeout 20m -run TestQuickstartLive -v ./e2e
 
       - name: Quickstart with the go-installed jig
-        shell: bash
         env:
           JIG_LIVE_CLAUDE: "1"
-        run: |
-          set -eu
-          JIG_E2E_BINARY="$(go env GOPATH)/bin/jig"
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            JIG_E2E_BINARY="$JIG_E2E_BINARY.exe"
-          fi
-          export JIG_E2E_BINARY
-          go test -count=1 -timeout 20m -run TestQuickstartLive -v ./e2e
+          JIG_E2E_BINARY: ${{ steps.go-install.outputs.bin }}
+        run: go test -count=1 -timeout 20m -run TestQuickstartLive -v ./e2e

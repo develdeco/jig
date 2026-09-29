@@ -88,6 +88,9 @@ jobs:
           go-version-file: go.mod
       - name: install the Claude Code CLI
         if: runner.os != 'Windows'
+        # bash, not the default shell, for pipefail: a failed download
+        # fails here rather than as a missing claude one step later.
+        shell: bash
         run: |
           curl -fsSL https://claude.ai/install.sh | bash -s latest
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"

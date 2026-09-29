@@ -98,10 +98,10 @@ JIG_LIVE_CLAUDE=1 go test -count=1 -run Live ./internal/session ./e2e
 CLI, and `e2e`'s runs README's Quickstart, from `jig skills install` to a
 published branch. Set `JIG_E2E_BINARY` to an installed jig to run the e2e
 suite against it instead of a binary built from the tree. CI's
-`claude-cli` job runs both on all three platforms, on every push and pull
-request and once a day, with the latest CLI release installed, and every
-release runs the Quickstart with its own binaries, as the installers put
-them on disk, before and after it is published.
+`claude-cli` job runs both on all three platforms, on every pull request,
+every push to main and once a day, with the latest CLI release installed,
+and every release runs the Quickstart with its own binaries, as they are
+installed, before and after it is published.
 
 ## Live review eval
 
