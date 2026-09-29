@@ -44,15 +44,16 @@ Require fixture
 
 # The rule a Wait+Line anchor depends on: the anchor must be the trimmed
 # tail of the cursor's physical row. So no anchored text may straddle a
-# wrapped row, and no prompt may exactly fill a row: its trailing space
-# then wraps onto a new, blank cursor row and the wait times out. A plain
-# Width/FontSize pair leaves the column count to the runner's installed
-# fonts (VHS has no native pty; it fits xterm.js in a headless browser
-# against whichever font its FontFamily fallback list resolves to), so
-# `Set Columns` pins the grid directly instead: it is exclusive with `Set
-# Width` (VHS command.go's ExecuteSetWidth/ExecuteSetColumns), and it
-# leaves `Set Height` alone to size the render (Rows is the one that
-# would conflict with Height).
+# wrapped row, and no prompt's text up to its trailing space may exactly
+# fill a row: the space then wraps onto a new, blank cursor row and the
+# wait times out. (A whole prompt that fills a row, trailing space
+# included, is fine.) A plain Width/FontSize pair leaves the column count
+# to the runner's installed fonts (VHS has no native pty; it fits
+# xterm.js in a headless browser against whichever font its FontFamily
+# fallback list resolves to), so `Set Columns` pins the grid directly
+# instead: it is exclusive with `Set Width` (VHS command.go's
+# ExecuteSetWidth/ExecuteSetColumns), and it leaves `Set Height` alone to
+# size the render (Rows is the one that would conflict with Height).
 #
 # The three anchored prompts, at their current lengths: triage.go:134's
 # batch prompt is 75-77 characters (75 at a single-digit fix count, one
@@ -60,17 +61,17 @@ Require fixture
 # triage.go:213's decision prompt is well under both (its length depends
 # on the finding id, "r1-f3" for every anchor below). A prompt can only
 # lose its Wait+Line anchor by wrapping the anchor's own trailing
-# characters onto the next row, or by exactly filling a row and wrapping
-# its trailing space onto a new blank one - both need Columns close to
-# the prompt's own length or to a whole fraction of it (a half, a third,
-# ...), and none of the three breaks at 88 columns or above. 160 clears all three
-# prompts with 70+ columns of margin, and is also wide of the widest
-# report row this tape waits past (154 columns, gate.go's findings table
-# for r1-f4), so nothing here wraps at this width. That margin is a
-# property of the current prompt text, not a fact about 160 itself:
-# changing Columns, or the text of any anchored prompt, needs every
-# Wait+Line anchor below re-verified against the tape's actual render,
-# not inferred from a character count alone.
+# characters onto the next row, or by its text up to the trailing space
+# exactly filling a row, so that the space wraps onto a new blank one -
+# both need Columns close to the prompt's own length or to a whole
+# fraction of it (a half, a third, ...), and none of the three breaks at
+# 88 columns or above. 160 clears all three prompts with 70+ columns of
+# margin, and is also wide of the widest report row this tape waits past
+# (154 columns, gate.go's findings table for r1-f4), so nothing here
+# wraps at this width. That margin is a property of the current prompt
+# text, not a fact about 160 itself: changing Columns, or the text of any
+# anchored prompt, needs every Wait+Line anchor below re-verified against
+# the tape's actual render, not inferred from a character count alone.
 Set Shell "bash"
 Set FontSize 14
 Set Columns 160
