@@ -138,9 +138,9 @@ Wait+Line@15s /skip\):$/
 Sleep 2s
 Type "Use a warm, casual tone; no exclamation marks." Enter
 # The round's own report: "gate:\n  ticket: JIG-1\n  round: 1\n  verdict:
-# fix-slices\n  model: claude-sonnet-5\n  scope: full\n..." (axi.KV,
-# gate.go:105-115), then the findings and fix_slices tables, then the
-# command exits and the shell prompt returns.
+# fix-slices\n  model: claude-sonnet-5\n  intent: brief\n  scope: full\n..."
+# (axi.KV, gate.go:150-161), then the findings and fix_slices tables, then
+# the command exits and the shell prompt returns.
 Wait@15s
 Sleep 5s
 

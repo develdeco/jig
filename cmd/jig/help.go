@@ -65,7 +65,8 @@ var commandTable = []cmdSpec{
 	{"gate", "run a gate round over the ticket's branch", []flagSpec{
 		{"early", "gate before the frontier is fully green", false},
 		{"branch", "validate this branch instead of jig/<ticket>", false},
-		{"doc", "brief doc path, used together with --branch", false},
+		{"intent", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md)", false},
+		{"doc", "doc file whose content becomes the ticket's explicit intent, recorded as intent.md (refused when the ticket has a brief.md)", false},
 		{"pr", "pr number (not implemented in v0.1)", true},
 		{"yes", "keep every finding jig can route on its own, without the triage prompt", false},
 		{"backend", "session backend for the reviewer: fake, headless, or herdr", false},
