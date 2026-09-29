@@ -67,6 +67,37 @@ func advanceTarget(t *testing.T, fx *fixture.Fixture) {
 	}
 }
 
+// wantFailureCommit asserts that d.Store's working copy is clean, pushed to
+// origin/branch (local HEAD matches the remote tip), and that its latest
+// commit subject is exactly wantSubject - the shape every post-journal
+// Publish failure must leave the store in, whichever step raised it. This
+// must fail on the unfixed code: without Publish's deferred push (or with
+// journaled set too late) the working copy stays dirty, or the pushed tip
+// lags the local commit, and the porcelain or HEAD check below fails first.
+func wantFailureCommit(t *testing.T, d Deps, branch, wantSubject string) {
+	t.Helper()
+	status, err := gitx.Run(d.Store.Root, "status", "--porcelain")
+	if err != nil {
+		t.Fatalf("store status: %v", err)
+	}
+	if status != "" {
+		t.Fatalf("store working copy is dirty after the failed publish:\n%s", status)
+	}
+	local := run(t, d.Store.Root, "rev-parse", "HEAD")
+	remote := run(t, d.Store.Root, "ls-remote", "origin", "refs/heads/"+branch)
+	fields := strings.Fields(remote)
+	if len(fields) == 0 {
+		t.Fatalf("ls-remote origin refs/heads/%s returned nothing", branch)
+	}
+	if local != fields[0] {
+		t.Fatalf("store local HEAD %s != pushed remote tip %s for %s", local, fields[0], branch)
+	}
+	subject := run(t, d.Store.Root, "log", "-1", "--format=%s")
+	if subject != wantSubject {
+		t.Fatalf("store failure commit subject = %q, want %q", subject, wantSubject)
+	}
+}
+
 func TestPublishFullChain(t *testing.T) {
 	t.Parallel()
 
@@ -261,6 +292,44 @@ func TestSquashRefusesPushedRange(t *testing.T) {
 	if remoteHead != buildHead {
 		t.Fatalf("remote jig/%s = %s, want unchanged pre-push head %s", fx.Ticket, remoteHead, buildHead)
 	}
+
+	// PUSHED_RANGE fires inside squash, well after recordAndCheckDivergence
+	// set journaled - the store must still end up clean, pushed, and
+	// carrying this failure's own subject rather than left for a later
+	// Sync to sweep anonymously.
+	wantFailureCommit(t, d, "main", fx.Ticket+": publish failed: PUSHED_RANGE")
+}
+
+// TestPublishNoDivergenceStillPushesStore checks that PUBLISH_NO_DIVERGENCE -
+// raised by recordAndCheckDivergence itself, immediately after it appends
+// Publish's own earliest store write and before revalidate, memorize,
+// squash, confirm or any push ever run - still leaves the store committed
+// and pushed under that failure's own subject: journaled must already be
+// true by the time this, the very first post-journal failure Publish can
+// hit, happens - not only once Publish reaches its later steps.
+func TestPublishNoDivergenceStillPushesStore(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	gateToClean(t, fx, d)
+
+	// Fast-forward origin's target branch to exactly the build lease's
+	// ticket-branch tip: reconcile then has nothing to rebase (the branch
+	// is already based on the new origin/main), so its diff against the
+	// target comes out empty - the same integration failure
+	// TestRecordAndCheckDivergenceRefusesEmptyDiff drives directly against
+	// recordAndCheckDivergence, reached here through the whole Publish
+	// pipeline instead, so it also exercises wherever journaled is set.
+	run(t, buildLeaseDir(t, fx), "push", "origin", "jig/"+fx.Ticket+":main")
+
+	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "PUBLISH_NO_DIVERGENCE" {
+		t.Fatalf("err = %v, want *axi.Error PUBLISH_NO_DIVERGENCE", err)
+	}
+
+	wantFailureCommit(t, d, "main", fx.Ticket+": publish failed: PUBLISH_NO_DIVERGENCE")
 }
 
 // TestRecordAndCheckDivergenceRefusesEmptyDiff checks that a reconcile whose
@@ -368,7 +437,16 @@ func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
 // It checks that Publish threads an honest confirm value into guardedPush: a
 // declined interactive prompt must stop before any push is attempted, and
 // both --yes and an accepted prompt must pass confirmed=true - never a
-// hardcoded literal, and never proceeding past a decline.
+// hardcoded literal, and never proceeding past a decline. Its
+// declined_prompt_pushes_store_not_branch and push_error_axi_code_only
+// subtests also each call wantFailureCommit, pinning the deferred
+// best-effort push these reproduce: the store must end up clean, pushed,
+// and carrying "<ticket>: publish failed: <code>" - the error's own axi
+// code only, never its message - rather than left for a later command's
+// own Sync to sweep up anonymously. failureCode's own branches (a plain
+// error, an axi.Error with no code, one wrapped by fmt.Errorf) are pinned
+// directly by TestFailureCode instead of paying for another full fixture
+// and gate rounds here.
 func TestPublishConfirmWiring(t *testing.T) {
 	origPush := guardedPush
 	origConfirm := confirm
@@ -382,7 +460,7 @@ func TestPublishConfirmWiring(t *testing.T) {
 		return fx, d
 	}
 
-	t.Run("declined_prompt_never_pushes", func(t *testing.T) {
+	t.Run("declined_prompt_pushes_store_not_branch", func(t *testing.T) {
 		fx, d := newPublishableFixture(t)
 		called := false
 		guardedPush = func(string, string, string, bool) error {
@@ -399,6 +477,24 @@ func TestPublishConfirmWiring(t *testing.T) {
 		if called {
 			t.Fatal("guardedPush was called despite a declined confirm")
 		}
+
+		// No leftover tracked change from the journal lines or documents
+		// Publish wrote before the decline: the store is already clean,
+		// pushed, and the commit names the decline - only the ticket
+		// branch itself (guardedPush, stubbed above) is never pushed.
+		wantFailureCommit(t, d, "main", fx.Ticket+": publish failed: PUBLISH_DECLINED")
+	})
+
+	t.Run("push_error_axi_code_only", func(t *testing.T) {
+		fx, d := newPublishableFixture(t)
+		guardedPush = func(string, string, string, bool) error {
+			return &axi.Error{Msg: "push rejected: /host/secret/abs/path", Code: "PUBLISH_PUSH_REJECTED"}
+		}
+
+		if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err == nil {
+			t.Fatal("Publish: want an error from the stubbed guardedPush")
+		}
+		wantFailureCommit(t, d, "main", fx.Ticket+": publish failed: PUBLISH_PUSH_REJECTED")
 	})
 
 	t.Run("yes_flag_threads_confirmed_true", func(t *testing.T) {

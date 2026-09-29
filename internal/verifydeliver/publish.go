@@ -54,8 +54,32 @@ var guardedPush = gitx.GuardedPush
 
 // Publish reconciles, re-validates, documents, squashes, and routes one
 // ticket's delivery. v0.1 handles a single repo.
-func Publish(d Deps, o PublishOpts) (PublishReport, error) {
+func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	ticket := o.Ticket
+	// journaled backs the deferred best-effort push below: once Publish's
+	// first tracked write to the store's working copy has landed (the
+	// journaled reconcile outcome, recordAndCheckDivergence below - the
+	// earliest store write in this whole function), any later error -
+	// PUBLISH_NO_DIVERGENCE, PUSHED_RANGE, an oracle failure in revalidate,
+	// a declined confirmation, a push or PR-creation failure - would
+	// otherwise leave that journal line (and whatever changelog, ledger,
+	// evidence or PR-body content landed after it) uncommitted until
+	// whatever later command next calls Store.Sync, on this ticket or any
+	// other (see failureCode for why this push runs here rather than
+	// waiting on Sync; Gate runs the same pattern on its own failures) -
+	// reachable simply by declining at this function's own confirmation
+	// prompt, not only by an outage.
+	var journaled bool
+	defer func() {
+		if err == nil || !journaled {
+			return
+		}
+		// Best-effort: if this push itself fails, the original error is
+		// still the one that reaches the caller; there is nothing more to
+		// do here but try.
+		_ = d.Store.Push(fmt.Sprintf("%s: publish failed: %s", ticket, failureCode(err)))
+	}()
+
 	if err := d.Store.Sync(); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: sync store: %w", err)
 	}
@@ -107,6 +131,15 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
+	// recordAndCheckDivergence's own journal line is this function's
+	// earliest tracked write to the store, appended unconditionally -
+	// including on its own PUBLISH_NO_DIVERGENCE error path, before that
+	// check runs - so journaled is set here rather than derived from its
+	// result. If divergenceFileCount or the append itself fails before
+	// anything actually lands, the deferred push above still fires but
+	// commits nothing: Store.Push skips its own commit when nothing is
+	// staged (it still pushes and runs maintenance, same as always).
+	journaled = true
 	if err := recordAndCheckDivergence(d, ticket, lease.Dir, target, policy); err != nil {
 		return PublishReport{}, err
 	}
@@ -187,9 +220,12 @@ func Publish(d Deps, o PublishOpts) (PublishReport, error) {
 
 	// confirmed tracks whether an actual publish confirmation ran: --yes
 	// stands in for it, or an interactive "y"/"yes" answer does. A decline
-	// stops cleanly here - nothing is pushed. This is the only value ever
-	// passed to guardedPush; it is never hardcoded to true, so a non-local
-	// remote with no confirmation is refused by the gitx guard downstream.
+	// stops cleanly here: the ticket branch itself is never pushed (the
+	// deferred push above still runs and pushes the store's own record of
+	// the attempt - only guardedPush's push of the ticket branch below is
+	// skipped). confirmed is the only value ever passed to guardedPush; it
+	// is never hardcoded to true, so a non-local remote with no
+	// confirmation is refused by the gitx guard downstream.
 	confirmed := o.Yes
 	if !o.Yes {
 		if !confirm(branch, ticket) {

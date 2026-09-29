@@ -970,16 +970,15 @@ func TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath(t *testing.T) {
 	}
 }
 
-// TestGateFailedRoundPushesStoreBestEffortSoARerunNeedsNoCleanup reproduces
-// the review finding that a round failing after its gate-open journal line
-// (REVIEW_INVALID here; a REVIEW_FAILED or a routing error take the exact
-// same path) left the store's working copy with a tracked, uncommitted
-// change: the round returns before Gate's own end-of-round Store.Push, so
-// the journal line jig itself just appended sits uncommitted, and the very
-// next command's Store.Sync (git pull --rebase) refuses against it - the
-// documented recovery ("the operator reruns") did not actually work
-// without a manual `git checkout`/`git clean` on the store first.
-func TestGateFailedRoundPushesStoreBestEffortSoARerunNeedsNoCleanup(t *testing.T) {
+// TestGateFailedRoundCommitsAndPushesStore reproduces the review finding
+// that a round failing after its gate-open journal line (REVIEW_INVALID
+// here; a REVIEW_FAILED or a routing error take the exact same path) left
+// the journal line jig itself just appended uncommitted: the round returns
+// before Gate's own end-of-round Store.Push, so that tracked change sat
+// uncommitted and unpushed until whatever later command's own Store.Sync
+// happened to sweep it into an anonymous commit, on this ticket or any
+// other, rather than attributed to this round's own failure.
+func TestGateFailedRoundCommitsAndPushesStore(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
@@ -1018,20 +1017,17 @@ func TestGateFailedRoundPushesStoreBestEffortSoARerunNeedsNoCleanup(t *testing.T
 		t.Fatalf("err = %v, want *axi.Error REVIEW_INVALID", err)
 	}
 
-	// The store's working copy must already be clean and pushed: no
-	// leftover tracked change from the failed round's own gate-open
-	// journal line, review.json or result.json.
-	status, err := gitx.Run(d.Store.Root, "status", "--porcelain")
-	if err != nil {
-		t.Fatalf("store status: %v", err)
-	}
-	if status != "" {
-		t.Fatalf("store working copy is dirty after the failed round:\n%s", status)
-	}
+	// The store's working copy must already be clean and pushed, under a
+	// commit naming this round's own failure - no leftover tracked change
+	// from the failed round's own gate-open journal line, review.json or
+	// result.json, and no dependence on a later command's Sync to sweep
+	// and push it anonymously.
+	wantFailureCommit(t, d, "main", fx.Ticket+": gate round 1 failed: REVIEW_INVALID")
 
-	// A plain rerun (no manual cleanup) must actually work: Sync must not
-	// refuse, and the corrected round must succeed as round 1 (the failed
-	// attempt above wrote no gate/round-1/ directory).
+	// A plain rerun still works with no manual cleanup either way (Sync
+	// sweeps any leftover uncommitted state on its own before it pulls,
+	// push or no push): the corrected round succeeds as round 1 (the
+	// failed attempt above wrote no gate/round-1/ directory).
 	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate rerun: %v", err)

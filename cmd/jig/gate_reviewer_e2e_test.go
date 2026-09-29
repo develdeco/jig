@@ -195,13 +195,29 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	// The failed attempt above still wrote review.json to the store's
 	// working copy and appended this round's gate-open journal line before
 	// failing. Gate's own best-effort push on any error after that journal
-	// line means the store must already be clean and pushed - no manual
-	// `git checkout`/`git clean` needed before the retry below, unlike the
-	// wedge this once left behind.
+	// line means the store must already be clean and pushed immediately,
+	// under a commit naming this round's own failure - not merely clean
+	// once some later command's Sync sweeps the leftovers up anonymously.
 	if status, err := gitx.Run(fx.StoreDir, "status", "--porcelain"); err != nil {
 		t.Fatalf("store status after the failed round: %v", err)
 	} else if status != "" {
 		t.Fatalf("store working copy is dirty after the failed round (the store push on error did not run):\n%s", status)
+	}
+	local, err := gitx.Run(fx.StoreDir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("store rev-parse HEAD after the failed round: %v", err)
+	}
+	remote, err := gitx.Run(fx.StoreDir, "ls-remote", "origin", "refs/heads/main")
+	if err != nil {
+		t.Fatalf("store ls-remote origin main after the failed round: %v", err)
+	}
+	if fields := strings.Fields(remote); len(fields) == 0 || fields[0] != local {
+		t.Fatalf("store local HEAD %s was not pushed to origin main (ls-remote: %q)", local, remote)
+	}
+	if subject, err := gitx.Run(fx.StoreDir, "log", "-1", "--format=%s"); err != nil {
+		t.Fatalf("store log after the failed round: %v", err)
+	} else if want := ticket + ": gate round 1 failed: REVIEW_INVALID"; subject != want {
+		t.Fatalf("store failure commit subject = %q, want %q", subject, want)
 	}
 
 	// --- round 1, corrected retry (still round 1: the failed attempt above

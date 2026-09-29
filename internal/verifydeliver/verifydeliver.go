@@ -10,11 +10,13 @@
 package verifydeliver
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/staircase"
@@ -110,6 +112,25 @@ func evidenceDir(st *store.Store, ticket string, n int) string {
 // gateRoundDir is <ticket>/gate/round-<n> under the store.
 func gateRoundDir(st *store.Store, ticket string, n int) string {
 	return filepath.Join(st.TicketDir(ticket), "gate", fmt.Sprintf("round-%d", n))
+}
+
+// failureCode returns err's own axi.Error code, or "INTERNAL" when err
+// isn't an *axi.Error or carries no code. Gate and Publish both call it to
+// build the subject of the deferred, best-effort push they run on any
+// error after their first journal line for that round/publish: that push
+// runs at the point of failure, rather than waiting on a later command's
+// own Store.Sync, so the leftovers land attributed to this failure by name
+// instead of swept into some other command's anonymous commit. The
+// subject carries only this code, never err's own message, because that
+// message can hold an absolute host path or other detail that has no
+// business in a commit subject that gets pushed to a remote. jig already
+// prints the full error on stdout, where it is read once and not kept.
+func failureCode(err error) string {
+	var ae *axi.Error
+	if errors.As(err, &ae) && ae.Code != "" {
+		return ae.Code
+	}
+	return "INTERNAL"
 }
 
 // existingGateRounds counts how many gate/round-* directories already exist
