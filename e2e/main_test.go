@@ -3,7 +3,9 @@
 // surface the way an operator would from a shell. TestMain builds the
 // binary once, before any test runs; if that build fails, TestMain prints
 // the error and exits non-zero instead of letting every test run and report
-// a misleading pass or skip.
+// a misleading pass or skip. JIG_E2E_BINARY names a jig binary built
+// elsewhere - a release's own, as its installer put it - to run the suite
+// against instead.
 //
 // This suite relies on two things about the CLI surface, called out here
 // and marked inline at their point of use as well:
@@ -46,18 +48,32 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	goBin := filepath.Join(runtime.GOROOT(), "bin", "go"+exeSuffix())
-	out := filepath.Join(tmp, "jig"+exeSuffix())
-	cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, filepath.Join(repoRoot, "cmd", "jig"))
-	cmd.Dir = repoRoot
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "e2e: go build ../cmd/jig failed: %v: %s\n", err, stderr.String())
-		os.RemoveAll(tmp)
-		os.Exit(1)
+	if given := os.Getenv("JIG_E2E_BINARY"); given != "" {
+		// Absolute, since each test runs it from a directory of its own.
+		abs, err := filepath.Abs(given)
+		if err == nil {
+			_, err = os.Stat(abs)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "e2e: JIG_E2E_BINARY=%s: %v\n", given, err)
+			os.RemoveAll(tmp)
+			os.Exit(1)
+		}
+		jigBinary = abs
+	} else {
+		goBin := filepath.Join(runtime.GOROOT(), "bin", "go"+exeSuffix())
+		out := filepath.Join(tmp, "jig"+exeSuffix())
+		cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, filepath.Join(repoRoot, "cmd", "jig"))
+		cmd.Dir = repoRoot
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "e2e: go build ../cmd/jig failed: %v: %s\n", err, stderr.String())
+			os.RemoveAll(tmp)
+			os.Exit(1)
+		}
+		jigBinary = out
 	}
-	jigBinary = out
 
 	// The real jig binary run by runJig inherits this process's environment
 	// (see helpers_test.go), so pinning identity here also pins it for every

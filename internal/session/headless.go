@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -179,15 +180,16 @@ type cliDenial struct {
 }
 
 // Run runs one session: `claude -p` in the lease worktree, in dontAsk
-// permission mode, with the tool surface and grants args describes. A
-// session that wrote d.ResultJSON has honored the disk contract, whatever
-// its exit status. Otherwise the CLI's final result object decides: a
-// missing one (the CLI never ran a session, e.g. a rejected flag) or an
-// error one (authentication, the API, a budget) is an infrastructure error
-// returned to the caller with the CLI's own message, while a completed
-// session's final message is parsed via outcome.ParseText and written to
-// d.ResultJSON in its place.
+// permission mode, with the tool surface and grants args describes, on the
+// dispatch as sessionView spells it. A session that wrote d.ResultJSON has
+// honored the disk contract, whatever its exit status. Otherwise the CLI's
+// final result object decides: a missing one (the CLI never ran a session,
+// e.g. a rejected flag) or an error one (authentication, the API, a
+// budget) is an infrastructure error returned to the caller with the CLI's
+// own message, while a completed session's final message is parsed via
+// outcome.ParseText and written to d.ResultJSON in its place.
 func (b *headlessBackend) Run(d Dispatch) error {
+	d = sessionView(d)
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
 		return &axi.Error{
@@ -269,6 +271,29 @@ func (b *headlessBackend) Run(d Dispatch) error {
 		return fmt.Errorf("session/headless: marshal fallback result: %w", err)
 	}
 	return writeResultBytes(d.ResultJSON, data)
+}
+
+// sessionView returns d as its session sees it: the worktree, input and
+// result paths spelled long (longPath), and the prompt's own mentions of
+// them spelled the same way. The CLI checks an edit against the permission
+// rules as the session spells its target, and it matches a Windows 8.3
+// short-name spelling (RUNNER~1) against no rule, however the rule itself
+// is spelled, so a session handed a short path would have every edit to it
+// denied.
+func sessionView(d Dispatch) Dispatch {
+	paths := []*string{&d.Worktree, &d.SliceJSON, &d.ResultJSON}
+	// Longest first, so a path that contains another one is replaced whole.
+	sort.SliceStable(paths, func(i, j int) bool { return len(*paths[i]) > len(*paths[j]) })
+	for _, p := range paths {
+		if *p == "" {
+			continue
+		}
+		if long := longPath(*p); long != *p {
+			d.Prompt = strings.ReplaceAll(d.Prompt, *p, long)
+			*p = long
+		}
+	}
+	return d
 }
 
 // args renders the full `claude` argv for d, plus a cleanup func the caller
