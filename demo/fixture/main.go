@@ -66,14 +66,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // printExports writes the shell `export` lines a tape evals: JIG_HOME (the
 // value run resolved, whether inherited or defaulted), the store dir, the
-// scenario dir, and the ticket id. -out is caller-supplied and may contain
-// spaces or shell metacharacters (an eval'd unquoted export truncates at the
-// first one), so every value is single-quoted with shellQuote before it is
-// printed, and a plain `eval "$(...)"` is still enough to load them back.
+// scenario dir, the fixture repo's own working clone, and the ticket id.
+// -out is caller-supplied and may contain spaces or shell metacharacters
+// (an eval'd unquoted export truncates at the first one), so every value
+// is single-quoted with shellQuote before it is printed, and a plain
+// `eval "$(...)"` is still enough to load them back.
 func printExports(stdout io.Writer, jigHome string, fx *fixture.Fixture) {
 	fmt.Fprintf(stdout, "export JIG_HOME=%s\n", shellQuote(jigHome))
 	fmt.Fprintf(stdout, "export JIG_STORE_DIR=%s\n", shellQuote(fx.StoreDir))
 	fmt.Fprintf(stdout, "export JIG_SCENARIO_DIR=%s\n", shellQuote(fx.ScenarioDir))
+	fmt.Fprintf(stdout, "export JIG_REPO_DIR=%s\n", shellQuote(fx.RepoDir))
 	fmt.Fprintf(stdout, "export JIG_TICKET=%s\n", shellQuote(fx.Ticket))
 }
 

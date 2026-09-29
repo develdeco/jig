@@ -35,15 +35,27 @@ and drives the real `jig` binary every time.
   keystroke for keystroke, with the same outcome-vs-wording split as
   `gate-reviewer.tape` above. Neither round here dispatches a reviewer, so
   there is no triage prompt and every `Wait` is bare.
+- **`gate-intent-inferred.tape`** - `gate-intent.tape`'s sibling for the third
+  intent source: a brief-less ticket through the `inferred-intent` fixture
+  scenario, with a synthetic local Claude Code transcript planted under a
+  separate demo `HOME` (and `USERPROFILE`) before the round runs, its own file
+  mentions matching the round's scope diff. A single `jig gate --backend fake`
+  round infers its intent from that transcript - the fake backend plays back
+  the summarizer's result - and reports `intent: inferred`; a `cat` shows
+  `intent.md` with its provenance (agent, session, match score), and `jig
+  status` points at publish. It mirrors `e2e/gate_intent_infer_test.go`'s
+  `TestGateInfersIntentBriefLess` keystroke for keystroke, with the same
+  outcome-vs-wording split as `gate-reviewer.tape` above. The scenario's round
+  reports no findings, so there is no triage prompt and every `Wait` is bare.
 
 ## Rule: fixture data only
 
 A tape's terminal must never show a host path, a user name, or a real repo -
 only fixture data (`internal/fixture`, `testdata/fixture/`), env var names
-(`$JIG_HOME`, `$JIG_STORE_DIR`, `$JIG_SCENARIO_DIR`, `$JIG_TICKET`), or
-paths relative to a ticket. Build the fixture with `demo/fixture` (see
-Rendering locally, below), `eval` its `export` lines, and never type an
-expanded path back out.
+(`$JIG_HOME`, `$JIG_STORE_DIR`, `$JIG_SCENARIO_DIR`, `$JIG_REPO_DIR`,
+`$JIG_TICKET`), or paths relative to a ticket. Build the fixture with
+`demo/fixture` (see Rendering locally, below), `eval` its `export` lines, and
+never type an expanded path back out.
 
 ## How CI renders and uploads them
 

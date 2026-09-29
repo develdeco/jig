@@ -67,6 +67,7 @@ func TestRunDefaultsJIGHome(t *testing.T) {
 		"export JIG_HOME='" + wantHome + "'\n",
 		"export JIG_STORE_DIR='" + filepath.Join(dir, "store") + "'\n",
 		"export JIG_SCENARIO_DIR='" + filepath.Join(dir, "scenario") + "'\n",
+		"export JIG_REPO_DIR='" + filepath.Join(dir, "fixture-repo") + "'\n",
 		"export JIG_TICKET='JIG-1'\n",
 	} {
 		if !strings.Contains(out, want) {
@@ -132,6 +133,7 @@ func TestRunQuotesExportsWithSpaces(t *testing.T) {
 		"export JIG_HOME='" + filepath.Join(dir, "home") + "'\n",
 		"export JIG_STORE_DIR='" + filepath.Join(dir, "store") + "'\n",
 		"export JIG_SCENARIO_DIR='" + filepath.Join(dir, "scenario") + "'\n",
+		"export JIG_REPO_DIR='" + filepath.Join(dir, "fixture-repo") + "'\n",
 		"export JIG_TICKET='JIG-1'\n",
 	} {
 		if !strings.Contains(out, want) {
