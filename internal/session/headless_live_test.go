@@ -205,8 +205,9 @@ func liveRepo(t *testing.T, dir string) string {
 
 // runLive points the CLI at a mock Messages API scripted with sess, runs d
 // through the headless backend with jig as the screen hook, and checks
-// every scripted step ran with the expected outcome, stopping the test
-// there if one did not.
+// every scripted step ran with the expected outcome. It stops the test
+// only when the session ran fewer steps than scripted; a step with the
+// wrong outcome is reported and the caller's own checks on disk still run.
 func runLive(t *testing.T, jig string, sess *claudetest.Session, d Dispatch) {
 	t.Helper()
 	claudetest.Serve(t, &claudetest.API{Route: func(string) *claudetest.Session { return sess }})
@@ -227,7 +228,7 @@ func runLive(t *testing.T, jig string, sess *claudetest.Session, d Dispatch) {
 	}
 
 	sess.Check(t)
-	if t.Failed() {
+	if len(sess.Results()) < len(sess.Steps) {
 		t.FailNow()
 	}
 }
