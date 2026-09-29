@@ -125,22 +125,18 @@ func TestTriageForYesNotesOnlyPrintsNoNoteLine(t *testing.T) {
 
 // TestTriageForYesUndecidedAskDoesNotClaimKept pins the rule that the note
 // line must never say every ask was kept when a no-workspace ask was left
-// undecided; it says how many are left for a human instead. The negative
-// check is against the note's own complete-without-a-count shape (what the
-// else branch below prints when nothing is undecided), not old wording:
-// that shape can never appear together with the undecided-count clause
-// this test also requires, so the two assertions can never both pass for a
-// note that falsely claims everything was kept.
+// undecided; it says how many are left for a human instead. The whole line
+// is compared, so the reason, what jig did with the fixes and the buildable
+// asks, and the undecided count are pinned together: a note that reversed
+// what happened ("dismissed every fix ..."), dropped the reason, or fell
+// back to the count-free shape would not match.
 func TestTriageForYesUndecidedAskDoesNotClaimKept(t *testing.T) {
 	var out bytes.Buffer
 	f := triageFor(true, strings.NewReader(""), &out)
 	f(sampleTriageInput()) // r1-f4 has no workspace
-	line := out.String()
-	if strings.Contains(line, "kept every fix and buildable ask\n") {
-		t.Fatalf("stdout falsely claims every ask was kept:\n%s", line)
-	}
-	if !strings.Contains(line, "1 ask(s) left for a human") {
-		t.Fatalf("stdout missing the undecided-ask count:\n%s", line)
+	const want = "triage (--yes): kept every fix and buildable ask; 1 ask(s) left for a human\n"
+	if out.String() != want {
+		t.Fatalf("note = %q, want %q", out.String(), want)
 	}
 }
 
@@ -218,23 +214,27 @@ func TestInteractiveTriageFixBatchEOFKeepsAllAsAuto(t *testing.T) {
 	if res.FixHuman {
 		t.Error("FixHuman = true, want false (stdin closed before anyone answered)")
 	}
-	if !strings.Contains(out.String(), "stdin closed") {
-		t.Fatalf("stdout missing the EOF note:\n%s", out.String())
+	// The whole note line, so what jig did with the remaining fixes is
+	// pinned along with the reason, and no undecided-ask count follows it.
+	const note = "triage (stdin closed): kept every remaining fix and buildable ask\n"
+	if !strings.Contains(out.String(), note) {
+		t.Fatalf("stdout missing the EOF note %q:\n%s", note, out.String())
 	}
 }
 
 // TestInteractiveTriageFixBatchPromptExplainsConsequences pins the rule
 // that the fix batch prompt says what each answer does, not only its
-// syntax: accepting queues the fix slices, dismissing means the finding is
-// never raised again; it also carries the fix count and the id-list
-// syntax for a dismissal (DECISIONS.md frees the literal wording but not
-// this answer syntax).
+// syntax: Enter queues the fix slices, and listing ids dismisses those
+// findings for good. Each fragment pairs an answer with its consequence, so
+// a prompt that swapped the two would not match; the prompt also carries
+// the fix count (DECISIONS.md frees the literal wording but not this answer
+// syntax).
 func TestInteractiveTriageFixBatchPromptExplainsConsequences(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
 	interactiveTriage(in, strings.NewReader("\n"), &out)
 	text := out.String()
-	for _, want := range []string{"2 fix(es)", "Enter queues fix slice(s)", "list ids", "gone for good"} {
+	for _, want := range []string{"2 fix(es)", "Enter queues fix slice(s)", "list ids to dismiss (gone for good)"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("fix batch prompt missing %q:\n%s", want, text)
 		}
@@ -310,17 +310,19 @@ func TestInteractiveTriageAskShowsFileLineDetailAndRationale(t *testing.T) {
 // TestInteractiveTriageAskPromptExplainsConsequences pins the rule that the
 // per-ask prompt says what each answer does, not only its syntax: keeping
 // queues a fix slice and asks for a decision, dismissing means the finding
-// is never raised again. It answers dismiss ("d") so no follow-up decision
-// prompt ever runs: with a keep answer, that second prompt's own "decision
-// for ... (optional, Enter to skip)" text would also satisfy a check for
-// "decision", so a mutant that dropped the word from the ask prompt itself
-// would go uncaught.
+// is gone for good. Each consequence sits next to the answer that causes
+// it, and the token list keeps the same keep-then-dismiss order, so a
+// prompt that swapped the two would not match. It answers dismiss ("d") so
+// no follow-up decision prompt ever runs: with a keep answer, that second
+// prompt's own "decision for ... (optional, Enter to skip)" text would also
+// satisfy a check for "decision", so a mutant that dropped the word from
+// the ask prompt itself would go uncaught.
 func TestInteractiveTriageAskPromptExplainsConsequences(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
 	interactiveTriage(in, strings.NewReader("d\n"), &out)
 	text := out.String()
-	for _, want := range []string{"fix slice + decision", "gone for good", "k/keep/Enter", "n/no/d/dismiss"} {
+	for _, want := range []string{"keep (fix slice + decision)", "dismiss (gone for good)", "[k/keep/Enter, n/no/d/dismiss]"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("ask prompt missing %q:\n%s", want, text)
 		}
@@ -567,8 +569,11 @@ func TestInteractiveTriageAskEOFDoesNotAutoKeepAStaleOracleAsk(t *testing.T) {
 	if _, ok := res.Asks["r1-f4"]; ok {
 		t.Error("Asks[r1-f4] decided, want undecided (a stale oracle needs a human's choice, EOF cannot supply it)")
 	}
-	if !strings.Contains(out.String(), "1 ask(s) left for a human") {
-		t.Fatalf("stdout missing the EOF undecided count:\n%s", out.String())
+	// The whole note line: the reason, what jig did with what it could keep,
+	// and the undecided count together.
+	const note = "triage (stdin closed): kept every remaining fix and buildable ask; 1 ask(s) left for a human\n"
+	if !strings.Contains(out.String(), note) {
+		t.Fatalf("stdout missing the EOF note %q:\n%s", note, out.String())
 	}
 }
 
