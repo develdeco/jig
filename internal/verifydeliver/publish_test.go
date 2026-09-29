@@ -232,13 +232,14 @@ func TestPublishFullChain(t *testing.T) {
 
 // TestPublishUsesRecordedBranch publishes a ticket whose ticket.yaml records
 // a branch, built and gated on that branch instead of the "jig/<ticket>"
-// default. Publish resolves the branch once and hands it to the lease, the
-// fetch from the build lease, reconcile, the push and the PR, so the squash
-// must land on origin under the recorded name. A branch under the default
-// name already sits on origin, as a stale one could: reconcile must not take
-// it for the ticket's own (which would make it merge, as it does for a pushed
-// branch, instead of rebasing), and publish must leave it alone. Every other
-// Publish test here records no branch, so a Publish that hardcoded
+// default. A recorded branch is on origin by definition, so the test puts it
+// there, at the target's tip, before the build. Publish resolves the branch
+// once and hands it to the lease, the fetch from the build lease, reconcile,
+// the push and the PR, so the squash must land on origin under the recorded
+// name, and nothing under the default name. The branch is on origin, so
+// reconcile merges the target into it rather than rebasing; a reconcile that
+// hardcoded "jig/"+ticket would find no such branch on origin and rebase. Every
+// other Publish test here records no branch, so a Publish that hardcoded
 // "jig/"+ticket, or resolved it separately in each step, would still pass
 // them.
 func TestPublishUsesRecordedBranch(t *testing.T) {
@@ -247,16 +248,9 @@ func TestPublishUsesRecordedBranch(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	recordBranch(t, d.Store, fx.Ticket, "feature/custom")
+	run(t, fx.RepoRemote, "branch", "feature/custom", "main")
 	gateToClean(t, fx, d)
 	advanceTarget(t, fx)
-
-	decoy, err := gitx.Run(fx.RepoRemote, "rev-parse", "refs/heads/main")
-	if err != nil {
-		t.Fatalf("resolve origin's main: %v", err)
-	}
-	if _, err := gitx.Run(fx.RepoRemote, "branch", ticketBranch(fx.Ticket), decoy); err != nil {
-		t.Fatalf("create the stale %s on origin: %v", ticketBranch(fx.Ticket), err)
-	}
 
 	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -274,8 +268,8 @@ func TestPublishUsesRecordedBranch(t *testing.T) {
 	if remoteHead != sha {
 		t.Fatalf("origin feature/custom = %s, want the squash sha %s", remoteHead, sha)
 	}
-	if got, err := gitx.Run(fx.RepoRemote, "rev-parse", "refs/heads/"+ticketBranch(fx.Ticket)); err != nil || got != decoy {
-		t.Fatalf("origin %s = %q (err %v), want the stale branch untouched at %s", ticketBranch(fx.Ticket), got, err, decoy)
+	if got := originRef(t, fx.RepoRemote, "refs/heads/"+ticketBranch(fx.Ticket)); got != "" {
+		t.Fatalf("origin has %s at %s, want no branch under the default name", ticketBranch(fx.Ticket), got)
 	}
 
 	lines, err := journal.Read(d.Store, fx.Ticket)
@@ -288,8 +282,8 @@ func TestPublishUsesRecordedBranch(t *testing.T) {
 			policy = l.Outcome
 		}
 	}
-	if !strings.HasPrefix(policy, policyLocalRebase+":") {
-		t.Fatalf("reconcile outcome = %q, want the %q policy: the recorded branch was never pushed, whatever sits under the default name", policy, policyLocalRebase)
+	if !strings.HasPrefix(policy, policyMerge+":") {
+		t.Fatalf("reconcile outcome = %q, want the %q policy: the recorded branch is on origin", policy, policyMerge)
 	}
 }
 
@@ -655,7 +649,9 @@ func TestPublishConfirmWiring(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		d := newDeps(t, fx)
 		if branch != "" {
+			// A recorded branch is on origin by definition.
 			recordBranch(t, d.Store, fx.Ticket, branch)
+			run(t, fx.RepoRemote, "branch", branch, "main")
 		}
 		gateToClean(t, fx, d)
 		return fx, d

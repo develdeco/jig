@@ -288,9 +288,10 @@ type runCtx struct {
 	storeMu sync.Mutex
 
 	// branchOnce guards the one resolution of the ticket's branch this Run
-	// makes (see ticketBranch); branch and branchErr are its result.
+	// makes (see ticketBranch); branch, adopted and branchErr are its result.
 	branchOnce sync.Once
 	branch     string
+	adopted    bool
 	branchErr  error
 }
 
@@ -300,12 +301,20 @@ type runCtx struct {
 // ticket.yaml changes mid-run (Store.TicketBranch's own rule for a command
 // that names the branch more than once). It resolves on the first slice
 // rather than up front, so a Run with nothing on its frontier never reads
-// the record.
-func (rc *runCtx) ticketBranch() (string, error) {
+// the record. adopted says whether the ticket recorded the branch: one built
+// outside jig, on origin by definition, where the ordinary jig/<ticket> is
+// not until a publish pushes it.
+func (rc *runCtx) ticketBranch() (branch string, adopted bool, err error) {
 	rc.branchOnce.Do(func() {
-		rc.branch, rc.branchErr = rc.d.Store.TicketBranch(rc.ticket, rc.target)
+		rec, err := rc.d.Store.ReadTicket(rc.ticket)
+		if err != nil {
+			rc.branchErr = err
+			return
+		}
+		rc.branch, rc.branchErr = rc.d.Store.ResolveTicketBranch(rc.ticket, rec, rc.target)
+		rc.adopted = rec.Adopted()
 	})
-	return rc.branch, rc.branchErr
+	return rc.branch, rc.adopted, rc.branchErr
 }
 
 func (rc *runCtx) isHalted() bool {
@@ -396,18 +405,47 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	d := rc.d
 	ticket := rc.ticket
 
-	branch, err := rc.ticketBranch()
+	branch, adopted, err := rc.ticketBranch()
 	if err != nil {
 		rc.fail(fmt.Errorf("frontier: resolve branch for %s: %w", ticket, err))
 		return
 	}
-	lease, err := pool.Acquire(d.Home, rc.repoName, rc.remote, rc.target, branch, ticket, pool.Build)
+	// An adopted branch is on origin by definition, so one that is not is
+	// refused (BRANCH_NOT_FOUND) instead of being cut from the target: the
+	// fixes would be built on a branch that lacks the author's code. The
+	// commits jig built on it and verified are what make the lease's copy
+	// jig's to keep: a lease that holds none that origin lacks follows
+	// origin's copy of the branch even where the two have diverged, since what
+	// it holds of its own is not jig's work (pool.RecutUnlessBuilt), and one
+	// that does hold one is refused as diverged, as always.
+	var (
+		acquireOpts []pool.Option
+		built       []string
+	)
+	if adopted {
+		if built, err = rc.builtCommits(); err != nil {
+			rc.fail(fmt.Errorf("frontier: read journal: %w", err))
+			return
+		}
+		acquireOpts = append(acquireOpts, pool.MustExistOnOrigin(), pool.RecutUnlessBuilt(built))
+	}
+	lease, err := pool.Acquire(d.Home, rc.repoName, rc.remote, rc.target, branch, ticket, pool.Build, acquireOpts...)
 	if err != nil {
 		rc.fail(fmt.Errorf("frontier: acquire lease for %s: %w", sl.ID, err))
 		return
 	}
+	// The lease's copy must hold every commit jig built on the branch, or the
+	// next commits would go on a branch that lacks the earlier ones: they
+	// are on another machine, or lost (the same rule the gate applies to the
+	// copy it reviews).
+	if adopted {
+		if err := pool.RequireBuilt(lease.Dir, "HEAD", lease.Dir, ticket, branch, "jig run "+ticket, built); err != nil {
+			rc.fail(err)
+			return
+		}
+	}
 
-	startSHA, ok := rc.ensureStartSHA(lease)
+	startSHA, ok := rc.ensureStartSHA(lease, adopted && len(built) == 0)
 	if !ok {
 		return
 	}
@@ -499,21 +537,41 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 }
 
 // ensureStartSHA writes <ticket>/start.<repoName>.sha the first time this
-// repo is dispatched into for ticket, recording origin/<target>'s sha as
-// the fork point squash and reconcile measure against later. It returns the
+// repo is dispatched into for ticket, recording the sha the lease's branch
+// started from: what a build's commits must descend from (verifyGreen), and
+// where a gate round's scope falls back to when it has no merge base with the
+// target (resolveScopeBase). Squash and reconcile do not read it. That is
+// where pool.Acquire cut the branch: origin/<branch> when origin already has
+// the branch - one built outside jig and adopted, whose start sha `jig gate
+// --branch` normally records first - else origin/<target>. It returns the
 // recorded sha and whether the caller may proceed.
-func (rc *runCtx) ensureStartSHA(lease pool.Lease) (string, bool) {
-	path := filepath.Join(rc.d.Store.TicketDir(rc.ticket), fmt.Sprintf("start.%s.sha", rc.repoName))
-	if data, err := os.ReadFile(path); err == nil {
-		return trimSHA(data), true
-	} else if !os.IsNotExist(err) {
-		rc.fail(fmt.Errorf("frontier: read %s: %w", path, err))
-		return "", false
+//
+// follow is true for an adopted branch jig has built nothing on: it is the
+// author's until jig builds on it, so its start sha follows it, and every
+// dispatch records origin's tip again, where the lease was just cut or
+// fast-forwarded to. An author who pushed to the branch, or rewrote it, after
+// the adoption is built on as the branch is when jig starts, where a start sha
+// fixed at adoption would fail every commit for a rewritten history and stall
+// the slices with no stated cause. Once jig has built (the journal records a
+// commit that verified), the start sha stays: those commits descend from it.
+func (rc *runCtx) ensureStartSHA(lease pool.Lease, follow bool) (string, bool) {
+	path := rc.d.Store.StartSHAPath(rc.ticket, rc.repoName)
+	if !follow {
+		if data, err := os.ReadFile(path); err == nil {
+			return trimSHA(data), true
+		} else if !os.IsNotExist(err) {
+			rc.fail(fmt.Errorf("frontier: read %s: %w", path, err))
+			return "", false
+		}
 	}
 
-	sha, err := gitx.RevParse(lease.Dir, "origin/"+rc.target)
+	startRef := "origin/" + rc.target
+	if _, err := gitx.RevParse(lease.Dir, "refs/remotes/origin/"+lease.Branch); err == nil {
+		startRef = "origin/" + lease.Branch
+	}
+	sha, err := gitx.RevParse(lease.Dir, startRef)
 	if err != nil {
-		rc.fail(fmt.Errorf("frontier: resolve origin/%s: %w", rc.target, err))
+		rc.fail(fmt.Errorf("frontier: resolve %s: %w", startRef, err))
 		return "", false
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -525,6 +583,18 @@ func (rc *runCtx) ensureStartSHA(lease pool.Lease) (string, bool) {
 		return "", false
 	}
 	return sha, true
+}
+
+// builtCommits is the commits the journal records jig built on the ticket's
+// branch and verified (journal.BuiltCommits).
+func (rc *runCtx) builtCommits() ([]string, error) {
+	rc.storeMu.Lock()
+	defer rc.storeMu.Unlock()
+	lines, err := journal.Read(rc.d.Store, rc.ticket)
+	if err != nil {
+		return nil, err
+	}
+	return journal.BuiltCommits(lines), nil
 }
 
 func trimSHA(data []byte) string {
@@ -602,6 +672,15 @@ func (rc *runCtx) tearDownEnv(sl store.Slice, h *envrun.Handle) {
 func (rc *runCtx) route(sl store.Slice, lease pool.Lease, attempt int, res outcome.Result, startSHA string) {
 	if res.Outcome == outcome.Green {
 		if reason, ok := verifyGreen(lease.Dir, startSHA, res); ok {
+			// The commit is the ticket's now: the result line records what the
+			// builder claimed, this one that it verified, and only these are
+			// the commits jig built (journal.BuiltCommits). It goes in before
+			// the slice is marked green, so a run that stops in between still
+			// has the commit recorded.
+			rc.journal(journal.Line{Slice: sl.ID, Event: "verified", Commit: res.Commit, Attempt: attempt})
+			if rc.isHalted() {
+				return
+			}
 			st, err := rc.readSliceState(sl.ID)
 			if err != nil {
 				rc.fail(fmt.Errorf("frontier: read slice state %s: %w", sl.ID, err))

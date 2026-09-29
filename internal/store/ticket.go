@@ -39,6 +39,12 @@ type Ticket struct {
 	BlockedBy []TicketBlockedBy
 }
 
+// Adopted reports whether the ticket adopted a branch: a recorded branch is
+// an adopted one, since nothing but adoption (`jig gate --branch`) writes it.
+// It is the one predicate every command that treats an adopted ticket
+// differently asks - gate, run, solve, publish and status alike.
+func (t Ticket) Adopted() bool { return t.Branch != "" }
+
 // ticketFile is the wire shape of <ticket>/ticket.yaml. schema_version
 // comes first for a human skimming the file; ticketSchemaVersion is the
 // only value this jig version writes or expects.
@@ -202,9 +208,9 @@ func writeTicketFile(path string, t Ticket) error {
 // the ticket has none. It is the one update of a record that already exists:
 // a ticket's title and blockers are written once, whole, by
 // CreateTicketRecord when the ticket is minted, and nothing changes them
-// afterwards. Nothing calls this yet in v0.1: branch adoption is a later
-// change; TicketBranch already resolves a recorded branch, so the write side
-// can land separately from the read side that depends on it.
+// afterwards. A ticket records a branch when it adopts one (`jig gate
+// --branch`), so a recorded branch is an adopted one; CheckAdoptableBranch
+// is the check a name passes before it is written, since this does none.
 func (s *Store) WriteTicketBranch(ticket string, branch string) error {
 	return s.mutateTicket(ticket, func(t *Ticket) { t.Branch = branch })
 }
@@ -212,12 +218,13 @@ func (s *Store) WriteTicketBranch(ticket string, branch string) error {
 // TicketBranch returns ticket's working branch, resolved and validated
 // against target: the branch recorded in its ticket.yaml, or "jig/<ticket>"
 // when none is recorded. Every caller that names a ticket's branch resolves
-// it here instead of hardcoding "jig/"+ticket, so the day something adopts
-// a branch, every one of them picks it up - and every one of them gets this
-// same validation for free, rather than each having to remember to run it
-// after its own read. A caller that names the branch more than once in one
-// command (publish, gate) resolves it once and passes the result down, so
-// the whole command works on one branch even if ticket.yaml changes under it.
+// it here instead of hardcoding "jig/"+ticket, so a branch the ticket
+// adopted is picked up by every one of them - and every one of them gets
+// this same validation for free, rather than each having to remember to run
+// it after its own read. A caller that names the branch more than once in
+// one command (publish, gate) resolves it once and passes the result down,
+// so the whole command works on one branch even if ticket.yaml changes under
+// it.
 //
 // A ticket.yaml ReadTicket refuses (an unknown key, a newer schema_version)
 // is returned as is: its *axi.Error already carries its own code and the
@@ -233,9 +240,9 @@ func (s *Store) WriteTicketBranch(ticket string, branch string) error {
 // Both checks are of names, so a spelling git resolves on its own terms
 // passes them: "refs/heads/main" for target, and "@", which git reads as HEAD
 // wherever it parses a revision (a checkout of it stays where it is), for the
-// name check. Nothing writes branch yet (WriteTicketBranch has no caller in
-// v0.1), so today this only guards a hand-edited or otherwise externally
-// written ticket.yaml, which `jig validate` checks the same way.
+// name check. Adoption checks the same rules before it records a name
+// (CheckAdoptableBranch), so this also guards a hand-edited or otherwise
+// externally written ticket.yaml, which `jig validate` checks the same way.
 func (s *Store) TicketBranch(ticket, target string) (string, error) {
 	rec, err := s.ReadTicket(ticket)
 	if err != nil {
@@ -250,41 +257,99 @@ func (s *Store) TicketBranch(ticket, target string) (string, error) {
 // the record cannot change between them. rec must be ticket's own record, as
 // ReadTicket returned it.
 func (s *Store) ResolveTicketBranch(ticket string, rec Ticket, target string) (string, error) {
-	if rec.Branch == "" {
+	if !rec.Adopted() {
 		return "jig/" + ticket, nil
 	}
-	if rec.Branch == target {
+	fault := s.branchNameFault(rec.Branch, target)
+	if fault == nil {
+		return rec.Branch, nil
+	}
+	recordPath := s.TicketFilePath(ticket)
+	switch fault.kind {
+	case faultTarget:
 		return "", &axi.Error{
 			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which is also the target branch", ticket, rec.Branch),
 			Code: "TICKET_BRANCH_INVALID",
 			Help: []string{
-				fmt.Sprintf("Record a branch other than %q in %s, or remove the branch key to use the default jig/%s", target, s.TicketFilePath(ticket), ticket),
+				fmt.Sprintf("Record a branch other than %q in %s, or remove the branch key to use the default jig/%s", target, recordPath, ticket),
 			},
 		}
+	case faultRejected:
+		return "", &axi.Error{
+			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which git rejects as a branch name: %s", ticket, rec.Branch, fault.detail),
+			Code: "TICKET_BRANCH_INVALID",
+			Help: []string{fmt.Sprintf("Fix the branch key in %s", recordPath)},
+		}
+	default:
+		return "", &axi.Error{
+			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which git reads as shorthand for %q, not as a branch name", ticket, rec.Branch, fault.detail),
+			Code: "TICKET_BRANCH_INVALID",
+			Help: []string{fmt.Sprintf("Record the branch's own name in %s", recordPath)},
+		}
+	}
+}
+
+// CheckAdoptableBranch reports why branch cannot become ticket's adopted
+// branch, before anything records it: the rules ResolveTicketBranch applies
+// to a recorded name, so a name that passes here is one every later command
+// resolves. It reads and writes nothing of the ticket's.
+func (s *Store) CheckAdoptableBranch(ticket, branch, target string) error {
+	fault := s.branchNameFault(branch, target)
+	if fault == nil {
+		return nil
+	}
+	var why string
+	switch fault.kind {
+	case faultTarget:
+		why = "it is the target branch, where a push would land without a pull request"
+	case faultRejected:
+		why = fmt.Sprintf("git rejects it as a branch name: %s", fault.detail)
+	default:
+		why = fmt.Sprintf("git reads it as shorthand for %q, not as a branch name", fault.detail)
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("%s cannot adopt branch %q: %s", ticket, branch, why),
+		Code: "TICKET_BRANCH_INVALID",
+		Help: []string{"Name the branch the work was built on, spelled as git names it, and never the target branch"},
+	}
+}
+
+// branchFaultKind says which rule a branch name broke.
+type branchFaultKind int
+
+const (
+	faultTarget    branchFaultKind = iota // the name is the target branch
+	faultRejected                         // git refuses it as a ref name
+	faultShorthand                        // git expands it to another name
+)
+
+// branchFault is one broken rule of a branch name: which, and the detail
+// that finishes its message (git's error, or the name git expanded it to;
+// empty for the target).
+type branchFault struct {
+	kind   branchFaultKind
+	detail string
+}
+
+// branchNameFault checks branch as a name against target and git, returning
+// nil when it can be a ticket's working branch: the one check both a
+// recorded branch (ResolveTicketBranch) and one about to be adopted
+// (CheckAdoptableBranch) pass.
+func (s *Store) branchNameFault(branch, target string) *branchFault {
+	if branch == target {
+		return &branchFault{kind: faultTarget}
 	}
 	// --branch prints the name it accepted, and expands "@{-N}" against this
 	// repo's own reflog: whatever it printed must be the recorded name
 	// itself, so a name that is only shorthand for another (which one
 	// depends on the store's own checkout history, so on the machine) is
 	// refused instead of resolved differently from one machine to the next.
-	name, err := gitx.Run(s.Root, "check-ref-format", "--branch", rec.Branch)
+	name, err := gitx.Run(s.Root, "check-ref-format", "--branch", branch)
 	if err != nil {
-		return "", &axi.Error{
-			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which git rejects as a branch name: %v", ticket, rec.Branch, err),
-			Code: "TICKET_BRANCH_INVALID",
-			Help: []string{
-				fmt.Sprintf("Fix the branch key in %s", s.TicketFilePath(ticket)),
-			},
-		}
+		return &branchFault{kind: faultRejected, detail: err.Error()}
 	}
-	if name != rec.Branch {
-		return "", &axi.Error{
-			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which git reads as shorthand for %q, not as a branch name", ticket, rec.Branch, name),
-			Code: "TICKET_BRANCH_INVALID",
-			Help: []string{
-				fmt.Sprintf("Record the branch's own name in %s", s.TicketFilePath(ticket)),
-			},
-		}
+	if name != branch {
+		return &branchFault{kind: faultShorthand, detail: name}
 	}
-	return rec.Branch, nil
+	return nil
 }
