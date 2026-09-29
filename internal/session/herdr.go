@@ -1,7 +1,9 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -59,17 +61,26 @@ func herdrCommand(goos string, distro string, args []string) (name string, argv 
 	return "wsl", wslArgs
 }
 
-// runHerdr runs one herdr control command (see herdrCommand) and parses its
-// JSON response.
-func (b *herdrBackend) runHerdr(args ...string) (map[string]any, error) {
-	name, argv := herdrCommand(b.goos, os.Getenv(jigWSLDistroEnv), args)
+// runHerdr runs one herdr control command and parses its JSON response. sub
+// names the command, "noun verb" ("agent prompt"), and args are its operands.
+// An error names the command and never its operands: the operands of `agent
+// prompt` are the whole prompt, and every path of the dispatch in it (on
+// Windows, spelled as WSL mounts), and those reach the operator's terminal
+// and the store's history through whatever records the error. herdr's own
+// stderr is kept, where it has said something.
+func (b *herdrBackend) runHerdr(sub string, args ...string) (map[string]any, error) {
+	name, argv := herdrCommand(b.goos, os.Getenv(jigWSLDistroEnv), append(strings.Fields(sub), args...))
 	out, err := exec.Command(name, argv...).Output()
 	if err != nil {
-		return nil, fmt.Errorf("session/herdr: herdr %s: %w", strings.Join(args, " "), err)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(bytes.TrimSpace(exitErr.Stderr)) > 0 {
+			return nil, fmt.Errorf("session/herdr: herdr %s: %w: %s", sub, err, outputTail(string(exitErr.Stderr), ""))
+		}
+		return nil, fmt.Errorf("session/herdr: herdr %s: %w", sub, err)
 	}
 	var res map[string]any
 	if err := json.Unmarshal(out, &res); err != nil {
-		return nil, fmt.Errorf("session/herdr: parse response for %q: %w", strings.Join(args, " "), err)
+		return nil, fmt.Errorf("session/herdr: parse the response of herdr %s: %w", sub, err)
 	}
 	return res, nil
 }
@@ -96,17 +107,22 @@ func herdrResult(res map[string]any) map[string]any {
 // wait, then read the result the agent was told to write. A blocked agent
 // (stuck at an approval dialog) becomes a failed result rather than an
 // infrastructure error. The workspace is closed on success and left open
-// (logged) on failure, for jump-in. d.NoSessionPersistence is accepted and
-// ignored: the claude agent herdr starts is an interactive session that jig
-// starts without flags, so Claude Code keeps its transcript whatever the
-// dispatch asked.
+// (logged) on failure, for jump-in. On Windows the session runs in WSL, so
+// the workspace is created at the worktree's WSL mount and the prompt's own
+// mentions of every path of the dispatch are spelled the same way
+// (respellMentions); the files jig itself wrote keep the host spelling of
+// whatever paths they hold. jig reads the result at its host path.
+// d.NoSessionPersistence is accepted and ignored: the claude agent herdr
+// starts is an interactive session that jig starts without flags, so Claude
+// Code keeps its transcript whatever the dispatch asked.
 func (b *herdrBackend) Run(d Dispatch) error {
 	label := fmt.Sprintf("jig-%s-%s", d.Ticket, d.Slice)
-	cwd := d.Worktree
+	cwd, prompt := d.Worktree, d.Prompt
 	if b.goos == "windows" {
-		cwd = wslPath(cwd)
+		cwd = wslPath(d.Worktree)
+		prompt = respellMentions(d.Prompt, d.paths(), wslPath)
 	}
-	ws, err := b.runHerdr("workspace", "create", "--cwd", cwd, "--label", label, "--no-focus")
+	ws, err := b.runHerdr("workspace create", "--cwd", cwd, "--label", label, "--no-focus")
 	if err != nil {
 		return err
 	}
@@ -115,12 +131,12 @@ func (b *herdrBackend) Run(d Dispatch) error {
 	paneID, _ := paneIDOf(wsResult)
 
 	agentName := fmt.Sprintf("jig-%s-%s-a%d", d.Ticket, d.Slice, d.Attempt)
-	if _, err := b.runHerdr("agent", "start", agentName, "--kind", "claude", "--pane", paneID, "--timeout", "60000"); err != nil {
+	if _, err := b.runHerdr("agent start", agentName, "--kind", "claude", "--pane", paneID, "--timeout", "60000"); err != nil {
 		b.leaveOpen(workspaceID)
 		return err
 	}
 
-	promptRes, err := b.runHerdr("agent", "prompt", agentName, d.Prompt, "--wait")
+	promptRes, err := b.runHerdr("agent prompt", agentName, prompt, "--wait")
 	if err != nil {
 		b.leaveOpen(workspaceID)
 		return err
@@ -139,7 +155,7 @@ func (b *herdrBackend) Run(d Dispatch) error {
 	}
 
 	if _, err := os.Stat(d.ResultJSON); err != nil {
-		readRes, err := b.runHerdr("agent", "read", agentName)
+		readRes, err := b.runHerdr("agent read", agentName)
 		if err != nil {
 			b.leaveOpen(workspaceID)
 			return err
@@ -155,7 +171,7 @@ func (b *herdrBackend) Run(d Dispatch) error {
 		}
 	}
 
-	if _, err := b.runHerdr("workspace", "close", workspaceID); err != nil {
+	if _, err := b.runHerdr("workspace close", workspaceID); err != nil {
 		b.leaveOpen(workspaceID)
 	}
 	return nil

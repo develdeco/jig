@@ -26,6 +26,15 @@ type Dispatch struct {
 	Model         string
 	Prompt        string // rendered dispatch prompt (paths, not contents)
 
+	// ExtraWriteDir, when set, is one absolute directory outside the
+	// worktree the session may also write files in: a gate demo's media
+	// directory. Every other path outside the worktree stays closed. Where a
+	// screen attaches (headless) it governs the shell either way, so this
+	// widens only the backend's own edit tools (headless: one more
+	// path-scoped rule); herdr sessions are not screened, and scope no edits
+	// of their own, so the field changes nothing there.
+	ExtraWriteDir string
+
 	// Screen attaches the command/secret screens as the session's
 	// PreToolUse hook, where the backend has one (headless only). Every
 	// dispatch jig makes is screened; an unscreened headless session gets
@@ -43,6 +52,12 @@ type Dispatch struct {
 	// not be copied into the operator's own Claude Code data (the intent
 	// summarizer's excerpt); every other dispatch leaves it unset.
 	NoSessionPersistence bool
+}
+
+// paths is every path d names: the ones a backend may have to spell for its
+// session, in the prompt's own mentions of them.
+func (d Dispatch) paths() []string {
+	return []string{d.Worktree, d.SliceJSON, d.ResultJSON, d.ExtraWriteDir}
 }
 
 // Backend runs one dispatch. A returned error means infrastructure failure
@@ -147,3 +162,9 @@ func available(goos, name string) error {
 		Help: []string{install, fmt.Sprintf("Or run with `--backend %s`", other)},
 	}
 }
+
+// GateDemoSlice is the Dispatch.Slice of a gate demo session: the dispatch
+// that follows a clean reviewer round and records what the change looks like
+// working. A backend that plays scenarios back tells it from a slice attempt
+// (any other Slice) and from a gate review (Slice "gate") by this name.
+const GateDemoSlice = "gate-demo"
