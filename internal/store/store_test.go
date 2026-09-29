@@ -41,6 +41,11 @@ func newTestRemoteStore(t *testing.T) (st *Store, work, remote string) {
 	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// As jig's own stores have (project.InitStandalone): what lets gitx work
+	// on a store in process.
+	if err := os.WriteFile(filepath.Join(work, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	runGit(t, work, "add", "-A")
 	runGit(t, work, "commit", "-m", "init")
 	runGit(t, work, "push", "origin", "main")
@@ -1151,6 +1156,9 @@ func newTestStandaloneStore(t *testing.T) (st *Store, work string) {
 	runGit(t, work, "config", "user.name", "tester")
 	runGit(t, work, "config", "user.email", "tester@example.invalid")
 	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, work, "add", "-A")
