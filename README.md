@@ -87,19 +87,23 @@ opening pull requests.
 ### Installing an unreleased build
 
 `main` can carry fixes that no release has yet. It has no release
-archives, so it installs with Go 1.27 or newer, skills included:
+archives, so it installs with Go 1.27 or newer:
 
 ```sh
 go install github.com/develdeco/jig/cmd/jig@main
+jig version
 jig skills install
 ```
 
-From a clone, `go install ./cmd/jig` does the same for the checked-out
-tree. Either way `jig` lands in `$(go env GOPATH)/bin`, or `GOBIN` when
-set, which must be on your PATH, and `jig version` reports a Go
-pseudo-version such as `v0.1.2-0.20260928203114-640df78698ec` instead of a
-release tag. `main` has passed CI, but not the checks a release runs on its
-own installed binaries.
+`go install` puts `jig` in `$(go env GOPATH)/bin`, or `GOBIN` when set,
+and that directory must come first on your PATH: otherwise a `jig` the
+installers put in their own directory still answers. `jig version` shows
+which one does. A build of `main` between releases reports a Go
+pseudo-version such as `v0.1.2-0.20260928203114-640df78698ec`, not a
+release tag. Run `jig skills install` once it does, so the skills match the
+binary. From a clone, `go install ./cmd/jig` does the same for the
+checked-out tree. `main` has passed CI, but not the checks a release runs
+on its own installed binaries.
 
 ## Quickstart
 
