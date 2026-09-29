@@ -78,13 +78,15 @@ func liveBuildSession(t *testing.T, jig string) {
 	if err := os.WriteFile(d.SliceJSON, []byte(`{"id":"a","goal":"say hello"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sibling := filepath.Join(work, "a.attempt-1.other.json")
-	outsideFile := filepath.Join(outside, "x.txt")
 	// The model writes through the paths its session is given, spelled as
 	// sessionView spells them, as a real session reads them from its prompt
 	// and its working directory; the dispatch keeps the temp dir's own
-	// spelling, which on a CI runner goes through an 8.3 short name.
+	// spelling, which on a CI runner goes through an 8.3 short name. The
+	// writes that must be denied are spelled long too, so that the rules
+	// are what denies them, not the CLI's refusal of any short spelling.
 	view := sessionView(d)
+	sibling := filepath.Join(filepath.Dir(view.ResultJSON), "a.attempt-1.other.json")
+	outsideFile := filepath.Join(longPath(outside), "x.txt")
 
 	api := &mockMessagesAPI{steps: []mockStep{
 		{name: "screen denies a push", call: bash("git push origin HEAD"), wantErr: "Blocked `git push`"},

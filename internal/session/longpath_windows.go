@@ -7,18 +7,19 @@ import (
 	"syscall"
 )
 
-// longPath returns p absolute, with every Windows 8.3 short-name component
+// longPath returns absolute p with every Windows 8.3 short-name component
 // (RUNNER~1) spelled out in full. Windows only expands a path that exists,
 // so a path whose tail does not exist yet - a result file before the
 // session writes it - has its longest existing prefix expanded and the
-// rest kept as written. It returns p unchanged when that fails.
+// rest kept as written. It returns p unchanged when p is relative, since
+// sessionView replaces p's text wherever the prompt holds it, or when
+// expanding fails.
 func longPath(p string) string {
-	abs, err := filepath.Abs(p)
-	if err != nil {
+	if !filepath.IsAbs(p) {
 		return p
 	}
 	rest := ""
-	for dir := abs; ; {
+	for dir := filepath.Clean(p); ; {
 		if long, ok := getLongPathName(dir); ok {
 			if rest == "" {
 				return long
