@@ -1228,8 +1228,11 @@ above:
   Go itself when the tree carried local modifications, and `(devel)` when build
   info is missing (a `-buildvcs=false` build, or `go run`).
 - v0.1.1 is retracted in `go.mod`: its headless backend cannot start a session, since
-  the CLI refuses its argv. `go install ...@latest` skips a retracted version, and Go
-  warns anyone who pins it. Its GitHub release stays as published, and the next
+  the CLI refuses its argv. Go reads retractions from the latest release's `go.mod`, so
+  this takes effect with the next release: `go list -m -retracted` marks v0.1.1,
+  `go get` and `go list -m -u` warn a module that requires it, and `@latest` never falls
+  back to it, even if a later release were retracted too. `go install ...@v0.1.1` still
+  installs it without a warning. Its GitHub release stays as published, and the next
   release replaces it as the one the installers fetch.
 - GoReleaser archives are named `jig_<os>_<arch>` with no version segment, so a
   "latest" download URL stays stable release over release instead of changing with
