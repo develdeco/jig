@@ -77,12 +77,12 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 
 	deps := verifydeliverDeps(st, cfg, mp, jigHome)
 	report, err := verifydeliver.Gate(deps, src, verifydeliver.GateOpts{
-		Ticket:   ticket,
-		Early:    *early,
-		Branch:   *branch,
-		BriefDoc: *doc,
-		PRMode:   *prNum != 0,
-		Triage:   triageFor(*yes, stdin, stdout),
+		Ticket:    ticket,
+		Early:     *early,
+		Branch:    *branch,
+		IntentDoc: *doc,
+		PRMode:    *prNum != 0,
+		Triage:    triageFor(*yes, stdin, stdout),
 	})
 	if err != nil {
 		return renderErr(stdout, err)

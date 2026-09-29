@@ -326,7 +326,9 @@ func retireRoundWork(st *store.Store, ticket string, n int, judgeWorkDir string)
 // dispatches the reviewer, applies findings bookkeeping, matches and
 // scores. ticket is the case's own opaque run id - the store ticket
 // and RoundInput.Ticket - never c.Name, which stays for error text and
-// MatchRound's own caseName parameter only. recordedLinks is every earlier
+// MatchRound's own caseName parameter only. intent is the fixed
+// verifydeliver.Intent{Source: "brief", ...} every case round dispatches
+// with, computed once by RunCase. recordedLinks is every earlier
 // round's decisions keyed by the finding id each one's "recorded" names;
 // prevHead is the previous round's own head, "" for round 1. judgeRoot is
 // RunCase's own judge scratch root (a fresh os.MkdirTemp, entirely outside
@@ -342,7 +344,7 @@ func retireRoundWork(st *store.Store, ticket string, n int, judgeWorkDir string)
 // the case repo to this round's own head before returning, since a later
 // round's git apply must never see anything a live reviewer or judge
 // dispatch left behind.
-func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string, idx int, repoDir, briefPath string, backend session.Backend, judge Judge, model, prevHead string, recordedLinks map[string]Decision) (rs RoundScore, head string, err error) {
+func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string, idx int, repoDir string, intent verifydeliver.Intent, backend session.Backend, judge Judge, model, prevHead string, recordedLinks map[string]Decision) (rs RoundScore, head string, err error) {
 	r := c.Rounds[idx]
 	n := r.N
 
@@ -388,7 +390,7 @@ func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string,
 
 	rnd, ok, rerr := verifydeliver.NewReviewerGateSource(backend).Round(verifydeliver.RoundInput{
 		Store: st, Ticket: ticket, Round: n, LeaseDir: repoDir, RepoName: evalRepoName, Target: evalTarget,
-		Model: model, BriefPath: briefPath, Manifest: man, Open: fold.Open, Dismissed: fold.Dismissed,
+		Model: model, Intent: intent, Manifest: man, Open: fold.Open, Dismissed: fold.Dismissed,
 	})
 	if rerr != nil {
 		rs, handled := reviewerRoundFailure(n, r.Gold, r.Decisions, rerr)
@@ -482,7 +484,21 @@ func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model
 	if err != nil {
 		return CaseScore{}, err
 	}
+	// Every case round dispatches with the fixed source "brief": revieweval
+	// measures the reviewer against the case's own seeded brief.md, never
+	// "explicit" or "none" - inference (a planned, not-yet-built source)
+	// is not this package's concern either. Path must be absolute,
+	// matching what Gate's own resolveIntent hands a real round; workDir
+	// (and so st.TicketDir) is always an absolute temp root
+	// (os.MkdirTemp/t.TempDir), but resolved through filepath.Abs anyway
+	// rather than assumed - an error here is surfaced, not silently
+	// swallowed by falling back to the unresolved path.
 	briefPath := filepath.Join(st.TicketDir(ticket), "brief.md")
+	absBriefPath, aerr := filepath.Abs(briefPath)
+	if aerr != nil {
+		return CaseScore{}, fmt.Errorf("revieweval: resolve brief path: %w", aerr)
+	}
+	intent := verifydeliver.Intent{Source: verifydeliver.IntentSourceBrief, Path: absBriefPath}
 
 	// The judge's own scratch dir - judge.json/verdicts.json per round -
 	// is a fresh OS temp directory of its own, never under workDir:
@@ -505,7 +521,7 @@ func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model
 	var prevHead string
 	recordedLinks := map[string]Decision{}
 	for idx, r := range c.Rounds {
-		rs, head, rerr := runRound(workDir, judgeRoot, st, c, ticket, idx, repoDir, briefPath, backend, judge, model, prevHead, recordedLinks)
+		rs, head, rerr := runRound(workDir, judgeRoot, st, c, ticket, idx, repoDir, intent, backend, judge, model, prevHead, recordedLinks)
 		if rerr != nil {
 			return CaseScore{}, rerr
 		}

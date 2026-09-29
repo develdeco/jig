@@ -105,11 +105,18 @@ func (f *fakeGateSource) Round(in RoundInput) (Round, bool, error) {
 
 // GateOpts configures one Gate invocation.
 type GateOpts struct {
-	Ticket   string
-	Early    bool
-	Branch   string // validate this branch instead of jig/<ticket>
-	BriefDoc string // spec-axis input when Branch is set
-	PRMode   bool
+	Ticket string
+	Early  bool
+	Branch string // validate this branch instead of jig/<ticket>
+	// Intent and IntentDoc are `jig gate --intent`/`--doc`: at most one is
+	// ever set - refused when both are, whether by the CLI or by a caller
+	// going straight to GateOpts - valid in every mode, and write the
+	// ticket's intent.md as an explicit, binding intent - refused with
+	// INTENT_CONFLICT when the ticket already has a brief.md. Intent is the
+	// literal text; IntentDoc is a file whose content becomes that text.
+	Intent    string
+	IntentDoc string
+	PRMode    bool
 	// Triage is the human seam for a reviewer round's fix batch and ask
 	// findings (route.go). nil means DefaultTriage: every fix is
 	// kept, every ask with a full build target is kept, one missing part
@@ -142,6 +149,13 @@ type GateReport struct {
 	// (across every round, not only this one's own): the "needs a human"
 	// list, the exit-2 signal. Empty when nothing is waiting on a person.
 	NeedsHuman []Finding
+	// Intent is this round's resolved intent binding (resolveIntent),
+	// resolved once before the round's source runs and the same whatever
+	// the round's own outcome.
+	Intent Intent
+	// IntentSHA256 is the sha256 hex of the exact bytes of the file at
+	// Intent.Path, "" for Intent.Source "none".
+	IntentSHA256 string
 }
 
 // reportYAML is gate/round-<n>/report.yaml's exact on-disk shape.
@@ -151,6 +165,15 @@ type reportYAML struct {
 	Model       string            `yaml:"model"`
 	TargetSHA   map[string]string `yaml:"target_sha"`
 	ReviewedSHA map[string]string `yaml:"reviewed_sha,omitempty"`
+	Intent      reportIntentYAML  `yaml:"intent"`
+}
+
+// reportIntentYAML is report.yaml's own "intent" block: the source
+// resolveIntent bound this round to, and the sha256 hex of the exact bytes
+// of the file at that source's path ("" for source "none").
+type reportIntentYAML struct {
+	Source string `yaml:"source"`
+	SHA256 string `yaml:"sha256"`
 }
 
 // Gate runs one gate round for ticket: it re-verifies every manifest
@@ -189,6 +212,10 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: sync store: %w", err)
 	}
 
+	// Preconditions before anything this round does is recorded or pushed:
+	// a ticket short of green refuses with GATE_NOT_GREEN below, and that
+	// refusal must leave no trace - not a pushed intent.md, not a journal
+	// line - for a plain rerun to be the whole recovery.
 	slices, err := d.Store.ReadSlices(ticket)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: read slices: %w", err)
@@ -200,24 +227,9 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	repo, repoName, target := primaryRepo(d.Cfg)
 	branch := ticketBranch(ticket)
 	// --branch: validate a hand-written branch fetched from origin instead
-	// of the ticket's own jig/<ticket>. Its spec axis reads opts.BriefDoc
-	// instead of the brief; report.yaml never records BriefDoc itself, but
-	// the doc's content is copied into this round's own
-	// gate/round-<n>/spec-input.md so the spec-axis-input swap is real
-	// rather than an accepted, no-op flag.
-	var briefDocContent []byte
+	// of the ticket's own jig/<ticket>.
 	if o.Branch != "" {
 		branch = o.Branch
-		if o.BriefDoc != "" {
-			data, err := os.ReadFile(o.BriefDoc)
-			if err != nil {
-				return GateReport{}, &axi.Error{
-					Msg:  fmt.Sprintf("brief doc %q is set but unreadable: %v", o.BriefDoc, err),
-					Code: "BRIEF_DOC_MISSING",
-				}
-			}
-			briefDocContent = data
-		}
 	}
 	// Restore an existing gate lease pristine at its current HEAD before
 	// Acquire ever touches it. A reviewer that outlived a killed jig, or an
@@ -281,6 +293,38 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		}
 	}
 
+	// `--intent`/`--doc`: record an explicit intent.md once every
+	// precondition above has passed - GATE_NOT_GREEN, and, in --branch
+	// mode, BRANCH_NOT_FOUND - so a refusal on either still leaves no
+	// trace: not a written intent.md, not a journal line, for a plain
+	// rerun to be the whole recovery. It is a ticket-level record, not
+	// specific to this round's branch or frontier state, so nothing here
+	// reads lease or branch state; the write only needs to happen after
+	// every precondition that can still refuse the round. No separate
+	// push: the write is a tracked change like any other this round makes,
+	// carried by the round's own end-of-Gate push on success, or by the
+	// deferred failure push below once journaled is true.
+	// writeExplicitIntent itself refuses INTENT_CONFLICT when the ticket
+	// already has a brief.md, which always wins resolution below
+	// regardless.
+	if o.Intent != "" || o.IntentDoc != "" {
+		if err := writeExplicitIntent(d.Store, ticket, o.Intent, o.IntentDoc); err != nil {
+			return GateReport{}, err
+		}
+	}
+
+	// Intent resolution, once per round, before the round's source runs
+	// and before journaling below: the ticket's own brief.md, else its
+	// intent.md (including whatever --intent/--doc just wrote above), else
+	// none (resolveIntent's own precedence doc comment). Resolving this
+	// before journaling means a malformed intent.md fails the round before
+	// a gate-open journal line is appended or an oracle suite runs, rather
+	// than after paying for both.
+	intent, intentText, err := resolveIntent(d.Store, ticket)
+	if err != nil {
+		return GateReport{}, err
+	}
+
 	// Resolved before the journal line below (not after, as manifest
 	// resolution and oracle runs once were) so roundNum is always this
 	// round's real number, never the zero value, by the time journaled
@@ -328,17 +372,6 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	}
 	cum := fold.Known
 
-	// The reviewer's brief_path is the ticket's own brief.md, except in
-	// --branch mode with --doc: there it must be the --doc file itself,
-	// absolute (PR #8's recorded decision) - pointing at this round's own
-	// gate/round-<n>/spec-input.md instead would leave a partial round dir
-	// on disk if the reviewer then fails, since that file is written only
-	// after the round succeeds (see briefDocContent below).
-	briefPath := filepath.Join(d.Store.TicketDir(ticket), "brief.md")
-	if o.Branch != "" && o.BriefDoc != "" {
-		briefPath = o.BriefDoc
-	}
-
 	round, ok, err := src.Round(RoundInput{
 		Store:     d.Store,
 		Ticket:    ticket,
@@ -347,7 +380,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		RepoName:  repoName,
 		Target:    target,
 		Model:     model,
-		BriefPath: briefPath,
+		Intent:    intent,
 		Manifest:  man,
 		Open:      fold.Open,
 		Dismissed: fold.Dismissed,
@@ -361,7 +394,10 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: resolve origin/%s: %w", target, err)
 	}
 
-	report = GateReport{Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA}}
+	report = GateReport{
+		Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA},
+		Intent: intent, IntentSHA256: intentSHA256(intent.Source, intentText),
+	}
 	switch {
 	case !ok:
 		// No round ran at all. The reviewer source reaches this only when
@@ -479,12 +515,6 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		}
 		if err := appendFixSlices(d, ticket, n, round.FixSlices); err != nil {
 			return GateReport{}, err
-		}
-	}
-
-	if briefDocContent != nil {
-		if err := os.WriteFile(filepath.Join(roundDir, "spec-input.md"), briefDocContent, 0o644); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: write spec-input.md: %w", err)
 		}
 	}
 
@@ -752,6 +782,7 @@ func writeReportYAML(dir string, report GateReport) error {
 		Model:       report.Model,
 		TargetSHA:   report.TargetSHA,
 		ReviewedSHA: report.ReviewedSHA,
+		Intent:      reportIntentYAML{Source: report.Intent.Source, SHA256: report.IntentSHA256},
 	})
 	if err != nil {
 		return fmt.Errorf("verifydeliver: gate: marshal report.yaml: %w", err)

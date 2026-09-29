@@ -3,8 +3,10 @@ package verifydeliver
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -104,6 +106,35 @@ func reviewInvalidCode(t *testing.T, err error) string {
 	return ae.Code
 }
 
+// requireIntentWireShape checks the intent binding's wire shape in the
+// review.json bytes a reviewer is handed, decoding them into raw keys
+// rather than into ReviewRequest: every other reader of review.json decodes
+// into that struct, so a renamed json tag round-trips through it unnoticed
+// while the reviewer looks for the name its prompt gave. The shape is one
+// top-level "intent" object with exactly the keys "source" and "path", and
+// no "brief_path" left beside it.
+func requireIntentWireShape(t *testing.T, reviewJSON []byte) {
+	t.Helper()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(reviewJSON, &raw); err != nil {
+		t.Fatalf("parse review.json as raw keys: %v", err)
+	}
+	if _, ok := raw["brief_path"]; ok {
+		t.Errorf("review.json still carries brief_path, which intent replaced:\n%s", reviewJSON)
+	}
+	rawIntent, ok := raw["intent"]
+	if !ok {
+		t.Fatalf("review.json has no \"intent\" key:\n%s", reviewJSON)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(rawIntent, &fields); err != nil {
+		t.Fatalf("review.json's \"intent\" is not an object: %v\n%s", err, rawIntent)
+	}
+	if got, want := slices.Sorted(maps.Keys(fields)), []string{"path", "source"}; !slices.Equal(got, want) {
+		t.Errorf("review.json's intent keys = %v, want %v", got, want)
+	}
+}
+
 // --- MarshalReviewRequest --------------------------------------------------
 
 func TestMarshalReviewRequestEmptyListsAsBrackets(t *testing.T) {
@@ -161,7 +192,12 @@ func TestMarshalReviewRequestPreservesPopulatedLists(t *testing.T) {
 // reworded prose that drifts from the contract - since every one of those
 // changes the byte-for-byte output the prompt must never gain: it states
 // the job and the output contract, and never coaches behavior or patches a
-// past model mistake.
+// past model mistake. The prompt is the same whatever this round's own
+// intent source actually is - it names what "brief", "explicit" and
+// "none" each mean once, generically, and points the reviewer at
+// review.json's own intent block for the value - so this one golden
+// covers every source; there is no per-source prompt text to pin
+// separately.
 func TestRenderReviewPromptMatchesDesignGolden(t *testing.T) {
 	t.Parallel()
 
@@ -170,9 +206,9 @@ func TestRenderReviewPromptMatchesDesignGolden(t *testing.T) {
 
 	schema := `{"findings": [{"file": "...", "line": 0, "title": "...", "detail": "...", "action": "fix|ask|note", "risk": "low|medium|high", "risk_rationale": "...", "oracle": "...", "prior": "r1-f2"}], "reviewed_paths": ["..."], "summary": "..."}`
 	golden := `You are reviewing round 2 of ticket JIG-1. Your inputs are in review.json at /abs/review.json.
-Review the delta diff aaa..bbb in this worktree against the brief; the brief says what was asked for. Do not edit files, commit, or push.
+Review the delta diff aaa..bbb in this worktree against the change's intent. review.json's intent names it and its source: "brief" or "explicit" is the human's own statement of what was asked for, "none" means nothing states it. Do not edit files, commit, or push.
 Report every problem you find in the files you review, as they are now, including problems already listed as open. For each, give file, line (0 if unknown), title, detail, action, risk, risk_rationale and oracle, plus prior when it is a finding listed under open or dismissed. The human dismissed the findings listed under dismissed.
-action: "fix" when the fix is objective and does not change what the brief asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
+action: "fix" when the fix is objective and does not change what the intent asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
 risk: "low", "medium" or "high": how much harm follows if this part of the change is wrong.
 oracle: the manifest oracle from review.json that best proves the fix.
 reviewed_paths: every file you read. jig rejects a result that does not include every path in must_review.
@@ -483,7 +519,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 		}
 	})
 
-	// reviewed_paths absolute entries (review.json, brief_path,
+	// reviewed_paths absolute entries (review.json, the intent path,
 	// slices_path, journal_path are all absolute, and the prompt asks for
 	// "every file you read") never fail the round; an absolute path inside
 	// the lease worktree still counts toward coverage.
@@ -808,11 +844,12 @@ func TestReviewerGateSourceRoundHappyPath(t *testing.T) {
 		return nil
 	}}
 
+	briefPath := filepath.Join(dir, "brief.md")
 	src := NewReviewerGateSource(backend)
 	rnd, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
-		BriefPath: filepath.Join(dir, "brief.md"), Manifest: oneOracleManifest(),
+		Intent: Intent{Source: IntentSourceBrief, Path: briefPath}, Manifest: oneOracleManifest(),
 	})
 	if err != nil {
 		t.Fatalf("Round: %v", err)
@@ -854,12 +891,16 @@ func TestReviewerGateSourceRoundHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read review.json: %v", err)
 	}
+	requireIntentWireShape(t, reviewData)
 	var req ReviewRequest
 	if err := json.Unmarshal(reviewData, &req); err != nil {
 		t.Fatalf("parse review.json: %v", err)
 	}
 	if req.Ticket != "JIG-1" || req.Round != 1 || req.Scope != "full" {
 		t.Errorf("review.json = %+v", req)
+	}
+	if req.Intent.Source != IntentSourceBrief || req.Intent.Path != briefPath {
+		t.Errorf("review.json intent = %+v, want source %q path %q", req.Intent, IntentSourceBrief, briefPath)
 	}
 	if len(req.Oracles) != 1 || req.Oracles[0] != "test" {
 		t.Errorf("review.json oracles = %v, want [test]", req.Oracles)

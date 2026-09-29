@@ -1,6 +1,7 @@
 package revieweval
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/session"
+	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // leakVocabulary is the fixed set of words nothing a live dispatch reads or
@@ -292,6 +294,7 @@ type leakCapturingBackend struct {
 	caseName   string
 	workDir    string // this case's own RunCase workDir
 	fixtureDir string // resultsDir("perfect")
+	briefPath  string // the case's own brief.md source (Case.BriefPath)
 }
 
 func (b leakCapturingBackend) Run(d session.Dispatch) error {
@@ -320,6 +323,34 @@ func (b leakCapturingBackend) Run(d session.Dispatch) error {
 
 	switch d.Slice {
 	case "gate":
+		// Pin the intent revieweval dispatches, the same one leakVocabulary
+		// checks are otherwise silent about: every case round must dispatch
+		// with source "brief", pointing at the store's own copy of the
+		// case's brief.md (the comment in RunCase where it builds that
+		// intent says why), never a missing or silently-defaulted intent a
+		// reviewer would never notice from the prompt alone.
+		var req verifydeliver.ReviewRequest
+		if err := json.Unmarshal(sliceData, &req); err != nil {
+			return fmt.Errorf("leakCapturingBackend: parse review.json: %w", err)
+		}
+		if req.Intent.Source != verifydeliver.IntentSourceBrief {
+			t.Errorf("%s: review.json intent.source = %q, want %q", label, req.Intent.Source, verifydeliver.IntentSourceBrief)
+		}
+		if !filepath.IsAbs(req.Intent.Path) {
+			t.Errorf("%s: review.json intent.path = %q, want an absolute path", label, req.Intent.Path)
+		}
+		gotBrief, err := os.ReadFile(req.Intent.Path)
+		if err != nil {
+			t.Errorf("%s: read review.json intent.path %s: %v", label, req.Intent.Path, err)
+		}
+		wantBrief, err := os.ReadFile(b.briefPath)
+		if err != nil {
+			return fmt.Errorf("leakCapturingBackend: read case brief %s: %w", b.briefPath, err)
+		}
+		if !bytes.Equal(gotBrief, wantBrief) {
+			t.Errorf("%s: review.json intent.path bytes differ from the case's own brief.md", label)
+		}
+
 		caseName, err := caseNameForRunID(b.fixtureDir, d.Ticket)
 		if err != nil {
 			return err
@@ -371,7 +402,7 @@ func TestRunCaseNeverLeaksTheCorpusVocabulary(t *testing.T) {
 			// subtest, which this loop names after the case - exactly the
 			// kind of path leak this test exists to catch, this time from
 			// its own harness rather than production code. review.json
-			// embeds workDir-derived absolute paths (BriefPath and
+			// embeds workDir-derived absolute paths (the intent path and
 			// friends), so a t.TempDir() here would fail every case
 			// through the harness's own doing.
 			workDir, err := os.MkdirTemp("", "jig-")
@@ -384,7 +415,7 @@ func TestRunCaseNeverLeaksTheCorpusVocabulary(t *testing.T) {
 				}
 			}()
 
-			backend := leakCapturingBackend{t: t, caseName: c.Name, workDir: workDir, fixtureDir: resultsDir("perfect")}
+			backend := leakCapturingBackend{t: t, caseName: c.Name, workDir: workDir, fixtureDir: resultsDir("perfect"), briefPath: c.BriefPath}
 			judge := &ModelJudge{Backend: backend, Model: "fixture-model"}
 
 			cs, err := RunCase(workDir, c, backend, judge, "model-a")
