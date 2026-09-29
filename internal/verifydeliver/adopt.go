@@ -240,9 +240,13 @@ func pointAtBuiltCopy(d Deps, leaseDir, buildDir, repoName, ticket, branch strin
 // open, from a branch that holds everything the ticket reviewed. When jig
 // built commits on the branch they wait in the build lease, so origin's copy
 // of the branch lacks the fix a clean round reviewed until someone pushes
-// them; leaseDir, when known, names that lease. The one sentence `jig status`,
-// the gate's hint and publish's own refusal all say, so they cannot disagree
-// about it.
+// them; leaseDir, when known, names that lease. That push is a fast-forward
+// only while the branch has not moved since, so the sentence says to merge the
+// branch into the lease first when it has (the gate's BRANCH_DIVERGED refusal
+// gives the commands), and needs no read of the branch to say it. The one
+// sentence `jig status`, the gate's hint and publish's own refusal all say, so
+// they cannot disagree about it. It is kept short: `jig status` prints it
+// after a clause of its own, and the demo's terminal is 160 columns wide.
 func PublishByHand(branch string, built bool, leaseDir string) string {
 	if !built {
 		return fmt.Sprintf("open the pull request for %s yourself", branch)
@@ -251,5 +255,5 @@ func PublishByHand(branch string, built bool, leaseDir string) string {
 	if leaseDir != "" {
 		where += " at " + leaseDir
 	}
-	return fmt.Sprintf("push jig's commits from %s to %s, then open the pull request", where, branch)
+	return fmt.Sprintf("push %s to %s (merge it in if it moved), then open the pull request", where, branch)
 }
