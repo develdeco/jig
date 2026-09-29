@@ -267,9 +267,10 @@ func undecidedAskCount(asks []verifydeliver.Finding, man manifest.Manifest) int 
 // decided asks in remaining are left for a human because they are missing a
 // workspace, an oracle, or both. It always starts on its own line: every
 // caller reaches it right after a prompt whose read returned EOF with
-// nothing typed. On a POSIX tty Ctrl-D echoes nothing, so the cursor is
-// still at the end of that prompt; a Windows console echoes the Enter that
-// follows Ctrl-Z, so there the note follows one blank row instead.
+// nothing typed. On a POSIX tty the cursor is still at the end of that
+// prompt after Ctrl-D (Linux echoes nothing; macOS echoes ^D and backs over
+// it); a Windows console echoes the Enter that follows Ctrl-Z, so there the
+// note follows one blank row instead.
 func eofNote(stdout io.Writer, remaining []verifydeliver.Finding, man manifest.Manifest) {
 	fmt.Fprintln(stdout)
 	if n := undecidedAskCount(remaining, man); n > 0 {

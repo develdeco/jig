@@ -14,7 +14,7 @@
 # against the real binary in a Go test, but it checks the round's outcome
 # (the report, the findings table, the store), never the literal prompt
 # wording this tape types against and waits on: a wording change there
-# shows up only as a failed or mismatched render here, not as a failing
+# shows up here as a failed or mismatched render, not as a failing
 # end-to-end test. See demo/README.md for that caveat.
 #
 # Each command's completion is detected by waiting for the shell prompt to
