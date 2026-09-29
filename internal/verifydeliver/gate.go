@@ -166,14 +166,11 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	// this round's own gate-open journal line has been appended (a tracked
 	// change to the store's working copy), any later error in this
 	// function - REVIEW_INVALID, REVIEW_FAILED, GATE_NO_ORACLE, an oracle
-	// failure, a routing error - would otherwise return before Gate's own
-	// end-of-round Store.Push, leaving that journal line (and any
-	// review.json/result.json this round wrote) committed nowhere: tracked
-	// but uncommitted. The store's own Sync (git pull --rebase) then
-	// refuses on the very next command, on this ticket or any other,
-	// wedging the whole store until an operator runs git by hand. Pushing
-	// here, whatever the failure, is what makes a plain rerun documented
-	// as the recovery actually work.
+	// failure, a routing error - would otherwise leave that journal line
+	// (and any review.json/result.json this round wrote) uncommitted until
+	// whatever later command next calls Store.Sync, on this ticket or any
+	// other (see failureCode for why this push runs here rather than
+	// waiting on Sync; Publish runs the same pattern on its own failures).
 	var (
 		journaled bool
 		roundNum  int
@@ -184,16 +181,8 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		}
 		// Best-effort: if this push itself fails, the original error is
 		// still the one that reaches the caller; there is nothing more to
-		// do here but try. The subject carries only the error's own code,
-		// never its message: the message can hold an absolute host path or
-		// other detail that has no business in a commit subject that gets
-		// pushed to a remote. jig already prints the full error on stdout.
-		code := "INTERNAL"
-		var ae *axi.Error
-		if errors.As(err, &ae) && ae.Code != "" {
-			code = ae.Code
-		}
-		_ = d.Store.Push(fmt.Sprintf("%s: gate round %d failed: %s", ticket, roundNum, code))
+		// do here but try.
+		_ = d.Store.Push(fmt.Sprintf("%s: gate round %d failed: %s", ticket, roundNum, failureCode(err)))
 	}()
 
 	if err := d.Store.Sync(); err != nil {

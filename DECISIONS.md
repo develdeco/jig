@@ -782,36 +782,68 @@ above:
   `Store.Push`. A round that fails after that journal line (`REVIEW_INVALID`,
   `REVIEW_FAILED`, `GATE_NO_ORACLE`, an oracle failure, a routing error)
   used to return before that `Push`, leaving the journal line tracked but
-  uncommitted - the store's next `Sync` (`git pull --rebase`) then refused
-  over it once a remote existed, and only a manual `git checkout -- .` /
-  `git clean -fd` on the store recovered it. `Gate` now runs a deferred,
-  best-effort `Store.Push` (a message naming the ticket, the round and the
-  failure) on any error once the `gate-open` journal line has been
-  appended, whatever the failure, so the store is always clean and pushed
-  by the time the error reaches the caller and a plain rerun works with no
-  manual cleanup. The decisive e2e test (three real gate rounds through
-  the fake backend, in-process through `cmd/jig`'s `Main`) asserts the
-  store is clean right after its deliberately broken round 1 attempt,
-  instead of discarding leftovers by hand before retrying.
+  uncommitted until the next command's own `Store.Sync` swept it into an
+  anonymous commit (`"jig: record uncommitted store state"`) - not lost
+  (`Sync` already stages and commits any uncommitted store state before it
+  pulls), but unpushed and unattributed to this round's failure until
+  whatever command happened to run `Sync` next, on this ticket or any
+  other. `Gate` now runs a deferred, best-effort `Store.Push` (a message
+  naming the ticket, the round and the failure) on any error once the
+  `gate-open` journal line has been appended, whatever the failure, so the
+  store is committed and pushed under that failure's own name immediately,
+  with no dependence on a later command's `Sync` sweep. The decisive e2e
+  test (three real gate rounds through the fake backend, in-process
+  through `cmd/jig`'s `Main`) asserts the store is clean and pushed right
+  after its deliberately broken round 1 attempt.
 - Every error a reviewer round can return after the `gate-open` journal
   line (`REVIEW_INVALID`, `REVIEW_FAILED`, `GATE_NO_ORACLE`) carries a
   `Help` line naming the recovery (fix the input, or add an oracle, then
   rerun `jig gate` for the ticket), on top of the best-effort push above.
-- Known gap, deliberately left for its own change: `Publish` journals in
-  several places and pushes once at the end, with no equivalent deferred
-  push, so any exit after its first journal line leaves the store dirty
-  and the next `Sync` refuses - reachable simply by declining at publish's
-  own confirmation prompt, not only by an outage. The fix belongs with
-  `Publish`'s own error paths rather than widened into the reviewer's
-  change, and until it lands the manual recovery is the one named above.
-- That failure commit's subject is built from the error's `axi` code plus
-  the ticket and round, never the error text: the message is permanent
-  store history and gets pushed, and a raw error carries whatever the
-  failure happened to contain, including absolute paths on the machine
-  that ran it. The full error still goes to stdout, where it is read once
-  and not kept. The round number is resolved before the `gate-open`
-  journal line for the same reason: a failure between journaling and
-  resolving it used to record "round 0", a round that never existed.
+- `Publish` had the same gap `Gate` once did: it journals its reconcile
+  outcome, then revalidate, memorize, changelog, squash, pr, route and
+  publish-done, and pushed once at the end with no equivalent deferred
+  push. Before this fix, any exit after that first journal line -
+  reachable simply by declining at `Publish`'s own confirmation prompt,
+  not only by an outage - left those writes uncommitted until the next
+  command's own `Store.Sync` swept them into that same anonymous,
+  unattributed commit, unpushed until whatever later command happened to
+  call `Store.Push`. `Publish` now runs the same deferred, best-effort
+  `Store.Push` `Gate` does, once its own earliest tracked write to the
+  store - `recordAndCheckDivergence`'s `reconcile` line, appended before
+  its `PUBLISH_NO_DIVERGENCE` check runs, so that error path counts as
+  journaled too - has landed, committing and pushing under this failure's
+  own name at the point of failure instead of leaving it for a later
+  `Sync` to sweep anonymously. `journaled` is set once, at that `reconcile`
+  line, and never cleared, so pinning it true at the earliest point it can
+  matter, a middle point, and the tail fixes it true everywhere in
+  between: the in-package tests cover `PUBLISH_NO_DIVERGENCE` from
+  `recordAndCheckDivergence` itself (the earliest point), `PUSHED_RANGE`
+  from `squash` (in between), and a declined prompt and a `guardedPush`
+  failure (both well after the `reconcile` line, at the tail) - each
+  asserting the code-only subject and the pushed tip. `failureCode`'s own
+  branches (a plain error, an `*axi.Error` with no code, one wrapped by
+  `fmt.Errorf`) are pinned separately, as a pure function, by its own
+  table test rather than paying for another fixture and gate rounds here.
+  The decisive e2e test runs `jig publish` through the real binary with no
+  `--yes` and no scripted stdin - the same empty answer a declining
+  operator's Enter would give - then asserts the store is clean, pushed,
+  and carries that exact subject.
+- `Gate`'s failure commit's subject is built from the error's `axi` code
+  plus the ticket and round, never the error text: the message is
+  permanent store history and gets pushed, and a raw error carries
+  whatever the failure happened to contain, including absolute paths on
+  the machine that ran it. The full error still goes to stdout, where it
+  is read once and not kept. The round number is resolved before the
+  `gate-open` journal line for the same reason: a failure between
+  journaling and resolving it used to record "round 0", a round that
+  never existed. Both `Gate` and `Publish` extract that code the same
+  way, through the shared `failureCode(err)` (`verifydeliver.go`) -
+  the error's own `axi.Error` code, or `INTERNAL` when it has none -
+  so the axi-code-only rule can't quietly drift between the two.
+- `Publish`'s own failure commit subject is `<ticket>: publish failed:
+  <code>` - the same `axi`-code-only rule as `Gate`'s (via the shared
+  `failureCode`), minus the round: `Publish` is not round-scoped the way
+  `Gate` is.
 
 ## Review eval
 
