@@ -184,7 +184,8 @@ func TestCIWorkflowTestJob(t *testing.T) {
 }
 
 // requireAllPlatforms asserts ci.yml's job name runs a strategy.matrix.os
-// leg on each of the three supported platforms.
+// leg on each of the three supported platforms: listed in matrix.os, and
+// not taken out again by a matrix.exclude entry naming it.
 func requireAllPlatforms(t *testing.T, name string, job map[string]interface{}) {
 	t.Helper()
 	strategy, _ := yamlMap(job["strategy"])
@@ -193,10 +194,18 @@ func requireAllPlatforms(t *testing.T, name string, job map[string]interface{}) 
 	if !ok {
 		t.Fatalf("ci.yml: %s job has no strategy.matrix.os list, so it would not run cross-platform at all", name)
 	}
+	excluded := map[string]bool{}
+	excludes, _ := yamlSlice(matrix["exclude"])
+	for _, e := range excludes {
+		entry, _ := yamlMap(e)
+		if s, ok := yamlString(entry["os"]); ok {
+			excluded[s] = true
+		}
+	}
 	var haveUbuntu, haveWindows, haveMacos bool
 	for _, v := range osList {
 		s, ok := yamlString(v)
-		if !ok {
+		if !ok || excluded[s] {
 			continue
 		}
 		lower := strings.ToLower(s)
@@ -223,11 +232,12 @@ func requireAllPlatforms(t *testing.T, name string, job map[string]interface{}) 
 
 // TestCIWorkflowClaudeCLIJob asserts ci.yml runs jig's sessions against the
 // real Claude Code CLI on all three platforms, on every run of the
-// workflow: a job with no job-level "if" installs the CLI with its official
-// installers, and a step with JIG_LIVE_CLAUDE set runs go test with no
-// step-level "if" and no continue-on-error. It has bitten: v0.1.1 shipped a
-// headless backend whose argv the CLI refuses, since the test job's stub
-// `claude` accepts any argv and nothing ran the real one.
+// workflow, and fails the run when they fail: a job with no job-level "if"
+// or continue-on-error installs the CLI with its official installers, and
+// a step with JIG_LIVE_CLAUDE set runs go test with no step-level "if" and
+// no continue-on-error. It has bitten: v0.1.1 shipped a headless backend
+// whose argv the CLI refuses, since the test job's stub `claude` accepts
+// any argv and nothing ran the real one.
 func TestCIWorkflowClaudeCLIJob(t *testing.T) {
 	root := repoRoot(t)
 	doc := loadWorkflow(t, root, "ci.yml")
@@ -241,18 +251,21 @@ func TestCIWorkflowClaudeCLIJob(t *testing.T) {
 		if !ok {
 			continue
 		}
-		steps, _ := yamlSlice(job["steps"])
-		live, ok := findLiveClaudeStep(steps)
+		live, ok := findLiveClaudeStep(job)
 		if !ok {
 			continue
 		}
 		if ifExpr, has := job["if"]; has {
 			t.Errorf("ci.yml: the %s job has a job-level if = %v, so some runs, a release's among them, could skip the real CLI", name, ifExpr)
 		}
+		if hasContinueOnError(job) {
+			t.Errorf("ci.yml: the %s job has a job-level continue-on-error, so its failure would not fail the run, and a release would publish past it", name)
+		}
 		requireAllPlatforms(t, name, job)
 		if _, hasIf := live["if"]; hasIf || hasContinueOnError(live) {
 			t.Errorf("ci.yml: the %s job's JIG_LIVE_CLAUDE step has a step-level \"if\" or continue-on-error, so it could skip or fail on some legs without failing the job", name)
 		}
+		steps, _ := yamlSlice(job["steps"])
 		for _, installer := range []string{"claude.ai/install.sh", "claude.ai/install.ps1"} {
 			if _, ok := findStepByRun(steps, installer); !ok {
 				t.Errorf("ci.yml: the %s job never runs %s, so a leg would run the live tests without the CLI a user installs", name, installer)
@@ -263,17 +276,27 @@ func TestCIWorkflowClaudeCLIJob(t *testing.T) {
 	t.Errorf("ci.yml: no job runs go test with JIG_LIVE_CLAUDE set, so no session ever runs against the real Claude Code CLI before a release")
 }
 
-// findLiveClaudeStep returns the first step in steps that runs go test with
-// JIG_LIVE_CLAUDE set in its own env, and whether one was found.
-func findLiveClaudeStep(steps []interface{}) (map[string]interface{}, bool) {
+// findLiveClaudeStep returns the first step of job that runs go test with
+// JIG_LIVE_CLAUDE set to a non-empty value, in the step's own env or the
+// job's (the live tests skip on an empty one), and whether one was found.
+func findLiveClaudeStep(job map[string]interface{}) (map[string]interface{}, bool) {
+	jobEnv, _ := yamlMap(job["env"])
+	steps, _ := yamlSlice(job["steps"])
 	for _, sv := range steps {
 		step, ok := yamlMap(sv)
 		if !ok {
 			continue
 		}
-		env, _ := yamlMap(step["env"])
 		run, _ := yamlString(step["run"])
-		if _, set := env["JIG_LIVE_CLAUDE"]; set && strings.Contains(run, "go test") {
+		if !strings.Contains(run, "go test") {
+			continue
+		}
+		env, _ := yamlMap(step["env"])
+		v, set := env["JIG_LIVE_CLAUDE"]
+		if !set {
+			v, set = jobEnv["JIG_LIVE_CLAUDE"]
+		}
+		if s, _ := yamlString(v); set && s != "" {
 			return step, true
 		}
 	}

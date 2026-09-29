@@ -1226,7 +1226,8 @@ above:
   accepts any argv, and the smoke test checked only `jig version`. The job installs the
   latest CLI release rather than a pinned one, since that is the release a user's CLI
   updates to, and a CLI release can break jig with no jig change at all; a daily
-  scheduled run of ci.yml catches that between pushes. It is a job of its own rather
+  scheduled run of ci.yml catches that between pushes, until GitHub turns the schedule
+  off after 60 days without repository activity. It is a job of its own rather
   than steps of the test job, so the hermetic suite still runs with no `claude` on PATH
   and the Windows leg's wall time does not grow.
 

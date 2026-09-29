@@ -94,8 +94,9 @@ need no sign-in and spend no tokens:
 JIG_LIVE_CLAUDE=1 go test -count=1 -run Live ./internal/session
 ```
 
-CI's `claude-cli` job runs them on all three platforms, on every push and
-pull request and once a day, with the latest CLI release installed.
+CI's `claude-cli` job runs them on all three platforms, on every pull
+request, every push to main and once a day, with the latest CLI release
+installed.
 
 ## Live review eval
 
