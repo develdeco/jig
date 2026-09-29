@@ -1,0 +1,11 @@
+{
+  "findings": [],
+  "reviewed_paths": [
+    "alpha/alpha.go",
+    "alpha/percent.go",
+    "alpha/percent_test.go",
+    "beta/beta.go",
+    "beta/version.go"
+  ],
+  "summary": "round 1: clean, reviewed against the inferred intent"
+}

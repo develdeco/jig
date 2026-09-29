@@ -13,6 +13,26 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// TestVerifydeliverDepsCarriesTheOperatorsHome: jig gate and jig solve both
+// build their Deps here, and gate intent inference reads the operator's
+// local agent transcripts under Deps.UserHome, so it must be the operator's
+// own home directory (os.UserHomeDir), beside the jig home root it was
+// handed.
+func TestVerifydeliverDepsCarriesTheOperatorsHome(t *testing.T) {
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)
+	t.Setenv("USERPROFILE", userHome)
+	jigHome := t.TempDir()
+
+	d := verifydeliverDeps(nil, project.Config{}, project.MachineProject{}, jigHome)
+	if d.UserHome != userHome {
+		t.Errorf("Deps.UserHome = %q, want the operator's home %q", d.UserHome, userHome)
+	}
+	if d.Home != jigHome {
+		t.Errorf("Deps.Home = %q, want the jig home %q", d.Home, jigHome)
+	}
+}
+
 // TestRenderStatus checks the status renderer against a hand-constructed
 // store state: slice a green (attempt 1), b queued (blocked_by a from the
 // fixture's own slices.yaml), c and d queued.

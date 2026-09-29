@@ -15,7 +15,7 @@
 # Every typed line here is checked against the real source, the same as
 # gate-reviewer.tape's own header states: the two reports below are
 # checked against cmd/jig/gate.go (the round report's kv fields, rendered
-# via axi.KV, gate.go:150-161). cmd/jig/gate_intent_e2e_test.go
+# via axi.KV, gate.go:154-165). cmd/jig/gate_intent_e2e_test.go
 # (TestGateIntentNoneToExplicitThroughMain) drives the same fixture and
 # flow against the real binary in a Go test, but it checks the round's
 # outcome (the report's kv lines, intent.md itself), never this tape's own
@@ -109,7 +109,7 @@ Show
 ## Brief-less and no intent.md yet, so resolveIntent's precedence falls all
 ## the way through to "none": "gate:\n  ticket: JIG-1\n  round: 1\n
 ## verdict: fix-slices\n  model: claude-sonnet-5\n  intent: none\n..."
-## (axi.KV, gate.go:150-161).
+## (axi.KV, gate.go:154-165).
 Type `jig gate JIG-1 --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 Wait@15s
 Sleep 5s
@@ -129,7 +129,7 @@ Sleep 3s
 ## so the source plays back nothing, and the fold - empty, since round 1
 ## never went through a reviewer - decides the round clean: "gate:\n
 ## ticket: JIG-1\n  round: 2\n  verdict: clean\n  model:
-## claude-sonnet-5\n  intent: explicit\n..." (axi.KV, gate.go:150-161).
+## claude-sonnet-5\n  intent: explicit\n..." (axi.KV, gate.go:154-165).
 Type `jig gate JIG-1 --intent "make the greeting warmer" --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 Wait@15s
 Sleep 5s

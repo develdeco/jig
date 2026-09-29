@@ -71,6 +71,60 @@ these:
 - Anything that lets a session reach another ticket's worktree, the store's
   own git history, or the host machine itself, through jig's own machinery
   rather than through git or the OS directly.
+- Gate intent inference (`internal/intent`, `internal/verifydeliver/
+  intent_infer.go`) leaking a local agent transcript's own text into the
+  store or a PR. A reviewer round with no brief and no explicit intent
+  reads the operator's local Claude Code transcripts for the repo and has
+  a model summarize the best match. The excerpt jig extracts from that
+  session - the developer's and the assistant's own text; tool calls, tool
+  results and thinking blocks are dropped, and so is a user record the
+  transcript marks as the harness's own (`isMeta`, a compaction recap, a
+  transcript-only notice) or as someone else's (any `origin` other than the
+  human) - is written only under the jig home, never the store, since a
+  transcript can hold secrets a store commit must never carry. A record
+  with no origin, such as a slash-command echo or local command output, is
+  kept and reaches the summarizing model. What does reach the store is
+  `<ticket>/intent.md` (the model's own summary of that excerpt, at most
+  4 KiB), which sits like `brief.md` already does - the same trust domain,
+  since both are text a human is meant to read back - plus, alongside it
+  under `<ticket>/work/`, `intent.json` (the dispatch
+  request: which agent and session matched, the diff files, and the
+  excerpt's own path under the jig home - metadata only, never the
+  excerpt's own text; the path is absolute and by default names the local
+  operator's home directory) and, when jig accepted the summarizer's
+  result, `intent.result.json` (the same bounded model output that became
+  `intent.md`'s own text, so the same trust domain applies: it is not
+  guaranteed free of anything the excerpt's own text contains, any more
+  than `intent.md` is). A result jig did not accept is removed on every way
+  out of the attempt - malformed, empty or oversized, a dispatch that
+  errored, a summarizer that moved HEAD or changed the gate lease - so the
+  round's store push never carries it. The summarizer session works in a
+  fresh, empty scratch directory under the jig home, never in the gate
+  lease, so under the headless backend its edit grant covers that
+  directory and its own result file and nothing of the code under review;
+  after the dispatch jig checks the lease's HEAD and tracked tree and
+  restores the lease if either changed. That is not confinement: the
+  headless backend is not a security boundary (see
+  [ADR 0008](../docs/adr/0008-headless-permission-model.md)), so the
+  session's shell can still reach the lease, or anything else the
+  operator's account can, and jig does not chase what it leaves there. The
+  restore after a change is `resetLeasePristine` (`git reset --hard`, then
+  `git clean -fd`), the same one every reviewer round uses; it does remove
+  untracked paths, and its behavior with a Windows junction planted in the
+  lease (`git clean -fd` can descend through an untracked junction and
+  delete what it points at) is a known gap of that shared restore, tracked
+  separately from inference, which inference neither adds to nor closes.
+  The scratch directory is removed with `os.RemoveAll`, which removes a
+  symlink or junction inside it itself and never follows it. The
+  summarizer dispatch also disables session persistence
+  (`--no-session-persistence`), so under the headless backend the excerpt
+  is not saved a second time in the operator's Claude Code data
+  (`~/.claude/projects`), where each dispatch's fresh scratch directory
+  would otherwise get a project directory of its own that nothing removes;
+  herdr ignores the setting, since its agent is an interactive Claude Code
+  session jig starts without flags, and Claude Code keeps that session's
+  transcript. The summary is never rendered into a PR body directly; a
+  reviewer session's own words, shaped by having read it, still can be.
 
 Out of scope:
 

@@ -47,6 +47,14 @@ func runJig(t *testing.T, cwd string, args ...string) jigResult {
 // several assertions (the pool build lease, the machine mapping file) need
 // to reach under JIG_HOME directly.
 //
+// It also points HOME and USERPROFILE at a second, separate fresh temp
+// dir: runJig runs the real jig binary with the test process's own
+// environment (cmd.Env = os.Environ()), and jig itself can reach
+// os.UserHomeDir() - most directly, gate's own local-transcript intent
+// inference - so this suite must never let that subprocess resolve to the
+// real host home directory, the same rule every other package's own tests
+// already hold to.
+//
 // NOTE: fixture.Generate resolves testdata/fixture relative to its own
 // source file and writes the machine mapping under whatever JIG_HOME is
 // already set when it is called; it does not create a home directory
@@ -57,6 +65,9 @@ func newFixture(t *testing.T, opts fixture.Opts) (fx *fixture.Fixture, home stri
 	t.Helper()
 	home = t.TempDir()
 	t.Setenv("JIG_HOME", home)
+	realHome := t.TempDir()
+	t.Setenv("HOME", realHome)
+	t.Setenv("USERPROFILE", realHome)
 	fx = fixture.Generate(t, opts)
 	return fx, home
 }

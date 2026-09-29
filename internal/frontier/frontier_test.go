@@ -1058,3 +1058,40 @@ func TestReportStoppedForPreExistingStall(t *testing.T) {
 		t.Fatalf("second Run: StopReason = %q, want it to name slice a and mention the stall", second.StopReason)
 	}
 }
+
+// recordingBackend runs every dispatch on the backend it wraps and keeps a
+// copy of each.
+type recordingBackend struct {
+	session.Backend
+	mu  sync.Mutex
+	got []session.Dispatch
+}
+
+func (r *recordingBackend) Run(d session.Dispatch) error {
+	r.mu.Lock()
+	r.got = append(r.got, d)
+	r.mu.Unlock()
+	return r.Backend.Run(d)
+}
+
+// TestRunLeavesSessionPersistenceOnForBuildDispatches: only the intent
+// summarizer's dispatch asks its backend to keep no transcript. A build
+// session's transcript is the operator's own record of the work and stays.
+func TestRunLeavesSessionPersistenceOnForBuildDispatches(t *testing.T) {
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d, _ := newDeps(t, fx)
+	rec := &recordingBackend{Backend: d.Backend}
+	d.Backend = rec
+
+	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(rec.got) == 0 {
+		t.Fatal("the run dispatched no build session")
+	}
+	for _, disp := range rec.got {
+		if disp.NoSessionPersistence {
+			t.Errorf("the build dispatch for slice %s attempt %d disables session persistence, want it left on", disp.Slice, disp.Attempt)
+		}
+	}
+}

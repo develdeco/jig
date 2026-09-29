@@ -170,10 +170,13 @@ missing a workspace, an oracle, or both for a human to decide later.
 Every round is judged against a resolved intent, not necessarily a brief:
 a ticket's own `brief.md` wins when there is one, else `jig gate --intent
 "<text>"` or `--doc <path>` records an explicit `intent.md` (refused when
-the ticket already has a brief.md - amend that instead), else the round
-has no intent to judge against at all, and the reviewer is told so
-plainly. Both flags work in every mode, not only `--branch`, and each
-gate report prints which one this round resolved to.
+the ticket already has a brief.md - amend that instead), else a
+dispatched reviewer round tries to infer one from your local Claude Code
+sessions for this repo (see Safety below), recorded in `intent.md` as a
+hint the reviewer is told may be partial or wrong, else the round has no
+intent to judge against at all, and the reviewer is told so plainly. Both
+flags work in every mode, not only `--branch`, and each gate report
+prints which one this round resolved to.
 
 ## Safety
 
@@ -206,6 +209,21 @@ the screen still answers, and refuses to run one behind a screen that is
 missing or broken - though that check only binds the start of a session,
 not its whole life. A session is bounded in time, so a wedged one fails
 instead of hanging. `herdr` sessions are not screened yet.
+
+A reviewer round with no brief and no explicit intent also reads your
+local Claude Code transcripts. With a mapped clone for the repo, it looks
+under `~/.claude/projects` for a session that ran in that repo and touched
+the files of the change, writes an excerpt of that session's own user and
+assistant text (tool calls and tool results are dropped) under the jig
+home, and has a model summarize it, in a scratch directory of its own
+rather than in the code under review (and, with the headless backend, with
+that summarizing session's own transcript not saved in Claude Code's data).
+The summary is pushed as the store's `intent.md`, beside the request's
+metadata (the session id, the diff files and the excerpt's local path) and
+the accepted result; the excerpt itself stays under the jig home on your
+machine. Nothing switches this off but stating the intent yourself, with a
+`brief.md`, `--intent` or `--doc`, so do that when a session's text must not
+reach a model.
 
 Every command pushes the ticket store's own bookkeeping commits to the
 store's remote as it works; only the ticket branch push is guarded, and only

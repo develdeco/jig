@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 )
@@ -713,4 +714,228 @@ func TestClearRepoEnv(t *testing.T) {
 	if got := os.Getenv("GIT_AUTHOR_NAME"); got != "kept" {
 		t.Errorf("GIT_AUTHOR_NAME = %q, want it kept", got)
 	}
+}
+
+// TestCommonDirMatchesAcrossWorktrees checks CommonDir's whole reason for
+// existing: a linked worktree of a repo resolves to the same common dir as
+// the main checkout, while an unrelated repo (even one cloned from the same
+// remote) never does.
+func TestCommonDirMatchesAcrossWorktrees(t *testing.T) {
+	main := initRepo(t, "https://example.invalid/x.git")
+	mainCommon, err := CommonDir(main)
+	if err != nil {
+		t.Fatalf("CommonDir(main): %v", err)
+	}
+	wantMainCommon, err := filepath.Abs(filepath.Join(main, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMainCommon = filepath.Clean(wantMainCommon)
+	if resolved, err := filepath.EvalSymlinks(wantMainCommon); err == nil {
+		wantMainCommon = resolved
+	}
+	if mainCommon != wantMainCommon {
+		t.Fatalf("CommonDir(main) = %q, want %q", mainCommon, wantMainCommon)
+	}
+
+	wt := filepath.Join(t.TempDir(), "wt")
+	if _, err := Run(main, "worktree", "add", "--detach", wt); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+	wtCommon, err := CommonDir(wt)
+	if err != nil {
+		t.Fatalf("CommonDir(worktree): %v", err)
+	}
+	if wtCommon != mainCommon {
+		t.Fatalf("CommonDir(worktree) = %q, want it to equal the main checkout's %q", wtCommon, mainCommon)
+	}
+
+	other := initRepo(t, "https://example.invalid/x.git") // same remote, separate clone
+	otherCommon, err := CommonDir(other)
+	if err != nil {
+		t.Fatalf("CommonDir(other): %v", err)
+	}
+	if otherCommon == mainCommon {
+		t.Fatalf("CommonDir(other clone of the same remote) = %q, want it distinct from %q", otherCommon, mainCommon)
+	}
+}
+
+// TestCommonDirNoRepoErrors checks that a directory outside any git
+// repository is refused rather than resolving to some enclosing repo (or
+// jig's own).
+func TestCommonDirNoRepoErrors(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := CommonDir(dir); err == nil {
+		t.Fatal("CommonDir(non-repo dir): expected an error, got nil")
+	}
+}
+
+// TestTopLevelIsPerWorktree checks TopLevel's whole reason for existing,
+// the opposite of CommonDir's: a linked worktree's own top level is its own
+// directory, never the main checkout's, and a subdirectory's top level is
+// its repo's root, not itself.
+func TestTopLevelIsPerWorktree(t *testing.T) {
+	main := initRepo(t, "https://example.invalid/x.git")
+	mainTop, err := TopLevel(main)
+	if err != nil {
+		t.Fatalf("TopLevel(main): %v", err)
+	}
+	wantMainTop := filepath.Clean(main)
+	if resolved, err := filepath.EvalSymlinks(wantMainTop); err == nil {
+		wantMainTop = resolved
+	}
+	if mainTop != wantMainTop {
+		t.Fatalf("TopLevel(main) = %q, want %q", mainTop, wantMainTop)
+	}
+
+	sub := filepath.Join(main, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if subTop, err := TopLevel(sub); err != nil || subTop != mainTop {
+		t.Fatalf("TopLevel(subdir) = %q err=%v, want %q", subTop, err, mainTop)
+	}
+
+	wt := filepath.Join(t.TempDir(), "wt")
+	if _, err := Run(main, "worktree", "add", "--detach", wt); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+	wtTop, err := TopLevel(wt)
+	if err != nil {
+		t.Fatalf("TopLevel(worktree): %v", err)
+	}
+	wantWtTop := filepath.Clean(wt)
+	if resolved, err := filepath.EvalSymlinks(wantWtTop); err == nil {
+		wantWtTop = resolved
+	}
+	if wtTop != wantWtTop {
+		t.Fatalf("TopLevel(worktree) = %q, want its own dir %q, not the main checkout's", wtTop, wantWtTop)
+	}
+	if wtTop == mainTop {
+		t.Fatalf("TopLevel(worktree) = %q, want it distinct from TopLevel(main) = %q (that is CommonDir's own invariant, not this one's)", wtTop, mainTop)
+	}
+}
+
+// TestTopLevelNoRepoErrors checks that a directory outside any git
+// repository is refused rather than resolving to some enclosing repo.
+func TestTopLevelNoRepoErrors(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := TopLevel(dir); err == nil {
+		t.Fatal("TopLevel(non-repo dir): expected an error, got nil")
+	}
+}
+
+// TestCommitTime checks that CommitTime reads back the exact committer
+// date a commit was pinned to, not the author date or the current time.
+func TestCommitTime(t *testing.T) {
+	dir := initRepo(t, "https://example.invalid/x.git")
+	if err := os.WriteFile(filepath.Join(dir, "g.txt"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{
+		"GIT_AUTHOR_DATE=2026-03-01T10:00:00Z",
+		"GIT_COMMITTER_DATE=2026-03-02T11:30:00Z",
+	}
+	if _, err := RunEnv(dir, env, "commit", "-m", "pinned"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	sha, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := CommitTime(dir, sha)
+	if err != nil {
+		t.Fatalf("CommitTime: %v", err)
+	}
+	want := time.Date(2026, 3, 2, 11, 30, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("CommitTime = %v, want %v", got, want)
+	}
+}
+
+// TestSameDirIsByIdentityNotSpelling: two directories are the same when
+// they are one directory on disk, and only then.
+func TestSameDirIsByIdentityNotSpelling(t *testing.T) {
+	a := t.TempDir()
+	b := t.TempDir()
+	missing := filepath.Join(a, "does-not-exist")
+
+	if !SameDir(a, a) {
+		t.Errorf("SameDir(%q, itself) = false, want true", a)
+	}
+	if SameDir(a, b) {
+		t.Errorf("SameDir(%q, %q) = true for two different directories, want false", a, b)
+	}
+	if SameDir(a, missing) || SameDir(missing, a) || SameDir(missing, missing) {
+		t.Errorf("SameDir with a directory that does not exist = true, want false")
+	}
+	if SameDir("", a) || SameDir(a, "") || SameDir("", "") {
+		t.Errorf("SameDir with an empty path = true, want false")
+	}
+	// A path spelled through a redundant element still names one directory.
+	// Joined by hand: filepath.Join would clean the element away and hand
+	// back the very same string.
+	sep := string(filepath.Separator)
+	viaParent := a + sep + ".." + sep + filepath.Base(a)
+	if viaParent == a {
+		t.Fatalf("test setup: %q was cleaned back to %q", viaParent, a)
+	}
+	if !SameDir(a, viaParent) {
+		t.Errorf("SameDir(%q, %q) = false, want true for one directory spelled through its own parent", a, viaParent)
+	}
+	// So does a symlink to it, where the platform lets a test make one.
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(a, link); err == nil {
+		if !SameDir(a, link) {
+			t.Errorf("SameDir(%q, symlink %q) = false, want true", a, link)
+		}
+		if SameDir(b, link) {
+			t.Errorf("SameDir(%q, symlink to %q) = true, want false", b, a)
+		}
+	}
+}
+
+// TestSameDirThroughJunction: a Windows junction is a second spelling of
+// the directory it points at - filepath.EvalSymlinks does not resolve it,
+// so a comparison of two CommonDir strings would call the two different -
+// and SameDir must not. So is a drive letter spelled in the other case.
+func TestSameDirThroughJunction(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("directory junctions only exist on Windows")
+	}
+	target := t.TempDir()
+	junction := filepath.Join(t.TempDir(), "via-junction")
+	out, err := exec.Command("cmd", "/c", "mklink", "/J", junction, target).CombinedOutput()
+	if err != nil {
+		t.Fatalf("mklink /J: %v\n%s", err, out)
+	}
+	// Removed before the temp dir holding it, so the cleanup never walks
+	// through the junction into the target.
+	t.Cleanup(func() { os.Remove(junction) })
+
+	if !SameDir(junction, target) {
+		t.Errorf("SameDir(junction %q, target %q) = false, want true", junction, target)
+	}
+	other := t.TempDir()
+	if SameDir(junction, other) {
+		t.Errorf("SameDir(junction %q, unrelated %q) = true, want false", junction, other)
+	}
+
+	flipped := string(swapCase(target[0])) + target[1:]
+	if flipped != target && !SameDir(target, flipped) {
+		t.Errorf("SameDir(%q, %q) = false, want true for a drive letter spelled in the other case", target, flipped)
+	}
+}
+
+func swapCase(b byte) byte {
+	switch {
+	case b >= 'a' && b <= 'z':
+		return b - ('a' - 'A')
+	case b >= 'A' && b <= 'Z':
+		return b + ('a' - 'A')
+	}
+	return b
 }

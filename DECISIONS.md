@@ -1016,6 +1016,189 @@ Intent provenance (see [ADR 0012](docs/adr/0012-intent-provenance.md)):
   set-but-empty `--intent` or `--doc` uses the same `INTENT_EMPTY`, so an
   empty flag and a whitespace-only one are one mistake with one code.
 
+Intent inference (see [ADR 0012](docs/adr/0012-intent-provenance.md)'s own
+amendment):
+
+- `internal/intent` knows nothing about the store, sessions, or dispatch: a
+  `Reader` discovers `Session`s (Claude Code today, `NewClaudeReader`),
+  `Best` scores and picks one against a diff file list, `RenderExcerpt`
+  renders its text. `internal/verifydeliver/intent_infer.go` is the only
+  caller that wires those into a live dispatch, so the matching algorithm
+  stays testable with plain structs and no store fixture at all.
+- Repo identity is a git common-dir comparison
+  (`internal/gitx.CommonDir`, a new function on the package that already
+  owns every git call - `internal/intent` imports it directly rather than
+  shelling out itself, same as every other package does), never a remote
+  URL: a remote-based comparison would let a jig lease clone of the
+  operator's own remote match, which is exactly the false positive this
+  design refuses. The two common dirs are compared with `gitx.SameDir`
+  (file identity, `os.SameFile`), not as strings: `CommonDir`'s symlink
+  resolution leaves a Windows junction or a subst drive as a different
+  spelling of the same directory.
+- The matcher's `mentionMatches` treats a bare-basename diff file (a
+  repo-root file, no directory component) specially: only an equally bare
+  mention can match it, never a mention merely ending in `/<basename>`,
+  which would otherwise let a nested file of the same name (a different
+  file entirely) stand in for the repo-root one.
+- Every `*.jsonl` under a session's own `<session>/subagents/`, at any
+  depth (a workflow's own subagents nest one level deeper, under
+  `subagents/workflows/<wf-id>/`), is read and folded into its parent
+  `Session` inside the reader, not returned as a session of its own: an
+  implementer subagent does the actual editing the matcher needs to see,
+  and the fold means the matcher and excerpt renderer need no special
+  case for it at all.
+- `RoundInput.OperatorClone` is resolved through the same lookup
+  `identityDir` already used (`operatorClone`, extracted from it rather
+  than duplicated), returning `""` with no leaseDir fallback: unlike
+  `identityDir`, which needs some directory to commit from either way,
+  inference has a real "there is nothing to compare a session against"
+  case, and must fail open to it rather than silently comparing against
+  the gate lease.
+- `Gate` resolves intent once, before the round's source runs (so the
+  reviewer source knows whether to even attempt inference), and hands the
+  source the intent and the exact bytes of its file (`RoundInput.Intent`,
+  `IntentText`). A reviewer round's `Review` carries back the intent it
+  dispatched with (`Review.Intent`, `IntentText`: the resolved one, or the
+  one `inferIntent` just recorded), and that is what Gate reports and
+  hashes, so a freshly inferred `intent.md` reaches this round's own
+  `report.yaml` and the report can never disagree with `review.json`. An
+  earlier draft re-ran `resolveIntent` after the round instead; that let
+  anything writing `brief.md` or `intent.md` during the round (a session's
+  screened shell is not a boundary) change the report away from what the
+  reviewer was given. The scripted source runs no reviewer, so its round
+  keeps the resolution made before it.
+- A user record in a Claude Code transcript is the developer's own words
+  when its `origin` says the human wrote it or it has none (older
+  versions), and never when it is `isMeta`, a compaction recap
+  (`isCompactSummary`), transcript-only (`isVisibleInTranscriptOnly`) or
+  attributed to someone else (a task notification, a peer session, a
+  workflow coordinator). Those are fields of the record, so no list of tags
+  or phrases is kept. Counted over one machine's transcripts, the records
+  with no origin still include slash-command echoes and command output,
+  which no field the reader uses distinguishes from a typed prompt; they
+  stay in the excerpt and the summarizing model judges them, since telling
+  them apart by their text is the enumerated filtering this design
+  refuses. The filter runs on a subagent's own file as well: a
+  coordinator's message to a subagent is dropped, and the parent's prompt
+  to it, which has no origin, is kept and labelled. Keeping every prompt a
+  subagent file holds would need the loader told which kind of file it
+  reads, so one rule applies to every file.
+- The summarizer does not run in the lease. It has to read the excerpt and
+  write its result and nothing else, so its session's working directory (the
+  dispatch's `Worktree`) is a fresh, empty scratch directory under the jig
+  home (`home.IntentScratchDir`), and under the headless backend its edit
+  grant, which follows the working directory, covers that directory and the
+  dispatch's own `result.json`. The alternative, running it in the lease and
+  cleaning up after it (reset to head, then list the lease's ignored paths
+  before and after the dispatch and remove every new one), cannot be made
+  safe. Git for Windows lists what lies behind a junction as the lease's own
+  files, so removing the new ones follows a junction out of the lease -
+  deleting a developer's files, or tracked files of the lease reached
+  through a link an install had made - and the walk still misses what `git
+  clean -fd` skips, an untracked nested repository. Cleaning up what a
+  session leaves in the code under review is a walk jig cannot make
+  complete or safe, so the session is kept out of that directory instead,
+  and there is nothing of its to clean out. This is not confinement: the
+  headless backend is not a security boundary
+  ([ADR 0008](docs/adr/0008-headless-permission-model.md)), so a session can
+  still reach the lease through its shell, and jig does not chase what it
+  leaves there.
+- The scratch directory is one per dispatch (`os.MkdirTemp` under
+  `IntentScratchDir`, owner-only), so two gates never share one and another
+  dispatch's directory, or a crashed run's, is neither seen nor removed (a
+  test holds two dispatches inside their sessions at once and checks that
+  neither sees the other's file). It is removed by a deferred
+  `os.RemoveAll`, so every way out of the attempt removes it. `RemoveAll`
+  is used because it removes a symlink or junction
+  itself and never follows it, whatever the session put in the directory (a
+  session's shell can plant a link there however it was granted its edits):
+  probed on Windows with junctions and symlinks, it removed a link at any
+  depth, a link to a directory that holds a link, a link to the lease, and
+  a link standing in the directory's own place, each as the link itself,
+  and left everything they point at. Tests pin that, with junctions on
+  Windows and symlinks elsewhere, so a removal that followed links would
+  fail them. Best effort, like removing the result file: a directory that
+  cannot be removed does not fail a round that failed open.
+- The dispatch sets `NoSessionPersistence` (a field of `session.Dispatch`
+  that no other dispatch sets), which the headless backend turns into
+  `claude -p --no-session-persistence`. `claude -p` saves every session
+  under `~/.claude/projects/<encoded cwd>`, and the summarizer's working
+  directory is a fresh random one per dispatch that jig then deletes: each
+  dispatch would leave a new project directory in the operator's Claude
+  Code data, named after a path that no longer exists and holding the
+  excerpt as the session read it, and nothing would ever remove it. The
+  excerpt stays under the jig home, where a failed or disputed inference
+  can be checked against it. The fake backend runs no session and herdr's
+  agent is an interactive session started without flags, so both accept the
+  field and ignore it (each says so where it does, and a test pins that
+  neither changes what it does for it). The headless argv is pinned with the
+  field set and unset, and tests pin that the reviewer's dispatch and a
+  build dispatch leave it unset.
+- The lease is still checked around the summarizer, with the reviewer's own
+  check (HEAD and the tracked tree; untracked files are not counted). A
+  change, or a check that could not be made, puts the lease back with
+  `resetLeasePristine` (`git reset --hard`, then `git clean -fd`), the
+  recovery `Gate` and the reviewer's own round use, and fails the inference
+  open: a summarizer that broke its read-only rule has no summary worth
+  trusting, and the reviewer is not blamed for a change that was not its
+  own. The reason reported is the dispatch's own error when there was one,
+  else that the summarizer changed the lease. A lease the check confirms
+  unchanged is left alone, exactly as it is: nothing of the summarizer's is
+  in it, and a reset there would only be jig's own `git clean -fd` walking a
+  lease no one had a reason to change - removing an untracked file or link a
+  session's shell planted there and, on Windows, possibly following such a
+  junction out of the lease. A test pins that with a summarizer that only
+  plants an untracked file and a link. That junction behavior belongs to
+  `resetLeasePristine`, the restore every round shares: a known gap of it,
+  tracked separately from inference, which the inference's restore neither
+  adds to nor closes. The restore failing is the one hard error, since a
+  round cannot safely dispatch a reviewer onto a lease that might still be
+  dirty.
+- `intent.result.json` is removed on every return that does not record it
+  as `intent.md` (a deferred remove, cleared by the one success path)
+  rather than on each rejection path in turn: the store's push commits
+  whatever is under `work/`, and enumerating the paths that reject a
+  result is how one of them was missed.
+- Every fail-open reason that comes from an error is built by one helper
+  (`noIntentFor`: what failed, then the cause), never by formatting the
+  error at its own call site. Eighteen steps can fail that way and a test
+  can provoke only some of them (a commit time git cannot read, or an
+  `intent.md` that cannot be read back, has no cheap way in), so a note
+  that drops its cause would go unseen at exactly those; one helper with
+  one test holds the rule for all of them.
+- The summary a summarizer may return is capped (4 KiB) and refused when
+  over, as every other malformed result is, not truncated: a result far
+  past the few sentences asked for is the excerpt echoed back, and
+  truncating it would still put transcript text in a store file.
+- Inference reads and writes under two roots, and takes both as explicit
+  inputs rather than reading the environment: `RoundInput.Home` (the jig
+  home, where the excerpt is written) and `RoundInput.UserHome` (the
+  operator's own home, where their local agent transcripts are read), from
+  `Deps.Home` and `Deps.UserHome`. `cmd/jig` resolves the operator's home
+  once, beside the jig home. One that could not be resolved is a named
+  reason to skip inference, never a search somewhere else, and no
+  inference test sets an environment variable, so all of them run in
+  parallel.
+- `work/intent.json`/`work/intent.result.json` are not round-numbered
+  (unlike `gate.round-N.review.json`): inference succeeds at most once per
+  ticket - it re-attempts on every brief-less round until one succeeds,
+  since a success writes `intent.md` and every later round's
+  `resolveIntent` then short-circuits before ever reaching the reviewer
+  source's own inference code, but a failed attempt leaves nothing to
+  reuse and so is retried - so a fixed pair of scratch names is enough.
+- `parseIntentInferResult` is `ParseReviewResult`'s own strictness -
+  exactly one object, no duplicate key, no unrecognized key, `"summary"`
+  present and non-null - reused only for `duplicateObjectKey`, rebuilt
+  for the rest, since a one-field schema does not need
+  `ParseReviewResult`'s case-variant-key machinery (a lone `"Summary"`
+  with no `"summary"` beside it is already caught by the manual key-name
+  loop before the strict decode ever runs).
+- The fake backend distinguishes an intent dispatch from a review one by
+  `Dispatch.Slice` (`"intent"` vs `"gate"`), plays back
+  `gate/round-N/intent-result.json` verbatim - the same shape
+  `review-result.json` already has - and errors loudly on a scenario with
+  no coverage for it, exactly like a missing `review-result.json` does.
+
 ## Review eval
 
 - `internal/verifydeliver` gains one type and one function beyond the

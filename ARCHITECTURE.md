@@ -67,7 +67,7 @@ charts/
     tickets.yaml    # the handover jig reads and writes
 <ticket>/
   brief.md
-  intent.md         # jig gate --intent/--doc, ignored when brief.md exists
+  intent.md         # jig gate --intent/--doc, or inferred; ignored when brief.md exists
   slices.yaml
   ticket.yaml       # optional: this ticket's own record - title, branch, blockers
   start.<repo>.sha
@@ -81,6 +81,8 @@ charts/
     <id>.attempt-N.result.json
     gate.round-N.review.json
     gate.round-N.result.json
+    intent.json        # intent inference, when attempted
+    intent.result.json # kept only when jig accepted it
   gate/
     round-N/
       findings.yaml
@@ -111,7 +113,7 @@ exists.
 | Package | Entry points | Input → Output |
 |---|---|---|
 | `cmd/jig/` | `main`, `cmdScreen` | CLI args, or a PreToolUse hook payload on stdin → subcommand dispatch, or a screen allow/deny |
-| `demo/fixture/` | `main` | `-out <dir>` + `-scenario <name>` → a fixture built via `internal/fixture`, and shell `export` lines (JIG_HOME, store dir, scenario dir, ticket id) for a VHS tape to eval |
+| `demo/fixture/` | `main` | `-out <dir>` + `-scenario <name>` → a fixture built via `internal/fixture`, and shell `export` lines (JIG_HOME, store dir, scenario dir, the fixture repo's working clone, ticket id) for a VHS tape to eval |
 | `e2e/` | (tests only) | the fixture + fake backend → asserts the full brief→publish chain twice; with `JIG_LIVE_CLAUDE`, README's Quickstart through the real `claude` CLI; `JIG_E2E_BINARY` → the same against an installed jig |
 | `internal/axi/` | `Render`, `Table`, `KV`, `Help`, `RenderError`, `ExitCode` | labelled data → jig's plain-text output register and process exit codes |
 | `internal/claudetest/` | `API`, `Session`, `Serve` | scripted sessions (tool calls in order) → a stand-in Messages API on loopback that the real `claude` CLI runs against, for the live CLI tests |
@@ -119,9 +121,10 @@ exists.
 | `internal/fixture/` | `Build`, `Generate`, `RepoRoot` | a dir + `Opts` → a fixture repo, its store, and a scripted attempt scenario (plus the machine mapping under `Opts.Home`, by default the jig home `home.Root` resolves); `Generate` builds into a `t.TempDir()`; `RepoRoot`: a caller's source file → the module root |
 | `internal/frontier/` | `Run`, `Requeue`, `RequeueSlice`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
-| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `DiffNameOnly`, `FileExistsAtRev`, `IsLocalRemote`, `GuardedPush`, `OpenRepo` (`Repo`: `State`, `CommitAll`, `Push`, `Fetch`) | argv + a working dir → git plumbing output, or a refused push; a store's directory → the same store operations in process (go-git), or `ErrUseCLI` for the caller's git-program path |
+| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `DiffNameOnly`, `FileExistsAtRev`, `IsLocalRemote`, `GuardedPush`, `CommonDir`, `SameDir`, `TopLevel`, `CommitTime`, `OpenRepo` (`Repo`: `State`, `CommitAll`, `Push`, `Fetch`) | argv + a working dir → git plumbing output, or a refused push; a store's directory → the same store operations in process (go-git), or `ErrUseCLI` for the caller's git-program path |
 | `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
-| `internal/home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths |
+| `internal/home/` | `Root`, `MachinePath`, `PoolDir`, `IntentExcerptDir`, `IntentScratchDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths, and the directories intent excerpts and summarizer scratch directories go under |
+| `internal/intent/` | `NewClaudeReader`, `Best`, `RenderExcerpt` | a repo's git common dir + a time window → matching local agent `Session`s; a scope diff's files → the `Match` a model then summarizes |
 | `internal/journal/` | `Append`, `Read`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs |
 | `internal/manifest/` | `Resolve` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
@@ -181,6 +184,66 @@ session, and rejects the round (`REVIEW_INVALID`) if either moved, or if
 scope diff, an oracle that isn't a manifest oracle, a `prior` naming no
 known finding, or `reviewed_paths` missing a `must_review` path all fail the
 round loudly rather than falling back to a partial result.
+
+**Intent inference.** When `resolveIntent` comes back `"none"` and the
+round is about to dispatch a reviewer (nothing outstanding and the scope
+diff empty skips it the same as any other round - a missing mapped clone
+alone does not, since the reviewer still runs; only inference itself is
+skipped), the reviewer source (`review.go`'s `Round` calls
+`intent_infer.go`'s `inferIntent`; `Gate` does not, since only the
+reviewer source holds the backend and the scope diff) tries to infer one
+before that dispatch. `internal/intent`'s Claude Code reader discovers the
+operator's local sessions (transcripts under `RoundInput.UserHome`) whose
+working directory belongs to the same repository as the operator's mapped
+clone (`RoundInput.OperatorClone`; identity by git common dir,
+`internal/gitx.CommonDir` compared with `gitx.SameDir` - nothing matches
+with no mapped clone) within a window anchored to the ticket's own
+merge-base and head commit times, `internal/intent.Best` scores each
+candidate by file overlap with the scope diff, and the best match's excerpt
+(the developer's and the assistant's own text only - tool calls, tool
+results and thinking dropped, and so is a user record the transcript marks
+as the harness's own or as someone else's, while a record with no origin
+stays for the summarizing model to judge - capped, written under the jig
+home, `RoundInput.Home` - never the store, since a transcript can hold
+secrets) is handed to a summarizer dispatch through the same
+backend and disk contract: jig writes `work/intent.json`, the session writes
+`work/intent.result.json` (`{"summary": "..."}`, strictly parsed - empty,
+malformed or over 4 KiB fails the attempt), and jig records
+`<ticket>/intent.md` (source `"inferred"`, the agent, session id and score)
+for this round's own `review.json` and every later round to reuse. A result
+jig did not accept is removed rather than left under `work/` for the
+round's store push. Both roots arrive as `Deps.Home` and `Deps.UserHome`,
+which `cmd/jig` resolves once; one that could not be resolved is named as
+the reason rather than searched for elsewhere. The summarizer does not run in
+the lease: its session's working directory is a fresh, empty scratch
+directory under the jig home (`home.IntentScratchDir`, one per dispatch,
+removed after it whatever the dispatch returned), so under the headless
+backend its edit grant is that directory and its own result file, and the
+code under review is neither where it works nor anywhere it may edit. That
+is not confinement - the headless backend is not a security boundary
+([ADR 0008](docs/adr/0008-headless-permission-model.md)), so a session's shell
+can still reach the lease - and jig does not chase what a session leaves
+there. The dispatch also disables session persistence
+(`session.Dispatch.NoSessionPersistence`, which the headless backend turns
+into `--no-session-persistence`), so under the headless backend the excerpt
+is not saved a second time in the operator's Claude Code data. After every summarizer dispatch,
+whatever it returned, jig checks the lease's HEAD and tracked tree are
+unchanged, as the reviewer's own guard does; a change (or a check that
+could not be made) puts the lease back with `resetLeasePristine` (`git reset
+--hard`, then `git clean -fd`), the recovery the reviewer's own round already
+performs around its dispatch, and fails the inference open; a lease the check
+confirms unchanged is left exactly as it is. That shared restore's behavior
+with a Windows junction planted in the lease is a known gap of it, tracked
+separately from inference. The round's `Review` carries the intent the
+reviewer was given and the exact bytes of its file, and `Gate` reports and
+hashes those. Inference fails open at every step - no mapped clone, no home
+to look in, no transcripts, no match, a dispatch failure, a bad summary, or
+a summarizer that moved HEAD or changed a tracked file - leaving the round's
+intent at `"none"`, with the reason shown in the gate report's own `intent`
+row; a gate round fails only
+if that restore itself fails, since it cannot safely continue on a lease that
+might still be dirty (an inference whose scratch directory cannot be made is
+not attempted, and fails open with that reason).
 
 Findings bookkeeping (`findings.go`) then folds the round onto the
 cumulative state: a finding's identity across rounds lives only in its own
@@ -297,6 +360,14 @@ its interactive confirm (or `--yes`) has run. Every command separately
 pushes the store's own bookkeeping commits to the store's remote
 (`store.Push`) as it works; that push is unguarded by design - it moves
 jig's own journal and ticket-folder state, not product code.
+
+**Transcripts stay local.** A reviewer round with no stated intent reads the
+operator's Claude Code transcripts for the repo (Intent inference, above). The
+excerpt of the matched session lives under the jig home, never the store;
+what the store's push carries is the summary jig accepted, the request
+naming the session, and nothing a rejected summarizer result left behind
+([SECURITY.md](.github/SECURITY.md) has the full list). There is no setting
+that turns inference off; stating the intent stops it.
 
 **Single git owner.** Only `gitx` runs git: it spawns the git program for
 users' repositories and runs git in process, through go-git, for the store

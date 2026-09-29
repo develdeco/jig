@@ -96,7 +96,10 @@ func herdrResult(res map[string]any) map[string]any {
 // wait, then read the result the agent was told to write. A blocked agent
 // (stuck at an approval dialog) becomes a failed result rather than an
 // infrastructure error. The workspace is closed on success and left open
-// (logged) on failure, for jump-in.
+// (logged) on failure, for jump-in. d.NoSessionPersistence is accepted and
+// ignored: the claude agent herdr starts is an interactive session that jig
+// starts without flags, so Claude Code keeps its transcript whatever the
+// dispatch asked.
 func (b *herdrBackend) Run(d Dispatch) error {
 	label := fmt.Sprintf("jig-%s-%s", d.Ticket, d.Slice)
 	cwd := d.Worktree

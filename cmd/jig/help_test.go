@@ -137,3 +137,17 @@ func TestPerCommandHelpFlag(t *testing.T) {
 		})
 	}
 }
+
+// TestGateHelpSaysItReadsLocalSessions: a reviewer round with no brief and
+// no explicit intent reads the operator's local Claude Code transcripts and
+// has a model summarize the best match, so the command's own help - the
+// environment is the source for CLI behavior - says so, in the flags a
+// person reaches for to state an intent themselves.
+func TestGateHelpSaysItReadsLocalSessions(t *testing.T) {
+	got := strings.Join(flagsBlockFor("gate"), "\n")
+	for _, want := range []string{"local Claude Code sessions", "--intent or --doc"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("jig gate's flag help does not mention %q:\n%s", want, got)
+		}
+	}
+}

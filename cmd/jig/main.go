@@ -306,13 +306,21 @@ func frontierDeps(st *store.Store, cfg project.Config, mp project.MachineProject
 // verifydeliverDeps assembles verifydeliver.Deps for one ticket. Unlike
 // frontier.Deps, verifydeliver.Deps carries no Backend or injected Journal
 // func: Gate and Publish journal internally, bound to d.Store.
+//
+// It also resolves the operator's own home directory, once, beside the jig
+// home root it is handed: gate intent inference looks for their local agent
+// transcripts under it, on every command that gates (jig gate and jig
+// solve). os.UserHomeDir returns "" when it cannot say, which inference
+// reports as its reason instead of looking anywhere else.
 func verifydeliverDeps(st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string) verifydeliver.Deps {
+	userHome, _ := os.UserHomeDir()
 	return verifydeliver.Deps{
-		Store:   st,
-		Cfg:     cfg,
-		Machine: mp,
-		Rungs:   rungs(cfg),
-		Home:    jigHome,
+		Store:    st,
+		Cfg:      cfg,
+		Machine:  mp,
+		Rungs:    rungs(cfg),
+		Home:     jigHome,
+		UserHome: userHome,
 	}
 }
 

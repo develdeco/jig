@@ -1,0 +1,2 @@
+{"type":"user","cwd":"{{CWD}}","timestamp":"2026-01-01T00:00:00.000Z","message":{"role":"user","content":"Look into the rounding bug and delegate the actual fix to a subagent."}}
+{"type":"assistant","cwd":"{{CWD}}","timestamp":"2026-01-01T00:01:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Spawning an implementer subagent to make the edit."}]}}

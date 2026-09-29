@@ -33,6 +33,11 @@ type Deps struct {
 	// Home is the jig home root whose pool holds the gate and publish
 	// leases: home.Root() for the binary, a test's own directory in tests.
 	Home string
+	// UserHome is the operator's own home directory, where their local
+	// agent sessions keep transcripts (os.UserHomeDir() for the binary, a
+	// test's own directory in tests). "" means it could not be resolved:
+	// gate intent inference then has nowhere to look and says so.
+	UserHome string
 }
 
 // primaryRepo returns v0.1's single repo and its target branch (defaulting
@@ -42,10 +47,23 @@ func primaryRepo(cfg project.Config) (project.Repo, string, string) {
 	return repo, repo.Name(), repo.TargetBranch()
 }
 
+// operatorClone returns the operator's mapped clone directory for
+// repoName, or "" when none is recorded. identityDir and RoundInput's own
+// OperatorClone (review.go) both resolve through this one lookup, so a
+// mapped clone's absence reads the same way in both: nothing to identify
+// commits with, and nothing intent inference can compare a session's own
+// cwd against.
+func operatorClone(d Deps, repoName string) string {
+	if dir, ok := d.Machine.Clones[repoName]; ok && dir != "" {
+		return dir
+	}
+	return ""
+}
+
 // identityDir returns where Publish resolves the operator's identity for
 // repoName: their mapped clone, or leaseDir when none is recorded.
 func identityDir(d Deps, repoName, leaseDir string) string {
-	if dir, ok := d.Machine.Clones[repoName]; ok && dir != "" {
+	if dir := operatorClone(d, repoName); dir != "" {
 		return dir
 	}
 	return leaseDir

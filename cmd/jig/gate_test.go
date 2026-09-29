@@ -47,6 +47,36 @@ func TestPrintGateReportShowsFindingsWithFileLineAndRationale(t *testing.T) {
 	}
 }
 
+// TestPrintGateReportShowsIntentRowWithFailOpenNote pins the printed
+// "intent" row's own shape: source alone when there is no note (a
+// resolved intent, or "none" with nothing attempted), and
+// "source (note)" when inference was attempted and failed open - which is
+// how a summarizer dispatch that left the gate lease dirty surfaces, as
+// exactly this row rather than a round failure.
+func TestPrintGateReportShowsIntentRowWithFailOpenNote(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+
+	report := verifydeliver.GateReport{
+		Round:      1,
+		Verdict:    "clean",
+		Intent:     verifydeliver.Intent{Source: verifydeliver.IntentSourceNone},
+		IntentNote: "the intent summarizer changed the gate lease",
+	}
+
+	var out bytes.Buffer
+	printGateReport(&out, st, fx.Ticket, report)
+	text := out.String()
+
+	if !strings.Contains(text, "intent: none (the intent summarizer changed the gate lease)") {
+		t.Fatalf("gate report missing the intent row with its fail-open note:\n%s", text)
+	}
+}
+
 // TestGateReportHintNamesDecidingAsksNotFixSlices pins the rule that a
 // round leaving any ask undecided always names a human decision at a
 // terminal as the way forward, never "work the fix-slice round" - true

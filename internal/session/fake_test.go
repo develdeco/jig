@@ -259,3 +259,72 @@ func TestFakeBackendGateMissingRoundErrors(t *testing.T) {
 		t.Error("ResultJSON was written despite the error")
 	}
 }
+
+// TestFakeBackendIntentPlayback checks the gate intent-inference dispatch
+// path: it copies the scenario's intent-result.json verbatim into
+// ResultJSON and never touches the worktree - the same shape
+// TestFakeBackendGatePlayback checks for a review dispatch.
+func TestFakeBackendIntentPlayback(t *testing.T) {
+	worktree := newWorktree(t)
+	before, err := gitx.Run(worktree, "log", "--format=%H")
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+
+	scenarioDir := t.TempDir()
+	roundDir := filepath.Join(scenarioDir, "gate", "round-1")
+	if err := os.MkdirAll(roundDir, 0o755); err != nil {
+		t.Fatalf("mkdir round dir: %v", err)
+	}
+	want := []byte(`{"summary":"the author was fixing a rounding bug in the percent helper"}`)
+	if err := os.WriteFile(filepath.Join(roundDir, "intent-result.json"), want, 0o644); err != nil {
+		t.Fatalf("write intent-result.json: %v", err)
+	}
+
+	backend := newFakeBackend(Options{ScenarioDir: scenarioDir})
+	resultPath := filepath.Join(t.TempDir(), "result.json")
+	// The intent summarizer's dispatch asks for no session persistence,
+	// which the fake accepts and ignores: it runs no session.
+	d := Dispatch{Ticket: "JIG-1", Slice: "intent", Attempt: 1, Worktree: worktree, ResultJSON: resultPath, NoSessionPersistence: true}
+	if err := backend.Run(d); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read result.json: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("result.json = %s, want verbatim %s", got, want)
+	}
+
+	after, err := gitx.Run(worktree, "log", "--format=%H")
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	if before != after {
+		t.Errorf("worktree history changed by an intent dispatch: before %q after %q", before, after)
+	}
+}
+
+// TestFakeBackendIntentMissingRoundErrors checks that an intent-inference
+// round the scenario has no coverage for fails loudly instead of a silent
+// empty summary.
+func TestFakeBackendIntentMissingRoundErrors(t *testing.T) {
+	worktree := newWorktree(t)
+	scenarioDir := t.TempDir() // no gate/ at all
+
+	backend := newFakeBackend(Options{ScenarioDir: scenarioDir})
+	resultPath := filepath.Join(t.TempDir(), "result.json")
+	d := Dispatch{Ticket: "JIG-1", Slice: "intent", Attempt: 2, Worktree: worktree, ResultJSON: resultPath}
+	err := backend.Run(d)
+	if err == nil {
+		t.Fatal("Run: expected an error for a missing intent round, got nil")
+	}
+	if !strings.Contains(err.Error(), "scenario has no gate round 2 intent-result.json") {
+		t.Errorf("error = %v, want it to name the missing intent round", err)
+	}
+	if _, statErr := os.Stat(resultPath); statErr == nil {
+		t.Error("ResultJSON was written despite the error")
+	}
+}

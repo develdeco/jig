@@ -39,9 +39,14 @@ var fakeGitEnv = []string{
 // result.json is copied to d.ResultJSON (substituting the real HEAD sha for
 // a green result whose commit field is "@HEAD" or absent). A gate-review
 // dispatch (d.Slice == "gate") is played back separately by runGate.
+// d.NoSessionPersistence is accepted and ignored: the fake runs no session,
+// so there is no transcript to keep or not.
 func (b *fakeBackend) Run(d Dispatch) error {
 	if d.Slice == "gate" {
 		return b.runGate(d)
+	}
+	if d.Slice == "intent" {
+		return b.runIntent(d)
 	}
 
 	attemptDir := filepath.Join(b.scenarioDir, "slices", d.Slice, fmt.Sprintf("attempt-%d", d.Attempt))
@@ -96,6 +101,21 @@ func (b *fakeBackend) runGate(d Dispatch) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("session/fake: scenario has no gate round %d review-result.json", d.Attempt)
+	}
+	return writeResultBytes(d.ResultJSON, data)
+}
+
+// runIntent plays back a gate intent-inference dispatch: it copies
+// <scenario>/gate/round-<n>/intent-result.json verbatim into d.ResultJSON,
+// the same shape runGate plays back a review round with. Missing scenario
+// coverage is an error, never a silent empty summary - a scenario that
+// reaches inference without scripting this file must fail loudly rather
+// than be misread as "nothing to summarize".
+func (b *fakeBackend) runIntent(d Dispatch) error {
+	path := filepath.Join(b.scenarioDir, "gate", fmt.Sprintf("round-%d", d.Attempt), "intent-result.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("session/fake: scenario has no gate round %d intent-result.json", d.Attempt)
 	}
 	return writeResultBytes(d.ResultJSON, data)
 }

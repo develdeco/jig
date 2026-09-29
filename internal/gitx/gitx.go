@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 )
@@ -314,6 +315,92 @@ func lsTreeEntry(entry string) (entryType, path string, err error) {
 		return "", "", fmt.Errorf("unexpected entry metadata")
 	}
 	return fields[1], path, nil
+}
+
+// CommonDir returns dir's git common directory - the one .git directory
+// shared by a repository and every linked worktree of it - resolved to an
+// absolute, cleaned, symlink-free path. Two directories name the same
+// repository exactly when their common dirs are equal: a linked worktree's
+// common dir equals its main checkout's, while a separate clone (even of
+// the same remote) always gets its own. dir that is not inside any git
+// repository, or that does not exist, is returned as an error.
+//
+// The result is canonicalized with filepath.EvalSymlinks so two
+// symlinked-equivalent spellings of one path compare equal as strings -
+// git itself can report a linked worktree's common dir through the
+// worktree's own path while the main checkout's git-common-dir answer
+// keeps a symlinked ancestor unresolved, and on Windows EvalSymlinks also
+// restores the on-disk case of the drive letter, so a lowercase-drive cwd
+// still compares equal to the canonical form. EvalSymlinks does not
+// resolve a Windows junction, a subst drive or an 8.3 short name, so a
+// caller comparing two common dirs asks SameDir, which compares the
+// directories themselves rather than their spellings.
+func CommonDir(dir string) (string, error) {
+	out, err := Run(dir, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(out) {
+		out = filepath.Join(dir, out)
+	}
+	out = filepath.Clean(out)
+	if resolved, err := filepath.EvalSymlinks(out); err == nil {
+		out = resolved
+	}
+	return out, nil
+}
+
+// SameDir reports whether a and b are the same directory on disk, judged by
+// file identity (os.SameFile: the volume and file ID on Windows, the device
+// and inode elsewhere) rather than by spelling, so a junction, a subst
+// drive, an 8.3 short name or a case variant of one path still compares
+// equal where a string comparison of the two spellings would not. A path
+// that cannot be examined (empty, or not there) is not the same as anything.
+func SameDir(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	infoA, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	infoB, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(infoA, infoB)
+}
+
+// TopLevel returns dir's own git worktree top-level directory - resolved to
+// an absolute, cleaned, symlink-free path the same way CommonDir is. Unlike
+// CommonDir, this is per-worktree, not per-repository: a linked worktree's
+// top level is its own directory, never its main checkout's, so a path
+// relativized against it stays repo-relative for whichever worktree dir was
+// actually given. dir that is not inside any git repository, or that does
+// not exist, is returned as an error.
+func TopLevel(dir string) (string, error) {
+	out, err := Run(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
+	out = filepath.Clean(out)
+	if resolved, err := filepath.EvalSymlinks(out); err == nil {
+		out = resolved
+	}
+	return out, nil
+}
+
+// CommitTime returns rev's committer time in dir.
+func CommitTime(dir, rev string) (time.Time, error) {
+	out, err := Run(dir, "show", "-s", "--format=%cI", rev)
+	if err != nil {
+		return time.Time{}, err
+	}
+	t, err := time.Parse(time.RFC3339, out)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("gitx: parse commit time %q: %w", out, err)
+	}
+	return t, nil
 }
 
 // CommitOnAnyRemote reports whether sha is reachable from any remote-

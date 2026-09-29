@@ -20,7 +20,7 @@ import (
 type Dispatch struct {
 	Ticket, Slice string
 	Attempt       int    // 1-based
-	Worktree      string // lease dir
+	Worktree      string // the session's working directory: the lease dir, or a scratch dir for an intent summarizer
 	SliceJSON     string // path jig writes before Run
 	ResultJSON    string // path expected after Run
 	Model         string
@@ -31,6 +31,18 @@ type Dispatch struct {
 	// dispatch jig makes is screened; an unscreened headless session gets
 	// its shell and read tools through plain allow rules instead.
 	Screen bool
+
+	// NoSessionPersistence asks the backend not to leave a transcript of
+	// the session on disk where it would otherwise keep one. Only the
+	// headless backend has anything to turn off: `claude -p` saves every
+	// session under ~/.claude/projects, in a directory named after the
+	// session's working directory, and this passes --no-session-persistence
+	// to it. The fake backend runs no session, and herdr's agent is an
+	// interactive claude session started without flags, so both accept the
+	// field and ignore it. A caller sets it for a dispatch whose input must
+	// not be copied into the operator's own Claude Code data (the intent
+	// summarizer's excerpt); every other dispatch leaves it unset.
+	NoSessionPersistence bool
 }
 
 // Backend runs one dispatch. A returned error means infrastructure failure

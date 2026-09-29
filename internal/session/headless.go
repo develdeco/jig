@@ -324,6 +324,12 @@ func (b *headlessBackend) args(d Dispatch) (argv []string, cleanup func(), err e
 		// lease.
 		"--setting-sources", "user",
 	)
+	// `claude -p` saves every session's transcript under
+	// ~/.claude/projects/<encoded cwd>. A dispatch whose input must not be
+	// copied into the operator's Claude Code data asks for none.
+	if d.NoSessionPersistence {
+		args = append(args, "--no-session-persistence")
+	}
 	// Dropping the project source also drops the lease's CLAUDE.md, which
 	// the CLI discovers through it, so jig carries that file itself. The
 	// distinction is capability against instructions: a settings file grants

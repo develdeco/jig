@@ -183,6 +183,54 @@ func TestHeadlessArgs(t *testing.T) {
 	}
 }
 
+// TestHeadlessArgsSessionPersistence: a dispatch is persisted by the CLI
+// unless it asks not to be. NoSessionPersistence adds exactly
+// --no-session-persistence and nothing else, ahead of the "--" that ends the
+// flags, and a dispatch that leaves it unset carries no such flag - a
+// reviewer or a build session keeps its transcript where the operator
+// expects it.
+func TestHeadlessArgsSessionPersistence(t *testing.T) {
+	t.Parallel()
+	b := &headlessBackend{goos: "linux", screenBinary: "/opt/jig/bin/jig"}
+	d := missingDispatch(t, true)
+	settings, err := b.settings(d)
+	if err != nil {
+		t.Fatalf("settings: %v", err)
+	}
+	base := []string{
+		"-p", "--output-format", "json",
+		"--model", "claude-haiku-4-5",
+		"--permission-mode", "dontAsk",
+		"--tools", "Bash,Read,Glob,Grep,Edit,Write,NotebookEdit",
+		"--strict-mcp-config",
+		"--setting-sources", "user",
+	}
+	tail := []string{"--settings", settings, "--", "-do the slice"}
+	cases := []struct {
+		name string
+		set  bool
+		want []string
+	}{
+		{"unset", false, append(append([]string(nil), base...), tail...)},
+		{"set", true, append(append(append([]string(nil), base...), "--no-session-persistence"), tail...)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			d := d
+			d.NoSessionPersistence = c.set
+			got, cleanup, err := b.args(d)
+			if err != nil {
+				t.Fatalf("args: %v", err)
+			}
+			defer cleanup()
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("args =\n%q\nwant\n%q", got, c.want)
+			}
+		})
+	}
+}
+
 // TestHeadlessScreenBinary checks the screen-hook binary resolution. A test
 // binary is not jig, so without Options.ScreenBinary a screened dispatch
 // refuses to register it as the hook, while an unscreened one - which runs
@@ -284,6 +332,59 @@ func runClaudeStub(t *testing.T, env map[string]string) claudeStubRun {
 		t.Errorf("claude ran in %s, want the lease worktree %s", call.Cwd, worktree)
 	}
 	return claudeStubRun{d: d, err: runErr}
+}
+
+// TestHeadlessRunPassesNoSessionPersistenceToTheCLI pins the flag through
+// Run itself, against the argv the stub CLI actually received, rather than
+// against args: a Run that dropped NoSessionPersistence on its way to args
+// (in sessionView, say) would lose it on both sides of runClaudeStub's own
+// comparison.
+func TestHeadlessRunPassesNoSessionPersistenceToTheCLI(t *testing.T) {
+	stubDir := buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude")
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	logFile := filepath.Join(t.TempDir(), "claude.log")
+	t.Setenv("CLAUDE_STUB_LOG", logFile)
+	for _, k := range []string{"CLAUDE_STUB_WRITE_PATH", "CLAUDE_STUB_WRITE_BODY", "CLAUDE_STUB_STDOUT", "CLAUDE_STUB_STDERR", "CLAUDE_STUB_EXIT"} {
+		t.Setenv(k, "")
+	}
+	work := filepath.Join(t.TempDir(), "T-1", "work")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := Dispatch{
+		Ticket:               "T-1",
+		Slice:                "intent",
+		Attempt:              1,
+		Worktree:             t.TempDir(),
+		SliceJSON:            filepath.Join(work, "intent.json"),
+		ResultJSON:           filepath.Join(work, "intent.result.json"),
+		Model:                "claude-haiku-4-5",
+		Prompt:               "summarize",
+		Screen:               true,
+		NoSessionPersistence: true,
+	}
+	b := &headlessBackend{goos: "linux", screenBinary: builtJigBinary(t)}
+	_ = b.Run(d) // the stub writes no result; only the argv it saw matters here
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read claude stub log: %v", err)
+	}
+	var call struct {
+		Argv []string `json:"argv"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &call); err != nil {
+		t.Fatalf("parse claude stub log: %v\n%s", err, data)
+	}
+	n := 0
+	for _, a := range call.Argv {
+		if a == "--no-session-persistence" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("the CLI received --no-session-persistence %d times, want exactly once:\n%q", n, call.Argv)
+	}
 }
 
 func sameDir(t *testing.T, a, b string) bool {

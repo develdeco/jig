@@ -1,0 +1,2 @@
+{"type":"user","cwd":"{{CWD}}","timestamp":"2026-01-01T00:02:00.000Z","message":{"role":"user","content":"Implement the fix for the rounding bug."}}
+{"type":"assistant","cwd":"{{CWD}}","timestamp":"2026-01-01T00:03:00.000Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"{{CWD_SLASH}}src/foo.go"}},{"type":"tool_use","name":"Edit","input":{"file_path":"{{CWD_SLASH}}src/bar.go"}}]}}
