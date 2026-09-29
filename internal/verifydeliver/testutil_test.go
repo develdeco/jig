@@ -2,12 +2,14 @@ package verifydeliver
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
@@ -35,6 +37,57 @@ func testRungs() staircase.Config {
 	return staircase.Config{Rungs: []string{"rung-a", "rung-b", "rung-c"}}
 }
 
+// ticketBranch is the default branch name a ticket with no recorded branch
+// resolves to (store.Store.TicketBranch's own fallback). Tests use this
+// literal directly wherever they only need to name that conventional
+// branch - to set up a lease, or to assert against it - without threading
+// a *store.Store through every call site for a value most of these tests
+// never record differently.
+func ticketBranch(ticket string) string { return "jig/" + ticket }
+
+// recordBranch records branch as ticket's working branch in st's
+// ticket.yaml and commits and pushes it, the way a later change that adopts
+// a branch would, so the next Gate, Publish or buildLeaseDir resolves it
+// instead of the "jig/<ticket>" default.
+func recordBranch(t *testing.T, st *store.Store, ticket, branch string) {
+	t.Helper()
+	if err := st.WriteTicketBranch(ticket, branch); err != nil {
+		t.Fatalf("WriteTicketBranch: %v", err)
+	}
+	if err := st.Push(ticket + ": record branch"); err != nil {
+		t.Fatalf("push the recorded branch: %v", err)
+	}
+}
+
+// wantAxiCode fails the test unless err is, or wraps, an *axi.Error with the
+// given code: the command under test must surface a refusal Store.TicketBranch
+// returned as its own failure, code included, not swallow it.
+func wantAxiCode(t *testing.T, err error, code string) {
+	t.Helper()
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != code {
+		t.Fatalf("err = %v, want an *axi.Error %s", err, code)
+	}
+}
+
+// wantTicketBranchInvalid is wantAxiCode for the refusal of a recorded branch.
+func wantTicketBranchInvalid(t *testing.T, err error) {
+	t.Helper()
+	wantAxiCode(t, err, "TICKET_BRANCH_INVALID")
+}
+
+// originRef returns the sha refname points at in the bare remote, or "" when
+// the remote has no such ref: a test compares it before and after a command
+// to see that the command pushed nothing there.
+func originRef(t *testing.T, remote, refname string) string {
+	t.Helper()
+	sha, err := gitx.Run(remote, "for-each-ref", "--format=%(objectname)", refname)
+	if err != nil {
+		t.Fatalf("resolve %s on origin: %v", refname, err)
+	}
+	return sha
+}
+
 // newDeps opens fx's store and loads its project.yaml into a Deps ready
 // for Gate/Publish.
 func newDeps(t *testing.T, fx *fixture.Fixture) Deps {
@@ -51,10 +104,21 @@ func newDeps(t *testing.T, fx *fixture.Fixture) Deps {
 }
 
 // buildLeaseDir returns the build lease directory frontier would use for the
-// fixture's ticket: <pool>/fixture-repo/<ticket>.
+// fixture's ticket: <pool>/fixture-repo/<ticket>, checked out on the branch
+// frontier would resolve for it, so a test that records a branch in the
+// fixture's ticket.yaml before driving the build gets a build lease on that
+// branch, and one that records none gets the "jig/<ticket>" default.
 func buildLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	t.Helper()
-	lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Build)
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	branch, err := st.TicketBranch(fx.Ticket, "main")
+	if err != nil {
+		t.Fatalf("resolve %s's branch: %v", fx.Ticket, err)
+	}
+	lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Build)
 	if err != nil {
 		t.Fatalf("pool.Acquire build lease: %v", err)
 	}

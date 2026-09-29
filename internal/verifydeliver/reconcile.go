@@ -32,12 +32,13 @@ func conflictErr(cause error) error {
 // reconcile brings dir's checked-out ticket branch up to date with
 // origin/target: a rebase when the branch has never been pushed (keeping
 // history linear), or a merge when it has (so pushed history is never
-// rewritten). It reports which policy it used.
+// rewritten). It reports which policy it used. branch is the name Publish
+// resolved for the ticket once, up front, so reconcile works on the same
+// branch the rest of the publish does.
 //
 // Merge and rebase create commits, so they run with identityEnv, the
 // operator's identity that Publish resolved.
-func reconcile(dir, ticket, target string, identityEnv []string) (string, error) {
-	branch := ticketBranch(ticket)
+func reconcile(dir, branch, target string, identityEnv []string) (string, error) {
 	out, err := gitx.Run(dir, "ls-remote", "origin", "refs/heads/"+branch)
 	if err != nil {
 		return "", fmt.Errorf("verifydeliver: reconcile: ls-remote: %w", err)

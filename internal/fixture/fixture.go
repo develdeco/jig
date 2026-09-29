@@ -504,6 +504,33 @@ func testdataFixtureDir() (string, error) {
 	return filepath.Join(root, "testdata", "fixture"), nil
 }
 
+// GhStub compiles testdata/fixture/ghstub into a binary named gh (or gh.exe
+// on Windows) inside a fresh directory, returning that directory so it can
+// be prepended to PATH. Any test that needs a github tracker without
+// talking to GitHub uses this instead of building its own copy of the same
+// stub.
+func GhStub(t testing.TB) string {
+	t.Helper()
+	src := filepath.Join(RepoRoot(t), "testdata", "fixture", "ghstub")
+
+	dir := t.TempDir()
+	name := "gh"
+	if runtime.GOOS == "windows" {
+		name = "gh.exe"
+	}
+	out := filepath.Join(dir, name)
+
+	goBin := filepath.Join(runtime.GOROOT(), "bin", "go")
+	if runtime.GOOS == "windows" {
+		goBin += ".exe"
+	}
+	cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, src)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("fixture: build ghstub: %v\n%s", err, output)
+	}
+	return dir
+}
+
 // RepoRoot returns the module root: the directory containing go.mod. It
 // walks up from the source file of RepoRoot's caller, so it keeps working
 // no matter how deep in the tree that caller's package lives.

@@ -1070,7 +1070,7 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 	// returns with the lease detached at the old commit and still dirty.
 	advance("third slice")
 	dirty("leftover from a killed attempt")
-	if err := fetchTicketBranchFromBuildLease(fx.Home, gateLease.Dir, "fixture-repo", fx.Ticket); err == nil {
+	if err := fetchTicketBranchFromBuildLease(fx.Home, gateLease.Dir, "fixture-repo", fx.Ticket, ticketBranch(fx.Ticket)); err == nil {
 		t.Fatal("test setup: fetchTicketBranchFromBuildLease should still fail on the dirty file before the pre-Acquire restore runs")
 	}
 
@@ -1098,6 +1098,107 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 	}
 	if status3 != "" {
 		t.Fatalf("gate lease left dirty after round 3: %q", status3)
+	}
+}
+
+// TestGateUsesRecordedBranch runs a gate round on a ticket whose ticket.yaml
+// records a branch, with the build lease on that branch instead of the
+// "jig/<ticket>" default. Gate resolves the branch once, through
+// Store.TicketBranch, and its gate lease and its fetch from the build lease
+// both name the result: the round succeeds only if the gate lease ends up on
+// the recorded branch, and no branch under the default name is ever made
+// there. Every other Gate test in this file records no branch, so a Gate that
+// hardcoded "jig/"+ticket would still pass them.
+func TestGateUsesRecordedBranch(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	recordBranch(t, d.Store, fx.Ticket, "feature/custom")
+	driveBuild(t, fx, "rung-a")
+
+	report, err := Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if report.Verdict != "fix-slices" {
+		t.Fatalf("Verdict = %q, want fix-slices", report.Verdict)
+	}
+
+	gateLease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
+	if err != nil {
+		t.Fatalf("resolve gate lease: %v", err)
+	}
+	if head := run(t, gateLease, "symbolic-ref", "--short", "HEAD"); head != "feature/custom" {
+		t.Fatalf("gate lease HEAD branch = %q, want the recorded %q", head, "feature/custom")
+	}
+	if _, err := gitx.Run(gateLease, "rev-parse", "--verify", "--quiet", "refs/heads/"+ticketBranch(fx.Ticket)); err == nil {
+		t.Fatalf("the gate lease has a %s branch, want only the recorded one", ticketBranch(fx.Ticket))
+	}
+}
+
+// TestGateFailsWithTheRefusalOfTicketBranch is the other side of
+// TestGateUsesRecordedBranch: whatever Store.TicketBranch refuses fails the
+// gate with the refusal's code, and no gate lease is created for it. The two
+// refusals a ticket.yaml can earn are a recorded branch equal to the target
+// and a record jig cannot read (here one a newer jig wrote, which may name a
+// branch this jig does not understand). A Gate that fell back to
+// "jig/<ticket>" on either would review that branch instead, which is the
+// silent fallback the refusals exist to prevent; a fallback that tells the two
+// apart and keeps only one refusal is still one. The build runs before the
+// record is written: the test's own build-lease helper resolves the branch
+// too, and would refuse it.
+func TestGateFailsWithTheRefusalOfTicketBranch(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		record   func(t *testing.T, st *store.Store, ticket string)
+		wantCode string
+	}{
+		{
+			name: "recorded branch equal to the target",
+			record: func(t *testing.T, st *store.Store, ticket string) {
+				recordBranch(t, st, ticket, "main")
+			},
+			wantCode: "TICKET_BRANCH_INVALID",
+		},
+		{
+			// Written with os.WriteFile: WriteTicketBranch refuses a
+			// record of a schema this jig cannot read.
+			name: "record of a newer schema",
+			record: func(t *testing.T, st *store.Store, ticket string) {
+				if err := os.WriteFile(filepath.Join(st.TicketDir(ticket), "ticket.yaml"), []byte("schema_version: 2\n"), 0o644); err != nil {
+					t.Fatalf("write the newer-schema record: %v", err)
+				}
+				if err := st.Push(ticket + ": a newer jig's record"); err != nil {
+					t.Fatalf("push the newer-schema record: %v", err)
+				}
+			},
+			wantCode: "TICKET_SCHEMA_UNSUPPORTED",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+			d := newDeps(t, fx)
+			driveBuild(t, fx, "rung-a")
+			tc.record(t, d.Store, fx.Ticket)
+			// Test setup: the record must earn this refusal from
+			// TicketBranch itself, or the Gate below proves nothing.
+			_, err := d.Store.TicketBranch(fx.Ticket, "main")
+			wantAxiCode(t, err, tc.wantCode)
+
+			_, err = Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})
+			wantAxiCode(t, err, tc.wantCode)
+
+			gateLease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
+			if err != nil {
+				t.Fatalf("resolve gate lease: %v", err)
+			}
+			if _, err := os.Stat(gateLease); !os.IsNotExist(err) {
+				t.Fatalf("the refused Gate left a gate lease at %s (stat err %v), want none", gateLease, err)
+			}
+		})
 	}
 }
 

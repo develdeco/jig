@@ -103,7 +103,9 @@ func equalArgs(a, b []string) bool {
 
 // buildHerdrStub returns the directory holding the once-built
 // testdata/fixture/herdrstub binary, named herdr (or herdr.exe on Windows),
-// so it can be prepended to PATH. Mirrors tracker's buildGhStub.
+// so it can be prepended to PATH. Mirrors fixture.GhStub's build-a-fake-CLI
+// shape, but caches the build across every test in this binary instead of
+// rebuilding per test (see buildBinary).
 func buildHerdrStub(t *testing.T) string {
 	t.Helper()
 	return buildBinary(t, filepath.Join("testdata", "fixture", "herdrstub"), "herdr")

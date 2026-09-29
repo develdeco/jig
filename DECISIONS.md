@@ -112,15 +112,141 @@ was ambiguous, what was chosen, and why.
   misreported as a conflict. When the rebase state itself can't be read,
   the abort is still attempted, best effort, rather than trusting a read
   that just failed.
+- `<ticket>/ticket.yaml` is now the ticket's one record, not only its blockers:
+  `title`, `branch` and `blocked_by`, all optional, under `schema_version: 1`.
+  A minted ticket's record is created whole, in one write, by
+  `Store.CreateTicketRecord`, which refuses an id that already has one
+  (`ErrTicketRecordExists`) instead of merging into whatever ticket claimed
+  it. Every later update goes through one read-modify-write under the store
+  lock (`Store.mutateTicket`, reached through `Store.WriteTicketBranch`), so
+  setting one field never drops another that was already recorded - the
+  full-file replace the old `WriteTicketDeps` did would otherwise silently
+  lose whichever field the caller was not writing. That writer, and the
+  `WriteTicketTitle` that would have joined it, are gone: a title and
+  blockers are written once, whole, when the ticket is minted, nothing
+  updates them afterwards, and an update no command calls is not kept for a
+  later change to find. Decoding is strict (`yaml.Decoder.KnownFields`): an
+  unknown key is refused rather than silently dropped the next time anything
+  on the ticket is written. The refusal is an `*axi.Error`
+  (`TICKET_RECORD_INVALID`) whose help names both causes, since the read
+  cannot tell them apart: upgrade jig if a newer version wrote the key, fix
+  it if it is a typo. Only keys are guarded: a rewrite drops YAML comments
+  and any second document, neither of which a file jig wrote has.
+  `ReadTicket` also refuses a `schema_version` greater
+  than `ticketSchemaVersion` (`TICKET_SCHEMA_UNSUPPORTED`, help: upgrade
+  jig): an unknown field alone would not catch a future jig repurposing an
+  existing key's meaning under a new version, and since every write reads the
+  file first, refusing here also stops a write from re-marshaling such a file
+  back out at today's `schema_version`, silently downgrading it. Both
+  refusals reach a build lease, gate round or publish unchanged through
+  `Store.TicketBranch`, with their own code and next step.
+- `Store.TicketBranch` is the one place that resolves a ticket's working
+  branch: the recorded `branch`, or `jig/<ticket>` when none is recorded. It
+  replaces every hardcoded `"jig/"+ticket` across frontier, gate, reconcile
+  and publish (`internal/verifydeliver/verifydeliver.go`'s old `ticketBranch`
+  helper is gone; test files keep a same-named literal-only helper that names
+  the default branch in test setup and assertions). `Publish` and `Gate`
+  resolve it once, at the top, and hand the name to the lease, the fetch from
+  the build lease and `reconcile` (which takes the branch, not the store): a
+  `ticket.yaml` that changes while a command runs cannot make it reconcile
+  one branch and push another. `frontier.Run` does the same on its first
+  slice attempt (not up front, so a run with nothing on its frontier never
+  reads the record): every slice of one run, across its concurrent repo
+  groups, builds on that one branch. `Store.TicketBranch` also takes `target`
+  and refuses a recorded branch equal to it (a comparison of names:
+  `refs/heads/main` passes it, and git refuses the push later as ambiguous),
+  or one git itself would reject as a ref name (`git check-ref-format
+  --branch`), or one git only expands: `@{-1}` names the store's previously
+  checked-out branch, so the name `check-ref-format` prints must equal the
+  recorded one, or the same store content would pass on one machine and fail
+  on another. Both checks are of names, so a spelling git resolves on its own
+  terms passes them: `refs/heads/main` for the target, and `@`, which git
+  reads as `HEAD` wherever it parses a revision (a checkout of it stays
+  where it is), for the name check. Reconcile's merge and publish's
+  guardedPush both trust whatever this resolves, and landing straight on
+  target - skipping the PR - is the one failure mode worth refusing at the one
+  place every caller already goes through, rather than trusting it silently.
+  `jig validate` runs the same check against the primary repo's target, whose
+  "main" default now lives in one place, `project.Repo.TargetBranch`, instead
+  of the copies in frontier and verifydeliver and a third `validate` would
+  have added. A `ticket.yaml` it cannot read is reported once, with the
+  refusal's own next steps listed under it (`ReadTicket`'s help names the fix,
+  which the message alone does not). Nothing writes `branch` yet through this
+  path - `WriteTicketBranch` has no caller in v0.1, branch adoption is a later
+  change - so today this only guards a hand-edited or otherwise externally
+  written `ticket.yaml`.
+- `jig ticket new` creates the ticket's `<ticket>/ticket.yaml`, with its
+  title, for every tracker, right after minting, through
+  `Store.CreateTicketRecord`. Creating it also creates the ticket's store
+  folder (the write's lock and `Store.AtomicWrite` both make a file's parent
+  directory), so a tracker whose `Mint` creates no store folder of its own
+  (github, command) gets one: a GitHub-tracked ticket used to fail
+  `requireTicket` until its brief was written by hand; `ticket new` alone is
+  now enough. Because a tracker's id is sometimes known only once the ticket
+  already exists there (github, command), a refusal or a store write that
+  fails after that point can't be retried by minting again without creating
+  a duplicate tracker ticket - so an id jig cannot use (`tracker.CheckMinted`,
+  a reserved suffix or a path-like id), a record-write failure, and a mint
+  that collides with a `ticket.yaml` some earlier, unrelated write already
+  left for that id (`ErrTicketRecordExists`) are each reported with the
+  tracker and id named and what to do about the ticket that now exists there
+  ("close it there", "do not mint again"). The collision is keyed on the
+  record, not on the ticket folder: a folder with no `ticket.yaml` is merged
+  into, its record created beside whatever it holds (a `brief.md`, a
+  `slices.yaml`), nothing there changed or removed. The record is what claims
+  an id; a folder alone claims nothing, since the intake skill writes one for
+  a ticket that exists only in its tracker and every ticket minted before jig
+  recorded titles has one without a record. Refusing every existing folder
+  instead would need to know which trackers' `Mint` create the folder
+  themselves (the local one does, before the record is written), a
+  per-tracker case this avoids.
+- `jig graduate` mints into the store under the same two rules, so a minted
+  ticket gets its record under one rule whichever command minted it.
+  `tracker.Graduate` runs `tracker.CheckMinted` (the check `jig ticket new`
+  runs) right after each mint, before anything is written under the id: a
+  reserved suffix or a path-like id used to get a record too, the latter
+  outside the store. It then calls `Store.CreateTicketRecord` once, with the
+  title and the resolved blockers, and an id that already has a `ticket.yaml`
+  is refused, not merged into, which would overwrite the other ticket's title
+  and hand the new one its blockers. Both refusals give the operator the
+  recovery `jig ticket new` gives: the collision has the same message and help
+  (`mintedIDCollision`: the tracker ticket exists, the record belongs to
+  another ticket and must not be deleted, resolve it by hand), not the orphan
+  help written for a folder graduate created itself ("put the id on the
+  entry, or delete that ticket folder"), which here would delete another
+  ticket's brief or bind the entry to it. The record also lets
+  `consolidatedTitle` (`internal/verifydeliver`) find a title for a graduated
+  ticket instead of falling all the way back to the bare id. A blocker-less
+  entry now gets a `ticket.yaml` too (title only, no `blocked_by`), which the
+  two tests pinning it absent were updated to expect. A graduate failure that
+  already carries its own next steps (an id jig cannot use, an id that could
+  not be written into the chart) keeps its code and help and names the
+  entries this run already created, as every other graduate failure does, so
+  the operator sees what a re-run continues after. The drift advisory for an
+  existing entry whose `ticket.yaml` cannot be read carries the refusal's own
+  next step, as `jig validate` does (upgrade jig for a newer schema), instead
+  of always saying to edit the file, which would be the wrong step for a
+  record a newer jig wrote.
+- `Publish`'s PR title (`consolidatedTitle`) falls back to the ticket's own
+  recorded title, then the ticket id, when the first slice has no goal to
+  offer - no slices yet, or a first slice with an empty goal. Previously it
+  fell straight to the ticket id. `Publish` reads the record once, before it
+  writes anything to the store, and takes both the branch
+  (`Store.ResolveTicketBranch`, the resolution `TicketBranch` runs after its
+  own read) and this title from that one read: a record it cannot read fails
+  there, rather than after the memorize commit and changelog writes, and one
+  that changes while publish runs cannot give the branch and the title two
+  different snapshots.
 
 ## Chart handover
 
 - `schema_version` stays 1 for both new files (`charts/<name>/tickets.yaml`,
   `<ticket>/ticket.yaml`): each is optional and purely additive, so a store
   written with them still reads exactly as before on an older jig, which
-  never looks for either file. Nothing checks the version against these
-  files yet - that check is left for whichever later change actually needs
-  it to gate compatibility.
+  never looks for either file. `ReadTicket` now checks `ticket.yaml`'s
+  version and refuses a newer one (see the ticket record entry under
+  "Store"); nothing checks `tickets.yaml`'s yet - that check is left for
+  whichever later change actually needs it to gate compatibility.
 - Duplicate-ref detection (`resolveChartEntryRefs`, "one entry must not list
   the same ticket twice") compares by resolved target identity, not by a
   ref's literal spelling: a direct ticket id and a `#k` that already

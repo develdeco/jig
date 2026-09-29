@@ -69,7 +69,7 @@ charts/
   brief.md
   intent.md         # jig gate --intent/--doc, ignored when brief.md exists
   slices.yaml
-  ticket.yaml       # optional: this ticket's own blockers, written by jig graduate
+  ticket.yaml       # optional: this ticket's own record - title, branch, blockers
   start.<repo>.sha
   slices/
     <id>.state
@@ -131,8 +131,8 @@ exists.
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` + `Config` → a model rung, disjoint from rungs already in use |
-| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicketDeps`, `WriteTicketDeps` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above |
-| `internal/tracker/` | `New`, `Graduate` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and, when it has blockers, its `ticket.yaml` written |
+| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above |
+| `internal/tracker/` | `New`, `Graduate`, `CheckMinted` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport`, or a `PublishReport` with an opened PR |
 
 ## Session backends
