@@ -241,6 +241,67 @@ func workflowJobs(t *testing.T, root, file string) map[string]interface{} {
 	return jobs
 }
 
+// gateCheckName is the one check main's ruleset requires: ci.yml's gate
+// job, which fails unless every job it needs succeeded.
+const gateCheckName = "ci ok"
+
+// TestCIWorkflowGateJob asserts ci.yml's gate job exists under the check
+// name the ruleset requires, always runs (GitHub counts a skipped required
+// check as passing), reads its needed jobs' results, and needs every job
+// that runs on every change - so a job gating nothing today, such as a new
+// agent CLI's contract check, cannot be added without gating merges. It
+// has bitten: claude-cli caught what the test job cannot, but only test's
+// three legs were required, so a PR breaking the CLI contract could merge.
+func TestCIWorkflowGateJob(t *testing.T) {
+	root := repoRoot(t)
+	jobs := workflowJobs(t, root, "ci.yml")
+	var gate string
+	for _, name := range sortedKeys(jobs) {
+		job, _ := yamlMap(jobs[name])
+		if n, _ := yamlString(job["name"]); n == gateCheckName {
+			gate = name
+		}
+	}
+	if gate == "" {
+		t.Fatalf("ci.yml: no job named %q, the check main's ruleset requires, so no pull request could merge", gateCheckName)
+	}
+	job, _ := yamlMap(jobs[gate])
+	if ifExpr, _ := yamlString(job["if"]); ifExpr != "always()" {
+		t.Errorf("ci.yml: the %s job's if = %q, want always(): a skipped required check counts as passing", gate, ifExpr)
+	}
+	needs := map[string]bool{}
+	for _, n := range needsList(job["needs"]) {
+		needs[n] = true
+	}
+	for _, name := range sortedKeys(jobs) {
+		other, _ := yamlMap(jobs[name])
+		if _, conditional := other["if"]; name == gate || conditional {
+			continue
+		}
+		if !needs[name] {
+			t.Errorf("ci.yml: the %s job does not need %s, which runs on every change, so %s failing would not block a merge", gate, name, name)
+		}
+	}
+	steps, _ := yamlSlice(job["steps"])
+	reads := false
+	for _, sv := range steps {
+		step, _ := yamlMap(sv)
+		env, _ := yamlMap(step["env"])
+		run, _ := yamlString(step["run"])
+		text := run
+		for _, v := range env {
+			s, _ := yamlString(v)
+			text += s
+		}
+		if strings.Contains(text, "needs.*.result") && strings.Contains(run, "exit 1") {
+			reads = true
+		}
+	}
+	if !reads {
+		t.Errorf("ci.yml: the %s job has no step that reads needs.*.result and exits 1, so it would pass whatever the jobs it needs did", gate)
+	}
+}
+
 // TestCIWorkflowClaudeCLIJob asserts ci.yml runs jig's sessions against the
 // real Claude Code CLI on all three platforms, on every run of the
 // workflow, and fails the run when they fail: a job with no job-level "if"

@@ -106,6 +106,30 @@ jobs:
           JIG_LIVE_CLAUDE: "1"
         run: go test -count=1 -timeout 20m -run Live -v ./internal/session ./e2e
 
+  # The one check main's ruleset requires. It passes only when every job it
+  # needs succeeded, so a job added to its needs - another agent CLI's
+  # contract check, say - gates merges with no ruleset edit. always(): a
+  # skipped required check counts as passing, so this job must run, and
+  # fail, when a job it needs failed or was cancelled.
+  ci-ok:
+    name: ci ok
+    if: always()
+    needs: [test, claude-cli]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: every needed job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "needed jobs: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != success ]; then
+              echo "a needed job ended $r"
+              exit 1
+            fi
+          done
+
   # The release archives GoReleaser builds, installed by the installers and
   # run through the Quickstart on each platform: on a manual dispatch, and
   # in every release before anything is published.
