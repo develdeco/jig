@@ -11,8 +11,8 @@ and drives the real `jig` binary every time.
 - **`gate-reviewer.tape`** - the gate reviewer's three rounds against the
   `reviewer` fixture scenario: round 1's real triage prompt (a fix batch with
   one dismissal, an ask kept with a decision), `jig run` building the fix
-  slices those decisions queue, a second (delta) round, a clean third round,
-  and `jig status`. It mirrors
+  slices those decisions queue, a second (delta) round, a clean third round
+  with its demo, and `jig status`. It mirrors
   `cmd/jig/gate_reviewer_e2e_test.go`'s `TestGateReviewerRoundsThroughMain`
   keystroke for keystroke, but that test checks the round's outcome (the
   report's kv lines, the findings table, the store) - never the literal
@@ -41,12 +41,26 @@ and drives the real `jig` binary every time.
   separate demo `HOME` (and `USERPROFILE`) before the round runs, its own file
   mentions matching the round's scope diff. A single `jig gate --backend fake`
   round infers its intent from that transcript - the fake backend plays back
-  the summarizer's result - and reports `intent: inferred`; a `cat` shows
-  `intent.md` with its provenance (agent, session, match score), and `jig
-  status` points at publish. It mirrors `e2e/gate_intent_infer_test.go`'s
+  the summarizer's result - and reports `intent: inferred`, then the round's
+  demo (the scenario scripts one with no media, so the report says `demo:
+  recorded` and gives its summary); a `cat` shows `intent.md` with its
+  provenance (agent, session, match score), and `jig status` points at
+  publish. It mirrors `e2e/gate_intent_infer_test.go`'s
   `TestGateInfersIntentBriefLess` keystroke for keystroke, with the same
   outcome-vs-wording split as `gate-reviewer.tape` above. The scenario's round
   reports no findings, so there is no triage prompt and every `Wait` is bare.
+
+- **`gate-demo.tape`** - a clean gate round with its demo, against the `demo`
+  fixture scenario: the reviewer reports nothing, so the round is clean, and
+  the demo session that follows shows the change working (the fake backend
+  plays back two small SVG frames drawn from the fixture's own test cases).
+  The gate report prints the demo line and the files recorded, `cat` shows the
+  `gate/round-1/demo.yaml` manifest the round left in the store, `ls` shows
+  the media where they live (under the jig home, never in the store), and a
+  second round on the same head says its demo already exists. It mirrors
+  `cmd/jig/gate_demo_e2e_test.go`'s `TestGateDemoThroughMain`, with the same
+  outcome-vs-wording split as the tapes above. No interactive prompt appears
+  on camera, so every `Wait` is bare.
 
 ## Rule: fixture data only
 
