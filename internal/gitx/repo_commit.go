@@ -108,7 +108,16 @@ func (r *Repo) CommitAll(msg, name, email string) (bool, error) {
 		return false, err
 	}
 	if parent.IsZero() && len(idx.Entries) == 0 {
-		return false, nil // an unborn branch and nothing to commit
+		// An unborn branch and nothing to commit; the index still loses
+		// whatever was staged and has since gone.
+		if !s.indexChanged {
+			return false, nil
+		}
+		indexData, err := encodeIndex(idx)
+		if err != nil {
+			return false, ErrUseCLI
+		}
+		return false, indexLock.commit(indexData)
 	}
 	sort.Slice(idx.Entries, func(i, j int) bool { return idx.Entries[i].Name < idx.Entries[j].Name })
 	root, err := buildTree(repo, idx.Entries, "")
@@ -402,8 +411,7 @@ func (s *scan) walk(parts []string, abs string, ps []gitignore.Pattern, ignored 
 		}
 		if tracked {
 			s.seen[rel] = true
-			if entry.Size == uint32(info.Size()) && sameTime(entry.ModifiedAt, info.ModTime()) &&
-				(s.indexTime.IsZero() || info.ModTime().Before(s.indexTime)) {
+			if sameStat(entry, info) && (s.indexTime.IsZero() || info.ModTime().Before(s.indexTime)) {
 				continue
 			}
 		} else {
@@ -420,6 +428,26 @@ func (s *scan) walk(parts []string, abs string, ps []gitignore.Pattern, ignored 
 		s.indexChanged = true
 	}
 	return nil
+}
+
+// sameStat reports whether a file still looks as its index entry recorded
+// it, by the stat data the git program compares: size and modification
+// time, and the change time, device and inode wherever both the entry and
+// the platform have them, so a same-size file replaced with its old
+// modification time kept (`cp -p`, `rsync -a`) is read again.
+func sameStat(entry *index.Entry, info os.FileInfo) bool {
+	if entry.Size != uint32(info.Size()) || !sameTime(entry.ModifiedAt, info.ModTime()) {
+		return false
+	}
+	var now index.Entry
+	fillStat(&now, info)
+	if !entry.CreatedAt.IsZero() && !now.CreatedAt.IsZero() && !sameTime(entry.CreatedAt, now.CreatedAt) {
+		return false
+	}
+	if entry.Inode != 0 && now.Inode != 0 && (entry.Inode != now.Inode || entry.Dev != now.Dev) {
+		return false
+	}
+	return true
 }
 
 // sameTime reports whether an index entry's modification time matches the

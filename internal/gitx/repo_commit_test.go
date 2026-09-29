@@ -7,18 +7,22 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/go-git/go-git/v5/plumbing/format/index"
 )
 
 // TestCommitAllMatchesTheGitProgram: the same changes made to two copies of
 // a store, committed once in process and once by `git add -A && git
 // commit`, give the same tree: changed, added and deleted files, a file
 // replaced by a directory, a tracked file inside an ignored directory,
-// ignore rules from the root, from a subdirectory and from info/exclude,
-// matched case-insensitively under core.ignoreCase, and names that sort
-// around "/".
+// ignore rules from the root (behind a byte-order mark), from a
+// subdirectory and from info/exclude, matched case-insensitively under
+// core.ignoreCase, names that sort around "/", and a version 4 index on the
+// in-process side.
 func TestCommitAllMatchesTheGitProgram(t *testing.T) {
 	base := newStoreRepo(t)
-	writeFileT(t, base, ".gitignore", "*.lock\nvendor/\n")
+	// Led by a byte-order mark, as some editors write it; git skips it.
+	writeFileT(t, base, ".gitignore", "\uFEFF*.lock\nvendor/\n")
 	for name, body := range map[string]string{
 		"a-b": "1\n", "a.b": "2\n", "a/x.txt": "3\n", "a0": "4\n",
 		"deep/er/est.txt": "5\n", "gone/soon.txt": "6\n", "file-to-dir": "7\n",
@@ -63,6 +67,9 @@ func TestCommitAllMatchesTheGitProgram(t *testing.T) {
 		mustRun(t, dir, "config", "core.ignoreCase", "true")
 		change(t, dir)
 	}
+	// An index in version 4, path-compressed, is read and written in
+	// process as well.
+	mustRun(t, inProcess, "update-index", "--index-version", "4")
 
 	committed, err := openRepo(t, inProcess).CommitAll("jig: record", "jig", "jig@invalid")
 	if err != nil || !committed {
@@ -230,6 +237,12 @@ func TestCommitAllLeavesWhatTheGitProgramStagesDifferently(t *testing.T) {
 		{"a name core.precomposeUnicode would recompose", func(t *testing.T, dir string) {
 			mustRun(t, dir, "config", "core.precomposeUnicode", "true")
 			writeFileT(t, dir, "caf\u00e9.txt", "x\n")
+		}},
+		{"a non-ASCII name under ignore rules", func(t *testing.T, dir string) {
+			writeFileT(t, dir, "café.txt", "x\n")
+		}},
+		{"a non-ASCII ignore rule", func(t *testing.T, dir string) {
+			writeFileT(t, dir, ".git/info/exclude", "café*\n")
 		}},
 		{"an ignore rule with a negation", func(t *testing.T, dir string) {
 			writeFileT(t, dir, ".gitignore", "*.lock\n!keep.lock\n")
@@ -416,4 +429,70 @@ func TestCommitAllRecordsWhatTheGitProgramCompares(t *testing.T) {
 	if !bytes.Equal(before, after) {
 		t.Fatal("git status rewrote the index: the stat data CommitAll recorded is not what git compares")
 	}
+}
+
+// TestCommitAllOnAnUnbornBranchDropsWhatWasStagedAndGone: on a branch with
+// no commit yet, a file staged and then deleted leaves the index, as `git
+// add -A` would drop it, with nothing to commit.
+func TestCommitAllOnAnUnbornBranchDropsWhatWasStagedAndGone(t *testing.T) {
+	dir := t.TempDir()
+	mustRun(t, dir, "init", "-q", "-b", "trunk")
+	writeFileT(t, dir, "a.txt", "a\n")
+	mustRun(t, dir, "add", "a.txt")
+	if err := os.Remove(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	committed, err := (&Repo{dir: dir}).CommitAll("nothing", "jig", "jig@invalid")
+	if err != nil || committed {
+		t.Fatalf("CommitAll = %v, %v; want no commit", committed, err)
+	}
+	if files := mustRun(t, dir, "ls-files"); files != "" {
+		t.Fatalf("index after CommitAll = %q, want it empty", files)
+	}
+}
+
+// TestCommitAllCatchesAFileReplacedWithItsOldTime: a same-size file
+// replaced with its old modification time kept, as `cp -p` or `rsync -a`
+// leave it, is read again when its change time or inode shows the
+// replacement, as the git program reads it.
+func TestCommitAllCatchesAFileReplacedWithItsOldTime(t *testing.T) {
+	dir := newStoreRepo(t)
+	if _, err := openRepo(t, dir).CommitAll("refresh", "jig", "jig@invalid"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "project.yaml")
+	old, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	tmp := filepath.Join(dir, "project.tmp")
+	writeFileT(t, dir, "project.tmp", "schema_version: 9\n") // the same size
+	if err := os.Chtimes(tmp, old.ModTime(), old.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatal(err)
+	}
+	now, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before, after := statOf(old), statOf(now); before.CreatedAt.Equal(after.CreatedAt) && before.Inode == after.Inode {
+		t.Skip("this file system kept the old change time and inode: neither git nor gitx can tell")
+	}
+	committed, err := openRepo(t, dir).CommitAll("replaced", "jig", "jig@invalid")
+	if err != nil || !committed {
+		t.Fatalf("CommitAll = %v, %v; want the replaced file committed", committed, err)
+	}
+	if got := mustRun(t, dir, "show", "HEAD:project.yaml"); got != "schema_version: 9" {
+		t.Fatalf("committed project.yaml = %q", got)
+	}
+}
+
+// statOf is the stat data fillStat records for info.
+func statOf(info os.FileInfo) index.Entry {
+	var e index.Entry
+	fillStat(&e, info)
+	return e
 }
