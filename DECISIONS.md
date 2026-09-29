@@ -1224,13 +1224,13 @@ above:
   106 s; Linux 46 and 43 s, and 47 and 47 s. What the Windows suite still spends is git
   work on users' repositories (pool leases, gate resets and diffs, publish), which stays
   on the git program, and test fixtures building their repositories with it.
-  Building fixtures with half as many git processes was tried and dropped:
-  `git init` and the pinned-identity commits stayed on the git program,
-  while the config, the bare clones and the remotes were set up in process
-  (16 git processes per fixture down to 8). On nine paired Windows runners
-  the whole suite averaged 351 s on main and 331 s with it, a difference no
-  larger than its own standard error, and macOS and Linux did not move. That
-  was not worth about 300 lines of gitx code.
+  Building fixtures with half as many git processes was tried and dropped: `git init`
+  and the pinned-identity commits stayed on the git program, while the config, the bare
+  clones and the remotes were set up in process (16 git processes per fixture down to
+  8). In nine paired Windows runs the whole suite averaged 351 s on main and 331 s with
+  it, a mean paired difference of 21 s against a standard error of 19 s, and macOS and
+  Linux, two runs each, did not change measurably. That was not worth 320 lines of gitx
+  code and 280 of tests.
 - The Windows test leg puts `git --exec-path` first on PATH. The runner's first git is
   Git for Windows' `bin\git.exe`, a launcher that starts git's own `git.exe` as a second
   process on every call, the calls git makes itself during a local push included. On
