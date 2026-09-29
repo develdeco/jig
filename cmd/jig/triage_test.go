@@ -581,6 +581,41 @@ func TestInteractiveTriageAskEOFDoesNotAutoKeepAStaleOracleAsk(t *testing.T) {
 	}
 }
 
+// TestInteractiveTriageAskEOFCountCoversOnlyTheAsksLeft pins that the count
+// in the stdin-closed note covers only the asks not yet decided. The first
+// ask has no workspace and is dismissed at the prompt; stdin then closes at
+// the second. The dismissed ask must not be counted as left for a human,
+// though its build target is unresolved: the note counts the second alone.
+func TestInteractiveTriageAskEOFCountCoversOnlyTheAsksLeft(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		second verifydeliver.Finding
+		want   string
+	}{
+		{"second ask buildable", verifydeliver.Finding{ID: "r1-f4", Workspace: "alpha", Title: "t2"},
+			"triage (stdin closed): kept every remaining fix and buildable ask\n"},
+		{"second ask unbuildable", verifydeliver.Finding{ID: "r1-f4", Title: "t2"},
+			"triage (stdin closed): kept every remaining fix and buildable ask; 1 ask(s) left for a human\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var out bytes.Buffer
+			in := verifydeliver.TriageInput{
+				Asks:     []verifydeliver.Finding{{ID: "r1-f3", Title: "t1"}, tc.second}, // r1-f3 has no workspace
+				Manifest: oneOracleManifest(),
+			}
+			res := interactiveTriage(in, strings.NewReader("d\n"), &out) // dismiss r1-f3, then EOF at r1-f4
+			if dec, ok := res.Asks["r1-f3"]; !ok || dec.Keep || !dec.Human {
+				t.Fatalf("Asks[r1-f3] = %+v, ok=%v, want dismissed/human before the EOF", dec, ok)
+			}
+			if !strings.Contains(out.String(), tc.want) {
+				t.Fatalf("stdout missing the EOF note %q:\n%s", tc.want, out.String())
+			}
+		})
+	}
+}
+
 // --- notes are only ever listed ---------------------------------------------
 
 func TestInteractiveTriageListsNotes(t *testing.T) {
