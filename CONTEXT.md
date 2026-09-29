@@ -68,6 +68,10 @@ _Avoid_: checkout, sandbox
 Out-of-band verification of a ticket's branch, run on its own lease, under a different model, with fresh context.
 _Avoid_: code review, QA pass
 
+**Intent**:
+What a change is meant to accomplish, resolved once per gate round with a provenance: `brief` (the ticket's own brief.md) or `explicit` (`jig gate --intent`/`--doc`, recorded in `intent.md`) are binding, the human's own statement of what was asked for; `none` means nothing states it. A planned `inferred` source (read from local agent transcripts) is a hint, not yet built.
+_Avoid_: spec, requirements, brief (a brief is one source of intent, not the concept itself)
+
 **Finding action**:
 Who acts on a gate finding, reported by the reviewer itself: `fix` means jig queues a fix slice, `ask` means a human decides, `note` means it is recorded only.
 _Avoid_: class, severity, category
