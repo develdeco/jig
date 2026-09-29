@@ -29,3 +29,5 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
+
+retract v0.1.1 // headless sessions never start: the Claude Code CLI refuses jig's argv
