@@ -380,6 +380,52 @@ func TestIsAncestor(t *testing.T) {
 	})
 }
 
+// TestMissing: a commit the ref's history includes is held; one on another
+// branch is missing; so is one this repository has never seen, which is not an
+// error; the answer keeps the order given.
+func TestMissing(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := Run(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return out
+	}
+	commitFile := func(name string) string {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		run("add", "-A")
+		run("commit", "-m", name)
+		return run("rev-parse", "HEAD")
+	}
+	run("init", "-b", "main")
+	run("config", "user.name", "jig-fixture")
+	run("config", "user.email", "fixture@example.invalid")
+	base := commitFile("base.txt")
+	onMain := commitFile("main.txt")
+	run("checkout", "-b", "other", base)
+	onOther := commitFile("other.txt")
+	const unseen = "0123456789abcdef0123456789abcdef01234567"
+
+	got, err := Missing(dir, "refs/heads/main", []string{onOther, base, unseen, onMain})
+	if err != nil {
+		t.Fatalf("Missing: %v", err)
+	}
+	if len(got) != 2 || got[0] != onOther || got[1] != unseen {
+		t.Fatalf("Missing = %v, want [%s %s]: the commit on another branch and the one never seen, in the order given", got, onOther, unseen)
+	}
+	if got, err := Missing(dir, "refs/heads/main", nil); err != nil || len(got) != 0 {
+		t.Fatalf("Missing over no commits = %v (err %v), want none", got, err)
+	}
+	if _, err := Missing(dir, "refs/heads/nowhere", []string{base}); err == nil {
+		t.Fatal("Missing against a ref that does not exist: expected an error, got nil")
+	}
+}
+
 // TestDiffNameOnly checks the changed/deleted split a rename produces under
 // --no-renames (the old path deleted, the new path added), and that an
 // unrestricted, unmodified range returns nothing.

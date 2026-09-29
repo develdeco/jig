@@ -259,6 +259,13 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
 		}
+		// The lease's own copy of the branch goes too (dropLeaseBranch): the
+		// round re-points the lease at its source below whatever the copy
+		// holds, and Acquire's sync of a branch that exists on origin must
+		// not refuse over a copy that is about to be replaced.
+		if err := dropLeaseBranch(leaseDir, branch); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: drop the lease's own %s before acquire: %w", branch, err)
+		}
 	}
 	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Gate)
 	if err != nil {
@@ -844,6 +851,26 @@ func resetLeasePristine(leaseDir, head string) error {
 	}
 	if _, err := gitx.Run(leaseDir, "clean", "-fd"); err != nil {
 		return err
+	}
+	return nil
+}
+
+// dropLeaseBranch forgets a gate lease's own local copy of branch, leaving
+// its HEAD detached. The gate lease never commits and Gate re-points it at
+// the round's source right after acquiring it, so its copy is disposable;
+// left in place, one that fell behind or diverged from origin's since the
+// last round would fail Acquire's sync with the branch (BRANCH_DIVERGED)
+// before Gate could replace it, over commits that are not the lease's to
+// keep.
+func dropLeaseBranch(leaseDir, branch string) error {
+	if _, err := gitx.Run(leaseDir, "checkout", "--detach", "HEAD"); err != nil {
+		return fmt.Errorf("detach HEAD: %w", err)
+	}
+	if _, err := gitx.Run(leaseDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		return nil // no local copy
+	}
+	if _, err := gitx.Run(leaseDir, "branch", "-D", branch); err != nil {
+		return fmt.Errorf("delete branch %s: %w", branch, err)
 	}
 	return nil
 }

@@ -245,6 +245,28 @@ func IsAncestor(dir, ancestor, descendant string) (bool, error) {
 	return false, callError(args, stderr.String(), err)
 }
 
+// Missing returns those of commits that ref's history in dir does not
+// include, in the order given: the ones neither ref nor any ancestor of it is.
+// A commit dir has never seen is missing, not an error: nothing here can say
+// where it went.
+func Missing(dir, ref string, commits []string) ([]string, error) {
+	var missing []string
+	for _, commit := range commits {
+		if _, err := Run(dir, "rev-parse", "--verify", "--quiet", commit+"^{commit}"); err != nil {
+			missing = append(missing, commit)
+			continue
+		}
+		held, err := IsAncestor(dir, commit, ref)
+		if err != nil {
+			return nil, err
+		}
+		if !held {
+			missing = append(missing, commit)
+		}
+	}
+	return missing, nil
+}
+
 // DiffNameOnly returns the files base..head touches in dir, restricted to
 // diffFilter (git's --diff-filter letters, e.g. "AMT" for added/modified/
 // type-changed, or "D" for deleted) with renames off, so a renamed file
