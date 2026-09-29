@@ -90,10 +90,7 @@ func Run(d Deps, o RunOpts) (RunReport, error) {
 	}
 	repo := d.Cfg.Repos[0]
 	repoName := repo.Name()
-	target := repo.Target
-	if target == "" {
-		target = "main"
-	}
+	target := repo.TargetBranch()
 
 	slices, err := d.Store.ReadSlices(ticket)
 	if err != nil {
@@ -265,8 +262,8 @@ func buildReport(st *store.Store, ticket string, slices []store.Slice, stopped b
 
 // runCtx carries the state one Run call shares across its concurrent repo
 // groups: the stall counter (scoped to this Run call), the halt flag a
-// stall raises, and the first infrastructure error seen. Every field below
-// mu is guarded by it.
+// stall raises, the first infrastructure error seen, and the ticket's branch,
+// resolved once. The fields from stall through err are guarded by mu.
 type runCtx struct {
 	d           Deps
 	ticket      string
@@ -289,6 +286,26 @@ type runCtx struct {
 	// sequences interleaving into the same question id. It guards call
 	// duration only, never held across an rc.mu-guarded section.
 	storeMu sync.Mutex
+
+	// branchOnce guards the one resolution of the ticket's branch this Run
+	// makes (see ticketBranch); branch and branchErr are its result.
+	branchOnce sync.Once
+	branch     string
+	branchErr  error
+}
+
+// ticketBranch is the ticket's working branch, resolved on first use and
+// never again: every slice attempt of one Run, across every concurrent repo
+// group, builds on the branch the first of them resolved, even if
+// ticket.yaml changes mid-run (Store.TicketBranch's own rule for a command
+// that names the branch more than once). It resolves on the first slice
+// rather than up front, so a Run with nothing on its frontier never reads
+// the record.
+func (rc *runCtx) ticketBranch() (string, error) {
+	rc.branchOnce.Do(func() {
+		rc.branch, rc.branchErr = rc.d.Store.TicketBranch(rc.ticket, rc.target)
+	})
+	return rc.branch, rc.branchErr
 }
 
 func (rc *runCtx) isHalted() bool {
@@ -379,7 +396,12 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	d := rc.d
 	ticket := rc.ticket
 
-	lease, err := pool.Acquire(d.Home, rc.repoName, rc.remote, rc.target, "jig/"+ticket, ticket, pool.Build)
+	branch, err := rc.ticketBranch()
+	if err != nil {
+		rc.fail(fmt.Errorf("frontier: resolve branch for %s: %w", ticket, err))
+		return
+	}
+	lease, err := pool.Acquire(d.Home, rc.repoName, rc.remote, rc.target, branch, ticket, pool.Build)
 	if err != nil {
 		rc.fail(fmt.Errorf("frontier: acquire lease for %s: %w", sl.ID, err))
 		return

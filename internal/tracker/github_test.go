@@ -3,9 +3,7 @@ package tracker_test
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -15,33 +13,8 @@ import (
 	"github.com/develdeco/jig/internal/tracker"
 )
 
-// buildGhStub compiles testdata/fixture/ghstub into a binary named gh (or
-// gh.exe on Windows) inside a fresh directory, returning that directory so
-// it can be prepended to PATH.
-func buildGhStub(t *testing.T) string {
-	t.Helper()
-	src := filepath.Join(fixture.RepoRoot(t), "testdata", "fixture", "ghstub")
-
-	dir := t.TempDir()
-	name := "gh"
-	if runtime.GOOS == "windows" {
-		name = "gh.exe"
-	}
-	out := filepath.Join(dir, name)
-
-	goBin := filepath.Join(runtime.GOROOT(), "bin", "go")
-	if runtime.GOOS == "windows" {
-		goBin += ".exe"
-	}
-	cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, src)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build ghstub: %v\n%s", err, output)
-	}
-	return dir
-}
-
 func TestGithubArgv(t *testing.T) {
-	stubDir := buildGhStub(t)
+	stubDir := fixture.GhStub(t)
 	home := t.TempDir()
 	t.Setenv("JIG_HOME", home)
 	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -112,7 +85,7 @@ func TestGithubArgv(t *testing.T) {
 }
 
 func TestGithubPRCreateArgv(t *testing.T) {
-	stubDir := buildGhStub(t)
+	stubDir := fixture.GhStub(t)
 	home := t.TempDir()
 	t.Setenv("JIG_HOME", home)
 	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))

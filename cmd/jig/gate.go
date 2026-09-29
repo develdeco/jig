@@ -44,7 +44,7 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 
 	fs := newFlagSet("gate")
 	early := fs.Bool("early", false, "gate before the frontier is fully green")
-	branch := fs.String("branch", "", "validate this branch instead of jig/<ticket>")
+	branch := fs.String("branch", "", "validate this branch instead of the ticket's branch (jig/<ticket> unless one is recorded)")
 	doc := fs.String("doc", "", "brief doc path, used together with --branch")
 	prNum := fs.Int("pr", 0, "pr number (not implemented in v0.1)")
 	yes := fs.Bool("yes", false, "keep every finding jig can route on its own, without the triage prompt")

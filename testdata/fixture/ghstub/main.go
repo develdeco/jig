@@ -1,9 +1,10 @@
-// Command ghstub is a fake `gh` binary used only by tracker's github-adapter
-// tests. It never talks to GitHub: it records every invocation's argv to
-// $GH_STUB_LOG (one JSON array per line) and answers from a small canned
-// set of responses keyed off the subcommand, tracking an incrementing issue
-// counter in $GH_STUB_STATE so repeated "issue create" calls mint distinct
-// numbers.
+// Command ghstub is a fake `gh` binary used by the tests that need a github
+// tracker without talking to GitHub: tracker's github-adapter tests and
+// cmd/jig's ticket tests (both build it through fixture.GhStub). It never
+// talks to GitHub: it records every invocation's argv to $GH_STUB_LOG (one
+// JSON array per line) and answers from a small canned set of responses
+// keyed off the subcommand, tracking an incrementing issue counter in
+// $GH_STUB_STATE so repeated "issue create" calls mint distinct numbers.
 package main
 
 import (

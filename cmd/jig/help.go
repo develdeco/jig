@@ -64,7 +64,7 @@ var commandTable = []cmdSpec{
 	}, false},
 	{"gate", "run a gate round over the ticket's branch", []flagSpec{
 		{"early", "gate before the frontier is fully green", false},
-		{"branch", "validate this branch instead of jig/<ticket>", false},
+		{"branch", "validate this branch instead of the ticket's branch (jig/<ticket> unless one is recorded)", false},
 		{"doc", "brief doc path, used together with --branch", false},
 		{"pr", "pr number (not implemented in v0.1)", true},
 		{"yes", "keep every finding jig can route on its own, without the triage prompt", false},

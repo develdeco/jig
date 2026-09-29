@@ -108,7 +108,22 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 
 	repo, repoName, target := primaryRepo(d.Cfg)
-	branch := ticketBranch(ticket)
+	// The ticket's record is read once, here, before publish writes anything
+	// to the store, and both the branch and the PR title come from that one
+	// read: a record that cannot be read fails now rather than after the
+	// memorize commit, and one that changes while publish runs cannot give
+	// the two different snapshots.
+	rec, err := d.Store.ReadTicket(ticket)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read ticket record: %w", err)
+	}
+	// Resolved once: the lease, the fetch, the reconcile, the confirm prompt,
+	// the push and the PR all name this one branch, so a ticket.yaml that
+	// changes while publish runs cannot split them across two.
+	branch, err := d.Store.ResolveTicketBranch(ticket, rec, target)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve ticket branch: %w", err)
+	}
 	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Publish)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
@@ -119,7 +134,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	if err := fetchTicketBranchFromBuildLease(d.Home, lease.Dir, repoName, ticket); err != nil {
+	if err := fetchTicketBranchFromBuildLease(d.Home, lease.Dir, repoName, ticket, branch); err != nil {
 		return PublishReport{}, err
 	}
 	if _, err := gitx.Run(lease.Dir, "fetch", "origin"); err != nil {
@@ -127,7 +142,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 
 	// Step 1: reconcile.
-	policy, err := reconcile(lease.Dir, ticket, target, identityEnv)
+	policy, err := reconcile(lease.Dir, branch, target, identityEnv)
 	if err != nil {
 		return PublishReport{}, err
 	}
@@ -178,7 +193,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err := writeChangelogs(d.Store, ticket, slices, lines); err != nil {
 		return PublishReport{}, err
 	}
-	title := consolidatedTitle(ticket, slices)
+	title := consolidatedTitle(rec.Title, ticket, slices)
 	if err := appendLedgerEntry(d.Store, ticket, title, slices, questions); err != nil {
 		return PublishReport{}, err
 	}

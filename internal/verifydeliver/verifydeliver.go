@@ -39,15 +39,8 @@ type Deps struct {
 // to "main" when unset).
 func primaryRepo(cfg project.Config) (project.Repo, string, string) {
 	repo := cfg.Repos[0]
-	target := repo.Target
-	if target == "" {
-		target = "main"
-	}
-	return repo, repo.Name(), target
+	return repo, repo.Name(), repo.TargetBranch()
 }
-
-// ticketBranch is the ticket's working branch name.
-func ticketBranch(ticket string) string { return "jig/" + ticket }
 
 // identityDir returns where Publish resolves the operator's identity for
 // repoName: their mapped clone, or leaseDir when none is recorded.
@@ -71,10 +64,17 @@ func CheckIdentity(d Deps) error {
 }
 
 // consolidatedTitle picks the ticket's headline title: the first slice's
-// goal, falling back to the ticket id when there are no slices yet.
-func consolidatedTitle(ticket string, slices []store.Slice) string {
+// goal, falling back - when there are no slices or the first has no goal -
+// to recorded, the ticket's own recorded title (jig ticket new and jig
+// graduate write one for every ticket they mint; empty when the record has
+// none), and then to the ticket id itself. The caller passes the title from
+// the record it already read, so choosing a title never touches the store.
+func consolidatedTitle(recorded, ticket string, slices []store.Slice) string {
 	if len(slices) > 0 && slices[0].Goal != "" {
 		return slices[0].Goal
+	}
+	if recorded != "" {
+		return recorded
 	}
 	return ticket
 }

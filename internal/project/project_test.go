@@ -152,6 +152,22 @@ func TestRepoName(t *testing.T) {
 	}
 }
 
+// TestRepoTargetBranch covers the one place the default target lives: a
+// configured target wins, an empty one is "main".
+func TestRepoTargetBranch(t *testing.T) {
+	cases := []struct{ target, want string }{
+		{"", "main"},
+		{"develop", "develop"},
+		{"main", "main"},
+	}
+	for _, c := range cases {
+		r := Repo{Remote: "https://example.invalid/org/demo.git", Target: c.target}
+		if got := r.TargetBranch(); got != c.want {
+			t.Errorf("Repo{Target: %q}.TargetBranch() = %q, want %q", c.target, got, c.want)
+		}
+	}
+}
+
 func TestMintLocalID(t *testing.T) {
 	cfg := Config{TicketFormat: "JIG-{n}"}
 	if got := cfg.MintLocalID(7); got != "JIG-7" {

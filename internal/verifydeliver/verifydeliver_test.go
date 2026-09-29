@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // TestFailureCode pins failureCode's own branches directly, as a pure
@@ -38,5 +39,50 @@ func TestFailureCode(t *testing.T) {
 				t.Fatalf("failureCode(%v) = %q, want %q", c.err, got, c.want)
 			}
 		})
+	}
+}
+
+// TestConsolidatedTitlePrefersSliceGoal covers the top precedence arm: a
+// slice's own goal wins even when the ticket has a recorded title.
+func TestConsolidatedTitlePrefersSliceGoal(t *testing.T) {
+	t.Parallel()
+
+	got := consolidatedTitle("Recorded title", "T-1", []store.Slice{{ID: "s-1", Goal: "Slice goal"}})
+	if got != "Slice goal" {
+		t.Fatalf("consolidatedTitle = %q, want %q", got, "Slice goal")
+	}
+}
+
+// TestConsolidatedTitleFallsBackToRecordedTitle covers a ticket with no
+// usable slice goal - no slices yet, or a first slice whose goal is empty:
+// it falls back to ticket.yaml's own title rather than the bare ticket id.
+func TestConsolidatedTitleFallsBackToRecordedTitle(t *testing.T) {
+	t.Parallel()
+
+	for name, slices := range map[string][]store.Slice{
+		"no slices":        nil,
+		"empty first goal": {{ID: "s-1"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := consolidatedTitle("Recorded title", "T-1", slices)
+			if got != "Recorded title" {
+				t.Fatalf("consolidatedTitle = %q, want %q", got, "Recorded title")
+			}
+		})
+	}
+}
+
+// TestConsolidatedTitleFallsBackToTicketID covers a ticket with no slices
+// and no recorded title: the last resort is still the bare ticket id, the
+// only fallback consolidatedTitle had before it could read a recorded
+// title at all.
+func TestConsolidatedTitleFallsBackToTicketID(t *testing.T) {
+	t.Parallel()
+
+	got := consolidatedTitle("", "T-1", nil)
+	if got != "T-1" {
+		t.Fatalf("consolidatedTitle = %q, want %q", got, "T-1")
 	}
 }

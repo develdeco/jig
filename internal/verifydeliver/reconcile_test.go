@@ -73,7 +73,7 @@ func TestReconcilePoliciesLocalOnly(t *testing.T) {
 	run(t, clone, "fetch", "origin")
 	beforeCount := len(strings.Split(run(t, clone, "log", "--format=%H"), "\n"))
 
-	policy, err := reconcile(clone, "T-1", "main", nil)
+	policy, err := reconcile(clone, ticketBranch("T-1"), "main", nil)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestReconcilePoliciesPrePushed(t *testing.T) {
 	run(t, advance, "push", "origin", "main")
 
 	run(t, clone, "fetch", "origin")
-	policy, err := reconcile(clone, "T-1", "main", nil)
+	policy, err := reconcile(clone, ticketBranch("T-1"), "main", nil)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
