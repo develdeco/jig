@@ -751,9 +751,22 @@ func (rc *runCtx) routeQuestion(sl store.Slice, attempt int, res outcome.Result)
 	body := res.Question
 	reason := ""
 	if res.Outcome == outcome.FlawedBrief {
-		headings := briefHeadingsFor(d.Store, ticket, sl)
-		body = flawedBriefQuestionBody(ticket, res.Summary, headings)
-		reason = "flawed-brief"
+		if headings := briefHeadingsFor(d.Store, ticket, sl); len(headings) > 0 {
+			body = flawedBriefQuestionBody(ticket, res.Summary, headings)
+			reason = "flawed-brief"
+		} else {
+			// A flawed brief is a finding about brief sections to amend, and
+			// the amend-then-requeue remedy needs some: `jig requeue
+			// --from-brief-diff` requeues the slices whose sections
+			// changed. A slice with none - on a ticket with no brief (one
+			// that adopted a branch, or was never given one), a gate fix
+			// slice, whose work no brief section describes - has nothing to
+			// amend, so the session's finding is a plain question for the
+			// human to answer, like any other. `jig status` decides the same
+			// way (resumeCommand). The journal still records what the
+			// builder reported.
+			body = res.Summary
+		}
 	}
 
 	qid, err := rc.writeNewQuestion(sl.ID, body)
