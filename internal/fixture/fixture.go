@@ -329,6 +329,10 @@ func buildStore(storeDir, testdataDir, repoRemote string) error {
 	if err := writeFile(filepath.Join(storeDir, ".gitignore"), []byte("*.lock\n.*.tmp\n")); err != nil {
 		return err
 	}
+	// And its .gitattributes: no conversion of any file in the store.
+	if err := writeFile(filepath.Join(storeDir, ".gitattributes"), []byte(gitx.StoreAttributes)); err != nil {
+		return err
+	}
 
 	briefSrc, err := os.ReadFile(filepath.Join(testdataDir, "brief.md"))
 	if err != nil {
