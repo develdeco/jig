@@ -243,13 +243,17 @@ func TestInteractiveTriageFixBatchPromptExplainsConsequences(t *testing.T) {
 
 // TestInteractiveTriageEOFNoteStartsItsOwnLine pins that the stdin-closed
 // note never runs on from the prompt whose read hit EOF: eofNote starts a
-// new line before it prints.
+// new line before it prints. It looks only at the byte before the note, so
+// it does not depend on how the prompt ends (that wording is a demo tape's
+// Wait+Line anchor, which a test must not pin).
 func TestInteractiveTriageEOFNoteStartsItsOwnLine(t *testing.T) {
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
 	interactiveTriage(in, strings.NewReader(""), &out)
-	if !strings.Contains(out.String(), "(gone for good): \ntriage (stdin closed)") {
-		t.Fatalf("EOF note does not start its own line:\n%q", out.String())
+	text := out.String()
+	i := strings.Index(text, "triage (stdin closed)")
+	if i < 1 || text[i-1] != '\n' {
+		t.Fatalf("EOF note does not start its own line:\n%q", text)
 	}
 }
 
