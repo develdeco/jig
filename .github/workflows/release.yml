@@ -24,6 +24,8 @@ jobs:
   ci:
     needs: repo-visibility
     uses: ./.github/workflows/ci.yml
+    with:
+      release: true
 
   version-check:
     needs: ci
