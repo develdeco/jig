@@ -1296,6 +1296,11 @@ above:
   (SHA-256) before extracting, and install to a user directory with no sudo or
   admin rights. `JIG_RELEASE_URL` overrides the base URL for mirrors and for
   testing against a local or snapshot build; `JIG_VERSION` pins a release tag.
+- The installers install release archives only. `main` has none, so README installs it
+  with `go install github.com/develdeco/jig/cmd/jig@main` (or `go install ./cmd/jig`
+  from a clone), then `jig skills install`. A `JIG_VERSION=main` would have to build
+  from source, which drops both of the installers' promises: no Go toolchain, and an
+  archive checked against `checksums.txt`.
 - `release.yml` runs the full test matrix through `ci.yml`'s `workflow_call`
   trigger, checks the built binary reports the tag exactly, publishes with
   GoReleaser, attests build provenance, then smoke-tests the installers and
