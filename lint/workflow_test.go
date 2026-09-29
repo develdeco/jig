@@ -164,39 +164,7 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	if !ok {
 		t.Fatalf("ci.yml: no \"test\" job, so there is nothing to run the cross-platform and gate checks below")
 	}
-
-	strategy, _ := yamlMap(job["strategy"])
-	matrix, _ := yamlMap(strategy["matrix"])
-	osList, ok := yamlSlice(matrix["os"])
-	if !ok {
-		t.Fatalf("ci.yml: test job has no strategy.matrix.os list, so it would not run cross-platform at all")
-	}
-	var haveUbuntu, haveWindows, haveMacos bool
-	for _, v := range osList {
-		s, ok := yamlString(v)
-		if !ok {
-			continue
-		}
-		lower := strings.ToLower(s)
-		if strings.HasPrefix(lower, "ubuntu-") {
-			haveUbuntu = true
-		}
-		if strings.HasPrefix(lower, "windows-") {
-			haveWindows = true
-		}
-		if strings.HasPrefix(lower, "macos-") {
-			haveMacos = true
-		}
-	}
-	if !haveUbuntu {
-		t.Errorf("ci.yml: test job matrix has no ubuntu-* leg, so a Linux-only regression would merge unnoticed")
-	}
-	if !haveWindows {
-		t.Errorf("ci.yml: test job matrix has no windows-* leg, so a Windows-only regression would merge unnoticed")
-	}
-	if !haveMacos {
-		t.Errorf("ci.yml: test job matrix has no macos-* leg, so a macOS-only regression would merge unnoticed (it has shipped before, commit d920a72)")
-	}
+	requireAllPlatforms(t, "test", job)
 
 	steps, ok := yamlSlice(job["steps"])
 	if !ok {
@@ -213,6 +181,126 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	requireUnconditionalStep(t, steps, "go vet", "go vet ./...")
 	requireUnconditionalStep(t, steps, "go test", "go test ")
 	requireStepOnExactly(t, steps, "gofmt", "gofmt -l", "runner.os == 'Linux'")
+}
+
+// requireAllPlatforms asserts ci.yml's job name runs a strategy.matrix.os
+// leg on each of the three supported platforms: listed in matrix.os, and
+// not taken out again by a matrix.exclude entry naming it.
+func requireAllPlatforms(t *testing.T, name string, job map[string]interface{}) {
+	t.Helper()
+	strategy, _ := yamlMap(job["strategy"])
+	matrix, _ := yamlMap(strategy["matrix"])
+	osList, ok := yamlSlice(matrix["os"])
+	if !ok {
+		t.Fatalf("ci.yml: %s job has no strategy.matrix.os list, so it would not run cross-platform at all", name)
+	}
+	excluded := map[string]bool{}
+	excludes, _ := yamlSlice(matrix["exclude"])
+	for _, e := range excludes {
+		entry, _ := yamlMap(e)
+		if s, ok := yamlString(entry["os"]); ok {
+			excluded[s] = true
+		}
+	}
+	var haveUbuntu, haveWindows, haveMacos bool
+	for _, v := range osList {
+		s, ok := yamlString(v)
+		if !ok || excluded[s] {
+			continue
+		}
+		lower := strings.ToLower(s)
+		if strings.HasPrefix(lower, "ubuntu-") {
+			haveUbuntu = true
+		}
+		if strings.HasPrefix(lower, "windows-") {
+			haveWindows = true
+		}
+		if strings.HasPrefix(lower, "macos-") {
+			haveMacos = true
+		}
+	}
+	if !haveUbuntu {
+		t.Errorf("ci.yml: %s job matrix has no ubuntu-* leg, so a Linux-only regression would merge unnoticed", name)
+	}
+	if !haveWindows {
+		t.Errorf("ci.yml: %s job matrix has no windows-* leg, so a Windows-only regression would merge unnoticed", name)
+	}
+	if !haveMacos {
+		t.Errorf("ci.yml: %s job matrix has no macos-* leg, so a macOS-only regression would merge unnoticed (it has shipped before, commit d920a72)", name)
+	}
+}
+
+// TestCIWorkflowClaudeCLIJob asserts ci.yml runs jig's sessions against the
+// real Claude Code CLI on all three platforms, on every run of the
+// workflow, and fails the run when they fail: a job with no job-level "if"
+// or continue-on-error installs the CLI with its official installers, and
+// a step with JIG_LIVE_CLAUDE set runs go test with no step-level "if" and
+// no continue-on-error. It has bitten: v0.1.1 shipped a headless backend
+// whose argv the CLI refuses, since the test job's stub `claude` accepts
+// any argv and nothing ran the real one.
+func TestCIWorkflowClaudeCLIJob(t *testing.T) {
+	root := repoRoot(t)
+	doc := loadWorkflow(t, root, "ci.yml")
+
+	jobs, ok := yamlMap(doc["jobs"])
+	if !ok {
+		t.Fatalf("ci.yml: no jobs mapping")
+	}
+	for _, name := range sortedKeys(jobs) {
+		job, ok := yamlMap(jobs[name])
+		if !ok {
+			continue
+		}
+		live, ok := findLiveClaudeStep(job)
+		if !ok {
+			continue
+		}
+		if ifExpr, has := job["if"]; has {
+			t.Errorf("ci.yml: the %s job has a job-level if = %v, so some runs, a release's among them, could skip the real CLI", name, ifExpr)
+		}
+		if hasContinueOnError(job) {
+			t.Errorf("ci.yml: the %s job has a job-level continue-on-error, so its failure would not fail the run, and a release would publish past it", name)
+		}
+		requireAllPlatforms(t, name, job)
+		if _, hasIf := live["if"]; hasIf || hasContinueOnError(live) {
+			t.Errorf("ci.yml: the %s job's JIG_LIVE_CLAUDE step has a step-level \"if\" or continue-on-error, so it could skip or fail on some legs without failing the job", name)
+		}
+		steps, _ := yamlSlice(job["steps"])
+		for _, installer := range []string{"claude.ai/install.sh", "claude.ai/install.ps1"} {
+			if _, ok := findStepByRun(steps, installer); !ok {
+				t.Errorf("ci.yml: the %s job never runs %s, so a leg would run the live tests without the CLI a user installs", name, installer)
+			}
+		}
+		return
+	}
+	t.Errorf("ci.yml: no job runs go test with JIG_LIVE_CLAUDE set, so no session ever runs against the real Claude Code CLI before a release")
+}
+
+// findLiveClaudeStep returns the first step of job that runs go test with
+// JIG_LIVE_CLAUDE set to a non-empty value, in the step's own env or the
+// job's (the live tests skip on an empty one), and whether one was found.
+func findLiveClaudeStep(job map[string]interface{}) (map[string]interface{}, bool) {
+	jobEnv, _ := yamlMap(job["env"])
+	steps, _ := yamlSlice(job["steps"])
+	for _, sv := range steps {
+		step, ok := yamlMap(sv)
+		if !ok {
+			continue
+		}
+		run, _ := yamlString(step["run"])
+		if !strings.Contains(run, "go test") {
+			continue
+		}
+		env, _ := yamlMap(step["env"])
+		v, set := env["JIG_LIVE_CLAUDE"]
+		if !set {
+			v, set = jobEnv["JIG_LIVE_CLAUDE"]
+		}
+		if s, _ := yamlString(v); set && s != "" {
+			return step, true
+		}
+	}
+	return nil, false
 }
 
 // findStepByRun returns the first step in steps whose "run" field contains

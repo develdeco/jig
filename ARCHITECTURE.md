@@ -282,7 +282,8 @@ is not a sandbox: a granted shell is not confined to the lease, and neither
 are `Read`, `Glob` and `Grep`, whose only limit is the credential denylist.
 See [ADR 0008](docs/adr/0008-headless-permission-model.md); `JIG_LIVE_CLAUDE=1
 go test ./internal/session -run Live` checks the model against the
-installed CLI through a local mock of the Messages API.
+installed CLI through a local mock of the Messages API, and CI's
+`claude-cli` job runs it against the latest CLI release.
 
 **Guarded push.** `gitx.GuardedPush` refuses to push to a remote that is not
 a local file path unless the caller has confirmed. `publish` is the only
