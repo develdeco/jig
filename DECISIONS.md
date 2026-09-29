@@ -1199,6 +1199,322 @@ amendment):
   `review-result.json` already has - and errors loudly on a scenario with
   no coverage for it, exactly like a missing `review-result.json` does.
 
+## Adopted branches
+
+The design is [ADR 0013](docs/adr/0013-a-ticket-branch-is-recorded.md); these
+are the judgment calls the build left open.
+
+- A recorded branch means an adopted one (`Ticket.Adopted`, the one predicate
+  gate, run, solve, publish and status all ask), and `jig publish` refuses every
+  recorded branch, whether or not it happens to be on origin. Nothing but
+  adoption writes `branch:`, so a record the refusal would let through - a
+  hand-edited one naming a branch jig built and never pushed - is a case no
+  command produces. The refusal is by the record because that is a fact the
+  store holds; the branch's presence on origin is a fact about one moment and
+  one remote. The publish tests that published a recorded, never-pushed branch
+  (they simulated adoption before it existed) now pin the refusal instead, and
+  return as real publish tests when publishing an adopted branch is built. The
+  target check and the record's own validation (`TICKET_BRANCH_INVALID`) still
+  come before the refusal, so a bad record says what is wrong with it.
+- `--branch` on a ticket jig already built on is refused (`TICKET_ALREADY_BUILT`)
+  where it used to review origin's copy of the named branch. That review
+  silently skipped the ticket's own commits, which is the mistake the refusal
+  exists to make loud; the way to review another branch is another ticket. The
+  store decides (`jigBuilt`, below): a `verified` journal line, a green result
+  line naming a commit, or a slice in state `green`. `--branch jig/<ticket>`,
+  the ticket's own default name, is an adoption like any other and is refused
+  the same way once jig has built.
+- "Did jig build on this ticket" and "which commits did jig build" are two
+  questions, and the store answers each from a different record. The commits are
+  the `verified` lines, which only this version journals. The frontier journals
+  one (slice, commit, attempt) when a green result's commit passes `verifyGreen`,
+  before it marks the slice green, and `journal.BuiltCommits` returns those
+  commits, once each. The `result` line, journaled before verification, stays
+  what the builder claimed. `BuiltCommits` used to count every `result` line
+  that named a commit, on the reasoning that a claimed green whose commit failed
+  verification still put a commit on the branch. That holds for a commit that
+  exists (a declared artifact missing at it): it stays in the lease, and the
+  retry that verifies builds on top of it, so a copy that holds the verified
+  commit holds it too. It is false for a sha that is not in the lease and for the
+  start sha itself, and counting them refused a ticket for good over a commit
+  that never existed: the gate refused the machine with no build lease
+  forever while ignoring the same journal on a machine with one. One predicate
+  now serves the start sha, both arms of the gate's choice of copy, the build
+  and the push-first hint: they need the commits, and only an adopted ticket
+  reaches them, which only this version makes. Whether jig built at all is a
+  stricter question than which commits, and is answered next.
+- Adoption asks whether jig built at all, and reads it from three facts of the
+  store (`jigBuilt`), any of which says so: a `verified` line, a green `result`
+  line naming a commit (`journal.GreenClaims`), and a slice in state `green`.
+  The path this guards is new; the state it guards, commits a released jig
+  built on `jig/<ticket>`, is not, and in those versions `--branch` meant
+  "review this branch once", so a user carrying an in-flight ticket across the
+  upgrade reaches adoption by doing what they did before. Adoption then holds
+  for good (`--branch jig/<ticket>` is `BRANCH_MISMATCH` and no verb un-adopts
+  it), every later round reviews the author's branch without the ticket's own
+  work, and the hint says to open the pull request for a branch that lacks it.
+  Two earlier readings each let that through. The `verified` lines alone, on the
+  reasoning that "the adoption path this guards is new", missed every ticket
+  whose journal predates them (v0.1.x: green result lines, green slices, no
+  `verified` line). Adding the slices' green state closed that, and still
+  failed open after `jig requeue --from-brief-diff`, which sets every slice
+  whose brief section changed back to queued, green ones included: a slice's
+  state is not a record of a build, and nothing else of one was left to read.
+  The green `result` line is the record. Every jig version journals it before it
+  routes the result, and nothing removes it. It is a claim, not proof, so it
+  decides only where there is no `verified` line to say better, and that costs
+  one shape: a ticket of this version whose green claims all failed
+  verification has no `verified` line either, and is now refused
+  (`TICKET_ALREADY_BUILT`, with the help to mint a ticket for the branch) where
+  it used to adopt. A journal from before the `verified` lines cannot be told
+  from it, and a loud refusal the ticket recovers from is better than an
+  adoption that is silent and permanent. The `verified` lines and the slices
+  still count, each for a shape of its own: this version journals a `verified`
+  line before it marks the slice green, so a run that stopped between the two
+  writes has built a commit no slice shows yet, and a slice in state `green` is
+  what every version writes only after its commit verified. In every journal
+  jig writes the claims subsume both, so a test pins each with the other two
+  facts gone. The id-based checks read the `verified` lines alone, since they
+  need which commits and not whether, and the tickets they guard are adopted
+  ones. An old ticket is not migrated: refusing to adopt for it is the whole
+  change, and its way to review another branch is a ticket of its own, like any
+  other.
+- An adoption is recorded after `--intent`/`--doc` is written and the intent
+  resolved, and before the round's journal line: the intent flags refuse
+  (`INTENT_CONFLICT`, `INTENT_DOC_MISSING`, `INTENT_EMPTY`) far more often than
+  anything after them can, and a refusal must leave no adopted branch behind for
+  a later `--branch <other>` to hit `BRANCH_MISMATCH` over. The start sha is
+  written before the record, so a crash between the two leaves a start sha no
+  record points at, which the next adoption replaces. Adoption replaces a start
+  sha that already exists: one can only be there from a dispatch that built
+  nothing, since the journal has no commits.
+- The start sha follows the author until jig builds. While the journal records
+  no commits jig built, every dispatch records origin's tip of the branch again
+  (`ensureStartSHA`), where the lease was just cut or fast-forwarded to, so a
+  branch the author pushed to or rewrote after the adoption is built on as it is
+  when jig starts. It used to be fixed at adoption, and a rewrite made every
+  build commit fail `verifyGreen`, so the slices stalled with no stated cause.
+  Once jig has built, the start sha stays: its commits descend from it, and
+  moving it would disown them. It stays for an ordinary ticket from the first
+  dispatch, too: the rule is for an adopted branch jig has built nothing on, and
+  nothing else. An ordinary ticket's slices are committed on `jig/<ticket>`, cut
+  from the target as it was, so a start sha that followed a target which moved
+  between two runs would disown every commit of the earlier ones, and the next
+  slice would stall on a green that did not verify. The frontier keeps it, not
+  the gate, because the frontier is what reads it: a gate round is refused while
+  a fix slice is queued (`--early` aside), which is exactly the state after a
+  rewrite between the first round and the first build, so a remedy that needed a
+  round would be one that could not run. What remains is a branch rewritten
+  under commits jig built. A lease that holds them stands diverged from
+  the rewritten origin, which `Acquire` refuses (`BRANCH_DIVERGED`); a
+  lease cut afresh from the rewritten origin, on a machine that did not
+  build them, lacks them, which the build refuses before its first dispatch
+  (`BUILD_LEASE_MISSING`, below). A third refusal, `BRANCH_REWRITTEN`, for
+  a lease whose branch no longer held the start sha, is gone. Every commit
+  jig built descends from the start sha, so a lease that holds them all
+  holds it, and its remedy could not work: rebasing jig's commits onto the
+  rewritten branch in the lease that built them made new shas the journal
+  does not record, and the start sha, frozen once jig built, is not on the
+  new history, so the rerun failed the same way forever. The remedy is the
+  divergence refusal's: merge origin's branch into the lease, which keeps
+  the old tip reachable, so the commits and the start sha stay valid.
+- A build lease that has diverged from origin is re-cut from origin's tip, not
+  refused, when it holds no commit jig built that origin lacks
+  (`pool.RecutUnlessBuilt`, which the build passes for an adopted ticket). Until
+  jig has built, the branch is the author's, and a run that parked a question or
+  failed leaves a lease holding the old tip: refusing it after the author's
+  rewrite sent the human to merge the discarded history back into the rewritten
+  branch, against the promise that a build follows the author until jig builds.
+  It is the pool's rule, decided by the same sync comparison, and not "drop the
+  lease's copy whenever nothing is built" as the gate does for its own lease,
+  because an unverified commit in a build lease is not always the author's: a
+  green whose declared artifact was missing leaves its commit there for the
+  retry to fix, and dropping it would make the retry start over. So an ahead
+  lease keeps such a commit, and only a diverged one - origin moved under it -
+  is re-cut, discarding the unverified commits (the reflog keeps them). The
+  re-cut is `checkout -B`, which like the fast-forward stops with git's own error
+  over an uncommitted edit it would overwrite, and a test pins that the re-cut
+  discards none. A lease that holds a commit jig built that origin lacks is
+  refused as diverged: it holds jig's work, which only it has.
+- Whether a diverged build lease is jig's to keep is one predicate,
+  `pool.HoldsUnpushedBuilt`: a copy that holds a commit jig built that origin
+  lacks is, and one that holds none is not. The build's re-cut and the gate's
+  choice of copy both ask it, and the reason a refusal gives is then true at both
+  sites: neither copy holds both that commit and the author's. The gate used to
+  refuse every divergence, on the reasoning that neither copy holds both jig's
+  commits and the author's, which is false for a lease holding none of jig's
+  commits: origin holds both, and the lease holds only an attempt's leftover.
+  The build went on over that state and the gate refused it, and the gate's help
+  (merge origin into the lease) folded the never-verified leftover into the
+  branch, which the re-cut exists to avoid. The predicate was then "holds any
+  commit jig built", and its reason was still false for a lease whose built
+  commits had all been pushed, with a leftover on top of them and the author's
+  commits on origin: origin holds jig's commits and the author's, the lease only
+  the leftover, and both the gate and the build refused it, with the same help.
+  Now such a lease counts, for the gate, as a build lease that does not hold the
+  branch: the round reviews origin's copy, the build re-cuts, and the
+  requirement that the copy holds every commit jig built applies to it as to any
+  (`BUILD_LEASE_MISSING` when jig's commits were built elsewhere and not
+  pushed).
+- The commits jig built must be in the copy a command works on, for the build as
+  for the gate (`pool.RequireBuilt`, `BUILD_LEASE_MISSING`). The frontier checks
+  its build lease's branch after acquiring it and before it dispatches, so a
+  machine whose lease was cut after another machine built does not put the next
+  commits on a branch that leaves the earlier ones out; verification would still
+  pass them, since it looks only at the start sha. The check is for adopted
+  tickets: a ticket's own `jig/<ticket>` is never on origin before a publish, so
+  a second machine could not hold the first's commits by any push, and the gap
+  there predates this work and claims nothing of the kind. The help is the same
+  for both commands: run it on the machine that built them, or push them from
+  there and this machine follows origin. The commits are found by id, not by
+  patch: a human who rebases or squashes jig's commits before pushing them gives
+  them ids the journal does not know, and every later round and build on that
+  branch is refused until they are integrated by a merge instead, which the help
+  says. Matching by patch would accept a rebase and still not a squash, and would
+  make "holds the commit" a similarity judgment where it is a fact about the
+  history; the refusal is loud and names the commits.
+- A recorded branch must be on origin, for the build as for the gate. The build's
+  `pool.Acquire` takes `pool.MustExistOnOrigin` for an adopted ticket and refuses
+  with `BRANCH_NOT_FOUND` where it used to cut the branch from the target, which
+  built the fixes on a branch that lacks the author's code with nothing said. The
+  gate takes the same option, which replaces its own check after a `--prune`
+  fetch: `Acquire` now fetches with `--prune` for every lease, since a lease's
+  view of origin that keeps a deleted branch defeats both the option and the sync
+  rule. The option is the caller's, not the pool's, because the ordinary
+  `jig/<ticket>` is cut from the target on purpose.
+- The first dispatch into a repo records the start sha where `pool.Acquire` cut
+  the lease's branch: `origin/<branch>` when origin has it, else the target.
+  Adoption normally wrote it first; the rule covers a record made any other way
+  and keeps the two from disagreeing about where a branch started.
+- The gate reviews the copy of an adopted branch that holds the commits jig
+  built, judged by the pool's own sync rule on the build lease's copy against
+  origin's (`chooseBuiltCopy`). It used to review the build lease's copy whenever
+  the journal recorded any commit, and never compared the two: once the human
+  had pushed jig's commits, as the publish refusal says to, and the author pushed
+  on top, a round said clean over a head that was not the branch's, and a machine
+  with no build lease refused even when origin already held every commit. Now
+  in step or behind, the round reviews origin's; ahead, the lease's; and with no
+  lease here, origin's. Diverged, with a lease that holds a commit jig built
+  that origin lacks, the round is refused with `BRANCH_DIVERGED`, naming the
+  build lease, where the alternative was to review the lease and print that
+  origin has commits the round did not review: a notice beside a clean verdict
+  is read as clean, and the next build refuses the same state, so the gate
+  refuses it too. A diverged lease that holds none is not jig's to keep (the
+  predicate above) and is no lease here for the gate: origin's. Whichever copy
+  is chosen must then hold every commit the journal records jig built
+  (`pool.RequireBuilt`), or the round is refused (`BUILD_LEASE_MISSING`). That
+  check used to run only for a machine with no build lease: with one, the
+  copy was chosen by comparing the lease with origin and the journal was
+  never consulted, so a lease cut after another machine built (any `jig run`
+  that acquired one), or one that built commits of its own without the other
+  machine's, was reviewed and called clean over less than the ticket built. A
+  commit the journal names that this repository has never seen counts as
+  not held (`gitx.Missing`), since nothing here can say where it went.
+- The gate lease drops its own local copy of the branch before acquiring, since
+  the round re-points it at the round's source and Acquire's sync would
+  otherwise refuse it over a stale copy in exactly the cases it exists for: a
+  branch the author has pushed to since the last round, after jig's commits were
+  fetched in. The publish lease is re-pointed from the build lease right after
+  acquiring too, and is not dropped: publish refuses an adopted ticket, and a
+  ticket's own `jig/<ticket>` on origin is the publish lease's own last push. That
+  stops being true when a published branch is published again, and that change
+  must drop the publish lease's copy the same way, or its stale copy can refuse
+  the acquire before it is replaced.
+- The sync rule changes one thing for a ticket that is not adopted, after its own
+  publish. Publish pushes a squash of `jig/<ticket>`, while the build lease keeps
+  the unsquashed commits, so the branch is on origin and the two stand diverged:
+  a build acquire after a publish (a `jig run` after a post-publish gate round or
+  requeue) stops with `BRANCH_DIVERGED`, where it used to build on and fail later,
+  at a second publish's push. The rule is the branch's, and `jig/<ticket>` is a
+  branch once it is on origin. The alternative, publish re-pointing the build
+  lease at what it pushed, writes to a lease publish does not own, after the push
+  has shipped, where a failure has nowhere honest to go. Publishing a branch that
+  already reached origin is the change that owns this state, and a test pins the
+  refusal until then. The `BRANCH_DIVERGED` help names neither side's author: jig
+  made this divergence itself.
+- The fast-forward is git's `merge --ff-only`, so an uncommitted edit in a lease
+  to a file the author's new commits change stops the acquire with git's own
+  error. The alternative, a hard reset, would discard the lease's uncommitted
+  work to make room, which jig does not do in a build lease.
+- `jig status` names an adopted ticket's branch on a `branch:` line under the
+  ticket's, and counts the ticket as `green` while it has no slices: nothing
+  built is not something building. After a clean round its hint says `jig
+  publish` does not ship an adopted branch yet, and what to do instead
+  (`PublishByHand`): open the pull request, and when jig built commits on the
+  branch, push them from the build lease first, since origin's copy lacks the fix
+  the round reviewed. The publish refusal says the same sentence, with the
+  lease's path, because it is one function, so the two cannot disagree. The
+  status and gate hints leave the path out and decide from the journal alone:
+  they read the store only, so they cannot tell that the human has pushed the
+  commits since (that is a fact about a lease and its remote, which opening
+  would make a read-only command fetch, and a lease's view of origin is as old as
+  its last fetch), and after a push they still say to push, which then has
+  nothing to send. For the same reason they cannot tell that the branch moved
+  since, when the push is not a fast-forward and git would reject it (the state
+  after the gate's `BRANCH_DIVERGED`), so the words carry the condition
+  instead: "merge it in if it moved". That is enough to keep the hint from
+  naming a push that cannot work, and it reads nothing. The sentence is short
+  for a reason: `jig status` prints it after a clause of its own, and the demo's
+  terminal is 160 columns wide (a test pins the row's width). The path is a
+  scratch location the demo's rule keeps off the screen, where those hints print.
+  The sentence does not count the commits. The gate report prints the same
+  `branch:` line for an adopted ticket only, so every other ticket's output is
+  unchanged.
+- `jig solve` on an adopted ticket stops at the clean round and prints that
+  round's gate report, exit 0, rather than falling through to a publish that
+  always refuses. The loop's work is done when a round is clean, and the refusal
+  read as failure to any script that drove it. Solve decides it from
+  `Ticket.Adopted`, the fact publish refuses on.
+- An adopted ticket's intent follows the precedence every ticket's does, the
+  brief, else `intent.md` (`--intent`, `--doc`, or inferred), else none
+  ([ADR 0012](docs/adr/0012-intent-provenance.md)), and adoption adds nothing to
+  it. Inferring an intent from the author's own Claude Code session was built
+  for a ticket with no brief, and a branch built outside jig is that ticket in
+  its purest form: the scope diff is the adopted branch against its merge base
+  with the target (the gate lease holds the branch, `origin/<target>` is the
+  base), the session that matches its files is the author's, and what is
+  recorded is the same `intent.md` with the same provenance. Nothing in the gate
+  treats an adopted ticket differently, since a special case that skipped it
+  would have left the ticket that most needs an intent without one.
+  `TestGateInfersAnAdoptedTicketsIntent` runs a reviewer source on an adopted,
+  brief-less branch with the target moved past its fork point: the summarizer is
+  given the branch's files and not the target's own change, the adoption and the
+  inferred `intent.md` are recorded, and a second round reads it without
+  inferring again. The demo's tape uses the scripted source, which runs no
+  reviewer and so no inference, and still reports `intent: none`.
+- `jig ticket new` offers both ways to give the new ticket work: a brief and
+  slices, or a branch built outside jig for `jig gate --branch`. It used to offer
+  only the brief. The refusal of the commands that can work an adopted ticket and
+  `jig status` of a ticket with no slices and no branch offer the same pair
+  (`getWorkHints`); status used to offer the brief alone.
+- `gate`, `run`, `solve` and `publish` share `requireWork`, which passes a ticket
+  with slices or an adopted branch; `requeue` keeps the strict check, since a
+  ticket with no slices has none to requeue. A refusal for a ticket with neither
+  offers both ways to get work (a brief and slices, or `jig gate --branch`), and
+  for an adopted ticket with no slices says the gate queues them. A ticket record
+  that cannot be read now fails these commands with its own error where they
+  used to say "no slices", since deciding whether a ticket adopted a branch reads
+  it.
+- Whether amending the brief is the remedy for a flawed brief is decided by
+  the slice: it cites brief sections to amend or it does not. A flawed-brief
+  outcome on a slice with none - on a ticket with no `brief.md`, or a gate
+  fix slice on a ticket that has one - parks the slice with the session's
+  summary as a plain question and no `flawed-brief` reason, so status offers
+  the answer command and never the requeue one. It used to ask whether the
+  ticket has a brief, which disagreed with `jig status` on a fix slice: the
+  question told the human to amend sections that were not named while status
+  said to answer it. The journal's `question` line still carries the outcome
+  the builder reported. `jig requeue --from-brief-diff` on a ticket with no
+  `brief.md` is refused (`VALIDATION_ERROR`) with the slices' own remedies,
+  where it failed on the missing file.
+- Tests that adopted the target as a stand-in for "some branch on origin"
+  (the intent-flag refusals) now push a real branch, since the target is
+  refused before anything else happens, and assert that the refusal recorded
+  no branch and no start sha; the two `--branch` tests that built the ticket
+  first (a stale gate lease, a branch deleted on origin) adopt a branch nobody
+  built on. The two publish and gate tests that recorded a branch by hand
+  put it on origin first, since a recorded branch is on origin by definition.
+
 ## Review eval
 
 - `internal/verifydeliver` gains one type and one function beyond the
