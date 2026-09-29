@@ -15,7 +15,7 @@
 # (the report, the findings table, the store), never the literal prompt
 # wording this tape types against and waits on: a wording change there
 # shows up only as a failed or mismatched render here, not as a failing
-# test. See demo/README.md for that caveat.
+# end-to-end test. See demo/README.md for that caveat.
 #
 # Each command's completion is detected by waiting for the shell prompt to
 # return (VHS's own default bash prompt, a colored "> ", matched by its

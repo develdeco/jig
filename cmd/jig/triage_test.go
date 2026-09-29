@@ -279,6 +279,28 @@ func TestInteractiveTriageAskKeepWithNoDecisionText(t *testing.T) {
 	}
 }
 
+// TestInteractiveTriageDecisionPromptSaysItIsOptionalAndEnterSkips pins the
+// rule that the decision prompt, shown after an ask is kept, says what its
+// answers do: a decision is optional, and a bare Enter skips it. The same
+// run checks that the prompt is telling the truth: Enter alone keeps the
+// ask with no decision text. It quotes the two consequences, not the whole
+// prompt, so the prompt's lead-in and anchor can be reworded freely.
+func TestInteractiveTriageDecisionPromptSaysItIsOptionalAndEnterSkips(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
+	res := interactiveTriage(in, strings.NewReader("k\n\n"), &out)
+	text := out.String()
+	for _, want := range []string{"optional", "Enter to skip"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("decision prompt missing %q:\n%s", want, text)
+		}
+	}
+	if dec := res.Asks["r1-f3"]; !dec.Keep || !dec.Human || dec.Decision != "" {
+		t.Fatalf("Asks[r1-f3] = %+v, want kept, human, no decision text (Enter skips it)", dec)
+	}
+}
+
 // The Human check matters as much as Keep here: if Enter stopped being an
 // explicit keep, the prompt would reprompt on the same blank line forever
 // and eventually hit EOF, which also keeps the ask (auto, not human) -

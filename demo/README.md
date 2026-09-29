@@ -22,8 +22,9 @@ and drives the real `jig` binary every time.
   and each Wait+Line anchor depends on; a bare `Wait` depends on VHS's own
   prompt and pattern instead, not a jig source line. A drift in a cited line
   shows up as a failed or mismatched render, not as a failing end-to-end
-  test. (`cmd/jig/triage_test.go` separately pins what each triage prompt
-  says its answers do, so rewording that fails a unit test as well.)
+  test. (`cmd/jig/triage_test.go` separately pins what the fix batch, ask
+  and decision prompts say their answers do, so rewording that fails a
+  unit test as well.)
 
 ## Rule: fixture data only
 
