@@ -106,10 +106,11 @@ jobs:
           JIG_LIVE_CLAUDE: "1"
         run: go test -count=1 -timeout 20m -run Live -v ./internal/session ./e2e
 
-  # The one check main's ruleset requires. It passes only when every job it
-  # needs succeeded, so a job added to its needs - another agent CLI's
-  # contract check, say - gates merges with no ruleset edit. always(): a
-  # skipped required check counts as passing, so this job must run, and
+  # Main's ruleset requires this check beside the test job's legs, which
+  # run the lint test that keeps this job's shape. It passes only when every
+  # job it needs succeeded, so a job added to its needs - another agent
+  # CLI's contract check, say - gates merges with no ruleset edit. always():
+  # a skipped required check counts as passing, so this job must run, and
   # fail, when a job it needs failed or was cancelled.
   ci-ok:
     name: ci ok
@@ -123,6 +124,10 @@ jobs:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           echo "needed jobs: $RESULTS"
+          if [ -z "$RESULTS" ]; then
+            echo "no needed job results"
+            exit 1
+          fi
           for r in $RESULTS; do
             if [ "$r" != success ]; then
               echo "a needed job ended $r"

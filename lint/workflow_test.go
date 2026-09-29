@@ -9,6 +9,7 @@ package lint
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -241,17 +242,20 @@ func workflowJobs(t *testing.T, root, file string) map[string]interface{} {
 	return jobs
 }
 
-// gateCheckName is the one check main's ruleset requires: ci.yml's gate
-// job, which fails unless every job it needs succeeded.
+// gateCheckName is the check main's ruleset requires beside the test
+// job's legs: ci.yml's gate job, which fails unless every job it needs
+// succeeded.
 const gateCheckName = "ci ok"
 
 // TestCIWorkflowGateJob asserts ci.yml's gate job exists under the check
 // name the ruleset requires, always runs (GitHub counts a skipped required
-// check as passing), reads its needed jobs' results, and needs every job
-// that runs on every change - so a job gating nothing today, such as a new
-// agent CLI's contract check, cannot be added without gating merges. It
+// check as passing), needs every job that runs on every change - so a new
+// agent CLI's contract job cannot be added without gating merges - and
+// that its step, run for real, fails unless every needed job succeeded. It
 // has bitten: claude-cli caught what the test job cannot, but only test's
 // three legs were required, so a PR breaking the CLI contract could merge.
+// The ruleset keeps those legs required because this test runs in them: a
+// pull request's own ci.yml defines the gate it is judged by.
 func TestCIWorkflowGateJob(t *testing.T) {
 	root := repoRoot(t)
 	jobs := workflowJobs(t, root, "ci.yml")
@@ -275,30 +279,61 @@ func TestCIWorkflowGateJob(t *testing.T) {
 	}
 	for _, name := range sortedKeys(jobs) {
 		other, _ := yamlMap(jobs[name])
-		if _, conditional := other["if"]; name == gate || conditional {
+		// Only the release and dispatch jobs, whose if reads inputs.release
+		// (TestReleaseRunsQuickstartOnInstalledBinaries), stay out of the
+		// gate: they never run on a pull request.
+		if ifExpr, _ := yamlString(other["if"]); name == gate || strings.Contains(ifExpr, "inputs.release") {
 			continue
 		}
 		if !needs[name] {
-			t.Errorf("ci.yml: the %s job does not need %s, which runs on every change, so %s failing would not block a merge", gate, name, name)
+			t.Errorf("ci.yml: the %s job does not need %s, which runs on pull requests, so %s failing would not block a merge", gate, name, name)
 		}
 	}
+	requireGateStepFailsClosed(t, gate, job)
+}
+
+// requireGateStepFailsClosed runs the gate job's step that reads
+// needs.*.result, with that expression's variable set to synthetic
+// results, and asserts it succeeds only when every result is success -
+// failing on a failed, cancelled or skipped job and on no results at all,
+// as it would if its wiring to the variable broke.
+func requireGateStepFailsClosed(t *testing.T, gate string, job map[string]interface{}) {
+	t.Helper()
+	var script, variable string
 	steps, _ := yamlSlice(job["steps"])
-	reads := false
 	for _, sv := range steps {
 		step, _ := yamlMap(sv)
 		env, _ := yamlMap(step["env"])
-		run, _ := yamlString(step["run"])
-		text := run
-		for _, v := range env {
-			s, _ := yamlString(v)
-			text += s
-		}
-		if strings.Contains(text, "needs.*.result") && strings.Contains(run, "exit 1") {
-			reads = true
+		for _, k := range sortedKeys(env) {
+			if v, _ := yamlString(env[k]); strings.Contains(v, "needs.*.result") {
+				script, _ = yamlString(step["run"])
+				variable = k
+			}
 		}
 	}
-	if !reads {
-		t.Errorf("ci.yml: the %s job has no step that reads needs.*.result and exits 1, so it would pass whatever the jobs it needs did", gate)
+	if script == "" {
+		t.Fatalf("ci.yml: the %s job has no step with needs.*.result in its env, so it cannot fail on a needed job's result", gate)
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skipf("no bash to run the %s job's step: %v", gate, err)
+	}
+	for _, c := range []struct {
+		results string
+		pass    bool
+	}{
+		{"success success", true},
+		{"success failure", false},
+		{"cancelled success", false},
+		{"success skipped", false},
+		{"", false},
+	} {
+		cmd := exec.Command(bash, "-e", "-c", script)
+		cmd.Env = append(os.Environ(), variable+"="+c.results)
+		out, err := cmd.CombinedOutput()
+		if passed := err == nil; passed != c.pass {
+			t.Errorf("ci.yml: the %s job's step with %s=%q passed=%v, want %v: %s", gate, variable, c.results, passed, c.pass, out)
+		}
 	}
 }
 
