@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"strconv"
@@ -33,9 +34,9 @@ func gateSourceFor(backendFlag, scenario string) (verifydeliver.GateSource, erro
 	return verifydeliver.NewReviewerGateSource(backend), nil
 }
 
-// cmdGate implements `jig gate <ticket> [--early] [--branch <name> [--doc
-// <path>]] [--pr <n>] [--yes] [--backend fake|headless|herdr] [--scenario
-// <dir>]`.
+// cmdGate implements `jig gate <ticket> [--early] [--branch <name>] [--intent
+// <text> | --doc <path>] [--pr <n>] [--yes] [--backend fake|headless|herdr]
+// [--scenario <dir>]`.
 func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
@@ -45,7 +46,8 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 	fs := newFlagSet("gate")
 	early := fs.Bool("early", false, "gate before the frontier is fully green")
 	branch := fs.String("branch", "", "validate this branch instead of the ticket's branch (jig/<ticket> unless one is recorded)")
-	doc := fs.String("doc", "", "brief doc path, used together with --branch")
+	intent := fs.String("intent", "", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md)")
+	doc := fs.String("doc", "", "doc file whose content becomes the ticket's explicit intent, recorded as intent.md (refused when the ticket has a brief.md)")
 	prNum := fs.Int("pr", 0, "pr number (not implemented in v0.1)")
 	yes := fs.Bool("yes", false, "keep every finding jig can route on its own, without the triage prompt")
 	backendFlag := fs.String("backend", "", "session backend for the reviewer: fake, headless, or herdr")
@@ -56,6 +58,48 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 		return 0
 	} else if err != nil {
 		return renderErr(stdout, err)
+	}
+	// --intent "" or --doc "" (the flag explicitly given an empty value) is
+	// otherwise indistinguishable from that flag never having been passed
+	// at all - *intent/*doc is "" either way - and would silently skip
+	// recording anything: for --doc specifically, that means running a
+	// whole round against no intent at all rather than refusing it. Worse,
+	// checking only *intent != "" && *doc != "" for the "not both" rule
+	// misses --intent x --doc "", since the empty *doc reads as unset by
+	// value even though --doc was on the command line. fs.Visit sees only
+	// flags that actually appeared on the command line, so both are
+	// checked that way - by presence, not by their resulting value - and
+	// "not both" is refused whenever both appeared, before either
+	// set-but-empty check below ever runs. A set-but-empty flag is then
+	// refused with INTENT_EMPTY, the code writeExplicitIntent gives an
+	// intent text with nothing in it (`--intent ""` and `--intent "  "`
+	// are one mistake, so one code), rather than treated as unset.
+	var intentFlagSet, docFlagSet bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "intent":
+			intentFlagSet = true
+		case "doc":
+			docFlagSet = true
+		}
+	})
+	if intentFlagSet && docFlagSet {
+		return renderErr(stdout, &axi.Error{
+			Msg:  "jig gate accepts --intent or --doc, not both",
+			Code: "VALIDATION_ERROR",
+		})
+	}
+	if intentFlagSet && *intent == "" {
+		return renderErr(stdout, &axi.Error{
+			Msg:  "jig gate --intent must not be empty",
+			Code: "INTENT_EMPTY",
+		})
+	}
+	if docFlagSet && *doc == "" {
+		return renderErr(stdout, &axi.Error{
+			Msg:  "jig gate --doc must not be empty",
+			Code: "INTENT_EMPTY",
+		})
 	}
 
 	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag)
@@ -77,12 +121,13 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 
 	deps := verifydeliverDeps(st, cfg, mp, jigHome)
 	report, err := verifydeliver.Gate(deps, src, verifydeliver.GateOpts{
-		Ticket:   ticket,
-		Early:    *early,
-		Branch:   *branch,
-		BriefDoc: *doc,
-		PRMode:   *prNum != 0,
-		Triage:   triageFor(*yes, stdin, stdout),
+		Ticket:    ticket,
+		Early:     *early,
+		Branch:    *branch,
+		Intent:    *intent,
+		IntentDoc: *doc,
+		PRMode:    *prNum != 0,
+		Triage:    triageFor(*yes, stdin, stdout),
 	})
 	if err != nil {
 		return renderErr(stdout, err)
@@ -107,6 +152,7 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 		{"round", strconv.Itoa(report.Round)},
 		{"verdict", report.Verdict},
 		{"model", report.Model},
+		{"intent", report.Intent.Source},
 	}
 	if report.Scope != "" {
 		kv = append(kv, [2]string{"scope", report.Scope})

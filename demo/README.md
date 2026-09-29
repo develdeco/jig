@@ -25,6 +25,16 @@ and drives the real `jig` binary every time.
   test. (`cmd/jig/triage_test.go` separately pins what the fix batch, ask
   and decision prompts say their answers do, so rewording that fails a
   unit test as well.)
+- **`gate-intent.tape`** - a brief-less ticket through the base fixture
+  scenario (no overlay): round 1 with no brief and no `--intent` resolves to
+  `intent: none`, a `jig run` works round 1's fix back to green, round 2 with
+  `jig gate --intent` records `intent.md` and resolves to `intent: explicit`,
+  a `cat` shows that file with its provenance, and `jig status` points at
+  publish. It mirrors
+  `cmd/jig/gate_intent_e2e_test.go`'s `TestGateIntentNoneToExplicitThroughMain`
+  keystroke for keystroke, with the same outcome-vs-wording split as
+  `gate-reviewer.tape` above. Neither round here dispatches a reviewer, so
+  there is no triage prompt and every `Wait` is bare.
 
 ## Rule: fixture data only
 

@@ -814,7 +814,8 @@ above:
   matching PR #8's own recorded reasoning: pointing at this round's own
   `gate/round-N/spec-input.md` instead would leave a partial round dir on
   disk if the reviewer then failed, since that file is written only once
-  the round succeeds.
+  the round succeeds. (Superseded: see Intent provenance below -
+  `RoundInput.BriefPath` is retired for `RoundInput.Intent`.)
 - `findings.md` never prints "clean" for a round that is not clean: it
   prints the round's own recorded verdict, and "nothing new this round"
   when that verdict isn't clean but nothing was reported this round -
@@ -970,6 +971,50 @@ above:
   <code>` - the same `axi`-code-only rule as `Gate`'s (via the shared
   `failureCode`), minus the round: `Publish` is not round-scoped the way
   `Gate` is.
+
+Intent provenance (see [ADR 0012](docs/adr/0012-intent-provenance.md)):
+
+- `gate/round-N/spec-input.md` is retired outright, and with it `--doc`'s
+  old behavior of copying its file's content there: the round-scoped spec
+  axis input it existed for is gone now that intent is resolved once per
+  ticket (`intent.md`, ticket-scoped like `brief.md` already is) rather
+  than reconstructed per round. `--doc` on a `--branch` ticket now does what
+  `--intent` does - writes an explicit `intent.md` - never a round-local
+  copy.
+- `--doc` on a ticket that already has a `brief.md` used to be silently
+  accepted and change what the reviewer read, in `--branch` mode; it is
+  now refused with `INTENT_CONFLICT`, the same as `--intent`, since a
+  ticket's intent resolution always prefers `brief.md` when one exists -
+  writing an `intent.md` beside it would record a provenance jig would
+  never actually read.
+- `writeExplicitIntent` checks `brief.md`'s existence, not its content,
+  before ever writing `intent.md` or reading `--doc`'s file: the conflict
+  check is structural (a file present or absent), never a comparison of
+  what either file says.
+- `report.yaml`'s `intent` block records the sha256 of the exact bytes of
+  the file at `intent.path`, not the text itself - the text already lives
+  in `brief.md` or `intent.md`, both already in the store, and
+  duplicating it into every round's own report bought nothing. The hash
+  is empty for source `"none"` rather than the hash of an empty string,
+  since `"none"` means no text was read at all, not that empty text was.
+- The prompt names what `"brief"`, `"explicit"` and `"none"` each mean
+  once, generically, rather than branching on this round's own resolved
+  source: it already points the reviewer at `review.json`'s own `intent`
+  block for the actual value, so the prompt's job is only to say what
+  each label means.
+- `resolveIntent` reads `brief.md`'s or `intent.md`'s exact bytes once
+  and returns them alongside the resolved `{source, path}`, so `Gate`
+  never reads the same file twice to compute the report's sha256
+  separately from what it handed the round's source.
+- `resolveIntent` reads `intent.md` as strictly as `writeExplicitIntent`
+  writes it. A body with no text in it (empty or whitespace only, one
+  shared rule) is `INTENT_EMPTY` on read too, and a front matter that does
+  not parse is `INTENT_INVALID`.
+  These two and `INTENT_INVALID_SOURCE` all carry the same help, to rerun
+  `jig gate` with `--intent` or `--doc`, which replaces the file. Only a
+  hand edit of `intent.md` reaches any of them. The CLI's refusal of a
+  set-but-empty `--intent` or `--doc` uses the same `INTENT_EMPTY`, so an
+  empty flag and a whitespace-only one are one mistake with one code.
 
 ## Review eval
 

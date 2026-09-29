@@ -167,6 +167,14 @@ dispatched reviewer round stops for a triage prompt over what it found:
 already resolves in full (a workspace and an oracle), and leaving an ask
 missing a workspace, an oracle, or both for a human to decide later.
 
+Every round is judged against a resolved intent, not necessarily a brief:
+a ticket's own `brief.md` wins when there is one, else `jig gate --intent
+"<text>"` or `--doc <path>` records an explicit `intent.md` (refused when
+the ticket already has a brief.md - amend that instead), else the round
+has no intent to judge against at all, and the reviewer is told so
+plainly. Both flags work in every mode, not only `--branch`, and each
+gate report prints which one this round resolved to.
+
 ## Safety
 
 The `headless` backend is not a security boundary: a granted session's

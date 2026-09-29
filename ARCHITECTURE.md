@@ -18,10 +18,12 @@ run(frontier)  dispatch queued, unblocked slices to a build session
   │                    journal.ndjson, questions/q-NNN.md, start.<repo>.sha
   ▼
 gate           re-verification round: oracles, then a reviewer session's find/route/triage
-  │            reads:  brief.md, slices.yaml, journal.ndjson, gate/round-N/findings.yaml (cumulative fold)
+  │            reads:  brief.md or intent.md (resolveIntent), slices.yaml, journal.ndjson,
+  │                    gate/round-N/findings.yaml (cumulative fold)
   │            writes: work/gate.round-N.{review,result}.json,
   │                    gate/round-N/{findings.yaml,findings.md,report.yaml,diff-changelog.md},
-  │                    evidence/round-N/*, slices.yaml (fix slices, findings, from_gate: N)
+  │                    evidence/round-N/*, slices.yaml (fix slices, findings, from_gate: N),
+  │                    intent.md (--intent/--doc only)
   ▼
 publish        reconcile, revalidate, docs, squash, route → open the PR
                reads:  gate/round-N/*, journal.ndjson
@@ -65,6 +67,7 @@ charts/
     tickets.yaml    # the handover jig reads and writes
 <ticket>/
   brief.md
+  intent.md         # jig gate --intent/--doc, ignored when brief.md exists
   slices.yaml
   ticket.yaml       # optional: this ticket's own record - title, branch, blockers
   start.<repo>.sha
@@ -84,7 +87,6 @@ charts/
       findings.md
       diff-changelog.md
       report.yaml
-      spec-input.md   # --branch --doc only
   evidence/
     round-N/
   changelog/
@@ -164,8 +166,10 @@ outside jig's own process.
 A gate round's reviewer dispatch (`internal/verifydeliver/review.go`) is the
 same disk-only contract as a build session, narrowed to read-only: jig
 writes `work/gate.round-N.review.json` (the ticket, round, scope, base and
-head sha, brief/slices/journal paths, manifest oracles, and the cumulative
-`open`/`dismissed` findings folded from every earlier round), the backend
+head sha, the round's resolved intent - source and path, `Gate`'s own
+`resolveIntent`, precedence brief.md then intent.md then none - plus
+slices/journal paths, manifest oracles, and the cumulative `open`/
+`dismissed` findings folded from every earlier round), the backend
 runs a session against `must_review` - every file the scope diff touched
 plus every still-open finding's file - and jig reads back
 `work/gate.round-N.result.json` (findings, `reviewed_paths`, a summary). The

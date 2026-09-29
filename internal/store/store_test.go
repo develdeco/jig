@@ -317,6 +317,69 @@ func TestSupersedePreservesAnswer(t *testing.T) {
 	}
 }
 
+// TestIntentRoundTrip asserts WriteIntent/ReadIntent round-trip a ticket's
+// intent.md, and that a second WriteIntent replaces the file's content
+// rather than appending to it.
+func TestIntentRoundTrip(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+
+	if _, ok, err := st.ReadIntent("JIG-1"); err != nil || ok {
+		t.Fatalf("ReadIntent before any write: ok=%v err=%v, want ok=false, err=nil", ok, err)
+	}
+
+	if err := st.WriteIntent("JIG-1", Intent{Source: "explicit", Text: "make the greeting warmer"}); err != nil {
+		t.Fatal(err)
+	}
+	in, ok, err := st.ReadIntent("JIG-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Intent{Source: "explicit", Text: "make the greeting warmer"}
+	if !ok || in != want {
+		t.Fatalf("ReadIntent = %+v (ok=%v), want %+v", in, ok, want)
+	}
+
+	if err := st.WriteIntent("JIG-1", Intent{Source: "explicit", Text: "second take"}); err != nil {
+		t.Fatal(err)
+	}
+	in, ok, err = st.ReadIntent("JIG-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = Intent{Source: "explicit", Text: "second take"}
+	if !ok || in != want {
+		t.Fatalf("ReadIntent after a second write = %+v (ok=%v), want %+v (replaced, not appended)", in, ok, want)
+	}
+}
+
+// TestIntentMissingFrontMatterErrors asserts ReadIntent fails loudly on an
+// intent.md with no front matter, rather than reading it as an empty
+// source.
+func TestIntentMissingFrontMatterErrors(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	path := st.IntentPath("JIG-1")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("just some text, no front matter\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.ReadIntent("JIG-1"); err == nil {
+		t.Fatal("ReadIntent: expected an error for a file with no front matter, got nil")
+	}
+}
+
+// TestIntentUnknownFrontMatterKeyRefused asserts ParseIntent refuses an
+// intent.md whose front matter carries a key jig never writes there,
+// rather than silently dropping it - the same standard revieweval holds
+// its own files to (yamlKnownFields).
+func TestIntentUnknownFrontMatterKeyRefused(t *testing.T) {
+	_, err := ParseIntent([]byte("---\nsource: explicit\nbogus: field\n---\nhello\n"))
+	if err == nil {
+		t.Fatal("ParseIntent: expected an error for an unknown front matter key, got nil")
+	}
+}
+
 func TestBriefSectionHashes(t *testing.T) {
 	brief := "# Brief\n\n## Goal\nDo the thing.\n\n## Slice A - repro\nMake it fail first.   \n\n## Slice B\nThen fix it.\n"
 	got := BriefSectionHashes([]byte(brief))

@@ -68,7 +68,7 @@ type ReviewRequest struct {
 	Scope       string             `json:"scope"` // full|delta
 	BaseSHA     string             `json:"base_sha"`
 	HeadSHA     string             `json:"head_sha"`
-	BriefPath   string             `json:"brief_path"`
+	Intent      Intent             `json:"intent"`
 	SlicesPath  string             `json:"slices_path"`
 	JournalPath string             `json:"journal_path"`
 	Oracles     []string           `json:"oracles"`
@@ -406,8 +406,8 @@ func normalizeRepoRelPath(p string) (string, error) {
 
 // relativizeReviewedPath resolves one reviewed_paths entry for coverage. A
 // plain repo-relative path normalizes as usual. review.json hands the
-// reviewer several absolute paths to read - review.json itself, brief_path,
-// slices_path, journal_path - and the prompt asks for "every file you
+// reviewer several absolute paths to read - review.json itself, intent's own
+// path, slices_path, journal_path - and the prompt asks for "every file you
 // read", so an absolute path inside the lease worktree is relativized to it
 // rather than rejected: strict parsing has no rule against a reviewed_paths
 // entry beyond coverage, only against a finding's file.
@@ -574,9 +574,9 @@ func validateReviewResult(req ReviewRequest, result ReviewResult, leaseDir strin
 // and says what jig will verify. It never lists kinds of problems, coaches
 // behavior, or patches a past model mistake.
 const reviewPromptTemplate = `You are reviewing round %d of ticket %s. Your inputs are in review.json at %s.
-Review the %s diff %s..%s in this worktree against the brief; the brief says what was asked for. Do not edit files, commit, or push.
+Review the %s diff %s..%s in this worktree against the change's intent. review.json's intent names it and its source: "brief" or "explicit" is the human's own statement of what was asked for, "none" means nothing states it. Do not edit files, commit, or push.
 Report every problem you find in the files you review, as they are now, including problems already listed as open. For each, give file, line (0 if unknown), title, detail, action, risk, risk_rationale and oracle, plus prior when it is a finding listed under open or dismissed. The human dismissed the findings listed under dismissed.
-action: "fix" when the fix is objective and does not change what the brief asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
+action: "fix" when the fix is objective and does not change what the intent asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
 risk: "low", "medium" or "high": how much harm follows if this part of the change is wrong.
 oracle: the manifest oracle from review.json that best proves the fix.
 reviewed_paths: every file you read. jig rejects a result that does not include every path in must_review.
@@ -752,15 +752,18 @@ type Review struct {
 // ignores the rest, while the reviewer source below uses the rest to build
 // review.json and dispatch.
 type RoundInput struct {
-	Store     *store.Store
-	Ticket    string
-	Round     int
-	LeaseDir  string
-	RepoName  string
-	Target    string
-	Model     string
-	BriefPath string
-	Manifest  manifest.Manifest
+	Store    *store.Store
+	Ticket   string
+	Round    int
+	LeaseDir string
+	RepoName string
+	Target   string
+	Model    string
+	// Intent is this round's resolved intent binding (intent.go's
+	// resolveIntent, which Gate calls), already absolute or "" for source
+	// "none".
+	Intent   Intent
+	Manifest manifest.Manifest
 	// Open is findings bookkeeping's cumulative fold (findings.go's
 	// openAndNotedFindingsList), carried whole rather than projected: it
 	// is jig's own Status that says what is outstanding, and the wire
@@ -869,7 +872,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		Scope:       scope,
 		BaseSHA:     base,
 		HeadSHA:     head,
-		BriefPath:   absPath(in.BriefPath),
+		Intent:      in.Intent,
 		SlicesPath:  absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "slices.yaml")),
 		JournalPath: absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "journal.ndjson")),
 		Oracles:     oracleNames,

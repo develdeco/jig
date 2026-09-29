@@ -1,11 +1,14 @@
 package verifydeliver
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,6 +22,21 @@ import (
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
+
+// sha256HexFile returns the sha256 hex digest of path's exact on-disk
+// bytes, computed independently of anything under test: a test pinning
+// report.yaml's sha256 against this catches a hash that quietly drifts
+// from the file a reviewer actually reads (for example hashing the wrong
+// field, or a parsed/normalized stand-in for the file's own bytes).
+func sha256HexFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
 
 // alwaysCleanSource is a GateSource stub that always reports a clean
 // round, for tests that only care about the frontier/model/oracle path.
@@ -297,116 +315,611 @@ func TestGateRefusesQueuedFixSlice(t *testing.T) {
 	}
 }
 
-// TestGateBranchCopiesBriefDoc checks that `--branch --doc <path>` actually
-// wires the spec-axis input swap: the doc's content lands in this round's
-// gate/round-<n>/spec-input.md rather than being silently accepted and
-// dropped.
-func TestGateBranchCopiesBriefDoc(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	// --branch validates a hand-written branch's oracles for real, so it
-	// needs one where they actually pass: drive the ticket's own branch to
-	// green, then push it to origin so the (separate) gate lease this call
-	// acquires can see it as "jig/<ticket>", same as a real hand-written
-	// branch pushed for review.
-	driveBuild(t, fx, "rung-a")
-	buildDir := buildLeaseDir(t, fx)
-	if _, err := gitx.Run(buildDir, "push", "origin", ticketBranch(fx.Ticket)); err != nil {
-		t.Fatalf("push build branch: %v", err)
-	}
-
-	briefDoc := filepath.Join(t.TempDir(), "brief.md")
-	if err := os.WriteFile(briefDoc, []byte("# spec axis input\n"), 0o644); err != nil {
-		t.Fatalf("write brief doc: %v", err)
-	}
-
-	d := newDeps(t, fx)
-	report, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: ticketBranch(fx.Ticket), BriefDoc: briefDoc, Early: true})
-	if err != nil {
-		t.Fatalf("Gate --branch --doc: %v", err)
-	}
-
-	specInput := filepath.Join(d.Store.TicketDir(fx.Ticket), "gate", fmt.Sprintf("round-%d", report.Round), "spec-input.md")
-	data, err := os.ReadFile(specInput)
-	if err != nil {
-		t.Fatalf("read spec-input.md: %v", err)
-	}
-	if string(data) != "# spec axis input\n" {
-		t.Fatalf("spec-input.md content = %q, want brief doc content", data)
+// removeBrief deletes fx's ticket's brief.md, simulating a brief-less
+// ticket: fixture.Generate always writes one, and intent precedence only
+// falls through to intent.md/none once it is gone.
+func removeBrief(t *testing.T, d Deps, ticket string) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(d.Store.TicketDir(ticket), "brief.md")); err != nil {
+		t.Fatalf("remove brief.md: %v", err)
 	}
 }
 
-// TestGateBranchMissingDocErrors checks that a --doc path that cannot be
-// read is refused with BRIEF_DOC_MISSING rather than silently ignored.
-func TestGateBranchMissingDocErrors(t *testing.T) {
+// gateRefused runs Gate and returns its error, requiring the call to leave
+// the journal exactly as it found it: a refusal that is documented as
+// leaving no trace (a bad intent flag, a bad intent.md, an unmet
+// precondition) must fail the round before its gate-open journal line is
+// appended, not after, or a plain rerun is no longer the whole recovery.
+// Journal lines are compared, not the store's HEAD: a round's own deferred
+// push and Sync's own "record uncommitted store state" commit both move
+// HEAD legitimately.
+func gateRefused(t *testing.T, d Deps, src GateSource, o GateOpts) error {
+	t.Helper()
+	count := func() int {
+		t.Helper()
+		lines, err := journal.Read(d.Store, o.Ticket)
+		if err != nil {
+			t.Fatalf("journal.Read: %v", err)
+		}
+		return len(lines)
+	}
+	before := count()
+	_, err := Gate(d, src, o)
+	if after := count(); after != before {
+		t.Errorf("journal has %d lines after the refused Gate (err = %v), want the %d it had before: a refusal must leave no journal line", after, err, before)
+	}
+	return err
+}
+
+// requireReportIntentWireShape checks the intent binding's wire shape in
+// the report.yaml bytes a round wrote, decoding them into raw keys rather
+// than into reportYAML: every other reader in this package decodes into
+// that struct, so a renamed yaml tag round-trips through it unnoticed
+// while the file itself, store schema (ADR 0003), changes shape for
+// everything else that reads it. The shape is one top-level "intent"
+// mapping with exactly the keys "sha256" and "source".
+func requireReportIntentWireShape(t *testing.T, reportData []byte) {
+	t.Helper()
+	var raw map[string]any
+	if err := yaml.Unmarshal(reportData, &raw); err != nil {
+		t.Fatalf("parse report.yaml as raw keys: %v", err)
+	}
+	rawIntent, ok := raw["intent"]
+	if !ok {
+		t.Fatalf("report.yaml has no \"intent\" key:\n%s", reportData)
+	}
+	fields, ok := rawIntent.(map[string]any)
+	if !ok {
+		t.Fatalf("report.yaml's \"intent\" is not a mapping: %T\n%s", rawIntent, reportData)
+	}
+	if got, want := slices.Sorted(maps.Keys(fields)), []string{"sha256", "source"}; !slices.Equal(got, want) {
+		t.Errorf("report.yaml's intent keys = %v, want %v", got, want)
+	}
+}
+
+// reportYAMLAt reads and parses one round's report.yaml, after pinning the
+// intent block's raw key names (requireReportIntentWireShape), so every
+// test that reads a report back also checks the file's shape.
+func reportYAMLAt(t *testing.T, d Deps, ticket string, round int) reportYAML {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(gateRoundDir(d.Store, ticket, round), "report.yaml"))
+	if err != nil {
+		t.Fatalf("read report.yaml: %v", err)
+	}
+	requireReportIntentWireShape(t, data)
+	var rep reportYAML
+	if err := yaml.Unmarshal(data, &rep); err != nil {
+		t.Fatalf("parse report.yaml: %v", err)
+	}
+	return rep
+}
+
+// TestGateIntentBriefWins checks the top of the precedence order: a ticket
+// with a brief.md (fixture.Generate always writes one) resolves to source
+// "brief", pointing at that file, with a non-empty report.yaml sha256.
+func TestGateIntentBriefWins(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-
+	driveBuild(t, fx, "rung-a")
 	d := newDeps(t, fx)
-	_, err := Gate(d, alwaysCleanSource{}, GateOpts{
-		Ticket:   fx.Ticket,
-		Branch:   "main",
-		BriefDoc: filepath.Join(t.TempDir(), "missing.md"),
-		Early:    true,
+
+	report, err := Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if report.Intent.Source != IntentSourceBrief {
+		t.Fatalf("Intent.Source = %q, want %q", report.Intent.Source, IntentSourceBrief)
+	}
+	wantPath, err := filepath.Abs(filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Intent.Path != wantPath {
+		t.Fatalf("Intent.Path = %q, want %q", report.Intent.Path, wantPath)
+	}
+	wantSHA256 := sha256HexFile(t, wantPath)
+	if report.IntentSHA256 != wantSHA256 {
+		t.Fatalf("IntentSHA256 = %q, want %q (sha256 of brief.md's own bytes)", report.IntentSHA256, wantSHA256)
+	}
+
+	rep := reportYAMLAt(t, d, fx.Ticket, report.Round)
+	if rep.Intent.Source != IntentSourceBrief || rep.Intent.SHA256 != wantSHA256 {
+		t.Fatalf("report.yaml intent = %+v, want source %q with sha256 %q", rep.Intent, IntentSourceBrief, wantSHA256)
+	}
+}
+
+// TestGateIntentNoneWithNoBriefOrIntent checks the bottom of the precedence
+// order: a ticket with neither a brief.md nor an intent.md resolves to
+// source "none", with no path and no sha256.
+func TestGateIntentNoneWithNoBriefOrIntent(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	removeBrief(t, d, fx.Ticket)
+
+	report, err := Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if report.Intent.Source != IntentSourceNone {
+		t.Fatalf("Intent.Source = %q, want %q", report.Intent.Source, IntentSourceNone)
+	}
+	if report.Intent.Path != "" {
+		t.Fatalf("Intent.Path = %q, want empty", report.Intent.Path)
+	}
+	if report.IntentSHA256 != "" {
+		t.Fatalf("IntentSHA256 = %q, want empty", report.IntentSHA256)
+	}
+
+	rep := reportYAMLAt(t, d, fx.Ticket, report.Round)
+	if rep.Intent.Source != IntentSourceNone || rep.Intent.SHA256 != "" {
+		t.Fatalf("report.yaml intent = %+v, want source %q with an empty sha256", rep.Intent, IntentSourceNone)
+	}
+}
+
+// TestGateIntentFlagOutsideBranch checks that --intent works in normal
+// (non-branch) mode, not only --branch: on a brief-less ticket it writes
+// intent.md and this round resolves to source "explicit". The text is
+// recorded byte for byte (surrounding spaces, CRLF and an inner blank line
+// kept, one newline appended to end the file), which ReadIntent's own
+// normalization cannot show, so the file is compared directly.
+func TestGateIntentFlagOutsideBranch(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	removeBrief(t, d, fx.Ticket)
+
+	const intentText = "  fix the thing that broke,\r\n\r\nnot the one next to it  "
+	src := NewFakeGateSource(fx.ScenarioDir)
+	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Intent: intentText})
+	if err != nil {
+		t.Fatalf("Gate --intent: %v", err)
+	}
+	if report.Intent.Source != IntentSourceExplicit {
+		t.Fatalf("Intent.Source = %q, want %q", report.Intent.Source, IntentSourceExplicit)
+	}
+	in, ok, err := d.Store.ReadIntent(fx.Ticket)
+	if err != nil || !ok {
+		t.Fatalf("ReadIntent: ok=%v err=%v", ok, err)
+	}
+	if in.Source != IntentSourceExplicit {
+		t.Fatalf("intent.md source = %q, want %q", in.Source, IntentSourceExplicit)
+	}
+	raw, err := os.ReadFile(d.Store.IntentPath(fx.Ticket))
+	if err != nil {
+		t.Fatalf("read intent.md: %v", err)
+	}
+	if want := "---\nsource: explicit\n---\n" + intentText + "\n"; string(raw) != want {
+		t.Fatalf("intent.md = %q, want the given text's own bytes after the front matter: %q", raw, want)
+	}
+
+	wantSHA256 := sha256HexFile(t, d.Store.IntentPath(fx.Ticket))
+	rep := reportYAMLAt(t, d, fx.Ticket, report.Round)
+	if rep.Intent.Source != IntentSourceExplicit || rep.Intent.SHA256 != wantSHA256 {
+		t.Fatalf("report.yaml intent = %+v, want source %q with sha256 %q (intent.md's own bytes)", rep.Intent, IntentSourceExplicit, wantSHA256)
+	}
+}
+
+// TestGateDocFlagWritesIntentFromFile checks --doc: its file's content, not
+// its path, becomes intent.md's text, byte for byte. The doc is shaped so
+// that trimming it, normalizing its CRLF line endings, or collapsing its
+// trailing blank lines (CRLF ones, then bare LF ones, so a trim of LF alone
+// and a trim of CR and LF each leave a different file) each change the
+// file: ReadIntent and ParseIntent normalize CRLF and trim newlines
+// themselves, so only the file's own bytes can tell a recorded text from a
+// rewritten one.
+func TestGateDocFlagWritesIntentFromFile(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	removeBrief(t, d, fx.Ticket)
+
+	const docText = "\r\n  line one\r\n\r\nline two  \r\n\r\n\n\n"
+	doc := filepath.Join(t.TempDir(), "doc.md")
+	if err := os.WriteFile(doc, []byte(docText), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	report, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, IntentDoc: doc})
+	if err != nil {
+		t.Fatalf("Gate --doc: %v", err)
+	}
+	if report.Intent.Source != IntentSourceExplicit {
+		t.Fatalf("Intent.Source = %q, want %q", report.Intent.Source, IntentSourceExplicit)
+	}
+	raw, err := os.ReadFile(d.Store.IntentPath(fx.Ticket))
+	if err != nil {
+		t.Fatalf("read intent.md: %v", err)
+	}
+	if want := "---\nsource: explicit\n---\n" + docText; string(raw) != want {
+		t.Fatalf("intent.md = %q, want the doc's own bytes after the front matter: %q", raw, want)
+	}
+
+	wantSHA256 := sha256HexFile(t, d.Store.IntentPath(fx.Ticket))
+	rep := reportYAMLAt(t, d, fx.Ticket, report.Round)
+	if rep.Intent.Source != IntentSourceExplicit || rep.Intent.SHA256 != wantSHA256 {
+		t.Fatalf("report.yaml intent = %+v, want source %q with sha256 %q (intent.md's own bytes)", rep.Intent, IntentSourceExplicit, wantSHA256)
+	}
+}
+
+// TestGateIntentFlagConflictsWithBrief checks that --intent is refused with
+// INTENT_CONFLICT on a ticket that already has a brief.md.
+func TestGateIntentFlagConflictsWithBrief(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()}) // brief.md present by default
+	d := newDeps(t, fx)
+
+	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: "main", Early: true, Intent: "explicit text"})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "INTENT_CONFLICT" {
+		t.Fatalf("err = %v, want *axi.Error INTENT_CONFLICT", err)
+	}
+	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
+		t.Fatalf("ReadIntent after INTENT_CONFLICT: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
+	}
+}
+
+// TestGateDocFlagConflictsWithBrief is TestGateIntentFlagConflictsWithBrief
+// for --doc.
+func TestGateDocFlagConflictsWithBrief(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()}) // brief.md present by default
+	d := newDeps(t, fx)
+	doc := filepath.Join(t.TempDir(), "doc.md")
+	if err := os.WriteFile(doc, []byte("text"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: "main", Early: true, IntentDoc: doc})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "INTENT_CONFLICT" {
+		t.Fatalf("err = %v, want *axi.Error INTENT_CONFLICT", err)
+	}
+	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
+		t.Fatalf("ReadIntent after INTENT_CONFLICT: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
+	}
+}
+
+// TestGateIntentDocMissingErrors checks that a --doc path that cannot be
+// read is refused with INTENT_DOC_MISSING rather than silently ignored.
+func TestGateIntentDocMissingErrors(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	removeBrief(t, d, fx.Ticket)
+
+	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{
+		Ticket: fx.Ticket, Branch: "main", Early: true,
+		IntentDoc: filepath.Join(t.TempDir(), "missing.md"),
 	})
 	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "BRIEF_DOC_MISSING" {
-		t.Fatalf("err = %v, want *axi.Error BRIEF_DOC_MISSING", err)
+	if !errors.As(err, &ae) || ae.Code != "INTENT_DOC_MISSING" {
+		t.Fatalf("err = %v, want *axi.Error INTENT_DOC_MISSING", err)
+	}
+	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
+		t.Fatalf("ReadIntent after INTENT_DOC_MISSING: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
 	}
 }
 
-// TestGateBranchModeBriefPathIsTheDocItself guards a regression: in
-// --branch mode with --doc, review.json's brief_path must be the absolute
-// path of the --doc file itself, not the ticket's own brief.md and not
-// this round's own gate/round-<n>/spec-input.md (PR #8's recorded
-// decision: pointing at spec-input.md would leave a partial round dir on
-// disk if the reviewer then failed, since that file is written only after
-// the round succeeds).
-func TestGateBranchModeBriefPathIsTheDocItself(t *testing.T) {
+// TestGateIntentAndDocBothSetRefused checks that writeExplicitIntent
+// refuses Intent and IntentDoc both being set, not only the CLI
+// (cmd/jig/gate.go's own "not both" check): GateOpts is a library entry
+// point, so a caller that reaches Gate directly, bypassing the CLI, must
+// be refused the same way rather than silently letting the doc win.
+func TestGateIntentAndDocBothSetRefused(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	removeBrief(t, d, fx.Ticket)
+	doc := filepath.Join(t.TempDir(), "doc.md")
+	if err := os.WriteFile(doc, []byte("doc text"), 0o644); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{
+		Ticket: fx.Ticket, Branch: "main", Early: true,
+		Intent: "explicit text", IntentDoc: doc,
+	})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "VALIDATION_ERROR" {
+		t.Fatalf("err = %v, want *axi.Error VALIDATION_ERROR", err)
+	}
+	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
+		t.Fatalf("ReadIntent after both Intent and IntentDoc set: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
+	}
+}
+
+// TestGateEmptyDocFileRefused checks that a --doc file that reads but holds
+// no text a reviewer could judge a fix against - truly empty, or
+// whitespace-only - is refused with INTENT_EMPTY rather than recording a
+// binding explicit intent with nothing in it.
+func TestGateEmptyDocFileRefused(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		body []byte
+	}{
+		{"empty", nil},
+		{"whitespace-only", []byte("\n")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+			d := newDeps(t, fx)
+			removeBrief(t, d, fx.Ticket)
+			doc := filepath.Join(t.TempDir(), "empty.md")
+			if err := os.WriteFile(doc, tc.body, 0o644); err != nil {
+				t.Fatalf("write doc: %v", err)
+			}
+
+			err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{
+				Ticket: fx.Ticket, Branch: "main", Early: true,
+				IntentDoc: doc,
+			})
+			var ae *axi.Error
+			if !errors.As(err, &ae) || ae.Code != "INTENT_EMPTY" {
+				t.Fatalf("err = %v, want *axi.Error INTENT_EMPTY", err)
+			}
+			if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
+				t.Fatalf("ReadIntent after INTENT_EMPTY: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
+			}
+		})
+	}
+}
+
+// TestGateIntentFlagReplacesExistingIntentMD checks that a second --intent
+// replaces intent.md's text rather than appending to it.
+func TestGateIntentFlagReplacesExistingIntentMD(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
-	buildDir := buildLeaseDir(t, fx)
-	if _, err := gitx.Run(buildDir, "push", "origin", ticketBranch(fx.Ticket)); err != nil {
-		t.Fatalf("push build branch: %v", err)
-	}
-
-	briefDoc := filepath.Join(t.TempDir(), "spec-axis-input.md")
-	if err := os.WriteFile(briefDoc, []byte("# spec axis input\n"), 0o644); err != nil {
-		t.Fatalf("write brief doc: %v", err)
-	}
-	wantPath, err := filepath.Abs(briefDoc)
-	if err != nil {
-		t.Fatalf("abs briefDoc: %v", err)
-	}
-
 	d := newDeps(t, fx)
-	var gotBriefPath string
+	removeBrief(t, d, fx.Ticket)
+
+	// alwaysCleanSource never appends a fix slice, so the frontier stays
+	// green across both calls; neither needs --early.
+	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Intent: "first take"}); err != nil {
+		t.Fatalf("Gate --intent (1st): %v", err)
+	}
+	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Intent: "second take"}); err != nil {
+		t.Fatalf("Gate --intent (2nd): %v", err)
+	}
+
+	in, ok, err := d.Store.ReadIntent(fx.Ticket)
+	if err != nil || !ok {
+		t.Fatalf("ReadIntent: ok=%v err=%v", ok, err)
+	}
+	if in.Text != "second take" {
+		t.Fatalf("intent.md text = %q, want it replaced with %q, not appended", in.Text, "second take")
+	}
+}
+
+// reviewJSONIntent dispatches a minimal clean round through a real
+// reviewerGateSource and returns the "intent" field review.json actually
+// carried - what the reviewer itself was pointed at - rather than
+// GateReport.Intent, which is set from the very same local variable Gate
+// resolves and so cannot catch RoundInput losing it on the way to the
+// reviewer (for example a RoundInput literal built with a zero Intent).
+// It also pins that field's raw key names (requireIntentWireShape), which
+// decoding into ReviewRequest cannot see.
+func reviewJSONIntent(t *testing.T, d Deps, ticket string, opts GateOpts) Intent {
+	t.Helper()
+	var got Intent
 	backend := stubBackend{run: func(sd session.Dispatch) error {
-		data, err := os.ReadFile(sd.SliceJSON)
+		reviewData, err := os.ReadFile(sd.SliceJSON)
 		if err != nil {
 			t.Fatalf("read review.json: %v", err)
 		}
+		requireIntentWireShape(t, reviewData)
 		var req ReviewRequest
-		if err := json.Unmarshal(data, &req); err != nil {
+		if err := json.Unmarshal(reviewData, &req); err != nil {
 			t.Fatalf("parse review.json: %v", err)
 		}
-		gotBriefPath = req.BriefPath
-		writeMustReviewResult(t, sd)
-		return nil
+		got = req.Intent
+		result := ReviewResult{ReviewedPaths: req.MustReview, Summary: "clean"}
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-
-	_, err = Gate(d, NewReviewerGateSource(backend), GateOpts{
-		Ticket: fx.Ticket, Branch: ticketBranch(fx.Ticket), BriefDoc: briefDoc, Early: true,
-	})
-	if err != nil {
-		t.Fatalf("Gate --branch --doc: %v", err)
+	opts.Ticket = ticket
+	if _, err := Gate(d, NewReviewerGateSource(backend), opts); err != nil {
+		t.Fatalf("Gate: %v", err)
 	}
-	if gotBriefPath != wantPath {
-		t.Fatalf("review.json brief_path = %q, want the --doc file itself: %q", gotBriefPath, wantPath)
+	return got
+}
+
+// TestGateResolvedIntentReachesReviewJSONExplicit checks that the intent
+// Gate resolves and hands RoundInput for a binding explicit intent is the
+// same one a real reviewer source writes into review.json.
+func TestGateResolvedIntentReachesReviewJSONExplicit(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	removeBrief(t, d, fx.Ticket)
+
+	got := reviewJSONIntent(t, d, fx.Ticket, GateOpts{Intent: "make the greeting warmer"})
+	wantPath, err := filepath.Abs(d.Store.IntentPath(fx.Ticket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Source != IntentSourceExplicit || got.Path != wantPath {
+		t.Fatalf("review.json intent = %+v, want {%q %q}", got, IntentSourceExplicit, wantPath)
+	}
+}
+
+// TestGateResolvedIntentReachesReviewJSONNone is
+// TestGateResolvedIntentReachesReviewJSONExplicit for a brief-less ticket
+// with no explicit intent either: review.json's intent must still name
+// source "none" with an empty path, exactly what Gate itself resolved.
+func TestGateResolvedIntentReachesReviewJSONNone(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	removeBrief(t, d, fx.Ticket)
+
+	got := reviewJSONIntent(t, d, fx.Ticket, GateOpts{})
+	if got.Source != IntentSourceNone || got.Path != "" {
+		t.Fatalf("review.json intent = %+v, want {%q \"\"}", got, IntentSourceNone)
+	}
+}
+
+// TestGateIntentBriefWinsOverExistingIntentMD checks that brief.md wins
+// precedence even when intent.md is also present: resolveIntent must
+// check brief.md first, never the other way around. writeExplicitIntent
+// itself refuses to create this state (INTENT_CONFLICT), so intent.md is
+// written directly through the store here, simulating a brief.md added
+// after an earlier explicit intent was recorded - which the CLI hints
+// (`jig ticket`) point a user toward doing, and nothing ever removes the
+// stale intent.md that leaves behind.
+func TestGateIntentBriefWinsOverExistingIntentMD(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()}) // brief.md present by default
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+
+	if err := d.Store.WriteIntent(fx.Ticket, store.Intent{Source: IntentSourceExplicit, Text: "stale explicit intent"}); err != nil {
+		t.Fatalf("WriteIntent: %v", err)
+	}
+
+	report, err := Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if report.Intent.Source != IntentSourceBrief {
+		t.Fatalf("Intent.Source = %q, want %q (brief.md must win even with intent.md present)", report.Intent.Source, IntentSourceBrief)
+	}
+}
+
+// TestGateRefusesAnIntentMDItCannotBind checks that resolveIntent refuses
+// a ticket's intent.md when it binds nothing jig could stand behind, each
+// with its own code and before the round's gate-open journal line, and that
+// every refusal names the way out, which works: rerunning with --intent
+// replaces the file. Only a hand edit
+// (or a stale file from a jig that recorded something else) reaches any of
+// these, since `jig gate --intent`/`--doc` never writes one:
+//
+//   - a recorded source that is not one jig itself ever writes there
+//     (today, only "explicit") must not silently impersonate a provenance
+//     the human never actually gave, brief included;
+//   - a body with no text in it (whitespace only) is refused on read the
+//     same way writeExplicitIntent refuses to record it;
+//   - a front matter that does not parse, however it fails to, is a coded
+//     refusal with help, never a bare error.
+func TestGateRefusesAnIntentMDItCannotBind(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		file string
+		code string
+	}{
+		{"unsupported source", "---\nsource: brief\n---\nimpersonating brief provenance\n", "INTENT_INVALID_SOURCE"},
+		{"whitespace-only body", "---\nsource: explicit\n---\n   \n\n", "INTENT_EMPTY"},
+		{"no front matter", "just some words\n", "INTENT_INVALID"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+			driveBuild(t, fx, "rung-a")
+			d := newDeps(t, fx)
+			removeBrief(t, d, fx.Ticket)
+			if err := os.WriteFile(d.Store.IntentPath(fx.Ticket), []byte(tc.file), 0o644); err != nil {
+				t.Fatalf("write intent.md: %v", err)
+			}
+
+			err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+			var ae *axi.Error
+			if !errors.As(err, &ae) || ae.Code != tc.code {
+				t.Fatalf("err = %v, want *axi.Error %s", err, tc.code)
+			}
+			if len(ae.Help) != 1 || !strings.Contains(ae.Help[0], "jig gate "+fx.Ticket) || !strings.Contains(ae.Help[0], "--intent") {
+				t.Fatalf("help = %q, want one line naming `jig gate %s` with --intent", ae.Help, fx.Ticket)
+			}
+
+			// The way out the help names: a rerun with --intent replaces
+			// the bad file, and the round resolves to it.
+			report, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Intent: "the replacement text"})
+			if err != nil {
+				t.Fatalf("Gate --intent over the bad intent.md: %v", err)
+			}
+			if report.Intent.Source != IntentSourceExplicit {
+				t.Fatalf("Intent.Source = %q, want %q", report.Intent.Source, IntentSourceExplicit)
+			}
+		})
+	}
+}
+
+// TestGateIntentNotRecordedWhenNotGreen checks that a gate refused with
+// GATE_NOT_GREEN leaves no trace: --intent must not write (or push)
+// intent.md, nor append a journal line, before the frontier precondition
+// is checked, so a plain rerun after finishing the frontier is the whole
+// recovery.
+func TestGateIntentNotRecordedWhenNotGreen(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	dir := buildLeaseDir(t, fx)
+	driveAttempt(t, st, fx, dir, "rung-a", "a", 1)
+	// b, c, d are left queued: the frontier is not empty.
+
+	d := newDeps(t, fx)
+	removeBrief(t, d, fx.Ticket)
+
+	err = gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Intent: "should not be recorded"})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "GATE_NOT_GREEN" {
+		t.Fatalf("Gate with a queued slice and --intent: err = %v, want *axi.Error GATE_NOT_GREEN", err)
+	}
+	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
+		t.Fatalf("ReadIntent after a refused gate: ok=%v err=%v, want ok=false (intent.md must not be written before preconditions pass)", ok, rerr)
+	}
+}
+
+// TestGateIntentNotRecordedWhenBranchNotFound checks that a --branch gate
+// refused with BRANCH_NOT_FOUND leaves the same no trace: --intent must not
+// write intent.md, nor append a journal line, when the branch check refuses
+// the round after the frontier precondition already passed, so a plain
+// rerun (after the branch actually exists on origin) is still the whole
+// recovery.
+func TestGateIntentNotRecordedWhenBranchNotFound(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	removeBrief(t, d, fx.Ticket)
+
+	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{
+		Ticket: fx.Ticket, Branch: "no-such-branch", Early: true,
+		Intent: "should not be recorded",
+	})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "BRANCH_NOT_FOUND" {
+		t.Fatalf("Gate --branch missing on origin, with --intent: err = %v, want *axi.Error BRANCH_NOT_FOUND", err)
+	}
+	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
+		t.Fatalf("ReadIntent after BRANCH_NOT_FOUND: ok=%v err=%v, want ok=false (intent.md must not be written before every precondition passes)", ok, rerr)
 	}
 }
 
