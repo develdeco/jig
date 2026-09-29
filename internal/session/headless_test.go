@@ -272,7 +272,7 @@ func runClaudeStub(t *testing.T, env map[string]string) claudeStubRun {
 	if err := json.Unmarshal([]byte(lines[0]), &call); err != nil {
 		t.Fatalf("parse claude stub log: %v", err)
 	}
-	wantArgs, wantCleanup, err := b.args(d)
+	wantArgs, wantCleanup, err := b.args(sessionView(d))
 	if err != nil {
 		t.Fatalf("args: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestHeadlessRunGivenEnvIsExact(t *testing.T) {
 
 	want := map[string]bool{
 		"FOO=bar": true, "CLAUDE_STUB_LOG=" + logFile: true, "CLAUDE_STUB_STDOUT=" + stdout: true,
-		"PWD=" + d.Worktree: true,
+		"PWD=" + sessionView(d).Worktree: true,
 	}
 	if runtime.GOOS == "windows" {
 		// os/exec's own documented contract: SYSTEMROOT is always added
@@ -759,12 +759,17 @@ func TestHeadlessTimeoutKillsTheChildTree(t *testing.T) {
 	}
 	// SIGKILL and the reaping of the orphaned child are asynchronous, so
 	// give the tree a moment to finish dying. A child the kill missed is
-	// still sleeping out its 90s here, so the wait cannot mask a miss.
+	// still sleeping out its 90s here, so the wait cannot mask a miss. The
+	// verdict is the last probe, never a fresh one after it: once the
+	// child is reaped its pid is free, and a probe taken after the one that
+	// found it gone can find another process there.
 	deadline := time.Now().Add(5 * time.Second)
-	for processAlive(pid) && time.Now().Before(deadline) {
+	alive := processAlive(pid)
+	for alive && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
+		alive = processAlive(pid)
 	}
-	if processAlive(pid) {
+	if alive {
 		t.Errorf("child pid %d is still running after the timeout, want killTree to have ended the whole tree", pid)
 	}
 }

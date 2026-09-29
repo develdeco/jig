@@ -14,10 +14,11 @@
 // import path, so testdataFixtureDir then finds go.mod only when the binary
 // runs from the module root.
 //
-// Callers must set JIG_HOME (typically t.Setenv("JIG_HOME", t.TempDir()))
-// before calling Build or Generate. Neither touches the environment itself;
-// each writes the per-machine project mapping under whatever JIG_HOME the
-// caller already configured, and returns the paths it created.
+// Build and Generate write the per-machine project mapping under Opts.Home,
+// the jig home root the caller hands the code under test (a test passes its
+// own t.TempDir()). Left empty, Home is home.Root(): JIG_HOME, else the real
+// home directory, as the jig binary resolves it, so a caller that leaves it
+// empty must set JIG_HOME first. Neither touches the environment itself.
 package fixture
 
 import (
@@ -37,6 +38,7 @@ import (
 
 	"github.com/develdeco/jig/internal/gittest"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
@@ -61,6 +63,7 @@ type Fixture struct {
 	StoreRemote string // bare remote for the store; "" when Opts.Standalone
 	ScenarioDir string // materialized scenario tree for the fake session backend
 	Ticket      string // "JIG-1"
+	Home        string // jig home root the machine mapping was written under
 }
 
 // Opts configures a Build or Generate call.
@@ -75,6 +78,9 @@ type Opts struct {
 	// EnvFail inserts " --fail" into the rig environment class's up command,
 	// so envtool exits 1 before writing its state file.
 	EnvFail bool
+	// Home is the jig home root the per-machine project mapping is written
+	// under. "" means home.Root() (JIG_HOME, else the real home directory).
+	Home string
 }
 
 // identityEnv pins the git author/committer identity and date used for every
@@ -97,8 +103,8 @@ var identityEnv = []string{
 // can run from any binary.
 //
 // Everything checkable is validated before writing the fixture, and the
-// per-machine JIG_HOME mapping (project.InitProject) is written last, after
-// everything else under dir already exists. On any error once the
+// per-machine mapping under the jig home (project.InitProject) is written
+// last, after everything else under dir already exists. On any error once the
 // non-empty check has passed, Build removes what it wrote: dir's new
 // contents, and dir itself when Build created it, so a retry into the same
 // dir is not refused unless the cleanup itself fails, which Build reports.
@@ -208,7 +214,13 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 		}
 	}
 
-	if _, err := project.InitProject(storeDir, map[string]string{"fixture-repo": repoDir}); err != nil {
+	jigHome := opts.Home
+	if jigHome == "" {
+		if jigHome, err = home.Root(); err != nil {
+			return nil, fmt.Errorf("fixture: resolve jig home: %w", err)
+		}
+	}
+	if _, err := project.InitProject(jigHome, storeDir, map[string]string{"fixture-repo": repoDir}); err != nil {
 		return nil, fmt.Errorf("fixture: init project machine mapping: %w", err)
 	}
 
@@ -220,13 +232,21 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 		StoreRemote: storeRemote,
 		ScenarioDir: scenarioDir,
 		Ticket:      Ticket,
+		Home:        jigHome,
 	}, nil
 }
 
 // Generate materializes a fresh fixture into a new t.TempDir() and returns
-// it. It fails the test via t.Fatal on any setup error.
+// it. It fails the test via t.Fatal on any setup error. With neither
+// opts.Home nor JIG_HOME set, the machine mapping goes to another
+// t.TempDir(), never the real home directory Build would fall back to.
 func Generate(t *testing.T, opts Opts) *Fixture {
 	t.Helper()
+	if opts.Home == "" && os.Getenv("JIG_HOME") == "" {
+		// Build would fall back to the real home directory; a test never
+		// writes there.
+		opts.Home = t.TempDir()
+	}
 	fx, err := Build(t.TempDir(), opts)
 	if err != nil {
 		t.Fatal(err)
@@ -307,6 +327,10 @@ func buildStore(storeDir, testdataDir, repoRemote string) error {
 	// sidecar "*.lock" files and store.AtomicWrite's ".*.tmp" scratch files
 	// must never show up as untracked/dirty in a fixture store either.
 	if err := writeFile(filepath.Join(storeDir, ".gitignore"), []byte("*.lock\n.*.tmp\n")); err != nil {
+		return err
+	}
+	// And its .gitattributes: no conversion of any file in the store.
+	if err := writeFile(filepath.Join(storeDir, ".gitattributes"), []byte(gitx.StoreAttributes)); err != nil {
 		return err
 	}
 

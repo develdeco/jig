@@ -714,22 +714,26 @@ func TestHelpContainsCommands(t *testing.T) {
 // resolves the store via the per-machine project mapping ahead of the
 // --store/cwd fallback resolveStore itself falls through to.
 func TestResolveStoreForProjectUsesMachineMapping(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	jigHome := t.TempDir()
+	t.Setenv("JIG_HOME", jigHome)
 	fx := fixture.Generate(t, fixture.Opts{})
 
 	cfg, err := project.Load(fx.StoreDir + "/project.yaml")
 	if err != nil {
 		t.Fatalf("project.Load: %v", err)
 	}
-	if _, err := project.InitProject(fx.StoreDir, nil); err != nil {
+	if _, err := project.InitProject(fx.Home, fx.StoreDir, nil); err != nil {
 		t.Fatalf("InitProject: %v", err)
 	}
 
 	// No --store and a cwd that resolves nothing: --project alone must
 	// still find the store through the machine mapping.
-	st, gotCfg, _, err := resolveStoreForProject(cfg.Name, "")
+	st, gotCfg, _, gotHome, err := resolveStoreForProject(cfg.Name, "")
 	if err != nil {
 		t.Fatalf("resolveStoreForProject: %v", err)
+	}
+	if gotHome != jigHome {
+		t.Fatalf("jig home = %q, want JIG_HOME's %q", gotHome, jigHome)
 	}
 	if st.Root != fx.StoreDir {
 		t.Fatalf("st.Root = %q, want %q", st.Root, fx.StoreDir)
@@ -744,7 +748,7 @@ func TestResolveStoreForProjectUsesMachineMapping(t *testing.T) {
 func TestResolveStoreForProjectUnknownName(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 
-	_, _, _, err := resolveStoreForProject("no-such-project", "")
+	_, _, _, _, err := resolveStoreForProject("no-such-project", "")
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "VALIDATION_ERROR" {
 		t.Fatalf("err = %v, want *axi.Error VALIDATION_ERROR", err)

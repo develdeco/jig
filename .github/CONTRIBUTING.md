@@ -73,17 +73,43 @@ annotation.
 - Every package whose tests run git wires `internal/gittest` into
   `TestMain` (`gittest.Run`), which points git at a generated, hermetic
   config and stops background maintenance from outliving the test process.
-- Only `internal/gitx` spawns `git`; `lint.TestNoGitSpawnOutsideGitx` parses
-  every other package and fails the build if one calls `os/exec` on a
-  program that resolves to `git`.
-- Every test gets its own `t.TempDir()`, and `JIG_HOME` is always overridden
-  with `t.Setenv` so a test run never touches a real machine's jig home.
+- Only `internal/gitx` runs git, as a program or in process:
+  `lint.TestNoGitSpawnOutsideGitx` parses every other package and fails the
+  build if one calls `os/exec` on a program that resolves to `git`, and
+  `lint.TestNoGoGitOutsideGitx` if one imports go-git.
+- Every test gets its own `t.TempDir()`, and its own jig home, so a test
+  run never touches a real machine's: packages take the jig home root as an
+  argument (`fixture.Opts.Home`, `verifydeliver.Deps.Home`,
+  `frontier.Deps.Home`, `pool.Acquire`), and a test passes a `t.TempDir()`;
+  a test that runs `cmd/jig` or the jig binary, which read `JIG_HOME`, sets
+  it with `t.Setenv`.
+
+## Tests against the real Claude Code CLI
+
+`go test ./...` runs every session backend against a stub `claude`. The
+live CLI tests run jig's headless backend through the real `claude` on
+your PATH instead, against a scripted Messages API on loopback, so they
+need no sign-in and spend no tokens:
+
+```sh
+JIG_LIVE_CLAUDE=1 go test -count=1 -run Live ./internal/session ./e2e
+```
+
+`internal/session`'s test checks the headless permission model against the
+CLI, and `e2e`'s runs README's Quickstart, from `jig skills install` to a
+published branch. Set `JIG_E2E_BINARY` to an installed jig to run the e2e
+suite against it instead of a binary built from the tree. CI's
+`claude-cli` job runs both on all three platforms, on every pull request,
+every push to main and once a day, with the latest CLI release installed,
+and every release runs the Quickstart with its own binaries, as they are
+installed, before and after it is published.
 
 ## Live review eval
 
 `internal/revieweval` scores the gate reviewer against a labeled corpus
 (`testdata/revieweval`) by dispatching a real reviewer session against it.
-It is opt-in, since CI has no `claude` CLI:
+It is opt-in, since it runs real model sessions, which need a signed-in
+`claude` CLI and spend tokens:
 
 ```sh
 JIG_REVIEWEVAL_BACKEND=headless go test -count=1 -timeout 0 -v -run TestEvalLive ./internal/revieweval

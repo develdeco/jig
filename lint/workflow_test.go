@@ -9,6 +9,7 @@ package lint
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -164,39 +165,7 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	if !ok {
 		t.Fatalf("ci.yml: no \"test\" job, so there is nothing to run the cross-platform and gate checks below")
 	}
-
-	strategy, _ := yamlMap(job["strategy"])
-	matrix, _ := yamlMap(strategy["matrix"])
-	osList, ok := yamlSlice(matrix["os"])
-	if !ok {
-		t.Fatalf("ci.yml: test job has no strategy.matrix.os list, so it would not run cross-platform at all")
-	}
-	var haveUbuntu, haveWindows, haveMacos bool
-	for _, v := range osList {
-		s, ok := yamlString(v)
-		if !ok {
-			continue
-		}
-		lower := strings.ToLower(s)
-		if strings.HasPrefix(lower, "ubuntu-") {
-			haveUbuntu = true
-		}
-		if strings.HasPrefix(lower, "windows-") {
-			haveWindows = true
-		}
-		if strings.HasPrefix(lower, "macos-") {
-			haveMacos = true
-		}
-	}
-	if !haveUbuntu {
-		t.Errorf("ci.yml: test job matrix has no ubuntu-* leg, so a Linux-only regression would merge unnoticed")
-	}
-	if !haveWindows {
-		t.Errorf("ci.yml: test job matrix has no windows-* leg, so a Windows-only regression would merge unnoticed")
-	}
-	if !haveMacos {
-		t.Errorf("ci.yml: test job matrix has no macos-* leg, so a macOS-only regression would merge unnoticed (it has shipped before, commit d920a72)")
-	}
+	requireAllPlatforms(t, "ci.yml", "test", job)
 
 	steps, ok := yamlSlice(job["steps"])
 	if !ok {
@@ -213,6 +182,337 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	requireUnconditionalStep(t, steps, "go vet", "go vet ./...")
 	requireUnconditionalStep(t, steps, "go test", "go test ")
 	requireStepOnExactly(t, steps, "gofmt", "gofmt -l", "runner.os == 'Linux'")
+}
+
+// requireAllPlatforms asserts job name in workflow file runs a
+// strategy.matrix.os leg on each of the three supported platforms: listed
+// in matrix.os, and not taken out again by a matrix.exclude entry naming
+// it.
+func requireAllPlatforms(t *testing.T, file, name string, job map[string]interface{}) {
+	t.Helper()
+	strategy, _ := yamlMap(job["strategy"])
+	matrix, _ := yamlMap(strategy["matrix"])
+	osList, ok := yamlSlice(matrix["os"])
+	if !ok {
+		t.Fatalf("%s: %s job has no strategy.matrix.os list, so it would not run cross-platform at all", file, name)
+	}
+	excluded := map[string]bool{}
+	excludes, _ := yamlSlice(matrix["exclude"])
+	for _, e := range excludes {
+		entry, _ := yamlMap(e)
+		if s, ok := yamlString(entry["os"]); ok {
+			excluded[s] = true
+		}
+	}
+	var haveUbuntu, haveWindows, haveMacos bool
+	for _, v := range osList {
+		s, ok := yamlString(v)
+		if !ok || excluded[s] {
+			continue
+		}
+		lower := strings.ToLower(s)
+		if strings.HasPrefix(lower, "ubuntu-") {
+			haveUbuntu = true
+		}
+		if strings.HasPrefix(lower, "windows-") {
+			haveWindows = true
+		}
+		if strings.HasPrefix(lower, "macos-") {
+			haveMacos = true
+		}
+	}
+	if !haveUbuntu {
+		t.Errorf("%s: %s job matrix has no ubuntu-* leg, so a Linux-only regression would merge unnoticed", file, name)
+	}
+	if !haveWindows {
+		t.Errorf("%s: %s job matrix has no windows-* leg, so a Windows-only regression would merge unnoticed", file, name)
+	}
+	if !haveMacos {
+		t.Errorf("%s: %s job matrix has no macos-* leg, so a macOS-only regression would merge unnoticed (it has shipped before, commit d920a72)", file, name)
+	}
+}
+
+// workflowJobs parses workflow file and returns its jobs mapping.
+func workflowJobs(t *testing.T, root, file string) map[string]interface{} {
+	t.Helper()
+	jobs, ok := yamlMap(loadWorkflow(t, root, file)["jobs"])
+	if !ok {
+		t.Fatalf("%s: no jobs mapping", file)
+	}
+	return jobs
+}
+
+// gateCheckName is the check main's ruleset requires beside the test
+// job's legs: ci.yml's gate job, which fails unless every job it needs
+// succeeded.
+const gateCheckName = "ci ok"
+
+// TestCIWorkflowGateJob asserts ci.yml's gate job exists under the check
+// name the ruleset requires, always runs (GitHub counts a skipped required
+// check as passing), needs every job that runs on every change - so a new
+// agent CLI's contract job cannot be added without gating merges - and
+// that its step, run for real, fails unless every needed job succeeded. It
+// has bitten: claude-cli caught what the test job cannot, but only test's
+// three legs were required, so a PR breaking the CLI contract could merge.
+// The ruleset keeps those legs required because this test runs in them: a
+// pull request's own ci.yml defines the gate it is judged by.
+func TestCIWorkflowGateJob(t *testing.T) {
+	root := repoRoot(t)
+	jobs := workflowJobs(t, root, "ci.yml")
+	var gate string
+	for _, name := range sortedKeys(jobs) {
+		job, _ := yamlMap(jobs[name])
+		if n, _ := yamlString(job["name"]); n == gateCheckName {
+			gate = name
+		}
+	}
+	if gate == "" {
+		t.Fatalf("ci.yml: no job named %q, the check main's ruleset requires, so no pull request could merge", gateCheckName)
+	}
+	job, _ := yamlMap(jobs[gate])
+	if ifExpr, _ := yamlString(job["if"]); ifExpr != "always()" {
+		t.Errorf("ci.yml: the %s job's if = %q, want always(): a skipped required check counts as passing", gate, ifExpr)
+	}
+	needs := map[string]bool{}
+	for _, n := range needsList(job["needs"]) {
+		needs[n] = true
+	}
+	for _, name := range sortedKeys(jobs) {
+		other, _ := yamlMap(jobs[name])
+		// Only the release and dispatch jobs, whose if reads inputs.release
+		// (TestReleaseRunsQuickstartOnInstalledBinaries), stay out of the
+		// gate: they never run on a pull request.
+		if ifExpr, _ := yamlString(other["if"]); name == gate || strings.Contains(ifExpr, "inputs.release") {
+			continue
+		}
+		if !needs[name] {
+			t.Errorf("ci.yml: the %s job does not need %s, which runs on pull requests, so %s failing would not block a merge", gate, name, name)
+		}
+	}
+	requireGateStepFailsClosed(t, gate, job)
+}
+
+// requireGateStepFailsClosed runs the gate job's step that reads
+// needs.*.result, with that expression's variable set to synthetic
+// results, and asserts it succeeds only when every result is success -
+// failing on a failed, cancelled or skipped job and on no results at all,
+// as it would if its wiring to the variable broke.
+func requireGateStepFailsClosed(t *testing.T, gate string, job map[string]interface{}) {
+	t.Helper()
+	var script, variable string
+	steps, _ := yamlSlice(job["steps"])
+	for _, sv := range steps {
+		step, _ := yamlMap(sv)
+		env, _ := yamlMap(step["env"])
+		for _, k := range sortedKeys(env) {
+			if v, _ := yamlString(env[k]); strings.Contains(v, "needs.*.result") {
+				script, _ = yamlString(step["run"])
+				variable = k
+			}
+		}
+	}
+	if script == "" {
+		t.Fatalf("ci.yml: the %s job has no step with needs.*.result in its env, so it cannot fail on a needed job's result", gate)
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skipf("no bash to run the %s job's step: %v", gate, err)
+	}
+	for _, c := range []struct {
+		results string
+		pass    bool
+	}{
+		{"success success", true},
+		{"success failure", false},
+		{"cancelled success", false},
+		{"success skipped", false},
+		{"", false},
+	} {
+		cmd := exec.Command(bash, "-e", "-c", script)
+		cmd.Env = append(os.Environ(), variable+"="+c.results)
+		out, err := cmd.CombinedOutput()
+		if passed := err == nil; passed != c.pass {
+			t.Errorf("ci.yml: the %s job's step with %s=%q passed=%v, want %v: %s", gate, variable, c.results, passed, c.pass, out)
+		}
+	}
+}
+
+// TestCIWorkflowClaudeCLIJob asserts ci.yml runs jig's sessions against the
+// real Claude Code CLI on all three platforms, on every run of the
+// workflow, and fails the run when they fail: a job with no job-level "if"
+// runs them (requireLiveJob). It has bitten: v0.1.1 shipped a headless
+// backend whose argv the CLI refuses, since the test job's stub `claude`
+// accepts any argv and nothing ran the real one.
+func TestCIWorkflowClaudeCLIJob(t *testing.T) {
+	root := repoRoot(t)
+	jobs := workflowJobs(t, root, "ci.yml")
+	for _, name := range sortedKeys(jobs) {
+		job, ok := yamlMap(jobs[name])
+		if !ok {
+			continue
+		}
+		if _, conditional := job["if"]; conditional {
+			continue
+		}
+		if len(findLiveSteps(job, false)) > 0 {
+			requireLiveJob(t, root, "ci.yml", name, job, false, 1)
+			return
+		}
+	}
+	t.Errorf("ci.yml: no job without a job-level if runs go test with JIG_LIVE_CLAUDE set, so no session runs against the real Claude Code CLI on every change, or before a release")
+}
+
+// TestReleaseRunsQuickstartOnInstalledBinaries asserts a release's own
+// binaries, as they are installed, run README's Quickstart through the
+// real CLI (requireLiveJob with JIG_E2E_BINARY) both before and after it is
+// published: ci.yml's installers job, on the snapshot archives, which
+// release.yml's call turns on with release: true, and smoke.yml, on the
+// published ones, both the installer's and go install's. It has bitten:
+// v0.1.1 installed and printed its version, the most either checked, and
+// failed at its first dispatch.
+func TestReleaseRunsQuickstartOnInstalledBinaries(t *testing.T) {
+	root := repoRoot(t)
+
+	ciDoc := loadWorkflow(t, root, "ci.yml")
+	on, _ := yamlMap(ciDoc["on"])
+	call, _ := yamlMap(on["workflow_call"])
+	inputs, _ := yamlMap(call["inputs"])
+	if _, ok := inputs["release"]; !ok {
+		t.Errorf("ci.yml: workflow_call has no \"release\" input, so release.yml cannot ask for its archives to be installed and run before publishing")
+	}
+	ciJobs := workflowJobs(t, root, "ci.yml")
+	for _, name := range []string{"snapshot", "installers"} {
+		job, ok := yamlMap(ciJobs[name])
+		if !ok {
+			t.Fatalf("ci.yml: no %s job, so a release's archives are never installed and run before publishing", name)
+		}
+		if ifExpr, _ := yamlString(job["if"]); !strings.Contains(ifExpr, "inputs.release") {
+			t.Errorf("ci.yml: the %s job's if = %q does not read inputs.release, so it never runs in a release", name, ifExpr)
+		}
+	}
+	installers, _ := yamlMap(ciJobs["installers"])
+	requireLiveJob(t, root, "ci.yml", "installers", installers, true, 1)
+
+	releaseJobs := workflowJobs(t, root, "release.yml")
+	for _, name := range sortedKeys(releaseJobs) {
+		job, _ := yamlMap(releaseJobs[name])
+		if uses, _ := yamlString(job["uses"]); !strings.Contains(uses, "ci.yml") {
+			continue
+		}
+		with, _ := yamlMap(job["with"])
+		if release, _ := with["release"].(bool); !release {
+			t.Errorf("release.yml: the %s job calls ci.yml without release: true, so a release publishes archives that were never installed and run", name)
+		}
+	}
+
+	smokeJobs := workflowJobs(t, root, "smoke.yml")
+	for _, name := range sortedKeys(smokeJobs) {
+		job, ok := yamlMap(smokeJobs[name])
+		if !ok {
+			continue
+		}
+		if len(findLiveSteps(job, true)) > 0 {
+			requireLiveJob(t, root, "smoke.yml", name, job, true, 2)
+			return
+		}
+	}
+	t.Errorf("smoke.yml: no step runs go test with JIG_LIVE_CLAUDE and JIG_E2E_BINARY set, so a published release is only checked for its version, as v0.1.1 was")
+}
+
+// requireLiveJob asserts job name in workflow file runs its live CLI tests
+// (findLiveSteps) in at least want steps, on all three platforms, gating
+// every leg and the run: no job-level continue-on-error, no step-level
+// "if" or continue-on-error on a live step, and the CLI installed with
+// both official installers. With installed set, each live step names the
+// binary under test in JIG_E2E_BINARY and runs one e2e test by its exact
+// name in ./e2e, so a renamed test or a dropped package argument cannot
+// turn the step into a run of nothing that passes.
+func requireLiveJob(t *testing.T, root, file, name string, job map[string]interface{}, installed bool, want int) {
+	t.Helper()
+	requireAllPlatforms(t, file, name, job)
+	if hasContinueOnError(job) {
+		t.Errorf("%s: the %s job has a job-level continue-on-error, so its failure would not fail the run, and a release would publish past it", file, name)
+	}
+	lives := findLiveSteps(job, installed)
+	if len(lives) < want {
+		t.Errorf("%s: the %s job has %d steps running go test with JIG_LIVE_CLAUDE set (and JIG_E2E_BINARY, for an installed binary), want %d", file, name, len(lives), want)
+	}
+	for _, live := range lives {
+		if _, hasIf := live["if"]; hasIf || hasContinueOnError(live) {
+			t.Errorf("%s: a live CLI step of the %s job has a step-level \"if\" or continue-on-error, so it could skip or fail on some legs without failing the job", file, name)
+		}
+		if !installed {
+			continue
+		}
+		run, _ := yamlString(live["run"])
+		m := goTestRunFlag.FindStringSubmatch(run)
+		if m == nil || !e2eTestExists(t, root, m[1]) || !strings.Contains(run, "./e2e") {
+			t.Errorf("%s: a JIG_E2E_BINARY step of the %s job does not run an e2e test in ./e2e by a name that exists (%q), so it can pass having run nothing", file, name, run)
+		}
+	}
+	steps, _ := yamlSlice(job["steps"])
+	for _, installer := range []string{"claude.ai/install.sh", "claude.ai/install.ps1"} {
+		if _, ok := findStepByRun(steps, installer); !ok {
+			t.Errorf("%s: the %s job never runs %s, so a leg would run the live tests without the CLI a user installs", file, name, installer)
+		}
+	}
+}
+
+// goTestRunFlag matches a go test -run flag naming one test function.
+var goTestRunFlag = regexp.MustCompile(`-run[ =]\^?(Test\w+)\$?(\s|$)`)
+
+// e2eTestExists reports whether a test function named name is declared in
+// the e2e package.
+func e2eTestExists(t *testing.T, root, name string) bool {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(root, "e2e", "*_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decl := regexp.MustCompile(`(?m)^func ` + regexp.QuoteMeta(name) + `\(t \*testing\.T\)`)
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decl.Match(data) {
+			return true
+		}
+	}
+	return false
+}
+
+// findLiveSteps returns the steps of job that run go test with
+// JIG_LIVE_CLAUDE set to a non-empty value - and, with installed set,
+// JIG_E2E_BINARY too - in the step's own env or the job's. The live tests
+// skip on an empty JIG_LIVE_CLAUDE.
+func findLiveSteps(job map[string]interface{}, installed bool) []map[string]interface{} {
+	jobEnv, _ := yamlMap(job["env"])
+	set := func(env map[string]interface{}, key string) bool {
+		v, ok := env[key]
+		if !ok {
+			v = jobEnv[key]
+		}
+		s, _ := yamlString(v)
+		return s != ""
+	}
+	var out []map[string]interface{}
+	steps, _ := yamlSlice(job["steps"])
+	for _, sv := range steps {
+		step, ok := yamlMap(sv)
+		if !ok {
+			continue
+		}
+		run, _ := yamlString(step["run"])
+		if !strings.Contains(run, "go test") {
+			continue
+		}
+		env, _ := yamlMap(step["env"])
+		if set(env, "JIG_LIVE_CLAUDE") && (!installed || set(env, "JIG_E2E_BINARY")) {
+			out = append(out, step)
+		}
+	}
+	return out
 }
 
 // findStepByRun returns the first step in steps whose "run" field contains
@@ -247,19 +547,31 @@ func hasContinueOnError(step map[string]interface{}) bool {
 // requireUnconditionalStep asserts ci.yml's test job has a step running
 // substr (named label for the failure message) with no step-level "if" and
 // no continue-on-error, so it runs, and actually gates, every matrix leg.
+// Other steps may run substr too, for one leg only (the Windows leg's
+// launcher check runs a narrower go test first); one unconditional,
+// gating step is what counts.
 func requireUnconditionalStep(t *testing.T, steps []interface{}, label, substr string) {
 	t.Helper()
-	step, ok := findStepByRun(steps, substr)
-	if !ok {
+	found := false
+	for _, sv := range steps {
+		step, ok := yamlMap(sv)
+		if !ok {
+			continue
+		}
+		run, _ := yamlString(step["run"])
+		if !strings.Contains(run, substr) {
+			continue
+		}
+		found = true
+		if _, hasIf := step["if"]; !hasIf && !hasContinueOnError(step) {
+			return
+		}
+	}
+	if !found {
 		t.Errorf("ci.yml: test job has no step running %s, so a %s failure would merge", substr, label)
 		return
 	}
-	if _, hasIf := step["if"]; hasIf {
-		t.Errorf("ci.yml: the %s step has a step-level \"if\", so it could silently skip on some matrix legs instead of gating every one", label)
-	}
-	if hasContinueOnError(step) {
-		t.Errorf("ci.yml: the %s step has continue-on-error, so it could fail without failing the job", label)
-	}
+	t.Errorf("ci.yml: every %s step has a step-level \"if\" or continue-on-error, so %s could silently skip or fail on some matrix legs instead of gating every one", label, label)
 }
 
 // requireStepOnExactly asserts ci.yml's test job has a step running substr

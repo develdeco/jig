@@ -15,18 +15,17 @@ func TestRootHonorsEnv(t *testing.T) {
 	if r != dir {
 		t.Fatalf("Root() = %q, want %q", r, dir)
 	}
-	p, err := PoolDir()
-	if err != nil {
-		t.Fatal(err)
+}
+
+// TestPathsDeriveFromTheRootGiven covers the home-anchored paths: they are
+// derived from the root a caller passes, never from the environment.
+func TestPathsDeriveFromTheRootGiven(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("JIG_HOME", t.TempDir())
+	if p := PoolDir(root); p != filepath.Join(root, "pool") {
+		t.Fatalf("PoolDir(%q) = %q", root, p)
 	}
-	if p != filepath.Join(dir, "pool") {
-		t.Fatalf("PoolDir() = %q", p)
-	}
-	m, err := MachinePath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m != filepath.Join(dir, "projects.yaml") {
-		t.Fatalf("MachinePath() = %q", m)
+	if m := MachinePath(root); m != filepath.Join(root, "projects.yaml") {
+		t.Fatalf("MachinePath(%q) = %q", root, m)
 	}
 }

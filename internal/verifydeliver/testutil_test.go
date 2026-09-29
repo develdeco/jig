@@ -47,14 +47,14 @@ func newDeps(t *testing.T, fx *fixture.Fixture) Deps {
 	if err != nil {
 		t.Fatalf("project.Load: %v", err)
 	}
-	return Deps{Store: st, Cfg: cfg, Rungs: testRungs()}
+	return Deps{Store: st, Cfg: cfg, Rungs: testRungs(), Home: fx.Home}
 }
 
 // buildLeaseDir returns the build lease directory frontier would use for the
 // fixture's ticket: <pool>/fixture-repo/<ticket>.
 func buildLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	t.Helper()
-	lease, err := pool.Acquire("fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Build)
+	lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Build)
 	if err != nil {
 		t.Fatalf("pool.Acquire build lease: %v", err)
 	}

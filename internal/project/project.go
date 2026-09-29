@@ -147,14 +147,13 @@ type MachineProject struct {
 	Clones map[string]string `yaml:"clones"`
 }
 
-// LoadMachine reads the per-machine project mapping, returning an empty map
-// when the file does not exist yet.
-func LoadMachine() (map[string]MachineProject, error) {
-	path, err := home.MachinePath()
-	if err != nil {
-		return nil, err
+// LoadMachine reads the per-machine project mapping under the jig home root
+// jigHome, returning an empty map when the file does not exist yet.
+func LoadMachine(jigHome string) (map[string]MachineProject, error) {
+	if jigHome == "" {
+		return nil, fmt.Errorf("project: no jig home given")
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(home.MachinePath(jigHome))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]MachineProject{}, nil
@@ -171,13 +170,13 @@ func LoadMachine() (map[string]MachineProject, error) {
 	return m, nil
 }
 
-// SaveMachine writes the per-machine project mapping, creating its parent
-// directory if needed.
-func SaveMachine(m map[string]MachineProject) error {
-	path, err := home.MachinePath()
-	if err != nil {
-		return err
+// SaveMachine writes the per-machine project mapping under the jig home root
+// jigHome, creating its parent directory if needed.
+func SaveMachine(jigHome string, m map[string]MachineProject) error {
+	if jigHome == "" {
+		return fmt.Errorf("project: no jig home given")
 	}
+	path := home.MachinePath(jigHome)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("project: create home dir: %w", err)
 	}
@@ -192,10 +191,10 @@ func SaveMachine(m map[string]MachineProject) error {
 }
 
 // Resolve locates the store for cwd: an explicit --store flag wins, then a
-// project.yaml directly in cwd, then a machine-mapping clone that contains
-// cwd.
-func Resolve(cwd, storeFlag string) (string, Config, error) {
-	storePath, err := resolveStorePath(cwd, storeFlag)
+// project.yaml directly in cwd, then a clone that contains cwd in the
+// machine mapping under the jig home root jigHome.
+func Resolve(jigHome, cwd, storeFlag string) (string, Config, error) {
+	storePath, err := resolveStorePath(jigHome, cwd, storeFlag)
 	if err != nil {
 		return "", Config{}, err
 	}
@@ -206,14 +205,14 @@ func Resolve(cwd, storeFlag string) (string, Config, error) {
 	return storePath, cfg, nil
 }
 
-func resolveStorePath(cwd, storeFlag string) (string, error) {
+func resolveStorePath(jigHome, cwd, storeFlag string) (string, error) {
 	if storeFlag != "" {
 		return storeFlag, nil
 	}
 	if _, err := os.Stat(filepath.Join(cwd, "project.yaml")); err == nil {
 		return cwd, nil
 	}
-	machine, err := LoadMachine()
+	machine, err := LoadMachine(jigHome)
 	if err != nil {
 		return "", err
 	}
@@ -319,14 +318,20 @@ func InitStandalone(repoDir string) (string, error) {
 	if err := os.WriteFile(filepath.Join(storeDir, ".gitignore"), []byte("*.lock\n.*.tmp\n"), 0o644); err != nil {
 		return "", fmt.Errorf("project: write .gitignore: %w", err)
 	}
+	// No conversion of any file in the store: its files are jig's data, and
+	// it lets gitx work on the store in process (gitx.Repo).
+	if err := os.WriteFile(filepath.Join(storeDir, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
+		return "", fmt.Errorf("project: write .gitattributes: %w", err)
+	}
 
 	return storeDir, nil
 }
 
 // InitProject loads storePath's project.yaml, validates that every clone
 // name matches a repo declared there (by Repo.Name), and records the
-// mapping in the per-machine store, keyed by the project's name.
-func InitProject(storePath string, clones map[string]string) (Config, error) {
+// mapping in the per-machine store under the jig home root jigHome, keyed by
+// the project's name.
+func InitProject(jigHome, storePath string, clones map[string]string) (Config, error) {
 	cfg, err := Load(filepath.Join(storePath, "project.yaml"))
 	if err != nil {
 		return Config{}, err
@@ -358,12 +363,12 @@ func InitProject(storePath string, clones map[string]string) (Config, error) {
 		absClones[name] = abs
 	}
 
-	machine, err := LoadMachine()
+	machine, err := LoadMachine(jigHome)
 	if err != nil {
 		return Config{}, err
 	}
 	machine[cfg.Name] = MachineProject{Store: absStore, Clones: absClones}
-	if err := SaveMachine(machine); err != nil {
+	if err := SaveMachine(jigHome, machine); err != nil {
 		return Config{}, err
 	}
 

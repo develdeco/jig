@@ -28,21 +28,22 @@ func commitOneFile(t *testing.T, dir, name, content string) {
 }
 
 // TestGateBrokenLeaseNeverResetsEnclosingRepo reproduces the data-loss path
-// where JIG_HOME sits inside another git working copy, and a gate lease
+// where the jig home sits inside another git working copy, and a gate lease
 // whose .git entry is not a repository. Neither the pre-Acquire restore nor
 // pool.Acquire may run in the enclosing repo, so its branch and its
 // uncommitted edit survive; Acquire moves the broken lease aside and clones
 // afresh, so the gate completes its round.
 func TestGateBrokenLeaseNeverResetsEnclosingRepo(t *testing.T) {
+	t.Parallel()
+
 	enclosing := t.TempDir()
 	commitOneFile(t, enclosing, "notes.txt", "committed\n")
 	jigHome := filepath.Join(enclosing, "jig-home")
-	t.Setenv("JIG_HOME", jigHome)
 
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
 	driveBuild(t, fx, "rung-a")
 
-	gateLease, err := pool.Dir("fixture-repo", fx.Ticket, pool.Gate)
+	gateLease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
 	if err != nil {
 		t.Fatalf("pool.Dir: %v", err)
 	}
@@ -81,11 +82,12 @@ func TestGateBrokenLeaseNeverResetsEnclosingRepo(t *testing.T) {
 // commit), Acquire reuses it in place, where its checkout repairs HEAD, and
 // the gate completes its round.
 func TestGateRecoversFromUnbornLease(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 
-	gateLease, err := pool.Dir("fixture-repo", fx.Ticket, pool.Gate)
+	gateLease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
 	if err != nil {
 		t.Fatalf("pool.Dir: %v", err)
 	}

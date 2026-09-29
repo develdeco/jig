@@ -415,6 +415,13 @@ func normalizeRepoRelPath(p string) (string, error) {
 // worktree, a ".." segment) is ignored rather than failing the round: it
 // can never match a must_review path either way, so rejecting the whole
 // result over it would fail a reviewer that followed the prompt exactly.
+//
+// The session may spell the worktree differently from jig: the headless
+// backend hands it the long spelling of a path jig reached through a
+// Windows 8.3 short name, and a reviewer may report a directory reached
+// through a symlink resolved. An absolute path that is not inside the
+// worktree as spelled is therefore compared once more with both sides
+// resolved, which compares the files rather than their spellings.
 func relativizeReviewedPath(leaseDir, p string) (string, bool) {
 	if norm, err := normalizeRepoRelPath(p); err == nil {
 		return norm, true
@@ -426,7 +433,24 @@ func relativizeReviewedPath(leaseDir, p string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	rel, err := filepath.Rel(absLease, p)
+	if norm, ok := relativeInside(absLease, p); ok {
+		return norm, true
+	}
+	resolvedLease, err := filepath.EvalSymlinks(absLease)
+	if err != nil {
+		return "", false
+	}
+	resolved, ok := resolvePath(p)
+	if !ok {
+		return "", false
+	}
+	return relativeInside(resolvedLease, resolved)
+}
+
+// relativeInside returns p relative to dir, normalized, when p is inside
+// dir.
+func relativeInside(dir, p string) (string, bool) {
+	rel, err := filepath.Rel(dir, p)
 	if err != nil {
 		return "", false
 	}
@@ -435,6 +459,20 @@ func relativizeReviewedPath(leaseDir, p string) (string, bool) {
 		return "", false
 	}
 	return norm, true
+}
+
+// resolvePath returns p with symlinks resolved (and, on Windows, 8.3 short
+// names spelled long), or, for a p that does not exist, its parent resolved
+// and its last element as written.
+func resolvePath(p string) (string, bool) {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r, true
+	}
+	dir, err := filepath.EvalSymlinks(filepath.Dir(p))
+	if err != nil {
+		return "", false
+	}
+	return filepath.Join(dir, filepath.Base(p)), true
 }
 
 // normalizeReviewedPaths relativizes and normalizes every reviewed_paths

@@ -110,20 +110,21 @@ exists.
 |---|---|---|
 | `cmd/jig/` | `main`, `cmdScreen` | CLI args, or a PreToolUse hook payload on stdin → subcommand dispatch, or a screen allow/deny |
 | `demo/fixture/` | `main` | `-out <dir>` + `-scenario <name>` → a fixture built via `internal/fixture`, and shell `export` lines (JIG_HOME, store dir, scenario dir, ticket id) for a VHS tape to eval |
-| `e2e/` | (tests only) | the fixture + fake backend → asserts the full brief→publish chain twice |
+| `e2e/` | (tests only) | the fixture + fake backend → asserts the full brief→publish chain twice; with `JIG_LIVE_CLAUDE`, README's Quickstart through the real `claude` CLI; `JIG_E2E_BINARY` → the same against an installed jig |
 | `internal/axi/` | `Render`, `Table`, `KV`, `Help`, `RenderError`, `ExitCode` | labelled data → jig's plain-text output register and process exit codes |
+| `internal/claudetest/` | `API`, `Session`, `Serve` | scripted sessions (tool calls in order) → a stand-in Messages API on loopback that the real `claude` CLI runs against, for the live CLI tests |
 | `internal/envrun/` | `Up`, `Shell` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable` |
-| `internal/fixture/` | `Build`, `Generate`, `RepoRoot` | a dir + `Opts` → a fixture repo, its store, and a scripted attempt scenario (plus the machine mapping under JIG_HOME); `Generate` builds into a `t.TempDir()`; `RepoRoot`: a caller's source file → the module root |
+| `internal/fixture/` | `Build`, `Generate`, `RepoRoot` | a dir + `Opts` → a fixture repo, its store, and a scripted attempt scenario (plus the machine mapping under `Opts.Home`, by default the jig home `home.Root` resolves); `Generate` builds into a `t.TempDir()`; `RepoRoot`: a caller's source file → the module root |
 | `internal/frontier/` | `Run`, `Requeue`, `RequeueSlice`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
-| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `DiffNameOnly`, `FileExistsAtRev`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
+| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `DiffNameOnly`, `FileExistsAtRev`, `IsLocalRemote`, `GuardedPush`, `OpenRepo` (`Repo`: `State`, `CommitAll`, `Push`, `Fetch`) | argv + a working dir → git plumbing output, or a refused push; a store's directory → the same store operations in process (go-git), or `ErrUseCLI` for the caller's git-program path |
 | `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
-| `internal/home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → per-machine paths |
+| `internal/home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths |
 | `internal/journal/` | `Append`, `Read`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs |
 | `internal/manifest/` | `Resolve` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
-| `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket` | repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point; anything git shows is not a repository of its own is moved aside and cloned afresh) |
-| `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping → a `Config` |
+| `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point; anything git shows is not a repository of its own is moved aside and cloned afresh) |
+| `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping under the jig home root → a `Config` |
 | `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `MatchRound`, `ScoreRound`, `RenderReport` | a labeled corpus (`testdata/revieweval`) + a session backend → a `CaseScore` per case, matched structurally against seeded gold through the real reviewer contract |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`) → `result.json` written to disk |
@@ -282,7 +283,8 @@ is not a sandbox: a granted shell is not confined to the lease, and neither
 are `Read`, `Glob` and `Grep`, whose only limit is the credential denylist.
 See [ADR 0008](docs/adr/0008-headless-permission-model.md); `JIG_LIVE_CLAUDE=1
 go test ./internal/session -run Live` checks the model against the
-installed CLI through a local mock of the Messages API.
+installed CLI through a local mock of the Messages API, and CI's
+`claude-cli` job runs it against the latest CLI release.
 
 **Guarded push.** `gitx.GuardedPush` refuses to push to a remote that is not
 a local file path unless the caller has confirmed. `publish` is the only
@@ -292,9 +294,12 @@ pushes the store's own bookkeeping commits to the store's remote
 (`store.Push`) as it works; that push is unguarded by design - it moves
 jig's own journal and ticket-folder state, not product code.
 
-**Single git owner.** Only `gitx` spawns `git`; `lint.TestNoGitSpawnOutsideGitx`
-parses every other package and fails on an `os/exec` call or `exec.Cmd`
-literal whose program resolves to `git`. Every gitx call runs with
+**Single git owner.** Only `gitx` runs git: it spawns the git program for
+users' repositories and runs git in process, through go-git, for the store
+([ADR 0011](docs/adr/0011-the-store-runs-git-in-process.md)).
+`lint.TestNoGitSpawnOutsideGitx` parses every other package and fails on an
+`os/exec` call or `exec.Cmd` literal whose program resolves to `git`, and
+`lint.TestNoGoGitOutsideGitx` on any import of go-git. Every gitx call runs with
 `-c maintenance.auto=false`, so none leaves git's detached background
 maintenance running; the flag is argv-only, so a user's own git still
 maintains their repos. Every call also drops an inherited `GIT_DIR` and the
@@ -322,8 +327,10 @@ racing the first would be.
 go test ./...
 ```
 
-Every test gets its own `t.TempDir()`, `JIG_HOME` is always overridden via
-`t.Setenv` so a test run never touches a real machine's jig home, and every
+Every test gets its own `t.TempDir()` and its own jig home (passed as an
+argument to the packages that use one, or as `JIG_HOME` via `t.Setenv` to
+`cmd/jig` and the binary), so a test run never touches a real machine's jig
+home, and every
 remote used in tests is a bare, file-path repo - no test ever talks to a
 real git host.
 

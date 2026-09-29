@@ -3,6 +3,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"runtime"
 	"strconv"
@@ -29,7 +30,9 @@ func processAlive(pid int) bool {
 	}
 	stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
-		return !os.IsNotExist(err)
+		// A process reaped between the signal and the read leaves its /proc
+		// entry missing, or failing the read with ESRCH.
+		return !os.IsNotExist(err) && !errors.Is(err, syscall.ESRCH)
 	}
 	// The state field follows the command name, which is parenthesized and
 	// may itself contain spaces or parentheses, so find the last ')'.

@@ -24,7 +24,7 @@ func cmdPublish(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -32,7 +32,7 @@ func cmdPublish(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	deps := verifydeliverDeps(st, cfg, mp)
+	deps := verifydeliverDeps(st, cfg, mp, jigHome)
 
 	// Check identity before acquiring a lease.
 	if err := verifydeliver.CheckIdentity(deps); err != nil {

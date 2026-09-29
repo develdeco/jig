@@ -39,6 +39,9 @@ type Deps struct {
 	Backend session.Backend
 	Rungs   staircase.Config
 	Journal func(l journal.Line) error
+	// Home is the jig home root whose pool holds the build leases:
+	// home.Root() for the binary, a test's own directory in tests.
+	Home string
 }
 
 // RunOpts configures one Run call.
@@ -376,7 +379,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	d := rc.d
 	ticket := rc.ticket
 
-	lease, err := pool.Acquire(rc.repoName, rc.remote, rc.target, "jig/"+ticket, ticket, pool.Build)
+	lease, err := pool.Acquire(d.Home, rc.repoName, rc.remote, rc.target, "jig/"+ticket, ticket, pool.Build)
 	if err != nil {
 		rc.fail(fmt.Errorf("frontier: acquire lease for %s: %w", sl.ID, err))
 		return

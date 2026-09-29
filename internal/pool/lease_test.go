@@ -121,7 +121,6 @@ func TestAcquireRecoversBrokenLease(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			enclosing := newEnclosingRepo(t)
 			home := filepath.Join(enclosing, "jig-home")
-			t.Setenv("JIG_HOME", home)
 			remote := newSourceAndRemote(t)
 			dir := filepath.Join(home, "pool", "fixture", "T-1")
 			marker := c.lay(t, dir, enclosing)
@@ -131,7 +130,7 @@ func TestAcquireRecoversBrokenLease(t *testing.T) {
 			}
 			writeFile(t, filepath.Join(enclosing, "notes.txt"), "uncommitted work\n")
 
-			lease, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+			lease, err := Acquire(home, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 
 			assertEnclosingUntouched(t, enclosing)
 			if err != nil {
@@ -158,14 +157,13 @@ func TestAcquireRecoversBrokenLease(t *testing.T) {
 // Acquire clones into it in place instead of moving it aside.
 func TestAcquireClonesIntoEmptyDir(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("JIG_HOME", home)
 	remote := newSourceAndRemote(t)
 	dir := filepath.Join(home, "pool", "fixture", "T-1")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build); err != nil {
+	if _, err := Acquire(home, "fixture", remote, "main", "jig/T-1", "T-1", Build); err != nil {
 		t.Fatalf("Acquire into an empty dir: %v", err)
 	}
 	assertOwnClone(t, dir, remote, "jig/T-1")
@@ -174,17 +172,18 @@ func TestAcquireClonesIntoEmptyDir(t *testing.T) {
 	}
 }
 
-// TestAcquireRelativeJIGHome covers a relative JIG_HOME: git runs the clone
-// from the lease's parent directory, so a relative lease path would be
-// resolved twice and every later git call would miss the lease.
-func TestAcquireRelativeJIGHome(t *testing.T) {
+// TestAcquireRelativeJigHome covers a relative jig home (a relative JIG_HOME
+// reaches Acquire as is): git runs the clone from the lease's parent
+// directory, so a relative lease path would be resolved twice and every
+// later git call would miss the lease.
+func TestAcquireRelativeJigHome(t *testing.T) {
 	t.Chdir(t.TempDir())
-	t.Setenv("JIG_HOME", "jig-home")
+	jigHome := "jig-home"
 	remote := newSourceAndRemote(t)
 
-	lease, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+	lease, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err != nil {
-		t.Fatalf("Acquire with a relative JIG_HOME: %v", err)
+		t.Fatalf("Acquire with a relative jig home: %v", err)
 	}
 	if !filepath.IsAbs(lease.Dir) {
 		t.Fatalf("lease dir = %q, want an absolute path", lease.Dir)
@@ -258,7 +257,6 @@ func TestUsable(t *testing.T) {
 // as they are and says so, instead of replacing or merging either.
 func TestAcquireNeverOverwritesAnAside(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("JIG_HOME", home)
 	remote := newSourceAndRemote(t)
 	fixed := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	now = func() time.Time { return fixed }
@@ -269,7 +267,7 @@ func TestAcquireNeverOverwritesAnAside(t *testing.T) {
 	taken := dir + ".broken-20260102T030405Z"
 	writeFile(t, filepath.Join(taken, "stray.txt"), "earlier aside\n")
 
-	_, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+	_, err := Acquire(home, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err == nil || !strings.Contains(err.Error(), taken) {
 		t.Fatalf("Acquire = %v, want an error naming the taken aside %s", err, taken)
 	}
@@ -290,9 +288,9 @@ func TestAcquireNeverOverwritesAnAside(t *testing.T) {
 // not move it aside and clone over its unpushed commit; it fails with git's
 // own ownership error instead, as it did before leases were checked.
 func TestAcquireKeepsLeaseGitRefusesByOwner(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	jigHome := t.TempDir()
 	remote := newSourceAndRemote(t)
-	lease, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+	lease, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
@@ -305,7 +303,7 @@ func TestAcquireKeepsLeaseGitRefusesByOwner(t *testing.T) {
 	if _, err := gitx.Run(lease.Dir, "-c", "safe.directory=*", "rev-parse", "HEAD"); err != nil {
 		t.Skipf("this git ignores safe.directory given with -c: %v", err)
 	}
-	_, err = Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+	_, err = Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err == nil || !strings.Contains(err.Error(), "pool: fetch") {
 		t.Fatalf("Acquire over a lease git refuses by owner = %v, want the reuse fetch's ownership error", err)
 	}
@@ -328,7 +326,7 @@ func TestAcquireKeepsLeaseGitRefusesByOwner(t *testing.T) {
 func TestAcquireReusesLeaseWithUnbornHEAD(t *testing.T) {
 	t.Run("a clone killed before its first checkout", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("JIG_HOME", home)
+		jigHome := home
 		remote := newSourceAndRemote(t)
 		dir := filepath.Join(home, "pool", "fixture", "T-1")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -337,7 +335,7 @@ func TestAcquireReusesLeaseWithUnbornHEAD(t *testing.T) {
 		run(t, dir, "init", "-b", "main")
 		run(t, dir, "remote", "add", "origin", remote)
 
-		if _, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build); err != nil {
+		if _, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build); err != nil {
 			t.Fatalf("Acquire: %v", err)
 		}
 		assertOwnClone(t, dir, remote, "jig/T-1")
@@ -347,9 +345,9 @@ func TestAcquireReusesLeaseWithUnbornHEAD(t *testing.T) {
 	})
 
 	t.Run("an orphan checkout over unpushed work", func(t *testing.T) {
-		t.Setenv("JIG_HOME", t.TempDir())
+		jigHome := t.TempDir()
 		remote := newSourceAndRemote(t)
-		lease, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+		lease, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 		if err != nil {
 			t.Fatalf("Acquire: %v", err)
 		}
@@ -359,7 +357,7 @@ func TestAcquireReusesLeaseWithUnbornHEAD(t *testing.T) {
 		unpushed := run(t, lease.Dir, "rev-parse", "HEAD")
 		run(t, lease.Dir, "checkout", "--orphan", "scratch")
 
-		if _, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build); err != nil {
+		if _, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build); err != nil {
 			t.Fatalf("second Acquire: %v", err)
 		}
 		if asides, _ := filepath.Glob(lease.Dir + ".broken-*"); len(asides) != 0 {
@@ -378,9 +376,9 @@ func TestAcquireReusesLeaseWithUnbornHEAD(t *testing.T) {
 // clone over it: it fails with git's own error and leaves the lease as it
 // was.
 func TestAcquireRefusesLeaseGitCannotOpen(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	jigHome := t.TempDir()
 	remote := newSourceAndRemote(t)
-	lease, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+	lease, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
@@ -388,7 +386,7 @@ func TestAcquireRefusesLeaseGitCannotOpen(t *testing.T) {
 	run(t, lease.Dir, "config", "core.repositoryformatversion", "1")
 	run(t, lease.Dir, "config", "extensions.jigTestUnknown", "true")
 
-	_, err = Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+	_, err = Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err == nil || !strings.Contains(err.Error(), "jigtestunknown") {
 		t.Fatalf("Acquire over a lease git refuses = %v, want git's unknown-extension error", err)
 	}
@@ -411,12 +409,12 @@ func TestAcquireRefusesLeaseGitCannotOpen(t *testing.T) {
 func TestAcquireIgnoresInheritedGitDir(t *testing.T) {
 	enclosing := newEnclosingRepo(t)
 	writeFile(t, filepath.Join(enclosing, "notes.txt"), "uncommitted work\n")
-	t.Setenv("JIG_HOME", t.TempDir())
+	jigHome := t.TempDir()
 	remote := newSourceAndRemote(t)
 	t.Setenv("GIT_DIR", filepath.Join(enclosing, ".git"))
 
 	for i := 0; i < 2; i++ { // a fresh clone, then a reuse
-		lease, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+		lease, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 		if err != nil {
 			t.Fatalf("Acquire %d: %v", i+1, err)
 		}
@@ -440,10 +438,9 @@ func TestAcquireIgnoresInheritedGitDir(t *testing.T) {
 func TestAcquireRefusesCorruptHEADLeaseInsideEnclosingRepo(t *testing.T) {
 	enclosing := newEnclosingRepo(t)
 	home := filepath.Join(enclosing, "jig-home")
-	t.Setenv("JIG_HOME", home)
 	remote := newSourceAndRemote(t)
 
-	lease, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+	lease, err := Acquire(home, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
@@ -455,7 +452,7 @@ func TestAcquireRefusesCorruptHEADLeaseInsideEnclosingRepo(t *testing.T) {
 	writeFile(t, filepath.Join(lease.Dir, ".git", "HEAD"), "")
 	writeFile(t, filepath.Join(enclosing, "notes.txt"), "uncommitted work\n")
 
-	_, err = Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+	_, err = Acquire(home, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err == nil || !strings.Contains(err.Error(), "cannot open lease") {
 		t.Fatalf("Acquire over a lease with a corrupt HEAD inside an enclosing repo = %v, want git's own error naming the lease", err)
 	}
@@ -484,9 +481,9 @@ func TestAcquireReusesSymlinkedLease(t *testing.T) {
 	for _, kind := range []string{"symlink", "junction"} {
 		t.Run(kind, func(t *testing.T) {
 			realHome := t.TempDir()
-			t.Setenv("JIG_HOME", realHome)
+			jigHome := realHome
 			remote := newSourceAndRemote(t)
-			real, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build)
+			real, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 			if err != nil {
 				t.Fatalf("Acquire: %v", err)
 			}
@@ -496,7 +493,7 @@ func TestAcquireReusesSymlinkedLease(t *testing.T) {
 			unpushed := run(t, real.Dir, "rev-parse", "HEAD")
 
 			home := t.TempDir()
-			t.Setenv("JIG_HOME", home)
+			jigHome = home
 			link := filepath.Join(home, "pool", "fixture", "T-1")
 			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
 				t.Fatal(err)
@@ -515,7 +512,7 @@ func TestAcquireReusesSymlinkedLease(t *testing.T) {
 				}
 			}
 
-			if _, err := Acquire("fixture", remote, "main", "jig/T-1", "T-1", Build); err != nil {
+			if _, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build); err != nil {
 				t.Fatalf("Acquire over the %s lease: %v", kind, err)
 			}
 			if asides, _ := filepath.Glob(link + ".broken-*"); len(asides) != 0 {

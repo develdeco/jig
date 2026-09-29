@@ -58,7 +58,7 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -75,7 +75,7 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	deps := verifydeliverDeps(st, cfg, mp)
+	deps := verifydeliverDeps(st, cfg, mp, jigHome)
 	report, err := verifydeliver.Gate(deps, src, verifydeliver.GateOpts{
 		Ticket:   ticket,
 		Early:    *early,

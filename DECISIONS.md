@@ -83,16 +83,20 @@ was ambiguous, what was chosen, and why.
 - `Sync` and `Push` both refuse with `STORE_CONFLICT`, without touching the
   index, when the store already has an unfinished rebase or merge in progress
   (`rebase-merge`, `rebase-apply`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`,
-  `REVERT_HEAD`, `sequencer` or `BISECT_LOG`, all read with one
-  `git rev-parse --git-path` call), when HEAD is detached (a bisect, say, so
+  `REVERT_HEAD`, `sequencer` or `BISECT_LOG`, looked up in the store's git
+  directory in process, or with one `git rev-parse --git-path` call when
+  the store is on the git program), when HEAD is detached (a bisect, say, so
   a commit would land where `git bisect reset` drops it), or when the index
   has unmerged entries, which is what a conflicted `git stash pop` leaves
   behind on its own. An unconditional `git add -A`
   would stage unresolved conflict markers as ordinary content, and a later
   commit (or `rebase --continue`) would finalize them onto the store branch,
-  corrupting whatever file conflicted for every later reader. The check
-  lives in the shared `stageAndCommit` step, so it also guards a command that
-  only ever `Push`es, such as `jig requeue`, not only the ones that `Sync` first.
+  corrupting whatever file conflicted for every later reader. Both `Sync` and
+  `Push` run the check first, so it also guards a command that only ever
+  `Push`es, such as `jig requeue`, not only the ones that `Sync` first. It runs
+  once per call: their shared `stageAndCommit` step ran it again with only
+  reads in between, two more git processes per store write, 1,408 of the
+  suite's 17,776 git calls in a traced Linux run.
 - A failed `pull --rebase` is aborted and wrapped as `STORE_CONFLICT` only when
   it actually left a rebase in progress; jig's own conflicts never leave the
   store mid-rebase for the guard above to catch on the next command, unless
@@ -251,9 +255,24 @@ was ambiguous, what was chosen, and why.
   (`C:\a` is `//c/a`), with gitignore characters escaped, plus the symlink-resolved form
   when it differs. Checked against the CLI: native backslash paths, lowercased paths, and
   a directory named `w [1] (x) y` all match, and a look-alike sibling does not.
+- A Windows 8.3 short-name spelling (a runner's `RUNNER~1`) matches no rule, however
+  the rule itself is spelled: the CLI checks an edit against the rules as the session
+  spells its target, and denies every edit to such a path (2.1.232 locally, 2.1.284 on
+  GitHub's Windows runners), while it allows the same file spelled long and matches a
+  long name holding a literal `~` as usual (2.1.232). So the backend hands a session the
+  long spelling of what it grants (`sessionView`): its working directory, its input and
+  result paths, and the prompt's mentions of them. GitHub's Windows runners reach every
+  test through such a temp dir, and a machine whose store, jig home or working directory
+  goes through a short name would reach its sessions the same way. Beyond spelling out
+  8.3 names, GetLongPathName only corrects the case of a name short enough to be one,
+  which rule matching ignores; a relative path is left alone, and a symlink or junction
+  keeps both of its spellings in the rules, as above. The gate reads the paths a
+  reviewer reports back through either spelling of its lease (`relativizeReviewedPath`
+  compares them resolved when they do not match as spelled), since the reviewer now
+  sees the long one.
 - The CLI contract test is opt-in (`JIG_LIVE_CLAUDE=1`), not part of `go test ./...`: it
-  runs whichever CLI version is installed, so its result is not reproducible run to run,
-  and CI has no `claude` binary.
+  runs whichever CLI version is installed, so its result is not reproducible run to run.
+  CI runs it in a job of its own, which installs the CLI (under "Git execution and CI").
 - Direction taken after three adversarial review rounds each patched around the same
   shape of hole (a glob, then a junction, then a parent search root): the `headless`
   backend is stated as not a security boundary, and no further denylist patch is made
@@ -1090,6 +1109,24 @@ above:
   named package directory actually exists.
 - CLAUDE.md consists of a single `@AGENTS.md` import line, so the two files share one
   content; AGENTS.md itself stays navigation pointers only.
+- verifydeliver's tests run in parallel. Its gate and publish tests make thousands of
+  git calls, and run one after another they were the Windows test step's wall time.
+  Each test now passes its own jig home through `fixture.Opts.Home` instead of setting
+  `JIG_HOME`, and calls `t.Parallel`. Three stay serial because they change
+  process-wide state: the two identity tests (git config and the identity
+  environment) and `TestPublishConfirmWiring` (swaps the package's push and confirm
+  hooks); go test runs them before any parallel test resumes. `go test -race` finds
+  no data race. On three GitHub Windows runners, test binaries precompiled and the
+  order rotated, the whole suite took 644-902 s on main, 453-659 s with the Windows
+  CI changes and gitx's PATH cache, and 306-403 s with this as well, with every vCPU
+  busy; Linux took 38-40 s for all three.
+- The scripted Messages API the live CLI tests run the real `claude` against lives in
+  `internal/claudetest`, shared by the headless contract test and the e2e Quickstart
+  rather than copied into each. A conversation's session is picked from its prompt,
+  so one server can play every session a `jig solve` dispatches, and a scripted
+  session takes the paths it writes to from jig's own dispatch prompt, as a real one
+  must. The Quickstart's reviewer reads `review.json` and lists its `must_review`
+  paths rather than hardcoding the one file the build session adds.
 
 ## Git execution and CI
 
@@ -1127,6 +1164,20 @@ above:
   filter stays for any caller that does not start from `main`, tests included.
   `TestRunIgnoresInheritedRepoEnv`, `TestClearRepoEnv` and
   `TestAcquireIgnoresInheritedGitDir` pin it.
+- gitx searches PATH for git once per PATH, not once per call. `exec.Command("git")`
+  searches PATH on every call, and on Windows that search stats every PATH directory
+  once per PATHEXT extension until it reaches git: 31-39 ms a call on a 57-entry
+  developer PATH with git's directory 31 entries in, as long as git itself takes to run
+  a small command. A syscall profile of `internal/pool`'s tests there put 16 s of the
+  package's 41 s in that search. gitx reuses the path it found while PATH, PATHEXT,
+  `NoDefaultCurrentDirectoryInExePath` and the working directory are unchanged, as a
+  shell's command hash does, so a test that changes PATH is searched again
+  (`TestRunSearchesPATHAgainWhenItChanges`). A reused path that no longer exists
+  (git removed or moved while jig runs) fails to start; gitx then forgets it and
+  tries once more (`TestRunSearchesAgainWhenTheGitItFoundIsGone`), unless the call's
+  own working directory is what is missing. On that machine `TestPublishFullChain`
+  went from 50-56 s to 27 s. A GitHub Windows runner's search costs 1.6-3.4 ms (git is
+  27 entries into its 74-entry PATH), so CI time there does not change measurably.
 - Long-lived repos (the store after a push, a pool lease after a reuse fetch) get a
   foreground, best-effort `git maintenance run --auto`. The per-call flag only stops
   commands from spawning detached maintenance, not this explicit run;
@@ -1147,6 +1198,106 @@ above:
   the test.
 - Windows Defender exclusions were considered for Windows CI time and dropped: GitHub's
   Windows runner images already turn real-time scanning off and exclude the C: and D: drives.
+- ci.yml's test step lists `internal/verifydeliver` ahead of `./...`. go test starts
+  packages in the order it is given them, four at a time on a hosted runner, so
+  verifydeliver, the longest-running package, started among the last from its `./...`
+  place and the Windows step then waited on it alone. Run both ways on the same runner, with the
+  order swapped on a second runner, the step took 1,004 s and 894 s in `./...` order
+  and 948 s and 756 s with verifydeliver first: 10% less on average. Replaying the
+  package times through go test's scheduling predicted 24%, but verifydeliver itself
+  runs 17-26% slower when it starts beside cmd/jig, e2e and frontier than when it
+  starts after them. go test still prints results in the order it was given, so
+  nothing prints until verifydeliver finishes.
+- What is left of Windows CI time, measured on GitHub's windows-2025 runners (4 vCPUs,
+  real-time scanning already off, so a Dev Drive for TEMP measured no faster): an empty
+  Go program takes 6-8 ms to start and a trivial git command 13-18 ms, against about
+  1 ms for either on Linux. A traced run of the suite starts 17,776 git processes, plus
+  the ones git starts itself for a local push, fetch or clone (a push takes about
+  300 ms on the runner): 880-1,540 s of git time across five runners, against 61 s on
+  Linux. With test binaries already compiled, the whole suite took 808-872 s on three
+  runners before gitx's PATH cache, running git's own binary rather than Git for
+  Windows' launcher, the single store guard and this order, and 546-564 s after,
+  against 51-53 s on Linux. What remains is verifydeliver:
+  7,891 of those git calls, one test after another, so with it listed first it is the
+  step's wall time. Split across four test processes beside the other packages, the
+  same runners took 380-400 s, and the other packages ran 1.5-1.9x slower beside it,
+  so every vCPU was busy: about the floor for a 4-vCPU runner. verifydeliver's tests
+  now run in parallel, which gets there (under "Fixture and tests"): the pool and
+  machine-mapping paths take the jig home root as an argument, so its tests no longer
+  set `JIG_HOME` with `t.Setenv`, which `t.Parallel` forbids. Below that takes fewer
+  git processes per test, or more vCPUs; the store's writes no longer start any (next
+  entry).
+- The store runs git in process (ADR 0011): `gitx.Repo` stages and commits from the
+  index itself and pushes to and fetches from a bare remote at a local path through
+  go-git's object storage, handing every step it would not do as the git program does
+  to the git program. One store write (`store.Push` with a change: stage, commit, push
+  to a local bare remote, maintenance), timed on GitHub runners in one binary whose two
+  stores differ only in the `.gitattributes` that allows the in-process path: Windows
+  408-700 ms through the git program and 21-28 ms in process, macOS 141-151 ms and
+  6-14 ms, Linux 44-47 ms and 3.5 ms; from 5,000 commits of packed history, Windows
+  406-658 ms and 38-62 ms, macOS 150-192 ms and 12-13 ms, Linux 22-25 ms and 9-22 ms.
+  go-git's own work tree was the first in-process version and was dropped: its status
+  read every HEAD tree from the pack on each write and checked every path it touched
+  for symbolic links, so a write grew with the store's history and size (on a Windows
+  machine 280 ms with no history and 470 ms with 3,000 commits, against 11 ms and 52 ms
+  for the index-based commit on the same machine). The whole suite on the same runners,
+  test binaries precompiled and the order rotated: Windows 388, 382 and 470 s on main
+  and 307, 370 and 341 s with the store in process; macOS 132 and 140 s, and 111 and
+  106 s; Linux 46 and 43 s, and 47 and 47 s. What the Windows suite still spends is git
+  work on users' repositories (pool leases, gate resets and diffs, publish), which stays
+  on the git program, and test fixtures building their repositories with it.
+  Building fixtures with half as many git processes was tried and dropped: `git init`
+  and the pinned-identity commits stayed on the git program, while the config, the bare
+  clones and the remotes were set up in process (16 git processes per fixture down to
+  8). In nine paired Windows runs the whole suite averaged 351 s on main and 331 s with
+  it, a mean paired difference of 21 s against a standard error of 19 s, and macOS and
+  Linux, two runs each, did not change measurably. That was not worth 320 lines of gitx
+  code and 280 of tests.
+- The Windows test leg puts `git --exec-path` first on PATH. The runner's first git is
+  Git for Windows' `bin\git.exe`, a launcher that starts git's own `git.exe` as a second
+  process on every call, the calls git makes itself during a local push included. On
+  the same runners (two runners, three rounds each, order rotated), verifydeliver's
+  publish tests took 123-170 s (mean 152 s) through the launcher and 96-144 s (mean
+  117 s) with git's own binary first, and `internal/store` 40.0 s against 27.5 s.
+  jig itself keeps running the first git on PATH. Running git's own binary from gitx
+  was tried, and it changes what git starts: Git for Windows' `git.exe` adds its
+  `mingw64\bin` and `usr\bin` to their PATH only when MSYSTEM is unset, and behind
+  `%HOME%\bin` rather than ahead of it as the launcher does, so with MSYSTEM set and
+  Git's directories off PATH a `#!/bin/sh` hook fails with "cannot spawn". A user's
+  hooks, credential helper and LFS must get what their own git gives them. The CI leg
+  runs pwsh with MSYSTEM unset and no `%HOME%\bin`. Since most Windows users do run
+  git through the launcher, `internal/gitx`'s own tests (argv, output, exit codes)
+  still run through it first, on the same leg, before the PATH change.
+- ci.yml's `claude-cli` job installs the real Claude Code CLI with its official
+  installers, on all three platforms, and runs the live CLI tests (`JIG_LIVE_CLAUDE=1`)
+  against it. v0.1.1 passed CI and its release smoke test and still shipped a headless
+  backend that never started a session: it asked for `--output-format stream-json` in
+  print mode without `--verbose`, which the CLI refuses, the test job's stub `claude`
+  accepts any argv, and the smoke test checked only `jig version`. The job installs the
+  latest CLI release rather than a pinned one, since that is the release a user's CLI
+  updates to, and a CLI release can break jig with no jig change at all; a daily
+  scheduled run of ci.yml catches that between pushes, until GitHub turns the schedule
+  off after 60 days without repository activity. It is a job of its own rather
+  than steps of the test job, so the hermetic suite still runs with no `claude` on PATH
+  and the Windows leg's wall time does not grow.
+- Main's ruleset requires `ci ok` beside the test job's three legs, switched once this
+  landed. `ci ok` is ci.yml's gate job: it needs every job that runs on pull requests
+  and fails unless each of them succeeded. Before it, only the test legs were required,
+  so a pull request that broke the CLI contract showed a red `claude-cli` and could
+  still merge; a release could not, since release.yml waits on all of ci.yml. Requiring
+  `claude-cli`'s legs by name would have meant a ruleset edit for every further agent
+  CLI jig drives, each of which needs its own real-CLI contract job for the reason
+  `claude-cli` exists; such a job joins the gate's needs instead. The test legs stay
+  required because they run the lint test that keeps the gate honest, and a pull
+  request's own ci.yml defines the gate it is judged by: required alone, `ci ok` would
+  let a pull request that emptied the gate's needs or its failure merge. The lint test
+  fails when a job that runs on pull requests is missing from the needs, and runs the
+  gate's step with synthetic results, so it fails on a failed, cancelled or skipped job
+  and on no results at all. The gate runs with `if: always()`: GitHub counts a skipped
+  required check as passing. `claude-cli` installs the latest CLI from claude.ai, so a
+  CLI release that breaks jig, or an outage there, blocks merges until fixed or over. A
+  pull request that edits both the gate and its lint test still gets through checks
+  alone; review is what stops it.
 
 ## Release and install
 
@@ -1156,6 +1307,13 @@ above:
   `vX.Y.(Z+1)-0.<timestamp>-<commit>` once one does), with `+dirty` appended by
   Go itself when the tree carried local modifications, and `(devel)` when build
   info is missing (a `-buildvcs=false` build, or `go run`).
+- v0.1.1 is retracted in `go.mod`: its headless backend cannot start a session, since
+  the CLI refuses its argv. Go reads retractions from the latest release's `go.mod`, so
+  this takes effect with the next release: `go list -m -retracted` marks v0.1.1,
+  `go get` and `go list -m -u` warn a module that requires it, and `@latest` never falls
+  back to it, even if a later release were retracted too. `go install ...@v0.1.1` still
+  installs it without a warning. Its GitHub release stays as published, and the next
+  release replaces it as the one the installers fetch.
 - GoReleaser archives are named `jig_<os>_<arch>` with no version segment, so a
   "latest" download URL stays stable release over release instead of changing with
   every tag.
@@ -1163,12 +1321,31 @@ above:
   (SHA-256) before extracting, and install to a user directory with no sudo or
   admin rights. `JIG_RELEASE_URL` overrides the base URL for mirrors and for
   testing against a local or snapshot build; `JIG_VERSION` pins a release tag.
+- The installers install release archives only. `main` has none, so README installs it
+  with `go install github.com/develdeco/jig/cmd/jig@main` (or `go install ./cmd/jig`
+  from a clone), then `jig skills install`. A `JIG_VERSION=main` would have to build
+  from source, which drops both of the installers' promises: no Go toolchain, and an
+  archive checked against `checksums.txt`.
 - `release.yml` runs the full test matrix through `ci.yml`'s `workflow_call`
   trigger, checks the built binary reports the tag exactly, publishes with
   GoReleaser, attests build provenance, then smoke-tests the installers and
   `go install` as a `needs:` job - a release published with the default
   `GITHUB_TOKEN` does not fire `release: published`, so the smoke test cannot be
   a separate trigger on that event.
-- The GoReleaser snapshot dry run and the installer checks against it run only on
-  manual dispatch of `ci.yml`, keeping every push and pull request fast while still
-  giving a way to validate the release pipeline before tagging.
+- The GoReleaser snapshot dry run and the installer checks against it run on a manual
+  dispatch of `ci.yml`, to validate the release pipeline before tagging, and in every
+  release before GoReleaser publishes (`release.yml` calls `ci.yml` with `release:
+  true`), never on a push or pull request, which they would slow down.
+- A release's own binaries run README's Quickstart through the real Claude Code CLI,
+  against a scripted Messages API on loopback, both before and after it is published:
+  the snapshot archives as the installers put them on disk (`ci.yml`'s installers job),
+  then the published ones from the installer and from `go install` (`smoke.yml`).
+  v0.1.1 installed and printed its version, the most either job checked, and failed at
+  its first dispatch. Checking before publishing is what keeps a broken release from
+  becoming the one every documented install path gets; checking after covers what only
+  publishing can break. The e2e suite runs against an installed binary through
+  `JIG_E2E_BINARY`.
+- `smoke.yml` checks out its own commit, not the tag it installs: in a release they are
+  the same commit, and a dispatch from a branch runs that branch's Quickstart against an
+  older release. Checked out at a tag from before the Quickstart test existed, `go test
+  -run` would match no test and pass.
