@@ -76,19 +76,26 @@ func liveBuildSession(t *testing.T, jig string) {
 	if err := os.WriteFile(d.SliceJSON, []byte(`{"id":"a","goal":"say hello"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sibling := filepath.Join(work, "a.attempt-1.other.json")
-	outsideFile := filepath.Join(outside, "x.txt")
+	// The model writes through the paths its session is given, spelled as
+	// sessionView spells them, as a real session reads them from its prompt
+	// and its working directory; the dispatch keeps the temp dir's own
+	// spelling, which on a CI runner goes through an 8.3 short name. The
+	// writes that must be denied are spelled long too, so that the rules
+	// are what denies them, not the CLI's refusal of any short spelling.
+	view := sessionView(d)
+	sibling := filepath.Join(filepath.Dir(view.ResultJSON), "a.attempt-1.other.json")
+	outsideFile := filepath.Join(longPath(outside), "x.txt")
 
 	sess := &claudetest.Session{Steps: []claudetest.Step{
 		{Name: "screen denies a push", Call: claudetest.Bash("git push origin HEAD"), WantErr: "Blocked `git push`"},
 		{Name: "read slice.json outside the lease", Call: claudetest.Tool("Read", map[string]any{"file_path": d.SliceJSON}), WantOut: `"goal":"say hello"`},
 		{Name: "write outside the lease", Call: claudetest.Write(outsideFile, "x"), WantDenied: true},
-		{Name: "write in the lease", Call: claudetest.Write(filepath.Join(worktree, "hello.txt"), "hello\n")},
+		{Name: "write in the lease", Call: claudetest.Write(filepath.Join(view.Worktree, "hello.txt"), "hello\n")},
 		{Name: "write a sibling of result.json", Call: claudetest.Write(sibling, "x"), WantDenied: true},
 		{Name: "commit", Call: claudetest.Bash("git add -A && git -c user.name=jig-test -c user.email=test@example.invalid commit -q -m hello && git rev-parse HEAD")},
 		{Name: "write result.json", Call: func(prior []claudetest.ToolResult) claudetest.ToolCall {
 			sha := regexp.MustCompile(`[0-9a-f]{40}`).FindString(prior[5].Content)
-			return claudetest.ToolCall{Name: "Write", Input: map[string]any{"file_path": d.ResultJSON, "content": `{"outcome":"green","summary":"live contract","commit":"` + sha + `"}`}}
+			return claudetest.ToolCall{Name: "Write", Input: map[string]any{"file_path": view.ResultJSON, "content": `{"outcome":"green","summary":"live contract","commit":"` + sha + `"}`}}
 		}},
 	}}
 	runLive(t, jig, sess, d)
@@ -164,11 +171,12 @@ func liveReviewerSession(t *testing.T, jig string) {
 		t.Fatal(err)
 	}
 	review := `{"verdict":"clean","findings":[],"closures":[],"summary":"live contract"}`
+	view := sessionView(d)
 
 	sess := &claudetest.Session{Steps: []claudetest.Step{
 		{Name: "read review.json", Call: claudetest.Tool("Read", map[string]any{"file_path": d.SliceJSON}), WantOut: `"scope":"full"`},
 		{Name: "read the diff", Call: claudetest.Bash("git diff --stat " + base + ".." + head), WantOut: "a.go"},
-		{Name: "write result.json", Call: claudetest.Write(d.ResultJSON, review)},
+		{Name: "write result.json", Call: claudetest.Write(view.ResultJSON, review)},
 	}}
 	runLive(t, jig, sess, d)
 

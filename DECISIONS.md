@@ -83,8 +83,9 @@ was ambiguous, what was chosen, and why.
 - `Sync` and `Push` both refuse with `STORE_CONFLICT`, without touching the
   index, when the store already has an unfinished rebase or merge in progress
   (`rebase-merge`, `rebase-apply`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`,
-  `REVERT_HEAD`, `sequencer` or `BISECT_LOG`, all read with one
-  `git rev-parse --git-path` call), when HEAD is detached (a bisect, say, so
+  `REVERT_HEAD`, `sequencer` or `BISECT_LOG`, looked up in the store's git
+  directory in process, or with one `git rev-parse --git-path` call when
+  the store is on the git program), when HEAD is detached (a bisect, say, so
   a commit would land where `git bisect reset` drops it), or when the index
   has unmerged entries, which is what a conflicted `git stash pop` leaves
   behind on its own. An unconditional `git add -A`
@@ -254,6 +255,21 @@ was ambiguous, what was chosen, and why.
   (`C:\a` is `//c/a`), with gitignore characters escaped, plus the symlink-resolved form
   when it differs. Checked against the CLI: native backslash paths, lowercased paths, and
   a directory named `w [1] (x) y` all match, and a look-alike sibling does not.
+- A Windows 8.3 short-name spelling (a runner's `RUNNER~1`) matches no rule, however
+  the rule itself is spelled: the CLI checks an edit against the rules as the session
+  spells its target, and denies every edit to such a path (2.1.232 locally, 2.1.284 on
+  GitHub's Windows runners), while it allows the same file spelled long and matches a
+  long name holding a literal `~` as usual (2.1.232). So the backend hands a session the
+  long spelling of what it grants (`sessionView`): its working directory, its input and
+  result paths, and the prompt's mentions of them. GitHub's Windows runners reach every
+  test through such a temp dir, and a machine whose store, jig home or working directory
+  goes through a short name would reach its sessions the same way. Beyond spelling out
+  8.3 names, GetLongPathName only corrects the case of a name short enough to be one,
+  which rule matching ignores; a relative path is left alone, and a symlink or junction
+  keeps both of its spellings in the rules, as above. The gate reads the paths a
+  reviewer reports back through either spelling of its lease (`relativizeReviewedPath`
+  compares them resolved when they do not match as spelled), since the reviewer now
+  sees the long one.
 - The CLI contract test is opt-in (`JIG_LIVE_CLAUDE=1`), not part of `go test ./...`: it
   runs whichever CLI version is installed, so its result is not reproducible run to run.
   CI runs it in a job of its own, which installs the CLI (under "Git execution and CI").
@@ -1209,7 +1225,27 @@ above:
   now run in parallel, which gets there (under "Fixture and tests"): the pool and
   machine-mapping paths take the jig home root as an argument, so its tests no longer
   set `JIG_HOME` with `t.Setenv`, which `t.Parallel` forbids. Below that takes fewer
-  git processes per test, or more vCPUs.
+  git processes per test, or more vCPUs; the store's writes no longer start any (next
+  entry).
+- The store runs git in process (ADR 0011): `gitx.Repo` stages and commits from the
+  index itself and pushes to and fetches from a bare remote at a local path through
+  go-git's object storage, handing every step it would not do as the git program does
+  to the git program. One store write (`store.Push` with a change: stage, commit, push
+  to a local bare remote, maintenance), timed on GitHub runners in one binary whose two
+  stores differ only in the `.gitattributes` that allows the in-process path: Windows
+  408-700 ms through the git program and 21-28 ms in process, macOS 141-151 ms and
+  6-14 ms, Linux 44-47 ms and 3.5 ms; from 5,000 commits of packed history, Windows
+  406-658 ms and 38-62 ms, macOS 150-192 ms and 12-13 ms, Linux 22-25 ms and 9-22 ms.
+  go-git's own work tree was the first in-process version and was dropped: its status
+  read every HEAD tree from the pack on each write and checked every path it touched
+  for symbolic links, so a write grew with the store's history and size (on a Windows
+  machine 280 ms with no history and 470 ms with 3,000 commits, against 11 ms and 52 ms
+  for the index-based commit on the same machine). The whole suite on the same runners,
+  test binaries precompiled and the order rotated: Windows 388, 382 and 470 s on main
+  and 307, 370 and 341 s with the store in process; macOS 132 and 140 s, and 111 and
+  106 s; Linux 46 and 43 s, and 47 and 47 s. What the Windows suite still spends is git
+  work on users' repositories (pool leases, gate resets and diffs, publish), which stays
+  on the git program, and test fixtures building their repositories with it.
 - The Windows test leg puts `git --exec-path` first on PATH. The runner's first git is
   Git for Windows' `bin\git.exe`, a launcher that starts git's own `git.exe` as a second
   process on every call, the calls git makes itself during a local push included. On

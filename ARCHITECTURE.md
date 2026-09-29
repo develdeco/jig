@@ -117,7 +117,7 @@ exists.
 | `internal/fixture/` | `Build`, `Generate`, `RepoRoot` | a dir + `Opts` → a fixture repo, its store, and a scripted attempt scenario (plus the machine mapping under `Opts.Home`, by default the jig home `home.Root` resolves); `Generate` builds into a `t.TempDir()`; `RepoRoot`: a caller's source file → the module root |
 | `internal/frontier/` | `Run`, `Requeue`, `RequeueSlice`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
-| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `DiffNameOnly`, `FileExistsAtRev`, `IsLocalRemote`, `GuardedPush` | argv + a working dir → git plumbing output, or a refused push |
+| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `DiffNameOnly`, `FileExistsAtRev`, `IsLocalRemote`, `GuardedPush`, `OpenRepo` (`Repo`: `State`, `CommitAll`, `Push`, `Fetch`) | argv + a working dir → git plumbing output, or a refused push; a store's directory → the same store operations in process (go-git), or `ErrUseCLI` for the caller's git-program path |
 | `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `internal/home/` | `Root`, `MachinePath`, `PoolDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths |
 | `internal/journal/` | `Append`, `Read`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs |
@@ -294,9 +294,12 @@ pushes the store's own bookkeeping commits to the store's remote
 (`store.Push`) as it works; that push is unguarded by design - it moves
 jig's own journal and ticket-folder state, not product code.
 
-**Single git owner.** Only `gitx` spawns `git`; `lint.TestNoGitSpawnOutsideGitx`
-parses every other package and fails on an `os/exec` call or `exec.Cmd`
-literal whose program resolves to `git`. Every gitx call runs with
+**Single git owner.** Only `gitx` runs git: it spawns the git program for
+users' repositories and runs git in process, through go-git, for the store
+([ADR 0011](docs/adr/0011-the-store-runs-git-in-process.md)).
+`lint.TestNoGitSpawnOutsideGitx` parses every other package and fails on an
+`os/exec` call or `exec.Cmd` literal whose program resolves to `git`, and
+`lint.TestNoGoGitOutsideGitx` on any import of go-git. Every gitx call runs with
 `-c maintenance.auto=false`, so none leaves git's detached background
 maintenance running; the flag is argv-only, so a user's own git still
 maintains their repos. Every call also drops an inherited `GIT_DIR` and the

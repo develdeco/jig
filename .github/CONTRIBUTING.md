@@ -73,9 +73,10 @@ annotation.
 - Every package whose tests run git wires `internal/gittest` into
   `TestMain` (`gittest.Run`), which points git at a generated, hermetic
   config and stops background maintenance from outliving the test process.
-- Only `internal/gitx` spawns `git`; `lint.TestNoGitSpawnOutsideGitx` parses
-  every other package and fails the build if one calls `os/exec` on a
-  program that resolves to `git`.
+- Only `internal/gitx` runs git, as a program or in process:
+  `lint.TestNoGitSpawnOutsideGitx` parses every other package and fails the
+  build if one calls `os/exec` on a program that resolves to `git`, and
+  `lint.TestNoGoGitOutsideGitx` if one imports go-git.
 - Every test gets its own `t.TempDir()`, and its own jig home, so a test
   run never touches a real machine's: packages take the jig home root as an
   argument (`fixture.Opts.Home`, `verifydeliver.Deps.Home`,
