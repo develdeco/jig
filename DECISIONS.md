@@ -1199,6 +1199,253 @@ amendment):
   `review-result.json` already has - and errors loudly on a scenario with
   no coverage for it, exactly like a missing `review-result.json` does.
 
+## Gate demo
+
+See [ADR 0014](docs/adr/0014-demo-session-at-the-gate.md) for the contract, the
+best-effort semantics, and why the media live under the jig home. What the code
+raised beyond it:
+
+- The demo is not part of `GateSource.Round`. `Gate` asks the source for a
+  `Demo` method by interface (`DemoSource`) after the round's final store push,
+  so the scripted source is excluded by having none, not by a flag or a check on
+  its type, and the round's own writes are already pushed when the session
+  starts.
+- `demo.yaml` has two statuses, `recorded` and `refused`. A dispatch that
+  errored or wrote no result is `refused` with a failure code as its reason
+  (see below), and a malformed result is `refused` with jig's own words, not a
+  third `failed` status: one vocabulary for "no demo", one reason field to
+  read. `existing` is only a `GateReport` status,
+  for a round that ran no demo because an earlier round holds one.
+- Only a `recorded` demo ends the retries for a head; a refused one does not.
+  The alternative, any `demo.yaml` naming the head, would strand a head with no
+  demo after one transient failure (a timed-out session, a backend that was
+  down), with no way to try again short of a new commit. As chosen, gating again
+  is the retry, and each retry is an operator's own command, so it cannot loop.
+- The demo's `base_sha` is the merge base with the target (`resolveFullBase`,
+  the same base a full review starts from), never the round's delta base: a demo
+  shows the whole change, and a delta round's base is only the previous review's
+  head.
+- A refusal reason is one line of at most 400 characters (`demoReason`): an
+  operating system or git message it quotes can run long, and `demo.yaml` is a
+  manifest, not a log. What the demo session or its backend said is not in it
+  at all (a bullet below).
+- The demo is not journaled. The journal records a gate round's own events
+  (`gate-open`, `gate-round`, `gate-clean`), not the reviewer session's dispatch,
+  and `demo.yaml` is the demo's own record, written per round beside `report.yaml`.
+- A result must give every file a non-empty caption and the demo a non-empty
+  summary, even with no media: the summary is what says why nothing is visible,
+  and a caption is what a reader sees beside a file. Both are structure jig can
+  check without judging what either says.
+- An attempt starts by clearing `media_dir` and making it fresh, notes which
+  directory that is, and checks afterwards that `media_dir` is a plain
+  directory and the same one (`os.SameFile`). The plain-directory check alone
+  follows every parent, so a directory above `media_dir` that a session swapped
+  for a link left the demo, and the rename after it, outside the evidence tree
+  (and, with a link into the store's working copy, committed into the store).
+  `os.RemoveAll` does not follow a link, so a link or junction a session left
+  is removed as itself and never what it pointed at; a test pins that the
+  target survives.
+- The identity check only sees a swap made during its own attempt. A swap that
+  stays would send the next attempt's `RemoveAll`, `MkdirAll` and media through
+  the link (`RemoveAll` on a path below a junction deletes what the junction
+  points at), so an attempt first requires the store id and ticket directories
+  above the head's to be plain directories (`plainEvidenceParents`) and refuses
+  the demo, dispatching no session, when one is not. The head directory is left
+  out on purpose, since clearing removes a link there as itself, and
+  `<jig home>/evidence` itself is the operator's own to link. The refusal names
+  the directory by its own name.
+- Nothing jig itself writes for a demo in the store names the jig home (the
+  session's own words are another matter, next bullets, and so is a result
+  key jig does not recognize, which a refusal quotes as the session wrote it). `demo.json` holds the
+  absolute `media_dir`, which by default sits under `<user home>/.config/jig`
+  and so holds the user name, and the store's git is committed, pushed and
+  often shared, so `demo.json` is written beside the media, at
+  `<jig home>/evidence/<store id>/<ticket>/<head sha>.demo.json`, and never in
+  the store's `work/`. It is machine-local like the media, nothing reads it
+  back, and being a sibling of `media_dir` it survives an attempt's clearing
+  and is never seen by the prune. Ignoring it in the store's `.gitignore`
+  would not cover a store created before the entry, and would leave a machine
+  path one missed pattern away from history. The result stays in `work/`: it
+  holds names, captions and a summary. A test walks the store's working tree
+  after a recorded demo whose session writes no path and fails on any file that
+  spells the jig home, raw, with forward slashes or JSON-escaped.
+- The session's own words are recorded as written, and jig does not filter or
+  rewrite them. A demo's result file, and the summary and captions `demo.yaml`
+  copies from it, are model prose, like the reviewer's `result.json` summary,
+  and the session was told `media_dir`'s absolute path, so a summary such as
+  "saved two screenshots in <media_dir>" is ordinary output and names the jig
+  home in the store. Two ways to make the claim "nothing in the store names the
+  jig home" true were weighed and set aside: keeping the result file out of the
+  store like `demo.json` (`demo.yaml` carries its content anyway), and passing
+  the summary and captions through the role-naming reasons get. Both rewrite
+  or hide what a model chose to say, on a guess about which strings are paths,
+  and a path in prose has no fixed spelling to find (raw, forward-slash,
+  Go-quoted, a WSL mount). So the guarantee is scoped to what jig writes: its
+  own fields and messages. The session's words, unlike jig's capped reasons,
+  are recorded unbounded, the way the reviewer's are. A test has a session
+  name `media_dir` in a summary and a caption
+  that are not tidy (edge whitespace, a line break, runs of spaces, more runes
+  than a reason is capped at) and asserts both are recorded byte for byte in the
+  result file, `demo.yaml` and the report, so that neither trimming, collapsing
+  nor capping can be applied to them unseen, while every other field of
+  `demo.yaml` still names no host path (`.github/SECURITY.md` says the same).
+- A refusal jig composes names its own directories by role. A reason is
+  committed to `demo.yaml` and printed, and the operating system and git
+  messages it can quote (`GetFileAttributesEx <path>: ...`, `mkdir <path>: ...`, a
+  failed rename) each name the path they failed on. `gateDemo` replaces the
+  media directory, the jig home and the store's own directory with `media_dir`,
+  `<jig home>` and `<store>` in every such reason before it is recorded, printed
+  or capped (`leaveOutHostPaths`). It is one step at the end, so a message added
+  later is covered, where wrapping each error at its own site would leave the
+  next one out. It replaces absolute spellings only (as given, cleaned, with
+  forward slashes, and each Go-quoted, since a message that quotes a path with
+  `%q` doubles a Windows path's backslashes), never a relative path or a
+  filesystem root, and only jig's own directories, so it is for the paths jig
+  chose. What it cannot cover is text jig did not write and cannot enumerate the
+  spellings of, which is why the demo session's and its backend's text is not
+  put through it: it is not recorded (next bullet).
+- A demo that failed because the demo session or its backend did (the dispatch
+  returned an error, or the session wrote no demo result) records a failure code
+  and never the failure's text. That text is not jig's: a backend's error can
+  echo the arguments it ran with (herdr's echoed the whole prompt, and on Windows
+  every path of the dispatch spelled as a WSL mount, a spelling
+  `leaveOutHostPaths` does not know), a stderr tail, or a path of its own, and a
+  committed reason cannot be cleaned of what jig cannot enumerate. So `demo.yaml`
+  gets `the demo session failed: <code>`, the code being `failureCode`'s, the
+  helper `Gate` and `Publish` use for a store commit subject for the same
+  reason (the error's own code where it has one, `INTERNAL` where it has none,
+  `DEMO_NO_RESULT` for a session that wrote no result), and the full text goes
+  to the gate report only (`demo_detail`, beside `demo_reason`), where it is read
+  once and not kept. The two kinds are told apart by a type (`demoFailure`), not
+  by the wording of an error: an error is a failure when the dispatch or the
+  missing result made it, and a refusal, jig's own words about a result it read,
+  when anything else did, so a refusal added later cannot carry a backend's text
+  by accident. Weighed and set aside: keeping the text in the reason and adding
+  the WSL spelling to `leaveOutHostPaths`, which is the route of extending the
+  list one spelling per backend, and would leave the whole prompt in a reason
+  that says nothing to an operator.
+- When a session wrote no demo result, headless and herdr each write a result of
+  their own into `demo.result.json` in its place, the slice result's shape (an
+  `outcome` field and a `summary`, which for a failed outcome headless extends with
+  the denied tool calls and their paths). It is not a demo result that broke the
+  contract: a result file whose top-level object has an `outcome` field is taken
+  as "the demo session wrote no demo result", a failure with the code
+  `DEMO_NO_RESULT`, and the file is removed from `work/` (`demoFailed`) before
+  the round's push, since it is the backend's text and the store would commit it.
+  The field decides, structurally (`backendFallback`), and no wording is read, so
+  a demo result whose summary says "outcome" is recorded as any other, and a
+  result a session wrote with such a field is taken the same way, being
+  indistinguishable from the backend's. What the backend recorded (its outcome
+  and summary) goes to the report's detail. A file a dispatch that failed left in
+  `work/` is removed the same way. The backends' fallback itself is not changed
+  here: it stays what it is for every dispatch, and what a backend writes for a
+  dispatch that is not a slice is a change to the backends of its own. A test
+  pins that what the backends write is the marshaled `outcome.Result` and has the
+  field, so a change of that shape fails before a demo stops recognizing it.
+- herdr's control commands are named by their subcommand in an error, never by
+  their operands: `runHerdr(sub, args...)` reports `herdr agent prompt: exit
+  status 1: <stderr tail>` and, for a response that is not JSON, `parse the
+  response of herdr agent prompt`. The operands of `agent prompt` are the whole
+  prompt and every path in it, and those of `workspace create` the worktree; the
+  errors quoted them, and they reach the terminal and whatever records an error.
+  The subcommand is a parameter of its own, so no caller can echo operands by
+  joining them. herdr's own stderr is kept, which is what says why.
+- A file the session listed is named in a reason by its index and the last
+  element of the string it gave (`demoEntry`: `media entry 1 ("shot.png") is not
+  a plain file name directly inside media_dir`), never by the string. The
+  session is told `media_dir`'s absolute path and may list a file by it, in
+  whatever spelling its backend gave it (raw, forward-slash, a herdr session's
+  WSL mount), and `leaveOutHostPaths` only knows the spellings jig chose. Not
+  echoing a path jig did not choose is the one rule that holds for every
+  spelling; extending the list of spellings would not, and quoting the string
+  with `%q` leaks a Windows jig home, its backslashes doubled. The same naming
+  applies to the empty-caption refusal, which is raised before the file is
+  looked at. A name that passed the plain-name check has no separator or
+  colon, so the refusals after it keep quoting it whole.
+- Both identity checks (the directory's, and a file's between `Lstat` and the
+  read) use `lstatPinned`, which reads the file id when the `Lstat` is taken. On
+  Windows a `FileInfo` from `Lstat` holds no id: `os.SameFile` opens its path to
+  read one the first time it compares, after any swap, and both sides then name
+  what now sits at the path. Tests swap a parent for a real junction and a file
+  for another, and fail on the plain `Lstat`.
+- A listed file that is empty is refused (`file %q is empty`). `gh --attach`
+  refuses an empty file, and the limits exist so that a file jig records is one
+  a later publish can attach.
+- After the rename, every entry in `media_dir` that is not a recorded file is
+  removed (an unlisted file, a subdirectory, a link, none followed), so the
+  directory holds exactly what `demo.yaml` lists. The 50-file limit counts
+  listed files, so without this the directory could hold more than the manifest
+  says, and a link could sit in the evidence tree pointing anywhere.
+- A refused demo "records none of your files": the files a session wrote stay in
+  `media_dir` until the next attempt clears it, and a rename refused part of the
+  way can leave staged `.jig-demo-N.tmp` names there. Nothing reads them, since
+  no `demo.yaml` lists them.
+- The rename is two-phase (every file to a temporary name, then to
+  `demo-<n>.<ext>`) and refuses up front when an unlisted file already holds a
+  final name. A session that called its files `demo-2` and `demo-1` in that
+  order is ordinary, and a single-phase rename would overwrite one with the
+  other.
+- A file name is a plain name: no separator in either spelling, no drive or
+  stream colon, listed once, and `filepath.IsLocal` (which also refuses a
+  Windows reserved device name). Duplicates compare case-insensitively, since
+  two spellings that differ only by case are one file on a case-insensitive
+  filesystem. Hard links are not detected: one is a regular file, the same as a
+  copy the session could make itself.
+- The store id is the first 16 hex digits of the sha256 of the store root,
+  absolute and symlink-resolved. A project name is not unique or a safe path
+  component, a remote URL does not exist for a standalone store, and a stored id
+  would travel with a clone that must not carry machine-local state. A Windows
+  junction is not a symlink and Go does not resolve it, so a clone reached
+  through one has its own id, like a clone that moved; that is documented rather
+  than resolved, since resolving it takes a Windows-only call for a spelling
+  that only changes where the media are looked for.
+- herdr on Windows rewrites the prompt's mentions of every path of the dispatch
+  (worktree, input file, result file, `ExtraWriteDir`) to their WSL mount, the
+  way headless rewrites them to the long spelling (`respellMentions`, one helper
+  for both), and creates the workspace at the worktree's mount as before. This
+  applies to every herdr dispatch on Windows, so the reviewer and slice
+  sessions there are now told WSL paths too, where they were told host
+  paths. jig still reads the result at its host path, and the JSON files it
+  wrote keep the host spelling of the paths they hold (`media_dir` in
+  `demo.json`, the paths in `review.json`); no backend can rewrite a file jig
+  wrote. herdr scopes no edits, so `ExtraWriteDir` needs no grant and is not
+  passed to herdr on its own. It does not refuse the dispatch on Windows: a
+  refusal there would be a platform case standing in for a mechanism that
+  already exists, and would record every demo on the default backend as
+  refused.
+- The sentence saying what each intent source means is one constant,
+  `intentSourcesPrompt`, in the reviewer's prompt and the demo's alike. The demo
+  is handed the round's own intent pair, so a source jig gains has to be
+  described to it too; two copies of the sentence would let one prompt lag the
+  other without a test failing. A test pins that each prompt carries it, and
+  another that the demo is dispatched with the very pair the reviewer was
+  handed and the report shows, for a brief, an explicit intent and none; the
+  inferred-intent test through the fake backend checks the same for an inferred
+  one.
+- `leaseChanged`, extracted from the reviewer round so the demo shares it, returns
+  errors with no package prefix, and each caller adds its own, so the reviewer
+  round's error text is what it was before the extraction.
+- The fake backend fails on a round with no scripted `demo-result.json`, the
+  way it fails on a round with no `review-result.json`, so a scenario that
+  forgot its demo shows up as a refused demo instead of a silent "nothing to
+  show". A scenario with no media has a result and no `demo-media/` directory.
+  The `reviewer` fixture scenario scripts a demo for its clean round 3, so the
+  tape and the tests that drive it show a recorded demo, not a refusal; a new
+  `demo` scenario has one clean round with its demo, for the demo tape. The
+  `inferred-intent` scenario scripts a demo with no media too, so its clean round
+  shows a recorded demo and its summary and not a refusal.
+- `jig gate --no-demo` and `jig solve --no-demo` are the only switches; there is
+  no config to turn demos off, since which repos want one is the repo's own
+  `CLAUDE.md` to say. The gate report prints nothing about a demo for a round
+  that ran none, `--no-demo` included.
+- `cmd/jig`'s `solveGateSource` is a variable only so a test can substitute a
+  source that counts demo dispatches: `jig solve` with `--scenario` always
+  selects the scripted source, so no scenario can reach a reviewer source through
+  solve's own flags.
+- The existing findings-bookkeeping tests that drive clean reviewer rounds
+  through a scripted reviewer stub pass `NoDemo`: their subject is the review,
+  and a demo dispatch would count as one more round on the stub.
+
 ## Review eval
 
 - `internal/verifydeliver` gains one type and one function beyond the

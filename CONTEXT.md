@@ -56,6 +56,10 @@ _Avoid_: log file, history
 Evidence that a check passed, stored in the ticket's `evidence/`.
 _Avoid_: screenshot, proof
 
+**Demo**:
+What a session shows a person reviewing a change: the change working, as a screenshot, a GIF or a video, whichever shows it best. After a clean reviewer round, `jig gate` dispatches a demo session and records what it produced: the media under the jig home's `evidence/` (never in the store's git) and `gate/round-N/demo.yaml`, the manifest of each file's hash, size and caption, or a refused status and why. There is one per reviewed head, and it is best effort: a refused or failed demo is recorded and shown, never a reason for the round's verdict to change. `jig gate --no-demo` skips it.
+_Avoid_: receipt (evidence that a check passed), recording, screencast
+
 **Fix slice**:
 A gate finding turned into a new frontier item. Review has no back-edges - every finding becomes forward work.
 _Avoid_: review comment, follow-up task

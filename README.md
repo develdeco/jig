@@ -178,6 +178,20 @@ intent to judge against at all, and the reviewer is told so plainly. Both
 flags work in every mode, not only `--branch`, and each gate report
 prints which one this round resolved to.
 
+After a clean reviewer round, `jig gate` also dispatches a demo session: it
+shows a person reviewing the change that it works, as a screenshot, a GIF or
+a video, whichever shows it best, and jig records what it produced - the
+media under the jig home's `evidence/` directory (never in the store's git)
+and a manifest, `gate/round-N/demo.yaml`, in the store. Your repo documents
+its own demo tooling in its own `CLAUDE.md`. A demo is best effort: one that
+fails, or whose files jig refuses, is recorded and shown in the gate report
+(`demo: refused` and why) and never changes the round's verdict. There is
+one demo per reviewed head, `--no-demo` skips it (on `jig solve` too), and
+the scripted source never runs one. A demo that needs an env class reports
+that it cannot record, since env classes are already down by then.
+Publishing the media on the pull request is not built yet: `jig publish`
+does not attach a recorded demo.
+
 ## Safety
 
 The `headless` backend is not a security boundary: a granted session's
@@ -199,9 +213,10 @@ host. See [ADR 0008](docs/adr/0008-headless-permission-model.md) for why a
 denylist of path spellings can't close that gap, and what would. A
 `headless` session gets nothing else it doesn't need: jig's own settings
 grant its shell and file reads only through a passing screen, and its file
-edits only inside the lease and its own `result.json` - though the
-operator's own user settings, which still load on top, can grant more. The
-lease's `.claude/settings.json` is not loaded, since that file is part of
+edits only inside the lease, its own `result.json`, and a gate demo's media
+directory - though the operator's own user settings, which still load on
+top, can grant more. The lease's `.claude/settings.json` is not loaded,
+since that file is part of
 the code under review, while its `CLAUDE.md` is carried in from the lease's
 committed tree, with a 64 KiB size cap, since that is the repo telling the
 session how it works. Before each screened session starts, jig checks that
