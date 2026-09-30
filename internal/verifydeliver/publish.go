@@ -71,6 +71,16 @@ var confirm = func(branch, ticket string) bool {
 // actually threads through, without needing a real non-local remote.
 var guardedPush = gitx.GuardedPush
 
+// fetchOrigin refreshes the publish lease's view of origin, once the lease has
+// been pointed at the copy publish ships. It is a func var, like guardedPush,
+// so a test can move origin at the one moment no state of the leases reaches:
+// the acquire compared the copy with origin's, and someone pushes before this
+// fetch, which is what the fast-forward check after it is for.
+var fetchOrigin = func(dir string) error {
+	_, err := gitx.Run(dir, "fetch", "origin")
+	return err
+}
+
 // Publish reconciles, re-validates, documents, squashes, and routes one
 // ticket's delivery. Only history not yet on origin is squashed: a branch
 // already there is pushed as it is. v0.1 handles a single repo.
@@ -172,7 +182,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err := fetchTicketBranchFromBuildLease(d.Home, lease.Dir, repoName, ticket, branch); err != nil {
 		return PublishReport{}, err
 	}
-	if _, err := gitx.Run(lease.Dir, "fetch", "origin"); err != nil {
+	if err := fetchOrigin(lease.Dir); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
 	}
 
@@ -186,6 +196,17 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve the head to ship: %w", err)
 	}
 	if err := checkReviewedHead(gateRep, repoName, shipHead, ticket); err != nil {
+		return PublishReport{}, err
+	}
+	// Publish never rewrites what is on origin and never forces: a branch that
+	// is already there must be a fast-forward from where it stands. Checked
+	// here for the same reason as above - git would refuse the push, but only
+	// after publish had written the store and made its commits.
+	buildDir, err := pool.Dir(d.Home, repoName, ticket, pool.Build)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve build lease: %w", err)
+	}
+	if err := requireFastForward(lease.Dir, branch, buildDir, ticket); err != nil {
 		return PublishReport{}, err
 	}
 
@@ -659,5 +680,51 @@ func checkReviewedHead(rep reportYAML, repoName, head, ticket string) error {
 		Msg:  fmt.Sprintf("the head publish would ship, %s, is not the head the last clean gate round reviewed, %s", head, reviewed),
 		Code: "PUBLISH_UNREVIEWED_HEAD",
 		Help: help,
+	}
+}
+
+// requireFastForward refuses, with PUBLISH_NOT_FAST_FORWARD, a push of branch
+// from dir that would not fast-forward origin's copy: origin has commits the
+// branch lacks, whether or not the branch has some origin lacks in turn. dir's
+// origin/<branch> is as of the fetch just made. A branch origin does not have
+// is a new branch, which has nothing to fast-forward. Publish pushes without
+// force, so git would refuse such a push in the end; this is the refusal made
+// early, with both sides counted, before publish writes to the store.
+//
+// The copy publish ships comes from the build lease at buildDir (or is
+// origin's own), so that is where the two are integrated: jig merges nothing
+// that is not its own.
+func requireFastForward(dir, branch, buildDir, ticket string) error {
+	remoteRef := "refs/remotes/origin/" + branch
+	tip, err := gitx.Run(dir, "for-each-ref", "--format=%(objectname)", remoteRef)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: look up origin/%s: %w", branch, err)
+	}
+	if tip == "" {
+		return nil
+	}
+	ok, err := gitx.IsAncestor(dir, remoteRef, "refs/heads/"+branch)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: compare %s with origin/%s: %w", branch, branch, err)
+	}
+	if ok {
+		return nil
+	}
+	theirs, err := gitx.CommitsIn(dir, "refs/heads/"+branch+".."+remoteRef)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: list the commits of origin/%s the copy lacks: %w", branch, err)
+	}
+	ours, err := gitx.CommitsIn(dir, remoteRef+"..refs/heads/"+branch)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: list the commits of %s origin lacks: %w", branch, err)
+	}
+	return &axi.Error{
+		Msg: fmt.Sprintf("pushing %s would not be a fast-forward: origin/%s has %d commit(s) the branch lacks, and the branch has %d commit(s) origin lacks",
+			branch, branch, len(theirs), len(ours)),
+		Code: "PUBLISH_NOT_FAST_FORWARD",
+		Help: []string{
+			"publish pushes only a fast-forward and never forces: it rewrites nothing that is on origin",
+			fmt.Sprintf("Integrate origin's copy in the build lease (for example `git -C %s fetch origin && git -C %s merge origin/%s`), run `jig gate %s`, then publish again", buildDir, buildDir, branch, ticket),
+		},
 	}
 }
