@@ -45,20 +45,15 @@ func cmdPublish(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	var prRows, prURLRows [][]string
+	var prRows [][]string
 	for repo, path := range report.PRBody {
 		prRows = append(prRows, []string{repo, path})
-	}
-	for repo, url := range report.PRURL {
-		if url != "" {
-			prURLRows = append(prURLRows, []string{repo, url})
-		}
 	}
 	axi.Render(stdout,
 		axi.KV("publish", [][2]string{{"ticket", ticket}, {"tier", report.Tier}}),
 		pushedTable(report),
 		axi.Table("pr_body", []string{"repo", "path"}, prRows),
-		axi.Table("pr_url", []string{"repo", "url"}, prURLRows),
+		prURLTable(report),
 		axi.Help("Run `jig status "+ticket+"` to confirm the ticket is fully green"),
 	)
 	return 0
@@ -78,4 +73,27 @@ func pushedTable(report verifydeliver.PublishReport) string {
 		rows = append(rows, []string{repo, report.Head[repo], report.Squash(repo)})
 	}
 	return axi.Table("pushed", []string{"repo", "head", "squash"}, rows)
+}
+
+// prURLTable is the publish report's account of the pull request each repo's
+// publish left: its URL, and whether publish opened it or updated the one the
+// branch already had open. A repo whose tracker opens no pull requests has no
+// row.
+func prURLTable(report verifydeliver.PublishReport) string {
+	repos := make([]string, 0, len(report.PRURL))
+	for repo, url := range report.PRURL {
+		if url != "" {
+			repos = append(repos, repo)
+		}
+	}
+	sort.Strings(repos)
+	rows := make([][]string, 0, len(repos))
+	for _, repo := range repos {
+		action := "opened"
+		if report.PRUpdated[repo] {
+			action = "updated"
+		}
+		rows = append(rows, []string{repo, report.PRURL[repo], action})
+	}
+	return axi.Table("pr_url", []string{"repo", "url", "action"}, rows)
 }

@@ -36,7 +36,10 @@ type PublishReport struct {
 	// Head is repo -> the head the push left on the branch.
 	Head   map[string]string
 	PRBody map[string]string // repo -> store-relative pr body path
-	PRURL  map[string]string // repo -> opened PR url; empty when the tracker adapter has no PRCreator
+	PRURL  map[string]string // repo -> the PR url, opened or updated; empty when the tracker adapter has no PRCreator
+	// PRUpdated is repo -> true when the branch already had an open pull
+	// request, which publish updated instead of opening another.
+	PRUpdated map[string]bool
 }
 
 // NotSquashed is what the publish report says of a repo whose branch was
@@ -58,8 +61,16 @@ func (r PublishReport) Squash(repo string) string {
 // both the fmt.Printf prompt and the stdin read - so a test can replace it
 // outright and never touch the real terminal: stubbing only the read half
 // would still print the literal prompt text to the test's real stdout.
-var confirm = func(branch, ticket string) bool {
-	fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
+//
+// openPR is the URL of the pull request the branch already has open, or "":
+// the question says which of the two things it is agreeing to, opening a
+// pull request or updating that one.
+var confirm = func(branch, ticket, openPR string) bool {
+	if openPR != "" {
+		fmt.Printf("Push %s and update its open PR %s for %s? [y/N] ", branch, openPR, ticket)
+	} else {
+		fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
+	}
 	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	answer := strings.ToLower(strings.TrimSpace(line))
 	return answer == "y" || answer == "yes"
@@ -209,6 +220,20 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err := requireFastForward(lease.Dir, branch, buildDir, ticket); err != nil {
 		return PublishReport{}, err
 	}
+	// The tracker is built, and asked whether the branch already has an open
+	// pull request, ahead of the first store write for the same reason: a
+	// tracker that cannot be reached, or cannot say, refuses the publish before
+	// it has written or pushed anything, not after the branch is on origin.
+	adapter, err := d.trackerAdapter()
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: build tracker adapter: %w", err)
+	}
+	openPR := ""
+	if updater, ok := adapter.(tracker.PRUpdater); ok {
+		if openPR, err = updater.FindOpenPR(branch, target); err != nil {
+			return PublishReport{}, fmt.Errorf("verifydeliver: publish: look for an open pull request from %s: %w", branch, err)
+		}
+	}
 
 	// Step 1: reconcile.
 	policy, err := reconcile(lease.Dir, branch, target, identityEnv)
@@ -328,7 +353,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// confirmation is refused by the gitx guard downstream.
 	confirmed := o.Yes
 	if !o.Yes {
-		if !confirm(branch, ticket) {
+		if !confirm(branch, ticket, openPR) {
 			return PublishReport{}, &axi.Error{Msg: "publish declined at confirmation", Code: "PUBLISH_DECLINED"}
 		}
 		confirmed = true
@@ -338,19 +363,29 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		return PublishReport{}, err
 	}
 
-	adapter, err := tracker.New(d.Cfg, d.Store)
-	if err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: build tracker adapter: %w", err)
-	}
-	prURL := ""
-	if creator, ok := adapter.(tracker.PRCreator); ok {
-		url, err := creator.CreatePR(branch, target, title, filepath.Join(d.Store.Root, prPath))
-		if err != nil {
-			return PublishReport{}, fmt.Errorf("verifydeliver: publish: create PR: %w", err)
+	// The pull request: the one the branch already has open into the target
+	// is updated, its body replaced with this publish's, and none is opened
+	// beside it; a branch with none gets one, when the tracker opens pull
+	// requests. A closed or merged pull request, or one into another base, is
+	// not that one (FindOpenPR): the operator asked to publish, so one is
+	// opened, and the others are left as they are.
+	prURL, prOutcome := "", ""
+	switch {
+	case openPR != "":
+		if err := adapter.(tracker.PRUpdater).UpdatePR(openPR, filepath.Join(d.Store.Root, prPath)); err != nil {
+			return PublishReport{}, fmt.Errorf("verifydeliver: publish: update PR %s: %w", openPR, err)
 		}
-		prURL = url
+		prURL, prOutcome = openPR, "updated"
+	default:
+		if creator, ok := adapter.(tracker.PRCreator); ok {
+			url, err := creator.CreatePR(branch, target, title, filepath.Join(d.Store.Root, prPath))
+			if err != nil {
+				return PublishReport{}, fmt.Errorf("verifydeliver: publish: create PR: %w", err)
+			}
+			prURL, prOutcome = url, "opened"
+		}
 	}
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: "pr"}); err != nil {
+	if err := journal.Append(d.Store, ticket, journal.Line{Event: "pr", Outcome: prOutcome, Commit: head}); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 	}
 
@@ -373,11 +408,12 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		squashed[repoName] = sha
 	}
 	return PublishReport{
-		Tier:     tier,
-		Squashed: squashed,
-		Head:     map[string]string{repoName: head},
-		PRBody:   map[string]string{repoName: prPath},
-		PRURL:    map[string]string{repoName: prURL},
+		Tier:      tier,
+		Squashed:  squashed,
+		Head:      map[string]string{repoName: head},
+		PRBody:    map[string]string{repoName: prPath},
+		PRURL:     map[string]string{repoName: prURL},
+		PRUpdated: map[string]bool{repoName: prOutcome == "updated"},
 	}, nil
 }
 

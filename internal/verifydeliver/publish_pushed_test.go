@@ -100,6 +100,24 @@ func TestPublishRepublishesAPublishedTicket(t *testing.T) {
 	if got := originRef(t, fx.RepoRemote, "refs/heads/"+branch); squash == "" || got != squash {
 		t.Fatalf("test setup: the first publish left origin's %s at %s, want its squash %q", branch, got, squash)
 	}
+	// What the publish reports and journals as pushed is the squash, the head
+	// that went to origin, not the branch's tip from before it.
+	if got := first.Head["fixture-repo"]; got != squash {
+		t.Fatalf("the first publish reports head %s, want the squash %s it pushed", got, squash)
+	}
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatalf("journal.Read: %v", err)
+	}
+	var prLines []journal.Line
+	for _, l := range lines {
+		if l.Event == "pr" {
+			prLines = append(prLines, l)
+		}
+	}
+	if len(prLines) != 1 || prLines[0].Commit != squash {
+		t.Fatalf("journal pr lines after the first publish = %+v, want one at the squash %s", prLines, squash)
+	}
 
 	// The build lease still holds the unsquashed commits, so it has diverged
 	// from origin's squash: merging origin's branch in there is what the sync

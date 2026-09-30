@@ -680,7 +680,7 @@ func TestPublishConfirmWiring(t *testing.T) {
 			called = true
 			return nil
 		}
-		confirm = func(string, string) bool { return false }
+		confirm = func(string, string, string) bool { return false }
 
 		_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: false})
 		var ae *axi.Error
@@ -734,7 +734,7 @@ func TestPublishConfirmWiring(t *testing.T) {
 			pushed = branch
 			return nil
 		}
-		confirm = func(branch, ticket string) bool {
+		confirm = func(branch, ticket, _ string) bool {
 			prompted, promptedTicket = branch, ticket
 			return true
 		}

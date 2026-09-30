@@ -133,6 +133,49 @@ func (a *githubAdapter) CreatePR(head, base, title, bodyFile string) (string, er
 	return url, nil
 }
 
+// pullRequest is one row of the pull requests REST endpoint's answer.
+type pullRequest struct {
+	HTMLURL string `json:"html_url"`
+}
+
+// FindOpenPR implements tracker.PRUpdater: the open pull request from head
+// into base in this repo, asked of the pull requests endpoint with the
+// qualified head filter (`owner:branch`), which GitHub applies itself: a pull
+// request from a fork whose branch happens to share head's name is another
+// head and is never in the answer. (`gh pr list --head` takes the bare branch
+// name, so it lists every fork's, one page of 30 at a time, and an answer the
+// page cut short reads as "none".) At most one open pull request can exist for
+// a head and base, so more than one is an error, not a choice.
+func (a *githubAdapter) FindOpenPR(head, base string) (string, error) {
+	out, err := a.run("api", "repos/"+a.repoSpec()+"/pulls", "--method", "GET",
+		"-f", "head="+a.owner+":"+head, "-f", "base="+base, "-f", "state=open")
+	if err != nil {
+		return "", err
+	}
+	var rows []pullRequest
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		return "", fmt.Errorf("tracker: parse gh api pulls output %q: %w", out, err)
+	}
+	urls := make([]string, len(rows))
+	for i, r := range rows {
+		urls[i] = r.HTMLURL
+	}
+	switch len(urls) {
+	case 0:
+		return "", nil
+	case 1:
+		return urls[0], nil
+	}
+	return "", fmt.Errorf("tracker: gh api pulls found %d open pull requests from %s into %s in %s: %s", len(urls), head, base, a.repoSpec(), strings.Join(urls, " "))
+}
+
+// UpdatePR implements tracker.PRUpdater: it replaces the body of the pull
+// request at url with bodyFile's content via `gh pr edit --body-file`.
+func (a *githubAdapter) UpdatePR(url, bodyFile string) error {
+	_, err := a.run("pr", "edit", url, "--repo", a.repoSpec(), "--body-file", bodyFile)
+	return err
+}
+
 // Comment posts body as a comment on ticketID.
 func (a *githubAdapter) Comment(ticketID string, body string) error {
 	n, err := issueNumber(ticketID)
