@@ -142,6 +142,54 @@ ticket then gets its own `brief.md` and `slices.yaml` and follows the same
 `validate`/`solve` flow above; re-running `jig graduate <name>` after the
 chart's fog clears creates just the new entries.
 
+## A branch built outside jig
+
+A branch you built yourself needs no brief and no slices. Push it, mint a
+ticket, and hand the branch to the gate:
+
+```sh
+jig ticket new --title "Add retry"    # mints T-2 in the store
+jig gate T-2 --branch add-retry       # reviews the pushed branch and adopts it
+jig run T-2                           # builds what the round queued, on add-retry
+jig gate T-2                          # reviews add-retry again, fixes included
+```
+
+The first `--branch` records `add-retry` as the ticket's branch, and its tip
+as the ticket's start sha. From then on `jig gate`, `jig run` and `jig solve`
+work on that branch: the fix slices a round queues are built in jig's own
+lease on top of your commits, and the next round reviews the branch with them.
+`jig solve` stops at the first clean round and prints its report. None of these
+commands pushes: jig's commits wait in the build lease. A ticket adopts one
+branch for good, so naming another `--branch` later is refused, and so is
+adopting a branch for a ticket jig has already built on: a green result in its
+journal says so, whichever version of jig wrote it, and adopting another
+branch would strand the commits on the ticket's own.
+
+The ticket needs no brief. A round resolves its intent the way any ticket's
+does (see below): the brief, else `--intent` or `--doc`, else, for a reviewer
+round, one inferred from your Claude Code sessions, else none. For a branch you
+built yourself, the session it matches is your own, by the files the branch
+changes. Pass `--backend headless` to `gate` and `run`, as in the quickstart,
+when herdr is not installed.
+
+Until jig has built on the branch it is yours, and each round and each build
+takes it as it is now: push to it, or rewrite it, and they follow. Once jig has
+built on it, a push of yours leaves each side with commits the other lacks: the
+next build stops with `BRANCH_DIVERGED`, and so does the next round, which
+would otherwise call a head clean that is not the branch's. jig merges nothing
+that is not its own: integrate the two in the lease the error names, then
+rerun. Once jig's commits have been pushed, rounds review the branch on origin.
+A machine whose build lease lacks commits that jig built on another machine
+neither reviews nor builds without them: it stops with `BUILD_LEASE_MISSING`
+until they are pushed from the machine that built them.
+
+`jig publish` does not ship an adopted branch yet. It refuses the ticket
+before it writes anything, and `jig status` says so once a round is clean.
+Open the pull request yourself, after pushing the commits jig built: they wait
+in the build lease the refusal names, and a pull request from origin's copy of
+the branch would lack the fix the clean round reviewed. If the branch moved
+since, merge it into the lease first: the push would not be a fast-forward.
+
 ## Session backends
 
 A build session (`jig run`) runs against one of three backends, picked with
@@ -264,7 +312,8 @@ the full model.
 
 ## Roadmap
 
-Coming in v0.2: `ask` findings parked as questions instead of left kept by
+Coming in v0.2: publishing an adopted branch (`jig publish` refuses one
+today), `ask` findings parked as questions instead of left kept by
 `--yes` or a non-terminal run, a review guide rendered into PR evidence
 from recorded rounds, review-eval scoring from recorded triage decisions,
 Jira and Linear tracker adapters, `gate`'s `--pr` mode for reviewing a PR

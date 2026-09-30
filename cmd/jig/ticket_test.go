@@ -35,8 +35,16 @@ func TestTicketNewRecordsTitleOnLocalTracker(t *testing.T) {
 	if code, out := jig("init", "--standalone"); code != 0 {
 		t.Fatalf("jig init --standalone: exit %d\n%s", code, out)
 	}
-	if code, out := jig("ticket", "new", "--title", "Fix the thing"); code != 0 {
+	code, out := jig("ticket", "new", "--title", "Fix the thing")
+	if code != 0 {
 		t.Fatalf("jig ticket new: exit %d\n%s", code, out)
+	}
+	// A minted ticket has no work yet, and there are two ways to give it some:
+	// a brief with slices, or a branch built outside jig, which needs neither.
+	for _, want := range []string{"jig validate T-1", "jig gate T-1 --branch <name>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("jig ticket new's output does not offer %q:\n%s", want, out)
+		}
 	}
 
 	cfgs, err := filepath.Glob(filepath.Join(filepath.Dir(repo), "*", "project.yaml"))

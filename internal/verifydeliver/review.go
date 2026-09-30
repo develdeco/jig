@@ -693,7 +693,7 @@ func resolveFullBase(st *store.Store, ticket, leaseDir, repoName, target, head s
 		return mergeBase, nil
 	}
 
-	startPath := filepath.Join(st.TicketDir(ticket), fmt.Sprintf("start.%s.sha", repoName))
+	startPath := st.StartSHAPath(ticket, repoName)
 	data, rerr := os.ReadFile(startPath)
 	if rerr != nil {
 		return "", fmt.Errorf("verifydeliver: review: resolve scope base: merge-base origin/%s failed (%v) and no start sha: %w", target, mbErr, rerr)

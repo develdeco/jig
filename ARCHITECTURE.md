@@ -16,14 +16,16 @@ run(frontier)  dispatch queued, unblocked slices to a build session
   │            reads:  slices.yaml, slices/<id>.state, questions/*.md
   │            writes: slices/<id>.state, work/<id>.attempt-N.{slice,result}.json,
   │                    journal.ndjson, questions/q-NNN.md, start.<repo>.sha
+  │                    (an adopted branch's again at each dispatch until jig has built)
   ▼
 gate           re-verification round: oracles, then a reviewer session's find/route/triage
   │            reads:  brief.md or intent.md (resolveIntent), slices.yaml, journal.ndjson,
-  │                    gate/round-N/findings.yaml (cumulative fold)
+  │                    ticket.yaml (branch), gate/round-N/findings.yaml (cumulative fold)
   │            writes: work/gate.round-N.{review,result}.json,
   │                    gate/round-N/{findings.yaml,findings.md,report.yaml,diff-changelog.md},
   │                    evidence/round-N/*, slices.yaml (fix slices, findings, from_gate: N),
-  │                    intent.md (--intent/--doc only)
+  │                    intent.md (--intent/--doc, or inferred),
+  │                    ticket.yaml (branch) and start.<repo>.sha (--branch adoption only)
   │            then, after a clean reviewer round only (best effort, never the verdict):
   │            a demo session shows the change working
   │            writes: work/gate.round-N.demo.result.json, gate/round-N/demo.yaml,
@@ -35,6 +37,12 @@ publish        reconcile, revalidate, docs, squash, route → open the PR
                writes: changelog/{<ws>.md,consolidated.md}, pr/{evidence.md,<repo>.md},
                        ledger.md, platform/contract-index.md
 ```
+
+A branch built outside jig enters at the gate instead of at the brief: the
+first `jig gate <ticket> --branch <name>` adopts it as the ticket's own,
+`run` then builds the fixes the round queued on that branch, and the next
+`gate` reviews it again. Publishing an adopted branch is not built yet. See
+[A ticket's branch](#a-tickets-branch).
 
 `frontier` (the frontier loop) and `verifydeliver` (gate + publish) are
 separate packages that share no in-memory state at all - package `frontier`
@@ -90,8 +98,8 @@ charts/
   brief.md
   intent.md         # jig gate --intent/--doc, or inferred; ignored when brief.md exists
   slices.yaml
-  ticket.yaml       # optional: this ticket's own record - title, branch, blockers
-  start.<repo>.sha
+  ticket.yaml       # optional: this ticket's own record - title, blockers, adopted branch
+  start.<repo>.sha  # the sha the ticket's branch started from
   slices/
     <id>.state
   journal.ndjson
@@ -145,22 +153,22 @@ exists.
 | `internal/fixture/` | `Build`, `Generate`, `RepoRoot` | a dir + `Opts` → a fixture repo, its store, and a scripted attempt scenario (plus the machine mapping under `Opts.Home`, by default the jig home `home.Root` resolves); `Generate` builds into a `t.TempDir()`; `RepoRoot`: a caller's source file → the module root |
 | `internal/frontier/` | `Run`, `Requeue`, `RequeueSlice`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
-| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `DiffNameOnly`, `FileExistsAtRev`, `IsLocalRemote`, `GuardedPush`, `CommonDir`, `SameDir`, `TopLevel`, `CommitTime`, `OpenRepo` (`Repo`: `State`, `CommitAll`, `Push`, `Fetch`) | argv + a working dir → git plumbing output, or a refused push; a store's directory → the same store operations in process (go-git), or `ErrUseCLI` for the caller's git-program path |
+| `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `Missing`, `DiffNameOnly`, `FileExistsAtRev`, `IsLocalRemote`, `GuardedPush`, `CommonDir`, `SameDir`, `TopLevel`, `CommitTime`, `OpenRepo` (`Repo`: `State`, `CommitAll`, `Push`, `Fetch`) | argv + a working dir → git plumbing output, or a refused push; a store's directory → the same store operations in process (go-git), or `ErrUseCLI` for the caller's git-program path |
 | `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `internal/home/` | `Root`, `MachinePath`, `PoolDir`, `IntentExcerptDir`, `IntentScratchDir`, `EvidenceDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths, including the directories intent excerpts and summarizer scratch directories go under, and where one reviewed head's demo media live |
 | `internal/intent/` | `NewClaudeReader`, `Best`, `RenderExcerpt` | a repo's git common dir + a time window → matching local agent `Session`s; a scope diff's files → the `Match` a model then summarizes |
-| `internal/journal/` | `Append`, `Read`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs |
+| `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
 | `internal/manifest/` | `Resolve` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
-| `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point; anything git shows is not a repository of its own is moved aside and cloned afresh) |
+| `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket`, `Compare`, `DivergedError`, `RequireBuilt`, `HoldsUnpushedBuilt`, `MustExistOnOrigin`, `RecutUnlessBuilt` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point, and synced with its branch when origin has it; anything git shows is not a repository of its own is moved aside and cloned afresh) |
 | `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping under the jig home root → a `Config` |
 | `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `MatchRound`, `ScoreRound`, `RenderReport` | a labeled corpus (`testdata/revieweval`) + a session backend → a `CaseScore` per case, matched structurally against seeded gold through the real reviewer contract |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` + `Config` → a model rung, disjoint from rungs already in use |
-| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `Store.ID` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by |
+| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by |
 | `internal/tracker/` | `New`, `Graduate`, `CheckMinted` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it |
-| `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened PR |
+| `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `PublishByHand`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened PR |
 
 ## Session backends
 
@@ -362,6 +370,93 @@ session runs, so a demo that needs one reports that it cannot record.
 Publishing the media on the pull request is a separate, later change: a
 recorded demo is not attached to anything yet. See
 [ADR 0014](docs/adr/0014-demo-session-at-the-gate.md).
+## A ticket's branch
+
+A ticket's working branch is recorded in its `ticket.yaml`, not derived
+from its id ([ADR 0013](docs/adr/0013-a-ticket-branch-is-recorded.md)).
+`store.TicketBranch` resolves it (the recorded `branch:`, else `jig/<ticket>`)
+and every command that names the branch resolves it there, once. A ticket
+that recorded one is an *adopted* ticket: the branch was built outside jig and
+is on origin, and the ticket needs no brief and no slices to be gated, built
+and solved.
+
+**Adoption** happens in `Gate` (`resolveGateBranch`), on the first `jig
+gate <ticket> --branch <name>`. A later `--branch` naming another branch
+is `BRANCH_MISMATCH`; naming the recorded one changes nothing. Adoption is
+refused for a name `TicketBranch` would refuse (`store.CheckAdoptableBranch`:
+the target, a name git rejects or expands), for a branch missing on origin
+(`BRANCH_NOT_FOUND`), and for a ticket jig already built on (`jigBuilt`,
+`TICKET_ALREADY_BUILT`): a `verified` journal line, a green `result` line
+naming a commit (`journal.GreenClaims`, the one fact every jig version journals
+and nothing removes, so a v0.1.x journal, or one whose slices a requeue
+set back to queued, is refused too), or a slice in state `green`. Judged
+from the store, never from the machine's lease. Which commits jig built is
+the `verified` lines alone (`journal.BuiltCommits`), and an adopted ticket
+always has them. `Gate` writes the record and the start sha (the branch's tip,
+not the target's) only after every precondition has passed, right before its
+`gate-open` journal line, so a refusal leaves nothing behind.
+
+**Intent.** An adopted ticket's rounds resolve their intent as every ticket's
+do: the brief, else `intent.md` (`--intent`, `--doc` or inferred), else none.
+Inference needs nothing special for it: a branch built outside jig is the case
+it exists for, the scope diff is the branch against its merge base with the
+target, and the matching session is the author's own.
+
+**The start sha** is what a build's commits must descend from (`verifyGreen`)
+and where a gate round's scope falls back when the branch has no merge base
+with the target; squash and reconcile do not read it. Adoption records the
+branch's tip. The author owns the branch until jig builds on it, so until the
+journal records commits jig built, every dispatch records origin's tip again
+(`ensureStartSHA`), following an author who pushed or rewrote the branch; after
+that it stays. An ordinary ticket's never follows origin. A build on an adopted
+branch refuses with `BRANCH_NOT_FOUND` when origin no longer has the branch
+(`pool.MustExistOnOrigin`), instead of cutting the branch from the target, and
+with `BUILD_LEASE_MISSING` when its lease's branch lacks a commit the journal
+records jig built (`pool.RequireBuilt`, below), instead of building on a branch
+that leaves them out.
+
+**Sync rule.** `pool.Acquire` fetches with `--prune` and compares a local
+branch with `origin/<branch>` when origin has one (`syncWithOrigin`, on
+`pool.Compare`), for every role: no commits of its own, it fast-forwards; ahead
+of origin (jig's own unpushed commits), it is kept; commits on both sides,
+`BRANCH_DIVERGED` (`pool.DivergedError`), with the lease untouched - except a
+build of an adopted branch whose lease holds no commit jig built that origin
+lacks (`pool.RecutUnlessBuilt`, `pool.HoldsUnpushedBuilt`), which follows the
+author and is re-cut from origin's tip. A branch origin lacks, the ordinary
+`jig/<ticket>` until a publish pushes it, is left as it is; once a publish
+has pushed the squash, the build lease's unsquashed commits stand diverged
+from it, and a build after a publish stops with `BRANCH_DIVERGED` until
+publishing a branch that already reached origin is built. The gate lease is
+disposable, so `Gate` drops its own local copy of the branch before acquiring
+(`dropLeaseBranch`); the publish lease, re-pointed from the build lease right
+after acquiring, has the same need once a published branch is published again.
+
+**What a round reviews.** For an adopted ticket the gate lease holds origin's
+copy of the branch while the journal records no commits jig built on it. Once
+it does, jig's commits stay in the build lease until someone pushes them, and
+`chooseBuiltCopy` picks the copy that holds them by the same sync rule, the
+build lease's copy against origin's: in step with or behind origin's, origin
+holds them all (and whatever the author added), so the round reviews origin's;
+ahead of it, the round reviews the lease's; diverged, the round refuses with
+`BRANCH_DIVERGED`, naming the build lease, unless the lease's copy holds no
+commit jig built that origin lacks (`pool.HoldsUnpushedBuilt`, the rule the
+build's re-cut applies), which makes it no build lease holding the branch;
+and with no build lease holding the branch here, the round reviews origin's.
+Whichever copy that is must hold every commit the journal records jig built, or
+the round refuses (`BUILD_LEASE_MISSING`, `pool.RequireBuilt`) - one rule for
+every copy, which the frontier applies to its build lease before it dispatches.
+The ticket's own `jig/<ticket>` is always the build lease's copy, as before.
+
+**Not built: publishing an adopted branch.** `Publish` refuses a ticket
+whose record holds a branch (`store.Ticket.Adopted`) before it acquires or
+writes anything (`PUBLISH_ADOPTED_BRANCH`, `adoptedBranchRefusal`): its squash
+refuses a range already on a remote, and the author's commits are. `jig status`
+stops suggesting `jig publish` for such a ticket once a round is clean, and
+the refusal, the status hint and the gate's hint all say what to do instead
+in one sentence, `verifydeliver.PublishByHand`: open the pull request, after
+pushing the commits jig built from the build lease when it built any (merging
+the branch in first if it moved). `jig solve` stops at the clean round with
+the gate report, exit 0.
 
 ## Safety
 

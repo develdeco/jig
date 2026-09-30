@@ -95,7 +95,7 @@ func cmdTicket(args []string, stdout io.Writer) int {
 
 	axi.Render(stdout,
 		axi.KV("ticket", [][2]string{{"id", id}, {"title", *title}}),
-		axi.Help(fmt.Sprintf("Run `jig validate %s` once its brief and slices are written", id)),
+		axi.Help(getWorkHints(id)...),
 	)
 	return 0
 }
@@ -156,7 +156,24 @@ func requireTicket(st *store.Store, ticket string) error {
 
 // requireSlices fails when ticket is not a usable id or has no slices to
 // work, which is also the case for a ticket with no folder in the store yet.
+// A ticket that adopted a branch has none until a gate round queues its
+// fixes, and the refusal says so instead of pointing at intake.
 func requireSlices(st *store.Store, ticket string) error {
+	return requireWorkable(st, ticket, false)
+}
+
+// requireWork is requireSlices for the commands that also work a ticket which
+// adopted a branch, whose gate round queues the slices the rest of the loop
+// builds: gate, run, solve and publish. A ticket with slices, or with an
+// adopted branch, passes; one with neither is told both ways to get work.
+func requireWork(st *store.Store, ticket string) error {
+	return requireWorkable(st, ticket, true)
+}
+
+// requireWorkable is the check behind requireSlices and requireWork:
+// adoptedOK says whether a ticket with no slices but an adopted branch
+// passes.
+func requireWorkable(st *store.Store, ticket string, adoptedOK bool) error {
 	if err := checkTicketID(ticket); err != nil {
 		return err
 	}
@@ -167,9 +184,38 @@ func requireSlices(st *store.Store, ticket string) error {
 	if len(slices) > 0 {
 		return nil
 	}
-	return &axi.Error{
+	rec, err := st.ReadTicket(ticket)
+	if err != nil {
+		return err
+	}
+	if rec.Adopted() && adoptedOK {
+		return nil
+	}
+	refusal := &axi.Error{
 		Msg:  fmt.Sprintf("ticket %s has no slices yet", ticket),
 		Code: "VALIDATION_ERROR",
-		Help: []string{intakeHint(ticket)},
 	}
+	switch {
+	case rec.Adopted():
+		refusal.Help = []string{fmt.Sprintf("It adopted branch %s: `jig gate %s` reviews it and queues what it finds as slices", rec.Branch, ticket)}
+	case adoptedOK:
+		refusal.Help = getWorkHints(ticket)
+	default:
+		refusal.Help = []string{intakeHint(ticket)}
+	}
+	return refusal
+}
+
+// adoptHint is the other way for a ticket with no slices to get work: gate a
+// branch built outside jig, which adopts it.
+func adoptHint(ticket string) string {
+	return fmt.Sprintf("Or review a branch built outside jig, which the ticket then adopts: `jig gate %s --branch <name>`", ticket)
+}
+
+// getWorkHints is both ways for a ticket with no slices and no adopted branch
+// to get work, in the order `jig ticket new`, `jig status` and the refusal of a
+// command that can work an adopted ticket (requireWork) all say them. A command
+// with nothing to adopt (requireSlices) names intake alone.
+func getWorkHints(ticket string) []string {
+	return []string{intakeHint(ticket), adoptHint(ticket)}
 }

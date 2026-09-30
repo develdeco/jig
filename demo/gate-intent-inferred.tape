@@ -16,7 +16,7 @@
 # Every typed line here is checked against the real source, the same as
 # gate-reviewer.tape's own header states: the report below is checked
 # against cmd/jig/gate.go (the round report's kv fields, rendered via
-# axi.KV, gate.go:154-165, including the "intent: inferred" row, which
+# axi.KV, gate.go:156-170, including the "intent: inferred" row, which
 # carries no note because a successful inference leaves none - only the
 # resolved source). e2e/gate_intent_infer_test.go
 # (TestGateInfersIntentBriefLess) drives the same fixture, transcript and
@@ -169,7 +169,7 @@ Show
 ## clean with no triage prompt to wait on: "gate:\n  ticket: JIG-1\n
 ## round: 1\n  verdict: clean\n  model: claude-sonnet-5\n  intent:
 ## inferred\n  scope: full\n  demo: recorded\n  demo_summary: ...\n..."
-## (axi.KV, gate.go:154-165, and demoRows beside them): the demo line is the
+## (axi.KV in gate.go's report, and demoRows beside it): the demo line is the
 ## round's clean-round demo, scripted with no media, so there is no
 ## demo_media table.
 Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter

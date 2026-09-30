@@ -23,6 +23,20 @@ func Requeue(d Deps, ticket string, fromBriefDiff bool) ([]string, error) {
 		return nil, nil
 	}
 
+	// A ticket with no brief - one that adopted a branch, or was never given
+	// one - has no sections to compare, so the mode has nothing to do: say
+	// so, and what the slices' own remedies are, instead of failing on a
+	// missing file.
+	if !hasBrief(d.Store, ticket) {
+		return nil, &axi.Error{
+			Msg:  fmt.Sprintf("ticket %s has no brief.md, so there are no brief sections for --from-brief-diff to compare", ticket),
+			Code: "VALIDATION_ERROR",
+			Help: []string{
+				fmt.Sprintf("Retry a stalled slice with `jig requeue %s --slice <id>`", ticket),
+				fmt.Sprintf("Answer a parked slice's question with `jig run %s --answer <qid> '<text>'`", ticket),
+			},
+		}
+	}
 	briefData, err := os.ReadFile(filepath.Join(d.Store.TicketDir(ticket), "brief.md"))
 	if err != nil {
 		return nil, fmt.Errorf("frontier: read brief.md: %w", err)

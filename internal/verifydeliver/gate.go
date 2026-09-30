@@ -107,7 +107,13 @@ func (f *fakeGateSource) Round(in RoundInput) (Round, bool, error) {
 type GateOpts struct {
 	Ticket string
 	Early  bool
-	Branch string // validate this branch instead of the ticket's branch (jig/<ticket> unless one is recorded)
+	// Branch is `jig gate --branch`: review this branch, built outside jig, and
+	// adopt it as the ticket's own. The first round that names it records it in
+	// the ticket's record, with the branch's tip as the ticket's start sha; every
+	// later round works on the recorded branch, and naming another one is
+	// refused (BRANCH_MISMATCH). Empty: the ticket's own branch, the recorded
+	// one or jig/<ticket>.
+	Branch string
 	// Intent and IntentDoc are `jig gate --intent`/`--doc`: at most one is
 	// ever set - refused when both are, whether by the CLI or by a caller
 	// going straight to GateOpts - valid in every mode, and write the
@@ -153,6 +159,9 @@ type GateReport struct {
 	// (across every round, not only this one's own): the "needs a human"
 	// list, the exit-2 signal. Empty when nothing is waiting on a person.
 	NeedsHuman []Finding
+	// Branch is the branch the ticket adopted, "" for a ticket working on
+	// its own jig/<ticket>.
+	Branch string
 	// Intent is this round's resolved intent binding (resolveIntent), read
 	// once before the round's source runs; a reviewer round reports the one
 	// it handed the reviewer instead (Review.Intent), which is an
@@ -240,16 +249,14 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 
 	repo, repoName, target := primaryRepo(d.Cfg)
 	// Resolved once: the lease and the fetch from the build lease both name
-	// this one branch.
-	branch, err := d.Store.TicketBranch(ticket, target)
+	// this one branch. The ticket's own record names it, or --branch adopts
+	// one (resolveGateBranch); an adoption is recorded further down, once
+	// every precondition of the round has passed.
+	gb, err := resolveGateBranch(d, ticket, target, o.Branch, slices)
 	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: resolve ticket branch: %w", err)
+		return GateReport{}, err
 	}
-	// --branch: validate a hand-written branch fetched from origin instead
-	// of the ticket's own branch (jig/<ticket> unless one is recorded).
-	if o.Branch != "" {
-		branch = o.Branch
-	}
+	branch := gb.Name
 	// Restore an existing gate lease pristine at its current HEAD before
 	// Acquire ever touches it. A reviewer that outlived a killed jig, or an
 	// oracle rewrite left over from an earlier attempt, can leave tracked
@@ -263,12 +270,25 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	// and one on an unborn HEAD would fail. Anything else is left to Acquire,
 	// which refuses a bad ticket id, clones where there is no lease yet, and
 	// moves aside anything git shows is not a repository of its own.
+	//
+	// The lease's own copy of the branch goes too (dropLeaseBranch): the
+	// round re-points the lease at its source below whatever the copy holds.
 	if leaseDir, derr := pool.Dir(d.Home, repoName, ticket, pool.Gate); derr == nil && pool.Usable(leaseDir) {
 		if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
 		}
+		if err := dropLeaseBranch(leaseDir, branch); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: drop the lease's own %s before acquire: %w", branch, err)
+		}
 	}
-	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Gate)
+	// A branch the ticket adopted is on origin by definition, so one that is
+	// not there is refused (BRANCH_NOT_FOUND) instead of being cut from the
+	// target: the round would review a branch that was never pushed.
+	var acquireOpts []pool.Option
+	if gb.Adopted {
+		acquireOpts = append(acquireOpts, pool.MustExistOnOrigin())
+	}
+	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Gate, acquireOpts...)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: acquire lease: %w", err)
 	}
@@ -278,35 +298,28 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	// existing local branch (a deliberate rule so a same-run slice's commits
 	// on it survive later acquires), so without this, a reviewer or an
 	// oracle that left the lease dirty or ahead on an earlier, killed jig
-	// has its leftovers reviewed by this round's own oracles, or in
-	// --branch mode makes this gate review the stale local copy instead of
+	// has its leftovers reviewed by this round's own oracles, or on an
+	// adopted branch makes this gate review the stale local copy instead of
 	// origin's current branch tip.
-	if o.Branch == "" {
+	//
+	// The copy the round reviews is the ticket's own jig/<ticket> from the
+	// build lease, where it lives until a publish pushes it; an adopted
+	// branch jig has built nothing on is the author's, origin's copy, exactly
+	// (the gate lease never commits); and one jig has built on is whichever
+	// copy holds jig's commits (chooseBuiltCopy).
+	switch {
+	case !gb.Adopted:
 		if err := fetchTicketBranchFromBuildLease(d.Home, lease.Dir, repoName, ticket, branch); err != nil {
 			return GateReport{}, err
 		}
 		if err := resetLeasePristine(lease.Dir, "HEAD"); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease before oracles: %w", err)
 		}
-	} else {
-		// pool.Acquire's own fetch has no --prune, so a branch deleted on
-		// origin since an earlier gate on this same lease would otherwise
-		// leave refs/remotes/origin/<branch> stale, and the check below
-		// would pass against the last-fetched tip instead of catching the
-		// deletion. Prune here so a deleted branch is always caught.
-		if _, err := gitx.Run(lease.Dir, "fetch", "--prune", "origin"); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: fetch --prune origin: %w", err)
+	case len(gb.Built) > 0:
+		if err := chooseBuiltCopy(d, lease.Dir, repoName, ticket, branch, gb.Built); err != nil {
+			return GateReport{}, err
 		}
-		// refs/remotes/origin/<branch> is now current. The gate lease never
-		// commits (reviewers and oracles are always undone), so it must
-		// always equal origin/<branch> exactly.
-		if _, err := gitx.RevParse(lease.Dir, "refs/remotes/origin/"+branch); err != nil {
-			return GateReport{}, &axi.Error{
-				Msg:  fmt.Sprintf("branch %q does not exist on origin", branch),
-				Code: "BRANCH_NOT_FOUND",
-				Help: []string{"Push the branch to origin, then rerun."},
-			}
-		}
+	default:
 		if err := resetLeasePristine(lease.Dir, "origin/"+branch); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease to origin/%s: %w", branch, err)
 		}
@@ -342,6 +355,31 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	intent, intentText, err := resolveIntent(d.Store, ticket)
 	if err != nil {
 		return GateReport{}, err
+	}
+
+	// Adoption is recorded last of the round's preconditions and first of its
+	// effects: a refusal above leaves nothing behind, so a plain rerun is the
+	// whole recovery, and every later round and command - `jig run` above
+	// all - finds the branch and where it started. The start sha is the
+	// branch's tip as the author left it, not the target's: what jig builds
+	// on the branch descends from the tip, and frontier's verifyGreen holds
+	// it to that. It replaces any start sha an earlier dispatch left before
+	// jig had built anything, which resolveGateBranch has established.
+	// origin/<branch> is the tip the lease was just reset to. The start sha
+	// is written first: a failure between the two writes leaves a start sha
+	// no record points at, which rerunning the adoption replaces. It is
+	// frontier that keeps it current until jig builds: see ensureStartSHA.
+	if gb.Adopting {
+		tip, err := gitx.RevParse(lease.Dir, "origin/"+branch)
+		if err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: resolve origin/%s: %w", branch, err)
+		}
+		if err := d.Store.WriteStartSHA(ticket, repoName, tip); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: record the start sha: %w", err)
+		}
+		if err := d.Store.WriteTicketBranch(ticket, branch); err != nil {
+			return GateReport{}, fmt.Errorf("verifydeliver: gate: record the adopted branch: %w", err)
+		}
 	}
 
 	// Resolved before the journal line below (not after, as manifest
@@ -431,6 +469,9 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	report = GateReport{
 		Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA},
 		Intent: intent, IntentSHA256: intentSHA256(intent.Source, intentText),
+	}
+	if gb.Adopted {
+		report.Branch = branch
 	}
 	if round.Review != nil {
 		report.IntentNote = round.Review.IntentNote
@@ -872,6 +913,26 @@ func resetLeasePristine(leaseDir, head string) error {
 	}
 	if _, err := gitx.Run(leaseDir, "clean", "-fd"); err != nil {
 		return err
+	}
+	return nil
+}
+
+// dropLeaseBranch forgets a gate lease's own local copy of branch, leaving
+// its HEAD detached. The gate lease never commits and Gate re-points it at
+// the round's source right after acquiring it, so its copy is disposable;
+// left in place, one that fell behind or diverged from origin's since the
+// last round would fail Acquire's sync with the branch (BRANCH_DIVERGED)
+// before Gate could replace it, over commits that are not the lease's to
+// keep.
+func dropLeaseBranch(leaseDir, branch string) error {
+	if _, err := gitx.Run(leaseDir, "checkout", "--detach", "HEAD"); err != nil {
+		return fmt.Errorf("detach HEAD: %w", err)
+	}
+	if _, err := gitx.Run(leaseDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		return nil // no local copy
+	}
+	if _, err := gitx.Run(leaseDir, "branch", "-D", branch); err != nil {
+		return fmt.Errorf("delete branch %s: %w", branch, err)
 	}
 	return nil
 }

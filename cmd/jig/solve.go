@@ -33,7 +33,10 @@ func gateSourceForSolve(scenario string, backend session.Backend) verifydeliver.
 var solveGateSource = gateSourceForSolve
 
 // cmdSolve implements `jig solve <ticket> [--yes] [--no-demo] [--answer <qid>
-// <text>] [--backend <name>] [--scenario <dir>]`.
+// <text>] [--backend <name>] [--scenario <dir>]`. It runs the frontier and the gate
+// until a round is clean, then publishes; a ticket that adopted a branch stops
+// at the clean round and prints its gate report, since publishing an adopted
+// branch is not built.
 //
 // NOTE: --backend/--scenario are accepted here, beyond solve's own --yes
 // and --answer, because solve's internal run steps need a session backend
@@ -70,7 +73,7 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	if err := requireSlices(st, ticket); err != nil {
+	if err := requireWork(st, ticket); err != nil {
 		return renderErr(stdout, err)
 	}
 	backendKind := backendName(*backendFlag, *scenario)
@@ -104,6 +107,7 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	var (
 		lastVerdict string
 		lastDemo    *verifydeliver.DemoReport
+		lastReport  verifydeliver.GateReport
 	)
 	for round := 0; round < maxSolveRounds; round++ {
 		gr, err := verifydeliver.Gate(vdeps, src, verifydeliver.GateOpts{Ticket: ticket, Triage: triage, NoDemo: *noDemo})
@@ -120,6 +124,7 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		}
 		lastVerdict = gr.Verdict
 		lastDemo = gr.Demo
+		lastReport = gr
 		if gr.Verdict == "clean" {
 			break
 		}
@@ -134,6 +139,20 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 	if err := solveShouldPublish(lastVerdict); err != nil {
 		return renderErr(stdout, err)
+	}
+
+	// Publishing an adopted branch is not built: Publish refuses a ticket
+	// that adopted one, and the same fact decides here (Ticket.Adopted), so a
+	// solve that reached a clean round stops with it. The loop's work is
+	// done - the branch is fixed and reviewed - and what is left is the
+	// human's, which the gate report's hint says (PublishByHand): reported
+	// as the success it is, not as Publish's refusal.
+	rec, err := st.ReadTicket(ticket)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	if rec.Adopted() {
+		return printGateReport(stdout, st, ticket, lastReport)
 	}
 
 	pdeps := vdeps

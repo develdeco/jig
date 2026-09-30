@@ -45,7 +45,7 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 
 	fs := newFlagSet("gate")
 	early := fs.Bool("early", false, "gate before the frontier is fully green")
-	branch := fs.String("branch", "", "validate this branch instead of the ticket's branch (jig/<ticket> unless one is recorded)")
+	branch := fs.String("branch", "", "review this branch, built outside jig, and adopt it as the ticket's own (recorded on the first round)")
 	intent := fs.String("intent", "", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md); with no brief, --intent or --doc, a reviewer round reads your local Claude Code sessions for this repo and has a model summarize the best match into intent.md")
 	doc := fs.String("doc", "", "doc file whose content becomes the ticket's explicit intent, recorded as intent.md (refused when the ticket has a brief.md)")
 	noDemo := fs.Bool("no-demo", false, "skip the demo session a clean reviewer round otherwise runs")
@@ -107,7 +107,9 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	check := requireSlices
+	// --branch adopts a branch for a ticket that may have no slices yet, so it
+	// needs only the ticket's folder; without it, the ticket needs work.
+	check := requireWork
 	if *branch != "" {
 		check = requireTicket
 	}
@@ -153,13 +155,16 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	if report.IntentNote != "" {
 		intentRow = fmt.Sprintf("%s (%s)", report.Intent.Source, report.IntentNote)
 	}
-	kv := [][2]string{
-		{"ticket", ticket},
-		{"round", strconv.Itoa(report.Round)},
-		{"verdict", report.Verdict},
-		{"model", report.Model},
-		{"intent", intentRow},
+	kv := [][2]string{{"ticket", ticket}}
+	if report.Branch != "" {
+		kv = append(kv, [2]string{"branch", report.Branch})
 	}
+	kv = append(kv,
+		[2]string{"round", strconv.Itoa(report.Round)},
+		[2]string{"verdict", report.Verdict},
+		[2]string{"model", report.Model},
+		[2]string{"intent", intentRow},
+	)
 	if report.Scope != "" {
 		kv = append(kv, [2]string{"scope", report.Scope})
 	}

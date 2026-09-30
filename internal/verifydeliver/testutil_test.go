@@ -11,6 +11,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/frontier"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
@@ -46,9 +47,9 @@ func testRungs() staircase.Config {
 func ticketBranch(ticket string) string { return "jig/" + ticket }
 
 // recordBranch records branch as ticket's working branch in st's
-// ticket.yaml and commits and pushes it, the way a later change that adopts
-// a branch would, so the next Gate, Publish or buildLeaseDir resolves it
-// instead of the "jig/<ticket>" default.
+// ticket.yaml and commits and pushes it, the way an adoption does (without the
+// review or the start sha), so the next Gate, Publish or buildLeaseDir
+// resolves it instead of the "jig/<ticket>" default.
 func recordBranch(t *testing.T, st *store.Store, ticket, branch string) {
 	t.Helper()
 	if err := st.WriteTicketBranch(ticket, branch); err != nil {
@@ -194,6 +195,21 @@ func applyScenarioPatch(t *testing.T, fx *fixture.Fixture, dir, ticket, slice st
 	}
 }
 
+// journalBuilt records a green result the way frontier does when its commit
+// verifies: the result line, what the builder claimed, then the verified line
+// that makes the commit one jig built (journal.BuiltCommits).
+func journalBuilt(t *testing.T, st *store.Store, ticket, slice, commit string, attempt int) {
+	t.Helper()
+	for _, l := range []journal.Line{
+		{Slice: slice, Event: "result", Outcome: "green", Commit: commit, Attempt: attempt},
+		{Slice: slice, Event: "verified", Commit: commit, Attempt: attempt},
+	} {
+		if err := journal.Append(st, ticket, l); err != nil {
+			t.Fatalf("journal %s %s/%d: %v", l.Event, slice, attempt, err)
+		}
+	}
+}
+
 // driveAttempt plays one scenario attempt for slice against the build
 // lease exactly as frontier would: it writes the dispatch line, applies any
 // patch, then routes the scenario result to a journal result line and slice
@@ -215,9 +231,7 @@ func driveAttempt(t *testing.T, st *store.Store, fx *fixture.Fixture, dir, model
 		if err != nil {
 			t.Fatalf("resolve HEAD after %s/%d: %v", slice, attempt, err)
 		}
-		if err := journal.Append(st, ticket, journal.Line{Slice: slice, Event: "result", Outcome: "green", Commit: sha, Attempt: attempt}); err != nil {
-			t.Fatalf("journal result %s/%d: %v", slice, attempt, err)
-		}
+		journalBuilt(t, st, ticket, slice, sha, attempt)
 		if err := st.WriteSliceState(ticket, slice, store.SliceState{State: "green", Attempts: attempt}); err != nil {
 			t.Fatalf("write slice state %s: %v", slice, err)
 		}
@@ -339,4 +353,141 @@ func driveFix1(t *testing.T, fx *fixture.Fixture, model string) {
 	}
 	dir := buildLeaseDir(t, fx)
 	driveAttempt(t, st, fx, dir, model, "fix-1", 1)
+}
+
+// authorBranch builds branch outside jig, the way its author would: a fresh
+// clone of the fixture's remote, a commit off main that leaves the fixture
+// repo passing its oracles (the scenario's slice a patch, which fixes Clamp),
+// pushed to origin under branch. It returns the pushed tip. jig never builds
+// or commits anything on it.
+func authorBranch(t *testing.T, fx *fixture.Fixture, branch string) string {
+	t.Helper()
+	dir := t.TempDir()
+	run(t, dir, "clone", fx.RepoRemote, ".")
+	run(t, dir, "checkout", "-b", branch)
+	applyScenarioPatch(t, fx, dir, "author", "a", 1)
+	run(t, dir, "push", "origin", branch)
+	return run(t, dir, "rev-parse", "HEAD")
+}
+
+// authorPush is the author pushing again: one more commit, adding file, on
+// top of branch as origin has it. It returns the new tip.
+func authorPush(t *testing.T, fx *fixture.Fixture, branch, file string) string {
+	t.Helper()
+	dir := t.TempDir()
+	run(t, dir, "clone", fx.RepoRemote, ".")
+	run(t, dir, "checkout", branch)
+	if err := os.WriteFile(filepath.Join(dir, file), []byte("the author again\n"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", file, err)
+	}
+	run(t, dir, "add", "-A")
+	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", "author: "+file); err != nil {
+		t.Fatalf("commit %s: %v", file, err)
+	}
+	run(t, dir, "push", "origin", branch)
+	return run(t, dir, "rev-parse", "HEAD")
+}
+
+// newAdoptTicket mints a ticket with a record and nothing else, as `jig
+// ticket new` leaves it: no brief, no slices, no branch.
+func newAdoptTicket(t *testing.T, d Deps, ticket string) {
+	t.Helper()
+	if err := d.Store.CreateTicketRecord(ticket, store.Ticket{Title: "Add retry"}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
+	}
+	if err := d.Store.Push(ticket + ": minted"); err != nil {
+		t.Fatalf("push the minted ticket: %v", err)
+	}
+}
+
+// pushedBranch pushes an author's branch to origin and returns its name, for
+// a test that only needs a branch a gate can adopt.
+func pushedBranch(t *testing.T, fx *fixture.Fixture) string {
+	t.Helper()
+	const name = "author-branch"
+	authorBranch(t, fx, name)
+	return name
+}
+
+// wantNoAdoption fails when ticket recorded a branch or a start sha: a round
+// that was refused adopted nothing. It is for a ticket whose start sha was not
+// written before the round, which none of the tests that use it drive a build
+// for.
+func wantNoAdoption(t *testing.T, d Deps, ticket string) {
+	t.Helper()
+	rec, err := d.Store.ReadTicket(ticket)
+	if err != nil {
+		t.Fatalf("ReadTicket: %v", err)
+	}
+	if rec.Branch != "" {
+		t.Fatalf("the refused round recorded branch %q, want no adoption", rec.Branch)
+	}
+	if got, err := os.ReadFile(d.Store.StartSHAPath(ticket, "fixture-repo")); !os.IsNotExist(err) {
+		t.Fatalf("the refused round recorded a start sha %q (err %v), want none", got, err)
+	}
+}
+
+// dropVerifiedLines rewrites ticket's journal the way a jig that never
+// journaled verified lines left it (v0.1.x): every line but those. The result
+// lines naming the commits stay, and so do the slices' green states.
+func dropVerifiedLines(t *testing.T, st *store.Store, ticket string) {
+	t.Helper()
+	dropJournalLines(t, st, ticket, "journal as v0.1 wrote it", func(l journal.Line) bool {
+		return l.Event == "verified"
+	})
+}
+
+// dropJournalLines rewrites ticket's journal without the lines drop selects,
+// and pushes it. Every other line is kept byte for byte.
+func dropJournalLines(t *testing.T, st *store.Store, ticket, why string, drop func(journal.Line) bool) {
+	t.Helper()
+	path := filepath.Join(st.TicketDir(ticket), "journal.ndjson")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the journal: %v", err)
+	}
+	var kept []string
+	for _, raw := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		var l journal.Line
+		if err := json.Unmarshal([]byte(raw), &l); err != nil {
+			t.Fatalf("parse journal line %q: %v", raw, err)
+		}
+		if !drop(l) {
+			kept = append(kept, raw)
+		}
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(kept, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("rewrite the journal: %v", err)
+	}
+	if err := st.Push(ticket + ": " + why); err != nil {
+		t.Fatalf("push the rewritten journal: %v", err)
+	}
+}
+
+// amendBriefAndRequeue amends every section of ticket's brief and runs the
+// real `jig requeue --from-brief-diff` over it (frontier.Requeue), which sets
+// each slice whose section changed back to queued, green ones included. It
+// returns the slices it touched.
+func amendBriefAndRequeue(t *testing.T, d Deps, ticket string) []string {
+	t.Helper()
+	path := filepath.Join(d.Store.TicketDir(ticket), "brief.md")
+	brief, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read brief.md: %v", err)
+	}
+	amended := strings.ReplaceAll(string(brief), "\n## ", "\nAmended.\n\n## ") + "\nAmended.\n"
+	if err := os.WriteFile(path, []byte(amended), 0o644); err != nil {
+		t.Fatalf("write brief.md: %v", err)
+	}
+	touched, err := frontier.Requeue(frontier.Deps{
+		Store:   d.Store,
+		Journal: func(l journal.Line) error { return journal.Append(d.Store, ticket, l) },
+	}, ticket, true)
+	if err != nil {
+		t.Fatalf("Requeue --from-brief-diff: %v", err)
+	}
+	return touched
 }

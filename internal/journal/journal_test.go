@@ -200,3 +200,53 @@ func TestRenderDiffChangelogRoundOneFromStart(t *testing.T) {
 		t.Fatalf("RenderDiffChangelog(round 1) =\n%q\nwant\n%q", got, want)
 	}
 }
+
+// TestBuiltCommits: the commits jig's builders reported that verified are the
+// commit of every verified line, in order and without repeats. A result line
+// is only what a builder claimed - it names a commit whether or not the
+// commit verified - and lines of any other event are not builds.
+func TestBuiltCommits(t *testing.T) {
+	lines := []Line{
+		{Event: "dispatch", Slice: "a", Commit: "not-a-verification"},
+		{Event: "result", Slice: "a", Outcome: "green", Commit: "c1"},
+		{Event: "verified", Slice: "a", Commit: "c1"},
+		{Event: "result", Slice: "b", Outcome: "green", Commit: "claimed-only"},
+		{Event: "result", Slice: "b", Outcome: "code-bug"},
+		{Event: "result", Slice: "b", Outcome: "green", Commit: "c2"},
+		{Event: "verified", Slice: "b", Commit: "c2"},
+		{Event: "verified", Slice: "c", Commit: "c1"}, // reported again after a requeue
+		{Event: "verified", Slice: "c"},
+		{Event: "squash", Commit: "not-a-build"},
+	}
+	got := BuiltCommits(lines)
+	if len(got) != 2 || got[0] != "c1" || got[1] != "c2" {
+		t.Fatalf("BuiltCommits = %v, want [c1 c2]", got)
+	}
+	if got := BuiltCommits(nil); len(got) != 0 {
+		t.Fatalf("BuiltCommits(nil) = %v, want none", got)
+	}
+}
+
+// TestGreenClaims: a green result line names the commit a builder claimed,
+// verified or not, in order and without repeats. A result of any other outcome
+// or without a commit, a verified line and any other event are not claims.
+func TestGreenClaims(t *testing.T) {
+	lines := []Line{
+		{Event: "dispatch", Slice: "a", Commit: "not-a-claim"},
+		{Event: "result", Slice: "a", Outcome: "green", Commit: "c1"},
+		{Event: "verified", Slice: "a", Commit: "c1"},
+		{Event: "result", Slice: "b", Outcome: "green", Commit: "claimed-only"},
+		{Event: "result", Slice: "b", Outcome: "code-bug", Commit: "not-green"},
+		{Event: "result", Slice: "b", Outcome: "green"},
+		{Event: "result", Slice: "c", Outcome: "green", Commit: "c1"}, // claimed again after a requeue
+		{Event: "verified", Slice: "d", Commit: "only-verified"},
+		{Event: "squash", Commit: "not-a-claim"},
+	}
+	got := GreenClaims(lines)
+	if len(got) != 2 || got[0] != "c1" || got[1] != "claimed-only" {
+		t.Fatalf("GreenClaims = %v, want [c1 claimed-only]", got)
+	}
+	if got := GreenClaims(nil); len(got) != 0 {
+		t.Fatalf("GreenClaims(nil) = %v, want none", got)
+	}
+}

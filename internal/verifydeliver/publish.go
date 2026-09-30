@@ -84,6 +84,30 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: sync store: %w", err)
 	}
 
+	repo, repoName, target := primaryRepo(d.Cfg)
+	// The ticket's record is read once, here, before publish writes anything
+	// to the store, and both the branch and the PR title come from that one
+	// read: a record that cannot be read fails now rather than after the
+	// memorize commit, and one that changes while publish runs cannot give
+	// the two different snapshots.
+	rec, err := d.Store.ReadTicket(ticket)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read ticket record: %w", err)
+	}
+	// Resolved once: the lease, the fetch, the reconcile, the confirm prompt,
+	// the push and the PR all name this one branch, so a ticket.yaml that
+	// changes while publish runs cannot split them across two.
+	branch, err := d.Store.ResolveTicketBranch(ticket, rec, target)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve ticket branch: %w", err)
+	}
+	// A ticket that adopted a branch is refused before anything is written
+	// or acquired, and ahead of the checks below, which it would only fail
+	// for a reason that is not the one to fix first.
+	if rec.Adopted() {
+		return PublishReport{}, adoptedBranchRefusal(d, ticket, repoName, branch)
+	}
+
 	// Precondition: every slice must be green (the same frontier check gate
 	// applies before it will even review), and the latest gate round must
 	// have returned a clean verdict. Without this, publish can squash and
@@ -107,23 +131,6 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		}
 	}
 
-	repo, repoName, target := primaryRepo(d.Cfg)
-	// The ticket's record is read once, here, before publish writes anything
-	// to the store, and both the branch and the PR title come from that one
-	// read: a record that cannot be read fails now rather than after the
-	// memorize commit, and one that changes while publish runs cannot give
-	// the two different snapshots.
-	rec, err := d.Store.ReadTicket(ticket)
-	if err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read ticket record: %w", err)
-	}
-	// Resolved once: the lease, the fetch, the reconcile, the confirm prompt,
-	// the push and the PR all name this one branch, so a ticket.yaml that
-	// changes while publish runs cannot split them across two.
-	branch, err := d.Store.ResolveTicketBranch(ticket, rec, target)
-	if err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve ticket branch: %w", err)
-	}
 	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Publish)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
@@ -521,4 +528,34 @@ func route(cfg project.Config, st *store.Store, adapter tracker.Adapter, ticket 
 		Subtasks:    subtasks,
 		Comments:    comments,
 	})
+}
+
+// adoptedBranchRefusal is Publish's refusal of a ticket that adopted a
+// branch. Publishing an adopted branch is not built: publish squashes
+// everything the branch holds beyond the target into one commit and refuses a
+// range already on a remote (PUSHED_RANGE), and the author's commits are on
+// origin. It would fail there, after writing the ticket's changelog, ledger
+// and journal entries for a publish that never happened, and it would fail
+// earlier still, on a machine with no build lease, at the fetch from one.
+// The refusal comes first and names the gap, so nothing is written for it,
+// and says what to do instead (PublishByHand): the commits jig built, when it
+// built any, are not on origin, so the pull request the human opens needs
+// them pushed first.
+func adoptedBranchRefusal(d Deps, ticket, repoName, branch string) error {
+	lines, err := journal.Read(d.Store, ticket)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: read journal: %w", err)
+	}
+	built := len(journal.BuiltCommits(lines)) > 0
+	leaseDir := ""
+	if built {
+		if leaseDir, err = pool.Dir(d.Home, repoName, ticket, pool.Build); err != nil {
+			return fmt.Errorf("verifydeliver: publish: resolve build lease: %w", err)
+		}
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("ticket %s adopted branch %s, and jig publish cannot ship an adopted branch yet", ticket, branch),
+		Code: "PUBLISH_ADOPTED_BRANCH",
+		Help: []string{"Until it can: " + PublishByHand(branch, built, leaseDir)},
+	}
 }

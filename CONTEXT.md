@@ -65,8 +65,12 @@ A gate finding turned into a new frontier item. Review has no back-edges - every
 _Avoid_: review comment, follow-up task
 
 **Lease**:
-A pooled worktree checked out for one phase's work and returned warm when that phase ends.
+A pooled worktree checked out for one phase's work and returned warm when that phase ends. A lease of a branch that exists on origin is synced with it when acquired: fast-forwarded when it has no commits of its own, kept when it is ahead, and refused as diverged when both sides have commits the other lacks.
 _Avoid_: checkout, sandbox
+
+**Adopted branch**:
+A branch built outside jig that a ticket took as its own with a first `jig gate <ticket> --branch <name>`. It is recorded in the ticket's `ticket.yaml`, and the ticket's start sha starts as its tip and follows it until jig builds on it. Every later gate round reviews it and every fix slice is built on it, on top of the author's commits; jig's own commits stay in the build lease until someone pushes them, and publishing an adopted branch is not built yet. A ticket has at most one, for good: it needs no brief and no slices to be gated.
+_Avoid_: imported branch, external branch, hand-written branch
 
 **Gate**:
 Out-of-band verification of a ticket's branch, run on its own lease, under a different model, with fresh context.

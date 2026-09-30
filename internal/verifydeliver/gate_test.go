@@ -62,6 +62,11 @@ func TestGateRound1FixSlice(t *testing.T) {
 	if report.Verdict != "fix-slices" {
 		t.Fatalf("Verdict = %q, want fix-slices", report.Verdict)
 	}
+	// A ticket on its own jig/<ticket> adopted nothing, so its report names no
+	// branch: only an adopted ticket's does.
+	if report.Branch != "" {
+		t.Fatalf("Branch = %q, want none for a ticket that adopted no branch", report.Branch)
+	}
 
 	roundDir := filepath.Join(d.Store.TicketDir(fx.Ticket), "gate", "round-1")
 	for _, name := range []string{"findings.md", "report.yaml", "diff-changelog.md"} {
@@ -557,7 +562,7 @@ func TestGateIntentFlagConflictsWithBrief(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()}) // brief.md present by default
 	d := newDeps(t, fx)
 
-	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: "main", Early: true, Intent: "explicit text"})
+	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: pushedBranch(t, fx), Early: true, Intent: "explicit text"})
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "INTENT_CONFLICT" {
 		t.Fatalf("err = %v, want *axi.Error INTENT_CONFLICT", err)
@@ -565,6 +570,7 @@ func TestGateIntentFlagConflictsWithBrief(t *testing.T) {
 	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
 		t.Fatalf("ReadIntent after INTENT_CONFLICT: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
 	}
+	wantNoAdoption(t, d, fx.Ticket)
 }
 
 // TestGateDocFlagConflictsWithBrief is TestGateIntentFlagConflictsWithBrief
@@ -579,7 +585,7 @@ func TestGateDocFlagConflictsWithBrief(t *testing.T) {
 		t.Fatalf("write doc: %v", err)
 	}
 
-	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: "main", Early: true, IntentDoc: doc})
+	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: pushedBranch(t, fx), Early: true, IntentDoc: doc})
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "INTENT_CONFLICT" {
 		t.Fatalf("err = %v, want *axi.Error INTENT_CONFLICT", err)
@@ -587,6 +593,7 @@ func TestGateDocFlagConflictsWithBrief(t *testing.T) {
 	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
 		t.Fatalf("ReadIntent after INTENT_CONFLICT: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
 	}
+	wantNoAdoption(t, d, fx.Ticket)
 }
 
 // TestGateIntentDocMissingErrors checks that a --doc path that cannot be
@@ -599,7 +606,7 @@ func TestGateIntentDocMissingErrors(t *testing.T) {
 	removeBrief(t, d, fx.Ticket)
 
 	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{
-		Ticket: fx.Ticket, Branch: "main", Early: true,
+		Ticket: fx.Ticket, Branch: pushedBranch(t, fx), Early: true,
 		IntentDoc: filepath.Join(t.TempDir(), "missing.md"),
 	})
 	var ae *axi.Error
@@ -609,6 +616,7 @@ func TestGateIntentDocMissingErrors(t *testing.T) {
 	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
 		t.Fatalf("ReadIntent after INTENT_DOC_MISSING: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
 	}
+	wantNoAdoption(t, d, fx.Ticket)
 }
 
 // TestGateIntentAndDocBothSetRefused checks that writeExplicitIntent
@@ -628,7 +636,7 @@ func TestGateIntentAndDocBothSetRefused(t *testing.T) {
 	}
 
 	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{
-		Ticket: fx.Ticket, Branch: "main", Early: true,
+		Ticket: fx.Ticket, Branch: pushedBranch(t, fx), Early: true,
 		Intent: "explicit text", IntentDoc: doc,
 	})
 	var ae *axi.Error
@@ -638,6 +646,7 @@ func TestGateIntentAndDocBothSetRefused(t *testing.T) {
 	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
 		t.Fatalf("ReadIntent after both Intent and IntentDoc set: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
 	}
+	wantNoAdoption(t, d, fx.Ticket)
 }
 
 // TestGateEmptyDocFileRefused checks that a --doc file that reads but holds
@@ -666,7 +675,7 @@ func TestGateEmptyDocFileRefused(t *testing.T) {
 			}
 
 			err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{
-				Ticket: fx.Ticket, Branch: "main", Early: true,
+				Ticket: fx.Ticket, Branch: pushedBranch(t, fx), Early: true,
 				IntentDoc: doc,
 			})
 			var ae *axi.Error
@@ -676,6 +685,7 @@ func TestGateEmptyDocFileRefused(t *testing.T) {
 			if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
 				t.Fatalf("ReadIntent after INTENT_EMPTY: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
 			}
+			wantNoAdoption(t, d, fx.Ticket)
 		})
 	}
 }
@@ -1109,13 +1119,16 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 // both name the result: the round succeeds only if the gate lease ends up on
 // the recorded branch, and no branch under the default name is ever made
 // there. Every other Gate test in this file records no branch, so a Gate that
-// hardcoded "jig/"+ticket would still pass them.
+// hardcoded "jig/"+ticket would still pass them. A recorded branch is on
+// origin by definition, so the test puts it there, at the target's tip, before
+// the build.
 func TestGateUsesRecordedBranch(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	recordBranch(t, d.Store, fx.Ticket, "feature/custom")
+	run(t, fx.RepoRemote, "branch", "feature/custom", "main")
 	driveBuild(t, fx, "rung-a")
 
 	report, err := Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})
@@ -1204,30 +1217,23 @@ func TestGateFailsWithTheRefusalOfTicketBranch(t *testing.T) {
 }
 
 // TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin reproduces
-// NM2 scenario B: `--branch` mode's gate lease never commits, so a local
-// commit left behind by a killed reviewer must be discarded - not reviewed
-// and passed clean - and origin advancing between two `--branch` gates must
-// make the second gate review the new head, not a stale local copy that
-// pool.Acquire would otherwise reuse as-is (pool.Acquire never resets an
-// existing local branch).
+// NM2 scenario B: the gate lease of a branch jig has built nothing on never
+// commits, so a local commit left behind by a killed reviewer must be
+// discarded - not reviewed and passed clean - and origin advancing between
+// two rounds must make the second gate review the new head, not a stale
+// local copy that pool.Acquire would otherwise reuse as-is (it never resets
+// an existing local branch), or refuse over as diverged: the leftover and
+// the author's new commit are each ahead of the other.
 func TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	buildDir := buildLeaseDir(t, fx)
-	branch := ticketBranch(fx.Ticket)
-	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
-		t.Fatalf("push build branch: %v", err)
-	}
+	branch := "feature-x"
+	origin1 := authorBranch(t, fx, branch)
 
 	d := newDeps(t, fx)
 	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: branch, Early: true}); err != nil {
 		t.Fatalf("Gate round 1: %v", err)
-	}
-	origin1, err := gitx.Run(buildDir, "rev-parse", "origin/"+branch)
-	if err != nil {
-		t.Fatalf("resolve origin/%s: %v", branch, err)
 	}
 
 	// Simulate a killed reviewer's leftover commit in the gate lease: a
@@ -1253,33 +1259,19 @@ func TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin(t *testing.T) 
 		t.Fatal("test setup: leftover commit did not move HEAD")
 	}
 
-	// Advance origin's branch, as a later build would.
-	if err := os.WriteFile(filepath.Join(buildDir, "alpha", "advance.txt"), []byte("advance\n"), 0o644); err != nil {
-		t.Fatalf("write advance file: %v", err)
-	}
-	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
-		t.Fatalf("git add advance: %v", err)
-	}
-	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "advance origin"); err != nil {
-		t.Fatalf("commit advance: %v", err)
-	}
-	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
-		t.Fatalf("push advance: %v", err)
-	}
-	origin2, err := gitx.Run(buildDir, "rev-parse", "origin/"+branch)
-	if err != nil {
-		t.Fatalf("resolve advanced origin/%s: %v", branch, err)
-	}
+	// The author pushes again.
+	origin2 := authorPush(t, fx, branch, "advance.txt")
 	if origin2 == origin1 {
 		t.Fatal("test setup: origin did not advance")
 	}
 
-	report2, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: branch, Early: true})
+	// Round 2 names no branch: the ticket recorded it in round 1.
+	report2, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Early: true})
 	if err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}
-	if report2.Round != 2 {
-		t.Fatalf("report2.Round = %d, want 2", report2.Round)
+	if report2.Round != 2 || report2.Branch != branch {
+		t.Fatalf("report2 = round %d on %q, want round 2 on the adopted %q", report2.Round, report2.Branch, branch)
 	}
 	head2, err := gitx.RevParse(gateLease.Dir, "HEAD")
 	if err != nil {
@@ -1293,7 +1285,9 @@ func TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin(t *testing.T) 
 // TestGateBranchNotFoundOnOrigin checks that gating a branch missing on
 // origin fails loudly with BRANCH_NOT_FOUND, instead of pool.Acquire's own
 // fallback (origin/<target> as the start point for a brand-new local
-// branch) silently validating a branch that was never pushed.
+// branch) silently validating a branch that was never pushed. The refusal
+// leaves nothing behind: the branch is not adopted, and no start sha is
+// recorded.
 func TestGateBranchNotFoundOnOrigin(t *testing.T) {
 	t.Parallel()
 
@@ -1304,6 +1298,12 @@ func TestGateBranchNotFoundOnOrigin(t *testing.T) {
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "BRANCH_NOT_FOUND" {
 		t.Fatalf("Gate --branch missing on origin: err = %v, want *axi.Error BRANCH_NOT_FOUND", err)
+	}
+	if rec, rerr := d.Store.ReadTicket(fx.Ticket); rerr != nil || rec.Branch != "" {
+		t.Fatalf("record after BRANCH_NOT_FOUND = %+v (err %v), want no adopted branch", rec, rerr)
+	}
+	if _, serr := os.Stat(d.Store.StartSHAPath(fx.Ticket, "fixture-repo")); !os.IsNotExist(serr) {
+		t.Fatalf("a start sha was recorded for a refused adoption (stat err %v)", serr)
 	}
 }
 
@@ -1316,12 +1316,8 @@ func TestGateBranchDeletedOnOriginAfterEarlierGate(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	buildDir := buildLeaseDir(t, fx)
 	branch := "feature-x"
-	if _, err := gitx.Run(buildDir, "push", "origin", "HEAD:refs/heads/"+branch); err != nil {
-		t.Fatalf("push branch: %v", err)
-	}
+	authorBranch(t, fx, branch)
 
 	d := newDeps(t, fx)
 	opts := GateOpts{Ticket: fx.Ticket, Branch: branch, Early: true}
@@ -1329,9 +1325,7 @@ func TestGateBranchDeletedOnOriginAfterEarlierGate(t *testing.T) {
 		t.Fatalf("Gate round 1: %v", err)
 	}
 
-	if _, err := gitx.Run(buildDir, "push", "origin", "--delete", branch); err != nil {
-		t.Fatalf("delete branch on origin: %v", err)
-	}
+	run(t, fx.RepoRemote, "branch", "-D", branch)
 
 	_, err := Gate(d, alwaysCleanSource{}, opts)
 	var ae *axi.Error

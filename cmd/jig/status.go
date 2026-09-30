@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -53,7 +54,8 @@ func cmdStatus(args []string, stdout io.Writer) int {
 // ticket/state lines, a slices table, a questions table (or "questions:
 // none"), a parked table (present only while a slice is needs-input) and a
 // stalled table (present only while a slice is stalled), and a contextual
-// help hint. The parked and stalled tables are the custody surface: they
+// help hint. A ticket that adopted a branch names it on a branch line under
+// the ticket's. The parked and stalled tables are the custody surface: they
 // make "awaiting a human" (parked) and "stuck" (stalled) unmistakable and
 // distinct from each other and from ordinary in-progress work.
 func RenderStatus(st *store.Store, ticket string) (string, error) {
@@ -65,10 +67,18 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	rec, err := st.ReadTicket(ticket)
+	if err != nil {
+		return "", err
+	}
+	adopted := rec.Adopted()
 
 	var rows, parkedRows, stalledRows [][]string
 	counts := map[string]int{}
-	allGreen := len(slices) > 0
+	// A ticket that adopted a branch has no slices until a gate round queues
+	// its fixes, and nothing built is not something building: every slice
+	// it has is green, however few.
+	allGreen := len(slices) > 0 || adopted
 	for _, sl := range slices {
 		ss, err := st.ReadSliceState(ticket, sl.ID)
 		if err != nil {
@@ -115,11 +125,14 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		overall = "green"
 	}
 
-	blocks := []string{
-		"ticket: " + ticket,
-		"state: " + overall,
-		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question"}, rows),
+	blocks := []string{"ticket: " + ticket}
+	if adopted {
+		blocks = append(blocks, "branch: "+rec.Branch)
 	}
+	blocks = append(blocks,
+		"state: "+overall,
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question"}, rows),
+	)
 	if len(questions) == 0 {
 		blocks = append(blocks, "questions: none")
 	} else {
@@ -210,6 +223,10 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 			ticket, strings.Join(rounds, ","))}
 	} else if len(outstanding) > 0 && frontierGreen(st, ticket) {
 		helpLines = []string{fmt.Sprintf("Run `jig gate %s` at a terminal to decide the outstanding asks", ticket)}
+	} else if len(slices) == 0 && !adopted {
+		// A ticket with nothing to work has the two ways to get work that
+		// `jig ticket new` and the refusal of `jig run` give.
+		helpLines = getWorkHints(ticket)
 	} else {
 		hint, err := nextStepHint(st, ticket)
 		if err != nil {
@@ -315,6 +332,10 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	rec, err := st.ReadTicket(ticket)
+	if err != nil {
+		return "", err
+	}
 	for _, q := range questions {
 		if q.Status != "open" {
 			continue
@@ -341,7 +362,9 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		return fmt.Sprintf("Run `%s` to answer and resume", cmd), nil
 	}
 
-	if len(slices) == 0 {
+	// A ticket that adopted a branch has no slices until a gate round queues
+	// its fixes: its next step is that round, not intake.
+	if len(slices) == 0 && !rec.Adopted() {
 		return intakeHint(ticket), nil
 	}
 	states := make(map[string]store.SliceState, len(slices))
@@ -407,6 +430,18 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		switch {
 		case rounds == 0:
 			return fmt.Sprintf("Run `jig gate %s` to open a gate round", ticket), nil
+		case verdict == "clean" && rec.Adopted():
+			// jig publish refuses an adopted branch (Publish's own refusal):
+			// naming it here would name a command that cannot run. What to do
+			// instead is the refusal's own sentence, which also says where the
+			// commits jig built wait when it built any: the pull request
+			// opened from origin's copy would lack the fix the round reviewed.
+			lines, err := journal.Read(st, ticket)
+			if err != nil {
+				return "", err
+			}
+			steps := verifydeliver.PublishByHand(rec.Branch, len(journal.BuiltCommits(lines)) > 0, "")
+			return fmt.Sprintf("Round %d is clean; jig publish does not ship an adopted branch yet: %s", rounds, steps), nil
 		case verdict == "clean":
 			return fmt.Sprintf("Run `jig publish %s` to open the PR", ticket), nil
 		default:

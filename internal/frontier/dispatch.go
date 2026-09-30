@@ -2,7 +2,9 @@ package frontier
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,6 +102,15 @@ func buildAttemptLog(st *store.Store, ticket, slice string, beforeAttempt int) [
 		log = log[len(log)-8:]
 	}
 	return log
+}
+
+// hasBrief reports whether ticket has a brief.md in the store: whether there
+// is a brief for `jig requeue --from-brief-diff` to diff. A brief that cannot
+// be statted for any reason but its absence counts as there, the way the reads
+// below treat it.
+func hasBrief(st *store.Store, ticket string) bool {
+	_, err := os.Stat(filepath.Join(st.TicketDir(ticket), "brief.md"))
+	return !errors.Is(err, fs.ErrNotExist)
 }
 
 // invertBriefHashes reads ticket's brief.md and returns its section hashes
