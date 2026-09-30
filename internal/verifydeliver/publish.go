@@ -176,6 +176,19 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
 	}
 
+	// Publish ships what was reviewed. The head it would ship, before reconcile
+	// adds anything to it, must be the head the last clean round reviewed
+	// (when that round recorded heads): a commit that landed on the branch since
+	// would go out under a verdict that never saw it. Checked ahead of
+	// everything that writes, so a refusal leaves the store untouched.
+	shipHead, err := gitx.RevParse(lease.Dir, "HEAD")
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve the head to ship: %w", err)
+	}
+	if err := checkReviewedHead(gateRep, repoName, shipHead, ticket); err != nil {
+		return PublishReport{}, err
+	}
+
 	// Step 1: reconcile.
 	policy, err := reconcile(lease.Dir, branch, target, identityEnv)
 	if err != nil {
@@ -609,5 +622,42 @@ func adoptedBranchRefusal(d Deps, ticket, repoName, branch string) error {
 		Msg:  fmt.Sprintf("ticket %s adopted branch %s, and jig publish cannot ship an adopted branch yet", ticket, branch),
 		Code: "PUBLISH_ADOPTED_BRANCH",
 		Help: []string{"Until it can: " + PublishByHand(branch, built, leaseDir)},
+	}
+}
+
+// checkReviewedHead refuses, with PUBLISH_UNREVIEWED_HEAD, a head publish
+// would ship that is not the head the latest clean gate round reviewed: rep is
+// that round's report (a clean verdict is checked before this is reached), and
+// head the ticket branch's head before reconcile. A reviewer round records the
+// heads it reviewed (reviewed_sha), one per repo; a scripted round records
+// none at all, and there is nothing to hold the head to, so it is let through
+// as it always has been. A round that recorded heads, but none for this repo,
+// reviewed something else - a repo renamed since, say - and is refused like a
+// different head: what was reviewed is not what would ship.
+func checkReviewedHead(rep reportYAML, repoName, head, ticket string) error {
+	if len(rep.ReviewedSHA) == 0 {
+		return nil
+	}
+	help := []string{fmt.Sprintf("Run `jig gate %s` to review the branch as it is now, then publish again.", ticket)}
+	reviewed := rep.ReviewedSHA[repoName]
+	if reviewed == "" {
+		repos := make([]string, 0, len(rep.ReviewedSHA))
+		for name := range rep.ReviewedSHA {
+			repos = append(repos, name)
+		}
+		sort.Strings(repos)
+		return &axi.Error{
+			Msg:  fmt.Sprintf("the last clean gate round recorded the head it reviewed for %s, but none for %s, the repo publish ships", strings.Join(repos, ", "), repoName),
+			Code: "PUBLISH_UNREVIEWED_HEAD",
+			Help: help,
+		}
+	}
+	if reviewed == head {
+		return nil
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("the head publish would ship, %s, is not the head the last clean gate round reviewed, %s", head, reviewed),
+		Code: "PUBLISH_UNREVIEWED_HEAD",
+		Help: help,
 	}
 }
