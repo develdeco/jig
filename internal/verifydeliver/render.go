@@ -58,8 +58,16 @@ func renderMemorize(ticket string, slices []store.Slice, lines []journal.Line, q
 
 // writeMemorize writes and commits the retrieval-notes file inside the
 // publish lease, before the squash commit so the squash's tree contains
-// it.
+// it. The commit holds the notes and nothing else. The lease has run every
+// oracle by now, when the target moved, and an oracle can leave anything
+// behind - a file git does not ignore, a rewrite of a tracked file, a change
+// it staged - none of which is the notes' to carry to a branch someone else
+// may have built. The lease is disposable, so it is put back at its head
+// first, as it is before every acquire; what git ignores stays ignored.
 func writeMemorize(leaseDir, ticket string, slices []store.Slice, lines []journal.Line, questions []store.Question, identityEnv []string) error {
+	if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
+		return fmt.Errorf("verifydeliver: memorize: restore the lease after the oracles: %w", err)
+	}
 	content := renderMemorize(ticket, slices, lines, questions)
 	path := filepath.Join(leaseDir, ".claude", "retrieval", ticket+".md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
