@@ -64,7 +64,7 @@ var commandTable = []cmdSpec{
 	}, false},
 	{"gate", "run a gate round over the ticket's branch", []flagSpec{
 		{"early", "gate before the frontier is fully green", false},
-		{"branch", "validate this branch instead of the ticket's branch (jig/<ticket> unless one is recorded)", false},
+		{"branch", "review this branch, built outside jig, and adopt it as the ticket's own (recorded on the first round)", false},
 		{"intent", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md); with no brief, --intent or --doc, a reviewer round reads your local Claude Code sessions for this repo and has a model summarize the best match into intent.md", false},
 		{"doc", "doc file whose content becomes the ticket's explicit intent, recorded as intent.md (refused when the ticket has a brief.md)", false},
 		{"pr", "pr number (not implemented in v0.1)", true},

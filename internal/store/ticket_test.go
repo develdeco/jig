@@ -520,3 +520,87 @@ func TestCreateTicketRecordConcurrentCreatorsOneWins(t *testing.T) {
 		t.Fatalf("%d of %d concurrent creators succeeded, want exactly 1", won, creators)
 	}
 }
+
+// TestCheckAdoptableBranch: a name passes the check exactly when TicketBranch
+// would resolve it once recorded - the target, a name git rejects, and one
+// git expands to another are refused with TICKET_BRANCH_INVALID, each saying
+// why - and the check writes nothing: no ticket.yaml appears.
+func TestCheckAdoptableBranch(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	runGit(t, work, "checkout", "-b", "other")
+	runGit(t, work, "checkout", "main")
+
+	for _, tc := range []struct {
+		branch  string
+		refused bool
+		mention string
+	}{
+		{"add-retry", false, ""},
+		{"feature/add-retry", false, ""},
+		{"main", true, "target branch"},
+		{"bad..name", true, "git rejects"},
+		{"@{-1}", true, `"other"`},
+	} {
+		t.Run(tc.branch, func(t *testing.T) {
+			err := st.CheckAdoptableBranch("T-1", tc.branch, "main")
+			var ae *axi.Error
+			switch {
+			case !tc.refused && err != nil:
+				t.Fatalf("CheckAdoptableBranch(%q) = %v, want it adoptable", tc.branch, err)
+			case tc.refused && (!errors.As(err, &ae) || ae.Code != "TICKET_BRANCH_INVALID"):
+				t.Fatalf("CheckAdoptableBranch(%q) = %v, want *axi.Error TICKET_BRANCH_INVALID", tc.branch, err)
+			case tc.refused && (!strings.Contains(ae.Msg, tc.mention) || !strings.Contains(ae.Msg, "T-1 cannot adopt branch")):
+				t.Fatalf("Msg = %q, want it to say T-1 cannot adopt the branch, and %q", ae.Msg, tc.mention)
+			}
+
+			// The same verdict TicketBranch gives the name once recorded.
+			if err := st.WriteTicketBranch("T-2", tc.branch); err != nil {
+				t.Fatalf("WriteTicketBranch: %v", err)
+			}
+			_, resolveErr := st.TicketBranch("T-2", "main")
+			if (resolveErr != nil) != tc.refused {
+				t.Fatalf("TicketBranch(%q) = %v, but CheckAdoptableBranch refused = %v: one rule must decide both", tc.branch, resolveErr, tc.refused)
+			}
+		})
+	}
+	if _, err := os.Stat(st.TicketFilePath("T-1")); !os.IsNotExist(err) {
+		t.Fatalf("CheckAdoptableBranch wrote T-1's ticket.yaml (stat err %v)", err)
+	}
+}
+
+// TestStartSHARoundTrip: the start sha is one file per repo under the ticket,
+// written whole, replacing an earlier one.
+func TestStartSHARoundTrip(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	want := filepath.Join(st.TicketDir("T-1"), "start.fixture-repo.sha")
+	if got := st.StartSHAPath("T-1", "fixture-repo"); got != want {
+		t.Fatalf("StartSHAPath = %q, want %q", got, want)
+	}
+
+	for _, sha := range []string{"1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"} {
+		if err := st.WriteStartSHA("T-1", "fixture-repo", sha); err != nil {
+			t.Fatalf("WriteStartSHA: %v", err)
+		}
+		if got, err := os.ReadFile(want); err != nil || string(got) != sha {
+			t.Fatalf("start sha file = %q (err %v), want %q", got, err, sha)
+		}
+	}
+}
+
+// TestTicketAdoptedIsTheRecordedBranch: a ticket adopted a branch exactly when
+// its record holds one, whatever else the record holds.
+func TestTicketAdoptedIsTheRecordedBranch(t *testing.T) {
+	for _, tc := range []struct {
+		rec  Ticket
+		want bool
+	}{
+		{Ticket{}, false},
+		{Ticket{Title: "Add retry", BlockedBy: []TicketBlockedBy{{Ticket: "T-1", Kind: "hard"}}}, false},
+		{Ticket{Branch: "add-retry"}, true},
+		{Ticket{Title: "Add retry", Branch: "add-retry"}, true},
+	} {
+		if got := tc.rec.Adopted(); got != tc.want {
+			t.Errorf("%+v.Adopted() = %v, want %v", tc.rec, got, tc.want)
+		}
+	}
+}

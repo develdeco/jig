@@ -99,3 +99,45 @@ func BuilderModels(lines []Line) []string {
 	}
 	return models
 }
+
+// BuiltCommits returns the commit of every event=verified line, without
+// repeats, in journal order: the commits jig's builders reported on the
+// ticket's branch that verified. The frontier journals one when a green result's
+// commit passes verifyGreen (a descendant of the start sha, reachable from the
+// lease's HEAD, its artifacts in its tree), after the result line that records
+// what the builder claimed, so a claim that did not verify - a sha that is not
+// in the lease, or is the start sha itself, or is off the branch - is not
+// among them. The journal is the store's record of them, so it answers
+// whether jig built on a ticket from any machine, where a lease answers only
+// for the machine it sits on. A journal written before jig recorded
+// verifications has none.
+func BuiltCommits(lines []Line) []string {
+	var commits []string
+	seen := map[string]bool{}
+	for _, l := range lines {
+		if l.Event == "verified" && l.Commit != "" && !seen[l.Commit] {
+			seen[l.Commit] = true
+			commits = append(commits, l.Commit)
+		}
+	}
+	return commits
+}
+
+// GreenClaims returns the commit of every green result line, without repeats,
+// in journal order: the commits jig's builders claimed on the ticket's branch,
+// whether or not they verified. Every jig version journals the result line
+// before it routes the result, and nothing removes it (a requeue changes a
+// slice's state, not the journal), so unlike a slice's state it is a record of
+// a claim for the journal's whole life, and it is the only one a journal
+// written before verified lines has. BuiltCommits is the ones that verified.
+func GreenClaims(lines []Line) []string {
+	var commits []string
+	seen := map[string]bool{}
+	for _, l := range lines {
+		if l.Event == "result" && l.Outcome == "green" && l.Commit != "" && !seen[l.Commit] {
+			seen[l.Commit] = true
+			commits = append(commits, l.Commit)
+		}
+	}
+	return commits
+}

@@ -125,13 +125,15 @@ func TestRunScenarioMainChain(t *testing.T) {
 // branch, not the "jig/<ticket>" default - proof frontier's own
 // TicketBranch call site is exercised, since no other frontier test here
 // ever records one, so reverting that call site to a hardcoded
-// "jig/"+ticket would still leave every one of them green.
+// "jig/"+ticket would still leave every one of them green. A recorded branch
+// is on origin by definition, so the test puts it there, at the target's tip.
 func TestRunUsesRecordedBranchForBuildLease(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 	if err := st.WriteTicketBranch(fx.Ticket, "feature/custom"); err != nil {
 		t.Fatalf("WriteTicketBranch: %v", err)
 	}
+	runGitT(t, fx.RepoRemote, "branch", "feature/custom", "main")
 
 	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -936,6 +938,120 @@ func TestVerifyGreenRejectsStartSHAItself(t *testing.T) {
 	}
 	if aState.State != "stalled" || aState.Reason != "attempt-cap" {
 		t.Fatalf("a state = %+v, want stalled/attempt-cap (verify-green failure routed as a normal failure)", aState)
+	}
+}
+
+// TestRouteJournalsTheCommitThatVerified: a green result that verifies leaves a
+// verified line naming its commit - the record of a commit jig built
+// (journal.BuiltCommits) - and one that does not leaves none, whatever
+// rejected it. The result line, journaled before verification, names the
+// builder's claim either way, which is why it cannot be the record.
+func TestRouteJournalsTheCommitThatVerified(t *testing.T) {
+	dir := t.TempDir()
+	startSHA := initTestGitRepo(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGitT(t, dir, "commit", "-am", "second")
+	second := runGitT(t, dir, "rev-parse", "HEAD")
+	// A commit on another line, off the lease's HEAD.
+	runGitT(t, dir, "checkout", "-b", "side", startSHA)
+	if err := os.WriteFile(filepath.Join(dir, "side.txt"), []byte("side"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGitT(t, dir, "add", "-A")
+	runGitT(t, dir, "commit", "-m", "side")
+	side := runGitT(t, dir, "rev-parse", "HEAD")
+	runGitT(t, dir, "checkout", "main")
+
+	for _, tc := range []struct {
+		name     string
+		start    string
+		res      outcome.Result
+		verified bool
+	}{
+		{"a commit that verifies", startSHA, outcome.Result{Outcome: outcome.Green, Commit: second}, true},
+		{"the start sha itself", startSHA, outcome.Result{Outcome: outcome.Green, Commit: startSHA}, false},
+		{"a sha that is not in the lease", startSHA, outcome.Result{Outcome: outcome.Green, Commit: "0123456789abcdef0123456789abcdef01234567"}, false},
+		{"a commit that does not descend from the start sha", second, outcome.Result{Outcome: outcome.Green, Commit: startSHA}, false},
+		{"a commit off the lease's HEAD", startSHA, outcome.Result{Outcome: outcome.Green, Commit: side}, false},
+		{"a commit missing a declared artifact", startSHA, outcome.Result{Outcome: outcome.Green, Commit: second, Artifacts: []string{"nowhere.txt"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var lines []journal.Line
+			rc := &runCtx{
+				d: Deps{Store: newTestStore(t), Journal: func(l journal.Line) error {
+					lines = append(lines, l)
+					return nil
+				}},
+				ticket:      "T",
+				maxAttempts: 1,
+			}
+
+			rc.route(store.Slice{ID: "a"}, pool.Lease{Dir: dir}, 1, tc.res, tc.start)
+
+			got := journal.BuiltCommits(lines)
+			if tc.verified {
+				if len(got) != 1 || got[0] != tc.res.Commit {
+					t.Fatalf("BuiltCommits = %v, want [%s]", got, tc.res.Commit)
+				}
+				if last := lines[len(lines)-1]; last.Event != "verified" || last.Slice != "a" || last.Attempt != 1 {
+					t.Fatalf("last journal line = %+v, want a's verified line for attempt 1", last)
+				}
+			} else if len(got) != 0 {
+				t.Fatalf("BuiltCommits = %v, want none: the commit did not verify", got)
+			}
+		})
+	}
+}
+
+// TestRouteNeverMarksASliceGreenWhenItsVerifiedLineFails: the verified line
+// goes in before the slice is marked green, so a run that stops between the two
+// writes has the commit recorded (journal.BuiltCommits). Written the other way
+// round, a journal that fails on the verified line would leave a green slice
+// whose commit is not among the commits jig built, and the next diverged build
+// acquire on an adopted ticket would re-cut that commit away while the slice
+// stays green. The run stops on the journal error, and the slice is not green.
+func TestRouteNeverMarksASliceGreenWhenItsVerifiedLineFails(t *testing.T) {
+	dir := t.TempDir()
+	startSHA := initTestGitRepo(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGitT(t, dir, "commit", "-am", "second")
+	commit := runGitT(t, dir, "rev-parse", "HEAD")
+
+	st := newTestStore(t)
+	var events []string
+	rc := &runCtx{
+		d: Deps{Store: st, Journal: func(l journal.Line) error {
+			events = append(events, l.Event)
+			if l.Event == "verified" {
+				return errors.New("the journal is unwritable")
+			}
+			return nil
+		}},
+		ticket:      "T",
+		maxAttempts: 1,
+	}
+
+	rc.route(store.Slice{ID: "a"}, pool.Lease{Dir: dir}, 1, outcome.Result{Outcome: outcome.Green, Commit: commit}, startSHA)
+
+	if err := rc.firstErr(); err == nil || !strings.Contains(err.Error(), "verified") {
+		t.Fatalf("run error = %v, want the verified line's journal failure", err)
+	}
+	if !rc.isHalted() {
+		t.Fatal("the run kept going after its journal failed")
+	}
+	if got := strings.Join(events, ","); got != "verified" {
+		t.Fatalf("journal events = %q, want the verified line attempted, and nothing else", got)
+	}
+	state, err := st.ReadSliceState("T", "a")
+	if err != nil {
+		t.Fatalf("ReadSliceState: %v", err)
+	}
+	if state.State == "green" {
+		t.Fatalf("slice a is green (%+v) although its verified line was never journaled", state)
 	}
 }
 

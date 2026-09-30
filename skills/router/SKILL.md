@@ -16,7 +16,7 @@ One table, one rule: match the phrase, deploy the row.
 | "solve T-901" (rushed backlog ticket) | ticket, quality unknown | intake evaluates as written: sharpen in place, promote to chart if secretly chart-shaped, or surface as already-covered via ledger recall |
 | "here's the contractor's PR" | external work product | `jig gate` pr-mode (v0.2 - parses and reports not-implemented in v0.1) |
 | "how's T-1130 going?" | status ask | `jig status` |
-| "I hand-wrote a fix on branch X - check and publish it" | validator side only | `jig gate --branch` → `jig publish` |
+| "I hand-wrote a fix on branch X - check it" | validator side only | `jig ticket new`, then `jig gate T --branch X`; `jig run T` builds what the round queues on X, and `jig gate T` reviews X again (publishing an adopted branch is not built yet) |
 | "work the backlog today" | many tickets | fleet-liaison skill over parallel `jig solve` sessions (fleet binary verbs v0.2) |
 | "it keeps making that same mistake" | process defect | retro skill (retro binary verb v0.2) |
 | "have we hit something like this before?" | recall | no machine: the ledger's Answers tails; deciding not to start a tool is also the router's judgment |

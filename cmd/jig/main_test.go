@@ -209,14 +209,17 @@ func TestRenderStatusParkedFlawedBrief(t *testing.T) {
 
 // TestGateFixSliceFlawedBriefResumesWithAnswer drives a real gate round
 // through `jig run`/`jig gate` (fake backend, scripted gate source) until a
-// gate fix slice - which never has FromBrief - is parked on a flawed-brief
-// question. Before resumeCommand keyed off the slice's own structure, this
-// was the exact regression the review caught: routeQuestion sets Reason
-// "flawed-brief" from the build session's outcome alone, so a fix slice
-// landed on the same Reason as a brief-derived slice, and the old
-// Reason-keyed resumeCommand printed `jig requeue ... --from-brief-diff` -
-// a command that can never touch a slice with no FromBrief hash to
-// recompute, wedging the ticket forever.
+// gate fix slice - which never has FromBrief - reports a flawed brief and
+// parks. Amending the brief is the remedy only for a slice that cites brief
+// sections, so the frontier parks the fix slice on a plain question, with no
+// flawed-brief reason, and status resumes it by answering. Before that, the
+// frontier set Reason "flawed-brief" from the build session's outcome alone, so
+// a fix slice landed on the same Reason as a brief-derived slice, and a
+// Reason-keyed resumeCommand printed `jig requeue ... --from-brief-diff` - a
+// command that can never touch a slice with no FromBrief hash to recompute,
+// wedging the ticket forever. resumeCommand keys off the slice's own
+// structure too, so a store an older jig wrote, whose fix slice still carries
+// the reason, is resumed by answering as well; the test checks both.
 func TestGateFixSliceFlawedBriefResumesWithAnswer(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "fix-flawed-brief"})
@@ -270,20 +273,26 @@ func TestGateFixSliceFlawedBriefResumesWithAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSliceState fix-1: %v", err)
 	}
-	if fix1State.State != "needs-input" || fix1State.Reason != "flawed-brief" {
-		t.Fatalf("fix-1 state = %+v, want needs-input/flawed-brief (test setup is wrong)", fix1State)
+	if fix1State.State != "needs-input" || fix1State.Reason != "" {
+		t.Fatalf("fix-1 state = %+v, want needs-input with no flawed-brief reason: it cites no brief section to amend", fix1State)
 	}
 
-	got, err := RenderStatus(st, fx.Ticket)
-	if err != nil {
-		t.Fatalf("RenderStatus: %v", err)
-	}
 	wantResume := fmt.Sprintf("jig run %s --answer %s '<text>'", fx.Ticket, fix1State.Question)
-	if !strings.Contains(got, wantResume) {
-		t.Errorf("expected fix-1's resume command %q, got:\n%s", wantResume, got)
-	}
-	if strings.Contains(got, "--from-brief-diff") {
-		t.Errorf("fix-1 (no FromBrief) was offered --from-brief-diff, which can never touch it, got:\n%s", got)
+	for _, reason := range []string{"", "flawed-brief"} {
+		fix1State.Reason = reason
+		if err := st.WriteSliceState(fx.Ticket, "fix-1", fix1State); err != nil {
+			t.Fatalf("WriteSliceState fix-1: %v", err)
+		}
+		got, err := RenderStatus(st, fx.Ticket)
+		if err != nil {
+			t.Fatalf("RenderStatus: %v", err)
+		}
+		if !strings.Contains(got, wantResume) {
+			t.Errorf("reason %q: expected fix-1's resume command %q, got:\n%s", reason, wantResume, got)
+		}
+		if strings.Contains(got, "--from-brief-diff") {
+			t.Errorf("reason %q: fix-1 (no FromBrief) was offered --from-brief-diff, which can never touch it, got:\n%s", reason, got)
+		}
 	}
 }
 
