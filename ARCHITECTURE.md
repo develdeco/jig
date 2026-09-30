@@ -32,17 +32,18 @@ gate           re-verification round: oracles, then a reviewer session's find/ro
   │                    and, under <jig home>/evidence/ (not in the store), the media and
   │                    the session's input, demo.json
   ▼
-publish        reconcile, revalidate, docs, squash, route → open the PR
-               reads:  gate/round-N/*, journal.ndjson
+publish        reconcile, revalidate, docs, squash (unpushed history only), route
+               → open or update the PR
+               reads:  gate/round-N/*, journal.ndjson, ticket.yaml
                writes: changelog/{<ws>.md,consolidated.md}, pr/{evidence.md,<repo>.md},
                        ledger.md, platform/contract-index.md
 ```
 
 A branch built outside jig enters at the gate instead of at the brief: the
 first `jig gate <ticket> --branch <name>` adopts it as the ticket's own,
-`run` then builds the fixes the round queued on that branch, and the next
-`gate` reviews it again. Publishing an adopted branch is not built yet. See
-[A ticket's branch](#a-tickets-branch).
+`run` then builds the fixes the round queued on that branch, the next
+`gate` reviews it again, and `publish` pushes it as it is. See
+[A ticket's branch](#a-tickets-branch) and [Publish](#publish).
 
 `frontier` (the frontier loop) and `verifydeliver` (gate + publish) are
 separate packages that share no in-memory state at all - package `frontier`
@@ -167,8 +168,8 @@ exists.
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` + `Config` → a model rung, disjoint from rungs already in use |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by |
-| `internal/tracker/` | `New`, `Graduate`, `CheckMinted` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it |
-| `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `PublishByHand`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened PR |
+| `internal/tracker/` | `New`, `Graduate`, `CheckMinted`, `PRCreator`, `PRUpdater` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it |
+| `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR |
 
 ## Session backends
 
@@ -424,19 +425,22 @@ build of an adopted branch whose lease holds no commit jig built that origin
 lacks (`pool.RecutUnlessBuilt`, `pool.HoldsUnpushedBuilt`), which follows the
 author and is re-cut from origin's tip. A branch origin lacks, the ordinary
 `jig/<ticket>` until a publish pushes it, is left as it is; once a publish
-has pushed the squash, the build lease's unsquashed commits stand diverged
-from it, and a build after a publish stops with `BRANCH_DIVERGED` until
-publishing a branch that already reached origin is built. The gate lease is
-disposable, so `Gate` drops its own local copy of the branch before acquiring
-(`dropLeaseBranch`); the publish lease, re-pointed from the build lease right
-after acquiring, has the same need once a published branch is published again.
+has squashed and pushed it, the build lease's unsquashed commits stand
+diverged from the squash, and a build, a gate round or a publish after it stops
+with `BRANCH_DIVERGED` until origin's branch is merged into the build lease,
+after which a publish pushes as it is (see [Publish](#publish)). The gate and
+publish leases are disposable, so `Gate` and `Publish` drop their own local
+copy of the branch before acquiring (`restoreLeaseBeforeAcquire`,
+`dropLeaseBranch`).
 
 **What a round reviews.** For an adopted ticket the gate lease holds origin's
 copy of the branch while the journal records no commits jig built on it. Once
-it does, jig's commits stay in the build lease until someone pushes them, and
-`chooseBuiltCopy` picks the copy that holds them by the same sync rule, the
-build lease's copy against origin's: in step with or behind origin's, origin
-holds them all (and whatever the author added), so the round reviews origin's;
+it does, and for a ticket's own `jig/<ticket>` from the start, jig's commits
+stay in the build lease until someone pushes them, and `chooseBuiltCopy` picks
+the copy that holds them by the same sync rule, the build lease's copy against
+origin's, once origin has a copy at all (until it does, the build lease's is the
+only one): in step with or behind origin's, origin holds them all (and whatever
+was added since, by the author or by a publish), so the round reviews origin's;
 ahead of it, the round reviews the lease's; diverged, the round refuses with
 `BRANCH_DIVERGED`, naming the build lease, unless the lease's copy holds no
 commit jig built that origin lacks (`pool.HoldsUnpushedBuilt`, the rule the
@@ -444,19 +448,85 @@ build's re-cut applies), which makes it no build lease holding the branch;
 and with no build lease holding the branch here, the round reviews origin's.
 Whichever copy that is must hold every commit the journal records jig built, or
 the round refuses (`BUILD_LEASE_MISSING`, `pool.RequireBuilt`) - one rule for
-every copy, which the frontier applies to its build lease before it dispatches.
-The ticket's own `jig/<ticket>` is always the build lease's copy, as before.
+every copy, which the frontier applies to its build lease before it dispatches
+on an adopted branch. The rule is the branch's, not the kind of ticket's: a
+ticket's own `jig/<ticket>` is judged the same way once a publish has put it on
+origin, so the round after a publish that pushed it as it is reviews origin's
+copy, and after the first publish, which squashed it, the round refuses until
+origin's branch is merged into the build lease. Publish ships the copy the round
+reviewed: `pointAtTicketBranch` is the one function that picks it, for the gate
+and for publish alike.
 
-**Not built: publishing an adopted branch.** `Publish` refuses a ticket
-whose record holds a branch (`store.Ticket.Adopted`) before it acquires or
-writes anything (`PUBLISH_ADOPTED_BRANCH`, `adoptedBranchRefusal`): its squash
-refuses a range already on a remote, and the author's commits are. `jig status`
-stops suggesting `jig publish` for such a ticket once a round is clean, and
-the refusal, the status hint and the gate's hint all say what to do instead
-in one sentence, `verifydeliver.PublishByHand`: open the pull request, after
-pushing the commits jig built from the build lease when it built any (merging
-the branch in first if it moved). `jig solve` stops at the clean round with
-the gate report, exit 0.
+## Publish
+
+`Publish` (`internal/verifydeliver/publish.go`) ships the ticket's branch, in
+this order. Steps 1 to 5 only read and refuse, and come before its first store
+write, so a refusal there leaves the store untouched; from the `reconcile`
+journal line (step 6) on, a failure commits and pushes the store best-effort
+under a subject naming it (see the store push above).
+
+1. **Preconditions.** The ticket's record is read once and names the branch
+   (`store.ResolveTicketBranch`); every slice is green; the latest gate round
+   is clean (`PUBLISH_NOT_CLEAN`).
+2. **The publish lease.** An existing publish lease is restored pristine and
+   drops its own copy of the branch (`restoreLeaseBeforeAcquire`), then is
+   acquired (`pool.MustExistOnOrigin` for an adopted branch, which is on origin
+   by definition: `BRANCH_NOT_FOUND`) and pointed at the copy the gate reviewed
+   by the function the gate uses, `pointAtTicketBranch`: an adopted branch as
+   origin has it while jig built nothing on it (no build lease needed), or
+   whichever copy holds the commits jig built (`chooseBuiltCopy`: the build
+   lease's while origin has no copy of the branch, else the two compared;
+   `BRANCH_DIVERGED`, `BUILD_LEASE_MISSING`).
+3. **Ship what was reviewed.** The head at that point must be the last clean
+   round's `reviewed_sha` for the repo, when a reviewer round recorded heads
+   (`PUBLISH_UNREVIEWED_HEAD`, `checkReviewedHead`); a round that recorded heads
+   for other repos only is refused too, and a scripted round records none at
+   all and is let through.
+4. **A fast-forward or nothing.** A branch already on origin must be a
+   descendant of origin's copy (`PUBLISH_NOT_FAST_FORWARD`,
+   `requireFastForward`); publish never forces. The copy was compared with
+   origin's when the lease was pointed at it, so what this catches is a push
+   since, between the acquire's fetch and the one publish makes right after. The
+   refusal says what to do about it by whose copy publish would ship
+   (`pointAtTicketBranch` reports it): the build lease's, where origin's is
+   merged in, or origin's own, which a round over the branch as it is now
+   catches up with. It comes before reconcile, whose merge of the target could
+   conflict in a branch that cannot be pushed and hide it behind `CONFLICT`.
+5. **The pull request.** The tracker adapter is built here, not after the push,
+   and if it is a `tracker.PRUpdater` it is asked for the branch's open pull
+   request into the target (`FindOpenPR`, exact: the pull requests endpoint with
+   the qualified head, the base and the open state, which GitHub applies, so no
+   page of other forks' pull requests can hide it); a lookup that fails refuses the
+   publish. A closed or merged pull request from the branch, or an open one into
+   another base, is not that one: none is found, and a new one is opened.
+6. **Reconcile** merges the target into a branch that is on origin and rebases
+   one that is not (`reconcile`'s own `ls-remote`, whose answer is the rest of
+   publish's too); the `reconcile` journal line is the first store write.
+   `PUBLISH_NO_DIVERGENCE` and `NOTHING_TO_PUBLISH` refuse an empty change.
+7. **Revalidate**: the gate's recorded target sha against `origin/<target>`;
+   moved, every oracle runs again in the publish lease.
+8. **Docs.** The memorize commit (`.claude/retrieval/<ticket>.md`) is made on
+   the branch in the publish lease, like the merge of the target: jig's own
+   commits, on top of the author's on an adopted branch. The lease is put back
+   at its head first, so whatever an oracle left in it stays out and the commit
+   holds the notes only. Then the changelogs, the ledger entry (titled by the
+   first slice that did not come from a gate round, else the recorded title, so
+   an adopted ticket, whose slices are only the gate's fixes, keeps the name it
+   was minted with), the contract index and the evidence.
+9. **Squash, unpushed history only.** A branch that was not on origin is
+   squashed into one commit (refusing a range whose commits reached a remote
+   under another name, `PUSHED_RANGE`); one that was is left as it is, and the
+   journal's `squash` line records `none:branch-on-origin`.
+10. **Confirm, push, pull request.** `--yes` or an accepted question (which
+    says whether it would open a pull request or update the open one), then a
+    plain `git push` of the branch, then the pull request: the open one is
+    updated (`UpdatePR`, `gh pr edit --body-file`), otherwise one is opened
+    (`CreatePR`) when the tracker can. The `pr` journal line records which
+    (`updated` or `opened`) and the pushed head. Route and `publish-done`
+    follow, and the store is pushed.
+
+The report names the head pushed and, per repo, whether the branch was squashed
+or was "not squashed (branch already on origin)".
 
 ## Safety
 

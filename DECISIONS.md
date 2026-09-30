@@ -1451,17 +1451,14 @@ The design is [ADR 0013](docs/adr/0013-a-ticket-branch-is-recorded.md); these
 are the judgment calls the build left open.
 
 - A recorded branch means an adopted one (`Ticket.Adopted`, the one predicate
-  gate, run, solve, publish and status all ask), and `jig publish` refuses every
-  recorded branch, whether or not it happens to be on origin. Nothing but
-  adoption writes `branch:`, so a record the refusal would let through - a
-  hand-edited one naming a branch jig built and never pushed - is a case no
-  command produces. The refusal is by the record because that is a fact the
-  store holds; the branch's presence on origin is a fact about one moment and
-  one remote. The publish tests that published a recorded, never-pushed branch
-  (they simulated adoption before it existed) now pin the refusal instead, and
-  return as real publish tests when publishing an adopted branch is built. The
-  target check and the record's own validation (`TICKET_BRANCH_INVALID`) still
-  come before the refusal, so a bad record says what is wrong with it.
+  gate, run, solve, publish and status all ask). Nothing but adoption writes
+  `branch:`, and the record is the fact the store holds; the branch's presence on
+  origin is a fact about one moment and one remote, so what needs the branch to be
+  there (`pool.MustExistOnOrigin` in the gate, the build and publish) asks origin,
+  and what needs to know the ticket adopted one asks the record. Publish refused
+  every recorded branch until it could ship one (below); the target check and the
+  record's own validation (`TICKET_BRANCH_INVALID`) come first, so a bad record
+  says what is wrong with it.
 - `--branch` on a ticket jig already built on is refused (`TICKET_ALREADY_BUILT`)
   where it used to review origin's copy of the named branch. That review
   silently skipped the ticket's own commits, which is the mistake the refusal
@@ -1635,12 +1632,12 @@ are the judgment calls the build left open.
 - The gate reviews the copy of an adopted branch that holds the commits jig
   built, judged by the pool's own sync rule on the build lease's copy against
   origin's (`chooseBuiltCopy`). It used to review the build lease's copy whenever
-  the journal recorded any commit, and never compared the two: once the human
-  had pushed jig's commits, as the publish refusal says to, and the author pushed
-  on top, a round said clean over a head that was not the branch's, and a machine
-  with no build lease refused even when origin already held every commit. Now
-  in step or behind, the round reviews origin's; ahead, the lease's; and with no
-  lease here, origin's. Diverged, with a lease that holds a commit jig built
+  the journal recorded any commit, and never compared the two: once a publish or
+  the human had pushed jig's commits and the author pushed on top, a round said
+  clean over a head that was not the branch's, and a machine with no build
+  lease refused even when origin already held every commit. Now in step or
+  behind, the round reviews origin's; ahead, the lease's; and with no lease
+  here, origin's. Diverged, with a lease that holds a commit jig built
   that origin lacks, the round is refused with `BRANCH_DIVERGED`, naming the
   build lease, where the alternative was to review the lease and print that
   origin has commits the round did not review: a notice beside a clean verdict
@@ -1660,57 +1657,60 @@ are the judgment calls the build left open.
   the round re-points it at the round's source and Acquire's sync would
   otherwise refuse it over a stale copy in exactly the cases it exists for: a
   branch the author has pushed to since the last round, after jig's commits were
-  fetched in. The publish lease is re-pointed from the build lease right after
-  acquiring too, and is not dropped: publish refuses an adopted ticket, and a
-  ticket's own `jig/<ticket>` on origin is the publish lease's own last push. That
-  stops being true when a published branch is published again, and that change
-  must drop the publish lease's copy the same way, or its stale copy can refuse
-  the acquire before it is replaced.
+  fetched in. The publish lease is re-pointed right after acquiring too, and
+  drops its copy the same way: it used to be that a ticket's own `jig/<ticket>` on
+  origin was the publish lease's own last push, but a branch that is published
+  again, or that reached origin another way, stands diverged from a copy an
+  earlier attempt left, and the stale copy would refuse the acquire before it is
+  replaced. Both leases restore pristine and drop the copy in one function
+  (`restoreLeaseBeforeAcquire`).
 - The sync rule changes one thing for a ticket that is not adopted, after its own
-  publish. Publish pushes a squash of `jig/<ticket>`, while the build lease keeps
-  the unsquashed commits, so the branch is on origin and the two stand diverged:
-  a build acquire after a publish (a `jig run` after a post-publish gate round or
-  requeue) stops with `BRANCH_DIVERGED`, where it used to build on and fail later,
-  at a second publish's push. The rule is the branch's, and `jig/<ticket>` is a
-  branch once it is on origin. The alternative, publish re-pointing the build
-  lease at what it pushed, writes to a lease publish does not own, after the push
-  has shipped, where a failure has nowhere honest to go. Publishing a branch that
-  already reached origin is the change that owns this state, and a test pins the
-  refusal until then. The `BRANCH_DIVERGED` help names neither side's author: jig
-  made this divergence itself.
+  publish, and so does the choice of copy. Publish pushes a squash of
+  `jig/<ticket>`, while the build lease keeps the unsquashed commits, so the
+  branch is on origin and the two stand diverged: a build acquire after a publish
+  (a `jig run` after a post-publish requeue) stops with `BRANCH_DIVERGED`, where
+  it used to build on and fail later, at a second publish's push. The rule is the
+  branch's, and `jig/<ticket>` is a branch once it is on origin, so the gate and
+  publish judge it as they judge an adopted branch jig built on
+  (`chooseBuiltCopy`): the build lease's copy while origin has none, and after a
+  publish the build lease's copy against origin's. Diverged, with commits jig
+  built that origin lacks, a round or a publish is refused with the same
+  `BRANCH_DIVERGED` (the gate used to review the lease's unsquashed copy, a head
+  no publish could ship). A branch pushed as it is leaves the lease behind
+  origin's, and the round reviews and publish ships origin's copy
+  (`TestOrdinaryTicketLoopAfterAnAsIsPublish`): `jig/<ticket>` used to be the
+  build lease's copy whatever origin held, so the round after a publish that
+  added commits said clean over a head that was not the branch's and the publish
+  after it was refused as not a fast-forward. The commits jig built are the
+  journal's verified lines for every ticket, adopted or not; a journal that
+  predates them records none, so a diverged lease of such a ticket holds none that
+  is unpushed and counts as no lease holding the branch: origin's copy. The
+  alternative, publish re-pointing the build lease at what it pushed, writes to a
+  lease publish does not own, after the push has shipped, where a failure has
+  nowhere honest to go; publishing a branch that already reached origin (below)
+  left that choice as it was. The way on is the refusal's own: merge origin's
+  branch into the build lease, which leaves it ahead of origin's, and the next
+  round and publish work from there (`TestPublishRepublishesAPublishedTicket`).
+  The `BRANCH_DIVERGED` help names neither side's author: jig made this
+  divergence itself.
 - The fast-forward is git's `merge --ff-only`, so an uncommitted edit in a lease
   to a file the author's new commits change stops the acquire with git's own
   error. The alternative, a hard reset, would discard the lease's uncommitted
   work to make room, which jig does not do in a build lease.
 - `jig status` names an adopted ticket's branch on a `branch:` line under the
   ticket's, and counts the ticket as `green` while it has no slices: nothing
-  built is not something building. After a clean round its hint says `jig
-  publish` does not ship an adopted branch yet, and what to do instead
-  (`PublishByHand`): open the pull request, and when jig built commits on the
-  branch, push them from the build lease first, since origin's copy lacks the fix
-  the round reviewed. The publish refusal says the same sentence, with the
-  lease's path, because it is one function, so the two cannot disagree. The
-  status and gate hints leave the path out and decide from the journal alone:
-  they read the store only, so they cannot tell that the human has pushed the
-  commits since (that is a fact about a lease and its remote, which opening
-  would make a read-only command fetch, and a lease's view of origin is as old as
-  its last fetch), and after a push they still say to push, which then has
-  nothing to send. For the same reason they cannot tell that the branch moved
-  since, when the push is not a fast-forward and git would reject it (the state
-  after the gate's `BRANCH_DIVERGED`), so the words carry the condition
-  instead: "merge it in if it moved". That is enough to keep the hint from
-  naming a push that cannot work, and it reads nothing. The sentence is short
-  for a reason: `jig status` prints it after a clause of its own, and the demo's
-  terminal is 160 columns wide (a test pins the row's width). The path is a
-  scratch location the demo's rule keeps off the screen, where those hints print.
-  The sentence does not count the commits. The gate report prints the same
-  `branch:` line for an adopted ticket only, so every other ticket's output is
-  unchanged.
-- `jig solve` on an adopted ticket stops at the clean round and prints that
-  round's gate report, exit 0, rather than falling through to a publish that
-  always refuses. The loop's work is done when a round is clean, and the refusal
-  read as failure to any script that drove it. Solve decides it from
-  `Ticket.Adopted`, the fact publish refuses on.
+  built is not something building. After a clean round its hint is `jig publish`,
+  as for any ticket: publish ships an adopted branch (below). While it could not,
+  the hint, the gate's and publish's refusal said one sentence between them - open
+  the pull request yourself, after pushing the commits jig built from the build
+  lease - kept short for the demo's 160-column terminal; that sentence and the
+  function that built it (`PublishByHand`) are gone with the gap they covered. The
+  gate report prints the `branch:` line for an adopted ticket only, so every other
+  ticket's output is unchanged.
+- `jig solve` on an adopted ticket runs the loop and publishes it like any other.
+  It stopped at the clean round with the gate report while publish refused an
+  adopted branch, since the loop's work was done and the refusal read as failure
+  to any script that drove it; with the refusal gone there is nothing to stop for.
 - An adopted ticket's intent follows the precedence every ticket's does, the
   brief, else `intent.md` (`--intent`, `--doc`, or inferred), else none
   ([ADR 0012](docs/adr/0012-intent-provenance.md)), and adoption adds nothing to
@@ -1760,6 +1760,147 @@ are the judgment calls the build left open.
   first (a stale gate lease, a branch deleted on origin) adopt a branch nobody
   built on. The two publish and gate tests that recorded a branch by hand
   put it on origin first, since a recorded branch is on origin by definition.
+
+## Publishing a branch that is already on origin
+
+The design is in [ADR 0013](docs/adr/0013-a-ticket-branch-is-recorded.md); these
+are the judgment calls the build left open.
+
+- The squash rule is about history, not about which branch it is. One answer
+  picks it: reconcile's own `ls-remote` of `refs/heads/<branch>` gives the policy
+  (merge for a branch on origin, rebase for one that is not), and the squash
+  follows the policy, so the two cannot disagree. Asking git twice would let a
+  push between the two answers merge a branch and then squash it. The squash
+  itself is unchanged and keeps `PUSHED_RANGE` for commits that reached a remote
+  under another name, which the old test pushed under the branch's own name and
+  now pushes under another.
+- The report's `squashed` table became `pushed`, with the head and a `squash`
+  column that says `squashed` or the words "not squashed (branch already on
+  origin)" (`verifydeliver.NotSquashed`). `jig solve` prints the same table.
+  `PublishReport.Squashed` still holds the squash sha, and only for a squashed
+  branch. The `pr_url` table gained an `action` column (`opened` or `updated`).
+  The journal records the squash as `none:branch-on-origin`, in the style of
+  `none:target-unmoved`, so the store says what happened, and the `pr` line
+  carries the pushed head and whether the pull request was opened or updated.
+- The gate and publish share the function that points their lease at the copy of
+  the branch (`pointAtTicketBranch`, from the gate's own switch), so a head the
+  gate reviewed and the head publish ships cannot be chosen by two rules. The
+  refusals that come with the copy - `BRANCH_DIVERGED`, `BUILD_LEASE_MISSING` -
+  name the command that hit them (`chooseBuiltCopy` takes it), and the help for
+  the machine that built the commits says to run publish there.
+- The reviewed-head check reads the head after the lease is pointed at the copy
+  and before reconcile, which is the head "it would ship", and compares it with
+  the latest round's `reviewed_sha` for the repo. The latest round is the last
+  clean one (publish refuses any other first). A round that recorded no head at
+  all is let through, not refused: a scripted round is a test double, and no
+  other rule can say what it reviewed. The alternative, deriving the reviewed
+  head from the journal for those rounds, would invent a fact the round did not
+  record. A round that recorded heads, but none for this repo, is refused, with
+  a message naming both: the map is keyed by the remote's basename, so a remote
+  renamed between the round and the publish would otherwise ship a head no
+  reviewer saw, with nothing said.
+- A push that is not a fast-forward has its own code, `PUBLISH_NOT_FAST_FORWARD`,
+  not `BRANCH_DIVERGED`: origin being ahead of the copy is not a divergence, and a
+  refusal that says "0 commits of ours" under that name misleads. It counts both
+  sides, says publish never forces, and says where to go on by whose copy publish
+  would ship (`pointAtTicketBranch` reports it): the build lease's is where
+  origin's copy is merged in, while origin's own has nothing to merge into and
+  can only be behind through a push between publish's two fetches, so the way on
+  is `jig gate`. Naming the build lease for both sent the operator to a lease
+  that may not exist. It is checked after the head check and before reconcile,
+  from the remote-tracking ref the lease just fetched: reconcile would merge the
+  target into a branch that cannot be pushed, and a conflict there would hide the
+  real problem behind `CONFLICT` (`TestPublishChecksTheFastForwardBeforeItReconciles`).
+  A push between that fetch and the push is git's to refuse, without force. The
+  copy was compared with origin's when the lease was pointed at it, and a copy that
+  neither holds the other is refused there with `BRANCH_DIVERGED`, so what reaches
+  this check is a push since the acquire's fetch, in the window before the fetch
+  publish makes right after pointing the lease. The tests move origin in that
+  window through `fetchOrigin`, a func var beside `guardedPush` and `confirm`,
+  since no state of the leases reaches it, and stay serial for it.
+- One `PRUpdater` interface with both halves, beside `PRCreator`, because they
+  are one question with two answers (there is a pull request, or there is not).
+  The lookup is the pull requests endpoint (`gh api repos/<owner>/<repo>/pulls
+  --method GET -f head=<owner>:<branch> -f base=<target> -f state=open`), not `gh
+  pr view`, which fails with a message when there is no pull request, and telling
+  that from any other failure would be matching prose, and not `gh pr list`. That
+  takes `--head` as the bare branch name, which matches it in every fork, so the
+  fork's pull requests share its one page of 30 (its default) with the repo's own,
+  and filtering by the head repository's owner afterwards read a page the forks
+  filled as "none": publish went on to open a second pull request, which GitHub
+  refuses after the push, and the rerun met the same lookup and the same failure,
+  so the branch could not be published at all. The endpoint takes the qualified
+  head and GitHub applies it, and the state and the base, so the answer is the
+  pull requests of that head into that base and nothing else, and two are an
+  error. (`--method GET` is not optional: gh sends a POST, which opens a pull
+  request, when it is given parameters and no method.) A lookup that fails refuses
+  the publish. The update replaces the body from the file and nothing else: the title,
+  which the author may have edited, is left alone. A pull request the author wrote
+  by hand has its body replaced by the one publish generated; there is no merging
+  of the two.
+- Only an open pull request from the branch into the target is the one publish
+  updates. A closed one, a merged one and an open one into another base are not
+  found, and publish opens one into the target beside them. The alternatives were
+  to refuse or to ask. A closed pull request is a decision about that pull
+  request, not about the branch's next delivery, and publish is what the operator
+  asked for and its question says it would open a pull request; refusing would
+  make every publish depend on the tracker's whole history of the branch, where
+  the question here is whether there is a pull request to update. The fake `gh`
+  answers the pull requests endpoint as GitHub does - the state, the qualified
+  head and the base narrow the list, and one page of it is returned, 30 rows unless
+  `per_page` says otherwise, and it refuses a request that is not a GET - so the
+  tests show that it is GitHub that leaves them out, and that a repo's pull request
+  behind a page of forks' is still found, not only that the arguments were passed.
+- The tracker is built, and the lookup made, before the first store write and
+  before the push. It used to be built after the push, so a missing `gh` stranded
+  a pushed branch with no pull request. `Deps.Tracker` lets a test hand its own
+  adapter without touching the process environment, so those tests stay parallel;
+  the ones that run the real github adapter against the fake `gh` put it on `PATH`
+  and are serial. They wrap the local adapter for everything but the pull request
+  (a fixture ticket is `JIG-1`, not the issue number the github adapter projects
+  onto) and let the github adapter make the pull request calls.
+- The question publish asks names the pull request it would update, when there is
+  one (`confirm` takes it), rather than say "open a PR" over an edit.
+- The pull request and the ledger entry are titled by the goal of the first slice
+  that did not come from a gate round (`consolidatedTitle`), else the recorded
+  title, else the ticket id. A gate round's fix slice records its round
+  (`FromGate`) and its goal names a batch of findings, not the work, so it never
+  heads a ticket: an adopted ticket's slices are all fixes, and it keeps the name
+  it was minted with. The slices say what they are, so nothing asks whether the
+  ticket was adopted. An adopted ticket with no recorded title is titled with
+  its id, not with a fix's multi-line goal.
+- Publish does not re-point the build lease at what it pushed (see the sync rule
+  above). A branch pushed as it is needs nothing: jig's commits are on origin under
+  their own shas, the build lease is behind origin's copy, the gate and publish
+  work from origin's meanwhile, and the next build acquire fast-forwards the lease.
+  A branch squashed by the first publish leaves the build lease diverged from the
+  squash, and the documented way on is a merge in the build lease.
+- A publish that fails after its push (a pull request that could not be opened
+  or updated) is not resumable by running it again: the branch on origin is the
+  squash, the build lease is diverged from it, and the rerun stops at
+  `BRANCH_DIVERGED` with the merge to do, and then at `PUBLISH_UNREVIEWED_HEAD`,
+  since the merge moved the head the last round reviewed, until a round has
+  reviewed the merged branch. Before this change the rerun squashed a second time
+  and failed at git's refusal of the push, later. It is a known limit, not a new
+  one, and an adopted branch, which is on origin from the start, is spared the
+  merge. The pull request calls are pinned to fail loudly
+  (`TestPublishFailsLoudlyWhenThePRCannotBeWritten`): a publish whose pull request
+  was not written is not reported or journaled as done.
+- The memorize commit lands on an adopted branch as a commit of its own, on top of
+  the author's, and is pushed with it. It adds `.claude/retrieval/<ticket>.md` to a
+  repo the author may not expect jig files in, the same file `jig/<ticket>` always
+  carried inside its squash. Leaving it out of an adopted branch would make publish
+  ship a different tree from the one it ships for every other ticket; the docs say
+  so.
+- The memorize commit holds the notes and nothing else. It used to stage the whole
+  working tree, and the publish lease has run every oracle by then when the target
+  moved, so a file an oracle left behind, a rewrite of a tracked file or a staged
+  change went into a commit that, on an adopted branch, lands on the author's
+  branch. The lease is now put back at its head before the notes are written (the
+  lease is disposable, and is restored the same way before every acquire); staging
+  only the notes' path would have failed the publish of a repo that ignores
+  `.claude/`, where staging everything skipped the notes without a word, and that
+  is left as it was.
 
 ## Review eval
 

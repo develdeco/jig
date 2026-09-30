@@ -69,7 +69,7 @@ A pooled worktree checked out for one phase's work and returned warm when that p
 _Avoid_: checkout, sandbox
 
 **Adopted branch**:
-A branch built outside jig that a ticket took as its own with a first `jig gate <ticket> --branch <name>`. It is recorded in the ticket's `ticket.yaml`, and the ticket's start sha starts as its tip and follows it until jig builds on it. Every later gate round reviews it and every fix slice is built on it, on top of the author's commits; jig's own commits stay in the build lease until someone pushes them, and publishing an adopted branch is not built yet. A ticket has at most one, for good: it needs no brief and no slices to be gated.
+A branch built outside jig that a ticket took as its own with a first `jig gate <ticket> --branch <name>`. It is recorded in the ticket's `ticket.yaml`, and the ticket's start sha starts as its tip and follows it until jig builds on it. Every later gate round reviews it and every fix slice is built on it, on top of the author's commits; jig's own commits stay in the build lease until `jig publish` pushes them, which ships the branch as it is: the author's commits keep their shas, jig's sit on top, and origin's branch is fast-forwarded (only history not yet on origin is ever squashed). A ticket has at most one, for good: it needs no brief and no slices to be gated.
 _Avoid_: imported branch, external branch, hand-written branch
 
 **Gate**:
