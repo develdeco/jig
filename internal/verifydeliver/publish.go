@@ -28,10 +28,29 @@ type PublishOpts struct {
 
 // PublishReport is Publish's result.
 type PublishReport struct {
-	Tier     string            // none|oracles-only
-	Squashed map[string]string // repo -> squash commit sha
-	PRBody   map[string]string // repo -> store-relative pr body path
-	PRURL    map[string]string // repo -> opened PR url; empty when the tracker adapter has no PRCreator
+	Tier string // none|oracles-only
+	// Squashed is repo -> the squash commit's sha, for a repo whose branch was
+	// squashed: one that was not on origin. A branch already on origin is
+	// pushed as it is and has no entry (Squash says which).
+	Squashed map[string]string
+	// Head is repo -> the head the push left on the branch.
+	Head   map[string]string
+	PRBody map[string]string // repo -> store-relative pr body path
+	PRURL  map[string]string // repo -> opened PR url; empty when the tracker adapter has no PRCreator
+}
+
+// NotSquashed is what the publish report says of a repo whose branch was
+// already on origin: published history is never rewritten, so the branch is
+// pushed as it is, with what publish adds on top.
+const NotSquashed = "not squashed (branch already on origin)"
+
+// Squash says what publish did with repo's history: "squashed", or
+// NotSquashed.
+func (r PublishReport) Squash(repo string) string {
+	if r.Squashed[repo] != "" {
+		return "squashed"
+	}
+	return NotSquashed
 }
 
 // confirm asks the interactive "Push ... ? [y/N]" question and reports
@@ -53,7 +72,8 @@ var confirm = func(branch, ticket string) bool {
 var guardedPush = gitx.GuardedPush
 
 // Publish reconciles, re-validates, documents, squashes, and routes one
-// ticket's delivery. v0.1 handles a single repo.
+// ticket's delivery. Only history not yet on origin is squashed: a branch
+// already there is pushed as it is. v0.1 handles a single repo.
 func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	ticket := o.Ticket
 	// journaled backs the deferred best-effort push below: once Publish's
@@ -131,6 +151,14 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		}
 	}
 
+	// The publish lease is re-pointed at the copy publish ships right after
+	// the acquire below, so its own copy of the branch is disposable: one left
+	// by an earlier attempt must not refuse the acquire (BRANCH_DIVERGED) over
+	// commits nobody keeps, which it does once the branch has reached origin
+	// another way.
+	if err := restoreLeaseBeforeAcquire(d.Home, repoName, ticket, pool.Publish, branch); err != nil {
+		return PublishReport{}, err
+	}
 	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Publish)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
@@ -226,12 +254,28 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 
 	// Step 5: PR (squash + confirm + push).
-	sha, err := squash(lease.Dir, target, ticket, title, identityEnv)
-	if err != nil {
-		return PublishReport{}, err
-	}
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: "squash", Commit: sha}); err != nil {
+	//
+	// Only unpushed history is squashed. A branch that is already on origin
+	// (the policy reconcile just chose from its own ls-remote, the one answer
+	// to that question) has published history, which is never rewritten: it is
+	// pushed as it is, the commits already there with their shas and what
+	// publish added (the merge of the target, the memorize commit) on top. A
+	// branch that was never pushed squashes as it always has.
+	var sha string
+	if policy == policyLocalRebase {
+		sha, err = squash(lease.Dir, target, ticket, title, identityEnv)
+		if err != nil {
+			return PublishReport{}, err
+		}
+		if err := journal.Append(d.Store, ticket, journal.Line{Event: "squash", Commit: sha}); err != nil {
+			return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal squash: %w", err)
+		}
+	} else if err := journal.Append(d.Store, ticket, journal.Line{Event: "squash", Outcome: "none:branch-on-origin"}); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal squash: %w", err)
+	}
+	head, err := gitx.RevParse(lease.Dir, "HEAD")
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve the head to push: %w", err)
 	}
 
 	consolidated := journal.RenderConsolidated(lines)
@@ -290,9 +334,14 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
 
+	squashed := map[string]string{}
+	if sha != "" {
+		squashed[repoName] = sha
+	}
 	return PublishReport{
 		Tier:     tier,
-		Squashed: map[string]string{repoName: sha},
+		Squashed: squashed,
+		Head:     map[string]string{repoName: head},
 		PRBody:   map[string]string{repoName: prPath},
 		PRURL:    map[string]string{repoName: prURL},
 	}, nil
@@ -413,12 +462,15 @@ func checkNonEmptyRange(dir, target string) error {
 }
 
 // squash refuses to publish a range that already reached a remote branch,
-// then collapses start..HEAD into one commit on the ticket branch. The
-// squash base is merge-base(origin/target, HEAD) computed here at squash
-// time, not the ticket's recorded start sha: while the target is unmoved
-// the two are equal, but after a reconcile rebase the recorded start sha
-// is stale (it would wrongly pull the target's own new history into the
-// range), while the merge-base tracks the rebase's new fork point.
+// then collapses start..HEAD into one commit on the ticket branch. Publish
+// calls it only for a branch that is not on origin under its own name (a
+// branch that is there is pushed as it is); the refusal is for commits that
+// reached a remote under another. The squash base is
+// merge-base(origin/target, HEAD) computed here at squash time, not the
+// ticket's recorded start sha: while the target is unmoved the two are
+// equal, but after a reconcile rebase the recorded start sha is stale (it
+// would wrongly pull the target's own new history into the range), while
+// the merge-base tracks the rebase's new fork point.
 func squash(leaseDir, target, ticket, title string, identityEnv []string) (string, error) {
 	start, err := gitx.MergeBase(leaseDir, "origin/"+target, "HEAD")
 	if err != nil {

@@ -470,6 +470,13 @@ func TestPublishTierNone(t *testing.T) {
 	}
 }
 
+// TestSquashRefusesPushedRange: a never-pushed branch squashes as it always
+// has, and the squash still refuses a range whose commits already reached a
+// remote under another name - commits someone may be building on, which the
+// squash would leave behind in a second copy. The branch is not on origin
+// under its own name, so it is the squash's rule that stops it, not the
+// branch-on-origin rule that lets publish push a branch as it is
+// (TestPublishPushesABranchAlreadyOnOriginAsItIs).
 func TestSquashRefusesPushedRange(t *testing.T) {
 	t.Parallel()
 
@@ -477,10 +484,10 @@ func TestSquashRefusesPushedRange(t *testing.T) {
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 
-	// Pre-push the build branch once: a commit mid-range becomes
-	// reachable from a remote-tracking ref.
+	// Pre-push the build branch once, under another name: a commit mid-range
+	// becomes reachable from a remote-tracking ref.
 	buildDir := buildLeaseDir(t, fx)
-	if _, err := gitx.Run(buildDir, "push", "origin", "jig/"+fx.Ticket); err != nil {
+	if _, err := gitx.Run(buildDir, "push", "origin", "jig/"+fx.Ticket+":scratch/"+fx.Ticket); err != nil {
 		t.Fatalf("pre-push build branch: %v", err)
 	}
 
@@ -490,18 +497,9 @@ func TestSquashRefusesPushedRange(t *testing.T) {
 		t.Fatalf("err = %v, want *axi.Error PUSHED_RANGE", err)
 	}
 
-	// Nothing was force-pushed: the remote branch still matches exactly
-	// what was pre-pushed (no diverging squash landed on it).
-	buildHead, err := gitx.Run(buildDir, "rev-parse", "HEAD")
-	if err != nil {
-		t.Fatalf("resolve build HEAD: %v", err)
-	}
-	remoteHead, err := gitx.Run(fx.RepoRemote, "rev-parse", "refs/heads/jig/"+fx.Ticket)
-	if err != nil {
-		t.Fatalf("resolve remote jig branch: %v", err)
-	}
-	if remoteHead != buildHead {
-		t.Fatalf("remote jig/%s = %s, want unchanged pre-push head %s", fx.Ticket, remoteHead, buildHead)
+	// Nothing was pushed under the ticket's own name.
+	if got := originRef(t, fx.RepoRemote, "refs/heads/jig/"+fx.Ticket); got != "" {
+		t.Fatalf("origin has jig/%s = %s after the refused publish, want no such branch", fx.Ticket, got)
 	}
 
 	// PUSHED_RANGE fires inside squash, well after recordAndCheckDivergence
@@ -925,14 +923,15 @@ func TestPublishByHand(t *testing.T) {
 }
 
 // TestBuildAcquireAfterPublishIsRefusedAsDiverged documents where a published
-// ticket stands until publishing a branch that already reached origin is
-// built. Publish rebases and squashes jig/<ticket> in its own lease and pushes
-// the squash, while the build lease keeps the unsquashed originals, so the
-// ticket's branch is on origin and the build lease's copy has diverged from
-// it: the next build acquire (a `jig run` after a post-publish gate round or
-// requeue) stops with BRANCH_DIVERGED rather than merge a squash with its own
-// originals. The sync rule is the branch's, the ordinary jig/<ticket> included
-// once it is on origin.
+// ticket stands. Publish rebases and squashes jig/<ticket> in its own lease
+// and pushes the squash, while the build lease keeps the unsquashed originals,
+// so the ticket's branch is on origin and the build lease's copy has diverged
+// from it: the next build acquire (a `jig run` after a post-publish gate round
+// or requeue) stops with BRANCH_DIVERGED rather than merge a squash with its
+// own originals. The sync rule is the branch's, the ordinary jig/<ticket>
+// included once it is on origin. Merging origin's branch into the build lease,
+// which the refusal says to do, is the way on: a publish from there is a
+// fast-forward (TestPublishRepublishesAPublishedTicket).
 func TestBuildAcquireAfterPublishIsRefusedAsDiverged(t *testing.T) {
 	t.Parallel()
 

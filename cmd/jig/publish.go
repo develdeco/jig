@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"sort"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/verifydeliver"
@@ -44,10 +45,7 @@ func cmdPublish(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	var squashRows, prRows, prURLRows [][]string
-	for repo, sha := range report.Squashed {
-		squashRows = append(squashRows, []string{repo, sha})
-	}
+	var prRows, prURLRows [][]string
 	for repo, path := range report.PRBody {
 		prRows = append(prRows, []string{repo, path})
 	}
@@ -58,10 +56,26 @@ func cmdPublish(args []string, stdout io.Writer) int {
 	}
 	axi.Render(stdout,
 		axi.KV("publish", [][2]string{{"ticket", ticket}, {"tier", report.Tier}}),
-		axi.Table("squashed", []string{"repo", "sha"}, squashRows),
+		pushedTable(report),
 		axi.Table("pr_body", []string{"repo", "path"}, prRows),
 		axi.Table("pr_url", []string{"repo", "url"}, prURLRows),
 		axi.Help("Run `jig status "+ticket+"` to confirm the ticket is fully green"),
 	)
 	return 0
+}
+
+// pushedTable is the publish report's account of what each repo's push left on
+// origin: the head, and whether publish squashed the branch or pushed it as it
+// was because it was already on origin (verifydeliver.NotSquashed).
+func pushedTable(report verifydeliver.PublishReport) string {
+	repos := make([]string, 0, len(report.Head))
+	for repo := range report.Head {
+		repos = append(repos, repo)
+	}
+	sort.Strings(repos)
+	rows := make([][]string, 0, len(repos))
+	for _, repo := range repos {
+		rows = append(rows, []string{repo, report.Head[repo], report.Squash(repo)})
+	}
+	return axi.Table("pushed", []string{"repo", "head", "squash"}, rows)
 }

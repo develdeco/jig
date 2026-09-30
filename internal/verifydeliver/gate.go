@@ -257,29 +257,12 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		return GateReport{}, err
 	}
 	branch := gb.Name
-	// Restore an existing gate lease pristine at its current HEAD before
-	// Acquire ever touches it. A reviewer that outlived a killed jig, or an
-	// oracle rewrite left over from an earlier attempt, can leave tracked
-	// dirt in the lease; if the ticket branch later advances past whatever
-	// file that dirt touched, Acquire's own `git checkout` (and, in normal
-	// mode, fetchTicketBranchFromBuildLease's checkout right after) refuses
-	// with "local changes ... would be overwritten" before the restore below
-	// ever runs, wedging every later attempt at the same point. This restore
-	// is best-effort and runs only in a pool.Usable lease: a reset where git
-	// resolves an enclosing repository would discard that repository's work,
-	// and one on an unborn HEAD would fail. Anything else is left to Acquire,
-	// which refuses a bad ticket id, clones where there is no lease yet, and
-	// moves aside anything git shows is not a repository of its own.
-	//
-	// The lease's own copy of the branch goes too (dropLeaseBranch): the
-	// round re-points the lease at its source below whatever the copy holds.
-	if leaseDir, derr := pool.Dir(d.Home, repoName, ticket, pool.Gate); derr == nil && pool.Usable(leaseDir) {
-		if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore existing lease before acquire: %w", err)
-		}
-		if err := dropLeaseBranch(leaseDir, branch); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: drop the lease's own %s before acquire: %w", branch, err)
-		}
+	// An existing gate lease is restored pristine, and forgets its own copy of
+	// the branch, before Acquire ever touches it (restoreLeaseBeforeAcquire):
+	// the round re-points the lease at its source below whatever the copy
+	// holds.
+	if err := restoreLeaseBeforeAcquire(d.Home, repoName, ticket, pool.Gate, branch); err != nil {
+		return GateReport{}, err
 	}
 	// A branch the ticket adopted is on origin by definition, so one that is
 	// not there is refused (BRANCH_NOT_FOUND) instead of being cut from the
@@ -917,13 +900,45 @@ func resetLeasePristine(leaseDir, head string) error {
 	return nil
 }
 
-// dropLeaseBranch forgets a gate lease's own local copy of branch, leaving
-// its HEAD detached. The gate lease never commits and Gate re-points it at
-// the round's source right after acquiring it, so its copy is disposable;
-// left in place, one that fell behind or diverged from origin's since the
-// last round would fail Acquire's sync with the branch (BRANCH_DIVERGED)
-// before Gate could replace it, over commits that are not the lease's to
-// keep.
+// restoreLeaseBeforeAcquire readies the ticket's gate or publish lease, if
+// there is one, for the Acquire that follows: it restores the lease pristine
+// at its current HEAD and forgets its own copy of branch (dropLeaseBranch).
+// Both roles re-point the lease at the copy they work on right after
+// acquiring it, so neither keeps anything of its own on the branch.
+//
+// The restore comes first. A reviewer that outlived a killed jig, or an oracle
+// rewrite left over from an earlier attempt, can leave tracked dirt in the
+// lease; if the ticket branch later advances past whatever file that dirt
+// touched, Acquire's own `git checkout` (and, in normal mode,
+// fetchTicketBranchFromBuildLease's checkout right after) refuses with "local
+// changes ... would be overwritten" before any restore after the acquire ever
+// runs, wedging every later attempt at the same point. It is best-effort and
+// runs only in a pool.Usable lease: a reset where git resolves an enclosing
+// repository would discard that repository's work, and one on an unborn HEAD
+// would fail. Anything else is left to Acquire, which refuses a bad ticket id,
+// clones where there is no lease yet, and moves aside anything git shows is
+// not a repository of its own.
+func restoreLeaseBeforeAcquire(jigHome, repoName, ticket string, role pool.Role, branch string) error {
+	leaseDir, err := pool.Dir(jigHome, repoName, ticket, role)
+	if err != nil || !pool.Usable(leaseDir) {
+		return nil
+	}
+	if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
+		return fmt.Errorf("verifydeliver: %s: restore existing lease before acquire: %w", role, err)
+	}
+	if err := dropLeaseBranch(leaseDir, branch); err != nil {
+		return fmt.Errorf("verifydeliver: %s: drop the lease's own %s before acquire: %w", role, branch, err)
+	}
+	return nil
+}
+
+// dropLeaseBranch forgets a gate or publish lease's own local copy of branch,
+// leaving its HEAD detached. Neither lease keeps commits of its own on the
+// branch - Gate and Publish each re-point the lease at the copy they work on
+// right after acquiring it - so its copy is disposable; left in place, one
+// that fell behind or diverged from origin's since the last round would fail
+// Acquire's sync with the branch (BRANCH_DIVERGED) before the command could
+// replace it, over commits that are not the lease's to keep.
 func dropLeaseBranch(leaseDir, branch string) error {
 	if _, err := gitx.Run(leaseDir, "checkout", "--detach", "HEAD"); err != nil {
 		return fmt.Errorf("detach HEAD: %w", err)

@@ -161,14 +161,10 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	var squashRows [][]string
-	for repo, sha := range preport.Squashed {
-		squashRows = append(squashRows, []string{repo, sha})
-	}
 	solveKV := append([][2]string{{"ticket", ticket}, {"tier", preport.Tier}}, demoRows(lastDemo)...)
 	axi.Render(stdout,
 		axi.KV("solve", solveKV),
-		axi.Table("squashed", []string{"repo", "sha"}, squashRows),
+		pushedTable(preport),
 		axi.Help("Run `jig status "+ticket+"` to confirm the ticket is fully green"),
 	)
 	return 0
