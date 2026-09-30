@@ -28,7 +28,7 @@ const (
 	Build Role = iota
 	// Gate is the lease the gate verifies in: pool/<repo>/<ticket>-gate.
 	Gate
-	// Publish is the lease publish squashes in: pool/<repo>/<ticket>-publish.
+	// Publish is the lease publish ships from: pool/<repo>/<ticket>-publish.
 	Publish
 )
 

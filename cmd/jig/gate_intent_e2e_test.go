@@ -205,7 +205,7 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("status: exit = %d, want 0\n%s", code, out)
 	}
-	if !strings.Contains(out, "Run `jig publish "+fx.Ticket+"` to open the PR") {
+	if !strings.Contains(out, "Run `jig publish "+fx.Ticket+"` to open or update the PR") {
 		t.Fatalf("status hint after a clean round 2 does not point at publish:\n%s", out)
 	}
 }

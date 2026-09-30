@@ -14,7 +14,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -430,20 +429,8 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		switch {
 		case rounds == 0:
 			return fmt.Sprintf("Run `jig gate %s` to open a gate round", ticket), nil
-		case verdict == "clean" && rec.Adopted():
-			// jig publish refuses an adopted branch (Publish's own refusal):
-			// naming it here would name a command that cannot run. What to do
-			// instead is the refusal's own sentence, which also says where the
-			// commits jig built wait when it built any: the pull request
-			// opened from origin's copy would lack the fix the round reviewed.
-			lines, err := journal.Read(st, ticket)
-			if err != nil {
-				return "", err
-			}
-			steps := verifydeliver.PublishByHand(rec.Branch, len(journal.BuiltCommits(lines)) > 0, "")
-			return fmt.Sprintf("Round %d is clean; jig publish does not ship an adopted branch yet: %s", rounds, steps), nil
 		case verdict == "clean":
-			return fmt.Sprintf("Run `jig publish %s` to open the PR", ticket), nil
+			return fmt.Sprintf("Run `jig publish %s` to open or update the PR", ticket), nil
 		default:
 			// Every slice is green and the last round was not clean, so
 			// its fix slices are already built: what moves the ticket is

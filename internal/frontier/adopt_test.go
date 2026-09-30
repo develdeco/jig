@@ -365,7 +365,7 @@ func TestRunFollowsAnAdoptedBranchTheAuthorRewroteBeforeJigBuilt(t *testing.T) {
 // TestRunKeepsTheStartSHAOnceJigBuilt: once the journal records commits jig
 // built, the start sha is theirs to descend from, and stays where it was even
 // when the branch moves under it - here jig's own commits pushed to origin, as
-// the publish refusal says to.
+// a publish pushes them.
 func TestRunKeepsTheStartSHAOnceJigBuilt(t *testing.T) {
 	const branch = "add-retry"
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})

@@ -8,8 +8,6 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -33,8 +31,9 @@ func writeRoundReport(t *testing.T, storeDir, ticket string, round int, verdict 
 // slices, or a branch adopted through the gate); one that adopted a branch
 // passes for gate, run, solve and publish - its gate round queues the slices
 // the rest of the loop builds - and status and the hints stop pointing it at
-// intake. Publish still refuses it, by name, instead of the "no slices"
-// message that would send its owner to write a brief.
+// intake. Publish gets past the precondition to its own checks (it has no
+// gate round to publish yet), instead of the "no slices" message that would
+// send its owner to write a brief.
 func TestAdoptedTicketIsWorkedWithoutSlices(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	fx := fixture.Generate(t, fixture.Opts{})
@@ -92,8 +91,8 @@ func TestAdoptedTicketIsWorkedWithoutSlices(t *testing.T) {
 		}
 	}
 	out, code = runMain(t, "", withStore("publish", ticket, "--yes")...)
-	if code == 0 || !strings.Contains(out, "code: PUBLISH_ADOPTED_BRANCH") || strings.Contains(out, "no slices yet") {
-		t.Errorf("jig publish on an adopted ticket: exit %d, want PUBLISH_ADOPTED_BRANCH:\n%s", code, out)
+	if code == 0 || strings.Contains(out, "no slices yet") || !strings.Contains(out, "no gate rounds recorded for "+ticket) {
+		t.Errorf("jig publish on an adopted ticket: exit %d, want publish's own refusal (no gate round yet), not a no-slices one:\n%s", code, out)
 	}
 	out, code = runMain(t, "", withStore("requeue", ticket, "--from-brief-diff")...)
 	if code == 0 || !strings.Contains(out, "adopted branch add-retry") || !strings.Contains(out, "`jig gate JIG-2`") || strings.Contains(out, "intake") {
@@ -103,9 +102,8 @@ func TestAdoptedTicketIsWorkedWithoutSlices(t *testing.T) {
 
 // TestStatusOfAnAdoptedTicket: an adopted ticket names its branch, is not
 // "building" for having no slices, and its hint follows its gate rounds - the
-// gate first, the next round after an unclean one - and never names `jig
-// publish` after a clean one, which refuses an adopted branch. A ticket that
-// adopted nothing keeps the intake hint.
+// gate first, the next round after an unclean one, `jig publish` after a clean
+// one, as for any ticket. A ticket that adopted nothing keeps the intake hint.
 func TestStatusOfAnAdoptedTicket(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	fx := fixture.Generate(t, fixture.Opts{})
@@ -145,52 +143,11 @@ func TestStatusOfAnAdoptedTicket(t *testing.T) {
 		t.Errorf("status after an unclean round does not point at the next round:\n%s", got)
 	}
 
-	// After a clean round jig built nothing on the branch: the pull request is
-	// the human's to open, and there is nothing of jig's to push first.
+	// After a clean round the ticket is published like any other: publish
+	// ships an adopted branch, so the hint names it.
 	writeRoundReport(t, fx.StoreDir, ticket, 2, "clean")
-	got = status(ticket)
-	if strings.Contains(got, "jig publish JIG-2") {
-		t.Errorf("status names `jig publish` for an adopted ticket, which publish refuses:\n%s", got)
-	}
-	if want := "  Round 2 is clean; jig publish does not ship an adopted branch yet: open the pull request for add-retry yourself\n"; !strings.HasSuffix(got, want) {
-		t.Errorf("status after a clean round does not say publishing an adopted branch is not built:\n%s", got)
-	}
-
-	// A builder's claim that did not verify put no commit on the branch: it
-	// leaves the hint as it was.
-	const commit = "1111111111111111111111111111111111111111"
-	if err := journal.Append(st, ticket, journal.Line{Slice: "fix-1", Event: "result", Outcome: "green", Commit: commit, Attempt: 1}); err != nil {
-		t.Fatalf("journal.Append: %v", err)
-	}
-	if got := status(ticket); !strings.HasSuffix(got, "yet: open the pull request for add-retry yourself\n") {
-		t.Errorf("status after a claim that never verified does not keep the plain hint:\n%s", got)
-	}
-
-	// Once jig built commits on the branch they wait in the build lease, so
-	// origin's copy lacks what the clean round reviewed: the hint says to push
-	// them first, in the words the publish refusal uses.
-	if err := journal.Append(st, ticket, journal.Line{Slice: "fix-1", Event: "verified", Commit: commit, Attempt: 1}); err != nil {
-		t.Fatalf("journal.Append: %v", err)
-	}
-	got = status(ticket)
-	steps := verifydeliver.PublishByHand("add-retry", true, "")
-	if want := "  Round 2 is clean; jig publish does not ship an adopted branch yet: " + steps + "\n"; !strings.HasSuffix(got, want) {
-		t.Errorf("status after a clean round, with jig's commits built, does not say to push them first (%q):\n%s", steps, got)
-	}
-	if !strings.Contains(steps, "build lease") {
-		t.Errorf("PublishByHand for built commits = %q, want it to name the build lease they wait in", steps)
-	}
-
-	// The fix for a branch that moved meanwhile is in the sentence itself: a
-	// push over a branch that moved is not a fast-forward. The row must fit
-	// the 160-column terminal the branch demo records in
-	// (demo/adopt-branch.tape), with the demo's branch name.
-	if !strings.Contains(steps, "if it moved") {
-		t.Errorf("PublishByHand for built commits = %q, want it to say to merge the branch in when it moved", steps)
-	}
-	row := "  Round 2 is clean; jig publish does not ship an adopted branch yet: " + verifydeliver.PublishByHand("add-percent", true, "")
-	if len(row) > 160 {
-		t.Errorf("the hint row is %d columns wide, want at most the demo's 160:\n%s", len(row), row)
+	if got := status(ticket); !strings.HasSuffix(got, "help[1]:\n  Run `jig publish JIG-2` to open or update the PR\n") {
+		t.Errorf("status after a clean round does not point at `jig publish`:\n%s", got)
 	}
 
 	// A ticket that adopted nothing has both ways to get work, as `jig ticket
@@ -228,14 +185,12 @@ func pushAuthorBranch(t *testing.T, fx *fixture.Fixture, branch string) string {
 	return tip
 }
 
-// TestSolveOfAnAdoptedTicketStopsAtTheCleanRound: `jig solve` on a ticket that
-// adopted a branch runs the loop - the fix the first round queued is built on
-// the branch, the next round is clean - and stops there with the gate report
-// and its hint, exit 0. Publishing an adopted branch is not built, and the
-// loop's work is done: solve must not fall through to a publish that always
-// refuses, which would end every successful solve in an error and print none of
-// the round.
-func TestSolveOfAnAdoptedTicketStopsAtTheCleanRound(t *testing.T) {
+// TestSolveOfAnAdoptedTicketPublishesIt: `jig solve` on a ticket that adopted a
+// branch runs the whole loop - the fix the first round queued is built on the
+// branch, the next round is clean - and publishes it: the branch on origin is
+// fast-forwarded, the author's commit keeping its sha and jig's fix and the
+// memorize commit on top, and the report says the branch was pushed as it was.
+func TestSolveOfAnAdoptedTicketPublishesIt(t *testing.T) {
 	jigHome := t.TempDir()
 	t.Setenv("JIG_HOME", jigHome)
 	fx := fixture.Generate(t, fixture.Opts{})
@@ -258,25 +213,31 @@ func TestSolveOfAnAdoptedTicketStopsAtTheCleanRound(t *testing.T) {
 
 	out, code = runMain(t, "", withStore("solve", ticket, "--yes", "--backend", "fake", "--scenario", fx.ScenarioDir)...)
 	if code != 0 {
-		t.Fatalf("jig solve on an adopted ticket: exit %d, want 0 - it built the fix and reached a clean round\n%s", code, out)
+		t.Fatalf("jig solve on an adopted ticket: exit %d, want 0 - it built the fix, reached a clean round and published\n%s", code, out)
 	}
-	if strings.Contains(out, "PUBLISH_ADOPTED_BRANCH") {
-		t.Errorf("jig solve fell through to publish, which refuses an adopted branch:\n%s", out)
+	head, err := gitx.Run(fx.RepoRemote, "rev-parse", "refs/heads/"+branch)
+	if err != nil || head == tip {
+		t.Fatalf("origin's %s = %q (err %v), want it advanced past the author's %s by the publish", branch, head, err, tip)
 	}
-	for _, want := range []string{"branch: " + branch, "round: 2", "verdict: clean", "push the build lease to " + branch + " (merge it in if it moved)"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("jig solve's output lacks %q:\n%s", want, out)
-		}
+	want := "pushed[1]{repo,head,squash}:\n  fixture-repo," + head + "," + verifydeliver.NotSquashed + "\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("jig solve's output lacks the pushed table %q:\n%s", want, out)
 	}
 
-	lease, err := pool.Dir(jigHome, "fixture-repo", ticket, pool.Build)
+	// The author's commit is under jig's fix, and the memorize commit is on
+	// top: fast-forwarded, nothing rewritten.
+	if _, err := gitx.Run(fx.RepoRemote, "merge-base", "--is-ancestor", tip, head); err != nil {
+		t.Fatalf("the author's %s is not under origin's %s: %v", tip, head, err)
+	}
+	subjects, err := gitx.Run(fx.RepoRemote, "log", "--format=%s", tip+".."+head)
 	if err != nil {
-		t.Fatalf("pool.Dir: %v", err)
+		t.Fatalf("git log: %v", err)
 	}
-	if subject, err := gitx.Run(lease, "log", "-1", "--format=%s"); err != nil || !strings.HasPrefix(subject, ticket+" fix-1: ") {
-		t.Fatalf("the build lease's tip is %q (err %v), want the fix-1 commit solve built", subject, err)
+	lines := strings.Split(subjects, "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[1], ticket+" fix-1: ") || lines[0] != "docs: memorize "+ticket {
+		t.Errorf("publish added %q on top of the author's commit, want the memorize commit over jig's fix-1", lines)
 	}
-	if got, err := gitx.Run(fx.RepoRemote, "rev-parse", "refs/heads/"+branch); err != nil || got != tip {
-		t.Fatalf("origin's %s = %q (err %v), want the author's %s: solve pushes nothing", branch, got, err, tip)
+	if got, err := gitx.Run(fx.RepoRemote, "for-each-ref", "--format=%(refname)", "refs/heads/jig/"); err != nil || got != "" {
+		t.Errorf("origin has jig/ branches %q (err %v), want none: an adopted ticket ships its own branch", got, err)
 	}
 }

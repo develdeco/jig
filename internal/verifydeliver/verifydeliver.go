@@ -95,15 +95,25 @@ func CheckIdentity(d Deps) error {
 	return gitx.CheckIdentity(dir)
 }
 
-// consolidatedTitle picks the ticket's headline title: the first slice's
-// goal, falling back - when there are no slices or the first has no goal -
-// to recorded, the ticket's own recorded title (jig ticket new and jig
-// graduate write one for every ticket they mint; empty when the record has
-// none), and then to the ticket id itself. The caller passes the title from
-// the record it already read, so choosing a title never touches the store.
+// consolidatedTitle picks the ticket's headline title: the goal of the first
+// slice that did not come from a gate round. A gate round's fix slice records
+// the round in FromGate, and its goal names a batch of findings, not the work,
+// so it never heads a ticket: the slices of an adopted branch are all gate
+// fixes, and it is titled by what follows. Falling back - when there is no
+// such slice or its goal is empty - to recorded, the ticket's own recorded
+// title (jig ticket new and jig graduate write one for every ticket they mint;
+// empty when the record has none), and then to the ticket id itself. The
+// caller passes the title from the record it already read, so choosing a
+// title never touches the store.
 func consolidatedTitle(recorded, ticket string, slices []store.Slice) string {
-	if len(slices) > 0 && slices[0].Goal != "" {
-		return slices[0].Goal
+	for _, s := range slices {
+		if s.FromGate != 0 {
+			continue
+		}
+		if s.Goal != "" {
+			return s.Goal
+		}
+		break
 	}
 	if recorded != "" {
 		return recorded

@@ -142,13 +142,6 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve ticket branch: %w", err)
 	}
-	// A ticket that adopted a branch is refused before anything is written
-	// or acquired, and ahead of the checks below, which it would only fail
-	// for a reason that is not the one to fix first.
-	if rec.Adopted() {
-		return PublishReport{}, adoptedBranchRefusal(d, ticket, repoName, branch)
-	}
-
 	// Precondition: every slice must be green (the same frontier check gate
 	// applies before it will even review), and the latest gate round must
 	// have returned a clean verdict. Without this, publish can squash and
@@ -180,7 +173,21 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err := restoreLeaseBeforeAcquire(d.Home, repoName, ticket, pool.Publish, branch); err != nil {
 		return PublishReport{}, err
 	}
-	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Publish)
+	// A branch the ticket adopted is on origin by definition, so one that is
+	// not there is refused (BRANCH_NOT_FOUND) instead of being cut from the
+	// target: publish would ship a branch that lacks the author's code. The
+	// commits jig built on the branch, whichever it is, are the journal's
+	// verified lines.
+	var acquireOpts []pool.Option
+	if rec.Adopted() {
+		acquireOpts = append(acquireOpts, pool.MustExistOnOrigin())
+	}
+	jlines, err := journal.Read(d.Store, ticket)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
+	}
+	built := journal.BuiltCommits(jlines)
+	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Publish, acquireOpts...)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
 	}
@@ -190,7 +197,12 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	if err := fetchTicketBranchFromBuildLease(d.Home, lease.Dir, repoName, ticket, branch); err != nil {
+	// The lease is pointed at the copy of the branch the gate reviewed, by the
+	// same function the gate uses: an adopted branch jig built nothing on as
+	// origin has it, or else whichever copy holds jig's commits - the build
+	// lease's while origin has no copy of the branch.
+	shipping, err := pointAtTicketBranch(d, lease.Dir, repoName, ticket, branch, rec.Adopted(), built, "publish")
+	if err != nil {
 		return PublishReport{}, err
 	}
 	if err := fetchOrigin(lease.Dir); err != nil {
@@ -217,7 +229,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve build lease: %w", err)
 	}
-	if err := requireFastForward(lease.Dir, branch, buildDir, ticket); err != nil {
+	if err := requireFastForward(lease.Dir, branch, buildDir, ticket, shipping); err != nil {
 		return PublishReport{}, err
 	}
 	// The tracker is built, and asked whether the branch already has an open
@@ -652,36 +664,6 @@ func route(cfg project.Config, st *store.Store, adapter tracker.Adapter, ticket 
 	})
 }
 
-// adoptedBranchRefusal is Publish's refusal of a ticket that adopted a
-// branch. Publishing an adopted branch is not built: publish squashes
-// everything the branch holds beyond the target into one commit and refuses a
-// range already on a remote (PUSHED_RANGE), and the author's commits are on
-// origin. It would fail there, after writing the ticket's changelog, ledger
-// and journal entries for a publish that never happened, and it would fail
-// earlier still, on a machine with no build lease, at the fetch from one.
-// The refusal comes first and names the gap, so nothing is written for it,
-// and says what to do instead (PublishByHand): the commits jig built, when it
-// built any, are not on origin, so the pull request the human opens needs
-// them pushed first.
-func adoptedBranchRefusal(d Deps, ticket, repoName, branch string) error {
-	lines, err := journal.Read(d.Store, ticket)
-	if err != nil {
-		return fmt.Errorf("verifydeliver: publish: read journal: %w", err)
-	}
-	built := len(journal.BuiltCommits(lines)) > 0
-	leaseDir := ""
-	if built {
-		if leaseDir, err = pool.Dir(d.Home, repoName, ticket, pool.Build); err != nil {
-			return fmt.Errorf("verifydeliver: publish: resolve build lease: %w", err)
-		}
-	}
-	return &axi.Error{
-		Msg:  fmt.Sprintf("ticket %s adopted branch %s, and jig publish cannot ship an adopted branch yet", ticket, branch),
-		Code: "PUBLISH_ADOPTED_BRANCH",
-		Help: []string{"Until it can: " + PublishByHand(branch, built, leaseDir)},
-	}
-}
-
 // checkReviewedHead refuses, with PUBLISH_UNREVIEWED_HEAD, a head publish
 // would ship that is not the head the latest clean gate round reviewed: rep is
 // that round's report (a clean verdict is checked before this is reached), and
@@ -727,14 +709,22 @@ func checkReviewedHead(rep reportYAML, repoName, head, ticket string) error {
 // force, so git would refuse such a push in the end; this is the refusal made
 // early, with both sides counted, before publish writes to the store.
 //
-// The copy publish ships comes from the build lease at buildDir (or is
-// origin's own), so that is where the two are integrated: jig merges nothing
-// that is not its own.
-func requireFastForward(dir, branch, buildDir, ticket string) error {
+// The copy publish ships was compared with origin's when the lease was pointed
+// at it (pointAtTicketBranch), and is refused there when neither holds the
+// other; what this catches is a push since, between the acquire's fetch and the
+// one publish makes right after.
+//
+// What to do about it depends on whose copy publish would ship (shipping).
+// The build lease's, at buildDir, is where jig's commits wait, so that is where
+// the two are integrated: jig merges nothing that is not its own. Origin's own
+// copy has nothing to integrate in anywhere - origin moved since the round, by
+// a push between publish's two fetches - and the way on is a round over the
+// branch as it is now.
+func requireFastForward(dir, branch, buildDir, ticket string, shipping branchCopy) error {
 	remoteRef := "refs/remotes/origin/" + branch
-	tip, err := gitx.Run(dir, "for-each-ref", "--format=%(objectname)", remoteRef)
+	tip, err := originsTip(dir, branch)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: publish: look up origin/%s: %w", branch, err)
+		return fmt.Errorf("verifydeliver: publish: %w", err)
 	}
 	if tip == "" {
 		return nil
@@ -754,13 +744,17 @@ func requireFastForward(dir, branch, buildDir, ticket string) error {
 	if err != nil {
 		return fmt.Errorf("verifydeliver: publish: list the commits of %s origin lacks: %w", branch, err)
 	}
+	next := fmt.Sprintf("Origin's %s moved since the round: run `jig gate %s` to review it as it is now, then publish again", branch, ticket)
+	if shipping == buildLeasesCopy {
+		next = fmt.Sprintf("Integrate origin's copy in the build lease (for example `git -C %s fetch origin && git -C %s merge origin/%s`), run `jig gate %s`, then publish again", buildDir, buildDir, branch, ticket)
+	}
 	return &axi.Error{
 		Msg: fmt.Sprintf("pushing %s would not be a fast-forward: origin/%s has %d commit(s) the branch lacks, and the branch has %d commit(s) origin lacks",
 			branch, branch, len(theirs), len(ours)),
 		Code: "PUBLISH_NOT_FAST_FORWARD",
 		Help: []string{
 			"publish pushes only a fast-forward and never forces: it rewrites nothing that is on origin",
-			fmt.Sprintf("Integrate origin's copy in the build lease (for example `git -C %s fetch origin && git -C %s merge origin/%s`), run `jig gate %s`, then publish again", buildDir, buildDir, branch, ticket),
+			next,
 		},
 	}
 }

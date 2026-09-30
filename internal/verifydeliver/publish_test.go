@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -231,92 +230,13 @@ func TestPublishFullChain(t *testing.T) {
 	}
 }
 
-// TestPublishRefusesAnAdoptedBranch: a ticket whose ticket.yaml records a
-// branch adopted it, and publishing an adopted branch is not built: publish
-// squashes everything the branch holds beyond the target and refuses a range
-// already on a remote, which the author's commits are. Publish refuses it up
-// front and names the gap, before it acquires a lease, writes to the store or
-// pushes anything. This ticket is otherwise ready - built, every slice green,
-// the last round clean, the target moved on, a stale branch under the default
-// name on origin - so it is the refusal, not another precondition, that stops
-// it. Nothing changes anywhere a publish would have: origin's main, the
-// recorded branch (still at the tip it had, jig's commits unpushed), the stale
-// default-named one, the ledger, the journal, the lease.
-func TestPublishRefusesAnAdoptedBranch(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	recordBranch(t, d.Store, fx.Ticket, "feature/custom")
-	run(t, fx.RepoRemote, "branch", "feature/custom", "main")
-	adoptedTip := originRef(t, fx.RepoRemote, "refs/heads/feature/custom")
-	gateToClean(t, fx, d)
-	advanceTarget(t, fx)
-	decoy := originRef(t, fx.RepoRemote, "refs/heads/main")
-	if _, err := gitx.Run(fx.RepoRemote, "branch", ticketBranch(fx.Ticket), decoy); err != nil {
-		t.Fatalf("create the stale %s on origin: %v", ticketBranch(fx.Ticket), err)
-	}
-	ledgerBefore, err := os.ReadFile(filepath.Join(d.Store.Root, "ledger.md"))
-	if err != nil {
-		t.Fatalf("read ledger.md: %v", err)
-	}
-	journalBefore, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-
-	_, err = Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "PUBLISH_ADOPTED_BRANCH" {
-		t.Fatalf("Publish of an adopted branch: err = %v, want an *axi.Error PUBLISH_ADOPTED_BRANCH", err)
-	}
-	if !strings.Contains(ae.Msg, "feature/custom") {
-		t.Errorf("the refusal %q does not name the adopted branch", ae.Msg)
-	}
-	buildLease, perr := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Build)
-	if perr != nil {
-		t.Fatal(perr)
-	}
-	if help := strings.Join(ae.Help, "\n"); help != "Until it can: "+PublishByHand("feature/custom", true, buildLease) || !strings.Contains(help, buildLease) {
-		t.Errorf("the refusal's help = %q, want the steps PublishByHand gives for a branch jig built on, naming the build lease (%s) its commits wait in", help, buildLease)
-	}
-
-	if got := originRef(t, fx.RepoRemote, "refs/heads/feature/custom"); got != adoptedTip {
-		t.Fatalf("origin's feature/custom = %s after a refused publish, want %s: publish must not push jig's commits", got, adoptedTip)
-	}
-	if got := originRef(t, fx.RepoRemote, "refs/heads/"+ticketBranch(fx.Ticket)); got != decoy {
-		t.Fatalf("origin %s = %q, want the stale branch untouched at %s", ticketBranch(fx.Ticket), got, decoy)
-	}
-	if got := originRef(t, fx.RepoRemote, "refs/heads/main"); got != decoy {
-		t.Fatalf("origin main = %q, want %s unchanged", got, decoy)
-	}
-	if got, rerr := os.ReadFile(filepath.Join(d.Store.Root, "ledger.md")); rerr != nil || string(got) != string(ledgerBefore) {
-		t.Fatalf("ledger.md changed over a refused publish (err %v)", rerr)
-	}
-	journalAfter, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-	if len(journalAfter) != len(journalBefore) {
-		t.Fatalf("the journal grew from %d to %d lines over a refused publish", len(journalBefore), len(journalAfter))
-	}
-	publishLease, perr := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Publish)
-	if perr != nil {
-		t.Fatal(perr)
-	}
-	if _, serr := os.Stat(publishLease); !os.IsNotExist(serr) {
-		t.Fatalf("the refused publish acquired a lease at %s (stat err %v)", publishLease, serr)
-	}
-}
-
 // TestPublishRefusesARecordedBranchEqualToTheTarget: a recorded branch
 // Store.TicketBranch refuses (here the target itself, where a push would land
-// without the PR) fails publish with the refusal's own code, not with the
-// adopted-branch refusal that any other recorded branch earns
-// (TestPublishRefusesAnAdoptedBranch), and before it pushes anything. Origin's
-// main and the ticket's default branch, which the command must not fall back
-// to, keep their shas. The ticket is gated first, on the branch it had then:
-// the gate helper resolves the branch too, and would refuse it.
+// without the PR) fails publish with the refusal's own code, before it pushes
+// anything. Origin's main and the ticket's default branch, which the command
+// must not fall back to, keep their shas. The ticket is gated first, on the
+// branch it had then: the gate helper resolves the branch too, and would
+// refuse it.
 func TestPublishRefusesARecordedBranchEqualToTheTarget(t *testing.T) {
 	t.Parallel()
 
@@ -647,9 +567,7 @@ func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
 // declined interactive prompt must stop before any push is attempted, and
 // both --yes and an accepted prompt must pass confirmed=true - never a
 // hardcoded literal, and never proceeding past a decline. It also checks that
-// the prompt and the push both name the ticket's own branch. (A ticket that
-// records a branch is refused before either: see
-// TestPublishRefusesAnAdoptedBranch.) Its
+// the prompt and the push both name the ticket's own branch. Its
 // declined_prompt_pushes_store_not_branch and push_error_axi_code_only
 // subtests also each call wantFailureCommit, pinning the deferred
 // best-effort push these reproduce: the store must end up clean, pushed,
@@ -867,59 +785,6 @@ func publishLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 		t.Fatalf("resolve publish lease: %v", err)
 	}
 	return dir
-}
-
-// TestPublishRefusalOfAnAdoptedBranchJigBuiltNothingOn: with no commits of
-// jig's on the branch there is nothing waiting in a build lease, so the
-// refusal says only that the pull request is the human's to open - the same
-// sentence `jig status` prints, from the one helper - and, like every refusal
-// of an adopted branch, it writes nothing.
-func TestPublishRefusalOfAnAdoptedBranchJigBuiltNothingOn(t *testing.T) {
-	t.Parallel()
-
-	const ticket, branch = "JIG-2", "add-retry"
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	newAdoptTicket(t, d, ticket)
-	tip := authorBranch(t, fx, branch)
-	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket, Branch: branch}); err != nil {
-		t.Fatalf("Gate --branch: %v", err)
-	}
-
-	_, err := Publish(d, PublishOpts{Ticket: ticket, Yes: true})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "PUBLISH_ADOPTED_BRANCH" {
-		t.Fatalf("Publish of an adopted branch: err = %v, want an *axi.Error PUBLISH_ADOPTED_BRANCH", err)
-	}
-	if want := []string{"Until it can: " + PublishByHand(branch, false, "")}; !slices.Equal(ae.Help, want) {
-		t.Fatalf("the refusal's help = %q, want %q", ae.Help, want)
-	}
-	if got := originRef(t, fx.RepoRemote, "refs/heads/"+branch); got != tip {
-		t.Fatalf("origin's %s = %s after the refused publish, want %s", branch, got, tip)
-	}
-}
-
-// TestPublishByHand: what to do in place of `jig publish` for an adopted
-// branch. Where jig built nothing the pull request is the only step; where it
-// built commits they are in the build lease, unpushed, and the step before
-// the pull request is pushing them - from the lease when its directory is
-// known, after merging the branch in if it moved, since a push over a branch
-// that moved is not a fast-forward.
-func TestPublishByHand(t *testing.T) {
-	t.Parallel()
-
-	if got, want := PublishByHand("add-retry", false, ""), "open the pull request for add-retry yourself"; got != want {
-		t.Errorf("PublishByHand with nothing built = %q, want %q", got, want)
-	}
-	if got, want := PublishByHand("add-retry", false, "/ignored"), "open the pull request for add-retry yourself"; got != want {
-		t.Errorf("PublishByHand with nothing built, given a lease = %q, want the lease left out: %q", got, want)
-	}
-	if got, want := PublishByHand("add-retry", true, ""), "push the build lease to add-retry (merge it in if it moved), then open the pull request"; got != want {
-		t.Errorf("PublishByHand with commits built = %q, want %q", got, want)
-	}
-	if got, want := PublishByHand("add-retry", true, "/pool/T-1"), "push the build lease at /pool/T-1 to add-retry (merge it in if it moved), then open the pull request"; got != want {
-		t.Errorf("PublishByHand with commits built and a lease = %q, want %q", got, want)
-	}
 }
 
 // TestBuildAcquireAfterPublishIsRefusedAsDiverged documents where a published

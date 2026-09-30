@@ -285,27 +285,15 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	// adopted branch makes this gate review the stale local copy instead of
 	// origin's current branch tip.
 	//
-	// The copy the round reviews is the ticket's own jig/<ticket> from the
-	// build lease, where it lives until a publish pushes it; an adopted
-	// branch jig has built nothing on is the author's, origin's copy, exactly
-	// (the gate lease never commits); and one jig has built on is whichever
-	// copy holds jig's commits (chooseBuiltCopy).
-	switch {
-	case !gb.Adopted:
-		if err := fetchTicketBranchFromBuildLease(d.Home, lease.Dir, repoName, ticket, branch); err != nil {
-			return GateReport{}, err
-		}
-		if err := resetLeasePristine(lease.Dir, "HEAD"); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease before oracles: %w", err)
-		}
-	case len(gb.Built) > 0:
-		if err := chooseBuiltCopy(d, lease.Dir, repoName, ticket, branch, gb.Built); err != nil {
-			return GateReport{}, err
-		}
-	default:
-		if err := resetLeasePristine(lease.Dir, "origin/"+branch); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: restore lease to origin/%s: %w", branch, err)
-		}
+	// The copy the round reviews is an adopted branch jig has built nothing on,
+	// which is the author's, origin's copy exactly (the gate lease never
+	// commits); and any other is whichever copy holds jig's commits
+	// (chooseBuiltCopy): the build lease's while origin has no copy of the
+	// branch, as the ticket's own jig/<ticket> does until a publish pushes it,
+	// and after that whichever copy the build lease's stands to origin's says
+	// holds them.
+	if _, err := pointAtTicketBranch(d, lease.Dir, repoName, ticket, branch, gb.Adopted, gb.Built, "gate"); err != nil {
+		return GateReport{}, err
 	}
 
 	// `--intent`/`--doc`: record an explicit intent.md once every

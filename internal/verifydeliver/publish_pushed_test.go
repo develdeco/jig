@@ -180,3 +180,59 @@ func TestPublishDropsThePublishLeasesStaleCopy(t *testing.T) {
 		t.Fatalf("origin's %s carries the stale lease's leftover.txt: publish shipped the stale copy", branch)
 	}
 }
+
+// TestOrdinaryTicketLoopAfterAnAsIsPublish: the loop of a ticket's own
+// jig/<ticket> goes on after a publish that pushed the branch as it is. The
+// first publish squashed it; the build lease was integrated with the squash, as
+// the refusals say to, and the second publish pushed as it is, adding the merge
+// of the moved target and the memorize commit. The build lease is now behind
+// origin's copy, which holds everything the lease does, so the next round
+// reviews origin's copy - the branch's head, and a clean round over the lease's
+// older one would say nothing of the commits publish added - and the publish
+// after it is a fast-forward of what the round reviewed.
+func TestOrdinaryTicketLoopAfterAnAsIsPublish(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	reviewedClean(t, fx, d)
+	branch := ticketBranch(fx.Ticket)
+	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
+		t.Fatalf("first Publish: %v", err)
+	}
+
+	// Integrated with the squash, a round reviews the build lease's copy, which is
+	// ahead of origin's.
+	buildDir := buildLeaseOf(t, fx, fx.Ticket)
+	run(t, buildDir, "fetch", "origin")
+	run(t, buildDir, "merge", "--no-edit", "origin/"+branch)
+	if got, want := gateReviewedClean(t, fx, d).ReviewedSHA["fixture-repo"], run(t, buildDir, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("the round over the integrated branch reviewed %s, want the build lease's %s", got, want)
+	}
+
+	advanceTarget(t, fx)
+	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
+		t.Fatalf("second Publish: %v", err)
+	}
+	pushed := originRef(t, fx.RepoRemote, "refs/heads/"+branch)
+	if got := run(t, buildDir, "rev-parse", "HEAD"); got == pushed {
+		t.Fatalf("test setup: the second publish left the build lease at origin's %s, want it behind", pushed)
+	}
+	run(t, buildDir, "fetch", "origin")
+	run(t, buildDir, "merge-base", "--is-ancestor", "HEAD", pushed)
+
+	// Behind origin's copy, the round reviews origin's.
+	if got := gateReviewedClean(t, fx, d).ReviewedSHA["fixture-repo"]; got != pushed {
+		t.Fatalf("the round after the second publish reviewed %s, want origin's copy %s: the build lease's is not the branch's head", got, pushed)
+	}
+
+	advanceTargetEditing(t, fx, "alpha/alpha_test.go")
+	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
+		t.Fatalf("third Publish: %v", err)
+	}
+	tip := originRef(t, fx.RepoRemote, "refs/heads/"+branch)
+	if tip == pushed {
+		t.Fatalf("origin's %s did not move over the third publish", branch)
+	}
+	run(t, fx.RepoRemote, "merge-base", "--is-ancestor", pushed, tip)
+}
