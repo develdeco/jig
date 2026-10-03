@@ -35,3 +35,30 @@ func TestPathsDeriveFromTheRootGiven(t *testing.T) {
 		t.Fatalf("IntentScratchDir(%q) = %q", root, s)
 	}
 }
+
+func TestEvidenceDirIsUnderTheRootGiven(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("JIG_HOME", t.TempDir())
+	got, err := EvidenceDir(root, "0123456789abcdef", "T-1", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, "evidence", "0123456789abcdef", "T-1", "abc123"); got != want {
+		t.Fatalf("EvidenceDir = %q, want %q", got, want)
+	}
+}
+
+// TestEvidenceDirRefusesAnythingButASingleDirectoryName checks each of the
+// three caller-supplied parts: a spelling that climbs out of the evidence
+// tree, or names two directories, or a directory Windows would fold onto
+// another, is refused rather than joined.
+func TestEvidenceDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
+	bad := []string{"", ".", "..", ".hidden", "a/b", `a\b`, "C:x", "x.", "x "}
+	for _, name := range bad {
+		for i, parts := range [][3]string{{name, "T-1", "abc"}, {"id", name, "abc"}, {"id", "T-1", name}} {
+			if got, err := EvidenceDir(t.TempDir(), parts[0], parts[1], parts[2]); err == nil {
+				t.Errorf("EvidenceDir with %q in part %d = %q, want a refusal", name, i, got)
+			}
+		}
+	}
+}

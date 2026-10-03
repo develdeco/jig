@@ -4,6 +4,8 @@
 package store
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -531,4 +533,29 @@ func (s *Store) Dirty() (bool, error) {
 		return false, err
 	}
 	return out != "", nil
+}
+
+// ID returns a short identifier for this store clone that is stable on this
+// machine: the first 16 hex digits of the sha256 of the store's root,
+// absolute and with symlinks resolved (Windows spells the resolved path in
+// its on-disk case), so the same clone reached by a relative path, a symlink
+// or a differently cased spelling names one id. A Windows junction is not a
+// symlink and is not resolved: a clone reached through one names its own id,
+// as a clone moved elsewhere does. It keys the machine-local files
+// that belong to a store but must stay out of its git, such as a gate demo's
+// media under the jig home (home.EvidenceDir). It is derived from the
+// path, not stored, because those files are per machine like the clone
+// itself: a clone moved elsewhere is a new id, and its media are not found
+// under the old one.
+func (s *Store) ID() (string, error) {
+	abs, err := filepath.Abs(s.Root)
+	if err != nil {
+		return "", fmt.Errorf("store: resolve %s: %w", s.Root, err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("store: resolve %s: %w", s.Root, err)
+	}
+	sum := sha256.Sum256([]byte(resolved))
+	return hex.EncodeToString(sum[:8]), nil
 }

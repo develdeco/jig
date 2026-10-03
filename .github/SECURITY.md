@@ -57,11 +57,11 @@ these:
 - A `headless` session that starts with its shell or file-read tools
   ungranted by the screen hook - for example, when the pre-dispatch check
   that must come back denied gets any other answer (`SCREEN_UNAVAILABLE`) -
-  or whose file-edit tools write outside its lease and its own
-  `result.json` through jig's generated settings rather than the
-  operator's own Claude Code settings. That guarantee binds only the start
-  of a session: a hook that dies mid-session is not caught, and is out of
-  scope (see ADR 0008).
+  or whose file-edit tools write outside its lease, its own
+  `result.json` and - for a gate demo - its one media directory, through
+  jig's generated settings rather than the operator's own Claude Code
+  settings. That guarantee binds only the start of a session: a hook that
+  dies mid-session is not caught, and is out of scope (see ADR 0008).
 - A guarded-push bypass: a `git push` of the ticket branch that gets past
   `gitx.GuardedPush` (`internal/gitx/gitx.go`) without the `publish`
   command's confirmed step (its interactive confirm, or `--yes`) having
@@ -125,6 +125,23 @@ these:
   session jig starts without flags, and Claude Code keeps that session's
   transcript. The summary is never rendered into a PR body directly; a
   reviewer session's own words, shaped by having read it, still can be.
+- A gate demo's failure text reaching the store. When the demo session or
+  its backend fails (the dispatch errors, or the session writes no demo
+  result), what jig writes into the store for that demo - the `reason` in
+  `gate/round-N/demo.yaml` - is `the demo session failed:` and the failure's
+  code (`failureCode`, the same code a store commit subject carries for a
+  failed gate round), never the failure's text: a backend's error can echo
+  the prompt and every path of the dispatch, a stderr tail, a path of its
+  own. The text is printed in the gate report (`demo_detail`), once, and not
+  kept. A backend writes a result of its own when a session wrote none (a
+  JSON object with an `outcome` field); jig treats that as no result and
+  removes the file from `work/` before the demo's own store push, since its summary
+  can name the paths of denied tool calls. A refusal jig decides itself (a
+  file name, an extension, a size, a moved lease) is jig's own words: it names
+  a listed file by its index and the last element of the name it was given,
+  and names its own directories (the media directory, the jig home, the
+  store) by role in any operating system or git message it quotes. See
+  [ADR 0014](../docs/adr/0014-demo-session-at-the-gate.md).
 
 Out of scope:
 
@@ -153,3 +170,11 @@ Out of scope:
   with the operator's rights, not a sandboxed one. `herdr` sessions run
   with no screening at all yet; that is a known gap, not something to
   report here.
+- A session's own words recorded as it wrote them: a gate demo's
+  `summary`, its captions and its `demo.result.json`, like a reviewer's
+  `result.json` summary. jig does not filter or rewrite model prose, so a
+  path the session was told and chose to repeat (a demo's `media_dir` sits
+  under the jig home, which by default names the operator's user) can
+  reach the store, which is committed and often pushed. That is the
+  session's text, not jig's: what jig writes for a demo - file names, hashes,
+  and a reason that is jig's own words or a failure code - is in scope above.

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -281,16 +280,10 @@ func (b *headlessBackend) Run(d Dispatch) error {
 // is spelled, so a session handed a short path would have every edit to it
 // denied.
 func sessionView(d Dispatch) Dispatch {
-	paths := []*string{&d.Worktree, &d.SliceJSON, &d.ResultJSON}
-	// Longest first, so a path that contains another one is replaced whole.
-	sort.SliceStable(paths, func(i, j int) bool { return len(*paths[i]) > len(*paths[j]) })
-	for _, p := range paths {
-		if *p == "" {
-			continue
-		}
-		if long := longPath(*p); long != *p {
-			d.Prompt = strings.ReplaceAll(d.Prompt, *p, long)
-			*p = long
+	d.Prompt = respellMentions(d.Prompt, d.paths(), longPath)
+	for _, p := range []*string{&d.Worktree, &d.SliceJSON, &d.ResultJSON, &d.ExtraWriteDir} {
+		if *p != "" {
+			*p = longPath(*p)
 		}
 	}
 	return d
@@ -352,13 +345,13 @@ func (b *headlessBackend) args(d Dispatch) (argv []string, cleanup func(), err e
 }
 
 // settings renders the session's `--settings` JSON. Its permission rules
-// grant the edit tools inside the lease worktree and on d.ResultJSON
-// itself, nowhere else. With d.Screen set, a PreToolUse hook runs
-// `<hookBinary> _screen` (exec form, so no shell parses the path) on every
-// tool call, and its allow is this settings object's only grant for the
-// screen.Granted tools - the operator's own user settings, loaded on top,
-// can still grant more. Without d.Screen those tools get plain allow rules
-// instead, unscreened.
+// grant the edit tools inside the lease worktree, on d.ResultJSON itself,
+// and inside d.ExtraWriteDir when one is named, nowhere else. With d.Screen
+// set, a PreToolUse hook runs `<hookBinary> _screen` (exec form, so no shell
+// parses the path) on every tool call, and its allow is this settings
+// object's only grant for the screen.Granted tools - the operator's own
+// user settings, loaded on top, can still grant more. Without d.Screen
+// those tools get plain allow rules instead, unscreened.
 func (b *headlessBackend) settings(d Dispatch) (string, error) {
 	worktree, err := filepath.Abs(d.Worktree)
 	if err != nil {
@@ -374,6 +367,15 @@ func (b *headlessBackend) settings(d Dispatch) (string, error) {
 	}
 	for _, p := range pathForms(result) {
 		allow = append(allow, "Edit("+rulePath(b.goos, p)+")")
+	}
+	if d.ExtraWriteDir != "" {
+		extra, err := filepath.Abs(d.ExtraWriteDir)
+		if err != nil {
+			return "", err
+		}
+		for _, p := range pathForms(extra) {
+			allow = append(allow, "Edit("+rulePath(b.goos, p)+"/**)")
+		}
 	}
 
 	settings := map[string]any{}

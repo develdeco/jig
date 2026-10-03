@@ -2,7 +2,8 @@
 #
 # Records the gate reviewer's rounds: a fix batch with one dismissal, an ask
 # kept with a decision, `jig run` building the fix slices those decisions
-# queue, a second (delta) round, a clean third round, and `jig status`.
+# queue, a second (delta) round, a clean third round with its demo, and
+# `jig status`.
 #
 # Every typed line and every anchored Wait+Line below is checked, line by
 # line (see the comments below), against the real source: cmd/jig/triage.go
@@ -171,10 +172,14 @@ Sleep 2s
 ## Round 3: clean. The scenario's own round-3 review-result.json reports no
 ## findings, so routeRound's fixes/asks/notes are all empty and
 ## interactiveTriage prints, and asks, nothing at all - straight to the
-## report and back to the shell prompt.
+## report and back to the shell prompt. A clean reviewer round also runs its
+## demo, which the scenario scripts for this round (demo-result.json and two
+## small SVG frames): the report's kv block gains "demo: recorded" and the
+## session's summary, and a demo_media table lists the two files (gate.go's
+## demoRows and printGateReport). The demo never changed the verdict above it.
 Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
-Wait@15s
-Sleep 5s
+Wait@30s
+Sleep 8s
 
 ## The ticket's final state: every slice green and nothing outstanding to
 ## decide. `jig status` prints slices, questions/parked/stalled and any

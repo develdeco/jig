@@ -249,3 +249,74 @@ func readHerdrLoggedArgv(t *testing.T, logFile string) [][]string {
 	}
 	return out
 }
+
+// TestHerdrErrorsNameTheCommandAndNotItsOperands: a failed herdr command is
+// named by its subcommand ("herdr agent prompt") and never by its operands,
+// whether it exited non-zero or answered with something that is not JSON. The
+// operands of `agent prompt` are the whole prompt and every path of the
+// dispatch in it (spelled as WSL mounts on Windows), and the operands of
+// `workspace create` are the worktree; an error carries them to the terminal
+// and to whatever records it. herdr's own stderr, which says why, is kept.
+func TestHerdrErrorsNameTheCommandAndNotItsOperands(t *testing.T) {
+	const (
+		worktree = `C:\demo\pool\repo\T-1-gate`
+		input    = `C:\demo\store\T-1\work\gate.round-1.demo.json`
+		extra    = `D:\jighome\evidence\id\T-1\abc`
+		marker   = "OPERAND-WORDS-OF-THE-PROMPT"
+	)
+	resultJSON := filepath.Join(t.TempDir(), "gate.round-1.demo.result.json")
+	prompt := fmt.Sprintf("%s: inputs in %s, media into %s, result at %s, worktree %s", marker, input, extra, resultJSON, worktree)
+
+	cases := []struct {
+		name   string
+		env    string
+		sub    string
+		stderr bool
+	}{
+		{"workspace create exits non-zero", "HERDR_STUB_FAIL_CMD", "workspace create", true},
+		{"agent start exits non-zero", "HERDR_STUB_FAIL_CMD", "agent start", true},
+		{"agent prompt exits non-zero", "HERDR_STUB_FAIL_CMD", "agent prompt", true},
+		{"agent read exits non-zero", "HERDR_STUB_FAIL_CMD", "agent read", true},
+		{"agent prompt exits non-zero without a word", "HERDR_STUB_SILENT_FAIL_CMD", "agent prompt", false},
+		{"workspace create exits non-zero without a word", "HERDR_STUB_SILENT_FAIL_CMD", "workspace create", false},
+		{"workspace create answers with something that is not JSON", "HERDR_STUB_GARBAGE_CMD", "workspace create", false},
+		{"agent prompt answers with something that is not JSON", "HERDR_STUB_GARBAGE_CMD", "agent prompt", false},
+	}
+	for _, goos := range []string{"linux", "windows"} {
+		for _, c := range cases {
+			c := c
+			goos := goos
+			t.Run(goos+"/"+c.name, func(t *testing.T) {
+				stubDir := buildHerdrStub(t)
+				wslDir := buildBinary(t, filepath.Join("testdata", "fixture", "herdrstub"), "wsl")
+				t.Setenv("PATH", stubDir+string(os.PathListSeparator)+wslDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+				t.Setenv(jigWSLDistroEnv, "")
+				t.Setenv(c.env, c.sub)
+
+				err := (&herdrBackend{goos: goos}).Run(Dispatch{
+					Ticket: "T-1", Slice: GateDemoSlice, Attempt: 1, Worktree: worktree,
+					SliceJSON: input, ResultJSON: resultJSON, ExtraWriteDir: extra, Prompt: prompt,
+				})
+				if err == nil {
+					t.Fatal("Run succeeded, want the failing command's error")
+				}
+				got := err.Error()
+				if !strings.Contains(got, "herdr "+c.sub) {
+					t.Errorf("error %q does not name the command %q", got, "herdr "+c.sub)
+				}
+				if c.stderr && !strings.Contains(got, "the command was refused") {
+					t.Errorf("error %q dropped herdr's own stderr", got)
+				}
+				for _, operand := range []string{
+					marker, worktree, input, extra, resultJSON,
+					wslPath(worktree), wslPath(input), wslPath(extra), wslPath(resultJSON),
+					"jig-T-1-gate-demo", "--cwd", "--wait",
+				} {
+					if strings.Contains(got, operand) {
+						t.Errorf("error %q echoes the operand %q", got, operand)
+					}
+				}
+			})
+		}
+	}
+}

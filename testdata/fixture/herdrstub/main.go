@@ -3,19 +3,37 @@
 // invocation's argv to $HERDR_STUB_LOG (one JSON array per line) and prints
 // the canned JSON response herdrBackend.Run expects for each control
 // command in a full Run: workspace create, agent start, agent prompt,
-// agent read, and workspace close.
+// agent read, and workspace close. Two environment variables make a command
+// misbehave, each naming it as "noun verb" ("agent prompt"):
+// HERDR_STUB_FAIL_CMD exits 1 after writing a line to stderr that does not
+// echo the command's operands, HERDR_STUB_SILENT_FAIL_CMD exits 1 with nothing
+// on stderr, and HERDR_STUB_GARBAGE_CMD prints a response that is not JSON.
 package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 func main() {
 	logArgs(os.Getenv("HERDR_STUB_LOG"), os.Args)
 
 	args := os.Args[1:]
+
+	sub := subcommand(args)
+	if sub != "" && sub == os.Getenv("HERDR_STUB_FAIL_CMD") {
+		fmt.Fprintln(os.Stderr, "herdr stub: the command was refused")
+		os.Exit(1)
+	}
+	if sub != "" && sub == os.Getenv("HERDR_STUB_SILENT_FAIL_CMD") {
+		os.Exit(1)
+	}
+	if sub != "" && sub == os.Getenv("HERDR_STUB_GARBAGE_CMD") {
+		fmt.Println("this is not json")
+		return
+	}
 
 	switch {
 	case len(args) >= 2 && args[0] == "workspace" && args[1] == "create":
@@ -31,6 +49,23 @@ func main() {
 	default:
 		fmt.Println("{}")
 	}
+}
+
+// subcommand names the herdr command args make, "noun verb": args are herdr's
+// own, or the ones herdrBackend hands wsl on Windows ("-e bash -lc" and a
+// command line whose words are each single-quoted).
+func subcommand(args []string) string {
+	if len(args) == 4 && args[0] == "-e" && args[1] == "bash" && args[2] == "-lc" {
+		words := strings.Fields(strings.TrimPrefix(args[3], "herdr "))
+		args = nil
+		for _, w := range words {
+			args = append(args, strings.Trim(w, "'"))
+		}
+	}
+	if len(args) < 2 {
+		return ""
+	}
+	return args[0] + " " + args[1]
 }
 
 // printReadResult prints the `agent read` response: a result whose text

@@ -265,26 +265,34 @@ var resultFindingKeys = map[string]bool{
 // this check's error is only ever used to skip it, never surfaced on its
 // own.
 func unknownCaseVariantKey(data []byte) (string, error) {
+	return unknownKey(data, resultTopLevelKeys, "findings", resultFindingKeys)
+}
+
+// unknownKey is unknownCaseVariantKey's check for any result shape: the
+// first key at the top level of data that is not exactly one of topKeys, or
+// inside an element of its listKey array that is not exactly one of
+// itemKeys. "" means every key matched exactly.
+func unknownKey(data []byte, topKeys map[string]bool, listKey string, itemKeys map[string]bool) (string, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(data, &top); err != nil {
 		return "", err
 	}
 	for key := range top {
-		if !resultTopLevelKeys[key] {
+		if !topKeys[key] {
 			return key, nil
 		}
 	}
-	raw, ok := top["findings"]
+	raw, ok := top[listKey]
 	if !ok {
 		return "", nil
 	}
-	var findings []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &findings); err != nil {
+	var items []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
 		return "", err
 	}
-	for _, f := range findings {
-		for key := range f {
-			if !resultFindingKeys[key] {
+	for _, item := range items {
+		for key := range item {
+			if !itemKeys[key] {
 				return key, nil
 			}
 		}
@@ -574,7 +582,7 @@ func validateReviewResult(req ReviewRequest, result ReviewResult, leaseDir strin
 // and says what jig will verify. It never lists kinds of problems, coaches
 // behavior, or patches a past model mistake.
 const reviewPromptTemplate = `You are reviewing round %d of ticket %s. Your inputs are in review.json at %s.
-Review the %s diff %s..%s in this worktree against the change's intent. review.json's intent names it and its source: "brief" or "explicit" is the human's own statement of what was asked for; "inferred" is jig's own summary of the author's own agent session, a hint that may be partial or wrong; "none" means nothing states it. Do not edit files, commit, or push.
+Review the %s diff %s..%s in this worktree against the change's intent. review.json's intent names it and its source: ` + intentSourcesPrompt + ` Do not edit files, commit, or push.
 Report every problem you find in the files you review, as they are now, including problems already listed as open. For each, give file, line (0 if unknown), title, detail, action, risk, risk_rationale and oracle, plus prior when it is a finding listed under open or dismissed. The human dismissed the findings listed under dismissed.
 action: "fix" when the fix is objective and does not change what the intent asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
 risk: "low", "medium" or "high": how much harm follows if this part of the change is wrong.
@@ -667,17 +675,48 @@ func resolveScopeBase(st *store.Store, ticket, leaseDir, repoName, target string
 		}
 	}
 
+	base, err = resolveFullBase(st, ticket, leaseDir, repoName, target, head)
+	if err != nil {
+		return "", "", err
+	}
+	return "full", base, nil
+}
+
+// resolveFullBase is the base of the whole change: merge-base(origin/target,
+// head), falling back to the ticket's recorded start sha only when the
+// merge-base call itself fails (e.g. no such ref). A full-scope review
+// starts here, and so does a demo, which shows the whole change whatever
+// the round's own scope was.
+func resolveFullBase(st *store.Store, ticket, leaseDir, repoName, target, head string) (string, error) {
 	mergeBase, mbErr := gitx.MergeBase(leaseDir, "origin/"+target, head)
 	if mbErr == nil {
-		return "full", mergeBase, nil
+		return mergeBase, nil
 	}
 
 	startPath := st.StartSHAPath(ticket, repoName)
 	data, rerr := os.ReadFile(startPath)
 	if rerr != nil {
-		return "", "", fmt.Errorf("verifydeliver: review: resolve scope base: merge-base origin/%s failed (%v) and no start sha: %w", target, mbErr, rerr)
+		return "", fmt.Errorf("verifydeliver: review: resolve scope base: merge-base origin/%s failed (%v) and no start sha: %w", target, mbErr, rerr)
 	}
-	return "full", strings.TrimSpace(string(data)), nil
+	return strings.TrimSpace(string(data)), nil
+}
+
+// leaseChanged is the read-only guard a session that must never edit is held
+// to: it reports whether leaseDir's HEAD is no longer head, or any tracked
+// file differs from it. Untracked files are left out on purpose - a session
+// is expected to leave scratch behind, and the caller restores the lease
+// pristine afterwards. The reviewer round and the demo dispatch both use it,
+// and each prefixes the errors with its own name.
+func leaseChanged(leaseDir, head string) (bool, error) {
+	headAfter, err := gitx.RevParse(leaseDir, "HEAD")
+	if err != nil {
+		return false, fmt.Errorf("resolve HEAD after dispatch: %w", err)
+	}
+	statusOut, err := gitx.Run(leaseDir, "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return false, fmt.Errorf("git status after dispatch: %w", err)
+	}
+	return headAfter != head || statusOut != "", nil
 }
 
 // scopeDiff is the scope diff's coverage lists: Changed is every file
@@ -983,15 +1022,11 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 
 	// The read-only guard: a reviewer edits nothing. HEAD must still be
 	// head, and every tracked file must be as it was.
-	headAfter, err := gitx.RevParse(in.LeaseDir, "HEAD")
+	changed, err := leaseChanged(in.LeaseDir, head)
 	if err != nil {
-		return Round{}, false, fmt.Errorf("verifydeliver: review: resolve HEAD after dispatch: %w", err)
+		return Round{}, false, fmt.Errorf("verifydeliver: review: %w", err)
 	}
-	statusOut, err := gitx.Run(in.LeaseDir, "status", "--porcelain", "--untracked-files=no")
-	if err != nil {
-		return Round{}, false, fmt.Errorf("verifydeliver: review: git status after dispatch: %w", err)
-	}
-	if headAfter != head || statusOut != "" {
+	if changed {
 		return Round{}, false, &axi.Error{
 			Msg:  "the reviewer changed the gate lease; reviewers never edit",
 			Code: "REVIEW_INVALID",

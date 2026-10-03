@@ -27,8 +27,13 @@ func gateSourceForSolve(scenario string, backend session.Backend) verifydeliver.
 	return verifydeliver.NewReviewerGateSource(backend)
 }
 
-// cmdSolve implements `jig solve <ticket> [--yes] [--answer <qid> <text>]
-// [--backend <name>] [--scenario <dir>]`. It runs the frontier and the gate
+// solveGateSource is how cmdSolve picks its gate source. It is a variable
+// only so a test can put a source that spies on the demo in its place, the
+// way newFlagSetHook lets a test capture flag sets; nothing else assigns it.
+var solveGateSource = gateSourceForSolve
+
+// cmdSolve implements `jig solve <ticket> [--yes] [--no-demo] [--answer <qid>
+// <text>] [--backend <name>] [--scenario <dir>]`. It runs the frontier and the gate
 // until a round is clean, then publishes; a ticket that adopted a branch stops
 // at the clean round and prints its gate report, since publishing an adopted
 // branch is not built.
@@ -53,6 +58,7 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 
 	fs := newFlagSet("solve")
 	yes := fs.Bool("yes", false, "skip the interactive publish confirm and finding triage")
+	noDemo := fs.Bool("no-demo", false, "skip the demo session a clean reviewer round otherwise runs")
 	backendFlag := fs.String("backend", "", "session backend: fake, headless, or herdr")
 	scenario := fs.String("scenario", "", "scenario dir for the fake backend")
 	storeFlag := fs.String("store", "", "explicit store path")
@@ -81,7 +87,7 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 
 	fdeps := frontierDeps(st, cfg, mp, jigHome, backend, ticket)
 	vdeps := verifydeliverDeps(st, cfg, mp, jigHome)
-	src := gateSourceForSolve(*scenario, backend)
+	src := solveGateSource(*scenario, backend)
 	triage := triageFor(*yes, stdin, stdout)
 
 	// Check identity before any session or gate round runs, not only at
@@ -98,10 +104,13 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		return printRunReport(stdout, st, ticket, report)
 	}
 
-	var lastVerdict string
-	var lastReport verifydeliver.GateReport
+	var (
+		lastVerdict string
+		lastDemo    *verifydeliver.DemoReport
+		lastReport  verifydeliver.GateReport
+	)
 	for round := 0; round < maxSolveRounds; round++ {
-		gr, err := verifydeliver.Gate(vdeps, src, verifydeliver.GateOpts{Ticket: ticket, Triage: triage})
+		gr, err := verifydeliver.Gate(vdeps, src, verifydeliver.GateOpts{Ticket: ticket, Triage: triage, NoDemo: *noDemo})
 		if err != nil {
 			return renderErr(stdout, err)
 		}
@@ -114,6 +123,7 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 			return printGateReport(stdout, st, ticket, gr)
 		}
 		lastVerdict = gr.Verdict
+		lastDemo = gr.Demo
 		lastReport = gr
 		if gr.Verdict == "clean" {
 			break
@@ -155,8 +165,9 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	for repo, sha := range preport.Squashed {
 		squashRows = append(squashRows, []string{repo, sha})
 	}
+	solveKV := append([][2]string{{"ticket", ticket}, {"tier", preport.Tier}}, demoRows(lastDemo)...)
 	axi.Render(stdout,
-		axi.KV("solve", [][2]string{{"ticket", ticket}, {"tier", preport.Tier}}),
+		axi.KV("solve", solveKV),
 		axi.Table("squashed", []string{"repo", "sha"}, squashRows),
 		axi.Help("Run `jig status "+ticket+"` to confirm the ticket is fully green"),
 	)
