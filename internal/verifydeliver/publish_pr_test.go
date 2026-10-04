@@ -2,6 +2,7 @@ package verifydeliver
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -34,6 +35,10 @@ func (a githubPRs) FindOpenPR(head, base string) (string, error) {
 
 func (a githubPRs) UpdatePR(url, bodyFile string) error {
 	return a.gh.(tracker.PRUpdater).UpdatePR(url, bodyFile)
+}
+
+func (a githubPRs) CommentPR(url, bodyFile string) error {
+	return a.gh.(tracker.PRCommenter).CommentPR(url, bodyFile)
 }
 
 // useGithubPRs points d at the fake gh, which lists pulls (fixture.GhPulls) as
@@ -369,5 +374,268 @@ func TestPublishFailsLoudlyWhenThePRCannotBeWritten(t *testing.T) {
 			}
 			wantFailureCommit(t, d, "main", fx.Ticket+": publish failed: INTERNAL")
 		})
+	}
+}
+
+// reviewNotesCommentCalls returns every logged "pr comment" call, so a test
+// can check not just how many there were but what they posted.
+func reviewNotesCommentCalls(calls [][]string) [][]string {
+	var out [][]string
+	for _, argv := range calls {
+		if len(argv) >= 2 && argv[0] == "pr" && argv[1] == "comment" {
+			out = append(out, argv)
+		}
+	}
+	return out
+}
+
+// wantReviewNotesBodyFile fails unless argv carries --body-file with a path
+// ending in pr/review-notes.md: the rule the brief states ("A new optional
+// tracker capability posts pr/review-notes.md as a comment"), not merely
+// that some comment was posted once. A wrong file (pr/<repo>.md, say) or a
+// call with no --body-file at all must fail this, not just the call count.
+func wantReviewNotesBodyFile(t *testing.T, argv []string) {
+	t.Helper()
+	for i, arg := range argv {
+		if arg == "--body-file" {
+			if i+1 >= len(argv) {
+				t.Fatalf("pr comment argv %v has --body-file with no value", argv)
+			}
+			file := filepath.ToSlash(argv[i+1])
+			if !strings.HasSuffix(file, "pr/review-notes.md") {
+				t.Fatalf("pr comment --body-file = %q, want it to end in pr/review-notes.md", file)
+			}
+			return
+		}
+	}
+	t.Fatalf("pr comment argv %v has no --body-file", argv)
+}
+
+// TestPublishPostsReviewNotesAsCommentOnCreate: publish posts the review notes
+// as a comment on a newly opened pull request, exactly once, with
+// pr/review-notes.md as its --body-file.
+//
+// This test must stay serial: it puts the fake gh on PATH.
+func TestPublishPostsReviewNotesAsCommentOnCreate(t *testing.T) {
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	gateToClean(t, fx, d)
+	logFile := useGithubPRs(t, &d, "", "")
+
+	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	calls := loggedGh(t, logFile)
+	commentCalls := reviewNotesCommentCalls(calls)
+	if len(commentCalls) != 1 {
+		t.Fatalf("pr comment called %d time(s), want exactly once: %v", len(commentCalls), calls)
+	}
+	wantReviewNotesBodyFile(t, commentCalls[0])
+}
+
+// TestPublishPostsReviewNotesAsCommentOnUpdate: publish posts the review notes
+// as a comment on an existing pull request that it updates, exactly once,
+// with pr/review-notes.md as its --body-file.
+//
+// This test must stay serial: it puts the fake gh on PATH.
+func TestPublishPostsReviewNotesAsCommentOnUpdate(t *testing.T) {
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	gateToClean(t, fx, d)
+	branch := ticketBranch(fx.Ticket)
+	run(t, buildLeaseDir(t, fx), "push", "origin", branch)
+	logFile := useGithubPRs(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
+
+	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	calls := loggedGh(t, logFile)
+	commentCalls := reviewNotesCommentCalls(calls)
+	if len(commentCalls) != 1 {
+		t.Fatalf("pr comment called %d time(s), want exactly once: %v", len(commentCalls), calls)
+	}
+	wantReviewNotesBodyFile(t, commentCalls[0])
+}
+
+// TestPublishContinuesWhenCommentPostingFails: when posting the review notes
+// as a comment fails, publish still succeeds: the pull request stands, the file
+// is kept for manual posting, the operator is warned (prefixed "jig:", like
+// every other stderr warning, and naming the file and the pull request), and
+// the journal and store are committed with the publish complete.
+//
+// This test must stay serial: it puts the fake gh on PATH and swaps the
+// package-level warn hook, which every parallel test's Publish could call.
+func TestPublishContinuesWhenCommentPostingFails(t *testing.T) {
+	origWarn := warn
+	defer func() { warn = origWarn }()
+	var warning string
+	warn = func(format string, args ...any) { warning = fmt.Sprintf(format, args...) }
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	gateToClean(t, fx, d)
+	logFile := useGithubPRs(t, &d, "", "pr comment")
+
+	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+	if err != nil {
+		t.Fatalf("Publish: %v (expected to succeed despite comment failure)", err)
+	}
+
+	reviewNotesPath := filepath.Join(d.Store.Root, fx.Ticket, "pr", "review-notes.md")
+	if !strings.HasPrefix(warning, "jig: ") {
+		t.Errorf("warning = %q, want it prefixed %q like every other stderr warning", warning, "jig: ")
+	}
+	if !strings.Contains(warning, reviewNotesPath) {
+		t.Errorf("warning = %q, want it to name %s", warning, reviewNotesPath)
+	}
+	if !strings.Contains(warning, "gh pr comment") {
+		t.Errorf("warning = %q, want it to carry the failed call's own error", warning)
+	}
+
+	calls := loggedGh(t, logFile)
+	if ghCalls(calls, "pr", "create") != 1 {
+		t.Errorf("pr create not called or called multiple times: %v", calls)
+	}
+
+	if _, err := os.Stat(reviewNotesPath); os.IsNotExist(err) {
+		t.Errorf("review notes file was not created at %s", reviewNotesPath)
+	} else if err != nil {
+		t.Errorf("could not stat review notes: %v", err)
+	}
+
+	lines, jerr := journal.Read(d.Store, fx.Ticket)
+	if jerr != nil {
+		t.Fatalf("journal.Read: %v", jerr)
+	}
+	var publishDone bool
+	for _, l := range lines {
+		if l.Event == "publish-done" {
+			publishDone = true
+			break
+		}
+	}
+	if !publishDone {
+		t.Errorf("journal has no publish-done line despite successful publish")
+	}
+}
+
+// TestPublishWarnsWhenTheBriefHasNoIntentToPublish: a brief that bound as the
+// intent source but has no "## " section to publish as the body's ## Intent
+// publishes a body without that section - the owner's rule, pinned by the
+// render tests - and publish warns the operator that it did, prefixed "jig:"
+// like every other publish warning and naming the brief. The omission is
+// deliberate, so the publish still succeeds; without the warning it is also
+// silent, and the body loses the one section that says why the change exists
+// with nothing in the run, the report or the store recording that it was ever
+// there to lose.
+//
+// This test must stay serial: it swaps the package-level warn hook, which
+// every parallel test's Publish could call.
+func TestPublishWarnsWhenTheBriefHasNoIntentToPublish(t *testing.T) {
+	origWarn := warn
+	defer func() { warn = origWarn }()
+	var warnings []string
+	warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	briefPath := filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md")
+	brief := "# Fixture ticket brief\n\nTwo small fixes, stated in prose with no \"## \" heading anywhere.\n"
+	if err := os.WriteFile(briefPath, []byte(brief), 0o644); err != nil {
+		t.Fatalf("write brief.md: %v", err)
+	}
+
+	body, _ := publishScriptedTicket(t, fx, d, IntentSourceBrief, "", "")
+
+	if strings.Contains(body, "## Intent") {
+		t.Fatalf("pr/fixture-repo.md has an ## Intent section for a brief with none to publish:\n%s", body)
+	}
+	var warning string
+	for _, w := range warnings {
+		if strings.Contains(w, "Intent") {
+			warning = w
+			break
+		}
+	}
+	if warning == "" {
+		t.Fatalf("publish warned %q, want a warning that the body's ## Intent section was left out", warnings)
+	}
+	if !strings.HasPrefix(warning, "jig: ") {
+		t.Errorf("warning = %q, want it prefixed %q like every other publish warning", warning, "jig: ")
+	}
+	if !strings.Contains(warning, briefPath) {
+		t.Errorf("warning = %q, want it to name %s, the brief the section would have come from", warning, briefPath)
+	}
+	if !strings.Contains(warning, `no "## " section with text to publish as one`) {
+		t.Errorf("warning = %q, want it to say why the section was left out: the brief has no \"## \" section with text to publish as one", warning)
+	}
+}
+
+// TestPublishWarnsAboutTheOmittedIntentBeforeTheConfirmationPrompt: the whole
+// point of the warning is that the operator can still answer "n" - editing the
+// brief and gating again is cheaper than editing a published pull request
+// (DECISIONS.md, and ARCHITECTURE.md's publish step: "`warn`, before the
+// confirmation prompt") - so it has to be out by the time confirm asks, not
+// after it, after the push, or among the post-PR work. The confirm hook here
+// declines and records what had been warned by the time it was asked. The warn
+// test above cannot hold this rule: it publishes with Yes, so confirm never
+// runs and the warn block passes wherever in Publish it sits.
+//
+// The brief driven here is the other brief the omission covers: one with `## `
+// headings whose first section is empty, which firstBriefSection reads the
+// same way as a brief with no heading at all (DECISIONS.md, and
+// TestFirstBriefSectionEmptyForAnEmptyFirstSection). That is the brief the
+// warning's wording has to fit - "no \"## \" section with text to publish as
+// one", since "no \"## \" section" would send its operator to add a heading
+// the brief already has.
+//
+// This test must stay serial: it swaps the package-level warn and confirm
+// hooks, which every parallel test's Publish reads.
+func TestPublishWarnsAboutTheOmittedIntentBeforeTheConfirmationPrompt(t *testing.T) {
+	origWarn, origConfirm := warn, confirm
+	defer func() { warn, confirm = origWarn, origConfirm }()
+	var warnings []string
+	warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+	asked := false
+	var warnedWhenAsked []string
+	confirm = func(string, string, string) bool {
+		asked = true
+		warnedWhenAsked = append(warnedWhenAsked, warnings...)
+		return false
+	}
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	briefPath := filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md")
+	brief := "# Fixture ticket brief\n\n## Intent\n\n## Plan\n\nTwo small fixes, under the second heading only.\n"
+	if err := os.WriteFile(briefPath, []byte(brief), 0o644); err != nil {
+		t.Fatalf("write brief.md: %v", err)
+	}
+	gateToClean(t, fx, d)
+
+	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket})
+	wantAxiCode(t, err, "PUBLISH_DECLINED")
+	if !asked {
+		t.Fatal("confirm was never asked, so nothing here can say when the warning came")
+	}
+	if body, _ := readPRFiles(t, d, fx.Ticket, "fixture-repo"); strings.Contains(body, "## Intent") {
+		t.Fatalf("pr/fixture-repo.md has an ## Intent section for a brief whose first section is empty:\n%s", body)
+	}
+	var warning string
+	for _, w := range warnedWhenAsked {
+		if strings.Contains(w, "## Intent") {
+			warning = w
+			break
+		}
+	}
+	if warning == "" {
+		t.Fatalf("publish had warned %q by the confirmation prompt, want the omitted ## Intent section already warned about there, while an operator can still decline", warnedWhenAsked)
+	}
+	if !strings.Contains(warning, `no "## " section with text to publish as one`) {
+		t.Errorf("warning = %q, want a reason that fits a brief whose first \"## \" section is merely empty", warning)
 	}
 }

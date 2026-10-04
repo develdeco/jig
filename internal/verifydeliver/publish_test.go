@@ -502,7 +502,11 @@ func TestRecordAndCheckDivergenceRefusesEmptyDiff(t *testing.T) {
 	}
 	d := Deps{Store: st}
 
-	err = recordAndCheckDivergence(d, "T-1", clone, "main", policy)
+	files, err := diffFiles(clone, "main")
+	if err != nil {
+		t.Fatalf("diffFiles: %v", err)
+	}
+	err = recordAndCheckDivergence(d, "T-1", policy, files)
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "PUBLISH_NO_DIVERGENCE" {
 		t.Fatalf("err = %v, want *axi.Error PUBLISH_NO_DIVERGENCE", err)
@@ -555,7 +559,11 @@ func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
 	}
 	d := Deps{Store: st}
 
-	if err := recordAndCheckDivergence(d, "T-1", clone, "main", policy); err != nil {
+	files, err := diffFiles(clone, "main")
+	if err != nil {
+		t.Fatalf("diffFiles: %v", err)
+	}
+	if err := recordAndCheckDivergence(d, "T-1", policy, files); err != nil {
 		t.Fatalf("recordAndCheckDivergence: %v", err)
 	}
 }

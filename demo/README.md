@@ -83,6 +83,25 @@ and drives the real `jig` binary every time.
   `cmd/jig/gate_demo_e2e_test.go`'s `TestGateDemoThroughMain`, with the same
   outcome-vs-wording split as the tapes above. No interactive prompt appears
   on camera, so every `Wait` is bare.
+- **`publish-body.tape`** - what `jig publish` leaves behind: `jig status`
+  showing every slice green over the same `reviewer` fixture scenario
+  `gate-reviewer.tape` records, `jig publish --yes` on the local tracker (the
+  report's `pushed` and `pr_body` rows, an empty `pr_url` table since the
+  local tracker opens no pull request), and a `cat` of the two files the
+  pull request's own three-section body and its findings detail come from:
+  `pr/fixture-repo.md` (Intent, What changed, Verification, and nothing
+  else) and `pr/review-notes.md` (every finding from every round, ordered by
+  risk, with how it ended, and coverage). The rounds that reach that clean,
+  publishable state - the same fix-kept/fix-dismissed/ask-kept-with-decision
+  rounds `gate-reviewer.tape` records on camera - run hidden here, since this
+  tape's own subject is what publish writes, not the gate's triage prompt;
+  see that tape's own header for their citation.
+  `cmd/jig/gate_reviewer_e2e_test.go`'s `TestGateReviewerRoundsThroughMain`
+  pins the same scripted stdin's findings and outcomes, and
+  `internal/verifydeliver/render.go` (`writePRBody`, `writeReviewNotes`) is
+  what `cat` shows. No interactive prompt appears on camera, so every `Wait`
+  shown is bare; the hidden rounds' `Wait+Line` anchors are
+  `gate-reviewer.tape`'s own, unchanged.
 
 ## Rule: fixture data only
 

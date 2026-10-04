@@ -176,6 +176,13 @@ func (a *githubAdapter) UpdatePR(url, bodyFile string) error {
 	return err
 }
 
+// CommentPR implements tracker.PRCommenter: it posts a comment on the pull
+// request at url with the content of bodyFile via `gh pr comment`.
+func (a *githubAdapter) CommentPR(url, bodyFile string) error {
+	_, err := a.run("pr", "comment", url, "--repo", a.repoSpec(), "--body-file", bodyFile)
+	return err
+}
+
 // Comment posts body as a comment on ticketID.
 func (a *githubAdapter) Comment(ticketID string, body string) error {
 	n, err := issueNumber(ticketID)

@@ -33,9 +33,10 @@ gate           re-verification round: oracles, then a reviewer session's find/ro
   │                    the session's input, demo.json
   ▼
 publish        reconcile, revalidate, docs, squash (unpushed history only), route
-               → open or update the PR
+               → open or update the PR, then post pr/review-notes.md as its first comment
                reads:  gate/round-N/*, journal.ndjson, ticket.yaml
-               writes: changelog/{<ws>.md,consolidated.md}, pr/{evidence.md,<repo>.md},
+               writes: changelog/{<ws>.md,consolidated.md},
+                       pr/{evidence.md,<repo>.md,review-notes.md},
                        ledger.md, platform/contract-index.md
 ```
 
@@ -129,6 +130,7 @@ charts/
   pr/
     evidence.md
     <repo>.md
+    review-notes.md
 ```
 
 `work/` is store-side, not lease-side, on purpose: a build session's `git add
@@ -168,7 +170,7 @@ exists.
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` + `Config` → a model rung, disjoint from rungs already in use |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by |
-| `internal/tracker/` | `New`, `Graduate`, `CheckMinted`, `PRCreator`, `PRUpdater` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it |
+| `internal/tracker/` | `New`, `Graduate`, `CheckMinted`, `PRCreator`, `PRUpdater`, `PRCommenter` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR |
 
 ## Session backends
@@ -481,7 +483,12 @@ under a subject naming it (see the store push above).
    round's `reviewed_sha` for the repo, when a reviewer round recorded heads
    (`PUBLISH_UNREVIEWED_HEAD`, `checkReviewedHead`); a round that recorded heads
    for other repos only is refused too, and a scripted round records none at
-   all and is let through.
+   all and is let through. The same holds for a binding intent, brief or
+   explicit: re-reading brief.md or intent.md now and hashing it must match
+   the sha256 that round's `report.yaml` recorded (`PUBLISH_UNREVIEWED_INTENT`,
+   `checkReviewedIntent`), so an edit after the round cannot be published as
+   the reviewed intent, silently. An inferred or absent intent has nothing
+   pinned to check.
 4. **A fast-forward or nothing.** A branch already on origin must be a
    descendant of origin's copy (`PUBLISH_NOT_FAST_FORWARD`,
    `requireFastForward`); publish never forces. The copy was compared with
@@ -513,15 +520,74 @@ under a subject naming it (see the store push above).
    first slice that did not come from a gate round, else the recorded title, so
    an adopted ticket, whose slices are only the gate's fixes, keeps the name it
    was minted with), the contract index and the evidence.
-9. **Squash, unpushed history only.** A branch that was not on origin is
-   squashed into one commit (refusing a range whose commits reached a remote
-   under another name, `PUSHED_RANGE`); one that was is left as it is, and the
-   journal's `squash` line records `none:branch-on-origin`.
+9. **Squash, unpushed history only, then the pull request's own docs.** A
+   branch that was not on origin is squashed into one commit (refusing a range
+   whose commits reached a remote under another name, `PUSHED_RANGE`); one
+   that was is left as it is, and the journal's `squash` line records
+   `none:branch-on-origin`. `pr/<repo>.md` is then rendered: exactly three
+   `## ` sections, with nothing else. `## Intent` comes from the last clean
+   round's intent provenance and is left out entirely for `inferred` or
+   `none` - an inferred intent summarizes the author's own private agent
+   session and never reaches a pull request (`docs/adr/0012-intent-provenance.md`,
+   `.github/SECURITY.md`) - and for a binding source whose file yields no
+   text of its own, rather than publishing a heading stating no intent: a
+   brief with no first `## ` section with text under it, whether it has no
+   such heading or one with nothing below it (`firstBriefSection`, and never
+   the whole brief in its place), an `intent.md` that is front matter and
+   nothing else. A brief that yielded nothing is the one omission publish
+   warns about (`warn`, before the confirmation prompt, naming the brief):
+   nothing else in a run says the body went out with no statement of why the
+   change exists - not the report, and not `jig validate`, whose section count
+   (`store.BriefSectionHashes`) counts the `## ` lines a code fence quotes
+   too. The intent text itself is rendered intact, with its own headings
+   demoted below the section level (`demoteHeadings`, which shifts them all
+   by the least that puts the shallowest at `### `, leaving a fenced code
+   block's own lines alone), so a whole design doc recorded by `jig gate --doc`
+   cannot add a fourth `## ` section or outrank the three with a `# ` title.
+   A fenced code block the text leaves open is closed before it is embedded
+   (`closeOpenFence`), since an unclosed fence renders the two sections
+   after it as the inside of a code block; a `## ` line inside a fence does
+   not end the brief's first section either (`firstBriefSection`), so a
+   brief that quotes the body's own sections publishes its whole example.
+   `## What changed` is, for an adopted ticket, the author's own pre-adoption
+   commits first (subject and short sha, from the merge base with the target
+   up to the start sha recorded at adoption, `adoptedAuthorCommits`); then
+   one bullet per green slice in slice order (the first line of its goal,
+   `bulletGoal`, and its short commit sha, omitted when a slice recorded
+   none), fix slices grouped after the others as fixes from review. One
+   line per bullet is what keeps a fix slice's goal - the builder prompt
+   `buildFixSlices` wrote out of the gate's findings - from dumping those
+   findings' own detail into the body, which is what the comment below is for.
+   `## Verification` names the oracles green at the last clean round
+   (`SortedOracleNames`, the manifest Publish itself resolved) and the
+   reviewed head, the revalidation tier, and one line counting the review's
+   findings by how they ended (fixed, dismissed, noted, asked), pointing at
+   the pull request's first comment for the detail - never a store path.
+   `pr/review-notes.md` is rendered beside it: the last round's own summary
+   (`findings.yaml`'s `summary`, not its verdict), every finding across every
+   round ordered by risk with how it ended (fixed by slice X and cleared at
+   round N, kept with the human's decision, dismissed by a human, noted, or
+   asked and still open), and coverage - the files the change touched
+   (Publish's own diff of the ship range, read before the memorize commit
+   adds anything on top of it) against the files the reviewer read (every
+   round's own reviewed paths). Both render from the one pass
+   `collectFindingsWithOutcomes` makes over every round's `findings.yaml`,
+   plus what the store already has (slices, the journal, the gate rounds),
+   with no model call (`writePRBody`, `writeReviewNotes`,
+   `internal/verifydeliver/render.go`).
 10. **Confirm, push, pull request.** `--yes` or an accepted question (which
     says whether it would open a pull request or update the open one), then a
     plain `git push` of the branch, then the pull request: the open one is
-    updated (`UpdatePR`, `gh pr edit --body-file`), otherwise one is opened
-    (`CreatePR`) when the tracker can. The `pr` journal line records which
+    updated (`UpdatePR`, `gh pr edit --body-file`) with `pr/<repo>.md` as its
+    body, otherwise one is opened (`CreatePR`) with it when the tracker can.
+    Once that pull request exists, its first comment is `pr/review-notes.md`,
+    posted through the tracker's optional `PRCommenter` capability (the
+    github adapter's `gh pr comment`) when the adapter has one - the local
+    tracker writes both files and posts nothing, and the command tracker gets
+    no comment capability at all. A post that fails is a warning, never a
+    publish failure: the pull request stands, the file stays for a manual
+    post, and nothing about the failure keeps the store's deferred push from
+    carrying what publish already wrote. The `pr` journal line records which
     (`updated` or `opened`) and the pushed head. Route and `publish-done`
     follow, and the store is pushed.
 

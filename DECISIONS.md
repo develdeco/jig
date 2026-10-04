@@ -1902,6 +1902,167 @@ are the judgment calls the build left open.
   `.claude/`, where staging everything skipped the notes without a word, and that
   is left as it was.
 
+## Lean PR body and review notes
+
+The brief's own user-confirmed decisions (reviewer material in a pull
+request comment, body stays lean; an inferred intent is never rendered into
+a pull request) and defaults (the body's three parts; no comment capability
+on the command tracker; `pr/evidence.md` keeps being written, only the
+body's link to it goes) are recorded at the top of `brief.md`'s own
+"Decisions" section, not repeated here. These are the judgment calls the
+build left open beyond those.
+
+- `firstBriefSection` reads `## Intent` by position, not by heading text: the
+  body of `brief.md`'s first `## ` section, whatever it is titled. Every
+  brief this repo has (its own included) opens with `## Intent`, so matching
+  by position tracks the convention without hard-coding the literal word
+  "Intent" into the parser. It matches the first line outside a fenced code
+  block that starts with `## `, wherever it falls - never a fixed "skip line
+  0" - and normalizes CRLF first, the same as `store.BriefSectionHashes`, so
+  a brief whose first section header is line 0 and a CRLF-authored brief both
+  parse the same way a LF brief with a leading title line does.
+- An explicit `intent.md` that fails to parse, or whose `text` field comes
+  back empty, falls back to the file's own bytes with the YAML front matter
+  stripped (`stripIntentFrontMatter`) rather than refusing the render: a
+  hand-edited or malformed `intent.md` still produces an `## Intent` section
+  instead of silently dropping it the way an inferred or absent intent does,
+  but never with the source/agent/session/score keys a hand edit's front
+  matter can carry.
+- Owner decision: a brief with no `## ` section - which nothing upstream
+  refuses - has no first section to publish, so no `## Intent` section is
+  published at all, exactly as for an inferred or absent intent. A brief
+  whose first section is merely empty reads the same way
+  (`firstBriefSection` returns `""` for both), and so does one whose only
+  `## ` lines sit inside a fenced code block, since those are a code
+  sample's own text wherever the body is built. The brief's own bytes are
+  never the fallback: a brief can be short and hand-written, but it can just
+  as well be long and sectioned with `### ` headings or bold run-in ones, and
+  publishing it whole put its Out of scope, Tests and Decisions in the body
+  as the intent they are not, against the brief's own "Nothing else belongs
+  there" - with those `### ` headings rendered as subsections of an Intent
+  they are no part of (`demoteHeadings` shifts nothing when the shallowest
+  heading is already below the section level). A bare `## Intent` heading
+  stays the one outcome no path allows: a binding source with no text to
+  show renders no section whatsoever. The hand-edited `intent.md` above
+  keeps its own fallback, front matter stripped, because there the whole
+  file is the intent text; a brief's later sections are not.
+- Owner decision: that omission is kept, and made visible. `publish` warns on
+  stderr that the body has no `## Intent` section and that the brief has no
+  `## ` section with text to publish as one (`renderIntentSection` reports the
+  omission, `Publish` warns), prefixed `jig:` like every other warning in the
+  tree, and before the confirmation prompt, where editing the brief and gating
+  again is still cheaper than editing a published pull request. A brief binds
+  whatever bytes it has - `resolveIntent` checks neither emptiness nor sections,
+  while an explicit intent with no text is refused `INTENT_EMPTY` - so a
+  brief-sourced ticket is the one way a publish ships a body that never says
+  why the change exists, and nothing else in a run records that it did: the
+  report says nothing about the body's sections, and `jig validate`'s
+  `brief.md has no "## " sections` counts with `store.BriefSectionHashes`,
+  which counts a `## ` line a fenced code block quotes too, so a brief whose
+  only headings sit inside a fence passes it. Warned, not refused: the
+  omission is the rule above, so an operator who reads the warning can
+  publish anyway and edit the pull request after.
+- Owner decision: the `## Intent` text is rendered intact, but every ATX
+  heading inside it is demoted below the section level (`demoteHeadings`),
+  so the body keeps exactly three `## ` sections. `jig gate --doc <path>`
+  records an arbitrary file's whole contents as the explicit intent text,
+  and a design doc or spec carries its own headings: rendered as they stand
+  they added `## ` sections indistinguishable from jig's own three, and a
+  `# ` title outranked all of them. The brief says both that the section is
+  that text and that the body has three `## ` sections, and demotion is the
+  one remedy that keeps both - rewriting or dropping the doc's prose would
+  cost the reviewer the text they came for. One shift for the whole text,
+  the least that puts the shallowest heading at `### `, so the doc's own
+  nesting survives; the shift stops at `######`, the deepest heading
+  markdown has, collapsing the last two levels of a doc that already uses
+  all six rather than emitting a literal `#######`. A heading inside a
+  fenced code block is left alone: it is a code sample's own text, which
+  renders literally and is never a section. The same call is made for a
+  brief-sourced section, where it is a no-op unless the brief put a `# `
+  inside its own first section, since `firstBriefSection` already stops at
+  the next `## `. Setext headings (`Title` over `====`) are left as they
+  are: the body's promise is about `## ` lines, and rewriting an underline
+  risks mistaking a thematic break or a list for one.
+- A `## ` line inside a fenced code block is a code sample's own text
+  everywhere the body is built, not only in `demoteHeadings`. It does not
+  end the brief's first section either (`firstBriefSection` tracks fences
+  with the same scanner, `fenceScanner`), so a brief that quotes the body's
+  own `## ` sections - what this repository's own briefs do - publishes its
+  whole example rather than half of one. And whatever the source hands over
+  is closed before it is embedded (`closeOpenFence`): a text ending inside
+  an open fence swallows `## What changed`, `## Verification` and the
+  findings line into a code block, silently - no error and no warning -
+  which `jig gate --doc` reaches with any file that ends mid-fence and a
+  brief reaches with a fence it never closes. Closed is judged by cmark-gfm's
+  rule, the renderer GitHub uses: a fence line closes a block only when its
+  run is the block's own character, at least as long, and followed by nothing
+  but spaces - an info string is allowed only on an opening fence, so a
+  closing fence that names a language closes nothing at all and leaves the
+  block open. `store.BriefSectionHashes` still splits on every `## ` line,
+  fenced or not: its hashes are a section's identity in `slices.yaml`
+  (`from_brief`), not a rendering, and re-splitting them would unbind the
+  slices already recorded against them.
+- A `## What changed` bullet prints the first line of a slice's goal, not
+  the whole goal (`bulletGoal`), with a trailing `":"` dropped. A goal an
+  author wrote is one line already; a fix slice's "goal" is the builder
+  prompt `buildFixSlices` wrote, which carries every finding's file:line,
+  title, detail, risk rationale and decision. Printed whole it closes the
+  list item and renders the gate's finding text as a paragraph with the
+  short sha stranded at its end, and it reproduces in the body the detail
+  the brief moves to `pr/review-notes.md`. Two fix slices for the same
+  workspace and oracle then read alike apart from their sha, which is what
+  the brief's own rule ("its goal and short commit sha") asks for; the
+  findings themselves, named and ordered by risk, are in the comment.
+- The blank lines in `## What changed` are separators between its three
+  blocks - the author's pre-adoption commits, jig's slice bullets, the
+  fixes from review - with one closing the last block before the next
+  `## ` heading. A block with nothing in it contributes no separator, so a
+  ticket with only the gate's fixes does not open the section with a blank
+  line, and an adopted ticket with no jig bullet at all does not end it
+  with two.
+- A finding's outcome in `pr/review-notes.md` is "fixed" whenever its id
+  appears in any round's `cleared` list, regardless of what its own last
+  recorded status says - a finding that was later fixed should never read
+  as merely dismissed or asked. The slice credited ("fixed by slice X") is
+  the last slice in `slices.yaml`'s own build order whose `Findings` names
+  the id, since a recurring finding can have more than one fix slice across
+  rounds and the latest is the one that actually cleared it. Findings are
+  then sorted by risk and, within a risk, by finding id, so the order is
+  stable across renders without needing the round number as a second key.
+- A dismissed finding is rendered "dismissed by a human", never an
+  auto-triaged variant: nothing but the interactive triage prompt ever
+  dismisses a fix or an ask (`DefaultTriage` never does), so the wording
+  does not key off the finding's own last-recorded `Triage` field, which
+  `ApplyRound`'s rule 2 resets to `""` on a dismissed finding's repeat on
+  purpose (nobody decided that round) and would otherwise misreport an
+  earlier human dismissal as automatic once it recurs.
+- The "Coverage" section's touched-files half is `Publish`'s own
+  `git diff --name-only origin/<target>...HEAD`, read once right after
+  reconcile and before the memorize commit adds the retrieval notes on top
+  of it (so jig's own bookkeeping file never counts as "touched"), not the
+  union of files the recorded findings happen to name: a file the change
+  touched that drew no finding at all is exactly the gap Coverage exists to
+  surface, and the old findings-only union could never show it.
+- A failed `CommentPR` is reported the same way any other soft failure in
+  `Publish` is: a line on stderr (`internal/verifydeliver/publish.go`'s own
+  `warn` func var, the same test seam as `confirm` and `guardedPush`),
+  prefixed `jig:` like every other warning in the tree, not a new field on
+  `PublishReport` or a journal line of its own. The journal's `pr` line
+  already records the pull request itself; a comment that failed to post is
+  not a publish outcome worth a line of its own, since the brief requires
+  publish to still succeed and the file to stay in the store for a manual
+  post either way.
+- Owner decision: publish refuses, before writing anything to the store,
+  when `brief.md` or `intent.md`'s bytes no longer match the sha256 the
+  last clean gate round recorded (`report.yaml`'s `intent.sha256`) - the
+  same rule `checkReviewedHead` already gives a reviewed head, extended to
+  the intent bytes that field exists to pin. A new code,
+  `PUBLISH_UNREVIEWED_INTENT`, with help to run `jig gate` again, rather
+  than warning and rendering whatever is on disk: a brief edited after the
+  clean round must not be published as the reviewed intent, silently. An
+  inferred or absent intent is never checked, the same as it is never
+  rendered (`renderIntentSection`): there is nothing pinned to hold it to.
+
 ## Review eval
 
 - `internal/verifydeliver` gains one type and one function beyond the
