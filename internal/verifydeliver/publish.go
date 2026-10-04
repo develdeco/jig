@@ -92,6 +92,16 @@ var fetchOrigin = func(dir string) error {
 	return err
 }
 
+// warn reports a soft-failure warning to the operator, prefixed like every
+// other stderr warning in the tree ("jig: proceeding without lock ...",
+// internal/store/lock.go; "jig: lease ... moved it", internal/pool/pool.go),
+// so a warning line is attributable in a transcript. It is a func var, the
+// same seam confirm and guardedPush are, so a test can capture what Publish
+// warned about instead of reading the process's real stderr.
+var warn = func(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format, args...)
+}
+
 // Publish reconciles, re-validates, documents, squashes, and routes one
 // ticket's delivery. Only history not yet on origin is squashed: a branch
 // already there is pushed as it is. v0.1 handles a single repo.
@@ -221,6 +231,9 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err := checkReviewedHead(gateRep, repoName, shipHead, ticket); err != nil {
 		return PublishReport{}, err
 	}
+	if err := checkReviewedIntent(d.Store, ticket, gateRep); err != nil {
+		return PublishReport{}, err
+	}
 	// Publish never rewrites what is on origin and never forces: a branch that
 	// is already there must be a fast-forward from where it stands. Checked
 	// here for the same reason as above - git would refuse the push, but only
@@ -252,16 +265,25 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
+	// touchedFiles is read once, right after reconcile and before the
+	// memorize commit adds the retrieval notes on top of it, so it is the
+	// change's own files - jig's bookkeeping never counts as "touched" -
+	// for both the divergence count below and review-notes' Coverage
+	// section later.
+	touchedFiles, err := diffFiles(lease.Dir, target)
+	if err != nil {
+		return PublishReport{}, err
+	}
 	// recordAndCheckDivergence's own journal line is this function's
 	// earliest tracked write to the store, appended unconditionally -
 	// including on its own PUBLISH_NO_DIVERGENCE error path, before that
 	// check runs - so journaled is set here rather than derived from its
-	// result. If divergenceFileCount or the append itself fails before
-	// anything actually lands, the deferred push above still fires but
-	// commits nothing: Store.Push skips its own commit when nothing is
-	// staged (it still pushes and runs maintenance, same as always).
+	// result. If the append itself fails before anything actually lands,
+	// the deferred push above still fires but commits nothing: Store.Push
+	// skips its own commit when nothing is staged (it still pushes and
+	// runs maintenance, same as always).
 	journaled = true
-	if err := recordAndCheckDivergence(d, ticket, lease.Dir, target, policy); err != nil {
+	if err := recordAndCheckDivergence(d, ticket, policy, touchedFiles); err != nil {
 		return PublishReport{}, err
 	}
 	if err := checkNonEmptyRange(lease.Dir, target); err != nil {
@@ -303,10 +325,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err := appendLedgerEntry(d.Store, ticket, title, slices, questions); err != nil {
 		return PublishReport{}, err
 	}
-	oracleNames := make([]string, 0, len(man.Oracles))
-	for name := range man.Oracles {
-		oracleNames = append(oracleNames, name)
-	}
+	oracleNames := SortedOracleNames(man)
 	if err := appendContractIndexEntry(d.Store, d.Cfg.Platform, ticket, slices, oracleNames); err != nil {
 		return PublishReport{}, err
 	}
@@ -349,9 +368,52 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve the head to push: %w", err)
 	}
 
-	consolidated := journal.RenderConsolidated(lines)
-	prPath, err := writePRBody(d.Store, ticket, repoName, consolidated)
+	commits := lastGreenCommits(lines)
+	// An adopted ticket's own commits, from the merge base with target up to
+	// the start sha recorded at adoption: the author's work, listed ahead of
+	// jig's in What changed. Read after reconcile and squash (an adopted
+	// branch is always on origin, so it is never squashed) so the lease's
+	// HEAD still has startSHA as an ancestor.
+	var authorCommits []authorCommit
+	if rec.Adopted() {
+		startData, err := os.ReadFile(d.Store.StartSHAPath(ticket, repoName))
+		if err != nil {
+			return PublishReport{}, fmt.Errorf("verifydeliver: publish: read start sha: %w", err)
+		}
+		authorCommits, err = adoptedAuthorCommits(lease.Dir, target, strings.TrimSpace(string(startData)))
+		if err != nil {
+			return PublishReport{}, err
+		}
+	}
+	outcomes, reviewedPaths, lastSummary, err := collectFindingsWithOutcomes(d.Store.TicketDir(ticket), lastRound, slices)
 	if err != nil {
+		return PublishReport{}, err
+	}
+	prPath, omittedBriefIntent, err := writePRBody(d.Store, ticket, repoName, slices, gateRep, tier, commits, authorCommits, oracleNames, outcomes)
+	if err != nil {
+		return PublishReport{}, err
+	}
+	// A brief that bound as the intent source but has no "## " section with
+	// text to publish as one - no such heading anywhere, or a first section
+	// with nothing under it, which renderIntentSection reads the same way -
+	// leaves the body with no ## Intent section at all, which is the owner's
+	// rule (DECISIONS.md, renderIntentSection) and so never an error - but it
+	// is the one way a published body loses the section that says why the
+	// change exists, and no other part of a run says it happened: the brief
+	// binds whatever bytes it has (resolveIntent), the report records nothing
+	// about the body's sections, and `jig validate` counts sections with
+	// store.BriefSectionHashes, which counts the ones a code fence quotes too.
+	// So the operator is told here, before the confirmation prompt below,
+	// while fixing the brief and gating again is still cheaper than editing a
+	// published pull request. The warning says "with text" because both briefs
+	// reach it: naming only the missing heading would point the operator at an
+	// edit that does not fix the brief that has one and nothing under it.
+	if omittedBriefIntent {
+		warn("jig: the pull request body for %s has no ## Intent section: %s has no \"## \" section with text to publish as one\n",
+			ticket, intentFilePath(d.Store, ticket, IntentSourceBrief))
+	}
+
+	if err := writeReviewNotes(d.Store, ticket, lastRound, lastSummary, outcomes, reviewedPaths, touchedFiles); err != nil {
 		return PublishReport{}, err
 	}
 
@@ -399,6 +461,18 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: "pr", Outcome: prOutcome, Commit: head}); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
+	}
+
+	// Post the review notes as a comment on the pull request, if supported.
+	// A failed post is a soft failure, not a publish failure: the pull
+	// request stands, and the file is kept in the store for a manual post.
+	if prURL != "" {
+		if commenter, ok := adapter.(tracker.PRCommenter); ok {
+			reviewNotesPath := filepath.Join(d.Store.Root, ticket, "pr", "review-notes.md")
+			if err := commenter.CommentPR(prURL, reviewNotesPath); err != nil {
+				warn("jig: post %s as a comment on %s: %v\n", reviewNotesPath, prURL, err)
+			}
+		}
 	}
 
 	// Step 6: route.
@@ -480,20 +554,22 @@ func revalidate(d Deps, ticket, repoName, target, leaseDir string, man manifest.
 	return "oracles-only", nil
 }
 
-// divergenceFileCount returns how many files differ between HEAD and
-// origin/target after reconcile, using the triple-dot form (relative to
-// their merge base) so a merge-policy reconcile is measured the same way as
-// a rebase one.
-func divergenceFileCount(dir, target string) (int, error) {
+// diffFiles returns the repo-relative paths that differ between
+// origin/target and HEAD, using the triple-dot form (relative to their
+// merge base) so a merge-policy reconcile is measured the same way as a
+// rebase one. Shared by recordAndCheckDivergence's own file count and
+// review-notes' Coverage section (the files the change touched), computed
+// once by Publish right after reconcile.
+func diffFiles(dir, target string) ([]string, error) {
 	out, err := gitx.Run(dir, "diff", "--name-only", "origin/"+target+"...HEAD")
 	if err != nil {
-		return 0, fmt.Errorf("verifydeliver: publish: diff origin/%s...HEAD: %w", target, err)
+		return nil, fmt.Errorf("verifydeliver: publish: diff origin/%s...HEAD: %w", target, err)
 	}
 	out = strings.TrimSpace(out)
 	if out == "" {
-		return 0, nil
+		return nil, nil
 	}
-	return len(strings.Split(out, "\n")), nil
+	return strings.Split(out, "\n"), nil
 }
 
 // recordAndCheckDivergence journals the reconcile step's outcome as
@@ -502,11 +578,8 @@ func divergenceFileCount(dir, target string) (int, error) {
 // integration that changes nothing is an ownership-aware divergence
 // failure - the target already carries the same content, so publishing
 // would silently keep whatever this ticket's slices actually changed.
-func recordAndCheckDivergence(d Deps, ticket, dir, target, policy string) error {
-	n, err := divergenceFileCount(dir, target)
-	if err != nil {
-		return err
-	}
+func recordAndCheckDivergence(d Deps, ticket, policy string, files []string) error {
+	n := len(files)
 	outcome := fmt.Sprintf("%s:%d-files", policy, n)
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: "reconcile", Outcome: outcome}); err != nil {
 		return fmt.Errorf("verifydeliver: publish: journal reconcile: %w", err)
@@ -698,6 +771,34 @@ func checkReviewedHead(rep reportYAML, repoName, head, ticket string) error {
 		Msg:  fmt.Sprintf("the head publish would ship, %s, is not the head the last clean gate round reviewed, %s", head, reviewed),
 		Code: "PUBLISH_UNREVIEWED_HEAD",
 		Help: help,
+	}
+}
+
+// checkReviewedIntent refuses, with PUBLISH_UNREVIEWED_INTENT, publishing an
+// intent the last clean gate round never reviewed: rep is that round's
+// report, which pins the sha256 of the exact bytes resolveIntent read
+// (reportIntentYAML.SHA256) for a binding source, brief or explicit.
+// Re-reading the same path now and hashing it the same way
+// (intentSHA256) catches a brief.md or intent.md edited after the round -
+// the file renderIntentSection would otherwise render as if it had been
+// reviewed. An inferred or absent intent has nothing pinned to check:
+// neither ever reaches the published body.
+func checkReviewedIntent(st *store.Store, ticket string, rep reportYAML) error {
+	if rep.Intent.Source != IntentSourceBrief && rep.Intent.Source != IntentSourceExplicit {
+		return nil
+	}
+	intentPath := intentFilePath(st, ticket, rep.Intent.Source)
+	data, err := os.ReadFile(intentPath)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: read %s: %w", intentPath, err)
+	}
+	if intentSHA256(rep.Intent.Source, string(data)) == rep.Intent.SHA256 {
+		return nil
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("%s has changed since the last clean gate round for %s reviewed it", intentPath, ticket),
+		Code: "PUBLISH_UNREVIEWED_INTENT",
+		Help: []string{fmt.Sprintf("Run `jig gate %s` to review the intent as it is now, then publish again.", ticket)},
 	}
 }
 

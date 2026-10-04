@@ -14,8 +14,9 @@ one dispatch loop over small, provable slices of work.
 - Re-verifies the branch's oracles in its own gate round, then a reviewer
   session finds, routes, and (with you, at a triage prompt) decides what
   becomes forward work before anything ships.
-- Reconciles, revalidates, and opens the pull request itself, evidence
-  attached.
+- Reconciles, revalidates, and opens or updates the pull request itself,
+  with a lean body - why, what changed, how it was verified - and the full
+  review detail posted as its first comment.
 - Keeps every ticket's state in a plain git repo, so progress survives any
   one session ending.
 
@@ -198,13 +199,69 @@ branch and jig's have diverged it stops with `BRANCH_DIVERGED`, and with
 `PUBLISH_NOT_FAST_FORWARD` when a push lands while it runs, before it writes
 anything either way, and it ships only the head the last clean round reviewed
 (`PUBLISH_UNREVIEWED_HEAD`): if the branch moved after the round, run `jig gate`
-again. Since jig's commits are on origin under their own shas, the ticket goes
+again. The same holds for a binding intent, `brief.md` or `intent.md`: edit it
+after the last clean round and publish refuses with
+`PUBLISH_UNREVIEWED_INTENT`, before writing anything, with the same fix.
+Since jig's commits are on origin under their own shas, the ticket goes
 on working: another round reviews origin's copy, and another publish is a
 fast-forward that updates the same pull request. That holds for a ticket's own
 `jig/<ticket>` after a publish that pushed it as it is, too. Its first publish
 squashes it, and jig's unsquashed commits in the build lease then stand diverged
 from the squash: the next round, build or publish stops with `BRANCH_DIVERGED`
 until you merge origin's branch into the build lease, as the error says.
+
+## What a published pull request looks like
+
+A reviewer who opens a pull request `jig publish` opened or updated finds
+three things in its body, and nothing else: why the change exists, what
+changed, and how it was verified.
+
+- **Intent** - the body of the first section of the ticket's `brief.md`, or
+  the text of an explicit `--intent`/`--doc`. Left out entirely when the last
+  clean gate round's intent was inferred from your own Claude Code sessions,
+  or when there was none: an inferred intent is a hint for the reviewer, not
+  a human's own words, and it never reaches a pull request. Left out too when
+  there is no such text to show - a brief with no first section with text
+  under it (no `## ` heading at all, or one with nothing below it), an
+  intent file that is front matter and nothing else - rather than publishing
+  a heading that states no intent, or the whole of a brief whose later
+  sections are not the intent. A brief that bound as the intent but has no
+  section with text to publish is the one omission publish warns about
+  (`jig: the pull request body for ... has no ## Intent section`, on stderr
+  before it asks you to push), so you can edit the brief and gate again
+  instead of editing a pull request already open. A whole design doc passed
+  to `--doc` is shown as it reads, with its own headings moved below the
+  section level so the body still has these three and nothing else.
+- **What changed** - on an adopted branch, your own pre-adoption commits
+  first (subject and short sha, from the merge base with the target up to
+  the start sha recorded at adoption); then one bullet per green slice, in
+  slice order, with the first line of its goal and its short commit sha; fix
+  slices from a gate round's findings are grouped after the others as fixes
+  from review. One line per bullet: a fix slice's goal is the prompt jig
+  wrote from the gate's findings, and those findings belong in the comment
+  below, not in the body.
+- **Verification** - the oracles green at the last clean round and the head
+  it reviewed, the revalidation tier, and one line counting the review's
+  findings by how they ended (fixed, dismissed, noted, asked), pointing at
+  the pull request's first comment for the detail.
+
+That first comment is `pr/review-notes.md`: the last round's own summary,
+every finding across every round ordered by risk, each one with its
+rationale and how it ended - fixed by a slice and cleared at a later round,
+kept with your own decision, dismissed by a human, noted, or still open and
+asked - and coverage: the files the change touched, against the files the
+reviewer read (every round's own reviewed paths). With the `github` tracker
+this is posted once, right after the pull request is created or updated
+(`gh pr comment`); a post that fails is a warning, not a failed publish - the
+pull request stands and the file stays in the store for you to post by hand.
+The `local` tracker (the standalone store above) writes both files under
+`<ticket>/pr/` and posts nothing; the `command` tracker gets no comment
+capability at all.
+
+`demo/publish-body.tape` plays this through end to end on the local tracker:
+a ticket's gate rounds fixing, dismissing, and noting findings, then
+`jig publish` and both files as it leaves them - see
+[demo/README.md](demo/README.md).
 
 ## Session backends
 
@@ -329,9 +386,8 @@ the full model.
 ## Roadmap
 
 Coming in v0.2: `ask` findings parked as questions instead of left kept by
-`--yes` or a non-terminal run, a review guide rendered into PR evidence
-from recorded rounds, review-eval scoring from recorded triage decisions,
-Jira and Linear tracker adapters, `gate`'s `--pr` mode for reviewing a PR
-someone else opened, the `fleet` and `retro` binary verbs for working many
-tickets and mining repeated failures, and design-facet oracles. Later:
-more than one repo per project, and nix packaging.
+`--yes` or a non-terminal run, review-eval scoring from recorded triage
+decisions, Jira and Linear tracker adapters, `gate`'s `--pr` mode for
+reviewing a PR someone else opened, the `fleet` and `retro` binary verbs
+for working many tickets and mining repeated failures, and design-facet
+oracles. Later: more than one repo per project, and nix packaging.

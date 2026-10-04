@@ -19,9 +19,9 @@
 // html_url, state ("open" when it says none), head.ref, head.user.login and
 // base.ref; one that lacks head or base matches any. A list that is not a JSON
 // array is printed as it is. "pr create" prints a pull request URL, and "pr
-// edit" prints the URL it was given. Set $GH_STUB_FAIL to a subcommand pair,
-// such as "pr create", to make that call fail the way gh does: a message on
-// stderr and exit status 1.
+// edit" prints the URL it was given. "pr comment" succeeds silently. Set
+// $GH_STUB_FAIL to a subcommand pair, such as "pr create", to make that call
+// fail the way gh does: a message on stderr and exit status 1.
 package main
 
 import (
@@ -56,6 +56,8 @@ func main() {
 		fmt.Println("https://github.example/owner/repo/pull/1")
 	case len(args) >= 3 && args[0] == "pr" && args[1] == "edit":
 		fmt.Println(args[2])
+	case len(args) >= 3 && args[0] == "pr" && args[1] == "comment":
+		// pr comment succeeds silently
 	default:
 		fmt.Println("{}")
 	}

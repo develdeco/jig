@@ -85,6 +85,15 @@ type PRUpdater interface {
 	UpdatePR(url, bodyFile string) error
 }
 
+// PRCommenter is an optional capability an Adapter may implement: posting
+// a comment on the pull request with the review notes. It is called after
+// publish creates or updates the pull request.
+type PRCommenter interface {
+	// CommentPR posts a comment on the pull request at url with the content
+	// of bodyFile.
+	CommentPR(url, bodyFile string) error
+}
+
 // New returns the Adapter selected by cfg.Tracker.
 func New(cfg project.Config, st *store.Store) (Adapter, error) {
 	switch cfg.Tracker {
