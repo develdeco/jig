@@ -67,6 +67,24 @@ type PRCreator interface {
 	CreatePR(head, base, title, bodyFile string) (url string, err error)
 }
 
+// PRUpdater is an optional capability an Adapter may implement beside
+// PRCreator: finding the open pull request for a branch and replacing its
+// body, so that publishing a branch that already has one updates it instead
+// of opening a second. Callers type-assert an Adapter to PRUpdater, as they do
+// to PRCreator; an adapter with only PRCreator is asked to create every time.
+type PRUpdater interface {
+	// FindOpenPR returns the URL of the open pull request from head into
+	// base, or "" when there is none. Only that: a closed or merged pull
+	// request from head is history, and an open one into another base is
+	// another delivery, so neither is "the" pull request and the caller opens
+	// one. A lookup that fails is an error, never "none": the caller would
+	// open a second pull request on it.
+	FindOpenPR(head, base string) (url string, err error)
+	// UpdatePR replaces the body of the pull request at url with the content
+	// of bodyFile. Its title, base and everything else stay as they are.
+	UpdatePR(url, bodyFile string) error
+}
+
 // New returns the Adapter selected by cfg.Tracker.
 func New(cfg project.Config, st *store.Store) (Adapter, error) {
 	switch cfg.Tracker {

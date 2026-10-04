@@ -76,7 +76,7 @@ var commandTable = []cmdSpec{
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},
-	{"publish", "reconcile, revalidate, and open the PR", []flagSpec{
+	{"publish", "reconcile, revalidate, and open or update the PR", []flagSpec{
 		{"yes", "skip the interactive confirm", false},
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},

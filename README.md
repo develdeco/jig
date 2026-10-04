@@ -31,7 +31,7 @@ run       dispatch the frontier of ready slices to a build session
 gate      re-verify the ticket's branch's oracles
   │
   ▼
-publish   reconcile, revalidate, and open the PR
+publish   reconcile, revalidate, and open or update the PR
 ```
 
 Two moments need a human: deciding what the brief actually asks for, and
@@ -152,15 +152,16 @@ jig ticket new --title "Add retry"    # mints T-2 in the store
 jig gate T-2 --branch add-retry       # reviews the pushed branch and adopts it
 jig run T-2                           # builds what the round queued, on add-retry
 jig gate T-2                          # reviews add-retry again, fixes included
+jig publish T-2                       # ships add-retry as it is, and opens or updates its PR
 ```
 
 The first `--branch` records `add-retry` as the ticket's branch, and its tip
 as the ticket's start sha. From then on `jig gate`, `jig run` and `jig solve`
 work on that branch: the fix slices a round queues are built in jig's own
 lease on top of your commits, and the next round reviews the branch with them.
-`jig solve` stops at the first clean round and prints its report. None of these
-commands pushes: jig's commits wait in the build lease. A ticket adopts one
-branch for good, so naming another `--branch` later is refused, and so is
+`jig solve` runs the loop and publishes. Only `jig publish` pushes: until then
+jig's commits wait in the build lease. A ticket adopts one branch for good, so
+naming another `--branch` later is refused, and so is
 adopting a branch for a ticket jig has already built on: a green result in its
 journal says so, whichever version of jig wrote it, and adopting another
 branch would strand the commits on the ticket's own.
@@ -183,12 +184,27 @@ A machine whose build lease lacks commits that jig built on another machine
 neither reviews nor builds without them: it stops with `BUILD_LEASE_MISSING`
 until they are pushed from the machine that built them.
 
-`jig publish` does not ship an adopted branch yet. It refuses the ticket
-before it writes anything, and `jig status` says so once a round is clean.
-Open the pull request yourself, after pushing the commits jig built: they wait
-in the build lease the refusal names, and a pull request from origin's copy of
-the branch would lack the fix the clean round reviewed. If the branch moved
-since, merge it into the lease first: the push would not be a fast-forward.
+`jig publish` ships the branch as it is. Only history that is not yet on origin
+is squashed, and your branch is already there: your commits keep their shas,
+jig's fix commits sit on top of them, and so do publish's own (the merge of the
+target when it moved, and the memorize commit with the retrieval notes), and
+origin's branch is fast-forwarded to the result. The output says "not squashed
+(branch already on origin)". If the branch already has an open pull request
+into the target - yours, say - its body is replaced with the one publish wrote
+(its title stays) and no second one is opened; otherwise, with the github
+tracker, one is opened. A closed or merged pull request, or one into another
+base, is not that one and is left as it is. Publish never forces: when your
+branch and jig's have diverged it stops with `BRANCH_DIVERGED`, and with
+`PUBLISH_NOT_FAST_FORWARD` when a push lands while it runs, before it writes
+anything either way, and it ships only the head the last clean round reviewed
+(`PUBLISH_UNREVIEWED_HEAD`): if the branch moved after the round, run `jig gate`
+again. Since jig's commits are on origin under their own shas, the ticket goes
+on working: another round reviews origin's copy, and another publish is a
+fast-forward that updates the same pull request. That holds for a ticket's own
+`jig/<ticket>` after a publish that pushed it as it is, too. Its first publish
+squashes it, and jig's unsquashed commits in the build lease then stand diverged
+from the squash: the next round, build or publish stops with `BRANCH_DIVERGED`
+until you merge origin's branch into the build lease, as the error says.
 
 ## Session backends
 
@@ -312,8 +328,7 @@ the full model.
 
 ## Roadmap
 
-Coming in v0.2: publishing an adopted branch (`jig publish` refuses one
-today), `ask` findings parked as questions instead of left kept by
+Coming in v0.2: `ask` findings parked as questions instead of left kept by
 `--yes` or a non-terminal run, a review guide rendered into PR evidence
 from recorded rounds, review-eval scoring from recorded triage decisions,
 Jira and Linear tracker adapters, `gate`'s `--pr` mode for reviewing a PR

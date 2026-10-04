@@ -538,8 +538,8 @@ func TestGateReviewsTheBuildLeaseCopyOnceJigBuilt(t *testing.T) {
 	}
 }
 
-// TestGateReviewsOriginOnceItHoldsWhatJigBuilt: once someone has pushed jig's
-// commits - the human opening the pull request, as the publish refusal says -
+// TestGateReviewsOriginOnceItHoldsWhatJigBuilt: once jig's commits are pushed
+// - by a publish, or by the human opening the pull request by hand -
 // origin holds everything the build lease does, so it is origin's copy the
 // round reviews, with whatever the author added on top since; the build lease's
 // older copy is not the branch's head, and a clean round over it would say
@@ -969,12 +969,17 @@ func TestGateIgnoresACommitJigReportedButNeverVerified(t *testing.T) {
 }
 
 // TestGatePostPublishRoundOnAnOrdinaryTicket: once a publish has pushed the
-// ticket's own jig/<ticket> to origin, a later round on that ticket still
-// works. The gate drops its own local copy of the branch before acquiring for
-// every ticket, adopted or not, since it re-points the lease at the round's
-// source: a copy left over from the round before the publish stands diverged
-// from the squash on origin and would refuse the acquire. The round reviews the
-// build lease's unsquashed copy, as it always has.
+// ticket's own jig/<ticket> to origin, the branch is judged as any branch on
+// origin is (chooseBuiltCopy). The first publish pushes a squash of the commits
+// the build lease holds, so the two stand diverged, and the lease holds
+// commits jig built that origin lacks: a round over either copy would call a
+// head clean that is not the branch's, so the round is refused with
+// BRANCH_DIVERGED, naming the build lease to integrate in. The refusal is the
+// judgment of the two copies, not the acquire's own over the gate lease's stale
+// copy of the branch: the gate drops its own copy before acquiring, since it
+// re-points the lease at the round's source, and the refusal names the build
+// lease, not the gate's. Once origin's branch is merged into the build lease, as
+// the refusal says, the lease is ahead of origin's and the round reviews it.
 func TestGatePostPublishRoundOnAnOrdinaryTicket(t *testing.T) {
 	t.Parallel()
 
@@ -999,15 +1004,24 @@ func TestGatePostPublishRoundOnAnOrdinaryTicket(t *testing.T) {
 	}
 	run(t, dir, "push", "origin", ticketBranch(fx.Ticket))
 
+	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+	wantAxiCode(t, err, "BRANCH_DIVERGED")
+	if !strings.Contains(err.Error(), "the build lease at "+buildLeaseOf(t, fx, fx.Ticket)) {
+		t.Fatalf("the refusal %q does not name the build lease to integrate in", err)
+	}
+
+	buildDir := buildLeaseOf(t, fx, fx.Ticket)
+	run(t, buildDir, "fetch", "origin")
+	run(t, buildDir, "merge", "--no-edit", "origin/"+ticketBranch(fx.Ticket))
 	r, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
-		t.Fatalf("Gate round 2 after the ticket's branch reached origin: %v", err)
+		t.Fatalf("Gate round 2 after the ticket's branch reached origin and was integrated: %v", err)
 	}
 	if r.Round != 2 || r.Verdict != "clean" || r.Branch != "" {
 		t.Fatalf("report = round %d %q on %q, want a clean round 2 on the ticket's own branch", r.Round, r.Verdict, r.Branch)
 	}
 	if head, want := run(t, gateLeaseOf(t, fx, fx.Ticket), "rev-parse", "HEAD"), run(t, buildLeaseOf(t, fx, fx.Ticket), "rev-parse", "HEAD"); head != want {
-		t.Fatalf("the round reviewed %s, want the build lease's copy %s", head, want)
+		t.Fatalf("the round reviewed %s, want the build lease's integrated copy %s", head, want)
 	}
 }
 

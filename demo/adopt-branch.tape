@@ -5,8 +5,10 @@
 # finding a fix, `jig run` building that fix ON the author's branch (a
 # `git log` of the build lease shows the fix commit sitting on top of the
 # author's commits, which origin has not changed), the next `jig gate`
-# reviewing the branch again and coming back clean, and a closing `jig
-# status`. This is the loop ADR 0013
+# reviewing the branch again and coming back clean, a `jig status` that
+# suggests `jig publish`, `jig publish` shipping the branch as it is, and a
+# `git log` of origin's branch: the author's commits unchanged, jig's fix and
+# publish's memorize commit on top. This is the loop ADR 0013
 # (docs/adr/0013-a-ticket-branch-is-recorded.md) exists to make work: before
 # it, the fix was built on a jig/<ticket> branch cut from main, which lacks
 # the author's code, and the next gate reviewed that branch instead.
@@ -14,8 +16,9 @@
 # Every typed line here is checked against the real source, the same as
 # gate-reviewer.tape's own header states: the reports below are checked
 # against cmd/jig/gate.go (printGateReport's kv fields, rendered via
-# axi.KV, with the branch line an adopted ticket adds) and cmd/jig/status.go
-# (RenderStatus and nextStepHint). e2e/adopt_branch_test.go
+# axi.KV, with the branch line an adopted ticket adds), cmd/jig/status.go
+# (RenderStatus and nextStepHint) and cmd/jig/publish.go (pushedTable).
+# e2e/adopt_branch_test.go
 # (TestGateBranchRoundFixesBuildOnTheReviewedBranch) drives the same
 # commands against the built binary with a hand-written branch, but it checks
 # the outcome (where the fix commit landed, what the ticket recorded), never
@@ -173,12 +176,30 @@ Wait@90s
 Sleep 6s
 
 ## The ticket's final state: the branch it adopted, every slice green, and
-## the next step after a clean round - which is not `jig publish`, since
-## publishing an adopted branch is not built yet: push the build lease, whose
-## commits are not on origin (as the `git log` above shows), merging the branch
-## in first if it moved, then open the pull request (cmd/jig/status.go's
-## nextStepHint, whose sentence is verifydeliver.PublishByHand's; the row fits
-## the 160 columns set above).
+## the next step after a clean round, which is `jig publish` like any
+## ticket's ("help[1]:\n  Run `jig publish JIG-2` to open or update the PR",
+## cmd/jig/status.go's nextStepHint).
 Type `jig status JIG-2 --store "$JIG_STORE_DIR"` Enter
 Wait@15s
+Sleep 6s
+
+Type "clear" Enter
+Wait@5s
+
+## Publish ships the branch as it is (verifydeliver/publish.go). The branch is
+## already on origin, so nothing is squashed: the pushed table says "not
+## squashed (branch already on origin)" beside the head that was pushed
+## (cmd/jig/publish.go's pushedTable). --yes stands in for the confirm
+## question, so nothing waits on a prompt; the fixture's tracker is local, so
+## no pull request is opened, and pr_url is empty.
+Type `jig publish JIG-2 --yes --store "$JIG_STORE_DIR"` Enter
+Wait@120s
 Sleep 8s
+
+## Origin's add-percent now: the author's three commits, listed at the top of
+## this recording, are unchanged - same shas, same order - with jig's fix
+## commit ("JIG-2 fix-1: ...") and publish's memorize commit ("docs: memorize
+## JIG-2") on top. Nothing was rewritten: origin's branch was fast-forwarded.
+Type `git -C "$DEMO_DIR/fixture-repo.git" log --oneline add-percent` Enter
+Wait@5s
+Sleep 12s

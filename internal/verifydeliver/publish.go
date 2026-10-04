@@ -28,10 +28,32 @@ type PublishOpts struct {
 
 // PublishReport is Publish's result.
 type PublishReport struct {
-	Tier     string            // none|oracles-only
-	Squashed map[string]string // repo -> squash commit sha
-	PRBody   map[string]string // repo -> store-relative pr body path
-	PRURL    map[string]string // repo -> opened PR url; empty when the tracker adapter has no PRCreator
+	Tier string // none|oracles-only
+	// Squashed is repo -> the squash commit's sha, for a repo whose branch was
+	// squashed: one that was not on origin. A branch already on origin is
+	// pushed as it is and has no entry (Squash says which).
+	Squashed map[string]string
+	// Head is repo -> the head the push left on the branch.
+	Head   map[string]string
+	PRBody map[string]string // repo -> store-relative pr body path
+	PRURL  map[string]string // repo -> the PR url, opened or updated; empty when the tracker adapter has no PRCreator
+	// PRUpdated is repo -> true when the branch already had an open pull
+	// request, which publish updated instead of opening another.
+	PRUpdated map[string]bool
+}
+
+// NotSquashed is what the publish report says of a repo whose branch was
+// already on origin: published history is never rewritten, so the branch is
+// pushed as it is, with what publish adds on top.
+const NotSquashed = "not squashed (branch already on origin)"
+
+// Squash says what publish did with repo's history: "squashed", or
+// NotSquashed.
+func (r PublishReport) Squash(repo string) string {
+	if r.Squashed[repo] != "" {
+		return "squashed"
+	}
+	return NotSquashed
 }
 
 // confirm asks the interactive "Push ... ? [y/N]" question and reports
@@ -39,8 +61,16 @@ type PublishReport struct {
 // both the fmt.Printf prompt and the stdin read - so a test can replace it
 // outright and never touch the real terminal: stubbing only the read half
 // would still print the literal prompt text to the test's real stdout.
-var confirm = func(branch, ticket string) bool {
-	fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
+//
+// openPR is the URL of the pull request the branch already has open, or "":
+// the question says which of the two things it is agreeing to, opening a
+// pull request or updating that one.
+var confirm = func(branch, ticket, openPR string) bool {
+	if openPR != "" {
+		fmt.Printf("Push %s and update its open PR %s for %s? [y/N] ", branch, openPR, ticket)
+	} else {
+		fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
+	}
 	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	answer := strings.ToLower(strings.TrimSpace(line))
 	return answer == "y" || answer == "yes"
@@ -52,8 +82,19 @@ var confirm = func(branch, ticket string) bool {
 // actually threads through, without needing a real non-local remote.
 var guardedPush = gitx.GuardedPush
 
+// fetchOrigin refreshes the publish lease's view of origin, once the lease has
+// been pointed at the copy publish ships. It is a func var, like guardedPush,
+// so a test can move origin at the one moment no state of the leases reaches:
+// the acquire compared the copy with origin's, and someone pushes before this
+// fetch, which is what the fast-forward check after it is for.
+var fetchOrigin = func(dir string) error {
+	_, err := gitx.Run(dir, "fetch", "origin")
+	return err
+}
+
 // Publish reconciles, re-validates, documents, squashes, and routes one
-// ticket's delivery. v0.1 handles a single repo.
+// ticket's delivery. Only history not yet on origin is squashed: a branch
+// already there is pushed as it is. v0.1 handles a single repo.
 func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	ticket := o.Ticket
 	// journaled backs the deferred best-effort push below: once Publish's
@@ -101,13 +142,6 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve ticket branch: %w", err)
 	}
-	// A ticket that adopted a branch is refused before anything is written
-	// or acquired, and ahead of the checks below, which it would only fail
-	// for a reason that is not the one to fix first.
-	if rec.Adopted() {
-		return PublishReport{}, adoptedBranchRefusal(d, ticket, repoName, branch)
-	}
-
 	// Precondition: every slice must be green (the same frontier check gate
 	// applies before it will even review), and the latest gate round must
 	// have returned a clean verdict. Without this, publish can squash and
@@ -131,7 +165,29 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		}
 	}
 
-	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Publish)
+	// The publish lease is re-pointed at the copy publish ships right after
+	// the acquire below, so its own copy of the branch is disposable: one left
+	// by an earlier attempt must not refuse the acquire (BRANCH_DIVERGED) over
+	// commits nobody keeps, which it does once the branch has reached origin
+	// another way.
+	if err := restoreLeaseBeforeAcquire(d.Home, repoName, ticket, pool.Publish, branch); err != nil {
+		return PublishReport{}, err
+	}
+	// A branch the ticket adopted is on origin by definition, so one that is
+	// not there is refused (BRANCH_NOT_FOUND) instead of being cut from the
+	// target: publish would ship a branch that lacks the author's code. The
+	// commits jig built on the branch, whichever it is, are the journal's
+	// verified lines.
+	var acquireOpts []pool.Option
+	if rec.Adopted() {
+		acquireOpts = append(acquireOpts, pool.MustExistOnOrigin())
+	}
+	jlines, err := journal.Read(d.Store, ticket)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
+	}
+	built := journal.BuiltCommits(jlines)
+	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Publish, acquireOpts...)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
 	}
@@ -141,11 +197,54 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	if err := fetchTicketBranchFromBuildLease(d.Home, lease.Dir, repoName, ticket, branch); err != nil {
+	// The lease is pointed at the copy of the branch the gate reviewed, by the
+	// same function the gate uses: an adopted branch jig built nothing on as
+	// origin has it, or else whichever copy holds jig's commits - the build
+	// lease's while origin has no copy of the branch.
+	shipping, err := pointAtTicketBranch(d, lease.Dir, repoName, ticket, branch, rec.Adopted(), built, "publish")
+	if err != nil {
 		return PublishReport{}, err
 	}
-	if _, err := gitx.Run(lease.Dir, "fetch", "origin"); err != nil {
+	if err := fetchOrigin(lease.Dir); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
+	}
+
+	// Publish ships what was reviewed. The head it would ship, before reconcile
+	// adds anything to it, must be the head the last clean round reviewed
+	// (when that round recorded heads): a commit that landed on the branch since
+	// would go out under a verdict that never saw it. Checked ahead of
+	// everything that writes, so a refusal leaves the store untouched.
+	shipHead, err := gitx.RevParse(lease.Dir, "HEAD")
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve the head to ship: %w", err)
+	}
+	if err := checkReviewedHead(gateRep, repoName, shipHead, ticket); err != nil {
+		return PublishReport{}, err
+	}
+	// Publish never rewrites what is on origin and never forces: a branch that
+	// is already there must be a fast-forward from where it stands. Checked
+	// here for the same reason as above - git would refuse the push, but only
+	// after publish had written the store and made its commits.
+	buildDir, err := pool.Dir(d.Home, repoName, ticket, pool.Build)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve build lease: %w", err)
+	}
+	if err := requireFastForward(lease.Dir, branch, buildDir, ticket, shipping); err != nil {
+		return PublishReport{}, err
+	}
+	// The tracker is built, and asked whether the branch already has an open
+	// pull request, ahead of the first store write for the same reason: a
+	// tracker that cannot be reached, or cannot say, refuses the publish before
+	// it has written or pushed anything, not after the branch is on origin.
+	adapter, err := d.trackerAdapter()
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: build tracker adapter: %w", err)
+	}
+	openPR := ""
+	if updater, ok := adapter.(tracker.PRUpdater); ok {
+		if openPR, err = updater.FindOpenPR(branch, target); err != nil {
+			return PublishReport{}, fmt.Errorf("verifydeliver: publish: look for an open pull request from %s: %w", branch, err)
+		}
 	}
 
 	// Step 1: reconcile.
@@ -226,12 +325,28 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 
 	// Step 5: PR (squash + confirm + push).
-	sha, err := squash(lease.Dir, target, ticket, title, identityEnv)
-	if err != nil {
-		return PublishReport{}, err
-	}
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: "squash", Commit: sha}); err != nil {
+	//
+	// Only unpushed history is squashed. A branch that is already on origin
+	// (the policy reconcile just chose from its own ls-remote, the one answer
+	// to that question) has published history, which is never rewritten: it is
+	// pushed as it is, the commits already there with their shas and what
+	// publish added (the merge of the target, the memorize commit) on top. A
+	// branch that was never pushed squashes as it always has.
+	var sha string
+	if policy == policyLocalRebase {
+		sha, err = squash(lease.Dir, target, ticket, title, identityEnv)
+		if err != nil {
+			return PublishReport{}, err
+		}
+		if err := journal.Append(d.Store, ticket, journal.Line{Event: "squash", Commit: sha}); err != nil {
+			return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal squash: %w", err)
+		}
+	} else if err := journal.Append(d.Store, ticket, journal.Line{Event: "squash", Outcome: "none:branch-on-origin"}); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal squash: %w", err)
+	}
+	head, err := gitx.RevParse(lease.Dir, "HEAD")
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve the head to push: %w", err)
 	}
 
 	consolidated := journal.RenderConsolidated(lines)
@@ -250,7 +365,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// confirmation is refused by the gitx guard downstream.
 	confirmed := o.Yes
 	if !o.Yes {
-		if !confirm(branch, ticket) {
+		if !confirm(branch, ticket, openPR) {
 			return PublishReport{}, &axi.Error{Msg: "publish declined at confirmation", Code: "PUBLISH_DECLINED"}
 		}
 		confirmed = true
@@ -260,19 +375,29 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		return PublishReport{}, err
 	}
 
-	adapter, err := tracker.New(d.Cfg, d.Store)
-	if err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: build tracker adapter: %w", err)
-	}
-	prURL := ""
-	if creator, ok := adapter.(tracker.PRCreator); ok {
-		url, err := creator.CreatePR(branch, target, title, filepath.Join(d.Store.Root, prPath))
-		if err != nil {
-			return PublishReport{}, fmt.Errorf("verifydeliver: publish: create PR: %w", err)
+	// The pull request: the one the branch already has open into the target
+	// is updated, its body replaced with this publish's, and none is opened
+	// beside it; a branch with none gets one, when the tracker opens pull
+	// requests. A closed or merged pull request, or one into another base, is
+	// not that one (FindOpenPR): the operator asked to publish, so one is
+	// opened, and the others are left as they are.
+	prURL, prOutcome := "", ""
+	switch {
+	case openPR != "":
+		if err := adapter.(tracker.PRUpdater).UpdatePR(openPR, filepath.Join(d.Store.Root, prPath)); err != nil {
+			return PublishReport{}, fmt.Errorf("verifydeliver: publish: update PR %s: %w", openPR, err)
 		}
-		prURL = url
+		prURL, prOutcome = openPR, "updated"
+	default:
+		if creator, ok := adapter.(tracker.PRCreator); ok {
+			url, err := creator.CreatePR(branch, target, title, filepath.Join(d.Store.Root, prPath))
+			if err != nil {
+				return PublishReport{}, fmt.Errorf("verifydeliver: publish: create PR: %w", err)
+			}
+			prURL, prOutcome = url, "opened"
+		}
 	}
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: "pr"}); err != nil {
+	if err := journal.Append(d.Store, ticket, journal.Line{Event: "pr", Outcome: prOutcome, Commit: head}); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 	}
 
@@ -290,11 +415,17 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
 
+	squashed := map[string]string{}
+	if sha != "" {
+		squashed[repoName] = sha
+	}
 	return PublishReport{
-		Tier:     tier,
-		Squashed: map[string]string{repoName: sha},
-		PRBody:   map[string]string{repoName: prPath},
-		PRURL:    map[string]string{repoName: prURL},
+		Tier:      tier,
+		Squashed:  squashed,
+		Head:      map[string]string{repoName: head},
+		PRBody:    map[string]string{repoName: prPath},
+		PRURL:     map[string]string{repoName: prURL},
+		PRUpdated: map[string]bool{repoName: prOutcome == "updated"},
 	}, nil
 }
 
@@ -413,12 +544,15 @@ func checkNonEmptyRange(dir, target string) error {
 }
 
 // squash refuses to publish a range that already reached a remote branch,
-// then collapses start..HEAD into one commit on the ticket branch. The
-// squash base is merge-base(origin/target, HEAD) computed here at squash
-// time, not the ticket's recorded start sha: while the target is unmoved
-// the two are equal, but after a reconcile rebase the recorded start sha
-// is stale (it would wrongly pull the target's own new history into the
-// range), while the merge-base tracks the rebase's new fork point.
+// then collapses start..HEAD into one commit on the ticket branch. Publish
+// calls it only for a branch that is not on origin under its own name (a
+// branch that is there is pushed as it is); the refusal is for commits that
+// reached a remote under another. The squash base is
+// merge-base(origin/target, HEAD) computed here at squash time, not the
+// ticket's recorded start sha: while the target is unmoved the two are
+// equal, but after a reconcile rebase the recorded start sha is stale (it
+// would wrongly pull the target's own new history into the range), while
+// the merge-base tracks the rebase's new fork point.
 func squash(leaseDir, target, ticket, title string, identityEnv []string) (string, error) {
 	start, err := gitx.MergeBase(leaseDir, "origin/"+target, "HEAD")
 	if err != nil {
@@ -530,32 +664,97 @@ func route(cfg project.Config, st *store.Store, adapter tracker.Adapter, ticket 
 	})
 }
 
-// adoptedBranchRefusal is Publish's refusal of a ticket that adopted a
-// branch. Publishing an adopted branch is not built: publish squashes
-// everything the branch holds beyond the target into one commit and refuses a
-// range already on a remote (PUSHED_RANGE), and the author's commits are on
-// origin. It would fail there, after writing the ticket's changelog, ledger
-// and journal entries for a publish that never happened, and it would fail
-// earlier still, on a machine with no build lease, at the fetch from one.
-// The refusal comes first and names the gap, so nothing is written for it,
-// and says what to do instead (PublishByHand): the commits jig built, when it
-// built any, are not on origin, so the pull request the human opens needs
-// them pushed first.
-func adoptedBranchRefusal(d Deps, ticket, repoName, branch string) error {
-	lines, err := journal.Read(d.Store, ticket)
-	if err != nil {
-		return fmt.Errorf("verifydeliver: publish: read journal: %w", err)
+// checkReviewedHead refuses, with PUBLISH_UNREVIEWED_HEAD, a head publish
+// would ship that is not the head the latest clean gate round reviewed: rep is
+// that round's report (a clean verdict is checked before this is reached), and
+// head the ticket branch's head before reconcile. A reviewer round records the
+// heads it reviewed (reviewed_sha), one per repo; a scripted round records
+// none at all, and there is nothing to hold the head to, so it is let through
+// as it always has been. A round that recorded heads, but none for this repo,
+// reviewed something else - a repo renamed since, say - and is refused like a
+// different head: what was reviewed is not what would ship.
+func checkReviewedHead(rep reportYAML, repoName, head, ticket string) error {
+	if len(rep.ReviewedSHA) == 0 {
+		return nil
 	}
-	built := len(journal.BuiltCommits(lines)) > 0
-	leaseDir := ""
-	if built {
-		if leaseDir, err = pool.Dir(d.Home, repoName, ticket, pool.Build); err != nil {
-			return fmt.Errorf("verifydeliver: publish: resolve build lease: %w", err)
+	help := []string{fmt.Sprintf("Run `jig gate %s` to review the branch as it is now, then publish again.", ticket)}
+	reviewed := rep.ReviewedSHA[repoName]
+	if reviewed == "" {
+		repos := make([]string, 0, len(rep.ReviewedSHA))
+		for name := range rep.ReviewedSHA {
+			repos = append(repos, name)
+		}
+		sort.Strings(repos)
+		return &axi.Error{
+			Msg:  fmt.Sprintf("the last clean gate round recorded the head it reviewed for %s, but none for %s, the repo publish ships", strings.Join(repos, ", "), repoName),
+			Code: "PUBLISH_UNREVIEWED_HEAD",
+			Help: help,
 		}
 	}
+	if reviewed == head {
+		return nil
+	}
 	return &axi.Error{
-		Msg:  fmt.Sprintf("ticket %s adopted branch %s, and jig publish cannot ship an adopted branch yet", ticket, branch),
-		Code: "PUBLISH_ADOPTED_BRANCH",
-		Help: []string{"Until it can: " + PublishByHand(branch, built, leaseDir)},
+		Msg:  fmt.Sprintf("the head publish would ship, %s, is not the head the last clean gate round reviewed, %s", head, reviewed),
+		Code: "PUBLISH_UNREVIEWED_HEAD",
+		Help: help,
+	}
+}
+
+// requireFastForward refuses, with PUBLISH_NOT_FAST_FORWARD, a push of branch
+// from dir that would not fast-forward origin's copy: origin has commits the
+// branch lacks, whether or not the branch has some origin lacks in turn. dir's
+// origin/<branch> is as of the fetch just made. A branch origin does not have
+// is a new branch, which has nothing to fast-forward. Publish pushes without
+// force, so git would refuse such a push in the end; this is the refusal made
+// early, with both sides counted, before publish writes to the store.
+//
+// The copy publish ships was compared with origin's when the lease was pointed
+// at it (pointAtTicketBranch), and is refused there when neither holds the
+// other; what this catches is a push since, between the acquire's fetch and the
+// one publish makes right after.
+//
+// What to do about it depends on whose copy publish would ship (shipping).
+// The build lease's, at buildDir, is where jig's commits wait, so that is where
+// the two are integrated: jig merges nothing that is not its own. Origin's own
+// copy has nothing to integrate in anywhere - origin moved since the round, by
+// a push between publish's two fetches - and the way on is a round over the
+// branch as it is now.
+func requireFastForward(dir, branch, buildDir, ticket string, shipping branchCopy) error {
+	remoteRef := "refs/remotes/origin/" + branch
+	tip, err := originsTip(dir, branch)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: %w", err)
+	}
+	if tip == "" {
+		return nil
+	}
+	ok, err := gitx.IsAncestor(dir, remoteRef, "refs/heads/"+branch)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: compare %s with origin/%s: %w", branch, branch, err)
+	}
+	if ok {
+		return nil
+	}
+	theirs, err := gitx.CommitsIn(dir, "refs/heads/"+branch+".."+remoteRef)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: list the commits of origin/%s the copy lacks: %w", branch, err)
+	}
+	ours, err := gitx.CommitsIn(dir, remoteRef+"..refs/heads/"+branch)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: publish: list the commits of %s origin lacks: %w", branch, err)
+	}
+	next := fmt.Sprintf("Origin's %s moved since the round: run `jig gate %s` to review it as it is now, then publish again", branch, ticket)
+	if shipping == buildLeasesCopy {
+		next = fmt.Sprintf("Integrate origin's copy in the build lease (for example `git -C %s fetch origin && git -C %s merge origin/%s`), run `jig gate %s`, then publish again", buildDir, buildDir, branch, ticket)
+	}
+	return &axi.Error{
+		Msg: fmt.Sprintf("pushing %s would not be a fast-forward: origin/%s has %d commit(s) the branch lacks, and the branch has %d commit(s) origin lacks",
+			branch, branch, len(theirs), len(ours)),
+		Code: "PUBLISH_NOT_FAST_FORWARD",
+		Help: []string{
+			"publish pushes only a fast-forward and never forces: it rewrites nothing that is on origin",
+			next,
+		},
 	}
 }

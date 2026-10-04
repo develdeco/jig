@@ -57,16 +57,21 @@ and drives the real `jig` binary every time.
   fix, `jig run` building that fix on it, a `git log` of the build lease
   showing the fix commit sitting on top of the author's three (whose tip is
   still origin's), the next `jig gate` reviewing the branch again and coming
-  back clean, and `jig status`, which names the adopted branch, no longer
-  suggests `jig publish`, and says to push the build lease (merging the branch
-  in first if it moved) before opening the pull request. It mirrors
+  back clean, `jig status`, which names the adopted branch and suggests `jig
+  publish`, `jig publish --yes` shipping the branch as it is (the output says
+  "not squashed (branch already on origin)"), and a `git log` of the fixture
+  remote's branch: the author's three commits from the top of the recording,
+  unchanged, with jig's fix commit and publish's memorize commit on top. It
+  mirrors
   `e2e/adopt_branch_test.go`'s `TestGateBranchRoundFixesBuildOnTheReviewedBranch`
   command for command, with the same outcome-vs-wording split as the tapes
   above, but that test hand-writes its branch and checks where the fix commit
-  landed and what the ticket recorded, not the tape's own typed lines. Nothing
-  here dispatches a reviewer, so there is no triage prompt and every `Wait` is
-  bare, and no intent is inferred: the reports say `intent: none`, where a
+  landed, that the author's commits kept their shas and what the ticket
+  recorded, not the tape's own typed lines. Nothing here dispatches a reviewer,
+  so there is no triage prompt and every `Wait` is bare (the publish runs with
+  `--yes`), and no intent is inferred: the reports say `intent: none`, where a
   reviewer round on an adopted branch infers one like any brief-less ticket's.
+  The fixture's tracker is local, so no pull request is opened.
 - **`gate-demo.tape`** - a clean gate round with its demo, against the `demo`
   fixture scenario: the reviewer reports nothing, so the round is clean, and
   the demo session that follows shows the change working (the fake backend

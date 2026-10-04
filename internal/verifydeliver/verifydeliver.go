@@ -21,6 +21,7 @@ import (
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
+	"github.com/develdeco/jig/internal/tracker"
 )
 
 // Deps is verifydeliver's own dependency bundle. It never imports package
@@ -38,6 +39,19 @@ type Deps struct {
 	// test's own directory in tests). "" means it could not be resolved:
 	// gate intent inference then has nowhere to look and says so.
 	UserHome string
+	// Tracker is the adapter Publish finds, opens or updates the pull request
+	// with, and routes the ticket through. nil means the tracker project.yaml
+	// names (tracker.New); a test hands its own.
+	Tracker tracker.Adapter
+}
+
+// trackerAdapter is the adapter d hands Publish: d.Tracker when set, else the
+// tracker the project's config names.
+func (d Deps) trackerAdapter() (tracker.Adapter, error) {
+	if d.Tracker != nil {
+		return d.Tracker, nil
+	}
+	return tracker.New(d.Cfg, d.Store)
 }
 
 // primaryRepo returns v0.1's single repo and its target branch (defaulting
@@ -81,15 +95,25 @@ func CheckIdentity(d Deps) error {
 	return gitx.CheckIdentity(dir)
 }
 
-// consolidatedTitle picks the ticket's headline title: the first slice's
-// goal, falling back - when there are no slices or the first has no goal -
-// to recorded, the ticket's own recorded title (jig ticket new and jig
-// graduate write one for every ticket they mint; empty when the record has
-// none), and then to the ticket id itself. The caller passes the title from
-// the record it already read, so choosing a title never touches the store.
+// consolidatedTitle picks the ticket's headline title: the goal of the first
+// slice that did not come from a gate round. A gate round's fix slice records
+// the round in FromGate, and its goal names a batch of findings, not the work,
+// so it never heads a ticket: the slices of an adopted branch are all gate
+// fixes, and it is titled by what follows. Falling back - when there is no
+// such slice or its goal is empty - to recorded, the ticket's own recorded
+// title (jig ticket new and jig graduate write one for every ticket they mint;
+// empty when the record has none), and then to the ticket id itself. The
+// caller passes the title from the record it already read, so choosing a
+// title never touches the store.
 func consolidatedTitle(recorded, ticket string, slices []store.Slice) string {
-	if len(slices) > 0 && slices[0].Goal != "" {
-		return slices[0].Goal
+	for _, s := range slices {
+		if s.FromGate != 0 {
+			continue
+		}
+		if s.Goal != "" {
+			return s.Goal
+		}
+		break
 	}
 	if recorded != "" {
 		return recorded

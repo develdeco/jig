@@ -54,14 +54,16 @@ func TestConsolidatedTitlePrefersSliceGoal(t *testing.T) {
 }
 
 // TestConsolidatedTitleFallsBackToRecordedTitle covers a ticket with no
-// usable slice goal - no slices yet, or a first slice whose goal is empty:
-// it falls back to ticket.yaml's own title rather than the bare ticket id.
+// usable slice goal - no slices yet, or a first slice whose goal is empty (the
+// first decides, a later slice's goal is not looked for): it falls back to
+// ticket.yaml's own title rather than the bare ticket id.
 func TestConsolidatedTitleFallsBackToRecordedTitle(t *testing.T) {
 	t.Parallel()
 
 	for name, slices := range map[string][]store.Slice{
-		"no slices":        nil,
-		"empty first goal": {{ID: "s-1"}},
+		"no slices":                       nil,
+		"empty first goal":                {{ID: "s-1"}},
+		"empty first goal, a later one's": {{ID: "s-1"}, {ID: "s-2", Goal: "Later goal"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
