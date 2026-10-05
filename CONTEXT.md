@@ -64,6 +64,14 @@ _Avoid_: receipt (evidence that a check passed), recording, screencast
 A gate finding turned into a new frontier item. Review has no back-edges - every finding becomes forward work.
 _Avoid_: review comment, follow-up task
 
+**Fix budget**:
+The cap on how many of a ticket's gate rounds may queue fix slices unattended (`gate.fix_rounds`), counted by how many of them appended at least one. Past it, a round parks each would-be open fix for a person instead of queuing it.
+_Avoid_: rate limit, throttle
+
+**Parked finding**:
+A would-be open fix the fix budget routed to asked instead of a fix slice, recorded `routed_why: budget` in `findings.yaml`. Only a person at a terminal can keep one; keeping it queues a fix slice anyway, the way any kept ask does.
+_Avoid_: blocked finding, deferred fix
+
 **Lease**:
 A pooled worktree checked out for one phase's work and returned warm when that phase ends. A lease of a branch that exists on origin is synced with it when acquired: fast-forwarded when it has no commits of its own, kept when it is ahead, and refused as diverged when both sides have commits the other lacks.
 _Avoid_: checkout, sandbox

@@ -66,8 +66,8 @@ func TestRenderStatusOutstandingAskWithQueuedFrontier(t *testing.T) {
 		t.Fatalf("RenderStatus: %v", err)
 	}
 
-	wantTable := "outstanding_asks[1]{id,risk,file:line,title}:\n" +
-		"  r1-f1,medium,\"go.mod:1\",toolchain bumped\n"
+	wantTable := "outstanding_asks[1]{id,risk,file:line,title,why}:\n" +
+		"  r1-f1,medium,\"go.mod:1\",toolchain bumped,\n"
 	if !strings.Contains(got, wantTable) {
 		t.Errorf("status is missing the outstanding_asks table %q:\n%s", wantTable, got)
 	}

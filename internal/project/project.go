@@ -47,6 +47,25 @@ func (r Repo) Name() string {
 	return strings.TrimSuffix(base, ".git")
 }
 
+// GateConfig is the optional gate: block from project.yaml, configuring the
+// gate's fix loop and risk floor. Pointers are used for int fields so absent
+// values can be distinguished from explicit 0.
+type GateConfig struct {
+	FixRounds        *int     `yaml:"fix_rounds"`
+	FixRisks         []string `yaml:"fix_risks"`
+	FixSliceFindings *int     `yaml:"fix_slice_findings"`
+}
+
+// DefaultGateConfig returns the config with all defaults applied.
+func DefaultGateConfig() GateConfig {
+	fr, fsf := 3, 5
+	return GateConfig{
+		FixRounds:        &fr,
+		FixRisks:         []string{"high", "medium"},
+		FixSliceFindings: &fsf,
+	}
+}
+
 // Config is a store's project.yaml.
 type Config struct {
 	SchemaVersion int
@@ -68,6 +87,10 @@ type Config struct {
 	// Config itself carries no defaults so an absent routes: key round-trips
 	// as absent.
 	Routes map[string][]string
+	// Gate is the optional gate: block configuring the gate's fix loop and
+	// risk floor. An absent block is nil; a block with absent keys gains
+	// defaults.
+	Gate *GateConfig
 }
 
 // configRaw mirrors Config's YAML shape with Tracker left as a raw node so
@@ -82,6 +105,7 @@ type configRaw struct {
 	Staircase     []string            `yaml:"staircase,omitempty"`
 	Context       map[string]any      `yaml:"context,omitempty"`
 	Routes        map[string][]string `yaml:"routes,omitempty"`
+	Gate          *GateConfig         `yaml:"gate,omitempty"`
 }
 
 // UnmarshalYAML decodes project.yaml, accepting the tracker field as either
@@ -99,6 +123,7 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	c.Staircase = raw.Staircase
 	c.Context = raw.Context
 	c.Routes = raw.Routes
+	c.Gate = raw.Gate
 
 	switch raw.Tracker.Kind {
 	case 0:
@@ -117,7 +142,54 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	default:
 		return fmt.Errorf("project: tracker must be a string or a {command: path} map")
 	}
+
+	if err := c.validateGateConfig(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateGateConfig validates the gate config.
+func (c *Config) validateGateConfig() error {
+	if c.Gate == nil {
+		return nil
+	}
+	// Validate fix_rounds: can be any non-negative int, negative is refused
+	if c.Gate.FixRounds != nil && *c.Gate.FixRounds < 0 {
+		return fmt.Errorf("project: gate.fix_rounds must be non-negative, got %d", *c.Gate.FixRounds)
+	}
+	// Validate fix_risks: each entry must be high, medium, or low
+	riskSet := map[string]bool{"high": true, "medium": true, "low": true}
+	for _, r := range c.Gate.FixRisks {
+		if !riskSet[r] {
+			return fmt.Errorf("project: gate.fix_risks contains invalid risk %q, must be high, medium, or low", r)
+		}
+	}
+	// Validate fix_slice_findings: must be >= 1
+	if c.Gate.FixSliceFindings != nil && *c.Gate.FixSliceFindings < 1 {
+		return fmt.Errorf("project: gate.fix_slice_findings must be at least 1, got %d", *c.Gate.FixSliceFindings)
+	}
+	return nil
+}
+
+// ResolvedGateConfig returns the gate config with defaults applied for any
+// absent fields. If Gate is nil, returns the full default config.
+func (c Config) ResolvedGateConfig() GateConfig {
+	defaults := DefaultGateConfig()
+	if c.Gate == nil {
+		return defaults
+	}
+	resolved := *c.Gate
+	if resolved.FixRounds == nil {
+		resolved.FixRounds = defaults.FixRounds
+	}
+	if resolved.FixRisks == nil || len(resolved.FixRisks) == 0 {
+		resolved.FixRisks = defaults.FixRisks
+	}
+	if resolved.FixSliceFindings == nil {
+		resolved.FixSliceFindings = defaults.FixSliceFindings
+	}
+	return resolved
 }
 
 // projectYAML is the on-disk shape written by InitStandalone: unlike

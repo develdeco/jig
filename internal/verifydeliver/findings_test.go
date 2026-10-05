@@ -32,6 +32,11 @@ func greenExcept(notGreen ...string) func(string) (bool, error) {
 	return func(id string) (bool, error) { return !set[id], nil }
 }
 
+// defaultTestFixRisks returns the default fix_risks for tests: [high, medium].
+func defaultTestFixRisks() []string {
+	return []string{RiskHigh, RiskMedium}
+}
+
 // --- workspaceFor ---------------------------------------------------------
 
 func TestWorkspaceForNestedPathsAndNoWorkspace(t *testing.T) {
@@ -140,7 +145,7 @@ func TestApplyRoundRule4NewFindingsRouteByAction(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go", "b.go", "c.go"},
 	}
-	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man)
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -192,7 +197,7 @@ func TestApplyRoundRecordsTheSoleOracleWhenTheReviewerOmitsIt(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man)
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -217,7 +222,7 @@ func TestApplyRoundForcesAskWhenNoOracleCanBeResolved(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man)
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -240,18 +245,19 @@ func TestApplyRoundStaleOracleAfterManifestChangeForcesAsk(t *testing.T) {
 		Workspaces: []manifest.Workspace{{ID: "root", Path: "."}},
 	}
 	// Recurrences stays at 0 and no slice recorded it yet, so the recurrence
-	// bound itself has no say here: only the stale oracle can force this to
-	// ask.
+	// bound itself has no say here; the risk clears the floor, which is
+	// decided first and would make a lower-risk finding a note. So only the
+	// stale oracle can force this to ask.
 	known := map[string]Finding{
-		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "old"},
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "old"},
 	}
 	result := ReviewResult{
 		Findings: []ResultFinding{
-			{File: "a.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Prior: "r1-f1"},
+			{File: "a.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Prior: "r1-f1"},
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -279,7 +285,7 @@ func TestApplyRoundRejectsAnUnnormalizableFindingFile(t *testing.T) {
 		},
 		ReviewedPaths: []string{"../secret.go"},
 	}
-	if _, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man); err == nil {
+	if _, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, defaultTestFixRisks(), false); err == nil {
 		t.Error("ApplyRound: want an error for an unnormalizable finding file, got nil")
 	}
 }
@@ -299,7 +305,7 @@ func TestApplyRoundRule1RecurrenceStaysOpenAndCountsUp(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), alwaysGreen, man)
+	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -336,7 +342,7 @@ func TestApplyRoundRule2DismissedRecurrenceStaysDismissed(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -366,7 +372,7 @@ func TestApplyRoundRule2ResetsTriageFieldsOnADismissedRepeat(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -393,7 +399,7 @@ func TestApplyRoundRule1CarriesOracleWhenThisRoundNamesNone(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -406,17 +412,19 @@ func TestApplyRoundRule1CarriesDecisionAndWorkspaceWhenFileUnchanged(t *testing.
 	t.Parallel()
 
 	man := manifest.Manifest{Oracles: map[string]string{"test": "true"}} // no workspaces declared
+	// Risk high: this test is about rule 1's carrying of workspace and
+	// decision, not the risk floor, so the risk stays well clear of it.
 	known := map[string]Finding{
-		"r1-f1": {ID: "r1-f1", File: "orphan.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "old",
+		"r1-f1": {ID: "r1-f1", File: "orphan.go", Status: StatusOpen, Action: ActionFix, Risk: RiskHigh, RiskRationale: "old",
 			Oracle: "test", Workspace: "billing", Decision: "ship it in billing"},
 	}
 	result := ReviewResult{
 		Findings: []ResultFinding{
-			{File: "orphan.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test", Prior: "r1-f1"},
+			{File: "orphan.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test", Prior: "r1-f1"},
 		},
 		ReviewedPaths: []string{"orphan.go"},
 	}
-	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -438,16 +446,18 @@ func TestApplyRoundRecurrenceBoundFirstRoutesLikeNew(t *testing.T) {
 	t.Parallel()
 
 	man := oneOracleManifest()
+	// Risk high: this test is about the recurrence bound, not the risk
+	// floor, so the risk stays well clear of it.
 	known := map[string]Finding{
-		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Recurrences: 0},
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Recurrences: 0},
 	}
 	result := ReviewResult{
 		Findings: []ResultFinding{
-			{File: "a.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test", Prior: "r1-f1"},
+			{File: "a.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test", Prior: "r1-f1"},
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), alwaysGreen, man)
+	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -476,7 +486,7 @@ func TestApplyRoundRecurrenceNotCountedWithoutAFixSlice(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man) // no existing slice records r1-f1
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man, defaultTestFixRisks(), false) // no existing slice records r1-f1
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -503,7 +513,7 @@ func TestApplyRoundRecurrenceNotCountedWhenRecordingSliceIsNotGreen(t *testing.T
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), greenExcept("fix-x"), man)
+	reported, err := ApplyRound(2, known, result, sliceRecording("r1-f1"), greenExcept("fix-x"), man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -527,7 +537,7 @@ func TestApplyRoundRecurrenceBoundSecondForcesAsk(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(3, known, result, sliceRecording("r1-f1"), alwaysGreen, man)
+	reported, err := ApplyRound(3, known, result, sliceRecording("r1-f1"), alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -553,7 +563,7 @@ func TestApplyRoundRecurrenceBoundSecondAsNoteKeepsPriorOracle(t *testing.T) {
 		},
 		ReviewedPaths: []string{"a.go"},
 	}
-	reported, err := ApplyRound(3, known, result, sliceRecording("r1-f1"), alwaysGreen, man)
+	reported, err := ApplyRound(3, known, result, sliceRecording("r1-f1"), alwaysGreen, man, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}
@@ -1091,7 +1101,7 @@ func TestApplyRoundAnUndecidedAskStaysAskedWhateverTheLabel(t *testing.T) {
 				},
 				ReviewedPaths: []string{"a.go"},
 			}
-			reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man)
+			reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man, defaultTestFixRisks(), false)
 			if err != nil {
 				t.Fatalf("ApplyRound: %v", err)
 			}
@@ -1111,5 +1121,269 @@ func TestApplyRoundAnUndecidedAskStaysAskedWhateverTheLabel(t *testing.T) {
 				t.Errorf("routed_as = %q, want %q recorded when the label disagrees with the status", f.RoutedAs, ActionAsk)
 			}
 		})
+	}
+}
+
+// TestRiskFloor verifies that fix findings below the risk floor are routed as
+// notes instead of open fixes.
+func TestRiskFloor(t *testing.T) {
+	t.Parallel()
+
+	man := oneOracleManifest()
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "high.go", Title: "high risk", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test"},
+			{File: "med.go", Title: "medium risk", Detail: "d", Action: ActionFix, Risk: RiskMedium, RiskRationale: "r", Oracle: "test"},
+			{File: "low.go", Title: "low risk", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test"},
+		},
+		ReviewedPaths: []string{"high.go", "med.go", "low.go"},
+	}
+
+	// Test with fix_risks = [high, medium]: low becomes noted.
+	fixRisks := []string{RiskHigh, RiskMedium}
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, fixRisks, false)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	if len(reported) != 3 {
+		t.Fatalf("reported = %+v, want 3 findings", reported)
+	}
+	byFile := map[string]Finding{}
+	for _, f := range reported {
+		byFile[f.File] = f
+	}
+	if got := byFile["high.go"].Status; got != StatusOpen {
+		t.Errorf("high.go status = %q, want open", got)
+	}
+	if got := byFile["med.go"].Status; got != StatusOpen {
+		t.Errorf("med.go status = %q, want open", got)
+	}
+	if got := byFile["low.go"].Status; got != StatusNoted {
+		t.Errorf("low.go status = %q, want noted", got)
+	}
+	if got := byFile["low.go"].RoutedAs; got != ActionNote {
+		t.Errorf("low.go routed_as = %q, want note", got)
+	}
+
+	// Test with fix_risks = [high]: medium and low become noted.
+	fixRisks = []string{RiskHigh}
+	reported, err = ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, fixRisks, false)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	byFile = map[string]Finding{}
+	for _, f := range reported {
+		byFile[f.File] = f
+	}
+	if got := byFile["high.go"].Status; got != StatusOpen {
+		t.Errorf("high.go status = %q, want open", got)
+	}
+	if got := byFile["med.go"].Status; got != StatusNoted {
+		t.Errorf("med.go status = %q, want noted", got)
+	}
+	if got := byFile["low.go"].Status; got != StatusNoted {
+		t.Errorf("low.go status = %q, want noted", got)
+	}
+	if got := byFile["med.go"].RoutedAs; got != ActionNote {
+		t.Errorf("med.go routed_as = %q, want note", got)
+	}
+
+	// Test with fix_risks = [high, medium, low]: all become open (no floor).
+	fixRisks = []string{RiskHigh, RiskMedium, RiskLow}
+	reported, err = ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, fixRisks, false)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	byFile = map[string]Finding{}
+	for _, f := range reported {
+		byFile[f.File] = f
+	}
+	if got := byFile["high.go"].Status; got != StatusOpen {
+		t.Errorf("high.go status = %q, want open", got)
+	}
+	if got := byFile["med.go"].Status; got != StatusOpen {
+		t.Errorf("med.go status = %q, want open", got)
+	}
+	if got := byFile["low.go"].Status; got != StatusOpen {
+		t.Errorf("low.go status = %q, want open", got)
+	}
+}
+
+// TestRiskFloorBeatsAMissingBuildTarget pins the floor's precedence over
+// the build-target rule, for both halves of a missing build target: a
+// below-floor fix is a note even when its file lies in no declared
+// workspace, or its oracle no longer resolves. The build-target rule only
+// ever applied to a would-be open fix, and a note follows a note's own
+// rules alone - so a round reporting only these folds clean instead of
+// summoning a person over a low finding.
+func TestRiskFloorBeatsAMissingBuildTarget(t *testing.T) {
+	t.Parallel()
+
+	// No workspace covers the repo root, so a root-level file maps to none;
+	// two oracles mean an omitted one has no sole default to fall back on.
+	man := manifest.Manifest{
+		Oracles:    map[string]string{"test": "go test ./...", "lint": "true"},
+		Workspaces: []manifest.Workspace{{ID: "api", Path: "api"}},
+	}
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "README.md", Title: "no workspace", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test"},
+			{File: "api/a.go", Title: "no oracle", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r"},
+		},
+		ReviewedPaths: []string{"README.md", "api/a.go"},
+	}
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, []string{RiskHigh, RiskMedium}, false)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	if len(reported) != 2 {
+		t.Fatalf("reported = %+v, want 2 findings", reported)
+	}
+	for _, f := range reported {
+		if f.Status != StatusNoted || f.RoutedAs != ActionNote || f.RoutedWhy != "" {
+			t.Errorf("%s: finding = %+v, want noted/routed_as note/no routed_why (the floor decides it, not the build target)", f.File, f)
+		}
+	}
+}
+
+// --- ApplyRound: the fix budget ---------------------------------------------
+
+// TestApplyRoundBudgetReachedParksAWouldBeOpenFix pins the fix budget's
+// core rule: with budgetReached true, a fresh fix finding that clears
+// every other check (risk floor, build target, recurrence bound) is
+// parked - asked, routed_as ask, routed_why budget - instead of becoming
+// an open fix. With budgetReached false the same finding becomes open.
+func TestApplyRoundBudgetReachedParksAWouldBeOpenFix(t *testing.T) {
+	t.Parallel()
+
+	man := oneOracleManifest()
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "a.go", Title: "fix me", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test"},
+		},
+		ReviewedPaths: []string{"a.go"},
+	}
+
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, defaultTestFixRisks(), false)
+	if err != nil {
+		t.Fatalf("ApplyRound (budget not reached): %v", err)
+	}
+	if reported[0].Status != StatusOpen || reported[0].RoutedWhy != "" {
+		t.Fatalf("budget not reached: finding = %+v, want open with no routed_why", reported[0])
+	}
+
+	reported, err = ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, defaultTestFixRisks(), true)
+	if err != nil {
+		t.Fatalf("ApplyRound (budget reached): %v", err)
+	}
+	f := reported[0]
+	if f.Status != StatusAsked || f.RoutedAs != ActionAsk || f.RoutedWhy != RoutedWhyBudget {
+		t.Fatalf("budget reached: finding = %+v, want asked/routed_as ask/routed_why budget", f)
+	}
+}
+
+// TestApplyRoundBudgetNeverParksANoteBelowTheRiskFloor pins the ordering
+// the brief gives the budget over the risk floor: a fix finding below the
+// floor is routed as a note - it never reaches the budget, whatever
+// budgetReached is - never asked for a budget reason.
+func TestApplyRoundBudgetNeverParksANoteBelowTheRiskFloor(t *testing.T) {
+	t.Parallel()
+
+	man := oneOracleManifest()
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "a.go", Title: "low risk", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test"},
+		},
+		ReviewedPaths: []string{"a.go"},
+	}
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, []string{RiskHigh, RiskMedium}, true)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	f := reported[0]
+	if f.Status != StatusNoted || f.RoutedWhy != "" {
+		t.Fatalf("finding = %+v, want noted with no routed_why (the risk floor, not the budget, decides it)", f)
+	}
+}
+
+// TestApplyRoundBudgetNeverOverridesTheRecurrenceBoundsOwnReason pins the
+// other half of the same precedence: a finding the recurrence bound
+// already forces to asked keeps routed_why recurrence, not budget, even
+// though budgetReached is also true.
+func TestApplyRoundBudgetNeverOverridesTheRecurrenceBoundsOwnReason(t *testing.T) {
+	t.Parallel()
+
+	man := oneOracleManifest()
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Recurrences: 1},
+	}
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "a.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "test", Prior: "r1-f1"},
+		},
+		ReviewedPaths: []string{"a.go"},
+	}
+	reported, err := ApplyRound(3, known, result, sliceRecording("r1-f1"), alwaysGreen, man, defaultTestFixRisks(), true)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	f := reported[0]
+	if f.Status != StatusAsked || f.RoutedWhy != RoutedWhyRecurrence {
+		t.Fatalf("finding = %+v, want asked/routed_why recurrence, not budget", f)
+	}
+}
+
+// TestApplyRoundBudgetNeverOverridesAMissingBuildTargetsOwnReason is the
+// third of the three reasons: a fix finding missing its build target
+// keeps routed_why build-target, not budget, even though budgetReached is
+// also true - it was never going to become an open fix either way.
+func TestApplyRoundBudgetNeverOverridesAMissingBuildTargetsOwnReason(t *testing.T) {
+	t.Parallel()
+
+	man := oneOracleManifest()
+	man.Oracles["lint"] = "true" // two oracles now: no single default
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "a.go", Title: "fix me", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r"},
+		},
+		ReviewedPaths: []string{"a.go"},
+	}
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, defaultTestFixRisks(), true)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	f := reported[0]
+	if f.Status != StatusAsked || f.RoutedWhy != RoutedWhyBuildTarget {
+		t.Fatalf("finding = %+v, want asked/routed_why build-target, not budget", f)
+	}
+}
+
+// TestApplyRoundBudgetKeepsReaffirmingWhyAcrossReReportedRounds pins that
+// routed_why does not decay once a budget-parked finding is reported
+// again in a later round (the reviewer still calling it fix, nobody
+// having decided it yet): with the budget still reached, it is asked with
+// routed_why budget again, not a blank reason inherited from mere
+// continuation.
+func TestApplyRoundBudgetKeepsReaffirmingWhyAcrossReReportedRounds(t *testing.T) {
+	t.Parallel()
+
+	man := oneOracleManifest()
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusAsked, Action: ActionFix, Risk: RiskHigh, RiskRationale: "r",
+			Workspace: "root", Oracle: "test", RoutedAs: ActionAsk, RoutedWhy: RoutedWhyBudget},
+	}
+	result := ReviewResult{
+		Findings: []ResultFinding{
+			{File: "a.go", Title: "still there", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test", Prior: "r1-f1"},
+		},
+		ReviewedPaths: []string{"a.go"},
+	}
+	reported, err := ApplyRound(2, known, result, nil, alwaysGreen, man, defaultTestFixRisks(), true)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
+	}
+	f := reported[0]
+	if f.Status != StatusAsked || f.RoutedWhy != RoutedWhyBudget {
+		t.Fatalf("finding = %+v, want asked/routed_why budget reaffirmed, not blank", f)
 	}
 }

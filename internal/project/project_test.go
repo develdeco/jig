@@ -492,3 +492,165 @@ func TestMachineMappingRefusesNoJigHome(t *testing.T) {
 		t.Error("SaveMachine with no jig home = nil error, want a refusal")
 	}
 }
+
+func TestLoadGateConfigAbsent(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+tracker: local
+repos: []
+platform: platform/
+`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Gate != nil {
+		t.Errorf("Gate = %+v, want nil when gate: is absent", cfg.Gate)
+	}
+	resolved := cfg.ResolvedGateConfig()
+	if *resolved.FixRounds != 3 || *resolved.FixSliceFindings != 5 {
+		t.Errorf("ResolvedGateConfig = %+v, unexpected defaults", resolved)
+	}
+	if len(resolved.FixRisks) != 2 || resolved.FixRisks[0] != "high" || resolved.FixRisks[1] != "medium" {
+		t.Errorf("FixRisks = %v, want [high, medium]", resolved.FixRisks)
+	}
+}
+
+func TestLoadGateConfigWithValues(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+tracker: local
+repos: []
+platform: platform/
+gate:
+  fix_rounds: 5
+  fix_risks:
+    - high
+    - low
+  fix_slice_findings: 10
+`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Gate == nil {
+		t.Fatalf("Gate = nil, want config")
+	}
+	if *cfg.Gate.FixRounds != 5 {
+		t.Errorf("FixRounds = %d, want 5", *cfg.Gate.FixRounds)
+	}
+	if *cfg.Gate.FixSliceFindings != 10 {
+		t.Errorf("FixSliceFindings = %d, want 10", *cfg.Gate.FixSliceFindings)
+	}
+	if len(cfg.Gate.FixRisks) != 2 || cfg.Gate.FixRisks[0] != "high" || cfg.Gate.FixRisks[1] != "low" {
+		t.Errorf("FixRisks = %v, want [high, low]", cfg.Gate.FixRisks)
+	}
+}
+
+func TestLoadGateConfigPartialDefaults(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+tracker: local
+repos: []
+platform: platform/
+gate:
+  fix_rounds: 0
+`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Gate == nil {
+		t.Fatalf("Gate = nil, want config")
+	}
+	if *cfg.Gate.FixRounds != 0 {
+		t.Errorf("FixRounds = %d, want 0", *cfg.Gate.FixRounds)
+	}
+	resolved := cfg.ResolvedGateConfig()
+	if *resolved.FixRounds != 0 {
+		t.Errorf("Resolved FixRounds = %d, want 0", *resolved.FixRounds)
+	}
+	if *resolved.FixSliceFindings != 5 {
+		t.Errorf("Resolved FixSliceFindings = %d, want default 5", *resolved.FixSliceFindings)
+	}
+}
+
+func TestLoadGateConfigValidationErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		errMsg  string
+	}{
+		{
+			"negative fix_rounds",
+			`
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+tracker: local
+repos: []
+platform: platform/
+gate:
+  fix_rounds: -1
+`,
+			"must be non-negative",
+		},
+		{
+			"invalid fix_risks",
+			`
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+tracker: local
+repos: []
+platform: platform/
+gate:
+  fix_risks:
+    - high
+    - critical
+`,
+			"invalid risk",
+		},
+		{
+			"fix_slice_findings too small",
+			`
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+tracker: local
+repos: []
+platform: platform/
+gate:
+  fix_slice_findings: 0
+`,
+			"must be at least 1",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "project.yaml")
+			writeFile(t, p, tc.content)
+			_, err := Load(p)
+			if err == nil {
+				t.Errorf("Load: expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.errMsg) {
+				t.Errorf("Load error = %v, want to contain %q", err, tc.errMsg)
+			}
+		})
+	}
+}

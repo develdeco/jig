@@ -140,6 +140,50 @@ contract - a store written by one jig version declares the layout a later
 version must still read. A demo's media are not in this tree at all (see the
 fifth home above): `demo.yaml` names them and holds their hashes.
 
+## Project configuration
+
+`project.yaml` is the project's configuration file. Beyond the required fields
+(`name`, `ticket_format`, `tracker`, `repos`, `platform`), it may contain an
+optional `gate` block configuring the gate's fix loop and risk floor:
+
+```yaml
+gate:
+  fix_rounds: 3                # rounds per ticket that may queue fix slices
+  fix_risks: [high, medium]    # risks whose fix findings become fix slices
+  fix_slice_findings: 5        # most findings one fix slice carries
+```
+
+All three keys are optional and default to the values shown above. A `gate`
+block with absent keys gains defaults for those keys. An absent gate block
+entirely is equivalent to all defaults.
+
+**`fix_rounds`** is the number of gate rounds per ticket that may queue fix
+slices without human intervention. Once this budget is exhausted, remaining fix
+findings are parked for a human to keep or dismiss, marked with `routed_why:
+budget` in `findings.yaml`. A value of 0 means no round queues fix slices
+unattended - every fix is parked. Negative values are refused at load time.
+
+**`fix_risks`** lists the risks (high, medium, or low) whose fix findings
+become fix slices. A fix finding whose risk is not in this list is routed as a
+note instead: its status becomes `noted`, `routed_as: note` is recorded, and it
+never reaches the triage batch. This holds whatever its build target: a
+below-floor fix in a file outside every declared workspace is a note, not an
+ask. An ask finding keeps its routing at any risk.
+
+**`fix_slice_findings`** is the maximum number of findings one fix slice can
+carry. A round's kept fixes, grouped by (workspace, oracle), are packed into
+slices greedily by file, taken in path order: findings in the same file
+always share a slice, and a file with more findings than the bound gets one
+slice of its own, over the bound, rather than being split itself. A group
+that fits in one slice keeps its existing id,
+`fix-<round>-<workspace>-<oracle>`; a split group's slices are numbered
+`-1`, `-2`, ... from 1. Must be at least 1. Invalid values are refused at
+load time.
+
+Invalid configuration values are refused when `project.yaml` loads:
+a negative `fix_rounds`, a `fix_risks` entry that is not `high`, `medium` or
+`low`, or a `fix_slice_findings` below 1.
+
 ## Module responsibilities
 
 The dir column is exact; a lint test parses this table and asserts every dir
@@ -294,13 +338,23 @@ nothing routed reported it again, or when its file no longer exists at
 head at all (checked directly against the lease, whatever this round's
 own scope diff says), and a finding recurring for the second time - once
 a fix slice built for it has actually gone green - is routed to a human
-regardless of the reviewer's own label. Routing (`route.go`) first runs
+regardless of the reviewer's own label. A would-be open fix that clears
+every other check (recurrence bound, a missing build target, the risk
+floor) is parked for a human the same way once the ticket's fix budget
+(`gate.fix_rounds`, compared against `UsedFixBudget`'s count of earlier
+rounds whose own `report.yaml` lists a fix slice it appended) is reached.
+Each of these three forced-ask cases records which one it was in
+`findings.yaml`'s additive `routed_why` field (`recurrence`,
+`build-target`, or `budget`), empty for an `ask` the reviewer reported as
+such itself. Routing (`route.go`) first runs
 triage over this round's `fix` batch and `ask` findings - a human at a
 terminal decides the batch (accept all, or list ids to dismiss) and each
-`ask` (keep, with an optional decision, or dismiss); `--yes` or a
+`ask` (keep, with an optional decision, or dismiss), a budget-parked one no
+differently, since only this terminal path may ever keep one; `--yes` or a
 non-terminal stdin runs `DefaultTriage` instead (every fix kept, every
 `ask` with a full build target - a derived workspace and a resolvable
-oracle - kept, one left undecided when either part is missing) - then
+oracle - kept, one left undecided when either part is missing, and a
+budget-parked `ask` always left undecided whatever its build target) - then
 turns every kept finding into a fix slice: one per workspace and oracle
 for the kept fixes, one each for a kept `ask`. Routing and triage both
 finish, and every fix slice from them is appended, before `Gate` pushes

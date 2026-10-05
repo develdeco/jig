@@ -772,7 +772,7 @@ func TestApplyRoundThenMatchWrongPriorFailsTheRound(t *testing.T) {
 	result := verifydeliver.ReviewResult{Findings: []verifydeliver.ResultFinding{
 		{File: "a.go", Line: 10, Title: "trap flagged", Detail: "d", Action: verifydeliver.ActionFix, Risk: verifydeliver.RiskLow, RiskRationale: "r", Prior: "r1-f1"},
 	}}
-	reported, err := verifydeliver.ApplyRound(2, known, result, nil, func(string) (bool, error) { return false, nil }, man)
+	reported, err := verifydeliver.ApplyRound(2, known, result, nil, func(string) (bool, error) { return false, nil }, man, []string{verifydeliver.RiskHigh, verifydeliver.RiskMedium, verifydeliver.RiskLow}, false)
 	if err != nil {
 		t.Fatalf("ApplyRound: %v", err)
 	}

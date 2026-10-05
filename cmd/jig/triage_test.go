@@ -257,6 +257,92 @@ func TestInteractiveTriageEOFNoteStartsItsOwnLine(t *testing.T) {
 	}
 }
 
+// --- interactiveTriage: budget-parked asks ----------------------------------
+
+// TestInteractiveTriagePrintsTheBudgetHeaderOnlyWhenSomethingIsParked pins
+// the header's exact wording and the numbers it carries (TriageInput's own
+// BudgetUsed/BudgetLimit), and that an ordinary round with no parked
+// finding never prints it at all.
+func TestInteractiveTriagePrintsTheBudgetHeaderOnlyWhenSomethingIsParked(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{
+		Asks: []verifydeliver.Finding{
+			{ID: "r1-f1", Workspace: "alpha", Oracle: "test", RoutedWhy: verifydeliver.RoutedWhyBudget, Title: "parked"},
+		},
+		Manifest:   oneOracleManifest(),
+		BudgetUsed: 2, BudgetLimit: 2,
+	}
+	interactiveTriage(in, strings.NewReader("d\n"), &out)
+	if !strings.Contains(out.String(), "fix budget reached (2 of 2): keeping one queues a fix anyway\n") {
+		t.Fatalf("stdout missing the budget header:\n%s", out.String())
+	}
+
+	var out2 bytes.Buffer
+	in2 := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f2", Workspace: "alpha", Title: "ordinary"}}}
+	interactiveTriage(in2, strings.NewReader("d\n"), &out2)
+	if strings.Contains(out2.String(), "fix budget reached") {
+		t.Fatalf("stdout printed the budget header with nothing parked:\n%s", out2.String())
+	}
+}
+
+// TestInteractiveTriageKeepsAParkedAskWhenAHumanExplicitlyKeepsIt pins
+// that a budget-parked ask is decided exactly like any other ask at a
+// terminal: an explicit keep queues its fix slice.
+func TestInteractiveTriageKeepsAParkedAskWhenAHumanExplicitlyKeepsIt(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{
+		Asks: []verifydeliver.Finding{
+			{ID: "r1-f1", Workspace: "alpha", Oracle: "test", RoutedWhy: verifydeliver.RoutedWhyBudget, Title: "parked"},
+		},
+		Manifest:   oneOracleManifest(),
+		BudgetUsed: 1, BudgetLimit: 1,
+	}
+	res := interactiveTriage(in, strings.NewReader("k\nship it\n"), &out)
+	dec, ok := res.Asks["r1-f1"]
+	if !ok || !dec.Keep || dec.Decision != "ship it" || !dec.Human {
+		t.Fatalf("Asks[r1-f1] = %+v, ok=%v, want kept with decision \"ship it\", human", dec, ok)
+	}
+}
+
+// TestInteractiveTriageEOFNeverAutoKeepsAParkedAsk pins the other half:
+// stdin closing must never auto-keep a parked ask, even though its
+// workspace and oracle both already resolve - only an explicit human
+// answer can, the same rule DefaultTriage already enforces for --yes and
+// a non-terminal stdin. The first ask (ordinary) is the one whose own
+// prompt actually hits EOF (interactiveTriage's inner read); the second
+// (parked) is then reached through the loop's own top-of-turn EOF check,
+// so both of interactiveTriage's EOF branches are covered by the one
+// stdin close.
+func TestInteractiveTriageEOFNeverAutoKeepsAParkedAsk(t *testing.T) {
+	var out bytes.Buffer
+	in := verifydeliver.TriageInput{
+		Asks: []verifydeliver.Finding{
+			{ID: "r1-f0", Workspace: "alpha", Oracle: "test", Title: "ordinary"},
+			{ID: "r1-f1", Workspace: "alpha", Oracle: "test", RoutedWhy: verifydeliver.RoutedWhyBudget, Title: "parked"},
+		},
+		Manifest: oneOracleManifest(),
+	}
+	res := interactiveTriage(in, strings.NewReader(""), &out) // EOF immediately
+	if dec, ok := res.Asks["r1-f0"]; !ok || !dec.Keep || dec.Human {
+		t.Errorf("Asks[r1-f0] = %+v, ok=%v, want kept/auto (an ordinary ask with a full build target)", dec, ok)
+	}
+	if _, ok := res.Asks["r1-f1"]; ok {
+		t.Error("Asks[r1-f1] decided, want undecided (budget-parked, only a terminal human can keep it)")
+	}
+}
+
+// TestUndecidedAskCountCountsAParkedAskWhateverItsBuildTarget pins that
+// the stdin-closed note's own count treats a budget-parked ask as always
+// left for a human, not only one missing a workspace or an oracle.
+func TestUndecidedAskCountCountsAParkedAskWhateverItsBuildTarget(t *testing.T) {
+	asks := []verifydeliver.Finding{
+		{ID: "r1-f1", Workspace: "alpha", Oracle: "test", RoutedWhy: verifydeliver.RoutedWhyBudget},
+	}
+	if n := undecidedAskCount(asks, oneOracleManifest()); n != 1 {
+		t.Fatalf("undecidedAskCount = %d, want 1 (budget-parked, whatever its build target)", n)
+	}
+}
+
 // --- interactiveTriage: per-ask prompt --------------------------------------
 
 func TestInteractiveTriageAskKeepWithDecision(t *testing.T) {

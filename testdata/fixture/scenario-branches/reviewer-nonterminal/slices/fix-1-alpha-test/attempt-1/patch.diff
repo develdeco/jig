@@ -1,0 +1,14 @@
+diff --git a/alpha/alpha.go b/alpha/alpha.go
+index 886d5f3..b5b2d5e 100644
+--- a/alpha/alpha.go
++++ b/alpha/alpha.go
+@@ -2,7 +2,8 @@
+ // fixture repo.
+ package alpha
+
+-// Add returns a plus b.
++// Add returns a plus b. Overflow beyond the int range is undefined,
++// matching Go's built-in + operator.
+ func Add(a, b int) int {
+ 	return a + b
+ }
