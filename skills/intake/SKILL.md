@@ -16,13 +16,21 @@ A round asks the whole **frontier** - every question whose prerequisites are set
 | Shape | Digs | Opening slice | Gate leans on |
 |---|---|---|---|
 | feature | behavior, acceptance criteria, out-of-scope, seams | first tracer bullet | spec axis |
-| bug | repro, expected-vs-actual, regression window | REPRO slice: oracle fails red before any fix | the regression test, unchanged |
-| refactor | behavior-preservation contract, current coverage | GUARDRAIL slice: missing coverage lands green first | guardrail oracles staying green |
+| bug | repro, expected-vs-actual, regression window, seams | REPRO slice: oracle fails red before any fix | the regression test, unchanged |
+| refactor | behavior-preservation contract, current coverage, seams | GUARDRAIL slice: missing coverage lands green first | guardrail oracles staying green |
+
+## Seams
+
+Every brief lists a `## Seams` section naming the public interfaces and critical paths tested:
+- **public interfaces:** a CLI command and its output, an exported function, a file or wire contract like `review.json` or `slices.yaml`;
+- **critical paths:** one line each, each a behavior rather than a test case or a test per rule.
+
+The section never lists test cases, never asks for a test per rule, and never asks that a test fail when its rule is removed. For a bug, the seam is where its REPRO oracle runs; for a refactor, the seams are its guardrails.
 
 ## Brief output (single ticket)
 
 - `brief.md`: `## `-sectioned behavioral spec; every decision tagged user-confirmed or defaulted.
-- `slices.yaml`: one entry per slice - `id`, `workspace`, `goal`, `oracle`, `env`, `blocked_by`, `from_brief`. Slices are tracer bullets: narrow but a COMPLETE path, demoable alone, sized to one session. Prefactoring is its own slice, first. `blocked_by` encodes the blocking edges between slices.
+- `slices.yaml`: one entry per slice - `id`, `workspace`, `goal`, `oracle`, `env`, `blocked_by`, `from_brief`. Slices are tracer bullets: narrow but a COMPLETE path, demoable alone, sized to one session. Prefactoring is its own slice, first. `blocked_by` encodes the blocking edges between slices. Every slice lists `Seams` in `from_brief`, so its builder reads it.
 - `from_brief` hashes come from `jig validate <ticket>`, which prints a heading/sha256 table over `brief.md`'s sections: write `slices.yaml`, run validate, paste the printed hashes into `from_brief`, re-run until it prints `valid: yes`.
 
 ## Chart output (fog spans tickets)
