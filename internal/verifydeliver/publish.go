@@ -16,6 +16,7 @@ import (
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/tracker"
 )
@@ -62,11 +63,14 @@ func (r PublishReport) Squash(repo string) string {
 // outright and never touch the real terminal: stubbing only the read half
 // would still print the literal prompt text to the test's real stdout.
 //
-// openPR is the URL of the pull request the branch already has open, or "":
-// the question says which of the two things it is agreeing to, opening a
-// pull request or updating that one.
-var confirm = func(branch, ticket, openPR string) bool {
-	if openPR != "" {
+// openPR is the URL of the pull request the branch already has open, or "";
+// hasHost indicates whether the repo has a pull request host. The question
+// says which of the things it is agreeing to: opening/updating a pull request,
+// or just pushing when there is no host.
+var confirm = func(branch, ticket, openPR string, hasHost bool) bool {
+	if !hasHost {
+		fmt.Printf("Push %s for %s? [y/N] ", branch, ticket)
+	} else if openPR != "" {
 		fmt.Printf("Push %s and update its open PR %s for %s? [y/N] ", branch, openPR, ticket)
 	} else {
 		fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
@@ -245,19 +249,28 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err := requireFastForward(lease.Dir, branch, buildDir, ticket, shipping); err != nil {
 		return PublishReport{}, err
 	}
-	// The tracker is built, and asked whether the branch already has an open
-	// pull request, ahead of the first store write for the same reason: a
-	// tracker that cannot be reached, or cannot say, refuses the publish before
-	// it has written or pushed anything, not after the branch is on origin.
+	// Build the repo host from the repo's remote. It may be nil if the remote
+	// is not a pull-request host (e.g., a local path).
+	host, err := repohost.New(repo.Remote)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: build repo host: %w", err)
+	}
+
+	// If the host exists, look for an open pull request ahead of the first
+	// store write: a host that cannot be reached, or cannot say, refuses the
+	// publish before it has written or pushed anything, not after the branch
+	// is on origin.
+	openPR := ""
+	if host != nil {
+		if openPR, err = host.FindOpenPR(branch, target); err != nil {
+			return PublishReport{}, fmt.Errorf("verifydeliver: publish: look for an open pull request from %s: %w", branch, err)
+		}
+	}
+
+	// The tracker is still built for routing (project step).
 	adapter, err := d.trackerAdapter()
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: build tracker adapter: %w", err)
-	}
-	openPR := ""
-	if updater, ok := adapter.(tracker.PRUpdater); ok {
-		if openPR, err = updater.FindOpenPR(branch, target); err != nil {
-			return PublishReport{}, fmt.Errorf("verifydeliver: publish: look for an open pull request from %s: %w", branch, err)
-		}
 	}
 
 	// Step 1: reconcile.
@@ -470,7 +483,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// confirmation is refused by the gitx guard downstream.
 	confirmed := o.Yes
 	if !o.Yes {
-		if !confirm(branch, ticket, openPR) {
+		if !confirm(branch, ticket, openPR, host != nil) {
 			return PublishReport{}, &axi.Error{Msg: "publish declined at confirmation", Code: "PUBLISH_DECLINED"}
 		}
 		confirmed = true
@@ -482,34 +495,34 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 
 	// The pull request: the one the branch already has open into the target
 	// is updated, its body replaced with this publish's, and none is opened
-	// beside it; a branch with none gets one, when the tracker opens pull
+	// beside it; a branch with none gets one, when the host supports pull
 	// requests. A closed or merged pull request, or one into another base, is
 	// not that one (FindOpenPR): the operator asked to publish, so one is
 	// opened, and the others are left as they are.
 	prURL, prOutcome := "", ""
 
-	switch {
-	case openPR != "":
-		// Try to update with media if supported
-		if updater, ok := adapter.(tracker.PRUpdaterWithMedia); ok && len(mediaFiles) > 0 {
-			attached, err := updater.UpdatePRWithMedia(openPR, filepath.Join(d.Store.Root, prPath), mediaDir, mediaFiles)
-			if err != nil {
-				return PublishReport{}, fmt.Errorf("verifydeliver: publish: update PR %s with media: %w", openPR, err)
+	if host != nil {
+		switch {
+		case openPR != "":
+			// Try to update with media if supported
+			if len(mediaFiles) > 0 {
+				attached, err := host.UpdatePRWithMedia(openPR, filepath.Join(d.Store.Root, prPath), mediaDir, mediaFiles)
+				if err != nil {
+					return PublishReport{}, fmt.Errorf("verifydeliver: publish: update PR %s with media: %w", openPR, err)
+				}
+				if !attached {
+					warn("jig: the installed gh does not support --attach; the pull request updated for %s carries no media\n", ticket)
+				}
+			} else {
+				if err := host.UpdatePR(openPR, filepath.Join(d.Store.Root, prPath)); err != nil {
+					return PublishReport{}, fmt.Errorf("verifydeliver: publish: update PR %s: %w", openPR, err)
+				}
 			}
-			if !attached {
-				warn("jig: the installed gh does not support --attach; the pull request updated for %s carries no media\n", ticket)
-			}
-		} else {
-			if err := adapter.(tracker.PRUpdater).UpdatePR(openPR, filepath.Join(d.Store.Root, prPath)); err != nil {
-				return PublishReport{}, fmt.Errorf("verifydeliver: publish: update PR %s: %w", openPR, err)
-			}
-		}
-		prURL, prOutcome = openPR, "updated"
-	default:
-		if creator, ok := adapter.(tracker.PRCreator); ok {
+			prURL, prOutcome = openPR, "updated"
+		default:
 			// Try to create with media if supported
-			if creatorWithMedia, ok := adapter.(tracker.PRCreatorWithMedia); ok && len(mediaFiles) > 0 {
-				url, attached, err := creatorWithMedia.CreatePRWithMedia(branch, target, title, filepath.Join(d.Store.Root, prPath), mediaDir, mediaFiles)
+			if len(mediaFiles) > 0 {
+				url, attached, err := host.CreatePRWithMedia(branch, target, title, filepath.Join(d.Store.Root, prPath), mediaDir, mediaFiles)
 				if err != nil {
 					return PublishReport{}, fmt.Errorf("verifydeliver: publish: create PR with media: %w", err)
 				}
@@ -518,14 +531,17 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 				}
 				prURL, prOutcome = url, "opened"
 			} else {
-				url, err := creator.CreatePR(branch, target, title, filepath.Join(d.Store.Root, prPath))
+				url, err := host.CreatePR(branch, target, title, filepath.Join(d.Store.Root, prPath))
 				if err != nil {
 					return PublishReport{}, fmt.Errorf("verifydeliver: publish: create PR: %w", err)
 				}
 				prURL, prOutcome = url, "opened"
 			}
 		}
+	} else {
+		prOutcome = "none:no-host"
 	}
+
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: "pr", Outcome: prOutcome, Commit: head}); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 	}
@@ -541,39 +557,33 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// request gets a second edit with the fix. Only a name gh appended no URL
 	// for at all - the read-back carries no record of it - is left as it was
 	// and named in the warning, the one case nothing here can fix.
-	if prURL != "" && len(mediaFiles) > 0 {
-		if reader, ok := adapter.(tracker.PRBodyReader); ok {
-			body, err := reader.ReadPRBody(prURL)
-			if err != nil {
-				warn("jig: read back the pull request body for %s to check for unrewritten media references: %v\n", ticket, err)
-			} else if unrewritten := checkUnrewrittenReferences(body, demoResult.MediaFiles); len(unrewritten) > 0 {
-				patched, changed, stillUnrewritten := rewriteUnrewrittenReferences(body, unrewritten)
-				if changed {
-					bodyPath := filepath.Join(d.Store.Root, prPath)
-					if err := os.WriteFile(bodyPath, []byte(patched), 0o644); err != nil {
-						warn("jig: write the patched pull request body for %s: %v\n", ticket, err)
-					} else if updater, ok := adapter.(tracker.PRUpdater); ok {
-						if err := updater.UpdatePR(prURL, bodyPath); err != nil {
-							warn("jig: rewrite unrewritten media references in the pull request body for %s: %v\n", ticket, err)
-						}
-					}
+	if prURL != "" && len(mediaFiles) > 0 && host != nil {
+		body, err := host.ReadPRBody(prURL)
+		if err != nil {
+			warn("jig: read back the pull request body for %s to check for unrewritten media references: %v\n", ticket, err)
+		} else if unrewritten := checkUnrewrittenReferences(body, demoResult.MediaFiles); len(unrewritten) > 0 {
+			patched, changed, stillUnrewritten := rewriteUnrewrittenReferences(body, unrewritten)
+			if changed {
+				bodyPath := filepath.Join(d.Store.Root, prPath)
+				if err := os.WriteFile(bodyPath, []byte(patched), 0o644); err != nil {
+					warn("jig: write the patched pull request body for %s: %v\n", ticket, err)
+				} else if err := host.UpdatePR(prURL, bodyPath); err != nil {
+					warn("jig: rewrite unrewritten media references in the pull request body for %s: %v\n", ticket, err)
 				}
-				if len(stillUnrewritten) > 0 {
-					warn("jig: unrewritten media references in the pull request body for %s: %v\n", ticket, stillUnrewritten)
-				}
+			}
+			if len(stillUnrewritten) > 0 {
+				warn("jig: unrewritten media references in the pull request body for %s: %v\n", ticket, stillUnrewritten)
 			}
 		}
 	}
 
-	// Post the review notes as a comment on the pull request, if supported.
+	// Post the review notes as a comment on the pull request, if there is one.
 	// A failed post is a soft failure, not a publish failure: the pull
 	// request stands, and the file is kept in the store for a manual post.
-	if prURL != "" {
-		if commenter, ok := adapter.(tracker.PRCommenter); ok {
-			reviewNotesPath := filepath.Join(d.Store.Root, ticket, "pr", "review-notes.md")
-			if err := commenter.CommentPR(prURL, reviewNotesPath); err != nil {
-				warn("jig: post %s as a comment on %s: %v\n", reviewNotesPath, prURL, err)
-			}
+	if prURL != "" && host != nil {
+		reviewNotesPath := filepath.Join(d.Store.Root, ticket, "pr", "review-notes.md")
+		if err := host.CommentPR(prURL, reviewNotesPath); err != nil {
+			warn("jig: post %s as a comment on %s: %v\n", reviewNotesPath, prURL, err)
 		}
 	}
 

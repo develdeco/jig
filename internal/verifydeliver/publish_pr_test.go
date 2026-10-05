@@ -349,7 +349,7 @@ func TestPublishConfirmNamesTheOpenPR(t *testing.T) {
 	logFile := useGithubPRs(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
 
 	var gotBranch, gotPR string
-	confirm = func(branch, _, openPR string) bool {
+	confirm = func(branch, _, openPR string, _ bool) bool {
 		gotBranch, gotPR = branch, openPR
 		return false
 	}
@@ -634,7 +634,7 @@ func TestPublishWarnsAboutTheOmittedIntentBeforeTheConfirmationPrompt(t *testing
 	warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
 	asked := false
 	var warnedWhenAsked []string
-	confirm = func(string, string, string) bool {
+	confirm = func(string, string, string, bool) bool {
 		asked = true
 		warnedWhenAsked = append(warnedWhenAsked, warnings...)
 		return false
