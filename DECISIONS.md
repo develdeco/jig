@@ -2599,3 +2599,279 @@ build left open beyond those.
   the same commit, and a dispatch from a branch runs that branch's Quickstart against an
   older release. Checked out at a tag from before the Quickstart test existed, `go test
   -run` would match no test and pass.
+
+## Publish demo attachment
+
+The brief's own user-confirmed decision (a visual demo shows a pull
+request's work best) and defaults (media uploaded through `gh --attach`;
+a refused or missing demo adds no section, and publish's output says why)
+are recorded at the top of `brief.md`'s own "Decisions" section, not
+repeated here. These are the judgment calls the build left open beyond
+those.
+
+- `renderDemoSection` reads the gate round that actually recorded a demo for
+  the shipped head: the latest round when its own `demo.yaml` names that
+  exact head, or - when the latest round ran none at all - the earliest
+  earlier round that did (`recordedDemoRound`). A demo is one per reviewed
+  head (ADR 0014): a later clean round on an unchanged head runs no demo of
+  its own and writes no `demo.yaml` (`DemoExisting`), which is routine, not
+  rare, so reading only the latest round would drop a recorded demo from
+  the pull request on every re-gate of the same head and tell the operator
+  the opposite of what happened. Every candidate's `head_sha` is still
+  checked again against the shipped head publish itself resolved, rather
+  than trusted - the same "verify, don't trust what was written earlier"
+  stance ADR 0014 takes with the gate's own session output - so the
+  fallback only ever reaches a round that recorded this exact head, never a
+  different change's media.
+- `Publish` attaches media through the evidence directory
+  `renderDemoSection` itself resolved and verified them against
+  (`DemoRenderResult.MediaDir`), never a directory it recomputes from the
+  branch's own head: by the time the pull request call runs, that head has
+  moved past the one the gate reviewed (the memorize commit, then the
+  squash, both land on the lease in between), and recomputing from it
+  resolves a directory that was never written to. A demo whose evidence
+  directory cannot be resolved at all is an error out of `renderDemoSection`,
+  not a silent "no demo": the alternative is a published body whose
+  `./<name>` references name media that was never looked for, let alone
+  uploaded.
+- Every file `demo.yaml` lists is re-verified at publish time against the
+  evidence directory - present, same sha256, same size - rather than
+  trusting the round's own manifest: the evidence directory is machine-local
+  scratch an operator can prune (ARCHITECTURE.md's fifth home), and a
+  publish can run long after the round, on the same machine or a different
+  one. A file that no longer verifies is left out of the section and named
+  in publish's own warning, never silently - the same "never partially
+  accept, but always say what's missing" rule ADR 0014 uses for the gate's
+  own verification, read the other way around: here it is one file that
+  drops, not the whole result.
+- When every listed file fails verification, publish reports
+  `DemoRenderResult.AllMediaFailed` rather than folding it into "no demo
+  recorded": the gate round did record one, and an operator who sees "no
+  demo" would look at the wrong half of the pipeline (the gate, not the
+  machine serving publish) to explain why. A demo recorded with no media at
+  all (a valid, empty-media result, ADR 0014) is not this case: nothing
+  failed, there was simply nothing to show, and publish adds no section for
+  it without reporting a failure that never happened. Nor is a demo.yaml
+  itself recorded as `status: refused` for the shipped head: that is
+  `DemoRenderResult.DemoRefused`, reported with demo.yaml's own reason - a
+  different half of the pipeline again (the demo session or its backend,
+  not publish's own re-verification), so the field that means "every file
+  failed re-verification" keeps a name of its own instead of overloading
+  demo.yaml's "refused" status, which is what the gate recorded and not
+  publish's own finding.
+- Each media file renders under the exact name `demo.yaml` already recorded
+  it under (`renameDemoMedia`'s own `demo-<n>.<ext>`, in its own order),
+  never a fresh counter over the verified files alone: the two can disagree
+  as soon as one file fails verification, and a renumbered reference then
+  names a file `gh` was never asked to attach while mislabeling the one
+  that was. Gate finding r1-f3's owner decision: the reference form is keyed
+  on `demoKind`'s own extension, not one form for every kind - an image as
+  markdown image syntax, `![caption](./<name>)`, a video as the plain
+  bullet, `- ./<name>: caption`, it is not renderable as. The build-time
+  call recorded here through v0.1 was the opposite (one bullet form for
+  every kind, "never a second code path keyed on file extension"), on the
+  reasoning that `gh`'s own rewrite support for a given reference form is
+  not guaranteed stable across its versions (ADR 0014's own "Videos" note)
+  either way, so keying the renderer on extension would not reliably buy
+  anything. r1-f3 found what that reasoning missed: a published body's
+  bare-path bullets are the one form `gh` has never rewritten at all, images
+  included, so every demo - not only a video one - shipped with dead
+  relative links beside `gh`'s own appended URLs. Markdown image syntax is
+  the one form `gh` does rewrite, so a second code path keyed on extension
+  is exactly what fixes it; see "Publish patches an unrewritten video
+  reference" below for the video half gh still leaves to publish.
+- Media attachment is two new optional tracker capabilities,
+  `PRCreatorWithMedia` and `PRUpdaterWithMedia`, beside `PRCreator` and
+  `PRUpdater`, rather than new parameters on those two: an adapter that
+  never attaches media (local, command) keeps its existing, narrower
+  signature with nothing to ignore, and `Publish` falls back to the plain
+  call whenever an adapter lacks the capability or there is no media to
+  attach, the same optional-capability shape `PRCommenter` already uses.
+- The installed `gh`'s `--attach` support is probed once per subcommand per
+  adapter instance (`gh pr create --help` for `CreatePRWithMedia`, `gh pr
+  edit --help` for `UpdatePRWithMedia`, each string-matched for the flag)
+  and cached separately: `pr create` and `pr edit` are different commands
+  with different flag sets, so one's support says nothing about the
+  other's, and probing the wrong one can send `--attach` to a subcommand
+  that does not take it - on `pr edit`, the common path, since publish
+  updates an open pull request on every re-publish. The check itself is
+  still cheap and side-effect free, so caching exists only to spare a pull
+  request's worth of `gh` invocations the same repeated question, not to
+  share an answer across commands. Without support on the subcommand about
+  to run, the pull request still opens or updates with `pr/<repo>.md` as
+  its body and no `--attach` flags, and `CreatePRWithMedia`/
+  `UpdatePRWithMedia`'s own `attached` return (rather than a side channel)
+  tells publish to say why - a `gh` an operator cannot upgrade is a reason
+  to degrade, never to refuse a publish outright.
+- `gh pr create`/`gh pr edit` run with the evidence directory as `cmd.Dir`
+  when attaching media, so `--attach <file>` names a file by its bare name:
+  the same spelling-safety reasoning ADR 0014 already applies to a demo
+  session's own dispatch (a path crossing a process boundary can be spelled
+  differently than it was given) applies again here, one hop later, to the
+  path `gh` is handed.
+- The read-back after an attach (`gh pr view <url> --json body`) checks the
+  body for the exact `./<name>` references `writePRBody` rendered
+  (`DemoRenderResult.MediaFiles`), not a substring scan for `./demo-` over
+  every line: the body can carry that text elsewhere (an Intent section
+  quoting a brief, a fenced snippet) without it being a reference `gh` was
+  ever asked to rewrite, and reporting a match names the file, never the
+  whole matching line, which can be model-written prose rather than
+  anything naming a file. Gate finding r1-f3's owner decision: a reference
+  still unrewritten is now patched, not left for the operator to fix by
+  hand (`rewriteUnrewrittenReferences`, see "Publish patches an unrewritten
+  video reference" below) - the build-time call recorded here through v0.1
+  was the opposite, never rewriting the pull request a second time, on the
+  reasoning that guessing which upload URL belongs to which leftover
+  reference is the kind of inference jig avoids elsewhere. r1-f3 found a
+  way to patch it that is not a guess: `gh` appends a `[<name>](<url>)`
+  link for an attached file it found no in-body reference to rewrite, and
+  that link names the file, so the match is read off `gh`'s own record, not
+  inferred from position or kind. Only a file with no such appended link at
+  all still gets the same soft-failure report, the same shape as the Intent
+  omission and a failed `CommentPR`, leaving that one case to the operator,
+  who already has the pull request open. A read-back that fails outright
+  (auth, rate limit, a `gh` that cannot parse the url) is the same kind of
+  soft failure and gets the same warning, not silence: media were just
+  uploaded, and the read-back is the one signal that says whether the
+  references actually point at them now.
+- A demo's `summary` and every file's `caption` are the session's own words,
+  recorded in `demo.yaml` as written and unbounded (ADR 0014's own
+  "Consequences"), and jig never filters or rewrites them going in: what jig
+  guarantees about host paths is about what jig writes, not about what a
+  model says, there. Rendering them into a pull request body changes that
+  guarantee's reach, since a published body is public on the tracker, so
+  gate finding r1-f13's owner decision draws the line at the render step,
+  `renderDemoSection`, rather than at the record: before rendering, the
+  summary and each verified file's own caption are checked, by exact string
+  match only and never a pattern, against the literal paths jig itself
+  handed the demo session - `media_dir`, the jig home, the gate lease (where
+  the session ran, `DemoInput.LeaseDir`) and the store - in every spelling
+  jig may have handed them out in, a WSL mount among them (`hostPathSpellings`,
+  `containsHostPath`), the one herdr respells a path to on Windows
+  (`session.respellMentions`/`session.WSLPath`). A summary or caption that
+  names one is left out of the section whole, not merely edited - rewriting
+  only the matched substring would still publish the rest of a sentence that
+  describes the operator's own machine - and the omission is named in
+  publish's own output (`DemoRenderResult.ScrubbedSummary`,
+  `.ScrubbedCaptions`), the same soft-failure shape as an omitted media file.
+  A caption that clears the check is still capped at `demoCaptionRenderCap`
+  runes: unlike the summary, a caption sits beside a file as a short label,
+  and an unbounded one is not that. `demo.yaml` itself is never touched by
+  either rule - the record stays exactly what the session wrote, per ADR
+  0014 - only what `renderDemoSection` builds from it for the body is.
+- Gate finding r4-f3: the host-path check above and `sanitizeDemoCaption`'s
+  bracket strip (r2-f6, its own comment in `render.go`) both leave a caption
+  or summary free to carry raw HTML, which GitHub renders a sanitized subset
+  of inside a pull request body - an `<img src="...">` caption or summary
+  becomes a live, camo-proxied remote image; an `<a href="...">` becomes a
+  live link. Caught for a non-image caption (`- ./<name>: <caption>`) and
+  for the summary, which gets no stripping and, by the r1-f13 decision
+  above, no cap either; an image caption was already inert there, landing
+  inside `![...](...)`'s alt text, which is never parsed as HTML. The
+  owner's decision: escape rather than strip or accept - `escapeDemoHTML`
+  renders `&`, `<` and `>` as HTML entities in both the summary and every
+  caption, the last transform before either reaches the body, so none of
+  it, nor anything demoteHeadings, closeOpenFence or sanitizeDemoCaption
+  added ahead of it, is read back as markup. `demo.yaml` itself is still
+  untouched, per ADR 0014.
+
+## Publish patches an unrewritten video reference
+
+Gate finding r1-f3 (reviewing this build) caught the two decisions above
+("Each media file renders..." and "The read-back after an attach...")
+leaving every published demo, images included, with dead `./demo-<n>.<ext>`
+links beside `gh`'s own appended URLs: the one reference form every media
+file rendered in, the bare bullet, is exactly the form `gh ... --attach`
+does not rewrite, and publish never fixed one itself. The two decisions are
+corrected in place above; this entry records how the fix is tested, since
+that needed its own call.
+
+- `testdata/fixture/ghstub` (the fake `gh` every tracker and publish test
+  builds against) is the only place this build can pin "which forms `gh`
+  rewrites" against: nothing else in the suite talks to a real `gh`. It now
+  reads the `--body-file` a `pr create`/`pr edit` call carries, for every
+  file named by that call's own `--attach` flags: a markdown image
+  reference to the file, `![alt](./<file>)`, is rewritten in place to a
+  minted upload URL, alt text kept; a file with no such reference gets no
+  in-place rewrite but is still "uploaded", so the stub appends
+  `[<file>](<url>)`, naming it, on its own line - the one way a test (or
+  `rewriteUnrewrittenReferences`) can learn which URL an unreferenced
+  attach actually got. The result is saved for a later `pr view` to answer
+  with ($GH_STUB_BODY_STATE), so a test exercising the full attach-then-
+  read-back round trip does not have to hand-write the body `gh` would
+  have produced - only a test that wants a body a real `gh` would not
+  produce (TestPublishWarnsAboutAnUnrewrittenMediaReference's image gh
+  somehow left unrewritten, with no appended URL either) still sets
+  `$GH_STUB_BODY` directly, which wins over the saved state.
+- The minted upload URL is call-local (`https://.../assets/<n>`, `n` the
+  1-based position of that file's own `--attach` flag in the call), never
+  a counter persisted across calls: a real upload mints a fresh asset id
+  every time a file is attached, even the same bytes attached twice across
+  a create and a later edit, so restarting the count per call is not a
+  simplification that costs the tests anything, and avoids one more state
+  file beside `$GH_STUB_STATE`'s issue counter (a different count; mixing
+  the two would make an issue-minting test's own number depend on whether
+  a media test ran first).
+
+## Pinning gh's own rewrite behavior against a real gh
+
+Gate finding r2-f4 (reviewing this build): both decisions above ("Each media
+file renders..." and "The read-back after an attach...") and the fixture
+that tests them were written from reasoning about how `gh ... --attach`
+probably behaves, then asserted against that same reasoning encoded as
+`testdata/fixture/ghstub`'s own rewrite rule - the brief's "check which
+forms gh rewrites" went unrecorded. No test, doc or ADR named a gh version,
+so nothing here distinguished a fact from a guess, and a wrong guess would
+have had publish's own second edit (`rewriteUnrewrittenReferences`) make a
+published body worse than before this feature existed.
+
+The owner ran a real `gh` against a real pull request and recorded what it
+did; that run, not reasoning about `--attach`, is the evidence this entry
+pins and the only thing the stub now models:
+
+- gh 2.100.0. `gh pr create --help` documents `--attach` as appending the
+  attached file to the body as a link; as rewriting a body reference such as
+  `![alt](./login.png)` in place to the uploaded asset; and, when some of a
+  call's own uploads fail, as still creating the pull request, printing the
+  uploaded URL to stdout, and exiting non-zero - the shape `runInDir` already
+  keeps (stdout folded into the returned error rather than discarded; see
+  "Publish demo attachment" above).
+- The same gh 2.100.0, run for real against a bare path reference
+  (2026-09-27): a `./x.mp4` line was left exactly as it stood, and the
+  video's own upload URL was appended at the end of the body - the
+  `[<name>](<url>)` line `appendedAttachmentURL` reads back - confirming the
+  video half of the r1-f3 premise by the same run that confirmed the image
+  half, rather than by the stub's own say-so.
+- Owner decision: a reference form this evidence does not show rewritten - a
+  video among them, but not only a video - is modeled, and treated by
+  `rewriteUnrewrittenReferences`, exactly like a bare path: left alone by the
+  attach call and patched from gh's own appended link afterward, never
+  assumed rewritten on the strength of a guess about what some other gh
+  might do.
+
+`testdata/fixture/ghstub/main.go`'s rewrite rule does not change for this
+entry - it already rewrote only a matched markdown image reference and
+appended a link naming the file for everything else - but its own comments
+now cite this evidence and name gh 2.100.0, rather than reading as a rule
+the fixture invented and then checked itself against.
+
+Gate finding r2-f4's other two risks are not settled by this evidence and
+stay open: whether a real gh refuses to run with `cmd.Dir` set to the
+evidence directory (not a git work tree) and `--head <branch>` naming no
+owner is still unrecorded. A human with a real gh and a real pull request
+remains the only oracle for that.
+
+## A real gh resolves `--repo`/`--head` outside a git work tree
+
+Gate finding r2-f4's remaining risk: closed by a second real-`gh` run, on
+2026-10-04, from a directory that is not a git repository at all (not just
+one lacking a remote) - `gh pr create --dry-run --repo develdeco/jig --head
+main --base main`, gh 2.100.0. It resolved the named repository and reached
+its own head/base check (head branch "main" is the same as base branch
+"main") without ever reading a local git remote, confirming `--repo` and
+`--head` together carry what a git checkout would have supplied, cmd.Dir
+notwithstanding. `gh pr create`/`gh pr edit` (`internal/tracker/github.go`)
+must keep passing both explicitly rather than relying on gh's own
+repo/remote inference. `--dry-run` cannot be combined with `--attach`, so
+this run is evidence for the repo/head resolution alone; the upload path's
+first real check is still the first live publish of a demo.

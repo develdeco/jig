@@ -25,6 +25,7 @@ func githubUnderStub(t *testing.T, pulls, fail string) (tracker.Adapter, string)
 	logFile := filepath.Join(t.TempDir(), "gh.log")
 	t.Setenv("GH_STUB_LOG", logFile)
 	t.Setenv("GH_STUB_STATE", filepath.Join(t.TempDir(), "gh.state"))
+	t.Setenv("GH_STUB_BODY_STATE", filepath.Join(t.TempDir(), "gh-body.state"))
 	t.Setenv("GH_STUB_PULLS", pulls)
 	t.Setenv("GH_STUB_FAIL", fail)
 
@@ -186,6 +187,243 @@ func TestGithubUpdatesAPRsBody(t *testing.T) {
 	failing, _ := githubUnderStub(t, "", "pr edit")
 	if err := failing.(tracker.PRUpdater).UpdatePR(url, bodyFile); err == nil || !strings.Contains(err.Error(), "gh pr edit") {
 		t.Fatalf("UpdatePR over a failing gh: %v, want an error naming the call", err)
+	}
+}
+
+// attachCount counts how many times "--attach" appears in argv.
+func attachCount(argv []string) int {
+	n := 0
+	for _, a := range argv {
+		if a == "--attach" {
+			n++
+		}
+	}
+	return n
+}
+
+// findCall returns the first logged call whose argv (after the stub binary
+// itself) has exactly prefix at its start and is not a --help probe, or nil.
+func findCall(calls []ghStubCall, prefix ...string) *ghStubCall {
+	for i := range calls {
+		argv := calls[i].Argv
+		if len(argv) < len(prefix)+1 || hasHelpFlag(argv) {
+			continue
+		}
+		match := true
+		for j, p := range prefix {
+			if argv[j+1] != p {
+				match = false
+				break
+			}
+		}
+		if match {
+			return &calls[i]
+		}
+	}
+	return nil
+}
+
+func hasHelpFlag(argv []string) bool {
+	for _, a := range argv {
+		if a == "--help" || a == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
+// TestGithubCreateAndUpdatePRWithMediaAttachArgvAndDir: both
+// CreatePRWithMedia and UpdatePRWithMedia run `gh` with mediaDir as its own
+// working directory and one `--attach <file>` per file, so a plain file name
+// is enough for gh to find it.
+func TestGithubCreateAndUpdatePRWithMediaAttachArgvAndDir(t *testing.T) {
+	a, logFile := githubUnderStub(t, "", "")
+	mediaDir := t.TempDir()
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(bodyFile, []byte("body"), 0o644); err != nil {
+		t.Fatalf("write body file: %v", err)
+	}
+	files := []string{"demo-1.png", "demo-2.mp4"}
+
+	creator, ok := a.(tracker.PRCreatorWithMedia)
+	if !ok {
+		t.Fatal("github adapter does not implement tracker.PRCreatorWithMedia")
+	}
+	url, attached, err := creator.CreatePRWithMedia("jig/JIG-1", "main", "title", bodyFile, mediaDir, files)
+	if err != nil {
+		t.Fatalf("CreatePRWithMedia: %v", err)
+	}
+	if !attached || url == "" {
+		t.Fatalf("CreatePRWithMedia = (%q, %v), want a url and attached=true", url, attached)
+	}
+
+	updater, ok := a.(tracker.PRUpdaterWithMedia)
+	if !ok {
+		t.Fatal("github adapter does not implement tracker.PRUpdaterWithMedia")
+	}
+	attached, err = updater.UpdatePRWithMedia(url, bodyFile, mediaDir, files)
+	if err != nil {
+		t.Fatalf("UpdatePRWithMedia: %v", err)
+	}
+	if !attached {
+		t.Fatal("UpdatePRWithMedia attached = false, want true")
+	}
+
+	calls := readLoggedCalls(t, logFile)
+	create := findCall(calls, "pr", "create")
+	if create == nil {
+		t.Fatal("no logged pr create call")
+	}
+	if create.Dir != mediaDir {
+		t.Errorf("pr create ran in %q, want the evidence directory %q", create.Dir, mediaDir)
+	}
+	if n := attachCount(create.Argv); n != len(files) {
+		t.Errorf("pr create argv %v has %d --attach flag(s), want %d", create.Argv, n, len(files))
+	}
+	for _, f := range files {
+		if !anyLineContainsAll([][]string{create.Argv}, "--attach", f) {
+			t.Errorf("pr create argv %v missing --attach %s", create.Argv, f)
+		}
+	}
+
+	edit := findCall(calls, "pr", "edit", url)
+	if edit == nil {
+		t.Fatal("no logged pr edit call")
+	}
+	if edit.Dir != mediaDir {
+		t.Errorf("pr edit ran in %q, want the evidence directory %q", edit.Dir, mediaDir)
+	}
+	if n := attachCount(edit.Argv); n != len(files) {
+		t.Errorf("pr edit argv %v has %d --attach flag(s), want %d", edit.Argv, n, len(files))
+	}
+}
+
+// TestGithubAttachSupportIsProbedPerSubcommand: CreatePRWithMedia probes
+// `gh pr create --help` and UpdatePRWithMedia probes `gh pr edit --help`,
+// never the other's: the two subcommands' flag sets are not the same thing,
+// so a `pr edit` gated on `pr create`'s own probe (or the reverse) can invoke
+// --attach on a subcommand that does not actually support it.
+func TestGithubAttachSupportIsProbedPerSubcommand(t *testing.T) {
+	a, logFile := githubUnderStub(t, "", "")
+	mediaDir := t.TempDir()
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(bodyFile, []byte("body"), 0o644); err != nil {
+		t.Fatalf("write body file: %v", err)
+	}
+
+	url, _, err := a.(tracker.PRCreatorWithMedia).CreatePRWithMedia("jig/JIG-1", "main", "t", bodyFile, mediaDir, []string{"demo-1.png"})
+	if err != nil {
+		t.Fatalf("CreatePRWithMedia: %v", err)
+	}
+	if _, err := a.(tracker.PRUpdaterWithMedia).UpdatePRWithMedia(url, bodyFile, mediaDir, []string{"demo-1.png"}); err != nil {
+		t.Fatalf("UpdatePRWithMedia: %v", err)
+	}
+
+	calls := readLoggedArgv(t, logFile)
+	if !anyLineHasPrefix(calls, "pr", "create", "--help") {
+		t.Errorf("no logged `gh pr create --help` call in %v, want CreatePRWithMedia to probe its own subcommand", calls)
+	}
+	if !anyLineHasPrefix(calls, "pr", "edit", "--help") {
+		t.Errorf("no logged `gh pr edit --help` call in %v, want UpdatePRWithMedia to probe its own subcommand, not pr create's", calls)
+	}
+}
+
+// TestGithubCreateAndUpdatePRWithMediaDegradeWithoutAttachSupport: a gh
+// without --attach on either subcommand (GH_STUB_NO_ATTACH) still opens and
+// updates the pull request, with no --attach flags and attached=false, so
+// the caller can say why.
+func TestGithubCreateAndUpdatePRWithMediaDegradeWithoutAttachSupport(t *testing.T) {
+	a, logFile := githubUnderStub(t, "", "")
+	t.Setenv("GH_STUB_NO_ATTACH", "1")
+	mediaDir := t.TempDir()
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(bodyFile, []byte("body"), 0o644); err != nil {
+		t.Fatalf("write body file: %v", err)
+	}
+
+	url, attached, err := a.(tracker.PRCreatorWithMedia).CreatePRWithMedia("jig/JIG-1", "main", "t", bodyFile, mediaDir, []string{"demo-1.png"})
+	if err != nil {
+		t.Fatalf("CreatePRWithMedia: %v", err)
+	}
+	if attached || url == "" {
+		t.Fatalf("CreatePRWithMedia = (%q, %v), want a url opened anyway and attached=false", url, attached)
+	}
+	attached, err = a.(tracker.PRUpdaterWithMedia).UpdatePRWithMedia(url, bodyFile, mediaDir, []string{"demo-1.png"})
+	if err != nil {
+		t.Fatalf("UpdatePRWithMedia: %v", err)
+	}
+	if attached {
+		t.Fatal("UpdatePRWithMedia attached = true, want false: the stub gh has no --attach")
+	}
+
+	calls := readLoggedArgv(t, logFile)
+	if anyLineContainsAll(calls, "--attach") {
+		t.Errorf("gh calls = %v, want no --attach flag anywhere without support", calls)
+	}
+}
+
+// TestGithubReadPRBody: ReadPRBody answers whatever $GH_STUB_BODY holds,
+// through `gh pr view --json body`.
+func TestGithubReadPRBody(t *testing.T) {
+	a, _ := githubUnderStub(t, "", "")
+	t.Setenv("GH_STUB_BODY", "## Demo\n\n- https://github.example/user-attachments/assets/1: it works\n")
+
+	reader, ok := a.(tracker.PRBodyReader)
+	if !ok {
+		t.Fatal("github adapter does not implement tracker.PRBodyReader")
+	}
+	body, err := reader.ReadPRBody("https://github.example/owner/repo/pull/7")
+	if err != nil {
+		t.Fatalf("ReadPRBody: %v", err)
+	}
+	if body != "## Demo\n\n- https://github.example/user-attachments/assets/1: it works\n" {
+		t.Errorf("ReadPRBody = %q, want $GH_STUB_BODY's own text", body)
+	}
+}
+
+// TestGithubAttachRewritesAnImageReferenceButNotABarePath pins the fake gh's
+// own model of the "Videos" rule (DECISIONS.md, gate finding r1-f3): a
+// markdown image reference to an attached file is rewritten in place to the
+// uploaded URL, alt text kept, but a bare path to one is left exactly as it
+// was. Attaching a file with no in-body reference at all still uploads it -
+// gh appends a `[<name>](<url>)` link naming it, the one record of that
+// upload a caller with no in-place rewrite to trust can read back and place
+// where its own reference stands (`rewriteUnrewrittenReferences`).
+func TestGithubAttachRewritesAnImageReferenceButNotABarePath(t *testing.T) {
+	a, _ := githubUnderStub(t, "", "")
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	const body = "## Demo\n\n" +
+		"- ![an image](./demo-1.png)\n" +
+		"- ./demo-2.mp4: a video\n"
+	if err := os.WriteFile(bodyFile, []byte(body), 0o644); err != nil {
+		t.Fatalf("write body file: %v", err)
+	}
+	mediaDir := t.TempDir()
+
+	creator := a.(tracker.PRCreatorWithMedia)
+	url, attached, err := creator.CreatePRWithMedia("jig/JIG-1", "main", "t", bodyFile, mediaDir, []string{"demo-1.png", "demo-2.mp4"})
+	if err != nil {
+		t.Fatalf("CreatePRWithMedia: %v", err)
+	}
+	if !attached {
+		t.Fatal("CreatePRWithMedia attached = false, want true")
+	}
+
+	got, err := a.(tracker.PRBodyReader).ReadPRBody(url)
+	if err != nil {
+		t.Fatalf("ReadPRBody: %v", err)
+	}
+	if strings.Contains(got, "./demo-1.png") {
+		t.Errorf("body = %q, want the image reference rewritten, not left as a relative path", got)
+	}
+	if !strings.Contains(got, "![an image](https://github.example/user-attachments/assets/1)") {
+		t.Errorf("body = %q, want the image reference rewritten to the uploaded URL, alt text kept", got)
+	}
+	if !strings.Contains(got, "- ./demo-2.mp4: a video") {
+		t.Errorf("body = %q, want the video's bare path left exactly as it was", got)
+	}
+	if !strings.Contains(got, "[demo-2.mp4](https://github.example/user-attachments/assets/2)") {
+		t.Errorf("body = %q, want gh to append the upload URL for the file it did not rewrite in place", got)
 	}
 }
 

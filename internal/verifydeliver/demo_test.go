@@ -19,6 +19,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/outcome"
+	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -1476,5 +1477,40 @@ func TestLeaveOutHostPathsNamesTheGoQuotedSpelling(t *testing.T) {
 		if strings.Contains(got, quoted(host)) {
 			t.Errorf("%q still names %s", got, quoted(host))
 		}
+	}
+}
+
+// TestContainsHostPathMatchesEveryHandedSpelling: containsHostPath is the
+// render-time check behind the owner's decision on r1-f13 (DECISIONS.md),
+// and so - unlike leaveOutHostPaths, which composes jig's own reasons - it
+// must also catch a directory's WSL mount spelling, the one herdr hands a
+// session on Windows: that is a spelling jig handed out, not jig's own
+// text, so a session's caption or summary can repeat it back. A path that
+// is not one of the known directories, in any spelling, is not matched:
+// comparison is exact strings only, never a pattern.
+func TestContainsHostPathMatchesEveryHandedSpelling(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join(t.TempDir(), "home")
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+	dirs := []hostDir{{home, "<jig home>"}}
+	wsl := session.WSLPath(home)
+
+	cases := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"the raw spelling", "under " + home + " somewhere", true},
+		{"the forward-slash spelling", "under " + filepath.ToSlash(home) + " somewhere", true},
+		{"the WSL mount spelling", "ran from " + wsl + " and it worked", true},
+		{"an unrelated path", "under " + elsewhere + " it worked", false},
+		{"no path at all", "it just worked", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := containsHostPath(c.text, dirs...); got != c.want {
+				t.Errorf("containsHostPath(%q) = %v, want %v", c.text, got, c.want)
+			}
+		})
 	}
 }

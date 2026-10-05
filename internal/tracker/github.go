@@ -16,9 +16,10 @@ import (
 // githubAdapter projects tickets onto GitHub Issues via the gh CLI,
 // invoked as argv (never through a shell).
 type githubAdapter struct {
-	gh    string
-	owner string
-	repo  string
+	gh            string
+	owner         string
+	repo          string
+	attachSupport map[string]bool // cached --attach support, keyed by subcommand ("pr create", "pr edit")
 }
 
 func newGithubAdapter(cfg project.Config) (*githubAdapter, error) {
@@ -74,16 +75,34 @@ func parseOwnerRepo(remote string) (string, string, error) {
 
 // run invokes gh with args, returning trimmed stdout.
 func (a *githubAdapter) run(args ...string) (string, error) {
+	return a.runInDir("", args...)
+}
+
+// runInDir invokes gh with args in the given directory, returning trimmed
+// stdout. If dir is empty, runs in the current directory. Trimmed stdout is
+// returned even when gh fails (folded into the error's own message, after
+// stderr): `gh pr create --attach` can print the pull request's URL on
+// stdout and then fail attaching a file, and a caller that discarded stdout
+// on that path would lose the one record of a pull request it already
+// opened.
+func (a *githubAdapter) runInDir(dir string, args ...string) (string, error) {
 	cmd := exec.Command(a.gh, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		out := strings.TrimSpace(stdout.String())
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", fmt.Errorf("tracker: gh %s: %s", strings.Join(args, " "), msg)
+		if out != "" {
+			msg = fmt.Sprintf("%s (stdout: %s)", msg, out)
+		}
+		return out, fmt.Errorf("tracker: gh %s: %s", strings.Join(args, " "), msg)
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
@@ -116,21 +135,62 @@ func (a *githubAdapter) Mint(d Draft) (string, error) {
 	return "#" + m[1], nil
 }
 
+// supportsAttach checks whether the installed gh supports --attach on
+// subcommand ("pr create" or "pr edit"), probing that exact subcommand's own
+// --help: the two subcommands' flag sets are not the same thing, so a
+// support check made against one must never gate the other. The result is
+// cached per subcommand, after its first check.
+func (a *githubAdapter) supportsAttach(subcommand string) bool {
+	if supported, ok := a.attachSupport[subcommand]; ok {
+		return supported
+	}
+	args := append(strings.Fields(subcommand), "--help")
+	out, err := a.run(args...)
+	supported := err == nil && strings.Contains(out, "--attach")
+	if a.attachSupport == nil {
+		a.attachSupport = map[string]bool{}
+	}
+	a.attachSupport[subcommand] = supported
+	return supported
+}
+
 // CreatePR implements tracker.PRCreator: it opens a GitHub pull request for
 // head against base via `gh pr create`, invoked as argv (never through a
 // shell, same as every other gh call this adapter makes), and returns the
 // PR's URL parsed from the last line of gh's stdout.
 func (a *githubAdapter) CreatePR(head, base, title, bodyFile string) (string, error) {
-	out, err := a.run("pr", "create", "--repo", a.repoSpec(), "--title", title, "--body-file", bodyFile, "--base", base, "--head", head)
-	if err != nil {
-		return "", err
+	url, _, err := a.CreatePRWithMedia(head, base, title, bodyFile, "", nil)
+	return url, err
+}
+
+// CreatePRWithMedia implements tracker.PRCreatorWithMedia: it opens a GitHub
+// pull request for head against base via `gh pr create`, run with mediaDir as
+// gh's own working directory so each of mediaFiles names a plain file gh can
+// find, adding one `--attach <file>` per file when mediaFiles is non-empty
+// and the installed gh supports it. attached reports whether the flags were
+// added; false whenever mediaFiles is empty or the installed gh does not
+// support --attach, in which case the pull request is still opened, with no
+// media.
+func (a *githubAdapter) CreatePRWithMedia(head, base, title, bodyFile, mediaDir string, mediaFiles []string) (string, bool, error) {
+	args := []string{"pr", "create", "--repo", a.repoSpec(), "--title", title, "--body-file", bodyFile, "--base", base, "--head", head}
+
+	attached := len(mediaFiles) > 0 && a.supportsAttach("pr create")
+	if attached {
+		for _, f := range mediaFiles {
+			args = append(args, "--attach", f)
+		}
 	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
+
+	out, err := a.runInDir(mediaDir, args...)
+	if err != nil {
+		return "", false, err
+	}
+	lines := strings.Split(out, "\n")
 	url := strings.TrimSpace(lines[len(lines)-1])
 	if url == "" {
-		return "", fmt.Errorf("tracker: gh pr create: could not parse PR url from %q", out)
+		return "", false, fmt.Errorf("tracker: gh pr create: could not parse PR url from %q", out)
 	}
-	return url, nil
+	return url, attached, nil
 }
 
 // pullRequest is one row of the pull requests REST endpoint's answer.
@@ -172,8 +232,29 @@ func (a *githubAdapter) FindOpenPR(head, base string) (string, error) {
 // UpdatePR implements tracker.PRUpdater: it replaces the body of the pull
 // request at url with bodyFile's content via `gh pr edit --body-file`.
 func (a *githubAdapter) UpdatePR(url, bodyFile string) error {
-	_, err := a.run("pr", "edit", url, "--repo", a.repoSpec(), "--body-file", bodyFile)
+	_, err := a.UpdatePRWithMedia(url, bodyFile, "", nil)
 	return err
+}
+
+// UpdatePRWithMedia implements tracker.PRUpdaterWithMedia: it replaces the
+// body of the pull request at url via `gh pr edit --body-file`, run with
+// mediaDir as gh's own working directory, adding one `--attach <file>` per
+// file when mediaFiles is non-empty and the installed gh's `pr edit`
+// supports it (checked on its own: `pr create` and `pr edit` do not
+// necessarily agree). attached reports whether the flags were added, the
+// same as CreatePRWithMedia's own.
+func (a *githubAdapter) UpdatePRWithMedia(url, bodyFile, mediaDir string, mediaFiles []string) (bool, error) {
+	args := []string{"pr", "edit", url, "--repo", a.repoSpec(), "--body-file", bodyFile}
+
+	attached := len(mediaFiles) > 0 && a.supportsAttach("pr edit")
+	if attached {
+		for _, f := range mediaFiles {
+			args = append(args, "--attach", f)
+		}
+	}
+
+	_, err := a.runInDir(mediaDir, args...)
+	return attached, err
 }
 
 // CommentPR implements tracker.PRCommenter: it posts a comment on the pull
@@ -181,6 +262,20 @@ func (a *githubAdapter) UpdatePR(url, bodyFile string) error {
 func (a *githubAdapter) CommentPR(url, bodyFile string) error {
 	_, err := a.run("pr", "comment", url, "--repo", a.repoSpec(), "--body-file", bodyFile)
 	return err
+}
+
+// ReadPRBody reads the body of the pull request at url via `gh pr view`.
+func (a *githubAdapter) ReadPRBody(url string) (string, error) {
+	out, err := a.run("pr", "view", url, "--repo", a.repoSpec(), "--json", "body")
+	if err != nil {
+		return "", err
+	}
+	// Parse the JSON output to extract the body field
+	var result map[string]string
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		return "", fmt.Errorf("tracker: failed to parse pr view output: %w", err)
+	}
+	return result["body"], nil
 }
 
 // Comment posts body as a comment on ticketID.

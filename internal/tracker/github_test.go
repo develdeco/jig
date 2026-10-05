@@ -165,22 +165,40 @@ func TestStubsNotImplemented(t *testing.T) {
 	}
 }
 
-func readLoggedArgv(t *testing.T, logFile string) [][]string {
+// ghStubCall is one line of the gh stub's log: its argv (argv[0] the stub
+// binary itself) and the working directory it ran in.
+type ghStubCall struct {
+	Argv []string `json:"argv"`
+	Dir  string   `json:"dir"`
+}
+
+// readLoggedCalls reads the gh stub's log, one ghStubCall per line.
+func readLoggedCalls(t *testing.T, logFile string) []ghStubCall {
 	t.Helper()
 	data, err := os.ReadFile(logFile)
 	if err != nil {
 		t.Fatalf("read gh stub log: %v", err)
 	}
-	var out [][]string
+	var out []ghStubCall
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		if line == "" {
 			continue
 		}
-		var argv []string
-		if err := json.Unmarshal([]byte(line), &argv); err != nil {
+		var c ghStubCall
+		if err := json.Unmarshal([]byte(line), &c); err != nil {
 			t.Fatalf("parse log line %q: %v", line, err)
 		}
-		out = append(out, argv)
+		out = append(out, c)
+	}
+	return out
+}
+
+func readLoggedArgv(t *testing.T, logFile string) [][]string {
+	t.Helper()
+	calls := readLoggedCalls(t, logFile)
+	out := make([][]string, len(calls))
+	for i, c := range calls {
+		out[i] = c.Argv
 	}
 	return out
 }

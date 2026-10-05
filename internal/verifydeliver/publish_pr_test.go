@@ -41,6 +41,18 @@ func (a githubPRs) CommentPR(url, bodyFile string) error {
 	return a.gh.(tracker.PRCommenter).CommentPR(url, bodyFile)
 }
 
+func (a githubPRs) CreatePRWithMedia(head, base, title, bodyFile, mediaDir string, mediaFiles []string) (string, bool, error) {
+	return a.gh.(tracker.PRCreatorWithMedia).CreatePRWithMedia(head, base, title, bodyFile, mediaDir, mediaFiles)
+}
+
+func (a githubPRs) UpdatePRWithMedia(url, bodyFile, mediaDir string, mediaFiles []string) (bool, error) {
+	return a.gh.(tracker.PRUpdaterWithMedia).UpdatePRWithMedia(url, bodyFile, mediaDir, mediaFiles)
+}
+
+func (a githubPRs) ReadPRBody(url string) (string, error) {
+	return a.gh.(tracker.PRBodyReader).ReadPRBody(url)
+}
+
 // useGithubPRs points d at the fake gh, which lists pulls (fixture.GhPulls) as
 // the repo's pull requests ("" for none) and fails the call named by fail ("" for
 // none), and returns the file it logs every argv to. It sets the process
@@ -52,6 +64,7 @@ func useGithubPRs(t *testing.T, d *Deps, pulls, fail string) string {
 	logFile := filepath.Join(t.TempDir(), "gh.log")
 	t.Setenv("GH_STUB_LOG", logFile)
 	t.Setenv("GH_STUB_STATE", filepath.Join(t.TempDir(), "gh.state"))
+	t.Setenv("GH_STUB_BODY_STATE", filepath.Join(t.TempDir(), "gh-body.state"))
 	t.Setenv("GH_STUB_PULLS", pulls)
 	t.Setenv("GH_STUB_FAIL", fail)
 
@@ -70,8 +83,15 @@ func useGithubPRs(t *testing.T, d *Deps, pulls, fail string) string {
 	return logFile
 }
 
-// loggedGh reads the fake gh's log: one argv per call, argv[0] the binary.
-func loggedGh(t *testing.T, logFile string) [][]string {
+// ghLogLine is one line of the fake gh's log: its argv (argv[0] the stub
+// binary itself) and the working directory it ran in.
+type ghLogLine struct {
+	Argv []string `json:"argv"`
+	Dir  string   `json:"dir"`
+}
+
+// loggedGhCalls reads the fake gh's log in full, one ghLogLine per call.
+func loggedGhCalls(t *testing.T, logFile string) []ghLogLine {
 	t.Helper()
 	data, err := os.ReadFile(logFile)
 	if err != nil {
@@ -80,16 +100,28 @@ func loggedGh(t *testing.T, logFile string) [][]string {
 		}
 		t.Fatalf("read the gh log: %v", err)
 	}
-	var out [][]string
+	var out []ghLogLine
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		if line == "" {
 			continue
 		}
-		var argv []string
-		if err := json.Unmarshal([]byte(line), &argv); err != nil {
+		var c ghLogLine
+		if err := json.Unmarshal([]byte(line), &c); err != nil {
 			t.Fatalf("parse gh log line %q: %v", line, err)
 		}
-		out = append(out, argv[1:])
+		out = append(out, c)
+	}
+	return out
+}
+
+// loggedGh reads the fake gh's log: one argv per call, the stub binary
+// itself (argv[0]) dropped.
+func loggedGh(t *testing.T, logFile string) [][]string {
+	t.Helper()
+	calls := loggedGhCalls(t, logFile)
+	out := make([][]string, len(calls))
+	for i, c := range calls {
+		out[i] = c.Argv[1:]
 	}
 	return out
 }

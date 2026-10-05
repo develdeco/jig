@@ -88,20 +88,27 @@ and drives the real `jig` binary every time.
   `gate-reviewer.tape` records, `jig publish --yes` on the local tracker (the
   report's `pushed` and `pr_body` rows, an empty `pr_url` table since the
   local tracker opens no pull request), and a `cat` of the two files the
-  pull request's own three-section body and its findings detail come from:
-  `pr/fixture-repo.md` (Intent, What changed, Verification, and nothing
-  else) and `pr/review-notes.md` (every finding from every round, ordered by
-  risk, with how it ended, and coverage). The rounds that reach that clean,
+  pull request's own body and its findings detail come from: `pr/fixture-repo.md`
+  (Intent, What changed, Demo, and Verification - the `reviewer` scenario
+  scripts a demo for its clean round 3, so the shipped head has one recorded,
+  and the section's two media references sit between What changed and
+  Verification, uploading nothing since this is the local tracker) and
+  `pr/review-notes.md` (every finding from every round, ordered by risk,
+  with how it ended, and coverage). The rounds that reach that clean,
   publishable state - the same fix-kept/fix-dismissed/ask-kept-with-decision
-  rounds `gate-reviewer.tape` records on camera - run hidden here, since this
-  tape's own subject is what publish writes, not the gate's triage prompt;
-  see that tape's own header for their citation.
+  rounds `gate-reviewer.tape` records on camera, plus the round 3 demo
+  neither tape shows dispatching - run hidden here, since this tape's own
+  subject is what publish writes, not the gate's triage prompt or its demo
+  session; see that tape's own header for their citation.
   `cmd/jig/gate_reviewer_e2e_test.go`'s `TestGateReviewerRoundsThroughMain`
-  pins the same scripted stdin's findings and outcomes, and
-  `internal/verifydeliver/render.go` (`writePRBody`, `writeReviewNotes`) is
-  what `cat` shows. No interactive prompt appears on camera, so every `Wait`
-  shown is bare; the hidden rounds' `Wait+Line` anchors are
-  `gate-reviewer.tape`'s own, unchanged.
+  pins the same scripted stdin's findings, outcomes and recorded demo, and
+  `cmd/jig/publish_demo_e2e_test.go`'s `TestPublishAttachesTheGateDemoThroughMain`
+  pins the body's resulting `## Demo` section (over the simpler `demo`
+  scenario, the same two media files); `internal/verifydeliver/render.go`
+  (`writePRBody`, `renderDemoSection`, `writeReviewNotes`) is what `cat`
+  shows. No interactive prompt appears on camera, so every `Wait` shown is
+  bare; the hidden rounds' `Wait+Line` anchors are `gate-reviewer.tape`'s
+  own, unchanged.
 
 ## Rule: fixture data only
 

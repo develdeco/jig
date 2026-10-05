@@ -389,9 +389,21 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	prPath, omittedBriefIntent, err := writePRBody(d.Store, ticket, repoName, slices, gateRep, tier, commits, authorCommits, oracleNames, outcomes)
+	prPath, omittedBriefIntent, demoResult, err := writePRBody(d.Store, ticket, repoName, slices, gateRep, tier, commits, authorCommits, oracleNames, outcomes, d, lastRound)
 	if err != nil {
 		return PublishReport{}, err
+	}
+
+	// The media directory and file names for attachment, when a demo has
+	// verified files: demoResult.MediaDir is the evidence directory
+	// renderDemoSection already resolved and verified these very files
+	// against, for the head the gate reviewed - never recomputed here from
+	// head, which by this point is the post-squash tip and names no
+	// evidence directory that exists.
+	mediaDir := demoResult.MediaDir
+	mediaFiles := make([]string, 0, len(demoResult.MediaFiles))
+	for _, f := range demoResult.MediaFiles {
+		mediaFiles = append(mediaFiles, f.Name)
 	}
 	// A brief that bound as the intent source but has no "## " section with
 	// text to publish as one - no such heading anywhere, or a first section
@@ -411,6 +423,37 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if omittedBriefIntent {
 		warn("jig: the pull request body for %s has no ## Intent section: %s has no \"## \" section with text to publish as one\n",
 			ticket, intentFilePath(d.Store, ticket, IntentSourceBrief))
+	}
+
+	// Report demo status: no demo recorded, a demo refused outright, every
+	// file of a recorded demo failing verification, or some files omitted
+	// from an otherwise rendered section. The three ways a published body
+	// ends up with no ## Demo section (no demo at all, a demo refused
+	// outright, or one whose media all failed verification) are told apart
+	// here, which half of the pipeline to blame.
+	switch {
+	case demoResult.NoDemo:
+		warn("jig: no demo recorded for %s\n", ticket)
+	case demoResult.DemoRefused:
+		warn("jig: the demo recorded for %s was refused: %s\n", ticket, demoResult.RefusalReason)
+	case demoResult.AllMediaFailed:
+		warn("jig: the pull request body for %s has no ## Demo section: all media files from the recorded demo failed verification: %v\n",
+			ticket, demoResult.Omitted)
+	case len(demoResult.Omitted) > 0:
+		warn("jig: media files omitted from the pull request body for %s: %v (missing or changed)\n",
+			ticket, demoResult.Omitted)
+	}
+
+	// Report any summary or caption left out of the rendered section because
+	// it named one of jig's own directories (the owner's decision on r1-f13,
+	// DECISIONS.md): independent of the switch above, since a section can be
+	// otherwise rendered in full.
+	if demoResult.ScrubbedSummary {
+		warn("jig: the demo summary for %s named one of jig's own directories and was left out of the pull request body\n", ticket)
+	}
+	if len(demoResult.ScrubbedCaptions) > 0 {
+		warn("jig: captions left out of the pull request body for %s because they named one of jig's own directories: %v\n",
+			ticket, demoResult.ScrubbedCaptions)
 	}
 
 	if err := writeReviewNotes(d.Store, ticket, lastRound, lastSummary, outcomes, reviewedPaths, touchedFiles); err != nil {
@@ -444,23 +487,82 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// not that one (FindOpenPR): the operator asked to publish, so one is
 	// opened, and the others are left as they are.
 	prURL, prOutcome := "", ""
+
 	switch {
 	case openPR != "":
-		if err := adapter.(tracker.PRUpdater).UpdatePR(openPR, filepath.Join(d.Store.Root, prPath)); err != nil {
-			return PublishReport{}, fmt.Errorf("verifydeliver: publish: update PR %s: %w", openPR, err)
+		// Try to update with media if supported
+		if updater, ok := adapter.(tracker.PRUpdaterWithMedia); ok && len(mediaFiles) > 0 {
+			attached, err := updater.UpdatePRWithMedia(openPR, filepath.Join(d.Store.Root, prPath), mediaDir, mediaFiles)
+			if err != nil {
+				return PublishReport{}, fmt.Errorf("verifydeliver: publish: update PR %s with media: %w", openPR, err)
+			}
+			if !attached {
+				warn("jig: the installed gh does not support --attach; the pull request updated for %s carries no media\n", ticket)
+			}
+		} else {
+			if err := adapter.(tracker.PRUpdater).UpdatePR(openPR, filepath.Join(d.Store.Root, prPath)); err != nil {
+				return PublishReport{}, fmt.Errorf("verifydeliver: publish: update PR %s: %w", openPR, err)
+			}
 		}
 		prURL, prOutcome = openPR, "updated"
 	default:
 		if creator, ok := adapter.(tracker.PRCreator); ok {
-			url, err := creator.CreatePR(branch, target, title, filepath.Join(d.Store.Root, prPath))
-			if err != nil {
-				return PublishReport{}, fmt.Errorf("verifydeliver: publish: create PR: %w", err)
+			// Try to create with media if supported
+			if creatorWithMedia, ok := adapter.(tracker.PRCreatorWithMedia); ok && len(mediaFiles) > 0 {
+				url, attached, err := creatorWithMedia.CreatePRWithMedia(branch, target, title, filepath.Join(d.Store.Root, prPath), mediaDir, mediaFiles)
+				if err != nil {
+					return PublishReport{}, fmt.Errorf("verifydeliver: publish: create PR with media: %w", err)
+				}
+				if !attached {
+					warn("jig: the installed gh does not support --attach; the pull request opened for %s carries no media\n", ticket)
+				}
+				prURL, prOutcome = url, "opened"
+			} else {
+				url, err := creator.CreatePR(branch, target, title, filepath.Join(d.Store.Root, prPath))
+				if err != nil {
+					return PublishReport{}, fmt.Errorf("verifydeliver: publish: create PR: %w", err)
+				}
+				prURL, prOutcome = url, "opened"
 			}
-			prURL, prOutcome = url, "opened"
 		}
 	}
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: "pr", Outcome: prOutcome, Commit: head}); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
+	}
+
+	// Check for unrewritten demo references if media was attached. A failed
+	// read-back is a warning, not silence: media were just uploaded, and the
+	// read-back is the one signal that says whether the references actually
+	// point at them now. gh rewrites an image reference in place but leaves
+	// other forms as they were - a bare video path among them, "Videos",
+	// DECISIONS.md - so a reference still unrewritten is patched here, not
+	// merely reported: the URL gh appended for that file (recorded in the very
+	// body just read back) moves to where the reference stands, and the pull
+	// request gets a second edit with the fix. Only a name gh appended no URL
+	// for at all - the read-back carries no record of it - is left as it was
+	// and named in the warning, the one case nothing here can fix.
+	if prURL != "" && len(mediaFiles) > 0 {
+		if reader, ok := adapter.(tracker.PRBodyReader); ok {
+			body, err := reader.ReadPRBody(prURL)
+			if err != nil {
+				warn("jig: read back the pull request body for %s to check for unrewritten media references: %v\n", ticket, err)
+			} else if unrewritten := checkUnrewrittenReferences(body, demoResult.MediaFiles); len(unrewritten) > 0 {
+				patched, changed, stillUnrewritten := rewriteUnrewrittenReferences(body, unrewritten)
+				if changed {
+					bodyPath := filepath.Join(d.Store.Root, prPath)
+					if err := os.WriteFile(bodyPath, []byte(patched), 0o644); err != nil {
+						warn("jig: write the patched pull request body for %s: %v\n", ticket, err)
+					} else if updater, ok := adapter.(tracker.PRUpdater); ok {
+						if err := updater.UpdatePR(prURL, bodyPath); err != nil {
+							warn("jig: rewrite unrewritten media references in the pull request body for %s: %v\n", ticket, err)
+						}
+					}
+				}
+				if len(stillUnrewritten) > 0 {
+					warn("jig: unrewritten media references in the pull request body for %s: %v\n", ticket, stillUnrewritten)
+				}
+			}
+		}
 	}
 
 	// Post the review notes as a comment on the pull request, if supported.
