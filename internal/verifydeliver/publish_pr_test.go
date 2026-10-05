@@ -266,6 +266,71 @@ func TestPublishOpensAPRWhenTheBranchHasNoOpenOneIntoTheTarget(t *testing.T) {
 	}
 }
 
+// TestPublishWithNoHostMakesNoGhCall: the fixture's own remote is a plain
+// local path, the configuration this store itself runs under - repohost.New
+// finds no pull-request host there (repohost.TestNewReturnsNilForNonGitHub
+// pins that inference alone). The fake gh goes on PATH, but the remote is
+// never swapped to githubRemote the way useGithubHost would: Publish must
+// make no gh call at all over it, not even to check gh is installed
+// (repohost.New returns nil before it ever looks). It asks the push-only
+// confirmation question - no open PR to name and no host - and journals `pr`
+// with none:no-host, not opened or updated.
+//
+// This test must stay serial: it puts the fake gh on PATH and swaps the
+// package-level confirm hook, which every parallel test's Publish reads.
+func TestPublishWithNoHostMakesNoGhCall(t *testing.T) {
+	origConfirm := confirm
+	defer func() { confirm = origConfirm }()
+
+	stubDir := fixture.GhStub(t)
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	logFile := filepath.Join(t.TempDir(), "gh.log")
+	t.Setenv("GH_STUB_LOG", logFile)
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	gateToClean(t, fx, d)
+
+	var gotBranch, gotPR string
+	var gotHasHost bool
+	confirm = func(branch, _, openPR string, hasHost bool) bool {
+		gotBranch, gotPR, gotHasHost = branch, openPR, hasHost
+		return true
+	}
+
+	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	if gotBranch != ticketBranch(fx.Ticket) || gotPR != "" || gotHasHost {
+		t.Errorf("confirm asked (branch=%q, openPR=%q, hasHost=%v), want the ticket's branch, no open PR and hasHost=false", gotBranch, gotPR, gotHasHost)
+	}
+	if calls := loggedGh(t, logFile); len(calls) != 0 {
+		t.Errorf("gh calls = %v, want none: the fixture's remote has no pull-request host", calls)
+	}
+	if report.PRURL["fixture-repo"] != "" || report.PRUpdated["fixture-repo"] {
+		t.Errorf("report: PR %q updated=%v, want empty and false: no pull-request host", report.PRURL["fixture-repo"], report.PRUpdated["fixture-repo"])
+	}
+	if got := originRef(t, fx.RepoRemote, "refs/heads/"+ticketBranch(fx.Ticket)); got == "" {
+		t.Errorf("origin has no %s after a confirmed publish with no pull-request host, want the branch pushed", ticketBranch(fx.Ticket))
+	}
+
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatalf("journal.Read: %v", err)
+	}
+	var prLines []journal.Line
+	for _, l := range lines {
+		if l.Event == "pr" {
+			prLines = append(prLines, l)
+		}
+	}
+	if len(prLines) != 1 || prLines[0].Outcome != "none:no-host" {
+		t.Errorf("journal pr lines = %+v, want exactly one recording none:no-host", prLines)
+	}
+}
+
 // TestPublishRefusesWhenItCannotTellWhetherThereIsAPR: a lookup that fails is
 // not "no pull request", which would open a second one. The publish is refused
 // before its first store write and before anything is pushed: the journal is
