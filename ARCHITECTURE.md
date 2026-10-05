@@ -252,7 +252,10 @@ Three backends implement that same narrow interface:
   and read tools, though the operator's own user settings (which still
   load) can grant more on top. Edits are granted only inside the lease, on
   the dispatch's own `result.json`, and - for a gate demo - inside its one
-  `ExtraWriteDir` (see Safety). The shell and reads it
+  `ExtraWriteDir` (see Safety). Its shell waits up to 30 minutes on a
+  command before the CLI moves it to the background, so a slice's oracle
+  finishes in the foreground
+  ([ADR 0018](docs/adr/0018-builders-test-narrowly.md)). The shell and reads it
   grants are the operator's own and are not confined to the lease, so this
   backend is not a security boundary.
 - **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); it has no PreToolUse hook to attach a screen to, so herdr sessions are not screened. It scopes no edits, so a dispatch's `ExtraWriteDir` needs no grant there. On Windows it creates the workspace at the worktree's WSL mount and rewrites the prompt's own mentions of every path of the dispatch (worktree, input and result files, `ExtraWriteDir`) to their mounts, as headless does its long spelling; the files jig wrote keep the host spelling of the paths they hold. A failed herdr command is named in an error by its subcommand and herdr's stderr, never by its operands (the prompt, the worktree).

@@ -62,6 +62,16 @@ func (b *headlessBackend) hookBinary() (string, error) {
 // hook that has stopped making progress at all, not to hurry one along.
 const defaultHeadlessTimeout = 90 * time.Minute
 
+// shellCommandTimeout is how long a headless session's shell waits on one
+// command before Claude Code moves it to the background: both the CLI's
+// default for a call that names no timeout (BASH_DEFAULT_TIMEOUT_MS, 2
+// minutes in the CLI) and the most a call may ask for (BASH_MAX_TIMEOUT_MS,
+// 10). A slice's oracle has to fit in it, and an unattended session can only
+// poll a command the CLI backgrounded: jig's own `go test
+// ./internal/verifydeliver/` takes about 9 minutes on a Windows dev machine
+// (ADR 0018).
+const shellCommandTimeout = 30 * time.Minute
+
 // headlessTimeout is defaultHeadlessTimeout, or the Go duration in
 // JIG_HEADLESS_TIMEOUT. A value that does not parse, or is not positive, is
 // refused rather than ignored: an operator who set a bound and got the
@@ -351,7 +361,9 @@ func (b *headlessBackend) args(d Dispatch) (argv []string, cleanup func(), err e
 // parses the path) on every tool call, and its allow is this settings
 // object's only grant for the screen.Granted tools - the operator's own
 // user settings, loaded on top, can still grant more. Without d.Screen
-// those tools get plain allow rules instead, unscreened.
+// those tools get plain allow rules instead, unscreened. Either way its env
+// sets the shell's command timeout (shellCommandTimeout), which the CLI
+// applies over the operator's own settings.
 func (b *headlessBackend) settings(d Dispatch) (string, error) {
 	worktree, err := filepath.Abs(d.Worktree)
 	if err != nil {
@@ -398,6 +410,11 @@ func (b *headlessBackend) settings(d Dispatch) (string, error) {
 		allow = append(allow, screen.Granted...)
 	}
 	settings["permissions"] = map[string]any{"allow": allow}
+	commandMS := strconv.FormatInt(shellCommandTimeout.Milliseconds(), 10)
+	settings["env"] = map[string]string{
+		"BASH_DEFAULT_TIMEOUT_MS": commandMS,
+		"BASH_MAX_TIMEOUT_MS":     commandMS,
+	}
 	data, err := json.Marshal(settings)
 	if err != nil {
 		return "", err

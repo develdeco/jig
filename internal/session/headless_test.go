@@ -81,9 +81,11 @@ func missingDispatch(t *testing.T, screen bool) Dispatch {
 // for the lease worktree and the result file only, and - when screened -
 // the exec-form `jig _screen` hook as the only grant for the shell and read
 // tools, which get no allow rule of their own. Unscreened, those tools get
-// plain allow rules and there is no hook.
+// plain allow rules and there is no hook. Either way the shell waits 30
+// minutes on a command, by default and at most (ADR 0018).
 func TestHeadlessSettings(t *testing.T) {
 	b := &headlessBackend{goos: "linux", screenBinary: "/opt/jig/bin/jig"}
+	shellEnv := map[string]any{"BASH_DEFAULT_TIMEOUT_MS": "1800000", "BASH_MAX_TIMEOUT_MS": "1800000"}
 
 	d := missingDispatch(t, true)
 	edits := []string{
@@ -110,6 +112,7 @@ func TestHeadlessSettings(t *testing.T) {
 				},
 			},
 		},
+		"env": shellEnv,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("screened settings =\n%s\nwant\n%v", raw, want)
@@ -126,6 +129,7 @@ func TestHeadlessSettings(t *testing.T) {
 	}
 	want = map[string]any{
 		"permissions": map[string]any{"allow": toAny(append(edits, "Bash", "Read", "Glob", "Grep"))},
+		"env":         shellEnv,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("unscreened settings =\n%s\nwant\n%v", raw, want)

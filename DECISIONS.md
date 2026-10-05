@@ -2895,3 +2895,7 @@ The staircase's floor was a keyword regex (`BigDecimal|rounding|migration|...`),
 ## Tests at agreed seams (slice RR-3)
 
 Briefs that list test cases one by one and demand that every new test fail when its rule is removed create large test suites. The intake skill now asks every brief for a `## Seams` section naming public interfaces and critical paths, never test cases; builders and the reviewer hold briefs to their seams. The reviewer's prompt gains one principle sentence after the action definition: "Tests belong at the seams the intent names: a missing test is a problem only at one of those seams or as the proof of a defect you report, and a test elsewhere is at most a note." See [ADR 0016](docs/adr/0016-tests-at-agreed-seams.md).
+
+## Builders test narrowly (build-speed item 2)
+
+The dispatch prompt now says to run only the tests that cover the change while working, and the oracle once at the end. It names no test runner, since jig builds any repo. Every headless session's `--settings` env sets the CLI's shell timeouts, `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`, both to 30 minutes, so an oracle finishes in the foreground instead of being backgrounded at the CLI's 2-minute default and polled. It lives in `--settings` rather than the child's environment for two reasons: `Options.Env` is an exact environment, and the CLI applies a settings source's env over the inherited one. herdr sessions keep the CLI's defaults. See [ADR 0018](docs/adr/0018-builders-test-narrowly.md).
