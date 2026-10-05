@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,10 +8,9 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/tracker"
 )
 
-// cmdTicket implements `jig ticket new --title <t> [--body <b>]`.
+// cmdTicket implements `jig ticket new --title <t>`.
 func cmdTicket(args []string, stdout io.Writer) int {
 	sub, rest, err := requirePositional(args, "subcommand (new)")
 	if err != nil {
@@ -31,7 +29,6 @@ func cmdTicket(args []string, stdout io.Writer) int {
 
 	fs := newFlagSet("ticket new")
 	title := fs.String("title", "", "ticket title (required)")
-	body := fs.String("body", "", "ticket body")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -48,49 +45,13 @@ func cmdTicket(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	adapter, err := tracker.New(cfg, st)
+	// jig mints every id itself, through the store package's own
+	// ticket_format counter, whatever project.yaml says about trackers:
+	// Mint computes the next id, refuses one jig cannot use before writing
+	// anything, and creates the ticket's folder and ticket.yaml together.
+	id, err := st.Mint(cfg.TicketFormat, store.Ticket{Title: *title})
 	if err != nil {
 		return renderErr(stdout, err)
-	}
-	id, err := adapter.Mint(tracker.Draft{Title: *title, Body: *body})
-	if err != nil {
-		return renderErr(stdout, err)
-	}
-	// The local tracker refuses an unusable id before writing anything; any
-	// other tracker's id is known only once it has created the ticket, so it
-	// is refused here, before anyone writes a brief under it.
-	if err := tracker.CheckMinted(adapter, id); err != nil {
-		return renderErr(stdout, err)
-	}
-
-	// Record the title on every tracker, not only the local one (whose Mint
-	// already creates the ticket's store folder itself): creating the record
-	// also creates the ticket's store folder, which requireTicket needs and
-	// a github or command tracker's Mint does not make. The record is
-	// created, never merged into: an id that already has a ticket.yaml means
-	// some earlier, unrelated write claimed it in the store, and no Mint
-	// (local, github, command) makes that file itself. The check is on the
-	// record, not on the folder: a folder with no ticket.yaml has no claim to
-	// protect (the intake skill writes one for a ticket that exists only in
-	// its tracker, and a ticket minted before jig recorded titles has one
-	// too), so the record is created in it.
-	//
-	// The tracker-side ticket exists by now (the same unavoidable ordering as
-	// the reserved-id refusal above), so a failure here says so and tells the
-	// operator not to mint again for it.
-	if err := st.CreateTicketRecord(id, store.Ticket{Title: *title}); err != nil {
-		doNotMint := "do not run `jig ticket new` again for it"
-		if errors.Is(err, store.ErrTicketRecordExists) {
-			return renderErr(stdout, mintedIDCollision(adapter.Name(), id, st.TicketFilePath(id), doNotMint))
-		}
-		return renderErr(stdout, &axi.Error{
-			Msg:  fmt.Sprintf("the %s tracker minted %s, but recording its title in the store failed: %v", adapter.Name(), id, err),
-			Code: "VALIDATION_ERROR",
-			Help: []string{
-				fmt.Sprintf("%s now exists in the %s tracker; %s", id, adapter.Name(), doNotMint),
-				fmt.Sprintf("Resolve the store error above, then write its title into %s by hand", st.TicketFilePath(id)),
-			},
-		})
 	}
 
 	axi.Render(stdout,
@@ -98,26 +59,6 @@ func cmdTicket(args []string, stdout io.Writer) int {
 		axi.Help(getWorkHints(id)...),
 	)
 	return 0
-}
-
-// mintedIDCollision is the refusal for a minted id whose store folder already
-// holds a ticket.yaml: some earlier, unrelated write claimed the id, so the
-// record is that ticket's own, and it is neither merged into nor deleted. The
-// tracker-side ticket exists by then (a github or command tracker's id is
-// known only once it has created the ticket), so the help says so first;
-// again is what the operator must not do about it, which differs by command
-// (mint again with jig ticket new, re-run jig graduate). Both commands that
-// mint into the store refuse this collision with this one message and one
-// recovery story.
-func mintedIDCollision(trackerName, id, recordPath, again string) *axi.Error {
-	return &axi.Error{
-		Msg:  fmt.Sprintf("the %s tracker minted %s, but the store already has a ticket.yaml for %s", trackerName, id, id),
-		Code: "VALIDATION_ERROR",
-		Help: []string{
-			fmt.Sprintf("%s now exists in the %s tracker; %s", id, trackerName, again),
-			fmt.Sprintf("Inspect %s to see which ticket already claims this id: it is that ticket's record, so do not delete it - resolve the collision by hand", recordPath),
-		},
-	}
 }
 
 // intakeHint is the next step for a ticket that has no slices yet.
@@ -147,10 +88,7 @@ func requireTicket(st *store.Store, ticket string) error {
 	return &axi.Error{
 		Msg:  fmt.Sprintf("ticket %s not found in the store at %s", ticket, st.Root),
 		Code: "VALIDATION_ERROR",
-		Help: []string{
-			"Run `jig ticket new --title \"...\"` to mint a ticket",
-			"For a ticket that exists only in the tracker, write its brief.md and slices.yaml (the intake skill drafts both)",
-		},
+		Help: []string{"Run `jig ticket new --title \"...\"` to mint a ticket"},
 	}
 }
 

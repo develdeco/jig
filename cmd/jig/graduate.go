@@ -12,7 +12,6 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/tracker"
 )
 
 // cmdGraduate implements `jig graduate <chart> [--store <path>] [--project <name>]`.
@@ -106,24 +105,19 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 			filePosToDraftIdx[entryIdx] = di
 		}
 
-		adapter, err := tracker.New(cfg, st)
-		if err != nil {
-			return renderErr(stdout, err)
-		}
-
-		drafts := make([]tracker.Draft, len(toCreate))
+		drafts := make([]store.Draft, len(toCreate))
 		for di, entryIdx := range toCreate {
 			e := entries[entryIdx]
-			var blockers []tracker.Blocker
+			var blockers []store.Blocker
 			for _, r := range refs[entryIdx] {
 				if r.knownID != "" {
-					blockers = append(blockers, tracker.Blocker{Ref: r.knownID, Kind: r.kind})
+					blockers = append(blockers, store.Blocker{Ref: r.knownID, Kind: r.kind})
 					continue
 				}
 				targetDraftIdx := filePosToDraftIdx[r.pending-1]
-				blockers = append(blockers, tracker.Blocker{Ref: fmt.Sprintf("#%d", targetDraftIdx+1), Kind: r.kind})
+				blockers = append(blockers, store.Blocker{Ref: fmt.Sprintf("#%d", targetDraftIdx+1), Kind: r.kind})
 			}
-			drafts[di] = tracker.Draft{Title: e.Title, Body: e.Body, BlockedBy: blockers}
+			drafts[di] = store.Draft{Title: e.Title, Body: e.Body, BlockedBy: blockers}
 		}
 
 		// Write the newly minted id into its chart entry as soon as that
@@ -131,7 +125,7 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 		// through then leaves every already-created ticket recorded in the
 		// file, and a re-run continues where it stopped instead of minting
 		// duplicates. recorded[di] is set only once that write-back lands, so
-		// graduateFailure can tell a ticket tracker.Graduate minted but this
+		// graduateFailure can tell a ticket store.Graduate minted but this
 		// call never got to record (recorded[di] still false) from one that
 		// is actually safe to re-run over.
 		recorded := make([]bool, len(toCreate))
@@ -152,9 +146,9 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 			return nil
 		}
 
-		g := tracker.Graduation{Chart: chart, Tickets: drafts}
-		if ids, err := tracker.Graduate(adapter, st, g, onMinted); err != nil {
-			return renderErr(stdout, graduateFailure(st, adapter.Name(), chart, toCreate, ids, recorded, err))
+		g := store.Graduation{Chart: chart, Tickets: drafts}
+		if ids, err := st.Graduate(cfg.TicketFormat, g, onMinted); err != nil {
+			return renderErr(stdout, graduateFailure(chart, toCreate, ids, recorded, err))
 		}
 	}
 
@@ -261,31 +255,26 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 	return 0
 }
 
-// graduateFailure turns a tracker.Graduate error into one the operator can
+// graduateFailure turns a store.Graduate error into one the operator can
 // recover from. An error that already carries its own Help keeps it and
-// its code, and gains the entries this run already created and recorded:
-// onMinted's own failure (a WriteChart error) names the one entry it
-// orphaned, and an id jig cannot use (tracker.CheckMinted) names the tracker
-// ticket to close, and neither says what came before it. Any other failure -
-// Mint, the store-folder MkdirAll, or the ticket.yaml write, none of which
-// onMinted ever saw - is raw and would otherwise reach renderErr as a bare
-// "code: ERROR".
+// its code (an id jig cannot use, store.Mint's own refusal, in particular),
+// and gains the entries this run already created and recorded: onMinted's
+// own failure (a WriteChart error) names the one entry it orphaned, and
+// neither says what came before it. Any other failure - Mint's own write,
+// none of which onMinted ever saw - is raw and would otherwise reach
+// renderErr as a bare "code: ERROR".
 //
-// A minted id that collides with a ticket.yaml already in the store
-// (store.ErrTicketRecordExists) is the one such failure whose folder is not
-// this run's to delete: it holds another ticket's record. It gets the
-// message and help jig ticket new gives the same collision
-// (mintedIDCollision), not the orphan help below.
-//
-// ids and recorded are tracker.Graduate's return value and this call's own
-// write-back bookkeeping, both indexed like toCreate: ids[di] is set for
-// every entry that reached a successful Mint, but recorded[di] is set only
+// ids and recorded are store.Graduate's return value and this call's own
+// write-back bookkeeping, both indexed like toCreate: ids[di] is set only
+// once store.Mint has fully minted that entry - its folder and ticket.yaml
+// both exist - never for one store.Mint refused, so every non-empty id here
+// names a ticket genuinely sitting in the store. recorded[di] is set only
 // once onMinted's write-back for it actually landed in the chart file.
-// tracker.Graduate calls onMinted for entry di before minting entry di+1, so
+// store.Graduate calls onMinted for entry di before minting entry di+1, so
 // at most one entry - the last one with a non-empty id - can have a ticket
 // minted but not recorded; that one is not safe to re-run over; every other
 // non-empty id is.
-func graduateFailure(st *store.Store, trackerName, chart string, toCreate []int, ids []string, recorded []bool, err error) error {
+func graduateFailure(chart string, toCreate []int, ids []string, recorded []bool, err error) error {
 	var done []string
 	orphanDi := -1
 	for di, id := range ids {
@@ -313,16 +302,6 @@ func graduateFailure(st *store.Store, trackerName, chart string, toCreate []int,
 		withDone := *ae
 		withDone.Msg = alreadyCreated(ae.Msg)
 		return &withDone
-	}
-
-	if orphanDi >= 0 && errors.Is(err, store.ErrTicketRecordExists) {
-		id := ids[orphanDi]
-		collision := mintedIDCollision(trackerName, id, st.TicketFilePath(id), fmt.Sprintf(
-			"entry %d of charts/%s/tickets.yaml has no id, so re-running `jig graduate %s` before this is settled mints a second ticket for it",
-			toCreate[orphanDi]+1, chart, chart,
-		))
-		collision.Msg = alreadyCreated(collision.Msg)
-		return collision
 	}
 
 	msg := alreadyCreated(err.Error())

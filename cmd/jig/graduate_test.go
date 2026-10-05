@@ -12,7 +12,6 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/tracker"
 )
 
 // setupGraduateStore initializes a standalone store in a fresh repo and
@@ -52,6 +51,25 @@ func writeChart(t *testing.T, storeRoot, name, content string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "tickets.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// rewriteTicketFormat replaces storeRoot's project.yaml ticket_format
+// ("T-{n}", jig init --standalone's default) with format, so a test can mint
+// through a ticket_format of its own choosing.
+func rewriteTicketFormat(t *testing.T, storeRoot, format string) {
+	t.Helper()
+	path := filepath.Join(storeRoot, "project.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewritten := strings.Replace(string(data), "T-{n}", format, 1)
+	if rewritten == string(data) {
+		t.Fatalf("project.yaml has no T-{n} ticket_format to rewrite:\n%s", data)
+	}
+	if err := os.WriteFile(path, []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -697,10 +715,10 @@ func TestGraduateFullyGraduatedStillAdvises(t *testing.T) {
 // TestGraduateMidRunFailureIsRecoverable covers the command-level invariant
 // the per-mint write-back exists for: after a run fails partway through, a
 // re-run creates exactly the tickets still missing, rather than minting a
-// duplicate for an entry that already succeeded. The local adapter's Mint
-// skips non-directories when it picks max+1 (internal/tracker/local.go),
-// so a plain file named T-2 makes entry B's Mint fail once entry A has
-// already taken T-1 - no fake adapter needed.
+// duplicate for an entry that already succeeded. store.Mint skips
+// non-directories when it picks max+1 (internal/store/mint.go), so a plain
+// file named T-2 makes entry B's mint fail once entry A has already taken
+// T-1 - no fake adapter needed.
 func TestGraduateMidRunFailureIsRecoverable(t *testing.T) {
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
@@ -778,19 +796,17 @@ func TestGraduateMidRunFailureIsRecoverable(t *testing.T) {
 // TestGraduateFailureDistinguishesOrphanFromRecorded covers graduateFailure
 // directly: entry 1's ticket reached onMinted (recorded[0] = true, safe to
 // re-run over), but entry 2's ticket was minted (ids[1] set) before a
-// generic, non-axi.Error failure struck - the tracker.Graduate return shape
-// a MkdirAll or ticket.yaml write failure leaves, which never reached
-// onMinted for entry 2. The result must not tell the operator to just
-// re-run: that would mint a duplicate for entry 2 and orphan its ticket.
+// generic, non-axi.Error failure struck - the shape onMinted's own
+// write-chart failure leaves, which never reached onMinted for entry 2. The
+// result must not tell the operator to just re-run: that would mint a
+// duplicate for entry 2 and orphan its ticket.
 func TestGraduateFailureDistinguishesOrphanFromRecorded(t *testing.T) {
 	err := graduateFailure(
-		&store.Store{Root: t.TempDir()},
-		"local",
 		"mychart",
 		[]int{0, 1},
 		[]string{"T-1", "T-2"},
 		[]bool{true, false},
-		errors.New("tracker: graduate: write ticket.yaml for T-2: boom"),
+		errors.New("store: graduate: write ticket.yaml for T-2: boom"),
 	)
 
 	var ae *axi.Error
@@ -815,25 +831,21 @@ func TestGraduateFailureDistinguishesOrphanFromRecorded(t *testing.T) {
 	}
 }
 
-// commandNamed is an adapter that is only asked its name: what
-// tracker.CheckMinted needs to build its refusal.
-type commandNamed struct{ tracker.Adapter }
-
-func (commandNamed) Name() string { return "command" }
-
 // TestGraduateFailureAddsCreatedEntriesToAnErrorWithItsOwnHelp
-// covers the failures tracker.Graduate returns as an *axi.Error already
-// carrying its own code and next steps: an id jig cannot use
-// (tracker.CheckMinted), refused after entry 1 was created and recorded, and
-// onMinted's own failure to record an id in the chart. Both keep their code and
-// their help unchanged, and say which entries this run already created, as
-// every other graduate failure does; with none created there is nothing to add.
-// The error the tracker returned is not changed in place.
+// covers the failures store.Graduate returns as an *axi.Error already
+// carrying its own code and next steps: an id ticket_format mints that jig
+// cannot use (store.Mint's own refusal), which never leaves an id behind to
+// orphan, and onMinted's own failure to record an id in the chart, which
+// does. Both keep their code and their help unchanged, and say which
+// entries this run already created, as every other graduate failure does;
+// with none created there is nothing to add. The error returned to
+// graduateFailure is not changed in place.
 func TestGraduateFailureAddsCreatedEntriesToAnErrorWithItsOwnHelp(t *testing.T) {
-	unusable := tracker.CheckMinted(commandNamed{}, "EXT-2-gate")
+	unusableStore := &store.Store{Root: t.TempDir()}
+	_, unusable := unusableStore.Mint("EXT-{n}-gate", store.Ticket{Title: "x"})
 	var unusableErr *axi.Error
 	if !errors.As(unusable, &unusableErr) {
-		t.Fatalf("test setup: CheckMinted(EXT-2-gate) = %v, want an *axi.Error refusal", unusable)
+		t.Fatalf("test setup: Mint with ticket_format EXT-{n}-gate = %v, want an *axi.Error refusal", unusable)
 	}
 	recordFailed := &axi.Error{
 		Msg:  `ticket EXT-2 was created for entry 2 but failed to write chart "mychart": boom`,
@@ -848,14 +860,16 @@ func TestGraduateFailureAddsCreatedEntriesToAnErrorWithItsOwnHelp(t *testing.T) 
 		recorded []bool
 		suffix   string
 	}{
-		{name: "an unusable id after one entry", refusal: unusableErr, ids: []string{"EXT-1", "EXT-2-gate"}, recorded: []bool{true, false}, suffix: " (already created: entry 1 (EXT-1))"},
+		// store.Mint never returns a non-empty id alongside an error, so the
+		// refused entry's own id is always "" here, whichever position fails.
+		{name: "an unusable id after one entry", refusal: unusableErr, ids: []string{"EXT-1", ""}, recorded: []bool{true, false}, suffix: " (already created: entry 1 (EXT-1))"},
 		{name: "a chart write failure after one entry", refusal: recordFailed, ids: []string{"EXT-1", "EXT-2"}, recorded: []bool{true, false}, suffix: " (already created: entry 1 (EXT-1))"},
-		{name: "an unusable id on the first entry", refusal: unusableErr, ids: []string{"EXT-2-gate", ""}, recorded: []bool{false, false}},
+		{name: "an unusable id on the first entry", refusal: unusableErr, ids: []string{"", ""}, recorded: []bool{false, false}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			msg, code, help := tc.refusal.Msg, tc.refusal.Code, append([]string{}, tc.refusal.Help...)
 
-			err := graduateFailure(&store.Store{Root: t.TempDir()}, "command", "mychart", []int{0, 1}, tc.ids, tc.recorded, tc.refusal)
+			err := graduateFailure("mychart", []int{0, 1}, tc.ids, tc.recorded, tc.refusal)
 
 			var ae *axi.Error
 			if !errors.As(err, &ae) {
@@ -868,7 +882,7 @@ func TestGraduateFailureAddsCreatedEntriesToAnErrorWithItsOwnHelp(t *testing.T) 
 				t.Fatalf("Code = %q, Help = %q, want the refusal's own %q and %q", ae.Code, ae.Help, code, help)
 			}
 			if tc.refusal.Msg != msg {
-				t.Fatalf("the tracker's own error now reads %q, want it left as it was: %q", tc.refusal.Msg, msg)
+				t.Fatalf("the refusal's own error now reads %q, want it left as it was: %q", tc.refusal.Msg, msg)
 			}
 		})
 	}
@@ -1372,164 +1386,42 @@ func TestGraduateFullyGraduatedWithRemoteStillSyncsPendingState(t *testing.T) {
 	}
 }
 
-// TestGraduateRefusesAMintedIDThatAlreadyHasARecord covers the collision
-// through the command: a tracker mints EXT-1, and the store's EXT-1/ already
-// holds another ticket's record and brief. graduate gives the operator the
-// recovery jig ticket new gives the same collision - the tracker ticket
-// exists, the record belongs to another ticket and must not be deleted, the
-// collision is resolved by hand - and not the orphan help written for a
-// folder graduate itself created ("put the id on the entry, or delete that
-// ticket folder"), which here would destroy the other ticket's brief or bind
-// this entry to it. The entry is named by its position in the chart file (2),
-// not by its position among the entries being created, and the other ticket's
-// files are untouched.
-func TestGraduateRefusesAMintedIDThatAlreadyHasARecord(t *testing.T) {
-	jig, st := commandTrackerMinting(t, "EXT-1")
-	if err := st.CreateTicketRecord("EXT-1", store.Ticket{Title: "Pre-existing, unrelated ticket"}); err != nil {
-		t.Fatalf("seed EXT-1's record: %v", err)
-	}
-	briefPath := filepath.Join(st.TicketDir("EXT-1"), "brief.md")
-	if err := os.WriteFile(briefPath, []byte("# The other ticket's brief\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(st.TicketDir("T-9"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeChart(t, st.Root, "mychart", `tickets:
-  - id: T-9
-    title: "Already graduated"
-  - title: "New entry"
-`)
-	recordPath := filepath.Join(st.TicketDir("EXT-1"), "ticket.yaml")
-	recordBefore, err := os.ReadFile(recordPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	code, out := jig("graduate", "mychart")
-	if code == 0 {
-		t.Fatalf("jig graduate over a minted id that has a record: exit 0, want a refusal:\n%s", out)
-	}
-	for _, want := range []string{
-		"the command tracker minted EXT-1, but the store already has a ticket.yaml for EXT-1",
-		"EXT-1 now exists in the command tracker",
-		"entry 2 of charts/mychart/tickets.yaml has no id",
-		"which ticket already claims this id",
-		"do not delete it",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("jig graduate over a minted id that has a record: output lacks %q:\n%s", want, out)
-		}
-	}
-	if record := st.TicketFilePath("EXT-1"); !strings.Contains(out, record) {
-		t.Fatalf("jig graduate over a minted id that has a record: help does not name the record to inspect, %s:\n%s", record, out)
-	}
-	for _, unwanted := range []string{"delete that ticket folder", "Put `id: EXT-1`"} {
-		if strings.Contains(out, unwanted) {
-			t.Fatalf("jig graduate over a minted id that has a record gave the orphan help (%q), which would claim or delete the other ticket's folder:\n%s", unwanted, out)
-		}
-	}
-
-	if after, err := os.ReadFile(recordPath); err != nil || string(after) != string(recordBefore) {
-		t.Fatalf("the other ticket's ticket.yaml after the refused graduate: %q (err %v), want it unchanged: %q", after, err, recordBefore)
-	}
-	if _, err := os.Stat(briefPath); err != nil {
-		t.Fatalf("the other ticket's brief.md after the refused graduate: %v", err)
-	}
-	entries, err := st.ReadChart("mychart")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entries[1].ID != "" {
-		t.Fatalf("entry 2 was recorded as %q, want no id: its ticket was never recorded", entries[1].ID)
-	}
-}
-
-// TestGraduateNamesTheEntriesAlreadyCreatedWhenALaterOneCollides covers the
-// same refusal after a success: a tracker that hands the same id out twice
-// makes entry 2's mint collide with the record entry 1's own ticket just got.
-// The failure still says entry 1 was created (and recorded in the chart, so a
-// re-run does not mint it again) and leaves its record alone.
-func TestGraduateNamesTheEntriesAlreadyCreatedWhenALaterOneCollides(t *testing.T) {
-	jig, st := commandTrackerMinting(t, "EXT-1")
-	writeChart(t, st.Root, "mychart", `tickets:
-  - title: "Slice A"
-  - title: "Slice B"
-`)
-
-	code, out := jig("graduate", "mychart")
-	if code == 0 {
-		t.Fatalf("jig graduate with a tracker minting EXT-1 twice: exit 0, want a refusal:\n%s", out)
-	}
-	for _, want := range []string{
-		"the store already has a ticket.yaml for EXT-1 (already created: entry 1 (EXT-1))",
-		"entry 2 of charts/mychart/tickets.yaml has no id",
-		"do not delete it",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("jig graduate with a tracker minting EXT-1 twice: output lacks %q:\n%s", want, out)
-		}
-	}
-
-	entries, err := st.ReadChart("mychart")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entries[0].ID != "EXT-1" || entries[1].ID != "" {
-		t.Fatalf("chart ids after the refusal = %q, %q, want EXT-1 and none", entries[0].ID, entries[1].ID)
-	}
-	rec, err := st.ReadTicket("EXT-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rec.Title != "Slice A" {
-		t.Fatalf("EXT-1's title = %q, want entry 1's %q left as it was", rec.Title, "Slice A")
-	}
-}
-
-// TestGraduateRefusesAMintedIDJigCannotUse covers the second half of "a minted
-// ticket gets its record under one rule, whichever command minted it": jig
-// ticket new refuses a minted id that names a lease or is not a single
-// directory before it writes anything, and so must graduate. Its help names the
-// tracker ticket to close (not the orphan help for a folder graduate created),
-// no folder or record is written under the id, for a path-like id not outside
-// the store either, and the chart entry stays without an id.
+// TestGraduateRefusesAMintedIDJigCannotUse covers an id ticket_format mints
+// that jig cannot use (pool.CheckTicket: a reserved lease suffix here):
+// graduate refuses it before writing anything under it - no folder or
+// record - and the chart entry stays without an id.
 func TestGraduateRefusesAMintedIDJigCannotUse(t *testing.T) {
-	for _, tc := range []struct{ name, id, reason string }{
-		{name: "reserved suffix", id: "EXT-7-gate", reason: "reserves"},
-		{name: "path separator", id: "../escape", reason: "path separator"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			jig, st := commandTrackerMinting(t, tc.id)
-			writeChart(t, st.Root, "mychart", `tickets:
+	jig, storeRoot := setupGraduateStore(t)
+	rewriteTicketFormat(t, storeRoot, "T-{n}-gate")
+	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "New entry"
 `)
 
-			code, out := jig("graduate", "mychart")
-			if code == 0 {
-				t.Fatalf("jig graduate with a tracker minting %q: exit 0, want a refusal:\n%s", tc.id, out)
-			}
-			for _, want := range []string{tc.id, tc.reason, "close it there"} {
-				if !strings.Contains(out, want) {
-					t.Fatalf("jig graduate with a tracker minting %q: output lacks %q:\n%s", tc.id, want, out)
-				}
-			}
-			if strings.Contains(out, "delete that ticket folder") {
-				t.Fatalf("jig graduate with a tracker minting %q gave the orphan help:\n%s", tc.id, out)
-			}
+	code, out := jig("graduate", "mychart")
+	if code == 0 {
+		t.Fatalf("jig graduate with ticket_format T-{n}-gate: exit 0, want a refusal:\n%s", out)
+	}
+	for _, want := range []string{"T-1-gate", "reserves"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("jig graduate with ticket_format T-{n}-gate: output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "delete that ticket folder") {
+		t.Fatalf("jig graduate with ticket_format T-{n}-gate gave the orphan help:\n%s", out)
+	}
 
-			for _, dir := range []string{st.TicketDir(tc.id), filepath.Join(filepath.Dir(st.Root), "escape")} {
-				if _, err := os.Stat(dir); !os.IsNotExist(err) {
-					t.Fatalf("the refused ticket %q left %s behind (stat err %v)", tc.id, dir, err)
-				}
-			}
-			entries, err := st.ReadChart("mychart")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if entries[0].ID != "" {
-				t.Fatalf("the chart entry was recorded as %q, want no id", entries[0].ID)
-			}
-		})
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(st.TicketDir("T-1-gate")); !os.IsNotExist(err) {
+		t.Fatalf("the refused ticket T-1-gate left a store folder behind (stat err %v)", err)
+	}
+	entries, err := st.ReadChart("mychart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries[0].ID != "" {
+		t.Fatalf("the chart entry was recorded as %q, want no id", entries[0].ID)
 	}
 }
