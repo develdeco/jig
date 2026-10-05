@@ -212,9 +212,9 @@ until you merge origin's branch into the build lease, as the error says.
 
 ## What a published pull request looks like
 
-A reviewer who opens a pull request `jig publish` opened or updated finds
-three things in its body, and nothing else: why the change exists, what
-changed, and how it was verified.
+A reviewer who opens a pull request `jig publish` opened or updated finds up
+to four things in its body, and nothing else: why the change exists, what
+changed, the change working, and how it was verified.
 
 - **Intent** - the body of the first section of the ticket's `brief.md`, or
   the text of an explicit `--intent`/`--doc`. Left out entirely when the last
@@ -231,7 +231,7 @@ changed, and how it was verified.
   before it asks you to push), so you can edit the brief and gate again
   instead of editing a pull request already open. A whole design doc passed
   to `--doc` is shown as it reads, with its own headings moved below the
-  section level so the body still has these three and nothing else.
+  section level so the body still has these four and nothing else.
 - **What changed** - on an adopted branch, your own pre-adoption commits
   first (subject and short sha, from the merge base with the target up to
   the start sha recorded at adoption); then one bullet per green slice, in
@@ -240,6 +240,25 @@ changed, and how it was verified.
   from review. One line per bullet: a fix slice's goal is the prompt jig
   wrote from the gate's findings, and those findings belong in the comment
   below, not in the body.
+- **Demo** - present only when the gate round that reviewed the shipped head
+  recorded one (`demo: recorded` in that round's gate report, not a later
+  round's): the demo's own summary, then each of its media files with its
+  caption, an image as a markdown image reference
+  (`![caption](./demo-<n>.<ext>)`) and a video as a plain bullet
+  (`- ./demo-<n>.<ext>: caption`) - the one reference form each kind
+  actually gets rewritten in. A file publish cannot
+  verify against the round's manifest anymore (missing, or changed since)
+  is left out and named on stderr, never rendered as if it were still
+  there; a refused demo, or no demo recorded for this head at all, leaves
+  the section out entirely, and stderr says which. On the `github` tracker
+  the media are attached to the pull request itself (`gh ... --attach`),
+  which rewrites a recognized image reference to the uploaded URL in place
+  but not a video's bare path; publish reads the pull request back, moves
+  the upload URL `gh` appended for each such file to where its own
+  reference stands, and edits the body again, reporting on stderr any
+  reference still unrewritten after that. The `local` tracker (the
+  standalone store above) leaves every reference as it is, since it
+  uploads nothing.
 - **Verification** - the oracles green at the last clean round and the head
   it reviewed, the revalidation tier, and one line counting the review's
   findings by how they ended (fixed, dismissed, noted, asked), pointing at
@@ -259,8 +278,9 @@ The `local` tracker (the standalone store above) writes both files under
 capability at all.
 
 `demo/publish-body.tape` plays this through end to end on the local tracker:
-a ticket's gate rounds fixing, dismissing, and noting findings, then
-`jig publish` and both files as it leaves them - see
+a ticket's gate rounds fixing, dismissing, and noting findings - the last of
+them clean, with its own recorded demo - then `jig publish` and both files
+as it leaves them, the body's `## Demo` section included - see
 [demo/README.md](demo/README.md).
 
 ## Session backends
@@ -310,8 +330,8 @@ fails, or whose files jig refuses, is recorded and shown in the gate report
 one demo per reviewed head, `--no-demo` skips it (on `jig solve` too), and
 the scripted source never runs one. A demo that needs an env class reports
 that it cannot record, since env classes are already down by then.
-Publishing the media on the pull request is not built yet: `jig publish`
-does not attach a recorded demo.
+`jig publish` attaches a recorded demo to the pull request it ships - see
+[What a published pull request looks like](#what-a-published-pull-request-looks-like).
 
 ## Safety
 

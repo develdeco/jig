@@ -28,7 +28,7 @@ func newHerdrBackend(opts Options) Backend {
 // WSL's default.
 const jigWSLDistroEnv = "JIG_WSL_DISTRO"
 
-// wslPath mechanically converts a Windows path (e.g. `C:\Users\x`) to its
+// WSLPath mechanically converts a Windows path (e.g. `C:\Users\x`) to its
 // WSL mount equivalent (`/mnt/c/Users/x`): lowercase the drive letter, drop
 // the colon, and flip backslashes to slashes. No wslpath subprocess is
 // needed for this shape of path. This is pure string manipulation rather
@@ -36,7 +36,13 @@ const jigWSLDistroEnv = "JIG_WSL_DISTRO"
 // would leave the backslashes untouched when jig is built on Linux (e.g. in
 // CI, where this helper's own test still runs). Only called on the Windows
 // (WSL) branch; off Windows, herdr sees the worktree path unchanged.
-func wslPath(winPath string) string {
+//
+// Exported for other packages that need jig's own notion of the WSL mount
+// spelling herdr hands a session on Windows: verifydeliver's render path
+// checks a demo's summary and captions for it, among the other spellings
+// jig itself handed the session, before they reach a published pull request
+// body (the owner's decision on r1-f13, DECISIONS.md).
+func WSLPath(winPath string) string {
 	p := strings.ReplaceAll(winPath, `\`, "/")
 	if len(p) >= 2 && p[1] == ':' {
 		drive := strings.ToLower(p[:1])
@@ -119,8 +125,8 @@ func (b *herdrBackend) Run(d Dispatch) error {
 	label := fmt.Sprintf("jig-%s-%s", d.Ticket, d.Slice)
 	cwd, prompt := d.Worktree, d.Prompt
 	if b.goos == "windows" {
-		cwd = wslPath(d.Worktree)
-		prompt = respellMentions(d.Prompt, d.paths(), wslPath)
+		cwd = WSLPath(d.Worktree)
+		prompt = respellMentions(d.Prompt, d.paths(), WSLPath)
 	}
 	ws, err := b.runHerdr("workspace create", "--cwd", cwd, "--label", label, "--no-focus")
 	if err != nil {

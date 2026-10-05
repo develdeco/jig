@@ -25,8 +25,8 @@ func TestWSLPath(t *testing.T) {
 		{"/mnt/c/already/posix", "/mnt/c/already/posix"},
 	}
 	for _, c := range cases {
-		if got := wslPath(c.in); got != c.want {
-			t.Errorf("wslPath(%q) = %q, want %q", c.in, got, c.want)
+		if got := WSLPath(c.in); got != c.want {
+			t.Errorf("WSLPath(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
@@ -309,7 +309,7 @@ func TestHerdrErrorsNameTheCommandAndNotItsOperands(t *testing.T) {
 				}
 				for _, operand := range []string{
 					marker, worktree, input, extra, resultJSON,
-					wslPath(worktree), wslPath(input), wslPath(extra), wslPath(resultJSON),
+					WSLPath(worktree), WSLPath(input), WSLPath(extra), WSLPath(resultJSON),
 					"jig-T-1-gate-demo", "--cwd", "--wait",
 				} {
 					if strings.Contains(got, operand) {

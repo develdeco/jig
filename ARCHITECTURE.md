@@ -170,8 +170,8 @@ exists.
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` + `Config` → a model rung, disjoint from rungs already in use |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by |
-| `internal/tracker/` | `New`, `Graduate`, `CheckMinted`, `PRCreator`, `PRUpdater`, `PRCommenter` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it |
-| `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR |
+| `internal/tracker/` | `New`, `Graduate`, `CheckMinted`, `PRCreator`, `PRUpdater`, `PRCommenter`, `PRCreatorWithMedia`, `PRUpdaterWithMedia`, `PRBodyReader` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it; on github, a pull request body + a media directory and file list → the same pull request with each file attached via `gh ... --attach`, or read back to check what `gh` rewrote |
+| `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one) |
 
 ## Session backends
 
@@ -369,10 +369,11 @@ that head tries again. The media themselves live under
 `<jig home>/evidence/<store id>/<ticket>/<head sha>/`, never in the store.
 
 Known v1 limit: env classes are torn down after the oracles, before any
-session runs, so a demo that needs one reports that it cannot record.
-Publishing the media on the pull request is a separate, later change: a
-recorded demo is not attached to anything yet. See
-[ADR 0014](docs/adr/0014-demo-session-at-the-gate.md).
+session runs, so a demo that needs one reports that it cannot record. See
+[ADR 0014](docs/adr/0014-demo-session-at-the-gate.md) for this half of the
+contract, and [Publish](#publish) below for the other: what `jig publish`
+does with a recorded demo when it ships the head it belongs to.
+
 ## A ticket's branch
 
 A ticket's working branch is recorded in its `ticket.yaml`, not derived
@@ -524,8 +525,12 @@ under a subject naming it (see the store push above).
    branch that was not on origin is squashed into one commit (refusing a range
    whose commits reached a remote under another name, `PUSHED_RANGE`); one
    that was is left as it is, and the journal's `squash` line records
-   `none:branch-on-origin`. `pr/<repo>.md` is then rendered: exactly three
-   `## ` sections, with nothing else. `## Intent` comes from the last clean
+   `none:branch-on-origin`. `pr/<repo>.md` is then rendered: `## What
+   changed` and `## Verification` always, `## Intent` first when the round's
+   intent is a binding source with text of its own, and `## Demo` between
+   `## What changed` and `## Verification` when the shipped head has a
+   recorded demo - never more than these four `## ` sections, in this order,
+   and never another. `## Intent` comes from the last clean
    round's intent provenance and is left out entirely for `inferred` or
    `none` - an inferred intent summarizes the author's own private agent
    session and never reaches a pull request (`docs/adr/0012-intent-provenance.md`,
@@ -543,7 +548,8 @@ under a subject naming it (see the store push above).
    demoted below the section level (`demoteHeadings`, which shifts them all
    by the least that puts the shallowest at `### `, leaving a fenced code
    block's own lines alone), so a whole design doc recorded by `jig gate --doc`
-   cannot add a fourth `## ` section or outrank the three with a `# ` title.
+   cannot add an extra `## ` section of its own or outrank the body's with a
+   `# ` title.
    A fenced code block the text leaves open is closed before it is embedded
    (`closeOpenFence`), since an unclosed fence renders the two sections
    after it as the inside of a code block; a `## ` line inside a fence does
@@ -558,6 +564,35 @@ under a subject naming it (see the store push above).
    line per bullet is what keeps a fix slice's goal - the builder prompt
    `buildFixSlices` wrote out of the gate's findings - from dumping those
    findings' own detail into the body, which is what the comment below is for.
+   `## Demo` (`renderDemoSection`) comes from the gate round that recorded
+   one for the shipped head, checked against `checkReviewedHead`'s own: the
+   latest round when its own `gate/round-N/demo.yaml` is `status: recorded`
+   and names that exact head (checked again, not trusted), or - when the
+   latest round ran no demo at all because an earlier one on the same head
+   already had (a later clean round on an unchanged head runs none of its
+   own, ADR 0014's `DemoExisting`) - the earliest earlier round that did.
+   No demo recorded for the head at all (none ever, or one recorded for a
+   different head) and a demo refused outright (`status: refused`) both
+   leave the body with no section, but publish's own output says which:
+   `DemoRenderResult.NoDemo` for the first, `DemoRenderResult.DemoRefused`
+   (carrying demo.yaml's own reason) for the second. Each listed file of a
+   recorded demo is checked again before it is trusted - present in the
+   evidence directory for that head (`demoMediaDir`), with the manifest's
+   own sha256 and size - and a file that fails is left out of the section
+   and named in publish's output rather than rendered as if it were still
+   there (`DemoRenderResult.Omitted`); every listed file failing leaves no
+   section either, which is `DemoRenderResult.AllMediaFailed`, neither of
+   the other two. What renders, when anything does, is the demo's own
+   `summary` and then every verified file with its caption, in
+   `demo.yaml`'s own order and under its own recorded name - never
+   renumbered from the verified files alone - in the one reference form
+   `gh` actually rewrites for its kind (gate finding r1-f3, DECISIONS.md):
+   an image (`demoKind`'s own extension list) as markdown image syntax,
+   `![caption](./<name>)`, which `gh ... --attach` rewrites to the uploaded
+   URL in place; a video as the plain bullet `./<name>: caption` it has
+   never reliably rewritten, which a later step (below) reads back and
+   patches itself where the tracker can. Neither this function nor
+   `pr/<repo>.md` itself ever names the evidence directory.
    `## Verification` names the oracles green at the last clean round
    (`SortedOracleNames`, the manifest Publish itself resolved) and the
    reviewed head, the revalidation tier, and one line counting the review's
@@ -580,16 +615,45 @@ under a subject naming it (see the store push above).
     plain `git push` of the branch, then the pull request: the open one is
     updated (`UpdatePR`, `gh pr edit --body-file`) with `pr/<repo>.md` as its
     body, otherwise one is opened (`CreatePR`) with it when the tracker can.
+    A pull request with a `## Demo` section's media
+    (`DemoRenderResult.MediaFiles`) goes through the tracker's optional
+    `PRCreatorWithMedia`/`PRUpdaterWithMedia` capability instead, when the
+    adapter has one: the github adapter's
+    `CreatePRWithMedia`/`UpdatePRWithMedia` add `--attach <file>` once per
+    verified file to the same `gh pr create`/`gh pr edit` call, run with the
+    evidence directory `renderDemoSection` itself resolved and verified those
+    files against (`DemoRenderResult.MediaDir`, never recomputed from the
+    branch's own head, which by this point is past the squash) as `gh`'s own
+    working directory, after checking that the installed `gh` supports
+    `--attach` on the very subcommand about to run (`gh pr create --help` or
+    `gh pr edit --help`, cached per subcommand, since the two do not
+    necessarily agree) - without support on that subcommand, the pull request
+    is opened or updated with no media, and `CreatePRWithMedia`/
+    `UpdatePRWithMedia`'s own `attached` return tells publish to say why. Once
+    the call returns, publish reads the pull request's body back (`ReadPRBody`,
+    `gh pr view <url> --json body`) - a failed read-back is a warning, not
+    silence - and checks it for any of the demo's own `./<name>` references
+    still sitting in it unrewritten (`checkUnrewrittenReferences`), rather than
+    parsing `gh`'s own stderr for the same fact. `gh` rewrites a recognized
+    image reference in place but not a video's bare path (`gh`'s own "Videos"
+    behavior, DECISIONS.md), so a reference still unrewritten is patched, not
+    merely reported: `rewriteUnrewrittenReferences` finds the upload URL `gh`
+    appended for that file in the very body just read, moves it to where the
+    reference stands, and publish edits the pull request again with the fix
+    (`UpdatePR`); only a file `gh` appended no URL for at all is left as it was
+    and named on stderr. The `local` tracker has neither capability: it writes
+    `pr/<repo>.md`'s own `./<name>` references and uploads nothing, since it
+    opens no pull request to attach to; the `command` tracker is unchanged.
     Once that pull request exists, its first comment is `pr/review-notes.md`,
-    posted through the tracker's optional `PRCommenter` capability (the
-    github adapter's `gh pr comment`) when the adapter has one - the local
-    tracker writes both files and posts nothing, and the command tracker gets
-    no comment capability at all. A post that fails is a warning, never a
-    publish failure: the pull request stands, the file stays for a manual
-    post, and nothing about the failure keeps the store's deferred push from
-    carrying what publish already wrote. The `pr` journal line records which
-    (`updated` or `opened`) and the pushed head. Route and `publish-done`
-    follow, and the store is pushed.
+    posted through the tracker's optional `PRCommenter` capability (the github
+    adapter's `gh pr comment`) when the adapter has one - the local tracker
+    writes both files and posts nothing, and the command tracker gets no
+    comment capability at all. A post that fails is a warning, never a publish
+    failure: the pull request stands, the file stays for a manual post, and
+    nothing about the failure keeps the store's deferred push from carrying
+    what publish already wrote. The `pr` journal line records which (`updated`
+    or `opened`) and the pushed head. Route and `publish-done` follow, and the
+    store is pushed.
 
 The report names the head pushed and, per repo, whether the branch was squashed
 or was "not squashed (branch already on origin)".

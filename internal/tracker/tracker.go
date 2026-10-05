@@ -94,6 +94,40 @@ type PRCommenter interface {
 	CommentPR(url, bodyFile string) error
 }
 
+// PRCreatorWithMedia is an optional capability an Adapter may implement:
+// creating a pull request with media attachment support.
+type PRCreatorWithMedia interface {
+	// CreatePRWithMedia opens a pull request with optional media files attached.
+	// mediaDir is the directory containing the media files, mediaFiles are the
+	// relative file names to attach (e.g., ["demo-1.mp4", "demo-2.gif"]).
+	// attached reports whether the files were actually attached: false
+	// whenever mediaFiles is empty or the adapter has no way to attach them
+	// (an installed gh too old for --attach, say), so the caller can tell
+	// the operator why a rendered ./demo-<n>.<ext> reference went out
+	// unattached rather than staying silent about it.
+	CreatePRWithMedia(head, base, title, bodyFile, mediaDir string, mediaFiles []string) (url string, attached bool, err error)
+}
+
+// PRUpdaterWithMedia is an optional capability an Adapter may implement:
+// updating a pull request with media attachment support.
+type PRUpdaterWithMedia interface {
+	// UpdatePRWithMedia updates the body of the pull request at url with optional
+	// media files attached. mediaDir is the directory containing the media files,
+	// mediaFiles are the relative file names to attach. attached reports
+	// whether the files were actually attached, the same as
+	// PRCreatorWithMedia.CreatePRWithMedia's own.
+	UpdatePRWithMedia(url, bodyFile, mediaDir string, mediaFiles []string) (attached bool, err error)
+}
+
+// PRBodyReader is an optional capability an Adapter may implement: reading
+// a pull request's current body back. Publish uses it right after writing
+// media references into a pull request's body, to check whether the
+// tracker actually rewrote them.
+type PRBodyReader interface {
+	// ReadPRBody returns the current body of the pull request at url.
+	ReadPRBody(url string) (string, error)
+}
+
 // New returns the Adapter selected by cfg.Tracker.
 func New(cfg project.Config, st *store.Store) (Adapter, error) {
 	switch cfg.Tracker {

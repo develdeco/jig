@@ -11,8 +11,9 @@ accepted.
 
 After a clean reviewer round, `jig gate` dispatches a demo session and
 records what it produced. This ADR fixes that contract, what makes it best
-effort, and where the media live. Publishing the media on the pull request is
-the next change: nothing here attaches anything to a PR yet.
+effort, where the media live, and - in "Publishing the media" below -
+publish's own half: the `## Demo` section a pull request gets from a
+recorded demo, and how the media reach the tracker.
 
 ## When a demo runs
 
@@ -272,6 +273,45 @@ dispatch (`runGateOracles`), so a demo that needs one cannot bring it up: it
 reports that it cannot record, and the demo is recorded with no media and
 that summary. Keeping an env class up for a demo is a follow-up.
 
+## Publishing the media
+
+`jig publish` ships the head the gate reviewed, so it is `Publish`, not
+`Gate`, that reads a `demo.yaml` back and puts it in front of a reviewer.
+When the round that reviewed the shipped head recorded a demo (`status:
+recorded`, its `head_sha` the one `publish` is about to ship), the pull
+request body gets a `## Demo` section between `## What changed` and `##
+Verification`: the demo's own `summary`, then each media file as a
+`./demo-<n>.<ext>` reference with its caption, in the order `demo.yaml`
+lists them. Nothing is dropped silently: before rendering, publish checks
+every listed file against the manifest again - present in the evidence
+directory for the shipped head, same sha256, same size - and a file that is
+missing or has changed since the gate round recorded it is left out of the
+section and named in publish's own output, never rendered as if it were
+still there. A refused demo, or no demo recorded for the shipped head (none
+at all, or one recorded for a different head), adds no `## Demo` section at
+all, and publish's output says which of the two it was - the same
+distinction `demo.yaml`'s own `status` already draws.
+
+The media themselves reach a reviewer through the tracker, not through the
+store: the `github` tracker runs `gh pr create` or `gh pr edit` with
+`--attach <file>` for every verified file, once per file, with the evidence
+directory as `gh`'s own working directory (so a plain file name is enough).
+`gh` uploads each one as a GitHub user attachment and rewrites a reference it
+recognizes to the uploaded URL - not every reference form gh rewrites is the
+same across its own versions, a bare video path among the ones that have not
+always been - so publish never trusts the rewrite happened: it reads the
+body back (`gh pr view <url> --json body`) once the tracker call returns and
+reports any of the demo's own `./<name>` references still sitting in it
+unrewritten, by name, rather than parsing `gh`'s own stderr for the same
+fact. Before relying on `--attach` at all, publish checks that the
+installed `gh` supports it on the very subcommand about to run (`gh pr
+create --help` or `gh pr edit --help`, cached separately - the two
+subcommands' flag sets do not necessarily agree); without support on that
+subcommand, the pull request is opened or updated with no media, and
+publish's output says why. The `local` tracker writes the same `./<name>`
+references and uploads nothing - there is no tracker to upload to - and
+the `command` tracker is unchanged by any of this.
+
 ## Consequences
 
 - A gate on a clean round can run a second session, so `--no-demo` exists,
@@ -286,6 +326,70 @@ that summary. Keeping an env class up for a demo is a follow-up.
   written and unbounded, like the reviewer's `result.json`: a session that
   writes a long summary, or a path it was told, has both in the store's
   history. jig bounds and cleans what it writes, not what a model says.
-- Publishing will read `demo.yaml` for the head it ships, check the hashes, and
-  attach the media, and a machine without them will report that. That is the
-  next change; nothing attaches yet.
+- Publishing reads `demo.yaml` for the head it ships, checks the files
+  against its hashes, and attaches whatever still verifies; a machine
+  missing one, a demo recorded for another head, or a refused demo, is
+  reported rather than silently producing a body with no `## Demo` section
+  and no explanation (see "Publishing the media" above).
+
+## Amendment: publish leaves out host paths and caps captions
+
+"Publishing the media" above renders the summary and every caption
+verbatim, the same "jig does not filter model prose" stance "The contract"
+takes for the record. That stance holds for `demo.yaml`, which only the
+store and the operator's own machine ever see; it does not hold once the
+same words reach a pull request body, which the tracker (GitHub) makes
+public. Gate finding r1-f13's owner decision draws that line at the render
+step rather than the record: before `renderDemoSection` builds the `##
+Demo` section, the summary and each verified file's own caption are checked
+for the literal paths jig itself handed the demo session - `media_dir`, the
+jig home, the gate lease (`DemoInput.LeaseDir`, where the session ran), and
+the store - in every spelling jig may have handed them out in, a WSL mount
+among them, the one herdr respells a path to on Windows
+(`session.respellMentions`/`session.WSLPath`). Comparison is exact strings
+only, never a pattern (`hostPathSpellings`, `containsHostPath`). A summary
+or caption naming one is left out of the section whole and named in
+publish's own output (`DemoRenderResult.ScrubbedSummary`,
+`.ScrubbedCaptions`); a caption that clears the check is still capped at
+`demoCaptionRenderCap` runes, a short label rather than a paragraph.
+`demo.yaml` itself is untouched by either rule - the record stays exactly
+the session's own words, as the rest of this ADR already promises - only
+what the render step builds from it for the body is.
+
+## Amendment: images rewrite in place, publish patches an unrewritten video
+
+"Publishing the media" above renders every media file as a `./demo-<n>.<ext>`
+reference and trusts `gh ... --attach` to rewrite it, reporting one it left
+unrewritten rather than fixing it. Gate finding r1-f3 (DECISIONS.md) found
+that reference form is exactly the one `gh` does not reliably rewrite - a
+bare path - so every published body, images included, carried dead relative
+links beside `gh`'s own appended URLs, never "a reviewer sees them in the
+body" this ADR opens with.
+
+`renderDemoSection` now renders each verified file in the one form `gh`
+actually rewrites for its kind: an image (`demoKind`'s own extension list)
+as markdown image syntax, `![caption](./<name>)`, which `gh` rewrites to the
+uploaded URL in place; a video keeps the bare bullet, `./<name>: caption`,
+since a video is not renderable as a markdown image and gh has never
+reliably rewritten that form either way. The read-back after an attach
+(`checkUnrewrittenReferences`) is unchanged, but a reference it still finds
+is no longer only reported: `rewriteUnrewrittenReferences` looks for the
+upload URL `gh` appended for that file - a markdown link naming it,
+`[<name>](<url>)`, on its own line, the one record of that upload a
+reference-free attach still leaves behind - and moves it to where the
+bare reference stands, removing the appended line, before publish edits
+the pull request a second time with the fix. This reverses the build-time
+call recorded in DECISIONS.md ("never rewrites the pull request a second
+time"): guessing which upload URL belongs to which reference is still
+avoided, since the URL is read from `gh`'s own appended record of that
+exact file, never inferred from position or kind. Only a file `gh`
+appended no URL for at all - a failed attach, or an image `gh` itself did
+not recognize despite rewriting it for every other file - is left as it
+was and named in publish's own warning, the one case left for the operator.
+
+This fixture's own `gh` stub (`testdata/fixture/ghstub`) pins both halves of
+the rule it would otherwise be impossible to test against: it rewrites a
+markdown image reference to a file it was asked to `--attach`, in the body
+named by `--body-file`, and appends a `[<name>](<url>)` line for any
+attached file with no such reference, so a test can drive the exact
+read-back `ReadPRBody` would see from a real `gh` without ever running one.

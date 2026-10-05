@@ -353,7 +353,7 @@ func TestHerdrBackendSpellsEveryPathOfTheDispatchForWSLOnWindows(t *testing.T) {
 	resultJSON := filepath.Join(t.TempDir(), "gate.round-1.demo.result.json")
 	prompt := fmt.Sprintf("inputs in %s, media into %s, result at %s, worktree %s", input, extra, resultJSON, worktree)
 	wantPrompt := fmt.Sprintf("inputs in %s, media into %s, result at %s, worktree %s",
-		"/mnt/c/demo/store/T-1/work/gate.round-1.demo.json", "/mnt/d/jighome/evidence/id/T-1/abc", wslPath(resultJSON), "/mnt/c/demo/pool/repo/T-1-gate")
+		"/mnt/c/demo/store/T-1/work/gate.round-1.demo.json", "/mnt/d/jighome/evidence/id/T-1/abc", WSLPath(resultJSON), "/mnt/c/demo/pool/repo/T-1-gate")
 
 	calls := herdrRunLog(t, "windows", Dispatch{
 		Ticket: "T-1", Slice: GateDemoSlice, Attempt: 1, Worktree: worktree,
@@ -430,7 +430,7 @@ func TestHerdrBackendPassesAnExtraDirThroughOffWindows(t *testing.T) {
 // or one the spelling leaves alone is skipped.
 func TestRespellMentionsReplacesTheLongestPathFirst(t *testing.T) {
 	t.Parallel()
-	got := respellMentions(`run C:\a\b\c.json in C:\a\b, then C:\a`, []string{`C:\a`, "", `C:\a\b\c.json`, `C:\a\b`, "/mnt/c/z"}, wslPath)
+	got := respellMentions(`run C:\a\b\c.json in C:\a\b, then C:\a`, []string{`C:\a`, "", `C:\a\b\c.json`, `C:\a\b`, "/mnt/c/z"}, WSLPath)
 	if want := `run /mnt/c/a/b/c.json in /mnt/c/a/b, then /mnt/c/a`; got != want {
 		t.Errorf("respellMentions = %q, want %q", got, want)
 	}

@@ -1,14 +1,17 @@
 # demo/publish-body.tape
 #
 # Records what `jig publish` leaves behind: a lean pull request body,
-# `pr/<repo>.md` (three `## ` sections - Intent, What changed, Verification -
-# and nothing else), and the full review detail in a separate file,
-# `pr/review-notes.md` (every finding across every gate round, ordered by
-# risk, with how it ended). This is the flow the brief behind this ticket
-# exists to make true: a reviewer finds why, what, and how in the body, and
+# `pr/<repo>.md` (up to four `## ` sections - Intent, What changed, Demo,
+# Verification - and nothing else), and the full review detail in a separate
+# file, `pr/review-notes.md` (every finding across every gate round, ordered
+# by risk, with how it ended). This is the flow jig's publish exists to make
+# true: a reviewer finds why the change exists, what changed, the change
+# working - the Demo section, present here because the reviewer scenario's
+# clean round 3 records one - and how it was verified, all in the body, and
 # everything else in one comment - here, on the local tracker, a file in the
-# store instead, since the local tracker posts nothing (see
-# ARCHITECTURE.md#publish and README.md#what-a-published-pull-request-looks-like).
+# store instead, since the local tracker posts nothing and uploads no media
+# (see ARCHITECTURE.md#publish and
+# README.md#what-a-published-pull-request-looks-like).
 #
 # The setup that reaches a clean, publishable round is hidden: it is the same
 # three rounds (a fix kept, a second fix dismissed at the batch prompt, an
@@ -34,9 +37,10 @@
 # checked against the real source: cmd/jig/status.go (RenderStatus's own
 # `slices`/`questions` tables) and cmd/jig/publish.go (`pushedTable`,
 # `pr_body` and `prURLTable`); the two files' content against
-# internal/verifydeliver/render.go (`writePRBody`, `writeReviewNotes`). None
-# of the three waits on an interactive prompt, so every Wait below is a bare
-# Wait (VHS's own default prompt and pattern), never a Wait+Line.
+# internal/verifydeliver/render.go (`writePRBody`, `renderDemoSection`,
+# `writeReviewNotes`). None of the three waits on an interactive prompt, so
+# every Wait below is a bare Wait (VHS's own default prompt and pattern),
+# never a Wait+Line.
 #
 # Nothing on screen is a host path, a user name, or a real repo: JIG_HOME,
 # the store, and the scenario all live under a fixture this tape builds for
@@ -166,18 +170,23 @@ Type `jig publish JIG-1 --yes --store "$JIG_STORE_DIR"` Enter
 Wait@120s
 Sleep 8s
 
-## The body: exactly three `## ` sections. Intent is brief.md's own first
-## section verbatim (this ticket has a brief, so its source is "brief", not
+## The body: four `## ` sections. Intent is brief.md's own first section
+## verbatim (this ticket has a brief, so its source is "brief", not
 ## "inferred" or "none"); What changed is one bullet per green slice with its
 ## short commit sha, the two gate-round fixes grouped after the rest under
-## "Fixes from review:"; Verification names the oracle, the reviewed head,
-## the revalidation tier, and points at the first comment (here, the second
-## file below) for the findings themselves - never a changelog of slice ids
-## or a "See pr/evidence.md" line a GitHub reviewer could not open
-## (internal/verifydeliver/render.go's writePRBody).
+## "Fixes from review:"; Demo is round 3's own recorded demo (the scenario
+## scripts two small SVG frames for its clean round) - the summary, then
+## each verified file in the one reference form gh --attach would rewrite
+## for its kind - both are svg here, so each as a markdown image reference,
+## `![caption](./<name>)` - left as a local path on this tracker since the
+## local tracker uploads nothing; Verification names the oracle, the reviewed
+## head, the revalidation tier, and points at the first comment (here, the
+## second file below) for the findings themselves - never a changelog of
+## slice ids or a "See pr/evidence.md" line a GitHub reviewer could not open
+## (internal/verifydeliver/render.go's writePRBody and renderDemoSection).
 Type `cat "$JIG_STORE_DIR/$JIG_TICKET/pr/fixture-repo.md"` Enter
 Wait@10s
-Sleep 12s
+Sleep 14s
 
 Type "clear" Enter
 Wait@5s
