@@ -6,9 +6,9 @@ A build session was told its oracle and nothing about how to use it. In one meas
 
 `dispatchPromptTemplate` (`internal/frontier/dispatch.go`) gains one line after the oracle:
 
-> While you work, run only the tests that cover your change. Run the oracle once, at the end, before you report green.
+> While you work, run only the tests that cover your change. Run the oracle after your last change, before you report green.
 
-It says how the oracle is used: the narrowest tests drive the work, and the oracle is the final check. It names no language or test runner, since jig builds any repo.
+It says how the oracle is used: the narrowest tests drive the work, and the oracle is the final check. A final run that comes back red means another change, and the oracle runs again after it. It names no language or test runner, since jig builds any repo.
 
 ## The shell's command timeout
 

@@ -17,12 +17,13 @@ import (
 // every build-session dispatch. The fake backend ignores it entirely; it is
 // still rendered so the headless/herdr backends and the recorded journal
 // carry it. The line after the oracle says how the oracle is used: it is the
-// slice's final check, run once, while the narrowest tests drive the work
-// (ADR 0018); the gate runs every oracle again after the build.
+// slice's final check, run after the last change, while the narrowest tests
+// drive the work (ADR 0018); the gate runs every oracle again after the
+// build.
 const dispatchPromptTemplate = "You are a jig build session for slice %s of ticket %s.\n" +
 	"Work ONLY in this worktree. Goal: %s\n" +
 	"Oracle (green = done): %s\n" +
-	"While you work, run only the tests that cover your change. Run the oracle once, at the end, before you report green.\n" +
+	"While you work, run only the tests that cover your change. Run the oracle after your last change, before you report green.\n" +
 	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer).\n" +
 	"Commit as you land. When finished write result.json at %s with exactly one JSON object: {\"outcome\": \"green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed\", \"summary\": \"...\", \"commit\": \"<sha>\", \"question\": \"only for needs-input\", \"artifacts\": [\"relative paths\"]}"
 
