@@ -2891,3 +2891,7 @@ A round's kept fixes, grouped by (workspace, oracle), are packed into slices bou
 ## Invariant-sensitive paths (slice RR-2)
 
 The staircase's floor was a keyword regex (`BigDecimal|rounding|migration|...`), where a string match cost 2026-10-04 a BG-1 dispatch extra on Opus because the test string "does not trim surrounding whitespace" matched `rounding` inside "surrounding". Structural invariants (repo-declared paths in `.claude/jig.yaml`) floor to the dearest model instead, measured by file change, not keywords.
+
+## Tests at agreed seams (slice RR-3)
+
+Briefs that list test cases one by one and demand that every new test fail when its rule is removed create large test suites. The intake skill now asks every brief for a `## Seams` section naming public interfaces and critical paths, never test cases; builders and the reviewer hold briefs to their seams. The reviewer's prompt gains one principle sentence after the action definition: "Tests belong at the seams the intent names: a missing test is a problem only at one of those seams or as the proof of a defect you report, and a test elsewhere is at most a note." See [ADR 0016](docs/adr/0016-tests-at-agreed-seams.md).
