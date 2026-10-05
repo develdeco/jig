@@ -2887,3 +2887,7 @@ Once a ticket's used budget - its earlier gate rounds that appended at least one
 ## Gate fix slice sizing (slice RR-1)
 
 A round's kept fixes, grouped by (workspace, oracle), are packed into slices bounded by `gate.fix_slice_findings` (default 5): same-file findings always share a slice, files are taken in path order and packed greedily, and a file over the bound gets a slice of its own. A group that fits in one slice keeps today's id; a split group's slices are numbered `-1`, `-2`, ... from 1. See [ADR 0015](docs/adr/0015-gate-fix-budget-and-risk-floor.md).
+
+## Invariant-sensitive paths (slice RR-2)
+
+The staircase's floor was a keyword regex (`BigDecimal|rounding|migration|...`), where a string match cost 2026-10-04 a BG-1 dispatch extra on Opus because the test string "does not trim surrounding whitespace" matched `rounding` inside "surrounding". Structural invariants (repo-declared paths in `.claude/jig.yaml`) floor to the dearest model instead, measured by file change, not keywords.

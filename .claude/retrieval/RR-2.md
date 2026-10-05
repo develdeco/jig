@@ -1,0 +1,20 @@
+# RR-2 - retrieval notes
+
+## invariant-paths
+
+- goal: A repo declares its invariant-sensitive paths in .claude/jig.yaml's new invariants: list (a directory entry ends in /, any other entry is a path.Match glob), carried on manifest.Manifest and refused when malformed, absolute or escaping the repo, as the brief's "The invariants declaration" specifies. staircase.Signals.Invariant becomes true when a file changed in the lease range matches a declared invariant; InvariantRE and the added-line scan are removed, so no keyword regex decides a rung, as "The floor" specifies. Test at the seams the brief names. Update CONTEXT.md's Staircase entry, ARCHITECTURE.md and one short DECISIONS.md entry, as "Docs" specifies. Leave go test ./... green.
+- commit: 152e67e
+
+## fix-1-root-test
+
+- goal: Fix these gate findings:
+
+internal/frontier/frontier_test.go:0 No test exercises the invariant floor through frontier's dispatch, as the brief's test-seam list requires
+The brief's "Test seams" section names three required seams, the third being: "The frontier's dispatch: the rung a dispatch gets when the lease diff touches a declared path, and when it touches none, through the frontier's existing fake-backend tests." This diff adds unit coverage for manifest.Resolve/MatchesInvariant (manifest_test.go) and staircase.Select already had Invariant-signal coverage, but neither frontier_test.go nor any new internal/frontier/signals_test.go was touched - there was never a signals_test.go either. No test wires a declared .claude/jig.yaml through manifest.Resolve, measureSignals and staircase.Select the way frontier.processSlice actually does (frontier.go:453-469), and checks the dispatched model (recorded on the journal's "dispatch" line, Model field, frontier.go:505) is the dearest rung when the lease diff touches a declared path and the normal rung when it does not. The fixture package already supports a committed .claude/jig.yaml per fixture (fixture.go's rewriteJigYAML), so this seam was reachable with existing infrastructure.
+Risk (medium): The only thing this ticket adds that unit tests can't see is the wiring itself (manifest resolved once per dispatch, passed into measureSignals, consumed by Select, landing in the journaled Model and the session Dispatch) - exactly the integration a future refactor is most likely to quietly break, on the cost-sensitive path the ticket exists to protect.
+
+internal/manifest/manifest.go:128 MatchesInvariant matches declared entries literally; validateInvariants validates their Clean()ed form
+validateInvariants judges whether an entry escapes the repo by running path.Clean on it (manifest.go:162), but MatchesInvariant never cleans the entry before matching (manifest.go:128-142) - it does a raw strings.HasPrefix for a directory entry or a raw path.Match for a glob, against the declared string exactly as written. An entry that Clean normalizes to something harmless still passes validation, but then can never match a real changed-file path because git never reports a path containing './' or an internal '..'. For example `invariants: ["./migrations/*.sql"]` - a natural thing to write - validates cleanly (Clean("./migrations/*.sql") = "migrations/*.sql", no '..' prefix), but at runtime path.Match("./migrations/*.sql", "migrations/001.sql") returns false (segment counts differ: 3 vs 2), so the entry silently never floors anything. Same failure mode for a directory entry like "./internal/store/", or any entry with an internal "a/../b" that Clean would collapse. There is no error at Resolve time and no signal at dispatch time; the repo's own invariant declaration just quietly does nothing.
+Risk (medium): This is the inverse of the bug the ticket fixes: instead of flooring when it shouldn't, a plausible, validation-passing declaration silently fails to floor when it should, on exactly the kind of path (migrations, numeric-precision directories) the feature exists to protect. The trigger ('./' prefix, or a redundant '..' segment) is a natural typo, not a contrived adversarial input.
+- commit: 38104bdb335e9f4d9731d42cd8bfa2e3144355da
+

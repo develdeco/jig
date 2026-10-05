@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
@@ -1188,6 +1190,112 @@ func (r *recordingBackend) Run(d session.Dispatch) error {
 	r.got = append(r.got, d)
 	r.mu.Unlock()
 	return r.Backend.Run(d)
+}
+
+// declareInvariants commits an invariants: list onto the fixture repo's own
+// .claude/jig.yaml and pushes it, so the build lease pool.Acquire cuts from
+// origin/main carries the declaration the way a real repo's committed
+// manifest does - which is the only place processSlice reads it from
+// (manifest.Resolve over lease.Dir). The file is rewritten through
+// manifest.Manifest so the fixture's substituted oracle and env commands
+// survive the edit.
+func declareInvariants(t *testing.T, fx *fixture.Fixture, invs []string) {
+	t.Helper()
+	path := filepath.Join(fx.RepoDir, ".claude", "jig.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the fixture repo's jig.yaml: %v", err)
+	}
+	var m manifest.Manifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		t.Fatalf("parse the fixture repo's jig.yaml: %v", err)
+	}
+	m.Invariants = invs
+	out, err := yaml.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal jig.yaml: %v", err)
+	}
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		t.Fatalf("write jig.yaml: %v", err)
+	}
+	runGitT(t, fx.RepoDir, "commit", "-am", "fixture: declare invariant paths")
+	runGitT(t, fx.RepoDir, "push", "origin", "main")
+}
+
+// dispatchModel returns the model the journal recorded for slice/attempt's
+// dispatch line - the rung the run actually selected.
+func dispatchModel(t *testing.T, st *store.Store, ticket, slice string, attempt int) string {
+	t.Helper()
+	lines, err := journal.Read(st, ticket)
+	if err != nil {
+		t.Fatalf("journal.Read: %v", err)
+	}
+	for _, l := range lines {
+		if l.Slice == slice && l.Event == "dispatch" && l.Attempt == attempt {
+			return l.Model
+		}
+	}
+	t.Fatalf("no dispatch line for slice %s attempt %d; journal:\n%+v", slice, attempt, lines)
+	return ""
+}
+
+// TestRunFloorsTheRungWhenTheLeaseDiffTouchesAnInvariant covers the whole
+// invariant floor at the one seam that holds its wiring together: frontier's
+// own dispatch. Nothing below it can see that the manifest processSlice
+// resolves from the lease is the one measureSignals matches changed files
+// against, that staircase.Select consumes that signal, and that the rung it
+// returns is what the journal's dispatch line and the session Dispatch
+// carry. A refactor that resolved an empty manifest, dropped the signal, or
+// journaled a rung other than the dispatched one leaves every unit test in
+// manifest and staircase green.
+//
+// Slice a is dispatched first over an empty lease diff, so it never floors,
+// whatever is declared; slice b is blocked by a, so its dispatch is the
+// first to measure a real lease diff - a's commit, under alpha/. The
+// declarations below differ only in whether they cover that path.
+func TestRunFloorsTheRungWhenTheLeaseDiffTouchesAnInvariant(t *testing.T) {
+	rungs := staircase.Default().Rungs
+	cheapest, dearest := rungs[0], rungs[len(rungs)-1]
+
+	for _, tc := range []struct {
+		name       string
+		invariants []string
+		want       string
+	}{
+		{"the diff touches a declared directory", []string{"alpha/"}, dearest},
+		{"the diff touches a declared glob", []string{"alpha/*.go"}, dearest},
+		{"the diff touches no declared path", []string{"migrations/*.sql"}, cheapest},
+		{"a declared directory written with a ./ prefix", []string{"./alpha/"}, dearest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+			declareInvariants(t, fx, tc.invariants)
+			d, st := newDeps(t, fx)
+			rec := &recordingBackend{Backend: d.Backend}
+			d.Backend = rec
+
+			if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			if got := dispatchModel(t, st, fx.Ticket, "a", 1); got != cheapest {
+				t.Errorf("slice a's dispatch model = %q, want the cheapest rung %q: its lease diff is empty, so nothing it declares is touched", got, cheapest)
+			}
+			if got := dispatchModel(t, st, fx.Ticket, "b", 1); got != tc.want {
+				t.Errorf("slice b's dispatch model = %q, want %q, with %v declared and a lease diff touching alpha/alpha.go", got, tc.want, tc.invariants)
+			}
+
+			var dispatched []string
+			for _, disp := range rec.got {
+				if disp.Slice == "b" && disp.Attempt == 1 {
+					dispatched = append(dispatched, disp.Model)
+				}
+			}
+			if len(dispatched) != 1 || dispatched[0] != tc.want {
+				t.Errorf("the session dispatches for slice b attempt 1 carried models %v, want exactly one, on %q: the journaled rung must be the rung the session ran on", dispatched, tc.want)
+			}
+		})
+	}
 }
 
 // TestRunLeavesSessionPersistenceOnForBuildDispatches: only the intent

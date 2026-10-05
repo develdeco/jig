@@ -3,8 +3,6 @@
 // Model axis only: stateless selection over a cheap-to-dear rung list.
 package staircase
 
-import "regexp"
-
 // Config lists the model rungs, cheapest first.
 type Config struct {
 	Rungs []string
@@ -19,12 +17,8 @@ func Default() Config {
 type Signals struct {
 	DiffLines int  // insertions+deletions of the lease diff
 	DiffFiles int  // files changed
-	Invariant bool // any added line matches InvariantRE
+	Invariant bool // any file changed matches a declared invariant
 }
-
-// InvariantRE flags changes touching invariant-sensitive code: numeric
-// precision, schema migrations, or the contract index.
-var InvariantRE = regexp.MustCompile(`(?i)(BigDecimal|rounding|toFixed|precision|CREATE TABLE|ALTER TABLE|migration|contract-index)`)
 
 // Select picks a rung for cfg given s. Selection opens on the cheapest rung;
 // a volume signal (more than 400 diff lines or more than 10 files changed)

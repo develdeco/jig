@@ -60,7 +60,7 @@ invalidates it:
 | Invalidated by | Home | What lives there |
 |---|---|---|
 | a jig release | binary + skills (process) | the machinery and judgment code itself |
-| one repo's own change | that repo's `.claude/` + `jig.yaml` | conventions, oracle commands, env classes - knowledge specific to that repo |
+| one repo's own change | that repo's `.claude/` + `jig.yaml` | conventions, oracle commands, env classes, invariant-sensitive paths - knowledge specific to that repo |
 | platform or ticket history | the truth repo | tickets at root, `platform/`, `ledger.md` |
 | session end | nowhere, except receipts | `evidence/` - a session's reasoning dies with it; only its artifacts persist |
 
@@ -82,6 +82,24 @@ The session's own words (its result file, and the summary and captions
 `demo.yaml` copies from it) are recorded as written, like the reviewer's
 `result.json` summary: jig does not filter or rewrite model prose. See
 [ADR 0014](docs/adr/0014-demo-session-at-the-gate.md).
+
+## Manifest and invariants
+
+A repo's `.claude/jig.yaml` can declare an optional `invariants:` list of
+repo-relative, `/`-separated paths that are sensitive to change: schema
+migrations, numeric precision code, or any other area where a structural
+change merits a more capable (dearer) model. Each entry is either a directory
+(ending in `/`), which covers its whole subtree, or a `path.Match` glob
+pattern matched against each changed file. Every entry is validated and
+matched in its `path.Clean`ed form, so a leading `./`, a doubled separator or
+a redundant `..` segment still matches the paths git reports; `./` (the repo
+root) covers every path in the repo.
+
+When `frontier` measures a dispatch's staircase signals, it checks whether any
+file changed in the ticket's lease diff matches a declared invariant. If any
+match, the invariant signal floors the rung selection to the dearest model,
+overriding volume climbing. A repo with no declared invariants detects no
+invariants and uses volume-only flooring.
 
 ## Store schema
 
@@ -205,14 +223,14 @@ exists.
 | `internal/home/` | `Root`, `MachinePath`, `PoolDir`, `IntentExcerptDir`, `IntentScratchDir`, `EvidenceDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths, including the directories intent excerpts and summarizer scratch directories go under, and where one reviewed head's demo media live |
 | `internal/intent/` | `NewClaudeReader`, `Best`, `RenderExcerpt` | a repo's git common dir + a time window → matching local agent `Session`s; a scope diff's files → the `Match` a model then summarizes |
 | `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
-| `internal/manifest/` | `Resolve` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes |
+| `internal/manifest/` | `Resolve`, `MatchesInvariant` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes, and invariant-sensitive paths; a file path → whether it matches a declared invariant |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket`, `Compare`, `DivergedError`, `RequireBuilt`, `HoldsUnpushedBuilt`, `MustExistOnOrigin`, `RecutUnlessBuilt` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point, and synced with its branch when origin has it; anything git shows is not a repository of its own is moved aside and cloned afresh) |
 | `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping under the jig home root → a `Config` |
 | `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `MatchRound`, `ScoreRound`, `RenderReport` | a labeled corpus (`testdata/revieweval`) + a session backend → a `CaseScore` per case, matched structurally against seeded gold through the real reviewer contract |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
-| `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` + `Config` → a model rung, disjoint from rungs already in use |
+| `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` (diff lines, files changed, invariant match) + `Config` → a model rung, disjoint from rungs already in use; invariant floored to the dearest rung, volume climbs one rung, otherwise cheapest |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by |
 | `internal/tracker/` | `New`, `Graduate`, `CheckMinted`, `PRCreator`, `PRUpdater`, `PRCommenter`, `PRCreatorWithMedia`, `PRUpdaterWithMedia`, `PRBodyReader` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it; on github, a pull request body + a media directory and file list → the same pull request with each file attached via `gh ... --attach`, or read back to check what `gh` rewrote |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one) |

@@ -465,7 +465,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		defer rc.tearDownEnv(sl, h)
 	}
 
-	sig := measureSignals(lease.Dir, startSHA)
+	sig := measureSignals(lease.Dir, startSHA, m)
 	model := staircase.Select(d.Rungs, sig)
 
 	st, err := rc.readSliceState(sl.ID)
