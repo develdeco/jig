@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/staircase"
 )
 
@@ -16,9 +17,9 @@ var shortstatCountRE = regexp.MustCompile(`(\d+) insertion|(\d+) deletion`)
 
 // measureSignals measures a lease's staircase signals over the range
 // startSHA..HEAD: total changed lines (from `git diff --shortstat`), files
-// changed (from `git diff --name-only`), and whether any added line matches
-// staircase.InvariantRE (from the full diff).
-func measureSignals(leaseDir, startSHA string) staircase.Signals {
+// changed (from `git diff --name-only`), and whether any file changed matches
+// a declared invariant.
+func measureSignals(leaseDir, startSHA string, m manifest.Manifest) staircase.Signals {
 	rangeSpec := startSHA + "..HEAD"
 	var sig staircase.Signals
 
@@ -28,10 +29,8 @@ func measureSignals(leaseDir, startSHA string) staircase.Signals {
 	if out, err := gitx.Run(leaseDir, "diff", "--name-only", rangeSpec); err == nil {
 		if trimmed := strings.TrimSpace(out); trimmed != "" {
 			sig.DiffFiles = len(strings.Split(trimmed, "\n"))
+			sig.Invariant = anyPathMatchesInvariant(trimmed, m)
 		}
-	}
-	if out, err := gitx.Run(leaseDir, "diff", rangeSpec); err == nil {
-		sig.Invariant = diffAddsInvariantLine(out)
 	}
 	return sig
 }
@@ -51,12 +50,12 @@ func sumShortstatCounts(shortstat string) int {
 	return total
 }
 
-func diffAddsInvariantLine(diff string) bool {
-	for _, line := range strings.Split(diff, "\n") {
-		if !strings.HasPrefix(line, "+") || strings.HasPrefix(line, "+++") {
+func anyPathMatchesInvariant(nameOnlyOutput string, m manifest.Manifest) bool {
+	for _, filePath := range strings.Split(nameOnlyOutput, "\n") {
+		if filePath == "" {
 			continue
 		}
-		if staircase.InvariantRE.MatchString(line) {
+		if m.MatchesInvariant(filePath) {
 			return true
 		}
 	}

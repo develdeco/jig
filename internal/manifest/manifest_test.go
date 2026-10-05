@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -166,5 +167,138 @@ func TestOracleCmd(t *testing.T) {
 	}
 	if got := m.OracleCmd("./run-custom.sh", ws); got != "./run-custom.sh" {
 		t.Errorf("OracleCmd(literal) = %q", got)
+	}
+}
+
+func TestResolveInvariants(t *testing.T) {
+	t.Run("declared invariants are carried", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, filepath.Join(dir, "go.mod"), "module example.invalid/x\n\ngo 1.27\n")
+		writeFile(t, filepath.Join(dir, ".claude", "jig.yaml"), `
+invariants:
+  - internal/store/
+  - migrations/*.sql
+`)
+		m, err := Resolve(dir)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		wantInvs := []string{"internal/store/", "migrations/*.sql"}
+		if !reflect.DeepEqual(m.Invariants, wantInvs) {
+			t.Errorf("Invariants = %v, want %v", m.Invariants, wantInvs)
+		}
+	})
+
+	// A declaration validates in its path.Clean'ed form, so it must match in
+	// that form too: "./migrations/*.sql" is a natural thing to write, and git
+	// never reports a changed path with a "./" prefix, so an entry matched as
+	// written would validate cleanly and then silently floor nothing.
+	t.Run("declared invariants match in their cleaned form", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, filepath.Join(dir, "go.mod"), "module example.invalid/x\n\ngo 1.27\n")
+		writeFile(t, filepath.Join(dir, ".claude", "jig.yaml"), `
+invariants:
+  - ./internal/store/
+  - ./migrations/*.sql
+`)
+		m, err := Resolve(dir)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		for _, filePath := range []string{"internal/store/repo.go", "migrations/001.sql"} {
+			if !m.MatchesInvariant(filePath) {
+				t.Errorf("MatchesInvariant(%q) = false, want true: a declared entry that validates must match the paths git reports", filePath)
+			}
+		}
+	})
+
+	t.Run("no invariants when absent", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, filepath.Join(dir, "go.mod"), "module example.invalid/x\n\ngo 1.27\n")
+		m, err := Resolve(dir)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if len(m.Invariants) != 0 {
+			t.Errorf("Invariants = %v, want empty", m.Invariants)
+		}
+	})
+
+	t.Run("malformed pattern is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, filepath.Join(dir, "go.mod"), "module example.invalid/x\n\ngo 1.27\n")
+		writeFile(t, filepath.Join(dir, ".claude", "jig.yaml"), `
+invariants:
+  - "migrations/[invalid.sql"
+`)
+		_, err := Resolve(dir)
+		if err == nil || !strings.Contains(err.Error(), "valid path.Match") {
+			t.Errorf("Resolve: expected path.Match error, got %v", err)
+		}
+	})
+
+	t.Run("absolute path is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, filepath.Join(dir, "go.mod"), "module example.invalid/x\n\ngo 1.27\n")
+		writeFile(t, filepath.Join(dir, ".claude", "jig.yaml"), `
+invariants:
+  - /absolute/path
+`)
+		_, err := Resolve(dir)
+		if err == nil || !strings.Contains(err.Error(), "absolute") {
+			t.Errorf("Resolve: expected absolute error, got %v", err)
+		}
+	})
+
+	t.Run("path escaping repo is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, filepath.Join(dir, "go.mod"), "module example.invalid/x\n\ngo 1.27\n")
+		writeFile(t, filepath.Join(dir, ".claude", "jig.yaml"), `
+invariants:
+  - ../escapes
+`)
+		_, err := Resolve(dir)
+		if err == nil || !strings.Contains(err.Error(), "escapes") {
+			t.Errorf("Resolve: expected escapes error, got %v", err)
+		}
+	})
+}
+
+func TestMatchesInvariant(t *testing.T) {
+	cases := []struct {
+		name       string
+		invariants []string
+		filePath   string
+		want       bool
+	}{
+		{"directory match: not the dir itself", []string{"internal/store/"}, "internal/store", false},
+		{"directory match: file under dir", []string{"internal/store/"}, "internal/store/repo.go", true},
+		{"directory match: subdir under dir", []string{"internal/store/"}, "internal/store/query/models.go", true},
+		{"directory match: prefix but not under", []string{"internal/store/"}, "internal/storage/file.go", false},
+		{"glob match: exact", []string{"migrations/*.sql"}, "migrations/001.sql", true},
+		{"glob match: no match", []string{"migrations/*.sql"}, "migrations/001.go", false},
+		{"glob match: deep path", []string{"migrations/*.sql"}, "src/migrations/001.sql", false},
+		{"multiple invariants: first matches", []string{"internal/store/", "migrations/*.sql"}, "internal/store/repo.go", true},
+		{"multiple invariants: second matches", []string{"internal/store/", "migrations/*.sql"}, "migrations/001.sql", true},
+		{"multiple invariants: none match", []string{"internal/store/", "migrations/*.sql"}, "main.go", false},
+		{"no invariants", []string{}, "internal/store/repo.go", false},
+		// Entries git's own paths can never carry literally: each is matched
+		// in the cleaned form validateInvariants already judges it in.
+		{"glob with a ./ prefix", []string{"./migrations/*.sql"}, "migrations/001.sql", true},
+		{"directory with a ./ prefix", []string{"./internal/store/"}, "internal/store/repo.go", true},
+		{"directory with a ./ prefix: prefix but not under", []string{"./internal/store/"}, "internal/storage/file.go", false},
+		{"entry with a redundant .. segment", []string{"internal/queue/../store/"}, "internal/store/repo.go", true},
+		{"entry with a doubled separator", []string{"internal//store/"}, "internal/store/repo.go", true},
+		{"the repo root as a directory entry covers every path", []string{"./"}, "main.go", true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := Manifest{Invariants: c.invariants}
+			got := m.MatchesInvariant(c.filePath)
+			if got != c.want {
+				t.Errorf("MatchesInvariant(%q) = %v, want %v", c.filePath, got, c.want)
+			}
+		})
 	}
 }
