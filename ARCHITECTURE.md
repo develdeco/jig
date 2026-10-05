@@ -281,8 +281,9 @@ cumulative `open`/`dismissed` findings folded from every earlier round), the
 backend runs a session against `must_review` - every file the scope diff
 touched plus every still-open finding's file - and jig reads back
 `work/gate.round-N.result.json` (findings, `reviewed_paths`, a summary). The
-review is a read: the gate's oracles already tested this head, so the
-reviewer runs no tests
+review is a read: test evidence is the oracles' job, and they ran on this
+head before the review, so the reviewer runs no tests, with an empty
+`oracles_passed` too
 ([ADR 0017](docs/adr/0017-the-reviewer-reads-the-gate-tests.md)). The
 reviewer edits, commits, and pushes nothing; jig checks this itself (HEAD
 and the tracked tree unchanged after dispatch) rather than trusting the

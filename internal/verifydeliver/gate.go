@@ -761,14 +761,15 @@ func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []
 		handles = append(handles, h)
 	}
 
-	return runOracleSuite(dir, man)
+	return RunOracleSuite(dir, man)
 }
 
-// runOracleSuite runs every manifest oracle across every manifest
+// RunOracleSuite runs every manifest oracle across every manifest
 // workspace in dir, workspaces in manifest order and oracles by name, and
 // returns the runs it made. Any failure stops the suite, so a nil error
-// means every returned run passed.
-func runOracleSuite(dir string, man manifest.Manifest) ([]OracleRun, error) {
+// means every returned run passed. Exported for internal/revieweval, whose
+// reviewer gets the runs the way Gate's does.
+func RunOracleSuite(dir string, man manifest.Manifest) ([]OracleRun, error) {
 	var runs []OracleRun
 	for _, ws := range man.Workspaces {
 		for _, name := range SortedOracleNames(man) {

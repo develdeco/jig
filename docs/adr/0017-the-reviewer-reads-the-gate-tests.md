@@ -12,7 +12,9 @@ no-mistakes splits the same work the same way this ADR does: its review step is 
 
 > jig ran every command in review.json's oracles_passed on this head before this review, and each passed. Review by reading: run no tests.
 
-It states the job's scope, as "Do not edit files, commit, or push" already does; it coaches nothing.
+It states the job's scope, as "Do not edit files, commit, or push" already does; it coaches nothing. The rule does not depend on the list: a repo with no oracle gets an empty `oracles_passed` and the same line, since producing test evidence is the oracles' job, not the review's.
+
+The review eval (`internal/revieweval`) runs the case repo's oracles before each round, as `Gate` does, and hands its reviewer the runs, so it measures the review a gate reviewer gives.
 
 ## What enforces it
 

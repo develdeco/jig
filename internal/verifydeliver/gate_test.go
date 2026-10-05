@@ -758,28 +758,33 @@ func reviewJSONIntent(t *testing.T, d Deps, ticket string, opts GateOpts) Intent
 
 // TestGateHandsTheReviewerTheOraclesItRan: review.json's oracles_passed
 // lists every oracle run the gate made before dispatching the reviewer -
-// one per oracle per workspace, in manifest order - so the reviewer has the
-// oracle's result and reads instead of retesting (ADR 0017).
+// one per oracle per workspace, workspaces in manifest order and oracles by
+// name - so the reviewer has the oracle's result and reads instead of
+// retesting (ADR 0017). Two oracles make the order observable: map order
+// would put vet before test about half the time.
 func TestGateHandsTheReviewerTheOraclesItRan(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
+	addSecondOracle(t, buildLeaseDir(t, fx), ticketBranch(fx.Ticket))
 	d := newDeps(t, fx)
 
 	got := gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed
-	// The fixture repo's jig.yaml declares one oracle, test, as
-	// "@GO test ./{path}/..." over workspaces alpha and beta.
-	want := []struct{ workspace, suffix string }{
-		{"alpha", " test ./alpha/..."},
-		{"beta", " test ./beta/..."},
+	// The fixture repo's jig.yaml declares test as "@GO test ./{path}/..."
+	// over workspaces alpha and beta; addSecondOracle adds vet beside it.
+	want := []struct{ oracle, workspace, suffix string }{
+		{"test", "alpha", " test ./alpha/..."},
+		{"vet", "alpha", " vet ./alpha/..."},
+		{"test", "beta", " test ./beta/..."},
+		{"vet", "beta", " vet ./beta/..."},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("review.json oracles_passed = %+v, want %d runs", got, len(want))
 	}
 	for i, w := range want {
-		if got[i].Oracle != "test" || got[i].Workspace != w.workspace || !strings.HasSuffix(got[i].Command, w.suffix) {
-			t.Errorf("oracles_passed[%d] = %+v, want oracle test, workspace %s, a command ending %q", i, got[i], w.workspace, w.suffix)
+		if got[i].Oracle != w.oracle || got[i].Workspace != w.workspace || !strings.HasSuffix(got[i].Command, w.suffix) {
+			t.Errorf("oracles_passed[%d] = %+v, want oracle %s, workspace %s, a command ending %q", i, got[i], w.oracle, w.workspace, w.suffix)
 		}
 	}
 }
