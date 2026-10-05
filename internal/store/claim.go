@@ -28,16 +28,15 @@ const idNotClaimedCode = "ID_NOT_CLAIMED"
 //
 // On a store with an origin, Claim pushes the commit alone. A push the
 // origin accepts finishes the claim. A push it rejects (the origin moved on:
-// not a fast-forward) undoes the commit - `git reset --hard` to the commit
-// before it, which restores an edited file (a chart's tickets.yaml) to what
-// it held before, plus `git clean -fdx` on write's own paths, since a reset
-// alone drops write's new ticket folder from git's tracked tree but leaves
-// the now-empty directory - and its gitignored lock sidecar - sitting on
-// disk (git never removes a directory merely for holding no tracked files) -
-// pulls (always a fast-forward, since the undone commit was the only thing
-// the local branch had that the origin lacked, so this can never end in a
-// merge or rebase conflict) and calls write again, up to maxClaimAttempts
-// times. A push that fails any other way
+// not a fast-forward) undoes the commit - scoped to write's own paths alone
+// (see undoClaim), never anything else in the store - restoring an edited
+// file (a chart's tickets.yaml) to what it held before and removing write's
+// new ticket folder, plus its gitignored lock sidecar, that a reset alone
+// would otherwise leave sitting on disk (git never removes a directory
+// merely for holding no tracked files) - pulls (always a fast-forward, since
+// the undone commit was the only thing the local branch had that the origin
+// lacked, so this can never end in a merge or rebase conflict) and calls
+// write again, up to maxClaimAttempts times. A push that fails any other way
 // (the origin unreachable, or anything else) undoes the claim the same way
 // and refuses at once with ID_NOT_CLAIMED, since retrying blind would not
 // help; so does the last of maxClaimAttempts rejections. Either way, nothing
@@ -101,18 +100,40 @@ func (s *Store) headSHA() (string, bool) {
 	return sha, true
 }
 
-// undoClaim discards every commit after sha and restores the working tree to
-// match it, then removes whatever of paths that leaves sitting on disk but
-// untracked (a new ticket folder's now-empty directory) - how Claim undoes a
-// push the origin rejected or otherwise refused. The clean also takes
-// ignored files (-x): a ticket folder's only survivor past the reset is
-// often store.Lock's own "*.lock" sidecar for its ticket.yaml, gitignored so
-// it never shows up in `git status` - left in place, that sidecar alone
-// would keep the folder on disk, and the next Mint's scan of the store root
-// would then see it and skip past the very id this claim just gave up.
+// undoClaim discards exactly the commit write's own call just made - never
+// anything else in the store - how Claim undoes a push the origin rejected
+// or otherwise refused. `reset --soft` moves HEAD (and the branch) back to
+// sha without touching the index or the working tree, so any other dirty
+// state another process left in the store (a journal.ndjson line, a commit
+// of its own ahead of sha) survives untouched; what paths held at sha is then
+// restored path by path: `git restore`, staged and worktree alike, for a path
+// that already existed there (an edited file such as a chart's
+// tickets.yaml), or `git rm -r --cached` for one that did not (a new ticket
+// folder, still staged as an addition after the soft reset). The clean that
+// follows, scoped to paths alone, takes ignored files too (-x): a ticket
+// folder's only survivor past that is often store.Lock's own "*.lock"
+// sidecar for its ticket.yaml, gitignored so it never shows up in
+// `git status` - left in place, that sidecar alone would keep the folder on
+// disk, and the next Mint's scan of the store root would then see it and
+// skip past the very id this claim just gave up.
 func (s *Store) undoClaim(sha string, paths []string) error {
-	if _, err := gitx.Run(s.Root, "reset", "--hard", sha); err != nil {
+	if _, err := gitx.Run(s.Root, "reset", "--soft", sha); err != nil {
 		return err
+	}
+	for _, p := range paths {
+		existed, err := gitx.FileExistsAtRev(s.Root, sha, p)
+		if err != nil {
+			return err
+		}
+		if existed {
+			if _, err := gitx.Run(s.Root, "restore", "--source="+sha, "--staged", "--worktree", "--", p); err != nil {
+				return err
+			}
+		} else {
+			if _, err := gitx.Run(s.Root, "rm", "-r", "--cached", "--", p); err != nil {
+				return err
+			}
+		}
 	}
 	args := append([]string{"clean", "-fdx", "--"}, paths...)
 	_, err := gitx.Run(s.Root, args...)

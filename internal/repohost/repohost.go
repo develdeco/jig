@@ -39,9 +39,9 @@ type Host interface {
 // Remote URL shapes: ssh (git@host:owner/repo[.git] or ssh://user@host/owner/repo[.git]),
 // https/http (scheme://host/owner/repo[.git]).
 var (
-	sshRemoteRE   = regexp.MustCompile(`^[^@\s]+@github\.com:([^/]+)/(.+)$`)
+	sshRemoteRE    = regexp.MustCompile(`^[^@\s]+@github\.com:([^/]+)/(.+)$`)
 	sshURLRemoteRE = regexp.MustCompile(`^ssh://[^@\s]+@github\.com/([^/]+)/(.+)$`)
-	httpRemoteRE  = regexp.MustCompile(`^https?://github\.com/([^/]+)/(.+)$`)
+	httpRemoteRE   = regexp.MustCompile(`^https?://github\.com/([^/]+)/(.+)$`)
 )
 
 // parseGitHubOwnerRepo extracts owner and repo from a GitHub remote URL.

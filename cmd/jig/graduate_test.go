@@ -1346,6 +1346,126 @@ func TestGraduateFullyGraduatedWithRemoteStillSyncsPendingState(t *testing.T) {
 	}
 }
 
+// TestClaimOneChartEntryRediscoversAnotherClonesGraduation reproduces two
+// clones graduating one chart entry: a second clone of the store's origin
+// claims it and pushes first, so this clone's own claim's push is rejected.
+// Per Claim's contract, the rejection undoes this clone's commit, pulls the
+// other clone's work in, and claimOneChartEntry must re-read the chart
+// before minting again - finding the entry already has an id and reporting
+// done, rather than minting (and pushing) a second ticket for it.
+func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
+	_, storeRoot := setupGraduateStore(t)
+
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if _, err := gitx.Run("", "init", "--bare", "-b", "main", remote); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "remote", "add", "origin", remote); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "push", "-u", "origin", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The chart entry itself is already committed and pushed, as it would be
+	// in real use (see TestGraduatePushFailureRemovesTheClaim's own comment on
+	// why): both clones below must see the same tickets.yaml.
+	writeChart(t, storeRoot, "mychart", `tickets:
+  - title: "Slice A"
+`)
+	if _, err := gitx.Run(storeRoot, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "chart: add Slice A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "push", "origin", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	other := t.TempDir()
+	if _, err := gitx.Run("", "clone", remote, other); err != nil {
+		t.Fatal(err)
+	}
+	otherSt, err := store.Open(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The two clones' claims would otherwise commit the exact same tree atop
+	// the exact same parent with the exact same author, committer and
+	// message, so pinning distinct commit dates is what makes them two
+	// distinct commits (and so what makes storeRoot's own push below a
+	// genuine rejection) rather than, by the coincidence of two commits built
+	// from identical inputs landing in the same wall-clock second, the same
+	// commit object twice - a push that would then trivially "succeed" as a
+	// no-op fast-forward onto the hash it already pushed.
+	t.Setenv("GIT_AUTHOR_DATE", "2024-01-01T00:00:00+00:00")
+	t.Setenv("GIT_COMMITTER_DATE", "2024-01-01T00:00:00+00:00")
+
+	// The other clone graduates Slice A and pushes it to the origin, standing
+	// in for `jig graduate mychart` run from a second clone.
+	otherID, _, otherDone, err := claimOneChartEntry(otherSt, "T-{n}", "mychart")
+	if err != nil {
+		t.Fatalf("claimOneChartEntry on the other clone: %v", err)
+	}
+	if otherDone || otherID == "" {
+		t.Fatalf("claimOneChartEntry on the other clone = id %q done %v, want it to claim Slice A", otherID, otherDone)
+	}
+
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIT_AUTHOR_DATE", "2024-01-02T00:00:00+00:00")
+	t.Setenv("GIT_COMMITTER_DATE", "2024-01-02T00:00:00+00:00")
+
+	// storeRoot never synced with the other clone's push: its own claim below
+	// mints against a stale chart, so its push is rejected by what the other
+	// clone already landed on the origin.
+	id, pos, done, err := claimOneChartEntry(st, "T-{n}", "mychart")
+	if err != nil {
+		t.Fatalf("claimOneChartEntry: %v", err)
+	}
+	if !done {
+		t.Fatalf("claimOneChartEntry = id %q pos %d done %v, want done=true: the re-read after the rejected push's pull must see the other clone's id and mint nothing new", id, pos, done)
+	}
+	if id != "" {
+		t.Fatalf("claimOneChartEntry minted %q despite Slice A already being graduated by the other clone", id)
+	}
+
+	entries, err := st.ReadChart("mychart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].ID != otherID {
+		t.Fatalf("entries after the rejected claim's pull = %+v, want entry 1's id to be the other clone's %q", entries, otherID)
+	}
+
+	remoteLog, err := gitx.Run("", "--git-dir", remote, "log", "--pretty=%s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(remoteLog, "graduate "+otherID); n != 1 {
+		t.Fatalf("remote log has %d commits graduating %s, want exactly 1 (the rejected clone must not have minted and pushed a second ticket)", n, otherID)
+	}
+
+	ents, err := os.ReadDir(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticketDirs := 0
+	for _, e := range ents {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "T-") {
+			ticketDirs++
+		}
+	}
+	if ticketDirs != 1 {
+		t.Fatalf("storeRoot has %d ticket folders after the rejected claim, want exactly 1 (the other clone's %s pulled in, no second one minted)", ticketDirs, otherID)
+	}
+}
+
 // TestGraduateRefusesAMintedIDJigCannotUse covers an id ticket_format mints
 // that jig cannot use (pool.CheckTicket: a reserved lease suffix here):
 // graduate refuses it before writing anything under it - no folder or

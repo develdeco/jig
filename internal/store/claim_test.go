@@ -162,6 +162,76 @@ func TestClaimRemintsAfterRejectedPush(t *testing.T) {
 	}
 }
 
+// TestClaimRemintsAfterRejectedPushPreservesUnrelatedDirtyState covers the
+// same rejected-then-retried race as TestClaimRemintsAfterRejectedPush, but
+// with another process's uncommitted edit to a tracked file (project.yaml)
+// landing in the store in the window between Claim reading its pre-write
+// HEAD and its own commit - the interleaving store.go's own comments already
+// treat as possible ("Another process working on the same store can still
+// slip in between"). undoClaim must discard only its own rejected commit,
+// never that edit: a repo-wide `git reset --hard` would silently restore
+// project.yaml to what it held before the edit, discarding the other
+// process's uncommitted work along with the rejected claim.
+func TestClaimRemintsAfterRejectedPushPreservesUnrelatedDirtyState(t *testing.T) {
+	st, work, remote := newTestRemoteStore(t)
+
+	other := t.TempDir()
+	runGit(t, "", "clone", remote, other)
+	runGit(t, other, "config", "user.name", "other")
+	runGit(t, other, "config", "user.email", "other@example.invalid")
+	if err := os.WriteFile(filepath.Join(other, "from-other.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "add", "-A")
+	runGit(t, other, "commit", "-m", "from other")
+	runGit(t, other, "push", "origin", "main")
+
+	calls := 0
+	id, err := st.Claim(
+		func() (string, []string, error) {
+			calls++
+			if calls == 1 {
+				// Another process on this same clone, uncommitted and no
+				// part of this claim's own paths.
+				if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\nextra: from-another-process\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			id, err := st.Mint("JIG-{n}", Ticket{Title: "x"})
+			if err != nil {
+				return "", nil, err
+			}
+			return id, []string{id}, nil
+		},
+		func(id string) string { return id + ": new ticket" },
+	)
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if id != "JIG-1" {
+		t.Fatalf("id = %q, want JIG-1", id)
+	}
+	if calls != 2 {
+		t.Fatalf("write was called %d times, want exactly 2 (one rejected, one that landed)", calls)
+	}
+
+	data, err := os.ReadFile(filepath.Join(work, "project.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "extra: from-another-process") {
+		t.Fatalf("project.yaml = %q, want the other process's uncommitted edit to survive the rejected claim's undo", data)
+	}
+	status := runGit(t, work, "status", "--porcelain")
+	if !strings.Contains(status, "project.yaml") {
+		t.Fatalf("status = %q, want project.yaml still showing as modified (uncommitted)", status)
+	}
+	subject := runGit(t, work, "log", "-1", "--pretty=%s")
+	if strings.Contains(subject, "project.yaml") {
+		t.Fatalf("commit subject = %q, want the claim's own commit, not the swept-up project.yaml edit", subject)
+	}
+}
+
 // TestClaimGivesUpAfterMaxAttempts covers an origin that keeps moving out
 // from under every push: write itself pushes a competing commit to the
 // remote (standing in for another, faster writer) before every attempt, so
