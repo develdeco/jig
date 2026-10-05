@@ -404,7 +404,7 @@ func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string,
 	}
 	result := rnd.Review.Result
 
-	reported, aerr := verifydeliver.ApplyRound(n, fold.Known, result, nil, alwaysNotGreen, man)
+	reported, aerr := verifydeliver.ApplyRound(n, fold.Known, result, nil, alwaysNotGreen, man, []string{verifydeliver.RiskHigh, verifydeliver.RiskMedium, verifydeliver.RiskLow}, false)
 	if aerr != nil {
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: apply round: %w", c.Name, n, aerr)
 	}

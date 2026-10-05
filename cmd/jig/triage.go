@@ -163,11 +163,22 @@ func interactiveTriage(in verifydeliver.TriageInput, stdin io.Reader, stdout io.
 		}
 	}
 
+	// Parked findings (budget-forced asks) are offered right alongside the
+	// rest, under one header naming why: the same per-ask prompt below
+	// decides each one, keep or dismiss, like any other ask - only
+	// DefaultTriage (--yes, a non-terminal stdin, `jig solve`) ever skips
+	// them.
+	if anyParked(in.Asks) {
+		fmt.Fprintf(stdout, "fix budget reached (%d of %d): keeping one queues a fix anyway\n", in.BudgetUsed, in.BudgetLimit)
+	}
+
 askLoop:
 	for i, f := range in.Asks {
 		if eof {
-			if noWorkspace, noOracle := verifydeliver.BuildTargetGaps(f, in.Manifest); !noWorkspace && !noOracle {
-				result.Asks[f.ID] = verifydeliver.AskOutcome{Keep: true, Workspace: f.Workspace}
+			if !parked(f) {
+				if noWorkspace, noOracle := verifydeliver.BuildTargetGaps(f, in.Manifest); !noWorkspace && !noOracle {
+					result.Asks[f.ID] = verifydeliver.AskOutcome{Keep: true, Workspace: f.Workspace}
+				}
 			}
 			continue
 		}
@@ -188,8 +199,10 @@ askLoop:
 			if err != nil && trimmed == "" {
 				eof = true
 				eofNote(stdout, in.Asks[i:], in.Manifest)
-				if noWorkspace, noOracle := verifydeliver.BuildTargetGaps(f, in.Manifest); !noWorkspace && !noOracle {
-					result.Asks[f.ID] = verifydeliver.AskOutcome{Keep: true, Workspace: f.Workspace}
+				if !parked(f) {
+					if noWorkspace, noOracle := verifydeliver.BuildTargetGaps(f, in.Manifest); !noWorkspace && !noOracle {
+						result.Asks[f.ID] = verifydeliver.AskOutcome{Keep: true, Workspace: f.Workspace}
+					}
 				}
 				continue askLoop
 			}
@@ -246,16 +259,40 @@ askLoop:
 	return result
 }
 
+// parked reports whether f is a fix the budget forced to asked
+// (Finding.RoutedWhy == RoutedWhyBudget): only a person at a terminal can
+// keep one, so stdin closing mid-session must never auto-keep it, the same
+// as a build-target gap EOF already leaves undecided.
+func parked(f verifydeliver.Finding) bool {
+	return f.RoutedWhy == verifydeliver.RoutedWhyBudget
+}
+
+// anyParked reports whether any of asks is budget-parked.
+func anyParked(asks []verifydeliver.Finding) bool {
+	for _, f := range asks {
+		if parked(f) {
+			return true
+		}
+	}
+	return false
+}
+
 // undecidedAskCount reports how many of asks would be left for a human
-// after stdin closes: one whose build target already resolves in full (a
-// derived workspace and a resolvable oracle) is kept automatically, the
-// same way DefaultTriage keeps it; one missing either part cannot be,
-// since that judgment needs a human and none is left to ask. It shares
-// verifydeliver.BuildTargetGaps with DefaultTriage and routeRound, rather
-// than re-deriving either rule here.
+// after stdin closes: a budget-parked ask always is, whatever its build
+// target - only a person at a terminal can keep one; otherwise one whose
+// build target already resolves in full (a derived workspace and a
+// resolvable oracle) is kept automatically, the same way DefaultTriage
+// keeps it, and one missing either part cannot be, since that judgment
+// needs a human and none is left to ask. It shares verifydeliver.
+// BuildTargetGaps with DefaultTriage and routeRound, rather than
+// re-deriving that rule here.
 func undecidedAskCount(asks []verifydeliver.Finding, man manifest.Manifest) int {
 	n := 0
 	for _, f := range asks {
+		if parked(f) {
+			n++
+			continue
+		}
 		if noWorkspace, noOracle := verifydeliver.BuildTargetGaps(f, man); noWorkspace || noOracle {
 			n++
 		}

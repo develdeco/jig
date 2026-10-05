@@ -1,0 +1,5 @@
+{
+  "outcome": "green",
+  "summary": "Pinned the trim with a regression test, the way the round 2 recurrence asked.",
+  "commit": "@HEAD"
+}

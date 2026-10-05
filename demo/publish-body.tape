@@ -14,9 +14,10 @@
 # README.md#what-a-published-pull-request-looks-like).
 #
 # The setup that reaches a clean, publishable round is hidden: it is the same
-# three rounds (a fix kept, a second fix dismissed at the batch prompt, an
-# ask kept with a decision, a note; a delta round where the kept fix recurs
-# and the dismissed one reaches no one; a clean third round with its demo)
+# three rounds (a fix kept, a low-risk fix routed as a note by the risk
+# floor, an ask kept with a decision, a note; a delta round where the kept
+# fix recurs and the noted one prompts no one; a clean third round with its
+# demo)
 # that demo/gate-reviewer.tape records on camera, over the same `reviewer`
 # fixture scenario - see that tape's own header for the full citation of
 # every typed line and every anchored Wait+Line against cmd/jig/triage.go and
@@ -100,14 +101,15 @@ Type `jig run "$JIG_TICKET" --answer q-001 "Casual." --backend fake --scenario "
 Wait@60s
 
 ## Round 1 (full), hidden: the real triage prompt, answered exactly as
-## gate-reviewer.tape's own Show section types it - dismiss the low-risk
-## trim fix (r1-f2), keep the high-risk overflow-doc fix (r1-f1) in the
-## batch, keep the ask (r1-f3) with a decision. Ends "verdict: fix-slices",
-## with fix_slices fix-1-alpha-test and fix-1-r1-f3 (the dismissed fix never
+## gate-reviewer.tape's own Show section types it - Enter keeps the
+## high-risk overflow-doc fix (r1-f1), the batch's only fix, since the
+## default risk floor routes the low-risk trim fix (r1-f2) as a note; then
+## keep the ask (r1-f3) with a decision. Ends "verdict: fix-slices", with
+## fix_slices fix-1-alpha-test and fix-1-r1-f3 (the noted trim fix never
 ## gets one).
 Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 Wait+Line@15s /good\):$/
-Type "r1-f2" Enter
+Enter
 Wait+Line@15s /dismiss\]:$/
 Type "k" Enter
 Wait+Line@15s /skip\):$/
@@ -120,8 +122,8 @@ Wait@60s
 
 ## Round 2 (delta), hidden: the doc-comment fix (r1-f1) recurs as this
 ## round's only fix - Enter alone accepts the batch of one. The tone ask
-## already cleared and the trim fix's dismissal carried forward, so neither
-## prompts again.
+## already cleared and the trim finding is still below the risk floor, so
+## neither prompts.
 Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 Wait+Line@15s /good\):$/
 Enter
@@ -194,8 +196,8 @@ Wait@5s
 ## The detail the body only points at: round 3's own summary, then every
 ## finding from every round ordered by risk - r1-f1 (high) fixed by the
 ## round 2 recurrence's slice and cleared at round 3, r1-f3 (medium) fixed
-## by its own slice and cleared at round 2, r1-f2 (low) dismissed by a
-## human, r1-f4 (low) noted - each with its own risk rationale, and
+## by its own slice and cleared at round 2, r1-f2 (low) noted by the
+## risk floor, r1-f4 (low) noted - each with its own risk rationale, and
 ## Coverage: the files the change touched (a git diff of the ship range)
 ## next to the paths a round actually read (internal/verifydeliver/
 ## render.go's writeReviewNotes). On a GitHub pull request this file is what

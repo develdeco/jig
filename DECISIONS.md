@@ -2875,3 +2875,15 @@ must keep passing both explicitly rather than relying on gh's own
 repo/remote inference. `--dry-run` cannot be combined with `--attach`, so
 this run is evidence for the repo/head resolution alone; the upload path's
 first real check is still the first live publish of a demo.
+
+## Gate risk floor (slice RR-1)
+
+A fix finding whose risk is not in `project.yaml`'s configured `gate.fix_risks` list is routed as a note (status `noted`, `routed_as: note`) rather than an open fix. The default floor is `[high, medium]`: low-risk findings are notes, stopping low-risk loops without blocking delivery. A round with only notes folds clean. The floor is decided before the missing-build-target rule, so a below-floor fix in a file outside every declared workspace is a note too, not an ask: that rule only ever applied to a would-be open fix. See [ADR 0015](docs/adr/0015-gate-fix-budget-and-risk-floor.md).
+
+## Gate fix budget (slice RR-1)
+
+Once a ticket's used budget - its earlier gate rounds that appended at least one fix slice, scripted source included - equals `gate.fix_rounds` (default 3), a round parks each would-be open fix as `asked`/`routed_why: budget` instead of queuing it. Only a person at a terminal can keep a parked finding; `--yes`, a non-terminal stdin and `jig solve` all build on `DefaultTriage`, which leaves it undecided regardless of its build target. `findings.yaml`'s `routed_why` also covers the two other forced-ask cases (`recurrence`, `build-target`), so `jig status`'s new `why` column names every one of them. See [ADR 0015](docs/adr/0015-gate-fix-budget-and-risk-floor.md).
+
+## Gate fix slice sizing (slice RR-1)
+
+A round's kept fixes, grouped by (workspace, oracle), are packed into slices bounded by `gate.fix_slice_findings` (default 5): same-file findings always share a slice, files are taken in path order and packed greedily, and a file over the bound gets a slice of its own. A group that fits in one slice keeps today's id; a split group's slices are numbered `-1`, `-2`, ... from 1. See [ADR 0015](docs/adr/0015-gate-fix-budget-and-risk-floor.md).

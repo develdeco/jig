@@ -27,6 +27,13 @@ type TriageInput struct {
 	Asks     []Finding
 	Notes    []Finding
 	Manifest manifest.Manifest
+	// BudgetUsed and BudgetLimit are this ticket's fix budget state (the
+	// gate's earlier fix-appending rounds, and gate.fix_rounds), carried so
+	// a hook can phrase the header it shows Asks' own budget-parked
+	// entries (Finding.RoutedWhy == RoutedWhyBudget) under, without
+	// recomputing either number itself. Meaningful only when at least one
+	// of Asks is budget-parked.
+	BudgetUsed, BudgetLimit int
 }
 
 // AskOutcome is one ask finding's triage decision. Keep false dismisses
@@ -69,11 +76,17 @@ type Triage func(TriageInput) TriageResult
 // that already has a full build target (a derived workspace and a
 // resolvable oracle) is kept with no decision text, and an
 // ask missing either stays undecided - keeping it needs a human's choice,
-// which nothing here can supply. Every decision it makes is auto (Human
-// false).
+// which nothing here can supply. A budget-parked ask (Finding.RoutedWhy ==
+// RoutedWhyBudget) stays undecided too, whatever its build target: only a
+// person at a terminal can keep one, so --yes, a non-terminal stdin and
+// `jig solve` (which all build on this function) never spend past the
+// budget. Every decision it makes is auto (Human false).
 func DefaultTriage(in TriageInput) TriageResult {
 	asks := make(map[string]AskOutcome, len(in.Asks))
 	for _, f := range in.Asks {
+		if f.RoutedWhy == RoutedWhyBudget {
+			continue // undecided: only a person at a terminal can keep a parked finding
+		}
 		if noWorkspace, noOracle := BuildTargetGaps(f, in.Manifest); noWorkspace || noOracle {
 			continue // undecided: keeping it needs a human's workspace/oracle choice
 		}
@@ -125,7 +138,14 @@ func sortByRiskThenID(fs []Finding) {
 // exactly as ApplyRound reported them: a note is never triaged. Routing
 // and triage finish entirely inside this call, before Gate appends any
 // slice or pushes the store.
-func routeRound(round int, st *store.Store, ticket string, existingSlices []store.Slice, reported []Finding, outstanding []Finding, triage Triage, man manifest.Manifest) ([]Finding, []store.Slice, error) {
+//
+// budgetUsed and budgetLimit are this ticket's own fix budget state
+// (Gate's own UsedFixBudget and gate.fix_rounds), passed through to the
+// triage hook's TriageInput unchanged so it can phrase its own
+// budget-parked header without recomputing either number. fixSliceFindings
+// is gate.fix_slice_findings, the most findings one fix slice may carry
+// (buildFixSlices' own splitFixGroupIntoSlices enforces it).
+func routeRound(round int, st *store.Store, ticket string, existingSlices []store.Slice, reported []Finding, outstanding []Finding, triage Triage, man manifest.Manifest, budgetUsed, budgetLimit, fixSliceFindings int) ([]Finding, []store.Slice, error) {
 	if triage == nil {
 		triage = DefaultTriage
 	}
@@ -169,7 +189,7 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 		}
 	}
 
-	result := triage(TriageInput{Fixes: fixes, Asks: asks, Notes: notes, Manifest: man})
+	result := triage(TriageInput{Fixes: fixes, Asks: asks, Notes: notes, Manifest: man, BudgetUsed: budgetUsed, BudgetLimit: budgetLimit})
 
 	fixTriage := TriageAuto
 	if result.FixHuman {
@@ -241,7 +261,7 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 	}
 	reported = append(reported, decidedOutstanding...)
 
-	slices, err := buildFixSlices(round, st, ticket, existingSlices, keptFixes, keptAsks, oracleNames)
+	slices, err := buildFixSlices(round, st, ticket, existingSlices, keptFixes, keptAsks, oracleNames, fixSliceFindings)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -420,14 +440,59 @@ func disambiguateFixSliceIDs(slices []store.Slice, existingSlices []store.Slice)
 	}
 }
 
+// splitFixGroupIntoSlices packs one (workspace, oracle) group's kept
+// fixes, already sorted by id, into one or more fix slices bounded by
+// fixSliceFindings findings each ("Fix slices sized to one session"):
+// findings in the same file always share a slice; files are taken in path
+// order and packed greedily, each slice filled as full as the bound
+// allows before starting the next one; a file whose own finding count
+// exceeds the bound gets a slice of its own, over the bound, rather than
+// being split itself. A group whose findings fit in one slice returns
+// exactly one subset, so the caller can keep that group's existing id.
+func splitFixGroupIntoSlices(group []Finding, fixSliceFindings int) [][]Finding {
+	byFile := map[string][]Finding{}
+	var files []string
+	for _, f := range group {
+		if _, ok := byFile[f.File]; !ok {
+			files = append(files, f.File)
+		}
+		byFile[f.File] = append(byFile[f.File], f)
+	}
+	sort.Strings(files)
+
+	var out [][]Finding
+	var current []Finding
+	for _, file := range files {
+		fs := byFile[file]
+		if len(fs) > fixSliceFindings {
+			if len(current) > 0 {
+				out = append(out, current)
+				current = nil
+			}
+			out = append(out, fs)
+			continue
+		}
+		if len(current) > 0 && len(current)+len(fs) > fixSliceFindings {
+			out = append(out, current)
+			current = nil
+		}
+		current = append(current, fs...)
+	}
+	if len(current) > 0 {
+		out = append(out, current)
+	}
+	return out
+}
+
 // buildFixSlices turns this round's kept findings into fix slices:
-// keptFixes group one slice per (workspace, oracle); keptAsks
-// each become their own slice, carrying the human's decision. existingSlices
-// is the ticket's slices.yaml as of before this round, used only to look up
-// a recurrence's previous fix slice. oracleNames is the manifest's sorted
-// oracle names, computed once by the caller (the zero-oracle check already
-// ran on it before triage).
-func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []store.Slice, keptFixes, keptAsks []Finding, oracleNames []string) ([]store.Slice, error) {
+// keptFixes group by (workspace, oracle), each group then split into one
+// or more slices bounded by fixSliceFindings (splitFixGroupIntoSlices);
+// keptAsks each become their own slice, carrying the human's decision.
+// existingSlices is the ticket's slices.yaml as of before this round, used
+// only to look up a recurrence's previous fix slice. oracleNames is the
+// manifest's sorted oracle names, computed once by the caller (the
+// zero-oracle check already ran on it before triage).
+func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []store.Slice, keptFixes, keptAsks []Finding, oracleNames []string, fixSliceFindings int) ([]store.Slice, error) {
 	type groupKey struct{ workspace, oracle string }
 	groups := map[groupKey][]Finding{}
 	var order []groupKey
@@ -453,21 +518,29 @@ func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []
 	for _, key := range order {
 		group := groups[key]
 		sort.Slice(group, func(i, j int) bool { return group[i].ID < group[j].ID })
-		var blocks []string
-		var ids []string
-		for _, f := range group {
-			blocks = append(blocks, findingGoalBlock(f, st, ticket, existingSlices))
-			ids = append(ids, f.ID)
+		parts := splitFixGroupIntoSlices(group, fixSliceFindings)
+		baseID := fmt.Sprintf("fix-%d-%s-%s", round, key.workspace, key.oracle)
+		for i, part := range parts {
+			var blocks []string
+			var ids []string
+			for _, f := range part {
+				blocks = append(blocks, findingGoalBlock(f, st, ticket, existingSlices))
+				ids = append(ids, f.ID)
+			}
+			goal := "Fix these gate findings:\n\n" + strings.Join(blocks, "\n\n")
+			id := baseID
+			if len(parts) > 1 {
+				id = fmt.Sprintf("%s-%d", baseID, i+1)
+			}
+			out = append(out, store.Slice{
+				ID:        sanitizeSliceID(id),
+				Workspace: key.workspace,
+				Goal:      goal,
+				Oracle:    key.oracle,
+				FromGate:  round,
+				Findings:  ids,
+			})
 		}
-		goal := "Fix these gate findings:\n\n" + strings.Join(blocks, "\n\n")
-		out = append(out, store.Slice{
-			ID:        sanitizeSliceID(fmt.Sprintf("fix-%d-%s-%s", round, key.workspace, key.oracle)),
-			Workspace: key.workspace,
-			Goal:      goal,
-			Oracle:    key.oracle,
-			FromGate:  round,
-			Findings:  ids,
-		})
 	}
 
 	sort.Slice(keptAsks, func(i, j int) bool { return keptAsks[i].ID < keptAsks[j].ID })

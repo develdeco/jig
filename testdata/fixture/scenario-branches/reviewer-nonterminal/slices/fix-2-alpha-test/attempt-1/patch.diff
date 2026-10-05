@@ -1,0 +1,14 @@
+diff --git a/alpha/alpha.go b/alpha/alpha.go
+index b5b2d5e..9b142dc 100644
+--- a/alpha/alpha.go
++++ b/alpha/alpha.go
+@@ -3,7 +3,8 @@
+ package alpha
+
+ // Add returns a plus b. Overflow beyond the int range is undefined,
+-// matching Go's built-in + operator.
++// matching Go's built-in + operator: callers near math.MaxInt must guard
++// against it themselves.
+ func Add(a, b int) int {
+ 	return a + b
+ }

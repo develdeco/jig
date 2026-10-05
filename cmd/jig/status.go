@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -72,6 +73,17 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 	}
 	adopted := rec.Adopted()
 
+	cfg, err := project.Load(filepath.Join(st.Root, "project.yaml"))
+	if err != nil {
+		return "", err
+	}
+	fixRounds := *cfg.ResolvedGateConfig().FixRounds
+	gateRounds, _, _, err := latestGateRound(st, ticket)
+	if err != nil {
+		return "", err
+	}
+	budgetUsed, _ := verifydeliver.UsedFixBudget(st, ticket, gateRounds+1)
+
 	var rows, parkedRows, stalledRows [][]string
 	counts := map[string]int{}
 	// A ticket that adopted a branch has no slices until a gate round queues
@@ -128,10 +140,19 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 	if adopted {
 		blocks = append(blocks, "branch: "+rec.Branch)
 	}
-	blocks = append(blocks,
-		"state: "+overall,
-		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question"}, rows),
-	)
+	blocks = append(blocks, "state: "+overall)
+	// fix_budget: once the ticket has a gate round, how much of its fix
+	// budget (gate.fix_rounds) is used - the count of its earlier rounds
+	// that appended at least one fix slice - ending in ", reached" exactly
+	// when the next round would park rather than queue.
+	if gateRounds > 0 {
+		budgetLine := fmt.Sprintf("fix_budget: %d of %d rounds used", budgetUsed, fixRounds)
+		if budgetUsed >= fixRounds {
+			budgetLine += ", reached"
+		}
+		blocks = append(blocks, budgetLine)
+	}
+	blocks = append(blocks, axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question"}, rows))
 	if len(questions) == 0 {
 		blocks = append(blocks, "questions: none")
 	} else {
@@ -189,12 +210,16 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		blocks = append(blocks, "note: asks recorded by an unreadable round are not listed")
 		blocks = append(blocks, axi.Table("unreadable_gate_rounds", []string{"round"}, rows))
 	}
+	parkedOutstanding := 0
 	if len(outstanding) > 0 {
 		var askRows [][]string
 		for _, f := range outstanding {
-			askRows = append(askRows, []string{f.ID, f.Risk, fileLine(f), f.Title})
+			askRows = append(askRows, []string{f.ID, f.Risk, fileLine(f), f.Title, f.RoutedWhy})
+			if f.RoutedWhy == verifydeliver.RoutedWhyBudget {
+				parkedOutstanding++
+			}
 		}
-		blocks = append(blocks, axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title"}, askRows))
+		blocks = append(blocks, axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title", "why"}, askRows))
 	}
 
 	// The help names one way forward, in this order of precedence: a
@@ -221,7 +246,7 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 			"Repair or remove %s/gate/{%s}/findings.yaml in the store: `jig gate` cannot open a round until it reads them",
 			ticket, strings.Join(rounds, ","))}
 	} else if len(outstanding) > 0 && frontierGreen(st, ticket) {
-		helpLines = []string{fmt.Sprintf("Run `jig gate %s` at a terminal to decide the outstanding asks", ticket)}
+		helpLines = []string{"Run " + outstandingAsksHelpLine(ticket, parkedOutstanding, budgetUsed, fixRounds)}
 	} else if len(slices) == 0 && !adopted {
 		// A ticket with nothing to work has the two ways to get work that
 		// `jig ticket new` and the refusal of `jig run` give.
@@ -233,7 +258,7 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		}
 		helpLines = []string{hint}
 		if len(outstanding) > 0 {
-			helpLines = append(helpLines, fmt.Sprintf("Then run `jig gate %s` at a terminal to decide the outstanding asks", ticket))
+			helpLines = append(helpLines, "Then run "+outstandingAsksHelpLine(ticket, parkedOutstanding, budgetUsed, fixRounds))
 		}
 	}
 	blocks = append(blocks, axi.Help(helpLines...))
@@ -241,6 +266,21 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 	var buf bytes.Buffer
 	axi.Render(&buf, blocks...)
 	return buf.String(), nil
+}
+
+// outstandingAsksHelpLine phrases the command that decides a ticket's
+// outstanding asks, lead-verb-free ("run ...", for a caller to prepend
+// "Run " or "Then "): while any of them is budget-parked (parked > 0) it
+// says the fix budget is reached and names keeping or dismissing them,
+// rather than the generic "decide the outstanding asks" - the same single
+// `jig gate <ticket>` terminal session offers both kinds together
+// (verifydeliver's own triage header over the parked subset), so this is
+// one line, not two.
+func outstandingAsksHelpLine(ticket string, parked, budgetUsed, budgetLimit int) string {
+	if parked > 0 {
+		return fmt.Sprintf("`jig gate %s` at a terminal to keep or dismiss the parked finding(s): the fix budget is reached (%d of %d)", ticket, budgetUsed, budgetLimit)
+	}
+	return fmt.Sprintf("`jig gate %s` at a terminal to decide the outstanding asks", ticket)
 }
 
 // resumeCommand returns the exact command that clears a parked

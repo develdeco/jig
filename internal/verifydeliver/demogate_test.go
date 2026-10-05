@@ -1458,7 +1458,10 @@ func TestGateRunsADemoOnlyAfterACleanReviewerRoundThatWantsOne(t *testing.T) {
 			res := ReviewResult{
 				Findings: []ResultFinding{{
 					File: "alpha/alpha.go", Line: 1, Title: "needs a fix", Detail: "d", Action: ActionFix,
-					Risk: RiskLow, RiskRationale: "r", Oracle: "test",
+					// High risk: this test is about the demo-after-clean
+					// rule, not the risk floor, so the risk stays well
+					// clear of it.
+					Risk: RiskHigh, RiskRationale: "r", Oracle: "test",
 				}},
 				ReviewedPaths: req.MustReview, Summary: "one fix",
 			}

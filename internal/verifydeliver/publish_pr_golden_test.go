@@ -87,12 +87,15 @@ func gateThroughReviewerScenario(t *testing.T, fx *fixture.Fixture, d Deps) Gate
 	}
 	src := NewReviewerGateSource(backend)
 
+	// The scenario's own low-risk fix (whitespace trimming) is below the
+	// default floor and routes straight to a note, never reaching this
+	// batch; nothing is left to dismiss here.
 	round1Triage := func(in TriageInput) TriageResult {
 		asks := map[string]AskOutcome{}
 		for _, f := range in.Asks {
 			asks[f.ID] = AskOutcome{Keep: true, Decision: "Use a warm, casual tone; no exclamation marks.", Human: true}
 		}
-		return TriageResult{DismissedFixIDs: map[string]bool{"r1-f2": true}, FixHuman: true, Asks: asks}
+		return TriageResult{FixHuman: true, Asks: asks}
 	}
 	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Triage: round1Triage})
 	if err != nil {
@@ -131,11 +134,12 @@ func gateThroughReviewerScenario(t *testing.T, fx *fixture.Fixture, d Deps) Gate
 // TestGoldenRenderBriefSourcedTicket pins both files for a ticket whose
 // intent comes from its brief.md, gated through three real reviewer rounds
 // (the "reviewer" scenario) so the findings-outcome rules - fixed by slice
-// X and cleared at round N, dismissed by a human even once a later round's
-// own record resets its Triage field, noted, the risk-then-id sort, the
-// findings count, the oracle names, and Coverage's touched-vs-reviewed
-// split - are all exercised, not merely the Intent/What-changed shape the
-// other three golden tickets below cover. It is also the one golden ticket
+// X and cleared at round N, noted (a genuine note, and the scenario's own
+// low-risk fix once the risk floor routes it there instead of into the
+// triage batch), the risk-then-id sort, the findings count, the oracle
+// names, and Coverage's touched-vs-reviewed split - are all exercised, not
+// merely the Intent/What-changed shape the other three golden tickets below
+// cover. It is also the one golden ticket
 // with real fix slices, so it pins what their bullets are: one line each,
 // the first line of the builder prompt buildFixSlices wrote, with the short
 // sha beside it and none of the gate's own finding text, which belongs to
@@ -194,7 +198,7 @@ Reviewed head:
 
 Revalidation tier: none
 
-Findings: 2 fixed, 1 dismissed, 1 noted, 0 asked. See the pull request's first comment for detail.
+Findings: 2 fixed, 0 dismissed, 2 noted, 0 asked. See the pull request's first comment for detail.
 `,
 		greenShortSHA(t, d, fx.Ticket, "a"),
 		greenShortSHA(t, d, fx.Ticket, "b"),
@@ -225,7 +229,7 @@ round 3: nothing new; the shared-helper note from round 1 remains on record
   - Oracle: test
 
 - **Greet does not trim surrounding whitespace from name** (low): cosmetic only, no functional or safety impact
-  - Status: dismissed by a human
+  - Status: noted
   - Oracle: test
 
 - **ClampPercent and Clamp could share a bounds-check helper later** (low): no functional risk, purely a maintainability idea

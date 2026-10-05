@@ -15,9 +15,15 @@ import (
 // fix kept, every workspace ask kept (no decision text), notes only
 // listed - without a single prompt. TestGateReviewerRoundsThroughMain in
 // cmd/jig covers the interactive terminal path (dismissing a fix, keeping
-// an ask with a decision) that this scenario's round 1 also exercises.
+// an ask with a decision) that the shared "reviewer" scenario's round 1
+// also exercises; this test needs its own "reviewer-nonterminal" branch
+// (identical except the beta.go trim finding is risk medium, not low) so
+// that DefaultTriage still has two fix findings to keep without a human -
+// a low-risk fix never reaches triage at all under the default risk
+// floor, which the "reviewer" branch's own low-risk finding is there to
+// pin, not this one.
 func TestGateReviewerNonTerminalTriage(t *testing.T) {
-	fx, _ := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
+	fx, _ := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-nonterminal"})
 	ticket := fx.Ticket
 
 	r1 := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)

@@ -179,6 +179,15 @@ type GateReport struct {
 	// reviewer round that was not run with NoDemo, nil for every other round.
 	// It never changes Verdict.
 	Demo *DemoReport
+	// BudgetParked is how many findings this round parked under the fix
+	// budget (status asked, RoutedWhyBudget): 0 for a round that parked
+	// none, a scripted round (the budget never forces one of its findings),
+	// or a round with nothing new to route at all. BudgetUsed and
+	// BudgetLimit are this round's own view of the fix budget (the
+	// ticket's earlier fix-appending rounds, and gate.fix_rounds),
+	// meaningful only alongside BudgetParked > 0.
+	BudgetParked            int
+	BudgetUsed, BudgetLimit int
 }
 
 // reportYAML is gate/round-<n>/report.yaml's exact on-disk shape.
@@ -189,6 +198,11 @@ type reportYAML struct {
 	TargetSHA   map[string]string `yaml:"target_sha"`
 	ReviewedSHA map[string]string `yaml:"reviewed_sha,omitempty"`
 	Intent      reportIntentYAML  `yaml:"intent"`
+	// FixSlices is the ids of the fix slices this round appended, whoever
+	// kept them (a reviewer round's own routing, or a scripted round's
+	// scenario fix slices): the fix budget's own used-rounds count
+	// (UsedFixBudget) is a round whose list here is non-empty.
+	FixSlices []string `yaml:"fix_slices,omitempty"`
 }
 
 // reportIntentYAML is report.yaml's own "intent" block: the source
@@ -197,6 +211,39 @@ type reportYAML struct {
 type reportIntentYAML struct {
 	Source string `yaml:"source"`
 	SHA256 string `yaml:"sha256"`
+}
+
+// UsedFixBudget returns how many of ticket's gate rounds before round
+// appended at least one fix slice (report.yaml's fix_slices, written for a
+// reviewer round's own routing and for a scripted round's scenario fix
+// slices alike): the count "The fix budget" compares against
+// gate.fix_rounds to decide whether a round still queues fix findings or
+// parks them. unreadable names any round in that range whose report.yaml
+// could not be read or parsed, skipped rather than counted either way -
+// the same tolerance OutstandingAsks and `jig status`'s own round-reading
+// already apply, since one corrupt earlier round is not reason enough to
+// treat every ticket's budget as exhausted or to refuse every later
+// round. Gate and `jig status` share this one reading, so neither can
+// disagree with the other about how much of the budget is used.
+func UsedFixBudget(st *store.Store, ticket string, round int) (used int, unreadable []int) {
+	for r := 1; r < round; r++ {
+		data, err := os.ReadFile(filepath.Join(gateRoundDir(st, ticket, r), "report.yaml"))
+		if err != nil {
+			if !os.IsNotExist(err) {
+				unreadable = append(unreadable, r)
+			}
+			continue
+		}
+		var rep reportYAML
+		if err := yaml.Unmarshal(data, &rep); err != nil {
+			unreadable = append(unreadable, r)
+			continue
+		}
+		if len(rep.FixSlices) > 0 {
+			used++
+		}
+	}
+	return used, unreadable
 }
 
 // Gate runs one gate round for ticket: it re-verifies every manifest
@@ -501,14 +548,30 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 			}
 			return st.State == "green", nil
 		}
-		reported, err := ApplyRound(n, cum, round.Review.Result, slices, sliceGreen, man)
+		gateCfg := d.Cfg.ResolvedGateConfig()
+		// The fix budget: a ticket's used budget is the count of its
+		// earlier gate rounds (1..n-1) that appended at least one fix
+		// slice; once that equals gate.fix_rounds, this round parks every
+		// would-be open fix instead of queuing it (ApplyRound's own
+		// budgetReached parameter).
+		budgetUsed, _ := UsedFixBudget(d.Store, ticket, n)
+		budgetReached := budgetUsed >= *gateCfg.FixRounds
+		reported, err := ApplyRound(n, cum, round.Review.Result, slices, sliceGreen, man, gateCfg.FixRisks, budgetReached)
 		if err != nil {
 			return GateReport{}, err
 		}
 		outstanding := outstandingAsks(cum, reported)
-		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, outstanding, o.Triage, man)
+		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, outstanding, o.Triage, man, budgetUsed, *gateCfg.FixRounds, *gateCfg.FixSliceFindings)
 		if err != nil {
 			return GateReport{}, err
+		}
+		for _, f := range routed {
+			if f.Status == StatusAsked && f.RoutedWhy == RoutedWhyBudget {
+				report.BudgetParked++
+			}
+		}
+		if report.BudgetParked > 0 {
+			report.BudgetUsed, report.BudgetLimit = budgetUsed, *gateCfg.FixRounds
 		}
 		cleared, err := ClearingAfterTriage(cum, routed, round.Review.Result.ReviewedPaths, existsAtHead)
 		if err != nil {
@@ -556,6 +619,14 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		}
 	default:
 		report.Verdict = "fix-slices"
+		// The scripted (scenario) source keeps appending its own fix
+		// slices unchanged, with no budget enforcement of its own, but
+		// they still count toward the budget for a later, reviewer-driven
+		// round: report.yaml has to list them the same way a reviewer
+		// round's own routing does, for UsedFixBudget to see them.
+		for _, fs := range round.FixSlices {
+			report.FixSlices = append(report.FixSlices, fs.ID)
+		}
 		if err := writeFixRound(d, ticket, n, report, round); err != nil {
 			return GateReport{}, err
 		}
@@ -852,6 +923,7 @@ func writeReportYAML(dir string, report GateReport) error {
 		TargetSHA:   report.TargetSHA,
 		ReviewedSHA: report.ReviewedSHA,
 		Intent:      reportIntentYAML{Source: report.Intent.Source, SHA256: report.IntentSHA256},
+		FixSlices:   report.FixSlices,
 	})
 	if err != nil {
 		return fmt.Errorf("verifydeliver: gate: marshal report.yaml: %w", err)

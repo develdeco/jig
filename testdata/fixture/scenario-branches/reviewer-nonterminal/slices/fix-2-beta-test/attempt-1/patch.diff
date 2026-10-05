@@ -1,0 +1,13 @@
+diff --git a/beta/beta_test.go b/beta/beta_test.go
+--- a/beta/beta_test.go
++++ b/beta/beta_test.go
+@@ -7,3 +7,9 @@ func TestGreet(t *testing.T) {
+ 		t.Fatalf("Greet(%q) = %q, want %q", "World", got, "Hello, World.")
+ 	}
+ }
++
++func TestGreetTrimsSurroundingWhitespace(t *testing.T) {
++	if got := Greet("  World  "); got != "Hello, World." {
++		t.Fatalf("Greet(%q) = %q, want %q", "  World  ", got, "Hello, World.")
++	}
++}

@@ -168,6 +168,13 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	if report.Scope != "" {
 		kv = append(kv, [2]string{"scope", report.Scope})
 	}
+	// The fix budget: named only for a round that actually parked
+	// findings, saying the budget is reached and how many it parked -
+	// jig status and the terminal triage prompt are where the budget's
+	// ongoing state (used of limit, every round until it changes) lives.
+	if report.BudgetParked > 0 {
+		kv = append(kv, [2]string{"fix_budget", fmt.Sprintf("reached (%d of %d): %d finding(s) parked", report.BudgetUsed, report.BudgetLimit, report.BudgetParked)})
+	}
 	kv = append(kv, demoRows(report.Demo)...)
 	blocks := []string{
 		axi.KV("gate", kv),

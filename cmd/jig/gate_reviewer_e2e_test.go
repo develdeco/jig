@@ -119,17 +119,19 @@ func withoutPrefix(paths []string, prefix string) []string {
 // exactly as a real terminal session would answer the triage prompts.
 //
 // It drives three full gate rounds:
-//   - round 1 (full): a fix kept, a second fix dismissed at the batch
-//     prompt, an ask kept with a decision, and a note - after a first
-//     attempt whose reviewed_paths is missing a must_review path fails
-//     REVIEW_INVALID and a corrected retry (same round number) succeeds;
-//     the two fix slices it appends are driven green by `jig run`.
+//   - round 1 (full): a fix kept at the batch prompt, a second (low-risk)
+//     fix routed straight to a note by the risk floor, below the batch
+//     entirely, an ask kept with a decision, and a genuine note - after a
+//     first attempt whose reviewed_paths is missing a must_review path
+//     fails REVIEW_INVALID and a corrected retry (same round number)
+//     succeeds; the two fix slices it appends are driven green by `jig run`.
 //   - round 2 (delta): the kept fix recurs through prior (its new fix
 //     slice's goal names the previous one), the kept ask's file clears
-//     since nothing new is reported there, and the dismissed fix is
-//     re-reported through prior and reaches no one (stays dismissed,
-//     never appears in this round's own triage or report); the
-//     recurrence's new fix slice is driven green by `jig run`.
+//     since nothing new is reported there, and the low-risk fix is
+//     re-reported through prior and, below the floor again, routes
+//     straight to a note once more (never reaching this round's own
+//     triage either); the recurrence's new fix slice is driven green by
+//     `jig run`.
 //   - round 3: clean, with the round 1 note still on record.
 func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	prevTerm := stdinIsTerminal
@@ -221,17 +223,19 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	}
 
 	// --- round 1, corrected retry (still round 1: the failed attempt above
-	// wrote nothing to gate/round-1/): the real triage script - dismiss
-	// fix r1-f2 at the batch prompt, keep ask r1-f3 with a decision.
+	// wrote nothing to gate/round-1/): the real triage script - r1-f2 never
+	// reaches the fix batch at all (the risk floor already routed it to a
+	// note), so the batch holds only r1-f1 and Enter accepts it; keep ask
+	// r1-f3 with a decision.
 	writeReviewResultAt(t, round1Path, correct)
-	out, code = runMain(t, "r1-f2\nk\nUse a warm, casual tone; no exclamation marks.\n", gateArgs()...)
+	out, code = runMain(t, "\nk\nUse a warm, casual tone; no exclamation marks.\n", gateArgs()...)
 	if code != 0 {
 		t.Fatalf("round 1 (corrected) exit = %d, want 0\n%s", code, out)
 	}
 	if !strings.Contains(out, "round: 1") || !strings.Contains(out, "verdict: fix-slices") || !strings.Contains(out, "scope: full") {
 		t.Fatalf("round 1 report missing round/verdict/scope kv lines:\n%s", out)
 	}
-	for _, want := range []string{"r1-f1,open,", "r1-f2,dismissed,", "r1-f3,open,", "r1-f4,noted,"} {
+	for _, want := range []string{"r1-f1,open,", "r1-f2,noted,note,", "r1-f3,open,", "r1-f4,noted,"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("round 1 findings table missing %q:\n%s", want, out)
 		}
@@ -269,7 +273,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 		t.Fatalf("expected slices fix-1-alpha-test and fix-1-r1-f3; got %+v", slices1)
 	}
 	if hasSlice(slices1, "fix-1-beta-test") {
-		t.Fatalf("the dismissed fix (beta workspace) must not build its own slice; got %+v", slices1)
+		t.Fatalf("the noted (below-floor) fix (beta workspace) must not build its own slice; got %+v", slices1)
 	}
 
 	// --- drive both round 1 fix slices to green.
@@ -290,8 +294,8 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	// --- round 2 (delta): the doc-comment fix recurs through prior (Enter
 	// accepts the batch, since it is the round's only fix); the tone ask's
 	// file is reviewed with nothing new reported there and clears; the
-	// trim fix is re-reported through prior and, since its prior is
-	// dismissed, stays dismissed and reaches no one.
+	// low-risk fix is re-reported through prior and, below the floor
+	// again, routes straight to a note once more, reaching no one.
 	out, code = runMain(t, "\n", gateArgs()...)
 	if code != 0 {
 		t.Fatalf("round 2 exit = %d, want 0\n%s", code, out)
@@ -302,8 +306,8 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	if !strings.Contains(out, "r1-f1,open,") {
 		t.Fatalf("round 2 findings table missing the recurring r1-f1 still open:\n%s", out)
 	}
-	if !strings.Contains(out, "r1-f2,dismissed,") {
-		t.Fatalf("round 2 findings table missing the dismissed r1-f2 repeat:\n%s", out)
+	if !strings.Contains(out, "r1-f2,noted,note,") {
+		t.Fatalf("round 2 findings table missing the noted r1-f2 repeat:\n%s", out)
 	}
 	if strings.Contains(out, "r1-f3") {
 		t.Fatalf("round 2 must not re-report the cleared ask r1-f3:\n%s", out)
@@ -317,8 +321,8 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	// proves nothing on its own - it is exactly as absent whether it
 	// cleared or simply went unmentioned. Read the round's own findings.yaml
 	// cleared list, which is the only place that distinguishes the two, and
-	// which a mutant that lets a dismissed repeat block clearing actually
-	// breaks.
+	// which a mutant that lets a noted repeat (r1-f2, same file) block
+	// clearing actually breaks.
 	cleared2 := findingsYAMLCleared(t, filepath.Join(fx.StoreDir, ticket, "gate", "round-2", "findings.yaml"))
 	foundCleared := false
 	for _, id := range cleared2 {

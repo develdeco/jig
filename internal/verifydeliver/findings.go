@@ -31,6 +31,18 @@ const (
 	TriageAuto  = "auto"
 )
 
+// RoutedWhy vocabulary: the reason jig forced a finding to asked despite
+// the reviewer's own label (Finding.RoutedWhy) - budget for one parked past
+// the fix budget, recurrence for one forced by the recurrence bound,
+// build-target for one missing a workspace or an oracle jig can resolve.
+// Empty (no constant) for a reviewer's own ask, which jig never had to
+// force.
+const (
+	RoutedWhyBudget      = "budget"
+	RoutedWhyRecurrence  = "recurrence"
+	RoutedWhyBuildTarget = "build-target"
+)
+
 // Finding is one persisted entry of gate/round-N/findings.yaml, plus its
 // additive triage fields (triage, decision, routed_as). It is jig's own
 // bookkeeping record: the reviewer never sees it directly, only the subset
@@ -58,6 +70,10 @@ type Finding struct {
 	Triage   string `yaml:"triage,omitempty"`
 	Decision string `yaml:"decision,omitempty"`
 	RoutedAs string `yaml:"routed_as,omitempty"`
+	// RoutedWhy is set alongside RoutedAs, whenever jig forces a finding to
+	// asked (RoutedWhyBudget, RoutedWhyRecurrence or RoutedWhyBuildTarget):
+	// empty for a reviewer's own ask, which jig never had to force.
+	RoutedWhy string `yaml:"routed_why,omitempty"`
 }
 
 // findingsYAML is gate/round-<n>/findings.yaml's exact on-disk shape, plus
@@ -90,6 +106,17 @@ func statusForAction(action string) (string, error) {
 	default:
 		return "", fmt.Errorf("verifydeliver: findings: action %q is not fix, ask or note", action)
 	}
+}
+
+// isRiskInFloor reports whether risk is in the configured floor of risks
+// that become fix slices.
+func isRiskInFloor(risk string, fixRisks []string) bool {
+	for _, r := range fixRisks {
+		if r == risk {
+			return true
+		}
+	}
+	return false
 }
 
 // workspaceFor derives a finding's workspace: the manifest workspace whose
@@ -170,7 +197,19 @@ func findingHasGreenFixSlice(id string, existingSlices []store.Slice, sliceGreen
 // merely reported again before any slice for it was ever built, or while
 // one is still queued or building (an undecided ask re-reported, or a
 // round run with --early).
-func ApplyRound(round int, known map[string]Finding, result ReviewResult, existingSlices []store.Slice, sliceGreen func(sliceID string) (bool, error), man manifest.Manifest) (reported []Finding, err error) {
+//
+// fixRisks is the set of risks whose fix findings become fix slices; a fix
+// finding whose risk is not in this set is routed as a note instead.
+//
+// budgetReached is this ticket's own fix budget state (the gate's earlier
+// rounds that appended at least one fix slice, compared against
+// gate.fix_rounds, computed once by the caller): true parks every
+// would-be open fix as asked (RoutedWhyBudget) instead of letting it queue
+// a fix slice. A finding the risk floor already routes as a note, or that
+// the recurrence bound or a missing build target already forces to asked,
+// never reaches the budget, since it was never going to become an open fix
+// on its own.
+func ApplyRound(round int, known map[string]Finding, result ReviewResult, existingSlices []store.Slice, sliceGreen func(sliceID string) (bool, error), man manifest.Manifest, fixRisks []string, budgetReached bool) (reported []Finding, err error) {
 	seq := 0
 	oracleNames := SortedOracleNames(man)
 
@@ -240,7 +279,12 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 			f.Oracle = resolved
 		}
 		f.Recurrences = recurrences
-		f.Triage, f.RoutedAs = "", ""
+		// Triage, RoutedAs and RoutedWhy are always this round's own
+		// routing, decided afresh below, never carried: a continuation (an
+		// ask already put to a person, below) can keep a finding asked with
+		// none of the three reasons re-firing this round, and a stale
+		// reason is worse than none.
+		f.Triage, f.RoutedAs, f.RoutedWhy = "", "", ""
 
 		newWorkspace := workspaceFor(file, man)
 		// The workspace is jig-derived, not the reviewer's word, so rule 1
@@ -262,8 +306,51 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 		if serr != nil {
 			return nil, serr
 		}
-		if recurrences >= 2 {
+		// wasOpen is the reviewer's own action alone, before any override
+		// below: every override that forces a would-be fix to ask
+		// (recurrence, a missing build target, the fix budget) is computed
+		// against it directly, rather than against status once an earlier
+		// override has already mutated that variable, so each one's own
+		// cause is still reported accurately (routedWhy, below) even while
+		// an outstanding ask (continuation, below) already forces the same
+		// status for a reason of its own.
+		wasOpen := status == StatusOpen
+		// Risk floor: a fix finding whose risk is not in fixRisks is routed
+		// as a note, and from there follows only the rules a reviewer's own
+		// note follows - the recurrence bound above, and the outstanding ask
+		// below. So it is decided before the build target and never reaches
+		// the budget either: a low finding in a file outside every workspace
+		// is a record, not a question put to a person.
+		belowFloor := wasOpen && !isRiskInFloor(f.Risk, fixRisks)
+		// A fix finding missing part of its build target - no declared
+		// workspace for its file, or no oracle jig can resolve against the
+		// current manifest (an oracle recorded before the manifest changed,
+		// say) - can never become a fix slice on its own; jig routes it to
+		// the human as an ask instead. A zero-oracle manifest is not this
+		// case: routeRound fails the whole round with GATE_NO_ORACLE before
+		// triage ever runs, so nothing here needs to force individual
+		// findings to ask over it.
+		missingOracle := len(oracleNames) > 0 && !validOracle(f.Oracle, oracleNames)
+		missingBuildTarget := wasOpen && (f.Workspace == "" || missingOracle)
+		// The fix budget: once a ticket's used budget (gate rounds that
+		// queued a fix slice) equals gate.fix_rounds, a would-be open fix -
+		// one the recurrence bound, a missing build target and the risk
+		// floor have all already let through - parks for a person instead.
+		budgetForces := wasOpen && budgetReached
+
+		routedWhy := ""
+		switch {
+		case recurrences >= 2:
 			status = StatusAsked
+			routedWhy = RoutedWhyRecurrence
+		case belowFloor:
+			status = StatusNoted
+		case missingBuildTarget:
+			status = StatusAsked
+			routedWhy = RoutedWhyBuildTarget
+		case budgetForces:
+			status = StatusAsked
+			routedWhy = RoutedWhyBudget
 		}
 		// An ask already put to a person stays asked, the same way rule 2
 		// keeps a dismissed finding dismissed: a later occurrence replaces
@@ -272,29 +359,25 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 		// this round's label decide instead would retire a question nobody
 		// answered - re-reported as `note` it became a record, the round
 		// went clean and publish unlocked; as `fix` it became queued work
-		// with no decision recorded anywhere.
+		// with no decision recorded anywhere. This runs last, so a
+		// continuing ask always wins over the risk-floor note above.
 		if hasPrior && prior.Status == StatusAsked {
 			status = StatusAsked
 		}
-		// A fix finding missing part of its build target - no declared
-		// workspace for its file, or no oracle jig can resolve against the
-		// current manifest (an oracle recorded before the manifest changed,
-		// say) - can never become a fix slice on its own; jig routes it to
-		// the human as an ask instead. A zero-oracle manifest
-		// is not this case: routeRound fails the whole round with
-		// GATE_NO_ORACLE before triage ever runs, so nothing here needs to
-		// force individual findings to ask over it.
-		missingOracle := len(oracleNames) > 0 && !validOracle(f.Oracle, oracleNames)
-		if status == StatusOpen && (f.Workspace == "" || missingOracle) {
-			status = StatusAsked
-		}
 		f.Status = status
-		// routed_as: written whenever jig's own status ends up asked
-		// although the reviewer labeled this finding something else (fix,
-		// via the recurrence bound or a missing build target above); the
-		// persisted action always stays the reviewer's own label.
+		// routed_as and routed_why: written whenever jig's own status ends
+		// up asked although the reviewer labeled this finding something
+		// else (fix, via one of the overrides above, or a continuing
+		// outstanding ask); the persisted action always stays the
+		// reviewer's own label. Both stay empty for a reviewer's own ask,
+		// which jig never had to force.
 		if status == StatusAsked && rf.Action != ActionAsk {
 			f.RoutedAs = ActionAsk
+			f.RoutedWhy = routedWhy
+		}
+		// Also record routed_as: note when a fix is downgraded to noted due to risk floor.
+		if status == StatusNoted && rf.Action == ActionFix {
+			f.RoutedAs = ActionNote
 		}
 
 		reported = append(reported, f)

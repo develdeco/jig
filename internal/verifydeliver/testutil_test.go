@@ -148,6 +148,23 @@ func marshalReviewResult(t *testing.T, result ReviewResult) []byte {
 	return data
 }
 
+// readReviewRequest reads and parses one round's review.json (the stub
+// backend's own sd.SliceJSON), so a scripted reviewer double can answer
+// ReviewedPaths with req.MustReview - the minimal valid response
+// ParseReviewResult accepts - without hand-naming every path itself.
+func readReviewRequest(t *testing.T, path string) ReviewRequest {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read review.json: %v", err)
+	}
+	var req ReviewRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		t.Fatalf("parse review.json: %v", err)
+	}
+	return req
+}
+
 // scenarioResult reads and parses a scenario attempt's result.json.
 func scenarioResult(t *testing.T, fx *fixture.Fixture, slice string, attempt int) map[string]any {
 	t.Helper()

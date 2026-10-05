@@ -19,6 +19,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -1489,6 +1490,287 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 	}
 }
 
+// --- the fix budget ----------------------------------------------------
+
+// TestGateFixBudgetParksAfterRoundsUsed is the budget's core integration
+// seam: round 1, with a fix_rounds:1 budget and nothing used yet, queues
+// its fix slice normally; round 2's own would-be open fix, with the
+// budget now reached, parks instead - unattended (nil Triage, i.e.
+// DefaultTriage), the way --yes and `jig solve` would leave it too.
+func TestGateFixBudgetParksAfterRoundsUsed(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	fr := 1
+	d.Cfg.Gate = &project.GateConfig{FixRounds: &fr}
+
+	round := 0
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		round++
+		req := readReviewRequest(t, sd.SliceJSON)
+		var result ReviewResult
+		switch round {
+		case 1:
+			result = ReviewResult{
+				Findings: []ResultFinding{{
+					File: "alpha/alpha.go", Line: 1, Title: "round 1 finding",
+					Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test",
+				}},
+				ReviewedPaths: req.MustReview,
+				Summary:       "round 1",
+			}
+		case 2:
+			result = ReviewResult{
+				Findings: []ResultFinding{{
+					File: "alpha/alpha.go", Line: 1, Title: "round 2 finding",
+					Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test",
+				}},
+				ReviewedPaths: req.MustReview,
+				Summary:       "round 2",
+			}
+		default:
+			t.Fatalf("unexpected round %d", round)
+		}
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
+	}}
+	src := NewReviewerGateSource(backend)
+
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
+	if err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+	if report1.Verdict != "fix-slices" || len(report1.FixSlices) != 1 {
+		t.Fatalf("round 1 = %+v, want fix-slices with one fix slice (the budget is not used yet)", report1)
+	}
+	if report1.BudgetParked != 0 {
+		t.Fatalf("round 1 BudgetParked = %d, want 0", report1.BudgetParked)
+	}
+
+	// Round 2 runs --early: round 1's own fix slice is still queued, and
+	// driving it green belongs to frontier, not this test.
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true, Early: true})
+	if err != nil {
+		t.Fatalf("Gate round 2: %v", err)
+	}
+	if len(report2.FixSlices) != 0 {
+		t.Fatalf("round 2 FixSlices = %v, want none (the budget is reached)", report2.FixSlices)
+	}
+	if report2.BudgetParked != 1 || report2.BudgetUsed != 1 || report2.BudgetLimit != 1 {
+		t.Fatalf("round 2 budget = used %d limit %d parked %d, want 1/1/1", report2.BudgetUsed, report2.BudgetLimit, report2.BudgetParked)
+	}
+	if len(report2.NeedsHuman) != 1 {
+		t.Fatalf("round 2 NeedsHuman = %+v, want the parked finding", report2.NeedsHuman)
+	}
+	parked := report2.NeedsHuman[0]
+	if parked.Status != StatusAsked || parked.RoutedAs != ActionAsk || parked.RoutedWhy != RoutedWhyBudget {
+		t.Fatalf("parked finding = %+v, want asked/routed_as ask/routed_why budget", parked)
+	}
+
+	used, unreadable := UsedFixBudget(d.Store, fx.Ticket, 3)
+	if used != 1 || len(unreadable) != 0 {
+		t.Fatalf("UsedFixBudget before round 3 = %d (unreadable %v), want 1 and none unreadable", used, unreadable)
+	}
+}
+
+// TestGateFixBudgetZeroParksTheFirstRoundsFixImmediately pins
+// fix_rounds: 0 - no round ever queues a fix slice unattended, starting
+// with the very first one.
+func TestGateFixBudgetZeroParksTheFirstRoundsFixImmediately(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	fr := 0
+	d.Cfg.Gate = &project.GateConfig{FixRounds: &fr}
+
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		req := readReviewRequest(t, sd.SliceJSON)
+		result := ReviewResult{
+			Findings: []ResultFinding{{
+				File: "alpha/alpha.go", Line: 1, Title: "fix me",
+				Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test",
+			}},
+			ReviewedPaths: req.MustReview,
+			Summary:       "round 1",
+		}
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
+	}}
+	src := NewReviewerGateSource(backend)
+
+	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if len(report.FixSlices) != 0 {
+		t.Fatalf("FixSlices = %v, want none (fix_rounds: 0 parks every fix, starting round 1)", report.FixSlices)
+	}
+	if len(report.NeedsHuman) != 1 || report.NeedsHuman[0].RoutedWhy != RoutedWhyBudget {
+		t.Fatalf("NeedsHuman = %+v, want one budget-parked finding", report.NeedsHuman)
+	}
+}
+
+// TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached pins
+// the two halves of "who can keep a parked finding": a human at a
+// terminal keeping one queues its fix slice anyway, and the budget stays
+// reached afterward, so the next round parks again.
+func TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	fr := 0
+	d.Cfg.Gate = &project.GateConfig{FixRounds: &fr}
+
+	round := 0
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		round++
+		req := readReviewRequest(t, sd.SliceJSON)
+		var result ReviewResult
+		switch round {
+		case 1:
+			result = ReviewResult{Findings: []ResultFinding{{
+				File: "alpha/alpha.go", Line: 1, Title: "round 1 finding", Detail: "d",
+				Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test",
+			}}, ReviewedPaths: req.MustReview, Summary: "round 1"}
+		case 2:
+			result = ReviewResult{Findings: []ResultFinding{{
+				File: "alpha/alpha.go", Line: 1, Title: "round 2 finding", Detail: "d",
+				Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test",
+			}}, ReviewedPaths: req.MustReview, Summary: "round 2"}
+		default:
+			t.Fatalf("unexpected round %d", round)
+		}
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
+	}}
+	src := NewReviewerGateSource(backend)
+
+	// A human at a terminal keeps every parked finding this round.
+	keepTriage := func(in TriageInput) TriageResult {
+		asks := make(map[string]AskOutcome, len(in.Asks))
+		for _, f := range in.Asks {
+			asks[f.ID] = AskOutcome{Keep: true, Human: true, Decision: "ship it"}
+		}
+		return TriageResult{Asks: asks}
+	}
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true, Triage: keepTriage})
+	if err != nil {
+		t.Fatalf("Gate round 1: %v", err)
+	}
+	if len(report1.FixSlices) != 1 {
+		t.Fatalf("round 1 FixSlices = %v, want one (a human kept the parked finding)", report1.FixSlices)
+	}
+	ff1, ok, err := readFindingsYAML(d.Store, fx.Ticket, 1)
+	if err != nil || !ok {
+		t.Fatalf("read round 1 findings.yaml: ok=%v err=%v", ok, err)
+	}
+	if ff1.Findings[0].Status != StatusOpen || ff1.Findings[0].RoutedWhy != RoutedWhyBudget {
+		t.Fatalf("round 1 finding = %+v, want open with routed_why budget still recorded (provenance)", ff1.Findings[0])
+	}
+
+	// Round 2: the budget stays reached after a person keeps one, so the
+	// next round parks again - unattended this time.
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true, Early: true})
+	if err != nil {
+		t.Fatalf("Gate round 2: %v", err)
+	}
+	if len(report2.FixSlices) != 0 {
+		t.Fatalf("round 2 FixSlices = %v, want none (the budget stays reached)", report2.FixSlices)
+	}
+	if len(report2.NeedsHuman) != 1 || report2.NeedsHuman[0].RoutedWhy != RoutedWhyBudget {
+		t.Fatalf("round 2 NeedsHuman = %+v, want one budget-parked finding", report2.NeedsHuman)
+	}
+}
+
+// TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices pins
+// "Fix slices sized to one session" through the full Gate round:
+// gate.fix_slice_findings threads from project.yaml down to the appended
+// slices, a (workspace, oracle) group over the bound splits into several
+// fix slices, each carrying only its own subset, and the split slices are
+// numbered "-1", "-2" from 1. A group that fits in one slice keeps today's
+// unsuffixed id, already pinned by TestGateRound1FixSlice; the packing
+// algorithm itself (file order, crowding, an oversized file getting its
+// own slice) is pinned at the lower seam by
+// TestRouteRoundSplitsAFixGroupPackingFilesGreedilyByPathOrder.
+func TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	fsf := 2
+	d.Cfg.Gate = &project.GateConfig{FixSliceFindings: &fsf}
+
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		req := readReviewRequest(t, sd.SliceJSON)
+		result := ReviewResult{
+			Findings: []ResultFinding{
+				{File: "alpha/alpha.go", Line: 1, Title: "a1", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test"},
+				{File: "alpha/alpha.go", Line: 2, Title: "a2", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test"},
+				{File: "alpha/alpha_test.go", Line: 1, Title: "b1", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test"},
+			},
+			ReviewedPaths: req.MustReview,
+			Summary:       "round 1",
+		}
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
+	}}
+	src := NewReviewerGateSource(backend)
+
+	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	wantIDs := []string{"fix-1-alpha-test-1", "fix-1-alpha-test-2"}
+	if !equalStrings(report.FixSlices, wantIDs) {
+		t.Fatalf("FixSlices = %v, want %v", report.FixSlices, wantIDs)
+	}
+
+	allSlices, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadSlices: %v", err)
+	}
+	byID := map[string]store.Slice{}
+	for _, s := range allSlices {
+		byID[s.ID] = s
+	}
+	if got := byID["fix-1-alpha-test-1"].Findings; !equalStrings(got, []string{"r1-f1", "r1-f2"}) {
+		t.Errorf("slice 1 (alpha/alpha.go, fits the bound) Findings = %v, want [r1-f1 r1-f2]", got)
+	}
+	if got := byID["fix-1-alpha-test-2"].Findings; !equalStrings(got, []string{"r1-f3"}) {
+		t.Errorf("slice 2 (alpha/alpha_test.go, crowded out of slice 1) Findings = %v, want [r1-f3]", got)
+	}
+}
+
+// TestGateScriptedRoundFixSlicesCountTowardTheBudget pins that the
+// scripted (scenario) gate source's own fix slices, appended unchanged
+// with no budget enforcement of its own, still count toward the budget:
+// report.yaml lists them the same way a reviewer round's own routing
+// does, so a later reviewer-driven round's UsedFixBudget sees them.
+func TestGateScriptedRoundFixSlicesCountTowardTheBudget(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	src := NewFakeGateSource(fx.ScenarioDir)
+
+	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if len(report.FixSlices) == 0 {
+		t.Fatalf("report.FixSlices = %v, want at least the scenario's own round-1 fix slice", report.FixSlices)
+	}
+
+	used, unreadable := UsedFixBudget(d.Store, fx.Ticket, 2)
+	if used != 1 || len(unreadable) != 0 {
+		t.Fatalf("UsedFixBudget = %d (unreadable %v), want 1 (the scripted round counts toward the budget)", used, unreadable)
+	}
+}
+
 // TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath reproduces the
 // review finding: a reviewer session whose file-read tool hands back
 // absolute paths (the ordinary case for a headless backend) must still
@@ -1922,7 +2204,10 @@ func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerat
 				Findings: []ResultFinding{{
 					File: "alpha/gen.txt", Line: 1, Title: "a generated file was committed",
 					Detail: "gen.txt should not be tracked", Action: ActionFix,
-					Risk: RiskLow, RiskRationale: "build artifact churn", Oracle: "test",
+					// High risk: this test is about gen.txt's own
+					// ignored/generated handling across rounds, not the
+					// risk floor, so the risk stays well clear of it.
+					Risk: RiskHigh, RiskRationale: "build artifact churn", Oracle: "test",
 				}},
 				ReviewedPaths: req.MustReview,
 				Summary:       "round 1 summary",

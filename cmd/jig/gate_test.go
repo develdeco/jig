@@ -47,6 +47,37 @@ func TestPrintGateReportShowsFindingsWithFileLineAndRationale(t *testing.T) {
 	}
 }
 
+// TestPrintGateReportNamesTheBudgetOnlyWhenItParkedSomething pins "The
+// gate's own report, for a round that parked findings, says the budget
+// is reached and how many findings were parked" - and that a round with
+// nothing parked (BudgetParked 0, the ordinary case) never prints the
+// row at all, even if the budget happens to be reached for other reasons.
+func TestPrintGateReportNamesTheBudgetOnlyWhenItParkedSomething(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+
+	parked := verifydeliver.GateReport{
+		Round: 2, Verdict: "fix-slices", Scope: "full",
+		BudgetParked: 2, BudgetUsed: 3, BudgetLimit: 3,
+	}
+	var out bytes.Buffer
+	printGateReport(&out, st, fx.Ticket, parked)
+	if !strings.Contains(out.String(), `fix_budget: "reached (3 of 3): 2 finding(s) parked"`) {
+		t.Fatalf("gate report missing the budget row:\n%s", out.String())
+	}
+
+	none := verifydeliver.GateReport{Round: 1, Verdict: "fix-slices", Scope: "full"}
+	var out2 bytes.Buffer
+	printGateReport(&out2, st, fx.Ticket, none)
+	if strings.Contains(out2.String(), "fix_budget") {
+		t.Fatalf("gate report named the budget with nothing parked:\n%s", out2.String())
+	}
+}
+
 // TestPrintGateReportShowsIntentRowWithFailOpenNote pins the printed
 // "intent" row's own shape: source alone when there is no note (a
 // resolved intent, or "none" with nothing attempted), and
