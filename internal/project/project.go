@@ -424,6 +424,18 @@ func InitStandalone(repoDir string) (string, error) {
 		return "", fmt.Errorf("project: write .gitattributes: %w", err)
 	}
 
+	// Commit the scaffold itself, under jig's own identity rather than
+	// whatever (if anything) the host's git config holds: every later write
+	// - store.Claim's claims in particular - stages and commits only the
+	// paths it touches, never a sweeping `add -A`, so nothing else in jig
+	// ever picks this scaffold up on its own.
+	if _, err := gitx.Run(storeDir, "add", "-A"); err != nil {
+		return "", fmt.Errorf("project: stage store scaffold: %w", err)
+	}
+	if _, err := gitx.Run(storeDir, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "jig: init store"); err != nil {
+		return "", fmt.Errorf("project: commit store scaffold: %w", err)
+	}
+
 	return storeDir, nil
 }
 

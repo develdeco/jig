@@ -567,12 +567,24 @@ func TestGraduateAdvisesRatherThanAbortsOnUnparseableTicketDeps(t *testing.T) {
 		t.Fatalf("ticket folder for %s missing: %v", idB, err)
 	}
 
+	// Entry B's claim committed its own folder and the chart's id for it;
+	// idA's hand-broken ticket.yaml is exactly what the claim must leave
+	// alone (store.Claim stages and commits only the paths it claims), so it
+	// is still there, uncommitted, afterward - not swept into this run's
+	// commit the way a broad `add -A` once would have.
 	status, err := gitx.Run(storeRoot, "status", "--porcelain")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(status) != "" {
-		t.Fatalf("store left dirty after a run that should have committed:\n%s", status)
+	if strings.TrimSpace(status) != "M "+idA+"/ticket.yaml" {
+		t.Fatalf("status = %q, want only idA's pre-existing hand-broken ticket.yaml left dirty", status)
+	}
+	subject, err := gitx.Run(storeRoot, "log", "-1", "--pretty=%s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subject != "chart mychart: graduate "+idB {
+		t.Fatalf("commit subject = %q, want %q", subject, "chart mychart: graduate "+idB)
 	}
 }
 
@@ -793,174 +805,148 @@ func TestGraduateMidRunFailureIsRecoverable(t *testing.T) {
 	}
 }
 
-// TestGraduateFailureDistinguishesOrphanFromRecorded covers graduateFailure
-// directly: entry 1's ticket reached onMinted (recorded[0] = true, safe to
-// re-run over), but entry 2's ticket was minted (ids[1] set) before a
-// generic, non-axi.Error failure struck - the shape onMinted's own
-// write-chart failure leaves, which never reached onMinted for entry 2. The
-// result must not tell the operator to just re-run: that would mint a
-// duplicate for entry 2 and orphan its ticket.
-func TestGraduateFailureDistinguishesOrphanFromRecorded(t *testing.T) {
-	err := graduateFailure(
-		"mychart",
-		[]int{0, 1},
-		[]string{"T-1", "T-2"},
-		[]bool{true, false},
-		errors.New("store: graduate: write ticket.yaml for T-2: boom"),
-	)
-
+// TestGraduateFailureNamesTicketsAlreadyClaimed covers graduateFailure
+// directly: every ticket this run already claimed (createdIDs) is already
+// committed, and - on a store with an origin - pushed, by its own
+// store.Claim call, so a plain (non-axi.Error) failure for the next one gets
+// a generic re-run Help line, while an error that already carries its own
+// code and Help (store.Claim's own ID_NOT_CLAIMED, in particular) keeps
+// both, gaining only the already-claimed context in its message. The error
+// passed in is not changed in place.
+func TestGraduateFailureNamesTicketsAlreadyClaimed(t *testing.T) {
+	raw := errors.New("boom")
+	err := graduateFailure("mychart", []string{"T-1"}, raw)
 	var ae *axi.Error
 	if !errors.As(err, &ae) {
 		t.Fatalf("graduateFailure returned %T, want *axi.Error", err)
 	}
-	if !strings.Contains(ae.Msg, "already created: entry 1 (T-1)") {
-		t.Fatalf("Msg = %q, want it to still name entry 1 as already created", ae.Msg)
+	if !strings.Contains(ae.Msg, "T-1") || !strings.Contains(ae.Msg, "already claimed") {
+		t.Fatalf("Msg = %q, want it to name T-1 as already claimed", ae.Msg)
 	}
-	if !strings.Contains(ae.Msg, "T-2") || !strings.Contains(ae.Msg, "entry 2") {
-		t.Fatalf("Msg = %q, want it to name ticket T-2 and entry 2 as minted but not recorded", ae.Msg)
-	}
-	if len(ae.Help) != 1 {
-		t.Fatalf("Help = %+v, want exactly one line naming the fix for entry 2", ae.Help)
-	}
-	want := "Put `id: T-2` on entry 2 of charts/mychart/tickets.yaml (or delete that ticket folder), then re-run"
-	if ae.Help[0] != want {
-		t.Fatalf("Help[0] = %q, want %q", ae.Help[0], want)
-	}
-	if strings.Contains(strings.Join(ae.Help, "\n"), "it creates only the entries") {
-		t.Fatalf("Help = %+v, must not give the blanket re-run advice: entry 2 is not safe to re-run over", ae.Help)
-	}
-}
-
-// TestGraduateFailureAddsCreatedEntriesToAnErrorWithItsOwnHelp
-// covers the failures store.Graduate returns as an *axi.Error already
-// carrying its own code and next steps: an id ticket_format mints that jig
-// cannot use (store.Mint's own refusal), which never leaves an id behind to
-// orphan, and onMinted's own failure to record an id in the chart, which
-// does. Both keep their code and their help unchanged, and say which
-// entries this run already created, as every other graduate failure does;
-// with none created there is nothing to add. The error returned to
-// graduateFailure is not changed in place.
-func TestGraduateFailureAddsCreatedEntriesToAnErrorWithItsOwnHelp(t *testing.T) {
-	unusableStore := &store.Store{Root: t.TempDir()}
-	_, unusable := unusableStore.Mint("EXT-{n}-gate", store.Ticket{Title: "x"})
-	var unusableErr *axi.Error
-	if !errors.As(unusable, &unusableErr) {
-		t.Fatalf("test setup: Mint with ticket_format EXT-{n}-gate = %v, want an *axi.Error refusal", unusable)
-	}
-	recordFailed := &axi.Error{
-		Msg:  `ticket EXT-2 was created for entry 2 but failed to write chart "mychart": boom`,
-		Code: "VALIDATION_ERROR",
-		Help: []string{"Put `id: EXT-2` on entry 2 of charts/mychart/tickets.yaml (or delete that ticket folder), then re-run"},
-	}
-
-	for _, tc := range []struct {
-		name     string
-		refusal  *axi.Error
-		ids      []string
-		recorded []bool
-		suffix   string
-	}{
-		// store.Mint never returns a non-empty id alongside an error, so the
-		// refused entry's own id is always "" here, whichever position fails.
-		{name: "an unusable id after one entry", refusal: unusableErr, ids: []string{"EXT-1", ""}, recorded: []bool{true, false}, suffix: " (already created: entry 1 (EXT-1))"},
-		{name: "a chart write failure after one entry", refusal: recordFailed, ids: []string{"EXT-1", "EXT-2"}, recorded: []bool{true, false}, suffix: " (already created: entry 1 (EXT-1))"},
-		{name: "an unusable id on the first entry", refusal: unusableErr, ids: []string{"", ""}, recorded: []bool{false, false}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			msg, code, help := tc.refusal.Msg, tc.refusal.Code, append([]string{}, tc.refusal.Help...)
-
-			err := graduateFailure("mychart", []int{0, 1}, tc.ids, tc.recorded, tc.refusal)
-
-			var ae *axi.Error
-			if !errors.As(err, &ae) {
-				t.Fatalf("graduateFailure returned %T, want an *axi.Error", err)
-			}
-			if ae.Msg != msg+tc.suffix {
-				t.Fatalf("Msg = %q, want %q", ae.Msg, msg+tc.suffix)
-			}
-			if ae.Code != code || !reflect.DeepEqual(ae.Help, help) {
-				t.Fatalf("Code = %q, Help = %q, want the refusal's own %q and %q", ae.Code, ae.Help, code, help)
-			}
-			if tc.refusal.Msg != msg {
-				t.Fatalf("the refusal's own error now reads %q, want it left as it was: %q", tc.refusal.Msg, msg)
-			}
-		})
-	}
-}
-
-// TestPushFailureNamesCreatedTicketsAndKeepsUnderlyingHelp covers
-// pushFailure directly: given a STORE_CONFLICT *axi.Error (the shape
-// Store.Push itself returns for a mid-rebase/mid-merge refusal or an
-// aborted conflicting pull), the wrapped error must still carry Push's own
-// Help (the specific `git rebase --abort`/`git status` guidance only Store
-// can give), name every id already created and recorded, and add a Help
-// line pointing at the commit to make by hand.
-func TestPushFailureNamesCreatedTicketsAndKeepsUnderlyingHelp(t *testing.T) {
-	underlying := &axi.Error{
-		Msg:  "the store at /store has an unfinished rebase",
-		Code: "STORE_CONFLICT",
-		Help: []string{"Check the store's state there with `git status`, resolve it, then rerun."},
-	}
-	err := pushFailure("/store", "mychart", []string{"T-1", "T-2"}, `chart mychart: graduate T-1, T-2`, underlying)
-
-	var ae *axi.Error
-	if !errors.As(err, &ae) {
-		t.Fatalf("pushFailure returned %T, want *axi.Error", err)
-	}
-	if ae.Code != "STORE_CONFLICT" {
-		t.Fatalf("Code = %q, want the underlying error's own STORE_CONFLICT preserved", ae.Code)
-	}
-	if !strings.Contains(ae.Msg, "T-1") || !strings.Contains(ae.Msg, "T-2") {
-		t.Fatalf("Msg = %q, want it to name every id already created", ae.Msg)
-	}
-	if !strings.Contains(ae.Msg, "charts/mychart/tickets.yaml") {
-		t.Fatalf("Msg = %q, want it to say the ids are recorded in tickets.yaml", ae.Msg)
-	}
-	if !strings.Contains(ae.Msg, underlying.Msg) {
-		t.Fatalf("Msg = %q, want it to keep the underlying Push error's own message", ae.Msg)
-	}
-	if len(ae.Help) != 2 {
-		t.Fatalf("Help = %+v, want the underlying Help kept plus one line naming the commit to make", ae.Help)
-	}
-	if ae.Help[0] != underlying.Help[0] {
-		t.Fatalf("Help[0] = %q, want the underlying Push error's own Help kept first", ae.Help[0])
-	}
-	if !strings.Contains(ae.Help[1], "chart mychart: graduate T-1, T-2") {
-		t.Fatalf("Help[1] = %q, want it to name the commit message to make by hand", ae.Help[1])
-	}
-	if !strings.Contains(strings.ToLower(ae.Help[1]), "re-run") {
-		t.Fatalf("Help[1] = %q, want it to also mention re-running once the store's git state is resolved", ae.Help[1])
-	}
-}
-
-// TestPushFailureOnRawError covers pushFailure given a plain (non-axi.Error)
-// error - the shape a push that cannot even be retried with pull --rebase
-// (an unreachable or misconfigured remote) leaves. There is no underlying
-// Help to preserve. createdIDs is non-empty, the only shape the CLI's one
-// call site ever passes: it is reached only after at least one mint has
-// already appended to it.
-func TestPushFailureOnRawError(t *testing.T) {
-	raw := errors.New("git push origin main: fatal: repository not found: exit status 128")
-	err := pushFailure("/store", "mychart", []string{"T-1"}, "chart mychart: graduate T-1", raw)
-
-	var ae *axi.Error
-	if !errors.As(err, &ae) {
-		t.Fatalf("pushFailure returned %T, want *axi.Error", err)
+	if !strings.Contains(ae.Msg, "boom") {
+		t.Fatalf("Msg = %q, want it to keep the underlying error's own message", ae.Msg)
 	}
 	if ae.Code != "VALIDATION_ERROR" {
 		t.Fatalf("Code = %q, want VALIDATION_ERROR for a plain error with no code of its own", ae.Code)
 	}
-	if !strings.Contains(ae.Msg, raw.Error()) {
-		t.Fatalf("Msg = %q, want it to keep the raw error's own message", ae.Msg)
+	if len(ae.Help) != 1 || !strings.Contains(strings.ToLower(ae.Help[0]), "re-run") {
+		t.Fatalf("Help = %+v, want one line about re-running", ae.Help)
 	}
-	if !strings.Contains(ae.Msg, "T-1") || !strings.Contains(ae.Msg, "already exists") {
-		t.Fatalf("Msg = %q, want it to name the already-created ticket", ae.Msg)
+
+	withNone := graduateFailure("mychart", nil, raw)
+	var aeNone *axi.Error
+	if !errors.As(withNone, &aeNone) {
+		t.Fatalf("graduateFailure returned %T, want *axi.Error", withNone)
 	}
-	if len(ae.Help) != 1 {
-		t.Fatalf("Help = %+v, want exactly one line naming the commit to make", ae.Help)
+	if strings.Contains(aeNone.Msg, "already claimed") {
+		t.Fatalf("Msg = %q, want no \"already claimed\" clause with nothing created yet", aeNone.Msg)
 	}
-	if !strings.Contains(ae.Help[0], "chart mychart: graduate T-1") {
-		t.Fatalf("Help[0] = %q, want it to name the commit message to make by hand", ae.Help[0])
+
+	claimFailed := &axi.Error{
+		Msg:  "the id could not be claimed on the store's origin: boom",
+		Code: "ID_NOT_CLAIMED",
+		Help: []string{"Retry once the origin is reachable"},
+	}
+	wrapped := graduateFailure("mychart", []string{"T-1"}, claimFailed)
+	var aeWrapped *axi.Error
+	if !errors.As(wrapped, &aeWrapped) {
+		t.Fatalf("graduateFailure returned %T, want *axi.Error", wrapped)
+	}
+	if aeWrapped.Code != "ID_NOT_CLAIMED" {
+		t.Fatalf("Code = %q, want the underlying error's own ID_NOT_CLAIMED preserved", aeWrapped.Code)
+	}
+	if !reflect.DeepEqual(aeWrapped.Help, claimFailed.Help) {
+		t.Fatalf("Help = %+v, want the underlying error's own Help kept as is", aeWrapped.Help)
+	}
+	if claimFailed.Msg != "the id could not be claimed on the store's origin: boom" {
+		t.Fatalf("the underlying error was changed in place: %q", claimFailed.Msg)
+	}
+}
+
+// TestGraduatePushFailureRemovesTheClaim reproduces a genuine push failure
+// from inside `jig graduate`: the store's fetch URL stays valid (so Sync's
+// own pull --rebase succeeds trivially) but its push URL is broken, the same
+// "a push that cannot be rebased" shape TestUnreachableRemoteIsNotReportedAs
+// Conflict documents for store.Push. Per the claim slice's contract, a push
+// failure other than a rejection undoes the claim entirely: the chart entry
+// gets no id, the ticket folder is removed, and the command refuses with
+// ID_NOT_CLAIMED rather than leaving a ticket claimed only locally.
+func TestGraduatePushFailureRemovesTheClaim(t *testing.T) {
+	jig, storeRoot := setupGraduateStore(t)
+
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if _, err := gitx.Run("", "init", "--bare", "-b", "main", remote); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "remote", "add", "origin", remote); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "push", "-u", "origin", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The chart entry itself is already committed and pushed, as it would be
+	// in real use (whoever edits charts/mychart/tickets.yaml commits that
+	// edit; graduate's own job is only to mint ids into it): otherwise
+	// Store.Sync, which cmdGraduate calls before Claim ever runs, would
+	// commit this uncommitted edit on its own, moving HEAD before the claim
+	// this test means to exercise even starts.
+	writeChart(t, storeRoot, "mychart", `tickets:
+  - title: "Slice A"
+`)
+	if _, err := gitx.Run(storeRoot, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "chart: add Slice A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "push", "origin", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := gitx.Run(storeRoot, "remote", "set-url", "--push", "origin", filepath.Join(t.TempDir(), "does-not-exist")); err != nil {
+		t.Fatal(err)
+	}
+
+	headBefore, err := gitx.Run(storeRoot, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, out := jig("graduate", "mychart")
+	if code == 0 {
+		t.Fatalf("jig graduate mychart: exit 0, want a push failure:\n%s", out)
+	}
+	if !strings.Contains(out, "ID_NOT_CLAIMED") {
+		t.Fatalf("output missing ID_NOT_CLAIMED:\n%s", out)
+	}
+
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := st.ReadChart("mychart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries[0].ID != "" {
+		t.Fatalf("entry A got an id %q despite its claim's push failing", entries[0].ID)
+	}
+	ents, err := os.ReadDir(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "T-") {
+			t.Fatalf("a ticket folder %q was left behind by a failed claim", e.Name())
+		}
+	}
+	headAfter, err := gitx.Run(storeRoot, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headAfter != headBefore {
+		t.Fatalf("HEAD moved from %s to %s: the failed claim's commit was not undone", headBefore, headAfter)
 	}
 }
 
@@ -1163,73 +1149,6 @@ func TestGraduateCommitAndTable(t *testing.T) {
 	}
 	if !strings.Contains(out, idA) || !strings.Contains(out, idB) {
 		t.Fatalf("output missing a row for both ids %s and %s:\n%s", idA, idB, out)
-	}
-}
-
-// TestGraduatePushFailureNamesCreatedTicket reproduces a genuine Store.Push
-// failure from inside `jig graduate`, after a ticket has already been
-// minted and written back to charts/mychart/tickets.yaml: the store's fetch
-// URL stays valid (so Sync's own pull --rebase, and Push's own retry pull,
-// both succeed trivially) but its push URL is broken, so Push's push - and
-// its retry after that pull - both fail, the same "a push that cannot be
-// rebased" shape TestUnreachableRemoteIsNotReportedAsConflict documents for
-// store.Push returning git's own error unwrapped. The command's own output
-// must not just relay that raw error: it must name the ticket already
-// created, say its id is already recorded, and carry a Help line.
-func TestGraduatePushFailureNamesCreatedTicket(t *testing.T) {
-	jig, storeRoot := setupGraduateStore(t)
-
-	if _, err := gitx.Run(storeRoot, "add", "-A"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "init"); err != nil {
-		t.Fatal(err)
-	}
-
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	if _, err := gitx.Run("", "init", "--bare", "-b", "main", remote); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.Run(storeRoot, "remote", "add", "origin", remote); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.Run(storeRoot, "push", "-u", "origin", "main"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.Run(storeRoot, "remote", "set-url", "--push", "origin", filepath.Join(t.TempDir(), "does-not-exist")); err != nil {
-		t.Fatal(err)
-	}
-
-	writeChart(t, storeRoot, "mychart", `tickets:
-  - title: "Slice A"
-`)
-
-	code, out := jig("graduate", "mychart")
-	if code == 0 {
-		t.Fatalf("jig graduate mychart: exit 0, want a Push failure:\n%s", out)
-	}
-
-	st, err := store.Open(storeRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries, err := st.ReadChart("mychart")
-	if err != nil {
-		t.Fatal(err)
-	}
-	idA := entries[0].ID
-	if idA == "" {
-		t.Fatalf("entry A has no id despite its mint (and the local commit that follows) succeeding before Push failed: %+v", entries)
-	}
-
-	if !strings.Contains(out, idA) {
-		t.Fatalf("failed run's output does not name the ticket already created for entry A (%s):\n%s", idA, out)
-	}
-	if !strings.Contains(out, "charts/mychart/tickets.yaml") {
-		t.Fatalf("failed run's output does not say the id is already recorded in tickets.yaml:\n%s", out)
-	}
-	if !strings.Contains(out, "help[") {
-		t.Fatalf("failed run's output has no Help block:\n%s", out)
 	}
 }
 

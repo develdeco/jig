@@ -208,6 +208,39 @@ func (cp *checkpoint) push() error {
 	return nil
 }
 
+// pushOnce pushes the branch to origin exactly once, with none of push's own
+// retry: Claim needs to tell a push the origin rejected (not a fast-forward:
+// something else landed there first) apart from any other failure, since
+// only a rejection is worth pulling and preparing a fresh claim for.
+func (cp *checkpoint) pushOnce() (rejected bool, err error) {
+	if cp.repo != nil {
+		err := cp.repo.Push("origin", cp.branch)
+		switch {
+		case err == nil:
+			return false, nil
+		case errors.Is(err, gitx.ErrPushRejected):
+			return true, err
+		case !errors.Is(err, gitx.ErrUseCLI):
+			return false, err
+		}
+	}
+	out, err := gitx.RunRaw(cp.s.Root, "push", "origin", cp.branch)
+	if err == nil {
+		return false, nil
+	}
+	return pushRejectedText(out), err
+}
+
+// pushRejectedText reports whether out - git push's combined stdout and
+// stderr - names a rejection (the remote branch moved on; not a
+// fast-forward), the only push failure Claim retries rather than refusing
+// outright.
+func pushRejectedText(out string) bool {
+	return strings.Contains(out, "[rejected]") ||
+		strings.Contains(out, "non-fast-forward") ||
+		strings.Contains(out, "fetch first")
+}
+
 // refuseIfMidRebaseOrMerge errors when the store has an unfinished rebase or
 // merge in progress, or unresolved conflict markers already sitting in the
 // index, without touching the index itself. Neither Sync nor Push must ever

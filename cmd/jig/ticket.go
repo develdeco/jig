@@ -45,11 +45,27 @@ func cmdTicket(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
+	if err := st.Sync(); err != nil {
+		return renderErr(stdout, err)
+	}
+
 	// jig mints every id itself, through the store package's own
 	// ticket_format counter, whatever project.yaml says about trackers:
 	// Mint computes the next id, refuses one jig cannot use before writing
 	// anything, and creates the ticket's folder and ticket.yaml together.
-	id, err := st.Mint(cfg.TicketFormat, store.Ticket{Title: *title})
+	// Claim then commits that folder alone and, on a store with an origin,
+	// pushes it alone, re-minting after a rejected push so two clones
+	// minting at once never collide on the same id (internal/store/claim.go).
+	id, err := st.Claim(
+		func() (string, []string, error) {
+			mintedID, err := st.Mint(cfg.TicketFormat, store.Ticket{Title: *title})
+			if err != nil {
+				return "", nil, err
+			}
+			return mintedID, []string{mintedID}, nil
+		},
+		func(id string) string { return fmt.Sprintf("%s: new ticket", id) },
+	)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

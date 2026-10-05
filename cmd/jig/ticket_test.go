@@ -11,6 +11,172 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// newTestOriginClone creates a bare remote with a committed, pushed
+// project.yaml (ticket_format "T-{n}", no trackers), then a plain clone of
+// it at dir, ready for `jig ticket new --store dir` to claim against.
+func newTestOriginClone(t *testing.T, dir string) (remote string) {
+	t.Helper()
+	parent := filepath.Dir(dir)
+	remote = filepath.Join(parent, filepath.Base(dir)+"-remote.git")
+
+	if _, err := gitx.Run("", "init", "--bare", "-b", "main", remote); err != nil {
+		t.Fatal(err)
+	}
+	seed := filepath.Join(parent, filepath.Base(dir)+"-seed")
+	if _, err := gitx.Run("", "clone", remote, seed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, "project.yaml"), []byte("schema_version: 1\nname: demo\nticket_format: T-{n}\ntrackers: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, ".gitignore"), []byte("*.lock\n.*.tmp\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(seed, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(seed, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "jig: init store"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(seed, "push", "origin", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := gitx.Run("", "clone", remote, dir); err != nil {
+		t.Fatal(err)
+	}
+	return remote
+}
+
+// TestTicketNewClaimsOnOrigin covers jig ticket new against a store whose
+// origin is a bare repo: the id it mints lands on the origin in its own
+// commit, named "<id>: new ticket", and the command's output names only
+// that id.
+func TestTicketNewClaimsOnOrigin(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	clone := filepath.Join(t.TempDir(), "clone")
+	remote := newTestOriginClone(t, clone)
+
+	var buf bytes.Buffer
+	code := Main([]string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader(""))
+	if code != 0 {
+		t.Fatalf("jig ticket new: exit %d\n%s", code, buf.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "T-1") {
+		t.Fatalf("output missing T-1:\n%s", out)
+	}
+
+	subject, err := gitx.Run("", "--git-dir", remote, "log", "-1", "--pretty=%s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subject != "T-1: new ticket" {
+		t.Fatalf("remote HEAD subject = %q, want %q", subject, "T-1: new ticket")
+	}
+
+	st, err := store.Open(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.ReadTicket("T-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "Fix the thing" {
+		t.Fatalf("ticket.yaml title = %q, want %q", got.Title, "Fix the thing")
+	}
+}
+
+// TestTicketNewSequentialClonesGetDifferentIDs covers two separate clones of
+// the same origin minting one after another: each claims a different id,
+// and the origin ends up with both.
+func TestTicketNewSequentialClonesGetDifferentIDs(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	parent := t.TempDir()
+	cloneA := filepath.Join(parent, "cloneA")
+	remote := newTestOriginClone(t, cloneA)
+	cloneB := filepath.Join(parent, "cloneB")
+	if _, err := gitx.Run("", "clone", remote, cloneB); err != nil {
+		t.Fatal(err)
+	}
+
+	jig := func(storeDir string, args ...string) (int, string) {
+		var buf bytes.Buffer
+		code := Main(append(args, "--store", storeDir), &buf, strings.NewReader(""))
+		return code, buf.String()
+	}
+
+	codeA, outA := jig(cloneA, "ticket", "new", "--title", "From A")
+	if codeA != 0 || !strings.Contains(outA, "T-1") {
+		t.Fatalf("jig ticket new (clone A): exit %d, want id T-1:\n%s", codeA, outA)
+	}
+	codeB, outB := jig(cloneB, "ticket", "new", "--title", "From B")
+	if codeB != 0 {
+		t.Fatalf("jig ticket new (clone B): exit %d\n%s", codeB, outB)
+	}
+	if strings.Contains(outB, "T-1") {
+		t.Fatalf("clone B minted T-1 again instead of a fresh id:\n%s", outB)
+	}
+	if !strings.Contains(outB, "T-2") {
+		t.Fatalf("clone B's output missing T-2:\n%s", outB)
+	}
+
+	log, err := gitx.Run("", "--git-dir", remote, "log", "--pretty=%s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"T-1: new ticket", "T-2: new ticket"} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("remote log = %q, want it to contain %q", log, want)
+		}
+	}
+}
+
+// TestTicketNewRefusesWhenOriginUnreachable covers a push that fails because
+// the origin cannot be reached: the command refuses with ID_NOT_CLAIMED and
+// leaves no ticket folder or commit behind.
+func TestTicketNewRefusesWhenOriginUnreachable(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	clone := filepath.Join(t.TempDir(), "clone")
+	newTestOriginClone(t, clone)
+	if _, err := gitx.Run(clone, "remote", "set-url", "--push", "origin", filepath.Join(t.TempDir(), "does-not-exist")); err != nil {
+		t.Fatal(err)
+	}
+	headBefore, err := gitx.Run(clone, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	code := Main([]string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader(""))
+	if code == 0 {
+		t.Fatalf("jig ticket new with an unreachable origin: exit 0, want a refusal:\n%s", buf.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "ID_NOT_CLAIMED") {
+		t.Fatalf("output missing ID_NOT_CLAIMED:\n%s", out)
+	}
+
+	st, err := store.Open(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(st.TicketDir("T-1")); !os.IsNotExist(err) {
+		t.Fatalf("ticket folder T-1 left behind by a failed claim (stat err %v)", err)
+	}
+	headAfter, err := gitx.Run(clone, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headAfter != headBefore {
+		t.Fatalf("HEAD moved from %s to %s: the failed claim's commit was not undone", headBefore, headAfter)
+	}
+}
+
 // TestTicketNewRecordsTitleAndMintsNextID covers the basic mint: jig ticket
 // new writes the title into <ticket>/ticket.yaml, and a second ticket gets
 // the next ticket_format id, not a repeat of the first.

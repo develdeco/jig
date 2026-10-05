@@ -329,11 +329,6 @@ func TestInitStandaloneGitignoreKeepsLockFilesUntracked(t *testing.T) {
 		t.Fatalf(".gitignore = %q, want it to ignore *.lock and .*.tmp", data)
 	}
 
-	runGitInProject(t, storePath, "config", "user.name", "tester")
-	runGitInProject(t, storePath, "config", "user.email", "tester@example.invalid")
-	runGitInProject(t, storePath, "add", "-A")
-	runGitInProject(t, storePath, "commit", "-m", "init")
-
 	st := &store.Store{Root: storePath}
 	if err := st.WriteSliceState("T-1", "a", store.SliceState{State: "queued"}); err != nil {
 		t.Fatalf("WriteSliceState: %v", err)
