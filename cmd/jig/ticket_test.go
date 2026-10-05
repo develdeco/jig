@@ -233,6 +233,45 @@ func TestTicketNewRecordsTitleAndMintsNextID(t *testing.T) {
 	}
 }
 
+// TestTicketNewWithBodyRecordsItInTheRecord covers --body: jig ticket new
+// writes it into the minted ticket.yaml alongside the title, and a ticket
+// minted with no --body gets no body key at all.
+func TestTicketNewWithBodyRecordsItInTheRecord(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	clone := filepath.Join(t.TempDir(), "clone")
+	newTestOriginClone(t, clone)
+
+	var buf bytes.Buffer
+	code := Main([]string{"ticket", "new", "--title", "Fix the thing", "--body", "Why this matters.", "--store", clone}, &buf, strings.NewReader(""))
+	if code != 0 {
+		t.Fatalf("jig ticket new --body: exit %d\n%s", code, buf.String())
+	}
+
+	st, err := store.Open(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.ReadTicket("T-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Body != "Why this matters." {
+		t.Fatalf("ticket.yaml body = %q, want %q", got.Body, "Why this matters.")
+	}
+
+	buf.Reset()
+	if code := Main([]string{"ticket", "new", "--title", "No body", "--store", clone}, &buf, strings.NewReader("")); code != 0 {
+		t.Fatalf("jig ticket new without --body: exit %d\n%s", code, buf.String())
+	}
+	got, err = st.ReadTicket("T-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Body != "" {
+		t.Fatalf("ticket.yaml body with no --body = %q, want empty", got.Body)
+	}
+}
+
 // TestTicketNewMintsByTicketFormatRegardlessOfTracker covers the central
 // change: jig ticket new mints through the store's own ticket_format
 // counter, never asking a tracker for an id - true not just of the

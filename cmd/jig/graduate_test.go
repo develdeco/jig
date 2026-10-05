@@ -1152,6 +1152,47 @@ func TestGraduateCommitAndTable(t *testing.T) {
 	}
 }
 
+// TestGraduateRecordsChartEntryBodyInTheRecord covers the other writer of a
+// ticket's body: graduate carries each chart entry's own body into the
+// ticket.yaml it mints, and an entry with no body mints a record with none.
+func TestGraduateRecordsChartEntryBodyInTheRecord(t *testing.T) {
+	jig, storeRoot := setupGraduateStore(t)
+	writeChart(t, storeRoot, "mychart", `tickets:
+  - title: "Slice A"
+    body: |
+      Why this entry matters.
+  - title: "Slice B"
+`)
+	if code, out := jig("graduate", "mychart"); code != 0 {
+		t.Fatalf("jig graduate mychart: exit %d\n%s", code, out)
+	}
+
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := st.ReadChart("mychart")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotA, err := st.ReadTicket(entries[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotA.Body != "Why this entry matters.\n" {
+		t.Fatalf("entry A's ticket.yaml body = %q, want %q", gotA.Body, "Why this entry matters.\n")
+	}
+
+	gotB, err := st.ReadTicket(entries[1].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotB.Body != "" {
+		t.Fatalf("entry B's ticket.yaml body = %q, want empty (its chart entry has none)", gotB.Body)
+	}
+}
+
 // TestGraduateFullyGraduatedLeavesStoreUntouched covers the fully-graduated
 // branch on a store with no remote: a re-run over a chart where every entry
 // already has an id must create, commit and push nothing itself, even when

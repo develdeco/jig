@@ -29,6 +29,7 @@ func cmdTicket(args []string, stdout io.Writer) int {
 
 	fs := newFlagSet("ticket new")
 	title := fs.String("title", "", "ticket title (required)")
+	body := fs.String("body", "", "ticket body/description")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -58,7 +59,7 @@ func cmdTicket(args []string, stdout io.Writer) int {
 	// minting at once never collide on the same id (internal/store/claim.go).
 	id, err := st.Claim(
 		func() (string, []string, error) {
-			mintedID, err := st.Mint(cfg.TicketFormat, store.Ticket{Title: *title})
+			mintedID, err := st.Mint(cfg.TicketFormat, store.Ticket{Title: *title, Body: *body})
 			if err != nil {
 				return "", nil, err
 			}

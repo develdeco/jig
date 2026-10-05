@@ -233,7 +233,7 @@ func claimOneChartEntry(st *store.Store, format, chart string) (id string, pos i
 		if i < 0 {
 			return "", nil, errChartFullyGraduated
 		}
-		rec := store.Ticket{Title: entries[i].Title, BlockedBy: toBlockedBy(refs[i])}
+		rec := store.Ticket{Title: entries[i].Title, Body: entries[i].Body, BlockedBy: toBlockedBy(refs[i])}
 		newID, merr := st.Mint(format, rec)
 		if merr != nil {
 			return "", nil, merr

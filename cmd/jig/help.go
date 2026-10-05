@@ -33,6 +33,7 @@ var commandTable = []cmdSpec{
 	}, false},
 	{"ticket", "mint a new ticket: jig ticket new --title <t>", []flagSpec{
 		{"title", "ticket title (required)", false},
+		{"body", "ticket body/description", false},
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},
