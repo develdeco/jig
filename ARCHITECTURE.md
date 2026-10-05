@@ -32,8 +32,9 @@ gate           re-verification round: oracles, then a reviewer session's find/ro
   │                    and, under <jig home>/evidence/ (not in the store), the media and
   │                    the session's input, demo.json
   ▼
-publish        reconcile, revalidate, docs, squash (unpushed history only), route
-               → open or update the PR, then post pr/review-notes.md as its first comment
+publish        reconcile, revalidate, docs, squash (unpushed history only)
+               → with a GitHub host, open or update the PR and post
+               pr/review-notes.md as its first comment; with no host, push only
                reads:  gate/round-N/*, journal.ndjson, ticket.yaml
                writes: changelog/{<ws>.md,consolidated.md},
                        pr/{evidence.md,<repo>.md,review-notes.md},
@@ -118,7 +119,7 @@ charts/
   brief.md
   intent.md         # jig gate --intent/--doc, or inferred; ignored when brief.md exists
   slices.yaml
-  ticket.yaml       # optional: this ticket's own record - title, blockers, adopted branch
+  ticket.yaml       # optional: this ticket's own record - title, body, blockers, adopted branch
   start.<repo>.sha  # the sha the ticket's branch started from
   slices/
     <id>.state
@@ -161,8 +162,16 @@ fifth home above): `demo.yaml` names them and holds their hashes.
 ## Project configuration
 
 `project.yaml` is the project's configuration file. Beyond the required fields
-(`name`, `ticket_format`, `tracker`, `repos`, `platform`), it may contain an
-optional `gate` block configuring the gate's fix loop and risk floor:
+(`name`, `ticket_format`, `repos`, `platform`), it declares `trackers:`, a list
+of mirrors of the store's tickets: absent or `[]` means none, and an entry is
+refused when the config loads (`VALIDATION_ERROR`) until T-24 builds the
+tracker tree and T-22 the GitHub mirror. The old `tracker:` key still reads
+`tracker: local` as no mirrors, until L3's migration rewrites `project.yaml`;
+any other `tracker:` value, `tracker:` and `trackers:` together, and `routes:`
+(which only ever fed publish's now-gone route step) are all refused at load,
+each with help naming the fix. `jig init` writes `trackers: []` and no
+`tracker:` key. It may also contain an optional `gate` block configuring the
+gate's fix loop and risk floor:
 
 ```yaml
 gate:
@@ -227,12 +236,12 @@ exists.
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket`, `Compare`, `DivergedError`, `RequireBuilt`, `HoldsUnpushedBuilt`, `MustExistOnOrigin`, `RecutUnlessBuilt` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point, and synced with its branch when origin has it; anything git shows is not a repository of its own is moved aside and cloned afresh) |
 | `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping under the jig home root → a `Config` |
+| `internal/repohost/` | `New`, `Host.CreatePR`, `Host.CreatePRWithMedia`, `Host.FindOpenPR`, `Host.UpdatePR`, `Host.UpdatePRWithMedia`, `Host.CommentPR`, `Host.ReadPRBody` | a repo's own `remote:` → a `Host` (a GitHub host, for a remote on github.com over ssh or https; refused up front, `GH_NOT_INSTALLED`, when `gh` is not on PATH) or `nil` (any other remote: a local path, or another host); a branch, base, title and a body file → an opened or updated pull request, with or without the gate's demo media attached, found by its qualified head into a base, or read back |
 | `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `MatchRound`, `ScoreRound`, `RenderReport` | a labeled corpus (`testdata/revieweval`) + a session backend → a `CaseScore` per case, matched structurally against seeded gold through the real reviewer contract |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` (diff lines, files changed, invariant match) + `Config` → a model rung, disjoint from rungs already in use; invariant floored to the dearest rung, volume climbs one rung, otherwise cheapest |
-| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by |
-| `internal/tracker/` | `New`, `Graduate`, `CheckMinted`, `PRCreator`, `PRUpdater`, `PRCommenter`, `PRCreatorWithMedia`, `PRUpdaterWithMedia`, `PRBodyReader` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it; on github, a pull request body + a media directory and file list → the same pull request with each file attached via `gh ... --attach`, or read back to check what `gh` rewrote |
+| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID`, `Mint`, `Claim` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by; `ticket_format` + a ticket's own record → the next id, its folder created and its `ticket.yaml` written whole (refused, before anything is written, when jig cannot use the id it computed); a mint (or other write) + a commit message → that id landed on the store's origin, retried after a push the origin rejects, undone and refused (`ID_NOT_CLAIMED`) after too many or any other failed push, committed with no push on a store with no origin |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one) |
 
 ## Session backends
@@ -572,13 +581,18 @@ under a subject naming it (see the store push above).
    merged in, or origin's own, which a round over the branch as it is now
    catches up with. It comes before reconcile, whose merge of the target could
    conflict in a branch that cannot be pushed and hide it behind `CONFLICT`.
-5. **The pull request.** The tracker adapter is built here, not after the push,
-   and if it is a `tracker.PRUpdater` it is asked for the branch's open pull
-   request into the target (`FindOpenPR`, exact: the pull requests endpoint with
-   the qualified head, the base and the open state, which GitHub applies, so no
-   page of other forks' pull requests can hide it); a lookup that fails refuses the
-   publish. A closed or merged pull request from the branch, or an open one into
-   another base, is not that one: none is found, and a new one is opened.
+5. **The pull request.** The repo host is built here, not after the push, from
+   the repo's own `remote:` (`repohost.New`): a GitHub host for a remote on
+   github.com over ssh or https, with any user, refused up front
+   (`GH_NOT_INSTALLED`) when `gh` is not on PATH; `nil` for any other remote - a
+   local path, as this store's own is, or another host. With a host, it is
+   asked for the branch's open pull request into the target (`FindOpenPR`,
+   exact: the pull requests endpoint with the qualified head, the base and the
+   open state, which GitHub applies, so no page of other forks' pull requests
+   can hide it); a lookup that fails refuses the publish. A closed or merged
+   pull request from the branch, or an open one into another base, is not that
+   one: none is found, and a new one is opened. With no host, nothing is
+   looked up: publish pushes the branch and opens nothing.
 6. **Reconcile** merges the target into a branch that is on origin and rebases
    one that is not (`reconcile`'s own `ls-remote`, whose answer is the rest of
    publish's too); the `reconcile` journal line is the first store write.
@@ -663,7 +677,7 @@ under a subject naming it (see the store push above).
    `![caption](./<name>)`, which `gh ... --attach` rewrites to the uploaded
    URL in place; a video as the plain bullet `./<name>: caption` it has
    never reliably rewritten, which a later step (below) reads back and
-   patches itself where the tracker can. Neither this function nor
+   patches itself where the host can. Neither this function nor
    `pr/<repo>.md` itself ever names the evidence directory.
    `## Verification` names the oracles green at the last clean round
    (`SortedOracleNames`, the manifest Publish itself resolved) and the
@@ -683,15 +697,16 @@ under a subject naming it (see the store push above).
    with no model call (`writePRBody`, `writeReviewNotes`,
    `internal/verifydeliver/render.go`).
 10. **Confirm, push, pull request.** `--yes` or an accepted question (which
-    says whether it would open a pull request or update the open one), then a
-    plain `git push` of the branch, then the pull request: the open one is
+    says whether it would push and open a pull request, push and update the
+    open one, or - with no host - only push the branch), then a plain `git
+    push` of the branch, then, with a host, the pull request: the open one is
     updated (`UpdatePR`, `gh pr edit --body-file`) with `pr/<repo>.md` as its
-    body, otherwise one is opened (`CreatePR`) with it when the tracker can.
+    body, otherwise one is opened (`CreatePR`) with it. With no host nothing is
+    opened; `pr/<repo>.md` and `pr/review-notes.md` still land in the store,
+    for the operator to post by hand.
     A pull request with a `## Demo` section's media
-    (`DemoRenderResult.MediaFiles`) goes through the tracker's optional
-    `PRCreatorWithMedia`/`PRUpdaterWithMedia` capability instead, when the
-    adapter has one: the github adapter's
-    `CreatePRWithMedia`/`UpdatePRWithMedia` add `--attach <file>` once per
+    (`DemoRenderResult.MediaFiles`) goes through `CreatePRWithMedia`/
+    `UpdatePRWithMedia` instead: both add `--attach <file>` once per
     verified file to the same `gh pr create`/`gh pr edit` call, run with the
     evidence directory `renderDemoSection` itself resolved and verified those
     files against (`DemoRenderResult.MediaDir`, never recomputed from the
@@ -713,19 +728,15 @@ under a subject naming it (see the store push above).
     appended for that file in the very body just read, moves it to where the
     reference stands, and publish edits the pull request again with the fix
     (`UpdatePR`); only a file `gh` appended no URL for at all is left as it was
-    and named on stderr. The `local` tracker has neither capability: it writes
-    `pr/<repo>.md`'s own `./<name>` references and uploads nothing, since it
-    opens no pull request to attach to; the `command` tracker is unchanged.
+    and named on stderr. With no host there is no pull request to attach media
+    to or read back, so none of this runs.
     Once that pull request exists, its first comment is `pr/review-notes.md`,
-    posted through the tracker's optional `PRCommenter` capability (the github
-    adapter's `gh pr comment`) when the adapter has one - the local tracker
-    writes both files and posts nothing, and the command tracker gets no
-    comment capability at all. A post that fails is a warning, never a publish
-    failure: the pull request stands, the file stays for a manual post, and
-    nothing about the failure keeps the store's deferred push from carrying
-    what publish already wrote. The `pr` journal line records which (`updated`
-    or `opened`) and the pushed head. Route and `publish-done` follow, and the
-    store is pushed.
+    posted through `CommentPR` (the GitHub host's `gh pr comment`). A post that
+    fails is a warning, never a publish failure: the pull request stands, the
+    file stays for a manual post, and nothing about the failure keeps the
+    store's deferred push from carrying what publish already wrote. The `pr`
+    journal line records which (`updated`, `opened`, or `none:no-host`) and the
+    pushed head. `publish-done` follows, and the store is pushed.
 
 The report names the head pushed and, per repo, whether the branch was squashed
 or was "not squashed (branch already on origin)".

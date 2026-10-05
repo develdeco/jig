@@ -82,8 +82,8 @@ local `claude -p` subprocess instead, which only needs `claude` on PATH.
 `jig run` and `jig solve` check that the backend's program is on PATH before
 they start and say what to install if it is not.
 `graphify` is optional; jig falls back cleanly without it.
-[`gh`](https://cli.github.com/) is needed for the GitHub tracker and
-opening pull requests.
+[`gh`](https://cli.github.com/) is needed for a GitHub remote's pull-request
+host and opening pull requests.
 
 ### Installing an unreleased build
 
@@ -120,10 +120,12 @@ jig solve T-1 --backend headless --yes    # runs run, gate, and publish as one c
 chain. `--yes` skips the publish confirm and every gate round's triage
 prompt (keeping every finding jig can route on its own): when a session asks a
 question, `jig solve` stops, and you resume it with
-`jig solve T-1 --yes --answer <qid> "<text>"`. With the standalone store above (`tracker: local`), publish
-pushes `jig/T-1` and writes the PR body into the store instead of opening a
-PR - set `tracker: github` in `project.yaml` and have `gh` on PATH to get
-an opened PR. Run `jig run T-1` and `jig gate T-1` on their own as slices
+`jig solve T-1 --yes --answer <qid> "<text>"`. jig infers the pull-request
+host from the shipped repo's own `remote:`: the standalone store above points
+at a local path, so publish only pushes `jig/T-1` and writes the PR body into
+the store instead of opening a PR; a repo whose remote is on github.com, with
+`gh` on PATH, gets its pull request opened automatically - no `project.yaml`
+setting is needed either way. Run `jig run T-1` and `jig gate T-1` on their own as slices
 need another attempt or a brief gets amended (`jig requeue T-1
 --from-brief-diff`), or to clear one stalled or env-blocked slice by id
 (`jig requeue T-1 --slice <id>`). `jig status T-1` prints the ticket's
@@ -192,8 +194,8 @@ target when it moved, and the memorize commit with the retrieval notes), and
 origin's branch is fast-forwarded to the result. The output says "not squashed
 (branch already on origin)". If the branch already has an open pull request
 into the target - yours, say - its body is replaced with the one publish wrote
-(its title stays) and no second one is opened; otherwise, with the github
-tracker, one is opened. A closed or merged pull request, or one into another
+(its title stays) and no second one is opened; otherwise, with a GitHub host,
+one is opened. A closed or merged pull request, or one into another
 base, is not that one and is left as it is. Publish never forces: when your
 branch and jig's have diverged it stops with `BRANCH_DIVERGED`, and with
 `PUBLISH_NOT_FAST_FORWARD` when a push lands while it runs, before it writes
@@ -250,15 +252,15 @@ changed, the change working, and how it was verified.
   verify against the round's manifest anymore (missing, or changed since)
   is left out and named on stderr, never rendered as if it were still
   there; a refused demo, or no demo recorded for this head at all, leaves
-  the section out entirely, and stderr says which. On the `github` tracker
-  the media are attached to the pull request itself (`gh ... --attach`),
+  the section out entirely, and stderr says which. With a GitHub host the
+  media are attached to the pull request itself (`gh ... --attach`),
   which rewrites a recognized image reference to the uploaded URL in place
   but not a video's bare path; publish reads the pull request back, moves
   the upload URL `gh` appended for each such file to where its own
   reference stands, and edits the body again, reporting on stderr any
-  reference still unrewritten after that. The `local` tracker (the
-  standalone store above) leaves every reference as it is, since it
-  uploads nothing.
+  reference still unrewritten after that. With no host (the standalone
+  store above, whose repo remote is a local path) every reference is left
+  as it is, since nothing is uploaded.
 - **Verification** - the oracles green at the last clean round and the head
   it reviewed, the revalidation tier, and one line counting the review's
   findings by how they ended (fixed, dismissed, noted, asked), pointing at
@@ -269,15 +271,14 @@ every finding across every round ordered by risk, each one with its
 rationale and how it ended - fixed by a slice and cleared at a later round,
 kept with your own decision, dismissed by a human, noted, or still open and
 asked - and coverage: the files the change touched, against the files the
-reviewer read (every round's own reviewed paths). With the `github` tracker
+reviewer read (every round's own reviewed paths). With a GitHub host
 this is posted once, right after the pull request is created or updated
 (`gh pr comment`); a post that fails is a warning, not a failed publish - the
 pull request stands and the file stays in the store for you to post by hand.
-The `local` tracker (the standalone store above) writes both files under
-`<ticket>/pr/` and posts nothing; the `command` tracker gets no comment
-capability at all.
+With no host (the standalone store above) both files are written under
+`<ticket>/pr/` and nothing is posted.
 
-`demo/publish-body.tape` plays this through end to end on the local tracker:
+`demo/publish-body.tape` plays this through end to end with no pull-request host:
 a ticket's gate rounds fixing, dismissing, and noting findings - the last of
 them clean, with its own recorded demo - then `jig publish` and both files
 as it leaves them, the body's `## Demo` section included - see

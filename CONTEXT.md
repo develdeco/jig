@@ -5,12 +5,16 @@ Vocabulary for jig, a CLI that runs a ticket from brief to merged PR as a dispat
 ## Language
 
 **Project**:
-A declared set of repos plus a tracker plus platform docs. Its identity is the truth repo's `project.yaml` - never inferred from folder layout or the current working directory.
+A declared set of repos plus trackers (mirrors of the store's tickets) plus platform docs. Its identity is the truth repo's `project.yaml` - never inferred from folder layout or the current working directory.
 _Avoid_: workspace config, repo group
 
 **Truth repo (store)**:
-A dedicated git repo with a remote holding every ticket artifact; it is the source of truth, and the tracker only projects it outward.
+A dedicated git repo with a remote holding every ticket artifact; it is the source of truth: jig mints every ticket id and claims it here, trackers only mirror the store outward, and pull requests come from the repo host, not a tracker.
 _Avoid_: database, state dir
+
+**Ticket**:
+jig's record of one unit of work, in the store, under an id jig mints.
+_Avoid_: issue, which names a tracker's copy of a ticket
 
 **Intake**:
 The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several.
