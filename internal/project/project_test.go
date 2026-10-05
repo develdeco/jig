@@ -155,6 +155,35 @@ platform: platform/
 	wantValidationError(t, err)
 }
 
+// TestLoadRefusesAMalformedTrackersShape checks that a trackers: value that
+// is not a sequence - a scalar (the one-character slip from tracker:) or a
+// mapping - is refused as a VALIDATION_ERROR, the same as a well-formed but
+// unsupported entry, rather than surfacing yaml.v3's own decode error.
+func TestLoadRefusesAMalformedTrackersShape(t *testing.T) {
+	cases := []struct {
+		name, trackersYAML string
+	}{
+		{"scalar", "trackers: github"},
+		{"mapping", "trackers:\n  github: {}"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "project.yaml")
+			writeFile(t, p, fmt.Sprintf(`
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+%s
+repos: []
+platform: platform/
+`, c.trackersYAML))
+			_, err := Load(p)
+			wantValidationError(t, err)
+		})
+	}
+}
+
 // TestLoadRefusesTrackerAndTrackersTogether checks that tracker: and
 // trackers: together are refused, even when tracker: carries its one
 // remaining legal value.
@@ -302,6 +331,35 @@ func TestInitStandalone(t *testing.T) {
 	absRepo, _ := filepath.Abs(repoDir)
 	if cfg.Repos[0].Remote != absRepo {
 		t.Errorf("Repos[0].Remote = %q, want %q", cfg.Repos[0].Remote, absRepo)
+	}
+}
+
+// TestInitStandaloneReinitLeavesOtherDirtyFilesAlone checks InitStandalone's
+// own re-init contract: run again against a store it already scaffolded, it
+// resets project.yaml and ledger.md without error, even though the reset
+// changes nothing (so there is nothing to commit), and it never sweeps an
+// unrelated dirty file in the store into its own commit.
+func TestInitStandaloneReinitLeavesOtherDirtyFilesAlone(t *testing.T) {
+	parent := t.TempDir()
+	repoDir := filepath.Join(parent, "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+
+	storePath, err := InitStandalone(repoDir)
+	if err != nil {
+		t.Fatalf("InitStandalone: %v", err)
+	}
+
+	writeFile(t, filepath.Join(storePath, "unrelated.txt"), "dirty\n")
+
+	if _, err := InitStandalone(repoDir); err != nil {
+		t.Fatalf("InitStandalone (re-init): %v", err)
+	}
+
+	status := runGitInProject(t, storePath, "status", "--porcelain", "unrelated.txt")
+	if !strings.Contains(status, "?? unrelated.txt") {
+		t.Fatalf("status unrelated.txt = %q, want it still untracked", status)
 	}
 }
 

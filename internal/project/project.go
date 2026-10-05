@@ -136,6 +136,13 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 		}
 	}
 	if trackersPresent {
+		if raw.Trackers.Kind != yaml.SequenceNode {
+			return &axi.Error{
+				Msg:  "project.yaml's trackers: is not a list",
+				Code: "VALIDATION_ERROR",
+				Help: []string{"trackers: takes a list of mirrors, e.g. trackers: []; T-24 builds the tracker tree and T-22 the GitHub mirror"},
+			}
+		}
 		var entries []yaml.Node
 		if err := raw.Trackers.Decode(&entries); err != nil {
 			return fmt.Errorf("project: decode trackers: %w", err)
@@ -427,13 +434,20 @@ func InitStandalone(repoDir string) (string, error) {
 	// Commit the scaffold itself, under jig's own identity rather than
 	// whatever (if anything) the host's git config holds: every later write
 	// - store.Claim's claims in particular - stages and commits only the
-	// paths it touches, never a sweeping `add -A`, so nothing else in jig
-	// ever picks this scaffold up on its own.
-	if _, err := gitx.Run(storeDir, "add", "-A"); err != nil {
+	// paths it touches, and so does this one, scoped to the scaffold's own
+	// paths rather than a sweeping `add -A` that would catch whatever else
+	// is dirty in an existing store. The re-init path's reset can leave
+	// nothing staged (project.yaml byte-identical, ledger.md already
+	// empty), which is success, not a failure to report.
+	if _, err := gitx.Run(storeDir, "add", "-A", "--", "project.yaml", "platform", "ledger.md", ".gitignore", ".gitattributes"); err != nil {
 		return "", fmt.Errorf("project: stage store scaffold: %w", err)
 	}
-	if _, err := gitx.Run(storeDir, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "jig: init store"); err != nil {
-		return "", fmt.Errorf("project: commit store scaffold: %w", err)
+	if staged, err := gitx.Run(storeDir, "diff", "--cached", "--name-only"); err != nil {
+		return "", fmt.Errorf("project: check staged store scaffold: %w", err)
+	} else if staged != "" {
+		if _, err := gitx.Run(storeDir, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "jig: init store"); err != nil {
+			return "", fmt.Errorf("project: commit store scaffold: %w", err)
+		}
 	}
 
 	return storeDir, nil

@@ -98,7 +98,12 @@ func (h *githubHost) run(args ...string) (string, error) {
 }
 
 // runInDir invokes gh with args in the given directory, returning trimmed
-// stdout. If dir is empty, runs in the current directory.
+// stdout. If dir is empty, runs in the current directory. Trimmed stdout is
+// returned even when gh fails (folded into the error's own message, after
+// stderr): `gh pr create --attach` can print the pull request's URL on
+// stdout and then fail attaching a file, and a caller that discarded stdout
+// on that path would lose the one record of a pull request it already
+// opened.
 func (h *githubHost) runInDir(dir string, args ...string) (string, error) {
 	cmd := exec.Command(h.gh, args...)
 	if dir != "" {
@@ -122,7 +127,10 @@ func (h *githubHost) runInDir(dir string, args ...string) (string, error) {
 }
 
 // supportsAttach checks whether the installed gh supports --attach on
-// subcommand ("pr create" or "pr edit").
+// subcommand ("pr create" or "pr edit"), probing that exact subcommand's own
+// --help: the two subcommands' flag sets are not the same thing, so a
+// support check made against one must never gate the other. The result is
+// cached per subcommand, after its first check.
 func (h *githubHost) supportsAttach(subcommand string) bool {
 	if supported, ok := h.attachSupport[subcommand]; ok {
 		return supported
@@ -145,7 +153,13 @@ func (h *githubHost) CreatePR(head, base, title, bodyFile string) (string, error
 	return url, err
 }
 
-// CreatePRWithMedia opens a GitHub pull request with optional media files attached.
+// CreatePRWithMedia opens a GitHub pull request for head against base via
+// `gh pr create`, run with mediaDir as gh's own working directory so each of
+// mediaFiles names a plain file gh can find, adding one `--attach <file>`
+// per file when mediaFiles is non-empty and the installed gh supports it.
+// attached reports whether the flags were added; false whenever mediaFiles
+// is empty or the installed gh does not support --attach, in which case the
+// pull request is still opened, with no media.
 func (h *githubHost) CreatePRWithMedia(head, base, title, bodyFile, mediaDir string, mediaFiles []string) (string, bool, error) {
 	args := []string{"pr", "create", "--repo", h.repoSpec(), "--title", title, "--body-file", bodyFile, "--base", base, "--head", head}
 
@@ -173,7 +187,14 @@ type pullRequest struct {
 	HTMLURL string `json:"html_url"`
 }
 
-// FindOpenPR returns the open pull request from head into base in this repo.
+// FindOpenPR returns the open pull request from head into base in this
+// repo, asked of the pull requests endpoint with the qualified head filter
+// (`owner:branch`), which GitHub applies itself: a pull request from a fork
+// whose branch happens to share head's name is another head and is never in
+// the answer. (`gh pr list --head` takes the bare branch name, so it lists
+// every fork's, one page of 30 at a time, and an answer the page cut short
+// reads as "none".) At most one open pull request can exist for a head and
+// base, so more than one is an error, not a choice.
 func (h *githubHost) FindOpenPR(head, base string) (string, error) {
 	out, err := h.run("api", "repos/"+h.repoSpec()+"/pulls", "--method", "GET",
 		"-f", "head="+h.owner+":"+head, "-f", "base="+base, "-f", "state=open")
@@ -203,7 +224,12 @@ func (h *githubHost) UpdatePR(url, bodyFile string) error {
 	return err
 }
 
-// UpdatePRWithMedia replaces the body of the pull request at url with optional media attached.
+// UpdatePRWithMedia replaces the body of the pull request at url via `gh pr
+// edit --body-file`, run with mediaDir as gh's own working directory, adding
+// one `--attach <file>` per file when mediaFiles is non-empty and the
+// installed gh's `pr edit` supports it (checked on its own: `pr create` and
+// `pr edit` do not necessarily agree). attached reports whether the flags
+// were added, the same as CreatePRWithMedia's own.
 func (h *githubHost) UpdatePRWithMedia(url, bodyFile, mediaDir string, mediaFiles []string) (bool, error) {
 	args := []string{"pr", "edit", url, "--repo", h.repoSpec(), "--body-file", bodyFile}
 
