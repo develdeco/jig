@@ -1,9 +1,9 @@
 # demo/gate-reviewer.tape
 #
-# Records the gate reviewer's rounds: a fix batch with one dismissal, an ask
-# kept with a decision, `jig run` building the fix slices those decisions
-# queue, a second (delta) round, a clean third round with its demo, and
-# `jig status`.
+# Records the gate reviewer's rounds: a fix batch whose low-risk fix the
+# risk floor notes, an ask kept with a decision, `jig run` building the fix
+# slices those decisions queue, a second (delta) round, a clean third round
+# with its demo, and `jig status`.
 #
 # Every typed line and every anchored Wait+Line below is checked, line by
 # line (see the comments below), against the real source: cmd/jig/triage.go
@@ -117,17 +117,18 @@ Wait@5s
 Show
 
 ## Round 1 (full): the real triage prompt, at a terminal, exactly as
-## cmd/jig/triage.go's interactiveTriage renders it - two fixes (r1-f1
-## high risk, r1-f2 low risk, sorted high first), one ask (r1-f3), one note
-## (r1-f4, listed only, never prompted).
+## cmd/jig/triage.go's interactiveTriage renders it - one fix (r1-f1, high
+## risk), one ask (r1-f3), and two notes listed only, never prompted: r1-f4,
+## and the low-risk trim fix r1-f2, which the default risk floor
+## (gate.fix_risks: [high, medium]) routes as a note.
 Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
-# triage.go:134 - "2 fix(es): Enter queues fix slice(s); list ids to
+# triage.go:134 - "1 fix(es): Enter queues fix slice(s); list ids to
 # dismiss (gone for good): " (trimmed tail: "good):")
 Wait+Line@15s /good\):$/
 Sleep 3s
-# Dismiss the low-risk trim fix (r1-f2); keep the high-risk overflow-doc
-# fix (r1-f1) in the batch - the same split the e2e test scripts.
-Type "r1-f2" Enter
+# Enter keeps the high-risk overflow-doc fix (r1-f1), the same "\n" the
+# e2e test scripts for this prompt.
+Enter
 # triage.go:185 - "keep (fix slice + decision) or dismiss (gone for
 # good)? [k/keep/Enter, n/no/d/dismiss]: " (trimmed tail: "dismiss]:")
 Wait+Line@15s /dismiss\]:$/
@@ -152,9 +153,8 @@ Sleep 2s
 
 ## Round 2 (delta): the doc-comment fix (r1-f1) recurs as this round's only
 ## fix - Enter alone accepts the batch of one, the same as the e2e test's
-## "\n". The tone ask already cleared and the trim fix's dismissal carried
-## forward (routeRound never re-offers a dismissed prior to triage), so
-## neither prompts again.
+## "\n". The tone ask already cleared and the trim finding is still below
+## the risk floor, so it is a note again; neither prompts.
 Type `jig gate JIG-1 --backend fake --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 # triage.go:134 with len(in.Fixes)=1 - "1 fix(es): Enter queues..."
 # (same trimmed tail as round 1's batch prompt: "good):")
