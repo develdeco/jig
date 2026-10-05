@@ -39,6 +39,12 @@ type PublishReport struct {
 	// PRUpdated is repo -> true when the branch already had an open pull
 	// request, which publish updated instead of opening another.
 	PRUpdated map[string]bool
+	// PRNote is repo -> why PRURL[repo] is empty - today always "no
+	// pull-request host" (the journal's own "none:no-host" outcome), the one
+	// way PRURL ends up empty - so a repo with no pull-request host still
+	// reports why, rather than a silent, unexplained gap where its row would
+	// otherwise be.
+	PRNote map[string]string
 }
 
 // NotSquashed is what the publish report says of a repo whose branch was
@@ -590,6 +596,10 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if sha != "" {
 		squashed[repoName] = sha
 	}
+	prNote := map[string]string{}
+	if host == nil {
+		prNote[repoName] = "no pull-request host"
+	}
 	return PublishReport{
 		Tier:      tier,
 		Squashed:  squashed,
@@ -597,6 +607,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		PRBody:    map[string]string{repoName: prPath},
 		PRURL:     map[string]string{repoName: prURL},
 		PRUpdated: map[string]bool{repoName: prOutcome == "updated"},
+		PRNote:    prNote,
 	}, nil
 }
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/verifydeliver"
@@ -34,8 +33,9 @@ func TestPushedTable(t *testing.T) {
 
 // TestPRURLTable: the publish report says, per repo, the pull request publish
 // left and whether it opened it or updated the one the branch already had - the
-// two words the confirm question, the journal's pr line and the docs use.
-// A repo whose tracker opens no pull requests has no row.
+// two words the confirm question, the journal's pr line and the docs use. A
+// repo with no pull-request host still gets a row, naming why in the action
+// column (report.PRNote) rather than being dropped with no explanation.
 func TestPRURLTable(t *testing.T) {
 	t.Parallel()
 
@@ -46,14 +46,19 @@ func TestPRURLTable(t *testing.T) {
 			"local": "",
 		},
 		PRUpdated: map[string]bool{"api": true, "web": false, "local": false},
+		PRNote:    map[string]string{"local": "no pull-request host"},
 	}
-	want := "pr_url[2]{repo,url,action}:\n  api,\"https://github.example/o/api/pull/9\",updated\n  web,\"https://github.example/o/web/pull/2\",opened"
+	want := "pr_url[3]{repo,url,action}:\n  api,\"https://github.example/o/api/pull/9\",updated\n  local,,no pull-request host\n  web,\"https://github.example/o/web/pull/2\",opened"
 	if got := prURLTable(report); got != want {
-		t.Errorf("a repo updated and a repo opened:\n got %q\nwant %q", got, want)
+		t.Errorf("a repo updated, a repo opened, and a repo with no host:\n got %q\nwant %q", got, want)
 	}
 
-	none := verifydeliver.PublishReport{PRURL: map[string]string{"local": ""}, PRUpdated: map[string]bool{"local": false}}
-	if got, want := prURLTable(none), "pr_url[0]"; !strings.HasPrefix(got, want) {
-		t.Errorf("a tracker that opens no pull request: %q, want a table with no rows (%s...)", got, want)
+	none := verifydeliver.PublishReport{
+		PRURL:  map[string]string{"local": ""},
+		PRNote: map[string]string{"local": "no pull-request host"},
+	}
+	want = "pr_url[1]{repo,url,action}:\n  local,,no pull-request host"
+	if got := prURLTable(none); got != want {
+		t.Errorf("a repo with no pull-request host:\n got %q\nwant %q", got, want)
 	}
 }

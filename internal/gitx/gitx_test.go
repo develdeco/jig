@@ -577,6 +577,62 @@ func TestFileExistsAtRev(t *testing.T) {
 	}
 }
 
+// TestPathExistsAtRev checks the one case FileExistsAtRev reports false for
+// that PathExistsAtRev must not: a directory tracked at rev. Everything
+// else - a present file, an absent one, a nested path, a bad rev - behaves
+// the same as FileExistsAtRev, since both share one lookup.
+func TestPathExistsAtRev(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := Run(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return out
+	}
+	run("init", "-b", "main")
+	run("config", "user.name", "jig-fixture")
+	run("config", "user.email", "fixture@example.invalid")
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "f.txt"), []byte("z"), 0o644); err != nil {
+		t.Fatalf("write sub/f.txt: %v", err)
+	}
+	run("add", "-A")
+	run("commit", "-m", "c1")
+	head, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse head: %v", err)
+	}
+
+	cases := []struct {
+		rev, path string
+		want      bool
+	}{
+		{head, "sub", true},            // a directory, unlike FileExistsAtRev
+		{head, "sub/", false},          // --literal-pathspecs: "sub/" names no entry, "sub" does
+		{head, "sub/f.txt", true},      // a nested blob
+		{head, "sub/never.txt", false}, // a missing path under an existing directory
+		{head, "never.txt", false},     // a missing top-level path
+		{head, ".", false},             // ls-tree names no entry "."
+	}
+	for _, c := range cases {
+		got, err := PathExistsAtRev(dir, c.rev, c.path)
+		if err != nil {
+			t.Fatalf("PathExistsAtRev(%s, %s): %v", c.rev, c.path, err)
+		}
+		if got != c.want {
+			t.Errorf("PathExistsAtRev(%s, %s) = %v, want %v", c.rev, c.path, got, c.want)
+		}
+	}
+
+	if _, err := PathExistsAtRev(dir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "sub"); err == nil {
+		t.Error("PathExistsAtRev with a bad rev: want an error, got nil")
+	}
+}
+
 // TestFileExistsAtRevIgnoresTheWorkingTree checks the wedge scenario a
 // message-text match on git's cat-file output used to fall into: a path
 // that git ignores, so it is never tracked at any rev, but that happens to

@@ -469,6 +469,29 @@ func conflictedPaths(dir string) ([]string, error) {
 	return paths, nil
 }
 
+// dirtyPaths names the paths `status --porcelain` reports as uncommitted in
+// dir - staged, unstaged or untracked alike - unlike Dirty, which only
+// reports whether any exist. Best-effort, for naming a local change in an
+// error message: a rename's "old -> new" porcelain line is reported as
+// written rather than split into two paths.
+func dirtyPaths(dir string) ([]string, error) {
+	out, err := gitx.Run(dir, "status", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		paths = append(paths, strings.TrimSpace(line[3:]))
+	}
+	return paths, nil
+}
+
 // wrapAbortedPullConflict turns a failed pull --rebase into a STORE_CONFLICT
 // the operator can act on, after jig's own best-effort `rebase --abort` has
 // run (abortErr is that attempt's result, nil on success) and after the
@@ -537,11 +560,17 @@ func (s *Store) detachedHEADError() error {
 	}
 }
 
-// hasStagedChanges reports whether the index differs from HEAD: "diff
-// --cached --quiet" exits 1 for staged changes; any other failure is an
-// error.
-func (s *Store) hasStagedChanges() (bool, error) {
-	_, err := gitx.Run(s.Root, "diff", "--cached", "--quiet")
+// hasStagedChanges reports whether the index differs from HEAD, restricted
+// to paths when any are given or the whole index when none are: "diff
+// --cached --quiet [-- <paths>]" exits 1 for staged changes; any other
+// failure is an error.
+func (s *Store) hasStagedChanges(paths ...string) (bool, error) {
+	args := []string{"diff", "--cached", "--quiet"}
+	if len(paths) > 0 {
+		args = append(args, "--")
+		args = append(args, paths...)
+	}
+	_, err := gitx.Run(s.Root, args...)
 	if err == nil {
 		return false, nil
 	}

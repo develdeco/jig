@@ -31,18 +31,23 @@ trackers, `jig ticket new` and `jig graduate` mint the same way.
 Computing an id correctly on one clone is not enough: two clones can each
 mint correctly and still both be right, until one of them lands on the
 store's origin. `Store.Claim` is the one way a mint becomes a fact
-everyone else's clone will see. It commits exactly the paths its write
-produced - never a sweeping `add -A`, so a claim never picks up unrelated
-dirty state - under one message naming the id, and, on a store with an
-origin, pushes that commit alone:
+everyone else's clone will see. It stages and commits exactly the paths its
+write produced - never a sweeping `add -A`, and the commit itself scoped to
+that same pathspec rather than the whole index - so a claim never picks up
+unrelated dirty state, even content a rejected claim's own undo can leave
+staged alongside it, under one message naming the id, and, on a store with
+an origin, pushes that commit alone:
 
 - a push the origin accepts finishes the claim;
 - a push it rejects (the origin moved on: not a fast-forward) undoes the
-  commit and the folder it created, pulls - always a fast-forward, since
-  the undone commit was the only thing the local branch had that the
-  origin lacked, so this can never end in a merge or rebase conflict - and
-  mints again, up to five attempts, after which it refuses with
-  `ID_NOT_CLAIMED` and leaves no claim behind;
+  commit and the folder it created, scoped to its own paths so any other
+  dirty state in the store survives, pulls - a fast-forward in the common
+  case, since the undone commit was the only thing the local branch had
+  that the origin lacked, but not always: a local change the undo
+  preserved can overlap a file the rejecting push itself brought in, and
+  Claim then refuses `ID_NOT_CLAIMED` naming it rather than ending in a
+  merge or rebase conflict - and mints again, up to five attempts, after
+  which it refuses with `ID_NOT_CLAIMED` and leaves no claim behind;
 - a push that fails for any other reason (the origin unreachable) undoes
   the claim the same way and refuses at once with `ID_NOT_CLAIMED`, help:
   retry once the origin is reachable;

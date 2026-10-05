@@ -123,6 +123,14 @@ func TestPublishFullChain(t *testing.T) {
 	if !ok || prPath == "" {
 		t.Fatalf("PRBody[fixture-repo] missing, got %v", report.PRBody)
 	}
+	// The fixture repo's remote is a plain local path: repohost.New finds no
+	// pull-request host there, so PRURL is empty and PRNote carries why.
+	if url := report.PRURL["fixture-repo"]; url != "" {
+		t.Fatalf("PRURL[fixture-repo] = %q, want empty: the fixture's remote has no pull-request host", url)
+	}
+	if note := report.PRNote["fixture-repo"]; note == "" {
+		t.Fatalf("PRNote[fixture-repo] empty, want a reason the PR URL is empty")
+	}
 
 	lines, err := journal.Read(d.Store, fx.Ticket)
 	if err != nil {

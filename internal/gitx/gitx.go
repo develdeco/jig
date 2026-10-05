@@ -296,32 +296,56 @@ func DiffNameOnly(dir, base, head, diffFilter string) ([]string, error) {
 // absent path look present (or a present one fail). Only an entry whose own
 // path is exactly path counts, and only when it is a blob: a directory
 // lists its children rather than itself, so "a/" or "a" for a directory is
-// false, not the type of whichever child git prints first.
+// false, not the type of whichever child git prints first. A caller that
+// needs to know whether path exists at all, blob or tree, wants
+// PathExistsAtRev instead.
 // --literal-pathspecs keeps a name like "a*b.go" or ":/x" a plain path
 // rather than a glob or pathspec magic. Any other failure of the ls-tree
 // call itself is returned as an error.
 func FileExistsAtRev(dir, rev, path string) (bool, error) {
+	entryType, found, err := treeEntryAtRev(dir, rev, path)
+	if err != nil {
+		return false, err
+	}
+	return found && entryType == "blob", nil
+}
+
+// PathExistsAtRev reports whether path exists at all in dir's tree at rev -
+// a blob or a tree (a directory) alike - unlike FileExistsAtRev, which
+// reports a blob alone and is false for a directory tracked at rev. Same
+// structural ls-tree check, same rev resolution and error shape as
+// FileExistsAtRev; only the type restriction differs.
+func PathExistsAtRev(dir, rev, path string) (bool, error) {
+	_, found, err := treeEntryAtRev(dir, rev, path)
+	return found, err
+}
+
+// treeEntryAtRev is FileExistsAtRev's and PathExistsAtRev's shared lookup:
+// it resolves rev to a commit, then reports the object type ("blob" or
+// "tree") of the tree entry at path there, and whether path matched one at
+// all.
+func treeEntryAtRev(dir, rev, path string) (entryType string, found bool, err error) {
 	if _, err := Run(dir, "rev-parse", "--verify", "--quiet", rev+"^{commit}"); err != nil {
-		return false, fmt.Errorf("gitx: file exists at rev: rev %q does not resolve to a commit: %w", rev, err)
+		return "", false, fmt.Errorf("gitx: tree entry at rev: rev %q does not resolve to a commit: %w", rev, err)
 	}
 	args := []string{"--literal-pathspecs", "ls-tree", "-z", "--full-tree", rev, "--", path}
 	var stdout, stderr bytes.Buffer
 	if err := run(dir, nil, &stdout, &stderr, args); err != nil {
-		return false, callError(args, stderr.String(), err)
+		return "", false, callError(args, stderr.String(), err)
 	}
 	for _, entry := range strings.Split(stdout.String(), "\x00") {
 		if entry == "" {
 			continue
 		}
-		entryType, entryPath, err := lsTreeEntry(entry)
+		et, ep, err := lsTreeEntry(entry)
 		if err != nil {
-			return false, fmt.Errorf("gitx: file exists at rev: %w (ls-tree %q)", err, entry)
+			return "", false, fmt.Errorf("gitx: tree entry at rev: %w (ls-tree %q)", err, entry)
 		}
-		if entryPath == path {
-			return entryType == "blob", nil
+		if ep == path {
+			return et, true, nil
 		}
 	}
-	return false, nil
+	return "", false, nil
 }
 
 // lsTreeEntry splits one "git ls-tree -z" entry,
