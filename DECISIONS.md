@@ -2895,3 +2895,7 @@ The staircase's floor was a keyword regex (`BigDecimal|rounding|migration|...`),
 ## Tests at agreed seams (slice RR-3)
 
 Briefs that list test cases one by one and demand that every new test fail when its rule is removed create large test suites. The intake skill now asks every brief for a `## Seams` section naming public interfaces and critical paths, never test cases; builders and the reviewer hold briefs to their seams. The reviewer's prompt gains one principle sentence after the action definition: "Tests belong at the seams the intent names: a missing test is a problem only at one of those seams or as the proof of a defect you report, and a test elsewhere is at most a note." See [ADR 0016](docs/adr/0016-tests-at-agreed-seams.md).
+
+## The reviewer reads, it doesn't test (build-speed item 1)
+
+The gate's oracles already pass on the head a reviewer gets, so `review.json` now carries them as `oracles_passed` (oracle, workspace, command) and the prompt says the review reads and runs no tests. The list has no result field, since the gate stops at the first failure and every entry it hands on passed. Each entry records the manifest's command, not the short-path spelling the Windows shell workaround runs. The gate now runs oracles in a fixed order, workspaces in manifest order and oracles by name, where it used to follow map order, so `oracles_passed` is deterministic. No screen rule refuses test commands: see [ADR 0017](docs/adr/0017-the-reviewer-reads-the-gate-tests.md).

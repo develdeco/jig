@@ -148,7 +148,7 @@ func TestMarshalReviewRequestEmptyListsAsBrackets(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	for _, field := range []string{"oracles", "open", "dismissed", "must_review"} {
+	for _, field := range []string{"oracles", "oracles_passed", "open", "dismissed", "must_review"} {
 		got := strings.TrimSpace(string(raw[field]))
 		if got != "[]" {
 			t.Errorf("field %q = %s, want []", field, got)
@@ -207,6 +207,7 @@ func TestRenderReviewPromptMatchesDesignGolden(t *testing.T) {
 	schema := `{"findings": [{"file": "...", "line": 0, "title": "...", "detail": "...", "action": "fix|ask|note", "risk": "low|medium|high", "risk_rationale": "...", "oracle": "...", "prior": "r1-f2"}], "reviewed_paths": ["..."], "summary": "..."}`
 	golden := `You are reviewing round 2 of ticket JIG-1. Your inputs are in review.json at /abs/review.json.
 Review the delta diff aaa..bbb in this worktree against the change's intent. review.json's intent names it and its source: "brief" or "explicit" is the human's own statement of what was asked for; "inferred" is jig's own summary of the author's own agent session, a hint that may be partial or wrong; "none" means nothing states it. Do not edit files, commit, or push.
+jig ran every command in review.json's oracles_passed on this head before this review, and each passed. Review by reading: run no tests.
 Report every problem you find in the files you review, as they are now, including problems already listed as open. For each, give file, line (0 if unknown), title, detail, action, risk, risk_rationale and oracle, plus prior when it is a finding listed under open or dismissed. The human dismissed the findings listed under dismissed.
 action: "fix" when the fix is objective and does not change what the intent asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
 Tests belong at the seams the intent names: a missing test is a problem only at one of those seams or as the proof of a defect you report, and a test elsewhere is at most a note.

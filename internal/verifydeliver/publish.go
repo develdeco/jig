@@ -647,7 +647,7 @@ func revalidate(d Deps, ticket, repoName, target, leaseDir string, man manifest.
 		return "none", nil
 	}
 
-	if err := runOracleSuite(leaseDir, man); err != nil {
+	if _, err := runOracleSuite(leaseDir, man); err != nil {
 		return "", err
 	}
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: "revalidate", Outcome: "oracles-only:target-moved"}); err != nil {

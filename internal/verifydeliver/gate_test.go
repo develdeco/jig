@@ -719,29 +719,26 @@ func TestGateIntentFlagReplacesExistingIntentMD(t *testing.T) {
 	}
 }
 
-// reviewJSONIntent dispatches a minimal clean round through a real
-// reviewerGateSource and returns the "intent" field review.json actually
-// carried - what the reviewer itself was pointed at - rather than
-// GateReport.Intent, which is set from the very same local variable Gate
-// resolves and so cannot catch RoundInput losing it on the way to the
-// reviewer (for example a RoundInput literal built with a zero Intent).
-// It also pins that field's raw key names (requireIntentWireShape), which
-// decoding into ReviewRequest cannot see.
-func reviewJSONIntent(t *testing.T, d Deps, ticket string, opts GateOpts) Intent {
+// gateReviewRequest dispatches a minimal clean round through a real
+// reviewerGateSource and returns the review.json that round's reviewer was
+// actually handed, rather than anything Gate reports, which cannot catch
+// RoundInput losing a field on the way to the reviewer (for example a
+// RoundInput literal built with a zero Intent). It also pins the intent
+// field's raw key names (requireIntentWireShape), which decoding into
+// ReviewRequest cannot see.
+func gateReviewRequest(t *testing.T, d Deps, ticket string, opts GateOpts) ReviewRequest {
 	t.Helper()
-	var got Intent
+	var got ReviewRequest
 	backend := stubBackend{run: func(sd session.Dispatch) error {
 		reviewData, err := os.ReadFile(sd.SliceJSON)
 		if err != nil {
 			t.Fatalf("read review.json: %v", err)
 		}
 		requireIntentWireShape(t, reviewData)
-		var req ReviewRequest
-		if err := json.Unmarshal(reviewData, &req); err != nil {
+		if err := json.Unmarshal(reviewData, &got); err != nil {
 			t.Fatalf("parse review.json: %v", err)
 		}
-		got = req.Intent
-		result := ReviewResult{ReviewedPaths: req.MustReview, Summary: "clean"}
+		result := ReviewResult{ReviewedPaths: got.MustReview, Summary: "clean"}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
 	opts.Ticket = ticket
@@ -750,6 +747,41 @@ func reviewJSONIntent(t *testing.T, d Deps, ticket string, opts GateOpts) Intent
 		t.Fatalf("Gate: %v", err)
 	}
 	return got
+}
+
+// reviewJSONIntent is the "intent" field of gateReviewRequest's review.json:
+// what the reviewer itself was pointed at.
+func reviewJSONIntent(t *testing.T, d Deps, ticket string, opts GateOpts) Intent {
+	t.Helper()
+	return gateReviewRequest(t, d, ticket, opts).Intent
+}
+
+// TestGateHandsTheReviewerTheOraclesItRan: review.json's oracles_passed
+// lists every oracle run the gate made before dispatching the reviewer -
+// one per oracle per workspace, in manifest order - so the reviewer has the
+// oracle's result and reads instead of retesting (ADR 0017).
+func TestGateHandsTheReviewerTheOraclesItRan(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+
+	got := gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed
+	// The fixture repo's jig.yaml declares one oracle, test, as
+	// "@GO test ./{path}/..." over workspaces alpha and beta.
+	want := []struct{ workspace, suffix string }{
+		{"alpha", " test ./alpha/..."},
+		{"beta", " test ./beta/..."},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("review.json oracles_passed = %+v, want %d runs", got, len(want))
+	}
+	for i, w := range want {
+		if got[i].Oracle != "test" || got[i].Workspace != w.workspace || !strings.HasSuffix(got[i].Command, w.suffix) {
+			t.Errorf("oracles_passed[%d] = %+v, want oracle test, workspace %s, a command ending %q", i, got[i], w.workspace, w.suffix)
+		}
+	}
 }
 
 // TestGateResolvedIntentReachesReviewJSONExplicit checks that the intent
