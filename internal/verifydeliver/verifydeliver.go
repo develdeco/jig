@@ -21,7 +21,6 @@ import (
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/tracker"
 )
 
 // Deps is verifydeliver's own dependency bundle. It never imports package
@@ -39,19 +38,6 @@ type Deps struct {
 	// test's own directory in tests). "" means it could not be resolved:
 	// gate intent inference then has nowhere to look and says so.
 	UserHome string
-	// Tracker is the adapter Publish finds, opens or updates the pull request
-	// with, and routes the ticket through. nil means the tracker project.yaml
-	// names (tracker.New); a test hands its own.
-	Tracker tracker.Adapter
-}
-
-// trackerAdapter is the adapter d hands Publish: d.Tracker when set, else the
-// tracker the project's config names.
-func (d Deps) trackerAdapter() (tracker.Adapter, error) {
-	if d.Tracker != nil {
-		return d.Tracker, nil
-	}
-	return tracker.New(d.Cfg, d.Store)
 }
 
 // primaryRepo returns v0.1's single repo and its target branch (defaulting

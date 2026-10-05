@@ -69,9 +69,9 @@ func TestTicketNewRecordsTitleAndMintsNextID(t *testing.T) {
 
 // TestTicketNewMintsByTicketFormatRegardlessOfTracker covers the central
 // change: jig ticket new mints through the store's own ticket_format
-// counter whatever project.yaml says about trackers, never asking the
-// tracker for an id. With tracker: github and no gh stub installed, minting
-// still succeeds, since nothing on this path ever shells out to gh.
+// counter, never asking a tracker for an id - true not just of the
+// trackers: [] jig init itself writes, but of the legacy tracker: local a
+// store may still carry (until L3's migration rewrites project.yaml).
 func TestTicketNewMintsByTicketFormatRegardlessOfTracker(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	repo := filepath.Join(t.TempDir(), "demo")
@@ -99,21 +99,17 @@ func TestTicketNewMintsByTicketFormatRegardlessOfTracker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewritten := strings.Replace(string(data), "tracker: local", "tracker: github", 1)
+	rewritten := strings.Replace(string(data), "trackers: []", "tracker: local", 1)
 	if rewritten == string(data) {
-		t.Fatalf("project.yaml has no local tracker to replace:\n%s", data)
+		t.Fatalf("project.yaml has no trackers: [] to replace:\n%s", data)
 	}
-	rewritten2 := strings.Replace(rewritten, "remote: "+repo, "remote: owner/repo", 1)
-	if rewritten2 == rewritten {
-		t.Fatalf("project.yaml has no repo remote %q to replace:\n%s", repo, rewritten)
-	}
-	if err := os.WriteFile(cfgs[0], []byte(rewritten2), 0o644); err != nil {
+	if err := os.WriteFile(cfgs[0], []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	code, out := jig("ticket", "new", "--title", "Fix the thing")
 	if code != 0 || !strings.Contains(out, "T-1") {
-		t.Fatalf("jig ticket new with tracker: github: exit %d, want id T-1:\n%s", code, out)
+		t.Fatalf("jig ticket new with tracker: local: exit %d, want id T-1:\n%s", code, out)
 	}
 
 	st, err := store.Open(filepath.Dir(cfgs[0]))

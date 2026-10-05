@@ -71,45 +71,40 @@ type Config struct {
 	SchemaVersion int
 	Name          string
 	TicketFormat  string
-	// Tracker is "local", "github", "jira", "linear", or "command"; it and
-	// TrackerCmd are populated from the YAML "tracker" key, which may be a
-	// plain string or a {command: <path>} map (see UnmarshalYAML).
-	Tracker    string
-	TrackerCmd string
-	Repos      []Repo
-	Platform   string
-	Staircase  []string
-	Context    map[string]any
-	// Routes is the declared routing map publish's route step consults: keys
-	// "pr.description", "pr.comments" and "ticket.comments", values being
-	// store-relative path globs. A nil/empty map (the common case) means
-	// "use the caller's defaults" (internal/verifydeliver's defaultRoutes) -
-	// Config itself carries no defaults so an absent routes: key round-trips
-	// as absent.
-	Routes map[string][]string
+	Repos         []Repo
+	Platform      string
+	Staircase     []string
+	Context       map[string]any
 	// Gate is the optional gate: block configuring the gate's fix loop and
 	// risk floor. An absent block is nil; a block with absent keys gains
 	// defaults.
 	Gate *GateConfig
 }
 
-// configRaw mirrors Config's YAML shape with Tracker left as a raw node so
-// UnmarshalYAML can accept either form the wire format allows.
+// configRaw mirrors Config's YAML shape, with Tracker, Trackers and Routes
+// left as raw nodes so UnmarshalYAML can tell an absent key apart from one
+// that is present but empty, and refuse the shapes it no longer accepts.
 type configRaw struct {
-	SchemaVersion int                 `yaml:"schema_version"`
-	Name          string              `yaml:"name"`
-	TicketFormat  string              `yaml:"ticket_format"`
-	Tracker       yaml.Node           `yaml:"tracker"`
-	Repos         []Repo              `yaml:"repos"`
-	Platform      string              `yaml:"platform"`
-	Staircase     []string            `yaml:"staircase,omitempty"`
-	Context       map[string]any      `yaml:"context,omitempty"`
-	Routes        map[string][]string `yaml:"routes,omitempty"`
-	Gate          *GateConfig         `yaml:"gate,omitempty"`
+	SchemaVersion int            `yaml:"schema_version"`
+	Name          string         `yaml:"name"`
+	TicketFormat  string         `yaml:"ticket_format"`
+	Tracker       yaml.Node      `yaml:"tracker"`
+	Trackers      yaml.Node      `yaml:"trackers"`
+	Repos         []Repo         `yaml:"repos"`
+	Platform      string         `yaml:"platform"`
+	Staircase     []string       `yaml:"staircase,omitempty"`
+	Context       map[string]any `yaml:"context,omitempty"`
+	Routes        yaml.Node      `yaml:"routes"`
+	Gate          *GateConfig    `yaml:"gate,omitempty"`
 }
 
-// UnmarshalYAML decodes project.yaml, accepting the tracker field as either
-// a plain scalar ("local", "github", ...) or a map ({command: <path>}).
+// UnmarshalYAML decodes project.yaml: trackers: is a list of mirrors (absent
+// or empty means none; jig mints every id itself and no mirror shape is
+// supported yet, so any entry is refused), tracker: is the key trackers:
+// replaces (tracker: local reads as no mirrors, until L3's migration rewrites
+// project.yaml; any other value is refused), the two keys together are
+// refused, and routes: (which only ever fed publish's now-gone route step)
+// is refused outright.
 func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	var raw configRaw
 	if err := value.Decode(&raw); err != nil {
@@ -122,26 +117,49 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	c.Platform = raw.Platform
 	c.Staircase = raw.Staircase
 	c.Context = raw.Context
-	c.Routes = raw.Routes
 	c.Gate = raw.Gate
 
-	switch raw.Tracker.Kind {
-	case 0:
-		// tracker not present
-	case yaml.ScalarNode:
-		c.Tracker = raw.Tracker.Value
-	case yaml.MappingNode:
-		var m struct {
-			Command string `yaml:"command"`
+	if raw.Routes.Kind != 0 {
+		return &axi.Error{
+			Msg:  "project.yaml declares routes:, which publish no longer consults",
+			Code: "VALIDATION_ERROR",
+			Help: []string{"Remove routes: from project.yaml: publish renders the pull request body and the review notes itself"},
 		}
-		if err := raw.Tracker.Decode(&m); err != nil {
-			return fmt.Errorf("project: decode tracker map: %w", err)
-		}
-		c.Tracker = "command"
-		c.TrackerCmd = m.Command
-	default:
-		return fmt.Errorf("project: tracker must be a string or a {command: path} map")
 	}
+
+	trackerPresent, trackersPresent := raw.Tracker.Kind != 0, raw.Trackers.Kind != 0
+	if trackerPresent && trackersPresent {
+		return &axi.Error{
+			Msg:  "project.yaml declares both tracker: and trackers:",
+			Code: "VALIDATION_ERROR",
+			Help: []string{"trackers: replaces tracker:; remove tracker: from project.yaml"},
+		}
+	}
+	if trackersPresent {
+		var entries []yaml.Node
+		if err := raw.Trackers.Decode(&entries); err != nil {
+			return fmt.Errorf("project: decode trackers: %w", err)
+		}
+		if len(entries) > 0 {
+			return &axi.Error{
+				Msg:  "project.yaml declares a trackers: entry, which is not supported yet",
+				Code: "VALIDATION_ERROR",
+				Help: []string{"T-24 builds the tracker tree and T-22 the GitHub mirror; leave trackers: empty until then"},
+			}
+		}
+	}
+	if trackerPresent && !(raw.Tracker.Kind == yaml.ScalarNode && raw.Tracker.Value == "local") {
+		return &axi.Error{
+			Msg:  "project.yaml's tracker: is no longer supported",
+			Code: "VALIDATION_ERROR",
+			Help: []string{
+				"jig mints ids itself; remove tracker: from project.yaml",
+				"A GitHub remote with gh on PATH gets its pull requests automatically",
+			},
+		}
+	}
+	// tracker: local reads as no mirrors, until L3's migration rewrites
+	// project.yaml.
 
 	if err := c.validateGateConfig(); err != nil {
 		return err
@@ -192,15 +210,16 @@ func (c Config) ResolvedGateConfig() GateConfig {
 	return resolved
 }
 
-// projectYAML is the on-disk shape written by InitStandalone: unlike
-// Config, it always writes Tracker as a plain scalar.
+// projectYAML is the on-disk shape written by InitStandalone: Trackers
+// always marshals as "trackers: []" (a nil slice, no omitempty), and no
+// tracker: key is ever written.
 type projectYAML struct {
-	SchemaVersion int    `yaml:"schema_version"`
-	Name          string `yaml:"name"`
-	TicketFormat  string `yaml:"ticket_format"`
-	Tracker       string `yaml:"tracker"`
-	Repos         []Repo `yaml:"repos"`
-	Platform      string `yaml:"platform"`
+	SchemaVersion int      `yaml:"schema_version"`
+	Name          string   `yaml:"name"`
+	TicketFormat  string   `yaml:"ticket_format"`
+	Trackers      []string `yaml:"trackers"`
+	Repos         []Repo   `yaml:"repos"`
+	Platform      string   `yaml:"platform"`
 }
 
 // Load reads and parses a project.yaml file.
@@ -376,7 +395,6 @@ func InitStandalone(repoDir string) (string, error) {
 		SchemaVersion: 1,
 		Name:          base,
 		TicketFormat:  "T-{n}",
-		Tracker:       "local",
 		Repos:         []Repo{{Remote: absRepo}},
 		Platform:      "platform/",
 	}

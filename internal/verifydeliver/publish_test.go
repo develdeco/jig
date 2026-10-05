@@ -151,7 +151,6 @@ func TestPublishFullChain(t *testing.T) {
 	assertJournal("memorize", "")
 	assertJournal("squash", "")
 	assertJournal("pr", "")
-	assertJournal("route", "")
 	assertJournal("publish-done", "")
 
 	// Memorize landed before the squash: the squash commit's tree
@@ -188,9 +187,6 @@ func TestPublishFullChain(t *testing.T) {
 		filepath.Join("changelog", "consolidated.md"),
 		filepath.Join("pr", "fixture-repo.md"),
 		filepath.Join("pr", "evidence.md"),
-		filepath.Join("tracker", "ticket.md"),
-		filepath.Join("tracker", "subtasks.yaml"),
-		filepath.Join("tracker", "comments", "001.md"),
 	} {
 		if _, err := os.Stat(filepath.Join(ticketDir, f)); err != nil {
 			t.Fatalf("missing store file %s: %v", f, err)
@@ -741,47 +737,6 @@ func TestCheckNonEmptyRangeAllowsRealCommits(t *testing.T) {
 
 	if err := checkNonEmptyRange(clone, "main"); err != nil {
 		t.Fatalf("checkNonEmptyRange: %v", err)
-	}
-}
-
-// TestRouteCustomRoutesExcludeDiffChangelogs checks that a project.yaml
-// routes: map actually drives which files feed the tracker projection's
-// comments: excluding "gate/round-*/diff-changelog.md" from pr.comments
-// must leave only the consolidated changelog behind, instead of the
-// hardcoded default (consolidated plus every gate round's diff changelog).
-func TestRouteCustomRoutesExcludeDiffChangelogs(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	gateToClean(t, fx, d) // two gate rounds, so the default would pick up two diff-changelog.md files
-
-	d.Cfg.Routes = map[string][]string{
-		"pr.comments": {"changelog/consolidated.md"},
-	}
-
-	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-
-	commentsDir := filepath.Join(d.Store.TicketDir(fx.Ticket), "tracker", "comments")
-	entries, err := os.ReadDir(commentsDir)
-	if err != nil {
-		t.Fatalf("ReadDir comments: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("comments count = %d, want 1 (only the consolidated changelog; diff-changelogs excluded by routes)", len(entries))
-	}
-	got, err := os.ReadFile(filepath.Join(commentsDir, entries[0].Name()))
-	if err != nil {
-		t.Fatalf("read %s: %v", entries[0].Name(), err)
-	}
-	want, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "changelog", "consolidated.md"))
-	if err != nil {
-		t.Fatalf("read consolidated.md: %v", err)
-	}
-	if string(got) != string(want) {
-		t.Fatalf("comment content = %q, want the consolidated changelog %q", got, want)
 	}
 }
 

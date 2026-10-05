@@ -1,12 +1,15 @@
 package project
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -30,14 +33,28 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-func TestLoadTrackerScalar(t *testing.T) {
+// wantValidationError fails unless err is a *axi.Error with code
+// VALIDATION_ERROR, the code every project.yaml load refusal this file
+// covers uses.
+func wantValidationError(t *testing.T, err error) {
+	t.Helper()
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "VALIDATION_ERROR" {
+		t.Fatalf("err = %v, want *axi.Error VALIDATION_ERROR", err)
+	}
+}
+
+// TestLoadTrackerLocalMeansNoMirrors checks that the legacy tracker: local
+// still loads (until L3's migration rewrites project.yaml), the one old
+// tracker: value trackers: replacing tracker: leaves standing.
+func TestLoadTrackerLocalMeansNoMirrors(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
 schema_version: 1
 name: demo
 ticket_format: "JIG-{n}"
-tracker: github
+tracker: local
 repos:
   - remote: https://example.invalid/org/demo.git
 platform: platform/
@@ -45,12 +62,6 @@ platform: platform/
 	cfg, err := Load(p)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
-	}
-	if cfg.Tracker != "github" {
-		t.Errorf("Tracker = %q, want github", cfg.Tracker)
-	}
-	if cfg.TrackerCmd != "" {
-		t.Errorf("TrackerCmd = %q, want empty", cfg.TrackerCmd)
 	}
 	if cfg.Name != "demo" || cfg.SchemaVersion != 1 || cfg.TicketFormat != "JIG-{n}" {
 		t.Errorf("cfg = %+v, unexpected", cfg)
@@ -60,11 +71,94 @@ platform: platform/
 	}
 }
 
-// TestLoadRoutes checks that a project.yaml's routes: map round-trips into
-// Config.Routes, and that a project.yaml with no routes: key leaves it nil
-// (the "use the caller's defaults" case, resolved by
-// internal/verifydeliver's resolveRoutes).
-func TestLoadRoutes(t *testing.T) {
+// TestLoadAbsentTrackersMeansNoMirrors checks that a project.yaml with
+// neither tracker: nor trackers: loads fine, same as an explicit empty
+// trackers: list.
+func TestLoadAbsentTrackersMeansNoMirrors(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+repos: []
+platform: platform/
+`)
+	if _, err := Load(p); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+}
+
+// TestLoadTrackersEmptyMeansNoMirrors checks that an explicit trackers: []
+// loads fine, same as an absent trackers: key.
+func TestLoadTrackersEmptyMeansNoMirrors(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+trackers: []
+repos: []
+platform: platform/
+`)
+	if _, err := Load(p); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+}
+
+// TestLoadRefusesEveryOtherTrackerValue checks that every tracker: value
+// besides "local" - github, jira, linear, and the old {command: ...} map -
+// is refused when the config loads.
+func TestLoadRefusesEveryOtherTrackerValue(t *testing.T) {
+	cases := []struct {
+		name, trackerYAML string
+	}{
+		{"github", "tracker: github"},
+		{"jira", "tracker: jira"},
+		{"linear", "tracker: linear"},
+		{"command map", "tracker:\n  command: ./scripts/tracker.sh"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "project.yaml")
+			writeFile(t, p, fmt.Sprintf(`
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+%s
+repos: []
+platform: platform/
+`, c.trackerYAML))
+			_, err := Load(p)
+			wantValidationError(t, err)
+		})
+	}
+}
+
+// TestLoadRefusesATrackersEntry checks that any trackers: entry - no mirror
+// shape is supported yet - is refused when the config loads.
+func TestLoadRefusesATrackersEntry(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+trackers:
+  - type: github
+repos: []
+platform: platform/
+`)
+	_, err := Load(p)
+	wantValidationError(t, err)
+}
+
+// TestLoadRefusesTrackerAndTrackersTogether checks that tracker: and
+// trackers: together are refused, even when tracker: carries its one
+// remaining legal value.
+func TestLoadRefusesTrackerAndTrackersTogether(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
@@ -72,69 +166,32 @@ schema_version: 1
 name: demo
 ticket_format: "JIG-{n}"
 tracker: local
-repos:
-  - remote: https://example.invalid/org/demo.git
+trackers: []
+repos: []
+platform: platform/
+`)
+	_, err := Load(p)
+	wantValidationError(t, err)
+}
+
+// TestLoadRefusesRoutes checks that a project.yaml declaring routes: -
+// which only ever fed publish's now-gone route step - is refused when the
+// config loads.
+func TestLoadRefusesRoutes(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+repos: []
 platform: platform/
 routes:
   pr.description:
     - changelog/consolidated.md
-  pr.comments:
-    - changelog/consolidated.md
-  ticket.comments:
-    - changelog/consolidated.md
-    - gate/round-*/diff-changelog.md
 `)
-	cfg, err := Load(p)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if got := cfg.Routes["pr.description"]; len(got) != 1 || got[0] != "changelog/consolidated.md" {
-		t.Errorf(`Routes["pr.description"] = %v, unexpected`, got)
-	}
-	if got := cfg.Routes["ticket.comments"]; len(got) != 2 {
-		t.Errorf(`Routes["ticket.comments"] = %v, want 2 entries`, got)
-	}
-
-	noRoutes := filepath.Join(dir, "no-routes.yaml")
-	writeFile(t, noRoutes, `
-schema_version: 1
-name: demo
-ticket_format: "JIG-{n}"
-tracker: local
-repos: []
-platform: platform/
-`)
-	cfg2, err := Load(noRoutes)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg2.Routes != nil {
-		t.Errorf("Routes = %v, want nil when routes: is absent", cfg2.Routes)
-	}
-}
-
-func TestLoadTrackerCommandMap(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "project.yaml")
-	writeFile(t, p, `
-schema_version: 1
-name: demo
-ticket_format: "JIG-{n}"
-tracker:
-  command: ./scripts/tracker.sh
-repos: []
-platform: platform/
-`)
-	cfg, err := Load(p)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.Tracker != "command" {
-		t.Errorf("Tracker = %q, want command", cfg.Tracker)
-	}
-	if cfg.TrackerCmd != "./scripts/tracker.sh" {
-		t.Errorf("TrackerCmd = %q, want ./scripts/tracker.sh", cfg.TrackerCmd)
-	}
+	_, err := Load(p)
+	wantValidationError(t, err)
 }
 
 func TestRepoName(t *testing.T) {
@@ -225,11 +282,22 @@ func TestInitStandalone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load generated project.yaml: %v", err)
 	}
-	if cfg.SchemaVersion != 1 || cfg.Name != "myrepo" || cfg.TicketFormat != "T-{n}" || cfg.Tracker != "local" || cfg.Platform != "platform/" {
+	if cfg.SchemaVersion != 1 || cfg.Name != "myrepo" || cfg.TicketFormat != "T-{n}" || cfg.Platform != "platform/" {
 		t.Errorf("cfg = %+v, unexpected", cfg)
 	}
 	if len(cfg.Repos) != 1 {
 		t.Fatalf("Repos = %+v, want 1 entry", cfg.Repos)
+	}
+
+	data, err := os.ReadFile(filepath.Join(storePath, "project.yaml"))
+	if err != nil {
+		t.Fatalf("read project.yaml: %v", err)
+	}
+	if !strings.Contains(string(data), "trackers: []") {
+		t.Errorf("project.yaml = %s, want trackers: []", data)
+	}
+	if strings.Contains(string(data), "tracker:") {
+		t.Errorf("project.yaml = %s, want no tracker: key", data)
 	}
 	absRepo, _ := filepath.Abs(repoDir)
 	if cfg.Repos[0].Remote != absRepo {

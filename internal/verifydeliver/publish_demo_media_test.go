@@ -140,7 +140,7 @@ func TestPublishAttachesDemoMediaOnCreate(t *testing.T) {
 		{Name: "demo-1.png", Content: "first file bytes"},
 		{Name: "demo-2.mp4", Content: "second file bytes, a bit longer"},
 	})
-	logFile := useGithubPRs(t, &d, "", "")
+	logFile := useGithubHost(t, &d, "", "")
 
 	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -197,7 +197,7 @@ func TestPublishAttachesDemoMediaOnUpdate(t *testing.T) {
 	})
 	branch := ticketBranch(fx.Ticket)
 	run(t, buildLeaseDir(t, fx), "push", "origin", branch)
-	logFile := useGithubPRs(t, &d, openPullOf(t, branch), "")
+	logFile := useGithubHost(t, &d, openPullOf(t, branch), "")
 
 	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -239,7 +239,7 @@ func TestPublishWarnsAboutAnUnrewrittenMediaReference(t *testing.T) {
 	d := newDeps(t, fx)
 	gateCleanReviewerRound(t, fx, d)
 	recordDemoForTicket(t, d, fx.Ticket, []demoMediaSpec{{Name: "demo-1.png", Content: "bytes"}})
-	useGithubPRs(t, &d, "", "")
+	useGithubHost(t, &d, "", "")
 	t.Setenv("GH_STUB_BODY", "## Demo\n\n- ./demo-1.png: still here, unrewritten\n")
 
 	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
@@ -277,7 +277,7 @@ func TestPublishWarnsWhenGhLacksAttachSupport(t *testing.T) {
 	d := newDeps(t, fx)
 	gateCleanReviewerRound(t, fx, d)
 	recordDemoForTicket(t, d, fx.Ticket, []demoMediaSpec{{Name: "demo-1.png", Content: "bytes"}})
-	logFile := useGithubPRs(t, &d, "", "")
+	logFile := useGithubHost(t, &d, "", "")
 	t.Setenv("GH_STUB_NO_ATTACH", "1")
 
 	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {

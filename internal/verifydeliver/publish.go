@@ -15,10 +15,8 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
-	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/tracker"
 )
 
 // PublishOpts configures one Publish invocation.
@@ -37,7 +35,7 @@ type PublishReport struct {
 	// Head is repo -> the head the push left on the branch.
 	Head   map[string]string
 	PRBody map[string]string // repo -> store-relative pr body path
-	PRURL  map[string]string // repo -> the PR url, opened or updated; empty when the tracker adapter has no PRCreator
+	PRURL  map[string]string // repo -> the PR url, opened or updated; empty when the repo has no pull-request host
 	// PRUpdated is repo -> true when the branch already had an open pull
 	// request, which publish updated instead of opening another.
 	PRUpdated map[string]bool
@@ -265,12 +263,6 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		if openPR, err = host.FindOpenPR(branch, target); err != nil {
 			return PublishReport{}, fmt.Errorf("verifydeliver: publish: look for an open pull request from %s: %w", branch, err)
 		}
-	}
-
-	// The tracker is still built for routing (project step).
-	adapter, err := d.trackerAdapter()
-	if err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: build tracker adapter: %w", err)
 	}
 
 	// Step 1: reconcile.
@@ -587,13 +579,6 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		}
 	}
 
-	// Step 6: route.
-	if err := route(d.Cfg, d.Store, adapter, ticket, slices); err != nil {
-		return PublishReport{}, err
-	}
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: "route"}); err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal route: %w", err)
-	}
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: "publish-done"}); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
 	}
@@ -769,84 +754,6 @@ func squash(leaseDir, target, ticket, title string, identityEnv []string) (strin
 		return "", fmt.Errorf("verifydeliver: squash: commit: %w", err)
 	}
 	return gitx.RevParse(leaseDir, "HEAD")
-}
-
-// defaultRoutes is jig's default routing map, used for any key cfg's
-// own project.yaml routes: block does not declare: pr.description is just
-// the consolidated changelog; pr.comments and ticket.comments are the
-// consolidated changelog followed by every gate round's diff changelog.
-// jig v0.1's Adapter.Project has a single Description/Comments projection
-// (no separate PR-vs-ticket sink), so pr.description/pr.comments are what
-// actually drive Project's call; ticket.comments is accepted and defaulted
-// the same way for forward compatibility with a future adapter split.
-var defaultRoutes = map[string][]string{
-	"pr.description":  {"changelog/consolidated.md"},
-	"pr.comments":     {"changelog/consolidated.md", "gate/round-*/diff-changelog.md"},
-	"ticket.comments": {"changelog/consolidated.md", "gate/round-*/diff-changelog.md"},
-}
-
-// resolveRoutes returns cfg's declared routing map overlaid onto
-// defaultRoutes: an absent cfg.Routes (or an absent individual key) falls
-// back to this default for that key.
-func resolveRoutes(cfg project.Config) map[string][]string {
-	out := make(map[string][]string, len(defaultRoutes))
-	for k, v := range defaultRoutes {
-		out[k] = v
-	}
-	for k, v := range cfg.Routes {
-		out[k] = v
-	}
-	return out
-}
-
-// routeFiles glob-expands each of globs (store-relative to the ticket's
-// folder) and returns the content of every match, in glob order and then
-// lexical match order, skipping any pattern that matches nothing.
-func routeFiles(st *store.Store, ticket string, globs []string) []string {
-	var out []string
-	for _, g := range globs {
-		matches, err := filepath.Glob(filepath.Join(st.TicketDir(ticket), g))
-		if err != nil {
-			continue
-		}
-		for _, m := range matches {
-			if data, err := os.ReadFile(m); err == nil {
-				out = append(out, string(data))
-			}
-		}
-	}
-	return out
-}
-
-// route projects the ticket's final state onto its tracker adapter: a
-// description and comment trail assembled from cfg's routing map (the
-// spec's defaults when it declares none), plus one subtask per slice with
-// its blocking links and current state.
-func route(cfg project.Config, st *store.Store, adapter tracker.Adapter, ticket string, slices []store.Slice) error {
-	subtasks := make([]tracker.Subtask, 0, len(slices))
-	for _, s := range slices {
-		state, err := st.ReadSliceState(ticket, s.ID)
-		if err != nil {
-			return fmt.Errorf("verifydeliver: route: read slice %s state: %w", s.ID, err)
-		}
-		subtasks = append(subtasks, tracker.Subtask{
-			ID:        s.ID,
-			Title:     s.Goal,
-			State:     state.State,
-			BlockedBy: s.BlockedBy,
-		})
-	}
-	sort.Slice(subtasks, func(i, j int) bool { return subtasks[i].ID < subtasks[j].ID })
-
-	routes := resolveRoutes(cfg)
-	description := strings.Join(routeFiles(st, ticket, routes["pr.description"]), "\n")
-	comments := routeFiles(st, ticket, routes["pr.comments"])
-
-	return adapter.Project(ticket, tracker.Projection{
-		Description: description,
-		Subtasks:    subtasks,
-		Comments:    comments,
-	})
 }
 
 // checkReviewedHead refuses, with PUBLISH_UNREVIEWED_HEAD, a head publish

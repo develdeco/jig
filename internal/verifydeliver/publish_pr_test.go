@@ -11,53 +11,28 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/project"
-	"github.com/develdeco/jig/internal/tracker"
 )
 
-// githubPRs is a tracker adapter for a publish test that wants the real
-// github adapter's pull request calls and nothing else of github's: the local
-// adapter mints, projects and comments (a fixture ticket is JIG-1, not the
-// issue number the github adapter projects onto), and the github adapter,
-// running against the fake gh, finds, opens and updates the pull request.
-type githubPRs struct {
-	tracker.Adapter
-	gh tracker.Adapter
-}
+// githubRemote is the github.com remote useGithubHost points the fixture's
+// single repo at. Its repo name is "fixture-repo", matching the fixture's
+// real remote (fixture.Build's repoRemote), so repo.Name() - the repoName
+// every pool lease directory and report map is keyed by - stays the same
+// before and after the swap.
+const githubRemote = "git@github.com:owner/fixture-repo.git"
 
-func (a githubPRs) CreatePR(head, base, title, bodyFile string) (string, error) {
-	return a.gh.(tracker.PRCreator).CreatePR(head, base, title, bodyFile)
-}
-
-func (a githubPRs) FindOpenPR(head, base string) (string, error) {
-	return a.gh.(tracker.PRUpdater).FindOpenPR(head, base)
-}
-
-func (a githubPRs) UpdatePR(url, bodyFile string) error {
-	return a.gh.(tracker.PRUpdater).UpdatePR(url, bodyFile)
-}
-
-func (a githubPRs) CommentPR(url, bodyFile string) error {
-	return a.gh.(tracker.PRCommenter).CommentPR(url, bodyFile)
-}
-
-func (a githubPRs) CreatePRWithMedia(head, base, title, bodyFile, mediaDir string, mediaFiles []string) (string, bool, error) {
-	return a.gh.(tracker.PRCreatorWithMedia).CreatePRWithMedia(head, base, title, bodyFile, mediaDir, mediaFiles)
-}
-
-func (a githubPRs) UpdatePRWithMedia(url, bodyFile, mediaDir string, mediaFiles []string) (bool, error) {
-	return a.gh.(tracker.PRUpdaterWithMedia).UpdatePRWithMedia(url, bodyFile, mediaDir, mediaFiles)
-}
-
-func (a githubPRs) ReadPRBody(url string) (string, error) {
-	return a.gh.(tracker.PRBodyReader).ReadPRBody(url)
-}
-
-// useGithubPRs points d at the fake gh, which lists pulls (fixture.GhPulls) as
-// the repo's pull requests ("" for none) and fails the call named by fail ("" for
-// none), and returns the file it logs every argv to. It sets the process
-// environment, so the test using it must not be parallel.
-func useGithubPRs(t *testing.T, d *Deps, pulls, fail string) string {
+// useGithubHost makes the fixture's single repo resolve to a GitHub pull
+// request host for Publish (repohost.New parses a repo's own remote): it
+// points d.Cfg.Repos[0].Remote at githubRemote, and tells git, through the
+// GIT_CONFIG_COUNT/KEY/VALUE discrete config variables (layered additively
+// over gittest's own hermetic global config, never replacing it), to treat
+// that URL as an alias for the fixture's real local remote - so every
+// clone, fetch and push Publish makes still reaches the real bare repo,
+// while repohost.New sees a github.com URL. It also puts the fake gh on
+// PATH, which lists pulls (fixture.GhPulls) as the repo's pull requests (""
+// for none) and fails the call named by fail ("" for none), and returns the
+// file it logs every argv to. It sets the process environment, so the test
+// using it must not be parallel.
+func useGithubHost(t *testing.T, d *Deps, pulls, fail string) string {
 	t.Helper()
 	stubDir := fixture.GhStub(t)
 	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -68,18 +43,11 @@ func useGithubPRs(t *testing.T, d *Deps, pulls, fail string) string {
 	t.Setenv("GH_STUB_PULLS", pulls)
 	t.Setenv("GH_STUB_FAIL", fail)
 
-	local, err := tracker.New(d.Cfg, d.Store)
-	if err != nil {
-		t.Fatalf("tracker.New local: %v", err)
-	}
-	ghCfg := d.Cfg
-	ghCfg.Tracker = "github"
-	ghCfg.Repos = []project.Repo{{Remote: "git@github.com:owner/repo.git"}}
-	gh, err := tracker.New(ghCfg, d.Store)
-	if err != nil {
-		t.Fatalf("tracker.New github: %v", err)
-	}
-	d.Tracker = githubPRs{Adapter: local, gh: gh}
+	real := d.Cfg.Repos[0].Remote
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "url."+filepath.ToSlash(real)+".insteadOf")
+	t.Setenv("GIT_CONFIG_VALUE_0", githubRemote)
+	d.Cfg.Repos[0].Remote = githubRemote
 	return logFile
 }
 
@@ -137,6 +105,11 @@ func ghCalls(calls [][]string, words ...string) int {
 	return n
 }
 
+// existingPR is the URL fixture.GhPulls bakes into a fake pull request's
+// html_url, "owner/repo" regardless of the actual repo the lookup asked
+// about (internal/fixture/ghpulls.go) - unlike the --repo flag and the
+// lookup's own request path below, which do carry the repo repohost.New
+// actually parsed (owner/fixture-repo, githubRemote's own repo name).
 const existingPR = "https://github.example/owner/repo/pull/7"
 
 // openPullOf lists the pull request existingPR names: open, from the repo's
@@ -150,7 +123,7 @@ func openPullOf(t *testing.T, branch string) string {
 // main: the pull requests endpoint, asked for the qualified head, the base and
 // the open state.
 func lookupCall(branch string) []string {
-	return []string{"api", "repos/owner/repo/pulls", "--method", "GET", "-f", "head=owner:" + branch, "-f", "base=main", "-f", "state=open"}
+	return []string{"api", "repos/owner/fixture-repo/pulls", "--method", "GET", "-f", "head=owner:" + branch, "-f", "base=main", "-f", "state=open"}
 }
 
 // TestPublishUpdatesTheOpenPRInsteadOfOpeningASecond: publishing a branch
@@ -170,7 +143,7 @@ func TestPublishUpdatesTheOpenPRInsteadOfOpeningASecond(t *testing.T) {
 	gateToClean(t, fx, d)
 	branch := ticketBranch(fx.Ticket)
 	run(t, buildLeaseDir(t, fx), "push", "origin", branch)
-	logFile := useGithubPRs(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
+	logFile := useGithubHost(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
 
 	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -182,7 +155,7 @@ func TestPublishUpdatesTheOpenPRInsteadOfOpeningASecond(t *testing.T) {
 		t.Errorf("the lookup of %s's open pull request into main called %d time(s), want once: %v", branch, n, calls)
 	}
 	body := filepath.Join(d.Store.Root, filepath.FromSlash(report.PRBody["fixture-repo"]))
-	if n := ghCalls(calls, "pr", "edit", existingPR, "--repo", "owner/repo", "--body-file", body); n != 1 {
+	if n := ghCalls(calls, "pr", "edit", existingPR, "--repo", "owner/fixture-repo", "--body-file", body); n != 1 {
 		t.Errorf("gh pr edit %s --body-file %s called %d time(s), want once: %v", existingPR, body, n, calls)
 	}
 	if n := ghCalls(calls, "pr", "create"); n != 0 {
@@ -218,7 +191,7 @@ func TestPublishOpensAPRWhenTheBranchHasNone(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
-	logFile := useGithubPRs(t, &d, "", "")
+	logFile := useGithubHost(t, &d, "", "")
 
 	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -226,7 +199,7 @@ func TestPublishOpensAPRWhenTheBranchHasNone(t *testing.T) {
 	}
 
 	calls := loggedGh(t, logFile)
-	if ghCalls(calls, lookupCall(ticketBranch(fx.Ticket))...) != 1 || ghCalls(calls, "pr", "create", "--repo", "owner/repo") != 1 || ghCalls(calls, "pr", "edit") != 0 {
+	if ghCalls(calls, lookupCall(ticketBranch(fx.Ticket))...) != 1 || ghCalls(calls, "pr", "create", "--repo", "owner/fixture-repo") != 1 || ghCalls(calls, "pr", "edit") != 0 {
 		t.Errorf("gh calls = %v, want one lookup, one pr create and no pr edit", calls)
 	}
 	if report.PRUpdated["fixture-repo"] || report.PRURL["fixture-repo"] == "" {
@@ -274,7 +247,7 @@ func TestPublishOpensAPRWhenTheBranchHasNoOpenOneIntoTheTarget(t *testing.T) {
 			gateToClean(t, fx, d)
 			branch := ticketBranch(fx.Ticket)
 			pulls := fixture.GhPulls(t, fixture.GhPull{Number: 7, State: tc.state, Merged: tc.merged, Owner: "owner", Head: branch, Base: tc.base})
-			logFile := useGithubPRs(t, &d, pulls, "")
+			logFile := useGithubHost(t, &d, pulls, "")
 
 			report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 			if err != nil {
@@ -283,7 +256,7 @@ func TestPublishOpensAPRWhenTheBranchHasNoOpenOneIntoTheTarget(t *testing.T) {
 
 			calls := loggedGh(t, logFile)
 			if ghCalls(calls, lookupCall(branch)...) != 1 ||
-				ghCalls(calls, "pr", "create", "--repo", "owner/repo", "--title") != 1 || ghCalls(calls, "pr", "edit") != 0 {
+				ghCalls(calls, "pr", "create", "--repo", "owner/fixture-repo", "--title") != 1 || ghCalls(calls, "pr", "edit") != 0 {
 				t.Errorf("gh calls = %v, want one lookup into main, one pr create and no pr edit", calls)
 			}
 			if report.PRUpdated["fixture-repo"] || report.PRURL["fixture-repo"] == "" || report.PRURL["fixture-repo"] == existingPR {
@@ -303,7 +276,7 @@ func TestPublishRefusesWhenItCannotTellWhetherThereIsAPR(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
-	logFile := useGithubPRs(t, &d, "", "api repos/owner/repo/pulls")
+	logFile := useGithubHost(t, &d, "", "api repos/owner/fixture-repo/pulls")
 	journalBefore, err := journal.Read(d.Store, fx.Ticket)
 	if err != nil {
 		t.Fatalf("journal.Read: %v", err)
@@ -311,7 +284,7 @@ func TestPublishRefusesWhenItCannotTellWhetherThereIsAPR(t *testing.T) {
 	storeHead := run(t, d.Store.Root, "rev-parse", "HEAD")
 
 	_, err = Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
-	if err == nil || !strings.Contains(err.Error(), "gh api repos/owner/repo/pulls") {
+	if err == nil || !strings.Contains(err.Error(), "gh api repos/owner/fixture-repo/pulls") {
 		t.Fatalf("Publish over a gh that cannot list: err = %v, want the failed call named", err)
 	}
 
@@ -346,7 +319,7 @@ func TestPublishConfirmNamesTheOpenPR(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
-	logFile := useGithubPRs(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
+	logFile := useGithubHost(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
 
 	var gotBranch, gotPR string
 	confirm = func(branch, _, openPR string, _ bool) bool {
@@ -388,7 +361,7 @@ func TestPublishFailsLoudlyWhenThePRCannotBeWritten(t *testing.T) {
 			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 			d := newDeps(t, fx)
 			gateToClean(t, fx, d)
-			useGithubPRs(t, &d, tc.pulls(t, ticketBranch(fx.Ticket)), tc.fail)
+			useGithubHost(t, &d, tc.pulls(t, ticketBranch(fx.Ticket)), tc.fail)
 
 			_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 			if err == nil || !strings.Contains(err.Error(), tc.call) {
@@ -452,7 +425,7 @@ func TestPublishPostsReviewNotesAsCommentOnCreate(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
-	logFile := useGithubPRs(t, &d, "", "")
+	logFile := useGithubHost(t, &d, "", "")
 
 	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -478,7 +451,7 @@ func TestPublishPostsReviewNotesAsCommentOnUpdate(t *testing.T) {
 	gateToClean(t, fx, d)
 	branch := ticketBranch(fx.Ticket)
 	run(t, buildLeaseDir(t, fx), "push", "origin", branch)
-	logFile := useGithubPRs(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
+	logFile := useGithubHost(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
 
 	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -510,7 +483,7 @@ func TestPublishContinuesWhenCommentPostingFails(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
-	logFile := useGithubPRs(t, &d, "", "pr comment")
+	logFile := useGithubHost(t, &d, "", "pr comment")
 
 	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
