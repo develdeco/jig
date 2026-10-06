@@ -9,6 +9,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
 )
@@ -16,16 +17,18 @@ import (
 // whenPublishFetchesOrigin runs move just before publish's fetch of origin, the
 // one made after its lease is pointed at the copy it ships: a push that lands
 // after the lease compared that copy with origin's, which is the one push no
-// state of the leases reaches. The test must stay serial: it replaces the
-// fetch.
-func whenPublishFetchesOrigin(t *testing.T, move func()) {
-	t.Helper()
-	orig := fetchOrigin
-	fetchOrigin = func(dir string) error {
+// state of the leases reaches.
+func whenPublishFetchesOrigin(d *Deps, move func()) {
+	orig := d.FetchOrigin
+	d.FetchOrigin = func(dir string) error {
 		move()
-		return orig(dir)
+		if orig != nil {
+			return orig(dir)
+		}
+		// Use package-level default if not set
+		_, err := gitx.Run(dir, "fetch", "origin")
+		return err
 	}
-	t.Cleanup(func() { fetchOrigin = orig })
 }
 
 // advanceTargetReplacing moves origin/main on by replacing from with to in
@@ -59,9 +62,8 @@ func advanceTargetReplacing(t *testing.T, fx *fixture.Fixture, rel, from, to str
 // refuses it up front instead, with the commit counts on both sides and where
 // to integrate them, before its first store write: nothing in the journal, no
 // store commit, nothing on origin.
-//
-// This test must stay serial: it replaces publish's fetch of origin.
 func TestPublishRefusesAPushThatIsNotAFastForward(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
@@ -69,7 +71,7 @@ func TestPublishRefusesAPushThatIsNotAFastForward(t *testing.T) {
 
 	// Someone else's commit on origin's jig/<ticket>, cut from main.
 	var theirs string
-	whenPublishFetchesOrigin(t, func() {
+	whenPublishFetchesOrigin(&d, func() {
 		foreign := t.TempDir()
 		run(t, foreign, "clone", fx.RepoRemote, ".")
 		run(t, foreign, "checkout", "-b", branch)
@@ -129,9 +131,8 @@ func TestPublishRefusesAPushThatIsNotAFastForward(t *testing.T) {
 // (here the build lease's copy, pushed, is an ancestor of the commit someone
 // else pushes on top of it after the lease was pointed at it). It is refused
 // the same way, and the message counts nothing on the copy's side.
-//
-// This test must stay serial: it replaces publish's fetch of origin.
 func TestPublishRefusesABranchOriginIsAheadOf(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
@@ -141,7 +142,7 @@ func TestPublishRefusesABranchOriginIsAheadOf(t *testing.T) {
 	buildDir := buildLeaseDir(t, fx)
 	run(t, buildDir, "push", "origin", branch)
 	var moved string
-	whenPublishFetchesOrigin(t, func() {
+	whenPublishFetchesOrigin(&d, func() {
 		ahead := t.TempDir()
 		run(t, ahead, "clone", fx.RepoRemote, ".")
 		run(t, ahead, "checkout", branch)
@@ -167,9 +168,8 @@ func TestPublishRefusesABranchOriginIsAheadOf(t *testing.T) {
 // place the branch changed: the merge conflicts, and the conflict would hide the
 // real problem, that someone else pushed to the branch, behind CONFLICT. The
 // refusal is the fast-forward one, and nothing was written.
-//
-// This test must stay serial: it replaces publish's fetch of origin.
 func TestPublishChecksTheFastForwardBeforeItReconciles(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
@@ -178,7 +178,7 @@ func TestPublishChecksTheFastForwardBeforeItReconciles(t *testing.T) {
 	// The branch changes Clamp's last lines (slice a); main moves on at the same
 	// place, so merging main into the branch cannot succeed.
 	advanceTargetReplacing(t, fx, "alpha/alpha.go", "\treturn v\n}", "\treturn v + 0\n}")
-	whenPublishFetchesOrigin(t, func() {
+	whenPublishFetchesOrigin(&d, func() {
 		foreign := t.TempDir()
 		run(t, foreign, "clone", fx.RepoRemote, ".")
 		run(t, foreign, "checkout", "-b", branch)
