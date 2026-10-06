@@ -278,11 +278,16 @@ same disk-only contract as a build session, narrowed to read-only: jig
 writes `work/gate.round-N.review.json` (the ticket, round, scope, base and
 head sha, the round's resolved intent - source and path, `Gate`'s own
 `resolveIntent`, precedence brief.md then intent.md then none - plus
-slices/journal paths, manifest oracles, and the cumulative `open`/
-`dismissed` findings folded from every earlier round), the backend
-runs a session against `must_review` - every file the scope diff touched
-plus every still-open finding's file - and jig reads back
+slices/journal paths, manifest oracles, `oracles_passed` - every oracle run
+the gate made on this head before the review, all passed - and the
+cumulative `open`/`dismissed` findings folded from every earlier round), the
+backend runs a session against `must_review` - every file the scope diff
+touched plus every still-open finding's file - and jig reads back
 `work/gate.round-N.result.json` (findings, `reviewed_paths`, a summary). The
+review is a read: test evidence is the oracles' job, and they ran on this
+head before the review, so the reviewer runs no tests, with an empty
+`oracles_passed` too
+([ADR 0017](docs/adr/0017-the-reviewer-reads-the-gate-tests.md)). The
 reviewer edits, commits, and pushes nothing; jig checks this itself (HEAD
 and the tracked tree unchanged after dispatch) rather than trusting the
 session, and rejects the round (`REVIEW_INVALID`) if either moved, or if
