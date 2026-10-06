@@ -29,7 +29,7 @@ A tracer-bullet unit of work with a named oracle and blocking edges to other sli
 _Avoid_: task, subtask, step
 
 **Oracle**:
-The command that proves a slice done. Green is done - there is no separate test stage beyond the oracle.
+The command that proves a slice done. Green is done - there is no separate test stage beyond the oracle, which jig runs itself when a builder reports green.
 _Avoid_: test suite, check
 
 **Workspace**:

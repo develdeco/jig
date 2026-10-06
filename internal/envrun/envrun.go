@@ -99,6 +99,24 @@ func Shell(cmd, dir string) error {
 	return nil
 }
 
+// ShellOutput runs cmd like Shell and returns its combined stdout and
+// stderr, which a failed oracle run hands back to the session that must fix
+// it.
+func ShellOutput(cmd, dir string) (string, error) {
+	var c *exec.Cmd
+	if runtime.GOOS == "windows" {
+		c = exec.Command("cmd", "/C", cmd)
+	} else {
+		c = exec.Command("sh", "-c", cmd)
+	}
+	c.Dir = dir
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("shell %q: %w", cmd, err)
+	}
+	return string(out), nil
+}
+
 // substitute replaces {ticket} and {port} placeholders in cmd.
 func substitute(cmd, ticket string, port int) string {
 	cmd = strings.ReplaceAll(cmd, "{ticket}", ticket)

@@ -16,16 +16,25 @@ import (
 // dispatchPromptTemplate is the exact prompt rendered (via fmt.Sprintf) for
 // every build-session dispatch. The fake backend ignores it entirely; it is
 // still rendered so the headless/herdr backends and the recorded journal
-// carry it. The line after the oracle says how the oracle is used: it is the
-// slice's final check, run after the last change, while the narrowest tests
-// drive the work (ADR 0018); the gate runs every oracle again after the
-// build.
+// carry it. The line after the oracle says how the oracle is used: the
+// narrowest tests drive the work (ADR 0018), and jig itself runs the oracle
+// when the builder reports green (ADR 0020).
 const dispatchPromptTemplate = "You are a jig build session for slice %s of ticket %s.\n" +
 	"Work ONLY in this worktree. Goal: %s\n" +
 	"Oracle (green = done): %s\n" +
-	"While you work, run only the tests that cover your change. Run the oracle after your last change, before you report green.\n" +
+	"While you work, run only the tests that cover your change. When you report green, jig runs the oracle and hands you its output if it fails.\n" +
 	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer).\n" +
 	"Commit as you land. When finished write result.json at %s with exactly one JSON object: {\"outcome\": \"green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed\", \"summary\": \"...\", \"commit\": \"<sha>\", \"question\": \"only for needs-input\", \"artifacts\": [\"relative paths\"]}"
+
+// oracleFixPromptTemplate is the next turn jig hands a builder's own session
+// when its oracle run at a claimed green comes back red (ADR 0020).
+const oracleFixPromptTemplate = "jig ran the oracle `%s` on your commit, and it failed. Its output ends:\n%s\n" +
+	"Fix the cause, commit, and write result.json at %s again, as before."
+
+// renderOracleFixPrompt fills oracleFixPromptTemplate.
+func renderOracleFixPrompt(oracleCmd, outputTail, resultJSONPath string) string {
+	return fmt.Sprintf(oracleFixPromptTemplate, oracleCmd, outputTail, resultJSONPath)
+}
 
 // renderDispatchPrompt fills dispatchPromptTemplate for one slice attempt.
 func renderDispatchPrompt(id, ticket, goal, oracleCmd, sliceJSONPath, resultJSONPath string) string {
