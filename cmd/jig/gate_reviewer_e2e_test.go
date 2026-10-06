@@ -89,9 +89,22 @@ func reviewResultAt(t *testing.T, path string) verifydeliver.ReviewResult {
 	return res
 }
 
-// writeReviewResultAt marshals res and writes it to path.
+// writeReviewResultAt marshals res and writes it to path, filling a nil
+// Findings, StillPresent or ReviewedPaths with [] first: ParseReviewResult
+// rejects a JSON null for any of the three, and a struct literal built by
+// hand - where a nil slice with no omitempty tag would otherwise marshal as
+// null - has to write the empty list out explicitly.
 func writeReviewResultAt(t *testing.T, path string, res verifydeliver.ReviewResult) {
 	t.Helper()
+	if res.Findings == nil {
+		res.Findings = []verifydeliver.ResultFinding{}
+	}
+	if res.StillPresent == nil {
+		res.StillPresent = []verifydeliver.StillPresentEntry{}
+	}
+	if res.ReviewedPaths == nil {
+		res.ReviewedPaths = []string{}
+	}
 	data, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal review result: %v", err)

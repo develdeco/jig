@@ -10,6 +10,7 @@
       "risk_rationale": "Not a correctness issue, but an avoidable allocation."
     }
   ],
+  "still_present": [],
   "reviewed_paths": [
     "stringutil/stringutil.go"
   ],
