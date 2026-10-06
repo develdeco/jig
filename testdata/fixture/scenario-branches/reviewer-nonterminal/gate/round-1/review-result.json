@@ -40,6 +40,7 @@
       "risk_rationale": "no functional risk, purely a maintainability idea"
     }
   ],
+  "still_present": [],
   "reviewed_paths": [
     "alpha/alpha.go",
     "alpha/alpha_test.go",
