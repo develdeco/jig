@@ -225,7 +225,7 @@ exists.
 | `internal/frontier/` | `Run`, `Requeue`, `RequeueSlice`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
 | `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `Missing`, `DiffNameOnly`, `FileExistsAtRev`, `IsLocalRemote`, `GuardedPush`, `CommonDir`, `SameDir`, `TopLevel`, `CommitTime`, `OpenRepo` (`Repo`: `State`, `CommitAll`, `Push`, `Fetch`) | argv + a working dir → git plumbing output, or a refused push; a store's directory → the same store operations in process (go-git), or `ErrUseCLI` for the caller's git-program path |
-| `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
+| `internal/graphify/` | `Detect`, `DetectWith`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that keeps a lease's code graph current and finds the code linked to a slice's goal ([ADR 0026](docs/adr/0026-a-code-graph-gives-the-builder-its-starting-points.md)) or affected by a seed |
 | `internal/home/` | `Root`, `MachinePath`, `PoolDir`, `IntentExcerptDir`, `IntentScratchDir`, `EvidenceDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths, including the directories intent excerpts and summarizer scratch directories go under, and where one reviewed head's demo media live |
 | `internal/intent/` | `NewClaudeReader`, `Best`, `RenderExcerpt` | a repo's git common dir + a time window → matching local agent `Session`s; a scope diff's files → the `Match` a model then summarizes |
 | `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `VerifiedSlices`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
@@ -248,7 +248,9 @@ The contract between jig and any backend is pure disk: jig writes
 question, how long jig's last run of the oracle took on this ticket,
 [ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md), and
 what the ticket's verified slices did and changed,
-[ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md)), the backend runs a session in the lease worktree, and jig reads
+[ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md), and,
+when the project keeps a code graph, the code it links to the goal,
+[ADR 0026](docs/adr/0026-a-code-graph-gives-the-builder-its-starting-points.md)), the backend runs a session in the lease worktree, and jig reads
 back `result.json` (outcome, summary, commit, and - for `needs-input` - a
 question). Nothing crosses in memory.
 

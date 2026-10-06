@@ -2950,3 +2950,7 @@ jig times each oracle run at green and journals it (`seconds` on the `oracle` li
 ## A builder reads what earlier slices built (build-speed item 6d)
 
 `slice.json` gains `earlier_slices`: every slice of the ticket whose green jig verified before this dispatch, with its builder's summary and the files its verified attempt changed (the union of each attempt's own range: from the lease head at its dispatch, now on the dispatch line, to its verified commit or the head its last turn ended on, now on the result line). The dispatch prompt names it. Sizing slices to a session goes into the intake skill instead (BS-2). See [ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md).
+
+## A code graph gives the builder its starting points
+
+jig's graphify plane gains `Update` and `Query` and a caller: when a project opts in (`context: graphify` in `project.yaml`) and the binary is on PATH, frontier runs `graphify update .` in the lease and `graphify query` with the slice's goal and earlier slices' files before each dispatch, and writes the linked files and symbols into `slice.json`'s `related` (25 files, 8 symbols each). `graphify-out/` goes in the lease's `info/exclude`; a `graph` journal line records each run, and a failure only empties `related`. `DetectWith` takes the binary lookup, so graphify's test no longer edits PATH and leaves the global-state lint's debt list. See [ADR 0026](docs/adr/0026-a-code-graph-gives-the-builder-its-starting-points.md).
