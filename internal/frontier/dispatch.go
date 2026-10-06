@@ -28,12 +28,25 @@ const dispatchPromptTemplate = "You are a jig build session for slice %s of tick
 
 // oracleFixPromptTemplate is the next turn jig hands a builder's own session
 // when its oracle run at a claimed green comes back red (ADR 0020).
-const oracleFixPromptTemplate = "jig ran the oracle `%s` on your commit, and it failed. Its output ends:\n%s\n" +
+// It says how long the run took (ADR 0024), so the session knows what
+// running it again costs.
+const oracleFixPromptTemplate = "jig ran the oracle `%s` on your commit, and it failed after %d s. Its output ends:\n%s\n" +
 	"Fix the cause, commit, and write result.json at %s again, as before."
 
 // renderOracleFixPrompt fills oracleFixPromptTemplate.
-func renderOracleFixPrompt(oracleCmd, outputTail, resultJSONPath string) string {
-	return fmt.Sprintf(oracleFixPromptTemplate, oracleCmd, outputTail, resultJSONPath)
+func renderOracleFixPrompt(oracleCmd string, seconds int, outputTail, resultJSONPath string) string {
+	return fmt.Sprintf(oracleFixPromptTemplate, oracleCmd, seconds, outputTail, resultJSONPath)
+}
+
+// dirtyTreePromptTemplate is the next turn jig hands a builder's own session
+// when it reports green with uncommitted changes to tracked files: jig does
+// not run the oracle, since a run would not test the reported commit.
+const dirtyTreePromptTemplate = "jig did not run the oracle `%s`: your working tree has uncommitted changes to tracked files, so the commit you reported is not what a run would test:\n%s\n" +
+	"Commit or revert them, and write result.json at %s again, as before."
+
+// renderDirtyTreePrompt fills dirtyTreePromptTemplate.
+func renderDirtyTreePrompt(oracleCmd, changes, resultJSONPath string) string {
+	return fmt.Sprintf(dirtyTreePromptTemplate, oracleCmd, changes, resultJSONPath)
 }
 
 // oracleLine is the dispatch prompt's line after the oracle: how the oracle

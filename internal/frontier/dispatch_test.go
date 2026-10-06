@@ -39,10 +39,24 @@ func TestRenderDispatchPromptMatchesGolden(t *testing.T) {
 func TestRenderOracleFixPromptMatchesGolden(t *testing.T) {
 	t.Parallel()
 
-	got := renderOracleFixPrompt("go test ./alpha/...", "--- FAIL: TestHello", "/abs/a.attempt-1.result.json")
-	want := "jig ran the oracle `go test ./alpha/...` on your commit, and it failed. Its output ends:\n" +
+	got := renderOracleFixPrompt("go test ./alpha/...", 42, "--- FAIL: TestHello", "/abs/a.attempt-1.result.json")
+	want := "jig ran the oracle `go test ./alpha/...` on your commit, and it failed after 42 s. Its output ends:\n" +
 		"--- FAIL: TestHello\n" +
 		"Fix the cause, commit, and write result.json at /abs/a.attempt-1.result.json again, as before."
+	if got != want {
+		t.Errorf("prompt does not match the golden text.\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestRenderDirtyTreePromptMatchesGolden pins the next turn jig hands a
+// builder's own session when it reports green with uncommitted changes.
+func TestRenderDirtyTreePromptMatchesGolden(t *testing.T) {
+	t.Parallel()
+
+	got := renderDirtyTreePrompt("go test ./alpha/...", " M alpha/alpha.go", "/abs/a.attempt-1.result.json")
+	want := "jig did not run the oracle `go test ./alpha/...`: your working tree has uncommitted changes to tracked files, so the commit you reported is not what a run would test:\n" +
+		" M alpha/alpha.go\n" +
+		"Commit or revert them, and write result.json at /abs/a.attempt-1.result.json again, as before."
 	if got != want {
 		t.Errorf("prompt does not match the golden text.\ngot:\n%s\nwant:\n%s", got, want)
 	}
