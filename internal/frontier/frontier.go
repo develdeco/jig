@@ -582,6 +582,9 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	}
 	sig.FailedAttempts = failed
 	model := staircase.Select(d.Rungs, sig)
+	// A retry after a failed attempt thinks harder, as it climbs a rung
+	// (ADR 0023).
+	effort := d.Cfg.BuilderEffortFor(failed)
 
 	attempt := st.Attempts + 1
 	st.State = "building"
@@ -633,7 +636,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	_, fixTurns := d.Backend.(session.Resumer)
 	prompt := renderDispatchPrompt(sl.ID, ticket, sl.Goal, oracleCmd, sjPath, rjPath, fixTurns)
 
-	rc.journal(journal.Line{Slice: sl.ID, Event: "dispatch", Model: model, Commit: base, Attempt: attempt})
+	rc.journal(journal.Line{Slice: sl.ID, Event: "dispatch", Model: model, Effort: effort, Commit: base, Attempt: attempt})
 	if rc.isHalted() {
 		return
 	}
@@ -646,6 +649,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		SliceJSON:  sjPath,
 		ResultJSON: rjPath,
 		Model:      model,
+		Effort:     effort,
 		Prompt:     prompt,
 		Screen:     true,
 	}

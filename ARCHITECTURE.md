@@ -204,9 +204,28 @@ that fits in one slice keeps its existing id,
 `-1`, `-2`, ... from 1. Must be at least 1. Invalid values are refused at
 load time.
 
+Sessions also get a reasoning effort, passed to `claude` as `--effort`: the
+gate reviewer's by round scope, a builder's by attempt
+([ADR 0023](docs/adr/0023-the-reviewer-runs-on-the-dearest-rung-and-builds-and-reviews-get-an-effort.md)):
+
+```yaml
+gate:
+  review_effort:
+    full: high                 # the first review, or one not on top of the last
+    delta: medium              # re-checking fixes since the last reviewed head
+builder_effort:
+  first: medium                # a slice's first attempt
+  retry: high                  # any attempt after a failed one
+```
+
+The values shown are the defaults, also for a key with no value; `""` passes
+no effort. The gate reviewer runs on the staircase's dearest rung on every
+round.
+
 Invalid configuration values are refused when `project.yaml` loads:
 a negative `fix_rounds`, a `fix_risks` entry that is not `high`, `medium` or
-`low`, or a `fix_slice_findings` below 1.
+`low`, a `fix_slice_findings` below 1, or an effort that is not one of `low`,
+`medium`, `high`, `xhigh`, `max` or empty.
 
 ## Module responsibilities
 
@@ -236,7 +255,7 @@ exists.
 | `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `MatchRound`, `ScoreRound`, `RenderReport` | a labeled corpus (`testdata/revieweval`) + a session backend → a `CaseScore` per case, matched structurally against seeded gold through the real reviewer contract |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
-| `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` (the slice's failed attempts, invariant match) + `Config` → a model rung, disjoint from rungs already in use; invariant floored to the dearest rung, one rung up per failed attempt, otherwise the first rung |
+| `internal/staircase/` | `Select`, `Dearest`, `Default` | build `Signals` (the slice's failed attempts, invariant match) + `Config` → a builder's model rung: invariant floored to the dearest rung, one rung up per failed attempt, otherwise the first rung; `Dearest` is the gate reviewer's rung on every round |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by |
 | `internal/tracker/` | `New`, `Graduate`, `CheckMinted`, `PRCreator`, `PRUpdater`, `PRCommenter`, `PRCreatorWithMedia`, `PRUpdaterWithMedia`, `PRBodyReader` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it; on github, a pull request body + a media directory and file list → the same pull request with each file attached via `gh ... --attach`, or read back to check what `gh` rewrote |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one) |

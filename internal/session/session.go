@@ -24,7 +24,10 @@ type Dispatch struct {
 	SliceJSON     string // path jig writes before Run
 	ResultJSON    string // path expected after Run
 	Model         string
-	Prompt        string // rendered dispatch prompt (paths, not contents)
+	// Effort is the session's reasoning effort, one of Claude Code's
+	// --effort levels, or "" to pass none. Only headless passes it.
+	Effort string
+	Prompt string // rendered dispatch prompt (paths, not contents)
 
 	// ExtraWriteDir, when set, is one absolute directory outside the
 	// worktree the session may also write files in: a gate demo's media
