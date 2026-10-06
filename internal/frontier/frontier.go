@@ -17,6 +17,7 @@ import (
 
 	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/graphify"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/outcome"
@@ -49,6 +50,18 @@ type Deps struct {
 	// with the Windows short-path workaround; a test that is not about the
 	// oracle hands one that passes.
 	Oracle func(cmd, dir string) (string, error)
+	// Graph is the code-graph plane that gives a builder the code linked to
+	// its goal (ADR 0026). nil means graphify.Detect(Cfg): graphify when the
+	// project opts in and the binary is on PATH, else none.
+	Graph graphify.Plane
+}
+
+// graph is d.Graph, or the plane the project's config detects.
+func (d Deps) graph() graphify.Plane {
+	if d.Graph != nil {
+		return d.Graph
+	}
+	return graphify.Detect(d.Cfg)
 }
 
 // runOracle runs cmd in dir through d.Oracle, or for real when it is nil.
@@ -405,6 +418,125 @@ func (rc *runCtx) readSliceState(sliceID string) (store.SliceState, error) {
 	return rc.d.Store.ReadSliceState(rc.ticket, sliceID)
 }
 
+// Caps on slice.json's related list: the files a code graph links to a
+// goal, most directly matched first, and the symbols named per file.
+const (
+	maxRelatedFiles   = 25
+	maxRelatedSymbols = 8
+)
+
+// graphContext asks the project's code graph (Deps.Graph) which code is
+// linked to sl's goal and to the files earlier slices changed, and returns
+// it grouped by file for slice.json's related (ADR 0026). With no graph it
+// returns an empty list and journals nothing. It first keeps the graph's
+// output directory out of the lease's commits, then brings the graph up to
+// date with the lease and queries it; a failure journals a graph line with
+// the reason and returns an empty list, never failing the attempt.
+func (rc *runCtx) graphContext(sl store.Slice, leaseDir string, attempt int, earlier []earlierSlice) []relatedFile {
+	related := []relatedFile{}
+	plane := rc.d.graph()
+	if !plane.Enabled() {
+		return related
+	}
+	started := time.Now()
+	nodes, err := queryGraph(plane, leaseDir, graphQuestion(sl.Goal, earlier))
+	seconds := int((time.Since(started) + time.Second - 1) / time.Second)
+	if err != nil {
+		rc.journal(journal.Line{Slice: sl.ID, Event: "graph", Outcome: "fail: " + oneLine(err.Error()), Attempt: attempt, Seconds: seconds})
+		return related
+	}
+	rc.journal(journal.Line{Slice: sl.ID, Event: "graph", Outcome: "pass", Attempt: attempt, Seconds: seconds})
+	return groupRelated(nodes)
+}
+
+// queryGraph excludes the graph's output in leaseDir, updates the graph,
+// and queries it with question.
+func queryGraph(plane graphify.Plane, leaseDir, question string) ([]graphify.Node, error) {
+	if err := excludeInLease(leaseDir, "/"+graphify.OutDir+"/"); err != nil {
+		return nil, err
+	}
+	if err := plane.Update(leaseDir); err != nil {
+		return nil, err
+	}
+	return plane.Query(leaseDir, question)
+}
+
+// graphQuestion is the code-graph query for a slice: its goal, then the
+// files earlier slices of the ticket changed, as seeds.
+func graphQuestion(goal string, earlier []earlierSlice) string {
+	q := goal
+	var files []string
+	for _, e := range earlier {
+		files = append(files, e.Files...)
+	}
+	if len(files) > 20 {
+		files = files[:20]
+	}
+	if len(files) > 0 {
+		q += " Related files: " + strings.Join(files, " ")
+	}
+	return q
+}
+
+// groupRelated groups nodes by file in first-seen order, each with its
+// symbols as "<label> L<line>", within maxRelatedFiles and
+// maxRelatedSymbols.
+func groupRelated(nodes []graphify.Node) []relatedFile {
+	related := []relatedFile{}
+	at := map[string]int{}
+	for _, n := range nodes {
+		i, ok := at[n.File]
+		if !ok {
+			if len(related) == maxRelatedFiles {
+				continue
+			}
+			i = len(related)
+			at[n.File] = i
+			related = append(related, relatedFile{File: n.File, Symbols: []string{}})
+		}
+		if len(related[i].Symbols) == maxRelatedSymbols {
+			continue
+		}
+		sym := n.Label
+		if n.Line > 0 {
+			sym = fmt.Sprintf("%s L%d", n.Label, n.Line)
+		}
+		related[i].Symbols = append(related[i].Symbols, sym)
+	}
+	return related
+}
+
+// excludeInLease adds pattern to the lease's own info/exclude, so files a
+// tool writes there are never committed and never make the tree look
+// dirty to jig (cleanHead, trackedChanges).
+func excludeInLease(leaseDir, pattern string) error {
+	path, err := gitx.Run(leaseDir, "rev-parse", "--git-path", "info/exclude")
+	if err != nil {
+		return fmt.Errorf("frontier: find the lease's info/exclude: %w", err)
+	}
+	path = strings.TrimSpace(path)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(leaseDir, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == pattern {
+			return nil
+		}
+	}
+	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
+		data = append(data, '\n')
+	}
+	data = append(data, []byte(pattern+"\n")...)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
 // maxEarlierFiles caps one earlier slice's file list in slice.json; the
 // rest are counted in its files_omitted.
 const maxEarlierFiles = 50
@@ -587,6 +719,9 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	}
 	sig.FailedAttempts = failed
 	model := staircase.Select(d.Rungs, sig)
+	// A retry after a failed attempt thinks harder, as it climbs a rung
+	// (ADR 0023).
+	effort := d.Cfg.BuilderEffortFor(failed)
 
 	attempt := st.Attempts + 1
 	st.State = "building"
@@ -609,6 +744,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		rc.fail(fmt.Errorf("frontier: read earlier slices for %s: %w", sl.ID, err))
 		return
 	}
+	related := rc.graphContext(sl, lease.Dir, attempt, earlier)
 	// The attempt's base: what its changed files are measured from, once it
 	// verifies (earlierSlices).
 	base, err := gitx.RevParse(lease.Dir, "HEAD")
@@ -629,6 +765,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		Answer:        answerFor(d.Store, ticket, sl.ID),
 		OracleSeconds: oracleSeconds,
 		EarlierSlices: earlier,
+		Related:       related,
 	}
 	if err := writeSliceJSON(sjPath, body); err != nil {
 		rc.fail(fmt.Errorf("frontier: write slice.json for %s: %w", sl.ID, err))
@@ -638,7 +775,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	_, fixTurns := d.Backend.(session.Resumer)
 	prompt := renderDispatchPrompt(sl.ID, ticket, sl.Goal, oracleCmd, sjPath, rjPath, fixTurns)
 
-	rc.journal(journal.Line{Slice: sl.ID, Event: "dispatch", Model: model, Commit: base, Attempt: attempt})
+	rc.journal(journal.Line{Slice: sl.ID, Event: "dispatch", Model: model, Effort: effort, Commit: base, Attempt: attempt})
 	if rc.isHalted() {
 		return
 	}
@@ -651,6 +788,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		SliceJSON:  sjPath,
 		ResultJSON: rjPath,
 		Model:      model,
+		Effort:     effort,
 		Prompt:     prompt,
 		Screen:     true,
 	}
