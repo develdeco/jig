@@ -19,18 +19,20 @@ A round asks the whole **frontier** - every question whose prerequisites are set
 | bug | repro, expected-vs-actual, regression window, seams | REPRO slice: oracle fails red before any fix | the regression test, unchanged |
 | refactor | behavior-preservation contract, current coverage, seams | GUARDRAIL slice: missing coverage lands green first | guardrail oracles staying green |
 
+A test diet is a refactor: its guardrails are the seams, and every test it deletes or merges names the seam test that covers its behavior, or why no seam needs it.
+
 ## Seams
 
 Every brief lists a `## Seams` section naming the public interfaces and critical paths tested:
 - **public interfaces:** a CLI command and its output, an exported function, a file or wire contract like `review.json` or `slices.yaml`;
 - **critical paths:** one line each, each a behavior rather than a test case or a test per rule.
 
-The section never lists test cases, never asks for a test per rule, and never asks that a test fail when its rule is removed. For a bug, the seam is where its REPRO oracle runs; for a refactor, the seams are its guardrails.
+The section never lists test cases, never asks for a test per rule, and never asks that a test fail when its rule is removed. A critical path gets one end-to-end chain; each rule variant is tested at the narrowest seam that holds it, not by another chain. For a bug, the seam is where its REPRO oracle runs; for a refactor, the seams are its guardrails.
 
 ## Brief output (single ticket)
 
 - `brief.md`: `## `-sectioned behavioral spec; every decision tagged user-confirmed or defaulted.
-- `slices.yaml`: one entry per slice - `id`, `workspace`, `goal`, `oracle`, `env`, `blocked_by`, `from_brief`. Slices are tracer bullets: narrow but a COMPLETE path, demoable alone, sized to one session. Prefactoring is its own slice, first. `blocked_by` encodes the blocking edges between slices. Every slice lists `Seams` in `from_brief`, so its builder reads it.
+- `slices.yaml`: one entry per slice - `id`, `workspace`, `goal`, `oracle`, `env`, `blocked_by`, `from_brief`. Slices are tracer bullets: narrow but a COMPLETE path, demoable alone, sized to one session. One cohesive change is one slice: split only where a part builds, verifies and demos on its own, since every slice is a session that starts cold. Prefactoring is its own slice, first. A slice that proves itself with the repo's own suite names its oracle (`test`), so it gets the repo's declared command and the gate can reuse its pass; a literal command is for a narrower proof. `blocked_by` encodes the blocking edges between slices. Every slice lists `Seams` in `from_brief`, so its builder reads it.
 - `from_brief` hashes come from `jig validate <ticket>`, which prints a heading/sha256 table over `brief.md`'s sections: write `slices.yaml`, run validate, paste the printed hashes into `from_brief`, re-run until it prints `valid: yes`.
 
 ## Chart output (fog spans tickets)
