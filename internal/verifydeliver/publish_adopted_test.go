@@ -442,8 +442,6 @@ func TestPublishRefusesAnAdoptedBranchTheAuthorPushedToWhileJigBuilt(t *testing.
 // their branch before handing it to jig. Publish updates that one - its body,
 // through `gh pr edit` - and opens no second, and the branch it pushes to is
 // the one that pull request is from.
-//
-// This test must stay serial: it puts the fake gh on PATH.
 func TestPublishUpdatesThePRTheAuthorOpened(t *testing.T) {
 	t.Parallel()
 	const ticket, branch = "JIG-2", "add-retry"

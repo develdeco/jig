@@ -112,6 +112,21 @@ func hasHelpArg(argv []string) bool {
 	return false
 }
 
+// sameDir reports whether a and b name the same directory once symlinks are
+// resolved. The fake gh logs the working directory os.Getwd gives it, and
+// with an explicit environment (tracker.NewWithEnv) the child gets no PWD
+// from os/exec, so on macOS it reads /private/var/... where the test's own
+// temp path says /var/....
+func sameDir(t *testing.T, a, b string) bool {
+	t.Helper()
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return ra == rb
+}
+
 func attachedFiles(argv []string) []string {
 	var out []string
 	for i, a := range argv {
@@ -130,8 +145,6 @@ func attachedFiles(argv []string) []string {
 // does not exist (the post-squash tip's own, never written to), which fails
 // before gh even starts; this test's gh call would error on exactly that if
 // the regression returned.
-//
-// This test must stay serial: it puts the fake gh on PATH.
 func TestPublishAttachesDemoMediaOnCreate(t *testing.T) {
 	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
@@ -158,7 +171,7 @@ func TestPublishAttachesDemoMediaOnCreate(t *testing.T) {
 	if create == nil {
 		t.Fatal("no logged pr create call")
 	}
-	if create.Dir != mediaDir {
+	if !sameDir(t, create.Dir, mediaDir) {
 		t.Errorf("pr create ran in %q, want the evidence directory for the reviewed head %q", create.Dir, mediaDir)
 	}
 	got := attachedFiles(create.Argv)
@@ -187,8 +200,6 @@ func TestPublishAttachesDemoMediaOnCreate(t *testing.T) {
 
 // TestPublishAttachesDemoMediaOnUpdate: the same attach path runs through
 // UpdatePRWithMedia when the branch already has an open pull request.
-//
-// This test must stay serial: it puts the fake gh on PATH.
 func TestPublishAttachesDemoMediaOnUpdate(t *testing.T) {
 	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
@@ -214,7 +225,7 @@ func TestPublishAttachesDemoMediaOnUpdate(t *testing.T) {
 	if edit == nil {
 		t.Fatal("no logged pr edit call")
 	}
-	if edit.Dir != mediaDir {
+	if !sameDir(t, edit.Dir, mediaDir) {
 		t.Errorf("pr edit ran in %q, want the evidence directory for the reviewed head %q", edit.Dir, mediaDir)
 	}
 	if got := attachedFiles(edit.Argv); len(got) != 1 || got[0] != files[0].Name {
