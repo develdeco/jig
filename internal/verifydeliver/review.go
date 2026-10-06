@@ -40,13 +40,19 @@ const (
 // cumulative findings state across rounds is findings bookkeeping;
 // RoundInput carries it as an input here.
 type OpenFinding struct {
-	ID          string `json:"id"`
-	File        string `json:"file"`
-	Line        int    `json:"line"`
-	Title       string `json:"title"`
-	Detail      string `json:"detail"`
-	Action      string `json:"action"`
-	Recurrences int    `json:"recurrences"`
+	ID     string `json:"id"`
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+	Title  string `json:"title"`
+	Detail string `json:"detail"`
+	Action string `json:"action"`
+	// Risk, RiskRationale and Oracle are shown so a reviewer can tell
+	// whether the finding is unchanged, which a still_present entry vouches
+	// for (ADR 0022).
+	Risk          string `json:"risk"`
+	RiskRationale string `json:"risk_rationale"`
+	Oracle        string `json:"oracle"`
+	Recurrences   int    `json:"recurrences"`
 }
 
 // DismissedFinding is one entry of review.json's "dismissed" list: a
@@ -58,6 +64,12 @@ type DismissedFinding struct {
 	Line   int    `json:"line"`
 	Title  string `json:"title"`
 	Detail string `json:"detail"`
+	// Action, Risk, RiskRationale and Oracle are shown for the same reason
+	// as OpenFinding's: a still_present entry vouches for them (ADR 0022).
+	Action        string `json:"action"`
+	Risk          string `json:"risk"`
+	RiskRationale string `json:"risk_rationale"`
+	Oracle        string `json:"oracle"`
 }
 
 // OracleRun is one entry of review.json's "oracles_passed" list: an oracle

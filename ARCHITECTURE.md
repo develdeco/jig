@@ -315,9 +315,10 @@ session, and rejects the round (`REVIEW_INVALID`) if either moved, or if
 `result.json` fails strict structural validation - an unknown `action` or
 `risk`, a finding whose file is neither present at head nor deleted in the
 scope diff, an oracle that isn't a manifest oracle, a `prior` naming no
-known finding, a `still_present` id naming no known finding or repeated,
-or `reviewed_paths` missing a `must_review` path all fail the
-round loudly rather than falling back to a partial result.
+known finding, a `still_present` id naming no known finding, repeated, or
+also a finding's `prior`, a `still_present` finding whose file is gone
+without a deletion, or `reviewed_paths` missing a `must_review` path all
+fail the round loudly rather than falling back to a partial result.
 
 **Intent inference.** When `resolveIntent` comes back `"none"` and the
 round is about to dispatch a reviewer (nothing outstanding and the scope

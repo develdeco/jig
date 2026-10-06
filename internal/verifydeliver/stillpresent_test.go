@@ -3,9 +3,11 @@ package verifydeliver
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -208,5 +210,53 @@ func TestGateFoldsAStillPresentEntryLikeAFullReport(t *testing.T) {
 	}
 	if len(onDisk.Findings) != 0 || len(onDisk.StillPresent) != 1 {
 		t.Errorf("round 2 result.json = %+v, want the reviewer's short form as written", onDisk)
+	}
+}
+
+// TestExpandStillPresentFoldsLikeAFullReport: for every kind of earlier
+// finding, ApplyRound on a still_present entry, once expanded, gives exactly
+// what it gives for the same finding re-reported in full with prior.
+func TestExpandStillPresentFoldsLikeAFullReport(t *testing.T) {
+	t.Parallel()
+
+	man := manifest.Manifest{
+		Oracles:    map[string]string{"test": "go test ./..."},
+		Workspaces: []manifest.Workspace{{ID: "alpha", Path: "alpha"}, {ID: "beta", Path: "beta"}},
+	}
+	earlier := map[string]Finding{
+		"open fix": {ID: "r1-f1", File: "alpha/a.go", Line: 3, Title: "open fix", Detail: "d1",
+			Action: ActionFix, Risk: RiskMedium, RiskRationale: "r1", Oracle: "test", Status: StatusOpen, Workspace: "alpha", Recurrences: 1},
+		"noted": {ID: "r1-f2", File: "beta/b.go", Line: 4, Title: "noted", Detail: "d2",
+			Action: ActionNote, Risk: RiskLow, RiskRationale: "r2", Oracle: "test", Status: StatusNoted, Workspace: "beta"},
+		"asked with a decision": {ID: "r1-f3", File: "alpha/c.go", Line: 5, Title: "asked", Detail: "d3",
+			Action: ActionAsk, Risk: RiskHigh, RiskRationale: "r3", Oracle: "test", Status: StatusAsked, Workspace: "alpha",
+			Triage: TriageHuman, Decision: "keep the old behavior"},
+		"workspace a human chose": {ID: "r1-f4", File: "docs/d.md", Line: 6, Title: "outside every workspace", Detail: "d4",
+			Action: ActionFix, Risk: RiskMedium, RiskRationale: "r4", Oracle: "test", Status: StatusOpen, Workspace: "beta"},
+		"dismissed": {ID: "r1-f5", File: "beta/e.go", Line: 7, Title: "dismissed", Detail: "d5",
+			Action: ActionFix, Risk: RiskLow, RiskRationale: "r5", Oracle: "test", Status: StatusDismissed, Workspace: "beta",
+			Triage: TriageHuman, Decision: "not worth it"},
+	}
+	for name, f := range earlier {
+		t.Run(name, func(t *testing.T) {
+			known := map[string]Finding{f.ID: f}
+			full := ReviewResult{Findings: []ResultFinding{{
+				File: f.File, Line: 9, Title: f.Title, Detail: f.Detail, Action: f.Action,
+				Risk: f.Risk, RiskRationale: f.RiskRationale, Oracle: f.Oracle, Prior: f.ID,
+			}}}
+			short := ReviewResult{StillPresent: []StillPresentEntry{{Prior: f.ID, Line: 9}}}
+
+			want, err := ApplyRound(2, known, full, nil, alwaysGreen, man, defaultTestFixRisks(), false)
+			if err != nil {
+				t.Fatalf("ApplyRound on the full re-report: %v", err)
+			}
+			got, err := ApplyRound(2, known, ExpandStillPresent(short, known), nil, alwaysGreen, man, defaultTestFixRisks(), false)
+			if err != nil {
+				t.Fatalf("ApplyRound on the expanded short form: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("short form folds to\n%+v\nwant the full re-report's\n%+v", got, want)
+			}
+		})
 	}
 }

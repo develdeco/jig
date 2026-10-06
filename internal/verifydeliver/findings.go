@@ -609,7 +609,10 @@ func askedFindingsList(cum map[string]Finding) []Finding {
 func toOpenFindingList(fs []Finding) []OpenFinding {
 	out := make([]OpenFinding, 0, len(fs))
 	for _, f := range fs {
-		out = append(out, OpenFinding{ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail, Action: f.Action, Recurrences: f.Recurrences})
+		out = append(out, OpenFinding{
+			ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail, Action: f.Action,
+			Risk: f.Risk, RiskRationale: f.RiskRationale, Oracle: f.Oracle, Recurrences: f.Recurrences,
+		})
 	}
 	return out
 }
@@ -619,7 +622,10 @@ func toOpenFindingList(fs []Finding) []OpenFinding {
 func toDismissedFindingList(fs []Finding) []DismissedFinding {
 	out := make([]DismissedFinding, 0, len(fs))
 	for _, f := range fs {
-		out = append(out, DismissedFinding{ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail})
+		out = append(out, DismissedFinding{
+			ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail,
+			Action: f.Action, Risk: f.Risk, RiskRationale: f.RiskRationale, Oracle: f.Oracle,
+		})
 	}
 	return out
 }
