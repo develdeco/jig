@@ -2947,6 +2947,10 @@ Before each run of its suite, the gate looks for an `oracle` pass line recorded 
 
 `result.json` gains a required `still_present` list: an earlier finding that is still present and unchanged is confirmed by its id and current line instead of being written again, and only new or changed findings are written in full. jig expands each entry into the earlier finding (`ExpandStillPresent`) right before `ApplyRound`, in the gate and in revieweval's runner, so the fold, recurrences, routing and scoring are unchanged. An id naming nothing, repeated, or also a finding's `prior`, or whose earlier file is gone without a deletion, is `REVIEW_INVALID`. Every review-result fixture gains `"still_present": []`. The code started as BS-3's jig build and was finished by hand when the run moved to hand-building. See [ADR 0022](docs/adr/0022-the-reviewer-confirms-an-unchanged-finding-by-id.md).
 
+## Builders are told how long the oracle took (build-speed item 6a)
+
+jig times each oracle run at green and journals it (`seconds` on the `oracle` line); `slice.json` gains `oracle_seconds`, the latest run time of the slice's exact oracle command on the ticket (0 before the first), and the dispatch prompt names it. The shell-call guard 6a once proposed is not built: the owner chose to measure first, and BS-3's Sonnet builder never set its own timeout or backgrounded a call. See [ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md).
+
 ## jig's testing method, and what a project owns (build-speed BS-2)
 
 One ADR lists jig's testing method, each item pointing at its decision, and adds the two principles that had no home: one end-to-end chain per critical path with rule variants at the narrowest seam, and the test diet as a refactor whose deletions name their covering seam test. Testing knowledge lives in three layers, jig's method, the project's facts and a run's choices, with no greenfield mode. The intake skill carries both principles, sizes one cohesive change as one slice, and has a full-suite slice name the repo's manifest oracle rather than write its command out. See [ADR 0027](docs/adr/0027-jigs-testing-method-and-what-a-project-owns.md).
