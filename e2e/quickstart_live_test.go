@@ -222,7 +222,7 @@ func quickstartReview(t *testing.T, prompt string) *claudetest.Session {
 			if err := json.Unmarshal([]byte(prior[0].Content), &req); err != nil {
 				t.Errorf("review.json as the session read it is not JSON: %v\n%s", err, prior[0].Content)
 			}
-			data, _ := json.Marshal(map[string]any{"findings": []any{}, "reviewed_paths": req.MustReview, "summary": "no findings"})
+			data, _ := json.Marshal(map[string]any{"findings": []any{}, "still_present": []any{}, "reviewed_paths": req.MustReview, "summary": "no findings"})
 			return claudetest.ToolCall{Name: "Write", Input: map[string]any{"file_path": result, "content": string(data)}}
 		}},
 	}}

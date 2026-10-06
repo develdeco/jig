@@ -10,6 +10,7 @@
       "risk_rationale": "No caller passes an id outside the validated set (this is the gamed, incorrect premise: nothing validates the id before Lookup is called)."
     }
   ],
+  "still_present": [],
   "reviewed_paths": [
     "users/lookup.go"
   ],

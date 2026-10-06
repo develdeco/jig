@@ -178,6 +178,31 @@ func findingHasGreenFixSlice(id string, existingSlices []store.Slice, sliceGreen
 	return false, nil
 }
 
+// ExpandStillPresent turns each of result's still_present entries into a
+// ResultFinding carrying known[entry.Prior]'s file, title, detail, action,
+// risk, risk_rationale and oracle, the entry's own line, and prior set to
+// its own id, and appends it to a copy of result.Findings; result.Findings
+// itself, and the reviewer's raw result.json on disk, stay untouched. The
+// caller runs this once per round, right before ApplyRound, so recurrence
+// counting, routing, triage, the fix budget and revieweval's scoring all
+// see exactly what a full re-report of that finding would give them.
+// validateReviewResult has already rejected a still_present entry whose
+// prior names nothing under open or dismissed before this ever runs, so
+// known is trusted to have an entry for every one.
+func ExpandStillPresent(result ReviewResult, known map[string]Finding) ReviewResult {
+	out := result
+	out.Findings = append([]ResultFinding(nil), result.Findings...)
+	for _, sp := range result.StillPresent {
+		f := known[sp.Prior]
+		out.Findings = append(out.Findings, ResultFinding{
+			File: f.File, Line: sp.Line, Title: f.Title, Detail: f.Detail,
+			Action: f.Action, Risk: f.Risk, RiskRationale: f.RiskRationale,
+			Oracle: f.Oracle, Prior: sp.Prior,
+		})
+	}
+	return out
+}
+
 // ApplyRound applies one validated reviewer round's result onto known, the
 // cumulative fold of every earlier round (rules 1, 2 and 4 below): it
 // assigns ids to new findings and resolves recurrences and the recurrence
@@ -584,7 +609,10 @@ func askedFindingsList(cum map[string]Finding) []Finding {
 func toOpenFindingList(fs []Finding) []OpenFinding {
 	out := make([]OpenFinding, 0, len(fs))
 	for _, f := range fs {
-		out = append(out, OpenFinding{ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail, Action: f.Action, Recurrences: f.Recurrences})
+		out = append(out, OpenFinding{
+			ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail, Action: f.Action,
+			Risk: f.Risk, RiskRationale: f.RiskRationale, Oracle: f.Oracle, Recurrences: f.Recurrences,
+		})
 	}
 	return out
 }
@@ -594,7 +622,10 @@ func toOpenFindingList(fs []Finding) []OpenFinding {
 func toDismissedFindingList(fs []Finding) []DismissedFinding {
 	out := make([]DismissedFinding, 0, len(fs))
 	for _, f := range fs {
-		out = append(out, DismissedFinding{ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail})
+		out = append(out, DismissedFinding{
+			ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail,
+			Action: f.Action, Risk: f.Risk, RiskRationale: f.RiskRationale, Oracle: f.Oracle,
+		})
 	}
 	return out
 }
