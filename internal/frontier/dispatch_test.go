@@ -16,7 +16,7 @@ func TestRenderDispatchPromptMatchesGolden(t *testing.T) {
 		"Work ONLY in this worktree. Goal: say hello\n" +
 		"Oracle (green = done): go test ./alpha/...\n" +
 		"While you work, run only the tests that cover your change. When you report green, jig runs the oracle and hands you its output if it fails.\n" +
-		"Read your inputs from slice.json at /abs/a.attempt-1.slice.json (brief sections by path, attempt log, prior answer, and oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first).\n" +
+		"Read your inputs from slice.json at /abs/a.attempt-1.slice.json (brief sections by path, attempt log, prior answer, oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first, and earlier_slices: what this ticket's verified slices did and the files they changed).\n" +
 		"Commit as you land. When finished write result.json at /abs/a.attempt-1.result.json with exactly one JSON object: " +
 		`{"outcome": "green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed", "summary": "...", "commit": "<sha>", "question": "only for needs-input", "artifacts": ["relative paths"]}`
 	if got != want {
@@ -42,7 +42,7 @@ func TestRenderOracleFixPromptMatchesGolden(t *testing.T) {
 	got := renderOracleFixPrompt("go test ./alpha/...", 42, "--- FAIL: TestHello", "/abs/a.attempt-1.result.json")
 	want := "jig ran the oracle `go test ./alpha/...` on your commit, and it failed after 42 s. Its output ends:\n" +
 		"--- FAIL: TestHello\n" +
-		"Fix the cause, commit, and write result.json at /abs/a.attempt-1.result.json again, as before."
+		"Fix the cause, commit, and write result.json at /abs/a.attempt-1.result.json again, as before, with a summary of the slice's whole change."
 	if got != want {
 		t.Errorf("prompt does not match the golden text.\ngot:\n%s\nwant:\n%s", got, want)
 	}
@@ -56,7 +56,7 @@ func TestRenderDirtyTreePromptMatchesGolden(t *testing.T) {
 	got := renderDirtyTreePrompt("go test ./alpha/...", " M alpha/alpha.go", "/abs/a.attempt-1.result.json")
 	want := "jig did not run the oracle `go test ./alpha/...`: your working tree has uncommitted changes to tracked files, so the commit you reported is not what a run would test:\n" +
 		" M alpha/alpha.go\n" +
-		"Commit or revert them, and write result.json at /abs/a.attempt-1.result.json again, as before."
+		"Commit or revert them, and write result.json at /abs/a.attempt-1.result.json again, as before, with a summary of the slice's whole change."
 	if got != want {
 		t.Errorf("prompt does not match the golden text.\ngot:\n%s\nwant:\n%s", got, want)
 	}

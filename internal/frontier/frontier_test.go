@@ -1228,16 +1228,37 @@ func declareInvariants(t *testing.T, fx *fixture.Fixture, invs []string) {
 // dispatch line - the rung the run actually selected.
 func dispatchModel(t *testing.T, st *store.Store, ticket, slice string, attempt int) string {
 	t.Helper()
+	return dispatchLine(t, st, ticket, slice, attempt).Model
+}
+
+// dispatchLine is the journal's dispatch line for slice's attempt.
+func dispatchLine(t *testing.T, st *store.Store, ticket, slice string, attempt int) journal.Line {
+	t.Helper()
 	lines, err := journal.Read(st, ticket)
 	if err != nil {
 		t.Fatalf("journal.Read: %v", err)
 	}
 	for _, l := range lines {
 		if l.Slice == slice && l.Event == "dispatch" && l.Attempt == attempt {
-			return l.Model
+			return l
 		}
 	}
 	t.Fatalf("no dispatch line for slice %s attempt %d; journal:\n%+v", slice, attempt, lines)
+	return journal.Line{}
+}
+
+// dispatchedEffort is the effort rec's session dispatch for slice's attempt
+// carried.
+func dispatchedEffort(t *testing.T, rec *recordingBackend, slice string, attempt int) string {
+	t.Helper()
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	for _, d := range rec.got {
+		if d.Slice == slice && d.Attempt == attempt {
+			return d.Effort
+		}
+	}
+	t.Fatalf("no session dispatch for slice %s attempt %d", slice, attempt)
 	return ""
 }
 
@@ -1302,8 +1323,10 @@ func TestRunFloorsTheRungWhenTheLeaseDiffTouchesAnInvariant(t *testing.T) {
 
 // TestRunClimbsARungPerFailedAttemptButNotForAQuestion: a slice that fails
 // at the work is dispatched again one rung up, and a slice resumed after its
-// question is answered stays on the rung it opened on (ADR 0019). The
-// journal's dispatch lines carry the rung each attempt ran on.
+// question is answered stays on the rung it opened on (ADR 0019). A retry
+// also thinks harder: the first attempt and the resumed one run at the
+// builder's first effort, each retry at its retry effort (ADR 0023). The
+// journal's dispatch lines carry the rung and effort each attempt ran on.
 func TestRunClimbsARungPerFailedAttemptButNotForAQuestion(t *testing.T) {
 	rungs := staircase.Config{Rungs: []string{"rung-a", "rung-b", "rung-c"}}
 
@@ -1311,12 +1334,22 @@ func TestRunClimbsARungPerFailedAttemptButNotForAQuestion(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "cap"})
 		d, st := newDeps(t, fx)
 		d.Rungs = rungs
+		rec := &recordingBackend{Backend: d.Backend}
+		d.Backend = rec
 		if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
 		for attempt, want := range map[int]string{1: "rung-a", 2: "rung-b", 3: "rung-c"} {
 			if got := dispatchModel(t, st, fx.Ticket, "a", attempt); got != want {
 				t.Errorf("slice a attempt %d ran on %q, want %q: each failed attempt climbs one rung", attempt, got, want)
+			}
+		}
+		for attempt, want := range map[int]string{1: "medium", 2: "high", 3: "high"} {
+			if got := dispatchLine(t, st, fx.Ticket, "a", attempt).Effort; got != want {
+				t.Errorf("slice a attempt %d journaled effort %q, want %q", attempt, got, want)
+			}
+			if got := dispatchedEffort(t, rec, "a", attempt); got != want {
+				t.Errorf("slice a attempt %d dispatched with effort %q, want %q", attempt, got, want)
 			}
 		}
 	})
@@ -1333,6 +1366,9 @@ func TestRunClimbsARungPerFailedAttemptButNotForAQuestion(t *testing.T) {
 		}
 		if got := dispatchModel(t, st, fx.Ticket, "c", 2); got != "rung-a" {
 			t.Errorf("slice c's resumed attempt ran on %q, want %q: asking a question is not a failed attempt", got, "rung-a")
+		}
+		if got := dispatchLine(t, st, fx.Ticket, "c", 2).Effort; got != "medium" {
+			t.Errorf("slice c's resumed attempt journaled effort %q, want the first attempt's medium", got)
 		}
 	})
 }

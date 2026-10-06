@@ -85,7 +85,7 @@ A branch built outside jig that a ticket took as its own with a first `jig gate 
 _Avoid_: imported branch, external branch, hand-written branch
 
 **Gate**:
-Out-of-band verification of a ticket's branch, run on its own lease, under a different model, with fresh context.
+Out-of-band verification of a ticket's branch, run on its own lease, on the staircase's dearest model, with fresh context.
 _Avoid_: code review, QA pass
 
 **Intent**:
@@ -113,7 +113,7 @@ A review-eval round's result: FAIL when it was refused or failed or any failure 
 _Avoid_: pass/fail, score
 
 **Staircase**:
-The per-dispatch model ladder: the first rung first (Sonnet by default), one rung up for each earlier attempt of the slice that failed at the work, floored to the dearest model when the diff touches a path a repo declares as invariant-sensitive.
+The per-dispatch model ladder: the first rung first (Sonnet by default), one rung up for each earlier attempt of the slice that failed at the work, floored to the dearest model when the diff touches a path a repo declares as invariant-sensitive. The gate reviewer always runs on the dearest rung.
 _Avoid_: model tiering, escalation policy
 
 **Stall**:

@@ -2964,7 +2964,7 @@ jig times each oracle run at green and journals it (`seconds` on the `oracle` li
 
 `Store.Mint(format, rec)` holds the store's own mint lock (`.jig-mint`, a `store.Lock` sidecar, the same 30s timeout every other store writer uses) across both the scan for the next id and the record's write, so two mints against one clone can never compute the same id. The scan is the local tracker's old algorithm, moved rather than rewritten: read the store root's entries, match each directory name against a regexp built from `ticket_format`'s one `{n}` placeholder, and take one past the highest number found; a non-directory entry that happens to match is skipped, so a stray file never shifts the count.
 
-`pool.CheckTicket` runs before `CreateTicketRecord`, so an id jig cannot use (a reserved lease suffix, or anything that is not a single directory name) is refused with no folder and no record left behind; its help says to change `ticket_format` and mint again, not to close a ticket in some tracker, since no tracker ever holds one now. `jig graduate` mints through the same `Store.Mint`, so a ticket gets its record under one rule whichever command minted it, and help text that used to say a ticket "exists only in the tracker" goes along with the case it described. See [ADR 0023](docs/adr/0023-jig-mints-and-claims-every-ticket-id.md).
+`pool.CheckTicket` runs before `CreateTicketRecord`, so an id jig cannot use (a reserved lease suffix, or anything that is not a single directory name) is refused with no folder and no record left behind; its help says to change `ticket_format` and mint again, not to close a ticket in some tracker, since no tracker ever holds one now. `jig graduate` mints through the same `Store.Mint`, so a ticket gets its record under one rule whichever command minted it, and help text that used to say a ticket "exists only in the tracker" goes along with the case it described. See [ADR 0028](docs/adr/0028-jig-mints-and-claims-every-ticket-id.md).
 
 ## Claiming an id on the store's origin
 
@@ -2992,3 +2992,14 @@ The tracker package (`internal/tracker`: local, command, github, jira/linear) an
 
 `Store.Mint` and `store.Ticket` already took a whole record; `--body`'s value and a chart entry's own `Body` are threaded into that same `store.Ticket` literal rather than becoming a second parameter `Mint` or `CreateTicketRecord` has to carry alongside title and blockers.
 
+## A builder reads what earlier slices built (build-speed item 6d)
+
+`slice.json` gains `earlier_slices`: every slice of the ticket whose green jig verified before this dispatch, with its builder's summary and the files its verified attempt changed (the union of each attempt's own range: from the lease head at its dispatch, now on the dispatch line, to its verified commit or the head its last turn ended on, now on the result line). The dispatch prompt names it. Sizing slices to a session goes into the intake skill instead (BS-2). See [ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md).
+
+## The reviewer runs on the dearest rung, and builds and reviews get an effort (build-speed item 6i)
+
+The gate reviewer runs on the staircase's dearest rung every round (`staircase.Dearest`), replacing `Disjoint`, which picked the first rung no builder used and gave an invariant-floored Opus build a Sonnet reviewer; its independence comes from its fresh read-only session. jig now passes `--effort` to `claude`: the reviewer's by round scope (`gate.review_effort`, full `high`, delta `medium`) and a builder's by attempt (`builder_effort`, first `medium`, retry `high`, a retry being an attempt after a failed one by the same count that climbs a rung). A builder's dispatch line and the reviewer round's line record the effort. herdr starts its agent without flags, so it passes neither effort nor model, as before. `journal.BuilderModels` lost its only caller and is removed. See [ADR 0023](docs/adr/0023-the-reviewer-runs-on-the-dearest-rung-and-builds-and-reviews-get-an-effort.md).
+
+## jig's testing method, and what a project owns (build-speed BS-2)
+
+One ADR lists jig's testing method, each item pointing at its decision, and adds the two principles that had no home: one end-to-end chain per critical path with rule variants at the narrowest seam, and the test diet as a refactor whose deletions name their covering seam test. Testing knowledge lives in three layers, jig's method, the project's facts and a run's choices, with no greenfield mode. The intake skill carries both principles, sizes one cohesive change as one slice, and has a full-suite slice name the repo's manifest oracle rather than write its command out. See [ADR 0027](docs/adr/0027-jigs-testing-method-and-what-a-project-owns.md).

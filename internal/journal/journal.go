@@ -22,6 +22,10 @@ type Line struct {
 	Outcome string `json:"outcome,omitempty"`
 	Commit  string `json:"commit,omitempty"`
 	Model   string `json:"model,omitempty"`
+	// Effort is the reasoning effort a session was dispatched with: on a
+	// builder's dispatch line, and on a gate round's own line for its
+	// reviewer ("" when none was passed).
+	Effort  string `json:"effort,omitempty"`
 	Attempt int    `json:"attempt,omitempty"`
 	// Command and Env are an oracle line's exact command and the env class
 	// that was up while it ran ("" for none): what the gate must match to
@@ -31,6 +35,10 @@ type Line struct {
 	// Seconds is an oracle line's wall time, in whole seconds: what the next
 	// builder of the same command is told (ADR 0024).
 	Seconds int `json:"seconds,omitempty"`
+	// Head is a result line's lease head when that turn of the attempt
+	// ended: with the attempt's dispatch line's commit (its base), the
+	// range of the attempt's own commits (ADR 0025).
+	Head string `json:"head,omitempty"`
 }
 
 func journalPath(st *store.Store, ticket string) string {
@@ -91,21 +99,6 @@ func Read(st *store.Store, ticket string) ([]Line, error) {
 		lines = append(lines, l)
 	}
 	return lines, nil
-}
-
-// BuilderModels returns the distinct models used by event=dispatch lines,
-// in first-seen order.
-func BuilderModels(lines []Line) []string {
-	seen := map[string]bool{}
-	var models []string
-	for _, l := range lines {
-		if l.Event != "dispatch" || l.Model == "" || seen[l.Model] {
-			continue
-		}
-		seen[l.Model] = true
-		models = append(models, l.Model)
-	}
-	return models
 }
 
 // FailedAttempts counts slice's attempts that failed at the work: a result
@@ -188,4 +181,69 @@ func LastOracleSeconds(lines []Line, command, env string) int {
 		}
 	}
 	return 0
+}
+
+// VerifiedSlice is a slice whose green jig verified, with the ranges of its
+// attempts' own commits (VerifiedSlices).
+type VerifiedSlice struct {
+	Slice string
+	// Attempt is the slice's latest verified attempt.
+	Attempt int
+	// Ranges are base..end pairs, one per attempt of the slice that has a
+	// dispatch base and an end: the base is the dispatch line's commit, and
+	// the end the attempt's verified commit or else its last result line's
+	// head. Other slices may run between two attempts, so only these ranges
+	// hold the slice's own commits.
+	Ranges [][2]string
+}
+
+// VerifiedSlices lists the slices in lines whose green jig verified, other
+// than skip, in the order they first verified.
+func VerifiedSlices(lines []Line, skip string) []VerifiedSlice {
+	type attemptKey struct {
+		slice   string
+		attempt int
+	}
+	base := map[attemptKey]string{}
+	end := map[attemptKey]string{}
+	verified := map[attemptKey]bool{}
+	var order []string
+	latest := map[string]int{}
+	attempts := map[string][]int{}
+	for _, l := range lines {
+		k := attemptKey{l.Slice, l.Attempt}
+		switch l.Event {
+		case "dispatch":
+			base[k] = l.Commit
+			attempts[l.Slice] = append(attempts[l.Slice], l.Attempt)
+		case "result":
+			if l.Head != "" && !verified[k] {
+				end[k] = l.Head
+			}
+		case "verified":
+			if l.Slice == skip {
+				continue
+			}
+			verified[k] = true
+			if l.Commit != "" {
+				end[k] = l.Commit
+			}
+			if _, ok := latest[l.Slice]; !ok {
+				order = append(order, l.Slice)
+			}
+			latest[l.Slice] = l.Attempt
+		}
+	}
+	out := make([]VerifiedSlice, 0, len(order))
+	for _, s := range order {
+		v := VerifiedSlice{Slice: s, Attempt: latest[s]}
+		for _, a := range attempts[s] {
+			k := attemptKey{s, a}
+			if base[k] != "" && end[k] != "" && base[k] != end[k] {
+				v.Ranges = append(v.Ranges, [2]string{base[k], end[k]})
+			}
+		}
+		out = append(out, v)
+	}
+	return out
 }

@@ -213,9 +213,28 @@ that fits in one slice keeps its existing id,
 `-1`, `-2`, ... from 1. Must be at least 1. Invalid values are refused at
 load time.
 
+Sessions also get a reasoning effort, passed to `claude` as `--effort`: the
+gate reviewer's by round scope, a builder's by attempt
+([ADR 0023](docs/adr/0023-the-reviewer-runs-on-the-dearest-rung-and-builds-and-reviews-get-an-effort.md)):
+
+```yaml
+gate:
+  review_effort:
+    full: high                 # the first review, or one not on top of the last
+    delta: medium              # re-checking fixes since the last reviewed head
+builder_effort:
+  first: medium                # a slice's first attempt
+  retry: high                  # any attempt after a failed one
+```
+
+The values shown are the defaults, also for a key with no value; `""` passes
+no effort. The gate reviewer runs on the staircase's dearest rung on every
+round.
+
 Invalid configuration values are refused when `project.yaml` loads:
 a negative `fix_rounds`, a `fix_risks` entry that is not `high`, `medium` or
-`low`, or a `fix_slice_findings` below 1.
+`low`, a `fix_slice_findings` below 1, or an effort that is not one of `low`,
+`medium`, `high`, `xhigh`, `max` or empty.
 
 ## Module responsibilities
 
@@ -237,7 +256,7 @@ exists.
 | `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `internal/home/` | `Root`, `MachinePath`, `PoolDir`, `IntentExcerptDir`, `IntentScratchDir`, `EvidenceDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths, including the directories intent excerpts and summarizer scratch directories go under, and where one reviewed head's demo media live |
 | `internal/intent/` | `NewClaudeReader`, `Best`, `RenderExcerpt` | a repo's git common dir + a time window → matching local agent `Session`s; a scope diff's files → the `Match` a model then summarizes |
-| `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
+| `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `VerifiedSlices`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
 | `internal/manifest/` | `Resolve`, `MatchesInvariant` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes, and invariant-sensitive paths; a file path → whether it matches a declared invariant |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket`, `Compare`, `DivergedError`, `RequireBuilt`, `HoldsUnpushedBuilt`, `MustExistOnOrigin`, `RecutUnlessBuilt` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point, and synced with its branch when origin has it; anything git shows is not a repository of its own is moved aside and cloned afresh) |
@@ -246,7 +265,7 @@ exists.
 | `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `MatchRound`, `ScoreRound`, `RenderReport` | a labeled corpus (`testdata/revieweval`) + a session backend → a `CaseScore` per case, matched structurally against seeded gold through the real reviewer contract |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
-| `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` (the slice's failed attempts, invariant match) + `Config` → a model rung, disjoint from rungs already in use; invariant floored to the dearest rung, one rung up per failed attempt, otherwise the first rung |
+| `internal/staircase/` | `Select`, `Dearest`, `Default` | build `Signals` (the slice's failed attempts, invariant match) + `Config` → a builder's model rung: invariant floored to the dearest rung, one rung up per failed attempt, otherwise the first rung; `Dearest` is the gate reviewer's rung on every round |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID`, `Mint`, `Claim` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by; `ticket_format` + a ticket's own record → the next id, its folder created and its `ticket.yaml` written whole (refused, before anything is written, when jig cannot use the id it computed); a mint (or other write) + a commit message → that id landed on the store's origin, retried after a push the origin rejects, undone and refused (`ID_NOT_CLAIMED`) after too many or any other failed push, committed with no push on a store with no origin |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one) |
 
@@ -254,8 +273,11 @@ exists.
 
 The contract between jig and any backend is pure disk: jig writes
 `slice.json` (goal, oracle, workspace, prior attempt log, any answered
-question, and how long jig's last run of the oracle took on this ticket,
-[ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md)), the backend runs a session in the lease worktree, and jig reads
+question, how long jig's last run of the oracle took on this ticket,
+[ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md), and
+what the ticket's verified slices did and changed,
+[ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md)),
+the backend runs a session in the lease worktree, and jig reads
 back `result.json` (outcome, summary, commit, and - for `needs-input` - a
 question). Nothing crosses in memory.
 

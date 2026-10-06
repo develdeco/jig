@@ -3,6 +3,7 @@ package journal
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -89,28 +90,6 @@ func TestAppendConcurrentNoLostLines(t *testing.T) {
 	}
 }
 
-func TestBuilderModels(t *testing.T) {
-	lines := []Line{
-		{Event: "dispatch", Model: "claude-sonnet-5"},
-		{Event: "result", Outcome: "green"},
-		{Event: "dispatch", Model: "claude-haiku-4-5"},
-		{Event: "dispatch", Model: "claude-sonnet-5"},
-		{Event: "dispatch", Model: ""},
-	}
-	got := BuilderModels(lines)
-	want := []string{"claude-sonnet-5", "claude-haiku-4-5"}
-	if len(got) != len(want) {
-		t.Fatalf("BuilderModels = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("BuilderModels = %v, want %v", got, want)
-		}
-	}
-}
-
-// TestFailedAttempts: an attempt fails at the work when its result is not a
-// question, a flawed brief or a blocked environment, and it did not verify.
 func TestFailedAttempts(t *testing.T) {
 	lines := []Line{
 		{Slice: "a", Event: "result", Outcome: "code-bug", Attempt: 1},
@@ -317,5 +296,33 @@ func TestLastOracleSeconds(t *testing.T) {
 	}
 	if got := LastOracleSeconds(lines, "go vet ./...", ""); got != 0 {
 		t.Errorf("LastOracleSeconds(never run) = %d, want 0", got)
+	}
+}
+
+// TestVerifiedSlices: a slice's ranges are each attempt's own, base to the
+// verified commit or the attempt's last result head, so commits other slices
+// made between two attempts are never its own; slices list in the order they
+// first verified, with their latest verified attempt, and skip is left out.
+func TestVerifiedSlices(t *testing.T) {
+	lines := []Line{
+		{Slice: "a", Event: "dispatch", Commit: "b1", Attempt: 1},
+		{Slice: "a", Event: "result", Outcome: "needs-input", Head: "h1", Attempt: 1},
+		{Slice: "x", Event: "dispatch", Commit: "h1", Attempt: 1},
+		{Slice: "x", Event: "result", Outcome: "green", Commit: "x1", Head: "x1", Attempt: 1},
+		{Slice: "x", Event: "verified", Commit: "x1", Attempt: 1},
+		{Slice: "a", Event: "dispatch", Commit: "x1", Attempt: 2},
+		{Slice: "a", Event: "result", Outcome: "green", Commit: "a2", Head: "a2", Attempt: 2},
+		{Slice: "a", Event: "verified", Commit: "a2", Attempt: 2},
+		{Slice: "a", Event: "result", Outcome: "green", Commit: "a3", Head: "a3", Attempt: 2},
+		{Slice: "z", Event: "dispatch", Commit: "a2", Attempt: 1},
+		{Slice: "z", Event: "verified", Commit: "z1", Attempt: 1},
+	}
+	got := VerifiedSlices(lines, "z")
+	want := []VerifiedSlice{
+		{Slice: "x", Attempt: 1, Ranges: [][2]string{{"h1", "x1"}}},
+		{Slice: "a", Attempt: 2, Ranges: [][2]string{{"b1", "h1"}, {"x1", "a2"}}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("VerifiedSlices =\n%+v\nwant\n%+v", got, want)
 	}
 }

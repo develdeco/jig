@@ -340,6 +340,9 @@ func (b *headlessBackend) args(d Dispatch) (argv []string, cleanup func(), err e
 	if d.Model != "" {
 		args = append(args, "--model", d.Model)
 	}
+	if d.Effort != "" {
+		args = append(args, "--effort", d.Effort)
+	}
 	args = append(args,
 		"--permission-mode", "dontAsk",
 		"--tools", strings.Join(headlessTools(), ","),

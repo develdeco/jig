@@ -775,3 +775,80 @@ gate:
 		})
 	}
 }
+
+// TestLoadEffortConfig: gate.review_effort and builder_effort set the
+// reviewer's effort by round scope and a builder's by attempt (ADR 0023);
+// an absent level takes its default, an empty one passes none, and a level
+// --effort does not accept is refused with the key named.
+func TestLoadEffortConfig(t *testing.T) {
+	head := `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+tracker: local
+repos: []
+platform: platform/
+`
+	load := func(t *testing.T, body string) (Config, error) {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "project.yaml")
+		writeFile(t, p, head+body)
+		return Load(p)
+	}
+
+	t.Run("defaults", func(t *testing.T) {
+		cfg, err := load(t, "")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got := cfg.ReviewEffortFor("full"); got != "high" {
+			t.Errorf("full review effort = %q, want high", got)
+		}
+		if got := cfg.ReviewEffortFor("delta"); got != "medium" {
+			t.Errorf("delta review effort = %q, want medium", got)
+		}
+		if got := cfg.BuilderEffortFor(0); got != "medium" {
+			t.Errorf("first attempt effort = %q, want medium", got)
+		}
+		if got := cfg.BuilderEffortFor(2); got != "high" {
+			t.Errorf("retry effort = %q, want high", got)
+		}
+	})
+
+	t.Run("declared, and empty for none", func(t *testing.T) {
+		cfg, err := load(t, `
+gate:
+  review_effort:
+    full: max
+    delta: ""
+builder_effort:
+  first: low
+  retry: xhigh
+`)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		for _, c := range []struct{ name, got, want string }{
+			{"full", cfg.ReviewEffortFor("full"), "max"},
+			{"delta", cfg.ReviewEffortFor("delta"), ""},
+			{"first", cfg.BuilderEffortFor(0), "low"},
+			{"retry", cfg.BuilderEffortFor(1), "xhigh"},
+		} {
+			if c.got != c.want {
+				t.Errorf("%s effort = %q, want %q", c.name, c.got, c.want)
+			}
+		}
+	})
+
+	for _, c := range []struct{ name, body, key string }{
+		{"bad review level", "gate:\n  review_effort:\n    full: extreme\n", "gate.review_effort.full"},
+		{"bad builder level", "builder_effort:\n  retry: HIGH\n", "builder_effort.retry"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := load(t, c.body)
+			if err == nil || !strings.Contains(err.Error(), c.key) {
+				t.Errorf("Load error = %v, want one naming %s", err, c.key)
+			}
+		})
+	}
+}

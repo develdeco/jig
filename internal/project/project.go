@@ -51,9 +51,84 @@ func (r Repo) Name() string {
 // gate's fix loop and risk floor. Pointers are used for int fields so absent
 // values can be distinguished from explicit 0.
 type GateConfig struct {
-	FixRounds        *int     `yaml:"fix_rounds"`
-	FixRisks         []string `yaml:"fix_risks"`
-	FixSliceFindings *int     `yaml:"fix_slice_findings"`
+	FixRounds        *int         `yaml:"fix_rounds"`
+	FixRisks         []string     `yaml:"fix_risks"`
+	FixSliceFindings *int         `yaml:"fix_slice_findings"`
+	ReviewEffort     ReviewEffort `yaml:"review_effort"`
+}
+
+// ReviewEffort is gate.review_effort: the gate reviewer's reasoning effort
+// by round scope, a "full" round (the first review, or one whose earlier
+// reviewed head is not an ancestor) or a "delta" one. A nil field takes its
+// default; "" passes no effort, so the CLI's own default applies.
+type ReviewEffort struct {
+	Full  *string `yaml:"full"`
+	Delta *string `yaml:"delta"`
+}
+
+// BuilderEffort is builder_effort: a builder's reasoning effort by attempt,
+// the first one of a slice or a retry after a failed one. A nil field takes
+// its default; "" passes no effort.
+type BuilderEffort struct {
+	First *string `yaml:"first"`
+	Retry *string `yaml:"retry"`
+}
+
+// effortLevels are the levels Claude Code's --effort accepts.
+var effortLevels = []string{"low", "medium", "high", "xhigh", "max"}
+
+// Effort defaults (ADR 0023): a full review and a builder's retry think
+// hard; a delta review and a builder's first attempt think less.
+const (
+	defaultReviewEffortFull  = "high"
+	defaultReviewEffortDelta = "medium"
+	defaultBuilderFirst      = "medium"
+	defaultBuilderRetry      = "high"
+)
+
+// effortOr is v's level, or def when v is absent.
+func effortOr(v *string, def string) string {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
+// ReviewEffortFor returns the gate reviewer's effort for a round of scope
+// ("full" or "delta").
+func (c Config) ReviewEffortFor(scope string) string {
+	var e ReviewEffort
+	if c.Gate != nil {
+		e = c.Gate.ReviewEffort
+	}
+	if scope == "delta" {
+		return effortOr(e.Delta, defaultReviewEffortDelta)
+	}
+	return effortOr(e.Full, defaultReviewEffortFull)
+}
+
+// BuilderEffortFor returns a builder's effort for an attempt that follows
+// failedAttempts failed attempts of its slice (journal.FailedAttempts, the
+// same count that climbs the staircase).
+func (c Config) BuilderEffortFor(failedAttempts int) string {
+	if failedAttempts > 0 {
+		return effortOr(c.BuilderEffort.Retry, defaultBuilderRetry)
+	}
+	return effortOr(c.BuilderEffort.First, defaultBuilderFirst)
+}
+
+// validateEffort refuses a level --effort does not accept; "" (no effort)
+// and an absent value pass.
+func validateEffort(key string, v *string) error {
+	if v == nil || *v == "" {
+		return nil
+	}
+	for _, l := range effortLevels {
+		if *v == l {
+			return nil
+		}
+	}
+	return fmt.Errorf("project: %s must be one of %s, or empty for none; got %q", key, strings.Join(effortLevels, ", "), *v)
 }
 
 // DefaultGateConfig returns the config with all defaults applied.
@@ -79,6 +154,9 @@ type Config struct {
 	// risk floor. An absent block is nil; a block with absent keys gains
 	// defaults.
 	Gate *GateConfig
+	// BuilderEffort is the optional builder_effort: block
+	// (BuilderEffortFor applies its defaults).
+	BuilderEffort BuilderEffort
 }
 
 // configRaw mirrors Config's YAML shape, with Tracker, Trackers and Routes
@@ -96,6 +174,7 @@ type configRaw struct {
 	Context       map[string]any `yaml:"context,omitempty"`
 	Routes        yaml.Node      `yaml:"routes"`
 	Gate          *GateConfig    `yaml:"gate,omitempty"`
+	BuilderEffort BuilderEffort  `yaml:"builder_effort,omitempty"`
 }
 
 // UnmarshalYAML decodes project.yaml: trackers: is a list of mirrors (absent
@@ -118,6 +197,7 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	c.Staircase = raw.Staircase
 	c.Context = raw.Context
 	c.Gate = raw.Gate
+	c.BuilderEffort = raw.BuilderEffort
 
 	if raw.Routes.Kind != 0 {
 		return &axi.Error{
@@ -171,7 +251,10 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	if err := c.validateGateConfig(); err != nil {
 		return err
 	}
-	return nil
+	if err := validateEffort("builder_effort.first", c.BuilderEffort.First); err != nil {
+		return err
+	}
+	return validateEffort("builder_effort.retry", c.BuilderEffort.Retry)
 }
 
 // validateGateConfig validates the gate config.
@@ -194,7 +277,10 @@ func (c *Config) validateGateConfig() error {
 	if c.Gate.FixSliceFindings != nil && *c.Gate.FixSliceFindings < 1 {
 		return fmt.Errorf("project: gate.fix_slice_findings must be at least 1, got %d", *c.Gate.FixSliceFindings)
 	}
-	return nil
+	if err := validateEffort("gate.review_effort.full", c.Gate.ReviewEffort.Full); err != nil {
+		return err
+	}
+	return validateEffort("gate.review_effort.delta", c.Gate.ReviewEffort.Delta)
 }
 
 // ResolvedGateConfig returns the gate config with defaults applied for any

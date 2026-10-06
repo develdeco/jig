@@ -23,7 +23,7 @@ const dispatchPromptTemplate = "You are a jig build session for slice %s of tick
 	"Work ONLY in this worktree. Goal: %s\n" +
 	"Oracle (green = done): %s\n" +
 	"%s\n" +
-	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer, and oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first).\n" +
+	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer, oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first, and earlier_slices: what this ticket's verified slices did and the files they changed).\n" +
 	"Commit as you land. When finished write result.json at %s with exactly one JSON object: {\"outcome\": \"green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed\", \"summary\": \"...\", \"commit\": \"<sha>\", \"question\": \"only for needs-input\", \"artifacts\": [\"relative paths\"]}"
 
 // oracleFixPromptTemplate is the next turn jig hands a builder's own session
@@ -31,7 +31,7 @@ const dispatchPromptTemplate = "You are a jig build session for slice %s of tick
 // It says how long the run took (ADR 0024), so the session knows what
 // running it again costs.
 const oracleFixPromptTemplate = "jig ran the oracle `%s` on your commit, and it failed after %d s. Its output ends:\n%s\n" +
-	"Fix the cause, commit, and write result.json at %s again, as before."
+	"Fix the cause, commit, and write result.json at %s again, as before, with a summary of the slice's whole change."
 
 // renderOracleFixPrompt fills oracleFixPromptTemplate.
 func renderOracleFixPrompt(oracleCmd string, seconds int, outputTail, resultJSONPath string) string {
@@ -42,7 +42,7 @@ func renderOracleFixPrompt(oracleCmd string, seconds int, outputTail, resultJSON
 // when it reports green with uncommitted changes to tracked files: jig does
 // not run the oracle, since a run would not test the reported commit.
 const dirtyTreePromptTemplate = "jig did not run the oracle `%s`: your working tree has uncommitted changes to tracked files, so the commit you reported is not what a run would test:\n%s\n" +
-	"Commit or revert them, and write result.json at %s again, as before."
+	"Commit or revert them, and write result.json at %s again, as before, with a summary of the slice's whole change."
 
 // renderDirtyTreePrompt fills dirtyTreePromptTemplate.
 func renderDirtyTreePrompt(oracleCmd, changes, resultJSONPath string) string {
@@ -81,6 +81,21 @@ type sliceJSONBody struct {
 	// oracle command took on this ticket, in seconds; 0 before the first
 	// (ADR 0024).
 	OracleSeconds int `json:"oracle_seconds"`
+	// EarlierSlices is what this ticket's already-verified slices did, in
+	// the order they verified, so a builder starts from what was built
+	// rather than rediscovering it (ADR 0025).
+	EarlierSlices []earlierSlice `json:"earlier_slices"`
+}
+
+// earlierSlice is one entry of slice.json's earlier_slices: a slice of the
+// ticket whose green jig verified, its builder's summary, and the files its
+// attempts changed.
+type earlierSlice struct {
+	ID      string   `json:"id"`
+	Summary string   `json:"summary"`
+	Files   []string `json:"files"`
+	// FilesOmitted counts the files past maxEarlierFiles left out of Files.
+	FilesOmitted int `json:"files_omitted,omitempty"`
 }
 
 // workDir returns the store-side (not lease-side) directory that carries
