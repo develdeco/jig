@@ -41,13 +41,22 @@ an origin, pushes that commit alone:
 - a push the origin accepts finishes the claim;
 - a push it rejects (the origin moved on: not a fast-forward) undoes the
   commit and the folder it created, scoped to its own paths so any other
-  dirty state in the store survives, pulls - a fast-forward in the common
-  case, since the undone commit was the only thing the local branch had
-  that the origin lacked, but not always: a local change the undo
-  preserved can overlap a file the rejecting push itself brought in, and
-  Claim then refuses `ID_NOT_CLAIMED` naming it rather than ending in a
-  merge or rebase conflict - and mints again, up to five attempts, after
-  which it refuses with `ID_NOT_CLAIMED` and leaves no claim behind;
+  dirty state in the store survives - but only once it has confirmed the
+  undo is safe: that nothing but this round's own commit sits between the
+  branch's tip and where the undo would reset it to. When another process's
+  own commit, made on this same clone while the claim was in flight, sits
+  there instead, that reset cannot discard this round's commit alone - it
+  would rewind the branch past the other commit too, orphaning it rather
+  than discarding it - so Claim never resets at all and refuses
+  `ID_NOT_CLAIMED` at once, naming that commit, leaving the branch untouched
+  for the operator to reconcile by hand. Once confirmed safe, it pulls - a
+  fast-forward in the common case, since the undone commit was the only
+  thing the local branch had that the origin lacked, but not always: a
+  local change the undo preserved can overlap a file the rejecting push
+  itself brought in, and Claim then refuses `ID_NOT_CLAIMED` naming it
+  rather than ending in a merge or rebase conflict - and mints again, up to
+  five attempts, after which it refuses with `ID_NOT_CLAIMED` and leaves no
+  claim behind;
 - a push that fails for any other reason (the origin unreachable) undoes
   the claim the same way and refuses at once with `ID_NOT_CLAIMED`, help:
   retry once the origin is reachable;

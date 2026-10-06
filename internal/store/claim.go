@@ -36,26 +36,39 @@ const idNotClaimedCode = "ID_NOT_CLAIMED"
 // file (a chart's tickets.yaml) to what it held before and removing write's
 // new ticket folder, plus its gitignored lock sidecar, that a reset alone
 // would otherwise leave sitting on disk (git never removes a directory
-// merely for holding no tracked files) - pulls and calls write again, up to
-// maxClaimAttempts times. That pull is a fast-forward in the common case
-// (the undone commit was the only thing the local branch had that the
-// origin lacked), but not always: a local change undoClaim's scoped undo
-// preserved (another process's own edit or commit, still in the store) can
-// overlap a path the rejecting push just brought in, and when it does the
-// pull refuses rather than merging or rebasing. Claim reports that as
-// ID_NOT_CLAIMED too, naming the local change only when the pull's own
-// failure actually names one - git's "would be overwritten by merge" text,
-// or a rebase conflict's own STORE_CONFLICT (abortFailedPull), which Claim
-// returns unchanged, Code and Help both, since that already carries the
-// real recipe; anything else - an unreachable or moved origin, a dead
+// merely for holding no tracked files). It undoes only once it has confirmed
+// the undo is safe, though: undoClaim's own `reset --soft` moves the branch
+// back to the commit from before this round's write ran, and cannot discard
+// this round's own commit alone - it takes whatever else sits between the
+// two with it, which would silently throw a commit another jig process made
+// on this same clone while this claim was in flight (Store.Sync's or
+// Store.Push's own `add -A`, racing in before or after this round's own
+// commit) off the branch - its message, author and date gone, recoverable
+// afterwards only from that clone's own reflog. foreignCommitAhead checks
+// for exactly that before every undo; when it finds one, Claim never resets
+// at all, refusing at once with ID_NOT_CLAIMED naming the other commit
+// (foreignCommitError) and leaving the branch untouched for the operator to
+// reconcile by hand. Once the undo is confirmed safe, Claim pulls and calls
+// write again, up to maxClaimAttempts times. That pull is a fast-forward in
+// the common case (the undone commit was the only thing the local branch had
+// that the origin lacked), but not always: a local, uncommitted change
+// undoClaim's scoped undo preserved (another process's own edit, still in
+// the store) can overlap a path the rejecting push just brought in, and when
+// it does the pull refuses rather than merging or rebasing. Claim reports
+// that as ID_NOT_CLAIMED too, naming the local change only when the pull's
+// own failure actually names one - git's "would be overwritten by merge"
+// text, or a rebase conflict's own STORE_CONFLICT (abortFailedPull), which
+// Claim returns unchanged, Code and Help both, since that already carries
+// the real recipe; anything else - an unreachable or moved origin, a dead
 // network - is reported as what it is, not blamed on a file that was never
 // in the way. A push that fails any other way (the origin unreachable, or
-// anything else) undoes the claim the same way and refuses at once with
-// ID_NOT_CLAIMED, since retrying blind would not help; so does the last of
-// maxClaimAttempts rejections. An undo that does not finish is reported the
-// same way too, naming the commit it was undoing and the branch's actual
-// state: undoClaim reports whether its own `reset --soft`, the first of its
-// steps, completed before a later, per-path step failed. When it did, that
+// anything else) undoes the claim the same way, subject to the same safety
+// check, and refuses at once with ID_NOT_CLAIMED, since retrying blind would
+// not help; so does the last of maxClaimAttempts rejections. An undo that
+// does not finish is reported the same way too, naming the commit it was
+// undoing and the branch's actual state: undoClaim reports whether its own
+// `reset --soft`, the first of its steps, completed before a later, per-path
+// step failed. When it did, that
 // commit (when this round made one at all - stageAndCommitPaths may have
 // found nothing of paths to stage) is off the branch either way, but a path
 // undoClaim did not get to revert may still need finishing by hand; when
@@ -79,7 +92,8 @@ func (s *Store) Claim(write func() (id string, paths []string, err error), msg f
 		if err != nil {
 			return "", err
 		}
-		if _, err := s.stageAndCommitPaths(paths, msg(id)); err != nil {
+		claimSHA, err := s.stageAndCommitPaths(paths, msg(id))
+		if err != nil {
 			if havePre {
 				_, _ = s.undoClaim(pre, paths)
 			}
@@ -94,9 +108,19 @@ func (s *Store) Claim(write func() (id string, paths []string, err error), msg f
 			return id, nil
 		}
 		if havePre {
-			claimSHA, _ := s.headSHA()
+			foreign, ferr := s.foreignCommitAhead(pre, claimSHA)
+			if ferr != nil {
+				return "", idNotClaimedError(ferr)
+			}
+			if foreign != "" {
+				return "", foreignCommitError(foreign)
+			}
+			effectiveSHA := claimSHA
+			if effectiveSHA == "" {
+				effectiveSHA = pre
+			}
 			if resetRan, err := s.undoClaim(pre, paths); err != nil {
-				return "", undoFailedError(err, claimSHA, pre, resetRan)
+				return "", undoFailedError(err, effectiveSHA, pre, resetRan)
 			}
 		}
 		if !rejected {
@@ -124,17 +148,70 @@ func (s *Store) headSHA() (string, bool) {
 	return sha, true
 }
 
+// foreignCommitAhead reports a commit, other than this round's own
+// (claimSHA, as stageAndCommitPaths reported it - "" when it found nothing
+// of paths to stage), that sits between pre and the branch's current tip:
+// landed under claimSHA (its own parent is not pre - another process
+// committed before this round's commit did) or over it (the tip is not
+// claimSHA at all - another process committed after). It returns "" when
+// pre..tip holds nothing but claimSHA alone, or, when claimSHA is "", when
+// the tip is still pre itself - the one shape undoClaim's `reset --soft
+// pre` is safe to run without rewinding over a commit that is not this
+// claim's to discard (see Claim's own doc comment and foreignCommitError,
+// which is what runs instead when it is not safe).
+func (s *Store) foreignCommitAhead(pre, claimSHA string) (string, error) {
+	tip, ok := s.headSHA()
+	if !ok {
+		return "", fmt.Errorf("HEAD does not resolve")
+	}
+	if tip == pre {
+		return "", nil
+	}
+	if claimSHA != "" && tip == claimSHA {
+		parent, err := gitx.Run(s.Root, "rev-parse", "--quiet", "--verify", claimSHA+"^")
+		if err != nil {
+			return "", err
+		}
+		if parent == pre {
+			return "", nil
+		}
+		return parent, nil
+	}
+	return tip, nil
+}
+
+// foreignCommitError refuses with ID_NOT_CLAIMED instead of ever calling
+// undoClaim: foreignCommitAhead found a commit between pre and the branch's
+// current tip that is not this round's own, and undoClaim's `reset --soft
+// pre` cannot discard this round's rejected commit alone - it moves the
+// branch back past whatever sits between the two, which would throw foreign
+// off the branch exactly as silently as a hard reset would (its message,
+// author and date gone, recoverable afterwards only from this clone's own
+// reflog, not the branch). Claim leaves the branch, foreign, and this
+// round's own rejected commit exactly as they are instead, for the operator
+// to reconcile by hand.
+func foreignCommitError(foreign string) error {
+	return &axi.Error{
+		Msg:  fmt.Sprintf("the id could not be claimed on the store's origin: commit %s landed on the branch while this claim was in flight, and undoing the rejected push would rewind the branch past it", foreign),
+		Code: idNotClaimedCode,
+		Help: []string{fmt.Sprintf("Claim left the branch untouched rather than rewinding over %s. Inspect it with `git log` and `git show %s`, reconcile the branch by hand (for example, rebase this claim's own rejected commit onto the current origin) and push, then retry.", foreign, foreign)},
+	}
+}
+
 // undoClaim discards exactly the commit write's own call just made - never
 // anything else in the store - how Claim undoes a push the origin rejected
-// or otherwise refused. `reset --soft` moves HEAD (and the branch) back to
-// sha without touching the index or the working tree: an edit another
-// process left uncommitted in the store (a journal.ndjson line) is
-// untouched by it. A commit that process made of its own, on top of this
-// claim's own commit (Store.Sync's or Store.Push's own `add -A`, racing in
-// before this push), is orphaned rather than discarded - no longer
-// reachable from the branch, its content left staged against the rewound
-// HEAD; it is stageAndCommitPaths' own pathspec-scoped commit, not this
-// reset, that keeps that content out of Claim's next retry (see
+// or otherwise refused, once Claim's own foreignCommitAhead check has
+// confirmed that is safe: nothing but this round's own commit sits between
+// sha (pre, in Claim's own terms) and the branch's current tip. `reset
+// --soft` moves HEAD (and the branch) back to sha without touching the
+// index or the working tree: an edit another process left uncommitted in
+// the store (a journal.ndjson line) is untouched by it. A commit that
+// process made of its own, racing in after foreignCommitAhead's check but
+// before this reset runs, would still be orphaned by it exactly as
+// foreignCommitAhead exists to prevent - no longer reachable from the
+// branch, its content left staged against the rewound HEAD; it is
+// stageAndCommitPaths' own pathspec-scoped commit, not this reset, that
+// then keeps that content out of Claim's next retry (see
 // stageAndCommitPaths). What paths held at sha is then restored path by
 // path: `git restore`, staged and worktree alike, for a path that already
 // existed there (an edited file such as a chart's tickets.yaml), or
@@ -187,27 +264,35 @@ func (s *Store) undoClaim(sha string, paths []string) (resetRan bool, err error)
 // Unlike stageAndCommit, it leaves any other dirty state in the store
 // untouched, so a claim's commit holds only what write reported: without
 // the pathspec, a commit here would instead sweep in whatever else the
-// index happens to carry staged - undoClaim's `reset --soft` can leave
-// another process's own commit staged exactly that way (see undoClaim) -
-// under write's own message, losing that other commit's identity and
-// pushing its content as if it were this claim's.
-func (s *Store) stageAndCommitPaths(paths []string, msg string) (bool, error) {
+// index happens to carry staged - a narrow race (see foreignCommitAhead)
+// can still leave another process's own commit staged exactly that way
+// after undoClaim's `reset --soft` - under write's own message, losing that
+// other commit's identity and pushing its content as if it were this
+// claim's. It reports the new commit's sha, or "" when nothing of paths
+// needed staging this round, so Claim's own caller can tell its commit
+// apart from anything else that may land on the branch around it (see
+// foreignCommitAhead).
+func (s *Store) stageAndCommitPaths(paths []string, msg string) (string, error) {
 	args := append([]string{"add", "--"}, paths...)
 	if _, err := gitx.Run(s.Root, args...); err != nil {
-		return false, err
+		return "", err
 	}
 	staged, err := s.hasStagedChanges(paths...)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	if !staged {
-		return false, nil
+		return "", nil
 	}
 	commitArgs := append([]string{"-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", msg, "--"}, paths...)
 	if _, err := gitx.Run(s.Root, commitArgs...); err != nil {
-		return false, err
+		return "", err
 	}
-	return true, nil
+	sha, ok := s.headSHA()
+	if !ok {
+		return "", fmt.Errorf("HEAD does not resolve right after committing")
+	}
+	return sha, nil
 }
 
 // idNotClaimedError wraps cause as Claim's ID_NOT_CLAIMED refusal.

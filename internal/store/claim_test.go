@@ -234,19 +234,19 @@ func TestClaimRemintsAfterRejectedPushPreservesUnrelatedDirtyState(t *testing.T)
 	}
 }
 
-// TestClaimRemintsAfterRejectedPushPreservesUnrelatedLocalCommit covers the
-// other half of the same race, r1-f6 called out as untested: another
-// process on this same clone commits its own work (as Store.Sync's or
-// Store.Push's own `add -A` would) on top of this claim's own commit, in
-// the window between the two - so by the time the push is rejected,
-// undoClaim's `reset --soft` moves the branch back past both commits at
-// once, leaving the other process's content staged against the rewound
-// HEAD rather than committed under its own name (see undoClaim). Without
-// stageAndCommitPaths' own pathspec-scoped commit, the retried claim's
-// plain `git commit` would sweep that staged content into its own commit,
-// under its own message, and push it to the origin as if it were part of
-// the claim.
-func TestClaimRemintsAfterRejectedPushPreservesUnrelatedLocalCommit(t *testing.T) {
+// TestClaimRefusesRatherThanOrphaningAConcurrentCommit covers the other half
+// of the same race, r1-f6 called out as fixed per the human's decision
+// (slice fix-3-r1-f6): another process on this same clone commits its own
+// work (as Store.Sync's or Store.Push's own `add -A` would) on top of this
+// claim's own commit, in the window between the two. A rejected push's
+// undo, `reset --soft` to the pre-write HEAD, cannot discard this claim's
+// own commit alone without also rewinding the branch past that other
+// commit - orphaning it, no longer reachable except through the clone's own
+// reflog (see undoClaim). Claim must refuse instead, ID_NOT_CLAIMED, naming
+// the other commit, and never call that reset at all: the branch, both
+// commits, and the rejected claim are left exactly as they were for the
+// operator to reconcile by hand.
+func TestClaimRefusesRatherThanOrphaningAConcurrentCommit(t *testing.T) {
 	st, work, remote := newTestRemoteStore(t)
 
 	other := t.TempDir()
@@ -260,21 +260,22 @@ func TestClaimRemintsAfterRejectedPushPreservesUnrelatedLocalCommit(t *testing.T
 	runGit(t, other, "commit", "-m", "from other")
 	runGit(t, other, "push", "origin", "main")
 
+	headBefore := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+
 	calls := 0
-	id, err := st.Claim(
+	_, err := st.Claim(
 		func() (string, []string, error) {
 			calls++
-			if calls == 1 {
-				// Another process on this same clone, committing its own
-				// work while this claim is in flight - lands on top of
-				// this claim's own commit once stageAndCommitPaths makes
-				// it below.
-				if err := os.WriteFile(filepath.Join(work, "from-same-clone.txt"), []byte("x\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				runGit(t, work, "add", "-A")
-				runGit(t, work, "-c", "user.name=other-local", "-c", "user.email=other-local@example.invalid", "commit", "-m", "other local commit")
+			// Another process on this same clone, committing its own
+			// work while this claim is in flight - lands on top of
+			// this claim's own commit once stageAndCommitPaths makes
+			// it below.
+			if err := os.WriteFile(filepath.Join(work, "from-same-clone.txt"), []byte("x\n"), 0o644); err != nil {
+				t.Fatal(err)
 			}
+			runGit(t, work, "add", "-A")
+			runGit(t, work, "-c", "user.name=other-local", "-c", "user.email=other-local@example.invalid", "commit", "-m", "other local commit")
+
 			id, err := st.Mint("JIG-{n}", Ticket{Title: "x"})
 			if err != nil {
 				return "", nil, err
@@ -283,40 +284,49 @@ func TestClaimRemintsAfterRejectedPushPreservesUnrelatedLocalCommit(t *testing.T
 		},
 		func(id string) string { return id + ": new ticket" },
 	)
-	if err != nil {
-		t.Fatalf("Claim: %v", err)
+	if err == nil {
+		t.Fatal("Claim: want an error when a concurrent commit would be orphaned by the undo, got nil")
 	}
-	if id != "JIG-1" {
-		t.Fatalf("id = %q, want JIG-1", id)
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != idNotClaimedCode {
+		t.Fatalf("err = %v, want *axi.Error %s", err, idNotClaimedCode)
 	}
-	if calls != 2 {
-		t.Fatalf("write was called %d times, want exactly 2 (one rejected, one that landed)", calls)
+	if calls != 1 {
+		t.Fatalf("write was called %d times, want exactly 1 (Claim must refuse, not retry, once it would have to orphan a concurrent commit)", calls)
 	}
 
-	data, err := os.ReadFile(filepath.Join(work, "from-same-clone.txt"))
-	if err != nil {
-		t.Fatal(err)
+	otherCommit := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD^"))
+	full := ae.Msg + " " + strings.Join(ae.Help, " ")
+	if !strings.Contains(full, otherCommit) {
+		t.Fatalf("err = %+v, want the other process's own commit %s named", ae, otherCommit)
 	}
-	if string(data) != "x\n" {
-		t.Fatalf("from-same-clone.txt = %q, want the other process's commit content to survive the rejected claim's undo", data)
+
+	// Claim never reset the branch: both the other process's commit and
+	// this claim's own rejected commit are still exactly where they
+	// landed, untouched.
+	headAfter := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+	if headAfter == headBefore {
+		t.Fatalf("HEAD = %s, want it still at this claim's own rejected commit, not rewound to %s", headAfter, headBefore)
+	}
+	subject := runGit(t, work, "log", "-1", "--pretty=%s")
+	if !strings.Contains(subject, "JIG-1: new ticket") {
+		t.Fatalf("HEAD subject = %q, want this claim's own rejected commit still there", subject)
+	}
+	parentSubject := runGit(t, work, "log", "-1", "--pretty=%s", "HEAD^")
+	if !strings.Contains(parentSubject, "other local commit") {
+		t.Fatalf("HEAD^ subject = %q, want the other process's own commit still there, not orphaned", parentSubject)
+	}
+	if _, err := os.Stat(st.TicketDir("JIG-1")); err != nil {
+		t.Fatalf("JIG-1 missing after a refused claim that left its own rejected commit in place: %v", err)
 	}
 	status := runGit(t, work, "status", "--porcelain")
-	if !strings.Contains(status, "from-same-clone.txt") {
-		t.Fatalf("status = %q, want from-same-clone.txt still showing as uncommitted (its own commit was orphaned by the undo)", status)
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("store left dirty after a refused claim that touched nothing: %q", status)
 	}
 
 	remoteLog := runGit(t, "", "--git-dir", remote, "log", "--pretty=%s")
-	for _, want := range []string{"from other", "JIG-1: new ticket"} {
-		if !strings.Contains(remoteLog, want) {
-			t.Fatalf("remote log = %q, want it to contain %q", remoteLog, want)
-		}
-	}
-	if strings.Contains(remoteLog, "other local commit") {
-		t.Fatalf("remote log = %q, want the orphaned local commit never pushed under its own message", remoteLog)
-	}
-	remoteFiles := runGit(t, "", "--git-dir", remote, "show", "--name-only", "--pretty=", "HEAD")
-	if strings.Contains(remoteFiles, "from-same-clone.txt") {
-		t.Fatalf("pushed commit's files = %q, want the other process's content never swept into the claim's own commit", remoteFiles)
+	if strings.Contains(remoteLog, "JIG-1: new ticket") || strings.Contains(remoteLog, "other local commit") {
+		t.Fatalf("remote log = %q, want neither local commit pushed", remoteLog)
 	}
 }
 
@@ -534,6 +544,95 @@ func TestUndoClaimReportsWhetherResetRan(t *testing.T) {
 	if headAfter != headBefore {
 		t.Fatalf("HEAD moved from %s to %s even though the reset itself failed", headBefore, headAfter)
 	}
+}
+
+// TestForeignCommitAheadFindsACommitOnEitherSideOfClaimsOwn pins
+// foreignCommitAhead's four shapes directly, at the git-plumbing level,
+// since TestClaimRefusesRatherThanOrphaningAConcurrentCommit can only drive
+// the one shape Claim's own write hook can arrange (a concurrent commit
+// landing before this round's own, not after it - Claim gives a test no
+// hook between its own commit and its push to arrange the other).
+func TestForeignCommitAheadFindsACommitOnEitherSideOfClaimsOwn(t *testing.T) {
+	commit := func(t *testing.T, work, path, subject string) string {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(work, path), []byte(subject+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, work, "add", "-A")
+		runGit(t, work, "commit", "-m", subject)
+		return strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+	}
+
+	t.Run("SafeWithOnlyClaimsOwnCommit", func(t *testing.T) {
+		st, work := newTestStandaloneStore(t)
+		pre := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+		claimSHA := commit(t, work, "a.txt", "claim's own commit")
+
+		foreign, err := st.foreignCommitAhead(pre, claimSHA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if foreign != "" {
+			t.Fatalf("foreign = %q, want \"\": nothing sits between pre and claimSHA but claimSHA itself", foreign)
+		}
+	})
+
+	t.Run("SafeWithNothingCommittedThisRound", func(t *testing.T) {
+		st, work := newTestStandaloneStore(t)
+		pre := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+
+		foreign, err := st.foreignCommitAhead(pre, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if foreign != "" {
+			t.Fatalf("foreign = %q, want \"\": the branch never left pre", foreign)
+		}
+	})
+
+	t.Run("NamesACommitLandedBeforeClaimsOwn", func(t *testing.T) {
+		st, work := newTestStandaloneStore(t)
+		pre := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+		other := commit(t, work, "other.txt", "other process's commit")
+		claimSHA := commit(t, work, "a.txt", "claim's own commit")
+
+		foreign, err := st.foreignCommitAhead(pre, claimSHA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if foreign != other {
+			t.Fatalf("foreign = %q, want %q (the commit between pre and claimSHA)", foreign, other)
+		}
+	})
+
+	t.Run("NamesACommitLandedAfterClaimsOwn", func(t *testing.T) {
+		st, work := newTestStandaloneStore(t)
+		pre := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+		claimSHA := commit(t, work, "a.txt", "claim's own commit")
+		other := commit(t, work, "other.txt", "other process's commit")
+
+		foreign, err := st.foreignCommitAhead(pre, claimSHA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if foreign != other {
+			t.Fatalf("foreign = %q, want %q (the branch's tip has moved past claimSHA)", foreign, other)
+		}
+	})
+
+	t.Run("NamesACommitWhenThisRoundCommittedNothingButHeadMoved", func(t *testing.T) {
+		st, work := newTestStandaloneStore(t)
+		pre := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+		other := commit(t, work, "other.txt", "other process's commit")
+
+		foreign, err := st.foreignCommitAhead(pre, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if foreign != other {
+			t.Fatalf("foreign = %q, want %q: this round made no commit of its own, but the branch moved anyway", foreign, other)
+		}
+	})
 }
 
 // TestUndoFailedErrorDescribesActualBranchState pins undoFailedError's
