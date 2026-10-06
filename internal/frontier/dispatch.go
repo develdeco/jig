@@ -23,7 +23,7 @@ const dispatchPromptTemplate = "You are a jig build session for slice %s of tick
 	"Work ONLY in this worktree. Goal: %s\n" +
 	"Oracle (green = done): %s\n" +
 	"%s\n" +
-	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer, oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first, and earlier_slices: what this ticket's verified slices did and the files they changed).\n" +
+	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer, oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first, earlier_slices: what this ticket's verified slices did and the files they changed, and related: the files and symbols a code graph links to your goal, empty when the project keeps none).\n" +
 	"Commit as you land. When finished write result.json at %s with exactly one JSON object: {\"outcome\": \"green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed\", \"summary\": \"...\", \"commit\": \"<sha>\", \"question\": \"only for needs-input\", \"artifacts\": [\"relative paths\"]}"
 
 // oracleFixPromptTemplate is the next turn jig hands a builder's own session
@@ -85,6 +85,17 @@ type sliceJSONBody struct {
 	// the order they verified, so a builder starts from what was built
 	// rather than rediscovering it (ADR 0025).
 	EarlierSlices []earlierSlice `json:"earlier_slices"`
+	// Related is the code a code graph links to the slice's goal, by file,
+	// most directly matched first; empty when the project keeps no graph
+	// (ADR 0026).
+	Related []relatedFile `json:"related"`
+}
+
+// relatedFile is one entry of slice.json's related: a file, and the
+// symbols in it the code graph matched, as "<label> L<line>".
+type relatedFile struct {
+	File    string   `json:"file"`
+	Symbols []string `json:"symbols"`
 }
 
 // earlierSlice is one entry of slice.json's earlier_slices: a slice of the
