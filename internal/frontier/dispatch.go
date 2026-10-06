@@ -23,7 +23,7 @@ const dispatchPromptTemplate = "You are a jig build session for slice %s of tick
 	"Work ONLY in this worktree. Goal: %s\n" +
 	"Oracle (green = done): %s\n" +
 	"%s\n" +
-	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer).\n" +
+	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer, and oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first).\n" +
 	"Commit as you land. When finished write result.json at %s with exactly one JSON object: {\"outcome\": \"green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed\", \"summary\": \"...\", \"commit\": \"<sha>\", \"question\": \"only for needs-input\", \"artifacts\": [\"relative paths\"]}"
 
 // oracleFixPromptTemplate is the next turn jig hands a builder's own session
@@ -64,6 +64,10 @@ type sliceJSONBody struct {
 	BriefSections []string `json:"brief_sections"`
 	AttemptLog    []string `json:"attempt_log"`
 	Answer        string   `json:"answer"`
+	// OracleSeconds is how long jig's latest run of this slice's exact
+	// oracle command took on this ticket, in seconds; 0 before the first
+	// (ADR 0024).
+	OracleSeconds int `json:"oracle_seconds"`
 }
 
 // workDir returns the store-side (not lease-side) directory that carries

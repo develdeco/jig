@@ -16,7 +16,7 @@ func TestRenderDispatchPromptMatchesGolden(t *testing.T) {
 		"Work ONLY in this worktree. Goal: say hello\n" +
 		"Oracle (green = done): go test ./alpha/...\n" +
 		"While you work, run only the tests that cover your change. When you report green, jig runs the oracle and hands you its output if it fails.\n" +
-		"Read your inputs from slice.json at /abs/a.attempt-1.slice.json (brief sections by path, attempt log, prior answer).\n" +
+		"Read your inputs from slice.json at /abs/a.attempt-1.slice.json (brief sections by path, attempt log, prior answer, and oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first).\n" +
 		"Commit as you land. When finished write result.json at /abs/a.attempt-1.result.json with exactly one JSON object: " +
 		`{"outcome": "green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed", "summary": "...", "commit": "<sha>", "question": "only for needs-input", "artifacts": ["relative paths"]}`
 	if got != want {

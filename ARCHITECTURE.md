@@ -245,7 +245,8 @@ exists.
 
 The contract between jig and any backend is pure disk: jig writes
 `slice.json` (goal, oracle, workspace, prior attempt log, any answered
-question), the backend runs a session in the lease worktree, and jig reads
+question, and how long jig's last run of the oracle took on this ticket,
+[ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md)), the backend runs a session in the lease worktree, and jig reads
 back `result.json` (outcome, summary, commit, and - for `needs-input` - a
 question). Nothing crosses in memory.
 

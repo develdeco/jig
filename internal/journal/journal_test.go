@@ -296,3 +296,22 @@ func TestGreenClaims(t *testing.T) {
 		t.Fatalf("GreenClaims(nil) = %v, want none", got)
 	}
 }
+
+// TestLastOracleSeconds: the latest oracle line of the exact command that
+// recorded a wall time wins; other commands, other events and lines without
+// one are skipped, and no such line is 0.
+func TestLastOracleSeconds(t *testing.T) {
+	lines := []Line{
+		{Slice: "a", Event: "oracle", Command: "go test ./...", Seconds: 600},
+		{Slice: "b", Event: "oracle", Command: "go test ./alpha/...", Seconds: 30},
+		{Slice: "b", Event: "oracle", Command: "go test ./...", Seconds: 640},
+		{Slice: "c", Event: "oracle", Command: "go test ./..."},
+		{Slice: "c", Event: "result", Command: "go test ./...", Seconds: 1},
+	}
+	if got := LastOracleSeconds(lines, "go test ./..."); got != 640 {
+		t.Errorf("LastOracleSeconds(go test ./...) = %d, want 640", got)
+	}
+	if got := LastOracleSeconds(lines, "go vet ./..."); got != 0 {
+		t.Errorf("LastOracleSeconds(never run) = %d, want 0", got)
+	}
+}

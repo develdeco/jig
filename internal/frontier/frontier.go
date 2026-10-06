@@ -405,8 +405,21 @@ func (rc *runCtx) readSliceState(sliceID string) (store.SliceState, error) {
 	return rc.d.Store.ReadSliceState(rc.ticket, sliceID)
 }
 
-// failedAttempts reads the ticket's journal and counts sliceID's attempts
-// that failed at the work (journal.FailedAttempts).
+// lastOracleSeconds is the wall time of jig's latest run of command on
+// this ticket (journal.LastOracleSeconds), reading the journal under
+// storeMu.
+func (rc *runCtx) lastOracleSeconds(command string) (int, error) {
+	rc.storeMu.Lock()
+	defer rc.storeMu.Unlock()
+	lines, err := journal.Read(rc.d.Store, rc.ticket)
+	if err != nil {
+		return 0, err
+	}
+	return journal.LastOracleSeconds(lines, command), nil
+}
+
+// failedAttempts counts sliceID's attempts that failed at the work
+// (journal.FailedAttempts), reading the journal under storeMu.
 func (rc *runCtx) failedAttempts(sliceID string) (int, error) {
 	rc.storeMu.Lock()
 	defer rc.storeMu.Unlock()
@@ -524,6 +537,13 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	sjPath := sliceJSONPath(d.Store, ticket, sl.ID, attempt)
 	rjPath := resultJSONPath(d.Store, ticket, sl.ID, attempt)
 
+	oracleCmd := m.OracleCmd(sl.Oracle, ws)
+	oracleSeconds, err := rc.lastOracleSeconds(oracleCmd)
+	if err != nil {
+		rc.fail(fmt.Errorf("frontier: read the oracle's last run time for %s: %w", sl.ID, err))
+		return
+	}
+
 	body := sliceJSONBody{
 		ID:            sl.ID,
 		Goal:          sl.Goal,
@@ -534,13 +554,13 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		BriefSections: resolveBriefSections(d.Store, ticket, sl),
 		AttemptLog:    buildAttemptLog(d.Store, ticket, sl.ID, attempt),
 		Answer:        answerFor(d.Store, ticket, sl.ID),
+		OracleSeconds: oracleSeconds,
 	}
 	if err := writeSliceJSON(sjPath, body); err != nil {
 		rc.fail(fmt.Errorf("frontier: write slice.json for %s: %w", sl.ID, err))
 		return
 	}
 
-	oracleCmd := m.OracleCmd(sl.Oracle, ws)
 	_, fixTurns := d.Backend.(session.Resumer)
 	prompt := renderDispatchPrompt(sl.ID, ticket, sl.Goal, oracleCmd, sjPath, rjPath, fixTurns)
 
@@ -627,12 +647,14 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 			tail = "Your working tree has uncommitted changes to tracked files, so the commit you reported is not what an oracle run would test:\n" + dirty
 		} else {
 			evidence := cleanHead(lease.Dir)
+			started := time.Now()
 			out, err := rc.d.runOracle(oracleCmd, lease.Dir)
+			seconds := int(time.Since(started) / time.Second)
 			result := "pass"
 			if err != nil {
 				result = "fail"
 			}
-			rc.journal(journal.Line{Slice: sl.ID, Event: "oracle", Outcome: result, Commit: evidence, Attempt: attempt, Command: oracleCmd, Env: sl.Env})
+			rc.journal(journal.Line{Slice: sl.ID, Event: "oracle", Outcome: result, Commit: evidence, Attempt: attempt, Command: oracleCmd, Env: sl.Env, Seconds: seconds})
 			if err == nil {
 				return res
 			}
