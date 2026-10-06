@@ -8,6 +8,6 @@ A CLI that runs a ticket from brief to merged PR as a dispatch loop over slices.
 - **Session skills** → `skills/`
 - **CLI behavior** → run the `jig` binary's help; the environment is the source
 - **Build log** → `DECISIONS.md`
-- **Verification** → `go build ./... && go test ./...` (`go vet` clean)
+- **Verification** → `go build ./... && go test -timeout 30m ./...` (`go vet` clean)
 - **Contribution workflow, pull request shape, testing rules** → `.github/CONTRIBUTING.md`
 - **Reporting a security issue** → `.github/SECURITY.md`

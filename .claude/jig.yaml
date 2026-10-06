@@ -1,0 +1,7 @@
+# jig's own build surface, for tickets jig builds on this repo.
+# The test oracle is the detected Go default with a longer per-package
+# timeout: on a loaded machine, cmd/jig and internal/frontier run past
+# go test's 10-minute default. 25m stays under jig's 30-minute bound on an
+# oracle run, so a hung test still fails with go test's own message naming it.
+oracles:
+  test: go test -timeout 25m ./...
