@@ -3,6 +3,29 @@
 A log of judgment calls made while building v0.1: one entry per decision, covering what
 was ambiguous, what was chosen, and why.
 
+## Testing
+
+- No test in `internal/` edits process-global state (environment, working directory,
+  or package-level variables): dependencies come through `Deps` fields or function
+  arguments, TestMain may set the process once before tests run, and
+  `lint.TestNoGlobalStateEditInInternalTests` enforces this as a ratchet. A debt list
+  in the lint names today's offenders outside `internal/verifydeliver`, which has none;
+  the list only shrinks as packages fix their own entries. This allows every test in
+  package `verifydeliver` to run in parallel, cutting its wall time from 763 s toward
+  400 s on the dev machine. The two git identity tests are the one exception the ratchet
+  still has to make room for: they must prove identity resolves from somewhere other
+  than the ambient identity every other verifydeliver test's `TestMain` pins process-wide
+  for determinism. A first pass gave them their own test binary
+  (`internal/verifydeliver/identitytest`), whose `TestMain` pinned no identity at all, but
+  that duplicated package `verifydeliver`'s own build/gate test harness verbatim - a second
+  copy only one of which the package's other tests exercised, free to drift from frontier's
+  contract unnoticed. They live in package `verifydeliver` instead, on that one harness:
+  `Deps.GitEnv`, nil by default, replaces the environment `Publish`'s own identity
+  resolution runs under when a test sets it, so the two tests hand it the ambient
+  environment with the pinned identity stripped out, rather than unsetting that pin with
+  `t.Setenv`/`os.Unsetenv` for their own span - which would also rule out `t.Parallel()`
+  for them, since `t.Setenv` panics in a parallel test.
+
 ## Scope and deferrals
 
 - Structural rounds render as markdown tables in v0.1.
@@ -2896,6 +2919,38 @@ The staircase's floor was a keyword regex (`BigDecimal|rounding|migration|...`),
 
 Briefs that list test cases one by one and demand that every new test fail when its rule is removed create large test suites. The intake skill now asks every brief for a `## Seams` section naming public interfaces and critical paths, never test cases; builders and the reviewer hold briefs to their seams. The reviewer's prompt gains one principle sentence after the action definition: "Tests belong at the seams the intent names: a missing test is a problem only at one of those seams or as the proof of a defect you report, and a test elsewhere is at most a note." See [ADR 0016](docs/adr/0016-tests-at-agreed-seams.md).
 
+## The reviewer reads, it doesn't test (build-speed item 1)
+
+The gate's oracles already pass on the head a reviewer gets, so `review.json` now carries them as `oracles_passed` (oracle, workspace, command) and the prompt says the review reads and runs no tests. The list has no result field, since the gate stops at the first failure and every entry it hands on passed. Each entry records the manifest's command, not the short-path spelling the Windows shell workaround runs. The gate now runs oracles in a fixed order, workspaces in manifest order and oracles by name, where it used to follow map order, so `oracles_passed` is deterministic. The review eval runs each case's oracles before the round and hands its reviewer the runs, as `Gate` does; that adds about 30 s to `go test ./internal/revieweval/` on the Windows dev machine, off the suite's critical path. No screen rule refuses test commands: see [ADR 0017](docs/adr/0017-the-reviewer-reads-the-gate-tests.md).
+
+## Builders test narrowly (build-speed item 2)
+
+The dispatch prompt now says to run only the tests that cover the change while working, and the oracle after the last change, before reporting green: not "once", which a builder could read as no rerun after a red final run. It names no test runner, since jig builds any repo. Every headless session's `--settings` env sets the CLI's shell timeouts, `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`, both to 30 minutes, so an oracle finishes in the foreground instead of being backgrounded at the CLI's 2-minute default and polled. It lives in `--settings` rather than the child's environment for two reasons: `Options.Env` is an exact environment, and the CLI applies a settings source's env over the inherited one. herdr sessions keep the CLI's defaults. See [ADR 0018](docs/adr/0018-builders-test-narrowly.md).
+
+## Builders open on Sonnet and climb on failure (build-speed item 6g)
+
+The staircase's default rungs are Sonnet then Opus, so Haiku runs only where a project lists it in `project.yaml`'s `staircase`. Each earlier attempt of a slice that failed at the work climbs one rung. That covers a journaled code-bug, oracle-wrong or failed result, and a green that did not verify. A question, a flawed brief or a blocked environment does not climb, so the count comes from the journal (`journal.FailedAttempts`), not from slice state, which counts every attempt. The volume rule, a cumulative lease diff over 400 lines or 10 files, is removed: with Sonnet opening, it would have sent most later slices of a multi-slice ticket to Opus. See [ADR 0019](docs/adr/0019-builders-open-on-sonnet-and-climb-on-failure.md).
+
+## jig runs the slice's oracle at green (build-speed item 6b)
+
+When a builder's green verifies, jig runs the slice's oracle in the lease and journals the run (`oracle`, pass or fail, with HEAD when the tree is clean). A red run goes back to the builder's own session (`session.Resumer`, `claude -p --resume`) with the oracle's output, up to two times. After that, or with a backend that cannot resume, the attempt fails as a code-bug carrying the output, written over `result.json` so the next attempt's log shows it. Uncommitted edits to tracked files go back to the session before any oracle run. jig's run is bounded at 30 minutes and ends its whole process tree when killed; the tree kill moved from `session` to `envrun` (`KillTree`), with the Windows quoted-path workaround (`ShortenQuotedPath`). Builders run only the tests that cover their change; the prompt says a red run comes back to them, or, with a backend that cannot resume, fails the attempt. Changelogs list verified commits, since an attempt can claim green more than once. `frontier.Deps.Oracle` lets tests that are not about the oracle pass it without running. See [ADR 0020](docs/adr/0020-jig-runs-the-slice-oracle-at-green.md).
+
+## The gate reuses an oracle pass on the same tree (build-speed item 6e)
+
+Before each run of its suite, the gate looks for an `oracle` pass line recorded at a slice's green, with the same exact command (frontier now records the command and the env class on the line), a commit with the gate head's tree, the same env class set the gate brings up, and no failed run of that command on the same tree. It reuses such a pass instead of running the oracle again, and brings up env classes only when some run is left. `review.json`'s `oracles_passed` marks each reused run with `reused_from`, and the review prompt now says each command passed on this head's tree (ADR 0017 amended). The gate's own runs and publish's revalidation are now bounded at 30 minutes, with the process tree killed past it, and a failure carries the end of the oracle's output. See [ADR 0021](docs/adr/0021-the-gate-reuses-an-oracle-pass-on-the-same-tree.md).
+
+## jig declares its own test oracle with a longer timeout
+
+`.claude/jig.yaml` declares this repo's `test` oracle as `go test -timeout 25m ./...` in place of the detected `go test ./...`. With verifydeliver's tests parallel (BS-1) and jig's oracle runs in frontier's tests (ADR 0020), `cmd/jig` and `internal/frontier` take 600 to 640 s each inside the full suite on the Windows dev machine, past `go test`'s 10-minute default per package, so the detected command would fail a slice's oracle run and the gate's on timing alone, unless the environment's `GOFLAGS` sets a longer timeout, as the coordination scripts for jig runs on this repo do. 25 minutes stays under jig's 30-minute bound on one oracle run (ADR 0020), so a hung test still fails with `go test`'s own message naming it. The declaration reaches only slices whose oracle names `test`; a literal oracle runs as written. CONTRIBUTING and AGENTS.md give the same timeout for the local suite, as CI does.
+
+## The reviewer confirms an unchanged finding by id (build-speed item 6h)
+
+`result.json` gains a required `still_present` list: an earlier finding that is still present and unchanged is confirmed by its id and current line instead of being written again, and only new or changed findings are written in full. jig expands each entry into the earlier finding (`ExpandStillPresent`) right before `ApplyRound`, in the gate and in revieweval's runner, so the fold, recurrences, routing and scoring are unchanged. An id naming nothing, repeated, or also a finding's `prior`, or whose earlier file is gone without a deletion, is `REVIEW_INVALID`. Every review-result fixture gains `"still_present": []`. The code started as BS-3's jig build and was finished by hand when the run moved to hand-building. See [ADR 0022](docs/adr/0022-the-reviewer-confirms-an-unchanged-finding-by-id.md).
+
+## Builders are told how long the oracle took (build-speed item 6a)
+
+jig times each oracle run at green and journals it (`seconds` on the `oracle` line); `slice.json` gains `oracle_seconds`, the latest run time of the slice's exact oracle command on the ticket (0 before the first), and the dispatch prompt names it. The shell-call guard 6a once proposed is not built: the owner chose to measure first, and BS-3's Sonnet builder never set its own timeout or backgrounded a call. See [ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md).
+
 ## Pull requests belong to the repo host
 
 `internal/repohost` replaces the github tracker's pull-request code. Its `Host` interface carries every capability unconditionally (`CreatePR`, `CreatePRWithMedia`, `FindOpenPR`, `UpdatePR`, `UpdatePRWithMedia`, `CommentPR`, `ReadPRBody`) rather than the tracker's optional `PRCreator`/`PRUpdater`/`PRCommenter`/`...WithMedia` split: with exactly one pull-request-capable host now, publish no longer needs to type-assert for behavior an adapter might or might not have.
@@ -2903,13 +2958,13 @@ Briefs that list test cases one by one and demand that every new test fail when 
 - `repohost.New(remote)` parses the remote against three forms (`user@github.com:owner/repo[.git]`, `ssh://user@github.com/owner/repo[.git]`, `https://github.com/owner/repo[.git]`), trimming a trailing `/` and `.git` first. Any other shape returns `nil, nil` - no host, not an error - since a project's own repo (a local path, as this store's is) is an ordinary case, not a failure.
 - A GitHub host is refused up front, `GH_NOT_INSTALLED`, when `gh` is not on PATH - checked inside `New` itself, so `Publish` discovers it before writing anything, the same point the old github tracker refused it.
 - `Publish` builds the host from `repo.Remote` right after the fast-forward check (step 4) and looks up the branch's open pull request there too, before reconcile (step 6) - "steps 1 to 5 only read and refuse" still holds with the host folded into step 5. The confirm prompt takes `hasHost bool` instead of asking a tracker what it supports, and the `pr` journal line records `"none:no-host"` in place of the old local tracker's own outcome string.
-- Latent regression, caught while deleting the tracker package: the repohost prefactor (this ticket's first commit) pointed publish's host resolution at the repo's own remote, but left `internal/verifydeliver`'s gh-stub test helper wired to the old tracker-based setup, so every GitHub-host publish test silently stopped exercising that path - it built a host, found it nil, and asserted nothing a github.com remote would have triggered. `useGithubHost` now points the fixture repo's remote at a github.com URL and aliases it back to the real local bare repo through git's own discrete `GIT_CONFIG_COUNT`/`KEY`/`VALUE` environment variables (`url.<real-remote>.insteadOf <github-remote>`, layered over `gittest`'s hermetic global config rather than replacing it): every clone, fetch and push `Publish` makes still reaches the real bare repo, while `repohost.New` sees a github.com URL, restoring real coverage of the host path.
+- Latent regression, caught while deleting the tracker package: the repohost prefactor (this ticket's first commit) pointed publish's host resolution at the repo's own remote, but left `internal/verifydeliver`'s gh-stub test helper wired to the old tracker-based setup, so every GitHub-host publish test silently stopped exercising that path - it built a host, found it nil, and asserted nothing a github.com remote would have triggered. `useGithubHost` now hands `Deps` a real GitHub host of its own (`repohost.NewWithEnv` on a github.com remote, the fake gh as its binary and the `GH_STUB_*` variables as its environment), restoring real coverage of the host path. `Deps.Host` is the publish-side seam that makes this possible without the process environment: unset, as production always leaves it, `Publish` resolves the host from `repo.Remote` as before; the fixture's own remote stays the local bare repo every clone, fetch and push still reaches. This replaced an earlier shape of the same helper that swapped the fixture's remote for a github.com URL and aliased it back through git's discrete `GIT_CONFIG_COUNT`/`KEY`/`VALUE` variables, which BS-1's no-process-global-state rule for `internal/verifydeliver` tests (`lint/global_state_test.go`) rules out.
 
 ## jig mints every ticket id
 
 `Store.Mint(format, rec)` holds the store's own mint lock (`.jig-mint`, a `store.Lock` sidecar, the same 30s timeout every other store writer uses) across both the scan for the next id and the record's write, so two mints against one clone can never compute the same id. The scan is the local tracker's old algorithm, moved rather than rewritten: read the store root's entries, match each directory name against a regexp built from `ticket_format`'s one `{n}` placeholder, and take one past the highest number found; a non-directory entry that happens to match is skipped, so a stray file never shifts the count.
 
-`pool.CheckTicket` runs before `CreateTicketRecord`, so an id jig cannot use (a reserved lease suffix, or anything that is not a single directory name) is refused with no folder and no record left behind; its help says to change `ticket_format` and mint again, not to close a ticket in some tracker, since no tracker ever holds one now. `jig graduate` mints through the same `Store.Mint`, so a ticket gets its record under one rule whichever command minted it, and help text that used to say a ticket "exists only in the tracker" goes along with the case it described. See [ADR 0017](docs/adr/0017-jig-mints-and-claims-every-ticket-id.md).
+`pool.CheckTicket` runs before `CreateTicketRecord`, so an id jig cannot use (a reserved lease suffix, or anything that is not a single directory name) is refused with no folder and no record left behind; its help says to change `ticket_format` and mint again, not to close a ticket in some tracker, since no tracker ever holds one now. `jig graduate` mints through the same `Store.Mint`, so a ticket gets its record under one rule whichever command minted it, and help text that used to say a ticket "exists only in the tracker" goes along with the case it described. See [ADR 0023](docs/adr/0023-jig-mints-and-claims-every-ticket-id.md).
 
 ## Claiming an id on the store's origin
 
@@ -2936,3 +2991,4 @@ The tracker package (`internal/tracker`: local, command, github, jira/linear) an
 `ticket.yaml`'s `body:` is a custom `literalString` type whose `MarshalYAML` forces YAML's literal block style (`|`), the same style `ChartEntry.Body` already used - so a ticket's body reads the same way in `ticket.yaml` as it did in the chart entry it may have come from, even for a one-line body. An empty body marshals as a plain empty string, which `omitempty` then drops, writing no `body:` key at all, same as a title-only ticket minted before this field existed.
 
 `Store.Mint` and `store.Ticket` already took a whole record; `--body`'s value and a chart entry's own `Body` are threaded into that same `store.Ticket` literal rather than becoming a second parameter `Mint` or `CreateTicketRecord` has to carry alongside title and blockers.
+

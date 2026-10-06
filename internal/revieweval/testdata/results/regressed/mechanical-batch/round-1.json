@@ -10,6 +10,7 @@
       "risk_rationale": "Three small, independent cleanups bundled into one note."
     }
   ],
+  "still_present": [],
   "reviewed_paths": [
     "mathutil/mathutil.go"
   ],

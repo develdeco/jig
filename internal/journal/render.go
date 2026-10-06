@@ -14,14 +14,37 @@ func shortSHA(sha string) string {
 	return sha
 }
 
+// landed reports whether l records a slice's commit landing: a verified
+// line, or, in a journal that predates verified lines (useVerified false), a
+// green result line. A builder can claim green more than once per attempt
+// (a red oracle run goes back to its session, ADR 0020), so only the commit
+// that verified counts.
+func landed(l Line, useVerified bool) bool {
+	if useVerified {
+		return l.Event == "verified"
+	}
+	return l.Event == "result" && l.Outcome == "green"
+}
+
+// hasVerified reports whether lines carry any verified line.
+func hasVerified(lines []Line) bool {
+	for _, l := range lines {
+		if l.Event == "verified" {
+			return true
+		}
+	}
+	return false
+}
+
 // RenderChangelog renders the green slices landed in one workspace: a
-// header followed by one bullet per green result line whose slice maps to
-// workspace in sliceWS. Pure and timestamp-free so it is golden-stable.
+// header followed by one bullet per landed commit (landed) whose slice maps
+// to workspace in sliceWS. Pure and timestamp-free so it is golden-stable.
 func RenderChangelog(lines []Line, workspace string, sliceWS map[string]string) string {
+	useVerified := hasVerified(lines)
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Changelog - %s\n", workspace)
 	for _, l := range lines {
-		if l.Event != "result" || l.Outcome != "green" {
+		if !landed(l, useVerified) {
 			continue
 		}
 		if sliceWS[l.Slice] != workspace {
@@ -32,7 +55,8 @@ func RenderChangelog(lines []Line, workspace string, sliceWS map[string]string) 
 	return b.String()
 }
 
-// RenderConsolidated renders every green slice across all workspaces for a
+// RenderConsolidated renders every landed slice commit (landed) across all
+// workspaces for a
 // ticket, plus a summary of gate fix-slice rounds. The ticket name is taken
 // from the first line. Pure and timestamp-free.
 //
@@ -49,8 +73,9 @@ func RenderConsolidated(lines []Line) string {
 
 	b.WriteString("\n## Slices\n")
 	any := false
+	useVerified := hasVerified(lines)
 	for _, l := range lines {
-		if l.Event != "result" || l.Outcome != "green" {
+		if !landed(l, useVerified) {
 			continue
 		}
 		fmt.Fprintf(&b, "- %s: %s\n", l.Slice, shortSHA(l.Commit))
@@ -76,7 +101,8 @@ func RenderConsolidated(lines []Line) string {
 	return b.String()
 }
 
-// RenderDiffChangelog renders the green slices landed between gate round
+// RenderDiffChangelog renders the slice commits landed (landed) between gate
+// round
 // round-1 (or the run start, if round-1 has no gate-round line) and gate
 // round round. Gate round lines carry their round number in Attempt. Pure
 // and timestamp-free.
@@ -97,8 +123,9 @@ func RenderDiffChangelog(lines []Line, round int) string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Diff changelog - round %d\n", round)
+	useVerified := hasVerified(lines)
 	for _, l := range lines[start:end] {
-		if l.Event != "result" || l.Outcome != "green" {
+		if !landed(l, useVerified) {
 			continue
 		}
 		fmt.Fprintf(&b, "- %s: %s\n", l.Slice, shortSHA(l.Commit))

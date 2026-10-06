@@ -572,10 +572,7 @@ func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
 	}
 }
 
-// TestPublishConfirmWiring must stay serial: it swaps the package-level
-// guardedPush and confirm hooks, which every parallel test's Publish reads.
-//
-// It checks that Publish threads an honest confirm value into guardedPush: a
+// TestPublishConfirmWiring checks that Publish threads an honest confirm value into guardedPush: a
 // declined interactive prompt must stop before any push is attempted, and
 // both --yes and an accepted prompt must pass confirmed=true - never a
 // hardcoded literal, and never proceeding past a decline. It also checks that
@@ -590,9 +587,7 @@ func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
 // directly by TestFailureCode instead of paying for another full fixture
 // and gate rounds here.
 func TestPublishConfirmWiring(t *testing.T) {
-	origPush := guardedPush
-	origConfirm := confirm
-	defer func() { guardedPush = origPush; confirm = origConfirm }()
+	t.Parallel()
 
 	// newPublishableFixture generates a gated ticket.
 	newPublishableFixture := func(t *testing.T) (*fixture.Fixture, Deps) {
@@ -604,13 +599,14 @@ func TestPublishConfirmWiring(t *testing.T) {
 	}
 
 	t.Run("declined_prompt_pushes_store_not_branch", func(t *testing.T) {
+		t.Parallel()
 		fx, d := newPublishableFixture(t)
 		called := false
-		guardedPush = func(string, string, string, bool) error {
+		d.GuardedPush = func(string, string, string, bool) error {
 			called = true
 			return nil
 		}
-		confirm = func(string, string, string, bool) bool { return false }
+		d.Confirm = func(string, string, string, bool) bool { return false }
 
 		_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: false})
 		var ae *axi.Error
@@ -629,8 +625,9 @@ func TestPublishConfirmWiring(t *testing.T) {
 	})
 
 	t.Run("push_error_axi_code_only", func(t *testing.T) {
+		t.Parallel()
 		fx, d := newPublishableFixture(t)
-		guardedPush = func(string, string, string, bool) error {
+		d.GuardedPush = func(string, string, string, bool) error {
 			return &axi.Error{Msg: "push rejected: /host/secret/abs/path", Code: "PUBLISH_PUSH_REJECTED"}
 		}
 
@@ -641,9 +638,10 @@ func TestPublishConfirmWiring(t *testing.T) {
 	})
 
 	t.Run("yes_flag_threads_confirmed_true", func(t *testing.T) {
+		t.Parallel()
 		fx, d := newPublishableFixture(t)
 		var gotConfirmed bool
-		guardedPush = func(_, _, _ string, confirmed bool) error {
+		d.GuardedPush = func(_, _, _ string, confirmed bool) error {
 			gotConfirmed = confirmed
 			return nil
 		}
@@ -656,15 +654,16 @@ func TestPublishConfirmWiring(t *testing.T) {
 	})
 
 	t.Run("accepted_prompt_threads_confirmed_true", func(t *testing.T) {
+		t.Parallel()
 		fx, d := newPublishableFixture(t)
 		var gotConfirmed bool
 		var pushed, prompted, promptedTicket string
-		guardedPush = func(_, _, branch string, confirmed bool) error {
+		d.GuardedPush = func(_, _, branch string, confirmed bool) error {
 			gotConfirmed = confirmed
 			pushed = branch
 			return nil
 		}
-		confirm = func(branch, ticket, _ string, _ bool) bool {
+		d.Confirm = func(branch, ticket, _ string, _ bool) bool {
 			prompted, promptedTicket = branch, ticket
 			return true
 		}

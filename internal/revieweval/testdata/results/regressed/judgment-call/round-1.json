@@ -10,6 +10,7 @@
       "risk_rationale": "Retrying a request that already succeeded server-side can duplicate its effect."
     }
   ],
+  "still_present": [],
   "reviewed_paths": [
     "netutil/retry.go"
   ],

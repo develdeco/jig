@@ -37,7 +37,20 @@ func Run(dir string, args ...string) (string, error) {
 // identity (GIT_AUTHOR_NAME and friends) without persisting it.
 func RunEnv(dir string, env []string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	if err := run(dir, env, &stdout, &stderr, args); err != nil {
+	if err := run(dir, env, false, &stdout, &stderr, args); err != nil {
+		return "", callError(args, stderr.String(), err)
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// RunReplaceEnv is Run with env as the call's whole process environment,
+// instead of appended to this process's own inherited one: a caller
+// resolving some other directory's identity, or lack of one, uses it so an
+// identity this process has pinned for its own commits (gittest.PinIdentity,
+// say) cannot shadow it.
+func RunReplaceEnv(dir string, env []string, args ...string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, env, true, &stdout, &stderr, args); err != nil {
 		return "", callError(args, stderr.String(), err)
 	}
 	return strings.TrimSpace(stdout.String()), nil
@@ -47,7 +60,7 @@ func RunEnv(dir string, env []string, args ...string) (string, error) {
 // callers that compare exact output.
 func RunRaw(dir string, args ...string) (string, error) {
 	var out bytes.Buffer
-	if err := run(dir, nil, &out, &out, args); err != nil {
+	if err := run(dir, nil, false, &out, &out, args); err != nil {
 		return out.String(), callError(args, out.String(), err)
 	}
 	return out.String(), nil
@@ -55,15 +68,17 @@ func RunRaw(dir string, args ...string) (string, error) {
 
 // run spawns git in dir with "-c maintenance.auto=false" ahead of args, so
 // no call leaves git's detached maintenance running after it returns. The
-// process environment is inherited without repoEnv, then env is appended.
-// When git fails to start because the path gitCommand reused no longer
-// exists (git was removed or moved while jig ran), run forgets that path and
-// tries once more, which searches PATH again. A missing dir fails the same
-// way and is returned as is: searching PATH again would not help.
-func run(dir string, env []string, stdout, stderr io.Writer, args []string) error {
-	err := runOnce(dir, env, stdout, stderr, args)
+// process environment is inherited without repoEnv, then env is appended -
+// unless exact is true, in which case env is the call's whole environment,
+// verbatim, and nothing is inherited. When git fails to start because the
+// path gitCommand reused no longer exists (git was removed or moved while
+// jig ran), run forgets that path and tries once more, which searches PATH
+// again. A missing dir fails the same way and is returned as is: searching
+// PATH again would not help.
+func run(dir string, env []string, exact bool, stdout, stderr io.Writer, args []string) error {
+	err := runOnce(dir, env, exact, stdout, stderr, args)
 	if errors.Is(err, fs.ErrNotExist) && dirExists(dir) && forgetGit() {
-		err = runOnce(dir, env, stdout, stderr, args)
+		err = runOnce(dir, env, exact, stdout, stderr, args)
 	}
 	return err
 }
@@ -79,10 +94,14 @@ func dirExists(dir string) bool {
 }
 
 // runOnce is one attempt of run.
-func runOnce(dir string, env []string, stdout, stderr io.Writer, args []string) error {
+func runOnce(dir string, env []string, exact bool, stdout, stderr io.Writer, args []string) error {
 	cmd := gitCommand(append([]string{"-c", "maintenance.auto=false"}, args...))
 	cmd.Dir = dir
-	cmd.Env = append(inheritedEnv(), env...)
+	if exact {
+		cmd.Env = filterRepoEnv(env)
+	} else {
+		cmd.Env = append(inheritedEnv(), env...)
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
@@ -158,11 +177,19 @@ var repoEnv = []string{
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
 }
 
-// inheritedEnv returns the process environment without repoEnv. Names match
-// case-insensitively, as Windows resolves them.
+// inheritedEnv returns the process environment without repoEnv.
 func inheritedEnv() []string {
-	var kept []string
-	for _, kv := range os.Environ() {
+	return filterRepoEnv(os.Environ())
+}
+
+// filterRepoEnv returns env without repoEnv. Names match case-insensitively,
+// as Windows resolves them. The result is never nil - even when env is nil or
+// every entry is filtered out - so a caller that assigns it to cmd.Env
+// replaces the child's environment with an empty one rather than falling
+// back to os/exec's nil-means-inherit behavior.
+func filterRepoEnv(env []string) []string {
+	kept := []string{}
+	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
 		if !slices.ContainsFunc(repoEnv, func(v string) bool { return strings.EqualFold(v, name) }) {
 			kept = append(kept, kv)
@@ -234,7 +261,7 @@ func CommitsIn(dir, rangeSpec string) ([]string, error) {
 func IsAncestor(dir, ancestor, descendant string) (bool, error) {
 	args := []string{"merge-base", "--is-ancestor", ancestor, descendant}
 	var stdout, stderr bytes.Buffer
-	err := run(dir, nil, &stdout, &stderr, args)
+	err := run(dir, nil, false, &stdout, &stderr, args)
 	if err == nil {
 		return true, nil
 	}
@@ -276,7 +303,7 @@ func Missing(dir, ref string, commits []string) ([]string, error) {
 func DiffNameOnly(dir, base, head, diffFilter string) ([]string, error) {
 	args := []string{"diff", "--name-only", "-z", "--no-renames", "--diff-filter=" + diffFilter, base, head}
 	var stdout, stderr bytes.Buffer
-	if err := run(dir, nil, &stdout, &stderr, args); err != nil {
+	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
 		return nil, callError(args, stderr.String(), err)
 	}
 	raw := strings.TrimSuffix(stdout.String(), "\x00")
@@ -330,7 +357,7 @@ func treeEntryAtRev(dir, rev, path string) (entryType string, found bool, err er
 	}
 	args := []string{"--literal-pathspecs", "ls-tree", "-z", "--full-tree", rev, "--", path}
 	var stdout, stderr bytes.Buffer
-	if err := run(dir, nil, &stdout, &stderr, args); err != nil {
+	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
 		return "", false, callError(args, stderr.String(), err)
 	}
 	for _, entry := range strings.Split(stdout.String(), "\x00") {
@@ -515,11 +542,36 @@ var identRe = regexp.MustCompile(`^(.*) <([^>]*)> \d+ [+-]\d{4}$`)
 // Passing them to RunEnv makes a commit in another clone carry dir's
 // identity. It fails with IDENTITY_REQUIRED when git has none.
 func IdentityEnv(dir string) ([]string, error) {
-	authorIdent, err := Run(dir, "var", "GIT_AUTHOR_IDENT")
+	return identityEnv(dir, func(name string) (string, error) {
+		return Run(dir, "var", name)
+	})
+}
+
+// IdentityEnvWithBase is IdentityEnv, except when base is non-nil: dir's
+// identity is then resolved with base as the "git var" calls' whole process
+// environment, instead of appended to this process's own inherited one, so
+// an identity this process has pinned for its own commits (gittest.PinIdentity,
+// say) cannot shadow dir's own config, or its absence, while resolving some
+// other dir's identity. A nil base is IdentityEnv.
+func IdentityEnvWithBase(dir string, base []string) ([]string, error) {
+	if base == nil {
+		return IdentityEnv(dir)
+	}
+	return identityEnv(dir, func(name string) (string, error) {
+		return RunReplaceEnv(dir, base, "var", name)
+	})
+}
+
+// identityEnv resolves dir's author/committer identity via runVar (one of
+// IdentityEnv's or IdentityEnvWithBase's own "git var" call) and returns it
+// as GIT_AUTHOR_NAME/EMAIL and GIT_COMMITTER_NAME/EMAIL entries, without
+// dates.
+func identityEnv(dir string, runVar func(name string) (string, error)) ([]string, error) {
+	authorIdent, err := runVar("GIT_AUTHOR_IDENT")
 	if err != nil {
 		return nil, identityRequiredError(dir, err)
 	}
-	committerIdent, err := Run(dir, "var", "GIT_COMMITTER_IDENT")
+	committerIdent, err := runVar("GIT_COMMITTER_IDENT")
 	if err != nil {
 		return nil, identityRequiredError(dir, err)
 	}

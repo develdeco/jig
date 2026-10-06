@@ -62,6 +62,16 @@ func (b *headlessBackend) hookBinary() (string, error) {
 // hook that has stopped making progress at all, not to hurry one along.
 const defaultHeadlessTimeout = 90 * time.Minute
 
+// shellCommandTimeout is how long a headless session's shell waits on one
+// command before Claude Code moves it to the background: both the CLI's
+// default for a call that names no timeout (BASH_DEFAULT_TIMEOUT_MS, 2
+// minutes in the CLI) and the most a call may ask for (BASH_MAX_TIMEOUT_MS,
+// 10). A slice's oracle has to fit in it, and an unattended session can only
+// poll a command the CLI backgrounded: jig's own `go test
+// ./internal/verifydeliver/` takes about 9 minutes on a Windows dev machine
+// (ADR 0018).
+const shellCommandTimeout = 30 * time.Minute
+
 // headlessTimeout is defaultHeadlessTimeout, or the Go duration in
 // JIG_HEADLESS_TIMEOUT. A value that does not parse, or is not positive, is
 // refused rather than ignored: an operator who set a bound and got the
@@ -167,6 +177,7 @@ func headlessTools() []string {
 // tool calls the permission system denied.
 type cliResult struct {
 	Type              string      `json:"type"`
+	SessionID         string      `json:"session_id"`
 	Subtype           string      `json:"subtype"`
 	IsError           bool        `json:"is_error"`
 	Result            string      `json:"result"`
@@ -188,10 +199,32 @@ type cliDenial struct {
 // own message, while a completed session's final message is parsed via
 // outcome.ParseText and written to d.ResultJSON in its place.
 func (b *headlessBackend) Run(d Dispatch) error {
+	_, err := b.run(d)
+	return err
+}
+
+// RunResumable is Run that also returns the CLI's session id, read from its
+// final result object ("" when there is none), so the caller can Resume it.
+func (b *headlessBackend) RunResumable(d Dispatch) (string, error) {
+	return b.run(d)
+}
+
+// Resume continues the session sessionID ran with d.Prompt as its next
+// turn, through `claude -p --resume`, with d's worktree, grants and result
+// path, and the same disk contract as Run.
+func (b *headlessBackend) Resume(d Dispatch, sessionID string) error {
+	d.resume = sessionID
+	_, err := b.run(d)
+	return err
+}
+
+// run is Run's body: it runs d, a new session or, when d.resume is set, the
+// next turn of that one, and returns the session id the CLI reported.
+func (b *headlessBackend) run(d Dispatch) (string, error) {
 	d = sessionView(d)
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
-		return &axi.Error{
+		return "", &axi.Error{
 			Msg:  "claude binary not found on PATH; install the Claude Code CLI to use the headless backend",
 			Code: "CLAUDE_NOT_FOUND",
 			Help: []string{"Install `claude` and ensure it is on PATH, or use `--backend fake --scenario <dir>` for CI."},
@@ -205,18 +238,18 @@ func (b *headlessBackend) Run(d Dispatch) error {
 	// itself was bad.
 	bound, err := headlessTimeout()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if d.Screen {
 		if err := b.verifyScreen(); err != nil {
-			return err
+			return "", err
 		}
 	}
 
 	args, cleanup, err := b.args(d)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer cleanup()
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
@@ -238,27 +271,27 @@ func (b *headlessBackend) Run(d Dispatch) error {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
+	res, ok := parseCLIResult(stdout.Bytes())
 
 	// A session that wrote its result honored the disk contract, whatever
 	// happened to the process afterwards - including a timeout while it was
 	// shutting down - so the result is read before the bound is reported.
 	if _, err := os.Stat(d.ResultJSON); err == nil {
-		return nil
+		return res.SessionID, nil
 	}
 	if ctx.Err() != nil {
-		return sessionTimeoutError(bound)
+		return "", sessionTimeoutError(bound)
 	}
 
-	res, ok := parseCLIResult(stdout.Bytes())
 	if !ok {
-		return fmt.Errorf("session/headless: claude ran no session (%s): %s", exitStatus(runErr), outputTail(stderr.String(), stdout.String()))
+		return "", fmt.Errorf("session/headless: claude ran no session (%s): %s", exitStatus(runErr), outputTail(stderr.String(), stdout.String()))
 	}
 	if res.IsError {
 		msg := res.Result
 		if msg == "" {
 			msg = res.Subtype
 		}
-		return fmt.Errorf("session/headless: claude session ended in error: %s", msg)
+		return res.SessionID, fmt.Errorf("session/headless: claude session ended in error: %s", msg)
 	}
 
 	parsed := outcome.ParseText("slice", res.Result)
@@ -267,9 +300,9 @@ func (b *headlessBackend) Run(d Dispatch) error {
 	}
 	data, err := json.Marshal(parsed)
 	if err != nil {
-		return fmt.Errorf("session/headless: marshal fallback result: %w", err)
+		return res.SessionID, fmt.Errorf("session/headless: marshal fallback result: %w", err)
 	}
-	return writeResultBytes(d.ResultJSON, data)
+	return res.SessionID, writeResultBytes(d.ResultJSON, data)
 }
 
 // sessionView returns d as its session sees it: the worktree, input and
@@ -301,6 +334,9 @@ func (b *headlessBackend) args(d Dispatch) (argv []string, cleanup func(), err e
 		return nil, noop, fmt.Errorf("session/headless: render settings: %w", err)
 	}
 	args := []string{"-p", "--output-format", "json"}
+	if d.resume != "" {
+		args = append(args, "--resume", d.resume)
+	}
 	if d.Model != "" {
 		args = append(args, "--model", d.Model)
 	}
@@ -351,7 +387,9 @@ func (b *headlessBackend) args(d Dispatch) (argv []string, cleanup func(), err e
 // parses the path) on every tool call, and its allow is this settings
 // object's only grant for the screen.Granted tools - the operator's own
 // user settings, loaded on top, can still grant more. Without d.Screen
-// those tools get plain allow rules instead, unscreened.
+// those tools get plain allow rules instead, unscreened. Either way its env
+// sets the shell's command timeout (shellCommandTimeout), which the CLI
+// applies over the operator's own settings.
 func (b *headlessBackend) settings(d Dispatch) (string, error) {
 	worktree, err := filepath.Abs(d.Worktree)
 	if err != nil {
@@ -398,6 +436,11 @@ func (b *headlessBackend) settings(d Dispatch) (string, error) {
 		allow = append(allow, screen.Granted...)
 	}
 	settings["permissions"] = map[string]any{"allow": allow}
+	commandMS := strconv.FormatInt(shellCommandTimeout.Milliseconds(), 10)
+	settings["env"] = map[string]string{
+		"BASH_DEFAULT_TIMEOUT_MS": commandMS,
+		"BASH_MAX_TIMEOUT_MS":     commandMS,
+	}
 	data, err := json.Marshal(settings)
 	if err != nil {
 		return "", err

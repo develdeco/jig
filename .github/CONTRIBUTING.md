@@ -8,7 +8,7 @@ repos.
 
 ```sh
 go build ./...
-go test ./...
+go test -timeout 30m ./...
 ```
 
 `gofmt -l .` should print nothing, and `go vet ./...` should be clean. See
@@ -77,6 +77,14 @@ annotation.
   `lint.TestNoGitSpawnOutsideGitx` parses every other package and fails the
   build if one calls `os/exec` on a program that resolves to `git`, and
   `lint.TestNoGoGitOutsideGitx` if one imports go-git.
+- No test in `internal/` edits process-global state: the environment
+  (`t.Setenv`, `os.Setenv`, `os.Unsetenv`), the working directory
+  (`t.Chdir`, `os.Chdir`), or a package-level variable declared in the
+  package's non-test code. A dependency a test must replace comes through
+  the package's `Deps` or an argument. `TestMain` may set the process up
+  once, before any test runs. `lint.TestNoGlobalStateEditInInternalTests`
+  enforces this as a ratchet; a debt list names the files that may still
+  offend today, and only shrinks as offenders are fixed.
 - Every test gets its own `t.TempDir()`, and its own jig home, so a test
   run never touches a real machine's: packages take the jig home root as an
   argument (`fixture.Opts.Home`, `verifydeliver.Deps.Home`,

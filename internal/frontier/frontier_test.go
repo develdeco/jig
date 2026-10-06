@@ -25,7 +25,8 @@ import (
 )
 
 // newDeps wires Deps against a generated fixture, using the fake
-// session backend against fx.ScenarioDir.
+// session backend against fx.ScenarioDir. Its oracle passes without running:
+// a test about jig's own oracle run (oracle_test.go) sets Oracle back to nil.
 func newDeps(t *testing.T, fx *fixture.Fixture) (Deps, *store.Store) {
 	t.Helper()
 	st, err := store.Open(fx.StoreDir)
@@ -47,6 +48,7 @@ func newDeps(t *testing.T, fx *fixture.Fixture) (Deps, *store.Store) {
 		Rungs:   staircase.Default(),
 		Journal: func(l journal.Line) error { return journal.Append(st, fx.Ticket, l) },
 		Home:    fx.Home,
+		Oracle:  func(string, string) (string, error) { return "", nil },
 	}
 	return d, st
 }
@@ -1296,6 +1298,43 @@ func TestRunFloorsTheRungWhenTheLeaseDiffTouchesAnInvariant(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRunClimbsARungPerFailedAttemptButNotForAQuestion: a slice that fails
+// at the work is dispatched again one rung up, and a slice resumed after its
+// question is answered stays on the rung it opened on (ADR 0019). The
+// journal's dispatch lines carry the rung each attempt ran on.
+func TestRunClimbsARungPerFailedAttemptButNotForAQuestion(t *testing.T) {
+	rungs := staircase.Config{Rungs: []string{"rung-a", "rung-b", "rung-c"}}
+
+	t.Run("failures climb", func(t *testing.T) {
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "cap"})
+		d, st := newDeps(t, fx)
+		d.Rungs = rungs
+		if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		for attempt, want := range map[int]string{1: "rung-a", 2: "rung-b", 3: "rung-c"} {
+			if got := dispatchModel(t, st, fx.Ticket, "a", attempt); got != want {
+				t.Errorf("slice a attempt %d ran on %q, want %q: each failed attempt climbs one rung", attempt, got, want)
+			}
+		}
+	})
+
+	t.Run("an answered question does not climb", func(t *testing.T) {
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+		d, st := newDeps(t, fx)
+		d.Rungs = rungs
+		if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+			t.Fatalf("first Run: %v", err)
+		}
+		if _, err := Run(d, RunOpts{Ticket: fx.Ticket, AnswerQID: "q-001", AnswerText: "Casual."}); err != nil {
+			t.Fatalf("second Run: %v", err)
+		}
+		if got := dispatchModel(t, st, fx.Ticket, "c", 2); got != "rung-a" {
+			t.Errorf("slice c's resumed attempt ran on %q, want %q: asking a question is not a failed attempt", got, "rung-a")
+		}
+	})
 }
 
 // TestRunLeavesSessionPersistenceOnForBuildDispatches: only the intent

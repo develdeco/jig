@@ -5,50 +5,68 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/repohost"
 )
 
-// githubRemote is the github.com remote useGithubHost points the fixture's
-// single repo at. Its repo name is "fixture-repo", matching the fixture's
-// real remote (fixture.Build's repoRemote), so repo.Name() - the repoName
-// every pool lease directory and report map is keyed by - stays the same
-// before and after the swap.
+// githubRemote is the github.com remote the host useGithubHost hands
+// Publish is built from. Its repo name is "fixture-repo", matching the
+// fixture's real remote (fixture.Build's repoRemote), so every argv gh is
+// asked for names the same repo the fixture itself ships.
 const githubRemote = "git@github.com:owner/fixture-repo.git"
 
-// useGithubHost makes the fixture's single repo resolve to a GitHub pull
-// request host for Publish (repohost.New parses a repo's own remote): it
-// points d.Cfg.Repos[0].Remote at githubRemote, and tells git, through the
-// GIT_CONFIG_COUNT/KEY/VALUE discrete config variables (layered additively
-// over gittest's own hermetic global config, never replacing it), to treat
-// that URL as an alias for the fixture's real local remote - so every
-// clone, fetch and push Publish makes still reaches the real bare repo,
-// while repohost.New sees a github.com URL. It also puts the fake gh on
-// PATH, which lists pulls (fixture.GhPulls) as the repo's pull requests (""
-// for none) and fails the call named by fail ("" for none), and returns the
-// file it logs every argv to. It sets the process environment, so the test
-// using it must not be parallel.
-func useGithubHost(t *testing.T, d *Deps, pulls, fail string) string {
+// useGithubHost hands d a GitHub pull request host (repohost.NewWithEnv on
+// githubRemote) running against the fake gh, which lists pulls
+// (fixture.GhPulls) as the repo's pull requests ("" for none) and fails the
+// call named by fail ("" for none). It returns the file gh logs every argv
+// to and a function that adds environment variables to the gh subprocess.
+// d.Cfg's own remote is left as the fixture's local path, which every
+// clone, fetch and push Publish makes still reaches, and nothing here edits
+// the process environment: the gh binary and the variables that drive it
+// are the injected host's own, so a test using it stays parallel.
+func useGithubHost(t *testing.T, d *Deps, pulls, fail string) (string, func(...string)) {
 	t.Helper()
 	stubDir := fixture.GhStub(t)
-	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	logFile := filepath.Join(t.TempDir(), "gh.log")
-	t.Setenv("GH_STUB_LOG", logFile)
-	t.Setenv("GH_STUB_STATE", filepath.Join(t.TempDir(), "gh.state"))
-	t.Setenv("GH_STUB_BODY_STATE", filepath.Join(t.TempDir(), "gh-body.state"))
-	t.Setenv("GH_STUB_PULLS", pulls)
-	t.Setenv("GH_STUB_FAIL", fail)
+	ghBin := filepath.Join(stubDir, "gh")
+	if runtime.GOOS == "windows" {
+		ghBin = filepath.Join(stubDir, "gh.exe")
+	}
 
-	real := d.Cfg.Repos[0].Remote
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "url."+filepath.ToSlash(real)+".insteadOf")
-	t.Setenv("GIT_CONFIG_VALUE_0", githubRemote)
-	d.Cfg.Repos[0].Remote = githubRemote
-	return logFile
+	logFile := filepath.Join(t.TempDir(), "gh.log")
+	stateFile := filepath.Join(t.TempDir(), "gh.state")
+	bodyStateFile := filepath.Join(t.TempDir(), "gh-body.state")
+
+	ghEnv := append(append([]string{}, os.Environ()...),
+		"GH_STUB_LOG="+logFile,
+		"GH_STUB_STATE="+stateFile,
+		"GH_STUB_BODY_STATE="+bodyStateFile,
+		"GH_STUB_PULLS="+pulls,
+		"GH_STUB_FAIL="+fail,
+	)
+
+	setHost := func(env []string) {
+		host, err := repohost.NewWithEnv(githubRemote, ghBin, env)
+		if err != nil {
+			t.Fatalf("repohost.NewWithEnv %s: %v", githubRemote, err)
+		}
+		if host == nil {
+			t.Fatalf("repohost.NewWithEnv %s: no host for a github.com remote", githubRemote)
+		}
+		d.Host = host
+	}
+	setHost(ghEnv)
+
+	addEnv := func(vars ...string) {
+		ghEnv = append(ghEnv, vars...)
+		setHost(ghEnv)
+	}
+	return logFile, addEnv
 }
 
 // ghLogLine is one line of the fake gh's log: its argv (argv[0] the stub
@@ -135,15 +153,14 @@ func lookupCall(branch string) []string {
 // origin (pushed from the build lease, the case a first squash would refuse
 // before this), so the push is a fast-forward and the body is the only thing
 // that changes on the pull request.
-//
-// This test must stay serial: it puts the fake gh on PATH.
 func TestPublishUpdatesTheOpenPRInsteadOfOpeningASecond(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 	branch := ticketBranch(fx.Ticket)
 	run(t, buildLeaseDir(t, fx), "push", "origin", branch)
-	logFile := useGithubHost(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
+	logFile, _ := useGithubHost(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
 
 	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -185,13 +202,12 @@ func TestPublishUpdatesTheOpenPRInsteadOfOpeningASecond(t *testing.T) {
 
 // TestPublishOpensAPRWhenTheBranchHasNone is the control: with no open pull
 // request the lookup answers none and publish opens one, as it always has.
-//
-// This test must stay serial: it puts the fake gh on PATH.
 func TestPublishOpensAPRWhenTheBranchHasNone(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
-	logFile := useGithubHost(t, &d, "", "")
+	logFile, _ := useGithubHost(t, &d, "", "")
 
 	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -228,9 +244,8 @@ func TestPublishOpensAPRWhenTheBranchHasNone(t *testing.T) {
 // publish the operator asked for opens one into the target, and touches none
 // of them. The fake gh applies the state, head and base the lookup passes, so
 // it is GitHub that leaves them out of the answer.
-//
-// This test must stay serial: it puts the fake gh on PATH.
 func TestPublishOpensAPRWhenTheBranchHasNoOpenOneIntoTheTarget(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		state  string
@@ -242,12 +257,13 @@ func TestPublishOpensAPRWhenTheBranchHasNoOpenOneIntoTheTarget(t *testing.T) {
 		{"open into another base", "open", false, "release"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 			d := newDeps(t, fx)
 			gateToClean(t, fx, d)
 			branch := ticketBranch(fx.Ticket)
 			pulls := fixture.GhPulls(t, fixture.GhPull{Number: 7, State: tc.state, Merged: tc.merged, Owner: "owner", Head: branch, Base: tc.base})
-			logFile := useGithubHost(t, &d, pulls, "")
+			logFile, _ := useGithubHost(t, &d, pulls, "")
 
 			report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 			if err != nil {
@@ -266,34 +282,24 @@ func TestPublishOpensAPRWhenTheBranchHasNoOpenOneIntoTheTarget(t *testing.T) {
 	}
 }
 
-// TestPublishWithNoHostMakesNoGhCall: the fixture's own remote is a plain
-// local path, the configuration this store itself runs under - repohost.New
-// finds no pull-request host there (repohost.TestNewReturnsNilForNonGitHub
-// pins that inference alone). The fake gh goes on PATH, but the remote is
-// never swapped to githubRemote the way useGithubHost would: Publish must
-// make no gh call at all over it, not even to check gh is installed
-// (repohost.New returns nil before it ever looks). It asks the push-only
-// confirmation question - no open PR to name and no host - and journals `pr`
-// with none:no-host, not opened or updated.
-//
-// This test must stay serial: it puts the fake gh on PATH and swaps the
-// package-level confirm hook, which every parallel test's Publish reads.
-func TestPublishWithNoHostMakesNoGhCall(t *testing.T) {
-	origConfirm := confirm
-	defer func() { confirm = origConfirm }()
-
-	stubDir := fixture.GhStub(t)
-	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	logFile := filepath.Join(t.TempDir(), "gh.log")
-	t.Setenv("GH_STUB_LOG", logFile)
-
+// TestPublishWithNoHostOpensNoPullRequest: the fixture's own remote is a
+// plain local path, the configuration this store itself runs under, and no
+// host is handed to Publish - so it resolves one from that remote and
+// repohost.New finds none there (repohost.TestNewReturnsNilForNonGitHub
+// pins that inference, and that New answers nil before it ever looks for
+// gh, so no host means no gh call at all). Publish asks the push-only
+// confirmation question - no open PR to name and no host - pushes the
+// branch, opens nothing, and journals `pr` with none:no-host, not opened or
+// updated; the report carries no URL and says why.
+func TestPublishWithNoHostOpensNoPullRequest(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 
 	var gotBranch, gotPR string
 	var gotHasHost bool
-	confirm = func(branch, _, openPR string, hasHost bool) bool {
+	d.Confirm = func(branch, _, openPR string, hasHost bool) bool {
 		gotBranch, gotPR, gotHasHost = branch, openPR, hasHost
 		return true
 	}
@@ -306,8 +312,8 @@ func TestPublishWithNoHostMakesNoGhCall(t *testing.T) {
 	if gotBranch != ticketBranch(fx.Ticket) || gotPR != "" || gotHasHost {
 		t.Errorf("confirm asked (branch=%q, openPR=%q, hasHost=%v), want the ticket's branch, no open PR and hasHost=false", gotBranch, gotPR, gotHasHost)
 	}
-	if calls := loggedGh(t, logFile); len(calls) != 0 {
-		t.Errorf("gh calls = %v, want none: the fixture's remote has no pull-request host", calls)
+	if report.PRNote["fixture-repo"] != "no pull-request host" {
+		t.Errorf("report: PR note %q, want it to say the remote has no pull-request host", report.PRNote["fixture-repo"])
 	}
 	if report.PRURL["fixture-repo"] != "" || report.PRUpdated["fixture-repo"] {
 		t.Errorf("report: PR %q updated=%v, want empty and false: no pull-request host", report.PRURL["fixture-repo"], report.PRUpdated["fixture-repo"])
@@ -335,13 +341,12 @@ func TestPublishWithNoHostMakesNoGhCall(t *testing.T) {
 // not "no pull request", which would open a second one. The publish is refused
 // before its first store write and before anything is pushed: the journal is
 // as it was, origin has no branch, and no pull request was created.
-//
-// This test must stay serial: it puts the fake gh on PATH.
 func TestPublishRefusesWhenItCannotTellWhetherThereIsAPR(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
-	logFile := useGithubHost(t, &d, "", "api repos/owner/fixture-repo/pulls")
+	logFile, _ := useGithubHost(t, &d, "", "api repos/owner/fixture-repo/pulls")
 	journalBefore, err := journal.Read(d.Store, fx.Ticket)
 	if err != nil {
 		t.Fatalf("journal.Read: %v", err)
@@ -374,20 +379,15 @@ func TestPublishRefusesWhenItCannotTellWhetherThereIsAPR(t *testing.T) {
 // TestPublishConfirmNamesTheOpenPR: the question the operator answers says
 // which pull request it is about - the one the branch already has open, which
 // a yes updates - and a no touches neither the branch nor that pull request.
-//
-// This test must stay serial: it swaps the package-level confirm hook, which
-// every parallel test's Publish reads, and puts the fake gh on PATH.
 func TestPublishConfirmNamesTheOpenPR(t *testing.T) {
-	origConfirm := confirm
-	defer func() { confirm = origConfirm }()
-
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
-	logFile := useGithubHost(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
+	logFile, _ := useGithubHost(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
 
 	var gotBranch, gotPR string
-	confirm = func(branch, _, openPR string, _ bool) bool {
+	d.Confirm = func(branch, _, openPR string, _ bool) bool {
 		gotBranch, gotPR = branch, openPR
 		return false
 	}
@@ -409,9 +409,8 @@ func TestPublishConfirmNamesTheOpenPR(t *testing.T) {
 // call's error, its journal has no `pr` line saying updated or opened (nor the
 // route and publish-done lines after it), and the deferred push commits what it
 // did write under a subject naming the failure.
-//
-// This test must stay serial: it puts the fake gh on PATH.
 func TestPublishFailsLoudlyWhenThePRCannotBeWritten(t *testing.T) {
+	t.Parallel()
 	noPulls := func(*testing.T, string) string { return "" }
 	for _, tc := range []struct {
 		name  string
@@ -423,10 +422,11 @@ func TestPublishFailsLoudlyWhenThePRCannotBeWritten(t *testing.T) {
 		{"open one", noPulls, "pr create", "gh pr create"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 			d := newDeps(t, fx)
 			gateToClean(t, fx, d)
-			useGithubHost(t, &d, tc.pulls(t, ticketBranch(fx.Ticket)), tc.fail)
+			_, _ = useGithubHost(t, &d, tc.pulls(t, ticketBranch(fx.Ticket)), tc.fail)
 
 			_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 			if err == nil || !strings.Contains(err.Error(), tc.call) {
@@ -484,13 +484,12 @@ func wantReviewNotesBodyFile(t *testing.T, argv []string) {
 // TestPublishPostsReviewNotesAsCommentOnCreate: publish posts the review notes
 // as a comment on a newly opened pull request, exactly once, with
 // pr/review-notes.md as its --body-file.
-//
-// This test must stay serial: it puts the fake gh on PATH.
 func TestPublishPostsReviewNotesAsCommentOnCreate(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
-	logFile := useGithubHost(t, &d, "", "")
+	logFile, _ := useGithubHost(t, &d, "", "")
 
 	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -508,15 +507,14 @@ func TestPublishPostsReviewNotesAsCommentOnCreate(t *testing.T) {
 // TestPublishPostsReviewNotesAsCommentOnUpdate: publish posts the review notes
 // as a comment on an existing pull request that it updates, exactly once,
 // with pr/review-notes.md as its --body-file.
-//
-// This test must stay serial: it puts the fake gh on PATH.
 func TestPublishPostsReviewNotesAsCommentOnUpdate(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 	branch := ticketBranch(fx.Ticket)
 	run(t, buildLeaseDir(t, fx), "push", "origin", branch)
-	logFile := useGithubHost(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
+	logFile, _ := useGithubHost(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
 
 	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -536,19 +534,14 @@ func TestPublishPostsReviewNotesAsCommentOnUpdate(t *testing.T) {
 // is kept for manual posting, the operator is warned (prefixed "jig:", like
 // every other stderr warning, and naming the file and the pull request), and
 // the journal and store are committed with the publish complete.
-//
-// This test must stay serial: it puts the fake gh on PATH and swaps the
-// package-level warn hook, which every parallel test's Publish could call.
 func TestPublishContinuesWhenCommentPostingFails(t *testing.T) {
-	origWarn := warn
-	defer func() { warn = origWarn }()
+	t.Parallel()
 	var warning string
-	warn = func(format string, args ...any) { warning = fmt.Sprintf(format, args...) }
-
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
+	d.Warn = func(format string, args ...any) { warning = fmt.Sprintf(format, args...) }
 	gateToClean(t, fx, d)
-	logFile := useGithubHost(t, &d, "", "pr comment")
+	logFile, _ := useGithubHost(t, &d, "", "pr comment")
 
 	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -603,16 +596,15 @@ func TestPublishContinuesWhenCommentPostingFails(t *testing.T) {
 // with nothing in the run, the report or the store recording that it was ever
 // there to lose.
 //
-// This test must stay serial: it swaps the package-level warn hook, which
-// every parallel test's Publish could call.
+// TestPublishWarnsWhenTheBriefHasNoIntentToPublish checks that a brief
+// without an Intent section to publish produces a warning and still publishes
+// successfully without that section in the pull request body.
 func TestPublishWarnsWhenTheBriefHasNoIntentToPublish(t *testing.T) {
-	origWarn := warn
-	defer func() { warn = origWarn }()
+	t.Parallel()
 	var warnings []string
-	warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
-
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
+	d.Warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
 	briefPath := filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md")
 	brief := "# Fixture ticket brief\n\nTwo small fixes, stated in prose with no \"## \" heading anywhere.\n"
 	if err := os.WriteFile(briefPath, []byte(brief), 0o644); err != nil {
@@ -663,23 +655,22 @@ func TestPublishWarnsWhenTheBriefHasNoIntentToPublish(t *testing.T) {
 // one", since "no \"## \" section" would send its operator to add a heading
 // the brief already has.
 //
-// This test must stay serial: it swaps the package-level warn and confirm
-// hooks, which every parallel test's Publish reads.
+// TestPublishWarnsAboutTheOmittedIntentBeforeTheConfirmationPrompt checks
+// that the warning about an omitted Intent section is raised before the
+// confirmation prompt, so the operator can still decline without pushing.
 func TestPublishWarnsAboutTheOmittedIntentBeforeTheConfirmationPrompt(t *testing.T) {
-	origWarn, origConfirm := warn, confirm
-	defer func() { warn, confirm = origWarn, origConfirm }()
+	t.Parallel()
 	var warnings []string
-	warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
 	asked := false
 	var warnedWhenAsked []string
-	confirm = func(string, string, string, bool) bool {
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	d.Warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+	d.Confirm = func(string, string, string, bool) bool {
 		asked = true
 		warnedWhenAsked = append(warnedWhenAsked, warnings...)
 		return false
 	}
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
 	briefPath := filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md")
 	brief := "# Fixture ticket brief\n\n## Intent\n\n## Plan\n\nTwo small fixes, under the second heading only.\n"
 	if err := os.WriteFile(briefPath, []byte(brief), 0o644); err != nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -38,6 +39,37 @@ type Deps struct {
 	// test's own directory in tests). "" means it could not be resolved:
 	// gate intent inference then has nowhere to look and says so.
 	UserHome string
+	// Host is the pull-request host Publish finds, opens or updates the pull
+	// request with. nil means the host the shipped repo's own remote names
+	// (repohost.New), which is itself nil for a remote with no pull-request
+	// host; a test hands its own, built on a fake gh.
+	Host repohost.Host
+	// Confirm asks the interactive confirmation question. nil means the default.
+	Confirm func(branch, ticket, openPR string, hasHost bool) bool
+	// GuardedPush pushes branch to origin. nil means gitx.GuardedPush.
+	GuardedPush func(dir, remote, branch string, confirmed bool) error
+	// FetchOrigin refreshes the view of origin. nil means the default fetch.
+	FetchOrigin func(dir string) error
+	// Warn reports a soft-failure warning. nil means the default stderr write.
+	Warn func(format string, args ...any)
+	// GitEnv is the whole process environment Publish's identity resolution
+	// runs its "git var" calls under, in place of this process's own
+	// inherited one. nil means inherit it, as production always does. A test
+	// whose own process has an identity pinned for its own commits
+	// (gittest.PinIdentity) sets its own so that pin cannot shadow a mapped
+	// clone's distinct identity, or its absence, while resolving one for
+	// Publish - without editing the process environment to get it.
+	GitEnv []string
+}
+
+// publishHost is the host d hands Publish for the repo it ships: d.Host when
+// set, else the host that repo's own remote names, which is nil - no pull
+// request opened or updated - for a remote with no pull-request host.
+func (d Deps) publishHost(remote string) (repohost.Host, error) {
+	if d.Host != nil {
+		return d.Host, nil
+	}
+	return repohost.New(remote)
 }
 
 // primaryRepo returns v0.1's single repo and its target branch (defaulting

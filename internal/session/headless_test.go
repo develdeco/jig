@@ -81,9 +81,11 @@ func missingDispatch(t *testing.T, screen bool) Dispatch {
 // for the lease worktree and the result file only, and - when screened -
 // the exec-form `jig _screen` hook as the only grant for the shell and read
 // tools, which get no allow rule of their own. Unscreened, those tools get
-// plain allow rules and there is no hook.
+// plain allow rules and there is no hook. Either way the shell waits 30
+// minutes on a command, by default and at most (ADR 0018).
 func TestHeadlessSettings(t *testing.T) {
 	b := &headlessBackend{goos: "linux", screenBinary: "/opt/jig/bin/jig"}
+	shellEnv := map[string]any{"BASH_DEFAULT_TIMEOUT_MS": "1800000", "BASH_MAX_TIMEOUT_MS": "1800000"}
 
 	d := missingDispatch(t, true)
 	edits := []string{
@@ -110,6 +112,7 @@ func TestHeadlessSettings(t *testing.T) {
 				},
 			},
 		},
+		"env": shellEnv,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("screened settings =\n%s\nwant\n%v", raw, want)
@@ -126,6 +129,7 @@ func TestHeadlessSettings(t *testing.T) {
 	}
 	want = map[string]any{
 		"permissions": map[string]any{"allow": toAny(append(edits, "Bash", "Read", "Glob", "Grep"))},
+		"env":         shellEnv,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("unscreened settings =\n%s\nwant\n%v", raw, want)
@@ -265,14 +269,31 @@ func TestHeadlessScreenBinary(t *testing.T) {
 // claudeStubRun is one headless Run against the claude stub: the dispatch
 // it ran and the error Run returned.
 type claudeStubRun struct {
-	d   Dispatch
-	err error
+	d         Dispatch
+	err       error
+	sessionID string // what RunResumable returned, when that is how it ran
 }
 
 // runClaudeStub runs a headless dispatch against testdata/fixture/claudestub
 // on PATH, configured by env (CLAUDE_STUB_*), and checks the stub was
 // invoked exactly once, in the lease worktree, with the backend's argv.
 func runClaudeStub(t *testing.T, env map[string]string) claudeStubRun {
+	t.Helper()
+	return runClaudeStubAs(t, env, stubRun)
+}
+
+// stubCall is how runClaudeStubAs drives the backend: a plain Run, a
+// RunResumable that reports the session id, or a Resume of a session.
+type stubCall struct {
+	resumable bool   // call RunResumable instead of Run
+	resume    string // call Resume with this session id instead of Run
+}
+
+var stubRun = stubCall{}
+
+// runClaudeStubAs is runClaudeStub for any of the three ways the backend
+// runs a session.
+func runClaudeStubAs(t *testing.T, env map[string]string, how stubCall) claudeStubRun {
 	t.Helper()
 	stubDir := buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude")
 	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -303,7 +324,16 @@ func runClaudeStub(t *testing.T, env map[string]string) claudeStubRun {
 	}
 
 	b := &headlessBackend{goos: "linux", screenBinary: builtJigBinary(t)}
-	runErr := b.Run(d)
+	var runErr error
+	var sessionID string
+	switch {
+	case how.resume != "":
+		runErr = b.Resume(d, how.resume)
+	case how.resumable:
+		sessionID, runErr = b.RunResumable(d)
+	default:
+		runErr = b.Run(d)
+	}
 
 	data, err := os.ReadFile(logFile)
 	if err != nil {
@@ -320,7 +350,9 @@ func runClaudeStub(t *testing.T, env map[string]string) claudeStubRun {
 	if err := json.Unmarshal([]byte(lines[0]), &call); err != nil {
 		t.Fatalf("parse claude stub log: %v", err)
 	}
-	wantArgs, wantCleanup, err := b.args(sessionView(d))
+	want := d
+	want.resume = how.resume
+	wantArgs, wantCleanup, err := b.args(sessionView(want))
 	if err != nil {
 		t.Fatalf("args: %v", err)
 	}
@@ -331,7 +363,57 @@ func runClaudeStub(t *testing.T, env map[string]string) claudeStubRun {
 	if !sameDir(t, call.Cwd, worktree) {
 		t.Errorf("claude ran in %s, want the lease worktree %s", call.Cwd, worktree)
 	}
-	return claudeStubRun{d: d, err: runErr}
+	return claudeStubRun{d: d, err: runErr, sessionID: sessionID}
+}
+
+// TestHeadlessRunResumableReportsTheSessionID: RunResumable returns the
+// session id from the CLI's final result object, even when the session also
+// wrote its own result.json, so the frontier can hand that session a red
+// oracle run (ADR 0020).
+func TestHeadlessRunResumableReportsTheSessionID(t *testing.T) {
+	run := runClaudeStubAs(t, map[string]string{
+		"CLAUDE_STUB_WRITE_PATH": "result",
+		"CLAUDE_STUB_WRITE_BODY": `{"outcome":"green","summary":"done","commit":"abc"}`,
+		"CLAUDE_STUB_STDOUT":     `{"type":"result","subtype":"success","session_id":"sess-9","result":"done"}`,
+	}, stubCall{resumable: true})
+	if run.err != nil {
+		t.Fatalf("RunResumable: %v", run.err)
+	}
+	if run.sessionID != "sess-9" {
+		t.Errorf("RunResumable session id = %q, want %q from the CLI's result object", run.sessionID, "sess-9")
+	}
+}
+
+// TestHeadlessResumeContinuesTheSession: Resume hands the CLI the session id
+// to continue (`--resume <id>`), with everything else a dispatch carries;
+// runClaudeStubAs compares the argv the stub received against args for a
+// dispatch carrying that id.
+func TestHeadlessResumeContinuesTheSession(t *testing.T) {
+	run := runClaudeStubAs(t, map[string]string{
+		"CLAUDE_STUB_WRITE_PATH": "result",
+		"CLAUDE_STUB_WRITE_BODY": `{"outcome":"green","summary":"fixed","commit":"def"}`,
+	}, stubCall{resume: "sess-9"})
+	if run.err != nil {
+		t.Fatalf("Resume: %v", run.err)
+	}
+	args, cleanup, err := (&headlessBackend{goos: "linux", screenBinary: "/opt/jig/bin/jig"}).args(Dispatch{Worktree: run.d.Worktree, ResultJSON: run.d.ResultJSON, Prompt: "x", resume: "sess-9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if !slicesContainPair(args, "--resume", "sess-9") {
+		t.Errorf("args = %q, want --resume sess-9", args)
+	}
+}
+
+// slicesContainPair reports whether args holds k immediately followed by v.
+func slicesContainPair(args []string, k, v string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == k && args[i+1] == v {
+			return true
+		}
+	}
+	return false
 }
 
 // TestHeadlessRunPassesNoSessionPersistenceToTheCLI pins the flag through

@@ -387,10 +387,18 @@ func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string,
 	if merr != nil {
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: resolve manifest: %w", c.Name, n, merr)
 	}
+	// Gate runs the oracles before it dispatches a reviewer and hands it the
+	// runs; the eval does the same, so its reviewer reads the round with
+	// what a gate reviewer knows. A case whose oracle fails is one no gate
+	// would ever review.
+	oracleRuns, oerr := verifydeliver.RunOracleSuite(repoDir, man)
+	if oerr != nil {
+		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: the oracles fail, so no gate would review this round: %w", c.Name, n, oerr)
+	}
 
 	rnd, ok, rerr := verifydeliver.NewReviewerGateSource(backend).Round(verifydeliver.RoundInput{
 		Store: st, Ticket: ticket, Round: n, LeaseDir: repoDir, RepoName: evalRepoName, Target: evalTarget,
-		Model: model, Intent: intent, Manifest: man, Open: fold.Open, Dismissed: fold.Dismissed,
+		Model: model, Intent: intent, Manifest: man, OracleRuns: oracleRuns, Open: fold.Open, Dismissed: fold.Dismissed,
 	})
 	if rerr != nil {
 		rs, handled := reviewerRoundFailure(n, r.Gold, r.Decisions, rerr)
@@ -402,7 +410,11 @@ func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string,
 	if !ok || rnd.Review == nil {
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: reviewer source returned no review content", c.Name, n)
 	}
-	result := rnd.Review.Result
+	// still_present entries are expanded into full ResultFindings here,
+	// right before ApplyRound, the same as a real gate round
+	// (verifydeliver/gate.go): matching and scoring below then see exactly
+	// what a full re-report of each confirmed finding would give them.
+	result := verifydeliver.ExpandStillPresent(rnd.Review.Result, fold.Known)
 
 	reported, aerr := verifydeliver.ApplyRound(n, fold.Known, result, nil, alwaysNotGreen, man, []string{verifydeliver.RiskHigh, verifydeliver.RiskMedium, verifydeliver.RiskLow}, false)
 	if aerr != nil {

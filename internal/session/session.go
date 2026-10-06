@@ -52,6 +52,20 @@ type Dispatch struct {
 	// not be copied into the operator's own Claude Code data (the intent
 	// summarizer's excerpt); every other dispatch leaves it unset.
 	NoSessionPersistence bool
+
+	// resume is the session id a Resumer continues instead of starting a new
+	// session; only Resume sets it.
+	resume string
+}
+
+// Resumer is a Backend that can continue a session it ran: RunResumable is
+// Run that also returns the session's id ("" when the backend could not read
+// one), and Resume hands that session d.Prompt as its next turn, with d's
+// worktree, grants and result path. Only headless implements it; a caller
+// that holds another backend starts a fresh dispatch instead.
+type Resumer interface {
+	RunResumable(d Dispatch) (sessionID string, err error)
+	Resume(d Dispatch, sessionID string) error
 }
 
 // paths is every path d names: the ones a backend may have to spell for its

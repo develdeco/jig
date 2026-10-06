@@ -11,6 +11,7 @@
       "oracle": "test"
     }
   ],
+  "still_present": [],
   "reviewed_paths": [
     "alpha/alpha.go",
     "alpha/alpha_test.go",

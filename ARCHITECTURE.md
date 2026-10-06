@@ -12,13 +12,15 @@ future tooling that reads a ticket's history.
 brief          author brief.md + slices.yaml (human + intake skill)
   │            writes: <ticket>/brief.md, <ticket>/slices.yaml
   ▼
-run(frontier)  dispatch queued, unblocked slices to a build session
+run(frontier)  dispatch queued, unblocked slices to a build session; a claimed green
+  │            runs the slice's oracle, and a red run goes back to that session (ADR 0020)
   │            reads:  slices.yaml, slices/<id>.state, questions/*.md
   │            writes: slices/<id>.state, work/<id>.attempt-N.{slice,result}.json,
   │                    journal.ndjson, questions/q-NNN.md, start.<repo>.sha
   │                    (an adopted branch's again at each dispatch until jig has built)
   ▼
-gate           re-verification round: oracles, then a reviewer session's find/route/triage
+gate           re-verification round: oracles (a pass jig recorded on the same tree is
+  │            reused, ADR 0021), then a reviewer session's find/route/triage
   │            reads:  brief.md or intent.md (resolveIntent), slices.yaml, journal.ndjson,
   │                    ticket.yaml (branch), gate/round-N/findings.yaml (cumulative fold)
   │            writes: work/gate.round-N.{review,result}.json,
@@ -99,8 +101,12 @@ root) covers every path in the repo.
 When `frontier` measures a dispatch's staircase signals, it checks whether any
 file changed in the ticket's lease diff matches a declared invariant. If any
 match, the invariant signal floors the rung selection to the dearest model,
-overriding volume climbing. A repo with no declared invariants detects no
-invariants and uses volume-only flooring.
+overriding everything else. Otherwise a dispatch opens on the first rung
+(Sonnet by default; a project lists its own rungs in `project.yaml`'s
+`staircase`) and climbs one rung for each earlier attempt of the slice that
+failed at the work, as the journal records it. A question, a flawed brief or
+a blocked environment is not such a failure
+([ADR 0019](docs/adr/0019-builders-open-on-sonnet-and-climb-on-failure.md)).
 
 ## Store schema
 
@@ -223,7 +229,7 @@ exists.
 | `e2e/` | (tests only) | the fixture + fake backend → asserts the full brief→publish chain twice; with `JIG_LIVE_CLAUDE`, README's Quickstart through the real `claude` CLI; `JIG_E2E_BINARY` → the same against an installed jig |
 | `internal/axi/` | `Render`, `Table`, `KV`, `Help`, `RenderError`, `ExitCode` | labelled data → jig's plain-text output register and process exit codes |
 | `internal/claudetest/` | `API`, `Session`, `Serve` | scripted sessions (tool calls in order) → a stand-in Messages API on loopback that the real `claude` CLI runs against, for the live CLI tests |
-| `internal/envrun/` | `Up`, `Shell` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable` |
+| `internal/envrun/` | `Up`, `Shell`, `ShellOutput`, `KillTree` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable`; a command with a time limit → its output (an oracle run); a process tree ended whole |
 | `internal/fixture/` | `Build`, `Generate`, `RepoRoot` | a dir + `Opts` → a fixture repo, its store, and a scripted attempt scenario (plus the machine mapping under `Opts.Home`, by default the jig home `home.Root` resolves); `Generate` builds into a `t.TempDir()`; `RepoRoot`: a caller's source file → the module root |
 | `internal/frontier/` | `Run`, `Requeue`, `RequeueSlice`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
@@ -231,7 +237,7 @@ exists.
 | `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `internal/home/` | `Root`, `MachinePath`, `PoolDir`, `IntentExcerptDir`, `IntentScratchDir`, `EvidenceDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths, including the directories intent excerpts and summarizer scratch directories go under, and where one reviewed head's demo media live |
 | `internal/intent/` | `NewClaudeReader`, `Best`, `RenderExcerpt` | a repo's git common dir + a time window → matching local agent `Session`s; a scope diff's files → the `Match` a model then summarizes |
-| `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
+| `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
 | `internal/manifest/` | `Resolve`, `MatchesInvariant` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes, and invariant-sensitive paths; a file path → whether it matches a declared invariant |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket`, `Compare`, `DivergedError`, `RequireBuilt`, `HoldsUnpushedBuilt`, `MustExistOnOrigin`, `RecutUnlessBuilt` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point, and synced with its branch when origin has it; anything git shows is not a repository of its own is moved aside and cloned afresh) |
@@ -240,7 +246,7 @@ exists.
 | `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `MatchRound`, `ScoreRound`, `RenderReport` | a labeled corpus (`testdata/revieweval`) + a session backend → a `CaseScore` per case, matched structurally against seeded gold through the real reviewer contract |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
-| `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` (diff lines, files changed, invariant match) + `Config` → a model rung, disjoint from rungs already in use; invariant floored to the dearest rung, volume climbs one rung, otherwise cheapest |
+| `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` (the slice's failed attempts, invariant match) + `Config` → a model rung, disjoint from rungs already in use; invariant floored to the dearest rung, one rung up per failed attempt, otherwise the first rung |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID`, `Mint`, `Claim` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by; `ticket_format` + a ticket's own record → the next id, its folder created and its `ticket.yaml` written whole (refused, before anything is written, when jig cannot use the id it computed); a mint (or other write) + a commit message → that id landed on the store's origin, retried after a push the origin rejects, undone and refused (`ID_NOT_CLAIMED`) after too many or any other failed push, committed with no push on a store with no origin |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one) |
 
@@ -248,7 +254,8 @@ exists.
 
 The contract between jig and any backend is pure disk: jig writes
 `slice.json` (goal, oracle, workspace, prior attempt log, any answered
-question), the backend runs a session in the lease worktree, and jig reads
+question, and how long jig's last run of the oracle took on this ticket,
+[ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md)), the backend runs a session in the lease worktree, and jig reads
 back `result.json` (outcome, summary, commit, and - for `needs-input` - a
 question). Nothing crosses in memory.
 
@@ -261,7 +268,10 @@ Three backends implement that same narrow interface:
   and read tools, though the operator's own user settings (which still
   load) can grant more on top. Edits are granted only inside the lease, on
   the dispatch's own `result.json`, and - for a gate demo - inside its one
-  `ExtraWriteDir` (see Safety). The shell and reads it
+  `ExtraWriteDir` (see Safety). Its shell waits up to 30 minutes on a
+  command before the CLI moves it to the background, so a slice's oracle
+  finishes in the foreground
+  ([ADR 0018](docs/adr/0018-builders-test-narrowly.md)). The shell and reads it
   grants are the operator's own and are not confined to the lease, so this
   backend is not a security boundary.
 - **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); it has no PreToolUse hook to attach a screen to, so herdr sessions are not screened. It scopes no edits, so a dispatch's `ExtraWriteDir` needs no grant there. On Windows it creates the workspace at the worktree's WSL mount and rewrites the prompt's own mentions of every path of the dispatch (worktree, input and result files, `ExtraWriteDir`) to their mounts, as headless does its long spelling; the files jig wrote keep the host spelling of the paths they hold. A failed herdr command is named in an error by its subcommand and herdr's stderr, never by its operands (the prompt, the worktree).
@@ -277,6 +287,14 @@ PreToolUse hook, which today is `headless` alone; `fake` has no tool calls
 to screen, and `herdr`'s tool calls run inside the remote agent it drives,
 outside jig's own process.
 
+**Resuming a session.** A backend that can continue a session it ran
+implements `session.Resumer`: `RunResumable` is `Run` that also returns the
+session id, and `Resume` hands that session one more turn. Only headless does,
+through `claude -p --resume <id>`, reading the id from the CLI's final result
+object. The frontier uses it when its own oracle run at a claimed green comes
+back red, and falls back to a failed attempt with any other backend
+([ADR 0020](docs/adr/0020-jig-runs-the-slice-oracle-at-green.md)).
+
 ## Gate reviewer contract
 
 A gate round's reviewer dispatch (`internal/verifydeliver/review.go`) is the
@@ -284,19 +302,33 @@ same disk-only contract as a build session, narrowed to read-only: jig
 writes `work/gate.round-N.review.json` (the ticket, round, scope, base and
 head sha, the round's resolved intent - source and path, `Gate`'s own
 `resolveIntent`, precedence brief.md then intent.md then none - plus
-slices/journal paths, manifest oracles, and the cumulative `open`/
-`dismissed` findings folded from every earlier round), the backend
-runs a session against `must_review` - every file the scope diff touched
-plus every still-open finding's file - and jig reads back
-`work/gate.round-N.result.json` (findings, `reviewed_paths`, a summary). The
+slices/journal paths, manifest oracles, `oracles_passed` - every oracle run
+the gate made on this head before the review, all passed, or reused with
+`reused_from` from a pass of the same command, under the same env classes,
+that jig recorded on a commit with the same tree
+([ADR 0021](docs/adr/0021-the-gate-reuses-an-oracle-pass-on-the-same-tree.md)) - and the
+cumulative `open`/`dismissed` findings folded from every earlier round), the
+backend runs a session against `must_review` - every file the scope diff
+touched plus every still-open finding's file - and jig reads back
+`work/gate.round-N.result.json` (findings, `still_present` - unchanged
+earlier findings confirmed by id and current line, which jig expands into
+the earlier finding before folding the round
+([ADR 0022](docs/adr/0022-the-reviewer-confirms-an-unchanged-finding-by-id.md))
+- `reviewed_paths`, a summary). The
+review is a read: test evidence is the oracles' job, and they ran on this
+head before the review, so the reviewer runs no tests, with an empty
+`oracles_passed` too
+([ADR 0017](docs/adr/0017-the-reviewer-reads-the-gate-tests.md)). The
 reviewer edits, commits, and pushes nothing; jig checks this itself (HEAD
 and the tracked tree unchanged after dispatch) rather than trusting the
 session, and rejects the round (`REVIEW_INVALID`) if either moved, or if
 `result.json` fails strict structural validation - an unknown `action` or
 `risk`, a finding whose file is neither present at head nor deleted in the
 scope diff, an oracle that isn't a manifest oracle, a `prior` naming no
-known finding, or `reviewed_paths` missing a `must_review` path all fail the
-round loudly rather than falling back to a partial result.
+known finding, a `still_present` id naming no known finding, repeated, or
+also a finding's `prior`, a `still_present` finding whose file is gone
+without a deletion, or `reviewed_paths` missing a `must_review` path all
+fail the round loudly rather than falling back to a partial result.
 
 **Intent inference.** When `resolveIntent` comes back `"none"` and the
 round is about to dispatch a reviewer (nothing outstanding and the scope
@@ -898,3 +930,13 @@ and sets `GIT_CONFIG_NOSYSTEM=1`. That reaches every git process the binary
 spawns, including `git-receive-pack` behind a local push, so no detached
 maintenance outlives a test. With no system or user config, a test that
 needs a git setting (for example `core.autocrlf`) sets it itself.
+
+Two tests in package `verifydeliver` (`identity_test.go`) prove where
+`Publish`'s own identity resolution looks: a mapped clone's distinct
+identity, or nowhere at all. Both need an environment without the identity
+`gittest.PinIdentity()` pins process-wide for every other verifydeliver
+test's commits, which `Deps.GitEnv` provides without touching the process
+environment itself - nil by default (inherit it, as production always
+does), set by these two tests to the ambient environment with that pin
+stripped out, so `Publish`'s own "git var" calls see the mapped clone's
+config, or its absence, instead.

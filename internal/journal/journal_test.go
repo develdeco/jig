@@ -3,6 +3,7 @@ package journal
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -105,6 +106,51 @@ func TestBuilderModels(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("BuilderModels = %v, want %v", got, want)
 		}
+	}
+}
+
+// TestFailedAttempts: an attempt fails at the work when its result is not a
+// question, a flawed brief or a blocked environment, and it did not verify.
+func TestFailedAttempts(t *testing.T) {
+	lines := []Line{
+		{Slice: "a", Event: "result", Outcome: "code-bug", Attempt: 1},
+		{Slice: "a", Event: "result", Outcome: "green", Attempt: 2}, // claimed green, never verified
+		{Slice: "a", Event: "result", Outcome: "needs-input", Attempt: 3},
+		{Slice: "a", Event: "result", Outcome: "flawed-brief", Attempt: 4},
+		{Slice: "a", Event: "result", Outcome: "blocked-by-env", Attempt: 5},
+		{Slice: "a", Event: "result", Outcome: "green", Attempt: 6},
+		{Slice: "a", Event: "verified", Attempt: 6},
+		{Slice: "b", Event: "result", Outcome: "failed", Attempt: 1},
+	}
+	if got := FailedAttempts(lines, "a"); got != 2 {
+		t.Fatalf("FailedAttempts(a) = %d, want 2 (the code-bug and the green that did not verify)", got)
+	}
+	if got := FailedAttempts(lines, "c"); got != 0 {
+		t.Fatalf("FailedAttempts(c) = %d, want 0 for a slice with no lines", got)
+	}
+}
+
+// TestRenderChangelogListsOnlyVerifiedCommits: a builder may claim green
+// more than once in an attempt (a red oracle run goes back to its session,
+// ADR 0020), so a journal with verified lines lists each slice by the commit
+// that verified, once, in every changelog.
+func TestRenderChangelogListsOnlyVerifiedCommits(t *testing.T) {
+	lines := []Line{
+		{Ticket: "JIG-1", Slice: "a", Event: "result", Outcome: "green", Commit: "1111111aaa", Attempt: 1},
+		{Ticket: "JIG-1", Slice: "a", Event: "oracle", Outcome: "fail", Attempt: 1},
+		{Ticket: "JIG-1", Slice: "a", Event: "result", Outcome: "green", Commit: "2222222bbb", Attempt: 1},
+		{Ticket: "JIG-1", Slice: "a", Event: "oracle", Outcome: "pass", Attempt: 1},
+		{Ticket: "JIG-1", Slice: "a", Event: "verified", Commit: "2222222bbb", Attempt: 1},
+	}
+	sliceWS := map[string]string{"a": "root"}
+	if got, want := RenderChangelog(lines, "root", sliceWS), "# Changelog - root\n- a: 2222222\n"; got != want {
+		t.Errorf("RenderChangelog =\n%q\nwant\n%q", got, want)
+	}
+	if got := RenderConsolidated(lines); !strings.Contains(got, "## Slices\n- a: 2222222\n\n") {
+		t.Errorf("RenderConsolidated =\n%q\nwant slice a listed once, by its verified commit", got)
+	}
+	if got, want := RenderDiffChangelog(lines, 1), "# Diff changelog - round 1\n- a: 2222222\n"; got != want {
+		t.Errorf("RenderDiffChangelog =\n%q\nwant\n%q", got, want)
 	}
 }
 
@@ -248,5 +294,28 @@ func TestGreenClaims(t *testing.T) {
 	}
 	if got := GreenClaims(nil); len(got) != 0 {
 		t.Fatalf("GreenClaims(nil) = %v, want none", got)
+	}
+}
+
+// TestLastOracleSeconds: the latest oracle line of the exact command and env
+// class that recorded a wall time wins; other commands, other env classes,
+// other events and lines without one are skipped, and no such line is 0.
+func TestLastOracleSeconds(t *testing.T) {
+	lines := []Line{
+		{Slice: "a", Event: "oracle", Command: "go test ./...", Seconds: 600},
+		{Slice: "b", Event: "oracle", Command: "go test ./alpha/...", Seconds: 30},
+		{Slice: "b", Event: "oracle", Command: "go test ./...", Seconds: 640},
+		{Slice: "c", Event: "oracle", Command: "go test ./..."},
+		{Slice: "c", Event: "result", Command: "go test ./...", Seconds: 1},
+		{Slice: "d", Event: "oracle", Command: "go test ./...", Env: "rig", Seconds: 900},
+	}
+	if got := LastOracleSeconds(lines, "go test ./...", ""); got != 640 {
+		t.Errorf("LastOracleSeconds(go test ./...) = %d, want 640", got)
+	}
+	if got := LastOracleSeconds(lines, "go test ./...", "rig"); got != 900 {
+		t.Errorf("LastOracleSeconds(go test ./..., rig) = %d, want 900", got)
+	}
+	if got := LastOracleSeconds(lines, "go vet ./...", ""); got != 0 {
+		t.Errorf("LastOracleSeconds(never run) = %d, want 0", got)
 	}
 }

@@ -65,21 +65,32 @@ func parseGitHubOwnerRepo(remote string) (string, string, error) {
 // New returns a Host for the given remote, or nil if the remote
 // is not a GitHub remote. It checks that gh is installed when returning a GitHub host.
 func New(remote string) (Host, error) {
+	return NewWithEnv(remote, "", nil)
+}
+
+// NewWithEnv is New with an explicit gh binary and environment: ghBin is
+// resolved on PATH when empty, and env is the gh subprocess's whole
+// environment, inherited from this process when nil. A test hands its own
+// fake gh and the variables that drive it this way, instead of editing the
+// environment its own process runs in.
+func NewWithEnv(remote, ghBin string, env []string) (Host, error) {
 	owner, repo, err := parseGitHubOwnerRepo(remote)
 	if err != nil {
 		return nil, nil
 	}
 
-	ghPath, err := exec.LookPath("gh")
-	if err != nil {
-		return nil, &axi.Error{
-			Msg:  "gh CLI is not installed",
-			Code: "GH_NOT_INSTALLED",
-			Help: []string{"Install gh from https://cli.github.com"},
+	if ghBin == "" {
+		ghBin, err = exec.LookPath("gh")
+		if err != nil {
+			return nil, &axi.Error{
+				Msg:  "gh CLI is not installed",
+				Code: "GH_NOT_INSTALLED",
+				Help: []string{"Install gh from https://cli.github.com"},
+			}
 		}
 	}
 
-	return &githubHost{gh: ghPath, owner: owner, repo: repo}, nil
+	return &githubHost{gh: ghBin, owner: owner, repo: repo, env: env}, nil
 }
 
 // githubHost is a GitHub pull request host.
@@ -88,6 +99,7 @@ type githubHost struct {
 	owner         string
 	repo          string
 	attachSupport map[string]bool
+	env           []string // gh's whole environment; nil inherits this process's
 }
 
 func (h *githubHost) repoSpec() string { return h.owner + "/" + h.repo }
@@ -103,11 +115,15 @@ func (h *githubHost) run(args ...string) (string, error) {
 // stderr): `gh pr create --attach` can print the pull request's URL on
 // stdout and then fail attaching a file, and a caller that discarded stdout
 // on that path would lose the one record of a pull request it already
-// opened.
+// opened. With h.env set, the subprocess runs with that environment instead
+// of inheriting this process's own.
 func (h *githubHost) runInDir(dir string, args ...string) (string, error) {
 	cmd := exec.Command(h.gh, args...)
 	if dir != "" {
 		cmd.Dir = dir
+	}
+	if h.env != nil {
+		cmd.Env = h.env
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -15,7 +15,6 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
-	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -61,60 +60,54 @@ func (r PublishReport) Squash(repo string) string {
 	return NotSquashed
 }
 
-// confirm asks the interactive "Push ... ? [y/N]" question and reports
-// whether the operator agreed. It is a func var covering the whole seam -
-// both the fmt.Printf prompt and the stdin read - so a test can replace it
-// outright and never touch the real terminal: stubbing only the read half
-// would still print the literal prompt text to the test's real stdout.
-//
-// openPR is the URL of the pull request the branch already has open, or "";
-// hasHost indicates whether the repo has a pull request host. The question
-// says which of the things it is agreeing to: opening/updating a pull request,
-// or just pushing when there is no host.
-var confirm = func(branch, ticket, openPR string, hasHost bool) bool {
-	if !hasHost {
-		fmt.Printf("Push %s for %s? [y/N] ", branch, ticket)
-	} else if openPR != "" {
-		fmt.Printf("Push %s and update its open PR %s for %s? [y/N] ", branch, openPR, ticket)
-	} else {
-		fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
-	}
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	answer := strings.ToLower(strings.TrimSpace(line))
-	return answer == "y" || answer == "yes"
-}
-
-// guardedPush pushes branch to origin, refusing a non-local remote without
-// confirmation. It is a func var (defaulting to gitx.GuardedPush) so tests
-// can intercept the call and assert what confirmation value Publish
-// actually threads through, without needing a real non-local remote.
-var guardedPush = gitx.GuardedPush
-
-// fetchOrigin refreshes the publish lease's view of origin, once the lease has
-// been pointed at the copy publish ships. It is a func var, like guardedPush,
-// so a test can move origin at the one moment no state of the leases reaches:
-// the acquire compared the copy with origin's, and someone pushes before this
-// fetch, which is what the fast-forward check after it is for.
-var fetchOrigin = func(dir string) error {
-	_, err := gitx.Run(dir, "fetch", "origin")
-	return err
-}
-
-// warn reports a soft-failure warning to the operator, prefixed like every
-// other stderr warning in the tree ("jig: proceeding without lock ...",
-// internal/store/lock.go; "jig: lease ... moved it", internal/pool/pool.go),
-// so a warning line is attributable in a transcript. It is a func var, the
-// same seam confirm and guardedPush are, so a test can capture what Publish
-// warned about instead of reading the process's real stderr.
-var warn = func(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format, args...)
-}
-
 // Publish reconciles, re-validates, documents, squashes, and routes one
 // ticket's delivery. Only history not yet on origin is squashed: a branch
 // already there is pushed as it is. v0.1 handles a single repo.
 func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	ticket := o.Ticket
+
+	// Use Deps fields if set, otherwise use default implementations.
+	// The confirm default covers the whole interactive seam - both the
+	// fmt.Printf prompt and the stdin read - so a test that hands its own
+	// never touches the real terminal: stubbing only the read half would
+	// still print the literal prompt text to the test's real stdout. openPR
+	// is the URL of the pull request the branch already has open, or "", and
+	// hasHost says whether the repo has a pull-request host at all: the
+	// question names which of the things it is agreeing to - opening a pull
+	// request, updating that one, or pushing alone when there is no host.
+	confirmFn := d.Confirm
+	if confirmFn == nil {
+		confirmFn = func(branch, ticket, openPR string, hasHost bool) bool {
+			if !hasHost {
+				fmt.Printf("Push %s for %s? [y/N] ", branch, ticket)
+			} else if openPR != "" {
+				fmt.Printf("Push %s and update its open PR %s for %s? [y/N] ", branch, openPR, ticket)
+			} else {
+				fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
+			}
+			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			answer := strings.ToLower(strings.TrimSpace(line))
+			return answer == "y" || answer == "yes"
+		}
+	}
+	guardedPushFn := d.GuardedPush
+	if guardedPushFn == nil {
+		guardedPushFn = gitx.GuardedPush
+	}
+	fetchOriginFn := d.FetchOrigin
+	if fetchOriginFn == nil {
+		fetchOriginFn = func(dir string) error {
+			_, err := gitx.Run(dir, "fetch", "origin")
+			return err
+		}
+	}
+	warnFn := d.Warn
+	if warnFn == nil {
+		warnFn = func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format, args...)
+		}
+	}
+
 	// journaled backs the deferred best-effort push below: once Publish's
 	// first tracked write to the store's working copy has landed (the
 	// journaled reconcile outcome, recordAndCheckDivergence below - the
@@ -211,7 +204,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 	// Resolve the operator's identity once, before the first commit
 	// (reconcile, memorize and squash all use it).
-	identityEnv, err := gitx.IdentityEnv(identityDir(d, repoName, lease.Dir))
+	identityEnv, err := gitx.IdentityEnvWithBase(identityDir(d, repoName, lease.Dir), d.GitEnv)
 	if err != nil {
 		return PublishReport{}, err
 	}
@@ -223,7 +216,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	if err := fetchOrigin(lease.Dir); err != nil {
+	if err := fetchOriginFn(lease.Dir); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
 	}
 
@@ -253,9 +246,10 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err := requireFastForward(lease.Dir, branch, buildDir, ticket, shipping); err != nil {
 		return PublishReport{}, err
 	}
-	// Build the repo host from the repo's remote. It may be nil if the remote
-	// is not a pull-request host (e.g., a local path).
-	host, err := repohost.New(repo.Remote)
+	// Build the repo host from the repo's remote (or take the one d hands
+	// Publish). It may be nil if the remote is not a pull-request host
+	// (e.g., a local path).
+	host, err := d.publishHost(repo.Remote)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: build repo host: %w", err)
 	}
@@ -432,7 +426,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// reach it: naming only the missing heading would point the operator at an
 	// edit that does not fix the brief that has one and nothing under it.
 	if omittedBriefIntent {
-		warn("jig: the pull request body for %s has no ## Intent section: %s has no \"## \" section with text to publish as one\n",
+		warnFn("jig: the pull request body for %s has no ## Intent section: %s has no \"## \" section with text to publish as one\n",
 			ticket, intentFilePath(d.Store, ticket, IntentSourceBrief))
 	}
 
@@ -444,14 +438,14 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// here, which half of the pipeline to blame.
 	switch {
 	case demoResult.NoDemo:
-		warn("jig: no demo recorded for %s\n", ticket)
+		warnFn("jig: no demo recorded for %s\n", ticket)
 	case demoResult.DemoRefused:
-		warn("jig: the demo recorded for %s was refused: %s\n", ticket, demoResult.RefusalReason)
+		warnFn("jig: the demo recorded for %s was refused: %s\n", ticket, demoResult.RefusalReason)
 	case demoResult.AllMediaFailed:
-		warn("jig: the pull request body for %s has no ## Demo section: all media files from the recorded demo failed verification: %v\n",
+		warnFn("jig: the pull request body for %s has no ## Demo section: all media files from the recorded demo failed verification: %v\n",
 			ticket, demoResult.Omitted)
 	case len(demoResult.Omitted) > 0:
-		warn("jig: media files omitted from the pull request body for %s: %v (missing or changed)\n",
+		warnFn("jig: media files omitted from the pull request body for %s: %v (missing or changed)\n",
 			ticket, demoResult.Omitted)
 	}
 
@@ -460,10 +454,10 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// DECISIONS.md): independent of the switch above, since a section can be
 	// otherwise rendered in full.
 	if demoResult.ScrubbedSummary {
-		warn("jig: the demo summary for %s named one of jig's own directories and was left out of the pull request body\n", ticket)
+		warnFn("jig: the demo summary for %s named one of jig's own directories and was left out of the pull request body\n", ticket)
 	}
 	if len(demoResult.ScrubbedCaptions) > 0 {
-		warn("jig: captions left out of the pull request body for %s because they named one of jig's own directories: %v\n",
+		warnFn("jig: captions left out of the pull request body for %s because they named one of jig's own directories: %v\n",
 			ticket, demoResult.ScrubbedCaptions)
 	}
 
@@ -481,13 +475,13 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// confirmation is refused by the gitx guard downstream.
 	confirmed := o.Yes
 	if !o.Yes {
-		if !confirm(branch, ticket, openPR, host != nil) {
+		if !confirmFn(branch, ticket, openPR, host != nil) {
 			return PublishReport{}, &axi.Error{Msg: "publish declined at confirmation", Code: "PUBLISH_DECLINED"}
 		}
 		confirmed = true
 	}
 
-	if err := guardedPush(lease.Dir, "origin", branch, confirmed); err != nil {
+	if err := guardedPushFn(lease.Dir, "origin", branch, confirmed); err != nil {
 		return PublishReport{}, err
 	}
 
@@ -509,7 +503,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 					return PublishReport{}, fmt.Errorf("verifydeliver: publish: update PR %s with media: %w", openPR, err)
 				}
 				if !attached {
-					warn("jig: the installed gh does not support --attach; the pull request updated for %s carries no media\n", ticket)
+					warnFn("jig: the installed gh does not support --attach; the pull request updated for %s carries no media\n", ticket)
 				}
 			} else {
 				if err := host.UpdatePR(openPR, filepath.Join(d.Store.Root, prPath)); err != nil {
@@ -525,7 +519,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 					return PublishReport{}, fmt.Errorf("verifydeliver: publish: create PR with media: %w", err)
 				}
 				if !attached {
-					warn("jig: the installed gh does not support --attach; the pull request opened for %s carries no media\n", ticket)
+					warnFn("jig: the installed gh does not support --attach; the pull request opened for %s carries no media\n", ticket)
 				}
 				prURL, prOutcome = url, "opened"
 			} else {
@@ -558,19 +552,19 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if prURL != "" && len(mediaFiles) > 0 && host != nil {
 		body, err := host.ReadPRBody(prURL)
 		if err != nil {
-			warn("jig: read back the pull request body for %s to check for unrewritten media references: %v\n", ticket, err)
+			warnFn("jig: read back the pull request body for %s to check for unrewritten media references: %v\n", ticket, err)
 		} else if unrewritten := checkUnrewrittenReferences(body, demoResult.MediaFiles); len(unrewritten) > 0 {
 			patched, changed, stillUnrewritten := rewriteUnrewrittenReferences(body, unrewritten)
 			if changed {
 				bodyPath := filepath.Join(d.Store.Root, prPath)
 				if err := os.WriteFile(bodyPath, []byte(patched), 0o644); err != nil {
-					warn("jig: write the patched pull request body for %s: %v\n", ticket, err)
+					warnFn("jig: write the patched pull request body for %s: %v\n", ticket, err)
 				} else if err := host.UpdatePR(prURL, bodyPath); err != nil {
-					warn("jig: rewrite unrewritten media references in the pull request body for %s: %v\n", ticket, err)
+					warnFn("jig: rewrite unrewritten media references in the pull request body for %s: %v\n", ticket, err)
 				}
 			}
 			if len(stillUnrewritten) > 0 {
-				warn("jig: unrewritten media references in the pull request body for %s: %v\n", ticket, stillUnrewritten)
+				warnFn("jig: unrewritten media references in the pull request body for %s: %v\n", ticket, stillUnrewritten)
 			}
 		}
 	}
@@ -581,7 +575,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if prURL != "" && host != nil {
 		reviewNotesPath := filepath.Join(d.Store.Root, ticket, "pr", "review-notes.md")
 		if err := host.CommentPR(prURL, reviewNotesPath); err != nil {
-			warn("jig: post %s as a comment on %s: %v\n", reviewNotesPath, prURL, err)
+			warnFn("jig: post %s as a comment on %s: %v\n", reviewNotesPath, prURL, err)
 		}
 	}
 
@@ -653,7 +647,7 @@ func revalidate(d Deps, ticket, repoName, target, leaseDir string, man manifest.
 		return "none", nil
 	}
 
-	if err := runOracleSuite(leaseDir, man); err != nil {
+	if _, err := RunOracleSuite(leaseDir, man); err != nil {
 		return "", err
 	}
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: "revalidate", Outcome: "oracles-only:target-moved"}); err != nil {

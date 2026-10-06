@@ -40,13 +40,19 @@ const (
 // cumulative findings state across rounds is findings bookkeeping;
 // RoundInput carries it as an input here.
 type OpenFinding struct {
-	ID          string `json:"id"`
-	File        string `json:"file"`
-	Line        int    `json:"line"`
-	Title       string `json:"title"`
-	Detail      string `json:"detail"`
-	Action      string `json:"action"`
-	Recurrences int    `json:"recurrences"`
+	ID     string `json:"id"`
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+	Title  string `json:"title"`
+	Detail string `json:"detail"`
+	Action string `json:"action"`
+	// Risk, RiskRationale and Oracle are shown so a reviewer can tell
+	// whether the finding is unchanged, which a still_present entry vouches
+	// for (ADR 0022).
+	Risk          string `json:"risk"`
+	RiskRationale string `json:"risk_rationale"`
+	Oracle        string `json:"oracle"`
+	Recurrences   int    `json:"recurrences"`
 }
 
 // DismissedFinding is one entry of review.json's "dismissed" list: a
@@ -58,23 +64,45 @@ type DismissedFinding struct {
 	Line   int    `json:"line"`
 	Title  string `json:"title"`
 	Detail string `json:"detail"`
+	// Action, Risk, RiskRationale and Oracle are shown for the same reason
+	// as OpenFinding's: a still_present entry vouches for them (ADR 0022).
+	Action        string `json:"action"`
+	Risk          string `json:"risk"`
+	RiskRationale string `json:"risk_rationale"`
+	Oracle        string `json:"oracle"`
+}
+
+// OracleRun is one entry of review.json's "oracles_passed" list: an oracle
+// command that passed on the lease head's tree before the reviewer was
+// dispatched, run by the gate or, with ReusedFrom set, reused from a pass
+// jig recorded on a commit with that tree. The gate stops at the first
+// oracle that fails, so every run that reaches a reviewer passed.
+type OracleRun struct {
+	Oracle    string `json:"oracle"`
+	Workspace string `json:"workspace"`
+	Command   string `json:"command"`
+	// ReusedFrom is set when the gate did not run this oracle itself but
+	// reused a pass jig recorded at a slice's green on a commit whose tree is
+	// this head's tree (ADR 0021): that commit.
+	ReusedFrom string `json:"reused_from,omitempty"`
 }
 
 // ReviewRequest is review.json's exact wire shape, the input jig writes
 // for one gate reviewer round.
 type ReviewRequest struct {
-	Ticket      string             `json:"ticket"`
-	Round       int                `json:"round"`
-	Scope       string             `json:"scope"` // full|delta
-	BaseSHA     string             `json:"base_sha"`
-	HeadSHA     string             `json:"head_sha"`
-	Intent      Intent             `json:"intent"`
-	SlicesPath  string             `json:"slices_path"`
-	JournalPath string             `json:"journal_path"`
-	Oracles     []string           `json:"oracles"`
-	Open        []OpenFinding      `json:"open"`
-	Dismissed   []DismissedFinding `json:"dismissed"`
-	MustReview  []string           `json:"must_review"`
+	Ticket        string             `json:"ticket"`
+	Round         int                `json:"round"`
+	Scope         string             `json:"scope"` // full|delta
+	BaseSHA       string             `json:"base_sha"`
+	HeadSHA       string             `json:"head_sha"`
+	Intent        Intent             `json:"intent"`
+	SlicesPath    string             `json:"slices_path"`
+	JournalPath   string             `json:"journal_path"`
+	Oracles       []string           `json:"oracles"`
+	OraclesPassed []OracleRun        `json:"oracles_passed"`
+	Open          []OpenFinding      `json:"open"`
+	Dismissed     []DismissedFinding `json:"dismissed"`
+	MustReview    []string           `json:"must_review"`
 }
 
 // ResultFinding is one finding as the reviewer session reports it in
@@ -91,19 +119,33 @@ type ResultFinding struct {
 	Prior         string `json:"prior"`
 }
 
+// StillPresentEntry is one entry of result.json's "still_present" list: an
+// earlier finding listed under review.json's open or dismissed, confirmed
+// unchanged at its current line, in place of writing it again in full
+// (ExpandStillPresent turns it back into one before ApplyRound).
+type StillPresentEntry struct {
+	Prior string `json:"prior"`
+	Line  int    `json:"line"`
+}
+
 // ReviewResult is result.json's exact wire shape, the reviewer session's
 // output.
 type ReviewResult struct {
-	Findings      []ResultFinding `json:"findings"`
-	ReviewedPaths []string        `json:"reviewed_paths"`
-	Summary       string          `json:"summary"`
+	Findings      []ResultFinding     `json:"findings"`
+	StillPresent  []StillPresentEntry `json:"still_present"`
+	ReviewedPaths []string            `json:"reviewed_paths"`
+	Summary       string              `json:"summary"`
 }
 
 // MarshalReviewRequest renders req as indented JSON, with nil Oracles,
-// Open, Dismissed and MustReview marshaled as [] rather than null.
+// OraclesPassed, Open, Dismissed and MustReview marshaled as [] rather than
+// null.
 func MarshalReviewRequest(req ReviewRequest) ([]byte, error) {
 	if req.Oracles == nil {
 		req.Oracles = []string{}
+	}
+	if req.OraclesPassed == nil {
+		req.OraclesPassed = []OracleRun{}
 	}
 	if req.Open == nil {
 		req.Open = []OpenFinding{}
@@ -138,25 +180,29 @@ func reviewInvalid(msg string) error {
 // wrote either key, or wrote one as null instead of a real list; summary
 // stays optional.
 type reviewResultWire struct {
-	Findings      []ResultFinding `json:"findings"`
-	ReviewedPaths []string        `json:"reviewed_paths"`
-	Summary       string          `json:"summary"`
+	Findings      []ResultFinding     `json:"findings"`
+	StillPresent  []StillPresentEntry `json:"still_present"`
+	ReviewedPaths []string            `json:"reviewed_paths"`
+	Summary       string              `json:"summary"`
 }
 
 // ParseReviewResult parses result.json strictly and checks the rules that
 // need no context beyond the result itself: exactly one JSON object (a
 // bare JSON null, or any other non-object top level, is
 // rejected), no key repeated - exactly or only by case - anywhere in the
-// document, every key at the top level and inside each finding an exact,
-// case-sensitive match of a recognized field name (a lone case variant with
-// no duplicate to catch, such as "Oracle" with no plain "oracle" beside it,
-// is rejected the same as an outright unknown key - encoding/json's own
-// struct decode below would otherwise match it case-insensitively and
-// accept it silently), the "findings" and "reviewed_paths" keys present and
-// not JSON null, a known action and risk on every finding, non-empty title
-// and risk_rationale, a non-negative line, and repo-relative file syntax.
-// The rules that need the request or the lease's head - oracle membership,
-// prior identity, reviewed_paths coverage, file existence - are checked
+// document, every key at the top level and inside each finding or
+// still_present entry an exact, case-sensitive match of a recognized field
+// name (a lone case variant with no duplicate to catch, such as "Oracle"
+// with no plain "oracle" beside it, is rejected the same as an outright
+// unknown key - encoding/json's own struct decode below would otherwise
+// match it case-insensitively and accept it silently), the "findings",
+// "still_present" and "reviewed_paths" keys present and not JSON null, a
+// known action and risk on every finding, non-empty title and
+// risk_rationale, a non-negative line, and repo-relative file syntax on
+// every finding, and a non-empty prior and non-negative line on every
+// still_present entry. The rules that need the request or the lease's
+// head - oracle membership, prior identity (a finding's or a still_present
+// entry's), reviewed_paths coverage, file existence - are checked
 // separately by validateReviewResult, once the caller has that context.
 // Errors are *axi.Error{Code: "REVIEW_INVALID"} naming the rule; nothing
 // here is silently accepted.
@@ -197,7 +243,7 @@ func ParseReviewResult(data []byte) (ReviewResult, error) {
 	if err := json.Unmarshal(data, &present); err != nil {
 		return ReviewResult{}, reviewInvalid(fmt.Sprintf("not valid JSON: %v", err))
 	}
-	for _, key := range []string{"findings", "reviewed_paths"} {
+	for _, key := range []string{"findings", "still_present", "reviewed_paths"} {
 		raw, ok := present[key]
 		if !ok {
 			return ReviewResult{}, reviewInvalid(fmt.Sprintf("missing %q", key))
@@ -217,7 +263,7 @@ func ParseReviewResult(data []byte) (ReviewResult, error) {
 	if err := dec.Decode(&extra); err != io.EOF {
 		return ReviewResult{}, reviewInvalid("must contain exactly one JSON object")
 	}
-	res := ReviewResult{Findings: wire.Findings, ReviewedPaths: wire.ReviewedPaths, Summary: wire.Summary}
+	res := ReviewResult{Findings: wire.Findings, StillPresent: wire.StillPresent, ReviewedPaths: wire.ReviewedPaths, Summary: wire.Summary}
 
 	for i, f := range res.Findings {
 		switch f.Action {
@@ -243,36 +289,57 @@ func ParseReviewResult(data []byte) (ReviewResult, error) {
 			return ReviewResult{}, reviewInvalid(fmt.Sprintf("finding %d file %q: %v", i, f.File, err))
 		}
 	}
+	for i, sp := range res.StillPresent {
+		if strings.TrimSpace(sp.Prior) == "" {
+			return ReviewResult{}, reviewInvalid(fmt.Sprintf("still_present %d has an empty prior", i))
+		}
+		if sp.Line < 0 {
+			return ReviewResult{}, reviewInvalid(fmt.Sprintf("still_present %d line %d is negative", i, sp.Line))
+		}
+	}
 	return res, nil
 }
 
-// resultTopLevelKeys and resultFindingKeys are the exact key names
-// reviewResultWire and ResultFinding's own JSON tags declare - the "exact
-// key names are required" half of strict parsing.
-var resultTopLevelKeys = map[string]bool{"findings": true, "reviewed_paths": true, "summary": true}
+// resultTopLevelKeys, resultFindingKeys and resultStillPresentKeys are the
+// exact key names reviewResultWire's, ResultFinding's and
+// StillPresentEntry's own JSON tags declare - the "exact key names are
+// required" half of strict parsing.
+var resultTopLevelKeys = map[string]bool{"findings": true, "still_present": true, "reviewed_paths": true, "summary": true}
 var resultFindingKeys = map[string]bool{
 	"file": true, "line": true, "title": true, "detail": true, "action": true,
 	"risk": true, "risk_rationale": true, "oracle": true, "prior": true,
 }
+var resultStillPresentKeys = map[string]bool{"prior": true, "line": true}
 
 // unknownCaseVariantKey returns the first key, at the top level of data or
-// inside one of its "findings" elements, that is not exactly one of
-// resultTopLevelKeys or resultFindingKeys - a case variant like "FINDINGS"
-// or "Oracle" included. "" means every key matched exactly. A structurally
-// unexpected shape (findings not an array of objects, say) reports its
-// decode error instead of a key name; ParseReviewResult's own strict typed
-// decode right after this call produces the actual error for that case, so
-// this check's error is only ever used to skip it, never surfaced on its
-// own.
+// inside one of its "findings" or "still_present" elements, that is not
+// exactly one of resultTopLevelKeys, resultFindingKeys or
+// resultStillPresentKeys - a case variant like "FINDINGS" or "Oracle"
+// included. "" means every key matched exactly. A structurally unexpected
+// shape (findings not an array of objects, say) reports its decode error
+// instead of a key name; ParseReviewResult's own strict typed decode right
+// after this call produces the actual error for that case, so this check's
+// error is only ever used to skip it, never surfaced on its own.
 func unknownCaseVariantKey(data []byte) (string, error) {
-	return unknownKey(data, resultTopLevelKeys, "findings", resultFindingKeys)
+	return unknownKey(data, resultTopLevelKeys,
+		listKeySpec{"findings", resultFindingKeys},
+		listKeySpec{"still_present", resultStillPresentKeys},
+	)
+}
+
+// listKeySpec pairs one top-level list key with the key set its own
+// elements must match exactly, so unknownKey can check more than one list
+// in the same document.
+type listKeySpec struct {
+	listKey  string
+	itemKeys map[string]bool
 }
 
 // unknownKey is unknownCaseVariantKey's check for any result shape: the
 // first key at the top level of data that is not exactly one of topKeys, or
-// inside an element of its listKey array that is not exactly one of
-// itemKeys. "" means every key matched exactly.
-func unknownKey(data []byte, topKeys map[string]bool, listKey string, itemKeys map[string]bool) (string, error) {
+// inside an element of one of lists' own listKey array that is not exactly
+// one of that spec's itemKeys. "" means every key matched exactly.
+func unknownKey(data []byte, topKeys map[string]bool, lists ...listKeySpec) (string, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(data, &top); err != nil {
 		return "", err
@@ -282,18 +349,20 @@ func unknownKey(data []byte, topKeys map[string]bool, listKey string, itemKeys m
 			return key, nil
 		}
 	}
-	raw, ok := top[listKey]
-	if !ok {
-		return "", nil
-	}
-	var items []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &items); err != nil {
-		return "", err
-	}
-	for _, item := range items {
-		for key := range item {
-			if !itemKeys[key] {
-				return key, nil
+	for _, spec := range lists {
+		raw, ok := top[spec.listKey]
+		if !ok {
+			continue
+		}
+		var items []map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return "", err
+		}
+		for _, item := range items {
+			for key := range item {
+				if !spec.itemKeys[key] {
+					return key, nil
+				}
 			}
 		}
 	}
@@ -510,17 +579,24 @@ func normalizeReviewedPaths(leaseDir string, paths []string) []string {
 // given, names a manifest oracle, and is required when the manifest has
 // more than one and the finding is fix or ask (no silent fallback); a
 // prior names an id under open or dismissed, and no two findings share one;
-// reviewed_paths covers every must_review path. atHead reports whether a
-// (normalized) path exists in the lease at head. leaseDir is the lease
-// worktree, used only to relativize an absolute reviewed_paths entry.
+// a still_present entry's prior names an id under open or dismissed, no two
+// still_present entries (nor a still_present entry and a finding's own
+// prior) share one, and that id's own file exists at head or was deleted in
+// the scope diff; reviewed_paths covers every must_review path. atHead
+// reports whether a (normalized) path exists in the lease at head. leaseDir
+// is the lease worktree, used only to relativize an absolute reviewed_paths
+// entry.
 func validateReviewResult(req ReviewRequest, result ReviewResult, leaseDir string, atHead func(path string) (bool, error), deleted map[string]bool, oracleNames []string) error {
 	openIDs := make(map[string]bool, len(req.Open))
+	fileByID := make(map[string]string, len(req.Open)+len(req.Dismissed))
 	for _, f := range req.Open {
 		openIDs[f.ID] = true
+		fileByID[f.ID] = f.File
 	}
 	dismissedIDs := make(map[string]bool, len(req.Dismissed))
 	for _, f := range req.Dismissed {
 		dismissedIDs[f.ID] = true
+		fileByID[f.ID] = f.File
 	}
 	oracleSet := make(map[string]bool, len(oracleNames))
 	for _, o := range oracleNames {
@@ -563,6 +639,36 @@ func validateReviewResult(req ReviewRequest, result ReviewResult, leaseDir strin
 		}
 	}
 
+	seenStillPresent := map[string]bool{}
+	for i, sp := range result.StillPresent {
+		if !openIDs[sp.Prior] && !dismissedIDs[sp.Prior] {
+			return reviewInvalid(fmt.Sprintf("still_present %d prior %q does not name a finding under open or dismissed", i, sp.Prior))
+		}
+		if seenStillPresent[sp.Prior] {
+			return reviewInvalid(fmt.Sprintf("still_present id %q appears twice", sp.Prior))
+		}
+		seenStillPresent[sp.Prior] = true
+		if seenPrior[sp.Prior] {
+			return reviewInvalid(fmt.Sprintf("still_present id %q also appears as a finding's prior", sp.Prior))
+		}
+
+		norm, err := normalizeRepoRelPath(fileByID[sp.Prior])
+		if err != nil {
+			// This id's file was already validated when it was first recorded;
+			// defensive only.
+			return reviewInvalid(fmt.Sprintf("still_present %d prior %q file %q: %v", i, sp.Prior, fileByID[sp.Prior], err))
+		}
+		if !deleted[norm] {
+			present, err := atHead(norm)
+			if err != nil {
+				return fmt.Errorf("verifydeliver: review: check %q at head: %w", norm, err)
+			}
+			if !present {
+				return reviewInvalid(fmt.Sprintf("still_present %d prior %q file %q is neither present at head nor deleted in the scope diff", i, sp.Prior, fileByID[sp.Prior]))
+			}
+		}
+	}
+
 	reviewed := map[string]bool{}
 	for _, p := range result.ReviewedPaths {
 		if norm, ok := relativizeReviewedPath(leaseDir, p); ok {
@@ -578,12 +684,14 @@ func validateReviewResult(req ReviewRequest, result ReviewResult, leaseDir strin
 }
 
 // reviewPromptTemplate is the exact prompt rendered (via fmt.Sprintf) for
-// every gate reviewer dispatch: it states the job and the output contract,
-// and says what jig will verify. It never lists kinds of problems, coaches
-// behavior, or patches a past model mistake.
+// every gate reviewer dispatch: it states the job, what lies outside it
+// (editing, and running tests the gate's oracles already ran: ADR 0017),
+// and the output contract, and says what jig will verify. It never lists
+// kinds of problems, coaches behavior, or patches a past model mistake.
 const reviewPromptTemplate = `You are reviewing round %d of ticket %s. Your inputs are in review.json at %s.
 Review the %s diff %s..%s in this worktree against the change's intent. review.json's intent names it and its source: ` + intentSourcesPrompt + ` Do not edit files, commit, or push.
-Report every problem you find in the files you review, as they are now, including problems already listed as open. For each, give file, line (0 if unknown), title, detail, action, risk, risk_rationale and oracle, plus prior when it is a finding listed under open or dismissed. The human dismissed the findings listed under dismissed.
+Every command in review.json's oracles_passed passed on this head's tree before this review: jig ran it, or reused a pass on a commit with the same tree (reused_from). Review by reading: run no tests.
+Report every problem you find in the files you review, as they are now, including problems already listed as open. List each one under open or dismissed that is still present and unchanged, by id and current line, in still_present instead of writing it again. For every other one, give file, line (0 if unknown), title, detail, action, risk, risk_rationale and oracle, plus prior when it is a finding listed under open or dismissed that changed. The human dismissed the findings listed under dismissed.
 action: "fix" when the fix is objective and does not change what the intent asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
 Tests belong at the seams the intent names: a missing test is a problem only at one of those seams or as the proof of a defect you report, and a test elsewhere is at most a note.
 risk: "low", "medium" or "high": how much harm follows if this part of the change is wrong.
@@ -593,7 +701,7 @@ When finished, write result.json at %s with exactly one JSON object: %s`
 
 // reviewResultSchema is the {schema} filled into reviewPromptTemplate: the
 // literal shape of one result.json.
-const reviewResultSchema = `{"findings": [{"file": "...", "line": 0, "title": "...", "detail": "...", "action": "fix|ask|note", "risk": "low|medium|high", "risk_rationale": "...", "oracle": "...", "prior": "r1-f2"}], "reviewed_paths": ["..."], "summary": "..."}`
+const reviewResultSchema = `{"findings": [{"file": "...", "line": 0, "title": "...", "detail": "...", "action": "fix|ask|note", "risk": "low|medium|high", "risk_rationale": "...", "oracle": "...", "prior": "r1-f2"}], "still_present": [{"prior": "r1-f10", "line": 52}], "reviewed_paths": ["..."], "summary": "..."}`
 
 // RenderReviewPrompt fills reviewPromptTemplate for one review dispatch.
 func RenderReviewPrompt(req ReviewRequest, reviewPath, resultPath string) string {
@@ -835,6 +943,11 @@ type RoundInput struct {
 	// does.
 	UserHome string
 	Manifest manifest.Manifest
+	// OracleRuns are the oracle runs that passed on the lease head's tree
+	// just before this round, made by Gate or reused (runGateOracles);
+	// review.json hands them to the reviewer as oracles_passed, so the review
+	// reads instead of retesting.
+	OracleRuns []OracleRun
 	// Open is findings bookkeeping's cumulative fold (findings.go's
 	// openAndNotedFindingsList), carried whole rather than projected: it
 	// is jig's own Status that says what is outstanding, and the wire
@@ -961,18 +1074,19 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 
 	oracleNames := SortedOracleNames(in.Manifest)
 	req := ReviewRequest{
-		Ticket:      in.Ticket,
-		Round:       in.Round,
-		Scope:       scope,
-		BaseSHA:     base,
-		HeadSHA:     head,
-		Intent:      reqIntent,
-		SlicesPath:  absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "slices.yaml")),
-		JournalPath: absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "journal.ndjson")),
-		Oracles:     oracleNames,
-		Open:        toOpenFindingList(in.Open),
-		Dismissed:   in.Dismissed,
-		MustReview:  diff.MustReview,
+		Ticket:        in.Ticket,
+		Round:         in.Round,
+		Scope:         scope,
+		BaseSHA:       base,
+		HeadSHA:       head,
+		Intent:        reqIntent,
+		SlicesPath:    absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "slices.yaml")),
+		JournalPath:   absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "journal.ndjson")),
+		Oracles:       oracleNames,
+		OraclesPassed: in.OracleRuns,
+		Open:          toOpenFindingList(in.Open),
+		Dismissed:     in.Dismissed,
+		MustReview:    diff.MustReview,
 	}
 
 	reviewPath := reviewJSONPath(in.Store, in.Ticket, in.Round)

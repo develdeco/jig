@@ -23,6 +23,14 @@ type Line struct {
 	Commit  string `json:"commit,omitempty"`
 	Model   string `json:"model,omitempty"`
 	Attempt int    `json:"attempt,omitempty"`
+	// Command and Env are an oracle line's exact command and the env class
+	// that was up while it ran ("" for none): what the gate must match to
+	// reuse the run (ADR 0021).
+	Command string `json:"command,omitempty"`
+	Env     string `json:"env,omitempty"`
+	// Seconds is an oracle line's wall time, in whole seconds: what the next
+	// builder of the same command is told (ADR 0024).
+	Seconds int `json:"seconds,omitempty"`
 }
 
 func journalPath(st *store.Store, ticket string) string {
@@ -100,6 +108,33 @@ func BuilderModels(lines []Line) []string {
 	return models
 }
 
+// FailedAttempts counts slice's attempts that failed at the work: a result
+// line whose outcome is not needs-input, flawed-brief or blocked-by-env, for
+// an attempt with no verified line. A question, a flawed brief or a blocked
+// environment is not the builder failing, and a green that verified is a
+// success; a green that did not verify is a failure. The staircase climbs a
+// rung per failed attempt (ADR 0019).
+func FailedAttempts(lines []Line, slice string) int {
+	verified := map[int]bool{}
+	for _, l := range lines {
+		if l.Slice == slice && l.Event == "verified" {
+			verified[l.Attempt] = true
+		}
+	}
+	failed := map[int]bool{}
+	for _, l := range lines {
+		if l.Slice != slice || l.Event != "result" || verified[l.Attempt] {
+			continue
+		}
+		switch l.Outcome {
+		case "needs-input", "flawed-brief", "blocked-by-env":
+			continue
+		}
+		failed[l.Attempt] = true
+	}
+	return len(failed)
+}
+
 // BuiltCommits returns the commit of every event=verified line, without
 // repeats, in journal order: the commits jig's builders reported on the
 // ticket's branch that verified. The frontier journals one when a green result's
@@ -140,4 +175,17 @@ func GreenClaims(lines []Line) []string {
 		}
 	}
 	return commits
+}
+
+// LastOracleSeconds is the wall time of the latest oracle run of command,
+// with env class env up ("" for none), in lines that recorded one, or 0
+// when none did. The same command can take very different times with and
+// without an env class, so both must match.
+func LastOracleSeconds(lines []Line, command, env string) int {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := lines[i]; l.Event == "oracle" && l.Command == command && l.Env == env && l.Seconds > 0 {
+			return l.Seconds
+		}
+	}
+	return 0
 }

@@ -47,7 +47,7 @@ func TestHeadlessLiveCLI(t *testing.T) {
 }
 
 // liveBuildSession runs a build-shaped dispatch: the screen denies a push,
-// reads outside the lease are granted, edits are granted in the lease and
+// the shell carries jig's command timeout, reads outside the lease are granted, edits are granted in the lease and
 // on the result file only, and a commit lands with nothing but the
 // session's own change in it.
 func liveBuildSession(t *testing.T, jig string) {
@@ -88,13 +88,14 @@ func liveBuildSession(t *testing.T, jig string) {
 
 	sess := &claudetest.Session{Steps: []claudetest.Step{
 		{Name: "screen denies a push", Call: claudetest.Bash("git push origin HEAD"), WantErr: "Blocked `git push`"},
+		{Name: "the shell waits 30 minutes on a command", Call: claudetest.Bash(`echo "default=$BASH_DEFAULT_TIMEOUT_MS max=$BASH_MAX_TIMEOUT_MS"`), WantOut: "default=1800000 max=1800000"},
 		{Name: "read slice.json outside the lease", Call: claudetest.Tool("Read", map[string]any{"file_path": d.SliceJSON}), WantOut: `"goal":"say hello"`},
 		{Name: "write outside the lease", Call: claudetest.Write(outsideFile, "x"), WantDenied: true},
 		{Name: "write in the lease", Call: claudetest.Write(filepath.Join(view.Worktree, "hello.txt"), "hello\n")},
 		{Name: "write a sibling of result.json", Call: claudetest.Write(sibling, "x"), WantDenied: true},
 		{Name: "commit", Call: claudetest.Bash("git add -A && git -c user.name=jig-test -c user.email=test@example.invalid commit -q -m hello && git rev-parse HEAD")},
 		{Name: "write result.json", Call: func(prior []claudetest.ToolResult) claudetest.ToolCall {
-			sha := regexp.MustCompile(`[0-9a-f]{40}`).FindString(prior[5].Content)
+			sha := regexp.MustCompile(`[0-9a-f]{40}`).FindString(prior[6].Content)
 			return claudetest.ToolCall{Name: "Write", Input: map[string]any{"file_path": view.ResultJSON, "content": `{"outcome":"green","summary":"live contract","commit":"` + sha + `"}`}}
 		}},
 	}}
