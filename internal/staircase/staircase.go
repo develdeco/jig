@@ -48,21 +48,13 @@ func Select(cfg Config, s Signals) string {
 	return cfg.Rungs[idx]
 }
 
-// Disjoint picks a model not already used by any builder this ticket: the
-// first cheap-to-dear rung not in used, or the dearest rung if all are used.
-func Disjoint(cfg Config, used []string) string {
-	n := len(cfg.Rungs)
-	if n == 0 {
+// Dearest is the staircase's dearest rung, the gate reviewer's model on
+// every round: its independence comes from a fresh, read-only session, not
+// from a model the builders did not use (ADR 0023). "" when cfg has no
+// rungs.
+func Dearest(cfg Config) string {
+	if len(cfg.Rungs) == 0 {
 		return ""
 	}
-	usedSet := make(map[string]bool, len(used))
-	for _, u := range used {
-		usedSet[u] = true
-	}
-	for _, r := range cfg.Rungs {
-		if !usedSet[r] {
-			return r
-		}
-	}
-	return cfg.Rungs[n-1]
+	return cfg.Rungs[len(cfg.Rungs)-1]
 }

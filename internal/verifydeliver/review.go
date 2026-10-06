@@ -821,6 +821,9 @@ type Review struct {
 	// outstanding to dispatch a reviewer over) or when it succeeded - the
 	// reason then is intent.md's own record, not a note.
 	IntentNote string
+	// Effort is the reasoning effort this round's reviewer was dispatched
+	// with: "" when none was passed or no reviewer ran.
+	Effort string
 }
 
 // RoundInput is what Gate hands a GateSource for one round: the scripted
@@ -835,6 +838,9 @@ type RoundInput struct {
 	RepoName string
 	Target   string
 	Model    string
+	// Effort gives the reviewer's reasoning effort for a round of a scope
+	// ("full" or "delta"): project.Config.ReviewEffortFor. nil passes none.
+	Effort func(scope string) string
 	// Intent is this round's resolved intent binding (intent.go's
 	// resolveIntent, which Gate calls), already absolute or "" for source
 	// "none", and IntentText the exact bytes at its Path ("" for "none").
@@ -1022,6 +1028,10 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 	}
 
 	prompt := RenderReviewPrompt(req, reviewPath, resultPath)
+	effort := ""
+	if in.Effort != nil {
+		effort = in.Effort(scope)
+	}
 	dispatch := session.Dispatch{
 		Ticket:     in.Ticket,
 		Slice:      "gate",
@@ -1030,6 +1040,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		SliceJSON:  reviewPath,
 		ResultJSON: resultPath,
 		Model:      in.Model,
+		Effort:     effort,
 		Prompt:     prompt,
 		Screen:     true,
 	}
@@ -1091,5 +1102,6 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		Intent:     reqIntent,
 		IntentText: reqIntentText,
 		IntentNote: intentNote,
+		Effort:     effort,
 	}}, true, nil
 }

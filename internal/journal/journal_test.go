@@ -89,28 +89,6 @@ func TestAppendConcurrentNoLostLines(t *testing.T) {
 	}
 }
 
-func TestBuilderModels(t *testing.T) {
-	lines := []Line{
-		{Event: "dispatch", Model: "claude-sonnet-5"},
-		{Event: "result", Outcome: "green"},
-		{Event: "dispatch", Model: "claude-haiku-4-5"},
-		{Event: "dispatch", Model: "claude-sonnet-5"},
-		{Event: "dispatch", Model: ""},
-	}
-	got := BuilderModels(lines)
-	want := []string{"claude-sonnet-5", "claude-haiku-4-5"}
-	if len(got) != len(want) {
-		t.Fatalf("BuilderModels = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("BuilderModels = %v, want %v", got, want)
-		}
-	}
-}
-
-// TestFailedAttempts: an attempt fails at the work when its result is not a
-// question, a flawed brief or a blocked environment, and it did not verify.
 func TestFailedAttempts(t *testing.T) {
 	lines := []Line{
 		{Slice: "a", Event: "result", Outcome: "code-bug", Attempt: 1},
