@@ -3,36 +3,36 @@ package verifydeliver
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 )
 
-// unsetIdentityEnvForTest unsets every GIT_AUTHOR_*/GIT_COMMITTER_* variable
-// gittest.PinIdentity set process-wide (via this package's TestMain), for
-// the duration of one test, restoring each to its pinned value afterward.
-// A test that wants to prove identity resolves from somewhere other than
-// the ambient environment - a distinct operator identity, or no identity at
-// all - needs this: env always wins over any git config, pinned or not.
-// t.Setenv registers the restore and panics in a parallel test, so a test
-// using this can never be made parallel by accident; os.Unsetenv then
-// removes the variable, which t.Setenv alone cannot.
-func unsetIdentityEnvForTest(t *testing.T) {
+// ambientWithoutIdentity returns this test binary's own process environment
+// with the six GIT_AUTHOR_*/GIT_COMMITTER_* variables this package's
+// TestMain pins for every other test's commits (gittest.PinIdentity)
+// dropped: Deps.GitEnv carries it into Publish's identity resolution so
+// that pin cannot shadow the mapped clone's own config, or its absence,
+// without editing the process environment to get there.
+func ambientWithoutIdentity(t *testing.T) []string {
 	t.Helper()
-	for _, k := range []string{
-		"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
-		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE",
-	} {
-		t.Setenv(k, "")
-		if err := os.Unsetenv(k); err != nil {
-			t.Fatalf("unset %s: %v", k, err)
+	drop := map[string]bool{
+		"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true, "GIT_AUTHOR_DATE": true,
+		"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true, "GIT_COMMITTER_DATE": true,
+	}
+	var kept []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if !drop[name] {
+			kept = append(kept, kv)
 		}
 	}
+	return kept
 }
 
 // identityRepo creates a bare-bones git repo at a fresh temp dir with
@@ -56,17 +56,16 @@ func identityRepo(t *testing.T, name, email string) string {
 // TestPublishCommitsWithMappedCloneIdentity is the identity-resolution
 // regression: it registers a Machine.Clones entry for the fixture repo
 // pointing at a directory with its own distinct repo-local identity -
-// never the fixture identity this package's TestMain pins process-wide,
-// and never any identity the pool lease itself carries - and checks that
-// identity, not the pinned one, lands on the squash commit. Without
-// resolving identity from the operator's own mapped clone (see the package
-// doc), this would land the pinned/ambient identity instead, exactly the
-// bug that motivated the fix.
+// never the fixture identity this package's TestMain pins process-wide -
+// and checks that identity, not the pinned one, lands on the squash
+// commit. d.GitEnv strips that pin from Publish's own identity resolution,
+// so the mapped clone's config decides instead.
 func TestPublishCommitsWithMappedCloneIdentity(t *testing.T) {
-	unsetIdentityEnvForTest(t)
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
+	d.GitEnv = ambientWithoutIdentity(t)
 
 	operatorDir := identityRepo(t, "Operator Distinct", "operator@example.invalid")
 	d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": operatorDir}}
@@ -92,27 +91,24 @@ func TestPublishCommitsWithMappedCloneIdentity(t *testing.T) {
 }
 
 // TestPublishFailsIdentityRequiredAndPushesNothing checks the other side of
-// the same gate: with no identity resolvable anywhere (no mapped clone
-// registered, so Publish falls back to its lease - a fresh clone with no
-// identity of its own - and the ambient environment has none either), it
-// fails IDENTITY_REQUIRED before its first commit and pushes nothing to
-// the ticket branch.
+// the same gate: with no identity resolvable anywhere - no mapped clone
+// registered, so Publish falls back to its lease, and that lease has
+// user.useConfigOnly sealed onto it (below) so git can neither find an
+// identity there nor guess one from the host's own user account or
+// hostname - it fails IDENTITY_REQUIRED before its first commit and pushes
+// nothing to the ticket branch. d.GitEnv strips this package's pinned
+// identity from Publish's own resolution the same way the test above does,
+// so nothing papers over the lease's missing identity.
 func TestPublishFailsIdentityRequiredAndPushesNothing(t *testing.T) {
-	unsetIdentityEnvForTest(t)
-
-	cfgPath := filepath.Join(t.TempDir(), "gitconfig-no-identity")
-	if err := os.WriteFile(cfgPath, []byte("[user]\n\tuseConfigOnly = true\n"), 0o644); err != nil {
-		t.Fatalf("write global config: %v", err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", cfgPath)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
+	d.GitEnv = ambientWithoutIdentity(t)
 	// d.Machine is left zero-valued: no mapped clone recorded for this
 	// project on this machine, so Publish falls back to checking its own
 	// (identity-less) lease.
+	sealNoIdentityOntoPublishLease(t, fx)
 
 	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	var ae *axi.Error
@@ -128,5 +124,25 @@ func TestPublishFailsIdentityRequiredAndPushesNothing(t *testing.T) {
 
 	if _, err := gitx.Run(fx.RepoRemote, "rev-parse", "--verify", "--quiet", "refs/heads/"+ticketBranch(fx.Ticket)); err == nil {
 		t.Fatalf("refs/heads/%s exists on origin, want nothing pushed", ticketBranch(fx.Ticket))
+	}
+}
+
+// sealNoIdentityOntoPublishLease acquires the ticket's publish lease once,
+// ahead of Publish, and sets user.useConfigOnly on it, repo-locally: git
+// then refuses to guess an identity from the host's own user account or
+// hostname the way it otherwise would with none configured, so the lease
+// carries no identity deterministically, on any host. Publish's own
+// Acquire, right after, reuses this same lease (a fetch, never a fresh
+// clone, once a directory is already its own repository - see
+// pool.Acquire), so the config set here is still there when Publish
+// resolves identity immediately afterward.
+func sealNoIdentityOntoPublishLease(t *testing.T, fx *fixture.Fixture) {
+	t.Helper()
+	lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Publish)
+	if err != nil {
+		t.Fatalf("pool.Acquire publish lease: %v", err)
+	}
+	if _, err := gitx.Run(lease.Dir, "config", "user.useConfigOnly", "true"); err != nil {
+		t.Fatalf("git config user.useConfigOnly: %v", err)
 	}
 }

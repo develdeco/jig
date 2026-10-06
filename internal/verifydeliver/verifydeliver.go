@@ -43,6 +43,22 @@ type Deps struct {
 	// with, and routes the ticket through. nil means the tracker project.yaml
 	// names (tracker.New); a test hands its own.
 	Tracker tracker.Adapter
+	// Confirm asks the interactive confirmation question. nil means the default.
+	Confirm func(branch, ticket, openPR string) bool
+	// GuardedPush pushes branch to origin. nil means gitx.GuardedPush.
+	GuardedPush func(dir, remote, branch string, confirmed bool) error
+	// FetchOrigin refreshes the view of origin. nil means the default fetch.
+	FetchOrigin func(dir string) error
+	// Warn reports a soft-failure warning. nil means the default stderr write.
+	Warn func(format string, args ...any)
+	// GitEnv is the whole process environment Publish's identity resolution
+	// runs its "git var" calls under, in place of this process's own
+	// inherited one. nil means inherit it, as production always does. A test
+	// whose own process has an identity pinned for its own commits
+	// (gittest.PinIdentity) sets its own so that pin cannot shadow a mapped
+	// clone's distinct identity, or its absence, while resolving one for
+	// Publish - without editing the process environment to get it.
+	GitEnv []string
 }
 
 // trackerAdapter is the adapter d hands Publish: d.Tracker when set, else the
