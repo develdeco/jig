@@ -1347,12 +1347,14 @@ func TestGraduateFullyGraduatedWithRemoteStillSyncsPendingState(t *testing.T) {
 }
 
 // TestClaimOneChartEntryRediscoversAnotherClonesGraduation reproduces two
-// clones graduating one chart entry: a second clone of the store's origin
-// claims it and pushes first, so this clone's own claim's push is rejected.
-// Per Claim's contract, the rejection undoes this clone's commit, pulls the
-// other clone's work in, and claimOneChartEntry must re-read the chart
-// before minting again - finding the entry already has an id and reporting
-// done, rather than minting (and pushing) a second ticket for it.
+// clones graduating a two-entry chart: a second clone of the store's origin
+// claims the first entry and pushes it before this clone's own claim does,
+// so this clone's push is rejected. Per Claim's contract, the rejection
+// undoes this clone's commit, pulls the other clone's work in, and
+// claimOneChartEntry must re-read the chart before minting again - this time
+// finding entry 1 already has an id and continuing with entry 2, the one
+// that still has none, minting and pushing a ticket for it alone rather than
+// a second one for entry 1.
 func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 	_, storeRoot := setupGraduateStore(t)
 
@@ -1367,16 +1369,17 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The chart entry itself is already committed and pushed, as it would be
+	// Both chart entries are already committed and pushed, as they would be
 	// in real use (see TestGraduatePushFailureRemovesTheClaim's own comment on
 	// why): both clones below must see the same tickets.yaml.
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
+  - title: "Slice B"
 `)
 	if _, err := gitx.Run(storeRoot, "add", "-A"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "chart: add Slice A"); err != nil {
+	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "chart: add Slice A and Slice B"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gitx.Run(storeRoot, "push", "origin", "main"); err != nil {
@@ -1428,19 +1431,22 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claimOneChartEntry: %v", err)
 	}
-	if !done {
-		t.Fatalf("claimOneChartEntry = id %q pos %d done %v, want done=true: the re-read after the rejected push's pull must see the other clone's id and mint nothing new", id, pos, done)
+	if done || id == "" {
+		t.Fatalf("claimOneChartEntry = id %q pos %d done %v, want it to continue past the other clone's entry and claim Slice B", id, pos, done)
 	}
-	if id != "" {
-		t.Fatalf("claimOneChartEntry minted %q despite Slice A already being graduated by the other clone", id)
+	if id == otherID {
+		t.Fatalf("claimOneChartEntry minted %q, the same id the other clone already claimed for Slice A", id)
+	}
+	if pos != 1 {
+		t.Fatalf("claimOneChartEntry pos = %d, want 1: the re-read must move past entry 1 (already claimed by the other clone) to entry 2", pos)
 	}
 
 	entries, err := st.ReadChart("mychart")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].ID != otherID {
-		t.Fatalf("entries after the rejected claim's pull = %+v, want entry 1's id to be the other clone's %q", entries, otherID)
+	if len(entries) != 2 || entries[0].ID != otherID || entries[1].ID != id {
+		t.Fatalf("entries after the rejected claim's pull and retry = %+v, want entry 1's id to be the other clone's %q and entry 2's id to be the newly minted %q, with entry 1 unclobbered", entries, otherID, id)
 	}
 
 	remoteLog, err := gitx.Run("", "--git-dir", remote, "log", "--pretty=%s")
@@ -1448,7 +1454,10 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n := strings.Count(remoteLog, "graduate "+otherID); n != 1 {
-		t.Fatalf("remote log has %d commits graduating %s, want exactly 1 (the rejected clone must not have minted and pushed a second ticket)", n, otherID)
+		t.Fatalf("remote log has %d commits graduating %s, want exactly 1 (the rejected clone must not have minted and pushed a second ticket for Slice A)", n, otherID)
+	}
+	if n := strings.Count(remoteLog, "graduate "+id); n != 1 {
+		t.Fatalf("remote log has %d commits graduating %s, want exactly 1 (the retried claim's own push for Slice B)", n, id)
 	}
 
 	ents, err := os.ReadDir(storeRoot)
@@ -1461,8 +1470,8 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 			ticketDirs++
 		}
 	}
-	if ticketDirs != 1 {
-		t.Fatalf("storeRoot has %d ticket folders after the rejected claim, want exactly 1 (the other clone's %s pulled in, no second one minted)", ticketDirs, otherID)
+	if ticketDirs != 2 {
+		t.Fatalf("storeRoot has %d ticket folders after the rejected claim's retry, want exactly 2 (the other clone's %s pulled in, plus this retry's own %s)", ticketDirs, otherID, id)
 	}
 }
 
