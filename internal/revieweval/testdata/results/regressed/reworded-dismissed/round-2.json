@@ -19,6 +19,7 @@
       "risk_rationale": "A style point worth a second look."
     }
   ],
+  "still_present": [],
   "reviewed_paths": [
     "queue/priority.go",
     "queue/labels.go"

@@ -559,7 +559,14 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		// budgetReached parameter).
 		budgetUsed, _ := UsedFixBudget(d.Store, ticket, n)
 		budgetReached := budgetUsed >= *gateCfg.FixRounds
-		reported, err := ApplyRound(n, cum, round.Review.Result, slices, sliceGreen, man, gateCfg.FixRisks, budgetReached)
+		// still_present entries are expanded into full ResultFindings here,
+		// right before ApplyRound, so recurrence counting, routing, triage,
+		// the fix budget and findings.yaml all see exactly what a full
+		// re-report of each confirmed finding would give them;
+		// round.Review.Result (and the reviewer's raw result.json on disk)
+		// stays as the reviewer actually wrote it.
+		expanded := ExpandStillPresent(round.Review.Result, cum)
+		reported, err := ApplyRound(n, cum, expanded, slices, sliceGreen, man, gateCfg.FixRisks, budgetReached)
 		if err != nil {
 			return GateReport{}, err
 		}
