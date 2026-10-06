@@ -294,7 +294,8 @@ head sha, the round's resolved intent - source and path, `Gate`'s own
 `resolveIntent`, precedence brief.md then intent.md then none - plus
 slices/journal paths, manifest oracles, `oracles_passed` - every oracle run
 the gate made on this head before the review, all passed, or reused with
-`reused_from` from a pass jig recorded on the identical tree
+`reused_from` from a pass of the same command, under the same env classes,
+that jig recorded on a commit with the same tree
 ([ADR 0021](docs/adr/0021-the-gate-reuses-an-oracle-pass-on-the-same-tree.md)) - and the
 cumulative `open`/`dismissed` findings folded from every earlier round), the
 backend runs a session against `must_review` - every file the scope diff
