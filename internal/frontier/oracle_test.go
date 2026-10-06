@@ -330,4 +330,15 @@ func TestRunHandsALaterSliceWhatEarlierSlicesBuilt(t *testing.T) {
 	if !alpha {
 		t.Errorf("slice a's files = %v, want the alpha/ files its attempt changed", a.Files)
 	}
+	// A beta slice's range never reaches back over slice a's commits.
+	for _, e := range body.EarlierSlices {
+		if e.ID != "c" && e.ID != "d" {
+			continue
+		}
+		for _, f := range e.Files {
+			if strings.HasPrefix(f, "alpha/") {
+				t.Errorf("beta slice %s lists alpha file %s: its range reaches over another slice's commits", e.ID, f)
+			}
+		}
+	}
 }

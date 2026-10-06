@@ -2949,4 +2949,4 @@ jig times each oracle run at green and journals it (`seconds` on the `oracle` li
 
 ## A builder reads what earlier slices built (build-speed item 6d)
 
-`slice.json` gains `earlier_slices`: every slice of the ticket whose green jig verified before this dispatch, with its builder's summary and the files its verified attempt changed (the lease diff from the head at its dispatch, which the dispatch line now records, to its verified commit). The dispatch prompt names it. Sizing slices to a session goes into the intake skill instead (BS-2). See [ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md).
+`slice.json` gains `earlier_slices`: every slice of the ticket whose green jig verified before this dispatch, with its builder's summary and the files its verified attempt changed (the union of each attempt's own range: from the lease head at its dispatch, now on the dispatch line, to its verified commit or the head its last turn ended on, now on the result line). The dispatch prompt names it. Sizing slices to a session goes into the intake skill instead (BS-2). See [ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md).

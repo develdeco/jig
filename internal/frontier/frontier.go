@@ -405,12 +405,16 @@ func (rc *runCtx) readSliceState(sliceID string) (store.SliceState, error) {
 	return rc.d.Store.ReadSliceState(rc.ticket, sliceID)
 }
 
+// maxEarlierFiles caps one earlier slice's file list in slice.json; the
+// rest are counted in its files_omitted.
+const maxEarlierFiles = 50
+
 // earlierSlices lists the ticket's slices other than sliceID whose green
-// jig verified, in the order they first verified, each with its latest
-// verified attempt: the summary from that attempt's result.json, and the
-// files the attempt changed, from the lease head at its dispatch (the
-// dispatch line's commit) to its verified commit. Files stay empty when
-// that range is not in leaseDir, as for a slice of another repo.
+// jig verified, in the order they first verified (journal.VerifiedSlices):
+// the summary from the latest verified attempt's result.json, and the
+// files the slice's attempts changed, the union of each attempt's own range
+// in leaseDir. A range git cannot resolve (an older journal without
+// dispatch bases, a commit no longer in the lease) adds no files.
 func (rc *runCtx) earlierSlices(sliceID, leaseDir string) ([]earlierSlice, error) {
 	rc.storeMu.Lock()
 	lines, err := journal.Read(rc.d.Store, rc.ticket)
@@ -418,37 +422,43 @@ func (rc *runCtx) earlierSlices(sliceID, leaseDir string) ([]earlierSlice, error
 	if err != nil {
 		return nil, err
 	}
-	bases := map[string]string{}
-	at := map[string]int{}
 	out := []earlierSlice{}
-	for _, l := range lines {
-		key := fmt.Sprintf("%s#%d", l.Slice, l.Attempt)
-		switch {
-		case l.Event == "dispatch":
-			bases[key] = l.Commit
-		case l.Event == "verified" && l.Slice != sliceID:
-			e := earlierSlice{ID: l.Slice, Files: []string{}}
-			if data, err := os.ReadFile(resultJSONPath(rc.d.Store, rc.ticket, l.Slice, l.Attempt)); err == nil {
-				e.Summary = outcome.ParseJSON("slice", data).Summary
-			}
-			if base := bases[key]; base != "" && l.Commit != "" {
-				if diff, err := gitx.Run(leaseDir, "diff", "--name-only", base+".."+l.Commit); err == nil {
-					for _, f := range strings.Split(strings.TrimSpace(diff), "\n") {
-						if f = strings.TrimSpace(f); f != "" {
-							e.Files = append(e.Files, f)
-						}
-					}
-				}
-			}
-			if i, ok := at[l.Slice]; ok {
-				out[i] = e
+	for _, v := range journal.VerifiedSlices(lines, sliceID) {
+		e := earlierSlice{ID: v.Slice, Files: []string{}}
+		if data, err := os.ReadFile(resultJSONPath(rc.d.Store, rc.ticket, v.Slice, v.Attempt)); err == nil {
+			e.Summary = outcome.ParseJSON("slice", data).Summary
+		}
+		seen := map[string]bool{}
+		for _, r := range v.Ranges {
+			diff, err := gitx.Run(leaseDir, "-c", "core.quotePath=false", "diff", "--name-only", r[0]+".."+r[1])
+			if err != nil {
 				continue
 			}
-			at[l.Slice] = len(out)
-			out = append(out, e)
+			for _, f := range strings.Split(strings.TrimSpace(diff), "\n") {
+				if f = strings.TrimSpace(f); f == "" || seen[f] {
+					continue
+				}
+				seen[f] = true
+				if len(e.Files) == maxEarlierFiles {
+					e.FilesOmitted++
+					continue
+				}
+				e.Files = append(e.Files, f)
+			}
 		}
+		out = append(out, e)
 	}
 	return out, nil
+}
+
+// leaseHead is dir's HEAD, or "" when git cannot say: the end of an
+// attempt's turn, for its result line.
+func leaseHead(dir string) string {
+	head, err := gitx.RevParse(dir, "HEAD")
+	if err != nil {
+		return ""
+	}
+	return head
 }
 
 // lastOracleSeconds is the wall time of jig's latest run of command with
@@ -651,7 +661,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	}
 	res := readResult(runErr, rjPath)
 
-	rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Attempt: attempt})
+	rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Head: leaseHead(lease.Dir), Attempt: attempt})
 	if rc.isHalted() {
 		return
 	}
@@ -743,7 +753,7 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 		fix := dispatch
 		fix.Prompt = prompt
 		res = readResult(resumer.Resume(fix, sessionID), dispatch.ResultJSON)
-		rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Attempt: attempt})
+		rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Head: leaseHead(lease.Dir), Attempt: attempt})
 		if rc.isHalted() {
 			return res
 		}
