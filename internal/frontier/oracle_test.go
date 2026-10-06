@@ -26,6 +26,7 @@ type redOracleBackend struct {
 	session.Backend
 	t        *testing.T
 	fixes    bool
+	dirty    bool // leave the failing test as an uncommitted tracked edit, not a commit
 	mu       sync.Mutex
 	prompts  []string
 	sessions []string
@@ -39,9 +40,17 @@ func (b *redOracleBackend) RunResumable(d session.Dispatch) (string, error) {
 	}
 	if d.Slice == "a" && d.Attempt == 1 {
 		body := "package alpha\n\nimport \"testing\"\n\nfunc TestRed(t *testing.T) { t.Fatal(\"red on purpose\") }\n"
-		b.commitGreen(d, func() error {
-			return os.WriteFile(filepath.Join(d.Worktree, filepath.FromSlash(redTestFile)), []byte(body), 0o644)
-		})
+		path := filepath.Join(d.Worktree, filepath.FromSlash(redTestFile))
+		if b.dirty {
+			// Commit the file empty of tests, then leave the failing test as
+			// an edit the builder never committed.
+			b.commitGreen(d, func() error { return os.WriteFile(path, []byte("package alpha\n"), 0o644) })
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				b.t.Fatal(err)
+			}
+			return "sess-1", nil
+		}
+		b.commitGreen(d, func() error { return os.WriteFile(path, []byte(body), 0o644) })
 	}
 	return "sess-1", nil
 }
@@ -58,9 +67,20 @@ func (b *redOracleBackend) Resume(d session.Dispatch, sessionID string) error {
 		}
 		return writeGreen(d.ResultJSON, head)
 	}
-	b.commitGreen(d, func() error {
-		return os.Remove(filepath.Join(d.Worktree, filepath.FromSlash(redTestFile)))
-	})
+	path := filepath.Join(d.Worktree, filepath.FromSlash(redTestFile))
+	if b.dirty {
+		// Revert the uncommitted edit, back to the committed, test-free file,
+		// and report the same commit green again.
+		if err := os.WriteFile(path, []byte("package alpha\n"), 0o644); err != nil {
+			return err
+		}
+		head, err := gitx.RevParse(d.Worktree, "HEAD")
+		if err != nil {
+			return err
+		}
+		return writeGreen(d.ResultJSON, head)
+	}
+	b.commitGreen(d, func() error { return os.Remove(path) })
 	return nil
 }
 
@@ -125,6 +145,7 @@ func TestRunHandsARedOracleBackToTheSameSession(t *testing.T) {
 	t.Run("the session fixes it", func(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		d, st := newDeps(t, fx)
+		d.Oracle = nil // the real oracle: the fixture's go test
 		b := &redOracleBackend{Backend: d.Backend, t: t, fixes: true}
 		d.Backend = b
 		if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
@@ -152,6 +173,7 @@ func TestRunHandsARedOracleBackToTheSameSession(t *testing.T) {
 	t.Run("the fix budget runs out", func(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		d, st := newDeps(t, fx)
+		d.Oracle = nil // the real oracle: the fixture's go test
 		b := &redOracleBackend{Backend: d.Backend, t: t, fixes: false}
 		d.Backend = b
 		if _, err := Run(d, RunOpts{Ticket: fx.Ticket, MaxAttempts: 1}); err != nil {
@@ -174,9 +196,28 @@ func TestRunHandsARedOracleBackToTheSameSession(t *testing.T) {
 		}
 	})
 
+	t.Run("uncommitted changes go back to the session", func(t *testing.T) {
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+		d, st := newDeps(t, fx)
+		d.Oracle = nil // the real oracle: the fixture's go test
+		b := &redOracleBackend{Backend: d.Backend, t: t, fixes: true, dirty: true}
+		d.Backend = b
+		if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+
+		if len(b.prompts) != 1 || !strings.Contains(b.prompts[0], "uncommitted changes") || !strings.Contains(b.prompts[0], redTestFile) {
+			t.Fatalf("fix turns = %q, want one naming the uncommitted change to %s", b.prompts, redTestFile)
+		}
+		if got := oracleLines(t, st, fx.Ticket, "a", 1); strings.Join(got, ",") != "pass" {
+			t.Errorf("slice a attempt 1 oracle runs = %v, want one pass, run only once the tree was the commit", got)
+		}
+	})
+
 	t.Run("a backend that cannot resume", func(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		d, st := newDeps(t, fx)
+		d.Oracle = nil // the real oracle: the fixture's go test
 		b := &redOracleBackend{Backend: d.Backend, t: t, fixes: true}
 		d.Backend = plainBackend{b: b}
 		if _, err := Run(d, RunOpts{Ticket: fx.Ticket, MaxAttempts: 1}); err != nil {

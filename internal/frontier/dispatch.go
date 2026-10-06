@@ -22,7 +22,7 @@ import (
 const dispatchPromptTemplate = "You are a jig build session for slice %s of ticket %s.\n" +
 	"Work ONLY in this worktree. Goal: %s\n" +
 	"Oracle (green = done): %s\n" +
-	"While you work, run only the tests that cover your change. When you report green, jig runs the oracle and hands you its output if it fails.\n" +
+	"%s\n" +
 	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer).\n" +
 	"Commit as you land. When finished write result.json at %s with exactly one JSON object: {\"outcome\": \"green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed\", \"summary\": \"...\", \"commit\": \"<sha>\", \"question\": \"only for needs-input\", \"artifacts\": [\"relative paths\"]}"
 
@@ -36,9 +36,20 @@ func renderOracleFixPrompt(oracleCmd, outputTail, resultJSONPath string) string 
 	return fmt.Sprintf(oracleFixPromptTemplate, oracleCmd, outputTail, resultJSONPath)
 }
 
-// renderDispatchPrompt fills dispatchPromptTemplate for one slice attempt.
-func renderDispatchPrompt(id, ticket, goal, oracleCmd, sliceJSONPath, resultJSONPath string) string {
-	return fmt.Sprintf(dispatchPromptTemplate, id, ticket, goal, oracleCmd, sliceJSONPath, resultJSONPath)
+// oracleLine is the dispatch prompt's line after the oracle: how the oracle
+// is used, which depends on whether the backend can hand a red run back to
+// the same session (session.Resumer) or a red run fails the attempt.
+func oracleLine(fixTurns bool) string {
+	if fixTurns {
+		return "While you work, run only the tests that cover your change. When you report green, jig runs the oracle and hands you its output if it fails."
+	}
+	return "While you work, run only the tests that cover your change. When you report green, jig runs the oracle, and a red run fails the attempt, so run it once yourself before you report green."
+}
+
+// renderDispatchPrompt fills dispatchPromptTemplate for one slice attempt;
+// fixTurns says whether a red oracle run goes back to this session.
+func renderDispatchPrompt(id, ticket, goal, oracleCmd, sliceJSONPath, resultJSONPath string, fixTurns bool) string {
+	return fmt.Sprintf(dispatchPromptTemplate, id, ticket, goal, oracleCmd, oracleLine(fixTurns), sliceJSONPath, resultJSONPath)
 }
 
 // sliceJSONBody is the exact wire shape jig writes to slice.json before

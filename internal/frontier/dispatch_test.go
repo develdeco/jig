@@ -1,6 +1,9 @@
 package frontier
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestRenderDispatchPromptMatchesGolden pins the build dispatch prompt to a
 // golden text transcribed here, not derived from dispatchPromptTemplate, so
@@ -8,7 +11,7 @@ import "testing"
 func TestRenderDispatchPromptMatchesGolden(t *testing.T) {
 	t.Parallel()
 
-	got := renderDispatchPrompt("a", "JIG-1", "say hello", "go test ./alpha/...", "/abs/a.attempt-1.slice.json", "/abs/a.attempt-1.result.json")
+	got := renderDispatchPrompt("a", "JIG-1", "say hello", "go test ./alpha/...", "/abs/a.attempt-1.slice.json", "/abs/a.attempt-1.result.json", true)
 	want := "You are a jig build session for slice a of ticket JIG-1.\n" +
 		"Work ONLY in this worktree. Goal: say hello\n" +
 		"Oracle (green = done): go test ./alpha/...\n" +
@@ -18,6 +21,16 @@ func TestRenderDispatchPromptMatchesGolden(t *testing.T) {
 		`{"outcome": "green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed", "summary": "...", "commit": "<sha>", "question": "only for needs-input", "artifacts": ["relative paths"]}`
 	if got != want {
 		t.Errorf("prompt does not match the golden text.\ngot:\n%s\nwant:\n%s", got, want)
+	}
+
+	// A backend that cannot resume a session: a red oracle run fails the
+	// attempt, so the builder runs the oracle once itself.
+	got = renderDispatchPrompt("a", "JIG-1", "say hello", "go test ./alpha/...", "/abs/a.attempt-1.slice.json", "/abs/a.attempt-1.result.json", false)
+	want = strings.Replace(want,
+		"When you report green, jig runs the oracle and hands you its output if it fails.\n",
+		"When you report green, jig runs the oracle, and a red run fails the attempt, so run it once yourself before you report green.\n", 1)
+	if got != want {
+		t.Errorf("prompt without fix turns does not match the golden text.\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
 

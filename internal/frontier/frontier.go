@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/gitx"
@@ -43,7 +44,25 @@ type Deps struct {
 	// Home is the jig home root whose pool holds the build leases:
 	// home.Root() for the binary, a test's own directory in tests.
 	Home string
+	// Oracle runs an oracle command in a lease and returns its combined
+	// output (oracleAtGreen). nil means the real run, envrun.ShellOutput
+	// with the Windows short-path workaround; a test that is not about the
+	// oracle hands one that passes.
+	Oracle func(cmd, dir string) (string, error)
 }
+
+// runOracle runs cmd in dir through d.Oracle, or for real when it is nil.
+func (d Deps) runOracle(cmd, dir string) (string, error) {
+	if d.Oracle != nil {
+		return d.Oracle(cmd, dir)
+	}
+	return envrun.ShellOutput(envrun.ShortenQuotedPath(cmd), dir, oracleLimit)
+}
+
+// oracleLimit bounds jig's own oracle run: the same bound a headless session's
+// shell gives one command (ADR 0018), so an oracle that fits a builder's shell
+// fits here too, and a hung one cannot hold the repo group.
+const oracleLimit = 30 * time.Minute
 
 // RunOpts configures one Run call.
 type RunOpts struct {
@@ -522,7 +541,8 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	}
 
 	oracleCmd := m.OracleCmd(sl.Oracle, ws)
-	prompt := renderDispatchPrompt(sl.ID, ticket, sl.Goal, oracleCmd, sjPath, rjPath)
+	_, fixTurns := d.Backend.(session.Resumer)
+	prompt := renderDispatchPrompt(sl.ID, ticket, sl.Goal, oracleCmd, sjPath, rjPath, fixTurns)
 
 	rc.journal(journal.Line{Slice: sl.ID, Event: "dispatch", Model: model, Attempt: attempt})
 	if rc.isHalted() {
@@ -598,17 +618,27 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 		if _, ok := verifyGreen(lease.Dir, startSHA, res); !ok {
 			return res
 		}
-		out, err := envrun.ShellOutput(envrun.ShortenQuotedPath(oracleCmd), lease.Dir)
-		result := "pass"
-		if err != nil {
-			result = "fail"
-		}
-		rc.journal(journal.Line{Slice: sl.ID, Event: "oracle", Outcome: result, Commit: cleanHead(lease.Dir), Attempt: attempt})
-		if err == nil {
-			return res
+
+		// An oracle run vouches for the reported commit only when the tracked
+		// files are that commit: uncommitted edits go back to the session
+		// like a red run, without running the oracle.
+		var tail string
+		if dirty := trackedChanges(lease.Dir); dirty != "" {
+			tail = "Your working tree has uncommitted changes to tracked files, so the commit you reported is not what an oracle run would test:\n" + dirty
+		} else {
+			evidence := cleanHead(lease.Dir)
+			out, err := rc.d.runOracle(oracleCmd, lease.Dir)
+			result := "pass"
+			if err != nil {
+				result = "fail"
+			}
+			rc.journal(journal.Line{Slice: sl.ID, Event: "oracle", Outcome: result, Commit: evidence, Attempt: attempt})
+			if err == nil {
+				return res
+			}
+			tail = outputTail(out)
 		}
 
-		tail := outputTail(out)
 		resumer, ok := rc.d.Backend.(session.Resumer)
 		if !ok || sessionID == "" || fixes == maxOracleFixes || rc.isHalted() {
 			failed := outcome.Result{
@@ -629,7 +659,21 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 		fix.Prompt = renderOracleFixPrompt(oracleCmd, tail, dispatch.ResultJSON)
 		res = readResult(resumer.Resume(fix, sessionID), dispatch.ResultJSON)
 		rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Attempt: attempt})
+		if rc.isHalted() {
+			return res
+		}
 	}
+}
+
+// trackedChanges returns dir's uncommitted changes to tracked files (git
+// status, untracked files left out), or "" when there are none or git
+// cannot say.
+func trackedChanges(dir string) string {
+	status, err := gitx.Run(dir, "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(status)
 }
 
 // cleanHead returns dir's HEAD sha when its working tree is clean (nothing
@@ -657,13 +701,17 @@ func outputTail(out string) string {
 	return out
 }
 
-// oneLine flattens s to one line of at most 600 bytes, for a result summary.
+// oneLine flattens the end of s to one line of at most about 600 bytes, for
+// a result summary. The kept part starts at a line boundary, so two identical
+// failures summarize identically and the stall counter can match them.
 func oneLine(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > 600 {
-		s = "..." + s[len(s)-600:]
+		s = s[len(s)-600:]
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = s[i+1:]
+		}
 	}
-	return s
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // ensureStartSHA writes <ticket>/start.<repoName>.sha the first time this

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/manifest"
 )
@@ -43,6 +44,32 @@ func TestShellExitCodes(t *testing.T) {
 	}
 	if err := Shell("exit 1", dir); err == nil {
 		t.Fatal("exit 1: want error, got nil")
+	}
+}
+
+// TestShellOutputReturnsOutputAndHonorsItsLimit: ShellOutput hands back what
+// the command printed, fails a command that exits non-zero, and fails one
+// that outlives its limit instead of waiting for it.
+func TestShellOutputReturnsOutputAndHonorsItsLimit(t *testing.T) {
+	dir := t.TempDir()
+	out, err := ShellOutput("echo hello", dir, time.Minute)
+	if err != nil || trimEOL(out) != "hello" {
+		t.Fatalf("echo: out=%q err=%v, want hello and no error", out, err)
+	}
+	if _, err := ShellOutput("exit 3", dir, time.Minute); err == nil {
+		t.Fatal("exit 3: want an error")
+	}
+	slow := "sleep 30"
+	if runtime.GOOS == "windows" {
+		slow = "ping -n 31 127.0.0.1 >nul"
+	}
+	start := time.Now()
+	_, err = ShellOutput(slow, dir, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "did not finish within") {
+		t.Fatalf("a command past its limit: err=%v, want the limit named", err)
+	}
+	if took := time.Since(start); took > 20*time.Second {
+		t.Errorf("ShellOutput took %s past a 1s limit, want it to stop waiting", took)
 	}
 }
 
