@@ -405,6 +405,62 @@ func (rc *runCtx) readSliceState(sliceID string) (store.SliceState, error) {
 	return rc.d.Store.ReadSliceState(rc.ticket, sliceID)
 }
 
+// maxEarlierFiles caps one earlier slice's file list in slice.json; the
+// rest are counted in its files_omitted.
+const maxEarlierFiles = 50
+
+// earlierSlices lists the ticket's slices other than sliceID whose green
+// jig verified, in the order they first verified (journal.VerifiedSlices):
+// the summary from the latest verified attempt's result.json, and the
+// files the slice's attempts changed, the union of each attempt's own range
+// in leaseDir. A range git cannot resolve (an older journal without
+// dispatch bases, a commit no longer in the lease) adds no files.
+func (rc *runCtx) earlierSlices(sliceID, leaseDir string) ([]earlierSlice, error) {
+	rc.storeMu.Lock()
+	lines, err := journal.Read(rc.d.Store, rc.ticket)
+	rc.storeMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	out := []earlierSlice{}
+	for _, v := range journal.VerifiedSlices(lines, sliceID) {
+		e := earlierSlice{ID: v.Slice, Files: []string{}}
+		if data, err := os.ReadFile(resultJSONPath(rc.d.Store, rc.ticket, v.Slice, v.Attempt)); err == nil {
+			e.Summary = outcome.ParseJSON("slice", data).Summary
+		}
+		seen := map[string]bool{}
+		for _, r := range v.Ranges {
+			diff, err := gitx.Run(leaseDir, "-c", "core.quotePath=false", "diff", "--name-only", r[0]+".."+r[1])
+			if err != nil {
+				continue
+			}
+			for _, f := range strings.Split(strings.TrimSpace(diff), "\n") {
+				if f = strings.TrimSpace(f); f == "" || seen[f] {
+					continue
+				}
+				seen[f] = true
+				if len(e.Files) == maxEarlierFiles {
+					e.FilesOmitted++
+					continue
+				}
+				e.Files = append(e.Files, f)
+			}
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// leaseHead is dir's HEAD, or "" when git cannot say: the end of an
+// attempt's turn, for its result line.
+func leaseHead(dir string) string {
+	head, err := gitx.RevParse(dir, "HEAD")
+	if err != nil {
+		return ""
+	}
+	return head
+}
+
 // lastOracleSeconds is the wall time of jig's latest run of command with
 // env class env up on this ticket (journal.LastOracleSeconds), reading the
 // journal under storeMu.
@@ -543,6 +599,18 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		rc.fail(fmt.Errorf("frontier: read the oracle's last run time for %s: %w", sl.ID, err))
 		return
 	}
+	earlier, err := rc.earlierSlices(sl.ID, lease.Dir)
+	if err != nil {
+		rc.fail(fmt.Errorf("frontier: read earlier slices for %s: %w", sl.ID, err))
+		return
+	}
+	// The attempt's base: what its changed files are measured from, once it
+	// verifies (earlierSlices).
+	base, err := gitx.RevParse(lease.Dir, "HEAD")
+	if err != nil {
+		rc.fail(fmt.Errorf("frontier: resolve the lease head for %s: %w", sl.ID, err))
+		return
+	}
 
 	body := sliceJSONBody{
 		ID:            sl.ID,
@@ -555,6 +623,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		AttemptLog:    buildAttemptLog(d.Store, ticket, sl.ID, attempt),
 		Answer:        answerFor(d.Store, ticket, sl.ID),
 		OracleSeconds: oracleSeconds,
+		EarlierSlices: earlier,
 	}
 	if err := writeSliceJSON(sjPath, body); err != nil {
 		rc.fail(fmt.Errorf("frontier: write slice.json for %s: %w", sl.ID, err))
@@ -564,7 +633,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	_, fixTurns := d.Backend.(session.Resumer)
 	prompt := renderDispatchPrompt(sl.ID, ticket, sl.Goal, oracleCmd, sjPath, rjPath, fixTurns)
 
-	rc.journal(journal.Line{Slice: sl.ID, Event: "dispatch", Model: model, Attempt: attempt})
+	rc.journal(journal.Line{Slice: sl.ID, Event: "dispatch", Model: model, Commit: base, Attempt: attempt})
 	if rc.isHalted() {
 		return
 	}
@@ -592,7 +661,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	}
 	res := readResult(runErr, rjPath)
 
-	rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Attempt: attempt})
+	rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Head: leaseHead(lease.Dir), Attempt: attempt})
 	if rc.isHalted() {
 		return
 	}
@@ -684,7 +753,7 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 		fix := dispatch
 		fix.Prompt = prompt
 		res = readResult(resumer.Resume(fix, sessionID), dispatch.ResultJSON)
-		rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Attempt: attempt})
+		rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Head: leaseHead(lease.Dir), Attempt: attempt})
 		if rc.isHalted() {
 			return res
 		}

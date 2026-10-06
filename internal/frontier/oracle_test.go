@@ -287,3 +287,58 @@ func TestRunTellsTheNextBuilderTheOraclesLastRunTime(t *testing.T) {
 		t.Errorf("slice b's oracle_seconds = %d, want slice a's run time, at least 1", got)
 	}
 }
+
+// TestRunHandsALaterSliceWhatEarlierSlicesBuilt: a slice dispatched after
+// another slice of the ticket verified green reads, in slice.json's
+// earlier_slices, that slice's summary and the files its verified attempt
+// changed, and never itself (ADR 0025). The fixture's slice b waits for a.
+func TestRunHandsALaterSliceWhatEarlierSlicesBuilt(t *testing.T) {
+	t.Parallel()
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d, st := newDeps(t, fx)
+	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	data, err := os.ReadFile(sliceJSONPath(st, fx.Ticket, "b", 1))
+	if err != nil {
+		t.Fatalf("read b's slice.json: %v", err)
+	}
+	var body sliceJSONBody
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("parse b's slice.json: %v", err)
+	}
+	var a *earlierSlice
+	for i, e := range body.EarlierSlices {
+		if e.ID == "b" {
+			t.Errorf("b's earlier_slices lists b itself: %+v", body.EarlierSlices)
+		}
+		if e.ID == "a" {
+			a = &body.EarlierSlices[i]
+		}
+	}
+	if a == nil {
+		t.Fatalf("b's earlier_slices = %+v, want slice a, which verified before b", body.EarlierSlices)
+	}
+	if a.Summary == "" {
+		t.Errorf("slice a's entry has no summary: %+v", *a)
+	}
+	alpha := false
+	for _, f := range a.Files {
+		alpha = alpha || strings.HasPrefix(f, "alpha/")
+	}
+	if !alpha {
+		t.Errorf("slice a's files = %v, want the alpha/ files its attempt changed", a.Files)
+	}
+	// A beta slice's range never reaches back over slice a's commits.
+	for _, e := range body.EarlierSlices {
+		if e.ID != "c" && e.ID != "d" {
+			continue
+		}
+		for _, f := range e.Files {
+			if strings.HasPrefix(f, "alpha/") {
+				t.Errorf("beta slice %s lists alpha file %s: its range reaches over another slice's commits", e.ID, f)
+			}
+		}
+	}
+}
