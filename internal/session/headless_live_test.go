@@ -88,7 +88,7 @@ func liveBuildSession(t *testing.T, jig string) {
 
 	sess := &claudetest.Session{Steps: []claudetest.Step{
 		{Name: "screen denies a push", Call: claudetest.Bash("git push origin HEAD"), WantErr: "Blocked `git push`"},
-		{Name: "the shell waits 30 minutes on a command", Call: claudetest.Bash(`echo "default=$BASH_DEFAULT_TIMEOUT_MS max=$BASH_MAX_TIMEOUT_MS"`), WantOut: "default=1800000 max=1800000"},
+		{Name: "the shell waits 30 minutes on a command and runs nothing in the background", Call: claudetest.Bash(`echo "default=$BASH_DEFAULT_TIMEOUT_MS max=$BASH_MAX_TIMEOUT_MS nobg=$CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"`), WantOut: "default=1800000 max=1800000 nobg=1"},
 		{Name: "read slice.json outside the lease", Call: claudetest.Tool("Read", map[string]any{"file_path": d.SliceJSON}), WantOut: `"goal":"say hello"`},
 		{Name: "write outside the lease", Call: claudetest.Write(outsideFile, "x"), WantDenied: true},
 		{Name: "write in the lease", Call: claudetest.Write(filepath.Join(view.Worktree, "hello.txt"), "hello\n")},
@@ -237,6 +237,14 @@ func runLive(t *testing.T, jig string, sess *claudetest.Session, d Dispatch) {
 	}
 
 	sess.Check(t)
+	// Background tasks are off: the shell offers no background option, so a
+	// session cannot start a command its own turn's end would orphan (ADR
+	// 0018).
+	if schema := sess.ToolSchema("Bash"); schema == nil {
+		t.Error("the CLI offered no Bash tool")
+	} else if props, _ := schema["properties"].(map[string]any); props["run_in_background"] != nil {
+		t.Error("the Bash tool offers run_in_background, want background tasks off")
+	}
 	if len(sess.Results()) < len(sess.Steps) {
 		t.FailNow()
 	}

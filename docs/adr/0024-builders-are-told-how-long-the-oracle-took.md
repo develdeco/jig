@@ -2,7 +2,7 @@
 
 Builders ran the full suite with their own short timeouts, or pushed it to the background and waited on it, because nothing told them how long it takes. On jig's own repo the suite takes 10 to 15 minutes on the Windows dev machine. ADR 0018 raised the shell's bound and asked builders to test narrowly, and since ADR 0020 jig runs the slice's oracle itself at green. What a builder still lacks is the fact: how long that oracle actually takes. kun's guidance is timeouts as configuration and better context over bolt-on guards.
 
-The owner chose to measure before enforcing anything: BS-3's Sonnet builder made 59 shell calls without setting its own timeout or backgrounding one, so no guard on shell calls is added here. The duration ships as context.
+The owner chose to measure before enforcing anything: BS-3's Sonnet builder made 59 shell calls without setting its own timeout or backgrounding one, so no guard on shell calls is added here. The duration ships as context. (The guard came later, when a Sonnet builder on another run backgrounded the full suite and lost its attempt: ADR 0018's amendment turns background shell runs off in headless sessions.)
 
 ## The rule
 
