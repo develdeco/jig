@@ -23,6 +23,11 @@ type Line struct {
 	Commit  string `json:"commit,omitempty"`
 	Model   string `json:"model,omitempty"`
 	Attempt int    `json:"attempt,omitempty"`
+	// Command and Env are an oracle line's exact command and the env class
+	// that was up while it ran ("" for none): what the gate must match to
+	// reuse the run (ADR 0021).
+	Command string `json:"command,omitempty"`
+	Env     string `json:"env,omitempty"`
 }
 
 func journalPath(st *store.Store, ticket string) string {
