@@ -1,4 +1,4 @@
-# The reviewer runs on the dearest rung, and every session gets an effort
+# The reviewer runs on the dearest rung, and builds and reviews get an effort
 
 The gate picked its reviewer's model with `staircase.Disjoint`: the first rung no builder of the ticket used. With Haiku builders that gave BS-1 a Sonnet reviewer on round 1 and Opus on rounds 2 and 3, weaker on the full review and stronger on the small re-checks. Since ADR 0019 the default staircase has two rungs, so `Disjoint` gave an invariant-floored Opus build a Sonnet reviewer.
 
@@ -19,10 +19,12 @@ jig also passed no reasoning effort to `claude`, so every session ran at the CLI
         first: medium
         retry: high
 
-  The values shown are the defaults. An empty value passes no effort, so the CLI's default applies, and a value `--effort` does not accept is refused when `project.yaml` loads, naming the key.
+  The values shown are the defaults, and a key with no value takes its default too. An empty string (`""`) passes no effort, so the CLI's default applies, and a value `--effort` does not accept is refused when `project.yaml` loads, naming the key.
 - **Every choice is in the journal.** A builder's `dispatch` line carries its effort beside its model. `gate-open` carries the reviewer's model, and the reviewer round's own line (`gate-round` or `gate-clean`) carries its effort, since the scope is known only once the round has started.
 
-`session.Dispatch` carries the effort, and the headless backend passes it as `--effort`. Backends that do not run the `claude` CLI ignore it, as they ignore the model.
+`session.Dispatch` carries the effort, and the headless backend passes it as `--effort`. The herdr backend starts its agent without flags, so it passes neither the effort nor the model, as before; the journal records what jig chose for both. revieweval's live reviewer gets the default efforts by the same rule, so the eval scores the reviewer production runs.
+
+The other sessions jig starts get no effort and run at the CLI's default: the gate demo, the intent summarizer, and revieweval's judge.
 
 ## Test seams
 

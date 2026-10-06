@@ -11,6 +11,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/manifest"
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
@@ -398,7 +399,7 @@ func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string,
 
 	rnd, ok, rerr := verifydeliver.NewReviewerGateSource(backend).Round(verifydeliver.RoundInput{
 		Store: st, Ticket: ticket, Round: n, LeaseDir: repoDir, RepoName: evalRepoName, Target: evalTarget,
-		Model: model, Intent: intent, Manifest: man, OracleRuns: oracleRuns, Open: fold.Open, Dismissed: fold.Dismissed,
+		Model: model, Effort: project.Config{}.ReviewEffortFor, Intent: intent, Manifest: man, OracleRuns: oracleRuns, Open: fold.Open, Dismissed: fold.Dismissed,
 	})
 	if rerr != nil {
 		rs, handled := reviewerRoundFailure(n, r.Gold, r.Decisions, rerr)

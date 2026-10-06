@@ -13,10 +13,10 @@ import (
 )
 
 // TestGateDispatchesTheReviewerOnTheDearestRungWithEffortByScope drives
-// two gate rounds over a ticket whose builders all ran on the dearest rung:
-// the reviewer runs on that rung both times, at the full effort on round 1
-// and the delta effort on round 2, and each round's own journal line
-// records the effort (ADR 0023).
+// three gate rounds over a ticket whose builders all ran on the dearest rung:
+// the reviewer runs on that rung, at the full effort on round 1 and the delta
+// effort on round 2, each round's own journal line records the effort, and
+// round 3, which dispatches no reviewer, records none (ADR 0023).
 func TestGateDispatchesTheReviewerOnTheDearestRungWithEffortByScope(t *testing.T) {
 	t.Parallel()
 
@@ -64,6 +64,11 @@ func TestGateDispatchesTheReviewerOnTheDearestRungWithEffortByScope(t *testing.T
 	if _, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true}); err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}
+	// Round 3 has nothing outstanding and nothing new to review, so it
+	// dispatches no reviewer and journals no effort.
+	if _, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true}); err != nil {
+		t.Fatalf("Gate round 3: %v", err)
+	}
 
 	want := []seen{{"rung-b", "high", "full"}, {"rung-b", "medium", "delta"}}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
@@ -74,13 +79,13 @@ func TestGateDispatchesTheReviewerOnTheDearestRungWithEffortByScope(t *testing.T
 	if err != nil {
 		t.Fatalf("journal.Read: %v", err)
 	}
-	efforts := map[string]string{}
+	efforts := map[int]string{}
 	for _, l := range lines {
 		if l.Event == "gate-round" || l.Event == "gate-clean" {
-			efforts[l.Event] = l.Effort
+			efforts[l.Attempt] = l.Effort
 		}
 	}
-	if efforts["gate-round"] != "high" || efforts["gate-clean"] != "medium" {
-		t.Errorf("round lines' efforts = %v, want gate-round high (round 1) and gate-clean medium (round 2); journal: %+v", efforts, lines)
+	if len(efforts) != 3 || efforts[1] != "high" || efforts[2] != "medium" || efforts[3] != "" {
+		t.Errorf("round lines' efforts by round = %v, want 1: high, 2: medium, 3: none (no reviewer); journal: %+v", efforts, lines)
 	}
 }

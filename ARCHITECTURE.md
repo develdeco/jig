@@ -206,7 +206,7 @@ load time.
 
 Sessions also get a reasoning effort, passed to `claude` as `--effort`: the
 gate reviewer's by round scope, a builder's by attempt
-([ADR 0023](docs/adr/0023-the-reviewer-runs-on-the-dearest-rung-and-every-session-gets-an-effort.md)):
+([ADR 0023](docs/adr/0023-the-reviewer-runs-on-the-dearest-rung-and-builds-and-reviews-get-an-effort.md)):
 
 ```yaml
 gate:
@@ -218,8 +218,9 @@ builder_effort:
   retry: high                  # any attempt after a failed one
 ```
 
-The values shown are the defaults; an empty value passes no effort. The gate
-reviewer runs on the staircase's dearest rung on every round.
+The values shown are the defaults, also for a key with no value; `""` passes
+no effort. The gate reviewer runs on the staircase's dearest rung on every
+round.
 
 Invalid configuration values are refused when `project.yaml` loads:
 a negative `fix_rounds`, a `fix_risks` entry that is not `high`, `medium` or

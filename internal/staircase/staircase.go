@@ -1,5 +1,5 @@
-// Package staircase selects a model rung for a build attempt, and picks a
-// model disjoint from ones already used by other builders in a ticket.
+// Package staircase selects a model rung for a build attempt, and names the
+// dearest rung, the gate reviewer's model.
 // Model axis only: stateless selection over a cheap-to-dear rung list.
 package staircase
 

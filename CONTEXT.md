@@ -81,7 +81,7 @@ A branch built outside jig that a ticket took as its own with a first `jig gate 
 _Avoid_: imported branch, external branch, hand-written branch
 
 **Gate**:
-Out-of-band verification of a ticket's branch, run on its own lease, under a different model, with fresh context.
+Out-of-band verification of a ticket's branch, run on its own lease, on the staircase's dearest model, with fresh context.
 _Avoid_: code review, QA pass
 
 **Intent**:
