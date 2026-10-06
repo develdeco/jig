@@ -3,6 +3,29 @@
 A log of judgment calls made while building v0.1: one entry per decision, covering what
 was ambiguous, what was chosen, and why.
 
+## Testing
+
+- No test in `internal/` edits process-global state (environment, working directory,
+  or package-level variables): dependencies come through `Deps` fields or function
+  arguments, TestMain may set the process once before tests run, and
+  `lint.TestNoGlobalStateEditInInternalTests` enforces this as a ratchet. A debt list
+  in the lint names today's offenders outside `internal/verifydeliver`, which has none;
+  the list only shrinks as packages fix their own entries. This allows every test in
+  package `verifydeliver` to run in parallel, cutting its wall time from 763 s toward
+  400 s on the dev machine. The two git identity tests are the one exception the ratchet
+  still has to make room for: they must prove identity resolves from somewhere other
+  than the ambient identity every other verifydeliver test's `TestMain` pins process-wide
+  for determinism. A first pass gave them their own test binary
+  (`internal/verifydeliver/identitytest`), whose `TestMain` pinned no identity at all, but
+  that duplicated package `verifydeliver`'s own build/gate test harness verbatim - a second
+  copy only one of which the package's other tests exercised, free to drift from frontier's
+  contract unnoticed. They live in package `verifydeliver` instead, on that one harness:
+  `Deps.GitEnv`, nil by default, replaces the environment `Publish`'s own identity
+  resolution runs under when a test sets it, so the two tests hand it the ambient
+  environment with the pinned identity stripped out, rather than unsetting that pin with
+  `t.Setenv`/`os.Unsetenv` for their own span - which would also rule out `t.Parallel()`
+  for them, since `t.Setenv` panics in a parallel test.
+
 ## Scope and deferrals
 
 - Structural rounds render as markdown tables in v0.1.
