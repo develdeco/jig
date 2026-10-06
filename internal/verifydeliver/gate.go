@@ -864,7 +864,7 @@ func coversSuite(man manifest.Manifest, reused map[string]string) bool {
 
 // oracleSuiteRuns is RunOracleSuite with the runs in reused (by command)
 // taken from there instead of run again, and each other run made by run.
-func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]string, run func(cmd, dir string) (string, error)) ([]OracleRun, error) {
+func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]string, run oracleFunc) ([]OracleRun, error) {
 	var runs []OracleRun
 	for _, ws := range man.Workspaces {
 		for _, name := range SortedOracleNames(man) {
@@ -890,6 +890,10 @@ func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]string
 // own run at a slice's green, so a hung oracle cannot hold the gate.
 const oracleLimit = 30 * time.Minute
 
+// oracleFunc runs one oracle command in a directory and returns its
+// combined output: Deps.Oracle's type.
+type oracleFunc = func(cmd, dir string) (string, error)
+
 // shellOracle is the real oracle run: cmd in dir within oracleLimit, its
 // process tree killed past it.
 func shellOracle(cmd, dir string) (string, error) {
@@ -898,7 +902,7 @@ func shellOracle(cmd, dir string) (string, error) {
 
 // runOracle runs one oracle command in dir through run. A failure carries
 // the end of the command's output, as the stderr Shell reported once did.
-func runOracle(run func(cmd, dir string) (string, error), cmd, dir string) error {
+func runOracle(run oracleFunc, cmd, dir string) error {
 	out, err := run(cmd, dir)
 	if err == nil {
 		return nil

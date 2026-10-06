@@ -770,6 +770,8 @@ func TestGateHandsTheReviewerTheOraclesItRan(t *testing.T) {
 	driveBuild(t, fx, "rung-a")
 	addSecondOracle(t, buildLeaseDir(t, fx), ticketBranch(fx.Ticket))
 	d := newDeps(t, fx)
+	rec := &oracleRecorder{}
+	d.Oracle = rec.run
 
 	got := gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed
 	// The fixture repo's jig.yaml declares test as "@GO test ./{path}/..."
@@ -786,6 +788,16 @@ func TestGateHandsTheReviewerTheOraclesItRan(t *testing.T) {
 	for i, w := range want {
 		if got[i].Oracle != w.oracle || got[i].Workspace != w.workspace || !strings.HasSuffix(got[i].Command, w.suffix) {
 			t.Errorf("oracles_passed[%d] = %+v, want oracle %s, workspace %s, a command ending %q", i, got[i], w.oracle, w.workspace, w.suffix)
+		}
+	}
+	// Every entry is a run the gate made, in the order it made them.
+	ran := rec.ran()
+	if len(ran) != len(got) {
+		t.Fatalf("the gate ran %q, want the %d runs oracles_passed lists", ran, len(got))
+	}
+	for i := range got {
+		if ran[i] != got[i].Command {
+			t.Errorf("run %d = %q, want %q, oracles_passed's entry %d", i, ran[i], got[i].Command, i)
 		}
 	}
 }

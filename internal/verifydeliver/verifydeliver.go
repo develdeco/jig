@@ -69,7 +69,7 @@ type Deps struct {
 }
 
 // oracle is d.Oracle, or the real run when it is nil.
-func (d Deps) oracle() func(cmd, dir string) (string, error) {
+func (d Deps) oracle() oracleFunc {
 	if d.Oracle != nil {
 		return d.Oracle
 	}
