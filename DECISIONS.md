@@ -2954,3 +2954,7 @@ jig times each oracle run at green and journals it (`seconds` on the `oracle` li
 ## A builder reads what earlier slices built (build-speed item 6d)
 
 `slice.json` gains `earlier_slices`: every slice of the ticket whose green jig verified before this dispatch, with its builder's summary and the files its verified attempt changed (the union of each attempt's own range: from the lease head at its dispatch, now on the dispatch line, to its verified commit or the head its last turn ended on, now on the result line). The dispatch prompt names it. Sizing slices to a session goes into the intake skill instead (BS-2). See [ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md).
+
+## A lease recovers from an operation a crashed session left unfinished (T-35)
+
+A builder session that died mid-merge (an API error) left the build lease's index unmerged, and the next attempt failed at acquire because no checkout runs over it. On reuse, `pool.Acquire` now aborts a merge, rebase, am, cherry-pick or revert left in progress and names it in `Lease.Recovered`; frontier journals a `lease-recovered` line. The operation's result was never committed, so nothing built is lost: the next attempt starts again from the branch's last commit.

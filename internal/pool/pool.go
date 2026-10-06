@@ -60,6 +60,10 @@ type Lease struct {
 	Dir    string
 	Repo   string
 	Branch string
+	// Recovered names the operation Acquire aborted because an earlier
+	// session left it in progress in this reused lease ("merge", "rebase",
+	// "am", "cherry-pick" or "revert"), or "" when there was none.
+	Recovered string
 }
 
 // Return leaves the lease directory exactly as it is: the pool never
@@ -194,6 +198,7 @@ func Acquire(jigHome, repoName, remote, target, branch, ticket string, role Role
 	if err != nil {
 		return Lease{}, err
 	}
+	var recovered string
 
 	reuse, err := prepare(dir)
 	if err != nil {
@@ -206,6 +211,12 @@ func Acquire(jigHome, repoName, remote, target, branch, ticket string, role Role
 		// Keep the reused clone packed. Best-effort: a maintenance failure
 		// must not fail an Acquire whose fetch already succeeded.
 		_ = gitx.MaintenanceAuto(dir)
+		// A session that died mid-merge (or mid-rebase) leaves the index
+		// unmerged, and no checkout can run over it until the operation
+		// ends.
+		if recovered, err = abortInProgress(dir); err != nil {
+			return Lease{}, err
+		}
 	} else {
 		parent := filepath.Dir(dir)
 		if err := os.MkdirAll(parent, 0o755); err != nil {
@@ -244,7 +255,40 @@ func Acquire(jigHome, repoName, remote, target, branch, ticket string, role Role
 		}
 	}
 
-	return Lease{Dir: dir, Repo: repoName, Branch: branch}, nil
+	return Lease{Dir: dir, Repo: repoName, Branch: branch, Recovered: recovered}, nil
+}
+
+// abortInProgress ends a merge, rebase, am, cherry-pick or revert an earlier
+// session left in progress in dir, and returns which it ended ("" for none).
+// The operation's result was never committed, so aborting loses no built
+// work: the next attempt starts again from the branch's last commit, where
+// the abort leaves the tree.
+func abortInProgress(dir string) (string, error) {
+	for _, op := range []struct{ marker, name string }{
+		{"MERGE_HEAD", "merge"},
+		{"rebase-merge", "rebase"},
+		{"rebase-apply/applying", "am"},
+		{"rebase-apply", "rebase"},
+		{"CHERRY_PICK_HEAD", "cherry-pick"},
+		{"REVERT_HEAD", "revert"},
+	} {
+		path, err := gitx.Run(dir, "rev-parse", "--git-path", op.marker)
+		if err != nil {
+			return "", fmt.Errorf("pool: look for an unfinished %s in %s: %w", op.name, dir, err)
+		}
+		path = strings.TrimSpace(path)
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		if _, err := gitx.Run(dir, op.name, "--abort"); err != nil {
+			return "", fmt.Errorf("pool: abort the %s an earlier session left unfinished in %s: %w", op.name, dir, err)
+		}
+		return op.name, nil
+	}
+	return "", nil
 }
 
 // syncWithOrigin brings the branch checked out in dir in step with

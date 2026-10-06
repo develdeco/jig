@@ -535,6 +535,11 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		rc.fail(fmt.Errorf("frontier: acquire lease for %s: %w", sl.ID, err))
 		return
 	}
+	// A crashed attempt left an operation unfinished in the lease, and
+	// Acquire aborted it: the journal keeps that visible.
+	if lease.Recovered != "" {
+		rc.journal(journal.Line{Slice: sl.ID, Event: "lease-recovered", Outcome: "aborted " + lease.Recovered})
+	}
 	// The lease's copy must hold every commit jig built on the branch, or the
 	// next commits would go on a branch that lacks the earlier ones: they
 	// are on another machine, or lost (the same rule the gate applies to the
