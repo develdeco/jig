@@ -21,6 +21,7 @@ import (
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/session"
+	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -196,19 +197,22 @@ func readDirBytes(t *testing.T, dir string) map[string][]byte {
 	return out
 }
 
-func TestGateModelDisjoint(t *testing.T) {
+// TestGateModelIsTheDearestRung: the round's report names the staircase's
+// dearest rung as the reviewer's model (ADR 0023).
+func TestGateModelIsTheDearestRung(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
+	d.Rungs = staircase.Config{Rungs: []string{"rung-a", "rung-b", "rung-c"}}
 	report, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate: %v", err)
 	}
-	if report.Model != "rung-b" {
-		t.Fatalf("Model = %q, want rung-b (builders used rung-a)", report.Model)
+	if report.Model != "rung-c" {
+		t.Fatalf("Model = %q, want the dearest rung, rung-c", report.Model)
 	}
 }
 

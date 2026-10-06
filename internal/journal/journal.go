@@ -22,6 +22,10 @@ type Line struct {
 	Outcome string `json:"outcome,omitempty"`
 	Commit  string `json:"commit,omitempty"`
 	Model   string `json:"model,omitempty"`
+	// Effort is the reasoning effort a session was dispatched with: on a
+	// builder's dispatch line, and on a gate round's own line for its
+	// reviewer ("" when none was passed).
+	Effort  string `json:"effort,omitempty"`
 	Attempt int    `json:"attempt,omitempty"`
 	// Command and Env are an oracle line's exact command and the env class
 	// that was up while it ran ("" for none): what the gate must match to
@@ -95,21 +99,6 @@ func Read(st *store.Store, ticket string) ([]Line, error) {
 		lines = append(lines, l)
 	}
 	return lines, nil
-}
-
-// BuilderModels returns the distinct models used by event=dispatch lines,
-// in first-seen order.
-func BuilderModels(lines []Line) []string {
-	seen := map[string]bool{}
-	var models []string
-	for _, l := range lines {
-		if l.Event != "dispatch" || l.Model == "" || seen[l.Model] {
-			continue
-		}
-		seen[l.Model] = true
-		models = append(models, l.Model)
-	}
-	return models
 }
 
 // FailedAttempts counts slice's attempts that failed at the work: a result
