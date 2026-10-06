@@ -68,6 +68,10 @@ type OracleRun struct {
 	Oracle    string `json:"oracle"`
 	Workspace string `json:"workspace"`
 	Command   string `json:"command"`
+	// ReusedFrom is set when the gate did not run this oracle itself but
+	// reused a pass jig recorded at a slice's green on a commit whose tree is
+	// this head's tree (ADR 0021): that commit.
+	ReusedFrom string `json:"reused_from,omitempty"`
 }
 
 // ReviewRequest is review.json's exact wire shape, the input jig writes

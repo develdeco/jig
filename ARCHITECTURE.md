@@ -19,7 +19,8 @@ run(frontier)  dispatch queued, unblocked slices to a build session; a claimed g
   │                    journal.ndjson, questions/q-NNN.md, start.<repo>.sha
   │                    (an adopted branch's again at each dispatch until jig has built)
   ▼
-gate           re-verification round: oracles, then a reviewer session's find/route/triage
+gate           re-verification round: oracles (a pass jig recorded on the same tree is
+  │            reused, ADR 0021), then a reviewer session's find/route/triage
   │            reads:  brief.md or intent.md (resolveIntent), slices.yaml, journal.ndjson,
   │                    ticket.yaml (branch), gate/round-N/findings.yaml (cumulative fold)
   │            writes: work/gate.round-N.{review,result}.json,
@@ -292,7 +293,9 @@ writes `work/gate.round-N.review.json` (the ticket, round, scope, base and
 head sha, the round's resolved intent - source and path, `Gate`'s own
 `resolveIntent`, precedence brief.md then intent.md then none - plus
 slices/journal paths, manifest oracles, `oracles_passed` - every oracle run
-the gate made on this head before the review, all passed - and the
+the gate made on this head before the review, all passed, or reused with
+`reused_from` from a pass jig recorded on the identical tree
+([ADR 0021](docs/adr/0021-the-gate-reuses-an-oracle-pass-on-the-same-tree.md)) - and the
 cumulative `open`/`dismissed` findings folded from every earlier round), the
 backend runs a session against `must_review` - every file the scope diff
 touched plus every still-open finding's file - and jig reads back
