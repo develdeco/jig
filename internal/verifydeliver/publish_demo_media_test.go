@@ -133,6 +133,7 @@ func attachedFiles(argv []string) []string {
 //
 // This test must stay serial: it puts the fake gh on PATH.
 func TestPublishAttachesDemoMediaOnCreate(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateCleanReviewerRound(t, fx, d)
@@ -140,7 +141,7 @@ func TestPublishAttachesDemoMediaOnCreate(t *testing.T) {
 		{Name: "demo-1.png", Content: "first file bytes"},
 		{Name: "demo-2.mp4", Content: "second file bytes, a bit longer"},
 	})
-	logFile := useGithubPRs(t, &d, "", "")
+	logFile, _ := useGithubPRs(t, &d, "", "")
 
 	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -189,6 +190,7 @@ func TestPublishAttachesDemoMediaOnCreate(t *testing.T) {
 //
 // This test must stay serial: it puts the fake gh on PATH.
 func TestPublishAttachesDemoMediaOnUpdate(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	gateCleanReviewerRound(t, fx, d)
@@ -197,7 +199,7 @@ func TestPublishAttachesDemoMediaOnUpdate(t *testing.T) {
 	})
 	branch := ticketBranch(fx.Ticket)
 	run(t, buildLeaseDir(t, fx), "push", "origin", branch)
-	logFile := useGithubPRs(t, &d, openPullOf(t, branch), "")
+	logFile, _ := useGithubPRs(t, &d, openPullOf(t, branch), "")
 
 	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
@@ -226,21 +228,16 @@ func TestPublishAttachesDemoMediaOnUpdate(t *testing.T) {
 // either (an image gh itself did not recognize, despite "Videos" saying it
 // would), nothing here can patch it: publish warns, naming the file, not an
 // arbitrary line of body prose.
-//
-// This test must stay serial: it puts the fake gh on PATH and swaps the
-// package-level warn hook, which every parallel test's Publish could call.
 func TestPublishWarnsAboutAnUnrewrittenMediaReference(t *testing.T) {
-	origWarn := warn
-	defer func() { warn = origWarn }()
+	t.Parallel()
 	var warnings []string
-	warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
-
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
+	d.Warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
 	gateCleanReviewerRound(t, fx, d)
 	recordDemoForTicket(t, d, fx.Ticket, []demoMediaSpec{{Name: "demo-1.png", Content: "bytes"}})
-	useGithubPRs(t, &d, "", "")
-	t.Setenv("GH_STUB_BODY", "## Demo\n\n- ./demo-1.png: still here, unrewritten\n")
+	_, addEnv := useGithubPRs(t, &d, "", "")
+	addEnv("GH_STUB_BODY=## Demo\n\n- ./demo-1.png: still here, unrewritten\n")
 
 	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -264,21 +261,16 @@ func TestPublishWarnsAboutAnUnrewrittenMediaReference(t *testing.T) {
 // on either subcommand (GH_STUB_NO_ATTACH) still opens the pull request, with
 // no media and a warning naming why - never a silent pull request with
 // broken ./<name> links and no explanation.
-//
-// This test must stay serial: it puts the fake gh on PATH and swaps the
-// package-level warn hook, which every parallel test's Publish could call.
 func TestPublishWarnsWhenGhLacksAttachSupport(t *testing.T) {
-	origWarn := warn
-	defer func() { warn = origWarn }()
+	t.Parallel()
 	var warnings []string
-	warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
-
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
+	d.Warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
 	gateCleanReviewerRound(t, fx, d)
 	recordDemoForTicket(t, d, fx.Ticket, []demoMediaSpec{{Name: "demo-1.png", Content: "bytes"}})
-	logFile := useGithubPRs(t, &d, "", "")
-	t.Setenv("GH_STUB_NO_ATTACH", "1")
+	logFile, addEnv := useGithubPRs(t, &d, "", "")
+	addEnv("GH_STUB_NO_ATTACH=1")
 
 	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
 		t.Fatalf("Publish: %v", err)

@@ -20,9 +20,17 @@ type githubAdapter struct {
 	owner         string
 	repo          string
 	attachSupport map[string]bool // cached --attach support, keyed by subcommand ("pr create", "pr edit")
+	env           []string        // explicit environment for gh subprocess; nil means inherit from process
 }
 
 func newGithubAdapter(cfg project.Config) (*githubAdapter, error) {
+	return newGithubAdapterWithEnv(cfg, "", nil)
+}
+
+// newGithubAdapterWithEnv creates a githubAdapter with an explicit gh binary and environment.
+// If ghBin is empty, it is resolved via exec.LookPath("gh").
+// If env is nil, the subprocess inherits the current process environment.
+func newGithubAdapterWithEnv(cfg project.Config, ghBin string, env []string) (*githubAdapter, error) {
 	if len(cfg.Repos) == 0 {
 		return nil, &axi.Error{
 			Msg:  "github tracker requires at least one repo in project.yaml",
@@ -33,15 +41,17 @@ func newGithubAdapter(cfg project.Config) (*githubAdapter, error) {
 	if err != nil {
 		return nil, &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"}
 	}
-	ghPath, err := exec.LookPath("gh")
-	if err != nil {
-		return nil, &axi.Error{
-			Msg:  "gh CLI is not installed",
-			Code: "GH_NOT_INSTALLED",
-			Help: []string{"Install gh from https://cli.github.com"},
+	if ghBin == "" {
+		ghBin, err = exec.LookPath("gh")
+		if err != nil {
+			return nil, &axi.Error{
+				Msg:  "gh CLI is not installed",
+				Code: "GH_NOT_INSTALLED",
+				Help: []string{"Install gh from https://cli.github.com"},
+			}
 		}
 	}
-	return &githubAdapter{gh: ghPath, owner: owner, repo: repo}, nil
+	return &githubAdapter{gh: ghBin, owner: owner, repo: repo, env: env}, nil
 }
 
 func (a *githubAdapter) Name() string { return "github" }
@@ -84,11 +94,15 @@ func (a *githubAdapter) run(args ...string) (string, error) {
 // stderr): `gh pr create --attach` can print the pull request's URL on
 // stdout and then fail attaching a file, and a caller that discarded stdout
 // on that path would lose the one record of a pull request it already
-// opened.
+// opened. If a.env is set, the subprocess runs with that environment instead
+// of inheriting from the current process.
 func (a *githubAdapter) runInDir(dir string, args ...string) (string, error) {
 	cmd := exec.Command(a.gh, args...)
 	if dir != "" {
 		cmd.Dir = dir
+	}
+	if a.env != nil {
+		cmd.Env = a.env
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

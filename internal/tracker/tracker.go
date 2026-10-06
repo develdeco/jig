@@ -130,13 +130,21 @@ type PRBodyReader interface {
 
 // New returns the Adapter selected by cfg.Tracker.
 func New(cfg project.Config, st *store.Store) (Adapter, error) {
+	return NewWithEnv(cfg, st, "", nil)
+}
+
+// NewWithEnv returns an Adapter selected by cfg.Tracker, with explicit gh binary and environment.
+// For the github tracker, ghBin specifies the path to the gh binary (resolved via LookPath if empty),
+// and env specifies the environment for the gh subprocess (inherits from process if nil).
+// For other trackers, ghBin and env are ignored.
+func NewWithEnv(cfg project.Config, st *store.Store, ghBin string, env []string) (Adapter, error) {
 	switch cfg.Tracker {
 	case "local":
 		return newLocalAdapter(cfg, st), nil
 	case "command":
 		return newCommandAdapter(cfg, st), nil
 	case "github":
-		return newGithubAdapter(cfg)
+		return newGithubAdapterWithEnv(cfg, ghBin, env)
 	case "jira":
 		return notImplementedAdapter{name: "jira"}, nil
 	case "linear":
