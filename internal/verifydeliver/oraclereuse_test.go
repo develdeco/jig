@@ -95,6 +95,7 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		driveBuild(t, fx, "rung-a")
 		d := newDeps(t, fx)
+		d.Oracle = nil // reuse is judged against real oracle runs
 		// Tests that fail are committed at the head, so a gate that ran the
 		// oracles itself would stop with GATE_ORACLE_FAILED and fail
 		// gateReviewRequest: the recorded passes are what lets it through.
@@ -113,6 +114,7 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		driveBuild(t, fx, "rung-a")
 		d := newDeps(t, fx)
+		d.Oracle = nil // reuse is judged against real oracle runs
 		head := commitInBuildLease(t, fx, note("one\n"))
 		recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "alpha"), "rig")
 
@@ -157,6 +159,7 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 			driveBuild(t, fx, "rung-a")
 			d := newDeps(t, fx)
+			d.Oracle = nil // reuse is judged against real oracle runs
 			commitInBuildLease(t, fx, note("one\n"))
 			head := commitInBuildLease(t, fx, note("two\n"))
 			tc.record(t, fx, d, head)
@@ -172,6 +175,7 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		driveBuild(t, fx, "rung-a")
 		d := newDeps(t, fx)
+		d.Oracle = nil // reuse is judged against real oracle runs
 		commitInBuildLease(t, fx, failing)
 
 		backend := stubBackend{run: func(session.Dispatch) error {

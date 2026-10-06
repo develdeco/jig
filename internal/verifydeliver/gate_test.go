@@ -127,6 +127,7 @@ func TestGateCleanRound2(t *testing.T) {
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
+	d.Oracle = nil // the real oracle run is what this test is about
 	src := NewFakeGateSource(fx.ScenarioDir)
 	if _, err := Gate(d, src, GateOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("Gate round 1: %v", err)
@@ -985,6 +986,7 @@ func TestGateWipesLeftoverLeaseDirtBeforeOracles(t *testing.T) {
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
+	d.Oracle = nil // the real oracle run is what this test is about
 	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("Gate round 1: %v", err)
 	}
@@ -1052,6 +1054,7 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 	driveBuild(t, fx, "rung-a")
 
 	d := newDeps(t, fx)
+	d.Oracle = nil // the real oracle run is what this test is about
 	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("Gate round 1: %v", err)
 	}
@@ -2222,6 +2225,7 @@ func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerat
 	}
 
 	d := newDeps(t, fx)
+	d.Oracle = nil // the real oracle run is what this test is about
 	round := 0
 	backend := stubBackend{run: func(sd session.Dispatch) error {
 		round++

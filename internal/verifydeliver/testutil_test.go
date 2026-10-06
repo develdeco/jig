@@ -101,8 +101,14 @@ func newDeps(t *testing.T, fx *fixture.Fixture) Deps {
 	if err != nil {
 		t.Fatalf("project.Load: %v", err)
 	}
-	return Deps{Store: st, Cfg: cfg, Rungs: testRungs(), Home: fx.Home}
+	return Deps{Store: st, Cfg: cfg, Rungs: testRungs(), Home: fx.Home, Oracle: passingOracle}
 }
+
+// passingOracle stands in for the gate's own oracle runs in tests that are
+// not about them: every run passes at once. A test about the gate's oracle
+// run (what it runs, a red run, what it runs after) sets Deps.Oracle to nil
+// for the real one.
+func passingOracle(string, string) (string, error) { return "", nil }
 
 // buildLeaseDir returns the build lease directory frontier would use for the
 // fixture's ticket: <pool>/fixture-repo/<ticket>, checked out on the branch
