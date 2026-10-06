@@ -22,7 +22,7 @@ Every headless session's `--settings` sets `BASH_DEFAULT_TIMEOUT_MS` and `BASH_M
 
 A headless session (`claude -p`) ends with its turn, so a command it runs in the background is never collected. On the store-layout run's T-23, a Sonnet builder ran the full suite with the shell's background option and ended its turn "waiting for the notification": nothing was committed and the attempt was lost (T-34). The owner had chosen to measure before guarding shell calls (ADR 0024); this is the recurrence that decision waited for.
 
-Every headless session's `--settings` env now also sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, which removes the background option from the session's shell and turns off moving a long command to the background. A command runs in the foreground within the 30-minute bound above, or is ended. jig already runs a slice's oracle itself at green (ADR 0020), so a builder never needs the full suite in its own shell.
+Every headless session's `--settings` env now also sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, which removes the background option from the session's shell and turns off moving a long command to the background. A command runs in the foreground within the 30-minute bound above, or is ended. jig already runs a slice's oracle itself at green (ADR 0020), so a builder never needs the full suite in its own shell. One consequence: a session can no longer keep a process running across shell calls, such as a dev server for a demo or an end-to-end check; it starts and stops it within one command.
 
 ## Test seams
 

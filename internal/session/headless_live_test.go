@@ -237,6 +237,14 @@ func runLive(t *testing.T, jig string, sess *claudetest.Session, d Dispatch) {
 	}
 
 	sess.Check(t)
+	// Background tasks are off: the shell offers no background option, so a
+	// session cannot start a command its own turn's end would orphan (ADR
+	// 0018).
+	if schema := sess.ToolSchema("Bash"); schema == nil {
+		t.Error("the CLI offered no Bash tool")
+	} else if props, _ := schema["properties"].(map[string]any); props["run_in_background"] != nil {
+		t.Error("the Bash tool offers run_in_background, want background tasks off")
+	}
 	if len(sess.Results()) < len(sess.Steps) {
 		t.FailNow()
 	}
