@@ -81,7 +81,7 @@ which needs `herdr` and the Claude Code CLI (`claude`), inside WSL on Windows
 local `claude -p` subprocess instead, which only needs `claude` on PATH.
 `jig run` and `jig solve` check that the backend's program is on PATH before
 they start and say what to install if it is not.
-`graphify` is optional; jig falls back cleanly without it.
+[`graphify`](https://github.com/Graphify-Labs/graphify) (`uv tool install graphifyy`) is optional: a project that opts in with `context: {graphify: true}` in `project.yaml` gets each builder the code a local code graph links to its goal, and jig falls back cleanly without it.
 [`gh`](https://cli.github.com/) is needed for the GitHub tracker and
 opening pull requests.
 
