@@ -1,0 +1,6 @@
+# jig's own build surface, for tickets jig builds on this repo.
+# The test oracle is the detected Go default with the timeout CI uses
+# (.github/workflows/ci.yml): on a loaded machine, cmd/jig and
+# internal/frontier run past go test's 10-minute default per package.
+oracles:
+  test: go test -timeout 30m ./...
