@@ -899,3 +899,13 @@ and sets `GIT_CONFIG_NOSYSTEM=1`. That reaches every git process the binary
 spawns, including `git-receive-pack` behind a local push, so no detached
 maintenance outlives a test. With no system or user config, a test that
 needs a git setting (for example `core.autocrlf`) sets it itself.
+
+Two tests in package `verifydeliver` (`identity_test.go`) prove where
+`Publish`'s own identity resolution looks: a mapped clone's distinct
+identity, or nowhere at all. Both need an environment without the identity
+`gittest.PinIdentity()` pins process-wide for every other verifydeliver
+test's commits, which `Deps.GitEnv` provides without touching the process
+environment itself - nil by default (inherit it, as production always
+does), set by these two tests to the ambient environment with that pin
+stripped out, so `Publish`'s own "git var" calls see the mapped clone's
+config, or its absence, instead.
