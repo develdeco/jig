@@ -5,8 +5,10 @@
 // SAME code path Gate itself uses - verifydeliver.NewReviewerGateSource's
 // Round, verifydeliver.ApplyRound and verifydeliver.ClearingAfterTriage,
 // reading a round's history from the store's own gate/round-N/findings.yaml
-// the way verifydeliver.FoldBefore does - so a corpus run measures the real
-// reviewer contract and the real bookkeeping it feeds, never a stand-in.
+// the way verifydeliver.FoldBefore does, and running the case repo's oracles
+// first (verifydeliver.RunOracleSuite) so the reviewer gets the runs a gate
+// reviewer gets - so a corpus run measures the real reviewer contract and
+// the real bookkeeping it feeds, never a stand-in.
 //
 // There is no triage step: this package never calls the routing hook that
 // turns a kept fix or ask into a fix slice. A round's fate is exactly what

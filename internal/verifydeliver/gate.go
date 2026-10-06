@@ -426,7 +426,8 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: resolve manifest: %w", err)
 	}
 
-	if err := runGateOracles(d, ticket, lease.Dir, man, slices); err != nil {
+	oracleRuns, err := runGateOracles(d, ticket, lease.Dir, man, slices)
+	if err != nil {
 		return GateReport{}, err
 	}
 
@@ -461,6 +462,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		Home:          d.Home,
 		UserHome:      d.UserHome,
 		Manifest:      man,
+		OracleRuns:    oracleRuns,
 		Open:          fold.Open,
 		Dismissed:     fold.Dismissed,
 	})
@@ -718,9 +720,10 @@ func fetchTicketBranchFromBuildLease(jigHome, leaseDir, repoName, ticket, branch
 
 // runGateOracles brings up every env class referenced by a slice, runs
 // every manifest oracle across every workspace, then tears the env classes
-// back down. An unavailable env with a defer-ci policy journals and skips;
-// one with no policy pauses the gate with a NEEDS_INPUT error.
-func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []store.Slice) error {
+// back down, and returns the oracle runs, all passed. An unavailable env
+// with a defer-ci policy journals and skips; one with no policy pauses the
+// gate with a NEEDS_INPUT error.
+func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []store.Slice) ([]OracleRun, error) {
 	var handles []*envrun.Handle
 	defer func() {
 		for _, h := range handles {
@@ -744,38 +747,43 @@ func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []
 			if errors.As(err, &un) {
 				if un.Policy == "defer-ci" {
 					if jerr := journal.Append(d.Store, ticket, journal.Line{Event: "env-unavailable", Outcome: "defer-ci"}); jerr != nil {
-						return fmt.Errorf("verifydeliver: gate: journal env-unavailable: %w", jerr)
+						return nil, fmt.Errorf("verifydeliver: gate: journal env-unavailable: %w", jerr)
 					}
 					continue
 				}
-				return &axi.Error{
+				return nil, &axi.Error{
 					Msg:  fmt.Sprintf("env class %q is unavailable and needs input: %v", s.Env, err),
 					Code: axi.NeedsInput,
 				}
 			}
-			return fmt.Errorf("verifydeliver: gate: bring up env %q: %w", s.Env, err)
+			return nil, fmt.Errorf("verifydeliver: gate: bring up env %q: %w", s.Env, err)
 		}
 		handles = append(handles, h)
 	}
 
-	return runOracleSuite(dir, man)
+	return RunOracleSuite(dir, man)
 }
 
-// runOracleSuite runs every manifest oracle across every manifest
-// workspace in dir.
-func runOracleSuite(dir string, man manifest.Manifest) error {
+// RunOracleSuite runs every manifest oracle across every manifest
+// workspace in dir, workspaces in manifest order and oracles by name, and
+// returns the runs it made. Any failure stops the suite, so a nil error
+// means every returned run passed. Exported for internal/revieweval, whose
+// reviewer gets the runs the way Gate's does.
+func RunOracleSuite(dir string, man manifest.Manifest) ([]OracleRun, error) {
+	var runs []OracleRun
 	for _, ws := range man.Workspaces {
-		for name := range man.Oracles {
-			cmd := shortenQuotedPath(man.OracleCmd(name, ws))
-			if err := envrun.Shell(cmd, dir); err != nil {
-				return &axi.Error{
+		for _, name := range SortedOracleNames(man) {
+			cmd := man.OracleCmd(name, ws)
+			if err := envrun.Shell(shortenQuotedPath(cmd), dir); err != nil {
+				return nil, &axi.Error{
 					Msg:  fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err),
 					Code: "GATE_ORACLE_FAILED",
 				}
 			}
+			runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd})
 		}
 	}
-	return nil
+	return runs, nil
 }
 
 // writeNoRound writes the files for a round that never ran while something
