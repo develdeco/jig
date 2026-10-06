@@ -19,6 +19,7 @@
       "risk_rationale": "Summarize's log line could include another tenant's counts."
     }
   ],
+  "still_present": [],
   "reviewed_paths": [
     "billing/invoices.go",
     "billing/report.go"

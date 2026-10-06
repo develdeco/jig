@@ -176,7 +176,7 @@ func ParseDemoResult(data []byte) (DemoResult, error) {
 	} else if dup != "" {
 		return DemoResult{}, demoInvalid(fmt.Sprintf("key %q repeats an earlier key in the same object", dup))
 	}
-	if bad, kerr := unknownKey(data, demoResultTopKeys, "media", demoMediaKeys); kerr == nil && bad != "" {
+	if bad, kerr := unknownKey(data, demoResultTopKeys, listKeySpec{"media", demoMediaKeys}); kerr == nil && bad != "" {
 		return DemoResult{}, demoInvalid(fmt.Sprintf("key %q is not a recognized field", bad))
 	}
 

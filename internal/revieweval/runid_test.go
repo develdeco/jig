@@ -42,6 +42,7 @@ const runIDTestGateResult = `{
       "risk_rationale": "An unknown id crashes the caller instead of returning an empty string."
     }
   ],
+  "still_present": [],
   "reviewed_paths": ["users/lookup.go"],
   "summary": "Lookup panics on an unknown id."
 }`

@@ -1,5 +1,6 @@
 {
   "findings": [],
+  "still_present": [],
   "reviewed_paths": [
     "store/reader.go",
     "store/writer.go"

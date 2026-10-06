@@ -127,16 +127,20 @@ func buildLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 }
 
 // marshalReviewResult marshals result as result.json's bytes, filling a nil
-// Findings or ReviewedPaths with [] first: ParseReviewResult rejects a JSON
-// null for either (a genuinely absent key is the only thing "not written"
-// means), so a scripted reviewer double that builds a ReviewResult as a
-// struct literal - where a nil slice with no omitempty tag would otherwise
-// marshal as null - has to write the empty list out explicitly, the same
-// way MarshalReviewRequest does for ReviewRequest's own nil slices.
+// Findings, StillPresent or ReviewedPaths with [] first: ParseReviewResult
+// rejects a JSON null for any of the three (a genuinely absent key is the
+// only thing "not written" means), so a scripted reviewer double that
+// builds a ReviewResult as a struct literal - where a nil slice with no
+// omitempty tag would otherwise marshal as null - has to write the empty
+// list out explicitly, the same way MarshalReviewRequest does for
+// ReviewRequest's own nil slices.
 func marshalReviewResult(t *testing.T, result ReviewResult) []byte {
 	t.Helper()
 	if result.Findings == nil {
 		result.Findings = []ResultFinding{}
+	}
+	if result.StillPresent == nil {
+		result.StillPresent = []StillPresentEntry{}
 	}
 	if result.ReviewedPaths == nil {
 		result.ReviewedPaths = []string{}

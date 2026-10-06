@@ -28,6 +28,7 @@
       "risk_rationale": "Every other exported function in this package is documented."
     }
   ],
+  "still_present": [],
   "reviewed_paths": [
     "mathutil/mathutil.go"
   ],
