@@ -12,7 +12,8 @@ future tooling that reads a ticket's history.
 brief          author brief.md + slices.yaml (human + intake skill)
   │            writes: <ticket>/brief.md, <ticket>/slices.yaml
   ▼
-run(frontier)  dispatch queued, unblocked slices to a build session
+run(frontier)  dispatch queued, unblocked slices to a build session; a claimed green
+  │            runs the slice's oracle, and a red run goes back to that session (ADR 0020)
   │            reads:  slices.yaml, slices/<id>.state, questions/*.md
   │            writes: slices/<id>.state, work/<id>.attempt-N.{slice,result}.json,
   │                    journal.ndjson, questions/q-NNN.md, start.<repo>.sha
@@ -218,7 +219,7 @@ exists.
 | `e2e/` | (tests only) | the fixture + fake backend → asserts the full brief→publish chain twice; with `JIG_LIVE_CLAUDE`, README's Quickstart through the real `claude` CLI; `JIG_E2E_BINARY` → the same against an installed jig |
 | `internal/axi/` | `Render`, `Table`, `KV`, `Help`, `RenderError`, `ExitCode` | labelled data → jig's plain-text output register and process exit codes |
 | `internal/claudetest/` | `API`, `Session`, `Serve` | scripted sessions (tool calls in order) → a stand-in Messages API on loopback that the real `claude` CLI runs against, for the live CLI tests |
-| `internal/envrun/` | `Up`, `Shell` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable` |
+| `internal/envrun/` | `Up`, `Shell`, `ShellOutput`, `KillTree` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable`; a command with a time limit → its output (an oracle run); a process tree ended whole |
 | `internal/fixture/` | `Build`, `Generate`, `RepoRoot` | a dir + `Opts` → a fixture repo, its store, and a scripted attempt scenario (plus the machine mapping under `Opts.Home`, by default the jig home `home.Root` resolves); `Generate` builds into a `t.TempDir()`; `RepoRoot`: a caller's source file → the module root |
 | `internal/frontier/` | `Run`, `Requeue`, `RequeueSlice`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
@@ -274,6 +275,14 @@ Screens attach only where the backend's tool-call surface allows a
 PreToolUse hook, which today is `headless` alone; `fake` has no tool calls
 to screen, and `herdr`'s tool calls run inside the remote agent it drives,
 outside jig's own process.
+
+**Resuming a session.** A backend that can continue a session it ran
+implements `session.Resumer`: `RunResumable` is `Run` that also returns the
+session id, and `Resume` hands that session one more turn. Only headless does,
+through `claude -p --resume <id>`, reading the id from the CLI's final result
+object. The frontier uses it when its own oracle run at a claimed green comes
+back red, and falls back to a failed attempt with any other backend
+([ADR 0020](docs/adr/0020-jig-runs-the-slice-oracle-at-green.md)).
 
 ## Gate reviewer contract
 

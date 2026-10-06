@@ -25,7 +25,8 @@ import (
 )
 
 // newDeps wires Deps against a generated fixture, using the fake
-// session backend against fx.ScenarioDir.
+// session backend against fx.ScenarioDir. Its oracle passes without running:
+// a test about jig's own oracle run (oracle_test.go) sets Oracle back to nil.
 func newDeps(t *testing.T, fx *fixture.Fixture) (Deps, *store.Store) {
 	t.Helper()
 	st, err := store.Open(fx.StoreDir)
@@ -47,6 +48,7 @@ func newDeps(t *testing.T, fx *fixture.Fixture) (Deps, *store.Store) {
 		Rungs:   staircase.Default(),
 		Journal: func(l journal.Line) error { return journal.Append(st, fx.Ticket, l) },
 		Home:    fx.Home,
+		Oracle:  func(string, string) (string, error) { return "", nil },
 	}
 	return d, st
 }

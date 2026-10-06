@@ -177,6 +177,7 @@ func headlessTools() []string {
 // tool calls the permission system denied.
 type cliResult struct {
 	Type              string      `json:"type"`
+	SessionID         string      `json:"session_id"`
 	Subtype           string      `json:"subtype"`
 	IsError           bool        `json:"is_error"`
 	Result            string      `json:"result"`
@@ -198,10 +199,32 @@ type cliDenial struct {
 // own message, while a completed session's final message is parsed via
 // outcome.ParseText and written to d.ResultJSON in its place.
 func (b *headlessBackend) Run(d Dispatch) error {
+	_, err := b.run(d)
+	return err
+}
+
+// RunResumable is Run that also returns the CLI's session id, read from its
+// final result object ("" when there is none), so the caller can Resume it.
+func (b *headlessBackend) RunResumable(d Dispatch) (string, error) {
+	return b.run(d)
+}
+
+// Resume continues the session sessionID ran with d.Prompt as its next
+// turn, through `claude -p --resume`, with d's worktree, grants and result
+// path, and the same disk contract as Run.
+func (b *headlessBackend) Resume(d Dispatch, sessionID string) error {
+	d.resume = sessionID
+	_, err := b.run(d)
+	return err
+}
+
+// run is Run's body: it runs d, a new session or, when d.resume is set, the
+// next turn of that one, and returns the session id the CLI reported.
+func (b *headlessBackend) run(d Dispatch) (string, error) {
 	d = sessionView(d)
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
-		return &axi.Error{
+		return "", &axi.Error{
 			Msg:  "claude binary not found on PATH; install the Claude Code CLI to use the headless backend",
 			Code: "CLAUDE_NOT_FOUND",
 			Help: []string{"Install `claude` and ensure it is on PATH, or use `--backend fake --scenario <dir>` for CI."},
@@ -215,18 +238,18 @@ func (b *headlessBackend) Run(d Dispatch) error {
 	// itself was bad.
 	bound, err := headlessTimeout()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if d.Screen {
 		if err := b.verifyScreen(); err != nil {
-			return err
+			return "", err
 		}
 	}
 
 	args, cleanup, err := b.args(d)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer cleanup()
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
@@ -248,27 +271,27 @@ func (b *headlessBackend) Run(d Dispatch) error {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
+	res, ok := parseCLIResult(stdout.Bytes())
 
 	// A session that wrote its result honored the disk contract, whatever
 	// happened to the process afterwards - including a timeout while it was
 	// shutting down - so the result is read before the bound is reported.
 	if _, err := os.Stat(d.ResultJSON); err == nil {
-		return nil
+		return res.SessionID, nil
 	}
 	if ctx.Err() != nil {
-		return sessionTimeoutError(bound)
+		return "", sessionTimeoutError(bound)
 	}
 
-	res, ok := parseCLIResult(stdout.Bytes())
 	if !ok {
-		return fmt.Errorf("session/headless: claude ran no session (%s): %s", exitStatus(runErr), outputTail(stderr.String(), stdout.String()))
+		return "", fmt.Errorf("session/headless: claude ran no session (%s): %s", exitStatus(runErr), outputTail(stderr.String(), stdout.String()))
 	}
 	if res.IsError {
 		msg := res.Result
 		if msg == "" {
 			msg = res.Subtype
 		}
-		return fmt.Errorf("session/headless: claude session ended in error: %s", msg)
+		return res.SessionID, fmt.Errorf("session/headless: claude session ended in error: %s", msg)
 	}
 
 	parsed := outcome.ParseText("slice", res.Result)
@@ -277,9 +300,9 @@ func (b *headlessBackend) Run(d Dispatch) error {
 	}
 	data, err := json.Marshal(parsed)
 	if err != nil {
-		return fmt.Errorf("session/headless: marshal fallback result: %w", err)
+		return res.SessionID, fmt.Errorf("session/headless: marshal fallback result: %w", err)
 	}
-	return writeResultBytes(d.ResultJSON, data)
+	return res.SessionID, writeResultBytes(d.ResultJSON, data)
 }
 
 // sessionView returns d as its session sees it: the worktree, input and
@@ -311,6 +334,9 @@ func (b *headlessBackend) args(d Dispatch) (argv []string, cleanup func(), err e
 		return nil, noop, fmt.Errorf("session/headless: render settings: %w", err)
 	}
 	args := []string{"-p", "--output-format", "json"}
+	if d.resume != "" {
+		args = append(args, "--resume", d.resume)
+	}
 	if d.Model != "" {
 		args = append(args, "--model", d.Model)
 	}

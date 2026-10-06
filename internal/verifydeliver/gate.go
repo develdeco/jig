@@ -774,7 +774,7 @@ func RunOracleSuite(dir string, man manifest.Manifest) ([]OracleRun, error) {
 	for _, ws := range man.Workspaces {
 		for _, name := range SortedOracleNames(man) {
 			cmd := man.OracleCmd(name, ws)
-			if err := envrun.Shell(shortenQuotedPath(cmd), dir); err != nil {
+			if err := envrun.Shell(envrun.ShortenQuotedPath(cmd), dir); err != nil {
 				return nil, &axi.Error{
 					Msg:  fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err),
 					Code: "GATE_ORACLE_FAILED",

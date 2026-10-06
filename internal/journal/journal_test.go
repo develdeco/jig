@@ -3,6 +3,7 @@ package journal
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -126,6 +127,30 @@ func TestFailedAttempts(t *testing.T) {
 	}
 	if got := FailedAttempts(lines, "c"); got != 0 {
 		t.Fatalf("FailedAttempts(c) = %d, want 0 for a slice with no lines", got)
+	}
+}
+
+// TestRenderChangelogListsOnlyVerifiedCommits: a builder may claim green
+// more than once in an attempt (a red oracle run goes back to its session,
+// ADR 0020), so a journal with verified lines lists each slice by the commit
+// that verified, once, in every changelog.
+func TestRenderChangelogListsOnlyVerifiedCommits(t *testing.T) {
+	lines := []Line{
+		{Ticket: "JIG-1", Slice: "a", Event: "result", Outcome: "green", Commit: "1111111aaa", Attempt: 1},
+		{Ticket: "JIG-1", Slice: "a", Event: "oracle", Outcome: "fail", Attempt: 1},
+		{Ticket: "JIG-1", Slice: "a", Event: "result", Outcome: "green", Commit: "2222222bbb", Attempt: 1},
+		{Ticket: "JIG-1", Slice: "a", Event: "oracle", Outcome: "pass", Attempt: 1},
+		{Ticket: "JIG-1", Slice: "a", Event: "verified", Commit: "2222222bbb", Attempt: 1},
+	}
+	sliceWS := map[string]string{"a": "root"}
+	if got, want := RenderChangelog(lines, "root", sliceWS), "# Changelog - root\n- a: 2222222\n"; got != want {
+		t.Errorf("RenderChangelog =\n%q\nwant\n%q", got, want)
+	}
+	if got := RenderConsolidated(lines); !strings.Contains(got, "## Slices\n- a: 2222222\n\n") {
+		t.Errorf("RenderConsolidated =\n%q\nwant slice a listed once, by its verified commit", got)
+	}
+	if got, want := RenderDiffChangelog(lines, 1), "# Diff changelog - round 1\n- a: 2222222\n"; got != want {
+		t.Errorf("RenderDiffChangelog =\n%q\nwant\n%q", got, want)
 	}
 }
 

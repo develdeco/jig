@@ -6,12 +6,14 @@
 package frontier
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/gitx"
@@ -42,7 +44,25 @@ type Deps struct {
 	// Home is the jig home root whose pool holds the build leases:
 	// home.Root() for the binary, a test's own directory in tests.
 	Home string
+	// Oracle runs an oracle command in a lease and returns its combined
+	// output (oracleAtGreen). nil means the real run, envrun.ShellOutput
+	// with the Windows short-path workaround; a test that is not about the
+	// oracle hands one that passes.
+	Oracle func(cmd, dir string) (string, error)
 }
+
+// runOracle runs cmd in dir through d.Oracle, or for real when it is nil.
+func (d Deps) runOracle(cmd, dir string) (string, error) {
+	if d.Oracle != nil {
+		return d.Oracle(cmd, dir)
+	}
+	return envrun.ShellOutput(envrun.ShortenQuotedPath(cmd), dir, oracleLimit)
+}
+
+// oracleLimit bounds jig's own oracle run: the same bound a headless session's
+// shell gives one command (ADR 0018), so an oracle that fits a builder's shell
+// fits here too, and a hung one cannot hold the repo group.
+const oracleLimit = 30 * time.Minute
 
 // RunOpts configures one Run call.
 type RunOpts struct {
@@ -521,7 +541,8 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	}
 
 	oracleCmd := m.OracleCmd(sl.Oracle, ws)
-	prompt := renderDispatchPrompt(sl.ID, ticket, sl.Goal, oracleCmd, sjPath, rjPath)
+	_, fixTurns := d.Backend.(session.Resumer)
+	prompt := renderDispatchPrompt(sl.ID, ticket, sl.Goal, oracleCmd, sjPath, rjPath, fixTurns)
 
 	rc.journal(journal.Line{Slice: sl.ID, Event: "dispatch", Model: model, Attempt: attempt})
 	if rc.isHalted() {
@@ -540,21 +561,157 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		Screen:     true,
 	}
 
-	var res outcome.Result
-	if err := d.Backend.Run(dispatch); err != nil {
-		res = outcome.Result{Outcome: outcome.Failed, Summary: fmt.Sprintf("backend run failed: %v", err)}
-	} else if data, rerr := os.ReadFile(rjPath); rerr != nil {
-		res = outcome.Result{Outcome: outcome.Failed, Summary: "session produced no result.json"}
+	// A backend that can resume its session reports the session's id, so a
+	// red oracle run can go back to that same session (oracleAtGreen).
+	var sessionID string
+	var runErr error
+	if r, ok := d.Backend.(session.Resumer); ok {
+		sessionID, runErr = r.RunResumable(dispatch)
 	} else {
-		res = outcome.ParseJSON("slice", data)
+		runErr = d.Backend.Run(dispatch)
 	}
+	res := readResult(runErr, rjPath)
 
 	rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Attempt: attempt})
 	if rc.isHalted() {
 		return
 	}
 
+	res = rc.oracleAtGreen(sl, lease, attempt, dispatch, sessionID, oracleCmd, startSHA, res)
+	if rc.isHalted() {
+		return
+	}
+
 	rc.route(sl, lease, attempt, res, startSHA)
+}
+
+// maxOracleFixes bounds how many times a red oracle run goes back to the
+// builder's own session before the attempt counts as failed (ADR 0020).
+const maxOracleFixes = 2
+
+// readResult turns one dispatch's backend error and the result.json it left
+// into the attempt's result.
+func readResult(runErr error, rjPath string) outcome.Result {
+	if runErr != nil {
+		return outcome.Result{Outcome: outcome.Failed, Summary: fmt.Sprintf("backend run failed: %v", runErr)}
+	}
+	data, err := os.ReadFile(rjPath)
+	if err != nil {
+		return outcome.Result{Outcome: outcome.Failed, Summary: "session produced no result.json"}
+	}
+	return outcome.ParseJSON("slice", data)
+}
+
+// oracleAtGreen runs sl's oracle in the lease when res claims a green that
+// verifies, and journals each run (event "oracle", pass or fail, with the
+// lease's HEAD when its tree is clean). A red run goes back to the builder's
+// own session, with the oracle's output, up to maxOracleFixes times, where
+// the backend can resume it. After that, or where it cannot, the attempt
+// fails with the output in its summary, written over result.json so the next
+// attempt's log carries it. Any other result passes through for route to
+// handle (ADR 0020).
+func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, dispatch session.Dispatch, sessionID, oracleCmd, startSHA string, res outcome.Result) outcome.Result {
+	for fixes := 0; ; fixes++ {
+		if res.Outcome != outcome.Green {
+			return res
+		}
+		if _, ok := verifyGreen(lease.Dir, startSHA, res); !ok {
+			return res
+		}
+
+		// An oracle run vouches for the reported commit only when the tracked
+		// files are that commit: uncommitted edits go back to the session
+		// like a red run, without running the oracle.
+		var tail string
+		if dirty := trackedChanges(lease.Dir); dirty != "" {
+			tail = "Your working tree has uncommitted changes to tracked files, so the commit you reported is not what an oracle run would test:\n" + dirty
+		} else {
+			evidence := cleanHead(lease.Dir)
+			out, err := rc.d.runOracle(oracleCmd, lease.Dir)
+			result := "pass"
+			if err != nil {
+				result = "fail"
+			}
+			rc.journal(journal.Line{Slice: sl.ID, Event: "oracle", Outcome: result, Commit: evidence, Attempt: attempt})
+			if err == nil {
+				return res
+			}
+			tail = outputTail(out)
+		}
+
+		resumer, ok := rc.d.Backend.(session.Resumer)
+		if !ok || sessionID == "" || fixes == maxOracleFixes || rc.isHalted() {
+			failed := outcome.Result{
+				Outcome: outcome.CodeBug,
+				Summary: fmt.Sprintf("jig's oracle run failed after %d fix turn(s): %s", fixes, oneLine(tail)),
+				Commit:  res.Commit,
+			}
+			if data, merr := json.Marshal(failed); merr == nil {
+				_ = os.WriteFile(dispatch.ResultJSON, data, 0o644)
+			}
+			return failed
+		}
+
+		// The session's last result is spent: a turn that writes no new one
+		// must not be read back as green.
+		_ = os.Remove(dispatch.ResultJSON)
+		fix := dispatch
+		fix.Prompt = renderOracleFixPrompt(oracleCmd, tail, dispatch.ResultJSON)
+		res = readResult(resumer.Resume(fix, sessionID), dispatch.ResultJSON)
+		rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Attempt: attempt})
+		if rc.isHalted() {
+			return res
+		}
+	}
+}
+
+// trackedChanges returns dir's uncommitted changes to tracked files (git
+// status, untracked files left out), or "" when there are none or git
+// cannot say.
+func trackedChanges(dir string) string {
+	status, err := gitx.Run(dir, "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(status)
+}
+
+// cleanHead returns dir's HEAD sha when its working tree is clean (nothing
+// modified, staged or untracked), else "": an oracle run is evidence about a
+// commit only when the tree it ran on was exactly that commit.
+func cleanHead(dir string) string {
+	status, err := gitx.Run(dir, "status", "--porcelain")
+	if err != nil || strings.TrimSpace(status) != "" {
+		return ""
+	}
+	head, err := gitx.RevParse(dir, "HEAD")
+	if err != nil {
+		return ""
+	}
+	return head
+}
+
+// outputTail keeps the last 4,000 bytes of an oracle's output: enough to
+// show a failure, small enough for a prompt and a summary.
+func outputTail(out string) string {
+	out = strings.TrimSpace(out)
+	if len(out) > 4000 {
+		out = out[len(out)-4000:]
+	}
+	return out
+}
+
+// oneLine flattens the end of s to one line of at most about 600 bytes, for
+// a result summary. The kept part starts at a line boundary, so two identical
+// failures summarize identically and the stall counter can match them.
+func oneLine(s string) string {
+	if len(s) > 600 {
+		s = s[len(s)-600:]
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = s[i+1:]
+		}
+	}
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // ensureStartSHA writes <ticket>/start.<repoName>.sha the first time this

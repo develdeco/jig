@@ -6,12 +6,14 @@ package envrun
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/manifest"
 )
@@ -97,6 +99,34 @@ func Shell(cmd, dir string) error {
 		return fmt.Errorf("shell %q: %s", cmd, msg)
 	}
 	return nil
+}
+
+// ShellOutput runs cmd like Shell and returns its combined stdout and
+// stderr, which a failed oracle run hands back to the session that must fix
+// it. A run longer than limit is killed and reported as failed, and Wait
+// stops waiting on its pipes shortly after, so a hung command cannot hold
+// the caller. The kill ends the shell's whole process tree (KillTree).
+func ShellOutput(cmd, dir string, limit time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	var c *exec.Cmd
+	if runtime.GOOS == "windows" {
+		c = exec.CommandContext(ctx, "cmd", "/C", cmd)
+	} else {
+		c = exec.CommandContext(ctx, "sh", "-c", cmd)
+	}
+	c.Dir = dir
+	NewProcessGroup(c)
+	c.Cancel = func() error { return KillTree(c) }
+	c.WaitDelay = 10 * time.Second
+	out, err := c.CombinedOutput()
+	if ctx.Err() != nil {
+		return string(out), fmt.Errorf("shell %q: did not finish within %s", cmd, limit)
+	}
+	if err != nil {
+		return string(out), fmt.Errorf("shell %q: %w", cmd, err)
+	}
+	return string(out), nil
 }
 
 // substitute replaces {ticket} and {port} placeholders in cmd.
