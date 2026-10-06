@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
@@ -231,4 +232,58 @@ func TestRunHandsARedOracleBackToTheSameSession(t *testing.T) {
 			t.Errorf("resumed %d time(s), want none", len(b.prompts))
 		}
 	})
+}
+
+// TestRunTellsTheNextBuilderTheOraclesLastRunTime: jig times each oracle run
+// at green and journals it, and the next builder of the same oracle command
+// on the ticket reads that time in slice.json's oracle_seconds; the first
+// builder of a command reads 0 (ADR 0024). The fixture's slices a and b share
+// workspace alpha's oracle, and b waits for a.
+func TestRunTellsTheNextBuilderTheOraclesLastRunTime(t *testing.T) {
+	t.Parallel()
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d, st := newDeps(t, fx)
+	d.Oracle = func(string, string) (string, error) {
+		time.Sleep(1100 * time.Millisecond)
+		return "", nil
+	}
+	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	lines, err := journal.Read(st, fx.Ticket)
+	if err != nil {
+		t.Fatalf("journal.Read: %v", err)
+	}
+	ran := false
+	for _, l := range lines {
+		if l.Event == "oracle" && l.Slice == "a" {
+			ran = true
+			if l.Seconds < 1 {
+				t.Errorf("slice a's oracle line records %d seconds, want at least 1", l.Seconds)
+			}
+		}
+	}
+	if !ran {
+		t.Fatalf("no oracle line for slice a; journal: %+v", lines)
+	}
+
+	read := func(slice string) sliceJSONBody {
+		t.Helper()
+		data, err := os.ReadFile(sliceJSONPath(st, fx.Ticket, slice, 1))
+		if err != nil {
+			t.Fatalf("read %s's slice.json: %v", slice, err)
+		}
+		var body sliceJSONBody
+		if err := json.Unmarshal(data, &body); err != nil {
+			t.Fatalf("parse %s's slice.json: %v", slice, err)
+		}
+		return body
+	}
+	if got := read("a").OracleSeconds; got != 0 {
+		t.Errorf("slice a's oracle_seconds = %d, want 0: nothing ran its oracle before it", got)
+	}
+	if got := read("b").OracleSeconds; got < 1 {
+		t.Errorf("slice b's oracle_seconds = %d, want slice a's run time, at least 1", got)
+	}
 }
