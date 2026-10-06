@@ -172,3 +172,32 @@ func TestRunHandsTheBuilderTheCodeTheGraphLinksToItsGoal(t *testing.T) {
 		}
 	})
 }
+
+// TestRunWithTheRealGraphify drives frontier with the real graphify binary
+// over the fixture repo: slice a's related must name a file under alpha/,
+// the workspace its goal is about. It needs graphify on PATH and runs only
+// with JIG_LIVE_GRAPHIFY=1.
+func TestRunWithTheRealGraphify(t *testing.T) {
+	if os.Getenv("JIG_LIVE_GRAPHIFY") != "1" {
+		t.Skip("set JIG_LIVE_GRAPHIFY=1 to run against the real graphify")
+	}
+	t.Parallel()
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d, st := newDeps(t, fx)
+	cfg := d.Cfg
+	cfg.Context = map[string]any{"graphify": true}
+	d.Graph = graphify.Detect(cfg)
+	if !d.Graph.Enabled() {
+		t.Fatal("JIG_LIVE_GRAPHIFY=1 but graphify is not on PATH")
+	}
+	if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	body := readSliceJSON(t, st, fx.Ticket, "a")
+	for _, r := range body.Related {
+		if strings.HasPrefix(r.File, "alpha/") {
+			return
+		}
+	}
+	t.Fatalf("a's related = %+v (graph lines %+v), want a file under alpha/", body.Related, graphLines(t, st, fx.Ticket, "a"))
+}

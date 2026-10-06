@@ -19,6 +19,6 @@ On Windows, graphify's incremental update fails on its own cache files under a p
 ## Test seams
 
 - graphify's output parsing (`parseQuery`, on graphify 0.9.77's own lines) and `DetectWith`, which takes the binary lookup so no test edits PATH.
-- `TestGraphifyLive`, behind `JIG_LIVE_GRAPHIFY=1`: the real binary updates a small Go repo's graph and a query finds its function.
+- `TestGraphifyLive` and `TestRunWithTheRealGraphify`, behind `JIG_LIVE_GRAPHIFY=1`: the real binary updates a small Go repo's graph and a query finds its function, and a real `frontier.Run` over the fixture repo hands slice a related files under the workspace its goal is about.
 - `frontier.Run` with a fake plane, through `TestRunHandsTheBuilderTheCodeTheGraphLinksToItsGoal`: a graph that answers fills `related` by file in order, is updated before it is queried, is asked the goal, journals a pass, and leaves `graphify-out/` excluded in the lease; a graph that fails leaves `related` empty, journals the reason, and the slice still goes green; no graph means an empty `related` and no journal line.
 - The dispatch prompt, through its goldens.
