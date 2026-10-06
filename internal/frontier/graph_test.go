@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/graphify"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
@@ -23,7 +24,7 @@ type fakePlane struct {
 
 	mu        sync.Mutex
 	questions []string
-	updates   int
+	calls     []string
 }
 
 func (p *fakePlane) Enabled() bool { return true }
@@ -33,13 +34,14 @@ func (p *fakePlane) Affected(string, string) ([]string, error) {
 func (p *fakePlane) Update(string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.updates++
+	p.calls = append(p.calls, "update")
 	return nil
 }
 func (p *fakePlane) Query(_, question string) ([]graphify.Node, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.questions = append(p.questions, question)
+	p.calls = append(p.calls, "query")
 	return p.nodes, p.err
 }
 
@@ -115,13 +117,13 @@ func TestRunHandsTheBuilderTheCodeTheGraphLinksToItsGoal(t *testing.T) {
 		}
 		plane.mu.Lock()
 		asked := strings.Join(plane.questions, "\n")
-		updates := plane.updates
+		calls := strings.Join(plane.calls, ",")
 		plane.mu.Unlock()
 		if !strings.Contains(asked, "Fix Clamp so TestClamp passes.") {
 			t.Errorf("questions = %q, want slice a's goal among them", asked)
 		}
-		if updates < len(plane.questions) {
-			t.Errorf("updates = %d for %d queries, want an update before each query", updates, len(plane.questions))
+		if calls == "" || strings.Count(calls, "update,query") != strings.Count(calls, "query") {
+			t.Errorf("calls = %s, want an update right before each query", calls)
 		}
 		if got := graphLines(t, st, fx.Ticket, "a"); len(got) != 1 || got[0].Outcome != "pass" || got[0].Seconds < 1 {
 			t.Errorf("a's graph lines = %+v, want one pass with its time", got)
@@ -131,7 +133,7 @@ func TestRunHandsTheBuilderTheCodeTheGraphLinksToItsGoal(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read the lease's info/exclude: %v", err)
 		}
-		if !strings.Contains(string(exclude), graphify.OutDir+"/") {
+		if !strings.Contains(string(exclude), "/"+graphify.OutDir+"/") {
 			t.Errorf("the lease's info/exclude = %q, want %s/ in it", exclude, graphify.OutDir)
 		}
 	})
@@ -200,4 +202,34 @@ func TestRunWithTheRealGraphify(t *testing.T) {
 		}
 	}
 	t.Fatalf("a's related = %+v (graph lines %+v), want a file under alpha/", body.Related, graphLines(t, st, fx.Ticket, "a"))
+}
+
+// TestExcludeInLease: the pattern is appended to the lease's info/exclude
+// once, after any last line without a newline, and a second call adds
+// nothing.
+func TestExcludeInLease(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if _, err := gitx.Run(dir, "init", "-q"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	path := filepath.Join(dir, ".git", "info", "exclude")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("*.log"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := excludeInLease(dir, "/graphify-out/"); err != nil {
+			t.Fatalf("excludeInLease call %d: %v", i+1, err)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "*.log\n/graphify-out/\n" {
+		t.Errorf("info/exclude = %q, want the old line, then the pattern once", got)
+	}
 }

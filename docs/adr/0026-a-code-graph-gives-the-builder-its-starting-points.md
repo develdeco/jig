@@ -9,8 +9,8 @@ graphify (PyPI `graphifyy`, Apache-2.0 and MIT) builds a knowledge graph of a re
 - **Opt-in and optional.** A project opts in with a `graphify` key under `context:` in `project.yaml`, and jig uses graphify only when the binary is on PATH (`graphify.Detect`). Otherwise slice.json's `related` is empty and nothing is journaled; nothing fails. jig's own CI needs no Python.
 - **Before each dispatch, jig brings the lease's graph up to date and queries it.** It runs `graphify update .` in the lease (incremental, code only), then `graphify query` with the slice's goal and, as seeds, up to 20 files earlier slices of the ticket changed (ADR 0025). Both runs are bounded (5 minutes and 1 minute), with the process tree killed past the bound.
 - **slice.json gains `related`:** the files the graph links to the goal, in the graph's order, most directly matched first, each with up to 8 symbols as `<label> L<line>`; at most 25 files. Nodes without a source file (packages, libraries) are left out. The dispatch prompt names the field.
-- **The graph never touches the build.** jig adds `graphify-out/` to the lease's own `info/exclude` before the first run, so a builder never commits it and jig's clean-tree checks (`cleanHead`, `trackedChanges`) never see it.
-- **A failure costs only the context.** jig journals a `graph` line per dispatch, `pass` or `fail: <reason>`, with its seconds; a failed update or query leaves `related` empty and the attempt goes on.
+- **The graph never touches the build.** jig adds `/graphify-out/` to the lease's own `info/exclude` before the first run, so a builder never commits it and jig's clean-tree checks (`cleanHead`, `trackedChanges`) never see it. A project that commits its own `graphify-out/` gets no such protection; it should not.
+- **A failure costs only the context.** jig journals a `graph` line per dispatch, `pass` or `fail: <reason>` (graphify's stderr and the end of its stdout, where it prints the cause), with its seconds; a failed update or query leaves `related` empty and the attempt goes on.
 
 The reviewer's `must_review` and publish's oracle scoping are later uses of the same plane.
 

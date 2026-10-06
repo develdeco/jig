@@ -452,7 +452,7 @@ func (rc *runCtx) graphContext(sl store.Slice, leaseDir string, attempt int, ear
 // queryGraph excludes the graph's output in leaseDir, updates the graph,
 // and queries it with question.
 func queryGraph(plane graphify.Plane, leaseDir, question string) ([]graphify.Node, error) {
-	if err := excludeInLease(leaseDir, graphify.OutDir+"/"); err != nil {
+	if err := excludeInLease(leaseDir, "/"+graphify.OutDir+"/"); err != nil {
 		return nil, err
 	}
 	if err := plane.Update(leaseDir); err != nil {

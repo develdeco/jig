@@ -82,6 +82,7 @@ func TestParseQuery(t *testing.T) {
 		"[!] TRUNCATED: showing 56 of 1511 nodes (~1500-token budget).\n" +
 		"\n" +
 		"NODE ExpandStillPresent() [src=internal/verifydeliver/findings.go loc=L192 community=]\n" +
+		"NODE Notes [src=docs/my notes.md loc=L3 community=]\n" +
 		`NODE Store schema is the API [src=docs\adr\0003-store-schema-is-the-api.md loc=L1 community=]` + "\n" +
 		"NODE go_pkg_os [src= loc= community=go_pkg_os]\n" +
 		"NODE testing.T [src= loc= community=]\n" +
@@ -89,6 +90,7 @@ func TestParseQuery(t *testing.T) {
 	got := parseQuery(canned)
 	want := []Node{
 		{Label: "ExpandStillPresent()", File: "internal/verifydeliver/findings.go", Line: 192},
+		{Label: "Notes", File: "docs/my notes.md", Line: 3},
 		{Label: "Store schema is the API", File: "docs/adr/0003-store-schema-is-the-api.md", Line: 1},
 	}
 	if !reflect.DeepEqual(got, want) {

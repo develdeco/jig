@@ -126,9 +126,17 @@ func (p cliPlane) run(repoDir string, limit time.Duration, args ...string) (stri
 		return "", fmt.Errorf("graphify %s: did not finish within %s", args[0], limit)
 	}
 	if err != nil {
+		// graphify prints a failure's cause on stdout and only a pointer to
+		// it on stderr, so the reason carries both.
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
+		}
+		if out := strings.TrimSpace(stdout.String()); out != "" {
+			if len(out) > 1500 {
+				out = out[len(out)-1500:]
+			}
+			msg += "\n" + out
 		}
 		return "", fmt.Errorf("graphify %s: %s", args[0], msg)
 	}
@@ -208,19 +216,19 @@ func parseQuery(output string) []Node {
 		if i < 0 || !strings.HasSuffix(rest, "]") {
 			continue
 		}
-		n := Node{Label: rest[:i]}
-		for _, field := range strings.Fields(rest[i+2 : len(rest)-1]) {
-			key, val, ok := strings.Cut(field, "=")
-			if !ok {
-				continue
-			}
-			switch key {
-			case "src":
-				n.File = filepath.ToSlash(val)
-			case "loc":
-				n.Line, _ = strconv.Atoi(strings.TrimPrefix(val, "L"))
-			}
+		// The source path runs from "src=" to " loc=", so a path with a
+		// space survives; graphify may print it with backslashes on any OS.
+		attrs := rest[i+len(" [src=") : len(rest)-1]
+		j := strings.Index(attrs, " loc=")
+		if j < 0 {
+			continue
 		}
+		n := Node{Label: rest[:i], File: strings.ReplaceAll(attrs[:j], `\`, "/")}
+		loc := attrs[j+len(" loc="):]
+		if k := strings.IndexByte(loc, ' '); k >= 0 {
+			loc = loc[:k]
+		}
+		n.Line, _ = strconv.Atoi(strings.TrimPrefix(loc, "L"))
 		if n.File == "" {
 			continue
 		}
