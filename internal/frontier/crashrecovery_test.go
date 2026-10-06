@@ -14,7 +14,7 @@ import (
 
 // TestRunRecoversALeaseAnAttemptLeftMidMerge: an attempt that died with a
 // merge in progress in the build lease (an API error mid-merge) must not
-// stop the next run at acquire: jig aborts the merge, says so, and builds
+// stop the next run at acquire: jig ends the merge, says so, and builds
 // (T-35). The merge's own commits were never made, so nothing is lost.
 func TestRunRecoversALeaseAnAttemptLeftMidMerge(t *testing.T) {
 	t.Parallel()
@@ -57,7 +57,7 @@ func TestRunRecoversALeaseAnAttemptLeftMidMerge(t *testing.T) {
 		t.Fatalf("Run after a crashed merge: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(lease.Dir, ".git", "MERGE_HEAD")); !os.IsNotExist(err) {
-		t.Errorf("MERGE_HEAD still there after the run (stat err %v), want the merge aborted", err)
+		t.Errorf("MERGE_HEAD still there after the run (stat err %v), want the merge ended", err)
 	}
 	if state, err := st.ReadSliceState(fx.Ticket, "a"); err != nil || state.State != "green" {
 		t.Errorf("slice a = %+v (%v), want green: the run builds once the lease is recovered (report %+v)", state, err, report)

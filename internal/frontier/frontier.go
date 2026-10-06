@@ -536,9 +536,9 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		return
 	}
 	// A crashed attempt left an operation unfinished in the lease, and
-	// Acquire aborted it: the journal keeps that visible.
+	// Acquire ended it: the journal keeps that visible.
 	if lease.Recovered != "" {
-		rc.journal(journal.Line{Slice: sl.ID, Event: "lease-recovered", Outcome: "aborted " + lease.Recovered})
+		rc.journal(journal.Line{Slice: sl.ID, Event: "lease-recovered", Outcome: "ended " + lease.Recovered})
 	}
 	// The lease's copy must hold every commit jig built on the branch, or the
 	// next commits would go on a branch that lacks the earlier ones: they
