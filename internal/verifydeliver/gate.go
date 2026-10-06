@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -718,12 +719,23 @@ func fetchTicketBranchFromBuildLease(jigHome, leaseDir, repoName, ticket, branch
 	return nil
 }
 
-// runGateOracles brings up every env class referenced by a slice, runs
-// every manifest oracle across every workspace, then tears the env classes
-// back down, and returns the oracle runs, all passed. An unavailable env
-// with a defer-ci policy journals and skips; one with no policy pauses the
-// gate with a NEEDS_INPUT error.
+// runGateOracles runs every manifest oracle across every workspace and
+// returns the runs, all passed. A run already passed on this head's tree, as
+// jig recorded it at a slice's green (reusablePasses), is reused, not run
+// again (ADR 0021). For the runs left, it brings up every env class
+// referenced by a slice, runs them, then tears the env classes back down; it
+// brings up none when no run is left. An unavailable env with a defer-ci
+// policy journals and skips; one with no policy pauses the gate with a
+// NEEDS_INPUT error.
 func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []store.Slice) ([]OracleRun, error) {
+	reused, err := reusablePasses(d, ticket, dir, man, slices)
+	if err != nil {
+		return nil, err
+	}
+	if coversSuite(man, reused) {
+		return oracleSuiteRuns(dir, man, reused)
+	}
+
 	var handles []*envrun.Handle
 	defer func() {
 		for _, h := range handles {
@@ -761,20 +773,100 @@ func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []
 		handles = append(handles, h)
 	}
 
-	return RunOracleSuite(dir, man)
+	return oracleSuiteRuns(dir, man, reused)
 }
 
-// RunOracleSuite runs every manifest oracle across every manifest
-// workspace in dir, workspaces in manifest order and oracles by name, and
-// returns the runs it made. Any failure stops the suite, so a nil error
-// means every returned run passed. Exported for internal/revieweval, whose
-// reviewer gets the runs the way Gate's does.
-func RunOracleSuite(dir string, man manifest.Manifest) ([]OracleRun, error) {
+// reusablePasses returns, by exact command, the commit of an oracle pass
+// jig recorded at a slice's green (ADR 0020) that stands for the gate's own
+// run of that command on dir's HEAD (ADR 0021). A pass stands only when:
+//   - it carries a commit, which frontier records only when the lease's
+//     tracked and untracked files were exactly that commit;
+//   - that commit's tree is HEAD's tree;
+//   - the env class that was up for it is the whole set of env classes the
+//     gate brings up for this ticket (gateEnvs);
+//   - no failed run of the same command is recorded on that tree, so a
+//     flaky oracle is sampled again.
+//
+// Every oracle runs from the repo root, so the command alone names the run.
+func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []store.Slice) (map[string]string, error) {
+	lines, err := journal.Read(d.Store, ticket)
+	if err != nil {
+		return nil, fmt.Errorf("verifydeliver: gate: read journal for oracle passes: %w", err)
+	}
+	headTree, err := gitx.RevParse(dir, "HEAD^{tree}")
+	if err != nil {
+		return nil, fmt.Errorf("verifydeliver: gate: resolve HEAD's tree: %w", err)
+	}
+	envs := gateEnvs(man, slices)
+	sameTree := func(commit string) bool {
+		tree, err := gitx.RevParse(dir, commit+"^{tree}")
+		return err == nil && tree == headTree
+	}
+	passed, failed := map[string]string{}, map[string]bool{}
+	for _, l := range lines {
+		if l.Event != "oracle" || l.Commit == "" || l.Command == "" || !sameTree(l.Commit) {
+			continue
+		}
+		switch l.Outcome {
+		case "fail":
+			failed[l.Command] = true
+		case "pass":
+			if sameEnvs(l.Env, envs) {
+				passed[l.Command] = l.Commit
+			}
+		}
+	}
+	for cmd := range failed {
+		delete(passed, cmd)
+	}
+	return passed, nil
+}
+
+// gateEnvs is the set of env classes runGateOracles brings up: every one a
+// slice names that the manifest declares.
+func gateEnvs(man manifest.Manifest, slices []store.Slice) map[string]bool {
+	envs := map[string]bool{}
+	for _, s := range slices {
+		if _, ok := man.Envs[s.Env]; s.Env != "" && ok {
+			envs[s.Env] = true
+		}
+	}
+	return envs
+}
+
+// sameEnvs reports whether a run with env class env up ("" for none) had
+// exactly the env classes in envs up.
+func sameEnvs(env string, envs map[string]bool) bool {
+	if env == "" {
+		return len(envs) == 0
+	}
+	return len(envs) == 1 && envs[env]
+}
+
+// coversSuite reports whether reused holds every run of man's suite.
+func coversSuite(man manifest.Manifest, reused map[string]string) bool {
+	for _, ws := range man.Workspaces {
+		for name := range man.Oracles {
+			if _, ok := reused[man.OracleCmd(name, ws)]; !ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// oracleSuiteRuns is RunOracleSuite with the runs in reused (by command)
+// taken from there instead of run again.
+func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]string) ([]OracleRun, error) {
 	var runs []OracleRun
 	for _, ws := range man.Workspaces {
 		for _, name := range SortedOracleNames(man) {
 			cmd := man.OracleCmd(name, ws)
-			if err := envrun.Shell(envrun.ShortenQuotedPath(cmd), dir); err != nil {
+			if commit, ok := reused[cmd]; ok {
+				runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, ReusedFrom: commit})
+				continue
+			}
+			if err := runOracle(cmd, dir); err != nil {
 				return nil, &axi.Error{
 					Msg:  fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err),
 					Code: "GATE_ORACLE_FAILED",
@@ -784,6 +876,38 @@ func RunOracleSuite(dir string, man manifest.Manifest) ([]OracleRun, error) {
 		}
 	}
 	return runs, nil
+}
+
+// oracleLimit bounds one oracle run of the gate or of publish's
+// revalidation: the same bound jig gives a builder's shell command and its
+// own run at a slice's green, so a hung oracle cannot hold the gate.
+const oracleLimit = 30 * time.Minute
+
+// runOracle runs one oracle command in dir within oracleLimit, its process
+// tree killed past it. A failure carries the end of the command's output, as
+// the stderr Shell reported once did.
+func runOracle(cmd, dir string) error {
+	out, err := envrun.ShellOutput(envrun.ShortenQuotedPath(cmd), dir, oracleLimit)
+	if err == nil {
+		return nil
+	}
+	out = strings.TrimSpace(out)
+	if len(out) > 4000 {
+		out = out[len(out)-4000:]
+	}
+	if out == "" {
+		return err
+	}
+	return fmt.Errorf("%w\n%s", err, out)
+}
+
+// RunOracleSuite runs every manifest oracle across every manifest
+// workspace in dir, workspaces in manifest order and oracles by name, and
+// returns the runs it made. Any failure stops the suite, so a nil error
+// means every returned run passed. Exported for internal/revieweval, whose
+// reviewer gets the runs the way Gate's does.
+func RunOracleSuite(dir string, man manifest.Manifest) ([]OracleRun, error) {
+	return oracleSuiteRuns(dir, man, nil)
 }
 
 // writeNoRound writes the files for a round that never ran while something

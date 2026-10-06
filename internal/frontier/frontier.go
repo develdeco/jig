@@ -632,7 +632,7 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 			if err != nil {
 				result = "fail"
 			}
-			rc.journal(journal.Line{Slice: sl.ID, Event: "oracle", Outcome: result, Commit: evidence, Attempt: attempt})
+			rc.journal(journal.Line{Slice: sl.ID, Event: "oracle", Outcome: result, Commit: evidence, Attempt: attempt, Command: oracleCmd, Env: sl.Env})
 			if err == nil {
 				return res
 			}
