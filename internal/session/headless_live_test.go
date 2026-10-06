@@ -88,7 +88,7 @@ func liveBuildSession(t *testing.T, jig string) {
 
 	sess := &claudetest.Session{Steps: []claudetest.Step{
 		{Name: "screen denies a push", Call: claudetest.Bash("git push origin HEAD"), WantErr: "Blocked `git push`"},
-		{Name: "the shell waits 30 minutes on a command", Call: claudetest.Bash(`echo "default=$BASH_DEFAULT_TIMEOUT_MS max=$BASH_MAX_TIMEOUT_MS"`), WantOut: "default=1800000 max=1800000"},
+		{Name: "the shell waits 30 minutes on a command and runs nothing in the background", Call: claudetest.Bash(`echo "default=$BASH_DEFAULT_TIMEOUT_MS max=$BASH_MAX_TIMEOUT_MS nobg=$CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"`), WantOut: "default=1800000 max=1800000 nobg=1"},
 		{Name: "read slice.json outside the lease", Call: claudetest.Tool("Read", map[string]any{"file_path": d.SliceJSON}), WantOut: `"goal":"say hello"`},
 		{Name: "write outside the lease", Call: claudetest.Write(outsideFile, "x"), WantDenied: true},
 		{Name: "write in the lease", Call: claudetest.Write(filepath.Join(view.Worktree, "hello.txt"), "hello\n")},

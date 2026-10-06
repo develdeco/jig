@@ -2954,3 +2954,7 @@ jig times each oracle run at green and journals it (`seconds` on the `oracle` li
 ## A builder reads what earlier slices built (build-speed item 6d)
 
 `slice.json` gains `earlier_slices`: every slice of the ticket whose green jig verified before this dispatch, with its builder's summary and the files its verified attempt changed (the union of each attempt's own range: from the lease head at its dispatch, now on the dispatch line, to its verified commit or the head its last turn ended on, now on the result line). The dispatch prompt names it. Sizing slices to a session goes into the intake skill instead (BS-2). See [ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md).
+
+## Headless sessions run nothing in the background (T-34)
+
+A `claude -p` session ends with its turn, and on T-23 a Sonnet builder backgrounded the full suite and ended its turn waiting for it, losing the attempt. Every headless session's settings now set `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so its shell has no background option and a long command is ended at the 30-minute bound instead of moved to the background. This is the recurrence the owner's measure-first decision on shell guards waited for. See ADR 0018's amendment.
