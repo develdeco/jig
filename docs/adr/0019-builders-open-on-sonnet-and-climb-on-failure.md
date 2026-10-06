@@ -20,7 +20,9 @@ no-mistakes puts the stronger tier on the first pass and keeps model choice the 
 - **An invariant match still floors to the dearest rung.**
 - **The volume rule is gone.** The cumulative lease diff measures the ticket so far, not the slice in hand. With Sonnet opening, it would have pushed most later slices of a multi-slice ticket to Opus, BS-1's by its second slice. Escalation now follows outcomes, not size thresholds.
 
-The gate reviewer's model is unchanged in kind: still the first rung no builder of the ticket used (`Disjoint`). With the new defaults, that is Opus once a builder has run on Sonnet.
+The climb carries across requeues: a requeued slice resumes on the rung its earlier failures earned. An attempt that produced nothing jig could read counts as a failure too: a backend error, or a session that wrote no result, is journaled as failed.
+
+The gate reviewer's model rule is unchanged here: the first rung no builder of the ticket used (`Disjoint`), or the dearest rung when the builders used them all. With two default rungs that gives an Opus reviewer once a builder ran on Sonnet only, but an Opus reviewer over Opus builders once a slice failed, and a Sonnet reviewer when an invariant floored every builder to Opus. The owner has decided the reviewer runs on the dearest rung every round, with independence coming from its fresh read-only session; that change belongs to the reviewer work that follows (build-speed item 6i).
 
 ## Test seams
 

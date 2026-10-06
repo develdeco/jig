@@ -17,8 +17,9 @@ func Default() Config {
 
 // Signals are the measurements Select climbs or floors the rung on.
 type Signals struct {
-	// FailedAttempts is how many earlier attempts of this slice ended
-	// without green.
+	// FailedAttempts is how many earlier attempts of this slice failed at
+	// the work (journal.FailedAttempts): not questions, flawed briefs or
+	// blocked environments, which are not the builder failing.
 	FailedAttempts int
 	// Invariant reports whether any file changed in the lease matches a
 	// declared invariant.
