@@ -8,31 +8,33 @@ type Config struct {
 	Rungs []string
 }
 
-// Default returns the built-in rung list, cheap to dear.
+// Default returns the built-in rung list, cheap to dear. It opens on Sonnet:
+// a project that wants a cheaper opening rung lists it first in
+// project.yaml's staircase (ADR 0019).
 func Default() Config {
-	return Config{Rungs: []string{"claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"}}
+	return Config{Rungs: []string{"claude-sonnet-5", "claude-opus-5"}}
 }
 
 // Signals are the measurements Select climbs or floors the rung on.
 type Signals struct {
-	DiffLines int  // insertions+deletions of the lease diff
-	DiffFiles int  // files changed
-	Invariant bool // any file changed matches a declared invariant
+	// FailedAttempts is how many earlier attempts of this slice ended
+	// without green.
+	FailedAttempts int
+	// Invariant reports whether any file changed in the lease matches a
+	// declared invariant.
+	Invariant bool
 }
 
-// Select picks a rung for cfg given s. Selection opens on the cheapest rung;
-// a volume signal (more than 400 diff lines or more than 10 files changed)
-// climbs one rung; an invariant match floors to the dearest rung, overriding
-// everything else. The result is always clamped to cfg's bounds.
+// Select picks a rung for cfg given s. Selection opens on the first rung and
+// climbs one rung per failed attempt of the slice; an invariant match floors
+// to the dearest rung, overriding everything else. The result is always
+// clamped to cfg's bounds.
 func Select(cfg Config, s Signals) string {
 	n := len(cfg.Rungs)
 	if n == 0 {
 		return ""
 	}
-	idx := 0
-	if s.DiffLines > 400 || s.DiffFiles > 10 {
-		idx = 1
-	}
+	idx := s.FailedAttempts
 	if s.Invariant {
 		idx = n - 1
 	}

@@ -95,7 +95,7 @@ Show
 ## Round 1: the reviewer reports nothing, so the round is clean, and the round's
 ## own files are pushed before the demo session starts. The report's kv block
 ## then carries the demo: "gate:\n  ticket: JIG-1\n  round: 1\n  verdict:
-## clean\n  model: claude-sonnet-5\n  intent: brief\n  scope: full\n  demo:
+## clean\n  model: claude-opus-5\n  intent: brief\n  scope: full\n  demo:
 ## recorded\n  demo_summary: ..." (axi.KV, gate.go's printGateReport and
 ## demoRows), and, because the demo recorded files, a demo_media table of each
 ## one's name, size and caption right after the empty findings and fix_slices

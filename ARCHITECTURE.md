@@ -98,8 +98,12 @@ root) covers every path in the repo.
 When `frontier` measures a dispatch's staircase signals, it checks whether any
 file changed in the ticket's lease diff matches a declared invariant. If any
 match, the invariant signal floors the rung selection to the dearest model,
-overriding volume climbing. A repo with no declared invariants detects no
-invariants and uses volume-only flooring.
+overriding everything else. Otherwise a dispatch opens on the first rung
+(Sonnet by default; a project lists its own rungs in `project.yaml`'s
+`staircase`) and climbs one rung for each earlier attempt of the slice that
+failed at the work, as the journal records it. A question, a flawed brief or
+a blocked environment is not such a failure
+([ADR 0019](docs/adr/0019-builders-open-on-sonnet-and-climb-on-failure.md)).
 
 ## Store schema
 
@@ -230,7 +234,7 @@ exists.
 | `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `MatchRound`, `ScoreRound`, `RenderReport` | a labeled corpus (`testdata/revieweval`) + a session backend → a `CaseScore` per case, matched structurally against seeded gold through the real reviewer contract |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
-| `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` (diff lines, files changed, invariant match) + `Config` → a model rung, disjoint from rungs already in use; invariant floored to the dearest rung, volume climbs one rung, otherwise cheapest |
+| `internal/staircase/` | `Select`, `Disjoint`, `Default` | build `Signals` (the slice's failed attempts, invariant match) + `Config` → a model rung, disjoint from rungs already in use; invariant floored to the dearest rung, one rung up per failed attempt, otherwise the first rung |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by |
 | `internal/tracker/` | `New`, `Graduate`, `CheckMinted`, `PRCreator`, `PRUpdater`, `PRCommenter`, `PRCreatorWithMedia`, `PRUpdaterWithMedia`, `PRBodyReader` | `project.Config` → an `Adapter` (local, github, jira/linear stub, or command); a `Graduation` (a chart's ordered ticket drafts) → the minted ids, each with its store folder created and its `ticket.yaml` (title and blockers) written; a freshly minted id → refused when jig cannot use it, before anything is written under it; on github, a pull request body + a media directory and file list → the same pull request with each file attached via `gh ... --attach`, or read back to check what `gh` rewrote |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one) |
