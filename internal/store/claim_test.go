@@ -513,6 +513,158 @@ func TestClaimWrapsUndoFailureAsIDNotClaimed(t *testing.T) {
 	}
 }
 
+// TestUndoClaimReportsWhetherResetRan covers undoClaim's own resetRan
+// report, which undoFailedError's message depends on: a sha that does not
+// resolve fails at the very first step, `reset --soft`, before it ever
+// moves the branch, so resetRan must come back false - unlike a failure in
+// one of the later, per-path steps (TestClaimWrapsUndoFailureAsIDNotClaimed),
+// where the reset has already run.
+func TestUndoClaimReportsWhetherResetRan(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	headBefore := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+
+	resetRan, err := st.undoClaim("0000000000000000000000000000000000000000", []string{"project.yaml"})
+	if err == nil {
+		t.Fatal("undoClaim: want an error for a sha that does not resolve, got nil")
+	}
+	if resetRan {
+		t.Fatal("resetRan = true, want false: `reset --soft` itself failed before it could move the branch")
+	}
+	headAfter := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+	if headAfter != headBefore {
+		t.Fatalf("HEAD moved from %s to %s even though the reset itself failed", headBefore, headAfter)
+	}
+}
+
+// TestUndoFailedErrorDescribesActualBranchState pins undoFailedError's
+// message to what undoClaim actually reported (resetRan) and to whether
+// stageAndCommitPaths made a commit this round at all (claimSHA != pre),
+// rather than assuming undoClaim's documented happy path always holds. The
+// four combinations below are mutually exclusive and must each describe the
+// branch differently - conflating any two is exactly the gate finding this
+// pins down.
+func TestUndoFailedErrorDescribesActualBranchState(t *testing.T) {
+	cause := errors.New("boom")
+
+	assertRefusal := func(t *testing.T, err error) *axi.Error {
+		t.Helper()
+		var ae *axi.Error
+		if !errors.As(err, &ae) || ae.Code != idNotClaimedCode {
+			t.Fatalf("err = %v, want *axi.Error %s", err, idNotClaimedCode)
+		}
+		return ae
+	}
+
+	t.Run("ResetFailedWithCommit", func(t *testing.T) {
+		// undoClaim's own `reset --soft` failed (a lock, a sha that no
+		// longer resolves) before it could move the branch back: the
+		// claim's own commit, claimSHA, is still the branch's HEAD, not
+		// off it.
+		ae := assertRefusal(t, undoFailedError(cause, "claimsha", "presha", false))
+		full := ae.Msg + " " + strings.Join(ae.Help, " ")
+		if strings.Contains(full, "off the branch") {
+			t.Fatalf("message = %q, want it not to claim the commit is off the branch when the reset itself failed", full)
+		}
+		if !strings.Contains(full, "claimsha") {
+			t.Fatalf("message = %q, want claimSHA named", full)
+		}
+	})
+
+	t.Run("ResetFailedNoCommit", func(t *testing.T) {
+		// Nothing was committed this round (claimSHA == pre): the reset,
+		// even though its target was already HEAD, still failed.
+		ae := assertRefusal(t, undoFailedError(cause, "samesha", "samesha", false))
+		full := ae.Msg + " " + strings.Join(ae.Help, " ")
+		if strings.Contains(full, "rejected commit") {
+			t.Fatalf("message = %q, want it not to call an unrelated, pre-existing commit \"its rejected commit\"", full)
+		}
+	})
+
+	t.Run("LaterStepFailedNoCommit", func(t *testing.T) {
+		// The reset ran (a no-op: pre was already HEAD) but a later,
+		// per-path step failed cleaning up after a push that was rejected
+		// without this round ever having committed anything, so claimSHA
+		// names a commit that predates this attempt.
+		ae := assertRefusal(t, undoFailedError(cause, "samesha", "samesha", true))
+		full := ae.Msg + " " + strings.Join(ae.Help, " ")
+		if strings.Contains(full, "its rejected commit") {
+			t.Fatalf("message = %q, want it not to call an unrelated, pre-existing commit \"its rejected commit\"", full)
+		}
+		if !strings.Contains(full, "samesha") {
+			t.Fatalf("message = %q, want the commit named", full)
+		}
+	})
+
+	t.Run("LaterStepFailedWithCommit", func(t *testing.T) {
+		// undoClaim's documented happy path: the reset already moved
+		// claimSHA off the branch before a later step failed.
+		ae := assertRefusal(t, undoFailedError(cause, "claimsha", "presha", true))
+		full := ae.Msg + " " + strings.Join(ae.Help, " ")
+		if !strings.Contains(full, "claimsha") || !strings.Contains(full, "off the branch") {
+			t.Fatalf("message = %q, want claimSHA named as off the branch", full)
+		}
+	})
+}
+
+// TestPullAfterUndoErrorPreservesInnerAxiError covers a post-undo pull
+// failure that already carries its own, more specific *axi.Error - a rebase
+// conflict abortFailedPull wrapped as STORE_CONFLICT, with the exact recipe
+// to resolve it (or, when jig's own best-effort `rebase --abort` also
+// failed, that the store is left mid-rebase). pullAfterUndoError must return
+// it unchanged rather than relabeling it ID_NOT_CLAIMED and replacing its
+// Help with "commit or stash it by hand", which resolves neither case.
+func TestPullAfterUndoErrorPreservesInnerAxiError(t *testing.T) {
+	inner := &axi.Error{
+		Msg:  "the store at /store is still mid-rebase",
+		Code: "STORE_CONFLICT",
+		Help: []string{"resolve it there with `git status`, then `git rebase --abort` or `--continue`"},
+	}
+	if got := pullAfterUndoError("/store", inner); got != inner {
+		t.Fatalf("pullAfterUndoError = %v, want the inner *axi.Error returned unchanged", got)
+	}
+}
+
+// TestPullAfterUndoErrorNamesOnlyAGenuineLocalChange covers the two shapes a
+// plain (non-*axi.Error) post-undo pull failure can take: one where git's
+// own message names a local change a merge or rebase would overwrite, and
+// one where it does not (the fetch itself failed - an unreachable origin).
+// Only the first should blame a local change, and only the path git itself
+// named - never dirtyPaths' whole-store listing, which would blame paths
+// that have nothing to do with the incoming commits.
+func TestPullAfterUndoErrorNamesOnlyAGenuineLocalChange(t *testing.T) {
+	t.Run("LocalChangeNamed", func(t *testing.T) {
+		cause := errors.New("git merge --ff-only --quiet refs/remotes/origin/main: error: Your local changes to the following files would be overwritten by merge:\n\tproject.yaml\nPlease commit your changes or stash them before you merge.\nAborting: exit status 1")
+		var ae *axi.Error
+		err := pullAfterUndoError("/store", cause)
+		if !errors.As(err, &ae) || ae.Code != idNotClaimedCode {
+			t.Fatalf("err = %v, want *axi.Error %s", err, idNotClaimedCode)
+		}
+		full := ae.Msg + " " + strings.Join(ae.Help, " ")
+		if !strings.Contains(full, "project.yaml") {
+			t.Fatalf("message = %q, want project.yaml named", full)
+		}
+		if strings.Contains(full, "an unrecorded local change") {
+			t.Fatalf("message = %q, want the real path named, not a generic placeholder", full)
+		}
+	})
+
+	t.Run("NoLocalChangeToBlame", func(t *testing.T) {
+		cause := errors.New("git fetch origin: could not resolve host: origin.example.invalid: exit status 128")
+		var ae *axi.Error
+		err := pullAfterUndoError("/store", cause)
+		if !errors.As(err, &ae) || ae.Code != idNotClaimedCode {
+			t.Fatalf("err = %v, want *axi.Error %s", err, idNotClaimedCode)
+		}
+		full := ae.Msg + " " + strings.Join(ae.Help, " ")
+		if strings.Contains(full, "commit or stash") {
+			t.Fatalf("message = %q, want it not to send the operator after a local change that was never confirmed", full)
+		}
+		if !strings.Contains(full, "could not resolve host") {
+			t.Fatalf("message = %q, want the real cause named", full)
+		}
+	})
+}
+
 // TestClaimWrapsPullFailureAfterUndoAsIDNotClaimed covers the pull that
 // follows a rejected push failing in turn: unlike before undoClaim's own
 // undo was scoped to write's own paths, that pull is no longer guaranteed a
