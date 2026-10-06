@@ -246,7 +246,7 @@ exists.
 The contract between jig and any backend is pure disk: jig writes
 `slice.json` (goal, oracle, workspace, prior attempt log, any answered
 question, how long jig's last run of the oracle took on this ticket,
-[ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md), and
+[ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md),
 what the ticket's verified slices did and changed,
 [ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md), and,
 when the project keeps a code graph, the code it links to the goal,
