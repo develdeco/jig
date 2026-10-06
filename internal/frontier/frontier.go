@@ -405,6 +405,52 @@ func (rc *runCtx) readSliceState(sliceID string) (store.SliceState, error) {
 	return rc.d.Store.ReadSliceState(rc.ticket, sliceID)
 }
 
+// earlierSlices lists the ticket's slices other than sliceID whose green
+// jig verified, in the order they first verified, each with its latest
+// verified attempt: the summary from that attempt's result.json, and the
+// files the attempt changed, from the lease head at its dispatch (the
+// dispatch line's commit) to its verified commit. Files stay empty when
+// that range is not in leaseDir, as for a slice of another repo.
+func (rc *runCtx) earlierSlices(sliceID, leaseDir string) ([]earlierSlice, error) {
+	rc.storeMu.Lock()
+	lines, err := journal.Read(rc.d.Store, rc.ticket)
+	rc.storeMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	bases := map[string]string{}
+	at := map[string]int{}
+	out := []earlierSlice{}
+	for _, l := range lines {
+		key := fmt.Sprintf("%s#%d", l.Slice, l.Attempt)
+		switch {
+		case l.Event == "dispatch":
+			bases[key] = l.Commit
+		case l.Event == "verified" && l.Slice != sliceID:
+			e := earlierSlice{ID: l.Slice, Files: []string{}}
+			if data, err := os.ReadFile(resultJSONPath(rc.d.Store, rc.ticket, l.Slice, l.Attempt)); err == nil {
+				e.Summary = outcome.ParseJSON("slice", data).Summary
+			}
+			if base := bases[key]; base != "" && l.Commit != "" {
+				if diff, err := gitx.Run(leaseDir, "diff", "--name-only", base+".."+l.Commit); err == nil {
+					for _, f := range strings.Split(strings.TrimSpace(diff), "\n") {
+						if f = strings.TrimSpace(f); f != "" {
+							e.Files = append(e.Files, f)
+						}
+					}
+				}
+			}
+			if i, ok := at[l.Slice]; ok {
+				out[i] = e
+				continue
+			}
+			at[l.Slice] = len(out)
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
 // lastOracleSeconds is the wall time of jig's latest run of command on
 // this ticket (journal.LastOracleSeconds), reading the journal under
 // storeMu.
@@ -543,6 +589,18 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		rc.fail(fmt.Errorf("frontier: read the oracle's last run time for %s: %w", sl.ID, err))
 		return
 	}
+	earlier, err := rc.earlierSlices(sl.ID, lease.Dir)
+	if err != nil {
+		rc.fail(fmt.Errorf("frontier: read earlier slices for %s: %w", sl.ID, err))
+		return
+	}
+	// The attempt's base: what its changed files are measured from, once it
+	// verifies (earlierSlices).
+	base, err := gitx.RevParse(lease.Dir, "HEAD")
+	if err != nil {
+		rc.fail(fmt.Errorf("frontier: resolve the lease head for %s: %w", sl.ID, err))
+		return
+	}
 
 	body := sliceJSONBody{
 		ID:            sl.ID,
@@ -555,6 +613,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		AttemptLog:    buildAttemptLog(d.Store, ticket, sl.ID, attempt),
 		Answer:        answerFor(d.Store, ticket, sl.ID),
 		OracleSeconds: oracleSeconds,
+		EarlierSlices: earlier,
 	}
 	if err := writeSliceJSON(sjPath, body); err != nil {
 		rc.fail(fmt.Errorf("frontier: write slice.json for %s: %w", sl.ID, err))
@@ -564,7 +623,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	_, fixTurns := d.Backend.(session.Resumer)
 	prompt := renderDispatchPrompt(sl.ID, ticket, sl.Goal, oracleCmd, sjPath, rjPath, fixTurns)
 
-	rc.journal(journal.Line{Slice: sl.ID, Event: "dispatch", Model: model, Attempt: attempt})
+	rc.journal(journal.Line{Slice: sl.ID, Event: "dispatch", Model: model, Commit: base, Attempt: attempt})
 	if rc.isHalted() {
 		return
 	}

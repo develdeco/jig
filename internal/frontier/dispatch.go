@@ -23,7 +23,7 @@ const dispatchPromptTemplate = "You are a jig build session for slice %s of tick
 	"Work ONLY in this worktree. Goal: %s\n" +
 	"Oracle (green = done): %s\n" +
 	"%s\n" +
-	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer, and oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first).\n" +
+	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer, oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first, and earlier_slices: what this ticket's verified slices did and the files they changed).\n" +
 	"Commit as you land. When finished write result.json at %s with exactly one JSON object: {\"outcome\": \"green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed\", \"summary\": \"...\", \"commit\": \"<sha>\", \"question\": \"only for needs-input\", \"artifacts\": [\"relative paths\"]}"
 
 // oracleFixPromptTemplate is the next turn jig hands a builder's own session
@@ -68,6 +68,20 @@ type sliceJSONBody struct {
 	// oracle command took on this ticket, in seconds; 0 before the first
 	// (ADR 0024).
 	OracleSeconds int `json:"oracle_seconds"`
+	// EarlierSlices is what this ticket's already-verified slices did, in
+	// the order they verified, so a builder starts from what was built
+	// rather than rediscovering it (ADR 0025).
+	EarlierSlices []earlierSlice `json:"earlier_slices"`
+}
+
+// earlierSlice is one entry of slice.json's earlier_slices: a slice of the
+// ticket whose green jig verified, its builder's summary, and the files its
+// verified attempt changed (empty when that range is not in this lease, as
+// for a slice of another repo).
+type earlierSlice struct {
+	ID      string   `json:"id"`
+	Summary string   `json:"summary"`
+	Files   []string `json:"files"`
 }
 
 // workDir returns the store-side (not lease-side) directory that carries
