@@ -37,27 +37,12 @@ func TestTransitions(t *testing.T) {
 	})
 }
 
-func TestDisjoint(t *testing.T) {
-	cfg := Config{Rungs: []string{"a", "b", "c"}}
-
-	cases := []struct {
-		name string
-		used []string
-		want string
-	}{
-		{"one used", []string{"a"}, "b"},
-		{"all used", []string{"a", "b", "c"}, "c"},
-		{"none used", []string{}, "a"},
-		{"middle used", []string{"b"}, "a"},
+func TestDearest(t *testing.T) {
+	if got := Dearest(Config{Rungs: []string{"a", "b", "c"}}); got != "c" {
+		t.Errorf("Dearest(a, b, c) = %q, want c", got)
 	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := Disjoint(cfg, c.used)
-			if got != c.want {
-				t.Fatalf("Disjoint(cfg, %v) = %q, want %q", c.used, got, c.want)
-			}
-		})
+	if got := Dearest(Config{}); got != "" {
+		t.Errorf("Dearest(no rungs) = %q, want empty", got)
 	}
 }
 

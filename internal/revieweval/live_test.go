@@ -69,18 +69,11 @@ func TestDefaultReportDirUsesUserCacheDir(t *testing.T) {
 	}
 }
 
-// defaultLiveModel is the model Gate itself picks when the builders used
-// the cheapest rung, the common unattended case: the rung after the
-// cheapest, not the cheapest itself. Gate's own model choice
-// (internal/verifydeliver/gate.go) is staircase.Disjoint(d.Rungs,
-// journal.BuilderModels(lines)); an unattended ticket's builders record the
-// cheapest rung (staircase.Select opens on it), so Disjoint's next
-// available rung up is what Gate would actually dispatch its reviewer
-// with. Derived rather than hardcoded so this test never drifts from
-// Gate's own choice.
+// defaultLiveModel is the model Gate dispatches its reviewer with: the
+// default staircase's dearest rung (staircase.Dearest, ADR 0023). Derived
+// rather than hardcoded so this test never drifts from Gate's own choice.
 func defaultLiveModel() string {
-	cfg := staircase.Default()
-	return staircase.Disjoint(cfg, []string{cfg.Rungs[0]})
+	return staircase.Dearest(staircase.Default())
 }
 
 // liveBackend constructs the backend a live reviewer or judge dispatch
@@ -233,13 +226,9 @@ func TestEvalLive(t *testing.T) {
 // JIG_REVIEWEVAL_BACKEND needed), unlike TestEvalLive itself, so the
 // default model choice stays covered whether or not a real backend is
 // available.
-func TestDefaultLiveModelSkipsTheCheapestRung(t *testing.T) {
+func TestDefaultLiveModelIsTheDearestRung(t *testing.T) {
 	cfg := staircase.Default()
-	got := defaultLiveModel()
-	if got == cfg.Rungs[0] {
-		t.Errorf("defaultLiveModel() = %q, want the rung after the cheapest: Gate's own pick once the builders used it", got)
-	}
-	if want := staircase.Disjoint(cfg, []string{cfg.Rungs[0]}); got != want {
-		t.Errorf("defaultLiveModel() = %q, want %q", got, want)
+	if got, want := defaultLiveModel(), cfg.Rungs[len(cfg.Rungs)-1]; got != want {
+		t.Errorf("defaultLiveModel() = %q, want the dearest rung %q: Gate's own pick", got, want)
 	}
 }
