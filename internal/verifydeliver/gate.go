@@ -412,11 +412,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	n++
 	roundNum = n
 
-	lines, err := journal.Read(d.Store, ticket)
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: read journal: %w", err)
-	}
-	model := staircase.Disjoint(d.Rungs, journal.BuilderModels(lines))
+	model := staircase.Dearest(d.Rungs)
 	if err := journal.Append(d.Store, ticket, journal.Line{Slice: "", Event: "gate-open", Model: model}); err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-open: %w", err)
 	}
@@ -457,6 +453,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		RepoName:      repoName,
 		Target:        target,
 		Model:         model,
+		Effort:        d.Cfg.ReviewEffortFor,
 		Intent:        intent,
 		IntentText:    intentText,
 		OperatorClone: operatorClone(d, repoName),
@@ -618,7 +615,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 		if report.Verdict == "clean" {
 			event = "gate-clean"
 		}
-		if err := journal.Append(d.Store, ticket, journal.Line{Event: event, Attempt: n}); err != nil {
+		if err := journal.Append(d.Store, ticket, journal.Line{Event: event, Effort: round.Review.Effort, Attempt: n}); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal %s: %w", event, err)
 		}
 		// Routing and triage are already finished above; appending these

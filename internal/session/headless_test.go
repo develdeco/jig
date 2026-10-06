@@ -1034,3 +1034,51 @@ func TestHeadlessCarriesTheLeaseMemory(t *testing.T) {
 		}
 	}
 }
+
+// TestHeadlessArgsEffort: a dispatch with an effort passes --effort right
+// after the model, a resumed turn keeps it, and a dispatch with none passes
+// no such flag (ADR 0023).
+func TestHeadlessArgsEffort(t *testing.T) {
+	t.Parallel()
+	b := &headlessBackend{goos: "linux", screenBinary: "/opt/jig/bin/jig"}
+	d := missingDispatch(t, true)
+	d.Effort = "medium"
+	got, cleanup, err := b.args(d)
+	if err != nil {
+		t.Fatalf("args: %v", err)
+	}
+	defer cleanup()
+	if i := indexOf(got, "--model"); i < 0 || len(got) < i+4 || got[i+2] != "--effort" || got[i+3] != "medium" {
+		t.Errorf("args = %q, want --effort medium right after the model", got)
+	}
+
+	d.resume = "session-1"
+	got, cleanup2, err := b.args(d)
+	if err != nil {
+		t.Fatalf("args: %v", err)
+	}
+	defer cleanup2()
+	if i := indexOf(got, "--effort"); i < 0 || got[i+1] != "medium" || indexOf(got, "--resume") < 0 {
+		t.Errorf("resumed args = %q, want --resume and the same --effort", got)
+	}
+
+	d.resume, d.Effort = "", ""
+	got, cleanup3, err := b.args(d)
+	if err != nil {
+		t.Fatalf("args: %v", err)
+	}
+	defer cleanup3()
+	if indexOf(got, "--effort") >= 0 {
+		t.Errorf("args with no effort carry --effort: %q", got)
+	}
+}
+
+// indexOf is the index of s in args, or -1.
+func indexOf(args []string, s string) int {
+	for i, a := range args {
+		if a == s {
+			return i
+		}
+	}
+	return -1
+}
