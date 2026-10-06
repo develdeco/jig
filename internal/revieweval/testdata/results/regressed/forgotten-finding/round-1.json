@@ -19,6 +19,7 @@
       "risk_rationale": "The report silently fails to write with a confusing error in place of the real one."
     }
   ],
+  "still_present": [],
   "reviewed_paths": [
     "inventory/count.go",
     "inventory/report.go"

@@ -319,7 +319,11 @@ that jig recorded on a commit with the same tree
 cumulative `open`/`dismissed` findings folded from every earlier round), the
 backend runs a session against `must_review` - every file the scope diff
 touched plus every still-open finding's file - and jig reads back
-`work/gate.round-N.result.json` (findings, `reviewed_paths`, a summary). The
+`work/gate.round-N.result.json` (findings, `still_present` - unchanged
+earlier findings confirmed by id and current line, which jig expands into
+the earlier finding before folding the round
+([ADR 0022](docs/adr/0022-the-reviewer-confirms-an-unchanged-finding-by-id.md))
+- `reviewed_paths`, a summary). The
 review is a read: test evidence is the oracles' job, and they ran on this
 head before the review, so the reviewer runs no tests, with an empty
 `oracles_passed` too
@@ -330,8 +334,10 @@ session, and rejects the round (`REVIEW_INVALID`) if either moved, or if
 `result.json` fails strict structural validation - an unknown `action` or
 `risk`, a finding whose file is neither present at head nor deleted in the
 scope diff, an oracle that isn't a manifest oracle, a `prior` naming no
-known finding, or `reviewed_paths` missing a `must_review` path all fail the
-round loudly rather than falling back to a partial result.
+known finding, a `still_present` id naming no known finding, repeated, or
+also a finding's `prior`, a `still_present` finding whose file is gone
+without a deletion, or `reviewed_paths` missing a `must_review` path all
+fail the round loudly rather than falling back to a partial result.
 
 **Intent inference.** When `resolveIntent` comes back `"none"` and the
 round is about to dispatch a reviewer (nothing outstanding and the scope

@@ -411,7 +411,11 @@ func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string,
 	if !ok || rnd.Review == nil {
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: reviewer source returned no review content", c.Name, n)
 	}
-	result := rnd.Review.Result
+	// still_present entries are expanded into full ResultFindings here,
+	// right before ApplyRound, the same as a real gate round
+	// (verifydeliver/gate.go): matching and scoring below then see exactly
+	// what a full re-report of each confirmed finding would give them.
+	result := verifydeliver.ExpandStillPresent(rnd.Review.Result, fold.Known)
 
 	reported, aerr := verifydeliver.ApplyRound(n, fold.Known, result, nil, alwaysNotGreen, man, []string{verifydeliver.RiskHigh, verifydeliver.RiskMedium, verifydeliver.RiskLow}, false)
 	if aerr != nil {

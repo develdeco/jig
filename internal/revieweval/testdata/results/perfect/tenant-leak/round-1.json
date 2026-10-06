@@ -10,6 +10,7 @@
       "risk_rationale": "One tenant can read another tenant's billing data."
     }
   ],
+  "still_present": [],
   "reviewed_paths": [
     "billing/invoices.go",
     "billing/report.go"
