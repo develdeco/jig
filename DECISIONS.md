@@ -2967,6 +2967,10 @@ One ADR lists jig's testing method, each item pointing at its decision, and adds
 
 jig's graphify plane gains `Update` and `Query` and a caller: when a project opts in (`context: {graphify: true}` in `project.yaml`) and the binary is on PATH, frontier runs `graphify update .` in the lease and `graphify query` with the slice's goal and earlier slices' files before each dispatch, and writes the linked files and symbols into `slice.json`'s `related` (25 files, 8 symbols each). `graphify-out/` goes in the lease's `info/exclude`; a `graph` journal line records each run, and a failure only empties `related`. `DetectWith` takes the binary lookup, so graphify's test no longer edits PATH and leaves the global-state lint's debt list. See [ADR 0026](docs/adr/0026-a-code-graph-gives-the-builder-its-starting-points.md).
 
+## Headless sessions run nothing in the background (T-34)
+
+A `claude -p` session ends with its turn, and on T-23 a Sonnet builder backgrounded the full suite and ended its turn waiting for it, losing the attempt. Every headless session's settings now set `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so its shell has no background option and a long command is ended at the 30-minute bound instead of moved to the background. This is the recurrence the owner's measure-first decision on shell guards waited for. See ADR 0018's amendment.
+
 ## A lease recovers from an operation a crashed session left unfinished (T-35)
 
 A builder session that died mid-merge (an API error) left the build lease's index unmerged, and the next attempt failed at acquire because no checkout runs over it. On reuse, `pool.Acquire` now ends a merge, rebase, am, cherry-pick or revert left in progress with `--quit`, which keeps every commit it already made (`--abort` would rewind the branch past an am's or a cherry-pick's commits), and resets an unmerged index to HEAD (`reset --merge`), which also covers a conflicted stash pop git keeps no marker for. No branch moves. It names what it ended in `Lease.Recovered`, frontier journals a `lease-recovered` line, and a recovery that fails says `LEASE_UNFINISHED` with how to end it by hand.
