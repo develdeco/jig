@@ -451,17 +451,17 @@ func (rc *runCtx) earlierSlices(sliceID, leaseDir string) ([]earlierSlice, error
 	return out, nil
 }
 
-// lastOracleSeconds is the wall time of jig's latest run of command on
-// this ticket (journal.LastOracleSeconds), reading the journal under
-// storeMu.
-func (rc *runCtx) lastOracleSeconds(command string) (int, error) {
+// lastOracleSeconds is the wall time of jig's latest run of command with
+// env class env up on this ticket (journal.LastOracleSeconds), reading the
+// journal under storeMu.
+func (rc *runCtx) lastOracleSeconds(command, env string) (int, error) {
 	rc.storeMu.Lock()
 	defer rc.storeMu.Unlock()
 	lines, err := journal.Read(rc.d.Store, rc.ticket)
 	if err != nil {
 		return 0, err
 	}
-	return journal.LastOracleSeconds(lines, command), nil
+	return journal.LastOracleSeconds(lines, command, env), nil
 }
 
 // failedAttempts counts sliceID's attempts that failed at the work
@@ -584,7 +584,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 	rjPath := resultJSONPath(d.Store, ticket, sl.ID, attempt)
 
 	oracleCmd := m.OracleCmd(sl.Oracle, ws)
-	oracleSeconds, err := rc.lastOracleSeconds(oracleCmd)
+	oracleSeconds, err := rc.lastOracleSeconds(oracleCmd, sl.Env)
 	if err != nil {
 		rc.fail(fmt.Errorf("frontier: read the oracle's last run time for %s: %w", sl.ID, err))
 		return
@@ -701,14 +701,17 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 		// An oracle run vouches for the reported commit only when the tracked
 		// files are that commit: uncommitted edits go back to the session
 		// like a red run, without running the oracle.
-		var tail string
+		var tail, prompt string
 		if dirty := trackedChanges(lease.Dir); dirty != "" {
-			tail = "Your working tree has uncommitted changes to tracked files, so the commit you reported is not what an oracle run would test:\n" + dirty
+			tail = "uncommitted changes to tracked files:\n" + dirty
+			prompt = renderDirtyTreePrompt(oracleCmd, dirty, dispatch.ResultJSON)
 		} else {
 			evidence := cleanHead(lease.Dir)
 			started := time.Now()
 			out, err := rc.d.runOracle(oracleCmd, lease.Dir)
-			seconds := int(time.Since(started) / time.Second)
+			// Rounded up, so every run records at least a second and 0
+			// keeps meaning "never ran".
+			seconds := int((time.Since(started) + time.Second - 1) / time.Second)
 			result := "pass"
 			if err != nil {
 				result = "fail"
@@ -718,6 +721,7 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 				return res
 			}
 			tail = outputTail(out)
+			prompt = renderOracleFixPrompt(oracleCmd, seconds, tail, dispatch.ResultJSON)
 		}
 
 		resumer, ok := rc.d.Backend.(session.Resumer)
@@ -737,7 +741,7 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 		// must not be read back as green.
 		_ = os.Remove(dispatch.ResultJSON)
 		fix := dispatch
-		fix.Prompt = renderOracleFixPrompt(oracleCmd, tail, dispatch.ResultJSON)
+		fix.Prompt = prompt
 		res = readResult(resumer.Resume(fix, sessionID), dispatch.ResultJSON)
 		rc.journal(journal.Line{Slice: sl.ID, Event: "result", Outcome: res.Outcome, Commit: res.Commit, Attempt: attempt})
 		if rc.isHalted() {

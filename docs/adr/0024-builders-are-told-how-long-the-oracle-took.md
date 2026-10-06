@@ -6,8 +6,9 @@ The owner chose to measure before enforcing anything: BS-3's Sonnet builder made
 
 ## The rule
 
-- **jig times each oracle run at green.** The `oracle` journal line gains `seconds`, the run's wall time in whole seconds.
-- **The next builder of the same command reads it.** `slice.json` gains `oracle_seconds`: the wall time of jig's latest run of this slice's exact oracle command on this ticket, or 0 before the first (`journal.LastOracleSeconds`).
+- **jig times each oracle run at green.** The `oracle` journal line gains `seconds`, the run's wall time rounded up to whole seconds, so any run records at least 1.
+- **The next builder of the same command reads it.** `slice.json` gains `oracle_seconds`: the wall time of jig's latest run of this slice's exact oracle command, with the same env class up, on this ticket, or 0 before the first (`journal.LastOracleSeconds`). The latest run counts whatever its outcome, a red one or one cut off at the 30-minute bound included.
+- **A red run's fix turn says how long it took,** so the session knows what running it again costs. A green with uncommitted changes to tracked files gets its own fix turn, which says jig did not run the oracle.
 - **The dispatch prompt names the field** in its line about slice.json, so a builder knows what a run of its oracle costs before it starts one.
 
 ## Test seams
