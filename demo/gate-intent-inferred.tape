@@ -167,7 +167,7 @@ Show
 ## dispatch, and the report below, both see "inferred", not "none". The
 ## scenario's round-1 reviewer finds nothing to report, so the round is
 ## clean with no triage prompt to wait on: "gate:\n  ticket: JIG-1\n
-## round: 1\n  verdict: clean\n  model: claude-sonnet-5\n  intent:
+## round: 1\n  verdict: clean\n  model: claude-opus-5\n  intent:
 ## inferred\n  scope: full\n  demo: recorded\n  demo_summary: ...\n..."
 ## (axi.KV in gate.go's report, and demoRows beside it): the demo line is the
 ## round's clean-round demo, scripted with no media, so there is no

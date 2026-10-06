@@ -385,6 +385,18 @@ func (rc *runCtx) readSliceState(sliceID string) (store.SliceState, error) {
 	return rc.d.Store.ReadSliceState(rc.ticket, sliceID)
 }
 
+// failedAttempts reads the ticket's journal and counts sliceID's attempts
+// that failed at the work (journal.FailedAttempts).
+func (rc *runCtx) failedAttempts(sliceID string) (int, error) {
+	rc.storeMu.Lock()
+	defer rc.storeMu.Unlock()
+	lines, err := journal.Read(rc.d.Store, rc.ticket)
+	if err != nil {
+		return 0, err
+	}
+	return journal.FailedAttempts(lines, sliceID), nil
+}
+
 // writeNewQuestion allocates the next question id and writes q under it,
 // holding storeMu across both steps so two concurrent repo groups can never
 // allocate and write the same id.
@@ -465,14 +477,23 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		defer rc.tearDownEnv(sl, h)
 	}
 
-	sig := measureSignals(lease.Dir, startSHA, m)
-	model := staircase.Select(d.Rungs, sig)
-
 	st, err := rc.readSliceState(sl.ID)
 	if err != nil {
 		rc.fail(fmt.Errorf("frontier: read slice state %s: %w", sl.ID, err))
 		return
 	}
+
+	// Each earlier attempt of this slice that failed at the work climbs the
+	// staircase a rung (ADR 0019).
+	sig := measureSignals(lease.Dir, startSHA, m)
+	failed, err := rc.failedAttempts(sl.ID)
+	if err != nil {
+		rc.fail(fmt.Errorf("frontier: count failed attempts of %s: %w", sl.ID, err))
+		return
+	}
+	sig.FailedAttempts = failed
+	model := staircase.Select(d.Rungs, sig)
+
 	attempt := st.Attempts + 1
 	st.State = "building"
 	st.Attempts = attempt

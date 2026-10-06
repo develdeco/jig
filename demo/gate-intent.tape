@@ -108,7 +108,7 @@ Show
 ## prompt to wait on - the report prints as soon as the command finishes.
 ## Brief-less and no intent.md yet, so resolveIntent's precedence falls all
 ## the way through to "none": "gate:\n  ticket: JIG-1\n  round: 1\n
-## verdict: fix-slices\n  model: claude-sonnet-5\n  intent: none\n..."
+## verdict: fix-slices\n  model: claude-opus-5\n  intent: none\n..."
 ## (axi.KV, gate.go:156-170).
 Type `jig gate JIG-1 --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 Wait@15s
@@ -129,7 +129,7 @@ Sleep 3s
 ## so the source plays back nothing, and the fold - empty, since round 1
 ## never went through a reviewer - decides the round clean: "gate:\n
 ## ticket: JIG-1\n  round: 2\n  verdict: clean\n  model:
-## claude-sonnet-5\n  intent: explicit\n..." (axi.KV, gate.go:156-170).
+## claude-opus-5\n  intent: explicit\n..." (axi.KV, gate.go:156-170).
 Type `jig gate JIG-1 --intent "make the greeting warmer" --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
 Wait@15s
 Sleep 5s

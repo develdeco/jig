@@ -109,7 +109,7 @@ A review-eval round's result: FAIL when it was refused or failed or any failure 
 _Avoid_: pass/fail, score
 
 **Staircase**:
-The per-dispatch model ladder: cheapest model first, climbing with volume, floored to the dearest model when the diff touches a path a repo declares as invariant-sensitive.
+The per-dispatch model ladder: the first rung first (Sonnet by default), one rung up for each earlier attempt of the slice that failed at the work, floored to the dearest model when the diff touches a path a repo declares as invariant-sensitive.
 _Avoid_: model tiering, escalation policy
 
 **Stall**:

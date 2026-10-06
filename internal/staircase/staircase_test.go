@@ -11,11 +11,11 @@ func TestTransitions(t *testing.T) {
 		want string
 	}{
 		{"no signals", Signals{}, "a"},
-		{"diff lines over threshold", Signals{DiffLines: 401}, "b"},
-		{"diff files over threshold", Signals{DiffFiles: 11}, "b"},
-		{"both volume signals", Signals{DiffLines: 401, DiffFiles: 11}, "b"},
+		{"one failed attempt", Signals{FailedAttempts: 1}, "b"},
+		{"two failed attempts", Signals{FailedAttempts: 2}, "c"},
+		{"more failures than rungs", Signals{FailedAttempts: 5}, "c"},
 		{"invariant", Signals{Invariant: true}, "c"},
-		{"invariant and volume", Signals{Invariant: true, DiffLines: 401}, "c"},
+		{"invariant and a failure", Signals{Invariant: true, FailedAttempts: 1}, "c"},
 	}
 
 	for _, c := range cases {
@@ -29,7 +29,7 @@ func TestTransitions(t *testing.T) {
 
 	t.Run("single-rung config clamps", func(t *testing.T) {
 		single := Config{Rungs: []string{"only"}}
-		for _, s := range []Signals{{}, {DiffLines: 401}, {Invariant: true}, {DiffFiles: 11, Invariant: true}} {
+		for _, s := range []Signals{{}, {FailedAttempts: 2}, {Invariant: true}, {FailedAttempts: 1, Invariant: true}} {
 			if got := Select(single, s); got != "only" {
 				t.Fatalf("Select(single, %+v) = %q, want %q", s, got, "only")
 			}
@@ -61,9 +61,11 @@ func TestDisjoint(t *testing.T) {
 	}
 }
 
+// TestDefault: builds open on Sonnet and climb to Opus; Haiku is used only
+// where a project lists it in project.yaml's staircase (ADR 0019).
 func TestDefault(t *testing.T) {
 	got := Default().Rungs
-	want := []string{"claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"}
+	want := []string{"claude-sonnet-5", "claude-opus-5"}
 	if len(got) != len(want) {
 		t.Fatalf("Default().Rungs = %v, want %v", got, want)
 	}

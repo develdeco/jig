@@ -100,6 +100,33 @@ func BuilderModels(lines []Line) []string {
 	return models
 }
 
+// FailedAttempts counts slice's attempts that failed at the work: a result
+// line whose outcome is not needs-input, flawed-brief or blocked-by-env, for
+// an attempt with no verified line. A question, a flawed brief or a blocked
+// environment is not the builder failing, and a green that verified is a
+// success; a green that did not verify is a failure. The staircase climbs a
+// rung per failed attempt (ADR 0019).
+func FailedAttempts(lines []Line, slice string) int {
+	verified := map[int]bool{}
+	for _, l := range lines {
+		if l.Slice == slice && l.Event == "verified" {
+			verified[l.Attempt] = true
+		}
+	}
+	failed := map[int]bool{}
+	for _, l := range lines {
+		if l.Slice != slice || l.Event != "result" || verified[l.Attempt] {
+			continue
+		}
+		switch l.Outcome {
+		case "needs-input", "flawed-brief", "blocked-by-env":
+			continue
+		}
+		failed[l.Attempt] = true
+	}
+	return len(failed)
+}
+
 // BuiltCommits returns the commit of every event=verified line, without
 // repeats, in journal order: the commits jig's builders reported on the
 // ticket's branch that verified. The frontier journals one when a green result's

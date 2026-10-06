@@ -108,6 +108,27 @@ func TestBuilderModels(t *testing.T) {
 	}
 }
 
+// TestFailedAttempts: an attempt fails at the work when its result is not a
+// question, a flawed brief or a blocked environment, and it did not verify.
+func TestFailedAttempts(t *testing.T) {
+	lines := []Line{
+		{Slice: "a", Event: "result", Outcome: "code-bug", Attempt: 1},
+		{Slice: "a", Event: "result", Outcome: "green", Attempt: 2}, // claimed green, never verified
+		{Slice: "a", Event: "result", Outcome: "needs-input", Attempt: 3},
+		{Slice: "a", Event: "result", Outcome: "flawed-brief", Attempt: 4},
+		{Slice: "a", Event: "result", Outcome: "blocked-by-env", Attempt: 5},
+		{Slice: "a", Event: "result", Outcome: "green", Attempt: 6},
+		{Slice: "a", Event: "verified", Attempt: 6},
+		{Slice: "b", Event: "result", Outcome: "failed", Attempt: 1},
+	}
+	if got := FailedAttempts(lines, "a"); got != 2 {
+		t.Fatalf("FailedAttempts(a) = %d, want 2 (the code-bug and the green that did not verify)", got)
+	}
+	if got := FailedAttempts(lines, "c"); got != 0 {
+		t.Fatalf("FailedAttempts(c) = %d, want 0 for a slice with no lines", got)
+	}
+}
+
 func TestRenderChangelogGolden(t *testing.T) {
 	lines := []Line{
 		{Slice: "a", Event: "dispatch", Model: "claude-sonnet-5"},

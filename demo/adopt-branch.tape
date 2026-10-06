@@ -145,7 +145,7 @@ Sleep 6s
 ## session (inference is reviewer-source code, internal/verifydeliver/review.go,
 ## which a reviewer round on an adopted branch runs like any brief-less
 ## ticket's), the round has no intent: "gate:\n  ticket: JIG-2\n  branch:
-## add-percent\n  round: 1\n  verdict: fix-slices\n  model: claude-haiku-4-5\n
+## add-percent\n  round: 1\n  verdict: fix-slices\n  model: claude-sonnet-5\n
 ## intent: none\n..." (axi.KV, cmd/jig/gate.go's printGateReport). The gate ran
 ## the oracles over origin's add-percent.
 Type `jig gate JIG-2 --branch add-percent --scenario "$JIG_SCENARIO_DIR" --store "$JIG_STORE_DIR"` Enter
