@@ -3,11 +3,14 @@ package verifydeliver
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/manifest"
+	"github.com/develdeco/jig/internal/session"
 )
 
 // commitInBuildLease writes files (repo-relative path to content) in the
@@ -37,27 +40,55 @@ func commitInBuildLease(t *testing.T, fx *fixture.Fixture, files map[string]stri
 	return head
 }
 
-// recordOraclePass journals the pass frontier writes when a slice's oracle
-// passes at its green on a clean tree (ADR 0020).
-func recordOraclePass(t *testing.T, d Deps, ticket, slice, commit string) {
+// testCmd is the fixture repo's test oracle command in workspace ws, as the
+// manifest at the build lease's head resolves it: the command frontier
+// records on an oracle line.
+func testCmd(t *testing.T, fx *fixture.Fixture, ws string) string {
 	t.Helper()
-	if err := journal.Append(d.Store, ticket, journal.Line{Slice: slice, Event: "oracle", Outcome: "pass", Commit: commit, Attempt: 1}); err != nil {
+	man, err := manifest.Resolve(buildLeaseDir(t, fx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, ok := man.Workspace(ws)
+	if !ok {
+		t.Fatalf("no workspace %s", ws)
+	}
+	return man.OracleCmd("test", w)
+}
+
+// recordOracle journals an oracle line the way frontier writes one at a
+// slice's green (ADR 0020).
+func recordOracle(t *testing.T, d Deps, ticket, outcome, commit, command, env string) {
+	t.Helper()
+	if err := journal.Append(d.Store, ticket, journal.Line{Slice: "a", Event: "oracle", Outcome: outcome, Commit: commit, Attempt: 1, Command: command, Env: env}); err != nil {
 		t.Fatal(err)
 	}
 }
 
+// reusedByWorkspace maps each oracles_passed entry's workspace to its
+// reused_from.
+func reusedByWorkspace(runs []OracleRun) map[string]string {
+	got := map[string]string{}
+	for _, r := range runs {
+		got[r.Workspace] = r.ReusedFrom
+	}
+	return got
+}
+
 // TestGateReusesAnOraclePassOnTheSameTree covers ADR 0021 at the gate: a run
-// of the suite that a slice's oracle already passed on a commit whose tree is
-// the gate's head tree is reused, not run again, and review.json says so;
-// every other run still runs.
+// of the suite that jig already passed at a slice's green, with the same
+// command, on a commit with the gate head's tree, under the same env classes
+// and with no failed run beside it, is reused, not run again, and review.json
+// says so; every other run still runs. The fixture repo's suite is
+// test@alpha and test@beta, and its slice d names the env class rig, so the
+// gate brings rig up and a pass stands for its run only with rig up too.
 func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 	t.Parallel()
-	// The fixture repo's suite is test@alpha and test@beta; slice a builds in
-	// alpha and slice c in beta.
 	failing := map[string]string{
 		"alpha/zz_red_test.go": "package alpha\n\nimport \"testing\"\n\nfunc TestRed(t *testing.T) { t.Fatal(\"red on purpose\") }\n",
 		"beta/zz_red_test.go":  "package beta\n\nimport \"testing\"\n\nfunc TestRed(t *testing.T) { t.Fatal(\"red on purpose\") }\n",
 	}
+	note := func(s string) map[string]string { return map[string]string{"alpha/note.txt": s} }
 
 	t.Run("every run reused", func(t *testing.T) {
 		t.Parallel()
@@ -68,34 +99,12 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 		// oracles itself would stop with GATE_ORACLE_FAILED and fail
 		// gateReviewRequest: the recorded passes are what lets it through.
 		head := commitInBuildLease(t, fx, failing)
-		recordOraclePass(t, d, fx.Ticket, "a", head)
-		recordOraclePass(t, d, fx.Ticket, "c", head)
+		recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "alpha"), "rig")
+		recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "beta"), "rig")
 
-		runs := gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed
-		if len(runs) != 2 {
-			t.Fatalf("oracles_passed = %+v, want test@alpha and test@beta", runs)
-		}
-		for _, r := range runs {
-			if r.ReusedFrom != head {
-				t.Errorf("oracles_passed entry %+v, want reused_from %s", r, head)
-			}
-		}
-	})
-
-	t.Run("a pass on another tree is not reused", func(t *testing.T) {
-		t.Parallel()
-		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-		driveBuild(t, fx, "rung-a")
-		d := newDeps(t, fx)
-		earlier := commitInBuildLease(t, fx, map[string]string{"alpha/note.txt": "one\n"})
-		recordOraclePass(t, d, fx.Ticket, "a", earlier)
-		recordOraclePass(t, d, fx.Ticket, "c", earlier)
-		commitInBuildLease(t, fx, map[string]string{"alpha/note.txt": "two\n"})
-
-		for _, r := range gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed {
-			if r.ReusedFrom != "" {
-				t.Errorf("oracles_passed entry %+v reused a pass from a different tree", r)
-			}
+		got := reusedByWorkspace(gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed)
+		if len(got) != 2 || got["alpha"] != head || got["beta"] != head {
+			t.Errorf("reused_from by workspace = %v, want both reused from %s", got, head)
 		}
 	})
 
@@ -104,15 +113,75 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		driveBuild(t, fx, "rung-a")
 		d := newDeps(t, fx)
-		head := commitInBuildLease(t, fx, map[string]string{"alpha/note.txt": "one\n"})
-		recordOraclePass(t, d, fx.Ticket, "a", head)
+		head := commitInBuildLease(t, fx, note("one\n"))
+		recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "alpha"), "rig")
 
-		got := map[string]string{}
-		for _, r := range gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed {
-			got[r.Workspace] = r.ReusedFrom
-		}
+		got := reusedByWorkspace(gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed)
 		if got["alpha"] != head || got["beta"] != "" {
 			t.Errorf("reused_from by workspace = %v, want alpha reused from %s and beta run", got, head)
+		}
+	})
+
+	// Each case below records a pass that must not stand for the gate's run
+	// of test@alpha; the head's tests pass, so the gate runs it and the round
+	// goes on.
+	for _, tc := range []struct {
+		name   string
+		record func(t *testing.T, fx *fixture.Fixture, d Deps, head string)
+	}{
+		{"a pass on another tree", func(t *testing.T, fx *fixture.Fixture, d Deps, _ string) {
+			t.Helper()
+			// commitInBuildLease below this record makes a new head.
+			earlier, err := gitx.RevParse(buildLeaseDir(t, fx), "HEAD~1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			recordOracle(t, d, fx.Ticket, "pass", earlier, testCmd(t, fx, "alpha"), "rig")
+		}},
+		{"another env class set", func(t *testing.T, fx *fixture.Fixture, d Deps, head string) {
+			t.Helper()
+			recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "alpha"), "")
+		}},
+		{"another command", func(t *testing.T, fx *fixture.Fixture, d Deps, head string) {
+			t.Helper()
+			recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "alpha")+" -run TestNothing", "rig")
+		}},
+		{"a failed run on the same tree", func(t *testing.T, fx *fixture.Fixture, d Deps, head string) {
+			t.Helper()
+			recordOracle(t, d, fx.Ticket, "fail", head, testCmd(t, fx, "alpha"), "rig")
+			recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "alpha"), "rig")
+		}},
+	} {
+		t.Run(tc.name+" is not reused", func(t *testing.T) {
+			t.Parallel()
+			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+			driveBuild(t, fx, "rung-a")
+			d := newDeps(t, fx)
+			commitInBuildLease(t, fx, note("one\n"))
+			head := commitInBuildLease(t, fx, note("two\n"))
+			tc.record(t, fx, d, head)
+
+			if got := reusedByWorkspace(gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed); got["alpha"] != "" {
+				t.Errorf("test@alpha reused from %s, want it run", got["alpha"])
+			}
+		})
+	}
+
+	t.Run("a failed gate run says why", func(t *testing.T) {
+		t.Parallel()
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+		driveBuild(t, fx, "rung-a")
+		d := newDeps(t, fx)
+		commitInBuildLease(t, fx, failing)
+
+		backend := stubBackend{run: func(session.Dispatch) error {
+			t.Fatal("a round whose oracles fail dispatched a reviewer")
+			return nil
+		}}
+		_, err := Gate(d, NewReviewerGateSource(backend), GateOpts{Ticket: fx.Ticket, NoDemo: true})
+		wantAxiCode(t, err, "GATE_ORACLE_FAILED")
+		if !strings.Contains(err.Error(), "red on purpose") {
+			t.Errorf("GATE_ORACLE_FAILED = %v, want the failing test's output in it", err)
 		}
 	})
 }

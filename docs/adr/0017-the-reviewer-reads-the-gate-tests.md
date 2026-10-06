@@ -24,3 +24,9 @@ Nothing mechanical. The command screen does not refuse test commands: telling a 
 
 - **The rendered review prompt,** through `TestRenderReviewPromptMatchesDesignGolden`.
 - **`review.json` as the reviewer receives it from `Gate`,** through `TestGateHandsTheReviewerTheOraclesItRan`: the gate's own oracle runs reach the reviewer.
+
+## Amendment: reused passes (ADR 0021)
+
+The gate can reuse a pass jig recorded at a slice's green on a commit with the head's tree, instead of running that oracle again. `oracles_passed` entries then carry `reused_from`, and the prompt line reads:
+
+> Every command in review.json's oracles_passed passed on this head's tree before this review: jig ran it, or reused a pass on a commit with the same tree (reused_from). Review by reading: run no tests.

@@ -61,9 +61,10 @@ type DismissedFinding struct {
 }
 
 // OracleRun is one entry of review.json's "oracles_passed" list: an oracle
-// command the gate ran on the lease head before dispatching the reviewer.
-// The gate stops at the first oracle that fails, so every run that reaches
-// a reviewer passed.
+// command that passed on the lease head's tree before the reviewer was
+// dispatched, run by the gate or, with ReusedFrom set, reused from a pass
+// jig recorded on a commit with that tree. The gate stops at the first
+// oracle that fails, so every run that reaches a reviewer passed.
 type OracleRun struct {
 	Oracle    string `json:"oracle"`
 	Workspace string `json:"workspace"`
@@ -603,7 +604,7 @@ func validateReviewResult(req ReviewRequest, result ReviewResult, leaseDir strin
 // kinds of problems, coaches behavior, or patches a past model mistake.
 const reviewPromptTemplate = `You are reviewing round %d of ticket %s. Your inputs are in review.json at %s.
 Review the %s diff %s..%s in this worktree against the change's intent. review.json's intent names it and its source: ` + intentSourcesPrompt + ` Do not edit files, commit, or push.
-jig ran every command in review.json's oracles_passed on this head before this review, and each passed. Review by reading: run no tests.
+Every command in review.json's oracles_passed passed on this head's tree before this review: jig ran it, or reused a pass on a commit with the same tree (reused_from). Review by reading: run no tests.
 Report every problem you find in the files you review, as they are now, including problems already listed as open. For each, give file, line (0 if unknown), title, detail, action, risk, risk_rationale and oracle, plus prior when it is a finding listed under open or dismissed. The human dismissed the findings listed under dismissed.
 action: "fix" when the fix is objective and does not change what the intent asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
 Tests belong at the seams the intent names: a missing test is a problem only at one of those seams or as the proof of a defect you report, and a test elsewhere is at most a note.
@@ -856,9 +857,10 @@ type RoundInput struct {
 	// does.
 	UserHome string
 	Manifest manifest.Manifest
-	// OracleRuns are the oracle runs Gate made on the lease head just before
-	// this round (runGateOracles), all passed; review.json hands them to the
-	// reviewer as oracles_passed, so the review reads instead of retesting.
+	// OracleRuns are the oracle runs that passed on the lease head's tree
+	// just before this round, made by Gate or reused (runGateOracles);
+	// review.json hands them to the reviewer as oracles_passed, so the review
+	// reads instead of retesting.
 	OracleRuns []OracleRun
 	// Open is findings bookkeeping's cumulative fold (findings.go's
 	// openAndNotedFindingsList), carried whole rather than projected: it
