@@ -247,7 +247,7 @@ exists.
 | `internal/graphify/` | `Detect`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that finds code affected by a seed |
 | `internal/home/` | `Root`, `MachinePath`, `PoolDir`, `IntentExcerptDir`, `IntentScratchDir`, `EvidenceDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths, including the directories intent excerpts and summarizer scratch directories go under, and where one reviewed head's demo media live |
 | `internal/intent/` | `NewClaudeReader`, `Best`, `RenderExcerpt` | a repo's git common dir + a time window → matching local agent `Session`s; a scope diff's files → the `Match` a model then summarizes |
-| `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
+| `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `VerifiedSlices`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
 | `internal/manifest/` | `Resolve`, `MatchesInvariant` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes, and invariant-sensitive paths; a file path → whether it matches a declared invariant |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket`, `Compare`, `DivergedError`, `RequireBuilt`, `HoldsUnpushedBuilt`, `MustExistOnOrigin`, `RecutUnlessBuilt` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point, and synced with its branch when origin has it; anything git shows is not a repository of its own is moved aside and cloned afresh) |
@@ -264,8 +264,11 @@ exists.
 
 The contract between jig and any backend is pure disk: jig writes
 `slice.json` (goal, oracle, workspace, prior attempt log, any answered
-question, and how long jig's last run of the oracle took on this ticket,
-[ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md)), the backend runs a session in the lease worktree, and jig reads
+question, how long jig's last run of the oracle took on this ticket,
+[ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md), and
+what the ticket's verified slices did and changed,
+[ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md)),
+the backend runs a session in the lease worktree, and jig reads
 back `result.json` (outcome, summary, commit, and - for `needs-input` - a
 question). Nothing crosses in memory.
 
