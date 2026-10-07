@@ -18,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/media"
 	"github.com/develdeco/jig/internal/outcome"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
@@ -62,14 +63,6 @@ func makeFileLink(target, link string) error {
 	return os.Symlink(target, link)
 }
 
-// linkFileOrSkip is makeFileLink, skipping the test when it cannot.
-func linkFileOrSkip(t *testing.T, target, link string) {
-	t.Helper()
-	if err := makeFileLink(target, link); err != nil {
-		t.Skipf("symlink: %v", err)
-	}
-}
-
 // makeDirLink makes link a link to the directory target: a symlink, or on
 // Windows, where one needs a privilege, a junction, which Go's Lstat reads
 // as ModeIrregular rather than a symlink. It reports why it cannot.
@@ -81,14 +74,6 @@ func makeDirLink(target, link string) error {
 		return nil
 	}
 	return os.Symlink(target, link)
-}
-
-// linkDirOrSkip is makeDirLink, skipping the test when it cannot.
-func linkDirOrSkip(t *testing.T, target, link string) {
-	t.Helper()
-	if err := makeDirLink(target, link); err != nil {
-		t.Skip(err)
-	}
 }
 
 func demoRes(entries ...string) DemoResult {
@@ -103,8 +88,8 @@ func demoRes(entries ...string) DemoResult {
 // is concerned, the directory jig made: its identity is read right now. A
 // path with nothing there has no identity, and verifyDemoMedia refuses it
 // before it looks for one.
-func verifyFresh(dir string, res DemoResult) ([]demoFile, error) {
-	made, _ := lstatPinned(dir)
+func verifyFresh(dir string, res DemoResult) ([]media.File, error) {
+	made, _ := media.LstatPinned(dir)
 	return verifyDemoMedia(dir, made, res)
 }
 
@@ -310,273 +295,12 @@ func TestParseDemoResultNamesAnEntryByIndexAndBase(t *testing.T) {
 
 // --- verifyDemoMedia ---------------------------------------------------------------
 
-func TestVerifyDemoMediaAcceptsEveryAllowedType(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	names := []string{"a.png", "b.jpg", "c.jpeg", "d.gif", "e.webp", "f.svg", "g.mp4", "h.mov", "i.webm", "UPPER.PNG"}
-	want := map[string]string{}
-	for _, n := range names {
-		want[n] = writeMediaFile(t, dir, n, 100+len(n))
-	}
-	files, err := verifyFresh(dir, demoRes(names...))
-	if err != nil {
-		t.Fatalf("verifyDemoMedia: %v", err)
-	}
-	if len(files) != len(names) {
-		t.Fatalf("accepted %d files, want %d", len(files), len(names))
-	}
-	for i, f := range files {
-		if f.name != names[i] {
-			t.Errorf("file %d = %q, want the listed order %q", i, f.name, names[i])
-		}
-		if f.sha256 != want[f.name] || f.size != int64(100+len(f.name)) {
-			t.Errorf("%s: sha256 %s size %d, want %s size %d", f.name, f.sha256, f.size, want[f.name], 100+len(f.name))
-		}
-		if f.caption != "caption of "+f.name {
-			t.Errorf("%s: caption %q", f.name, f.caption)
-		}
-	}
-	if files[len(files)-1].ext != "png" {
-		t.Errorf("the extension of UPPER.PNG = %q, want it lowercased", files[len(files)-1].ext)
-	}
-}
+// media.Verify's own tests (internal/media) hold the checks on a listing; what
+// stays here is what the demo path says of its own: a refusal that calls the
+// listing "the demo", as demo.yaml records it.
 
-func TestVerifyDemoMediaAcceptsNothingListed(t *testing.T) {
-	t.Parallel()
-	files, err := verifyFresh(t.TempDir(), demoRes())
-	if err != nil || len(files) != 0 {
-		t.Fatalf("verifyDemoMedia of an empty list = %v, %v; want no files and no error", files, err)
-	}
-}
-
-// TestVerifyDemoMediaRefusesAFileOutsideMediaDir: a listed name is a plain
-// file name directly inside media_dir, never a path that reaches elsewhere.
-func TestVerifyDemoMediaRefusesAFileOutsideMediaDir(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	dir := filepath.Join(root, "media")
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeMediaFile(t, root, "outside.png", 10)
-	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeMediaFile(t, filepath.Join(dir, "sub"), "inner.png", 10)
-	abs := filepath.Join(root, "outside.png")
-
-	for _, name := range []string{
-		"../outside.png",
-		"..\\outside.png",
-		"sub/inner.png",
-		"sub\\inner.png",
-		"./x.png",
-		abs,
-		"C:\\outside.png",
-		"C:outside.png",
-		"outside.png:stream",
-		"..",
-		".",
-	} {
-		wantDemoRefusal(t, dir, demoRes(name), "not a plain file name directly inside media_dir")
-	}
-}
-
-// TestVerifyDemoMediaNamesAnEntryThatIsNotAPlainNameByIndexAndBase: the
-// refusal for a listed name that is not a plain file name is jig's own text,
-// committed to the store, and the session may have listed the file by its full
-// path, in a spelling its backend gave it (the WSL mount of a Windows path, for
-// one) that jig has no way to know. It names the entry by its index and the
-// last element of the string, and never repeats the string.
-func TestVerifyDemoMediaNamesAnEntryThatIsNotAPlainNameByIndexAndBase(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	writeMediaFile(t, dir, "ok.png", 10)
-	writeMediaFile(t, dir, "shot.png", 10)
-
-	for name, listed := range listedSpellings(dir, "shot.png") {
-		wantDemoRefusal(t, dir, demoRes("ok.png", listed), `media entry 1 ("shot.png") is not a plain file name directly inside media_dir`)
-
-		_, err := verifyFresh(dir, demoRes("ok.png", listed))
-		if strings.Contains(err.Error(), listed) || strings.Contains(err.Error(), filepath.Dir(listed)) {
-			t.Errorf("%s: refusal = %q repeats what the session listed", name, err)
-		}
-	}
-}
-
-// TestVerifyDemoMediaRefusesASubdirectory: a directory is not a media file,
-// even one named like one.
-func TestVerifyDemoMediaRefusesASubdirectory(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "shots.png"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wantDemoRefusal(t, dir, demoRes("shots.png"), `"shots.png"`, "not a regular file")
-}
-
-// TestVerifyDemoMediaRefusesALink covers a symlink to a file outside media_dir
-// and a link to a directory named like a media file (on Windows a junction,
-// which Lstat reads as irregular): neither is followed.
-func TestVerifyDemoMediaRefusesALink(t *testing.T) {
-	t.Parallel()
-
-	t.Run("file symlink", func(t *testing.T) {
-		root := t.TempDir()
-		dir := filepath.Join(root, "media")
-		if err := os.Mkdir(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		writeMediaFile(t, root, "secret.png", 10)
-		linkFileOrSkip(t, filepath.Join(root, "secret.png"), filepath.Join(dir, "link.png"))
-		wantDemoRefusal(t, dir, demoRes("link.png"), `"link.png"`, "not a regular file")
-	})
-
-	t.Run("directory link", func(t *testing.T) {
-		root := t.TempDir()
-		dir := filepath.Join(root, "media")
-		outside := filepath.Join(root, "outside")
-		for _, d := range []string{dir, outside} {
-			if err := os.Mkdir(d, 0o755); err != nil {
-				t.Fatal(err)
-			}
-		}
-		linkDirOrSkip(t, outside, filepath.Join(dir, "shots.png"))
-		wantDemoRefusal(t, dir, demoRes("shots.png"), `"shots.png"`, "not a regular file")
-	})
-}
-
-// TestVerifyDemoMediaRefusesALinkedMediaDir: media_dir itself must be the real
-// directory jig made, not a link a session swapped in.
-func TestVerifyDemoMediaRefusesALinkedMediaDir(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	real := filepath.Join(root, "real")
-	if err := os.Mkdir(real, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeMediaFile(t, real, "a.png", 10)
-	link := filepath.Join(root, "link")
-	linkDirOrSkip(t, real, link)
-	wantDemoRefusal(t, link, demoRes("a.png"), "media_dir is not a plain directory")
-}
-
-func TestVerifyDemoMediaRefusesAMissingMediaDir(t *testing.T) {
-	t.Parallel()
-	wantDemoRefusal(t, filepath.Join(t.TempDir(), "gone"), demoRes("a.png"), "media_dir cannot be read")
-}
-
-// TestVerifyDemoMediaRefusesADirectoryAboveMediaDirSwappedForALink: a plain
-// directory check follows every parent of media_dir, so a directory above it
-// that a session replaced with a link (on Windows a junction) would carry the
-// demo, and jig's rename after it, outside the evidence tree. media_dir must
-// be the directory jig made, whatever spelling now reaches it.
-func TestVerifyDemoMediaRefusesADirectoryAboveMediaDirSwappedForALink(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	parent := filepath.Join(root, "evidence")
-	dir := filepath.Join(parent, "head")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	made, err := lstatPinned(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeMediaFile(t, dir, "a.png", 10)
-	// The control reads its own identity: comparing made would settle its id
-	// early, before the swap the test is about.
-	if files, err := verifyFresh(dir, demoRes("a.png")); err != nil || len(files) != 1 {
-		t.Fatalf("the directory jig made, unswapped: %+v, %v; want it accepted", files, err)
-	}
-
-	// Somewhere else, a tree of the same shape holds a file that would pass
-	// every other check.
-	elsewhere := filepath.Join(root, "elsewhere")
-	if err := os.MkdirAll(filepath.Join(elsewhere, "head"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeMediaFile(t, filepath.Join(elsewhere, "head"), "a.png", 10)
-	if err := os.Rename(parent, parent+".moved"); err != nil {
-		t.Fatal(err)
-	}
-	linkDirOrSkip(t, elsewhere, parent)
-
-	files, err := verifyDemoMedia(dir, made, demoRes("a.png"))
-	if err == nil {
-		t.Fatalf("accepted %+v through a swapped parent, want a refusal", files)
-	}
-	if !strings.Contains(err.Error(), "not the directory jig made") {
-		t.Fatalf("refusal = %q, want it to say media_dir is not the directory jig made", err)
-	}
-}
-
-// TestVerifyDemoMediaRefusesAnEmptyFile: gh --attach refuses an empty file,
-// so a demo that recorded one would fail at publish. One byte is not empty.
-func TestVerifyDemoMediaRefusesAnEmptyFile(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	writeMediaFile(t, dir, "empty.png", 0)
-	writeMediaFile(t, dir, "empty.mp4", 0)
-	writeMediaFile(t, dir, "one.png", 1)
-	wantDemoRefusal(t, dir, demoRes("empty.png"), `"empty.png" is empty`)
-	wantDemoRefusal(t, dir, demoRes("one.png", "empty.mp4"), `"empty.mp4" is empty`)
-	if files, err := verifyFresh(dir, demoRes("one.png")); err != nil || len(files) != 1 || files[0].size != 1 {
-		t.Fatalf("a file of one byte: %+v, %v; want it accepted", files, err)
-	}
-}
-
-func TestVerifyDemoMediaRefusesABadExtension(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	for _, name := range []string{"notes.txt", "clip.avi", "readme", "x.png.exe", "x.pngg", "x."} {
-		writeMediaFile(t, dir, name, 10)
-		wantDemoRefusal(t, dir, demoRes(name), fmt.Sprintf("%q", name), "not an allowed image")
-	}
-}
-
-func TestVerifyDemoMediaRefusesAMissingFile(t *testing.T) {
-	t.Parallel()
-	wantDemoRefusal(t, t.TempDir(), demoRes("gone.png"), `"gone.png" is not in media_dir`)
-}
-
-func TestVerifyDemoMediaRefusesAFileListedTwice(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	writeMediaFile(t, dir, "a.png", 10)
-	wantDemoRefusal(t, dir, demoRes("a.png", "a.png"), `"a.png" is listed more than once`)
-	// The same file under another case is the same file on a case-insensitive
-	// filesystem, so it is one listing too.
-	wantDemoRefusal(t, dir, demoRes("a.png", "A.PNG"), `"A.PNG" is listed more than once`)
-}
-
-// TestVerifyDemoMediaRefusesAnOversizeFile pins each kind's limit at its
-// boundary: an image at exactly 10 MiB is accepted and one byte more is
-// refused; a video is held to 100 MiB, not the image limit.
-func TestVerifyDemoMediaRefusesAnOversizeFile(t *testing.T) {
-	t.Parallel()
-
-	t.Run("image", func(t *testing.T) {
-		dir := t.TempDir()
-		writeSparseFile(t, dir, "fits.png", 10<<20)
-		if _, err := verifyFresh(dir, demoRes("fits.png")); err != nil {
-			t.Fatalf("an image of exactly 10 MiB: %v", err)
-		}
-		writeSparseFile(t, dir, "big.png", 10<<20+1)
-		wantDemoRefusal(t, dir, demoRes("big.png"), `"big.png"`, "10485761 bytes", "image", "at most 10485760")
-	})
-
-	t.Run("video", func(t *testing.T) {
-		dir := t.TempDir()
-		writeSparseFile(t, dir, "fits.mp4", 11<<20)
-		if _, err := verifyFresh(dir, demoRes("fits.mp4")); err != nil {
-			t.Fatalf("a video of 11 MiB, over the image limit: %v", err)
-		}
-		writeSparseFile(t, dir, "big.webm", 100<<20+1)
-		wantDemoRefusal(t, dir, demoRes("big.webm"), `"big.webm"`, "104857601 bytes", "video", "at most 104857600")
-	})
-}
-
+// TestVerifyDemoMediaRefusesTooManyFiles: exactly 50 files are accepted and a
+// 51st refuses the whole result in the demo's own words.
 func TestVerifyDemoMediaRefusesTooManyFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -592,31 +316,9 @@ func TestVerifyDemoMediaRefusesTooManyFiles(t *testing.T) {
 	wantDemoRefusal(t, dir, demoRes(names...), "lists 51 files", "at most 50")
 }
 
-// TestVerifyDemoMediaNeverAcceptsPartially: one bad file in the middle refuses
-// the whole result, and nothing has been renamed or removed by then.
-func TestVerifyDemoMediaNeverAcceptsPartially(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	writeMediaFile(t, dir, "a.png", 10)
-	writeMediaFile(t, dir, "notes.txt", 10)
-	writeMediaFile(t, dir, "c.png", 10)
-	files, err := verifyFresh(dir, demoRes("a.png", "notes.txt", "c.png"))
-	if err == nil {
-		t.Fatalf("accepted %+v", files)
-	}
-	if files != nil {
-		t.Errorf("a refused result still returned %d files", len(files))
-	}
-	for _, n := range []string{"a.png", "notes.txt", "c.png"} {
-		if _, err := os.Lstat(filepath.Join(dir, n)); err != nil {
-			t.Errorf("%s was touched by a refused verification: %v", n, err)
-		}
-	}
-}
-
 // --- renameDemoMedia ---------------------------------------------------------------
 
-func acceptedFiles(t *testing.T, dir string, names ...string) []demoFile {
+func acceptedFiles(t *testing.T, dir string, names ...string) []media.File {
 	t.Helper()
 	files, err := verifyFresh(dir, demoRes(names...))
 	if err != nil {
@@ -715,72 +417,6 @@ func TestRenameDemoMediaRefusesToOverwriteAnUnlistedFile(t *testing.T) {
 	if hex.EncodeToString(sum[:]) != shaKept {
 		t.Error("the unlisted demo-1.png was overwritten")
 	}
-}
-
-// TestPlainEvidenceParentsRefusesALinkedStoreIDOrTicketDirectory: the
-// directories jig made above a head's media_dir must be plain directories
-// before an attempt clears or makes anything below them; ones that do not
-// exist yet are fine, and so is a link at the head itself, which an attempt
-// removes as itself.
-func TestPlainEvidenceParentsRefusesALinkedStoreIDOrTicketDirectory(t *testing.T) {
-	t.Parallel()
-	newTree := func(t *testing.T) (root, mediaDir string) {
-		t.Helper()
-		root = t.TempDir()
-		mediaDir = filepath.Join(root, "evidence", "id", "JIG-1", "head")
-		return root, mediaDir
-	}
-
-	t.Run("nothing made yet", func(t *testing.T) {
-		_, mediaDir := newTree(t)
-		if err := plainEvidenceParents(mediaDir); err != nil {
-			t.Fatalf("plainEvidenceParents with nothing made: %v", err)
-		}
-	})
-	t.Run("plain directories", func(t *testing.T) {
-		_, mediaDir := newTree(t)
-		if err := os.MkdirAll(mediaDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := plainEvidenceParents(mediaDir); err != nil {
-			t.Fatalf("plainEvidenceParents with plain directories: %v", err)
-		}
-	})
-	for _, level := range []struct{ name, rel string }{
-		{"store id directory", filepath.Join("evidence", "id")},
-		{"ticket directory", filepath.Join("evidence", "id", "JIG-1")},
-	} {
-		level := level
-		t.Run("a linked "+level.name, func(t *testing.T) {
-			root, mediaDir := newTree(t)
-			elsewhere := filepath.Join(root, "elsewhere")
-			if err := os.MkdirAll(filepath.Join(elsewhere, "JIG-1", "head"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			link := filepath.Join(root, level.rel)
-			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			linkDirOrSkip(t, elsewhere, link)
-			err := plainEvidenceParents(mediaDir)
-			if err == nil || !strings.Contains(err.Error(), "is not a plain directory") {
-				t.Fatalf("plainEvidenceParents through a linked %s = %v, want a refusal", level.name, err)
-			}
-			if strings.Contains(err.Error(), root) {
-				t.Errorf("the refusal names a host path: %v", err)
-			}
-		})
-	}
-	t.Run("a link at the head is cleared as itself, not refused here", func(t *testing.T) {
-		root, mediaDir := newTree(t)
-		if err := os.MkdirAll(filepath.Dir(mediaDir), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		linkDirOrSkip(t, root, mediaDir)
-		if err := plainEvidenceParents(mediaDir); err != nil {
-			t.Fatalf("plainEvidenceParents with a link at the head: %v", err)
-		}
-	})
 }
 
 // TestPruneDemoMediaLeavesExactlyTheRecordedFiles: after a demo is accepted
@@ -1252,78 +888,6 @@ func TestDemoMediaDirRefusesATicketThatIsNotOneDirectory(t *testing.T) {
 		if dir, err := demoMediaDir(d, ticket, "abc123"); err == nil {
 			t.Errorf("demoMediaDir for ticket %q = %q, want a refusal", ticket, dir)
 		}
-	}
-}
-
-// --- hashRegularFile -----------------------------------------------------------------
-
-// TestHashRegularFileRefusesAFileThatChanged: the hash is of the very file
-// Lstat described. A file that grew or shrank since, or is another file than
-// the one Lstat saw, is refused instead of hashed, so a session that left a
-// process running cannot slip different bytes in between the check and the read.
-func TestHashRegularFileRefusesAFileThatChanged(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	want := writeMediaFile(t, dir, "a.png", 10)
-	path := filepath.Join(dir, "a.png")
-	info, err := os.Lstat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, err := hashRegularFile(path, info); err != nil || got != want {
-		t.Fatalf("hashRegularFile of an unchanged file = %q, %v; want %q", got, err, want)
-	}
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString("grown"); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := hashRegularFile(path, info); err == nil || !strings.Contains(err.Error(), "changed size") {
-		t.Errorf("hashRegularFile of a file that grew = %q, %v; want a changed-size refusal", got, err)
-	}
-
-	if err := os.Truncate(path, 3); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := hashRegularFile(path, info); err == nil || !strings.Contains(err.Error(), "changed size") {
-		t.Errorf("hashRegularFile of a file that shrank = %q, %v; want a changed-size refusal", got, err)
-	}
-
-	writeMediaFile(t, dir, "b.png", 10)
-	other, err := os.Lstat(filepath.Join(dir, "b.png"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, err := hashRegularFile(path, other); err == nil || !strings.Contains(err.Error(), "changed while") {
-		t.Errorf("hashRegularFile of another file than Lstat saw = %q, %v; want a refusal", got, err)
-	}
-}
-
-// TestHashRegularFileRefusesAFileSwappedAfterLstat: a file replaced by another
-// between the Lstat and the read is refused whatever the platform. On Windows
-// that holds only if the Lstat's file id was read when it was taken.
-func TestHashRegularFileRefusesAFileSwappedAfterLstat(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "a.png")
-	writeMediaFile(t, dir, "a.png", 10)
-	info, err := lstatPinned(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The old file is kept, so the new one cannot reuse its inode.
-	if err := os.Rename(path, path+".old"); err != nil {
-		t.Fatal(err)
-	}
-	writeMediaFile(t, dir, "a.png", 10)
-	if got, err := hashRegularFile(path, info); err == nil || !strings.Contains(err.Error(), "changed while") {
-		t.Fatalf("hashRegularFile of a swapped file = %q, %v; want a refusal", got, err)
 	}
 }
 

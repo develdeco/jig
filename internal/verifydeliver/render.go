@@ -13,6 +13,7 @@ import (
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/media"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -909,7 +910,7 @@ func renderDemoSection(d Deps, st *store.Store, ticket, repoName string, rep rep
 	var omitted []string
 	for _, f := range rec.Media {
 		path := filepath.Join(mediaDir, f.Name)
-		info, err := lstatPinned(path)
+		info, err := media.LstatPinned(path)
 		if err != nil {
 			omitted = append(omitted, f.Name)
 			continue
@@ -919,7 +920,7 @@ func renderDemoSection(d Deps, st *store.Store, ticket, repoName string, rep rep
 			continue
 		}
 		// Verify the sha256.
-		sum, err := hashRegularFile(path, info)
+		sum, err := media.HashRegularFile(path, info)
 		if err != nil || sum != f.SHA256 {
 			omitted = append(omitted, f.Name)
 			continue
@@ -979,7 +980,7 @@ func renderDemoSection(d Deps, st *store.Store, ticket, repoName string, rep rep
 		}
 		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(f.Name), "."))
 		switch {
-		case demoKind(ext) == "image":
+		case media.Kind(ext) == "image":
 			fmt.Fprintf(&b, "- ![%s](./%s)\n", caption, f.Name)
 		case caption == "":
 			fmt.Fprintf(&b, "- ./%s\n", f.Name)

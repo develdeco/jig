@@ -258,6 +258,7 @@ exists.
 | `internal/intent/` | `NewClaudeReader`, `Best`, `RenderExcerpt` | a repo's git common dir + a time window → matching local agent `Session`s; a scope diff's files → the `Match` a model then summarizes |
 | `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `VerifiedSlices`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
 | `internal/manifest/` | `Resolve`, `MatchesInvariant` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes, and invariant-sensitive paths; a file path → whether it matches a declared invariant |
+| `internal/media/` | `Verify`, `Kind`, `PlainName`, `PlainParents`, `LstatPinned`, `HashRegularFile`, `EntryLabel`, `ImageExtensions`, `VideoExtensions` | a directory jig made + a session's listing of files in it → the `File`s that passed what `gh ... --attach` accepts (a plain name, an allowed type, a regular non-empty file within its size limit, hashed from the very file checked), or a refusal naming the first that did not; a standard-library leaf, so `frontier` and `verifydeliver` can both use it |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket`, `Compare`, `DivergedError`, `RequireBuilt`, `HoldsUnpushedBuilt`, `MustExistOnOrigin`, `RecutUnlessBuilt` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point, and synced with its branch when origin has it; anything git shows is not a repository of its own is moved aside and cloned afresh) |
 | `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping under the jig home root → a `Config` |
@@ -729,7 +730,7 @@ under a subject naming it (see the store push above).
    `demo.yaml`'s own order and under its own recorded name - never
    renumbered from the verified files alone - in the one reference form
    `gh` actually rewrites for its kind (gate finding r1-f3, DECISIONS.md):
-   an image (`demoKind`'s own extension list) as markdown image syntax,
+   an image (`media.Kind`'s own extension list) as markdown image syntax,
    `![caption](./<name>)`, which `gh ... --attach` rewrites to the uploaded
    URL in place; a video as the plain bullet `./<name>: caption` it has
    never reliably rewritten, which a later step (below) reads back and
