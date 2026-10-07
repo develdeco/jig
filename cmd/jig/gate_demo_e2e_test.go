@@ -174,6 +174,33 @@ func TestGateDemoThroughMain(t *testing.T) {
 	}
 }
 
+// demoEvidence names what a gate demo leaves under the jig home's evidence
+// directory: every entry of a ticket's evidence directory (evidence/<store
+// id>/<ticket>/) but the directories that are not a demo's: "recordings" (a
+// builder's green oracle run makes it whether or not a demo follows, and its
+// parents stay when the run recorded nothing), "picks" (a publish's) and
+// "reviews" (a reviewer round's).
+func demoEvidence(t *testing.T, jigHome string) []string {
+	t.Helper()
+	tickets, err := filepath.Glob(filepath.Join(jigHome, "evidence", "*", "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	for _, ticketDir := range tickets {
+		entries, err := os.ReadDir(ticketDir)
+		if err != nil {
+			t.Fatalf("read %s: %v", ticketDir, err)
+		}
+		for _, e := range entries {
+			if n := e.Name(); n != "recordings" && n != "picks" && n != "reviews" {
+				left = append(left, e.Name())
+			}
+		}
+	}
+	return left
+}
+
 // TestGateNoDemoFlagThroughMain: --no-demo skips the demo of a clean round,
 // prints no demo line, and leaves no trace of one; the next round without
 // the flag then runs it.
@@ -195,8 +222,8 @@ func TestGateNoDemoFlagThroughMain(t *testing.T) {
 	if strings.Contains(out, "demo") {
 		t.Errorf("a --no-demo report mentions a demo:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(jigHome, "evidence")); err == nil {
-		t.Error("--no-demo created the evidence directory")
+	if left := demoEvidence(t, jigHome); len(left) > 0 {
+		t.Errorf("--no-demo left %v under the evidence directory", left)
 	}
 	work := filepath.Join(st.TicketDir(fx.Ticket), "work")
 	for _, p := range []string{
