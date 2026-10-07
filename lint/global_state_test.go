@@ -23,6 +23,7 @@ var debtList = map[string]bool{
 	"internal/gitx/repo_commit_test.go":         true,
 	"internal/home/home_test.go":                true,
 	"internal/pool/lease_test.go":               true,
+	"internal/repohost/repohost_test.go":        true,
 	"internal/revieweval/leak_test.go":          true,
 	"internal/revieweval/realchild_test.go":     true,
 	"internal/session/extradir_test.go":         true,
@@ -32,9 +33,6 @@ var debtList = map[string]bool{
 	"internal/session/longpath_windows_test.go": true,
 	"internal/session/session_test.go":          true,
 	"internal/store/checkpoint_test.go":         true,
-	"internal/tracker/github_pr_test.go":        true,
-	"internal/tracker/github_test.go":           true,
-	"internal/tracker/local_test.go":            true,
 }
 
 // TestNoGlobalStateEditInInternalTests enforces that no test in internal/

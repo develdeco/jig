@@ -77,23 +77,30 @@ func pushedTable(report verifydeliver.PublishReport) string {
 
 // prURLTable is the publish report's account of the pull request each repo's
 // publish left: its URL, and whether publish opened it or updated the one the
-// branch already had open. A repo whose tracker opens no pull requests has no
-// row.
+// branch already had open. A repo with no pull request still gets a row,
+// naming why in the action column (report.PRNote) rather than being dropped
+// silently: the operator cannot otherwise tell "this remote has no
+// pull-request host" from "the host returned no URL".
 func prURLTable(report verifydeliver.PublishReport) string {
 	repos := make([]string, 0, len(report.PRURL))
-	for repo, url := range report.PRURL {
-		if url != "" {
-			repos = append(repos, repo)
-		}
+	for repo := range report.PRURL {
+		repos = append(repos, repo)
 	}
 	sort.Strings(repos)
 	rows := make([][]string, 0, len(repos))
 	for _, repo := range repos {
+		url := report.PRURL[repo]
 		action := "opened"
-		if report.PRUpdated[repo] {
+		switch {
+		case url != "" && report.PRUpdated[repo]:
 			action = "updated"
+		case url == "":
+			action = report.PRNote[repo]
+			if action == "" {
+				action = "none"
+			}
 		}
-		rows = append(rows, []string{repo, report.PRURL[repo], action})
+		rows = append(rows, []string{repo, url, action})
 	}
 	return axi.Table("pr_url", []string{"repo", "url", "action"}, rows)
 }

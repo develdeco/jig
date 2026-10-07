@@ -1,7 +1,7 @@
-// Command ghstub is a fake `gh` binary used by the tests that need a github
-// tracker without talking to GitHub: tracker's github-adapter tests,
-// cmd/jig's ticket tests, and verifydeliver's publish tests (all build it
-// through fixture.GhStub). It never talks to GitHub: it records every
+// Command ghstub is a fake `gh` binary used by the tests that need a GitHub
+// pull-request host without talking to GitHub: repohost's own tests and
+// verifydeliver's publish tests (both build it through fixture.GhStub). It
+// never talks to GitHub: it records every
 // invocation's argv and working directory to $GH_STUB_LOG (one JSON object
 // per line, `{"argv": [...], "dir": "..."}`, argv[0] the stub binary itself)
 // and answers from a small canned set of responses keyed off the subcommand,

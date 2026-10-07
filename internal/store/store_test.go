@@ -46,6 +46,11 @@ func newTestRemoteStore(t *testing.T) (st *Store, work, remote string) {
 	if err := os.WriteFile(filepath.Join(work, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Also as project.InitStandalone's stores have: Lock's own "*.lock"
+	// sidecar files (never removed) must never show up in `git status`.
+	if err := os.WriteFile(filepath.Join(work, ".gitignore"), []byte("*.lock\n.*.tmp\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	runGit(t, work, "add", "-A")
 	runGit(t, work, "commit", "-m", "init")
 	runGit(t, work, "push", "origin", "main")

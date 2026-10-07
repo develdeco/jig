@@ -63,7 +63,7 @@ func TestTicketRecordRoundTrip(t *testing.T) {
 	}
 
 	deps := []TicketBlockedBy{{Ticket: "T-4", Kind: "merged"}}
-	if err := st.CreateTicketRecord("T-1", Ticket{Title: "Fix the thing", BlockedBy: deps}); err != nil {
+	if err := st.CreateTicketRecord("T-1", Ticket{Title: "Fix the thing", Body: "Line one.\nLine two.", BlockedBy: deps}); err != nil {
 		t.Fatalf("CreateTicketRecord: %v", err)
 	}
 	if err := st.WriteTicketBranch("T-1", "fix/T-1"); err != nil {
@@ -74,9 +74,53 @@ func TestTicketRecordRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTicket: %v", err)
 	}
-	want := Ticket{Title: "Fix the thing", Branch: "fix/T-1", BlockedBy: deps}
+	want := Ticket{Title: "Fix the thing", Body: "Line one.\nLine two.", Branch: "fix/T-1", BlockedBy: deps}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ReadTicket = %+v, want %+v", got, want)
+	}
+}
+
+// TestTicketBodyWrittenAsLiteralBlockAndKeptByRewrite covers the body's wire
+// shape (a literal block, "body: |", next to title - the same style
+// ChartEntry.Body is written in, charts.go) and the rule every rewrite of
+// the record follows: WriteTicketBranch's own read-modify-write must not
+// drop a body it does not otherwise touch, even a single-line one, which
+// yaml.v3 would otherwise write in plain style on its own. An empty body
+// writes no key at all.
+func TestTicketBodyWrittenAsLiteralBlockAndKeptByRewrite(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	if err := st.CreateTicketRecord("T-1", Ticket{Title: "Fix the thing", Body: "A single line"}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
+	}
+
+	raw, err := os.ReadFile(st.TicketFilePath("T-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "body: |") {
+		t.Fatalf("ticket.yaml does not write body as a literal block:\n%s", raw)
+	}
+
+	if err := st.WriteTicketBranch("T-1", "fix/T-1"); err != nil {
+		t.Fatalf("WriteTicketBranch: %v", err)
+	}
+	got, err := st.ReadTicket("T-1")
+	if err != nil {
+		t.Fatalf("ReadTicket: %v", err)
+	}
+	if got.Body != "A single line" {
+		t.Fatalf("body after WriteTicketBranch = %q, want %q (a rewrite must keep it)", got.Body, "A single line")
+	}
+
+	if err := st.CreateTicketRecord("T-2", Ticket{Title: "Nothing to say"}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
+	}
+	raw, err = os.ReadFile(st.TicketFilePath("T-2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "body:") {
+		t.Fatalf("ticket.yaml writes a body key for an empty body:\n%s", raw)
 	}
 }
 
@@ -440,6 +484,7 @@ func TestCreateTicketRecordWritesEveryFieldInOneWrite(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
 	want := Ticket{
 		Title:     "Fix the thing",
+		Body:      "Why this matters and what to do about it.",
 		BlockedBy: []TicketBlockedBy{{Ticket: "T-4", Kind: "merged"}, {Ticket: "T-9", Kind: "stacked"}},
 	}
 
