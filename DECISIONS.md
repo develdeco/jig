@@ -3011,3 +3011,7 @@ jig's graphify plane gains `Update` and `Query` and a caller: when a project opt
 ## Headless sessions run nothing in the background (T-34)
 
 A `claude -p` session ends with its turn, and on T-23 a Sonnet builder backgrounded the full suite and ended its turn waiting for it, losing the attempt. Every headless session's settings now set `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so its shell has no background option and a long command is ended at the 30-minute bound instead of moved to the background. This is the recurrence the owner's measure-first decision on shell guards waited for. See ADR 0018's amendment.
+
+## frontier's tests run in parallel
+
+The quiet-machine profile of the whole suite (main 58e4c34) put its wall at frontier's 635 s: frontier, cmd/jig, e2e and revieweval each ran its tests one at a time, while verifydeliver, parallel since BS-1, ran 4,715 s of tests in 323 s. frontier's tests share no package-level state, and every fixture builds under its own jig home, so the 49 that did not ask to run in parallel now do. frontier alone went from 635 s to about 80 s (three runs: 87, 78 and 80 s), and no test was deleted or changed otherwise, so coverage is the same by construction (ADR 0027's diet as a refactor).
