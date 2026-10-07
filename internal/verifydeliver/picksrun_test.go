@@ -2,6 +2,7 @@ package verifydeliver
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,9 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/media"
 	"github.com/develdeco/jig/internal/session"
 )
 
@@ -487,5 +490,375 @@ func TestPublishRefusesAPickWhoseFileChangedAfterItWasOffered(t *testing.T) {
 	}
 	if body := pf.body(t, report); strings.Contains(body, "### ") {
 		t.Errorf("pr body = %q, want no flows", body)
+	}
+}
+
+// step is the pick step for the fixture's ticket as it stands: its journal read
+// now, the build lease (which holds the commits jig built) as the lease the
+// recorded commits are looked up in, and the head the gate reviewed.
+func (pf *picksFixture) step(t *testing.T, backend session.Backend) picksStep {
+	t.Helper()
+	lines, err := journal.Read(pf.d.Store, pf.fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return picksStep{
+		d: pf.d, backend: backend, ticket: pf.fx.Ticket, repoName: "fixture-repo",
+		leaseDir: buildLeaseDir(t, pf.fx), head: pf.head, lines: lines, warn: pf.d.Warn,
+	}
+}
+
+// onboardingPicks resolves the answers the staging tests stage: all three of
+// the onboarding recordings, and only the first step of the onboarding flow.
+func onboardingPicks(t *testing.T, cands []pickCandidate) (three, one pick) {
+	t.Helper()
+	res, err := ParsePicksResult([]byte(onboardingPick))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if three, err = resolvePicks(res, cands); err != nil {
+		t.Fatal(err)
+	}
+	if one, err = resolvePicks(PicksResult{Summary: "S", Flows: []PicksFlow{{Title: "T", Items: []PicksItem{{ID: "r2"}}}}}, cands); err != nil {
+		t.Fatal(err)
+	}
+	return three, one
+}
+
+// dirNames are the names of the entries of dir, in order.
+func dirNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// TestPublishRefusesStagedMediaThatChangedBeforeThePush: the pick's files are
+// checked once more after the confirmation and before anything is pushed. A
+// file edited or swapped for a link since it was staged stops the publish with
+// a code, with origin untouched and nothing uploaded; the next publish takes
+// the pick from the journal, stages the recordings afresh, and ships them, with
+// no gate round in between.
+func TestPublishRefusesStagedMediaThatChangedBeforeThePush(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		change func(t *testing.T, staged string)
+	}{
+		{"rewritten to the same size", func(t *testing.T, staged string) {
+			if err := os.WriteFile(staged, []byte("LOGIN PNG"), 0o644); err != nil {
+				t.Errorf("rewrite the staged file: %v", err)
+			}
+		}},
+		{"replaced by a link", func(t *testing.T, staged string) {
+			target := filepath.Join(t.TempDir(), "elsewhere.png")
+			if err := os.WriteFile(target, []byte("login png"), 0o644); err != nil {
+				t.Errorf("write the link's target: %v", err)
+				return
+			}
+			if err := os.Remove(staged); err != nil {
+				t.Errorf("remove the staged file: %v", err)
+				return
+			}
+			if err := os.Symlink(target, staged); err != nil {
+				t.Skipf("cannot make a symbolic link here: %v", err)
+			}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			pf := newPicksFixture(t)
+			pf.onboardingRecordings(t)
+			spy := picksScenario(t, onboardingPick)
+			staged := filepath.Join(pf.picksDir(t), "rec-1.png")
+			pushed := false
+			pf.d.GuardedPush = func(string, string, string, bool) error {
+				pushed = true
+				return nil
+			}
+			// The confirmation is where the time passes: it runs after the pick
+			// is staged and before the check.
+			pf.d.Confirm = func(string, string, string, bool) bool {
+				c.change(t, staged)
+				return true
+			}
+
+			_, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Backend: spy})
+			wantAxiCode(t, err, "PUBLISH_PICKS_CHANGED")
+			var ae *axi.Error
+			if errors.As(err, &ae) && !strings.Contains(strings.Join(ae.Help, " "), "Nothing was pushed") {
+				t.Errorf("help = %q, want it to say nothing was pushed", ae.Help)
+			}
+			if pushed {
+				t.Error("the branch was pushed although the staged media had changed")
+			}
+			if sha := originRef(t, pf.fx.RepoRemote, "refs/heads/"+ticketBranch(pf.fx.Ticket)); sha != "" {
+				t.Errorf("origin has the ticket branch at %s after a refused publish, want it untouched", sha)
+			}
+			if create := findGhCall(loggedGhCalls(t, pf.logFile), "pr", "create"); create != nil {
+				t.Errorf("pr create ran (%v) after the staged media changed", create.Argv)
+			}
+
+			// The next publish asks the session nothing, stages afresh, and ships.
+			pf.d.Confirm, pf.d.GuardedPush = nil, nil
+			report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
+			if err != nil {
+				t.Fatalf("the publish after the refusal: %v", err)
+			}
+			if report.Picks.Status != PicksReused || len(spy.dispatches) != 1 {
+				t.Errorf("status = %q after %d dispatches, want the pick reused after one", report.Picks.Status, len(spy.dispatches))
+			}
+			if got, err := os.ReadFile(staged); err != nil || string(got) != "login png" {
+				t.Errorf("staged rec-1.png = %q, %v; want the recording staged afresh", got, err)
+			}
+			create := findGhCall(loggedGhCalls(t, pf.logFile), "pr", "create")
+			if create == nil {
+				t.Fatal("no pr create call after the second publish")
+			}
+			if got, want := attachedFiles(create.Argv), []string{"rec-1.png", "rec-2.svg", "rec-3.mp4"}; !reflect.DeepEqual(got, want) {
+				t.Errorf("pr create --attach files = %v, want %v", got, want)
+			}
+			if sha := originRef(t, pf.fx.RepoRemote, "refs/heads/"+ticketBranch(pf.fx.Ticket)); sha == "" {
+				t.Error("the second publish pushed nothing")
+			}
+		})
+	}
+}
+
+// TestRemoveStagingNeverFollowsALink: the cleanup of a failed staging goes by
+// path, so it removes the directory only when a directory above it is still
+// plain and it is still the directory stage made; a swapped one is left, and
+// what a link leads to is never removed.
+func TestRemoveStagingNeverFollowsALink(t *testing.T) {
+	t.Parallel()
+	setup := func(t *testing.T) (top, dir string, made os.FileInfo) {
+		t.Helper()
+		top = filepath.Join(t.TempDir(), "evidence")
+		dir = filepath.Join(top, "id", "T-1", "picks", "head")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "rec-1.png"), []byte("staged"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		made, err := media.LstatPinned(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return top, dir, made
+	}
+	// victim is a directory outside the evidence tree that a link leads to.
+	victim := func(t *testing.T) string {
+		t.Helper()
+		v := t.TempDir()
+		if err := os.WriteFile(filepath.Join(v, "precious"), []byte("keep"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	kept := func(t *testing.T, v string) {
+		t.Helper()
+		if got, err := os.ReadFile(filepath.Join(v, "precious")); err != nil || string(got) != "keep" {
+			t.Errorf("what the link leads to = %q, %v; want it untouched", got, err)
+		}
+	}
+
+	t.Run("the directory it made", func(t *testing.T) {
+		t.Parallel()
+		top, dir, made := setup(t)
+		removeStaging(top, dir, made)
+		if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+			t.Errorf("the staging directory is still there (err %v)", err)
+		}
+	})
+	t.Run("the directory swapped for a link", func(t *testing.T) {
+		t.Parallel()
+		top, dir, made := setup(t)
+		v := victim(t)
+		if err := os.RemoveAll(dir); err != nil {
+			t.Fatal(err)
+		}
+		symlinkOrSkip(t, v, dir)
+		removeStaging(top, dir, made)
+		kept(t, v)
+		if _, err := os.Lstat(dir); err != nil {
+			t.Errorf("the swapped directory was removed (err %v), want it left for the operator", err)
+		}
+	})
+	t.Run("a directory above it swapped for a link", func(t *testing.T) {
+		t.Parallel()
+		top, dir, made := setup(t)
+		v := victim(t)
+		if err := os.MkdirAll(filepath.Join(v, "head"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(v, "head", "rec-1.png"), []byte("not ours"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		picks := filepath.Dir(dir)
+		if err := os.Rename(picks, picks+".moved"); err != nil {
+			t.Fatal(err)
+		}
+		symlinkOrSkip(t, v, picks)
+		removeStaging(top, dir, made)
+		kept(t, v)
+		if got, err := os.ReadFile(filepath.Join(v, "head", "rec-1.png")); err != nil || string(got) != "not ours" {
+			t.Errorf("a file behind the link = %q, %v; want it untouched", got, err)
+		}
+	})
+	t.Run("a directory it never pinned that is a link", func(t *testing.T) {
+		t.Parallel()
+		top, dir, _ := setup(t)
+		v := victim(t)
+		if err := os.RemoveAll(dir); err != nil {
+			t.Fatal(err)
+		}
+		symlinkOrSkip(t, v, dir)
+		removeStaging(top, dir, nil)
+		kept(t, v)
+		if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+			t.Errorf("the link itself is still there (err %v), want it removed as itself", err)
+		}
+	})
+}
+
+// TestAPickIsNotReusedAfterTheIntentChanged: the intent a pick was judged
+// against is part of the question. A new gate round on the same head can
+// change it (a brief edited, an explicit intent set), and a pick made for the
+// old one is then asked again, not reused.
+func TestAPickIsNotReusedAfterTheIntentChanged(t *testing.T) {
+	t.Parallel()
+	pf := newPicksFixture(t)
+	pf.onboardingRecordings(t)
+	spy := picksScenario(t, onboardingPick)
+	run := func() PicksReport {
+		t.Helper()
+		report, _, err := publishPicks(pf.step(t, spy))
+		if err != nil {
+			t.Fatalf("publishPicks: %v", err)
+		}
+		return report
+	}
+
+	if got := run().Status; got != PicksPicked {
+		t.Fatalf("first status = %q, want picked", got)
+	}
+	if got := run().Status; got != PicksReused || len(spy.dispatches) != 1 {
+		t.Fatalf("second status = %q after %d dispatches, want reused after one", got, len(spy.dispatches))
+	}
+	brief := filepath.Join(pf.d.Store.TicketDir(pf.fx.Ticket), "brief.md")
+	text, err := os.ReadFile(brief)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(brief, append(text, []byte("\nA paragraph added after the first pick.\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := run().Status; got != PicksPicked || len(spy.dispatches) != 2 {
+		t.Errorf("third status = %q after %d dispatches, want a new pick after a second dispatch", got, len(spy.dispatches))
+	}
+}
+
+// TestStagingLeavesNothingOfAnEarlierPickOfTheSameHead: a pick of fewer files
+// than the one before it stages exactly its own, so no rec-N of the earlier
+// pick is left to be attached, and a pick whose staging fails leaves no
+// directory at all.
+func TestStagingLeavesNothingOfAnEarlierPickOfTheSameHead(t *testing.T) {
+	t.Parallel()
+	pf := newPicksFixture(t)
+	pf.onboardingRecordings(t)
+	s := pf.step(t, nil)
+	cands, _, err := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	three, one := onboardingPicks(t, cands)
+	dir := s.picksDir()
+	top := absPath(filepath.Join(pf.d.Home, "evidence"))
+
+	if files, err := s.stage(dir, three); err != nil || len(files) != 3 {
+		t.Fatalf("staging three: %v, %v", files, err)
+	}
+	files, err := s.stage(dir, one)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("staging one: %v, %v", files, err)
+	}
+	if got := dirNames(t, dir); !reflect.DeepEqual(got, []string{"rec-1.png"}) {
+		t.Errorf("staging directory holds %v after the smaller pick, want only rec-1.png", got)
+	}
+	if err := verifyStaged(top, dir, files); err != nil {
+		t.Errorf("verifyStaged on the staged files: %v", err)
+	}
+
+	// A file that changed since it was offered refuses the pick and leaves
+	// no half-staged directory behind.
+	lone := recordedFile(t, pf.d, pf.fx.Ticket, pf.built[0], "a-a1-f0", "lone.mp4")
+	if err := os.WriteFile(lone, []byte("DASHBOARD VIDEO BYTES"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.stage(dir, three); err == nil || !strings.Contains(err.Error(), "the recording lone.mp4 changed while it was being staged") {
+		t.Errorf("staging a changed recording: err = %v, want it refused", err)
+	}
+	if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+		t.Errorf("a refused staging left the directory behind (err %v)", err)
+	}
+}
+
+// TestStagingNeverWritesThroughALink: a link where the staging directory goes
+// is removed as itself and replaced by a real directory, and its target gets
+// nothing; a link above it (the ticket's picks directory) refuses the pick
+// before anything is written, the session included.
+func TestStagingNeverWritesThroughALink(t *testing.T) {
+	t.Parallel()
+	pf := newPicksFixture(t)
+	pf.onboardingRecordings(t)
+	s := pf.step(t, nil)
+	cands, _, err := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, one := onboardingPicks(t, cands)
+	dir := s.picksDir()
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	target := t.TempDir()
+	symlinkOrSkip(t, target, dir)
+	if _, err := s.stage(dir, one); err != nil {
+		t.Fatalf("staging over a link: %v", err)
+	}
+	if got := dirNames(t, target); len(got) != 0 {
+		t.Errorf("the link's target received %v, want nothing", got)
+	}
+	if fi, err := os.Lstat(dir); err != nil || fi.Mode().Type() != os.ModeDir {
+		t.Errorf("the staging directory is %v (err %v), want a real directory", fi, err)
+	}
+
+	if err := os.RemoveAll(filepath.Dir(dir)); err != nil {
+		t.Fatal(err)
+	}
+	above := t.TempDir()
+	symlinkOrSkip(t, above, filepath.Dir(dir))
+	spy := picksScenario(t, onboardingPick)
+	report, rendered, err := publishPicks(pf.step(t, spy))
+	if err != nil {
+		t.Fatalf("publishPicks: %v", err)
+	}
+	if report.Status != PicksRefused || !strings.Contains(report.Reason, "not a plain directory") || rendered != nil {
+		t.Errorf("report = %+v, rendered = %v; want a refusal because a directory above is a link", report, rendered)
+	}
+	if len(spy.dispatches) != 0 {
+		t.Errorf("%d sessions were dispatched with a link above the picks directory", len(spy.dispatches))
+	}
+	if got := dirNames(t, above); len(got) != 0 {
+		t.Errorf("the link's target received %v, want nothing", got)
 	}
 }

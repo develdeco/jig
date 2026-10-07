@@ -111,6 +111,7 @@ func RenderPicksPrompt(reqPath, resultPath string) string {
 var (
 	picksResultTopKeys  = map[string]bool{"flows": true, "summary": true}
 	picksResultFlowKeys = map[string]bool{"title": true, "items": true}
+	picksResultItemKeys = map[string]bool{"id": true, "caption": true}
 )
 
 // picksInvalid wraps msg as the error ParsePicksResult and resolvePicks return
@@ -147,7 +148,7 @@ func ParsePicksResult(data []byte) (PicksResult, error) {
 			return PicksResult{}, picksInvalid("%q must not be null", key)
 		}
 	}
-	if bad, err := unknownKey(data, picksResultTopKeys, listKeySpec{"flows", picksResultFlowKeys}); err == nil && bad != "" {
+	if bad, err := unknownKey(data, picksResultTopKeys, listKeySpec{"flows", picksResultFlowKeys}); (err == nil && bad != "") || unknownItemKey(data) {
 		return PicksResult{}, picksInvalid("it has a key other than flows, summary, title, items, id and caption")
 	}
 
@@ -202,7 +203,8 @@ var hexSHA = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 // every file of a "recorded" line that wrote some and was not refused, whose
 // commit is head or an ancestor of it in leaseDir (a recording of a commit the
 // branch no longer holds shows something it does not ship), and of the files
-// sharing a flow, scenario and step the one from the latest such line, since a
+// sharing a flow, scenario and step those of the latest such line (all of them:
+// one step can be two files, a screenshot and a video), since a
 // later build recorded the same scenario again. A candidate is then checked
 // against its file under the jig home (recordingProblem); one that fails is no
 // candidate, and dropped names it and why. The candidates come back in a
@@ -257,22 +259,32 @@ func recordedCandidates(d Deps, lines []journal.Line, leaseDir, head string) ([]
 		flow, scenario string
 		step           int
 	}
-	latest := map[key]pickCandidate{}
-	for _, l := range recorded {
+	// Of the lines that recorded a key, the latest one is the key's: a later
+	// build recorded the scenario again. Every file of that line with the key is
+	// a candidate, since one step can be recorded as two files (a screenshot and
+	// a video, or an untagged login.png and login.svg, which both default to the
+	// scenario "login").
+	latestLine := map[key]int{}
+	for i, l := range recorded {
 		if gone[l.Commit] {
 			continue
 		}
 		for _, r := range l.Recordings {
-			latest[key{r.Flow, r.Scenario, r.Step}] = pickCandidate{
+			latestLine[key{r.Flow, r.Scenario, r.Step}] = i
+		}
+	}
+	var all []pickCandidate
+	for i, l := range recorded {
+		for _, r := range l.Recordings {
+			if gone[l.Commit] || latestLine[key{r.Flow, r.Scenario, r.Step}] != i {
+				continue
+			}
+			all = append(all, pickCandidate{
 				PicksCandidate: PicksCandidate{Scenario: r.Scenario, Flow: r.Flow, Step: r.Step, Caption: r.Caption, Commit: l.Commit, Name: r.File},
 				run:            l.RecordRun,
 				rec:            r,
-			}
+			})
 		}
-	}
-	all := make([]pickCandidate, 0, len(latest))
-	for _, c := range latest {
-		all = append(all, c)
 	}
 	sort.Slice(all, func(i, j int) bool {
 		a, b := all[i], all[j]
@@ -359,12 +371,15 @@ func recordingProblem(d Deps, top, storeID, ticket string, c pickCandidate) stri
 	return ""
 }
 
-// pickFingerprint identifies a set of candidates: the hash of everything about
-// each one that decides what a pick of it would show. A re-publish of the same
-// head whose candidates hash the same asks the same question, so it takes the
-// earlier answer.
-func pickFingerprint(cands []pickCandidate) string {
+// pickFingerprint identifies a question put to the pick session: the hash of
+// everything about each candidate that decides what a pick of it would show,
+// and of the intent it was judged against, its source and the hash of its text
+// (not its path, which is of this machine). A re-publish of the same head
+// whose candidates and intent hash the same asks the same question, so it takes
+// the earlier answer; a new gate round that changed the intent does not.
+func pickFingerprint(cands []pickCandidate, intentSource, intentHash string) string {
 	h := sha256.New()
+	fmt.Fprintf(h, "intent %q %q\n", intentSource, intentHash)
 	for _, c := range cands {
 		fmt.Fprintf(h, "%q %q %q %q %q %q %d %q\n", c.ID, c.Commit, c.run, c.rec.File, c.rec.SHA256, c.Scenario, c.Step, c.Flow+"\x00"+c.Caption)
 	}
@@ -578,4 +593,30 @@ func renderPicksSection(p pick, dir string, files []DemoFile, knownHostDirs []ho
 	}
 	res.Section = b.String()
 	return res
+}
+
+// unknownItemKey reports whether an item of a flow of data, a pick result,
+// has a key that is not exactly one of the item keys. unknownKey looks one
+// list level down, at the flows, and the decoder matches the items' field names
+// without regard to case, so this is the check that makes {"ID": ...} as
+// refused as {"Title": ...}.
+func unknownItemKey(data []byte) bool {
+	var top struct {
+		Flows []struct {
+			Items []map[string]json.RawMessage `json:"items"`
+		} `json:"flows"`
+	}
+	if json.Unmarshal(data, &top) != nil {
+		return false
+	}
+	for _, f := range top.Flows {
+		for _, it := range f.Items {
+			for key := range it {
+				if !picksResultItemKeys[key] {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

@@ -505,6 +505,24 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		confirmed = true
 	}
 
+	// The files a pick staged are attached by name from their directory, and
+	// the session and the confirmation have run since they were copied: check
+	// them once more before anything is pushed. A pick's media are never
+	// uploaded unchecked, and a change here refuses the publish with origin
+	// untouched: the next publish reuses the journaled pick (the head and the
+	// recordings are the same) and stages the files afresh, with no gate round.
+	// What is left after this is the push and the host's own read of the files,
+	// which a check made by jig cannot close, since the host opens them by name.
+	if picked != nil && host != nil {
+		if err := verifyStaged(absPath(filepath.Join(d.Home, "evidence")), picked.MediaDir, picked.MediaFiles); err != nil {
+			return PublishReport{}, &axi.Error{
+				Msg:  fmt.Sprintf("the recordings staged for %s changed before they were attached: %v", ticket, err),
+				Code: "PUBLISH_PICKS_CHANGED",
+				Help: []string{fmt.Sprintf("Nothing was pushed. Run `jig publish %s` again: it reuses the pick and stages the recordings afresh.", ticket)},
+			}
+		}
+	}
+
 	if err := guardedPushFn(lease.Dir, "origin", branch, confirmed); err != nil {
 		return PublishReport{}, err
 	}
