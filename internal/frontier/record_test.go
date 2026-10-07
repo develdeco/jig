@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -366,7 +367,6 @@ func TestOracleAtGreenRefusesTheWholeCollection(t *testing.T) {
 	}{
 		{"an empty recording", map[string]string{"good.svg": loginSVG, "empty.png": ""}, `file "empty.png" is empty`},
 		{"a tag that is not valid", map[string]string{"good.svg": loginSVG, "good.svg.json": `{"scenario":"x","colour":"red"}`}, `tag "good.svg.json" is not valid: it has a field other than`},
-		{"too many recordings", manyFiles(media.MaxFiles + 1), "at most 50 are accepted"},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -398,6 +398,80 @@ func manyFiles(n int) map[string]string {
 		files[string(rune('a'+i/26))+string(rune('a'+i%26))+".svg"] = loginSVG
 	}
 	return files
+}
+
+// sortedNames returns the keys of files in name order.
+func sortedNames(files map[string]string) []string {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// TestOracleAtGreenKeepsMoreRecordingsThanOneAttachTakes: jig's own end-to-end
+// suite makes dozens of runs, so a run's collection is bounded by
+// maxRecordings, not by the 50 files one `gh --attach` takes (media.MaxFiles),
+// which binds publish's pick. Each recording is verified on its own and all are
+// kept. Beyond maxRecordings the later ones by name are left out and counted,
+// not a reason to refuse the rest, and a tag of one left out is not read.
+func TestOracleAtGreenKeepsMoreRecordingsThanOneAttachTakes(t *testing.T) {
+	t.Parallel()
+	t.Run("more than the attach limit, within the bound", func(t *testing.T) {
+		t.Parallel()
+		files := manyFiles(media.MaxFiles + 10)
+		r := newRecordRun(t, &recordingOracle{files: files})
+		if res := r.atGreen(); res.Outcome != outcome.Green {
+			t.Fatalf("outcome = %q, want green", res.Outcome)
+		}
+		rec := recordedLines(r.journaled())
+		if len(rec) != 1 || rec[0].Outcome != "" || len(rec[0].Recordings) != len(files) {
+			t.Fatalf("recorded lines = %+v, want one with all %d recordings and no outcome", rec, len(files))
+		}
+		for i, name := range sortedNames(files) {
+			if got := rec[0].Recordings[i]; got.File != name || got.SHA256 != sum(loginSVG) {
+				t.Errorf("recording %d = %+v, want %s intact", i, got, name)
+			}
+		}
+	})
+	t.Run("beyond the bound", func(t *testing.T) {
+		t.Parallel()
+		files := manyFiles(maxRecordings + 5)
+		names := sortedNames(files)
+		// The tag of a recording left out is never read, so it cannot refuse the rest.
+		files[names[len(names)-1]+".json"] = "not json"
+		r := newRecordRun(t, &recordingOracle{files: files})
+		if res := r.atGreen(); res.Outcome != outcome.Green {
+			t.Fatalf("outcome = %q, want green", res.Outcome)
+		}
+		rec := recordedLines(r.journaled())
+		if len(rec) != 1 || len(rec[0].Recordings) != maxRecordings {
+			t.Fatalf("recorded lines = %+v, want one keeping %d recordings", rec, maxRecordings)
+		}
+		if want := "5 recordings beyond the first 200 left out"; rec[0].Outcome != want {
+			t.Errorf("Outcome = %q, want %q", rec[0].Outcome, want)
+		}
+		for i, name := range names[:maxRecordings] {
+			if rec[0].Recordings[i].File != name {
+				t.Errorf("recording %d = %s, want %s: the first by name are kept", i, rec[0].Recordings[i].File, name)
+				break
+			}
+		}
+		mustExist(t, filepath.Join(r.recordDir(firstRun), names[len(names)-1]))
+	})
+	t.Run("a refusal still refuses the whole collection", func(t *testing.T) {
+		t.Parallel()
+		files := manyFiles(media.MaxFiles + 10)
+		files["aa.svg"] = ""
+		r := newRecordRun(t, &recordingOracle{files: files})
+		r.atGreen()
+		rec := recordedLines(r.journaled())
+		if len(rec) != 1 || !strings.HasPrefix(rec[0].Outcome, "refused: ") || !strings.Contains(rec[0].Outcome, `file "aa.svg" is empty`) || len(rec[0].Recordings) != 0 {
+			t.Fatalf("recorded lines = %+v, want one refusal naming aa.svg", rec)
+		}
+		mustNotExist(t, r.recordDir(firstRun))
+	})
 }
 
 // TestOracleAtGreenNeverCommitsAHostPathOrAnUnboundedReason: a tag may name
@@ -895,7 +969,8 @@ func TestCollectRecordings(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		return collectRecordings(top, dir)
+		got, err := collectRecordings(top, dir)
+		return got.recs, got.dropped, err
 	}
 
 	t.Run("recordings come back in name order, scenario from the name", func(t *testing.T) {
@@ -985,7 +1060,8 @@ func TestCollectRecordings(t *testing.T) {
 	t.Run("a directory that is gone holds nothing", func(t *testing.T) {
 		t.Parallel()
 		top := filepath.Join(t.TempDir(), "evidence")
-		recs, dropped, err := collectRecordings(top, filepath.Join(top, "id", "T", "recordings", "sha", "run"))
+		got, err := collectRecordings(top, filepath.Join(top, "id", "T", "recordings", "sha", "run"))
+		recs, dropped := got.recs, got.dropped
 		if err != nil || len(recs) != 0 || len(dropped) != 0 {
 			t.Errorf("recs=%+v dropped=%v err=%v", recs, dropped, err)
 		}
@@ -1000,14 +1076,14 @@ func TestCollectRecordings(t *testing.T) {
 		if err := os.WriteFile(dir, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := collectRecordings(top, dir); err == nil || !strings.Contains(err.Error(), "is not a plain directory") {
+		if _, err := collectRecordings(top, dir); err == nil || !strings.Contains(err.Error(), "is not a plain directory") {
 			t.Errorf("err = %v, want the refusal", err)
 		}
 	})
 	t.Run("a directory outside the evidence directory is refused", func(t *testing.T) {
 		t.Parallel()
 		top := filepath.Join(t.TempDir(), "evidence")
-		if _, _, err := collectRecordings(top, t.TempDir()); err == nil {
+		if _, err := collectRecordings(top, t.TempDir()); err == nil {
 			t.Error("a directory that is not below the evidence directory was read")
 		}
 	})

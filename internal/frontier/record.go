@@ -43,6 +43,13 @@ const (
 	maxFlowBytes     = 200
 	maxCaptionBytes  = 1000
 
+	// maxRecordings bounds how many recordings one oracle run's collection
+	// keeps: jig's own end-to-end suite makes dozens, and each is verified on
+	// its own. The 50 files media.MaxFiles allows bind what one `gh --attach`
+	// takes, which is publish's pick of recordings, not their collection.
+	// Beyond it the later recordings by name are left out and counted.
+	maxRecordings = 200
+
 	// maxDroppedNames bounds how many dropped entries a recorded line names.
 	maxDroppedNames = 5
 
@@ -148,20 +155,25 @@ func (rc *runCtx) finishRecording(sliceID string, attempt int, commit string, t 
 		line.Outcome = "refused: " + capText(leaveOutHostPaths(err.Error(), t.dir, absPath(rc.d.Home)), maxOutcomeBytes)
 		rc.journal(line)
 	}
-	recs, dropped, err := collectRecordings(top, t.dir)
+	got, err := collectRecordings(top, t.dir)
 	switch {
 	case err != nil:
 		_ = removeRecordDir(top, t.dir)
 		refuse(err)
 		return
-	case len(recs) == 0 && len(dropped) == 0:
+	case len(got.recs) == 0 && len(got.dropped) == 0:
 		_ = os.Remove(t.dir)
 		return
 	}
-	line.Recordings = recs
-	if len(dropped) > 0 {
-		line.Outcome = capText("dropped: "+nameDropped(dropped), maxOutcomeBytes)
+	line.Recordings = got.recs
+	var notes []string
+	if len(got.dropped) > 0 {
+		notes = append(notes, "dropped: "+nameDropped(got.dropped))
 	}
+	if got.over > 0 {
+		notes = append(notes, fmt.Sprintf("%d recordings beyond the first %d left out", got.over, maxRecordings))
+	}
+	line.Outcome = capText(strings.Join(notes, "; "), maxOutcomeBytes)
 	rc.journal(line)
 }
 
@@ -237,71 +249,83 @@ func pickRecordings(entries []dirEntry) (picks []pick, dropped []string) {
 	return picks, dropped
 }
 
+// collected is what collectRecordings found in a record directory.
+type collected struct {
+	recs    []journal.Recording // in name order
+	dropped []string            // entries that are not recordings, by name
+	over    int                 // recordings beyond maxRecordings, left out
+}
+
 // collectRecordings reads dir, the record directory of a finished oracle run
 // below top (the evidence directory of the jig home), and returns the
 // recordings in it in name order and the names of the entries it left
-// unrecorded (pickRecordings). Only the files directly in dir count.
+// unrecorded (pickRecordings). Only the files directly in dir count. At most
+// maxRecordings are kept: the first by name, the rest only counted, and not
+// read, so a tag of a recording left out cannot refuse the others.
 //
 // A harness may remove and recreate the directory (Playwright clears its
 // output directory), so dir is not required to be the very directory jig
 // made. What is required is that it is a plain directory under plain parents
 // when it is read: those are checked first, before anything in it is read,
 // and the directory is pinned then for the media rules (media.Verify), which
-// are the gate demo's: their types, sizes and count, no link, and every file
-// hashed from the very file checked. A directory the harness removed and did
-// not recreate held nothing. An unreadable or invalid tag, or a recording that
-// fails a rule, refuses the whole collection with a reason naming the file.
-func collectRecordings(top, dir string) (recs []journal.Recording, dropped []string, err error) {
+// are the gate demo's, applied to each recording on its own: its type and
+// size, no link, and the file hashed from the very file checked. The number of
+// files is not one of them here, since the 50 of media.MaxFiles is what one
+// `gh --attach` takes, which binds publish's pick. A directory the harness
+// removed and did not recreate held nothing. An unreadable or invalid tag, or
+// a recording that fails a rule, refuses the whole collection with a reason
+// naming the file.
+func collectRecordings(top, dir string) (collected, error) {
+	var none collected
 	if err := media.PlainParents(top, dir); err != nil {
-		return nil, nil, err
+		return none, err
 	}
 	made, err := media.LstatPinned(dir)
 	if os.IsNotExist(err) {
-		return nil, nil, nil
+		return none, nil
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s cannot be read: %w", recordDirEnv, withoutPath(err))
+		return none, fmt.Errorf("%s cannot be read: %w", recordDirEnv, withoutPath(err))
 	}
 	if made.Mode().Type() != os.ModeDir {
-		return nil, nil, fmt.Errorf("%s is not a plain directory (a link or junction is refused)", recordDirEnv)
+		return none, fmt.Errorf("%s is not a plain directory (a link or junction is refused)", recordDirEnv)
 	}
 	dirEntries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s cannot be read: %w", recordDirEnv, withoutPath(err))
+		return none, fmt.Errorf("%s cannot be read: %w", recordDirEnv, withoutPath(err))
 	}
 	entries := make([]dirEntry, len(dirEntries))
 	for i, e := range dirEntries {
 		entries[i] = dirEntry{name: e.Name(), regular: e.Type().IsRegular()}
 	}
 	picks, dropped := pickRecordings(entries)
-	if len(picks) == 0 {
-		return nil, dropped, nil
+	got := collected{dropped: dropped}
+	if len(picks) > maxRecordings {
+		got.over = len(picks) - maxRecordings
+		picks = picks[:maxRecordings]
 	}
 
-	tags := make([]recordingTag, len(picks))
-	listed := make([]media.Listed, len(picks))
-	for i, p := range picks {
+	got.recs = make([]journal.Recording, 0, len(picks))
+	for _, p := range picks {
+		var tag recordingTag
 		if p.tag != "" {
-			if tags[i], err = readTag(dir, p.tag); err != nil {
-				return nil, nil, err
+			if tag, err = readTag(dir, p.tag); err != nil {
+				return none, err
 			}
 		}
-		listed[i] = media.Listed{File: p.name, Caption: tags[i].Caption}
-	}
-	files, err := media.Verify(dir, recordDirEnv, made, listed)
-	if err != nil {
-		return nil, nil, err
-	}
-	recs = make([]journal.Recording, len(files))
-	for i, f := range files {
-		tag := tags[i]
+		// One at a time: Verify refuses a listing of more than media.MaxFiles.
+		files, err := media.Verify(dir, recordDirEnv, made, []media.Listed{{File: p.name, Caption: tag.Caption}})
+		if err != nil {
+			return none, err
+		}
+		f := files[0]
 		scenario := tag.Scenario
 		if scenario == "" {
 			scenario = strings.TrimSuffix(f.Name, filepath.Ext(f.Name))
 		}
-		recs[i] = journal.Recording{File: f.Name, SHA256: f.SHA256, Size: f.Size, Scenario: scenario, Flow: tag.Flow, Step: tag.Step, Caption: tag.Caption}
+		got.recs = append(got.recs, journal.Recording{File: f.Name, SHA256: f.SHA256, Size: f.Size, Scenario: scenario, Flow: tag.Flow, Step: tag.Step, Caption: tag.Caption})
 	}
-	return recs, dropped, nil
+	return got, nil
 }
 
 // readTag reads and parses the tag file name in dir, strictly: an unknown
