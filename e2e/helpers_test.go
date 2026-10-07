@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,7 +94,9 @@ func sameEnvName(a, b string) bool {
 // runJig runs the built jig binary with cwd and args in the process
 // environment plus env's variables. It never fails the test on a non-zero
 // exit: callers assert Code themselves, since every jig subcommand's
-// pause/stop/error paths are meaningful exit codes, not test failures.
+// pause/stop/error paths are meaningful exit codes, not test failures. While
+// JIG_RECORD_DIR is set it also records the run (record_test.go); the
+// returned output is the same either way.
 func runJig(t *testing.T, env jigEnv, cwd string, args ...string) jigResult {
 	t.Helper()
 	if env.home == "" {
@@ -104,10 +107,12 @@ func runJig(t *testing.T, env jigEnv, cwd string, args ...string) jigResult {
 	cmd.Dir = cwd
 	cmd.Env = env.environ()
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return jigResult{Stdout: stdout.String(), Stderr: stderr.String(), Code: exitCodeOf(t, err)}
+	code := records.run(t, recordCall{env: env, cwd: cwd, args: args}, &stdout, &stderr, func(out, errs io.Writer) int {
+		cmd.Stdout = out
+		cmd.Stderr = errs
+		return exitCodeOf(t, cmd.Run())
+	})
+	return jigResult{Stdout: stdout.String(), Stderr: stderr.String(), Code: code}
 }
 
 // newFixture generates a fresh fixture under a fresh jig home and returns
