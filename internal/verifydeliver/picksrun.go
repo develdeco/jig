@@ -434,7 +434,12 @@ func removeStaging(top, dir string, made os.FileInfo) {
 	if err != nil {
 		return
 	}
-	if made != nil && !os.SameFile(made, cur) {
+	// A link is never the pinned staging directory, whatever its identity
+	// says: on Linux a link made where the directory was removed can be
+	// handed the freed inode number, and os.SameFile compares only device and
+	// inode. (Unpinned, a link is removed as itself: RemoveAll never follows
+	// it.)
+	if made != nil && (cur.Mode().Type() != os.ModeDir || !os.SameFile(made, cur)) {
 		return
 	}
 	_ = os.RemoveAll(dir)
