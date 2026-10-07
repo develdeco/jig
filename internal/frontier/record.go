@@ -30,7 +30,8 @@ import (
 const (
 	// recordDirEnv names the variable that gives an oracle run its recording
 	// directory. A run that does not have it set does not record. The gate's
-	// own oracle run never sets it, and no child of jig inherits it.
+	// own oracle run never sets it, and no oracle run, env command or session
+	// jig starts inherits it (envrun.RecordDirEnv).
 	recordDirEnv = envrun.RecordDirEnv
 
 	// maxTagBytes bounds a tag file: a few short fields, never a document.
@@ -122,34 +123,30 @@ func (rc *runCtx) startRecording(sliceID string, attempt, fix int, commit string
 	return recordTarget{}
 }
 
-// finishRecording settles t after the oracle run at commit. Nothing under a
-// parent that has become a link or junction is read or removed: the directory
-// is left for the operator and the refusal is journaled. A failed run's
-// recordings are discarded, since only a green scenario is evidence. A passing
-// run's directory is collected and, when it held anything, journaled as one
-// "recorded" line keyed by commit and the run: with the verified recordings,
-// or with the reason the whole collection was refused (and the directory
-// removed). A directory that held nothing is removed. It runs before
-// oracleAtGreen returns green, so the line is there before the slice is
-// marked green.
+// finishRecording settles t after the oracle run at commit. A failed run's
+// recordings are discarded, since only a green scenario is evidence, and
+// nothing is journaled for it. A passing run's directory is collected and,
+// when it held anything, journaled as one "recorded" line keyed by commit and
+// the run: with the verified recordings, or with the reason the whole
+// collection was refused (and the directory removed). A directory that held
+// nothing is removed. Nothing under a directory above t.dir that has become a
+// link or junction is read or removed, whatever the run's outcome: the
+// directory is left for the operator, and for a passing run the refusal is
+// journaled. It runs before oracleAtGreen returns green, so the line is there
+// before the slice is marked green.
 func (rc *runCtx) finishRecording(sliceID string, attempt int, commit string, t recordTarget, passed bool) {
 	if t.dir == "" {
 		return
 	}
 	top := rc.evidenceTop()
+	if !passed {
+		_ = removeRecordDir(top, t.dir)
+		return
+	}
 	line := journal.Line{Slice: sliceID, Event: "recorded", Commit: commit, Attempt: attempt, RecordRun: t.run}
 	refuse := func(err error) {
 		line.Outcome = "refused: " + capText(leaveOutHostPaths(err.Error(), t.dir, absPath(rc.d.Home)), maxOutcomeBytes)
 		rc.journal(line)
-	}
-
-	if err := media.PlainParents(top, t.dir); err != nil {
-		refuse(err)
-		return
-	}
-	if !passed {
-		_ = removeRecordDir(top, t.dir)
-		return
 	}
 	recs, dropped, err := collectRecordings(top, t.dir)
 	switch {

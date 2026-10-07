@@ -191,6 +191,10 @@ func sum(content string) string {
 	return hex.EncodeToString(h[:])
 }
 
+// asJSON is s as the inside of a JSON string: each backslash written as two,
+// the way a Windows path appears in a JSON key or in a decoder's message.
+func asJSON(s string) string { return strings.ReplaceAll(s, `\`, `\\`) }
+
 func mustNotExist(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Lstat(path); !os.IsNotExist(err) {
@@ -403,7 +407,6 @@ func manyFiles(n int) map[string]string {
 // short.
 func TestOracleAtGreenNeverCommitsAHostPathOrAnUnboundedReason(t *testing.T) {
 	t.Parallel()
-	asJSON := func(s string) string { return strings.ReplaceAll(s, `\`, `\`) }
 	for name, tag := range map[string]func(dir string) string{
 		"a field named as the directory": func(dir string) string { return `{"` + asJSON(dir) + `":1}` },
 		"a huge field name":              func(string) string { return `{"` + strings.Repeat("k", maxTagBytes/2) + `":1}` },
@@ -444,7 +447,6 @@ func TestLeaveOutHostPathsNamesTheDirectoriesJigChose(t *testing.T) {
 	t.Parallel()
 	jigHome := filepath.Join(t.TempDir(), "jig home")
 	recordDir := filepath.Join(jigHome, "evidence", "id", "T-1", "recordings", "abc", "run")
-	asJSON := func(s string) string { return strings.ReplaceAll(s, `\`, `\`) }
 	for name, spell := range map[string]func(string) string{
 		"as they are":                func(p string) string { return p },
 		"with forward slashes":       filepath.ToSlash,
@@ -467,6 +469,25 @@ func TestLeaveOutHostPathsNamesTheDirectoriesJigChose(t *testing.T) {
 	}
 	if got := leaveOutHostPaths("nothing here", "", ""); got != "nothing here" {
 		t.Errorf("leaveOutHostPaths with no directories changed the text: %q", got)
+	}
+}
+
+// TestLeaveOutHostPathsInAWindowsSpelling runs on every OS with Windows-style
+// paths: an error text that quotes one inside a JSON string has each
+// separator doubled, and the reason must not keep it.
+func TestLeaveOutHostPathsInAWindowsSpelling(t *testing.T) {
+	t.Parallel()
+	jigHome := `C:\Users\Someone\.config\jig`
+	recordDir := jigHome + `\evidence\id\T-1\recordings\abc\run`
+	in := `json: unknown field "` + asJSON(recordDir) + `"; open ` + recordDir + `\a.png: denied; ` + asJSON(jigHome)
+	got := leaveOutHostPaths(in, recordDir, jigHome)
+	for _, bad := range []string{jigHome, asJSON(jigHome), "Someone"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("leaveOutHostPaths(%q) = %q, still holds %q", in, got, bad)
+		}
+	}
+	if want := `json: unknown field "JIG_RECORD_DIR"; open JIG_RECORD_DIR\a.png: denied; <jig home>`; got != want {
+		t.Errorf("leaveOutHostPaths = %q, want %q", got, want)
 	}
 }
 
@@ -587,16 +608,17 @@ func TestOracleAtGreenAcceptsADirectoryTheHarnessRecreated(t *testing.T) {
 }
 
 // TestOracleAtGreenLeavesWhatASwappedDirectoryLeadsTo: a link in place of the
-// record directory, or of a directory above it, is refused, and nothing is
-// read or removed through it: a link's target is never touched, whether the
-// run passed or failed.
+// record directory, or of a directory above it, is never read or removed
+// through: a link's target is never touched, whether the run passed or failed.
+// A passing run journals the refusal. A failing run journals nothing, as for
+// any failing run, and leaves the directory as it is.
 func TestOracleAtGreenLeavesWhatASwappedDirectoryLeadsTo(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		fail bool
 		swap func(t *testing.T, r *recordRun, rd, elsewhere string) error
-		want string
+		want string // the refusal a recorded line says; "" for no recorded line
 	}{
 		{"the record directory", false, func(t *testing.T, r *recordRun, rd, elsewhere string) error {
 			if err := os.RemoveAll(rd); err != nil {
@@ -611,13 +633,19 @@ func TestOracleAtGreenLeavesWhatASwappedDirectoryLeadsTo(t *testing.T) {
 			}
 			return os.Symlink(elsewhere, parent)
 		}, "is not a plain directory"},
+		{"the record directory, on a failing run", true, func(t *testing.T, r *recordRun, rd, elsewhere string) error {
+			if err := os.RemoveAll(rd); err != nil {
+				return err
+			}
+			return os.Symlink(elsewhere, rd)
+		}, ""},
 		{"a directory above it, on a failing run", true, func(t *testing.T, r *recordRun, rd, elsewhere string) error {
 			parent := filepath.Dir(filepath.Dir(rd))
 			if err := os.Rename(parent, parent+".moved"); err != nil {
 				return err
 			}
 			return os.Symlink(elsewhere, parent)
-		}, "is not a plain directory"},
+		}, ""},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -647,14 +675,20 @@ func TestOracleAtGreenLeavesWhatASwappedDirectoryLeadsTo(t *testing.T) {
 			r.atGreen()
 
 			rec := recordedLines(r.journaled())
-			if len(rec) != 1 || !strings.HasPrefix(rec[0].Outcome, "refused: ") || !strings.Contains(rec[0].Outcome, tc.want) {
-				t.Fatalf("recorded lines = %+v, want one refusal saying %q", rec, tc.want)
-			}
-			if len(rec[0].Recordings) != 0 {
-				t.Errorf("recordings were collected through a link: %+v", rec[0].Recordings)
-			}
-			if strings.Contains(rec[0].Outcome, "x.png") {
-				t.Errorf("the refusal quotes what the link leads to: %s", rec[0].Outcome)
+			if tc.want == "" {
+				if len(rec) != 0 {
+					t.Errorf("a failing run journaled a recorded line: %+v", rec)
+				}
+			} else {
+				if len(rec) != 1 || !strings.HasPrefix(rec[0].Outcome, "refused: ") || !strings.Contains(rec[0].Outcome, tc.want) {
+					t.Fatalf("recorded lines = %+v, want one refusal saying %q", rec, tc.want)
+				}
+				if len(rec[0].Recordings) != 0 {
+					t.Errorf("recordings were collected through a link: %+v", rec[0].Recordings)
+				}
+				if strings.Contains(rec[0].Outcome, "x.png") {
+					t.Errorf("the refusal quotes what the link leads to: %s", rec[0].Outcome)
+				}
 			}
 			for _, p := range precious {
 				mustExist(t, p)

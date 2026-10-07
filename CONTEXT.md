@@ -65,7 +65,7 @@ What a session shows a person reviewing a change: the change working, as a scree
 _Avoid_: receipt (evidence that a check passed), screencast
 
 **Recording**:
-What the build's end-to-end scenarios write while they run at a builder's green oracle run: a screenshot, a video or a terminal capture, optionally tagged with its scenario, flow, step and caption. jig gives that run a directory of its own under the jig home's `evidence/` (`JIG_RECORD_DIR`, which no child of jig inherits), verifies what a passing run left there, and journals it as one `recorded` line with the commit the oracle ran at and the run; a failing run's recordings are discarded, and the gate records nothing. The source the demo is moving to (ADR 0029).
+What the build's end-to-end scenarios write while they run at a builder's green oracle run: a screenshot, a video or a terminal capture, optionally tagged with its scenario, flow, step and caption. jig gives that run a directory of its own under the jig home's `evidence/` (`JIG_RECORD_DIR`, which jig strips from the environment of every oracle run, env command and session it starts), verifies what a passing run left there, and journals it as one `recorded` line with the commit the oracle ran at and the run; a failing run's recordings are discarded, and the gate records nothing. The source the demo is moving to (ADR 0029).
 _Avoid_: demo (the gate session's media for one reviewed head), screencast
 
 **Fix slice**:

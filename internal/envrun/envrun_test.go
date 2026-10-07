@@ -250,6 +250,16 @@ func TestShellOutputHelper(t *testing.T) {
 	}
 	t.Logf("plain=%s", strings.TrimSpace(plain))
 	t.Logf("given=%s", strings.TrimSpace(given))
+	// An env class's up, check and down commands (Shell) must not see it either.
+	notSet := `test -z "$JIG_RECORD_DIR"`
+	if runtime.GOOS == "windows" {
+		notSet = "if defined JIG_RECORD_DIR exit 1"
+	}
+	if err := Shell(notSet, dir); err != nil {
+		t.Logf("shell=saw it: %v", err)
+	} else {
+		t.Logf("shell=unset")
+	}
 }
 
 // TestShellOutputDoesNotPassOnTheRecordDirItInherited: jig can run inside a
@@ -268,9 +278,69 @@ func TestShellOutputDoesNotPassOnTheRecordDirItInherited(t *testing.T) {
 	if strings.Contains(got, "set-outer") {
 		t.Errorf("a command saw the inherited JIG_RECORD_DIR:\n%s", got)
 	}
-	for _, want := range []string{"plain=unset", "given=set-given"} {
+	for _, want := range []string{"plain=unset", "given=set-given", "shell=unset"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("helper output lacks %q:\n%s", want, got)
 		}
+	}
+}
+
+// envrunPWDHelperEnv marks a run of this test binary as the command
+// TestShellOutputGivesTheChildThePWDOfItsDir shells out.
+const envrunPWDHelperEnv = "JIG_ENVRUN_TEST_PWD_HELPER"
+
+// TestPWDHelper runs as the command TestShellOutputGivesTheChildThePWDOfItsDir
+// shells out, and prints the PWD it was given. Outside that it does nothing.
+func TestPWDHelper(t *testing.T) {
+	if os.Getenv(envrunPWDHelperEnv) == "" {
+		t.Skip("only the command of TestShellOutputGivesTheChildThePWDOfItsDir runs this")
+	}
+	t.Logf("pwd=%s", os.Getenv("PWD"))
+}
+
+// TestShellOutputGivesTheChildThePWDOfItsDir: a command's environment is the
+// inherited one with the PWD os/exec sets for the directory it runs in. Setting
+// Env by hand drops that PWD, and the child (a program exec'd without a shell
+// resetting PWD, as a session's claude is) gets jig's own, which names another
+// directory. Windows has no PWD.
+func TestShellOutputGivesTheChildThePWDOfItsDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no PWD")
+	}
+	dir := t.TempDir()
+	if wd, err := os.Getwd(); err != nil || filepath.Clean(wd) == filepath.Clean(dir) {
+		t.Fatalf("the test needs to run elsewhere than %s (cwd %q, %v)", dir, wd, err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := "'" + exe + "' -test.run='^TestPWDHelper$' -test.v"
+	for _, tc := range []struct {
+		name string
+		run  func() (string, error)
+	}{
+		{"ShellOutput", func() (string, error) { return ShellOutput(envrunPWDHelperEnv+"=1 "+child, dir, time.Minute) }},
+		{"ShellOutputEnv", func() (string, error) {
+			return ShellOutputEnv(child, dir, time.Minute, []string{envrunPWDHelperEnv + "=1"})
+		}},
+	} {
+		out, err := tc.run()
+		if err != nil || !strings.Contains(out, "pwd="+dir+"\n") {
+			t.Errorf("%s: out=%q err=%v, want the child's PWD to be %s", tc.name, out, err, dir)
+		}
+	}
+
+	// And as a plain function of the command.
+	c := exec.Command("true")
+	c.Dir = dir
+	var pwd string
+	for _, kv := range ChildEnv(c) {
+		if v, ok := strings.CutPrefix(kv, "PWD="); ok {
+			pwd = v
+		}
+	}
+	if pwd != dir {
+		t.Errorf("ChildEnv PWD = %q, want %q", pwd, dir)
 	}
 }

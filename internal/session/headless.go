@@ -260,10 +260,11 @@ func (b *headlessBackend) run(d Dispatch) (string, error) {
 	if b.env != nil {
 		cmd.Env = childEnv(b.goos, b.env, d.Worktree)
 	} else {
-		// The inherited environment, except the variable that makes a run
+		// The inherited environment (with the PWD os/exec sets for cmd.Dir, so
+		// this is built after cmd.Dir is), except the variable that makes a run
 		// record (ADR 0029): a builder session starts the project's tests, and
 		// jig may itself be running inside a recording oracle run.
-		cmd.Env = envrun.Environ()
+		cmd.Env = envrun.ChildEnv(cmd)
 	}
 	newProcessGroup(cmd)
 	// A session spawns children - a shell per Bash call, a test runner,
@@ -511,10 +512,11 @@ func rulePath(goos, p string) string {
 // worktree (d.Worktree, the same directory cmd.Dir already names): env
 // verbatim, minus any PWD or OLDPWD entry, and any JIG_RECORD_DIR one (how a
 // run is told to record, which only jig's own oracle run sets;
-// envrun.RecordDirEnv), with PWD then appended as worktree. Names are compared case-insensitively on goos == "windows",
-// where environment variable names are not case sensitive, and case-
-// sensitively elsewhere - the same distinction rulePath already makes for
-// this backend. An inherited PWD naming some other directory, or an OLDPWD
+// envrun.RecordDirEnv), with PWD then appended as worktree. Names are
+// compared case-insensitively on goos == "windows", where environment
+// variable names are not case sensitive, and case-sensitively elsewhere -
+// the same distinction rulePath already makes for this backend. An
+// inherited PWD naming some other directory, or an OLDPWD
 // naming a directory that has nothing to do with this dispatch, would
 // either misreport the child's own cwd to a program that trusts PWD over
 // calling getcwd, or hand it a path the caller never intended it to see.
