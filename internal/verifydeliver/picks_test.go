@@ -659,9 +659,9 @@ func TestCopyRecordingRefusesWhatIsNotTheCheckedFileInTheMadeDirectory(t *testin
 	}
 }
 
-// TestVerifyStagedHoldsEveryStagedFileToWhatWasStaged: right before the host
-// attaches them by name, each staged file must still be the regular file of
-// the staged size and hash, in a plain directory.
+// TestVerifyStagedHoldsEveryStagedFileToWhatWasStaged: before anything is
+// pushed, each staged file the host will attach by name must still be the
+// regular file of the staged size and hash, in a plain directory.
 func TestVerifyStagedHoldsEveryStagedFileToWhatWasStaged(t *testing.T) {
 	t.Parallel()
 	setup := func(t *testing.T) (top, dir string, files []DemoFile) {

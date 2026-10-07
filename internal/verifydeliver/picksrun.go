@@ -312,12 +312,13 @@ func (s picksStep) stage(dir string, p pick) (files []DemoFile, err error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, pickRefused("the picks directory could not be made: %v", err)
 	}
+	var made os.FileInfo
 	defer func() {
 		if err != nil {
-			_ = os.RemoveAll(dir)
+			removeStaging(top, dir, made)
 		}
 	}()
-	made, err := media.LstatPinned(dir)
+	made, err = media.LstatPinned(dir)
 	if err != nil || made.Mode().Type() != os.ModeDir {
 		return nil, pickRefused("the picks directory is not a plain directory")
 	}
@@ -386,11 +387,12 @@ func copyRecording(top, src, dir string, made os.FileInfo, name string, rec jour
 	return nil
 }
 
-// verifyStaged checks, right before the host attaches them, that dir is still
-// a plain directory under plain parents and that every staged file in it is
-// still the regular file of the recorded size and sha256 stage made. The files
-// are attached by name from dir, so a file swapped or edited between staging
-// and the attach call would otherwise be the one uploaded.
+// verifyStaged checks, after the confirmation and before anything is pushed,
+// that dir is still a plain directory under plain parents and that every staged
+// file in it is still the regular file of the recorded size and sha256 stage
+// made. The files are attached by name from dir, so a file swapped or edited
+// between staging and the attach call would otherwise be the one uploaded. It
+// runs before the push so that a refusal leaves origin as it was.
 func verifyStaged(top, dir string, files []DemoFile) error {
 	if err := media.PlainParents(top, dir); err != nil {
 		return err
@@ -415,4 +417,25 @@ func verifyStaged(top, dir string, files []DemoFile) error {
 		}
 	}
 	return nil
+}
+
+// removeStaging removes dir, the staging directory of a staging that failed,
+// unless it cannot be sure what it would remove: RemoveAll goes by path, and
+// one that followed a link swapped in for a directory above dir, or for dir
+// itself, would remove what the link leads to. So a directory above dir that is
+// no longer plain, or a dir that is no longer the directory stage made (made,
+// pinned when it was made; nil when it never was), is left for the operator.
+// A link is never followed: RemoveAll removes one as itself.
+func removeStaging(top, dir string, made os.FileInfo) {
+	if media.PlainParents(top, dir) != nil {
+		return
+	}
+	cur, err := media.LstatPinned(dir)
+	if err != nil {
+		return
+	}
+	if made != nil && !os.SameFile(made, cur) {
+		return
+	}
+	_ = os.RemoveAll(dir)
 }

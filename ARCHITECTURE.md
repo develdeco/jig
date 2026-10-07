@@ -779,8 +779,9 @@ under a subject naming it (see the store push above).
    finds them, with host paths left out whole. A refused pick or a failed
    session is journaled (`publish-picks`, `refused: <reason>`), said on
    stderr and in `PublishReport.Picks`, and the gate's demo renders as it
-   always did. The staged files are checked again right before the host reads
-   them (`verifyStaged`, `PUBLISH_PICKS_CHANGED`). A publish of the same head
+   always did. The staged files are checked again after the confirmation and
+   before the push (`verifyStaged`, `PUBLISH_PICKS_CHANGED`: origin untouched,
+   and the next publish reuses the pick and stages afresh). A publish of the same head
    over the same candidates and intent (their fingerprint) takes the earlier
    pick from the journal, re-validated, and dispatches nothing.
    `## Verification` names the oracles green at the last clean round
