@@ -6,12 +6,14 @@ package e2e
 // and while it is set every runJig call also writes a recording of the run
 // into it: an animated SVG of what jig printed, and a tag beside it that
 // names the test as the scenario and flow and the call's place in the test
-// as the step. Unset, nothing is recorded and runJig is what it was.
+// as the step. Unset, nothing is recorded and runJig is what it was (the
+// jig under test never sees the variable either way).
 //
 // The recording is a by-product of the run, so it never fails a test: a
 // recording that cannot be made or written is logged and dropped.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -44,10 +46,11 @@ const (
 	recordMaxHeight = 100
 	recordMinHeight = 4
 
-	// maxRecordings is how many recordings a directory may hold: jig refuses
-	// the whole collection above 50, so recording stops here rather than
-	// lose them all.
-	maxRecordings = 50
+	// maxRecordings is how many recordings a directory may hold: the most the
+	// collection of an oracle run accepts, each verified on its own. (The 50
+	// of gh's --attach binds publish's pick, not the collection.) Recording
+	// stops here rather than lose the whole collection.
+	maxRecordings = 200
 
 	// maxTagText bounds a tag's scenario and flow (the most jig accepts is
 	// 200 bytes); maxCaptionText bounds its caption (jig accepts 1000, a
@@ -57,6 +60,10 @@ const (
 
 	// maxNameBytes bounds the test-name part of a recording's file name.
 	maxNameBytes = 96
+
+	// maxLineHold bounds what a stream holds back waiting for its line to
+	// end; a line longer than this is passed on in pieces.
+	maxLineHold = 64 << 10
 )
 
 // recordT is the part of *testing.T a recording uses, so a test of the
@@ -74,16 +81,17 @@ var records = newRecordings(os.Getenv(recordDirEnv))
 // recordings is where one test binary writes its recordings: dir, and what
 // the tests running side by side have written into it so far.
 type recordings struct {
-	dir string // "" records nothing
+	dir   string // "" records nothing
+	limit int    // how many recordings dir may hold
 
 	mu      sync.Mutex
 	steps   map[string]int // test name -> its last step
 	written int            // recordings made or being made
-	full    bool           // the cap was reached and logged
+	full    bool           // the limit was reached and logged
 }
 
 func newRecordings(dir string) *recordings {
-	return &recordings{dir: dir, steps: map[string]int{}}
+	return &recordings{dir: dir, limit: maxRecordings, steps: map[string]int{}}
 }
 
 // recordCall is one jig run, as the test made it.
@@ -98,7 +106,9 @@ type recordCall struct {
 // The caller's stdout and stderr are what its test asserts on and receive the
 // process's output exactly as it is. While r records, run also tees both
 // streams into a recording of the call: the command as a prompt line, the
-// output, and the exit code when it is not zero.
+// output, and the exit code when it is not zero. What the recording shows is
+// read a line at a time with the host's paths left out (lineScrubber), so a
+// path a pipe read split in two is found whole.
 func (r *recordings) run(t recordT, call recordCall, stdout, stderr io.Writer, runProcess func(stdout, stderr io.Writer) int) int {
 	t.Helper()
 	step, ok := r.reserve(t)
@@ -116,14 +126,18 @@ func (r *recordings) run(t recordT, call recordCall, stdout, stderr io.Writer, r
 		t.Logf("record %s: %v", t.Name(), err)
 		return runProcess(stdout, stderr)
 	}
+	paths := newPathScrubber(hostPaths(call))
 	meta := rec.Stream()
-	fmt.Fprintf(meta, "\x1b[1m$ jig %s\x1b[0m\n", shellWords(call.args))
-	code := runProcess(io.MultiWriter(stdout, rec.Stream()), io.MultiWriter(stderr, rec.Stream()))
+	fmt.Fprintf(meta, "\x1b[1m$ jig %s\x1b[0m\n", paths.scrub(shellWords(call.args)))
+	outTee, errTee := newLineScrubber(rec.Stream(), paths), newLineScrubber(rec.Stream(), paths)
+	code := runProcess(io.MultiWriter(stdout, outTee), io.MultiWriter(stderr, errTee))
+	outTee.Flush()
+	errTee.Flush()
 	if code != 0 {
 		fmt.Fprintf(meta, "\x1b[31m[exit %d]\x1b[0m\n", code)
 	}
 	finished = true
-	if err := r.write(t.Name(), step, call, rec.Cast()); err != nil {
+	if err := r.write(t.Name(), step, paths, call.args, rec.Cast()); err != nil {
 		t.Logf("record %s: %v", t.Name(), err)
 		r.release()
 	}
@@ -139,10 +153,10 @@ func (r *recordings) reserve(t recordT) (step int, ok bool) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.written >= maxRecordings {
+	if r.written >= r.limit {
 		if !r.full {
 			r.full = true
-			t.Logf("record: %s holds %d recordings, the most jig accepts; the rest of this run is not recorded", recordDirEnv, maxRecordings)
+			t.Logf("record: %s holds %d recordings, the most a collection accepts; the rest of this run is not recorded", recordDirEnv, r.limit)
 		}
 		return 0, false
 	}
@@ -158,34 +172,61 @@ func (r *recordings) release() {
 	r.mu.Unlock()
 }
 
-// write renders c, the recording of call, and writes the SVG and its tag
-// into the directory. A tag is written only beside an SVG, and an SVG whose
-// tag could not be written is removed, so a failure leaves no half.
-func (r *recordings) write(test string, step int, call recordCall, c termrec.Cast) error {
-	c = fitHeight(redact(c, hostPaths(call)))
-	svg, err := c.SVG(termrec.SVGOptions{})
+// write renders c, the recording of a call with args, and writes the SVG and
+// its tag into the directory. jig collects an SVG whether or not its tag is
+// there, so none is ever there half written, and no other recording's file is
+// ever replaced:
+//
+//  1. The tag is created exclusively, which claims the file name.
+//  2. The SVG is written to <name>.svg.part, which is not a type jig collects.
+//  3. The part is renamed to <name>.svg, so the SVG appears whole, tag first.
+//
+// Whatever fails after step 1 removes what this call made.
+func (r *recordings) write(test string, step int, paths *pathScrubber, args []string, c termrec.Cast) error {
+	svg, err := fitHeight(c).SVG(termrec.SVGOptions{})
 	if err != nil {
 		return err
 	}
 	tag, err := encodeTag(recordingTag{
-		Scenario: capText(test, maxTagText),
-		Flow:     capText(test, maxTagText),
+		Scenario: capText(paths.scrub(test), maxTagText),
+		Flow:     capText(paths.scrub(test), maxTagText),
 		Step:     step,
-		Caption:  capText(caption(call.args), maxCaptionText),
+		Caption:  capText(paths.scrub(caption(args)), maxCaptionText),
 	})
 	if err != nil {
 		return err
 	}
-	name := recordingName(test, step)
-	path := filepath.Join(r.dir, name)
-	if err := os.WriteFile(path, svg, 0o644); err != nil {
+	path := filepath.Join(r.dir, recordingName(test, step))
+	if err := createExclusive(path+".json", tag); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path+".json", tag, 0o644); err != nil {
-		os.Remove(path)
+	if err := createExclusive(path+".part", svg); err != nil {
+		os.Remove(path + ".json")
+		return err
+	}
+	if err := os.Rename(path+".part", path); err != nil {
+		os.Remove(path + ".part")
+		os.Remove(path + ".json")
 		return err
 	}
 	return nil
+}
+
+// createExclusive writes data to a new file at path. It fails, touching
+// nothing, when path exists; a file it could not finish writing is removed.
+func createExclusive(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(path)
+	}
+	return err
 }
 
 // fitHeight returns c on the shortest terminal that ends on the same screen:
@@ -230,9 +271,10 @@ func encodeTag(tag recordingTag) ([]byte, error) {
 var dashRuns = regexp.MustCompile(`-{2,}`)
 
 // recordingName is the file name of the step'th recording of the named test:
-// the test's name as a plain file name (letters, digits, '-' and '_'), cut
-// short with a hash of the whole name when it is long, then the step. The
-// name is the test's, so two tests never share one.
+// the test's name as a plain file name (letters, digits, '-' and '_'), then
+// the step. A name that had to change to be plain (a subtest's slashes, a
+// space) or be cut short gets a hash of the whole name, since two different
+// names can come to the same plain one.
 func recordingName(test string, step int) string {
 	var b strings.Builder
 	for _, r := range test {
@@ -244,14 +286,24 @@ func recordingName(test string, step int) string {
 		}
 	}
 	name := strings.Trim(dashRuns.ReplaceAllString(b.String(), "-"), "-")
+	changed := name != test
 	if len(name) > maxNameBytes {
-		sum := sha256.Sum256([]byte(test))
-		name = strings.TrimRight(name[:maxNameBytes], "-") + "-" + hex.EncodeToString(sum[:4])
+		name = strings.TrimRight(name[:maxNameBytes], "-")
+		changed = true
 	}
 	if name == "" {
 		name = "test"
 	}
+	if changed {
+		name += "-" + nameHash(test)
+	}
 	return fmt.Sprintf("%s-%02d.svg", name, step)
+}
+
+// nameHash is a short hash of a test's whole name.
+func nameHash(test string) string {
+	sum := sha256.Sum256([]byte(test))
+	return hex.EncodeToString(sum[:4])
 }
 
 // capText keeps s to at most n bytes, ending at a whole rune and marked with
@@ -313,12 +365,23 @@ func caption(args []string) string {
 type pathName struct{ path, name string }
 
 // hostPaths lists the paths of this machine a recording of call may carry:
-// the jig home and the user home the call ran with, the directory it ran in,
-// the paths it was given, the host's user home and the temp directory.
+// the jig home and the user home the call ran with, the host's user home and
+// temp directory, the product repo and the directory of the jig binary (a
+// panic in jig prints its source paths, and jig prints its own), then the
+// directory the call ran in and the paths it was given. A path listed twice
+// keeps its first name, so the fixed names come before the ones taken from
+// the call.
 func hostPaths(call recordCall) []pathName {
 	roots := []pathName{{call.env.home, "<jig-home>"}}
 	if call.env.userHome != "" {
 		roots = append(roots, pathName{call.env.userHome, "<user-home>"})
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		roots = append(roots, pathName{home, "<user-home>"})
+	}
+	roots = append(roots, pathName{os.TempDir(), "<tmp>"}, pathName{repoRoot, "<repo>"})
+	if jigBinary != "" {
+		roots = append(roots, pathName{filepath.Dir(jigBinary), "<jig-bin>"})
 	}
 	roots = append(roots, pathName{call.cwd, dirName(call.cwd)})
 	for _, a := range call.args {
@@ -326,10 +389,7 @@ func hostPaths(call recordCall) []pathName {
 			roots = append(roots, pathName{p, dirName(p)})
 		}
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		roots = append(roots, pathName{home, "<user-home>"})
-	}
-	return append(roots, pathName{os.TempDir(), "<tmp>"})
+	return roots
 }
 
 // dirName is how a recording names the directory at path: by its last
@@ -343,46 +403,28 @@ func dirName(path string) string {
 	return "<" + base + ">"
 }
 
-// redact returns c with every host path in its output replaced by its name.
-// Each write is read on its own, so a path split across two writes is not
-// found; jig prints a path in one write.
-func redact(c termrec.Cast, roots []pathName) termrec.Cast {
-	re, names := pathMatcher(roots)
-	if re == nil {
-		return c
-	}
-	out := c
-	out.Events = make([]termrec.Event, len(c.Events))
-	for i, e := range c.Events {
-		e.Data = re.ReplaceAllStringFunc(e.Data, func(m string) string { return names[foldPath(m)] })
-		out.Events[i] = e
-	}
-	return out
+// pathScrubber replaces the host paths in text with their names.
+type pathScrubber struct {
+	spellings []string          // longest first, folded
+	names     map[string]string // folded spelling -> its root's name
+	first     [256]bool         // the first bytes a spelling starts with
+	fold      bool              // paths have no case here
 }
 
-// foldPath is the form paths are compared in: Windows has no case in its
-// paths.
-func foldPath(p string) string {
-	if runtime.GOOS == "windows" {
-		return strings.ToLower(p)
-	}
-	return p
-}
-
-// pathMatcher compiles roots into one expression that finds any of them in
-// the spellings output carries a path in: as it is, with forward slashes, and
+// newPathScrubber compiles roots into a scrubber that finds each in the
+// spellings output carries a path in: as it is, with forward slashes, and
 // with every backslash doubled as a JSON string writes it; and, for a
 // directory that is a link or has a short name, as it resolves. The longest
 // spelling wins where two start at the same place, and the first root where
-// two are the same. names maps each spelling, folded, to its root's name.
-func pathMatcher(roots []pathName) (*regexp.Regexp, map[string]string) {
-	names := map[string]string{}
-	var spellings []string
+// two are the same.
+func newPathScrubber(roots []pathName) *pathScrubber {
+	s := &pathScrubber{names: map[string]string{}, fold: runtime.GOOS == "windows"}
 	add := func(spelling, name string) {
-		key := foldPath(spelling)
-		if _, dup := names[key]; !dup {
-			names[key] = name
-			spellings = append(spellings, spelling)
+		key := s.key(spelling)
+		if _, dup := s.names[key]; !dup {
+			s.names[key] = name
+			s.spellings = append(s.spellings, key)
+			s.first[key[0]] = true
 		}
 	}
 	for _, root := range roots {
@@ -403,17 +445,117 @@ func pathMatcher(roots []pathName) (*regexp.Regexp, map[string]string) {
 			add(strings.ReplaceAll(form, `\`, `\\`), root.name)
 		}
 	}
-	if len(spellings) == 0 {
-		return nil, nil
+	sort.SliceStable(s.spellings, func(i, j int) bool { return len(s.spellings[i]) > len(s.spellings[j]) })
+	return s
+}
+
+// key is the form paths are compared in. Windows has no case in its paths;
+// only ASCII is folded, so the key is as long as the text it stands for.
+func (s *pathScrubber) key(text string) string {
+	if !s.fold {
+		return text
 	}
-	sort.SliceStable(spellings, func(i, j int) bool { return len(spellings[i]) > len(spellings[j]) })
-	quoted := make([]string, len(spellings))
-	for i, s := range spellings {
-		quoted[i] = regexp.QuoteMeta(s)
+	b := []byte(text)
+	for i, c := range b {
+		if 'A' <= c && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
 	}
-	expr := strings.Join(quoted, "|")
-	if runtime.GOOS == "windows" {
-		expr = "(?i:" + expr + ")"
+	return string(b)
+}
+
+// scrub returns text with every root it holds replaced by its name. A root
+// is found only where it ends a path component: the text after it is the end,
+// a separator, a quote, a space or other punctuation, never a letter, digit,
+// '_' or '-', so "/tmp" is found in "/tmp/x" and not in "/tmpl".
+func (s *pathScrubber) scrub(text string) string {
+	if len(s.spellings) == 0 {
+		return text
 	}
-	return regexp.MustCompile(expr), names
+	folded := s.key(text)
+	var b strings.Builder
+	last := 0
+	for i := 0; i < len(text); {
+		if sp := s.matchAt(text, folded, i); sp != "" {
+			b.WriteString(text[last:i])
+			b.WriteString(s.names[sp])
+			i += len(sp)
+			last = i
+			continue
+		}
+		i++
+	}
+	if last == 0 {
+		return text
+	}
+	b.WriteString(text[last:])
+	return b.String()
+}
+
+// matchAt returns the longest spelling that is in folded at i and ends a path
+// component in text, or "".
+func (s *pathScrubber) matchAt(text, folded string, i int) string {
+	if !s.first[folded[i]] {
+		return ""
+	}
+	for _, sp := range s.spellings {
+		if !strings.HasPrefix(folded[i:], sp) {
+			continue
+		}
+		end := i + len(sp)
+		if end == len(text) {
+			return sp
+		}
+		if r, _ := utf8.DecodeRuneInString(text[end:]); !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-' {
+			return sp
+		}
+	}
+	return ""
+}
+
+// lineScrubber writes to w what is written to it with the host's paths left
+// out, a line at a time: it holds what follows the last line feed until the
+// line ends, so a path that one write split in two is found whole. It holds
+// at most maxLineHold bytes, and Flush passes on the rest.
+type lineScrubber struct {
+	mu   sync.Mutex
+	w    io.Writer
+	s    *pathScrubber
+	held []byte
+}
+
+func newLineScrubber(w io.Writer, s *pathScrubber) *lineScrubber {
+	return &lineScrubber{w: w, s: s}
+}
+
+// Write holds p's last, unfinished line and writes the lines before it. It
+// never fails.
+func (l *lineScrubber) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.held = append(l.held, p...)
+	if i := bytes.LastIndexByte(l.held, '\n'); i >= 0 {
+		l.emit(l.held[:i+1])
+		l.held = append(l.held[:0], l.held[i+1:]...)
+	}
+	if len(l.held) > maxLineHold {
+		l.emit(l.held)
+		l.held = l.held[:0]
+	}
+	return len(p), nil
+}
+
+// Flush writes the line still held, ended or not.
+func (l *lineScrubber) Flush() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.emit(l.held)
+	l.held = l.held[:0]
+}
+
+// emit writes b, scrubbed. The recorder behind it never fails.
+func (l *lineScrubber) emit(b []byte) {
+	if len(b) > 0 {
+		_, _ = io.WriteString(l.w, l.s.scrub(string(b)))
+	}
 }

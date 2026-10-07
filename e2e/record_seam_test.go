@@ -115,26 +115,43 @@ func writeAll(w io.Writer, s string) {
 	}
 }
 
+// jigTestPaths are the paths a recording test writes into the output: the
+// jig home, a scenario and the directory of the call.
+type jigTestPaths struct {
+	env      jigEnv
+	scenario string
+	cwd      string
+}
+
+func newJigTestPaths(t *testing.T) jigTestPaths {
+	t.Helper()
+	return jigTestPaths{
+		env:      jigEnv{home: t.TempDir(), userHome: t.TempDir()},
+		scenario: filepath.Join(t.TempDir(), "scenario"),
+		cwd:      filepath.Join(t.TempDir(), "store"),
+	}
+}
+
 // TestRecordRunRecordsTheCall pins the recording of one jig run at its seam:
 // the SVG shows the command and its output (stdout and stderr) and the exit
-// code, the temp paths of the run are left out, the caller's buffers get
+// code, the paths of this machine are left out, the caller's buffers get
 // exactly what the process wrote, and the tag names the scenario, flow, step
 // and caption.
 func TestRecordRunRecordsTheCall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	env := jigEnv{home: t.TempDir(), userHome: t.TempDir()}
-	scenario := filepath.Join(t.TempDir(), "scenario")
-	cwd := filepath.Join(t.TempDir(), "store")
+	p := newJigTestPaths(t)
 	other := filepath.Join(os.TempDir(), "elsewhere")
-	args := []string{"run", "T-1", "--title", "Add retry", "--backend", "fake", "--scenario", scenario}
+	sep := string(filepath.Separator)
+	args := []string{"run", "T-1", "--title", "Add retry", "--backend", "fake", "--scenario", p.scenario}
 	ft := &fakeT{name: "TestScenario/sub case"}
 	rs := newRecordings(dir)
 
 	var stdout, stderr bytes.Buffer
-	wantOut := fmt.Sprintf("jig home %s\nscenario %s\nstore %s\nslash %s\njson %s\nelsewhere %s\ndone\n",
-		env.home, scenario, cwd, filepath.ToSlash(env.home), strings.ReplaceAll(env.home, `\`, `\\`), other)
-	code := rs.run(ft, recordCall{env: env, cwd: cwd, args: args}, &stdout, &stderr, func(out, errs io.Writer) int {
+	wantOut := fmt.Sprintf("jig home %s\nscenario %s\nstore %s\nslash %s\njson %s\nelsewhere %s\nrepo %s\nbinary %s\ndone\n",
+		p.env.home, p.scenario, p.cwd, filepath.ToSlash(p.env.home), strings.ReplaceAll(p.env.home, `\`, `\\`), other,
+		filepath.Join(repoRoot, "cmd"), jigBinary)
+	code := rs.run(ft, recordCall{env: p.env, cwd: p.cwd, args: args}, &stdout, &stderr, func(out, errs io.Writer) int {
 		writeAll(out, wantOut)
 		writeAll(errs, "warning: slow\n")
 		return 2
@@ -149,7 +166,8 @@ func TestRecordRunRecordsTheCall(t *testing.T) {
 	if len(ft.logs) != 0 {
 		t.Errorf("a recording that worked logged %q", ft.logs)
 	}
-	wantFiles := []string{"TestScenario-sub-case-01.svg", "TestScenario-sub-case-01.svg.json"}
+	base := "TestScenario-sub-case-" + nameHash("TestScenario/sub case") + "-01.svg"
+	wantFiles := []string{base, base + ".json"}
 	if got := recordedFiles(t, dir); !slices.Equal(got, wantFiles) {
 		t.Fatalf("record directory = %q, want %q", got, wantFiles)
 	}
@@ -166,7 +184,8 @@ func TestRecordRunRecordsTheCall(t *testing.T) {
 		"store <store>",
 		"slash <jig-home>",
 		"json <jig-home>",
-		"elsewhere <tmp>" + string(filepath.Separator) + "elsewhere",
+		"elsewhere <tmp>" + sep + "elsewhere",
+		"repo <repo>" + sep + "cmd",
 		"done",
 		"warning: slow",
 		"[exit 2]",
@@ -175,7 +194,7 @@ func TestRecordRunRecordsTheCall(t *testing.T) {
 			t.Errorf("the recording shows no row %q; its rows:\n%s", want, strings.Join(rows, "\n"))
 		}
 	}
-	for _, leaked := range []string{env.home, env.userHome, scenario, cwd, os.TempDir(), filepath.ToSlash(env.home)} {
+	for _, leaked := range []string{p.env.home, p.env.userHome, p.scenario, p.cwd, os.TempDir(), filepath.ToSlash(p.env.home), repoRoot, filepath.Dir(jigBinary)} {
 		if strings.Contains(string(svg), leaked) {
 			t.Errorf("the recording carries the host path %q", leaked)
 		}
@@ -191,6 +210,176 @@ func TestRecordRunRecordsTheCall(t *testing.T) {
 	if tag != want {
 		t.Errorf("tag = %+v, want %+v", tag, want)
 	}
+}
+
+// TestRecordRunScrubsTheCaption: a path inside an argument that is not itself
+// a path reaches neither the prompt nor the tag.
+func TestRecordRunScrubsTheCaption(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	p := newJigTestPaths(t)
+	args := []string{"ticket", "new", "--title", "see " + p.env.home + " and x:" + p.scenario}
+	rs := newRecordings(dir)
+	rs.run(&fakeT{name: "TestCaption"}, recordCall{env: p.env, cwd: p.cwd, args: args}, io.Discard, io.Discard, func(out, errs io.Writer) int { return 0 })
+
+	tag := readTagFile(t, filepath.Join(dir, "TestCaption-01.svg.json"))
+	if want := "jig ticket new --title 'see <jig-home> and x:<tmp>"; !strings.HasPrefix(tag.Caption, want) {
+		t.Errorf("caption = %q, want it to start %q", tag.Caption, want)
+	}
+	for _, leaked := range []string{p.env.home, p.scenario, os.TempDir()} {
+		if strings.Contains(tag.Caption, leaked) {
+			t.Errorf("the caption carries the host path %q", leaked)
+		}
+	}
+	svg, err := os.ReadFile(filepath.Join(dir, "TestCaption-01.svg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leaked := range []string{p.env.home, p.scenario} {
+		if strings.Contains(string(svg), leaked) {
+			t.Errorf("the prompt carries the host path %q", leaked)
+		}
+	}
+}
+
+// TestRecordRunFindsAPathSplitAcrossWrites: a pipe may hand jig's output over
+// in pieces that cut a path in two, so the recording reads whole lines. The
+// caller's buffers still get the writes as they came.
+func TestRecordRunFindsAPathSplitAcrossWrites(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	p := newJigTestPaths(t)
+	cut := len(p.env.home) / 2
+	rs := newRecordings(dir)
+	var stdout, stderr bytes.Buffer
+	rs.run(&fakeT{name: "TestSplit"}, recordCall{env: p.env, cwd: p.cwd, args: []string{"status", "--scenario", p.scenario}}, &stdout, &stderr, func(out, errs io.Writer) int {
+		writeAll(out, "split "+p.env.home[:cut])
+		writeAll(errs, "other stream ")
+		writeAll(out, p.env.home[cut:]+" and more\nsecond "+p.scenario[:3])
+		writeAll(out, p.scenario[3:]+"\ntail "+p.env.home[:cut])
+		writeAll(out, p.env.home[cut:]) // no line feed: flushed when the run ends
+		writeAll(errs, "done\n")
+		return 0
+	})
+	if want := "split " + p.env.home + " and more\nsecond " + p.scenario + "\ntail " + p.env.home; stdout.String() != want {
+		t.Errorf("stdout = %q, want the writes unchanged", stdout.String())
+	}
+
+	svg, err := os.ReadFile(filepath.Join(dir, "TestSplit-01.svg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := svgRows(t, svg)
+	for _, want := range []string{"split <jig-home> and more", "second <scenario>", "tail <jig-home>", "other stream done"} {
+		if !slices.Contains(rows, want) {
+			t.Errorf("the recording shows no row %q; its rows:\n%s", want, strings.Join(rows, "\n"))
+		}
+	}
+	for _, leaked := range []string{p.env.home, p.env.home[:cut], p.env.home[cut:]} {
+		if strings.Contains(string(svg), leaked) {
+			t.Errorf("the recording carries a piece of the host path: %q", leaked)
+		}
+	}
+}
+
+// TestLineScrubber: it writes whole lines, holds an unfinished one, and holds
+// no more than maxLineHold.
+func TestLineScrubber(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "root")
+	var out bytes.Buffer
+	l := newLineScrubber(&out, newPathScrubber([]pathName{{root, "<root>"}}))
+
+	writeAll(l, "one\ntw")
+	if out.String() != "one\n" {
+		t.Errorf("after one line and a part, the writer holds %q, want %q", out.String(), "one\n")
+	}
+	writeAll(l, "o "+root[:4])
+	writeAll(l, root[4:]+"\nthree")
+	if out.String() != "one\ntwo <root>\n" {
+		t.Errorf("after the second line, the writer holds %q", out.String())
+	}
+	l.Flush()
+	if out.String() != "one\ntwo <root>\nthree" {
+		t.Errorf("after Flush, the writer holds %q", out.String())
+	}
+	l.Flush()
+	if out.String() != "one\ntwo <root>\nthree" {
+		t.Errorf("a second Flush wrote %q more", out.String())
+	}
+
+	out.Reset()
+	writeAll(l, strings.Repeat("x", maxLineHold+1))
+	if out.Len() != maxLineHold+1 {
+		t.Errorf("a line over %d bytes is held: the writer has %d bytes", maxLineHold, out.Len())
+	}
+}
+
+// TestPathScrubberFindsWholeComponents: a root is found where a path
+// component ends, and a longer root wins; a shorter one is the fallback.
+func TestPathScrubberFindsWholeComponents(t *testing.T) {
+	t.Parallel()
+	sep := string(filepath.Separator)
+	base := t.TempDir()
+	tmp := filepath.Join(base, "tmp")
+	sc := newPathScrubber([]pathName{{tmp, "<tmp>"}, {filepath.Join(tmp, "a"), "<a>"}, {filepath.Join(tmp, "a", "b"), "<b>"}})
+	for _, c := range []struct{ in, want string }{
+		{tmp, "<tmp>"},
+		{tmp + sep + "x", "<tmp>" + sep + "x"},
+		{`"` + tmp + `"`, `"<tmp>"`},
+		{"at " + tmp + ": failed", "at <tmp>: failed"},
+		{tmp + ".", "<tmp>."},
+		{tmp + "l" + sep + "x", tmp + "l" + sep + "x"},
+		{tmp + "-2", tmp + "-2"},
+		{tmp + "_x", tmp + "_x"},
+		{tmp + "é", tmp + "é"},
+		{filepath.Join(tmp, "a", "b") + sep + "c", "<b>" + sep + "c"},
+		{filepath.Join(tmp, "a", "bx"), "<a>" + sep + "bx"},
+		{tmp + " and " + tmp, "<tmp> and <tmp>"},
+		{"no path", "no path"},
+	} {
+		if got := sc.scrub(c.in); got != c.want {
+			t.Errorf("scrub(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestPathScrubberSpellings: a link and the directory it leads to are one
+// root, and Windows paths differ by case only.
+func TestPathScrubberSpellings(t *testing.T) {
+	t.Parallel()
+	t.Run("link", func(t *testing.T) {
+		t.Parallel()
+		real := filepath.Join(t.TempDir(), "real")
+		if err := os.Mkdir(real, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(filepath.Dir(real), "link")
+		if err := os.Symlink(real, link); err != nil {
+			t.Skipf("no symbolic links here: %v", err)
+		}
+		resolved, err := filepath.EvalSymlinks(link)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sc := newPathScrubber([]pathName{{link, "<dir>"}})
+		for _, spelling := range []string{link, resolved} {
+			if got := sc.scrub("at " + spelling + " ok"); got != "at <dir> ok" {
+				t.Errorf("scrub of %q = %q, want the link's name", spelling, got)
+			}
+		}
+	})
+	t.Run("case", func(t *testing.T) {
+		t.Parallel()
+		if runtime.GOOS != "windows" {
+			t.Skip("paths have case outside Windows")
+		}
+		root := filepath.Join(t.TempDir(), "Root")
+		sc := newPathScrubber([]pathName{{root, "<root>"}})
+		if got := sc.scrub("at " + strings.ToUpper(root) + `\x`); got != `at <root>\x` {
+			t.Errorf("scrub of an upper-cased path = %q, want it found", got)
+		}
+	})
 }
 
 // TestRecordRunNumbersStepsPerTest: a test's runs are its steps, 1 on, in
@@ -216,14 +405,15 @@ func TestRecordRunNumbersStepsPerTest(t *testing.T) {
 		})
 	}
 
-	want := []string{"TestA-01.svg", "TestA-01.svg.json", "TestA-02.svg", "TestA-02.svg.json", "TestB-sub-01.svg", "TestB-sub-01.svg.json"}
+	sub := "TestB-sub-" + nameHash("TestB/sub")
+	want := []string{"TestA-01.svg", "TestA-01.svg.json", "TestA-02.svg", "TestA-02.svg.json", sub + "-01.svg", sub + "-01.svg.json"}
 	if got := recordedFiles(t, dir); !slices.Equal(got, want) {
 		t.Fatalf("record directory = %q, want %q", got, want)
 	}
 	for file, caption := range map[string]string{
-		"TestA-01.svg.json":     "jig status T-1",
-		"TestA-02.svg.json":     "jig run T-1",
-		"TestB-sub-01.svg.json": "jig validate T-1",
+		"TestA-01.svg.json":  "jig status T-1",
+		"TestA-02.svg.json":  "jig run T-1",
+		sub + "-01.svg.json": "jig validate T-1",
 	} {
 		tag := readTagFile(t, filepath.Join(dir, file))
 		if tag.Caption != caption || tag.Step < 1 || tag.Flow != tag.Scenario {
@@ -267,23 +457,31 @@ func TestRecordRunWithoutADirectoryRecordsNothing(t *testing.T) {
 	}
 }
 
-// TestRecordRunStopsAtTheCap: the directory holds at most 50 recordings,
-// which jig accepts, and the run that finds it full says so once; every run
-// still runs and still reports to its caller.
-func TestRecordRunStopsAtTheCap(t *testing.T) {
+// TestRecordRunStopsAtTheLimit: the directory holds at most limit recordings
+// (200, what a collection accepts), and the run that finds it full says so
+// once; every run still runs and still reports to its caller.
+func TestRecordRunStopsAtTheLimit(t *testing.T) {
 	t.Parallel()
+	if maxRecordings != 200 {
+		t.Errorf("maxRecordings = %d, want the 200 a collection accepts", maxRecordings)
+	}
 	dir := t.TempDir()
 	env := jigEnv{home: t.TempDir()}
 	rs := newRecordings(dir)
+	if rs.limit != maxRecordings {
+		t.Fatalf("a sink's limit = %d, want %d", rs.limit, maxRecordings)
+	}
+	const limit = 6
+	rs.limit = limit
 	ft := &fakeT{name: "TestMany"}
-	for i := 0; i < maxRecordings+4; i++ {
+	for i := 0; i < limit+4; i++ {
 		var stdout bytes.Buffer
 		code := rs.run(ft, recordCall{env: env, cwd: env.home, args: []string{"status", fmt.Sprint(i)}}, &stdout, io.Discard, func(out, errs io.Writer) int {
 			writeAll(out, "ok\n")
 			return 0
 		})
 		if code != 0 || stdout.String() != "ok\n" {
-			t.Fatalf("run %d = %d, %q, want the process's own result past the cap too", i, code, stdout.String())
+			t.Fatalf("run %d = %d, %q, want the process's own result past the limit too", i, code, stdout.String())
 		}
 	}
 
@@ -301,10 +499,10 @@ func TestRecordRunStopsAtTheCap(t *testing.T) {
 		}
 		svgs++
 	}
-	if svgs != maxRecordings {
-		t.Errorf("the directory holds %d recordings, want exactly %d", svgs, maxRecordings)
+	if svgs != limit {
+		t.Errorf("the directory holds %d recordings, want exactly %d", svgs, limit)
 	}
-	if len(ft.logs) != 1 || !strings.Contains(ft.logs[0], "50") {
+	if len(ft.logs) != 1 || !strings.Contains(ft.logs[0], fmt.Sprint(limit)) {
 		t.Errorf("logs = %q, want the one line saying the directory is full", ft.logs)
 	}
 }
@@ -336,6 +534,67 @@ func TestRecordRunNeverFailsARun(t *testing.T) {
 	}
 }
 
+// TestRecordRunNeverReplacesAFile: a recording whose file name is taken is
+// dropped, and what is there is left as it is.
+func TestRecordRunNeverReplacesAFile(t *testing.T) {
+	t.Parallel()
+	for _, taken := range []string{"TestClash-01.svg.json", "TestClash-01.svg.part"} {
+		t.Run(taken, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			path := filepath.Join(dir, taken)
+			if err := os.WriteFile(path, []byte("keep"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			rs := newRecordings(dir)
+			ft := &fakeT{name: "TestClash"}
+			var stdout bytes.Buffer
+			rs.run(ft, recordCall{env: jigEnv{home: t.TempDir()}, cwd: t.TempDir(), args: []string{"status"}}, &stdout, io.Discard, func(out, errs io.Writer) int {
+				writeAll(out, "ok\n")
+				return 0
+			})
+			if got, err := os.ReadFile(path); err != nil || string(got) != "keep" {
+				t.Errorf("%s = %q, %v, want it left as it was", taken, got, err)
+			}
+			if got := recordedFiles(t, dir); !slices.Equal(got, []string{taken}) {
+				t.Errorf("record directory = %q, want only %q", got, taken)
+			}
+			if len(ft.logs) != 1 || rs.written != 0 || stdout.String() != "ok\n" {
+				t.Errorf("logs %q, places held %d, stdout %q, want one log line, no place held and the run's output", ft.logs, rs.written, stdout.String())
+			}
+		})
+	}
+}
+
+// TestRecordRunLeavesNoHalfWritten: a recording that fails while it is being
+// written leaves nothing a collection would take: no .svg, no tag.
+func TestRecordRunLeavesNoHalfWritten(t *testing.T) {
+	t.Parallel()
+	for _, blocked := range []string{"TestHalf-01.svg.part", "TestHalf-01.svg"} {
+		t.Run(blocked, func(t *testing.T) {
+			t.Parallel()
+			// A directory in the way fails the write of the part, or the
+			// rename of it to the SVG.
+			dir := t.TempDir()
+			if err := os.Mkdir(filepath.Join(dir, blocked), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			rs := newRecordings(dir)
+			ft := &fakeT{name: "TestHalf"}
+			rs.run(ft, recordCall{env: jigEnv{home: t.TempDir()}, cwd: t.TempDir(), args: []string{"status"}}, io.Discard, io.Discard, func(out, errs io.Writer) int {
+				writeAll(out, "ok\n")
+				return 0
+			})
+			if got := recordedFiles(t, dir); !slices.Equal(got, []string{blocked}) {
+				t.Errorf("record directory = %q, want only the directory in the way", got)
+			}
+			if len(ft.logs) != 1 || rs.written != 0 {
+				t.Errorf("logs %q, places held %d, want one log line and no place held", ft.logs, rs.written)
+			}
+		})
+	}
+}
+
 // TestRecordRunWritesNothingForARunThatEndedTheTest: a process that ends the
 // test (runJig's Fatal when jig cannot start) leaves no recording and gives
 // its place back.
@@ -360,6 +619,9 @@ func TestRecordRunWritesNothingForARunThatEndedTheTest(t *testing.T) {
 	}
 }
 
+// TestRecordingName: a name is a plain file name; one that had to change to
+// be, or be cut short, carries a hash of the whole name, so two tests never
+// come to one file.
 func TestRecordingName(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -367,14 +629,25 @@ func TestRecordingName(t *testing.T) {
 		step int
 		want string
 	}{
-		{"TestEndToEndTwice/iterations/iteration_1", 3, "TestEndToEndTwice-iterations-iteration_1-03.svg"},
-		{"TestInit/a b//c#01", 12, "TestInit-a-b-c-01-12.svg"},
-		{"Testé世", 1, "Test-01.svg"},
-		{"///", 1, "test-01.svg"},
+		{"TestEndToEndTwice", 3, "TestEndToEndTwice-03.svg"},
+		{"Test_a-b", 1, "Test_a-b-01.svg"},
+		{"TestEndToEndTwice/iterations/iteration_1", 3, "TestEndToEndTwice-iterations-iteration_1-" + nameHash("TestEndToEndTwice/iterations/iteration_1") + "-03.svg"},
+		{"TestInit/a b//c#01", 12, "TestInit-a-b-c-01-" + nameHash("TestInit/a b//c#01") + "-12.svg"},
+		{"///", 1, "test-" + nameHash("///") + "-01.svg"},
 	} {
 		if got := recordingName(c.test, c.step); got != c.want {
 			t.Errorf("recordingName(%q, %d) = %q, want %q", c.test, c.step, got, c.want)
 		}
+	}
+
+	// Names that sanitize alike stay apart, whatever the file system's case.
+	seen := map[string]string{}
+	for _, test := range []string{"TestX", "TestX/a-b", "TestX/a.b", "TestX/a/b", "TestX/é", "TestX/世", "TestX/case#01", "TestX/case-01", "TestX/Case", "TestX/case"} {
+		name := strings.ToLower(recordingName(test, 1))
+		if other, dup := seen[name]; dup {
+			t.Errorf("%q and %q share the file name %q", test, other, name)
+		}
+		seen[name] = test
 	}
 
 	// A long name is cut, and what is cut still tells two tests apart.

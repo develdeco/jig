@@ -52,9 +52,22 @@ func (e jigEnv) overrides() []string {
 
 // environ returns the process environment with e's variables replacing
 // whatever the process has under the same names (not appended beside them,
-// so the subprocess sees each name once).
+// so the subprocess sees each name once), and without JIG_RECORD_DIR: that
+// names the directory this suite records into, and the jig under test must
+// run the same whether or not the suite records, and never write there.
 func (e jigEnv) environ() []string {
-	return replaceEnv(os.Environ(), e.overrides())
+	return withoutEnv(replaceEnv(os.Environ(), e.overrides()), recordDirEnv)
+}
+
+// withoutEnv returns base without the entries named like one of names.
+func withoutEnv(base []string, names ...string) []string {
+	out := make([]string, 0, len(base))
+	for _, kv := range base {
+		if !slices.ContainsFunc(names, func(n string) bool { return sameEnvName(envName(kv), n) }) {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // replaceEnv returns base without any entry named like one of overrides,
