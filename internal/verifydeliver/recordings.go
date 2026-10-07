@@ -7,9 +7,11 @@ package verifydeliver
 // ancestor of it are listed in a recordings.json under the jig home, and the
 // review prompt names that file, so the reviewer can read how the change
 // behaves end to end. The selection is the one publish makes for its pick
-// (pickCandidates: the latest recording of each flow, scenario and step, each
-// checked again against its file); this file holds the part that is the
-// reviewer's own: the order, the bound, the wire shape and the write.
+// (recordedCandidates, then verifiedCandidates: the latest recording of each
+// flow, scenario and step, each checked again against its file); this file
+// holds the part that is the reviewer's own: the order, the bound, the wire
+// shape, the write, and keeping the machine's paths out of what the reviewer
+// writes back.
 
 import (
 	"encoding/json"
@@ -17,17 +19,19 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/media"
+	"github.com/develdeco/jig/internal/screen"
 )
 
 const (
 	// maxReviewRecordings bounds how many recordings one round lists for its
-	// reviewer. A reviewer reads the ones that bear on the change, so a list
-	// longer than this is a shelf to look along, not evidence: the latest are
-	// listed and the rest counted.
+	// reviewer, and so how many files it checks and hashes. A reviewer reads
+	// the ones that bear on the change, so a list longer than this is a shelf
+	// to look along, not evidence: the latest are listed and the rest counted.
 	maxReviewRecordings = 50
 
 	// reviewRecordingsFile is the name of the list in the round's directory
@@ -52,8 +56,11 @@ type ReviewRecording struct {
 
 // ReviewRecordings is recordings.json's exact wire shape, the list jig writes
 // for one gate reviewer round whose head's history holds recordings. The
-// recordings are the latest first. Omitted counts the older ones left out when
-// there are more than maxReviewRecordings, and is absent when none were.
+// recordings are the latest first. Omitted counts the recordings of the
+// head's history left out of the list because it is cut at
+// maxReviewRecordings or because the reviewer's read tools would be refused
+// the file; it is absent when there were none. A recording that no longer
+// matches its journal line is not evidence and is not counted.
 type ReviewRecordings struct {
 	Ticket     string            `json:"ticket"`
 	HeadSHA    string            `json:"head_sha"`
@@ -73,7 +80,13 @@ type ReviewRecordings struct {
 // pushed. The reviewer reads the files by those paths; a headless session's
 // Read, Glob and Grep reach any path the screen does not name a credential
 // location (ADR 0008), as they already reach review.json, the intent and the
-// journal outside the lease, so no grant is added for them.
+// journal outside the lease, so no grant is added for them. The same screen
+// refuses a file whose name looks like a credential (".env*", "*_key*"), so
+// such a recording is left out of the list and counted in Omitted rather than
+// listed as evidence the reviewer cannot read.
+//
+// Only the first maxReviewRecordings (latest first) are checked against their
+// files, so a round never hashes more than that many.
 func writeReviewRecordings(in RoundInput, head string) (string, error) {
 	if in.Home == "" {
 		return "", nil
@@ -82,19 +95,23 @@ func writeReviewRecordings(in RoundInput, head string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("verifydeliver: review: read the journal for recordings: %w", err)
 	}
-	// pickCandidates reads a Deps' Home and Store and nothing else of it.
+	// The selection reads a Deps' Home and Store and nothing else of it.
 	d := Deps{Store: in.Store, Home: in.Home}
-	cands, _, err := pickCandidates(d, in.Ticket, lines, in.LeaseDir, head)
+	all, err := recordedCandidates(d, lines, in.LeaseDir, head)
 	if err != nil {
 		return "", fmt.Errorf("verifydeliver: review: list the build's recordings: %w", err)
 	}
-	if len(cands) == 0 {
+	if len(all) == 0 {
 		return "", nil
+	}
+	storeID, err := in.Store.ID()
+	if err != nil {
+		return "", fmt.Errorf("verifydeliver: review: resolve the store id: %w", err)
 	}
 
 	// Latest first: the order of the journal lines the recordings came from.
 	// A stable sort keeps the candidates' own order (flow, step, scenario)
-	// within one line.
+	// within one line, which reads as the build's scenarios do.
 	type origin struct{ commit, run, file string }
 	at := map[origin]int{}
 	for i, l := range lines {
@@ -105,19 +122,30 @@ func writeReviewRecordings(in RoundInput, head string) (string, error) {
 			at[origin{l.Commit, l.RecordRun, r.File}] = i
 		}
 	}
-	sort.SliceStable(cands, func(i, j int) bool {
-		a, b := cands[i], cands[j]
+	sort.SliceStable(all, func(i, j int) bool {
+		a, b := all[i], all[j]
 		return at[origin{a.Commit, a.run, a.rec.File}] > at[origin{b.Commit, b.run, b.rec.File}]
 	})
-	list := ReviewRecordings{Ticket: in.Ticket, HeadSHA: head}
-	if len(cands) > maxReviewRecordings {
-		list.Omitted = len(cands) - maxReviewRecordings
-		cands = cands[:maxReviewRecordings]
-	}
 
-	storeID, err := in.Store.ID()
+	list := ReviewRecordings{Ticket: in.Ticket, HeadSHA: head}
+	var readable []pickCandidate
+	for _, c := range all {
+		if file, err := c.path(d, storeID, in.Ticket); err == nil && !readByReviewer(file) {
+			list.Omitted++
+			continue
+		}
+		readable = append(readable, c)
+	}
+	if len(readable) > maxReviewRecordings {
+		list.Omitted += len(readable) - maxReviewRecordings
+		readable = readable[:maxReviewRecordings]
+	}
+	cands, _, err := verifiedCandidates(d, in.Ticket, readable)
 	if err != nil {
-		return "", fmt.Errorf("verifydeliver: review: resolve the store id: %w", err)
+		return "", fmt.Errorf("verifydeliver: review: check the build's recordings: %w", err)
+	}
+	if len(cands) == 0 {
+		return "", nil
 	}
 	for _, c := range cands {
 		file, err := c.path(d, storeID, in.Ticket)
@@ -154,4 +182,69 @@ func writeReviewRecordings(in RoundInput, head string) (string, error) {
 		return "", fmt.Errorf("verifydeliver: review: write recordings.json: %w", err)
 	}
 	return path, nil
+}
+
+// readByReviewer reports whether the screen that governs a headless reviewer
+// session would let it Read file: the same decision the session's hook makes.
+func readByReviewer(file string) bool {
+	_, ok := screen.ToolCall("Read", map[string]any{"file_path": file})
+	return ok
+}
+
+// reviewerHostDirs are the directories of this machine that a reviewer's
+// words, which reach the store, must not name: the lease it works in, the jig
+// home (the recordings and everything else jig keeps there) and the store.
+func reviewerHostDirs(in RoundInput) []hostDir {
+	dirs := []hostDir{{in.LeaseDir, "<lease>"}, {in.Home, "<jig home>"}}
+	if in.Store != nil {
+		dirs = append(dirs, hostDir{in.Store.Root, "<store>"})
+	}
+	return dirs
+}
+
+// leaveOutSessionHostPaths is leaveOutHostPaths for text a session wrote: it
+// also replaces the WSL mount spelling of each directory, the one herdr hands
+// a session on Windows and so the one it may repeat.
+func leaveOutSessionHostPaths(s string, dirs ...hostDir) string {
+	for _, sp := range hostPathSpellings(true, dirs...) {
+		s = strings.ReplaceAll(s, sp.text, sp.name)
+	}
+	return s
+}
+
+// scrubReviewResult returns r with every directory of this machine in dirs
+// left out of the words the reviewer wrote that jig commits to the store: each
+// finding's title, detail and risk rationale, and the summary. A finding that
+// cites a recording by its path (the prompt asks for its scenario, step and
+// commit instead) would otherwise commit the operator's jig home. The paths
+// the result names as files are jig's to check, not text, and are left as they
+// are: a finding's file and reviewed_paths are relativized or refused as
+// before.
+func scrubReviewResult(r ReviewResult, dirs []hostDir) ReviewResult {
+	scrub := func(s string) string { return leaveOutSessionHostPaths(s, dirs...) }
+	out := r
+	if r.Findings != nil {
+		out.Findings = make([]ResultFinding, len(r.Findings))
+		for i, f := range r.Findings {
+			f.Title, f.Detail, f.RiskRationale = scrub(f.Title), scrub(f.Detail), scrub(f.RiskRationale)
+			out.Findings[i] = f
+		}
+	}
+	out.Summary = scrub(r.Summary)
+	return out
+}
+
+// scrubReviewResultFile rewrites the reviewer's result.json at path, whose
+// bytes are data, with the directories of this machine left out, when it names
+// any: the file sits in the store's work directory, which is committed. Nothing
+// reads it back after the round parsed it.
+func scrubReviewResultFile(path string, data []byte, dirs []hostDir) error {
+	scrubbed := leaveOutSessionHostPaths(string(data), dirs...)
+	if scrubbed == string(data) {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(scrubbed), 0o644); err != nil {
+		return fmt.Errorf("verifydeliver: review: rewrite result.json without host paths: %w", err)
+	}
+	return nil
 }

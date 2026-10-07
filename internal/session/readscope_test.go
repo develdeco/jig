@@ -67,5 +67,10 @@ func TestAHeadlessSessionReadsEvidenceUnderTheJigHomeWithoutAGrant(t *testing.T)
 		if reason, allowed := screen.ToolCall(call.tool, call.input); !allowed {
 			t.Errorf("the screen denies %s %v: %s", call.tool, call.input, reason)
 		}
+		// With the screen attached, the hook's allow is the only grant a read
+		// tool has: a call it passes still needs the tool to be one it grants.
+		if !screen.Grants(call.tool) {
+			t.Errorf("a passing %s call gets no allow from the screen: %s is not in screen.Granted", call.tool, call.tool)
+		}
 	}
 }

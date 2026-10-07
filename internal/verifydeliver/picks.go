@@ -209,10 +209,24 @@ var hexSHA = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 // stable order, flow then step then scenario, with ids r1, r2, ... in that
 // order, so the same set of recordings always reads the same.
 func pickCandidates(d Deps, ticket string, lines []journal.Line, leaseDir, head string) (cands []pickCandidate, dropped []string, err error) {
+	all, err := recordedCandidates(d, lines, leaseDir, head)
+	if err != nil || len(all) == 0 {
+		return nil, nil, err
+	}
+	return verifiedCandidates(d, ticket, all)
+}
+
+// recordedCandidates is the first half of pickCandidates: the latest recording
+// of each flow, scenario and step made at head or an ancestor of it, as the
+// journal describes it and not yet checked against its file, in the stable
+// order (flow, step, scenario) that gives them their ids. A caller that wants
+// fewer than all of them, or another order, chooses before verifiedCandidates
+// pays for the check of each.
+func recordedCandidates(d Deps, lines []journal.Line, leaseDir, head string) ([]pickCandidate, error) {
 	// Recordings are kept under the jig home, so with none there are none: a
 	// relative evidence path would be read from wherever jig happens to run.
 	if d.Home == "" {
-		return nil, nil, nil
+		return nil, nil
 	}
 	var recorded []journal.Line
 	var commits []string
@@ -228,11 +242,11 @@ func pickCandidates(d Deps, ticket string, lines []journal.Line, leaseDir, head 
 		}
 	}
 	if len(recorded) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	missing, err := gitx.Missing(leaseDir, head, commits)
 	if err != nil {
-		return nil, nil, fmt.Errorf("check which recorded commits the branch holds: %w", err)
+		return nil, fmt.Errorf("check which recorded commits the branch holds: %w", err)
 	}
 	gone := map[string]bool{}
 	for _, c := range missing {
@@ -274,7 +288,14 @@ func pickCandidates(d Deps, ticket string, lines []journal.Line, leaseDir, head 
 		}
 		return a.Commit < b.Commit
 	})
+	return all, nil
+}
 
+// verifiedCandidates is the second half of pickCandidates: each of all, in the
+// order given, checked against its file under the jig home. One that fails is
+// no candidate, and dropped names it and why; the rest come back with ids r1,
+// r2, ... in that order and their kind.
+func verifiedCandidates(d Deps, ticket string, all []pickCandidate) (cands []pickCandidate, dropped []string, err error) {
 	storeID, err := d.Store.ID()
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve the store id: %w", err)

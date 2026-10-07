@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
@@ -209,6 +210,10 @@ func TestReviewerRoundListsTheRecordingsOfTheHeadsHistoryAndNamesThemInThePrompt
 			t.Errorf("the prompt does not say %q", phrase)
 		}
 	}
+	// The dispatch carries the list for the backends that spell the prompt's paths for their session.
+	if disp.ExtraReadFile != path {
+		t.Errorf("ExtraReadFile = %q, want the list %q", disp.ExtraReadFile, path)
+	}
 	// The reviewer is given no new place to write for this.
 	if disp.ExtraWriteDir != "" {
 		t.Errorf("ExtraWriteDir = %q, want none", disp.ExtraWriteDir)
@@ -228,6 +233,9 @@ func TestReviewerRoundWithoutRecordingsHandsTheReviewerWhatItAlwaysHas(t *testin
 	d := Deps{Store: st, Home: jigHome}
 
 	baseDisp, baseJSON := dispatchedRound(t, l.roundInput(st, ""))
+	if baseDisp.ExtraReadFile != "" {
+		t.Errorf("a round with no jig home names a file to read: %q", baseDisp.ExtraReadFile)
+	}
 	if strings.Contains(baseDisp.Prompt, "recordings") {
 		t.Fatalf("a round with no jig home mentions recordings:\n%s", baseDisp.Prompt)
 	}
@@ -258,10 +266,12 @@ func TestReviewerRoundWithoutRecordingsHandsTheReviewerWhatItAlwaysHas(t *testin
 	}
 }
 
-// TestReviewerRoundListsOnlyTheLatestRecordingsAndSaysHowManyItLeftOut: a
+// TestReviewerRoundListsOnlyTheLatestRecordingsAndChecksNoMoreThanThat: a
 // build with more recordings than a reviewer is handed lists the latest ones
-// and counts the rest.
-func TestReviewerRoundListsOnlyTheLatestRecordingsAndSaysHowManyItLeftOut(t *testing.T) {
+// and counts the rest, and only the listed ones are checked against their
+// files: a file past the cut that has since gone is not noticed (it is counted
+// as it was), while one inside the cut that has gone is simply not listed.
+func TestReviewerRoundListsOnlyTheLatestRecordingsAndChecksNoMoreThanThat(t *testing.T) {
 	t.Parallel()
 	l := newRecordingsLease(t)
 	st := newReviewStore(t)
@@ -281,7 +291,7 @@ func TestReviewerRoundListsOnlyTheLatestRecordingsAndSaysHowManyItLeftOut(t *tes
 		recordBuild(t, d, "JIG-1", l.c2, "b-a1-f0", specs("late", late)),
 	)
 
-	disp, _ := dispatchedRound(t, l.roundInput(st, jigHome))
+	dispatchedRound(t, l.roundInput(st, jigHome))
 	list := recordedList(t, reviewListPath(t, st, jigHome, 1))
 	if len(list.Recordings) != maxReviewRecordings || list.Omitted != early+late-maxReviewRecordings {
 		t.Fatalf("listed %d recordings, omitted %d; want %d listed and %d omitted", len(list.Recordings), list.Omitted, maxReviewRecordings, early+late-maxReviewRecordings)
@@ -295,8 +305,243 @@ func TestReviewerRoundListsOnlyTheLatestRecordingsAndSaysHowManyItLeftOut(t *tes
 			t.Errorf("recording %d is from %s, want %s: the latest build's come first", i, r.Commit, want)
 		}
 	}
-	if !strings.Contains(disp.Prompt, "omitted") {
-		t.Errorf("the prompt does not tell the reviewer that the list can be cut:\n%s", disp.Prompt)
+
+	// early-05 is the sixth of the early build's, inside the cut; early-25 is past it.
+	for _, name := range []string{"early-05.svg", "early-25.svg"} {
+		if err := os.Remove(recordedFile(t, d, "JIG-1", l.c1, "a-a1-f0", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	in := l.roundInput(st, jigHome)
+	in.Round = 2
+	dispatchedRound(t, in)
+	list = recordedList(t, reviewListPath(t, st, jigHome, 2))
+	if len(list.Recordings) != maxReviewRecordings-1 || list.Omitted != early+late-maxReviewRecordings {
+		t.Errorf("after two files went: listed %d, omitted %d; want %d listed (the one inside the cut gone) and %d omitted (the cut as it was)", len(list.Recordings), list.Omitted, maxReviewRecordings-1, early+late-maxReviewRecordings)
+	}
+}
+
+// TestReviewerRoundLeavesOutARecordingTheReadToolsWouldRefuse: a recording
+// whose name the screen that governs a reviewer's reads would deny as a
+// credential (".env*", "*_key*") is not listed, and is counted as omitted
+// instead of being listed as evidence the reviewer cannot read.
+func TestReviewerRoundLeavesOutARecordingTheReadToolsWouldRefuse(t *testing.T) {
+	t.Parallel()
+	l := newRecordingsLease(t)
+	st := newReviewStore(t)
+	jigHome := t.TempDir()
+	d := Deps{Store: st, Home: jigHome}
+	journalLines(t, st, "JIG-1", recordBuild(t, d, "JIG-1", l.c2, "a-a1-f0", []recSpec{
+		{File: "home.svg", Content: "home"},
+		{File: "press_key.svg", Content: "a key press"},
+		{File: ".env-setup.svg", Content: "setup"},
+	}))
+
+	dispatchedRound(t, l.roundInput(st, jigHome))
+	list := recordedList(t, reviewListPath(t, st, jigHome, 1))
+	if len(list.Recordings) != 1 || list.Recordings[0].Scenario != "home" || list.Omitted != 2 {
+		t.Errorf("listed %+v, omitted %d; want home alone, with the two the reads would refuse counted", list.Recordings, list.Omitted)
+	}
+}
+
+// TestReviewerRoundNeverWritesThroughALinkOrReadsAnEarlierList: the list is not
+// written below a directory that is a link (the round fails and the link's
+// target is untouched), a link in the list's own place is replaced, not written
+// through, and a list left by an earlier attempt at the round is replaced.
+func TestReviewerRoundNeverWritesThroughALinkOrReadsAnEarlierList(t *testing.T) {
+	t.Parallel()
+	l := newRecordingsLease(t)
+	st := newReviewStore(t)
+	jigHome := t.TempDir()
+	d := Deps{Store: st, Home: jigHome}
+	journalLines(t, st, "JIG-1", recordBuild(t, d, "JIG-1", l.c2, "a-a1-f0", []recSpec{{File: "home.svg", Content: "home"}}))
+	path := reviewListPath(t, st, jigHome, 1)
+	outside := t.TempDir()
+
+	// A round directory that is a link: refused, and nothing lands in its target.
+	linkDir(t, filepath.Dir(path), outside)
+	backend := stubBackend{run: func(session.Dispatch) error {
+		t.Error("the reviewer was dispatched after the list could not be written")
+		return nil
+	}}
+	_, _, err := NewReviewerGateSource(backend).Round(l.roundInput(st, jigHome))
+	if err == nil || !strings.Contains(err.Error(), "recordings.json") {
+		t.Fatalf("Round through a linked round directory: err = %v, want a refusal naming recordings.json", err)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("the list was written through the link: %v", entries)
+	}
+	if err := os.Remove(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+
+	// A list of an earlier attempt, and a link in the list's own place.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("an earlier attempt's list"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dispatchedRound(t, l.roundInput(st, jigHome))
+	if list := recordedList(t, path); len(list.Recordings) != 1 {
+		t.Errorf("the earlier attempt's list was not replaced: %+v", list)
+	}
+
+	target := filepath.Join(outside, "target.txt")
+	if err := os.WriteFile(target, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := makeFileLink(target, path); err != nil {
+		t.Skipf("file links unavailable here: %v", err)
+	}
+	dispatchedRound(t, l.roundInput(st, jigHome))
+	if got, _ := os.ReadFile(target); string(got) != "outside" {
+		t.Errorf("the list was written through a link: %q", got)
+	}
+	if list := recordedList(t, path); len(list.Recordings) != 1 {
+		t.Errorf("the link was not replaced by the list: %+v", list)
+	}
+}
+
+// hostSpellingsIn reports which spellings of dir (as the machine's paths are
+// scrubbed, the WSL mount among them) s still holds.
+func hostSpellingsIn(s, dir string) []string {
+	var found []string
+	for _, sp := range hostPathSpellings(true, hostDir{dir, "x"}) {
+		if strings.Contains(s, sp.text) {
+			found = append(found, sp.text)
+		}
+	}
+	return found
+}
+
+// TestReviewerRoundLeavesTheMachinesPathsOutOfWhatTheReviewerWrote: a finding
+// that cites a recording by its path, in any of the spellings the path has,
+// reaches Gate without the jig home in it, in every free-text field and in the
+// summary, and so does the result.json the reviewer left in the store's work
+// directory; the lease and store paths go the same way. The files the result
+// names are not text and still count: an absolute reviewed path inside the
+// lease is relativized as before.
+func TestReviewerRoundLeavesTheMachinesPathsOutOfWhatTheReviewerWrote(t *testing.T) {
+	t.Parallel()
+	l := newRecordingsLease(t)
+	st := newReviewStore(t)
+	jigHome := t.TempDir()
+	d := Deps{Store: st, Home: jigHome}
+	journalLines(t, st, "JIG-1", recordBuild(t, d, "JIG-1", l.c2, "a-a1-f0", []recSpec{{File: "home.svg", Content: "home"}}))
+	rec := recordedFile(t, d, "JIG-1", l.c2, "a-a1-f0", "home.svg")
+
+	var resultPath string
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		resultPath = sd.ResultJSON
+		result := ReviewResult{
+			Findings: []ResultFinding{{
+				File: "a.go", Line: 1, Action: ActionNote, Risk: RiskLow,
+				Title:         "the screen in " + rec + " is wrong",
+				Detail:        "see " + filepath.ToSlash(rec) + " and " + fmt.Sprintf("%q", rec) + ", checked in " + l.dir,
+				RiskRationale: "from " + session.WSLPath(rec),
+			}},
+			ReviewedPaths: []string{filepath.Join(l.dir, "a.go"), "b.go"},
+			Summary:       "read " + jigHome + " and " + st.Root,
+		}
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
+	}}
+	rnd, ok, err := NewReviewerGateSource(backend).Round(l.roundInput(st, jigHome))
+	if err != nil || !ok {
+		t.Fatalf("Round: ok = %v, err = %v", ok, err)
+	}
+	res := rnd.Review.Result
+	if len(res.Findings) != 1 {
+		t.Fatalf("findings = %+v", res.Findings)
+	}
+	f := res.Findings[0]
+	texts := map[string]string{"title": f.Title, "detail": f.Detail, "risk_rationale": f.RiskRationale, "summary": res.Summary}
+	raw, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	texts["result.json"] = string(raw)
+	for name, text := range texts {
+		for _, dir := range []string{jigHome, l.dir, st.Root} {
+			if found := hostSpellingsIn(text, dir); len(found) > 0 {
+				t.Errorf("%s still holds %v:\n%s", name, found, text)
+			}
+		}
+	}
+	if !strings.Contains(f.Title, "<jig home>") || !strings.Contains(f.Detail, "<lease>") || !strings.Contains(res.Summary, "<store>") {
+		t.Errorf("the paths were not replaced by their names: title %q, detail %q, summary %q", f.Title, f.Detail, res.Summary)
+	}
+	if want := []string{"a.go", "b.go"}; !reflect.DeepEqual(res.ReviewedPaths, want) {
+		t.Errorf("reviewed_paths = %v, want %v: an absolute path inside the lease still counts as coverage", res.ReviewedPaths, want)
+	}
+}
+
+// TestGateCommitsNoPathOfTheJigHomeWhenAFindingCitesARecording: through Gate, a
+// reviewer that cites a recording by its absolute path leaves the finding in
+// the round's files, and nothing in the store's working copy (what the round
+// commits and pushes) names the jig home.
+func TestGateCommitsNoPathOfTheJigHomeWhenAFindingCitesARecording(t *testing.T) {
+	t.Parallel()
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	tip, err := gitx.RevParse(buildLeaseDir(t, fx), ticketBranch(fx.Ticket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	journalLines(t, d.Store, fx.Ticket, recordBuild(t, d, fx.Ticket, tip, "a-a1-f0", []recSpec{{File: "login.svg", Content: "login"}}))
+	rec := recordedFile(t, d, fx.Ticket, tip, "a-a1-f0", "login.svg")
+
+	backend := stubBackend{run: func(sd session.Dispatch) error {
+		req := readReviewRequest(t, sd.SliceJSON)
+		if !strings.Contains(sd.Prompt, "recordings.json") {
+			t.Errorf("the reviewer was not told of the recordings:\n%s", sd.Prompt)
+		}
+		result := ReviewResult{
+			Findings: []ResultFinding{{
+				File: req.MustReview[0], Line: 1, Action: ActionNote, Risk: RiskLow,
+				Title: "the login screen is wrong", Detail: "the recording at " + rec + " shows it", RiskRationale: "read from " + rec,
+			}},
+			ReviewedPaths: req.MustReview,
+			Summary:       "looked at " + rec,
+		}
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
+	}}
+	if _, err := Gate(d, NewReviewerGateSource(backend), GateOpts{Ticket: fx.Ticket, NoDemo: true}); err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+
+	findings, err := os.ReadFile(filepath.Join(gateRoundDir(d.Store, fx.Ticket, 1), "findings.yaml"))
+	if err != nil {
+		t.Fatalf("read findings.yaml: %v", err)
+	}
+	if !strings.Contains(string(findings), "the login screen is wrong") || !strings.Contains(string(findings), "<jig home>") {
+		t.Errorf("the finding is not in findings.yaml, with the path replaced by its name:\n%s", findings)
+	}
+	err = filepath.WalkDir(d.Store.Root, func(p string, de os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if de.IsDir() {
+			if de.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		data, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return rerr
+		}
+		if found := hostSpellingsIn(string(data), d.Home); len(found) > 0 {
+			t.Errorf("%s names the jig home (%v)", p, found)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

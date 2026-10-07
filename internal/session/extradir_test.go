@@ -165,6 +165,34 @@ func TestSessionViewSpellsTheExtraWriteDirLikeTheOtherPaths(t *testing.T) {
 	}
 }
 
+// TestSessionViewSpellsTheExtraReadFileLikeTheOtherPaths: the file the prompt
+// names for the session to read goes through the same long-spelling rewrite,
+// and, like the extra directory, grants nothing: the settings are the same
+// with and without it.
+func TestSessionViewSpellsTheExtraReadFileLikeTheOtherPaths(t *testing.T) {
+	d := missingDispatch(t, true)
+	d.ExtraReadFile = filepath.Join(t.TempDir(), "reviews", "round-1", "recordings.json")
+	d.Prompt = "recordings.json at " + d.ExtraReadFile
+	got := sessionView(d)
+	if want := longPath(d.ExtraReadFile); got.ExtraReadFile != want || got.Prompt != "recordings.json at "+want {
+		t.Errorf("sessionView left ExtraReadFile %q and prompt %q, want the long spelling %q", got.ExtraReadFile, got.Prompt, want)
+	}
+
+	b := &headlessBackend{goos: "linux", screenBinary: "/opt/jig/bin/jig"}
+	with, err := b.settings(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.ExtraReadFile = ""
+	without, err := b.settings(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if with != without {
+		t.Errorf("an ExtraReadFile changed the settings:\n%s\nwant\n%s", with, without)
+	}
+}
+
 // --- fake -----------------------------------------------------------------------
 
 // writeDemoScenario writes <scenario>/gate/round-<n>/demo-result.json and the
@@ -337,7 +365,7 @@ func herdrRunLog(t *testing.T, goos string, d Dispatch) [][]string {
 
 // TestHerdrBackendSpellsEveryPathOfTheDispatchForWSLOnWindows: on Windows the
 // session runs in WSL, so herdr hands it the prompt with the worktree, the
-// input file, the result file and the extra directory each spelled as their
+// input file, the result file, the extra directory and the file to read each spelled as their
 // WSL mount, while the workspace is created at the worktree's mount. jig
 // itself keeps reading the result at its host path. A path that another one
 // contains is replaced whole, and the extra directory takes no channel of its
@@ -349,15 +377,16 @@ func TestHerdrBackendSpellsEveryPathOfTheDispatchForWSLOnWindows(t *testing.T) {
 		worktree = `C:\demo\pool\repo\T-1-gate`
 		input    = `C:\demo\store\T-1\work\gate.round-1.demo.json`
 		extra    = `D:\jighome\evidence\id\T-1\abc`
+		readFile = `D:\jighome\evidence\id\T-1\reviews\round-1\recordings.json`
 	)
 	resultJSON := filepath.Join(t.TempDir(), "gate.round-1.demo.result.json")
-	prompt := fmt.Sprintf("inputs in %s, media into %s, result at %s, worktree %s", input, extra, resultJSON, worktree)
-	wantPrompt := fmt.Sprintf("inputs in %s, media into %s, result at %s, worktree %s",
-		"/mnt/c/demo/store/T-1/work/gate.round-1.demo.json", "/mnt/d/jighome/evidence/id/T-1/abc", WSLPath(resultJSON), "/mnt/c/demo/pool/repo/T-1-gate")
+	prompt := fmt.Sprintf("inputs in %s, media into %s, list at %s, result at %s, worktree %s", input, extra, readFile, resultJSON, worktree)
+	wantPrompt := fmt.Sprintf("inputs in %s, media into %s, list at %s, result at %s, worktree %s",
+		"/mnt/c/demo/store/T-1/work/gate.round-1.demo.json", "/mnt/d/jighome/evidence/id/T-1/abc", "/mnt/d/jighome/evidence/id/T-1/reviews/round-1/recordings.json", WSLPath(resultJSON), "/mnt/c/demo/pool/repo/T-1-gate")
 
 	calls := herdrRunLog(t, "windows", Dispatch{
 		Ticket: "T-1", Slice: GateDemoSlice, Attempt: 1, Worktree: worktree,
-		SliceJSON: input, ResultJSON: resultJSON, ExtraWriteDir: extra, Prompt: prompt,
+		SliceJSON: input, ResultJSON: resultJSON, ExtraWriteDir: extra, ExtraReadFile: readFile, Prompt: prompt,
 	})
 
 	wantCreate := herdrCmdline(t, "workspace", "create", "--cwd", "/mnt/c/demo/pool/repo/T-1-gate", "--label", "jig-T-1-gate-demo", "--no-focus")

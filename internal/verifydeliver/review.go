@@ -711,7 +711,7 @@ const reviewResultSchema = `{"findings": [{"file": "...", "line": 0, "title": ".
 // recordings.json. It states what the file is and how to weigh what it points
 // at, and leaves the review contract as it was: a finding still needs a cause
 // in the diff.
-const reviewRecordingsParagraph = `The build recorded its end-to-end scenarios at its builders' greens. recordings.json at %s lists the recordings made on this head's history, latest first, each with its scenario, an optional flow and step, a caption, the commit it ran at, its kind (image or video) and the path of its file; omitted counts older ones it leaves out. Read the ones that bear on the change as evidence of how it behaves end to end: an SVG recording's <text> elements are the terminal's screens, frame by frame. Treat what they show like any other evidence you cite: a finding still needs a cause in the diff.`
+const reviewRecordingsParagraph = `The build recorded its end-to-end scenarios while its tests passed. recordings.json at %s lists the recordings made on this head's history, latest first, each with its scenario, an optional flow and step, a caption, the commit it ran at, its kind (image or video) and the path of its file; omitted counts the recordings it leaves out. A recording shows the code at its commit, which may precede this head's change. Read the ones that bear on the change as evidence of how it behaves end to end. In an SVG that jig's terminal recorder wrote, the <text> elements are the terminal's screens, frame by frame. A video cannot be viewed with the read tools: weigh it by its scenario, caption and file name. Treat what a recording shows like any other evidence you cite: a finding still needs a cause in the diff, and names a recording by its scenario, step and commit, never by its path.`
 
 // RenderReviewPrompt fills reviewPromptTemplate for one review dispatch that
 // has no recordings to hand the reviewer.
@@ -1160,7 +1160,10 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		Model:      in.Model,
 		Effort:     effort,
 		Prompt:     prompt,
-		Screen:     true,
+		// The prompt names recordings.json (when there is one); a backend that
+		// spells paths for its session spells that mention too.
+		ExtraReadFile: recordingsPath,
+		Screen:        true,
 	}
 	if err := r.backend.Run(dispatch); err != nil {
 		return Round{}, false, &axi.Error{
@@ -1208,6 +1211,17 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		return Round{}, false, err
 	}
 	result.ReviewedPaths = normalizeReviewedPaths(in.LeaseDir, result.ReviewedPaths)
+
+	// What the reviewer wrote reaches the store: findings.yaml and findings.md,
+	// the fix slices built from a finding, and its own result.json in work/.
+	// It was told to cite a recording by scenario, step and commit, but a
+	// finding that cites one by its path must not commit the operator's jig
+	// home, so every directory of this machine is left out of its words.
+	hostDirs := reviewerHostDirs(in)
+	result = scrubReviewResult(result, hostDirs)
+	if err := scrubReviewResultFile(resultPath, resultData, hostDirs); err != nil {
+		return Round{}, false, err
+	}
 
 	return Round{Review: &Review{
 		Scope:      scope,
