@@ -2970,3 +2970,7 @@ jig's graphify plane gains `Update` and `Query` and a caller: when a project opt
 ## Headless sessions run nothing in the background (T-34)
 
 A `claude -p` session ends with its turn, and on T-23 a Sonnet builder backgrounded the full suite and ended its turn waiting for it, losing the attempt. Every headless session's settings now set `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so its shell has no background option and a long command is ended at the 30-minute bound instead of moved to the background. This is the recurrence the owner's measure-first decision on shell guards waited for. See ADR 0018's amendment.
+
+## Demos are recordings of the build's end-to-end scenarios: the format first
+
+The demo moves from ADR 0014's gate session and the VHS tapes to recordings made while the build's end-to-end scenarios run (decided 2026-10-05, design in ADR 0029, built in seven steps). The first step adds `internal/termrec`: a `Cast` in asciicast v2's model (read and written as asciicast, so asciinema's files read too), a small terminal model, and `Cast.SVG`, an animated SVG with one frame per visible change, pauses capped at 2 s, writes within 50 ms merged, and at most 600 frames. Nothing calls it yet. The owner chose on 2026-10-07 how jig's own tests capture: by stamping the pipe writes they already read, since jig's output ignores terminals and a pseudo-terminal would merge the streams they assert on; the pseudo-terminal recorder comes next for other projects. See [ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md).
