@@ -11,7 +11,8 @@ import (
 // package (no run/gate involved) and asserts `jig status` renders exactly
 // cmd/jig's RenderStatus format (status.go) for that snapshot.
 func TestStatusGoldenConstructed(t *testing.T) {
-	fx, _ := newFixture(t, fixture.Opts{})
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -29,7 +30,7 @@ func TestStatusGoldenConstructed(t *testing.T) {
 		}
 	}
 
-	r := runJig(t, fx.StoreDir, "status", fx.Ticket)
+	r := runJig(t, env, fx.StoreDir, "status", fx.Ticket)
 	if r.Code != 0 {
 		t.Fatalf("jig status exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
@@ -44,7 +45,8 @@ func TestStatusGoldenConstructed(t *testing.T) {
 // and the stalled remediation hint, alongside TestStatusGoldenConstructed's
 // plain building state.
 func TestStatusGoldenStalled(t *testing.T) {
-	fx, _ := newFixture(t, fixture.Opts{})
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -62,7 +64,7 @@ func TestStatusGoldenStalled(t *testing.T) {
 		}
 	}
 
-	r := runJig(t, fx.StoreDir, "status", fx.Ticket)
+	r := runJig(t, env, fx.StoreDir, "status", fx.Ticket)
 	if r.Code != 0 {
 		t.Fatalf("jig status exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}

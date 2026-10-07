@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -24,16 +26,79 @@ type jigResult struct {
 	Code   int
 }
 
-// runJig runs the built jig binary with cwd and args, inheriting the test
-// process's environment (which already carries JIG_HOME from t.Setenv, set
-// by newFixture below). It never fails the test on a non-zero exit: callers
-// assert Code themselves, since every jig subcommand's pause/stop/error
-// paths are meaningful exit codes, not test failures.
-func runJig(t *testing.T, cwd string, args ...string) jigResult {
+// jigEnv is the environment one test hands the jig subprocesses it runs:
+// the few variables jig reads from its environment, set explicitly rather
+// than through t.Setenv. Setenv edits the process's environment, which every
+// test in the package shares, so a test that used it could not run in
+// parallel with another (t.Setenv panics in a parallel test); a jigEnv is a
+// plain value one test owns and passes to runJig, which lays it over the
+// process environment for that one subprocess. It is a value on purpose: a
+// test that needs a different jig home for one command copies it and edits
+// the copy (TestInitProject).
+type jigEnv struct {
+	home     string // JIG_HOME: the jig home root the subprocess resolves
+	userHome string // HOME and USERPROFILE, so the subprocess never reaches the real user home; "" leaves the host's
+}
+
+// overrides is the KEY=VALUE list e lays over the process environment.
+func (e jigEnv) overrides() []string {
+	out := []string{"JIG_HOME=" + e.home}
+	if e.userHome != "" {
+		out = append(out, "HOME="+e.userHome, "USERPROFILE="+e.userHome)
+	}
+	return out
+}
+
+// environ returns the process environment with e's variables replacing
+// whatever the process has under the same names (not appended beside them,
+// so the subprocess sees each name once).
+func (e jigEnv) environ() []string {
+	return replaceEnv(os.Environ(), e.overrides())
+}
+
+// replaceEnv returns base without any entry named like one of overrides,
+// followed by overrides. Names compare case-insensitively on Windows, where
+// the environment is case-insensitive ("Path" and "PATH" are one variable).
+func replaceEnv(base, overrides []string) []string {
+	out := make([]string, 0, len(base)+len(overrides))
+	for _, kv := range base {
+		if !slices.ContainsFunc(overrides, func(o string) bool { return sameEnvName(envName(kv), envName(o)) }) {
+			out = append(out, kv)
+		}
+	}
+	return append(out, overrides...)
+}
+
+// envName is the name part of a KEY=VALUE entry. Windows keeps per-drive
+// working directories in entries that begin with "=" (such as "=C:=C:\work"),
+// so the name starts after any leading "=".
+func envName(kv string) string {
+	start := 0
+	if strings.HasPrefix(kv, "=") {
+		start = 1
+	}
+	if i := strings.Index(kv[start:], "="); i >= 0 {
+		return kv[:start+i]
+	}
+	return kv
+}
+
+func sameEnvName(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+// runJig runs the built jig binary with cwd and args in the process
+// environment plus env's variables. It never fails the test on a non-zero
+// exit: callers assert Code themselves, since every jig subcommand's
+// pause/stop/error paths are meaningful exit codes, not test failures.
+func runJig(t *testing.T, env jigEnv, cwd string, args ...string) jigResult {
 	t.Helper()
 	cmd := exec.Command(jigBinary, args...)
 	cmd.Dir = cwd
-	cmd.Env = os.Environ()
+	cmd.Env = env.environ()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -41,35 +106,29 @@ func runJig(t *testing.T, cwd string, args ...string) jigResult {
 	return jigResult{Stdout: stdout.String(), Stderr: stderr.String(), Code: exitCodeOf(t, err)}
 }
 
-// newFixture sets a fresh JIG_HOME (via t.Setenv, so it is scoped to this
-// test/subtest and inherited by runJig's subprocess) and generates a fresh
-// fixture under it. It returns both the fixture and the JIG_HOME path, since
-// several assertions (the pool build lease, the machine mapping file) need
-// to reach under JIG_HOME directly.
+// newFixture generates a fresh fixture under a fresh jig home and returns
+// both the fixture and the environment to run jig in against it. The jig
+// home is in the returned jigEnv (env.home), since several assertions (the
+// pool build lease, the machine mapping file) need to reach under it
+// directly. Opts.Home is set here: this helper owns the decision.
 //
-// It also points HOME and USERPROFILE at a second, separate fresh temp
-// dir: runJig runs the real jig binary with the test process's own
-// environment (cmd.Env = os.Environ()), and jig itself can reach
+// The environment also points HOME and USERPROFILE at a second, separate
+// fresh temp dir: runJig runs the real jig binary, and jig itself can reach
 // os.UserHomeDir() - most directly, gate's own local-transcript intent
 // inference - so this suite must never let that subprocess resolve to the
 // real host home directory, the same rule every other package's own tests
 // already hold to.
 //
-// NOTE: fixture.Generate resolves testdata/fixture relative to its own
-// source file and writes the machine mapping under whatever JIG_HOME is
-// already set when it is called; it does not create a home directory
-// itself. That means JIG_HOME is a temp dir independent of fx.Dir, not
-// "<fx.Dir>/home" as a first pass at this task assumed - this helper is the
-// single place that decision lives.
-func newFixture(t *testing.T, opts fixture.Opts) (fx *fixture.Fixture, home string) {
+// NOTE: fixture.Generate writes the machine mapping under Opts.Home, and
+// does not create a home directory itself. That means the jig home is a temp
+// dir independent of fx.Dir, not "<fx.Dir>/home" as a first pass at this task
+// assumed - this helper is the single place that decision lives.
+func newFixture(t *testing.T, opts fixture.Opts) (fx *fixture.Fixture, env jigEnv) {
 	t.Helper()
-	home = t.TempDir()
-	t.Setenv("JIG_HOME", home)
-	realHome := t.TempDir()
-	t.Setenv("HOME", realHome)
-	t.Setenv("USERPROFILE", realHome)
+	env = jigEnv{home: t.TempDir(), userHome: t.TempDir()}
+	opts.Home = env.home
 	fx = fixture.Generate(t, opts)
-	return fx, home
+	return fx, env
 }
 
 // poolBuildLeaseDir returns the build lease directory for ticket under home,

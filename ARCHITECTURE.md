@@ -934,8 +934,9 @@ go test ./...
 
 Every test gets its own `t.TempDir()` and its own jig home (passed as an
 argument to the packages that use one, or as `JIG_HOME` via `t.Setenv` to
-`cmd/jig` and the binary), so a test run never touches a real machine's jig
-home, and every
+`cmd/jig` and the binary - except in `e2e`, which sets it in the binary's own
+subprocess environment so its tests run in parallel), so a test run never
+touches a real machine's jig home, and every
 remote used in tests is a bare, file-path repo - no test ever talks to a
 real git host.
 
