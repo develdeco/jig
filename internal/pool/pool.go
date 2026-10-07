@@ -60,6 +60,11 @@ type Lease struct {
 	Dir    string
 	Repo   string
 	Branch string
+	// Recovered names what Acquire ended because an earlier session left it
+	// unfinished in this reused lease: "merge", "rebase", "am",
+	// "cherry-pick", "revert" or "unmerged index"; "" when there was nothing
+	// (recoverUnfinished).
+	Recovered string
 }
 
 // Return leaves the lease directory exactly as it is: the pool never
@@ -194,6 +199,7 @@ func Acquire(jigHome, repoName, remote, target, branch, ticket string, role Role
 	if err != nil {
 		return Lease{}, err
 	}
+	var recovered string
 
 	reuse, err := prepare(dir)
 	if err != nil {
@@ -206,6 +212,12 @@ func Acquire(jigHome, repoName, remote, target, branch, ticket string, role Role
 		// Keep the reused clone packed. Best-effort: a maintenance failure
 		// must not fail an Acquire whose fetch already succeeded.
 		_ = gitx.MaintenanceAuto(dir)
+		// A session that died mid-merge (or mid-rebase) leaves the index
+		// unmerged, and no checkout can run over it until the operation
+		// ends.
+		if recovered, err = recoverUnfinished(dir); err != nil {
+			return Lease{}, err
+		}
 	} else {
 		parent := filepath.Dir(dir)
 		if err := os.MkdirAll(parent, 0o755); err != nil {
@@ -244,7 +256,89 @@ func Acquire(jigHome, repoName, remote, target, branch, ticket string, role Role
 		}
 	}
 
-	return Lease{Dir: dir, Repo: repoName, Branch: branch}, nil
+	return Lease{Dir: dir, Repo: repoName, Branch: branch, Recovered: recovered}, nil
+}
+
+// unfinishedOps are the operations an earlier session can leave in progress
+// in a lease, by the marker git keeps while one is: the name is the git
+// command whose --quit ends it.
+var unfinishedOps = []struct{ marker, name string }{
+	{"rebase-merge", "rebase"},
+	{"rebase-apply/applying", "am"},
+	{"rebase-apply", "rebase"},
+	{"MERGE_HEAD", "merge"},
+	{"CHERRY_PICK_HEAD", "cherry-pick"},
+	{"REVERT_HEAD", "revert"},
+	{"sequencer", "cherry-pick"},
+}
+
+// recoverUnfinished ends what an earlier session left unfinished in dir,
+// without moving any branch, and returns what it ended ("" for nothing):
+//   - an operation in progress (unfinishedOps) is ended with `--quit`, which
+//     keeps every commit it already made: am, cherry-pick and revert commit
+//     as they go, and their --abort would rewind the branch past them;
+//   - an index with unmerged entries, from that operation or from one git
+//     keeps no marker for (a conflicted stash pop, a squash merge), is reset
+//     to HEAD with `reset --merge`, which keeps local changes it does not
+//     have to touch.
+//
+// What it discards was never committed. A rebase's progress lives on a
+// detached HEAD, never on the branch, so the checkout after this returns the
+// branch exactly as the rebase found it.
+func recoverUnfinished(dir string) (string, error) {
+	args := []string{"rev-parse"}
+	for _, op := range unfinishedOps {
+		args = append(args, "--git-path", op.marker)
+	}
+	out, err := gitx.Run(dir, args...)
+	if err != nil {
+		return "", fmt.Errorf("pool: look for unfinished operations in %s: %w", dir, err)
+	}
+	paths := strings.Split(strings.TrimSpace(strings.ReplaceAll(out, "\r\n", "\n")), "\n")
+	if len(paths) != len(unfinishedOps) {
+		return "", fmt.Errorf("pool: look for unfinished operations in %s: git printed %d paths for %d markers", dir, len(paths), len(unfinishedOps))
+	}
+	recovered := ""
+	for i, op := range unfinishedOps {
+		path := strings.TrimSpace(paths[i])
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		if _, err := gitx.Run(dir, op.name, "--quit"); err != nil {
+			return "", unfinishedError(dir, op.name, err)
+		}
+		recovered = op.name
+		break
+	}
+	unmerged, err := gitx.Run(dir, "ls-files", "--unmerged")
+	if err != nil {
+		return "", fmt.Errorf("pool: look for an unmerged index in %s: %w", dir, err)
+	}
+	if strings.TrimSpace(unmerged) != "" {
+		if _, err := gitx.Run(dir, "reset", "--merge"); err != nil {
+			return "", unfinishedError(dir, "unmerged index", err)
+		}
+		if recovered == "" {
+			recovered = "unmerged index"
+		}
+	}
+	return recovered, nil
+}
+
+// unfinishedError is the error for a lease jig could not recover: what it
+// tried to end, where, and how a person ends it.
+func unfinishedError(dir, what string, err error) error {
+	return &axi.Error{
+		Msg:  fmt.Sprintf("the lease %s holds an unfinished %s that jig could not end: %v", dir, what, err),
+		Code: "LEASE_UNFINISHED",
+		Help: []string{
+			"`git status` in the lease names what is in progress",
+			"End it there (for example `git merge --quit` then `git reset --merge`), then rerun",
+		},
+	}
 }
 
 // syncWithOrigin brings the branch checked out in dir in step with
