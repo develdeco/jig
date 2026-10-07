@@ -46,11 +46,13 @@ Testing rules below for what the suite does and doesn't touch.
     prompt and what follows it. Attach media with `gh pr create --attach` or
     `gh pr edit --attach` (gh 2.99 or later) rather than committing it.
     Leave the section out when nothing is visible, as with a docs-only or
-    purely internal change. CI records nothing: a demo of jig's own flows
-    comes from the recordings its end-to-end tests make of each jig run
-    while the build runs them ([ADR 0029](../docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md),
-    built in steps), and until those reach your build you attach the
-    screenshot, GIF or SVG by hand as above.
+    purely internal change. CI records nothing. A pull request built
+    through jig gets its demo from jig: today the gate's demo session
+    ([ADR 0014](../docs/adr/0014-demo-session-at-the-gate.md)), and, as
+    [ADR 0029](../docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md)
+    lands step by step, the recordings the build's end-to-end tests make. A
+    hand-built pull request attaches its screenshot, GIF or video by hand
+    as above (an SVG works too).
   - **Verification**: the gates you ran, and anything you checked beyond
     them.
 - Everything else a reviewer might want - contract changes, where to look,

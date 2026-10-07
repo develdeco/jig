@@ -21,7 +21,7 @@ ADR 0014 made the demo a model session of its own, run after a clean reviewer ro
 
 ## Built in steps
 
-Each step is its own pull request, and until the last ones land ADR 0014's demo session and the tapes stand:
+Each step is its own pull request, and until step 6 lands ADR 0014's demo session stands. The tapes went first (step 7), since nothing read them but people:
 1. The recording format and its SVG rendering (`internal/termrec`).
 2. Capture: a pseudo-terminal recorder, and the pipe-stamping one jig's own tests use.
 3. Build-phase collection: jig's oracle run at a builder's green gives the scenarios a directory to record into, verifies what they wrote, and records the manifest with the commit.
