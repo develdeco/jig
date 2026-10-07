@@ -28,4 +28,4 @@ Each step is its own pull request, and until the last ones land ADR 0014's demo 
 4. jig's own end-to-end tests record.
 5. Publish picks the recordings and composes the flows; the reviewer prompt names them as evidence.
 6. The gate demo session is retired.
-7. The tapes, `demo/fixture` and `demo.yml` are retired.
+7. The tapes, `demo/fixture` and `demo.yml` are retired (done).

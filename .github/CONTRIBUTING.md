@@ -46,8 +46,11 @@ Testing rules below for what the suite does and doesn't touch.
     prompt and what follows it. Attach media with `gh pr create --attach` or
     `gh pr edit --attach` (gh 2.99 or later) rather than committing it.
     Leave the section out when nothing is visible, as with a docs-only or
-    purely internal change. jig's own flows are recorded as VHS tapes that
-    CI renders from each branch head: see [demo/README.md](../demo/README.md).
+    purely internal change. CI records nothing: a demo of jig's own flows
+    comes from the recordings its end-to-end tests make of each jig run
+    while the build runs them ([ADR 0029](../docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md),
+    built in steps), and until those reach your build you attach the
+    screenshot, GIF or SVG by hand as above.
   - **Verification**: the gates you ran, and anything you checked beyond
     them.
 - Everything else a reviewer might want - contract changes, where to look,

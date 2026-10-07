@@ -17,10 +17,6 @@ import (
 // between `## What changed` and `## Verification`, referencing each
 // verified file (both are svg here, so each as a markdown image reference)
 // with its caption, right after the summary.
-// demo/publish-body.tape's own hidden setup already reaches this
-// state (the `reviewer` fixture scenario scripts a demo for its clean round
-// 3) but never shows the body on camera with a demo in it; this test is
-// what a tape showing one would cite.
 func TestPublishAttachesTheGateDemoThroughMain(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "demo"})

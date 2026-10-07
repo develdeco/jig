@@ -123,13 +123,12 @@ func TestGateDocFlagWritesIntentThroughMain(t *testing.T) {
 // a `jig run` in between works round 1's own fix-1 (the base scenario's
 // scripted round) back to green, so round 2 - with --intent, recording
 // intent.md and printing "intent: explicit" - needs no --early either: the
-// frontier is fully green by the time each gate call runs, matching
-// demo/gate-intent.tape's own flow keystroke for keystroke (its `cat` of
-// intent.md is the raw file read below). Neither round needs --early for
-// that reason; skipping the `jig run` in between would leave fix-1 queued
-// through round 2, which still prints "verdict: clean" but then points the
-// next-step hint at `jig run` instead of `jig publish` - a mismatched
-// frame this test's own final assertion catches.
+// frontier is fully green by the time each gate call runs, matching the flow
+// a person types (the raw intent.md is read below). Neither round needs
+// --early for that reason; skipping the `jig run` in between would leave
+// fix-1 queued through round 2, which still prints "verdict: clean" but then
+// points the next-step hint at `jig run` instead of `jig publish` - a
+// mismatched hint this test's own final assertion catches.
 func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 	fx := fixture.Generate(t, fixture.Opts{})
@@ -167,9 +166,8 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 	}
 
 	// Round 1's scripted round raised a fix, queuing fix-1: work it back to
-	// green before round 2, the same as a real terminal session would (and
-	// demo/gate-intent.tape does) rather than gating again over unfinished
-	// work.
+	// green before round 2, the same as a real terminal session would,
+	// rather than gating again over unfinished work.
 	out, code = runMain(t, "", runArgs...)
 	if code != 0 {
 		t.Fatalf("run (fix-1): exit = %d, want 0\n%s", code, out)
@@ -187,9 +185,9 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 	if err != nil || !ok || in.Text != "make the greeting warmer" {
 		t.Fatalf("intent.md = %+v ok=%v err=%v, want the recorded explicit text", in, ok, err)
 	}
-	// The file's own bytes, the frame demo/gate-intent.tape's `cat` shows on
-	// camera: a front matter naming the provenance the report just printed,
-	// then the flag's own text.
+	// The file's own bytes, as a person reading it would see them: a front
+	// matter naming the provenance the report just printed, then the flag's
+	// own text.
 	raw, err := os.ReadFile(st.IntentPath(fx.Ticket))
 	if err != nil {
 		t.Fatalf("read intent.md: %v", err)
@@ -199,8 +197,7 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 	}
 
 	// The frontier is fully green and round 2 was clean, so the next-step
-	// hint must point at publish, not run - the exact frame
-	// demo/gate-intent.tape's own final command shows on camera.
+	// hint must point at publish, not run.
 	out, code = runMain(t, "", "status", fx.Ticket, "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("status: exit = %d, want 0\n%s", code, out)

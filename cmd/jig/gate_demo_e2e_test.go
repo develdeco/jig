@@ -46,11 +46,11 @@ func mapKeys(m map[string]any) string {
 }
 
 // TestGateDemoThroughMain drives one clean reviewer round through Main with
-// the fake backend, exactly as demo/gate-demo.tape does: the gate report
-// prints the demo line and the recorded media, demo.yaml lands in the store
-// with the media's own hashes, the media themselves land under the jig home
-// (never in the store), and a second round on the same head prints that its
-// demo already exists instead of running another.
+// the fake backend, as a person gating the demo scenario would: the gate
+// report prints the demo line and the recorded media, demo.yaml lands in the
+// store with the media's own hashes, the media themselves land under the jig
+// home (never in the store), and a second round on the same head prints that
+// its demo already exists instead of running another.
 func TestGateDemoThroughMain(t *testing.T) {
 	jigHome := t.TempDir()
 	t.Setenv("JIG_HOME", jigHome)
