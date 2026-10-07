@@ -2,6 +2,8 @@ package home
 
 import (
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +62,81 @@ func TestEvidenceDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
 				t.Errorf("EvidenceDir with %q in part %d = %q, want a refusal", name, i, got)
 			}
 		}
+	}
+}
+
+// userDirVar is the variable os.UserHomeDir reads on this OS.
+func userDirVar() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "USERPROFILE"
+	case "plan9":
+		return "home"
+	}
+	return "HOME"
+}
+
+// envOf is a getenv that answers from vars alone, never from the process.
+func envOf(vars map[string]string) func(string) string {
+	return func(key string) string { return vars[key] }
+}
+
+// TestRootFromHonorsTheEnvironmentGiven: JIG_HOME wins over the user home,
+// and both come from the environment handed in, not the process's.
+func TestRootFromHonorsTheEnvironmentGiven(t *testing.T) {
+	t.Parallel()
+
+	got, err := RootFrom(envOf(map[string]string{"JIG_HOME": "/elsewhere", userDirVar(): "/users/me"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/elsewhere" {
+		t.Fatalf("RootFrom with JIG_HOME = %q, want /elsewhere", got)
+	}
+}
+
+// TestRootFromFallsBackToTheUserHomesConfigDir: with no JIG_HOME, the root is
+// .config/jig under the user home the environment names.
+func TestRootFromFallsBackToTheUserHomesConfigDir(t *testing.T) {
+	t.Parallel()
+
+	userHome := t.TempDir()
+	got, err := RootFrom(envOf(map[string]string{userDirVar(): userHome}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(userHome, ".config", "jig"); got != want {
+		t.Fatalf("RootFrom with only a user home = %q, want %q", got, want)
+	}
+}
+
+// TestRootFromWithNoHomeAtAllFails: an environment naming neither JIG_HOME nor
+// a user home gives no root, with the error os.UserHomeDir gives for it.
+func TestRootFromWithNoHomeAtAllFails(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "android" || runtime.GOOS == "ios" {
+		t.Skipf("%s has a fixed home directory when the variable is unset", runtime.GOOS)
+	}
+
+	got, err := RootFrom(envOf(nil))
+	if err == nil {
+		t.Fatalf("RootFrom of an empty environment = %q, want an error", got)
+	}
+	if !strings.Contains(err.Error(), "is not defined") {
+		t.Fatalf("RootFrom of an empty environment: error %q, want the variable-not-defined error os.UserHomeDir gives", err)
+	}
+}
+
+// TestUserDirFromReadsTheVariableTheOSDoes: UserDirFrom answers from the
+// environment given, by os.UserHomeDir's own rule.
+func TestUserDirFromReadsTheVariableTheOSDoes(t *testing.T) {
+	t.Parallel()
+
+	got, err := UserDirFrom(envOf(map[string]string{userDirVar(): "/users/me"}))
+	if err != nil || got != "/users/me" {
+		t.Fatalf("UserDirFrom = %q, %v, want /users/me", got, err)
+	}
+	if got, err := UserDirFrom(envOf(map[string]string{"JIG_HOME": "/elsewhere"})); err == nil && runtime.GOOS != "android" && runtime.GOOS != "ios" {
+		t.Fatalf("UserDirFrom with no user home variable = %q, want an error", got)
 	}
 }

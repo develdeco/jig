@@ -17,8 +17,8 @@ import (
 )
 
 // cmdValidate implements `jig validate <ticket>`.
-func cmdValidate(args []string, stdout io.Writer) int {
-	fs := newFlagSet("validate")
+func cmdValidate(e env, args []string, stdout io.Writer) int {
+	fs := newFlagSet(e, "validate")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	ticket, rest, err := requirePositional(args, "ticket")
@@ -31,7 +31,7 @@ func cmdValidate(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, _, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, mp, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

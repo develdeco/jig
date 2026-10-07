@@ -44,6 +44,7 @@ func replaceTicketDeps(t *testing.T, st *store.Store, ticket string, deps []stor
 // TestValidateTicketDepsAbsent covers a ticket without ticket.yaml: it
 // validates as before, with no problems reported.
 func TestValidateTicketDepsAbsent(t *testing.T) {
+	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 
@@ -55,6 +56,7 @@ func TestValidateTicketDepsAbsent(t *testing.T) {
 // TestValidateTicketDepsParseError covers a ticket.yaml that is not valid
 // YAML.
 func TestValidateTicketDepsParseError(t *testing.T) {
+	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 	path := filepath.Join(st.TicketDir("T-1"), "ticket.yaml")
@@ -74,6 +76,7 @@ func TestValidateTicketDepsParseError(t *testing.T) {
 // alone does not), verbatim and in order, as further lines of the same report,
 // for every kind of refusal that has any.
 func TestValidateTicketDepsCarriesTheReadRefusalsNextSteps(t *testing.T) {
+	t.Parallel()
 	for name, content := range map[string]string{
 		"not yaml":     "blocked_by: [this is not valid yaml",
 		"unknown key":  "schema_version: 1\nfrobnicate: yes\n",
@@ -103,6 +106,7 @@ func TestValidateTicketDepsCarriesTheReadRefusalsNextSteps(t *testing.T) {
 // TestValidateTicketDepsMissingTicket covers a blocked_by entry with no
 // ticket field.
 func TestValidateTicketDepsMissingTicket(t *testing.T) {
+	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 	path := filepath.Join(st.TicketDir("T-1"), "ticket.yaml")
@@ -119,6 +123,7 @@ func TestValidateTicketDepsMissingTicket(t *testing.T) {
 // TestValidateTicketDepsUnknownBlocker covers a blocker the store has no
 // ticket folder for.
 func TestValidateTicketDepsUnknownBlocker(t *testing.T) {
+	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 	replaceTicketDeps(t, st, "T-1", []store.TicketBlockedBy{{Ticket: "T-999", Kind: "merged"}})
@@ -131,6 +136,7 @@ func TestValidateTicketDepsUnknownBlocker(t *testing.T) {
 
 // TestValidateTicketDepsBadKind covers a kind other than merged or stacked.
 func TestValidateTicketDepsBadKind(t *testing.T) {
+	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 	mustMkdirTicket(t, st, "T-2")
@@ -145,6 +151,7 @@ func TestValidateTicketDepsBadKind(t *testing.T) {
 // TestValidateTicketDepsCycle covers a cycle followed across two tickets'
 // own ticket.yaml files, naming both tickets in the cycle.
 func TestValidateTicketDepsCycle(t *testing.T) {
+	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 	mustMkdirTicket(t, st, "T-2")
@@ -165,6 +172,7 @@ func TestValidateTicketDepsCycle(t *testing.T) {
 
 // TestValidateTicketDepsSelfCycle covers a ticket blocked_by itself.
 func TestValidateTicketDepsSelfCycle(t *testing.T) {
+	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 	replaceTicketDeps(t, st, "T-1", []store.TicketBlockedBy{{Ticket: "T-1", Kind: "merged"}})
@@ -184,6 +192,7 @@ func TestValidateTicketDepsSelfCycle(t *testing.T) {
 // TestValidateTicketBranchAbsent covers a ticket without a recorded branch:
 // it validates as before, with no problems reported.
 func TestValidateTicketBranchAbsent(t *testing.T) {
+	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 
@@ -197,6 +206,7 @@ func TestValidateTicketBranchAbsent(t *testing.T) {
 // gate and publish, surfaced here instead so `jig validate` catches a bad
 // hand-edited ticket.yaml before any of them do.
 func TestValidateTicketBranchEqualsTarget(t *testing.T) {
+	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 	if err := st.WriteTicketBranch("T-1", "main"); err != nil {
@@ -212,6 +222,7 @@ func TestValidateTicketBranchEqualsTarget(t *testing.T) {
 // TestValidateTicketBranchBadRefName covers a recorded branch git itself
 // would refuse as a ref name.
 func TestValidateTicketBranchBadRefName(t *testing.T) {
+	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
 	if err := st.WriteTicketBranch("T-1", "bad..name"); err != nil {
@@ -230,6 +241,7 @@ func TestValidateTicketBranchBadRefName(t *testing.T) {
 // different codes - is reported once, by validateTicketDeps, not duplicated
 // by validateTicketBranch.
 func TestValidateTicketBranchSkipsUnreadableRecord(t *testing.T) {
+	t.Parallel()
 	for name, content := range map[string]string{
 		"unknown key":     "schema_version: 1\nfrobnicate: yes\n",
 		"newer schema":    "schema_version: 2\nbranch: feature/x\n",
@@ -257,6 +269,7 @@ func TestValidateTicketBranchSkipsUnreadableRecord(t *testing.T) {
 // not. It fails if validateTicket stops running the branch check, or if the
 // check uses "main" instead of the configured target.
 func TestValidateTicketChecksRecordedBranchAgainstTheConfiguredTarget(t *testing.T) {
+	t.Parallel()
 	cfg := project.Config{Repos: []project.Repo{{Remote: "https://example.invalid/org/demo.git", Target: "develop"}}}
 	st := &store.Store{Root: t.TempDir()}
 	mustMkdirTicket(t, st, "T-1")
@@ -308,6 +321,7 @@ func TestValidateTicketChecksRecordedBranchAgainstTheConfiguredTarget(t *testing
 // end against a store with two minted tickets whose ticket.yaml files block
 // each other, checking the CLI surfaces the cycle as a validation failure.
 func TestValidateCommandReportsTicketDepsProblem(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 
 	if code, out := jig("ticket", "new", "--title", "A"); code != 0 {

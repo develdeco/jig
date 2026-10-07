@@ -18,7 +18,6 @@ import (
 // returns a jig() runner plus the store's root directory.
 func setupGraduateStore(t *testing.T) (jig func(args ...string) (int, string), storeRoot string) {
 	t.Helper()
-	t.Setenv("JIG_HOME", t.TempDir())
 	repo := filepath.Join(t.TempDir(), "demo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
@@ -26,11 +25,11 @@ func setupGraduateStore(t *testing.T) (jig func(args ...string) (int, string), s
 	if _, err := gitx.Run(repo, "init", "-b", "main"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	t.Chdir(repo)
+	e := testEnv(t.TempDir()).inDir(repo)
 
 	jig = func(args ...string) (int, string) {
 		var buf bytes.Buffer
-		code := Main(args, &buf, strings.NewReader(""))
+		code := run(e, args, &buf, strings.NewReader(""))
 		return code, buf.String()
 	}
 	if code, out := jig("init", "--standalone"); code != 0 {
@@ -78,6 +77,7 @@ func rewriteTicketFormat(t *testing.T, storeRoot, format string) {
 // blocked_by an earlier entry in the same chart, with an explicit and a
 // defaulted kind, resolving to the sibling's newly minted id.
 func TestGraduateResolvesSameChartBlockedBy(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
@@ -139,6 +139,7 @@ func TestGraduateResolvesSameChartBlockedBy(t *testing.T) {
 // TestGraduateCrossChartRef covers a ref into another chart that has already
 // graduated, and the self-named-chart spelling of an own-chart ref.
 func TestGraduateCrossChartRef(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "parent", `tickets:
   - title: "Parent slice"
@@ -210,6 +211,7 @@ func TestGraduateCrossChartRef(t *testing.T) {
 // file does not exist reports false rather than erroring (so the caller
 // falls through to the cross-chart branch's own "no tickets.yaml" error).
 func TestSameChartFile(t *testing.T) {
+	t.Parallel()
 	storeRoot := t.TempDir()
 	writeChart(t, storeRoot, "mychart", "tickets: []\n")
 	writeChart(t, storeRoot, "other", "tickets: []\n")
@@ -247,6 +249,7 @@ func TestSameChartFile(t *testing.T) {
 // every OS: the test discovers which case applies by stat-ing both
 // spellings itself, rather than assuming it from runtime.GOOS.
 func TestGraduateCaseVariantSelfRef(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "casechart", `tickets:
   - title: "Slice A"
@@ -304,6 +307,7 @@ func TestGraduateCaseVariantSelfRef(t *testing.T) {
 // TestGraduateRefusesBadRefs covers every ref failure the run must refuse
 // before creating anything, leaving no ticket folders behind.
 func TestGraduateRefusesBadRefs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		chart string
@@ -421,6 +425,7 @@ func TestGraduateRefusesBadRefs(t *testing.T) {
 // TestGraduateRefusesCrossChartRefWithoutID covers a cross-chart ref naming
 // an entry that has not been graduated yet.
 func TestGraduateRefusesCrossChartRefWithoutID(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "parent", `tickets:
   - title: "Parent slice"
@@ -445,6 +450,7 @@ func TestGraduateRefusesCrossChartRefWithoutID(t *testing.T) {
 // missing tickets and exits 0, but prints an advisory naming the file to
 // edit, and never touches the existing ticket's ticket.yaml.
 func TestGraduateAdvisoryOnDrift(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
@@ -502,6 +508,7 @@ func TestGraduateAdvisoryOnDrift(t *testing.T) {
 // uncommitted while telling the operator about neither. It must instead
 // advise (naming the broken file) and let the run reach Push.
 func TestGraduateAdvisesRatherThanAbortsOnUnparseableTicketDeps(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
@@ -594,6 +601,7 @@ func TestGraduateAdvisesRatherThanAbortsOnUnparseableTicketDeps(t *testing.T) {
 // would be wrong for it), verbatim, as `jig validate` gives them; and, for a
 // read failure with none of its own, the fixed "edit it" step.
 func TestGraduateAdvisoryCarriesTheReadRefusalsNextSteps(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		place   func(t *testing.T, path string)
@@ -675,6 +683,7 @@ func TestGraduateAdvisoryCarriesTheReadRefusalsNextSteps(t *testing.T) {
 // to create: it still compares existing entries against their ticket.yaml
 // and advises on drift, without writing anything.
 func TestGraduateFullyGraduatedStillAdvises(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
@@ -732,6 +741,7 @@ func TestGraduateFullyGraduatedStillAdvises(t *testing.T) {
 // file named T-2 makes entry B's mint fail once entry A has already taken
 // T-1 - no fake adapter needed.
 func TestGraduateMidRunFailureIsRecoverable(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
@@ -814,6 +824,7 @@ func TestGraduateMidRunFailureIsRecoverable(t *testing.T) {
 // both, gaining only the already-claimed context in its message. The error
 // passed in is not changed in place.
 func TestGraduateFailureNamesTicketsAlreadyClaimed(t *testing.T) {
+	t.Parallel()
 	raw := errors.New("boom")
 	err := graduateFailure("mychart", []string{"T-1"}, raw)
 	var ae *axi.Error
@@ -872,6 +883,7 @@ func TestGraduateFailureNamesTicketsAlreadyClaimed(t *testing.T) {
 // gets no id, the ticket folder is removed, and the command refuses with
 // ID_NOT_CLAIMED rather than leaving a ticket claimed only locally.
 func TestGraduatePushFailureRemovesTheClaim(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 
 	remote := filepath.Join(t.TempDir(), "remote.git")
@@ -955,6 +967,7 @@ func TestGraduatePushFailureRemovesTheClaim(t *testing.T) {
 // guard that keeps a blocked_by ref's chart name (e.g. "../x#1") from
 // escaping charts/.
 func TestGraduateRefusesBadChartName(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{".", "..", "a/b", `a\b`} {
 		t.Run(name, func(t *testing.T) {
 			jig, _ := setupGraduateStore(t)
@@ -969,6 +982,7 @@ func TestGraduateRefusesBadChartName(t *testing.T) {
 // TestGraduateRefusesMissingTicketsFile covers a chart name that is valid
 // but names no charts/<chart>/tickets.yaml at all.
 func TestGraduateRefusesMissingTicketsFile(t *testing.T) {
+	t.Parallel()
 	jig, _ := setupGraduateStore(t)
 	code, out := jig("graduate", "no-such-chart")
 	if code == 0 {
@@ -983,6 +997,7 @@ func TestGraduateRefusesMissingTicketsFile(t *testing.T) {
 // no entries at all: WriteChart would refuse the same file, so graduate must
 // refuse it too rather than report a false "fully graduated".
 func TestGraduateRefusesEmptyChart(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", "tickets: []\n")
 
@@ -1000,6 +1015,7 @@ func TestGraduateRefusesEmptyChart(t *testing.T) {
 
 // TestGraduateRefusesNoTitle covers an entry with no title.
 func TestGraduateRefusesNoTitle(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - id: T-1
@@ -1017,6 +1033,7 @@ func TestGraduateRefusesNoTitle(t *testing.T) {
 // TestGraduateRefusesUnknownTicketFolder covers an entry whose id the store
 // has no folder for.
 func TestGraduateRefusesUnknownTicketFolder(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - id: T-999
@@ -1034,6 +1051,7 @@ func TestGraduateRefusesUnknownTicketFolder(t *testing.T) {
 
 // TestGraduateRefusesDuplicateID covers two entries sharing the same id.
 func TestGraduateRefusesDuplicateID(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	if err := os.MkdirAll(filepath.Join(storeRoot, "T-1"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1058,6 +1076,7 @@ func TestGraduateRefusesDuplicateID(t *testing.T) {
 // name would escape charts/ (e.g. "../../secrets#1"): the same rule the
 // command's own chart-name argument is held to.
 func TestGraduateRefusesCrossChartTraversal(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
@@ -1081,6 +1100,7 @@ func TestGraduateRefusesCrossChartTraversal(t *testing.T) {
 // the fully-graduated branch does, and the results table has one row per
 // entry, each tagged "created" or "existing".
 func TestGraduateCommitAndTable(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
@@ -1156,6 +1176,7 @@ func TestGraduateCommitAndTable(t *testing.T) {
 // ticket's body: graduate carries each chart entry's own body into the
 // ticket.yaml it mints, and an entry with no body mints a record with none.
 func TestGraduateRecordsChartEntryBodyInTheRecord(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
@@ -1205,6 +1226,7 @@ func TestGraduateRecordsChartEntryBodyInTheRecord(t *testing.T) {
 // truly does not move; see TestGraduateFullyGraduatedWithRemoteStillSyncsPendingState
 // for the same branch when a remote makes Sync commit on entry.
 func TestGraduateFullyGraduatedLeavesStoreUntouched(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
@@ -1268,6 +1290,7 @@ func TestGraduateFullyGraduatedLeavesStoreUntouched(t *testing.T) {
 // opt out of. What that branch must still not do is push, or make a second,
 // graduate-specific commit of its own on top of Sync's.
 func TestGraduateFullyGraduatedWithRemoteStillSyncsPendingState(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
@@ -1355,6 +1378,10 @@ func TestGraduateFullyGraduatedWithRemoteStillSyncsPendingState(t *testing.T) {
 // finding entry 1 already has an id and continuing with entry 2, the one
 // that still has none, minting and pushing a ticket for it alone rather than
 // a second one for entry 1.
+//
+// It is not parallel: the two clones' claims differ only in their commit
+// dates, which the commit code reads from the process environment
+// (GIT_AUTHOR_DATE, GIT_COMMITTER_DATE), so it sets them with t.Setenv.
 func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 	_, storeRoot := setupGraduateStore(t)
 
@@ -1480,6 +1507,7 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 // graduate refuses it before writing anything under it - no folder or
 // record - and the chart entry stays without an id.
 func TestGraduateRefusesAMintedIDJigCannotUse(t *testing.T) {
+	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
 	rewriteTicketFormat(t, storeRoot, "T-{n}-gate")
 	writeChart(t, storeRoot, "mychart", `tickets:

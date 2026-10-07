@@ -16,6 +16,7 @@ import (
 // existed, cmdSolve fell through to Publish unconditionally once the round
 // loop ended, whether it ended by "clean" or by exhausting maxSolveRounds.
 func TestSolveShouldPublish(t *testing.T) {
+	t.Parallel()
 	if err := solveShouldPublish("clean"); err != nil {
 		t.Fatalf("solveShouldPublish(clean) = %v, want nil", err)
 	}
@@ -39,6 +40,7 @@ func TestSolveShouldPublish(t *testing.T) {
 // whenever the report's Stalled or EnvBlocked tables are non-empty, even
 // when Stopped is false (a slice left over from an earlier invocation).
 func TestReportExitCodeStalledOrEnvBlocked(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		report frontier.RunReport
@@ -64,8 +66,8 @@ func TestReportExitCodeStalledOrEnvBlocked(t *testing.T) {
 // ticket that already has stalled or env-blocked slices left over from a
 // previous invocation, even though this call's own Stopped flag is false.
 func TestPrintRunReportStalledExitsNonZero(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)

@@ -15,13 +15,13 @@ import (
 )
 
 // cmdGraduate implements `jig graduate <chart> [--store <path>] [--project <name>]`.
-func cmdGraduate(args []string, stdout io.Writer) int {
+func cmdGraduate(e env, args []string, stdout io.Writer) int {
 	chart, rest, err := requirePositional(args, "chart name")
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
-	fs := newFlagSet("graduate")
+	fs := newFlagSet(e, "graduate")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -42,7 +42,7 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, _, _, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

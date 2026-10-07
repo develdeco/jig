@@ -52,9 +52,10 @@ func mapKeys(m map[string]any) string {
 // (never in the store), and a second round on the same head prints that its
 // demo already exists instead of running another.
 func TestGateDemoThroughMain(t *testing.T) {
+	t.Parallel()
 	jigHome := t.TempDir()
-	t.Setenv("JIG_HOME", jigHome)
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "demo"})
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "demo", Home: jigHome})
+	e := testEnv(jigHome)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -62,7 +63,7 @@ func TestGateDemoThroughMain(t *testing.T) {
 	buildFixtureTicket(t, fx)
 
 	gate := []string{"gate", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	out, code := runMain(t, "", gate...)
+	out, code := runMain(t, e, "", gate...)
 	if code != 0 {
 		t.Fatalf("gate: exit = %d, want 0\n%s", code, out)
 	}
@@ -162,7 +163,7 @@ func TestGateDemoThroughMain(t *testing.T) {
 	}
 
 	// Round 2 on the same head: its demo exists, so it says so and runs none.
-	out, code = runMain(t, "", gate...)
+	out, code = runMain(t, e, "", gate...)
 	if code != 0 {
 		t.Fatalf("gate round 2: exit = %d, want 0\n%s", code, out)
 	}
@@ -178,9 +179,10 @@ func TestGateDemoThroughMain(t *testing.T) {
 // prints no demo line, and leaves no trace of one; the next round without
 // the flag then runs it.
 func TestGateNoDemoFlagThroughMain(t *testing.T) {
+	t.Parallel()
 	jigHome := t.TempDir()
-	t.Setenv("JIG_HOME", jigHome)
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "demo"})
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "demo", Home: jigHome})
+	e := testEnv(jigHome)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -188,7 +190,7 @@ func TestGateNoDemoFlagThroughMain(t *testing.T) {
 	buildFixtureTicket(t, fx)
 
 	gate := []string{"gate", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	out, code := runMain(t, "", append(append([]string{}, gate...), "--no-demo")...)
+	out, code := runMain(t, e, "", append(append([]string{}, gate...), "--no-demo")...)
 	if code != 0 || !strings.Contains(out, "verdict: clean") {
 		t.Fatalf("gate --no-demo: exit = %d\n%s", code, out)
 	}
@@ -210,7 +212,7 @@ func TestGateNoDemoFlagThroughMain(t *testing.T) {
 
 	// The scenario scripts a demo per round; round 2 replays round 1's.
 	copyDemoRound(t, fx.ScenarioDir, 1, 2)
-	out, code = runMain(t, "", gate...)
+	out, code = runMain(t, e, "", gate...)
 	if code != 0 || !strings.Contains(out, "demo: recorded") {
 		t.Fatalf("gate without the flag: exit = %d\n%s", code, out)
 	}
@@ -223,8 +225,9 @@ func TestGateNoDemoFlagThroughMain(t *testing.T) {
 // fails loudly on a demo the scenario has no coverage for, and the gate
 // reports it as a refused demo beside a clean verdict, exit 0.
 func TestGateDemoTheScenarioDidNotScriptIsARefusalNotAFailure(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "demo"})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "demo"})
+	e := testEnv(fx.Home)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -234,7 +237,7 @@ func TestGateDemoTheScenarioDidNotScriptIsARefusalNotAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, code := runMain(t, "", "gate", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir)
+	out, code := runMain(t, e, "", "gate", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("gate: exit = %d, want 0 (a refused demo never fails a round)\n%s", code, out)
 	}
@@ -287,10 +290,7 @@ func (s *demoSpySource) Demo(in verifydeliver.DemoInput) (verifydeliver.DemoResu
 // reviewer session: without --no-demo the clean round runs its demo and solve
 // reports it, and with --no-demo solve hands Gate the flag and none runs.
 func TestSolvePassesNoDemoThrough(t *testing.T) {
-	spy := &demoSpySource{}
-	prev := solveGateSource
-	solveGateSource = func(string, session.Backend) verifydeliver.GateSource { return spy }
-	t.Cleanup(func() { solveGateSource = prev })
+	t.Parallel()
 
 	for _, tc := range []struct {
 		name      string
@@ -302,13 +302,15 @@ func TestSolvePassesNoDemoThrough(t *testing.T) {
 		{"--no-demo", []string{"--no-demo"}, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("JIG_HOME", t.TempDir())
-			fx := fixture.Generate(t, fixture.Opts{})
+			t.Parallel()
+			fx := newFixture(t, fixture.Opts{})
 			buildFixtureTicket(t, fx)
-			spy.demos = 0
+			spy := &demoSpySource{}
+			e := testEnv(fx.Home)
+			e.solveGateSource = func(string, session.Backend) verifydeliver.GateSource { return spy }
 
 			args := append([]string{"solve", fx.Ticket, "--yes", "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}, tc.extra...)
-			out, code := runMain(t, "", args...)
+			out, code := runMain(t, e, "", args...)
 			if code != 0 {
 				t.Fatalf("solve %v: exit = %d\n%s", tc.extra, code, out)
 			}
@@ -354,6 +356,8 @@ func copyDemoRound(t *testing.T, scenarioDir string, from, to int) {
 // no demo, otherwise the status, its one detail row, and a warning when the
 // store push carrying demo.yaml failed.
 func TestDemoRowsShowsTheOneDetailEachStatusCarries(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		demo *verifydeliver.DemoReport

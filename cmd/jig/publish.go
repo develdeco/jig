@@ -9,13 +9,13 @@ import (
 )
 
 // cmdPublish implements `jig publish <ticket> [--yes]`.
-func cmdPublish(args []string, stdout io.Writer) int {
+func cmdPublish(e env, args []string, stdout io.Writer) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
-	fs := newFlagSet("publish")
+	fs := newFlagSet(e, "publish")
 	yes := fs.Bool("yes", false, "skip the interactive confirm")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
@@ -25,7 +25,7 @@ func cmdPublish(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -33,7 +33,7 @@ func cmdPublish(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	deps := verifydeliverDeps(st, cfg, mp, jigHome)
+	deps := verifydeliverDeps(e, st, cfg, mp, jigHome)
 
 	// Check identity before acquiring a lease.
 	if err := verifydeliver.CheckIdentity(deps); err != nil {

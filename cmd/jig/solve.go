@@ -27,11 +27,6 @@ func gateSourceForSolve(scenario string, backend session.Backend) verifydeliver.
 	return verifydeliver.NewReviewerGateSource(backend)
 }
 
-// solveGateSource is how cmdSolve picks its gate source. It is a variable
-// only so a test can put a source that spies on the demo in its place, the
-// way newFlagSetHook lets a test capture flag sets; nothing else assigns it.
-var solveGateSource = gateSourceForSolve
-
 // cmdSolve implements `jig solve <ticket> [--yes] [--no-demo] [--answer <qid>
 // <text>] [--backend <name>] [--scenario <dir>]`. It runs the frontier and the gate
 // until a round is clean, then publishes, an adopted branch included.
@@ -44,7 +39,7 @@ var solveGateSource = gateSourceForSolve
 // publish confirm and keeps every finding jig can route on its own, without
 // prompting; an ask whose workspace or oracle jig cannot derive still waits
 // for a human.
-func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
+func cmdSolve(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest0, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -54,7 +49,7 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	fs := newFlagSet("solve")
+	fs := newFlagSet(e, "solve")
 	yes := fs.Bool("yes", false, "skip the interactive publish confirm and finding triage")
 	noDemo := fs.Bool("no-demo", false, "skip the demo session a clean reviewer round otherwise runs")
 	backendFlag := fs.String("backend", "", "session backend: fake, headless, or herdr")
@@ -67,7 +62,7 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -84,9 +79,9 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 
 	fdeps := frontierDeps(st, cfg, mp, jigHome, backend, ticket)
-	vdeps := verifydeliverDeps(st, cfg, mp, jigHome)
-	src := solveGateSource(*scenario, backend)
-	triage := triageFor(*yes, stdin, stdout)
+	vdeps := verifydeliverDeps(e, st, cfg, mp, jigHome)
+	src := e.solveGateSource(*scenario, backend)
+	triage := triageFor(e, *yes, stdin, stdout)
 
 	// Check identity before any session or gate round runs, not only at
 	// publish.

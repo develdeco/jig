@@ -7,22 +7,59 @@
 package home
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 // Root returns the jig home directory: $JIG_HOME if set, else <user home>/.config/jig.
+// It reads the process's environment; a caller that holds an environment of its
+// own resolves the root from that with RootFrom.
 func Root() (string, error) {
-	if v := os.Getenv("JIG_HOME"); v != "" {
+	return RootFrom(os.Getenv)
+}
+
+// RootFrom is Root against the environment getenv reads, in place of the
+// process's: $JIG_HOME if getenv gives one, else <user home>/.config/jig with
+// the user home UserDirFrom finds. The binary passes os.Getenv; a command that
+// runs in a process beside others (a test) passes the environment it was
+// given, so what it resolves never depends on a variable another sets.
+func RootFrom(getenv func(string) string) (string, error) {
+	if v := getenv("JIG_HOME"); v != "" {
 		return v, nil
 	}
-	h, err := os.UserHomeDir()
+	h, err := UserDirFrom(getenv)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(h, ".config", "jig"), nil
+}
+
+// UserDirFrom returns the user's own home directory from the environment
+// getenv reads, by the rule os.UserHomeDir applies to the process's: $HOME
+// (%USERPROFILE% on Windows, $home on Plan 9), else the fixed directory Android
+// and iOS use. It fails when the variable is empty elsewhere.
+func UserDirFrom(getenv func(string) string) (string, error) {
+	env, enverr := "HOME", "$HOME"
+	switch runtime.GOOS {
+	case "windows":
+		env, enverr = "USERPROFILE", "%userprofile%"
+	case "plan9":
+		env, enverr = "home", "$home"
+	}
+	if v := getenv(env); v != "" {
+		return v, nil
+	}
+	switch runtime.GOOS {
+	case "android":
+		return "/sdcard", nil
+	case "ios":
+		return "/", nil
+	}
+	return "", errors.New(enverr + " is not defined")
 }
 
 // PoolDir returns the worktree pool root under the jig home root.

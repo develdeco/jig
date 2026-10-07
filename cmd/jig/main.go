@@ -14,7 +14,6 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/frontier"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/session"
@@ -28,10 +27,19 @@ func main() {
 	os.Exit(Main(os.Args[1:], os.Stdout, os.Stdin))
 }
 
-// Main dispatches one CLI invocation and returns the process exit code. It
-// is separated from main() so tests can drive it without spawning a
-// subprocess.
+// Main dispatches one CLI invocation against the process's own environment
+// and working directory, and returns the process exit code. It is separated
+// from main() so a test can drive the binary's entry without spawning a
+// subprocess; a test that gives the run an environment of its own calls run.
 func Main(args []string, stdout io.Writer, stdin io.Reader) int {
+	return run(processEnv(), args, stdout, stdin)
+}
+
+// run dispatches one CLI invocation against e and returns the process exit
+// code. Everything the invocation reads from outside its arguments and
+// streams comes through e (see env), so runs in one process do not touch each
+// other's environment.
+func run(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		axi.Render(stdout, usageBlocks()...)
 		return 0
@@ -40,29 +48,29 @@ func Main(args []string, stdout io.Writer, stdin io.Reader) int {
 	cmd, rest := args[0], args[1:]
 	switch cmd {
 	case "init":
-		return cmdInit(rest, stdout)
+		return cmdInit(e, rest, stdout)
 	case "ticket":
-		return cmdTicket(rest, stdout)
+		return cmdTicket(e, rest, stdout)
 	case "graduate":
-		return cmdGraduate(rest, stdout)
+		return cmdGraduate(e, rest, stdout)
 	case "solve":
-		return cmdSolve(rest, stdout, stdin)
+		return cmdSolve(e, rest, stdout, stdin)
 	case "run":
-		return cmdRun(rest, stdout)
+		return cmdRun(e, rest, stdout)
 	case "requeue":
-		return cmdRequeue(rest, stdout)
+		return cmdRequeue(e, rest, stdout)
 	case "gate":
-		return cmdGate(rest, stdout, stdin)
+		return cmdGate(e, rest, stdout, stdin)
 	case "publish":
-		return cmdPublish(rest, stdout)
+		return cmdPublish(e, rest, stdout)
 	case "status":
-		return cmdStatus(rest, stdout)
+		return cmdStatus(e, rest, stdout)
 	case "validate":
-		return cmdValidate(rest, stdout)
+		return cmdValidate(e, rest, stdout)
 	case "version":
-		return cmdVersion(rest, stdout)
+		return cmdVersion(e, rest, stdout)
 	case "skills":
-		return cmdSkills(rest, stdout)
+		return cmdSkills(e, rest, stdout)
 	case "_screen":
 		return cmdScreen(stdin, stdout)
 	default:
@@ -85,18 +93,15 @@ func renderErr(stdout io.Writer, err error) int {
 	return axi.ExitCode(ae)
 }
 
-// newFlagSetHook, when set, sees every FlagSet newFlagSet builds; tests use
-// it to compare real flag registration with commandTable.
-var newFlagSetHook func(name string, fs *flag.FlagSet)
-
 // newFlagSet builds a stdlib FlagSet for name that reports parse errors
-// without dumping its own usage text (jig's help block covers that).
-func newFlagSet(name string) *flag.FlagSet {
+// without dumping its own usage text (jig's help block covers that), and shows
+// it to e.newFlagSetHook when there is one.
+func newFlagSet(e env, name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
-	if newFlagSetHook != nil {
-		newFlagSetHook(name, fs)
+	if e.newFlagSetHook != nil {
+		e.newFlagSetHook(name, fs)
 	}
 	return fs
 }
@@ -209,12 +214,12 @@ func splitOnce(s string, sep byte) (before, after string, ok bool) {
 // mapping for cfg's project, honoring an explicit --store flag over cwd
 // resolution, and returns the jig home root it read the mapping from, for
 // the packages that keep leases under it.
-func resolveStore(storeFlag string) (*store.Store, project.Config, project.MachineProject, string, error) {
-	jigHome, err := home.Root()
+func resolveStore(e env, storeFlag string) (*store.Store, project.Config, project.MachineProject, string, error) {
+	jigHome, err := e.jigHome()
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
-	cwd, err := os.Getwd()
+	cwd, err := e.getwd()
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
@@ -239,11 +244,11 @@ func resolveStore(storeFlag string) (*store.Store, project.Config, project.Machi
 // mapping (project.LoadMachine(jigHome)[name].Store), ahead of the
 // --store/cwd fallback chain resolveStore falls through to when projectFlag
 // is empty.
-func resolveStoreForProject(projectFlag, storeFlag string) (*store.Store, project.Config, project.MachineProject, string, error) {
+func resolveStoreForProject(e env, projectFlag, storeFlag string) (*store.Store, project.Config, project.MachineProject, string, error) {
 	if projectFlag == "" {
-		return resolveStore(storeFlag)
+		return resolveStore(e, storeFlag)
 	}
-	jigHome, err := home.Root()
+	jigHome, err := e.jigHome()
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
@@ -258,7 +263,7 @@ func resolveStoreForProject(projectFlag, storeFlag string) (*store.Store, projec
 			Code: "VALIDATION_ERROR",
 		}
 	}
-	return resolveStore(mp.Store)
+	return resolveStore(e, mp.Store)
 }
 
 // rungs returns cfg's staircase rungs, falling back to staircase.Default()
@@ -310,10 +315,10 @@ func frontierDeps(st *store.Store, cfg project.Config, mp project.MachineProject
 // It also resolves the operator's own home directory, once, beside the jig
 // home root it is handed: gate intent inference looks for their local agent
 // transcripts under it, on every command that gates (jig gate and jig
-// solve). os.UserHomeDir returns "" when it cannot say, which inference
-// reports as its reason instead of looking anywhere else.
-func verifydeliverDeps(st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string) verifydeliver.Deps {
-	userHome, _ := os.UserHomeDir()
+// solve). e.userHomeDir fails when it cannot say, which leaves UserHome ""
+// and inference reports that as its reason instead of looking anywhere else.
+func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string) verifydeliver.Deps {
+	userHome, _ := e.userHomeDir()
 	return verifydeliver.Deps{
 		Store:    st,
 		Cfg:      cfg,

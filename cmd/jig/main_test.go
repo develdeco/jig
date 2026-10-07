@@ -19,12 +19,12 @@ import (
 // own home directory (os.UserHomeDir), beside the jig home root it was
 // handed.
 func TestVerifydeliverDepsCarriesTheOperatorsHome(t *testing.T) {
+	t.Parallel()
 	userHome := t.TempDir()
-	t.Setenv("HOME", userHome)
-	t.Setenv("USERPROFILE", userHome)
 	jigHome := t.TempDir()
+	e := envFrom(map[string]string{"HOME": userHome, "USERPROFILE": userHome})
 
-	d := verifydeliverDeps(nil, project.Config{}, project.MachineProject{}, jigHome)
+	d := verifydeliverDeps(e, nil, project.Config{}, project.MachineProject{}, jigHome)
 	if d.UserHome != userHome {
 		t.Errorf("Deps.UserHome = %q, want the operator's home %q", d.UserHome, userHome)
 	}
@@ -37,8 +37,8 @@ func TestVerifydeliverDepsCarriesTheOperatorsHome(t *testing.T) {
 // store state: slice a green (attempt 1), b queued (blocked_by a from the
 // fixture's own slices.yaml), c and d queued.
 func TestRenderStatus(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -82,8 +82,8 @@ func TestRenderStatus(t *testing.T) {
 // form this replaced (see internal/axi's TestQuoteUnchangedWhenPlain and
 // TestTableQuotesCells assertions).
 func TestRenderStatusParked(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -127,8 +127,8 @@ func TestRenderStatusParked(t *testing.T) {
 // touch it. The parked cell also renders with no quoting, for the same
 // reason TestRenderStatusParked notes.
 func TestRenderStatusParkedNoFromBrief(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -171,8 +171,8 @@ func TestRenderStatusParkedNoFromBrief(t *testing.T) {
 // requeue --from-brief-diff, not --answer, since the way out is amending the
 // brief and requeuing the slice, not answering the question with text.
 func TestRenderStatusParkedFlawedBrief(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -221,8 +221,9 @@ func TestRenderStatusParkedFlawedBrief(t *testing.T) {
 // structure too, so a store an older jig wrote, whose fix slice still carries
 // the reason, is resumed by answering as well; the test checks both.
 func TestGateFixSliceFlawedBriefResumesWithAnswer(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "fix-flawed-brief"})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "fix-flawed-brief"})
+	e := testEnv(fx.Home)
 
 	runArgs := func(extra ...string) []string {
 		return append([]string{"run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}, extra...)
@@ -230,19 +231,19 @@ func TestGateFixSliceFlawedBriefResumesWithAnswer(t *testing.T) {
 
 	// 1. a, b, d green; c parks on q-001 (see testdata/fixture/scenario).
 	var buf1 bytes.Buffer
-	if code := Main(runArgs(), &buf1, strings.NewReader("")); code != 2 {
+	if code := run(e, runArgs(), &buf1, strings.NewReader("")); code != 2 {
 		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\n%s", code, buf1.String())
 	}
 
 	// 2. answer q-001: every base slice reaches green.
 	var buf2 bytes.Buffer
-	if code := Main(runArgs("--answer", "q-001", "Casual."), &buf2, strings.NewReader("")); code != 0 {
+	if code := run(e, runArgs("--answer", "q-001", "Casual."), &buf2, strings.NewReader("")); code != 0 {
 		t.Fatalf("run 2 (answer) exit = %d, want 0\n%s", code, buf2.String())
 	}
 
 	// 3. gate round 1 appends fix-1 (see testdata/fixture/scenario/gate).
 	var buf3 bytes.Buffer
-	gateCode := Main([]string{"gate", fx.Ticket, "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}, &buf3, strings.NewReader(""))
+	gateCode := run(e, []string{"gate", fx.Ticket, "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}, &buf3, strings.NewReader(""))
 	if gateCode != 0 {
 		t.Fatalf("gate exit = %d, want 0\n%s", gateCode, buf3.String())
 	}
@@ -266,7 +267,7 @@ func TestGateFixSliceFlawedBriefResumesWithAnswer(t *testing.T) {
 	// 4. run again: fix-1 dispatches to the scripted flawed-brief outcome
 	// (testdata/fixture/scenario-branches/fix-flawed-brief) and parks.
 	var buf4 bytes.Buffer
-	if code := Main(runArgs(), &buf4, strings.NewReader("")); code != 2 {
+	if code := run(e, runArgs(), &buf4, strings.NewReader("")); code != 2 {
 		t.Fatalf("run 3 (fix-1) exit = %d, want 2 (paused)\n%s", code, buf4.String())
 	}
 	fix1State, err := st.ReadSliceState(fx.Ticket, "fix-1")
@@ -304,8 +305,8 @@ func TestGateFixSliceFlawedBriefResumesWithAnswer(t *testing.T) {
 // proving stalled beats parked for the state line without hiding the parked
 // table.
 func TestRenderStatusStalled(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -350,8 +351,8 @@ func TestRenderStatusStalled(t *testing.T) {
 // TestRenderStatusStalledHint checks the stalled hint text itself, with no
 // open question in the way.
 func TestRenderStatusStalledHint(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -385,8 +386,8 @@ func TestRenderStatusStalledHint(t *testing.T) {
 // hint must not claim where the slice came from (a hand-written slice with
 // no FromBrief looks identical to this fixture).
 func TestRenderStatusStalledHintFromGate(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -427,8 +428,8 @@ func TestRenderStatusStalledHintFromGate(t *testing.T) {
 // slice reports "env-blocked", the old combined "paused" value's other half
 // now that parked means needs-input specifically.
 func TestRenderStatusEnvBlocked(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -464,8 +465,8 @@ func TestRenderStatusEnvBlocked(t *testing.T) {
 // never "env-blocked" - matching the doc comment on RenderStatus's
 // precedence switch (parked outranks env-blocked, which outranks green).
 func TestRenderStatusParkedOutranksEnvBlocked(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -498,8 +499,8 @@ func TestRenderStatusParkedOutranksEnvBlocked(t *testing.T) {
 // RenderStatus, not just the order slices.yaml happens to list them in
 // (which a single combined loop would get wrong here).
 func TestRenderStatusStalledOutranksEnvBlockedHint(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -534,6 +535,7 @@ func TestRenderStatusStalledOutranksEnvBlockedHint(t *testing.T) {
 // sections for --from-brief-diff to notice; every other parked slice, which
 // is the common case, is resumed by answering its open question.
 func TestResumeCommandChoosesFromReasonAndBriefSections(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		reason    string
@@ -559,11 +561,12 @@ func TestResumeCommandChoosesFromReasonAndBriefSections(t *testing.T) {
 // TestValidateFixture checks `jig validate` against the fixture's committed
 // brief/slices/manifest: it must report valid.
 func TestValidateFixture(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	e := testEnv(fx.Home)
 
 	var buf bytes.Buffer
-	code := Main([]string{"validate", fx.Ticket, "--store", fx.StoreDir}, &buf, strings.NewReader(""))
+	code := run(e, []string{"validate", fx.Ticket, "--store", fx.StoreDir}, &buf, strings.NewReader(""))
 	if code != 0 {
 		t.Fatalf("jig validate exit code = %d, output:\n%s", code, buf.String())
 	}
@@ -575,6 +578,7 @@ func TestValidateFixture(t *testing.T) {
 // TestValidateCatchesCycle checks that a blocked_by cycle is reported as a
 // validation problem instead of hanging or panicking.
 func TestValidateCatchesCycle(t *testing.T) {
+	t.Parallel()
 	slices := []store.Slice{
 		{ID: "a", BlockedBy: []string{"b"}, Oracle: "test", Workspace: "root"},
 		{ID: "b", BlockedBy: []string{"a"}, Oracle: "test", Workspace: "root"},
@@ -591,6 +595,7 @@ func TestValidateCatchesCycle(t *testing.T) {
 // malformed input get no decision at all, leaving the call to the session's
 // permission rules.
 func TestScreenDenyAllow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		input string
@@ -651,6 +656,7 @@ func TestScreenDenyAllow(t *testing.T) {
 // like) must get a deny decision instead of silently falling through to
 // the session's permission rules.
 func TestScreenDeniesUnreadableInput(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		input string
@@ -683,6 +689,7 @@ func TestScreenDeniesUnreadableInput(t *testing.T) {
 // well-formed call to each still gets its allow decision through the real
 // hook path, not only Bash and Read.
 func TestScreenGrantsEveryToolWithValidInput(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		tool  string
 		input string
@@ -708,6 +715,7 @@ func TestScreenGrantsEveryToolWithValidInput(t *testing.T) {
 // non-hidden command and flag in commandTable, and that hidden ones (the
 // _screen command, gate's --pr flag) are absent from it.
 func TestHelpContainsCommands(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	code := Main(nil, &buf, strings.NewReader(""))
 	if code != 0 {
@@ -743,9 +751,10 @@ func TestHelpContainsCommands(t *testing.T) {
 // resolves the store via the per-machine project mapping ahead of the
 // --store/cwd fallback resolveStore itself falls through to.
 func TestResolveStoreForProjectUsesMachineMapping(t *testing.T) {
+	t.Parallel()
 	jigHome := t.TempDir()
-	t.Setenv("JIG_HOME", jigHome)
-	fx := fixture.Generate(t, fixture.Opts{})
+	fx := newFixture(t, fixture.Opts{Home: jigHome})
+	e := testEnv(jigHome)
 
 	cfg, err := project.Load(fx.StoreDir + "/project.yaml")
 	if err != nil {
@@ -757,7 +766,7 @@ func TestResolveStoreForProjectUsesMachineMapping(t *testing.T) {
 
 	// No --store and a cwd that resolves nothing: --project alone must
 	// still find the store through the machine mapping.
-	st, gotCfg, _, gotHome, err := resolveStoreForProject(cfg.Name, "")
+	st, gotCfg, _, gotHome, err := resolveStoreForProject(e, cfg.Name, "")
 	if err != nil {
 		t.Fatalf("resolveStoreForProject: %v", err)
 	}
@@ -775,9 +784,10 @@ func TestResolveStoreForProjectUsesMachineMapping(t *testing.T) {
 // TestResolveStoreForProjectUnknownName checks that an unmapped --project
 // name is refused rather than silently falling back to cwd resolution.
 func TestResolveStoreForProjectUnknownName(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 
-	_, _, _, _, err := resolveStoreForProject("no-such-project", "")
+	_, _, _, _, err := resolveStoreForProject(e, "no-such-project", "")
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "VALIDATION_ERROR" {
 		t.Fatalf("err = %v, want *axi.Error VALIDATION_ERROR", err)
@@ -788,6 +798,7 @@ func TestResolveStoreForProjectUnknownName(t *testing.T) {
 // package produces gets its single-dash flag reference rewritten to jig's
 // own double-dash convention.
 func TestNormalizeFlagErr(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		want string
@@ -809,6 +820,7 @@ func TestNormalizeFlagErr(t *testing.T) {
 // TestUnknownCommand checks the VALIDATION_ERROR/exit-2 path for an
 // unrecognized subcommand.
 func TestUnknownCommand(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	code := Main([]string{"bogus"}, &buf, strings.NewReader(""))
 	if code != 2 {

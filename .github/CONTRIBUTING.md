@@ -88,9 +88,15 @@ annotation.
 - Every test gets its own `t.TempDir()`, and its own jig home, so a test
   run never touches a real machine's: packages take the jig home root as an
   argument (`fixture.Opts.Home`, `verifydeliver.Deps.Home`,
-  `frontier.Deps.Home`, `pool.Acquire`), and a test passes a `t.TempDir()`;
-  a test that runs `cmd/jig` or the jig binary, which read `JIG_HOME`, sets
-  it with `t.Setenv`.
+  `frontier.Deps.Home`, `pool.Acquire`), and a test passes a `t.TempDir()`.
+  `cmd/jig` takes what it reads from the process (the environment, the
+  working directory, the terminal check, the solve gate source) as an `env`
+  per run, so a `cmd/jig` test hands `run` an env of its own (`testEnv(home)`)
+  instead of calling `t.Setenv` or `t.Chdir`, and calls `t.Parallel()`. A
+  test that runs the jig binary sets `JIG_HOME` with `t.Setenv`. Two
+  `cmd/jig` tests must edit the process and stay serial: the one that
+  checks `Main` reads the process's `JIG_HOME`, and the one that sets git's
+  commit dates in the environment, which the commit code reads from it.
 
 ## Tests against the real Claude Code CLI
 

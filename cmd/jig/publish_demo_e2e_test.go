@@ -22,8 +22,9 @@ import (
 // 3) but never shows the body on camera with a demo in it; this test is
 // what a tape showing one would cite.
 func TestPublishAttachesTheGateDemoThroughMain(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "demo"})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "demo"})
+	e := testEnv(fx.Home)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -31,12 +32,12 @@ func TestPublishAttachesTheGateDemoThroughMain(t *testing.T) {
 	buildFixtureTicket(t, fx)
 
 	gate := []string{"gate", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	out, code := runMain(t, "", gate...)
+	out, code := runMain(t, e, "", gate...)
 	if code != 0 || !strings.Contains(out, "verdict: clean") || !strings.Contains(out, "demo: recorded") {
 		t.Fatalf("gate: exit = %d, want 0 with a recorded demo\n%s", code, out)
 	}
 
-	out, code = runMain(t, "", "publish", fx.Ticket, "--yes", "--store", fx.StoreDir)
+	out, code = runMain(t, e, "", "publish", fx.Ticket, "--yes", "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("publish: exit = %d, want 0\n%s", code, out)
 	}

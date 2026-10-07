@@ -20,8 +20,8 @@ import (
 )
 
 // cmdStatus implements `jig status [<ticket>]`.
-func cmdStatus(args []string, stdout io.Writer) int {
-	fs := newFlagSet("status")
+func cmdStatus(e env, args []string, stdout io.Writer) int {
+	fs := newFlagSet(e, "status")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	ticket, rest, err := requirePositional(args, "ticket")
@@ -34,7 +34,7 @@ func cmdStatus(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, _, _, _, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, _, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
