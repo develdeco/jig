@@ -737,7 +737,7 @@ func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []
 		return nil, err
 	}
 	if coversSuite(man, reused) {
-		return oracleSuiteRuns(dir, man, reused)
+		return oracleSuiteRuns(dir, man, reused, d.oracle())
 	}
 
 	var handles []*envrun.Handle
@@ -777,7 +777,7 @@ func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []
 		handles = append(handles, h)
 	}
 
-	return oracleSuiteRuns(dir, man, reused)
+	return oracleSuiteRuns(dir, man, reused, d.oracle())
 }
 
 // reusablePasses returns, by exact command, the commit of an oracle pass
@@ -860,8 +860,8 @@ func coversSuite(man manifest.Manifest, reused map[string]string) bool {
 }
 
 // oracleSuiteRuns is RunOracleSuite with the runs in reused (by command)
-// taken from there instead of run again.
-func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]string) ([]OracleRun, error) {
+// taken from there instead of run again, and each other run made by run.
+func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]string, run oracleFunc) ([]OracleRun, error) {
 	var runs []OracleRun
 	for _, ws := range man.Workspaces {
 		for _, name := range SortedOracleNames(man) {
@@ -870,7 +870,7 @@ func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]string
 				runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, ReusedFrom: commit})
 				continue
 			}
-			if err := runOracle(cmd, dir); err != nil {
+			if err := runOracle(run, cmd, dir); err != nil {
 				return nil, &axi.Error{
 					Msg:  fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err),
 					Code: "GATE_ORACLE_FAILED",
@@ -887,11 +887,20 @@ func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]string
 // own run at a slice's green, so a hung oracle cannot hold the gate.
 const oracleLimit = 30 * time.Minute
 
-// runOracle runs one oracle command in dir within oracleLimit, its process
-// tree killed past it. A failure carries the end of the command's output, as
-// the stderr Shell reported once did.
-func runOracle(cmd, dir string) error {
-	out, err := envrun.ShellOutput(envrun.ShortenQuotedPath(cmd), dir, oracleLimit)
+// oracleFunc runs one oracle command in a directory and returns its
+// combined output: Deps.Oracle's type.
+type oracleFunc = func(cmd, dir string) (string, error)
+
+// shellOracle is the real oracle run: cmd in dir within oracleLimit, its
+// process tree killed past it.
+func shellOracle(cmd, dir string) (string, error) {
+	return envrun.ShellOutput(envrun.ShortenQuotedPath(cmd), dir, oracleLimit)
+}
+
+// runOracle runs one oracle command in dir through run. A failure carries
+// the end of the command's output, as the stderr Shell reported once did.
+func runOracle(run oracleFunc, cmd, dir string) error {
+	out, err := run(cmd, dir)
 	if err == nil {
 		return nil
 	}
@@ -911,7 +920,7 @@ func runOracle(cmd, dir string) error {
 // means every returned run passed. Exported for internal/revieweval, whose
 // reviewer gets the runs the way Gate's does.
 func RunOracleSuite(dir string, man manifest.Manifest) ([]OracleRun, error) {
-	return oracleSuiteRuns(dir, man, nil)
+	return oracleSuiteRuns(dir, man, nil, shellOracle)
 }
 
 // writeNoRound writes the files for a round that never ran while something

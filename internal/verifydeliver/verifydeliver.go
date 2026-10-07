@@ -60,6 +60,21 @@ type Deps struct {
 	// clone's distinct identity, or its absence, while resolving one for
 	// Publish - without editing the process environment to get it.
 	GitEnv []string
+	// Oracle runs one of the gate's own oracle commands in a lease and
+	// returns its combined output, the way frontier.Deps.Oracle does for a
+	// slice's run at green. nil means the real run, bounded by oracleLimit
+	// with its process tree killed past it; a test that is not about the
+	// gate's oracle run hands one that passes. Publish's revalidation always
+	// runs the real oracles.
+	Oracle func(cmd, dir string) (string, error)
+}
+
+// oracle is d.Oracle, or the real run when it is nil.
+func (d Deps) oracle() oracleFunc {
+	if d.Oracle != nil {
+		return d.Oracle
+	}
+	return shellOracle
 }
 
 // publishHost is the host d hands Publish for the repo it ships: d.Host when

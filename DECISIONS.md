@@ -3003,3 +3003,11 @@ The gate reviewer runs on the staircase's dearest rung every round (`staircase.D
 ## jig's testing method, and what a project owns (build-speed BS-2)
 
 One ADR lists jig's testing method, each item pointing at its decision, and adds the two principles that had no home: one end-to-end chain per critical path with rule variants at the narrowest seam, and the test diet as a refactor whose deletions name their covering seam test. Testing knowledge lives in three layers, jig's method, the project's facts and a run's choices, with no greenfield mode. The intake skill carries both principles, sizes one cohesive change as one slice, and has a full-suite slice name the repo's manifest oracle rather than write its command out. See [ADR 0027](docs/adr/0027-jigs-testing-method-and-what-a-project-owns.md).
+
+## A code graph gives the builder its starting points
+
+jig's graphify plane gains `Update` and `Query` and a caller: when a project opts in (`context: {graphify: true}` in `project.yaml`) and the binary is on PATH, frontier runs `graphify update .` in the lease and `graphify query` with the slice's goal and earlier slices' files before each dispatch, and writes the linked files and symbols into `slice.json`'s `related` (25 files, 8 symbols each). `graphify-out/` goes in the lease's `info/exclude`; a `graph` journal line records each run, and a failure only empties `related`. `DetectWith` takes the binary lookup, so graphify's test no longer edits PATH and leaves the global-state lint's debt list. See [ADR 0026](docs/adr/0026-a-code-graph-gives-the-builder-its-starting-points.md).
+
+## Headless sessions run nothing in the background (T-34)
+
+A `claude -p` session ends with its turn, and on T-23 a Sonnet builder backgrounded the full suite and ended its turn waiting for it, losing the attempt. Every headless session's settings now set `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so its shell has no background option and a long command is ended at the 30-minute bound instead of moved to the background. This is the recurrence the owner's measure-first decision on shell guards waited for. See ADR 0018's amendment.

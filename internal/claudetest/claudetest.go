@@ -63,7 +63,25 @@ type Session struct {
 	Steps []Step
 
 	mu      sync.Mutex
-	results []ToolResult // the longest conversation's tool results
+	results []ToolResult      // the longest conversation's tool results
+	tools   []json.RawMessage // the tool schemas the CLI offered
+}
+
+// ToolSchema returns the input schema the CLI offered for the tool named
+// name in the session's requests, decoded, or nil when it offered none.
+func (s *Session) ToolSchema(name string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, raw := range s.tools {
+		var tool struct {
+			Name        string         `json:"name"`
+			InputSchema map[string]any `json:"input_schema"`
+		}
+		if json.Unmarshal(raw, &tool) == nil && tool.Name == name {
+			return tool.InputSchema
+		}
+	}
+	return nil
 }
 
 // Results returns the tool results the CLI sent back in the session's
@@ -74,11 +92,14 @@ func (s *Session) Results() []ToolResult {
 	return s.results
 }
 
-func (s *Session) record(results []ToolResult) {
+func (s *Session) record(results []ToolResult, tools []json.RawMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(results) >= len(s.results) {
 		s.results = results
+	}
+	if len(tools) > 0 {
+		s.tools = tools
 	}
 }
 
@@ -171,7 +192,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	stop := "end_turn"
 	if len(req.Tools) > 0 && len(req.Messages) > 0 {
 		if s := a.session(textOf(req.Messages[0].Content)); s != nil {
-			s.record(results)
+			s.record(results, req.Tools)
 			if n := len(results); n < len(s.Steps) {
 				call := s.Steps[n].Call(results)
 				block = map[string]any{"type": "tool_use", "id": fmt.Sprintf("toolu_jig_%02d", n), "name": call.Name, "input": call.Input}

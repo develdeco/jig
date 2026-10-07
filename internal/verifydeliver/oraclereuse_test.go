@@ -95,9 +95,11 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		driveBuild(t, fx, "rung-a")
 		d := newDeps(t, fx)
+		rec := &oracleRecorder{}
+		d.Oracle = rec.run
 		// Tests that fail are committed at the head, so a gate that ran the
-		// oracles itself would stop with GATE_ORACLE_FAILED and fail
-		// gateReviewRequest: the recorded passes are what lets it through.
+		// oracles for real would stop with GATE_ORACLE_FAILED: the recorded
+		// passes are what lets it through, and the gate runs nothing.
 		head := commitInBuildLease(t, fx, failing)
 		recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "alpha"), "rig")
 		recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "beta"), "rig")
@@ -106,6 +108,9 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 		if len(got) != 2 || got["alpha"] != head || got["beta"] != head {
 			t.Errorf("reused_from by workspace = %v, want both reused from %s", got, head)
 		}
+		if ran := rec.ran(); len(ran) != 0 {
+			t.Errorf("the gate ran %q, want nothing run", ran)
+		}
 	})
 
 	t.Run("a partial pass runs the rest", func(t *testing.T) {
@@ -113,12 +118,17 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		driveBuild(t, fx, "rung-a")
 		d := newDeps(t, fx)
+		rec := &oracleRecorder{}
+		d.Oracle = rec.run
 		head := commitInBuildLease(t, fx, note("one\n"))
 		recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "alpha"), "rig")
 
 		got := reusedByWorkspace(gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed)
 		if got["alpha"] != head || got["beta"] != "" {
 			t.Errorf("reused_from by workspace = %v, want alpha reused from %s and beta run", got, head)
+		}
+		if ran := rec.ran(); len(ran) != 1 || ran[0] != testCmd(t, fx, "beta") {
+			t.Errorf("the gate ran %q, want only test@beta", ran)
 		}
 	})
 
@@ -157,12 +167,22 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 			driveBuild(t, fx, "rung-a")
 			d := newDeps(t, fx)
+			rec := &oracleRecorder{}
+			d.Oracle = rec.run
 			commitInBuildLease(t, fx, note("one\n"))
 			head := commitInBuildLease(t, fx, note("two\n"))
 			tc.record(t, fx, d, head)
 
 			if got := reusedByWorkspace(gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed); got["alpha"] != "" {
 				t.Errorf("test@alpha reused from %s, want it run", got["alpha"])
+			}
+			alpha := testCmd(t, fx, "alpha")
+			found := false
+			for _, c := range rec.ran() {
+				found = found || c == alpha
+			}
+			if !found {
+				t.Errorf("the gate ran %q, want test@alpha among them", rec.ran())
 			}
 		})
 	}
@@ -172,6 +192,7 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		driveBuild(t, fx, "rung-a")
 		d := newDeps(t, fx)
+		d.Oracle = nil // reuse is judged against real oracle runs
 		commitInBuildLease(t, fx, failing)
 
 		backend := stubBackend{run: func(session.Dispatch) error {
