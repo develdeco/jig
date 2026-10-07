@@ -19,9 +19,9 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/tracker"
 )
 
 // Deps is verifydeliver's own dependency bundle. It never imports package
@@ -39,12 +39,13 @@ type Deps struct {
 	// test's own directory in tests). "" means it could not be resolved:
 	// gate intent inference then has nowhere to look and says so.
 	UserHome string
-	// Tracker is the adapter Publish finds, opens or updates the pull request
-	// with, and routes the ticket through. nil means the tracker project.yaml
-	// names (tracker.New); a test hands its own.
-	Tracker tracker.Adapter
+	// Host is the pull-request host Publish finds, opens or updates the pull
+	// request with. nil means the host the shipped repo's own remote names
+	// (repohost.New), which is itself nil for a remote with no pull-request
+	// host; a test hands its own, built on a fake gh.
+	Host repohost.Host
 	// Confirm asks the interactive confirmation question. nil means the default.
-	Confirm func(branch, ticket, openPR string) bool
+	Confirm func(branch, ticket, openPR string, hasHost bool) bool
 	// GuardedPush pushes branch to origin. nil means gitx.GuardedPush.
 	GuardedPush func(dir, remote, branch string, confirmed bool) error
 	// FetchOrigin refreshes the view of origin. nil means the default fetch.
@@ -76,13 +77,14 @@ func (d Deps) oracle() oracleFunc {
 	return shellOracle
 }
 
-// trackerAdapter is the adapter d hands Publish: d.Tracker when set, else the
-// tracker the project's config names.
-func (d Deps) trackerAdapter() (tracker.Adapter, error) {
-	if d.Tracker != nil {
-		return d.Tracker, nil
+// publishHost is the host d hands Publish for the repo it ships: d.Host when
+// set, else the host that repo's own remote names, which is nil - no pull
+// request opened or updated - for a remote with no pull-request host.
+func (d Deps) publishHost(remote string) (repohost.Host, error) {
+	if d.Host != nil {
+		return d.Host, nil
 	}
-	return tracker.New(d.Cfg, d.Store)
+	return repohost.New(remote)
 }
 
 // primaryRepo returns v0.1's single repo and its target branch (defaulting

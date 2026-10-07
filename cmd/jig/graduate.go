@@ -12,7 +12,6 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/tracker"
 )
 
 // cmdGraduate implements `jig graduate <chart> [--store <path>] [--project <name>]`.
@@ -53,7 +52,10 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	// Read the chart
+	// Read the chart, just to refuse early on a missing file or an empty
+	// one: claimOneChartEntry re-reads it fresh on every attempt, since what
+	// it must do next (which entry still needs an id, resolved against
+	// whatever a rejected claim's pull brought in) can change between them.
 	entries, err := st.ReadChart(chart)
 	if err != nil {
 		return renderErr(stdout, &axi.Error{
@@ -72,114 +74,54 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 		})
 	}
 
-	// Validate all entries before creating anything
-	if err := validateChartEntries(st, entries, chart); err != nil {
-		return renderErr(stdout, err)
-	}
-
-	// Resolve and validate every blocked_by ref before creating anything: any
-	// failure refuses the whole run with nothing created.
-	refs, err := resolveChartEntryRefs(st, chart, entries)
-	if err != nil {
-		return renderErr(stdout, err)
-	}
-
-	// Find entries without IDs
-	var toCreate []int
-	for i, e := range entries {
-		if e.ID == "" {
-			toCreate = append(toCreate, i)
-		}
-	}
-	created := make(map[int]bool, len(toCreate))
-	for _, i := range toCreate {
-		created[i] = true
-	}
-
+	// Claim one ticket at a time, each with its own commit (and, on a store
+	// with an origin, its own push): a failure partway leaves every ticket
+	// claimed so far recorded on the origin, and a re-run continues where it
+	// stopped, so the end-of-run commit and push earlier revisions made here
+	// are gone - every ticket is already pushed by the time this loop ends.
 	var createdIDs []string
-	if len(toCreate) > 0 {
-		// Map a file position (0-based) being created to its position in the
-		// draft list (0-based), so a same-chart "#k" ref that points at another
-		// entry being created can be rewritten in the draft list's own numbering.
-		filePosToDraftIdx := make(map[int]int, len(toCreate))
-		for di, entryIdx := range toCreate {
-			filePosToDraftIdx[entryIdx] = di
-		}
-
-		adapter, err := tracker.New(cfg, st)
+	created := map[int]bool{}
+	for {
+		id, pos, done, err := claimOneChartEntry(st, cfg.TicketFormat, chart)
 		if err != nil {
-			return renderErr(stdout, err)
+			return renderErr(stdout, graduateFailure(chart, createdIDs, err))
 		}
-
-		drafts := make([]tracker.Draft, len(toCreate))
-		for di, entryIdx := range toCreate {
-			e := entries[entryIdx]
-			var blockers []tracker.Blocker
-			for _, r := range refs[entryIdx] {
-				if r.knownID != "" {
-					blockers = append(blockers, tracker.Blocker{Ref: r.knownID, Kind: r.kind})
-					continue
-				}
-				targetDraftIdx := filePosToDraftIdx[r.pending-1]
-				blockers = append(blockers, tracker.Blocker{Ref: fmt.Sprintf("#%d", targetDraftIdx+1), Kind: r.kind})
-			}
-			drafts[di] = tracker.Draft{Title: e.Title, Body: e.Body, BlockedBy: blockers}
+		if done {
+			break
 		}
-
-		// Write the newly minted id into its chart entry as soon as that
-		// ticket exists, before the next one is minted: a failure partway
-		// through then leaves every already-created ticket recorded in the
-		// file, and a re-run continues where it stopped instead of minting
-		// duplicates. recorded[di] is set only once that write-back lands, so
-		// graduateFailure can tell a ticket tracker.Graduate minted but this
-		// call never got to record (recorded[di] still false) from one that
-		// is actually safe to re-run over.
-		recorded := make([]bool, len(toCreate))
-		onMinted := func(di int, id string) error {
-			entryIdx := toCreate[di]
-			entries[entryIdx].ID = id
-			createdIDs = append(createdIDs, id)
-			if err := st.WriteChart(chart, entries); err != nil {
-				return &axi.Error{
-					Msg:  fmt.Sprintf("ticket %s was created for entry %d but failed to write chart %q: %v", id, entryIdx+1, chart, err),
-					Code: "VALIDATION_ERROR",
-					Help: []string{
-						fmt.Sprintf("Put `id: %s` on entry %d of charts/%s/tickets.yaml (or delete that ticket folder), then re-run", id, entryIdx+1, chart),
-					},
-				}
-			}
-			recorded[di] = true
-			return nil
-		}
-
-		g := tracker.Graduation{Chart: chart, Tickets: drafts}
-		if ids, err := tracker.Graduate(adapter, st, g, onMinted); err != nil {
-			return renderErr(stdout, graduateFailure(st, adapter.Name(), chart, toCreate, ids, recorded, err))
-		}
+		createdIDs = append(createdIDs, id)
+		created[pos] = true
 	}
 
 	// An entry that already had an id is never changed by this run; compare
-	// its resolved blockers against that ticket's own ticket.yaml (the source
-	// of truth after graduation) and advise when they differ. This runs
-	// after every new ticket was minted and recorded in the chart but before
-	// Push, so a problem here must stay advisory (naming the file, not
-	// aborting): a hard return at this point would leave those new tickets
-	// created and recorded on disk but never committed, with the operator
-	// told about neither. A ticket.yaml that ReadTicketDeps cannot read -
-	// whether it fails to parse or the read itself fails (permission denied,
-	// an EISDIR, and so on) - is exactly such a problem: it is already `jig
-	// validate`'s own reported issue (validateTicketDeps) - so it gets the
-	// same "could not be read" advisory instead of a VALIDATION_ERROR.
-	finalIDs := make([]string, len(entries))
-	for i, e := range entries {
-		finalIDs[i] = e.ID
+	// its resolved blockers (re-read fresh, now that every entry has an id)
+	// against that ticket's own ticket.yaml (the source of truth after
+	// graduation) and advise when they differ, rather than aborting: a
+	// ticket.yaml that ReadTicketDeps cannot read - whether it fails to
+	// parse or the read itself fails (permission denied, an EISDIR, and so
+	// on) - is already `jig validate`'s own reported issue
+	// (validateTicketDeps) - so it gets the same "could not be read"
+	// advisory instead of a VALIDATION_ERROR.
+	entries, err = st.ReadChart(chart)
+	if err != nil {
+		return renderErr(stdout, &axi.Error{
+			Msg:  fmt.Sprintf("failed to read chart %q: %v", chart, err),
+			Code: "VALIDATION_ERROR",
+			Help: []string{
+				fmt.Sprintf("Check that charts/%s/tickets.yaml exists and is valid YAML", chart),
+			},
+		})
+	}
+	refs, err := resolveChartEntryRefs(st, chart, entries)
+	if err != nil {
+		return renderErr(stdout, err)
 	}
 	var advisories []string
 	for i, e := range entries {
 		if created[i] {
 			continue
 		}
-		resolved := finalizeRefs(refs[i], finalIDs)
+		resolved := toBlockedBy(refs[i])
 		existing, err := st.ReadTicketDeps(e.ID)
 		if err != nil {
 			// A refusal that carries its own next steps (an unknown key:
@@ -221,7 +163,7 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 		rows[i] = []string{fmt.Sprintf("%d", i+1), e.ID, e.Title, status}
 	}
 
-	if len(toCreate) == 0 {
+	if len(createdIDs) == 0 {
 		// A re-run over a fully graduated chart only reports the chart's
 		// current state: this branch itself creates, commits and pushes
 		// nothing. Store.Sync, called above before the chart was even read,
@@ -244,12 +186,6 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 		return 0
 	}
 
-	// Commit the store
-	commitMsg := fmt.Sprintf("chart %s: graduate %s", chart, strings.Join(createdIDs, ", "))
-	if err := st.Push(commitMsg); err != nil {
-		return renderErr(stdout, pushFailure(st.Root, chart, createdIDs, commitMsg, err))
-	}
-
 	helpLines := append([]string{}, advisories...)
 	helpLines = append(helpLines, "Write each ticket's brief.md and slices.yaml (the intake skill drafts both), then run `jig validate <id>`")
 	blocks := []string{
@@ -261,124 +197,126 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 	return 0
 }
 
-// graduateFailure turns a tracker.Graduate error into one the operator can
-// recover from. An error that already carries its own Help keeps it and
-// its code, and gains the entries this run already created and recorded:
-// onMinted's own failure (a WriteChart error) names the one entry it
-// orphaned, and an id jig cannot use (tracker.CheckMinted) names the tracker
-// ticket to close, and neither says what came before it. Any other failure -
-// Mint, the store-folder MkdirAll, or the ticket.yaml write, none of which
-// onMinted ever saw - is raw and would otherwise reach renderErr as a bare
-// "code: ERROR".
-//
-// A minted id that collides with a ticket.yaml already in the store
-// (store.ErrTicketRecordExists) is the one such failure whose folder is not
-// this run's to delete: it holds another ticket's record. It gets the
-// message and help jig ticket new gives the same collision
-// (mintedIDCollision), not the orphan help below.
-//
-// ids and recorded are tracker.Graduate's return value and this call's own
-// write-back bookkeeping, both indexed like toCreate: ids[di] is set for
-// every entry that reached a successful Mint, but recorded[di] is set only
-// once onMinted's write-back for it actually landed in the chart file.
-// tracker.Graduate calls onMinted for entry di before minting entry di+1, so
-// at most one entry - the last one with a non-empty id - can have a ticket
-// minted but not recorded; that one is not safe to re-run over; every other
-// non-empty id is.
-func graduateFailure(st *store.Store, trackerName, chart string, toCreate []int, ids []string, recorded []bool, err error) error {
-	var done []string
-	orphanDi := -1
-	for di, id := range ids {
-		if id == "" {
-			continue
+// errChartFullyGraduated is claimOneChartEntry's internal sentinel: a fresh
+// read of the chart, inside store.Claim's own write (so it is current even
+// after a rejected claim pulled in another clone's work), found no entry
+// without an id. It never reaches the operator; claimOneChartEntry turns it
+// into done=true instead.
+var errChartFullyGraduated = errors.New("graduate: chart fully graduated")
+
+// claimOneChartEntry claims exactly one ticket for chart through
+// store.Claim. Its write re-reads the chart fresh on every attempt -
+// including after a rejected claim pulls in whatever another clone pushed -
+// so it always targets the first entry that still has no id, resolving that
+// entry's blocked_by refs against the ids already on disk: by construction
+// (resolveChartEntryRefs refuses a ref from a not-yet-created entry to a
+// later one, "it must point at an earlier one") every entry before the one
+// claimOneChartEntry is about to mint already has an id, so none of its refs
+// ever comes back pending. done reports whether the chart had nothing left
+// to claim; id and pos (the entry's 0-based position) are only meaningful
+// when done is false and err is nil.
+func claimOneChartEntry(st *store.Store, format, chart string) (id string, pos int, done bool, err error) {
+	pos = -1
+	write := func() (string, []string, error) {
+		entries, rerr := st.ReadChart(chart)
+		if rerr != nil {
+			return "", nil, rerr
 		}
-		if recorded[di] {
-			done = append(done, fmt.Sprintf("entry %d (%s)", toCreate[di]+1, id))
-		} else {
-			orphanDi = di
+		if rerr := validateChartEntries(st, entries, chart); rerr != nil {
+			return "", nil, rerr
+		}
+		refs, rerr := resolveChartEntryRefs(st, chart, entries)
+		if rerr != nil {
+			return "", nil, rerr
+		}
+		i := firstMissingID(entries)
+		if i < 0 {
+			return "", nil, errChartFullyGraduated
+		}
+		rec := store.Ticket{Title: entries[i].Title, Body: entries[i].Body, BlockedBy: toBlockedBy(refs[i])}
+		newID, merr := st.Mint(format, rec)
+		if merr != nil {
+			return "", nil, merr
+		}
+		entries[i].ID = newID
+		if werr := st.WriteChart(chart, entries); werr != nil {
+			return "", nil, &axi.Error{
+				Msg:  fmt.Sprintf("ticket %s was created for entry %d but failed to write chart %q: %v", newID, i+1, chart, werr),
+				Code: "VALIDATION_ERROR",
+				Help: []string{
+					fmt.Sprintf("Put `id: %s` on entry %d of charts/%s/tickets.yaml (or delete that ticket folder), then re-run", newID, i+1, chart),
+				},
+			}
+		}
+		pos = i
+		return newID, []string{newID, "charts/" + chart + "/tickets.yaml"}, nil
+	}
+	msgFn := func(claimedID string) string { return fmt.Sprintf("chart %s: graduate %s", chart, claimedID) }
+
+	id, err = st.Claim(write, msgFn)
+	if errors.Is(err, errChartFullyGraduated) {
+		return "", -1, true, nil
+	}
+	if err != nil {
+		return "", -1, false, err
+	}
+	return id, pos, false, nil
+}
+
+// firstMissingID returns the 0-based position of the first entry with no
+// id, or -1 when every entry already has one.
+func firstMissingID(entries []store.ChartEntry) int {
+	for i, e := range entries {
+		if e.ID == "" {
+			return i
 		}
 	}
-	// The entries this run already created and recorded, for a failure that
-	// strikes after some of them: a re-run continues after them.
-	alreadyCreated := func(msg string) string {
-		if len(done) == 0 {
-			return msg
-		}
-		return fmt.Sprintf("%s (already created: %s)", msg, strings.Join(done, ", "))
+	return -1
+}
+
+// toBlockedBy converts refs - every one of them knownID, by
+// claimOneChartEntry's own invariant (see its doc comment) - into the
+// store.TicketBlockedBy list a ticket.yaml record holds.
+func toBlockedBy(refs []entryRef) []store.TicketBlockedBy {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]store.TicketBlockedBy, len(refs))
+	for i, r := range refs {
+		out[i] = store.TicketBlockedBy{Ticket: r.knownID, Kind: r.kind}
+	}
+	return out
+}
+
+// graduateFailure turns a claimOneChartEntry error into one the operator can
+// recover from, naming every ticket this run already claimed on the origin
+// so far (createdIDs): each was committed, and - on a store with an origin -
+// pushed, by its own store.Claim call, so nothing about it is still pending
+// the way an orphaned mint once was; a re-run simply continues with the
+// entries that still have no id. An error that already carries its own Help
+// (an id jig cannot use, a chart write failure, store.Claim's own
+// ID_NOT_CLAIMED) keeps its code and Help, gaining only this context; any
+// other failure is raw and would otherwise reach renderErr as a bare
+// "code: ERROR".
+func graduateFailure(chart string, createdIDs []string, err error) error {
+	msg := fmt.Sprintf("chart %q: claiming a ticket for the next entry failed: %v", chart, err)
+	if len(createdIDs) > 0 {
+		msg = fmt.Sprintf("chart %q: %s already claimed on the origin; claiming the next ticket failed: %v", chart, strings.Join(createdIDs, ", "), err)
 	}
 
 	var ae *axi.Error
 	if errors.As(err, &ae) {
 		// A copy: the caller's error is not this function's to change.
-		withDone := *ae
-		withDone.Msg = alreadyCreated(ae.Msg)
-		return &withDone
-	}
-
-	if orphanDi >= 0 && errors.Is(err, store.ErrTicketRecordExists) {
-		id := ids[orphanDi]
-		collision := mintedIDCollision(trackerName, id, st.TicketFilePath(id), fmt.Sprintf(
-			"entry %d of charts/%s/tickets.yaml has no id, so re-running `jig graduate %s` before this is settled mints a second ticket for it",
-			toCreate[orphanDi]+1, chart, chart,
-		))
-		collision.Msg = alreadyCreated(collision.Msg)
-		return collision
-	}
-
-	msg := alreadyCreated(err.Error())
-
-	if orphanDi >= 0 {
-		id := ids[orphanDi]
-		entryIdx := toCreate[orphanDi]
-		msg = fmt.Sprintf("%s (ticket %s was created for entry %d but not yet recorded in charts/%s/tickets.yaml)", msg, id, entryIdx+1, chart)
-		return &axi.Error{
-			Msg:  msg,
-			Code: "VALIDATION_ERROR",
-			Help: []string{fmt.Sprintf("Put `id: %s` on entry %d of charts/%s/tickets.yaml (or delete that ticket folder), then re-run", id, entryIdx+1, chart)},
-		}
+		withMsg := *ae
+		withMsg.Msg = msg
+		return &withMsg
 	}
 
 	return &axi.Error{
 		Msg:  msg,
 		Code: "VALIDATION_ERROR",
-		Help: []string{fmt.Sprintf("Re-run `jig graduate %s`; it creates only the entries in charts/%s/tickets.yaml that still have no id", chart, chart)},
+		Help: []string{fmt.Sprintf("Re-run `jig graduate %s`; every ticket already claimed stays recorded on the origin and is not re-created", chart)},
 	}
-}
-
-// pushFailure wraps a Store.Push failure - one that refused outright (a
-// mid-rebase or mid-merge, internal/store/store.go:204) or one that could
-// not even be retried with pull --rebase - with what Store itself has no
-// way to know: every id in createdIDs is already written into
-// charts/<chart>/tickets.yaml and its ticket folder already exists on disk,
-// so nothing from this run is lost - only committing it is still pending.
-// The only caller, cmdGraduate's Store.Push call (reached only when at
-// least one entry was created), reaches this after at least one mint has
-// already appended to createdIDs, so it is never empty here. err's own
-// message and Help (Push's
-// STORE_CONFLICT already names the store's exact git state and how to
-// resolve it there) are kept, not discarded, since only Store can describe
-// that state; this only adds the graduate-specific context plus the commit
-// the operator can make by hand with commitMsg, the message Push itself
-// would have used.
-func pushFailure(storeRoot, chart string, createdIDs []string, commitMsg string, err error) error {
-	msg := fmt.Sprintf(
-		"chart %q: every ticket from this run already exists with its id recorded in charts/%s/tickets.yaml (%s), but committing that failed: %v",
-		chart, chart, strings.Join(createdIDs, ", "), err,
-	)
-
-	var ae *axi.Error
-	code := "VALIDATION_ERROR"
-	var help []string
-	if errors.As(err, &ae) {
-		code = ae.Code
-		help = append(help, ae.Help...)
-	}
-	help = append(help, fmt.Sprintf(
-		"Nothing is lost: commit it yourself with `git -C %s add -A && git -C %s commit -m %q` (a new ticket folder is untracked, so `-a` alone would miss it), or re-run `jig graduate %s` once the store's git state above is resolved - it will only need to commit, not re-create anything",
-		storeRoot, storeRoot, commitMsg, chart,
-	))
-
-	return &axi.Error{Msg: msg, Code: code, Help: help}
 }
 
 // validateChartName checks that name is a valid chart name.
@@ -621,25 +559,6 @@ func refErr(chart string, entries []store.ChartEntry, i int, ref, reason string)
 		Code: "VALIDATION_ERROR",
 		Help: []string{fmt.Sprintf("Fix blocked_by ref %q on entry %d (%q) in charts/%s/tickets.yaml", ref, pos, entries[i].Title, chart)},
 	}
-}
-
-// finalizeRefs resolves every entryRef in refs to a concrete ticket id,
-// using finalIDs (indexed by 0-based chart position) for any ref still
-// pending at validation time - valid once every entry that will be created
-// this run has been created.
-func finalizeRefs(refs []entryRef, finalIDs []string) []store.TicketBlockedBy {
-	if len(refs) == 0 {
-		return nil
-	}
-	out := make([]store.TicketBlockedBy, len(refs))
-	for i, r := range refs {
-		id := r.knownID
-		if id == "" {
-			id = finalIDs[r.pending-1]
-		}
-		out[i] = store.TicketBlockedBy{Ticket: id, Kind: r.kind}
-	}
-	return out
 }
 
 // blockersEqual reports whether a and b name the same (ticket, kind) pairs,

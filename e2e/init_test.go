@@ -36,16 +36,24 @@ func TestInitStandalone(t *testing.T) {
 	if fi, err := os.Stat(filepath.Join(storeDir, "platform")); err != nil || !fi.IsDir() {
 		t.Fatalf("platform/ missing under standalone store: %v", err)
 	}
-	// project.InitStandalone writes project.yaml/ledger.md/platform/ without
-	// committing them, so the new repo has no commits yet; rev-parse
-	// --abbrev-ref HEAD requires a resolvable commit and fails on an unborn
-	// branch, but symbolic-ref does not.
 	branch, err := gitx.Run(storeDir, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		t.Fatalf("symbolic-ref HEAD in standalone store: %v", err)
 	}
 	if branch != "main" {
 		t.Fatalf("standalone store branch = %q, want main", branch)
+	}
+	// project.InitStandalone commits its own scaffold (store.Claim only ever
+	// stages and commits the paths it claims, never a sweeping `add -A`, so
+	// nothing else in jig would pick an uncommitted scaffold up later), and
+	// the working tree it leaves is clean.
+	if _, err := gitx.Run(storeDir, "rev-parse", "HEAD"); err != nil {
+		t.Fatalf("standalone store has no commit: %v", err)
+	}
+	if status, err := gitx.Run(storeDir, "status", "--porcelain"); err != nil {
+		t.Fatalf("git status in standalone store: %v", err)
+	} else if status != "" {
+		t.Fatalf("standalone store left dirty right after init:\n%s", status)
 	}
 }
 

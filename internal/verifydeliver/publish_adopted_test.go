@@ -89,7 +89,7 @@ func TestPublishShipsAnAdoptedBranch(t *testing.T) {
 	for _, l := range lines {
 		seen[l.Event] = l
 	}
-	for _, event := range []string{"reconcile", "memorize", "changelog", "squash", "pr", "route", "publish-done"} {
+	for _, event := range []string{"reconcile", "memorize", "changelog", "squash", "pr", "publish-done"} {
 		if _, ok := seen[event]; !ok {
 			t.Errorf("journal has no %q line after the publish", event)
 		}
@@ -452,7 +452,7 @@ func TestPublishUpdatesThePRTheAuthorOpened(t *testing.T) {
 	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket, Branch: branch}); err != nil {
 		t.Fatalf("Gate --branch: %v", err)
 	}
-	logFile, _ := useGithubPRs(t, &d, openPullOf(t, branch), "")
+	logFile, _ := useGithubHost(t, &d, openPullOf(t, branch), "")
 
 	report, err := Publish(d, PublishOpts{Ticket: ticket, Yes: true})
 	if err != nil {

@@ -41,7 +41,6 @@ func TestTicketPreconditions(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"status", "T-99"}, "ticket T-99 not found"},
 		{[]string{"run", "T-1"}, "ticket T-1 has no slices yet"},
 		{[]string{"run", "T-99"}, "ticket T-99 has no slices yet"},
 		{[]string{"requeue", "T-1", "--from-brief-diff"}, "ticket T-1 has no slices yet"},
@@ -56,7 +55,18 @@ func TestTicketPreconditions(t *testing.T) {
 		}
 	}
 
-	code, out := jig("status", "T-1")
+	// A ticket the store has no folder for at all (never minted) is told to
+	// mint one, not pointed at the intake skill: no tracker holds an id jig
+	// does not also have a folder for.
+	code, out := jig("status", "T-99")
+	if code == 0 || !strings.Contains(out, "ticket T-99 not found") || !strings.Contains(out, "jig ticket new") {
+		t.Errorf("jig status T-99: exit %d, want a non-zero exit naming the missing ticket and jig ticket new:\n%s", code, out)
+	}
+	if strings.Contains(out, "intake skill") {
+		t.Errorf("jig status T-99: output mentions the intake skill for a ticket that was never minted:\n%s", out)
+	}
+
+	code, out = jig("status", "T-1")
 	if code != 0 || !strings.Contains(out, "intake skill") {
 		t.Errorf("jig status T-1: exit %d, want 0 with the intake hint:\n%s", code, out)
 	}
@@ -108,21 +118,5 @@ func TestTicketNewRefusesReservedID(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(cfgs[0]), "T-1-gate")); !os.IsNotExist(err) {
 		t.Fatalf("the refused ticket T-1-gate left a store folder behind (stat err %v)", err)
-	}
-}
-
-// TestTicketNewRefusesReservedIDFromCommandTracker covers a tracker whose
-// ids are known only once it has created the ticket (here a command tracker
-// that mints EXT-7-gate): jig cannot refuse the id before the mint, so it
-// refuses it after and says the ticket now exists in the tracker.
-func TestTicketNewRefusesReservedIDFromCommandTracker(t *testing.T) {
-	jig, st := commandTrackerMinting(t, "EXT-7-gate")
-
-	code, out := jig("ticket", "new", "--title", "Fix the thing")
-	if code == 0 || !strings.Contains(out, "EXT-7-gate") || !strings.Contains(out, "reserves") || !strings.Contains(out, "close it there") {
-		t.Fatalf("jig ticket new with a tracker minting EXT-7-gate: exit %d, want a non-zero exit naming EXT-7-gate as reserved and the ticket to close:\n%s", code, out)
-	}
-	if _, err := os.Stat(st.TicketDir("EXT-7-gate")); !os.IsNotExist(err) {
-		t.Fatalf("the refused ticket EXT-7-gate left a store folder behind (stat err %v)", err)
 	}
 }
