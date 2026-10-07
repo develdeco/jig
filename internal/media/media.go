@@ -38,15 +38,15 @@ func ImageExtensions() []string { return append([]string{}, imageExts...) }
 // VideoExtensions returns the lowercase extensions accepted as videos.
 func VideoExtensions() []string { return append([]string{}, videoExts...) }
 
-// Listed is one file a session reports: a name inside the media directory and
-// the caption a reader sees beside it.
+// Listed is one file a writer reports: a name inside the directory jig made
+// and the caption a reader sees beside it.
 type Listed struct {
 	File    string
 	Caption string
 }
 
-// File is one listed file that passed verification, still under the session's
-// own name. Ext is its lowercase extension without the dot.
+// File is one listed file that passed verification, still under the name it
+// was listed under. Ext is its lowercase extension without the dot.
 type File struct {
 	Name    string
 	Ext     string
@@ -71,10 +71,10 @@ func Kind(ext string) string {
 	return ""
 }
 
-// PlainName reports whether name is a single file name: no path separator
+// plainName reports whether name is a single file name: no path separator
 // (either spelling), no drive or stream colon, not a dot name, and - via
 // filepath.IsLocal - not a Windows reserved device name.
-func PlainName(name string) bool {
+func plainName(name string) bool {
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\:\x00") {
 		return false
 	}
@@ -143,8 +143,10 @@ func PlainParents(mediaDir string) error {
 // Windows junction (which reads as irregular) is never followed; not empty
 // (gh refuses an empty file); and within the size limit for its kind. The
 // bytes are hashed from the very file Lstat saw. Nothing is renamed here.
-// dirName is what a refusal calls dir, the name the session was told for it
-// (demo.json's "media_dir"), since dir itself is a path of this machine.
+// The result is one File per Listed, in listed order. dirName is what a
+// refusal calls dir, the caller's name for it (verifydeliver passes
+// "media_dir", the name its session is told), since dir itself is a path of
+// this machine.
 func Verify(dir, dirName string, made os.FileInfo, listed []Listed) ([]File, error) {
 	if len(listed) > MaxFiles {
 		return nil, fmt.Errorf("%d files are listed; at most %d are accepted", len(listed), MaxFiles)
@@ -163,7 +165,7 @@ func Verify(dir, dirName string, made os.FileInfo, listed []Listed) ([]File, err
 	seen := map[string]bool{}
 	files := make([]File, 0, len(listed))
 	for i, m := range listed {
-		if !PlainName(m.File) {
+		if !plainName(m.File) {
 			return nil, fmt.Errorf("%s is not a plain file name directly inside %s", EntryLabel(i, m.File), dirName)
 		}
 		key := strings.ToLower(m.File)
