@@ -306,7 +306,6 @@ func buildStore(storeDir, testdataDir, repoRemote string) error {
 		SchemaVersion: 1,
 		Name:          "fixture",
 		TicketFormat:  "JIG-{n}",
-		Tracker:       "local",
 		Repos:         []project.Repo{{Remote: repoRemote, Target: "main"}},
 		Platform:      "platform/",
 	}
@@ -365,11 +364,13 @@ func buildStore(storeDir, testdataDir, repoRemote string) error {
 
 // storeProjectYAML is the on-disk shape Build writes for the fixture
 // store's project.yaml; it mirrors project.Config's declared wire format.
+// Trackers always marshals as "trackers: []" (a nil slice, no omitempty),
+// and no tracker: key is ever written, matching jig init.
 type storeProjectYAML struct {
 	SchemaVersion int            `yaml:"schema_version"`
 	Name          string         `yaml:"name"`
 	TicketFormat  string         `yaml:"ticket_format"`
-	Tracker       string         `yaml:"tracker"`
+	Trackers      []string       `yaml:"trackers"`
 	Repos         []project.Repo `yaml:"repos"`
 	Platform      string         `yaml:"platform"`
 }
@@ -506,9 +507,9 @@ func testdataFixtureDir() (string, error) {
 
 // GhStub compiles testdata/fixture/ghstub into a binary named gh (or gh.exe
 // on Windows) inside a fresh directory, returning that directory so it can
-// be prepended to PATH. Any test that needs a github tracker without
-// talking to GitHub uses this instead of building its own copy of the same
-// stub.
+// be prepended to PATH. Any test that needs a GitHub pull-request host
+// without talking to GitHub uses this instead of building its own copy of
+// the same stub.
 func GhStub(t testing.TB) string {
 	t.Helper()
 	src := filepath.Join(RepoRoot(t), "testdata", "fixture", "ghstub")

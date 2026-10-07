@@ -30,6 +30,11 @@ type Ticket struct {
 	// Title is the ticket's headline, recorded right after minting by jig
 	// ticket new and jig graduate, whatever the tracker.
 	Title string
+	// Body is the ticket's description, recorded right after minting by jig
+	// ticket new --body and jig graduate (from the chart entry's own body).
+	// Empty means no body was given; nothing distinguishes that from an
+	// older ticket minted before this field existed.
+	Body string
 	// Branch is the ticket's adopted working branch. Empty means none is
 	// recorded: callers resolve the branch through Store.TicketBranch,
 	// never by reading this field directly, so the default ("jig/<ticket>")
@@ -51,8 +56,23 @@ func (t Ticket) Adopted() bool { return t.Branch != "" }
 type ticketFile struct {
 	SchemaVersion int               `yaml:"schema_version"`
 	Title         string            `yaml:"title,omitempty"`
+	Body          literalString     `yaml:"body,omitempty"`
 	Branch        string            `yaml:"branch,omitempty"`
 	BlockedBy     []TicketBlockedBy `yaml:"blocked_by,omitempty"`
+}
+
+// literalString marshals as a YAML literal block scalar ("|"), the same
+// style ChartEntry.Body is written in (internal/store/charts.go), even for
+// a single-line value: ticket.yaml's body is the chart entry's body or the
+// --body flag's value carried over verbatim, so it reads the same way in
+// both places.
+type literalString string
+
+func (s literalString) MarshalYAML() (interface{}, error) {
+	if s == "" {
+		return "", nil
+	}
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: string(s), Style: yaml.LiteralStyle}, nil
 }
 
 // ticketSchemaVersion is the schema_version every ticket.yaml this jig
@@ -125,7 +145,7 @@ func (s *Store) ReadTicket(ticket string) (Ticket, error) {
 			Help: []string{"Upgrade jig to a version that understands this ticket.yaml schema"},
 		}
 	}
-	return Ticket{Title: f.Title, Branch: f.Branch, BlockedBy: f.BlockedBy}, nil
+	return Ticket{Title: f.Title, Body: string(f.Body), Branch: f.Branch, BlockedBy: f.BlockedBy}, nil
 }
 
 // ReadTicketDeps reads <ticket>/ticket.yaml's blockers. An absent file
@@ -194,6 +214,7 @@ func writeTicketFile(path string, t Ticket) error {
 	out, err := yaml.Marshal(ticketFile{
 		SchemaVersion: ticketSchemaVersion,
 		Title:         t.Title,
+		Body:          literalString(t.Body),
 		Branch:        t.Branch,
 		BlockedBy:     t.BlockedBy,
 	})
