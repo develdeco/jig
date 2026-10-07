@@ -96,6 +96,10 @@ func sameEnvName(a, b string) bool {
 // pause/stop/error paths are meaningful exit codes, not test failures.
 func runJig(t *testing.T, env jigEnv, cwd string, args ...string) jigResult {
 	t.Helper()
+	if env.home == "" {
+		// An empty JIG_HOME makes jig fall back to the real home's jig dir.
+		t.Fatal("runJig: the jigEnv names no jig home")
+	}
 	cmd := exec.Command(jigBinary, args...)
 	cmd.Dir = cwd
 	cmd.Env = env.environ()

@@ -91,8 +91,9 @@ annotation.
   `frontier.Deps.Home`, `pool.Acquire`), and a test passes a `t.TempDir()`;
   a test that runs `cmd/jig` or the jig binary, which read `JIG_HOME`, sets
   it with `t.Setenv`, except `e2e`'s: they hand the subprocess `JIG_HOME`
-  (and `HOME`) in its own environment (`jigEnv` and `runJig`), never through
-  the test process's, so they run in parallel with each other.
+  (and, for the tests built on `newFixture`, `HOME` and `USERPROFILE`) in its
+  own environment (`jigEnv` and `runJig`), never through the test process's,
+  so they run in parallel with each other.
 
 ## Tests against the real Claude Code CLI
 
