@@ -27,7 +27,10 @@ gate           re-verification round: oracles (a pass jig recorded on the same t
   │                    gate/round-N/{findings.yaml,findings.md,report.yaml,diff-changelog.md},
   │                    evidence/round-N/*, slices.yaml (fix slices, findings, from_gate: N),
   │                    intent.md (--intent/--doc, or inferred),
-  │                    ticket.yaml (branch) and start.<repo>.sha (--branch adoption only)
+  │                    ticket.yaml (branch) and start.<repo>.sha (--branch adoption only),
+  │                    and, when the build recorded scenarios on the reviewed head's
+  │                    history (ADR 0029), under <jig home>/evidence/ (not in the
+  │                    store) the round's recordings.json for the reviewer
   │            then, after a clean reviewer round only (best effort, never the verdict):
   │            a demo session shows the change working
   │            writes: work/gate.round-N.demo.result.json, gate/round-N/demo.yaml,
@@ -89,7 +92,9 @@ live in the same tree, one directory per oracle run, under
 line is their manifest. The files a publish picks from them are copied to
 `<store id>/<ticket>/picks/<head>/` (as `rec-<n>.<ext>`), beside the pick
 session's `<head>.picks.json` input and `<head>.result.json` answer, and the
-journal's `publish-picks` line records the pick. The session's input, `demo.json`, lives beside the
+journal's `publish-picks` line records the pick. A reviewer round's list of the
+recordings on the reviewed head's history, `recordings.json`, is written to
+`<store id>/<ticket>/reviews/round-<n>/`. The session's input, `demo.json`, lives beside the
 media (`<head sha>.demo.json`, in the ticket's evidence directory): it holds the
 absolute `media_dir`, a path that names the operator's jig home, and nothing
 jig itself writes to the store for a demo, which is committed and pushed, does.
@@ -367,6 +372,25 @@ known finding, a `still_present` id naming no known finding, repeated, or
 also a finding's `prior`, a `still_present` finding whose file is gone
 without a deletion, or `reviewed_paths` missing a `must_review` path all
 fail the round loudly rather than falling back to a partial result.
+
+**Recordings as evidence.** When the build recorded its end-to-end scenarios
+([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md))
+at the reviewed head or an ancestor of it, the round also hands the reviewer
+a `recordings.json` (`internal/verifydeliver/recordings.go`) and its prompt
+gains one paragraph that names it. The list is publish's selection - the
+latest recording of each flow, scenario and step, each checked again against
+its file under the jig home - latest build first, at most 50 (`omitted` counts
+the older ones left out), each entry `{scenario, flow, step, caption, commit,
+kind, file}` with the absolute path of the file. It is written under the jig
+home (`<jig home>/evidence/<store id>/<ticket>/reviews/round-<n>/`), never in
+`work/`: it names files of this machine, and the store is shared. The
+reviewer reads the files by those paths with the read tools it already has,
+so the dispatch gets no extra grant (a headless session's reads are not
+scoped to the lease, [ADR 0008](docs/adr/0008-headless-permission-model.md)).
+What they show is evidence like any other: a finding still needs a cause in
+the diff, and `review.json`, `result.json`, `still_present` and the read-only
+guard are unchanged. A round with no recordings writes no file, and its
+`review.json` and prompt are what they were before recordings existed.
 
 **Intent inference.** When `resolveIntent` comes back `"none"` and the
 round is about to dispatch a reviewer (nothing outstanding and the scope

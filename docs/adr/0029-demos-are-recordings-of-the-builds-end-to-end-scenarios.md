@@ -33,6 +33,12 @@ The picked files are copied, each checked as it is copied (the very handle read 
 
 Publish journals one `publish-picks` line per publish that had candidates: the head in `commit`, `picked`, `reused` or `refused: <reason>` as the outcome, and for a pick its summary, flows and files with a fingerprint of the candidates it was made from. A publish of the same head whose candidates hash the same takes the pick from the latest such line and asks the session nothing; it passes through the same validation. A refusal is not reused: it is asked again.
 
+## The reviewer reads the recordings
+
+At each reviewer round (step 5b) the recordings made at the reviewed head or an ancestor of it are evidence for the review. The selection is publish's own, shared: the latest recording of each flow, scenario and step, each checked again against its file under the jig home. When there are some, jig writes `recordings.json` to `evidence/<store id>/<ticket>/reviews/round-<n>/` under the jig home, not to the store's `work/` beside `review.json`, because it names files of this machine by absolute path and the store is shared and pushed: `{"ticket", "head_sha", "recordings": [{"scenario", "flow", "step", "caption", "commit", "kind", "file"}], "omitted"}`, the latest build's recordings first (a build's own in flow and step order), at most 50, `omitted` counting the older ones left out. The review prompt then gains one paragraph that names the file and says what it holds: the build recorded its end-to-end scenarios at its builders' greens, the reviewer reads the ones that bear on the change as evidence of how it behaves end to end (an SVG recording's `<text>` elements are the terminal's screens, frame by frame), and what they show is evidence like any other: a finding still needs a cause in the diff. The review contract is otherwise unchanged: `review.json`, `result.json`, `still_present` and the read-only guard. A round with no recordings (no jig home, none recorded, none on the head's history) writes nothing and hands the reviewer a `review.json` and a prompt byte for byte what they were.
+
+The reviewer reads the files by their paths with the tools it already has, so no grant is added. A headless session's `Read`, `Glob` and `Grep` are not scoped to the lease (ADR 0008): the screen names credential locations only, and `review.json`, the intent and the journal already sit outside the lease. Edits stay scoped as they were, and the reviewer gets no write directory for this.
+
 ## Built in steps
 
 Each step is its own pull request, and until the last ones land ADR 0014's demo session and the tapes stand:
@@ -40,6 +46,6 @@ Each step is its own pull request, and until the last ones land ADR 0014's demo 
 2. Capture: a pseudo-terminal recorder, and the pipe-stamping one jig's own tests use.
 3. Build-phase collection: jig's oracle run at a builder's green gives the scenarios a directory to record into, verifies what they wrote, and records the manifest with the commit.
 4. jig's own end-to-end tests record.
-5. Publish picks the recordings and composes the flows (5a); the reviewer prompt names them as evidence (5b).
+5. Publish picks the recordings and composes the flows (5a); the reviewer reads them as evidence (5b).
 6. The gate demo session is retired.
 7. The tapes, `demo/fixture` and `demo.yml` are retired.

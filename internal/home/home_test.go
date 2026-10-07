@@ -131,3 +131,37 @@ func TestPicksDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
 		}
 	}
 }
+
+// TestReviewDirIsOneDirectoryPerRoundUnderTheTicketsReviews: what a round
+// hands its reviewer from the jig home lives in a directory of the round's own,
+// under a "reviews" directory of the ticket's evidence, never sharing a name
+// with a gate head's demo media, the recordings or the picks.
+func TestReviewDirIsOneDirectoryPerRoundUnderTheTicketsReviews(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	got, err := ReviewDir(root, "0123456789abcdef", "T-1", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, "evidence", "0123456789abcdef", "T-1", "reviews", "round-2"); got != want {
+		t.Fatalf("ReviewDir = %q, want %q", got, want)
+	}
+	other, err := ReviewDir(root, "0123456789abcdef", "T-1", 3)
+	if err != nil || other == got {
+		t.Fatalf("round 3's directory = %q, %v; want one other than round 2's", other, err)
+	}
+}
+
+// TestReviewDirRefusesAnythingButASingleDirectoryName holds ReviewDir's store
+// id and ticket to the rule EvidenceDir's are held to.
+func TestReviewDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
+	t.Parallel()
+	bad := []string{"", ".", "..", ".hidden", "a/b", `a\b`, "C:x", "x.", "x "}
+	for _, name := range bad {
+		for i, parts := range [][2]string{{name, "T-1"}, {"id", name}} {
+			if got, err := ReviewDir(t.TempDir(), parts[0], parts[1], 1); err == nil {
+				t.Errorf("ReviewDir with %q in part %d = %q, want a refusal", name, i, got)
+			}
+		}
+	}
+}

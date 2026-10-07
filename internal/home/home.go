@@ -100,6 +100,22 @@ func PicksDir(root, storeID, ticket, sha string) (string, error) {
 	return filepath.Join(root, "evidence", storeID, ticket, "picks", sha), nil
 }
 
+// ReviewDir returns where what one gate round hands its reviewer, and the
+// store does not hold, lives under the jig home root:
+// <root>/evidence/<storeID>/<ticket>/reviews/round-<n> (ADR 0029). The round's
+// list of the build's recordings is written here, because it names the
+// absolute paths of files on this machine and the store is shared. It sits in
+// the same evidence tree as EvidenceDir, under a "reviews" directory of the
+// ticket, so it never shares a name with a gate head's demo media, the
+// "recordings" directory or the "picks" directory. storeID and ticket are held
+// to the same rule as EvidenceDir's.
+func ReviewDir(root, storeID, ticket string, round int) (string, error) {
+	if err := evidenceParts([]evidencePart{{"store id", storeID}, {"ticket", ticket}}); err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "evidence", storeID, ticket, "reviews", fmt.Sprintf("round-%d", round)), nil
+}
+
 // evidencePart is one caller-supplied part of an evidence path, named for
 // the refusal.
 type evidencePart struct{ what, name string }
