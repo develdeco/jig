@@ -49,6 +49,22 @@ func TestFinalTextDrawsWhatATerminalShows(t *testing.T) {
 		{"overwriting the right half of a wide rune clears its left half", 10, 4, "日b\r\x1b[CX", " Xb"},
 		{"a combining mark joins the rune before it", 10, 4, "éx", "éx"},
 		{"a reset clears everything", 10, 4, "abc\x1bcX", "X"},
+		{"a DCS string draws nothing", 10, 4, "\x1bP+q544e\x1b\\ok", "ok"},
+		{"an APC string draws nothing", 10, 4, "\x1b_Gf=100;AAAA\x1b\\ok", "ok"},
+		{"a PM string draws nothing", 10, 4, "\x1b^privacy\x1b\\ok", "ok"},
+		{"backspace from the last column", 5, 4, "abcde\bX", "abcXe"},
+		{"erasing the scrollback leaves the screen", 10, 4, "abc\x1b[3J", "abc"},
+		{"ESC inside an escape sequence starts it over", 10, 4, "\x1b\x1b[31mX", "X"},
+		{"CAN cancels a sequence", 10, 4, "\x1b[31\x18X", "X"},
+		{"a control inside an escape sequence runs", 10, 4, "abc\x1b\r[2CX", "abX"},
+		{"reverse index at the top scrolls down", 10, 4, "a\x1bMb", " b\na"},
+		{"insert lines", 10, 4, "a\r\nb\x1b[A\x1b[L", "\na\nb"},
+		{"delete lines", 10, 4, "a\r\nb\r\nc\x1b[2A\x1b[M", "b\nc"},
+		{"scroll up", 10, 4, "a\r\nb\x1b[S", "b"},
+		{"scroll down", 10, 4, "a\x1b[T", "\na"},
+		{"a 1x1 terminal shows the last rune", 1, 1, "abc", "c"},
+		{"a mark after a pending wrap joins the last rune", 3, 2, "abć", "abć"},
+		{"a cell keeps at most 8 marks", 10, 2, "e" + strings.Repeat("́", 20), "e" + strings.Repeat("́", 8)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

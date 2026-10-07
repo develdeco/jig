@@ -36,6 +36,34 @@ func TestAsciicastRoundTrip(t *testing.T) {
 	}
 }
 
+// TestAsciicastCarriesARuneSplitAcrossWrites: a write that ends mid-rune
+// cannot be a JSON string; the writer carries the partial rune into the next
+// event, so the file draws what the terminal drew.
+func TestAsciicastCarriesARuneSplitAcrossWrites(t *testing.T) {
+	t.Parallel()
+	c := Cast{Width: 10, Height: 2, Events: []Event{
+		{Data: "a\xe6\x97"},
+		{Time: time.Millisecond, Data: "\xa5!"},
+		{Time: 2 * time.Millisecond, Data: "\xff\xe6"}, // invalid, then a rune the recording cuts off
+	}}
+	var buf bytes.Buffer
+	if err := c.WriteAsciicast(&buf); err != nil {
+		t.Fatalf("WriteAsciicast: %v", err)
+	}
+	read, err := ReadAsciicast(&buf)
+	if err != nil {
+		t.Fatalf("ReadAsciicast: %v", err)
+	}
+	want, _ := c.FinalText()
+	got, err := read.FinalText()
+	if err != nil {
+		t.Fatalf("FinalText: %v", err)
+	}
+	if got != want || got != "a日!�" {
+		t.Errorf("read back draws %q, the recording drew %q, want both %q", got, want, "a日!�")
+	}
+}
+
 // TestReadAsciicastTakesARecorderOwnFile: asciinema's header fields and its
 // input, marker and resize events are read past; output events are kept.
 func TestReadAsciicastTakesARecorderOwnFile(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 // The terminal model: enough of a VT100/xterm to show what command-line
 // programs write (text, line control, colors, erasing, cursor moves, a
 // progress line redrawn in place). What it does not model, such as the
-// alternate screen, scroll regions, or mouse and mode switches, it reads past
-// without drawing anything.
+// alternate screen, scroll regions, mouse and mode switches, or control
+// strings (OSC, DCS, SOS, PM, APC), it reads past without drawing anything.
 
 // color is a cell color: defaultColor, or an RGB value 0xRRGGBB.
 type color int32
@@ -40,14 +40,18 @@ type cell struct {
 // to its end and drawn as if cut there.
 const maxParams = 64
 
+// maxMarks bounds the combining marks a cell keeps, as xterm keeps a few:
+// the rest are dropped.
+const maxMarks = 8
+
 // parser states.
 const (
 	ground = iota
 	escape
 	escapeSkip // an escape sequence that takes one more byte, such as ESC ( B
 	csi
-	osc
-	oscEscape // ESC inside an OSC string, the start of its ST terminator
+	str       // a control string (OSC, DCS, SOS, PM, APC), read past to its end
+	strEscape // ESC inside a control string, the start of its ST terminator
 )
 
 type screen struct {
@@ -103,6 +107,8 @@ func (s *screen) feed(data string) {
 			switch {
 			case b == 0x1b:
 				s.state = escape
+			case b == 0x18 || b == 0x1a: // CAN, SUB: the sequence is cancelled
+				s.state = ground
 			case b < 0x20:
 				s.control(b)
 			case b >= 0x40 && b <= 0x7e:
@@ -111,18 +117,18 @@ func (s *screen) feed(data string) {
 			case len(s.params) < maxParams:
 				s.params = append(s.params, b)
 			}
-		case osc:
+		case str:
 			switch b {
-			case 0x07:
+			case 0x07, 0x18, 0x1a: // BEL ends an OSC; CAN and SUB cancel any
 				s.state = ground
 			case 0x1b:
-				s.state = oscEscape
+				s.state = strEscape
 			}
-		case oscEscape:
+		case strEscape:
 			if b == '\\' {
 				s.state = ground
 			} else {
-				s.state = osc
+				s.state = str
 			}
 		}
 	}
@@ -161,7 +167,7 @@ func (s *screen) control(b byte) {
 	case '\n', 0x0b, 0x0c:
 		s.lineFeed()
 	case '\b':
-		if s.col > 0 && !s.pendingWrap {
+		if s.col > 0 {
 			s.col--
 		}
 		s.pendingWrap = false
@@ -172,12 +178,22 @@ func (s *screen) control(b byte) {
 }
 
 func (s *screen) escape(b byte) {
+	switch {
+	case b == 0x1b: // a new sequence starts over
+		return
+	case b == 0x18 || b == 0x1a:
+		s.state = ground
+		return
+	case b < 0x20: // a control inside the sequence runs, and the sequence goes on
+		s.control(b)
+		return
+	}
 	s.state = ground
 	switch b {
 	case '[':
 		s.state, s.params = csi, s.params[:0]
-	case ']':
-		s.state = osc
+	case ']', 'P', 'X', '^', '_': // OSC, DCS, SOS, PM, APC: strings to ST
+		s.state = str
 	case '(', ')', '*', '+', '-', '.', '/', '#', '%', ' ':
 		s.state = escapeSkip
 	case '7':
@@ -269,8 +285,8 @@ func (s *screen) mark(r rune) {
 	if s.rows[row][col].cont && col > 0 {
 		col--
 	}
-	if s.rows[row][col].r != 0 {
-		s.rows[row][col].mark += string(r)
+	if c := &s.rows[row][col]; c.r != 0 && utf8.RuneCountInString(c.mark) < maxMarks {
+		c.mark += string(r)
 	}
 }
 
@@ -386,7 +402,7 @@ func (s *screen) dispatchCSI(final byte) {
 				s.erase(r, 0, s.w)
 			}
 			s.erase(s.row, 0, s.col+1)
-		case 2, 3:
+		case 2: // 3 erases only the scrollback, which the model has none of
 			for r := 0; r < s.h; r++ {
 				s.erase(r, 0, s.w)
 			}
@@ -488,7 +504,7 @@ func (s *screen) sgr(raw string) {
 			s.st.fg = palette(n - 90 + 8)
 		case n >= 100 && n <= 107:
 			s.st.bg = palette(n - 100 + 8)
-		case n == 38 || n == 48:
+		case n == 38 || n == 48 || n == 58: // 58, the underline color, is not drawn
 			c, used := extendedColor(numbers(groups[i+1:]))
 			i += used
 			s.setColor(n, c)
@@ -497,14 +513,14 @@ func (s *screen) sgr(raw string) {
 }
 
 // setColor sets the foreground (38) or background (48) to c; a malformed
-// color (defaultColor) leaves it as it was.
+// color (defaultColor) leaves it as it was, and any other parameter sets
+// nothing.
 func (s *screen) setColor(which int, c color) {
-	if c == defaultColor {
-		return
-	}
-	if which == 38 {
+	switch {
+	case c == defaultColor:
+	case which == 38:
 		s.st.fg = c
-	} else {
+	case which == 48:
 		s.st.bg = c
 	}
 }

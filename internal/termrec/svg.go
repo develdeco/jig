@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // SVGOptions shapes a rendering. The zero value takes the defaults.
@@ -21,13 +22,17 @@ type SVGOptions struct {
 const (
 	defaultIdleLimit = 2 * time.Second
 	defaultHold      = 3 * time.Second
-	// minFrameInterval merges writes closer together than this into one
-	// frame: an eye cannot tell them apart.
+	// minFrameInterval is the shortest slot of time one frame stands for:
+	// writes in the same slot make one frame, as an eye cannot tell them
+	// apart.
 	minFrameInterval = 50 * time.Millisecond
-	// maxFrames bounds a rendering's size: a longer recording's frames are
-	// spaced further apart, so it keeps at most this many (plus the blank
-	// first frame).
+	// maxFrames bounds a rendering's frames: a longer recording gets wider
+	// slots, so it keeps at most this many frames in all.
 	maxFrames = 600
+	// MaxSVGBytes bounds a rendering's size, under the 10 MB GitHub takes for
+	// an attached image: a rendering past it gets wider slots, so fewer
+	// frames, until it fits.
+	MaxSVGBytes = 8 << 20
 
 	cellWidth  = 8.4 // a monospace cell at 14px: 0.6em
 	lineHeight = 18
@@ -38,15 +43,33 @@ const (
 	themeFG color = 0xd4d4d4
 )
 
-// frame is the screen from a moment on, until the next frame.
+// frame is the screen from a moment on, until the next frame: the rows it
+// shows, each by its id among the rendering's distinct rows.
 type frame struct {
 	at   time.Duration
-	body string
+	rows []rowUse
+}
+
+// rowUse is one distinct row drawn at a row position.
+type rowUse struct{ id, row int }
+
+func (f frame) same(g frame) bool {
+	if len(f.rows) != len(g.rows) {
+		return false
+	}
+	for i := range f.rows {
+		if f.rows[i] != g.rows[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // SVG renders c as an animated SVG: the terminal's screen as it changed,
 // pauses capped at IdleLimit, looping after Hold. A recording whose screen
-// never changes renders as a still image.
+// never changes renders as a still image. Each distinct row is drawn once
+// and placed in every frame that shows it, and every run of text is pinned
+// to its cells, so the columns line up in any monospace font.
 func (c Cast) SVG(o SVGOptions) ([]byte, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -57,17 +80,88 @@ func (c Cast) SVG(o SVGOptions) ([]byte, error) {
 	if o.Hold <= 0 {
 		o.Hold = defaultHold
 	}
-	frames := c.frames(o.IdleLimit)
+	times := make([]time.Duration, len(c.Events))
+	var at, prev time.Duration
+	for i, e := range c.Events {
+		at += min(e.Time-prev, o.IdleLimit)
+		prev = e.Time
+		times[i] = at
+	}
+	interval := minFrameInterval
+	if len(times) > 0 {
+		interval = max(interval, times[len(times)-1]/maxFrames+1)
+	}
+	for {
+		frames, rows := c.frames(times, interval)
+		out := render(c.Width, c.Height, frames, rows, o.Hold)
+		if len(out) <= MaxSVGBytes {
+			return out, nil
+		}
+		if len(frames) == 1 {
+			return nil, fmt.Errorf("termrec: the last screen alone renders to %d bytes, over the %d-byte budget", len(out), MaxSVGBytes)
+		}
+		interval *= 2
+	}
+}
 
-	innerW := float64(c.Width) * cellWidth
-	innerH := c.Height * lineHeight
+// frames plays c's events on a screen and returns what it showed over time
+// (a blank first frame, then one frame per visible change) and the distinct
+// rows those frames draw. The events in one slot of interval make one frame,
+// timed at the slot's start; times are the events' times, pauses capped.
+func (c Cast) frames(times []time.Duration, interval time.Duration) ([]frame, []string) {
+	ids := map[string]int{}
+	var rows []string
+	snapshot := func(s *screen, at time.Duration) frame {
+		f := frame{at: at}
+		for r, line := range s.rows {
+			body := rowSVG(line)
+			if body == "" {
+				continue
+			}
+			id, ok := ids[body]
+			if !ok {
+				id = len(rows)
+				ids[body] = id
+				rows = append(rows, body)
+			}
+			f.rows = append(f.rows, rowUse{id: id, row: r})
+		}
+		return f
+	}
+
+	s := newScreen(c.Width, c.Height)
+	frames := []frame{snapshot(s, 0)}
+	for i := 0; i < len(c.Events); {
+		slot := times[i] / interval
+		for ; i < len(c.Events) && times[i]/interval == slot; i++ {
+			s.feed(c.Events[i].Data)
+		}
+		f := snapshot(s, slot*interval)
+		last := &frames[len(frames)-1]
+		switch {
+		case f.same(*last):
+		case last.at == f.at:
+			*last = f
+		default:
+			frames = append(frames, f)
+		}
+	}
+	return frames, rows
+}
+
+// render writes the SVG: the distinct rows the frames use as definitions,
+// then the frames stacked one screen apart, stepped through by a CSS
+// animation when there is more than one.
+func render(width, height int, frames []frame, rows []string, hold time.Duration) []byte {
+	innerW := float64(width) * cellWidth
+	innerH := height * lineHeight
 	var b strings.Builder
 	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" width="%s" height="%d" viewBox="0 0 %s %d" role="img">`,
 		px(innerW+2*padding), innerH+2*padding, px(innerW+2*padding), innerH+2*padding)
 	b.WriteString(`<style>text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:14px;white-space:pre;fill:` + hex(themeFG) + `}`)
 	b.WriteString(`.b{font-weight:700}.i{font-style:italic}.u{text-decoration:underline}.d{opacity:.6}`)
 	if len(frames) > 1 {
-		total := frames[len(frames)-1].at + o.Hold
+		total := frames[len(frames)-1].at + hold
 		b.WriteString(`@keyframes play{`)
 		for i, f := range frames {
 			fmt.Fprintf(&b, `%s%%{transform:translateY(-%dpx)}`, strconv.FormatFloat(float64(f.at)/float64(total)*100, 'f', 4, 64), i*innerH)
@@ -76,104 +170,112 @@ func (c Cast) SVG(o SVGOptions) ([]byte, error) {
 		fmt.Fprintf(&b, `.play{animation:play %ss steps(1,end) infinite}`, strconv.FormatFloat(total.Seconds(), 'f', 3, 64))
 	}
 	b.WriteString(`</style>`)
+
+	// Only the rows a kept frame shows: a frame merged away may have drawn
+	// rows no other frame does.
+	used := make([]bool, len(rows))
+	for _, f := range frames {
+		for _, u := range f.rows {
+			used[u.id] = true
+		}
+	}
+	b.WriteString(`<defs>`)
+	for id, body := range rows {
+		if used[id] {
+			fmt.Fprintf(&b, `<g id="r%d">%s</g>`, id, body)
+		}
+	}
+	b.WriteString(`</defs>`)
+
 	fmt.Fprintf(&b, `<rect width="100%%" height="100%%" rx="6" fill="%s"/>`, hex(themeBG))
 	fmt.Fprintf(&b, `<svg x="%d" y="%d" width="%s" height="%d" overflow="hidden"><g class="play">`, padding, padding, px(innerW), innerH)
 	for i, f := range frames {
-		fmt.Fprintf(&b, `<g transform="translate(0 %d)">%s</g>`, i*innerH, f.body)
+		fmt.Fprintf(&b, `<g transform="translate(0 %d)">`, i*innerH)
+		for _, u := range f.rows {
+			fmt.Fprintf(&b, `<use href="#r%d" y="%d"/>`, u.id, u.row*lineHeight)
+		}
+		b.WriteString(`</g>`)
 	}
 	b.WriteString(`</g></svg></svg>`)
 	b.WriteByte('\n')
-	return []byte(b.String()), nil
+	return []byte(b.String())
 }
 
-// frames plays c's events on a screen and returns what it showed over time:
-// a blank first frame, then one frame per change, with pauses capped at
-// idle. Writes in the same interval (at least minFrameInterval, wider for
-// a long recording so it keeps at most maxFrames) make one frame, timed at
-// the interval's start.
-func (c Cast) frames(idle time.Duration) []frame {
-	times := make([]time.Duration, len(c.Events))
-	var at, prev time.Duration
-	for i, e := range c.Events {
-		at += min(e.Time-prev, idle)
-		prev = e.Time
-		times[i] = at
-	}
-	interval := minFrameInterval
-	if len(times) > 0 {
-		interval = max(interval, times[len(times)-1]/maxFrames+1)
-	}
-
-	s := newScreen(c.Width, c.Height)
-	frames := []frame{{at: 0, body: s.svg()}}
-	for i := 0; i < len(c.Events); {
-		slot := times[i] / interval
-		for ; i < len(c.Events) && times[i]/interval == slot; i++ {
-			s.feed(c.Events[i].Data)
-		}
-		body := s.svg()
-		last := &frames[len(frames)-1]
-		switch {
-		case body == last.body:
-		case last.at == slot*interval:
-			last.body = body
-		default:
-			frames = append(frames, frame{at: slot * interval, body: body})
-		}
-	}
-	return frames
-}
-
-// svg draws the screen: per row, a rect for each run of cells with a
-// background other than the theme's, and a text element with a tspan for
-// each run of text in one style.
-func (s *screen) svg() string {
+// rowSVG draws one row at the top of its own space: a rect for each run of
+// cells with a background other than the theme's, and a text element with a
+// tspan for each run of text. A run of plain narrow characters in one style
+// is pinned to its cells with textLength; a wide rune, a rune with combining
+// marks, or one outside the Basic Multilingual Plane is a run of its own,
+// placed at its cell. It is "" for a row with nothing to draw.
+func rowSVG(row []cell) string {
 	var b strings.Builder
-	for r, row := range s.rows {
-		y := r * lineHeight
-		// Backgrounds.
-		for c := 0; c < s.w; {
-			bg := cellColors(row[c].st).bg
-			end := c + 1
-			for end < s.w && cellColors(row[end].st).bg == bg {
-				end++
-			}
-			if bg != themeBG {
-				fmt.Fprintf(&b, `<rect x="%s" y="%d" width="%s" height="%d" fill="%s"/>`,
-					px(float64(c)*cellWidth), y, px(float64(end-c)*cellWidth), lineHeight, hex(bg))
-			}
-			c = end
+	for c := 0; c < len(row); {
+		bg := cellColors(row[c].st).bg
+		end := c + 1
+		for end < len(row) && cellColors(row[end].st).bg == bg {
+			end++
 		}
-		// Text, in runs of one style; blank cells inside a run are spaces.
-		var text strings.Builder
-		for c := 0; c < s.w; {
-			if row[c].r == 0 || row[c].cont {
-				c++
+		if bg != themeBG {
+			fmt.Fprintf(&b, `<rect x="%s" y="0" width="%s" height="%d" fill="%s"/>`,
+				px(float64(c)*cellWidth), px(float64(end-c)*cellWidth), lineHeight, hex(bg))
+		}
+		c = end
+	}
+
+	var text strings.Builder
+	for c := 0; c < len(row); {
+		if row[c].r == 0 || row[c].cont {
+			c++
+			continue
+		}
+		st := textStyle(row[c].st)
+		if alone(row[c]) {
+			writeRun(&text, c, 0, escapeXML(string(row[c].r)+row[c].mark), st)
+			c++
+			continue
+		}
+		// A run: cells of this style, blank cells (as spaces) between them,
+		// up to the next cell that must stand alone.
+		// It ends at its last cell that draws something: a written space
+		// draws only when underlined, a blank cell never.
+		start := c
+		var run []rune
+		drawsTo := 0
+		for ; c < len(row) && !row[c].cont && !alone(row[c]) && (row[c].r == 0 || textStyle(row[c].st) == st); c++ {
+			if row[c].r == 0 {
+				run = append(run, ' ')
 				continue
 			}
-			st := textStyle(row[c].st)
-			var run strings.Builder
-			start, end := c, c
-			for ; c < s.w && (row[c].cont || row[c].r == 0 || textStyle(row[c].st) == st); c++ {
-				switch {
-				case row[c].cont:
-				case row[c].r == 0:
-					run.WriteByte(' ')
-				default:
-					run.WriteString(escapeXML(string(row[c].r) + row[c].mark))
-					end = c + 1
-				}
+			run = append(run, row[c].r)
+			if row[c].r != ' ' || st.underline {
+				drawsTo = len(run)
 			}
-			// Trailing blanks belong to no run.
-			c = end
-			out := strings.TrimRight(run.String(), " ")
-			fmt.Fprintf(&text, `<tspan x="%s"%s>%s</tspan>`, px(float64(start)*cellWidth), st.attrs(), out)
 		}
-		if text.Len() > 0 {
-			fmt.Fprintf(&b, `<text y="%d" xml:space="preserve">%s</text>`, y+baseline, text.String())
+		if drawsTo == 0 {
+			continue
 		}
+		writeRun(&text, start, drawsTo, escapeXML(string(run[:drawsTo])), st)
+	}
+	if text.Len() > 0 {
+		fmt.Fprintf(&b, `<text y="%d" xml:space="preserve">%s</text>`, baseline, text.String())
 	}
 	return b.String()
+}
+
+// alone reports a cell drawn as a run of its own: a glyph whose advance is
+// not one cell, or that SVG may count as more than one character.
+func alone(c cell) bool {
+	return c.wide || c.mark != "" || c.r > 0xffff || c.r == utf8.RuneError
+}
+
+// writeRun writes one tspan at cell col; cells > 1 pins its width to that
+// many cells.
+func writeRun(b *strings.Builder, col, cells int, text string, st drawn) {
+	fmt.Fprintf(b, `<tspan x="%s"`, px(float64(col)*cellWidth))
+	if cells > 1 {
+		fmt.Fprintf(b, ` textLength="%s"`, px(float64(cells)*cellWidth))
+	}
+	fmt.Fprintf(b, `%s>%s</tspan>`, st.attrs(), text)
 }
 
 // colors is a cell's foreground and background as drawn, the theme's in

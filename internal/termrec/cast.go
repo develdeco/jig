@@ -12,6 +12,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Size bounds a Cast's terminal, so a rendering stays a size a pull request
@@ -22,8 +23,8 @@ const (
 )
 
 // Cast is a terminal recording: the terminal's size and the output written to
-// it, in order. It is asciicast v2's model, so a recording asciinema made
-// reads as one (ReadAsciicast).
+// it, in order. It is asciicast v2's model, so an asciicast v2 file reads as
+// one (ReadAsciicast): asciinema 2's, or asciinema 3's written as v2.
 type Cast struct {
 	Width, Height int
 	Events        []Event
@@ -62,7 +63,11 @@ type asciicastHeader struct {
 }
 
 // WriteAsciicast writes c as an asciicast v2 file: the header line, then one
-// `[seconds, "o", text]` line per event.
+// `[seconds, "o", text]` line per event. An asciicast event is a JSON string,
+// which cannot hold part of a rune, so a rune a write split is carried whole
+// into the next event, and one the recording ends in the middle of, which a
+// terminal never drew, is left out; any other invalid UTF-8 is written as
+// U+FFFD, which is what a terminal draws for it.
 func (c Cast) WriteAsciicast(w io.Writer) error {
 	if err := c.Validate(); err != nil {
 		return err
@@ -73,13 +78,29 @@ func (c Cast) WriteAsciicast(w io.Writer) error {
 	if err := enc.Encode(asciicastHeader{Version: 2, Width: c.Width, Height: c.Height}); err != nil {
 		return err
 	}
+	carry := ""
 	for _, e := range c.Events {
-		if err := enc.Encode([]any{json.Number(seconds(e.Time)), "o", e.Data}); err != nil {
+		var data string
+		data, carry = cutPartialRune(carry + e.Data)
+		if err := enc.Encode([]any{json.Number(seconds(e.Time)), "o", data}); err != nil {
 			return err
 		}
 	}
 	_, err := w.Write(buf.Bytes())
 	return err
+}
+
+// cutPartialRune splits off the start of a rune that s ends in the middle of.
+func cutPartialRune(s string) (whole, partial string) {
+	for i := len(s) - 1; i >= 0 && i >= len(s)-utf8.UTFMax; i-- {
+		if utf8.RuneStart(s[i]) {
+			if !utf8.FullRuneInString(s[i:]) {
+				return s[:i], s[i:]
+			}
+			break
+		}
+	}
+	return s, ""
 }
 
 // seconds spells d as asciicast's seconds, to the microsecond.
