@@ -62,16 +62,40 @@ func IntentScratchDir(root string) string {
 // directory, so no caller-supplied spelling can climb out of the evidence
 // tree.
 func EvidenceDir(root, storeID, ticket, sha string) (string, error) {
+	if err := evidenceParts(storeID, ticket, sha); err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "evidence", storeID, ticket, sha), nil
+}
+
+// RecordDir returns where the recordings a builder's green oracle run wrote
+// live under the jig home root:
+// <root>/evidence/<storeID>/<ticket>/recordings/<sha>, sha being the commit
+// the oracle ran at (ADR 0029). It sits in the same evidence tree as
+// EvidenceDir, under a "recordings" directory of the ticket, so it never
+// shares a name with a gate head's demo media. The parts are held to the same
+// rule as EvidenceDir's.
+func RecordDir(root, storeID, ticket, sha string) (string, error) {
+	if err := evidenceParts(storeID, ticket, sha); err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "evidence", storeID, ticket, "recordings", sha), nil
+}
+
+// evidenceParts refuses a store id, ticket or sha that is not one plain
+// directory name, so no caller-supplied spelling climbs out of the evidence
+// tree.
+func evidenceParts(storeID, ticket, sha string) error {
 	for _, part := range []struct{ what, name string }{
 		{"store id", storeID},
 		{"ticket", ticket},
 		{"sha", sha},
 	} {
 		if !singleDirName(part.name) {
-			return "", fmt.Errorf("home: evidence %s %q must name a single plain directory", part.what, part.name)
+			return fmt.Errorf("home: evidence %s %q must name a single plain directory", part.what, part.name)
 		}
 	}
-	return filepath.Join(root, "evidence", storeID, ticket, sha), nil
+	return nil
 }
 
 // singleDirName reports whether name is one plain, visible directory name:

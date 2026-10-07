@@ -39,6 +39,23 @@ type Line struct {
 	// ended: with the attempt's dispatch line's commit (its base), the
 	// range of the attempt's own commits (ADR 0025).
 	Head string `json:"head,omitempty"`
+	// Recordings is a recorded line's files: what the build's end-to-end
+	// scenarios wrote at a builder's green oracle run, with the commit it
+	// ran at in Commit (ADR 0029).
+	Recordings []Recording `json:"recordings,omitempty"`
+}
+
+// Recording is one file a scenario recorded: its name inside the recording
+// directory under the jig home, its hash and size as jig checked them, and
+// the scenario, optional flow and step, and caption its writer tagged it with.
+type Recording struct {
+	File     string `json:"file"`
+	SHA256   string `json:"sha256"`
+	Size     int64  `json:"size"`
+	Scenario string `json:"scenario"`
+	Flow     string `json:"flow,omitempty"`
+	Step     int    `json:"step,omitempty"`
+	Caption  string `json:"caption,omitempty"`
 }
 
 func journalPath(st *store.Store, ticket string) string {

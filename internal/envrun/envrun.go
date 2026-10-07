@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -107,6 +108,15 @@ func Shell(cmd, dir string) error {
 // stops waiting on its pipes shortly after, so a hung command cannot hold
 // the caller. The kill ends the shell's whole process tree (KillTree).
 func ShellOutput(cmd, dir string, limit time.Duration) (string, error) {
+	return ShellOutputEnv(cmd, dir, limit, nil)
+}
+
+// ShellOutputEnv is ShellOutput with extra environment variables, each as
+// "NAME=value", added to the process environment for this command alone. It
+// sets them on the command, never on the process, since two runs of jig's
+// loop may be in flight at once. With none, the command inherits the process
+// environment as ShellOutput always did.
+func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	var c *exec.Cmd
@@ -116,6 +126,9 @@ func ShellOutput(cmd, dir string, limit time.Duration) (string, error) {
 		c = exec.CommandContext(ctx, "sh", "-c", cmd)
 	}
 	c.Dir = dir
+	if len(env) > 0 {
+		c.Env = append(os.Environ(), env...)
+	}
 	NewProcessGroup(c)
 	c.Cancel = func() error { return KillTree(c) }
 	c.WaitDelay = 10 * time.Second

@@ -174,3 +174,35 @@ func TestAllocatePortLoopbackOnly(t *testing.T) {
 	}
 	l.Close()
 }
+
+// TestShellOutputEnvGivesTheChildItsVariables: a variable passed to
+// ShellOutputEnv reaches the command beside the inherited environment, and
+// without one (nil, empty, or ShellOutput) it is unset.
+func TestShellOutputEnvGivesTheChildItsVariables(t *testing.T) {
+	dir := t.TempDir()
+	// A variable the process has and the child must keep.
+	inherited := "PATH"
+	echo := `echo "$JIG_T $PATH"`
+	if runtime.GOOS == "windows" {
+		inherited = "SystemRoot"
+		echo = "echo %JIG_T% %SystemRoot%"
+	}
+	want := os.Getenv(inherited)
+	if want == "" {
+		t.Skipf("%s is not set", inherited)
+	}
+	out, err := ShellOutputEnv(echo, dir, time.Minute, []string{"JIG_T=hello-env"})
+	if err != nil || !strings.Contains(out, "hello-env") || !strings.Contains(out, want) {
+		t.Fatalf("with the variable: out=%q err=%v, want hello-env and the inherited %s", out, err, inherited)
+	}
+	for name, run := range map[string]func() (string, error){
+		"nil env":     func() (string, error) { return ShellOutputEnv(echo, dir, time.Minute, nil) },
+		"empty env":   func() (string, error) { return ShellOutputEnv(echo, dir, time.Minute, []string{}) },
+		"ShellOutput": func() (string, error) { return ShellOutput(echo, dir, time.Minute) },
+	} {
+		out, err := run()
+		if err != nil || strings.Contains(out, "hello-env") || !strings.Contains(out, want) {
+			t.Errorf("%s: out=%q err=%v, want the variable unset and the inherited %s kept", name, out, err, inherited)
+		}
+	}
+}

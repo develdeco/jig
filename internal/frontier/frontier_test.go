@@ -48,7 +48,7 @@ func newDeps(t *testing.T, fx *fixture.Fixture) (Deps, *store.Store) {
 		Rungs:   staircase.Default(),
 		Journal: func(l journal.Line) error { return journal.Append(st, fx.Ticket, l) },
 		Home:    fx.Home,
-		Oracle:  func(string, string) (string, error) { return "", nil },
+		Oracle:  func(string, string, []string) (string, error) { return "", nil },
 	}
 	return d, st
 }

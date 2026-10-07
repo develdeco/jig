@@ -62,3 +62,31 @@ func TestEvidenceDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
 		}
 	}
 }
+
+// TestRecordDirIsUnderTheTicketsRecordings: a builder's recordings live in a
+// recordings directory of the ticket's evidence, one directory per commit,
+// so they never share a name with a gate head's demo media.
+func TestRecordDirIsUnderTheTicketsRecordings(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("JIG_HOME", t.TempDir())
+	got, err := RecordDir(root, "0123456789abcdef", "T-1", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, "evidence", "0123456789abcdef", "T-1", "recordings", "abc123"); got != want {
+		t.Fatalf("RecordDir = %q, want %q", got, want)
+	}
+}
+
+// TestRecordDirRefusesAnythingButASingleDirectoryName holds RecordDir's three
+// parts to the rule EvidenceDir's are held to.
+func TestRecordDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
+	bad := []string{"", ".", "..", ".hidden", "a/b", `a\b`, "C:x", "x.", "x "}
+	for _, name := range bad {
+		for i, parts := range [][3]string{{name, "T-1", "abc"}, {"id", name, "abc"}, {"id", "T-1", name}} {
+			if got, err := RecordDir(t.TempDir(), parts[0], parts[1], parts[2]); err == nil {
+				t.Errorf("RecordDir with %q in part %d = %q, want a refusal", name, i, got)
+			}
+		}
+	}
+}
