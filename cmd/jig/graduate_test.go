@@ -12,7 +12,6 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/tracker"
 )
 
 // setupGraduateStore initializes a standalone store in a fresh repo and
@@ -52,6 +51,25 @@ func writeChart(t *testing.T, storeRoot, name, content string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "tickets.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// rewriteTicketFormat replaces storeRoot's project.yaml ticket_format
+// ("T-{n}", jig init --standalone's default) with format, so a test can mint
+// through a ticket_format of its own choosing.
+func rewriteTicketFormat(t *testing.T, storeRoot, format string) {
+	t.Helper()
+	path := filepath.Join(storeRoot, "project.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewritten := strings.Replace(string(data), "T-{n}", format, 1)
+	if rewritten == string(data) {
+		t.Fatalf("project.yaml has no T-{n} ticket_format to rewrite:\n%s", data)
+	}
+	if err := os.WriteFile(path, []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -549,12 +567,24 @@ func TestGraduateAdvisesRatherThanAbortsOnUnparseableTicketDeps(t *testing.T) {
 		t.Fatalf("ticket folder for %s missing: %v", idB, err)
 	}
 
+	// Entry B's claim committed its own folder and the chart's id for it;
+	// idA's hand-broken ticket.yaml is exactly what the claim must leave
+	// alone (store.Claim stages and commits only the paths it claims), so it
+	// is still there, uncommitted, afterward - not swept into this run's
+	// commit the way a broad `add -A` once would have.
 	status, err := gitx.Run(storeRoot, "status", "--porcelain")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(status) != "" {
-		t.Fatalf("store left dirty after a run that should have committed:\n%s", status)
+	if strings.TrimSpace(status) != "M "+idA+"/ticket.yaml" {
+		t.Fatalf("status = %q, want only idA's pre-existing hand-broken ticket.yaml left dirty", status)
+	}
+	subject, err := gitx.Run(storeRoot, "log", "-1", "--pretty=%s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subject != "chart mychart: graduate "+idB {
+		t.Fatalf("commit subject = %q, want %q", subject, "chart mychart: graduate "+idB)
 	}
 }
 
@@ -697,10 +727,10 @@ func TestGraduateFullyGraduatedStillAdvises(t *testing.T) {
 // TestGraduateMidRunFailureIsRecoverable covers the command-level invariant
 // the per-mint write-back exists for: after a run fails partway through, a
 // re-run creates exactly the tickets still missing, rather than minting a
-// duplicate for an entry that already succeeded. The local adapter's Mint
-// skips non-directories when it picks max+1 (internal/tracker/local.go),
-// so a plain file named T-2 makes entry B's Mint fail once entry A has
-// already taken T-1 - no fake adapter needed.
+// duplicate for an entry that already succeeded. store.Mint skips
+// non-directories when it picks max+1 (internal/store/mint.go), so a plain
+// file named T-2 makes entry B's mint fail once entry A has already taken
+// T-1 - no fake adapter needed.
 func TestGraduateMidRunFailureIsRecoverable(t *testing.T) {
 	jig, storeRoot := setupGraduateStore(t)
 	writeChart(t, storeRoot, "mychart", `tickets:
@@ -775,178 +805,148 @@ func TestGraduateMidRunFailureIsRecoverable(t *testing.T) {
 	}
 }
 
-// TestGraduateFailureDistinguishesOrphanFromRecorded covers graduateFailure
-// directly: entry 1's ticket reached onMinted (recorded[0] = true, safe to
-// re-run over), but entry 2's ticket was minted (ids[1] set) before a
-// generic, non-axi.Error failure struck - the tracker.Graduate return shape
-// a MkdirAll or ticket.yaml write failure leaves, which never reached
-// onMinted for entry 2. The result must not tell the operator to just
-// re-run: that would mint a duplicate for entry 2 and orphan its ticket.
-func TestGraduateFailureDistinguishesOrphanFromRecorded(t *testing.T) {
-	err := graduateFailure(
-		&store.Store{Root: t.TempDir()},
-		"local",
-		"mychart",
-		[]int{0, 1},
-		[]string{"T-1", "T-2"},
-		[]bool{true, false},
-		errors.New("tracker: graduate: write ticket.yaml for T-2: boom"),
-	)
-
+// TestGraduateFailureNamesTicketsAlreadyClaimed covers graduateFailure
+// directly: every ticket this run already claimed (createdIDs) is already
+// committed, and - on a store with an origin - pushed, by its own
+// store.Claim call, so a plain (non-axi.Error) failure for the next one gets
+// a generic re-run Help line, while an error that already carries its own
+// code and Help (store.Claim's own ID_NOT_CLAIMED, in particular) keeps
+// both, gaining only the already-claimed context in its message. The error
+// passed in is not changed in place.
+func TestGraduateFailureNamesTicketsAlreadyClaimed(t *testing.T) {
+	raw := errors.New("boom")
+	err := graduateFailure("mychart", []string{"T-1"}, raw)
 	var ae *axi.Error
 	if !errors.As(err, &ae) {
 		t.Fatalf("graduateFailure returned %T, want *axi.Error", err)
 	}
-	if !strings.Contains(ae.Msg, "already created: entry 1 (T-1)") {
-		t.Fatalf("Msg = %q, want it to still name entry 1 as already created", ae.Msg)
+	if !strings.Contains(ae.Msg, "T-1") || !strings.Contains(ae.Msg, "already claimed") {
+		t.Fatalf("Msg = %q, want it to name T-1 as already claimed", ae.Msg)
 	}
-	if !strings.Contains(ae.Msg, "T-2") || !strings.Contains(ae.Msg, "entry 2") {
-		t.Fatalf("Msg = %q, want it to name ticket T-2 and entry 2 as minted but not recorded", ae.Msg)
-	}
-	if len(ae.Help) != 1 {
-		t.Fatalf("Help = %+v, want exactly one line naming the fix for entry 2", ae.Help)
-	}
-	want := "Put `id: T-2` on entry 2 of charts/mychart/tickets.yaml (or delete that ticket folder), then re-run"
-	if ae.Help[0] != want {
-		t.Fatalf("Help[0] = %q, want %q", ae.Help[0], want)
-	}
-	if strings.Contains(strings.Join(ae.Help, "\n"), "it creates only the entries") {
-		t.Fatalf("Help = %+v, must not give the blanket re-run advice: entry 2 is not safe to re-run over", ae.Help)
-	}
-}
-
-// commandNamed is an adapter that is only asked its name: what
-// tracker.CheckMinted needs to build its refusal.
-type commandNamed struct{ tracker.Adapter }
-
-func (commandNamed) Name() string { return "command" }
-
-// TestGraduateFailureAddsCreatedEntriesToAnErrorWithItsOwnHelp
-// covers the failures tracker.Graduate returns as an *axi.Error already
-// carrying its own code and next steps: an id jig cannot use
-// (tracker.CheckMinted), refused after entry 1 was created and recorded, and
-// onMinted's own failure to record an id in the chart. Both keep their code and
-// their help unchanged, and say which entries this run already created, as
-// every other graduate failure does; with none created there is nothing to add.
-// The error the tracker returned is not changed in place.
-func TestGraduateFailureAddsCreatedEntriesToAnErrorWithItsOwnHelp(t *testing.T) {
-	unusable := tracker.CheckMinted(commandNamed{}, "EXT-2-gate")
-	var unusableErr *axi.Error
-	if !errors.As(unusable, &unusableErr) {
-		t.Fatalf("test setup: CheckMinted(EXT-2-gate) = %v, want an *axi.Error refusal", unusable)
-	}
-	recordFailed := &axi.Error{
-		Msg:  `ticket EXT-2 was created for entry 2 but failed to write chart "mychart": boom`,
-		Code: "VALIDATION_ERROR",
-		Help: []string{"Put `id: EXT-2` on entry 2 of charts/mychart/tickets.yaml (or delete that ticket folder), then re-run"},
-	}
-
-	for _, tc := range []struct {
-		name     string
-		refusal  *axi.Error
-		ids      []string
-		recorded []bool
-		suffix   string
-	}{
-		{name: "an unusable id after one entry", refusal: unusableErr, ids: []string{"EXT-1", "EXT-2-gate"}, recorded: []bool{true, false}, suffix: " (already created: entry 1 (EXT-1))"},
-		{name: "a chart write failure after one entry", refusal: recordFailed, ids: []string{"EXT-1", "EXT-2"}, recorded: []bool{true, false}, suffix: " (already created: entry 1 (EXT-1))"},
-		{name: "an unusable id on the first entry", refusal: unusableErr, ids: []string{"EXT-2-gate", ""}, recorded: []bool{false, false}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			msg, code, help := tc.refusal.Msg, tc.refusal.Code, append([]string{}, tc.refusal.Help...)
-
-			err := graduateFailure(&store.Store{Root: t.TempDir()}, "command", "mychart", []int{0, 1}, tc.ids, tc.recorded, tc.refusal)
-
-			var ae *axi.Error
-			if !errors.As(err, &ae) {
-				t.Fatalf("graduateFailure returned %T, want an *axi.Error", err)
-			}
-			if ae.Msg != msg+tc.suffix {
-				t.Fatalf("Msg = %q, want %q", ae.Msg, msg+tc.suffix)
-			}
-			if ae.Code != code || !reflect.DeepEqual(ae.Help, help) {
-				t.Fatalf("Code = %q, Help = %q, want the refusal's own %q and %q", ae.Code, ae.Help, code, help)
-			}
-			if tc.refusal.Msg != msg {
-				t.Fatalf("the tracker's own error now reads %q, want it left as it was: %q", tc.refusal.Msg, msg)
-			}
-		})
-	}
-}
-
-// TestPushFailureNamesCreatedTicketsAndKeepsUnderlyingHelp covers
-// pushFailure directly: given a STORE_CONFLICT *axi.Error (the shape
-// Store.Push itself returns for a mid-rebase/mid-merge refusal or an
-// aborted conflicting pull), the wrapped error must still carry Push's own
-// Help (the specific `git rebase --abort`/`git status` guidance only Store
-// can give), name every id already created and recorded, and add a Help
-// line pointing at the commit to make by hand.
-func TestPushFailureNamesCreatedTicketsAndKeepsUnderlyingHelp(t *testing.T) {
-	underlying := &axi.Error{
-		Msg:  "the store at /store has an unfinished rebase",
-		Code: "STORE_CONFLICT",
-		Help: []string{"Check the store's state there with `git status`, resolve it, then rerun."},
-	}
-	err := pushFailure("/store", "mychart", []string{"T-1", "T-2"}, `chart mychart: graduate T-1, T-2`, underlying)
-
-	var ae *axi.Error
-	if !errors.As(err, &ae) {
-		t.Fatalf("pushFailure returned %T, want *axi.Error", err)
-	}
-	if ae.Code != "STORE_CONFLICT" {
-		t.Fatalf("Code = %q, want the underlying error's own STORE_CONFLICT preserved", ae.Code)
-	}
-	if !strings.Contains(ae.Msg, "T-1") || !strings.Contains(ae.Msg, "T-2") {
-		t.Fatalf("Msg = %q, want it to name every id already created", ae.Msg)
-	}
-	if !strings.Contains(ae.Msg, "charts/mychart/tickets.yaml") {
-		t.Fatalf("Msg = %q, want it to say the ids are recorded in tickets.yaml", ae.Msg)
-	}
-	if !strings.Contains(ae.Msg, underlying.Msg) {
-		t.Fatalf("Msg = %q, want it to keep the underlying Push error's own message", ae.Msg)
-	}
-	if len(ae.Help) != 2 {
-		t.Fatalf("Help = %+v, want the underlying Help kept plus one line naming the commit to make", ae.Help)
-	}
-	if ae.Help[0] != underlying.Help[0] {
-		t.Fatalf("Help[0] = %q, want the underlying Push error's own Help kept first", ae.Help[0])
-	}
-	if !strings.Contains(ae.Help[1], "chart mychart: graduate T-1, T-2") {
-		t.Fatalf("Help[1] = %q, want it to name the commit message to make by hand", ae.Help[1])
-	}
-	if !strings.Contains(strings.ToLower(ae.Help[1]), "re-run") {
-		t.Fatalf("Help[1] = %q, want it to also mention re-running once the store's git state is resolved", ae.Help[1])
-	}
-}
-
-// TestPushFailureOnRawError covers pushFailure given a plain (non-axi.Error)
-// error - the shape a push that cannot even be retried with pull --rebase
-// (an unreachable or misconfigured remote) leaves. There is no underlying
-// Help to preserve. createdIDs is non-empty, the only shape the CLI's one
-// call site ever passes: it is reached only after at least one mint has
-// already appended to it.
-func TestPushFailureOnRawError(t *testing.T) {
-	raw := errors.New("git push origin main: fatal: repository not found: exit status 128")
-	err := pushFailure("/store", "mychart", []string{"T-1"}, "chart mychart: graduate T-1", raw)
-
-	var ae *axi.Error
-	if !errors.As(err, &ae) {
-		t.Fatalf("pushFailure returned %T, want *axi.Error", err)
+	if !strings.Contains(ae.Msg, "boom") {
+		t.Fatalf("Msg = %q, want it to keep the underlying error's own message", ae.Msg)
 	}
 	if ae.Code != "VALIDATION_ERROR" {
 		t.Fatalf("Code = %q, want VALIDATION_ERROR for a plain error with no code of its own", ae.Code)
 	}
-	if !strings.Contains(ae.Msg, raw.Error()) {
-		t.Fatalf("Msg = %q, want it to keep the raw error's own message", ae.Msg)
+	if len(ae.Help) != 1 || !strings.Contains(strings.ToLower(ae.Help[0]), "re-run") {
+		t.Fatalf("Help = %+v, want one line about re-running", ae.Help)
 	}
-	if !strings.Contains(ae.Msg, "T-1") || !strings.Contains(ae.Msg, "already exists") {
-		t.Fatalf("Msg = %q, want it to name the already-created ticket", ae.Msg)
+
+	withNone := graduateFailure("mychart", nil, raw)
+	var aeNone *axi.Error
+	if !errors.As(withNone, &aeNone) {
+		t.Fatalf("graduateFailure returned %T, want *axi.Error", withNone)
 	}
-	if len(ae.Help) != 1 {
-		t.Fatalf("Help = %+v, want exactly one line naming the commit to make", ae.Help)
+	if strings.Contains(aeNone.Msg, "already claimed") {
+		t.Fatalf("Msg = %q, want no \"already claimed\" clause with nothing created yet", aeNone.Msg)
 	}
-	if !strings.Contains(ae.Help[0], "chart mychart: graduate T-1") {
-		t.Fatalf("Help[0] = %q, want it to name the commit message to make by hand", ae.Help[0])
+
+	claimFailed := &axi.Error{
+		Msg:  "the id could not be claimed on the store's origin: boom",
+		Code: "ID_NOT_CLAIMED",
+		Help: []string{"Retry once the origin is reachable"},
+	}
+	wrapped := graduateFailure("mychart", []string{"T-1"}, claimFailed)
+	var aeWrapped *axi.Error
+	if !errors.As(wrapped, &aeWrapped) {
+		t.Fatalf("graduateFailure returned %T, want *axi.Error", wrapped)
+	}
+	if aeWrapped.Code != "ID_NOT_CLAIMED" {
+		t.Fatalf("Code = %q, want the underlying error's own ID_NOT_CLAIMED preserved", aeWrapped.Code)
+	}
+	if !reflect.DeepEqual(aeWrapped.Help, claimFailed.Help) {
+		t.Fatalf("Help = %+v, want the underlying error's own Help kept as is", aeWrapped.Help)
+	}
+	if claimFailed.Msg != "the id could not be claimed on the store's origin: boom" {
+		t.Fatalf("the underlying error was changed in place: %q", claimFailed.Msg)
+	}
+}
+
+// TestGraduatePushFailureRemovesTheClaim reproduces a genuine push failure
+// from inside `jig graduate`: the store's fetch URL stays valid (so Sync's
+// own pull --rebase succeeds trivially) but its push URL is broken, the same
+// "a push that cannot be rebased" shape TestUnreachableRemoteIsNotReportedAs
+// Conflict documents for store.Push. Per the claim slice's contract, a push
+// failure other than a rejection undoes the claim entirely: the chart entry
+// gets no id, the ticket folder is removed, and the command refuses with
+// ID_NOT_CLAIMED rather than leaving a ticket claimed only locally.
+func TestGraduatePushFailureRemovesTheClaim(t *testing.T) {
+	jig, storeRoot := setupGraduateStore(t)
+
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if _, err := gitx.Run("", "init", "--bare", "-b", "main", remote); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "remote", "add", "origin", remote); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "push", "-u", "origin", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The chart entry itself is already committed and pushed, as it would be
+	// in real use (whoever edits charts/mychart/tickets.yaml commits that
+	// edit; graduate's own job is only to mint ids into it): otherwise
+	// Store.Sync, which cmdGraduate calls before Claim ever runs, would
+	// commit this uncommitted edit on its own, moving HEAD before the claim
+	// this test means to exercise even starts.
+	writeChart(t, storeRoot, "mychart", `tickets:
+  - title: "Slice A"
+`)
+	if _, err := gitx.Run(storeRoot, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "chart: add Slice A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "push", "origin", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := gitx.Run(storeRoot, "remote", "set-url", "--push", "origin", filepath.Join(t.TempDir(), "does-not-exist")); err != nil {
+		t.Fatal(err)
+	}
+
+	headBefore, err := gitx.Run(storeRoot, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, out := jig("graduate", "mychart")
+	if code == 0 {
+		t.Fatalf("jig graduate mychart: exit 0, want a push failure:\n%s", out)
+	}
+	if !strings.Contains(out, "ID_NOT_CLAIMED") {
+		t.Fatalf("output missing ID_NOT_CLAIMED:\n%s", out)
+	}
+
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := st.ReadChart("mychart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries[0].ID != "" {
+		t.Fatalf("entry A got an id %q despite its claim's push failing", entries[0].ID)
+	}
+	ents, err := os.ReadDir(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "T-") {
+			t.Fatalf("a ticket folder %q was left behind by a failed claim", e.Name())
+		}
+	}
+	headAfter, err := gitx.Run(storeRoot, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headAfter != headBefore {
+		t.Fatalf("HEAD moved from %s to %s: the failed claim's commit was not undone", headBefore, headAfter)
 	}
 }
 
@@ -1152,47 +1152,19 @@ func TestGraduateCommitAndTable(t *testing.T) {
 	}
 }
 
-// TestGraduatePushFailureNamesCreatedTicket reproduces a genuine Store.Push
-// failure from inside `jig graduate`, after a ticket has already been
-// minted and written back to charts/mychart/tickets.yaml: the store's fetch
-// URL stays valid (so Sync's own pull --rebase, and Push's own retry pull,
-// both succeed trivially) but its push URL is broken, so Push's push - and
-// its retry after that pull - both fail, the same "a push that cannot be
-// rebased" shape TestUnreachableRemoteIsNotReportedAsConflict documents for
-// store.Push returning git's own error unwrapped. The command's own output
-// must not just relay that raw error: it must name the ticket already
-// created, say its id is already recorded, and carry a Help line.
-func TestGraduatePushFailureNamesCreatedTicket(t *testing.T) {
+// TestGraduateRecordsChartEntryBodyInTheRecord covers the other writer of a
+// ticket's body: graduate carries each chart entry's own body into the
+// ticket.yaml it mints, and an entry with no body mints a record with none.
+func TestGraduateRecordsChartEntryBodyInTheRecord(t *testing.T) {
 	jig, storeRoot := setupGraduateStore(t)
-
-	if _, err := gitx.Run(storeRoot, "add", "-A"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "init"); err != nil {
-		t.Fatal(err)
-	}
-
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	if _, err := gitx.Run("", "init", "--bare", "-b", "main", remote); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.Run(storeRoot, "remote", "add", "origin", remote); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.Run(storeRoot, "push", "-u", "origin", "main"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.Run(storeRoot, "remote", "set-url", "--push", "origin", filepath.Join(t.TempDir(), "does-not-exist")); err != nil {
-		t.Fatal(err)
-	}
-
 	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
+    body: |
+      Why this entry matters.
+  - title: "Slice B"
 `)
-
-	code, out := jig("graduate", "mychart")
-	if code == 0 {
-		t.Fatalf("jig graduate mychart: exit 0, want a Push failure:\n%s", out)
+	if code, out := jig("graduate", "mychart"); code != 0 {
+		t.Fatalf("jig graduate mychart: exit %d\n%s", code, out)
 	}
 
 	st, err := store.Open(storeRoot)
@@ -1203,19 +1175,21 @@ func TestGraduatePushFailureNamesCreatedTicket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idA := entries[0].ID
-	if idA == "" {
-		t.Fatalf("entry A has no id despite its mint (and the local commit that follows) succeeding before Push failed: %+v", entries)
+
+	gotA, err := st.ReadTicket(entries[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotA.Body != "Why this entry matters.\n" {
+		t.Fatalf("entry A's ticket.yaml body = %q, want %q", gotA.Body, "Why this entry matters.\n")
 	}
 
-	if !strings.Contains(out, idA) {
-		t.Fatalf("failed run's output does not name the ticket already created for entry A (%s):\n%s", idA, out)
+	gotB, err := st.ReadTicket(entries[1].ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(out, "charts/mychart/tickets.yaml") {
-		t.Fatalf("failed run's output does not say the id is already recorded in tickets.yaml:\n%s", out)
-	}
-	if !strings.Contains(out, "help[") {
-		t.Fatalf("failed run's output has no Help block:\n%s", out)
+	if gotB.Body != "" {
+		t.Fatalf("entry B's ticket.yaml body = %q, want empty (its chart entry has none)", gotB.Body)
 	}
 }
 
@@ -1372,164 +1346,171 @@ func TestGraduateFullyGraduatedWithRemoteStillSyncsPendingState(t *testing.T) {
 	}
 }
 
-// TestGraduateRefusesAMintedIDThatAlreadyHasARecord covers the collision
-// through the command: a tracker mints EXT-1, and the store's EXT-1/ already
-// holds another ticket's record and brief. graduate gives the operator the
-// recovery jig ticket new gives the same collision - the tracker ticket
-// exists, the record belongs to another ticket and must not be deleted, the
-// collision is resolved by hand - and not the orphan help written for a
-// folder graduate itself created ("put the id on the entry, or delete that
-// ticket folder"), which here would destroy the other ticket's brief or bind
-// this entry to it. The entry is named by its position in the chart file (2),
-// not by its position among the entries being created, and the other ticket's
-// files are untouched.
-func TestGraduateRefusesAMintedIDThatAlreadyHasARecord(t *testing.T) {
-	jig, st := commandTrackerMinting(t, "EXT-1")
-	if err := st.CreateTicketRecord("EXT-1", store.Ticket{Title: "Pre-existing, unrelated ticket"}); err != nil {
-		t.Fatalf("seed EXT-1's record: %v", err)
-	}
-	briefPath := filepath.Join(st.TicketDir("EXT-1"), "brief.md")
-	if err := os.WriteFile(briefPath, []byte("# The other ticket's brief\n"), 0o644); err != nil {
+// TestClaimOneChartEntryRediscoversAnotherClonesGraduation reproduces two
+// clones graduating a two-entry chart: a second clone of the store's origin
+// claims the first entry and pushes it before this clone's own claim does,
+// so this clone's push is rejected. Per Claim's contract, the rejection
+// undoes this clone's commit, pulls the other clone's work in, and
+// claimOneChartEntry must re-read the chart before minting again - this time
+// finding entry 1 already has an id and continuing with entry 2, the one
+// that still has none, minting and pushing a ticket for it alone rather than
+// a second one for entry 1.
+func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
+	_, storeRoot := setupGraduateStore(t)
+
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if _, err := gitx.Run("", "init", "--bare", "-b", "main", remote); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(st.TicketDir("T-9"), 0o755); err != nil {
+	if _, err := gitx.Run(storeRoot, "remote", "add", "origin", remote); err != nil {
 		t.Fatal(err)
 	}
-	writeChart(t, st.Root, "mychart", `tickets:
-  - id: T-9
-    title: "Already graduated"
-  - title: "New entry"
-`)
-	recordPath := filepath.Join(st.TicketDir("EXT-1"), "ticket.yaml")
-	recordBefore, err := os.ReadFile(recordPath)
-	if err != nil {
+	if _, err := gitx.Run(storeRoot, "push", "-u", "origin", "main"); err != nil {
 		t.Fatal(err)
 	}
 
-	code, out := jig("graduate", "mychart")
-	if code == 0 {
-		t.Fatalf("jig graduate over a minted id that has a record: exit 0, want a refusal:\n%s", out)
-	}
-	for _, want := range []string{
-		"the command tracker minted EXT-1, but the store already has a ticket.yaml for EXT-1",
-		"EXT-1 now exists in the command tracker",
-		"entry 2 of charts/mychart/tickets.yaml has no id",
-		"which ticket already claims this id",
-		"do not delete it",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("jig graduate over a minted id that has a record: output lacks %q:\n%s", want, out)
-		}
-	}
-	if record := st.TicketFilePath("EXT-1"); !strings.Contains(out, record) {
-		t.Fatalf("jig graduate over a minted id that has a record: help does not name the record to inspect, %s:\n%s", record, out)
-	}
-	for _, unwanted := range []string{"delete that ticket folder", "Put `id: EXT-1`"} {
-		if strings.Contains(out, unwanted) {
-			t.Fatalf("jig graduate over a minted id that has a record gave the orphan help (%q), which would claim or delete the other ticket's folder:\n%s", unwanted, out)
-		}
-	}
-
-	if after, err := os.ReadFile(recordPath); err != nil || string(after) != string(recordBefore) {
-		t.Fatalf("the other ticket's ticket.yaml after the refused graduate: %q (err %v), want it unchanged: %q", after, err, recordBefore)
-	}
-	if _, err := os.Stat(briefPath); err != nil {
-		t.Fatalf("the other ticket's brief.md after the refused graduate: %v", err)
-	}
-	entries, err := st.ReadChart("mychart")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entries[1].ID != "" {
-		t.Fatalf("entry 2 was recorded as %q, want no id: its ticket was never recorded", entries[1].ID)
-	}
-}
-
-// TestGraduateNamesTheEntriesAlreadyCreatedWhenALaterOneCollides covers the
-// same refusal after a success: a tracker that hands the same id out twice
-// makes entry 2's mint collide with the record entry 1's own ticket just got.
-// The failure still says entry 1 was created (and recorded in the chart, so a
-// re-run does not mint it again) and leaves its record alone.
-func TestGraduateNamesTheEntriesAlreadyCreatedWhenALaterOneCollides(t *testing.T) {
-	jig, st := commandTrackerMinting(t, "EXT-1")
-	writeChart(t, st.Root, "mychart", `tickets:
+	// Both chart entries are already committed and pushed, as they would be
+	// in real use (see TestGraduatePushFailureRemovesTheClaim's own comment on
+	// why): both clones below must see the same tickets.yaml.
+	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "Slice A"
   - title: "Slice B"
 `)
-
-	code, out := jig("graduate", "mychart")
-	if code == 0 {
-		t.Fatalf("jig graduate with a tracker minting EXT-1 twice: exit 0, want a refusal:\n%s", out)
+	if _, err := gitx.Run(storeRoot, "add", "-A"); err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []string{
-		"the store already has a ticket.yaml for EXT-1 (already created: entry 1 (EXT-1))",
-		"entry 2 of charts/mychart/tickets.yaml has no id",
-		"do not delete it",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("jig graduate with a tracker minting EXT-1 twice: output lacks %q:\n%s", want, out)
-		}
+	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "chart: add Slice A and Slice B"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(storeRoot, "push", "origin", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	other := t.TempDir()
+	if _, err := gitx.Run("", "clone", remote, other); err != nil {
+		t.Fatal(err)
+	}
+	otherSt, err := store.Open(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The two clones' claims would otherwise commit the exact same tree atop
+	// the exact same parent with the exact same author, committer and
+	// message, so pinning distinct commit dates is what makes them two
+	// distinct commits (and so what makes storeRoot's own push below a
+	// genuine rejection) rather than, by the coincidence of two commits built
+	// from identical inputs landing in the same wall-clock second, the same
+	// commit object twice - a push that would then trivially "succeed" as a
+	// no-op fast-forward onto the hash it already pushed.
+	t.Setenv("GIT_AUTHOR_DATE", "2024-01-01T00:00:00+00:00")
+	t.Setenv("GIT_COMMITTER_DATE", "2024-01-01T00:00:00+00:00")
+
+	// The other clone graduates Slice A and pushes it to the origin, standing
+	// in for `jig graduate mychart` run from a second clone.
+	otherID, _, otherDone, err := claimOneChartEntry(otherSt, "T-{n}", "mychart")
+	if err != nil {
+		t.Fatalf("claimOneChartEntry on the other clone: %v", err)
+	}
+	if otherDone || otherID == "" {
+		t.Fatalf("claimOneChartEntry on the other clone = id %q done %v, want it to claim Slice A", otherID, otherDone)
+	}
+
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIT_AUTHOR_DATE", "2024-01-02T00:00:00+00:00")
+	t.Setenv("GIT_COMMITTER_DATE", "2024-01-02T00:00:00+00:00")
+
+	// storeRoot never synced with the other clone's push: its own claim below
+	// mints against a stale chart, so its push is rejected by what the other
+	// clone already landed on the origin.
+	id, pos, done, err := claimOneChartEntry(st, "T-{n}", "mychart")
+	if err != nil {
+		t.Fatalf("claimOneChartEntry: %v", err)
+	}
+	if done || id == "" {
+		t.Fatalf("claimOneChartEntry = id %q pos %d done %v, want it to continue past the other clone's entry and claim Slice B", id, pos, done)
+	}
+	if id == otherID {
+		t.Fatalf("claimOneChartEntry minted %q, the same id the other clone already claimed for Slice A", id)
+	}
+	if pos != 1 {
+		t.Fatalf("claimOneChartEntry pos = %d, want 1: the re-read must move past entry 1 (already claimed by the other clone) to entry 2", pos)
 	}
 
 	entries, err := st.ReadChart("mychart")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entries[0].ID != "EXT-1" || entries[1].ID != "" {
-		t.Fatalf("chart ids after the refusal = %q, %q, want EXT-1 and none", entries[0].ID, entries[1].ID)
+	if len(entries) != 2 || entries[0].ID != otherID || entries[1].ID != id {
+		t.Fatalf("entries after the rejected claim's pull and retry = %+v, want entry 1's id to be the other clone's %q and entry 2's id to be the newly minted %q, with entry 1 unclobbered", entries, otherID, id)
 	}
-	rec, err := st.ReadTicket("EXT-1")
+
+	remoteLog, err := gitx.Run("", "--git-dir", remote, "log", "--pretty=%s")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Title != "Slice A" {
-		t.Fatalf("EXT-1's title = %q, want entry 1's %q left as it was", rec.Title, "Slice A")
+	if n := strings.Count(remoteLog, "graduate "+otherID); n != 1 {
+		t.Fatalf("remote log has %d commits graduating %s, want exactly 1 (the rejected clone must not have minted and pushed a second ticket for Slice A)", n, otherID)
+	}
+	if n := strings.Count(remoteLog, "graduate "+id); n != 1 {
+		t.Fatalf("remote log has %d commits graduating %s, want exactly 1 (the retried claim's own push for Slice B)", n, id)
+	}
+
+	ents, err := os.ReadDir(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticketDirs := 0
+	for _, e := range ents {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "T-") {
+			ticketDirs++
+		}
+	}
+	if ticketDirs != 2 {
+		t.Fatalf("storeRoot has %d ticket folders after the rejected claim's retry, want exactly 2 (the other clone's %s pulled in, plus this retry's own %s)", ticketDirs, otherID, id)
 	}
 }
 
-// TestGraduateRefusesAMintedIDJigCannotUse covers the second half of "a minted
-// ticket gets its record under one rule, whichever command minted it": jig
-// ticket new refuses a minted id that names a lease or is not a single
-// directory before it writes anything, and so must graduate. Its help names the
-// tracker ticket to close (not the orphan help for a folder graduate created),
-// no folder or record is written under the id, for a path-like id not outside
-// the store either, and the chart entry stays without an id.
+// TestGraduateRefusesAMintedIDJigCannotUse covers an id ticket_format mints
+// that jig cannot use (pool.CheckTicket: a reserved lease suffix here):
+// graduate refuses it before writing anything under it - no folder or
+// record - and the chart entry stays without an id.
 func TestGraduateRefusesAMintedIDJigCannotUse(t *testing.T) {
-	for _, tc := range []struct{ name, id, reason string }{
-		{name: "reserved suffix", id: "EXT-7-gate", reason: "reserves"},
-		{name: "path separator", id: "../escape", reason: "path separator"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			jig, st := commandTrackerMinting(t, tc.id)
-			writeChart(t, st.Root, "mychart", `tickets:
+	jig, storeRoot := setupGraduateStore(t)
+	rewriteTicketFormat(t, storeRoot, "T-{n}-gate")
+	writeChart(t, storeRoot, "mychart", `tickets:
   - title: "New entry"
 `)
 
-			code, out := jig("graduate", "mychart")
-			if code == 0 {
-				t.Fatalf("jig graduate with a tracker minting %q: exit 0, want a refusal:\n%s", tc.id, out)
-			}
-			for _, want := range []string{tc.id, tc.reason, "close it there"} {
-				if !strings.Contains(out, want) {
-					t.Fatalf("jig graduate with a tracker minting %q: output lacks %q:\n%s", tc.id, want, out)
-				}
-			}
-			if strings.Contains(out, "delete that ticket folder") {
-				t.Fatalf("jig graduate with a tracker minting %q gave the orphan help:\n%s", tc.id, out)
-			}
+	code, out := jig("graduate", "mychart")
+	if code == 0 {
+		t.Fatalf("jig graduate with ticket_format T-{n}-gate: exit 0, want a refusal:\n%s", out)
+	}
+	for _, want := range []string{"T-1-gate", "reserves"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("jig graduate with ticket_format T-{n}-gate: output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "delete that ticket folder") {
+		t.Fatalf("jig graduate with ticket_format T-{n}-gate gave the orphan help:\n%s", out)
+	}
 
-			for _, dir := range []string{st.TicketDir(tc.id), filepath.Join(filepath.Dir(st.Root), "escape")} {
-				if _, err := os.Stat(dir); !os.IsNotExist(err) {
-					t.Fatalf("the refused ticket %q left %s behind (stat err %v)", tc.id, dir, err)
-				}
-			}
-			entries, err := st.ReadChart("mychart")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if entries[0].ID != "" {
-				t.Fatalf("the chart entry was recorded as %q, want no id", entries[0].ID)
-			}
-		})
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(st.TicketDir("T-1-gate")); !os.IsNotExist(err) {
+		t.Fatalf("the refused ticket T-1-gate left a store folder behind (stat err %v)", err)
+	}
+	entries, err := st.ReadChart("mychart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries[0].ID != "" {
+		t.Fatalf("the chart entry was recorded as %q, want no id", entries[0].ID)
 	}
 }

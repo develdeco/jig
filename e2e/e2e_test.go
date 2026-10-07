@@ -6,13 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/tracker"
 )
 
 // TestEndToEndTwice drives the full chain (run to first pause, answer
@@ -208,7 +205,7 @@ func runEndToEndOnce(t *testing.T) {
 		t.Fatalf("publish must never move the target branch: main = %s, want unchanged %s", mainTip, movedTip)
 	}
 
-	// --- changelogs, ledger, contract index, PR body, tracker projections.
+	// --- changelogs, ledger, contract index, PR body.
 	for _, ws := range []string{"alpha", "beta"} {
 		data := readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "changelog", ws+".md"))
 		if strings.TrimSpace(string(data)) == "" {
@@ -242,30 +239,6 @@ func runEndToEndOnce(t *testing.T) {
 	prBody := string(readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "pr", repoName+".md")))
 	if strings.TrimSpace(prBody) == "" {
 		t.Fatalf("PR body file is empty")
-	}
-
-	ticketMD := string(readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "tracker", "ticket.md")))
-	if strings.TrimSpace(ticketMD) == "" {
-		t.Fatalf("tracker/ticket.md is empty")
-	}
-	subtasksData := readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "tracker", "subtasks.yaml"))
-	var subtasksFile struct {
-		Subtasks []tracker.Subtask `yaml:"subtasks"`
-	}
-	if err := yaml.Unmarshal(subtasksData, &subtasksFile); err != nil {
-		t.Fatalf("parse tracker/subtasks.yaml: %v", err)
-	}
-	if len(subtasksFile.Subtasks) != 5 {
-		t.Fatalf("tracker subtasks count = %d, want 5 (a,b,c,d,fix-1); got %+v", len(subtasksFile.Subtasks), subtasksFile.Subtasks)
-	}
-
-	commentsDir := joinPath(fx.StoreDir, ticket, "tracker", "comments")
-	entries, err := os.ReadDir(commentsDir)
-	if err != nil {
-		t.Fatalf("read tracker/comments: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Fatalf("expected route to leave at least one tracker comment")
 	}
 
 	storeRevAfter := gitLog(t, fx.StoreRemote, "rev-list", "--count", "main")
