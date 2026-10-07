@@ -74,7 +74,20 @@ func cmdInit(e env, args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	cfg, err := project.InitProject(jigHome, *storeFlag, clones.m)
+	storePath, err := e.abs(*storeFlag)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	var clonePaths map[string]string
+	if clones.m != nil {
+		clonePaths = make(map[string]string, len(clones.m))
+		for name, path := range clones.m {
+			if clonePaths[name], err = e.abs(path); err != nil {
+				return renderErr(stdout, err)
+			}
+		}
+	}
+	cfg, err := project.InitProject(jigHome, storePath, clonePaths)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

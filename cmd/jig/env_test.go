@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -120,5 +123,125 @@ func TestMainReadsTheProcessEnvironment(t *testing.T) {
 	code := Main([]string{"status", fx.Ticket, "--project", cfg.Name}, &buf, strings.NewReader(""))
 	if code != 0 || !strings.HasPrefix(buf.String(), "ticket: "+fx.Ticket+"\n") {
 		t.Fatalf("jig status --project %s: exit %d, want the ticket's status from the store JIG_HOME's mapping names:\n%s", cfg.Name, code, buf.String())
+	}
+}
+
+// TestEnvAbsResolvesAgainstTheEnvsWorkingDirectory pins that a relative path
+// is placed under the env's working directory, never the process's, and that
+// an absolute or empty path is left as it is.
+func TestEnvAbsResolvesAgainstTheEnvsWorkingDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	e := testEnv(t.TempDir()).inDir(dir)
+	for _, c := range []struct{ in, want string }{
+		{"", ""},
+		{"rel", filepath.Join(dir, "rel")},
+		{filepath.Join(".", "a", "..", "b"), filepath.Join(dir, "b")},
+		{filepath.Join(dir, "abs"), filepath.Join(dir, "abs")},
+	} {
+		got, err := e.abs(c.in)
+		if err != nil || got != c.want {
+			t.Errorf("abs(%q) = %q, %v, want %q", c.in, got, err, c.want)
+		}
+	}
+
+	// The working directory is asked for only when a path needs it.
+	broken := e
+	broken.getwd = func() (string, error) { return "", errors.New("no working directory") }
+	if got, err := broken.abs(filepath.Join(dir, "abs")); err != nil || got != filepath.Join(dir, "abs") {
+		t.Errorf("abs of an absolute path with no working directory = %q, %v, want it unchanged", got, err)
+	}
+	if got, err := broken.abs("rel"); err == nil {
+		t.Errorf("abs(rel) with no working directory = %q, want the error", got)
+	}
+}
+
+// TestRelativeStoreFlagResolvesAgainstTheEnvsWorkingDirectory: --store given
+// as a relative path finds the store under the env's directory, so a test's
+// working directory is per call even though the process's is some other.
+func TestRelativeStoreFlagResolvesAgainstTheEnvsWorkingDirectory(t *testing.T) {
+	t.Parallel()
+
+	fx := newFixture(t, fixture.Opts{})
+	rel, err := filepath.Rel(fx.Dir, fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, code := runMain(t, testEnv(fx.Home).inDir(fx.Dir), "", "status", fx.Ticket, "--store", rel)
+	if code != 0 || !strings.HasPrefix(out, "ticket: "+fx.Ticket+"\n") {
+		t.Fatalf("jig status --store %s from %s: exit %d, want the ticket's status:\n%s", rel, fx.Dir, code, out)
+	}
+}
+
+// TestInitResolvesRelativeStoreAndCloneAgainstTheEnvsWorkingDirectory: the
+// machine mapping `jig init --store --clone` writes names the paths as placed
+// under the env's directory, and the command prints the store as it was given.
+func TestInitResolvesRelativeStoreAndCloneAgainstTheEnvsWorkingDirectory(t *testing.T) {
+	t.Parallel()
+
+	fx := newFixture(t, fixture.Opts{})
+	relStore, err := filepath.Rel(fx.Dir, fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relRepo, err := filepath.Rel(fx.Dir, fx.RepoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newHome := t.TempDir()
+	out, code := runMain(t, testEnv(newHome).inDir(fx.Dir), "", "init", "--store", relStore, "--clone", "fixture-repo="+relRepo)
+	if code != 0 {
+		t.Fatalf("jig init --store %s --clone fixture-repo=%s: exit %d\n%s", relStore, relRepo, code, out)
+	}
+	if !strings.Contains(out, "store: "+relStore+"\n") {
+		t.Errorf("init output does not print the store as given (%s):\n%s", relStore, out)
+	}
+	cfg, err := project.Load(filepath.Join(fx.StoreDir, "project.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine, err := project.LoadMachine(newHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp, ok := machine[cfg.Name]
+	if !ok || mp.Store != fx.StoreDir || mp.Clones["fixture-repo"] != fx.RepoDir {
+		t.Fatalf("machine mapping for %s = %+v (found %v), want store %s and clone fixture-repo=%s", cfg.Name, mp, ok, fx.StoreDir, fx.RepoDir)
+	}
+}
+
+// TestSkillsInstallPlacesARelativeDestUnderTheEnvsWorkingDirectory: --dest as a
+// relative path is written under the env's directory and shown as given.
+func TestSkillsInstallPlacesARelativeDestUnderTheEnvsWorkingDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	e := testEnv(t.TempDir()).inDir(dir)
+	var buf bytes.Buffer
+	if code := cmdSkills(e, []string{"install", "--dest", "out"}, &buf); code != 0 {
+		t.Fatalf("cmdSkills install --dest out: exit %d\n%s", code, buf.String())
+	}
+	for _, name := range wantSkillNames(t) {
+		if _, err := os.Stat(filepath.Join(dir, "out", name, "SKILL.md")); err != nil {
+			t.Errorf("%s: not installed under the env's directory: %v", name, err)
+		}
+		if want := filepath.Join("out", name, "SKILL.md"); !strings.Contains(buf.String(), want) {
+			t.Errorf("table does not show %s as given:\n%s", want, buf.String())
+		}
+	}
+}
+
+// TestProcessEnvOperatorHomeAgreesWithTheStdlib pins that the binary's
+// operator-home lookup, os.UserHomeDir's rule over a getenv, gives on this
+// machine exactly what os.UserHomeDir gives: the same directory, or the same
+// error. It only reads the process, so it is parallel.
+func TestProcessEnvOperatorHomeAgreesWithTheStdlib(t *testing.T) {
+	t.Parallel()
+
+	got, gotErr := processEnv().userHomeDir()
+	want, wantErr := os.UserHomeDir()
+	if got != want || fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
+		t.Errorf("processEnv().userHomeDir() = %q, %v, want os.UserHomeDir's %q, %v", got, gotErr, want, wantErr)
 	}
 }

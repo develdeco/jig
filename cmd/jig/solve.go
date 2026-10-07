@@ -62,6 +62,9 @@ func cmdSolve(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
+	if *scenario, err = e.abs(*scenario); err != nil {
+		return renderErr(stdout, err)
+	}
 	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
 	if err != nil {
 		return renderErr(stdout, err)

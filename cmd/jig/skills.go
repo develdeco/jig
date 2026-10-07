@@ -42,14 +42,21 @@ func cmdSkills(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	installed, err := installSkills(root)
+	// Skills are written under the absolute root, so a relative --dest lands
+	// under e's working directory; the table names each file as the root was
+	// given.
+	writeRoot, err := e.abs(root)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	installed, err := installSkills(writeRoot)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
 	var rows [][]string
 	for _, ins := range installed {
-		rows = append(rows, []string{ins.Name, ins.Path})
+		rows = append(rows, []string{ins.Name, filepath.Join(root, ins.Name, "SKILL.md")})
 	}
 	axi.Render(stdout,
 		axi.Table("installed", []string{"name", "path"}, rows),

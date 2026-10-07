@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -35,13 +36,19 @@ func TestSolveStopsOnNeedsHumanInsteadOfRedispatching(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-no-workspace"})
 	e := testEnv(fx.Home).atTerminal()
-	e.solveGateSource = func(scenario string, _ session.Backend) verifydeliver.GateSource {
+	e.solveGateSource = func(scenario string, solves session.Backend) verifydeliver.GateSource {
 		if scenario != "" {
 			t.Errorf("solve handed its gate source scenario %q, want none (the test passes no --scenario)", scenario)
 		}
 		backend, err := session.New("fake", session.Options{ScenarioDir: fx.ScenarioDir})
 		if err != nil {
 			t.Fatalf("session.New(fake): %v", err)
+		}
+		// The backend solve built from --backend fake is the one the reviewer is
+		// meant to run on; this swaps in one that can find the scenario, so check
+		// that solve handed over a backend of that kind and not nil or another.
+		if solves == nil || reflect.TypeOf(solves) != reflect.TypeOf(backend) {
+			t.Errorf("solve handed its gate source backend %T, want the fake backend it built from --backend fake (%T)", solves, backend)
 		}
 		return gateSourceForSolve(scenario, backend)
 	}

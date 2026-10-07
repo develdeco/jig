@@ -223,6 +223,7 @@ func resolveStore(e env, storeFlag string) (*store.Store, project.Config, projec
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
+	storeFlag = absFrom(cwd, storeFlag)
 	storePath, cfg, err := project.Resolve(jigHome, cwd, storeFlag)
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err

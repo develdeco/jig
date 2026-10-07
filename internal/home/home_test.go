@@ -1,6 +1,8 @@
 package home
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -138,5 +140,19 @@ func TestUserDirFromReadsTheVariableTheOSDoes(t *testing.T) {
 	}
 	if got, err := UserDirFrom(envOf(map[string]string{"JIG_HOME": "/elsewhere"})); err == nil && runtime.GOOS != "android" && runtime.GOOS != "ios" {
 		t.Fatalf("UserDirFrom with no user home variable = %q, want an error", got)
+	}
+}
+
+// TestUserDirFromAgreesWithTheStdlibOnTheProcess pins that, over the
+// process's own environment, UserDirFrom gives exactly what os.UserHomeDir
+// gives: the same directory, or the same error. It only reads the process, so
+// it is parallel.
+func TestUserDirFromAgreesWithTheStdlibOnTheProcess(t *testing.T) {
+	t.Parallel()
+
+	got, gotErr := UserDirFrom(os.Getenv)
+	want, wantErr := os.UserHomeDir()
+	if got != want || fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
+		t.Errorf("UserDirFrom(os.Getenv) = %q, %v, want os.UserHomeDir's %q, %v", got, gotErr, want, wantErr)
 	}
 }
