@@ -282,8 +282,7 @@ With no host (the standalone store above) both files are written under
 
 `demo/publish-body.tape` plays this through end to end with no pull-request host:
 a ticket's gate rounds fixing, dismissing, and noting findings - the last of
-them clean, with its own recorded demo - then `jig publish` and both files
-as it leaves them, the body's `## Demo` section included - see
+them clean - then `jig publish` and both files as it leaves them - see
 [demo/README.md](demo/README.md).
 
 ## Session backends

@@ -453,15 +453,21 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 
 	// A pull request has a ## Demo section only from a pick. One that was
 	// refused or failed has been said where it was (publishPicks); a ticket
-	// with nothing to pick from has none, and is told so here.
+	// with nothing to pick from has none, and is told so here. When the build
+	// did record, the recordings left out of the choice have been named
+	// (publishPicks), so this says none is left rather than none was made.
 	if picked == nil && picksReport.Status == "" {
-		warnFn("jig: no demo for %s: there are no recordings to show\n", ticket)
+		if len(picksReport.Dropped) > 0 {
+			warnFn("jig: no demo for %s: no recordings are left to show\n", ticket)
+		} else {
+			warnFn("jig: no demo for %s: there are no recordings to show\n", ticket)
+		}
 	}
 
 	// Report any summary or caption left out of the rendered section because
 	// it named one of jig's own directories (the owner's decision on r1-f13,
-	// DECISIONS.md): independent of the switch above, since a section can be
-	// otherwise rendered in full.
+	// DECISIONS.md): independent of whether a pick stands, since a section can
+	// be otherwise rendered in full.
 	if demoResult.ScrubbedSummary {
 		warnFn("jig: the demo summary for %s named one of jig's own directories and was left out of the pull request body\n", ticket)
 	}
