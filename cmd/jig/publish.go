@@ -73,8 +73,8 @@ func cmdPublish(args []string, stdout io.Writer) int {
 // with, built the way the other commands build theirs. Publish needs a session
 // only for a ticket whose build recorded something, so a backend that is not
 // installed does not stop a publish: it is handed over as one that fails when
-// it is used, and the pick is then refused with that failure and the gate's
-// demo stands in. A backend name jig does not have is an error at once.
+// it is used, and the pick is then refused with that failure and the pull request
+// has no demo section. A backend name jig does not have is an error at once.
 // available says whether the program a backend runs is there (session.Available).
 func publishBackend(backendFlag, scenario string, available func(name string) error) (session.Backend, error) {
 	kind := backendName(backendFlag, scenario)

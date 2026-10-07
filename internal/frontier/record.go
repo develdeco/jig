@@ -268,8 +268,8 @@ type collected struct {
 // made. What is required is that it is a plain directory under plain parents
 // when it is read: those are checked first, before anything in it is read,
 // and the directory is pinned then for the media rules (media.Verify), which
-// are the gate demo's, applied to each recording on its own: its type and
-// size, no link, and the file hashed from the very file checked. The number of
+// are what `gh --attach` takes, applied to each recording on its own: its type
+// and size, no link, and the file hashed from the very file checked. The number of
 // files is not one of them here, since the 50 of media.MaxFiles is what one
 // `gh --attach` takes, which binds publish's pick. A directory the harness
 // removed and did not recreate held nothing. An unreadable or invalid tag, or

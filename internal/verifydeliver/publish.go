@@ -26,8 +26,8 @@ type PublishOpts struct {
 	// Backend runs the short session that picks, from the recordings the
 	// build made, the ones the pull request shows (ADR 0029). nil means no
 	// session can be dispatched: a ticket with recordings then has its pick
-	// refused, and the gate's demo, if there is one, stands in. A ticket with
-	// no recordings never dispatches one.
+	// refused, and the pull request has no demo section. A ticket with no
+	// recordings never dispatches one.
 	Backend session.Backend
 }
 
@@ -406,7 +406,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 	// The recordings the build made, picked for the pull request (ADR 0029).
 	// A pick that stands renders the ## Demo section; one that does not, or
-	// none to make, leaves it to the gate's demo as it always was. The pick is
+	// none to make, leaves the pull request without one. The pick is
 	// made for the head the gate reviewed (shipHead, before reconcile and
 	// squash rewrote anything), whose history still holds the recorded commits.
 	picksReport, picked, err := publishPicks(picksStep{
@@ -416,19 +416,16 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	prPath, omittedBriefIntent, demoResult, err := writePRBody(d.Store, ticket, repoName, slices, gateRep, tier, commits, authorCommits, oracleNames, outcomes, d, lastRound, picked)
+	prPath, omittedBriefIntent, demoResult, err := writePRBody(d.Store, ticket, repoName, slices, gateRep, tier, commits, authorCommits, oracleNames, outcomes, picked)
 	if err != nil {
 		return PublishReport{}, err
 	}
 
-	// The media directory and file names for attachment, when a demo has
-	// verified files: demoResult.MediaDir is the evidence directory
-	// renderDemoSection already resolved and verified these very files
-	// against, for the head the gate reviewed - never recomputed here from
-	// head, which by this point is the post-squash tip and names no
-	// evidence directory that exists. A pick's files are staged in a
-	// directory of their own (picksStep.stage), and are handed over the same
-	// way.
+	// The media directory and file names for attachment, when a pick staged
+	// files: demoResult.MediaDir is the staging directory (picksStep.stage)
+	// the pick copied and checked them in, for the head the gate reviewed -
+	// never recomputed here from head, which by this point is the post-squash
+	// tip and names no staging directory that exists.
 	mediaDir := demoResult.MediaDir
 	mediaFiles := make([]string, 0, len(demoResult.MediaFiles))
 	for _, f := range demoResult.MediaFiles {
@@ -454,23 +451,11 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 			ticket, intentFilePath(d.Store, ticket, IntentSourceBrief))
 	}
 
-	// Report demo status: no demo recorded, a demo refused outright, every
-	// file of a recorded demo failing verification, or some files omitted
-	// from an otherwise rendered section. The three ways a published body
-	// ends up with no ## Demo section (no demo at all, a demo refused
-	// outright, or one whose media all failed verification) are told apart
-	// here, which half of the pipeline to blame.
-	switch {
-	case demoResult.NoDemo:
-		warnFn("jig: no demo recorded for %s\n", ticket)
-	case demoResult.DemoRefused:
-		warnFn("jig: the demo recorded for %s was refused: %s\n", ticket, demoResult.RefusalReason)
-	case demoResult.AllMediaFailed:
-		warnFn("jig: the pull request body for %s has no ## Demo section: all media files from the recorded demo failed verification: %v\n",
-			ticket, demoResult.Omitted)
-	case len(demoResult.Omitted) > 0:
-		warnFn("jig: media files omitted from the pull request body for %s: %v (missing or changed)\n",
-			ticket, demoResult.Omitted)
+	// A pull request has a ## Demo section only from a pick. One that was
+	// refused or failed has been said where it was (publishPicks); a ticket
+	// with nothing to pick from has none, and is told so here.
+	if picked == nil && picksReport.Status == "" {
+		warnFn("jig: no demo for %s: there are no recordings to show\n", ticket)
 	}
 
 	// Report any summary or caption left out of the rendered section because

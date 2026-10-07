@@ -294,11 +294,11 @@ func TestPublishRendersAndAttachesThePickedRecordings(t *testing.T) {
 	}
 }
 
-// TestPublishFallsBackToTheGateDemoWhenThePickIsRefused: a pick jig refuses
+// TestPublishLeavesOutTheDemoSectionWhenThePickIsRefused: a pick jig refuses
 // (an id that is no candidate, one used twice, an answer that is not JSON) is
-// journaled with jig's reason and said in the output, and the gate's demo
-// renders and attaches as it always did.
-func TestPublishFallsBackToTheGateDemoWhenThePickIsRefused(t *testing.T) {
+// journaled with jig's reason and said in the output, and the pull request
+// carries no ## Demo section and attaches nothing.
+func TestPublishLeavesOutTheDemoSectionWhenThePickIsRefused(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ name, result, reason string }{
 		{"an id that is no candidate", `{"flows":[{"title":"T","items":[{"id":"r9"}]}],"summary":"S"}`, "flow 1 item 1 is not a candidate"},
@@ -310,7 +310,6 @@ func TestPublishFallsBackToTheGateDemoWhenThePickIsRefused(t *testing.T) {
 			t.Parallel()
 			pf := newPicksFixture(t)
 			pf.onboardingRecordings(t)
-			mediaDir, files := recordDemoForTicket(t, pf.d, pf.fx.Ticket, []demoMediaSpec{{Name: "demo-1.png", Content: "the gate demo"}})
 			spy := picksScenario(t, c.result)
 
 			report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
@@ -329,16 +328,15 @@ func TestPublishFallsBackToTheGateDemoWhenThePickIsRefused(t *testing.T) {
 				t.Errorf("warnings = %q, want the refusal and its reason in the output", pf.warnings)
 			}
 
-			body := pf.body(t, report)
-			if !strings.Contains(body, "it works") || !strings.Contains(body, "![caption for demo-1.png](./demo-1.png)") || strings.Contains(body, "### ") {
-				t.Errorf("pr body = %q, want the gate demo's section and no flows", body)
+			if body := pf.body(t, report); strings.Contains(body, "## Demo") || strings.Contains(body, "rec-") {
+				t.Errorf("pr body = %q, want no Demo section", body)
 			}
 			create := findGhCall(loggedGhCalls(t, pf.logFile), "pr", "create")
 			if create == nil {
 				t.Fatal("no logged pr create call")
 			}
-			if !sameDir(t, create.Dir, mediaDir) || !reflect.DeepEqual(attachedFiles(create.Argv), []string{files[0].Name}) {
-				t.Errorf("pr create ran in %q attaching %v, want the gate demo's directory %q and %s", create.Dir, attachedFiles(create.Argv), mediaDir, files[0].Name)
+			if got := attachedFiles(create.Argv); len(got) != 0 {
+				t.Errorf("pr create attached %v, want nothing", got)
 			}
 		})
 	}

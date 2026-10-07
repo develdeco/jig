@@ -242,23 +242,19 @@ changed, the change working, and how it was verified.
   from review. One line per bullet: a fix slice's goal is the prompt jig
   wrote from the gate's findings, and those findings belong in the comment
   below, not in the body.
-- **Demo** - present only when the gate round that reviewed the shipped head
-  recorded one (`demo: recorded` in that round's gate report, not a later
-  round's): the demo's own summary, then each of its media files with its
-  caption, an image as a markdown image reference
-  (`![caption](./demo-<n>.<ext>)`) and a video as a plain bullet
-  (`- ./demo-<n>.<ext>: caption`) - the one reference form each kind
-  actually gets rewritten in. A file publish cannot
-  verify against the round's manifest anymore (missing, or changed since)
-  is left out and named on stderr, never rendered as if it were still
-  there; a refused demo, or no demo recorded for this head at all, leaves
-  the section out entirely, and stderr says which. When the build recorded
-  its end-to-end scenarios, a short session picks the recordings that show
-  the change and composes them into flows (`--backend` and `--scenario` pick
-  its backend, as for `jig run`): the section is then its summary and each
-  flow under a `###` heading, the files staged as `rec-<n>.<ext>`, and a
-  pick that is refused or fails falls back to the demo above, with the
-  reason on stderr. With a GitHub host the
+- **Demo** - present only when the build recorded its end-to-end scenarios
+  and a pick stands: a short session picks, among the recordings made at the
+  shipped head or an ancestor of it, the ones that show the change, and
+  composes them into flows (`--backend` and `--scenario` pick its backend, as
+  for `jig run`). The section is the pick's summary and each flow under a
+  `###` heading, the files staged as `rec-<n>.<ext>`, an image as a markdown
+  image reference (`![caption](./rec-<n>.<ext>)`) and a video as a plain
+  bullet (`- ./rec-<n>.<ext>: caption`) - the one reference form each kind
+  actually gets rewritten in. A recording publish cannot verify anymore
+  (missing, or changed since the build recorded it) is left out of the choice
+  and named on stderr; a pick that is refused or fails, like a build that
+  recorded nothing, leaves the section out entirely, and stderr says why.
+  With a GitHub host the
   media are attached to the pull request itself (`gh ... --attach`),
   which rewrites a recognized image reference to the uploaded URL in place
   but not a video's bare path; publish reads the pull request back, moves
@@ -326,18 +322,11 @@ intent to judge against at all, and the reviewer is told so plainly. Both
 flags work in every mode, not only `--branch`, and each gate report
 prints which one this round resolved to.
 
-After a clean reviewer round, `jig gate` also dispatches a demo session: it
-shows a person reviewing the change that it works, as a screenshot, a GIF or
-a video, whichever shows it best, and jig records what it produced - the
-media under the jig home's `evidence/` directory (never in the store's git)
-and a manifest, `gate/round-N/demo.yaml`, in the store. Your repo documents
-its own demo tooling in its own `CLAUDE.md`. A demo is best effort: one that
-fails, or whose files jig refuses, is recorded and shown in the gate report
-(`demo: refused` and why) and never changes the round's verdict. There is
-one demo per reviewed head, `--no-demo` skips it (on `jig solve` too), and
-the scripted source never runs one. A demo that needs an env class reports
-that it cannot record, since env classes are already down by then.
-`jig publish` attaches a recorded demo to the pull request it ships - see
+The gate records nothing. What a pull request shows of the change working
+comes from the build: the end-to-end scenarios a builder's green oracle run
+executes can leave recordings (screenshots, videos, terminal captures) in the
+directory jig names in `JIG_RECORD_DIR`, and `jig publish` has a short
+session pick among them - see
 [What a published pull request looks like](#what-a-published-pull-request-looks-like).
 
 ## Safety
@@ -361,8 +350,7 @@ host. See [ADR 0008](docs/adr/0008-headless-permission-model.md) for why a
 denylist of path spellings can't close that gap, and what would. A
 `headless` session gets nothing else it doesn't need: jig's own settings
 grant its shell and file reads only through a passing screen, and its file
-edits only inside the lease, its own `result.json`, and a gate demo's media
-directory - though the operator's own user settings, which still load on
+edits only inside the lease and its own `result.json` - though the operator's own user settings, which still load on
 top, can grant more. The lease's `.claude/settings.json` is not loaded,
 since that file is part of
 the code under review, while its `CLAUDE.md` is carried in from the lease's

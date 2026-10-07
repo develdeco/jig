@@ -214,10 +214,6 @@ func TestReviewerRoundListsTheRecordingsOfTheHeadsHistoryAndNamesThemInThePrompt
 	if disp.ExtraReadFile != path {
 		t.Errorf("ExtraReadFile = %q, want the list %q", disp.ExtraReadFile, path)
 	}
-	// The reviewer is given no new place to write for this.
-	if disp.ExtraWriteDir != "" {
-		t.Errorf("ExtraWriteDir = %q, want none", disp.ExtraWriteDir)
-	}
 }
 
 // TestReviewerRoundWithoutRecordingsHandsTheReviewerWhatItAlwaysHas: a round
@@ -394,7 +390,7 @@ func TestReviewerRoundNeverWritesThroughALinkOrReadsAnEarlierList(t *testing.T) 
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if err := makeFileLink(target, path); err != nil {
+	if err := os.Symlink(target, path); err != nil {
 		t.Skipf("file links unavailable here: %v", err)
 	}
 	dispatchedRound(t, l.roundInput(st, jigHome))
@@ -510,7 +506,7 @@ func TestGateCommitsNoPathOfTheJigHomeWhenAFindingCitesARecording(t *testing.T) 
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	if _, err := Gate(d, NewReviewerGateSource(backend), GateOpts{Ticket: fx.Ticket, NoDemo: true}); err != nil {
+	if _, err := Gate(d, NewReviewerGateSource(backend), GateOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("Gate: %v", err)
 	}
 

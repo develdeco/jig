@@ -746,3 +746,17 @@ func TestVerifyStagedHoldsEveryStagedFileToWhatWasStaged(t *testing.T) {
 		})
 	}
 }
+
+// TestSessionPromptsDescribeTheIntentSourcesInOnePlace: the reviewer's prompt
+// and the pick's both hand the session an intent and a source, so both carry
+// the one sentence that says what each source means.
+func TestSessionPromptsDescribeTheIntentSourcesInOnePlace(t *testing.T) {
+	t.Parallel()
+	review := RenderReviewPrompt(ReviewRequest{Ticket: "JIG-1", Round: 1, Scope: "full"}, "/abs/review.json", "/abs/result.json")
+	pick := RenderPicksPrompt("/abs/picks.json", "/abs/picks.result.json")
+	for name, prompt := range map[string]string{"reviewer": review, "pick": pick} {
+		if !strings.Contains(prompt, intentSourcesPrompt) {
+			t.Errorf("the %s prompt does not carry intentSourcesPrompt:\n%s", name, prompt)
+		}
+	}
+}

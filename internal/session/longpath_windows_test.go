@@ -66,7 +66,7 @@ func TestHeadlessRunSpellsShortPathsLong(t *testing.T) {
 	}
 
 	long, short := longNamedDir(t)
-	for _, dir := range []string{"lease", "work", "media"} {
+	for _, dir := range []string{"lease", "work", "reviews"} {
 		if err := os.Mkdir(filepath.Join(long, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -76,19 +76,18 @@ func TestHeadlessRunSpellsShortPathsLong(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := filepath.Join(short, "work", "a.attempt-1.result.json")
-	media := filepath.Join(short, "media")
+	list := filepath.Join(short, "reviews", "recordings.json")
 	d := Dispatch{
-		Ticket:     "T-1",
-		Slice:      "a",
-		Attempt:    1,
-		Worktree:   filepath.Join(short, "lease"),
-		SliceJSON:  slice,
-		ResultJSON: result,
-		Model:      "claude-haiku-4-5",
-		Prompt:     "Read slice.json at " + slice + ". Put media in " + media + ". When finished write result.json at " + result + " with exactly one JSON object.",
-		Screen:     true,
-
-		ExtraWriteDir: media,
+		Ticket:        "T-1",
+		Slice:         "a",
+		Attempt:       1,
+		Worktree:      filepath.Join(short, "lease"),
+		SliceJSON:     slice,
+		ResultJSON:    result,
+		Model:         "claude-haiku-4-5",
+		Prompt:        "Read slice.json at " + slice + ". Read the list at " + list + ". When finished write result.json at " + result + " with exactly one JSON object.",
+		Screen:        true,
+		ExtraReadFile: list,
 	}
 	b := &headlessBackend{goos: "windows", screenBinary: builtJigBinary(t)}
 	if err := b.Run(d); err != nil {
@@ -111,7 +110,7 @@ func TestHeadlessRunSpellsShortPathsLong(t *testing.T) {
 	}
 	prompt := call.Argv[len(call.Argv)-1]
 	wantPrompt := "Read slice.json at " + filepath.Join(long, "work", "a.attempt-1.slice.json") +
-		". Put media in " + filepath.Join(long, "media") +
+		". Read the list at " + filepath.Join(long, "reviews", "recordings.json") +
 		". When finished write result.json at " + filepath.Join(long, "work", "a.attempt-1.result.json") +
 		" with exactly one JSON object."
 	if prompt != wantPrompt {
@@ -129,10 +128,13 @@ func TestHeadlessRunSpellsShortPathsLong(t *testing.T) {
 	for _, rule := range []string{
 		"Edit(" + rulePath("windows", filepath.Join(long, "lease")) + "/**)",
 		"Edit(" + rulePath("windows", filepath.Join(long, "work", "a.attempt-1.result.json")) + ")",
-		"Edit(" + rulePath("windows", filepath.Join(long, "media")) + "/**)",
 	} {
 		if !strings.Contains(settings, rule) {
 			t.Errorf("settings grant no %s:\n%s", rule, settings)
 		}
+	}
+	// The list is named to the session, not granted to it.
+	if strings.Contains(settings, "recordings.json") {
+		t.Errorf("settings name the file to read:\n%s", settings)
 	}
 }

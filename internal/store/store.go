@@ -581,11 +581,11 @@ func (s *Store) Dirty() (bool, error) {
 // or a differently cased spelling names one id. A Windows junction is not a
 // symlink and is not resolved: a clone reached through one names its own id,
 // as a clone moved elsewhere does. It keys the machine-local files
-// that belong to a store but must stay out of its git, such as a gate demo's
-// media under the jig home (home.EvidenceDir). It is derived from the
-// path, not stored, because those files are per machine like the clone
-// itself: a clone moved elsewhere is a new id, and its media are not found
-// under the old one.
+// that belong to a store but must stay out of its git, such as a ticket's
+// recordings under the jig home's evidence tree (home.RecordDir). It is
+// derived from the path, not stored, because those files are per machine like
+// the clone itself: a clone moved elsewhere is a new id, and its media are not
+// found under the old one.
 func (s *Store) ID() (string, error) {
 	abs, err := filepath.Abs(s.Root)
 	if err != nil {
