@@ -1084,10 +1084,11 @@ func indexOf(args []string, s string) int {
 	return -1
 }
 
-// recordDirChildEnv marks a run of this test binary as the child that
+// recordDirChildStubEnv marks a run of this test binary as the child that
 // TestHeadlessChildDoesNotInheritTheRecordDir runs the dispatch in, a process
-// whose environment holds a JIG_RECORD_DIR.
-const recordDirChildEnv = "JIG_SESSION_TEST_RECORD_DIR_CHILD"
+// whose environment holds a JIG_RECORD_DIR, and carries the directory of the
+// claude stub the parent built, so the child compiles nothing.
+const recordDirChildStubEnv = "JIG_SESSION_TEST_STUB_DIR"
 
 // TestHeadlessChildDoesNotInheritTheRecordDir: JIG_RECORD_DIR is how an oracle
 // run is told to record (ADR 0029), and only jig's own builder-green oracle
@@ -1096,13 +1097,23 @@ const recordDirChildEnv = "JIG_SESSION_TEST_RECORD_DIR_CHILD"
 // whether Options.Env is nil (the inherited environment) or given. The
 // variable is set on a child process running this test again, never on this
 // one. A session that inherits the environment also gets the PWD of its
-// worktree, as os/exec sets it when Env is nil (Windows has no PWD).
+// worktree, as os/exec sets it when Env is nil (Windows has no PWD). The
+// screen is irrelevant to the environment, so the dispatch runs without it.
 func TestHeadlessChildDoesNotInheritTheRecordDir(t *testing.T) {
-	if os.Getenv(recordDirChildEnv) == "" {
-		cmd := exec.Command(os.Args[0], "-test.run=^TestHeadlessChildDoesNotInheritTheRecordDir$", "-test.v")
-		cmd.Env = append(os.Environ(), recordDirChildEnv+"=1", "JIG_RECORD_DIR="+filepath.Join(t.TempDir(), "outer"))
-		if out, err := cmd.CombinedOutput(); err != nil {
+	stubDir := os.Getenv(recordDirChildStubEnv)
+	if stubDir == "" {
+		const self = "TestHeadlessChildDoesNotInheritTheRecordDir"
+		cmd := exec.Command(os.Args[0], "-test.run=^"+self+"$", "-test.v")
+		cmd.Env = append(os.Environ(),
+			recordDirChildStubEnv+"="+buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude"),
+			"JIG_RECORD_DIR="+filepath.Join(t.TempDir(), "outer"))
+		out, err := cmd.CombinedOutput()
+		if err != nil {
 			t.Fatalf("the child run failed: %v\n%s", err, out)
+		}
+		// A renamed or skipped test would exit 0 having checked nothing.
+		if !strings.Contains(string(out), "--- PASS: "+self+" ") {
+			t.Fatalf("the child run did not run %s to a pass:\n%s", self, out)
 		}
 		return
 	}
@@ -1110,14 +1121,13 @@ func TestHeadlessChildDoesNotInheritTheRecordDir(t *testing.T) {
 		t.Fatal("the child run was not given a JIG_RECORD_DIR")
 	}
 
-	stubDir := buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude")
 	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	logFile := filepath.Join(t.TempDir(), "claude.log")
 	t.Setenv("CLAUDE_STUB_LOG", logFile)
 	t.Setenv("CLAUDE_STUB_STDOUT", strings.TrimSuffix(cliResultJSON(t, false, "done", nil), "\n"))
 
-	d := realDispatch(t, true)
-	backend, err := New("headless", Options{ScreenBinary: builtJigBinary(t)})
+	d := realDispatch(t, false)
+	backend, err := New("headless", Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -300,9 +300,11 @@ func TestPWDHelper(t *testing.T) {
 
 // TestShellOutputGivesTheChildThePWDOfItsDir: a command's environment is the
 // inherited one with the PWD os/exec sets for the directory it runs in. Setting
-// Env by hand drops that PWD, and the child (a program exec'd without a shell
-// resetting PWD, as a session's claude is) gets jig's own, which names another
-// directory. Windows has no PWD.
+// Env by hand drops that PWD, and a child exec'd without a shell resetting it
+// (as a session's claude is, which internal/session's test pins) gets jig's
+// own, which names another directory. The subtests through sh only show that
+// a command runs with the right PWD, since sh discards a PWD that is not its
+// cwd; ChildEnv's own assertion is what pins the function. Windows has no PWD.
 func TestShellOutputGivesTheChildThePWDOfItsDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows has no PWD")

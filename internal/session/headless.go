@@ -515,11 +515,11 @@ func rulePath(goos, p string) string {
 // envrun.RecordDirEnv), with PWD then appended as worktree. Names are
 // compared case-insensitively on goos == "windows", where environment
 // variable names are not case sensitive, and case-sensitively elsewhere -
-// the same distinction rulePath already makes for this backend. An
-// inherited PWD naming some other directory, or an OLDPWD
-// naming a directory that has nothing to do with this dispatch, would
-// either misreport the child's own cwd to a program that trusts PWD over
-// calling getcwd, or hand it a path the caller never intended it to see.
+// the same distinction rulePath already makes for this backend. An inherited
+// PWD naming some other directory, or an OLDPWD naming a directory that has
+// nothing to do with this dispatch, would either misreport the child's own
+// cwd to a program that trusts PWD over calling getcwd, or hand it a path
+// the caller never intended it to see.
 //
 // On Windows, os/exec's own Env doc adds one more entry beyond this
 // function's control: SYSTEMROOT is always set on the child when the

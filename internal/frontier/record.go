@@ -30,8 +30,8 @@ import (
 const (
 	// recordDirEnv names the variable that gives an oracle run its recording
 	// directory. A run that does not have it set does not record. The gate's
-	// own oracle run never sets it, and no oracle run, env command or session
-	// jig starts inherits it (envrun.RecordDirEnv).
+	// own oracle run never sets it, and no oracle run, env command or headless
+	// session jig starts inherits it (envrun.RecordDirEnv).
 	recordDirEnv = envrun.RecordDirEnv
 
 	// maxTagBytes bounds a tag file: a few short fields, never a document.

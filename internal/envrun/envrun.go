@@ -105,13 +105,14 @@ func Shell(cmd, dir string) error {
 // RecordDirEnv names the variable that gives an oracle run the directory its
 // scenarios record into (ADR 0029). jig sets it only on a builder's green
 // oracle run; unset means do not record. Because the variable is how a run
-// opts in, the commands and sessions jig starts that can run a project's
-// tests never inherit it from jig's own environment: every command in this
-// package (an oracle run, an env class's up, check and down) and a headless
-// session (internal/session), through ChildEnv. jig can itself run inside a
-// recording oracle run (it tests itself), and these must not record into that
-// run's directory. The other tools jig runs (git, gh, graphify, herdr) run no
-// scenarios and may inherit it.
+// opts in, jig never passes it on from its own environment to a command in
+// this package (an oracle run, an env class's up, check and down) or to a
+// headless session (internal/session), both through ChildEnv. jig can itself
+// run inside a recording oracle run (it tests itself), and these must not
+// record into that run's directory. git, gh and graphify run no scenarios and
+// may inherit it. A
+// herdr terminal session does run the project's tests, but in herdr's own
+// environment, which jig does not set, so jig cannot strip it from there.
 const RecordDirEnv = "JIG_RECORD_DIR"
 
 // ChildEnv is the environment cmd's process will get, for a caller that
