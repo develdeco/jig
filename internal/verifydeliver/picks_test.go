@@ -276,23 +276,24 @@ func TestParsePicksResultIsStrict(t *testing.T) {
 	}
 
 	bad := map[string]string{
-		"empty":             ``,
-		"an array":          `[]`,
-		"not JSON":          `{"flows":`,
-		"two objects":       good + good,
-		"a repeated key":    `{"flows":[],"flows":[],"summary":"S"}`,
-		"a case-only twin":  `{"flows":[],"Flows":[],"summary":"S"}`,
-		"flows missing":     `{"summary":"S"}`,
-		"summary missing":   `{"flows":[]}`,
-		"flows null":        `{"flows":null,"summary":"S"}`,
-		"summary null":      `{"flows":[],"summary":null}`,
-		"flows not a list":  `{"flows":"x","summary":"S"}`,
-		"summary not text":  `{"flows":[],"summary":7}`,
-		"unknown top key":   `{"flows":[],"summary":"S","extra":1}`,
-		"unknown flow key":  `{"flows":[{"title":"T","items":[],"extra":1}],"summary":"S"}`,
-		"unknown item key":  `{"flows":[{"title":"T","items":[{"id":"r1","extra":1}]}],"summary":"S"}`,
-		"a case variant":    `{"flows":[{"Title":"T","items":[]}],"summary":"S"}`,
-		"an item not a map": `{"flows":[{"title":"T","items":["r1"]}],"summary":"S"}`,
+		"empty":                 ``,
+		"an array":              `[]`,
+		"not JSON":              `{"flows":`,
+		"two objects":           good + good,
+		"a repeated key":        `{"flows":[],"flows":[],"summary":"S"}`,
+		"a case-only twin":      `{"flows":[],"Flows":[],"summary":"S"}`,
+		"flows missing":         `{"summary":"S"}`,
+		"summary missing":       `{"flows":[]}`,
+		"flows null":            `{"flows":null,"summary":"S"}`,
+		"summary null":          `{"flows":[],"summary":null}`,
+		"flows not a list":      `{"flows":"x","summary":"S"}`,
+		"summary not text":      `{"flows":[],"summary":7}`,
+		"unknown top key":       `{"flows":[],"summary":"S","extra":1}`,
+		"unknown flow key":      `{"flows":[{"title":"T","items":[],"extra":1}],"summary":"S"}`,
+		"unknown item key":      `{"flows":[{"title":"T","items":[{"id":"r1","extra":1}]}],"summary":"S"}`,
+		"a case variant":        `{"flows":[{"Title":"T","items":[]}],"summary":"S"}`,
+		"an item not a map":     `{"flows":[{"title":"T","items":["r1"]}],"summary":"S"}`,
+		"item keys in capitals": `{"flows":[{"title":"T","items":[{"ID":"r1","CAPTION":"x"}]}],"summary":"S"}`,
 	}
 	for name, data := range bad {
 		if _, err := ParsePicksResult([]byte(data)); err == nil {
@@ -377,7 +378,7 @@ func TestAJournaledPickIsTheResultItWasMadeFrom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp := pickFingerprint(cands)
+	fp := pickFingerprint(cands, IntentSourceBrief, "h1")
 	jp := journalPick(p, fp)
 	want := &journal.Pick{Candidates: fp, Summary: "S", Flows: []journal.PickFlow{
 		{Title: "Onboarding", Items: []journal.PickItem{{ID: "r2", File: "login.svg"}, {ID: "r3", File: "profile.mp4", Caption: "profile"}}},
@@ -394,16 +395,23 @@ func TestAJournaledPickIsTheResultItWasMadeFrom(t *testing.T) {
 	// The fingerprint follows everything a pick of the candidates depends on.
 	changed := pickTestCands()
 	changed[1].rec.SHA256 = strings.Repeat("1", 64)
-	if pickFingerprint(changed) == fp {
+	if pickFingerprint(changed, IntentSourceBrief, "h1") == fp {
 		t.Error("the fingerprint ignores a recording's content")
 	}
 	moved := pickTestCands()
 	moved[2].Step = 9
-	if pickFingerprint(moved) == fp {
+	if pickFingerprint(moved, IntentSourceBrief, "h1") == fp {
 		t.Error("the fingerprint ignores a recording's step")
 	}
-	if pickFingerprint(pickTestCands()) != fp {
+	if pickFingerprint(pickTestCands(), IntentSourceBrief, "h1") != fp {
 		t.Error("the same candidates fingerprint differently")
+	}
+	// The intent the pick was judged against is part of the question.
+	if pickFingerprint(pickTestCands(), IntentSourceBrief, "h2") == fp {
+		t.Error("the fingerprint ignores the intent's text")
+	}
+	if pickFingerprint(pickTestCands(), IntentSourceExplicit, "h1") == fp {
+		t.Error("the fingerprint ignores the intent's source")
 	}
 }
 
@@ -502,5 +510,239 @@ func TestRenderPicksSectionComposesFlowsInOrderAndMakesTheWordsSafe(t *testing.T
 	p.summary = "recorded under " + secret
 	if out := renderPicksSection(p, "/stage", files, []hostDir{{secret, "<jig home>"}}); !out.ScrubbedSummary || strings.Contains(out.Section, "recorded under") || !strings.HasPrefix(out.Section, "## Demo\n\n### Onboarding") {
 		t.Errorf("a summary naming a host directory was kept: scrubbed=%v\n%s", out.ScrubbedSummary, out.Section)
+	}
+}
+
+// TestPickCandidatesOfferEveryFileOfTheLatestLineThatSharesAKey: one step can
+// be recorded as two files, a screenshot and a video of a tagged step, or an
+// untagged login.png and login.svg, which both default to the scenario
+// "login". Of the lines that recorded a key the latest is the key's, and all of
+// its files with the key are candidates, each with an id of its own; an older
+// line's file for the same key is replaced.
+func TestPickCandidatesOfferEveryFileOfTheLatestLineThatSharesAKey(t *testing.T) {
+	t.Parallel()
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	repo, c1, c2, _ := history(t)
+
+	older := recordBuild(t, d, fx.Ticket, c1, "a-a1-f0", []recSpec{{File: "login.png", Content: "login png at c1"}})
+	newer := recordBuild(t, d, fx.Ticket, c2, "b-a1-f0", []recSpec{
+		{File: "login.png", Content: "login png at c2"},
+		{File: "login.svg", Content: "login svg at c2"},
+		{File: "checkout.webm", Content: "checkout video", Scenario: "checkout", Flow: "buy", Step: 1},
+		{File: "checkout.png", Content: "checkout screenshot", Scenario: "checkout", Flow: "buy", Step: 1},
+	})
+
+	cands, dropped, err := pickCandidates(d, fx.Ticket, []journal.Line{older, newer}, repo, c2)
+	if err != nil || len(dropped) != 0 {
+		t.Fatalf("pickCandidates: dropped %q, err %v", dropped, err)
+	}
+	type view struct{ ID, Name, Commit string }
+	var got []view
+	for _, c := range cands {
+		got = append(got, view{c.ID, c.Name, c.Commit})
+	}
+	want := []view{
+		{"r1", "login.png", c2},
+		{"r2", "login.svg", c2},
+		{"r3", "checkout.png", c2},
+		{"r4", "checkout.webm", c2},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("candidates = %+v\nwant         %+v", got, want)
+	}
+}
+
+// symlinkOrSkip makes a symbolic link at link to target, or skips the test on a
+// machine that will not make one (Windows without the privilege).
+func symlinkOrSkip(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("cannot make a symbolic link here: %v", err)
+	}
+}
+
+// TestPickCandidatesDropsARecordingBehindALink: the recording directories are
+// jig's, so a link in place of one of them is something else's and is never
+// read through.
+func TestPickCandidatesDropsARecordingBehindALink(t *testing.T) {
+	t.Parallel()
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	repo, _, c2, _ := history(t)
+
+	line := recordBuild(t, d, fx.Ticket, c2, "a-a1-f0", []recSpec{{File: "login.svg", Content: "login"}})
+	commitDir := filepath.Dir(filepath.Dir(recordedFile(t, d, fx.Ticket, c2, "a-a1-f0", "login.svg")))
+	moved := filepath.Join(t.TempDir(), "moved")
+	if err := os.Rename(commitDir, moved); err != nil {
+		t.Fatal(err)
+	}
+	symlinkOrSkip(t, moved, commitDir)
+
+	cands, dropped, err := pickCandidates(d, fx.Ticket, []journal.Line{line}, repo, c2)
+	if err != nil {
+		t.Fatalf("pickCandidates: %v", err)
+	}
+	if len(cands) != 0 || !reflect.DeepEqual(dropped, []string{"login.svg (a directory above it is a link)"}) {
+		t.Errorf("candidates = %+v, dropped = %q; want none, and the recording behind the link named", cands, dropped)
+	}
+}
+
+// stagedFile writes a file for the copy and staging checks and returns the
+// evidence directory above it, its path, and a Recording that describes it.
+func stagedFile(t *testing.T, content string) (top, src string, rec journal.Recording) {
+	t.Helper()
+	top = filepath.Join(t.TempDir(), "evidence")
+	dir := filepath.Join(top, "id", "T-1", "recordings", "abc", "run")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src = filepath.Join(dir, "a.svg")
+	if err := os.WriteFile(src, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(content))
+	return top, src, journal.Recording{File: "a.svg", SHA256: hex.EncodeToString(sum[:]), Size: int64(len(content))}
+}
+
+// TestCopyRecordingRefusesWhatIsNotTheCheckedFileInTheMadeDirectory: the copy
+// holds a recording to the line that describes it, and the directory it copies
+// into to the one stage made.
+func TestCopyRecordingRefusesWhatIsNotTheCheckedFileInTheMadeDirectory(t *testing.T) {
+	t.Parallel()
+	top, src, rec := stagedFile(t, "login svg")
+	dir := t.TempDir()
+	made, err := media.LstatPinned(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyRecording(top, src, dir, made, "rec-1.svg", rec); err != nil {
+		t.Fatalf("a recording as described: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "rec-1.svg")); err != nil || string(got) != "login svg" {
+		t.Errorf("copy = %q, %v; want the recording's bytes", got, err)
+	}
+
+	other, err := media.LstatPinned(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = copyRecording(top, src, dir, other, "rec-2.svg", rec)
+	if err == nil || !strings.Contains(err.Error(), "the picks directory was replaced") {
+		t.Errorf("a directory that is not the one made: err = %v, want it refused as replaced", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "rec-2.svg")); !os.IsNotExist(err) {
+		t.Errorf("a file was created in a directory that was not the one made (err %v)", err)
+	}
+
+	wrong := rec
+	wrong.SHA256 = strings.Repeat("0", 64)
+	err = copyRecording(top, src, dir, made, "rec-3.svg", wrong)
+	if err == nil || !strings.Contains(err.Error(), "changed while it was being staged") {
+		t.Errorf("a recording whose bytes are not the recorded hash: err = %v, want it refused", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "rec-3.svg")); !os.IsNotExist(err) {
+		t.Errorf("a copy that failed its hash was left behind (err %v)", err)
+	}
+
+	linkTop, linkSrc, linkRec := stagedFile(t, "login svg")
+	real := filepath.Join(linkTop, "id", "T-1", "recordings")
+	moved := filepath.Join(t.TempDir(), "recordings")
+	if err := os.Rename(real, moved); err != nil {
+		t.Fatal(err)
+	}
+	symlinkOrSkip(t, moved, real)
+	err = copyRecording(linkTop, linkSrc, dir, made, "rec-4.svg", linkRec)
+	if err == nil || !strings.Contains(err.Error(), "a directory above the recording a.svg is a link") {
+		t.Errorf("a recording behind a link: err = %v, want it refused", err)
+	}
+}
+
+// TestVerifyStagedHoldsEveryStagedFileToWhatWasStaged: right before the host
+// attaches them by name, each staged file must still be the regular file of
+// the staged size and hash, in a plain directory.
+func TestVerifyStagedHoldsEveryStagedFileToWhatWasStaged(t *testing.T) {
+	t.Parallel()
+	setup := func(t *testing.T) (top, dir string, files []DemoFile) {
+		t.Helper()
+		top = filepath.Join(t.TempDir(), "evidence")
+		dir = filepath.Join(top, "id", "T-1", "picks", "head")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for name, content := range map[string]string{"rec-1.png": "first", "rec-2.mp4": "second"} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		sum := func(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+		files = []DemoFile{{Name: "rec-1.png", SHA256: sum("first"), Size: 5}, {Name: "rec-2.mp4", SHA256: sum("second"), Size: 6}}
+		return top, dir, files
+	}
+
+	top, dir, files := setup(t)
+	if err := verifyStaged(top, dir, files); err != nil {
+		t.Fatalf("files as staged: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		change func(t *testing.T, dir string)
+		want   string
+	}{
+		{"a file rewritten to the same size", func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "rec-1.png"), []byte("FIRST"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, "rec-1.png changed"},
+		{"a file that grew", func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "rec-2.mp4"), []byte("second, longer"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, "rec-2.mp4 changed size"},
+		{"a file removed", func(t *testing.T, dir string) {
+			if err := os.Remove(filepath.Join(dir, "rec-1.png")); err != nil {
+				t.Fatal(err)
+			}
+		}, "rec-1.png cannot be read"},
+		{"a file replaced by a directory", func(t *testing.T, dir string) {
+			p := filepath.Join(dir, "rec-1.png")
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(p, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, "rec-1.png is not a regular file"},
+		{"a file replaced by a link", func(t *testing.T, dir string) {
+			target := filepath.Join(t.TempDir(), "elsewhere")
+			if err := os.WriteFile(target, []byte("first"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			p := filepath.Join(dir, "rec-1.png")
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+			symlinkOrSkip(t, target, p)
+		}, "rec-1.png is not a regular file"},
+		{"the directory replaced by a link", func(t *testing.T, dir string) {
+			moved := filepath.Join(t.TempDir(), "moved")
+			if err := os.Rename(dir, moved); err != nil {
+				t.Fatal(err)
+			}
+			symlinkOrSkip(t, moved, dir)
+		}, "not a plain directory"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			top, dir, files := setup(t)
+			c.change(t, dir)
+			err := verifyStaged(top, dir, files)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("verifyStaged = %v, want a refusal naming %q", err, c.want)
+			}
+		})
 	}
 }

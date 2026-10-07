@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
@@ -106,18 +107,40 @@ func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
 
 // TestPublishBackendFailsOnlyWhenUsed: a backend that is not installed does
 // not stop a publish that has no recordings to pick from, and a backend name
-// jig does not have is refused at once.
+// jig does not have is refused at once. The availability check is the
+// caller's, so the branch of a backend that is not there is reached here with
+// one that is missing.
 func TestPublishBackendFailsOnlyWhenUsed(t *testing.T) {
 	t.Parallel()
-	if _, err := publishBackend("nonesuch", ""); err == nil {
+	gone := &axi.Error{Msg: "the headless backend needs claude, which is not on PATH", Code: "BACKEND_UNAVAILABLE"}
+	missing := func(string) error { return gone }
+	present := func(string) error { return nil }
+
+	if _, err := publishBackend("nonesuch", "", present); err == nil {
 		t.Error("an unknown backend name was accepted")
 	}
-	if b, err := publishBackend("fake", t.TempDir()); err != nil || b == nil {
-		t.Errorf("publishBackend(fake) = %v, %v; want the fake backend", b, err)
+	if _, err := publishBackend("nonesuch", "", missing); err == nil {
+		t.Error("an unknown backend name was accepted because its program was not checked first")
 	}
-	gone := errors.New("the backend needs a program that is not on PATH")
-	if err := (unavailableBackend{gone}).Run(session.Dispatch{}); !errors.Is(err, gone) {
-		t.Errorf("an unavailable backend ran with %v, want it to fail with why it is unavailable", err)
+
+	b, err := publishBackend("headless", "", missing)
+	if err != nil {
+		t.Fatalf("a backend that is not installed stopped publish: %v", err)
+	}
+	if _, ok := b.(unavailableBackend); !ok {
+		t.Fatalf("publishBackend(headless, missing) = %T, want an unavailableBackend", b)
+	}
+	var ae *axi.Error
+	if err := b.Run(session.Dispatch{}); !errors.As(err, &ae) || ae.Code != "BACKEND_UNAVAILABLE" {
+		t.Errorf("an unavailable backend ran with %v, want it to fail with BACKEND_UNAVAILABLE", err)
+	}
+
+	b, err = publishBackend("fake", t.TempDir(), present)
+	if err != nil {
+		t.Fatalf("publishBackend(fake): %v", err)
+	}
+	if _, ok := b.(unavailableBackend); ok || b == nil {
+		t.Errorf("publishBackend(fake) = %T, want the fake backend", b)
 	}
 }
 

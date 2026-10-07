@@ -121,7 +121,14 @@ func publishPicks(s picksStep) (PicksReport, *DemoRenderResult, error) {
 		return refuse(pickRefused("the recordings could not be listed: %v", cerr))
 	}
 
-	fp := pickFingerprint(cands)
+	// The intent the pick is judged against is part of the question: resolved
+	// once, here, it is what the session is handed and what a reused pick must
+	// have been made for.
+	intent, intentText, err := resolveIntent(s.d.Store, s.ticket)
+	if err != nil {
+		return refuse(pickRefused("the intent could not be read: %v", err))
+	}
+	fp := pickFingerprint(cands, intent.Source, intentSHA256(intent.Source, intentText))
 	var (
 		p      pick
 		reused bool
@@ -134,7 +141,7 @@ func publishPicks(s picksStep) (PicksReport, *DemoRenderResult, error) {
 		}
 	}
 	if !reused {
-		res, err := s.dispatch(cands, dir)
+		res, err := s.dispatch(cands, intent, dir)
 		if err != nil {
 			return refuse(err)
 		}
@@ -207,16 +214,12 @@ func (s picksStep) hostDirs(dir string) []hostDir {
 // because it names the intent by its absolute path. It runs on the cheapest
 // rung of the staircase at low effort, and asks the backend to keep no
 // transcript, as the intent summarizer does.
-func (s picksStep) dispatch(cands []pickCandidate, dir string) (PicksResult, error) {
+func (s picksStep) dispatch(cands []pickCandidate, intent Intent, dir string) (PicksResult, error) {
 	if s.backend == nil {
 		return PicksResult{}, pickRefused("no session backend was given to pick the recordings with")
 	}
 	if dir == "" {
 		return PicksResult{}, pickRefused("there is no jig home to keep the picked recordings in")
-	}
-	intent, _, err := resolveIntent(s.d.Store, s.ticket)
-	if err != nil {
-		return PicksResult{}, pickRefused("the intent could not be read: %v", err)
 	}
 	req := PicksRequest{Ticket: s.ticket, HeadSHA: s.head, Intent: intent}
 	for _, c := range cands {
@@ -285,8 +288,12 @@ func (s picksStep) dispatch(cands []pickCandidate, dir string) (PicksResult, err
 // them as the host attaches them: each file is checked as it is copied (a
 // regular file of the recorded size whose bytes hash to the recorded sha256,
 // read through the handle that was checked), because the session has run
-// since the candidates were checked. A file that fails refuses the whole pick.
-func (s picksStep) stage(dir string, p pick) ([]DemoFile, error) {
+// since the candidates were checked. The directory is pinned once it is made,
+// and checked to be that very directory before each file is created in it.
+// Whatever dir held before is gone, so a pick of fewer files than an earlier
+// pick of the same head leaves none of the earlier one's behind. A file that
+// fails refuses the whole pick and leaves no directory.
+func (s picksStep) stage(dir string, p pick) (files []DemoFile, err error) {
 	if dir == "" {
 		return nil, pickRefused("there is no jig home to keep the picked recordings in")
 	}
@@ -305,15 +312,24 @@ func (s picksStep) stage(dir string, p pick) ([]DemoFile, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, pickRefused("the picks directory could not be made: %v", err)
 	}
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(dir)
+		}
+	}()
+	made, err := media.LstatPinned(dir)
+	if err != nil || made.Mode().Type() != os.ModeDir {
+		return nil, pickRefused("the picks directory is not a plain directory")
+	}
 	items := p.items()
-	files := make([]DemoFile, 0, len(items))
+	files = make([]DemoFile, 0, len(items))
 	for i, it := range items {
 		src, err := it.cand.path(s.d, storeID, s.ticket)
 		if err != nil {
 			return nil, pickRefused("the recording %s cannot be found: %v", it.cand.rec.File, err)
 		}
 		name := fmt.Sprintf("rec-%d.%s", i+1, it.cand.ext())
-		if err := copyRecording(top, src, filepath.Join(dir, name), it.cand.rec); err != nil {
+		if err := copyRecording(top, src, dir, made, name, it.cand.rec); err != nil {
 			return nil, err
 		}
 		files = append(files, DemoFile{Name: name, SHA256: it.cand.rec.SHA256, Size: it.cand.rec.Size, Caption: it.shownCaption()})
@@ -321,11 +337,12 @@ func (s picksStep) stage(dir string, p pick) ([]DemoFile, error) {
 	return files, nil
 }
 
-// copyRecording copies the recording rec from src to dst, which must not
-// exist, and refuses when src is not what rec describes. src is checked and
-// opened and the very handle is read and hashed as it is copied, so a file
+// copyRecording copies the recording rec from src to dir/name, which must not
+// exist, and refuses when src is not what rec describes or dir is no longer
+// the directory made, which stage pinned when it made it. src is checked
+// and opened and the very handle is read and hashed as it is copied, so a file
 // swapped or grown after the check is refused, not copied.
-func copyRecording(top, src, dst string, rec journal.Recording) error {
+func copyRecording(top, src, dir string, made os.FileInfo, name string, rec journal.Recording) error {
 	if err := media.PlainParents(top, src); err != nil {
 		return pickRefused("a directory above the recording %s is a link", rec.File)
 	}
@@ -346,6 +363,10 @@ func copyRecording(top, src, dst string, rec journal.Recording) error {
 	if opened, err := in.Stat(); err != nil || !os.SameFile(info, opened) {
 		return pickRefused("the recording %s changed while it was being read", rec.File)
 	}
+	if cur, err := media.LstatPinned(dir); err != nil || cur.Mode().Type() != os.ModeDir || !os.SameFile(made, cur) {
+		return pickRefused("the picks directory was replaced while the recordings were being staged")
+	}
+	dst := filepath.Join(dir, name)
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return pickRefused("the recording %s could not be staged: %v", rec.File, err)
@@ -361,6 +382,37 @@ func copyRecording(top, src, dst string, rec journal.Recording) error {
 	case n != info.Size() || hex.EncodeToString(h.Sum(nil)) != rec.SHA256:
 		_ = os.Remove(dst)
 		return pickRefused("the recording %s changed while it was being staged", rec.File)
+	}
+	return nil
+}
+
+// verifyStaged checks, right before the host attaches them, that dir is still
+// a plain directory under plain parents and that every staged file in it is
+// still the regular file of the recorded size and sha256 stage made. The files
+// are attached by name from dir, so a file swapped or edited between staging
+// and the attach call would otherwise be the one uploaded.
+func verifyStaged(top, dir string, files []DemoFile) error {
+	if err := media.PlainParents(top, dir); err != nil {
+		return err
+	}
+	info, err := media.LstatPinned(dir)
+	if err != nil || info.Mode().Type() != os.ModeDir {
+		return fmt.Errorf("the staging directory is not a plain directory")
+	}
+	for _, f := range files {
+		path := filepath.Join(dir, f.Name)
+		fi, err := media.LstatPinned(path)
+		switch {
+		case err != nil:
+			return fmt.Errorf("%s cannot be read", f.Name)
+		case !fi.Mode().IsRegular():
+			return fmt.Errorf("%s is not a regular file", f.Name)
+		case fi.Size() != f.Size:
+			return fmt.Errorf("%s changed size", f.Name)
+		}
+		if sum, err := media.HashRegularFile(path, fi); err != nil || sum != f.SHA256 {
+			return fmt.Errorf("%s changed", f.Name)
+		}
 	}
 	return nil
 }

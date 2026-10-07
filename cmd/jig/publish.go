@@ -38,7 +38,7 @@ func cmdPublish(args []string, stdout io.Writer) int {
 	if err := requireWork(st, ticket); err != nil {
 		return renderErr(stdout, err)
 	}
-	backend, err := publishBackend(*backendFlag, *scenario)
+	backend, err := publishBackend(*backendFlag, *scenario, session.Available)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -75,13 +75,14 @@ func cmdPublish(args []string, stdout io.Writer) int {
 // installed does not stop a publish: it is handed over as one that fails when
 // it is used, and the pick is then refused with that failure and the gate's
 // demo stands in. A backend name jig does not have is an error at once.
-func publishBackend(backendFlag, scenario string) (session.Backend, error) {
+// available says whether the program a backend runs is there (session.Available).
+func publishBackend(backendFlag, scenario string, available func(name string) error) (session.Backend, error) {
 	kind := backendName(backendFlag, scenario)
 	backend, err := session.New(kind, session.Options{ScenarioDir: scenario})
 	if err != nil {
 		return nil, err
 	}
-	if err := session.Available(kind); err != nil {
+	if err := available(kind); err != nil {
 		return unavailableBackend{err}, nil
 	}
 	return backend, nil

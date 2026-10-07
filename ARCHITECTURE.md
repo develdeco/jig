@@ -86,17 +86,21 @@ store. The recordings of a builder's green oracle run
 ([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md))
 live in the same tree, one directory per oracle run, under
 `<store id>/<ticket>/recordings/<commit>/<run>/`, and the journal's `recorded`
-line is their manifest. The files a publish picks from them are copied to
-`<store id>/<ticket>/picks/<head>/` (as `rec-<n>.<ext>`), beside the pick
-session's `<head>.picks.json` input and `<head>.result.json` answer, and the
-journal's `publish-picks` line records the pick. The session's input, `demo.json`, lives beside the
+line is their manifest. The gate demo session's input, `demo.json`, lives beside the
 media (`<head sha>.demo.json`, in the ticket's evidence directory): it holds the
 absolute `media_dir`, a path that names the operator's jig home, and nothing
 jig itself writes to the store for a demo, which is committed and pushed, does.
-The session's own words (its result file, and the summary and captions
+The demo session's own words (its result file, and the summary and captions
 `demo.yaml` copies from it) are recorded as written, like the reviewer's
 `result.json` summary: jig does not filter or rewrite model prose. See
 [ADR 0014](docs/adr/0014-demo-session-at-the-gate.md).
+
+The files a publish picks from the recordings are copied to
+`<store id>/<ticket>/picks/<head>/` (as `rec-<n>.<ext>`). The pick session's
+own input and answer, `<head>.picks.json` and `<head>.result.json`, sit beside
+that directory, and the journal's `publish-picks` line records the pick. As
+`demo.json` does, `picks.json` names an absolute path of this machine (the
+intent file's), so neither stays in the store.
 
 ## Manifest and invariants
 
@@ -753,8 +757,10 @@ under a subject naming it (see the store push above).
    ([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md),
    `publishPicks` in `picksrun.go`, run just before the body is written, for
    the head the gate reviewed). The candidates are the journal's `recorded`
-   lines whose commit that head holds (`gitx.Missing`), the latest of each
-   flow, scenario and step, each checked again against its file under the jig
+   lines whose commit that head holds (`gitx.Missing`); of the lines that
+   recorded a flow, scenario and step, the latest one's, every file of it with
+   that key (a screenshot and a video of one step are two candidates), each
+   checked again against its file under the jig
    home (`pickCandidates`, `recordingProblem`; a failure is named in the
    output and not offered). With none, nothing changes and no session is
    dispatched. Otherwise one short session (`PublishOpts.Backend`: `jig
@@ -765,16 +771,18 @@ under a subject naming it (see the store push above).
    strictly (`ParsePicksResult`) and validated in jig's words (`resolvePicks`:
    known ids, none twice, step order within a candidate flow, bounded
    non-empty words, at most `media.MaxFiles`). The picked files are copied
-   into `PicksDir`, each hashed as it is copied (`copyRecording`), as
+   into `PicksDir` (pinned once made, and cleared of whatever an earlier pick
+   of the head left), each hashed as it is copied (`copyRecording`), as
    `rec-<n>.<ext>` in flow order, and go to the host's attach call as a demo's
    media do; the section (`renderPicksSection`) is the summary, then a `###
    <title>` per flow with the same bullets as above, so the read-back patch
    finds them, with host paths left out whole. A refused pick or a failed
    session is journaled (`publish-picks`, `refused: <reason>`), said on
    stderr and in `PublishReport.Picks`, and the gate's demo renders as it
-   always did. A publish of the same head over the same candidates (their
-   fingerprint) takes the earlier pick from the journal, re-validated, and
-   dispatches nothing.
+   always did. The staged files are checked again right before the host reads
+   them (`verifyStaged`, `PUBLISH_PICKS_CHANGED`). A publish of the same head
+   over the same candidates and intent (their fingerprint) takes the earlier
+   pick from the journal, re-validated, and dispatches nothing.
    `## Verification` names the oracles green at the last clean round
    (`SortedOracleNames`, the manifest Publish itself resolved) and the
    reviewed head, the revalidation tier, and one line counting the review's
