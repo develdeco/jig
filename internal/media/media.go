@@ -71,10 +71,10 @@ func Kind(ext string) string {
 	return ""
 }
 
-// plainName reports whether name is a single file name: no path separator
+// PlainName reports whether name is a single file name: no path separator
 // (either spelling), no drive or stream colon, not a dot name, and - via
 // filepath.IsLocal - not a Windows reserved device name.
-func plainName(name string) bool {
+func PlainName(name string) bool {
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\:\x00") {
 		return false
 	}
@@ -174,7 +174,7 @@ func Verify(dir, dirName string, made os.FileInfo, listed []Listed) ([]File, err
 	seen := map[string]bool{}
 	files := make([]File, 0, len(listed))
 	for i, m := range listed {
-		if !plainName(m.File) {
+		if !PlainName(m.File) {
 			return nil, fmt.Errorf("%s is not a plain file name directly inside %s", EntryLabel(i, m.File), dirName)
 		}
 		key := strings.ToLower(m.File)

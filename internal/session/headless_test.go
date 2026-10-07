@@ -1082,3 +1082,56 @@ func indexOf(args []string, s string) int {
 	}
 	return -1
 }
+
+// TestHeadlessChildDoesNotInheritTheRecordDir: JIG_RECORD_DIR is how an oracle
+// run is told to record (ADR 0029), and only jig's own builder-green oracle
+// run sets it. jig can itself run inside such a run (it tests itself), so a
+// dispatched session, which starts the project's tests, must not inherit it,
+// whether Options.Env is nil (the inherited environment) or given.
+func TestHeadlessChildDoesNotInheritTheRecordDir(t *testing.T) {
+	stubDir := buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude")
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	logFile := filepath.Join(t.TempDir(), "claude.log")
+	t.Setenv("CLAUDE_STUB_LOG", logFile)
+	t.Setenv("CLAUDE_STUB_STDOUT", strings.TrimSuffix(cliResultJSON(t, false, "done", nil), "\n"))
+	t.Setenv("JIG_RECORD_DIR", filepath.Join(t.TempDir(), "outer"))
+
+	d := realDispatch(t, true)
+	backend, err := New("headless", Options{ScreenBinary: builtJigBinary(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.Run(d); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read claude stub log: %v", err)
+	}
+	var call struct {
+		Env []string `json:"env"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &call); err != nil {
+		t.Fatalf("parse claude stub log: %v", err)
+	}
+	kept := false
+	for _, kv := range call.Env {
+		name, _, _ := strings.Cut(kv, "=")
+		if strings.EqualFold(name, "JIG_RECORD_DIR") {
+			t.Errorf("the child inherited %q", kv)
+		}
+		kept = kept || name == "CLAUDE_STUB_LOG"
+	}
+	if !kept {
+		t.Errorf("the child did not inherit the rest of the environment: %v", call.Env)
+	}
+
+	given := childEnv("linux", []string{"FOO=bar", "JIG_RECORD_DIR=outer"}, "wt")
+	if want := []string{"FOO=bar", "PWD=wt"}; !reflect.DeepEqual(given, want) {
+		t.Errorf("childEnv kept JIG_RECORD_DIR: %v, want %v", given, want)
+	}
+	given = childEnv("windows", []string{"FOO=bar", "jig_record_dir=outer"}, "wt")
+	if want := []string{"FOO=bar", "PWD=wt"}; !reflect.DeepEqual(given, want) {
+		t.Errorf("childEnv (windows) kept a differently cased JIG_RECORD_DIR: %v, want %v", given, want)
+	}
+}

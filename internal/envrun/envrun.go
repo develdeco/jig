@@ -102,6 +102,43 @@ func Shell(cmd, dir string) error {
 	return nil
 }
 
+// RecordDirEnv names the variable that gives an oracle run the directory its
+// scenarios record into (ADR 0029). jig sets it only on a builder's green
+// oracle run; unset means do not record. Because the variable is how a run
+// opts in, a child of jig never inherits it from jig's own environment: jig
+// can itself run inside a recording oracle run (it tests itself), and its
+// own runs and sessions must not record into that run's directory.
+const RecordDirEnv = "JIG_RECORD_DIR"
+
+// Environ is the process environment a child of jig inherits: os.Environ
+// without RecordDirEnv.
+func Environ() []string {
+	return environWithout(os.Environ(), runtime.GOOS, RecordDirEnv)
+}
+
+// environWithout returns environ ("NAME=value" entries) without the entries
+// named in names. Names are compared case-insensitively on goos == "windows",
+// where environment variable names are not case sensitive, and exactly
+// elsewhere. environ is not modified.
+func environWithout(environ []string, goos string, names ...string) []string {
+	same := func(a, b string) bool { return a == b }
+	if goos == "windows" {
+		same = strings.EqualFold
+	}
+	out := make([]string, 0, len(environ))
+next:
+	for _, kv := range environ {
+		key, _, _ := strings.Cut(kv, "=")
+		for _, name := range names {
+			if same(key, name) {
+				continue next
+			}
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 // ShellOutput runs cmd like Shell and returns its combined stdout and
 // stderr, which a failed oracle run hands back to the session that must fix
 // it. A run longer than limit is killed and reported as failed, and Wait
@@ -114,8 +151,10 @@ func ShellOutput(cmd, dir string, limit time.Duration) (string, error) {
 // ShellOutputEnv is ShellOutput with extra environment variables, each as
 // "NAME=value", added to the process environment for this command alone. It
 // sets them on the command, never on the process, since two runs of jig's
-// loop may be in flight at once. With none, the command inherits the process
-// environment as ShellOutput always did.
+// loop may be in flight at once. The command inherits the process environment
+// (Environ: without an inherited RecordDirEnv, so a run given none does not
+// record into the directory of an outer jig run), and a variable in env
+// replaces an inherited one of the same name.
 func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
@@ -126,9 +165,7 @@ func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string,
 		c = exec.CommandContext(ctx, "sh", "-c", cmd)
 	}
 	c.Dir = dir
-	if len(env) > 0 {
-		c.Env = append(os.Environ(), env...)
-	}
+	c.Env = append(Environ(), env...)
 	NewProcessGroup(c)
 	c.Cancel = func() error { return KillTree(c) }
 	c.WaitDelay = 10 * time.Second

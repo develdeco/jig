@@ -41,7 +41,10 @@ type Line struct {
 	Head string `json:"head,omitempty"`
 	// Recordings is a recorded line's files: what the build's end-to-end
 	// scenarios wrote at a builder's green oracle run, with the commit it
-	// ran at in Commit (ADR 0029).
+	// ran at in Commit (ADR 0029). RecordRun names the oracle run, one
+	// directory below the commit's, so a reader finds the files at
+	// home.RecordDir(root, storeID, ticket, Commit, RecordRun).
+	RecordRun  string      `json:"record_run,omitempty"`
 	Recordings []Recording `json:"recordings,omitempty"`
 }
 

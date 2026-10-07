@@ -864,7 +864,7 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 			prompt = renderDirtyTreePrompt(oracleCmd, dirty, dispatch.ResultJSON)
 		} else {
 			evidence := cleanHead(lease.Dir)
-			rec := rc.startRecording(evidence)
+			rec := rc.startRecording(sl.ID, attempt, fixes, evidence)
 			started := time.Now()
 			out, err := rc.d.runOracle(oracleCmd, lease.Dir, rec.env())
 			// Rounded up, so every run records at least a second and 0

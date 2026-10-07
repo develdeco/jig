@@ -181,8 +181,8 @@ func TestKindClassifiesALowercaseExtension(t *testing.T) {
 func TestPlainNameIsOneFileNameAndNothingElse(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"a.png", "UPPER.PNG", "shot 1.png", ".hidden.png"} {
-		if !plainName(name) {
-			t.Errorf("plainName(%q) = false, want true", name)
+		if !PlainName(name) {
+			t.Errorf("PlainName(%q) = false, want true", name)
 		}
 	}
 	bad := []string{"", ".", "..", "a/b.png", `a\b.png`, "../a.png", `..\a.png`, "/a.png", "C:a.png", "a.png:stream", "a\x00.png"}
@@ -190,8 +190,8 @@ func TestPlainNameIsOneFileNameAndNothingElse(t *testing.T) {
 		bad = append(bad, "NUL")
 	}
 	for _, name := range bad {
-		if plainName(name) {
-			t.Errorf("plainName(%q) = true, want false", name)
+		if PlainName(name) {
+			t.Errorf("PlainName(%q) = true, want false", name)
 		}
 	}
 }

@@ -101,7 +101,9 @@ type Options struct {
 	// `claude` child process gets: this list, with any PWD or OLDPWD entry
 	// dropped and PWD then set to the dispatch's own worktree (cmd.Dir) -
 	// never a mix with this process's own environment. Nil, the default,
-	// means the child inherits this process's full environment unchanged. A caller that dispatches against a corpus or
+	// means the child inherits this process's full environment, except
+	// JIG_RECORD_DIR (envrun.RecordDirEnv), which only jig's own oracle run
+	// sets and no session inherits. A caller that dispatches against a corpus or
 	// other content it does not fully trust - internal/revieweval's live
 	// path above all - should build this from a filtered copy of its own
 	// environment, never pass its own os.Environ() through untouched: a nil

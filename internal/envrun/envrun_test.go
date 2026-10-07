@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -203,6 +204,73 @@ func TestShellOutputEnvGivesTheChildItsVariables(t *testing.T) {
 		out, err := run()
 		if err != nil || strings.Contains(out, "hello-env") || !strings.Contains(out, want) {
 			t.Errorf("%s: out=%q err=%v, want the variable unset and the inherited %s kept", name, out, err, inherited)
+		}
+	}
+}
+
+// TestEnvironWithout drops the named variables by the rules of the OS the
+// environment is for, and leaves the entries it keeps (including Windows'
+// own "=C:" ones) as they are.
+func TestEnvironWithout(t *testing.T) {
+	environ := []string{"A=1", "JIG_RECORD_DIR=outer", "jig_record_dir=lower", "=C:=C:/work", "B=JIG_RECORD_DIR=x", "JIG_RECORD_DIRX=y"}
+	if got, want := environWithout(environ, "linux", RecordDirEnv), []string{"A=1", "jig_record_dir=lower", "=C:=C:/work", "B=JIG_RECORD_DIR=x", "JIG_RECORD_DIRX=y"}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("linux: %q, want %q", got, want)
+	}
+	if got, want := environWithout(environ, "windows", RecordDirEnv), []string{"A=1", "=C:=C:/work", "B=JIG_RECORD_DIR=x", "JIG_RECORD_DIRX=y"}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("windows: %q, want %q", got, want)
+	}
+	if len(environ) != 6 || environ[1] != "JIG_RECORD_DIR=outer" {
+		t.Errorf("the environment given was modified: %q", environ)
+	}
+}
+
+// envrunHelperEnv marks a run of this test binary as the child
+// TestShellOutputDoesNotPassOnTheRecordDirItInherited drives.
+const envrunHelperEnv = "JIG_ENVRUN_TEST_HELPER"
+
+// TestShellOutputHelper runs in the child of the test below, in a process
+// whose environment holds a JIG_RECORD_DIR, and prints what a command it
+// shells out sees. Outside that child it does nothing.
+func TestShellOutputHelper(t *testing.T) {
+	if os.Getenv(envrunHelperEnv) == "" {
+		t.Skip("only the child of TestShellOutputDoesNotPassOnTheRecordDirItInherited runs this")
+	}
+	show := `if [ -n "$JIG_RECORD_DIR" ]; then echo "set-$JIG_RECORD_DIR"; else echo unset; fi`
+	if runtime.GOOS == "windows" {
+		show = "if defined JIG_RECORD_DIR (echo set-%JIG_RECORD_DIR%) else (echo unset)"
+	}
+	dir := t.TempDir()
+	plain, err := ShellOutput(show, dir, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	given, err := ShellOutputEnv(show, dir, time.Minute, []string{RecordDirEnv + "=given"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("plain=%s", strings.TrimSpace(plain))
+	t.Logf("given=%s", strings.TrimSpace(given))
+}
+
+// TestShellOutputDoesNotPassOnTheRecordDirItInherited: jig can run inside a
+// recording oracle run, so its own environment may hold JIG_RECORD_DIR. A
+// command ShellOutput runs (the gate's oracle) must not see it, and a command
+// ShellOutputEnv gives one must see that one and no other. The environment is
+// set on a child process, never on this one.
+func TestShellOutputDoesNotPassOnTheRecordDirItInherited(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestShellOutputHelper$", "-test.v")
+	cmd.Env = append(os.Environ(), envrunHelperEnv+"=1", RecordDirEnv+"=outer")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper: %v\n%s", err, out)
+	}
+	got := string(out)
+	if strings.Contains(got, "set-outer") {
+		t.Errorf("a command saw the inherited JIG_RECORD_DIR:\n%s", got)
+	}
+	for _, want := range []string{"plain=unset", "given=set-given"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("helper output lacks %q:\n%s", want, got)
 		}
 	}
 }

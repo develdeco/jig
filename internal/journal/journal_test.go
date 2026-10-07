@@ -63,7 +63,7 @@ func TestRecordingsRoundTripAndOldLinesStillRead(t *testing.T) {
 		{File: "a.svg", SHA256: "abc", Size: 12, Scenario: "login", Flow: "onboarding", Step: 2, Caption: "signs in"},
 		{File: "b.png", SHA256: "def", Size: 7, Scenario: "b"},
 	}
-	if err := Append(st, "JIG-1", Line{Slice: "a", Event: "recorded", Commit: "abc1234", Attempt: 1, Recordings: want}); err != nil {
+	if err := Append(st, "JIG-1", Line{Slice: "a", Event: "recorded", Commit: "abc1234", Attempt: 1, RecordRun: "a-a1-f0", Recordings: want}); err != nil {
 		t.Fatal(err)
 	}
 	if err := Append(st, "JIG-1", Line{Slice: "a", Event: "oracle", Outcome: "pass"}); err != nil {
@@ -76,6 +76,9 @@ func TestRecordingsRoundTripAndOldLinesStillRead(t *testing.T) {
 	if !reflect.DeepEqual(got[0].Recordings, want) {
 		t.Errorf("Recordings = %+v, want %+v", got[0].Recordings, want)
 	}
+	if got[0].RecordRun != "a-a1-f0" || got[1].RecordRun != "" {
+		t.Errorf("RecordRun = %q and %q, want a-a1-f0 and none", got[0].RecordRun, got[1].RecordRun)
+	}
 	if got[1].Recordings != nil {
 		t.Errorf("a line with no recordings read back %+v", got[1].Recordings)
 	}
@@ -85,13 +88,16 @@ func TestRecordingsRoundTripAndOldLinesStillRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	written := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	for _, key := range []string{`"recordings":[`, `"file":"a.svg"`, `"sha256":"abc"`, `"size":12`, `"scenario":"login"`, `"flow":"onboarding"`, `"step":2`, `"caption":"signs in"`} {
+	for _, key := range []string{`"record_run":"a-a1-f0"`, `"recordings":[`, `"file":"a.svg"`, `"sha256":"abc"`, `"size":12`, `"scenario":"login"`, `"flow":"onboarding"`, `"step":2`, `"caption":"signs in"`} {
 		if !strings.Contains(written[0], key) {
 			t.Errorf("the recorded line lacks %s: %s", key, written[0])
 		}
 	}
 	if strings.Count(written[0], `"flow"`) != 1 || strings.Count(written[0], `"step"`) != 1 || strings.Count(written[0], `"caption"`) != 1 {
 		t.Errorf("an unset flow, step or caption is written: %s", written[0])
+	}
+	if strings.Contains(written[1], "record_run") {
+		t.Errorf("a line with no record run writes the key: %s", written[1])
 	}
 	if strings.Contains(written[1], "recordings") {
 		t.Errorf("a line with no recordings writes the key: %s", written[1])
