@@ -38,8 +38,9 @@ var fakeGitEnv = []string{
 // applied and committed with a pinned identity, and the scenario's
 // result.json is copied to d.ResultJSON (substituting the real HEAD sha for
 // a green result whose commit field is "@HEAD" or absent). A gate-review
-// dispatch (d.Slice == "gate") is played back separately by runGate, and a
-// gate demo dispatch (d.Slice == GateDemoSlice) by runGateDemo.
+// dispatch (d.Slice == "gate") is played back separately by runGate, a gate
+// demo dispatch (d.Slice == GateDemoSlice) by runGateDemo, and a publish
+// picks dispatch (d.Slice == PublishPicksSlice) by runPublishPicks.
 // d.NoSessionPersistence is accepted and ignored: the fake runs no session,
 // so there is no transcript to keep or not.
 func (b *fakeBackend) Run(d Dispatch) error {
@@ -48,6 +49,8 @@ func (b *fakeBackend) Run(d Dispatch) error {
 		return b.runGate(d)
 	case GateDemoSlice:
 		return b.runGateDemo(d)
+	case PublishPicksSlice:
+		return b.runPublishPicks(d)
 	}
 	if d.Slice == "intent" {
 		return b.runIntent(d)
@@ -188,4 +191,18 @@ func (b *fakeBackend) runGateDemo(d Dispatch) error {
 		}
 	}
 	return writeResultBytes(d.ResultJSON, result)
+}
+
+// runPublishPicks plays back a publish picks dispatch: it copies
+// <scenario>/publish/picks-result.json verbatim into d.ResultJSON, the way
+// runGateDemo plays back a demo result. A publish is not a gate round, so the
+// file is the scenario's one. Missing coverage is an error, never a silent
+// "nothing picked": a scenario that reaches a pick without scripting it must
+// fail loudly. The worktree is never touched.
+func (b *fakeBackend) runPublishPicks(d Dispatch) error {
+	data, err := os.ReadFile(filepath.Join(b.scenarioDir, "publish", "picks-result.json"))
+	if err != nil {
+		return fmt.Errorf("session/fake: scenario has no publish/picks-result.json")
+	}
+	return writeResultBytes(d.ResultJSON, data)
 }

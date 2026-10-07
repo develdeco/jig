@@ -389,3 +389,51 @@ func TestVerifiedSlices(t *testing.T) {
 		t.Errorf("VerifiedSlices =\n%+v\nwant\n%+v", got, want)
 	}
 }
+
+// TestPickRoundTripsAndOtherLinesWriteNone: a publish-picks line carries its
+// pick under the "pick" key, flows and items in order; a line with no pick
+// writes no pick key and reads back with none, and a line from before Pick
+// existed still reads.
+func TestPickRoundTripsAndOtherLinesWriteNone(t *testing.T) {
+	st := newTestStore(t)
+	want := &Pick{
+		Candidates: "f00d",
+		Summary:    "the rounding fix",
+		Flows: []PickFlow{
+			{Title: "Rounding", Items: []PickItem{{ID: "r1", File: "a.svg"}, {ID: "r2", File: "b.png", Caption: "after"}}},
+			{Title: "Errors", Items: []PickItem{{ID: "r3", File: "c.mp4"}}},
+		},
+	}
+	if err := Append(st, "JIG-1", Line{Event: "publish-picks", Commit: "abc1234", Outcome: "picked", Pick: want}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Append(st, "JIG-1", Line{Event: "publish-picks", Commit: "abc1234", Outcome: "refused: it picked nothing"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(st, "JIG-1")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("Read = %+v, %v", got, err)
+	}
+	if !reflect.DeepEqual(got[0].Pick, want) {
+		t.Errorf("Pick = %+v, want %+v", got[0].Pick, want)
+	}
+	if got[1].Pick != nil {
+		t.Errorf("a refused line read back the pick %+v", got[1].Pick)
+	}
+	raw, err := os.ReadFile(journalPath(st, "JIG-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	written := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	for _, key := range []string{`"pick":{`, `"candidates":"f00d"`, `"summary":"the rounding fix"`, `"title":"Rounding"`, `"id":"r2"`, `"file":"b.png"`, `"caption":"after"`} {
+		if !strings.Contains(written[0], key) {
+			t.Errorf("the picks line lacks %s: %s", key, written[0])
+		}
+	}
+	if strings.Count(written[0], `"caption"`) != 1 {
+		t.Errorf("an item that kept its recording's caption writes one: %s", written[0])
+	}
+	if strings.Contains(written[1], `"pick"`) {
+		t.Errorf("a line with no pick writes the key: %s", written[1])
+	}
+}

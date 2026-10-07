@@ -188,3 +188,9 @@ func available(goos, name string) error {
 // working. A backend that plays scenarios back tells it from a slice attempt
 // (any other Slice) and from a gate review (Slice "gate") by this name.
 const GateDemoSlice = "gate-demo"
+
+// PublishPicksSlice is the Dispatch.Slice of a publish picks session: the
+// short dispatch that chooses which of the build's recordings a pull request
+// shows and composes them into flows (ADR 0029). A backend that plays
+// scenarios back tells it from a slice attempt by this name.
+const PublishPicksSlice = "publish-picks"

@@ -85,6 +85,21 @@ func RecordDir(root, storeID, ticket, sha, run string) (string, error) {
 	return filepath.Join(root, "evidence", storeID, ticket, "recordings", sha, run), nil
 }
 
+// PicksDir returns where the recordings one publish picked are staged under
+// the jig home root: <root>/evidence/<storeID>/<ticket>/picks/<sha>, sha being
+// the head publish ships (ADR 0029). Publish copies the picked files here, named
+// for the pull request, and hands this directory to the host's attach call. It
+// sits in the same evidence tree as EvidenceDir, under a "picks" directory of
+// the ticket, so it never shares a name with a gate head's demo media or with
+// the "recordings" directory. The parts are held to the same rule as
+// EvidenceDir's.
+func PicksDir(root, storeID, ticket, sha string) (string, error) {
+	if err := evidenceParts([]evidencePart{{"store id", storeID}, {"ticket", ticket}, {"sha", sha}}); err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "evidence", storeID, ticket, "picks", sha), nil
+}
+
 // evidencePart is one caller-supplied part of an evidence path, named for
 // the refusal.
 type evidencePart struct{ what, name string }
