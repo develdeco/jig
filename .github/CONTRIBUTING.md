@@ -14,6 +14,10 @@ go test -timeout 30m ./...
 `gofmt -l .` should print nothing, and `go vet ./...` should be clean. See
 Testing rules below for what the suite does and doesn't touch.
 
+While working, test the packages you touched (`go test ./internal/store`,
+say). The full suite takes minutes, and CI runs it on all three platforms on
+every pull request.
+
 ## Making a change
 
 - Keep commits to one logical change each, with a conventional commit message
