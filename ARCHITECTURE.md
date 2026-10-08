@@ -1034,7 +1034,7 @@ racing the first would be.
 ## Testing
 
 ```sh
-go test ./...
+go test -timeout 30m ./...
 ```
 
 Every test gets its own `t.TempDir()` and its own jig home (passed as an
