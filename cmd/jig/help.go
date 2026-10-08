@@ -94,6 +94,11 @@ var commandTable = []cmdSpec{
 		{"project", "install under ./.claude/skills of the current directory", false},
 		{"dest", "install under <dir>/<name>/SKILL.md instead of the default location", false},
 	}, false},
+	{"trackers", "jig trackers sync: sync the store onto GitHub issues", []flagSpec{
+		{"dry-run", "read everything and report what would change, writing nothing", false},
+		{"store", "explicit store path", false},
+		{"project", "project name, resolved via the machine mapping", false},
+	}, false},
 	{"_screen", "hidden PreToolUse hook: reads a tool call on stdin", nil, true},
 }
 
@@ -143,6 +148,8 @@ func flagSetName(cmdName string) string {
 		return "ticket new"
 	case "skills":
 		return "skills install"
+	case "trackers":
+		return "trackers sync"
 	default:
 		return cmdName
 	}
