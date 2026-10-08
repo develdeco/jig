@@ -122,3 +122,29 @@ func TestMintRefusesAPathLikeID(t *testing.T) {
 		t.Fatalf("the refused ticket left a file outside the store (stat err %v)", err)
 	}
 }
+
+// TestTicketIDsSortsByNumberAscending checks that TicketIDs returns the
+// store-root folders format mints, in ascending numeric order - not the
+// directory listing's own alphabetic order, which would put "JIG-10" ahead
+// of "JIG-2".
+func TestTicketIDsSortsByNumberAscending(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	for _, id := range []string{"JIG-10", "JIG-2", "JIG-1"} {
+		if err := os.MkdirAll(st.TicketDir(id), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A plain file matching the format must not be counted.
+	if err := os.WriteFile(filepath.Join(st.Root, "JIG-99"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := st.TicketIDs("JIG-{n}")
+	if err != nil {
+		t.Fatalf("TicketIDs: %v", err)
+	}
+	want := []string{"JIG-1", "JIG-2", "JIG-10"}
+	if strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Fatalf("TicketIDs = %v, want %v", ids, want)
+	}
+}

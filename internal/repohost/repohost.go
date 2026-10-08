@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitx"
 )
 
 // Host is a repository host capable of managing pull requests. nil means
@@ -60,6 +61,33 @@ func parseGitHubOwnerRepo(remote string) (string, string, error) {
 		return m[1], m[2], nil
 	}
 	return "", "", fmt.Errorf("repohost: not a GitHub remote: %q", remote)
+}
+
+// OwnerRepo infers remote's GitHub owner and repo, exported for the GitHub
+// mirror's own use: finding a ticket's pull requests and qualifying a bare
+// "#123" in rendered text (brief.md#Status and pull requests). remote
+// itself when it already names a GitHub URL, or - when remote is a local
+// clone's filesystem path - the GitHub remote its own "origin" names, as
+// the bridge resolves it today. ok is false for anything else: a
+// non-GitHub remote, or a local clone whose own origin is not on GitHub
+// either. This is purely about finding the GitHub repo such a clone's
+// origin points at; New (which backs publish) keeps treating a local path
+// as no host, unchanged.
+func OwnerRepo(remote string) (owner, repo string, ok bool) {
+	if o, r, err := parseGitHubOwnerRepo(remote); err == nil {
+		return o, r, true
+	}
+	if !gitx.IsLocalRemote(remote) {
+		return "", "", false
+	}
+	origin, err := gitx.Run(remote, "remote", "get-url", "origin")
+	if err != nil {
+		return "", "", false
+	}
+	if o, r, err := parseGitHubOwnerRepo(origin); err == nil {
+		return o, r, true
+	}
+	return "", "", false
 }
 
 // New returns a Host for the given remote, or nil if the remote
