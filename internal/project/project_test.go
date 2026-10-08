@@ -137,8 +137,9 @@ platform: platform/
 	}
 }
 
-// TestLoadRefusesATrackersEntry checks that any trackers: entry - no mirror
-// shape is supported yet - is refused when the config loads.
+// TestLoadRefusesATrackersEntry checks that a trackers: entry under an
+// unsupported key (only github: is supported) is refused when the config
+// loads.
 func TestLoadRefusesATrackersEntry(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
@@ -218,6 +219,107 @@ platform: platform/
 routes:
   pr.description:
     - changelog/consolidated.md
+`)
+	_, err := Load(p)
+	wantValidationError(t, err)
+}
+
+// TestLoadAcceptsAGitHubTrackersEntry checks that a well-formed trackers:
+// github: entry loads, populating Config.GitHub.
+func TestLoadAcceptsAGitHubTrackersEntry(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+trackers:
+  - github:
+      repo: example/tracking
+      project: https://github.com/users/example/projects/7
+repos: []
+platform: platform/
+`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.GitHub == nil {
+		t.Fatal("cfg.GitHub = nil, want a github entry")
+	}
+	if cfg.GitHub.Repo != "example/tracking" || cfg.GitHub.Project != "https://github.com/users/example/projects/7" {
+		t.Errorf("cfg.GitHub = %+v, unexpected", cfg.GitHub)
+	}
+}
+
+// TestLoadRefusesASecondTrackersEntry checks that two entries under
+// trackers: are refused, even when the first is a well-formed github:.
+func TestLoadRefusesASecondTrackersEntry(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+trackers:
+  - github:
+      repo: example/tracking
+      project: https://github.com/users/example/projects/7
+  - github:
+      repo: example/other
+      project: https://github.com/users/example/projects/8
+repos: []
+platform: platform/
+`)
+	_, err := Load(p)
+	wantValidationError(t, err)
+}
+
+// TestLoadRefusesAGitHubEntryMissingAField checks that a github: entry with
+// only one of repo:/project: is refused, each required on its own.
+func TestLoadRefusesAGitHubEntryMissingAField(t *testing.T) {
+	cases := []struct {
+		name, entryYAML string
+	}{
+		{"no project", "repo: example/tracking"},
+		{"no repo", "project: https://github.com/users/example/projects/7"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "project.yaml")
+			writeFile(t, p, fmt.Sprintf(`
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+trackers:
+  - github:
+      %s
+repos: []
+platform: platform/
+`, c.entryYAML))
+			_, err := Load(p)
+			wantValidationError(t, err)
+		})
+	}
+}
+
+// TestLoadRefusesAGitHubEntryWithAnUnknownKey checks that a github: entry
+// carrying a key besides repo:/project: is refused.
+func TestLoadRefusesAGitHubEntryWithAnUnknownKey(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+trackers:
+  - github:
+      repo: example/tracking
+      project: https://github.com/users/example/projects/7
+      token: abc
+repos: []
+platform: platform/
 `)
 	_, err := Load(p)
 	wantValidationError(t, err)
