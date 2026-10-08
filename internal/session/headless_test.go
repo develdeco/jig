@@ -804,6 +804,11 @@ func realDispatch(t *testing.T, screen bool) Dispatch {
 // does not, since silently falling back to 90 minutes would only show up as
 // a wait.
 func TestHeadlessTimeoutParsing(t *testing.T) {
+	// Read as unset, whatever the shell running the test has set: a jig
+	// build session sets JIG_HEADLESS_TIMEOUT for its own child, so a test
+	// that asserted the default against the ambient environment would fail
+	// exactly when it ran inside jig. headlessTimeout reads "" as unset.
+	t.Setenv("JIG_HEADLESS_TIMEOUT", "")
 	got, err := headlessTimeout()
 	if err != nil || got != defaultHeadlessTimeout {
 		t.Errorf("headlessTimeout() = %v, %v, want the default and no error", got, err)
