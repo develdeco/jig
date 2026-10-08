@@ -34,7 +34,7 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, _, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
+	st, _, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

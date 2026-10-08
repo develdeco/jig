@@ -42,7 +42,7 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
+	st, cfg, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -84,6 +84,25 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 	for {
 		id, pos, done, err := claimOneChartEntry(st, cfg.TicketFormat, chart)
 		if err != nil {
+			// Every ticket already claimed (createdIDs) landed on the origin
+			// before this error; running the checkpoint sync for them now,
+			// best-effort like every other call to this hook, keeps a
+			// partial failure from leaving them unmirrored until some
+			// unrelated later command happens to push. But a
+			// writeChartAfterMintError means this very attempt minted a
+			// ticket (its folder and ticket.yaml are on disk) whose chart
+			// write then failed, leaving it uncommitted; a sync is a full
+			// sync, not scoped to createdIDs, so it would see that folder too
+			// and open it a GitHub issue no commit backs - a record the
+			// printed recovery's "delete that ticket folder" would then
+			// orphan. Skip the sync entirely rather than risk that: the
+			// tickets in createdIDs stay unsynced until the next command that
+			// pushes commits this attempt's folder first, same as before
+			// this hook existed.
+			var wcErr *writeChartAfterMintError
+			if len(createdIDs) > 0 && !errors.As(err, &wcErr) {
+				st.RunCheckpointHook()
+			}
 			return renderErr(stdout, graduateFailure(chart, createdIDs, err))
 		}
 		if done {
@@ -91,6 +110,15 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 		}
 		createdIDs = append(createdIDs, id)
 		created[pos] = true
+	}
+
+	// Claim never runs the checkpoint hook itself (internal/mirror's own
+	// claims reach the store through Claim too, and hooking Claim would
+	// re-enter the mirror), so this is the checkpoint: one sync, run
+	// explicitly once every entry's claim has landed, covers every ticket
+	// this run minted (Sync is a full sync, not a per-ticket one).
+	if len(createdIDs) > 0 {
+		st.RunCheckpointHook()
 	}
 
 	// An entry that already had an id is never changed by this run; compare
@@ -197,6 +225,28 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 	return 0
 }
 
+// writeChartAfterMintError marks the one error claimOneChartEntry's write
+// can return after st.Mint has already minted and committed nothing to the
+// chart: the ticket folder and its ticket.yaml exist on disk, uncommitted,
+// with the chart entry still lacking an id. cmdGraduate's failure branch
+// tests for it with errors.As (it wraps the same *axi.Error Error() and
+// Help describe) to withhold the checkpoint sync specifically on this path
+// - see that branch's own comment for why.
+type writeChartAfterMintError struct {
+	err error
+}
+
+func (e *writeChartAfterMintError) Error() string { return e.err.Error() }
+func (e *writeChartAfterMintError) Unwrap() error { return e.err }
+
+// writeChartForTest, set only by a test in this package, replaces
+// claimOneChartEntry's call to st.WriteChart with its own, so a test can
+// force one particular call to fail deterministically - the same way
+// mirrorClientForTest (main.go) injects a GitHub client for this package's
+// other tests - instead of racing an OS-specific read-only chmod against
+// store.AtomicWrite's own os.Rename, whose failure mode differs by OS.
+var writeChartForTest func(st *store.Store, chart string, entries []store.ChartEntry) error
+
 // errChartFullyGraduated is claimOneChartEntry's internal sentinel: a fresh
 // read of the chart, inside store.Claim's own write (so it is current even
 // after a rejected claim pulled in another clone's work), found no entry
@@ -239,14 +289,19 @@ func claimOneChartEntry(st *store.Store, format, chart string) (id string, pos i
 			return "", nil, merr
 		}
 		entries[i].ID = newID
-		if werr := st.WriteChart(chart, entries); werr != nil {
-			return "", nil, &axi.Error{
+		writeChart := st.WriteChart
+		if writeChartForTest != nil {
+			wc := writeChartForTest
+			writeChart = func(name string, entries []store.ChartEntry) error { return wc(st, name, entries) }
+		}
+		if werr := writeChart(chart, entries); werr != nil {
+			return "", nil, &writeChartAfterMintError{&axi.Error{
 				Msg:  fmt.Sprintf("ticket %s was created for entry %d but failed to write chart %q: %v", newID, i+1, chart, werr),
 				Code: "VALIDATION_ERROR",
 				Help: []string{
 					fmt.Sprintf("Put `id: %s` on entry %d of charts/%s/tickets.yaml (or delete that ticket folder), then re-run", newID, i+1, chart),
 				},
-			}
+			}}
 		}
 		pos = i
 		return newID, []string{newID, "charts/" + chart + "/tickets.yaml"}, nil

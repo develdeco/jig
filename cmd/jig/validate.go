@@ -31,7 +31,7 @@ func cmdValidate(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
+	st, cfg, mp, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

@@ -35,7 +35,7 @@ func cmdRun(e env, args []string, stdout io.Writer) int {
 	if *scenario, err = e.abs(*scenario); err != nil {
 		return renderErr(stdout, err)
 	}
-	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -78,7 +78,7 @@ func cmdRequeue(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

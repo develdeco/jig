@@ -41,7 +41,7 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, &axi.Error{Msg: "jig ticket new requires --title", Code: "VALIDATION_ERROR"})
 	}
 
-	st, cfg, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag)
+	st, cfg, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -70,6 +70,12 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+
+	// Claim never runs the checkpoint hook itself (internal/mirror's own
+	// claims reach the store through Claim too, and hooking Claim would
+	// re-enter the mirror), so this is the checkpoint: a newly minted
+	// ticket's own sync, run explicitly once its claim has landed.
+	st.RunCheckpointHook()
 
 	axi.Render(stdout,
 		axi.KV("ticket", [][2]string{{"id", id}, {"title", *title}}),

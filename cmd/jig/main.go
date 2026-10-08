@@ -15,6 +15,8 @@ import (
 	"github.com/develdeco/jig/internal/frontier"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/mirror"
+	"github.com/develdeco/jig/internal/mirror/github"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/staircase"
@@ -71,6 +73,8 @@ func run(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return cmdVersion(e, rest, stdout)
 	case "skills":
 		return cmdSkills(e, rest, stdout)
+	case "trackers":
+		return cmdTrackers(e, rest, stdout)
 	case "_screen":
 		return cmdScreen(stdin, stdout)
 	default:
@@ -210,11 +214,25 @@ func splitOnce(s string, sep byte) (before, after string, ok bool) {
 	return s, "", false
 }
 
+// mirrorClientForTest, set only by a cmd/jig test in this package,
+// overrides the GitHub client every checkpoint's sync (and `jig trackers
+// sync`) uses, the same seam mirror.Deps.Client already gives
+// internal/mirror's own tests: production never sets it, so every real
+// invocation still builds the client ghAuthToken and api.github.com give it.
+// This keeps a test that wants a checkpoint sync to fail (or succeed)
+// hermetic - pointed at an httptest server rather than the developer's own
+// gh token and github.com (brief.md's test constraints).
+var mirrorClientForTest github.Client
+
 // resolveStore resolves the store, project config and this machine's clone
 // mapping for cfg's project, honoring an explicit --store flag over cwd
 // resolution, and returns the jig home root it read the mapping from, for
-// the packages that keep leases under it.
-func resolveStore(e env, storeFlag string) (*store.Store, project.Config, project.MachineProject, string, error) {
+// the packages that keep leases under it. stdout is the resolving command's
+// own writer: the checkpoint hook renders its sync report through it
+// (brief.md#Ownership and drift: "Drift lines print in the output of the
+// command whose checkpoint found them"), and a failed sync's warning lands
+// in the command's own structured output rather than bare stderr.
+func resolveStore(e env, storeFlag string, stdout io.Writer) (*store.Store, project.Config, project.MachineProject, string, error) {
 	jigHome, err := e.jigHome()
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
@@ -232,6 +250,24 @@ func resolveStore(e env, storeFlag string) (*store.Store, project.Config, projec
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
+	// Every store checkpoint (Store.Push) syncs the GitHub mirror, from
+	// inside the command that made it: the mirror depends on the store
+	// (internal/mirror imports internal/store), never the reverse, so this
+	// is the one place that wires the hook rather than internal/store
+	// importing internal/mirror itself. A store with no trackers: github:
+	// entry is a no-op (mirror.Sync's own NoTracker report), so this never
+	// reaches the network for the vast majority of stores and tests.
+	st.AfterCheckpoint = func(s *store.Store) error {
+		report, err := mirror.Sync(mirror.Deps{Store: s, Cfg: cfg, Home: jigHome, Client: mirrorClientForTest}, mirror.SyncOpts{})
+		if err != nil {
+			return err
+		}
+		renderSyncReport(stdout, report, false)
+		return nil
+	}
+	st.Warn = func(format string, args ...any) {
+		axi.Render(stdout, axi.KV("warning", [][2]string{{"message", fmt.Sprintf(format, args...)}}))
+	}
 	machine, err := project.LoadMachine(jigHome)
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
@@ -245,9 +281,9 @@ func resolveStore(e env, storeFlag string) (*store.Store, project.Config, projec
 // mapping (project.LoadMachine(jigHome)[name].Store), ahead of the
 // --store/cwd fallback chain resolveStore falls through to when projectFlag
 // is empty.
-func resolveStoreForProject(e env, projectFlag, storeFlag string) (*store.Store, project.Config, project.MachineProject, string, error) {
+func resolveStoreForProject(e env, projectFlag, storeFlag string, stdout io.Writer) (*store.Store, project.Config, project.MachineProject, string, error) {
 	if projectFlag == "" {
-		return resolveStore(e, storeFlag)
+		return resolveStore(e, storeFlag, stdout)
 	}
 	jigHome, err := e.jigHome()
 	if err != nil {
@@ -264,7 +300,7 @@ func resolveStoreForProject(e env, projectFlag, storeFlag string) (*store.Store,
 			Code: "VALIDATION_ERROR",
 		}
 	}
-	return resolveStore(e, mp.Store)
+	return resolveStore(e, mp.Store, stdout)
 }
 
 // rungs returns cfg's staircase rungs, falling back to staircase.Default()

@@ -40,6 +40,7 @@ func TestCommandTableFlagsMatchRegistration(t *testing.T) {
 	invoke("status", "T-1")
 	invoke("validate", "T-1")
 	invoke("skills", "install")
+	invoke("trackers", "sync")
 	invoke("version")
 
 	for _, c := range commandTable {

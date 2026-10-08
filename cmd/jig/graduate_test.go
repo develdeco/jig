@@ -1172,6 +1172,137 @@ func TestGraduateCommitAndTable(t *testing.T) {
 	}
 }
 
+// TestGraduateRunsItsOwnCheckpointSync is the symmetric fix to r2-f8's
+// TestTicketNewRunsItsOwnCheckpointSync: `jig graduate` reaches the store
+// through Store.Claim alone too, so it must run the checkpoint sync itself,
+// explicitly, once every entry's claim has landed - one sync covering every
+// ticket this run minted. A ticket a chart graduates must have a GitHub
+// issue recorded before the command returns, rather than waiting on some
+// later, unrelated command's Push.
+func TestGraduateRunsItsOwnCheckpointSync(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	clone := filepath.Join(t.TempDir(), "clone")
+	newTestOriginCloneWithGitHubTracker(t, clone)
+	writeChart(t, clone, "mychart", `tickets:
+  - title: "Slice A"
+`)
+
+	mirrorClientForTest = &stubGitHub{}
+	defer func() { mirrorClientForTest = nil }()
+
+	var buf bytes.Buffer
+	code := Main([]string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader(""))
+	if code != 0 {
+		t.Fatalf("jig graduate mychart: exit %d\n%s", code, buf.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(clone, "T-1", "tracker", "github.yaml"))
+	if err != nil {
+		t.Fatalf("read T-1's github.yaml: %v, want jig graduate's own checkpoint sync to have created it", err)
+	}
+	if !strings.Contains(string(data), "issue: 1") {
+		t.Fatalf("github.yaml = %s, want issue: 1 from the checkpoint sync's CreateIssue", data)
+	}
+}
+
+// TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure covers r4-f2: a
+// chart whose first entry claims cleanly but whose second entry's mint fails
+// for a standing reason (here, a plain file named T-2 sitting where that id's
+// ticket folder must go, so CreateTicketRecord's own MkdirAll refuses it)
+// must still run the checkpoint sync for every ticket already claimed before
+// the command returns its failure - the claim landed and was pushed, so a
+// GitHub issue and board card are owed, not just a bare error.
+func TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	clone := filepath.Join(t.TempDir(), "clone")
+	newTestOriginCloneWithGitHubTracker(t, clone)
+	writeChart(t, clone, "mychart", `tickets:
+  - title: "Slice A"
+  - title: "Slice B"
+`)
+	if err := os.WriteFile(filepath.Join(clone, "T-2"), []byte("in the way"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mirrorClientForTest = &stubGitHub{}
+	defer func() { mirrorClientForTest = nil }()
+
+	var buf bytes.Buffer
+	code := Main([]string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader(""))
+	if code == 0 {
+		t.Fatalf("jig graduate mychart: exit 0, want a refusal on entry 2's mint:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "T-1") {
+		t.Fatalf("jig graduate mychart output lacks T-1 as already claimed:\n%s", buf.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(clone, "T-1", "tracker", "github.yaml"))
+	if err != nil {
+		t.Fatalf("read T-1's github.yaml: %v, want the checkpoint sync to have run for it despite entry 2's failure", err)
+	}
+	if !strings.Contains(string(data), "issue: 1") {
+		t.Fatalf("github.yaml = %s, want issue: 1 from the checkpoint sync's CreateIssue", data)
+	}
+}
+
+// TestGraduateSkipsTheCheckpointSyncOnAWriteChartFailureAfterMint covers
+// r5-f1: an entry whose st.Mint lands but whose chart write then fails
+// leaves its ticket folder and ticket.yaml on disk, uncommitted, with the
+// chart entry still missing its id - a half-minted ticket a full sync (not
+// scoped to createdIDs) would still find on its scan of the store root and
+// open a GitHub issue for, pushing a record no commit backs. jig graduate
+// must skip the checkpoint sync entirely on this failure, even though entry
+// A landed whole earlier in the same run, rather than risk that.
+//
+// The chart write failure is driven through writeChartForTest (r6-f1):
+// entry A's own WriteChart call passes through to the real st.WriteChart, and
+// entry B's is forced to fail, the same write-after-mint shape on every OS -
+// an OS-specific read-only chmod raced against store.AtomicWrite's own
+// os.Rename only fails this way on Windows (POSIX rename needs no write
+// permission on the target file itself, only its directory).
+func TestGraduateSkipsTheCheckpointSyncOnAWriteChartFailureAfterMint(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	clone := filepath.Join(t.TempDir(), "clone")
+	newTestOriginCloneWithGitHubTracker(t, clone)
+	writeChart(t, clone, "mychart", `tickets:
+  - title: "Slice A"
+  - title: "Slice B"
+`)
+
+	writeCalls := 0
+	writeChartForTest = func(st *store.Store, chart string, entries []store.ChartEntry) error {
+		writeCalls++
+		if writeCalls == 2 {
+			return errors.New("forced failure on entry B's chart write")
+		}
+		return st.WriteChart(chart, entries)
+	}
+	defer func() { writeChartForTest = nil }()
+
+	mirrorClientForTest = &stubGitHub{}
+	defer func() { mirrorClientForTest = nil }()
+
+	var buf bytes.Buffer
+	code := Main([]string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader(""))
+
+	if code == 0 {
+		t.Fatalf("jig graduate mychart: exit 0, want a refusal on entry B's chart write:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "failed to write chart") {
+		t.Fatalf("output missing \"failed to write chart\":\n%s", buf.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(clone, "T-2")); err != nil {
+		t.Fatalf("T-2's half-minted ticket folder is gone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(clone, "T-2", "tracker", "github.yaml")); err == nil {
+		t.Fatal("T-2 (half-minted, uncommitted) got a GitHub issue record despite the WriteChart failure")
+	}
+	if _, err := os.Stat(filepath.Join(clone, "T-1", "tracker", "github.yaml")); err == nil {
+		t.Fatal("T-1 got synced despite the checkpoint hook being skipped entirely on this failure")
+	}
+}
+
 // TestGraduateRecordsChartEntryBodyInTheRecord covers the other writer of a
 // ticket's body: graduate carries each chart entry's own body into the
 // ticket.yaml it mints, and an entry with no body mints a record with none.
