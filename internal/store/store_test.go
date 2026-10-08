@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -519,6 +520,79 @@ func TestPush(t *testing.T) {
 	afterCount := runGit(t, work, "rev-list", "--count", "HEAD")
 	if beforeCount != afterCount {
 		t.Fatalf("Push with nothing staged created a commit: %q -> %q", beforeCount, afterCount)
+	}
+}
+
+// TestPushRunsAfterCheckpointHook checks that a successful Push, on a store
+// with an origin, runs AfterCheckpoint once it has pushed.
+func TestPushRunsAfterCheckpointHook(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+
+	var calls int
+	var sawRoot string
+	st.AfterCheckpoint = func(s *Store) error {
+		calls++
+		sawRoot = s.Root
+		return nil
+	}
+
+	if err := os.WriteFile(filepath.Join(work, "note.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Push("add note"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("AfterCheckpoint ran %d times, want 1", calls)
+	}
+	if sawRoot != st.Root {
+		t.Fatalf("AfterCheckpoint saw root %q, want %q", sawRoot, st.Root)
+	}
+}
+
+// TestPushRunsAfterCheckpointHookWithNoRemote checks that a standalone
+// store's Push - which commits without ever reaching the push step - still
+// runs AfterCheckpoint.
+func TestPushRunsAfterCheckpointHookWithNoRemote(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+
+	var calls int
+	st.AfterCheckpoint = func(s *Store) error {
+		calls++
+		return nil
+	}
+
+	if err := os.WriteFile(filepath.Join(work, "note.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Push("add note"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("AfterCheckpoint ran %d times, want 1", calls)
+	}
+}
+
+// TestPushReportsAfterCheckpointFailureThroughWarnAndSucceeds checks that a
+// failing AfterCheckpoint hook never fails Push itself (best-effort), and
+// that its cause reaches Warn rather than os.Stderr when Warn is set.
+func TestPushReportsAfterCheckpointFailureThroughWarnAndSucceeds(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+
+	st.AfterCheckpoint = func(s *Store) error {
+		return errors.New("github is down")
+	}
+	var warnings []string
+	st.Warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+
+	if err := os.WriteFile(filepath.Join(work, "note.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Push("add note"); err != nil {
+		t.Fatalf("Push: %v, want nil - a hook failure is best-effort", err)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "github is down") {
+		t.Fatalf("warnings = %v, want one naming the hook's cause", warnings)
 	}
 }
 
