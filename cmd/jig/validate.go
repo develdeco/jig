@@ -35,6 +35,10 @@ func cmdValidate(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	ticket, err = resolveTicketArg(st, ticket, stdout)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
 
 	problems, err := validateTicket(st, cfg, mp, ticket)
 	if err != nil {
@@ -89,6 +93,12 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	} else if hashes := store.BriefSectionHashes(briefData); len(hashes) == 0 {
 		problems = append(problems, `brief.md has no "## " sections`)
 	}
+
+	aliasProblems, err := st.CheckAliases()
+	if err != nil {
+		return nil, err
+	}
+	problems = append(problems, aliasProblems...)
 
 	problems = append(problems, validateTicketDeps(st, ticket)...)
 	problems = append(problems, validateTicketBranch(st, cfg, ticket)...)
@@ -254,7 +264,10 @@ func validateTicketDeps(st *store.Store, ticket string) []string {
 			problems = append(problems, fmt.Sprintf("ticket.yaml: entry %d has no ticket", i+1))
 			continue
 		}
-		if err := requireTicket(st, d.Ticket); err != nil {
+		resolved, rerr := st.ResolveTicket(d.Ticket)
+		if rerr != nil {
+			problems = append(problems, fmt.Sprintf("ticket.yaml: blocked_by %q: %v", d.Ticket, rerr))
+		} else if err := requireTicket(st, resolved); err != nil {
 			problems = append(problems, fmt.Sprintf("ticket.yaml: blocked_by %q: %v", d.Ticket, err))
 		}
 		if d.Kind != "merged" && d.Kind != "stacked" {
@@ -332,19 +345,23 @@ func ticketDepsCycle(st *store.Store, ticket string) string {
 			if b.Ticket == "" {
 				continue
 			}
-			switch color[b.Ticket] {
+			next := b.Ticket
+			if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
+				next = resolved
+			}
+			switch color[next] {
 			case gray:
 				idx := 0
 				for i, p := range path {
-					if p == b.Ticket {
+					if p == next {
 						idx = i
 						break
 					}
 				}
-				found = strings.Join(append(append([]string{}, path[idx:]...), b.Ticket), "->")
+				found = strings.Join(append(append([]string{}, path[idx:]...), next), "->")
 				return
 			case white:
-				dfs(b.Ticket)
+				dfs(next)
 			}
 		}
 		path = path[:len(path)-1]

@@ -130,3 +130,45 @@ func TestTicketIDsListsUndeclaredKeysToo(t *testing.T) {
 		t.Fatalf("TicketIDs = %v, want [OLD-1]", ids)
 	}
 }
+
+// TestMintCountsAliasesToo covers the critical path "a key whose highest
+// number belongs to an alias mints one past it": an alias on a ticket whose
+// own id is lower than the alias's number still raises the next id minted
+// under that alias's key, since the number was already minted once under it.
+func TestMintCountsAliasesToo(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	if err := st.CreateTicketRecord("JIG-1", Ticket{Title: "Renamed", Aliases: []string{"JIG-9"}}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
+	}
+
+	id, err := st.Mint("JIG", Ticket{Title: "Next"})
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if id != "JIG-10" {
+		t.Fatalf("id = %q, want JIG-10 (one past the alias JIG-9)", id)
+	}
+}
+
+// TestMintToleratesAnUnreadableTicketRecord covers a ticket.yaml that
+// cannot be decoded (a hand-broken file) sitting under the same key: Mint
+// must still compute a next id from the folder names alone, since the
+// broken record is that ticket's own problem (jig validate reports it), not
+// a reason to refuse every other mint under its key.
+func TestMintToleratesAnUnreadableTicketRecord(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	if err := os.MkdirAll(st.TicketDir("JIG-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(st.TicketFilePath("JIG-1"), []byte("blocked_by: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	id, err := st.Mint("JIG", Ticket{Title: "Next"})
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	if id != "JIG-2" {
+		t.Fatalf("id = %q, want JIG-2", id)
+	}
+}

@@ -92,10 +92,15 @@ func (s *Store) TicketIDs() ([]string, error) {
 }
 
 // nextID scans the store root (the same scan TicketIDs runs) and returns one
-// past the highest number among the ids already minted under key, formatted
-// as "<key>-<n>": the next number under a key is one past the highest
-// number among the ids - and, once L3 brings aliases, the aliases - that
-// carry it, worked out from the store rather than stored anywhere.
+// past the highest number among the ids and the aliases already minted under
+// key, formatted as "<key>-<n>": the next number under a key is one past the
+// highest number among the ids - and the aliases, which carry an alias
+// collision no further than any other read of a ticket.yaml - that carry it,
+// worked out from the store rather than stored anywhere. An alias counts
+// even when it is also claimed by some other ticket's own id or another
+// ticket's alias: nextID only cares that the number was once minted under
+// key, not who owns it now - Store.ResolveTicket is where a collision itself
+// is refused.
 func (s *Store) nextID(key string) (string, error) {
 	recs, err := scanTicketIDs(s.Root)
 	if err != nil {
@@ -105,6 +110,29 @@ func (s *Store) nextID(key string) (string, error) {
 	for _, r := range recs {
 		if r.key == key && r.n > maxN {
 			maxN = r.n
+		}
+		// A ticket.yaml that cannot be read or decoded (a hand-broken file,
+		// an unsupported schema_version) is this ticket's own problem, which
+		// jig validate already reports; Mint must still be able to compute
+		// the next number from the folder names alone, so a bad record here
+		// only costs its own aliases' contribution to the count, never the
+		// mint itself.
+		rec, err := s.ReadTicket(r.id)
+		if err != nil {
+			continue
+		}
+		for _, alias := range rec.Aliases {
+			m := ticketIDPattern.FindStringSubmatch(alias)
+			if m == nil || m[1] != key {
+				continue
+			}
+			n, err := strconv.Atoi(m[2])
+			if err != nil {
+				continue
+			}
+			if n > maxN {
+				maxN = n
+			}
 		}
 	}
 	return fmt.Sprintf("%s-%d", key, maxN+1), nil

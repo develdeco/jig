@@ -555,10 +555,14 @@ func resolveChartEntryRefs(st *store.Store, chart string, entries []store.ChartE
 			refChart, k, isIndexRef := parseRef(r.Ref)
 			switch {
 			case !isIndexRef:
-				if err := requireTicket(st, r.Ref); err != nil {
+				resolved, rerr := st.ResolveTicket(r.Ref)
+				if rerr != nil {
+					return nil, refErr(chart, entries, i, r.Ref, rerr.Error())
+				}
+				if err := requireTicket(st, resolved); err != nil {
 					return nil, refErr(chart, entries, i, r.Ref, err.Error())
 				}
-				er = entryRef{knownID: r.Ref, kind: kind}
+				er = entryRef{knownID: resolved, kind: kind}
 
 			case refChart == "" || sameChartFile(st, refChart, chart):
 				if k < 1 || k > len(entries) {

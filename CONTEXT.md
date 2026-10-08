@@ -14,7 +14,8 @@ _Avoid_: database, state dir
 
 **Ticket**:
 jig's record of one unit of work, in the store, under an id jig mints: a
-key plus a number.
+key plus a number. May carry aliases, its earlier ids, kept forever; an id or
+alias resolves to the ticket's current id wherever jig takes one.
 _Avoid_: issue, which names a tracker's copy of a ticket
 
 **Key**:

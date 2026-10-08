@@ -133,7 +133,7 @@ charts/
   brief.md
   intent.md         # jig gate --intent/--doc, or inferred; ignored when brief.md exists
   slices.yaml
-  ticket.yaml       # optional: this ticket's own record - title, body, blockers, adopted branch
+  ticket.yaml       # optional: this ticket's own record - title, body, blockers, adopted branch, aliases
   start.<repo>.sha  # the sha the ticket's branch started from
   slices/
     <id>.state
@@ -212,9 +212,29 @@ letter (uppercase so a filesystem that ignores case, the Windows and
 macOS default, never confuses `STORE-1` with `store-1`); a key breaking
 that rule, or a meaning that is empty, is refused when the config loads.
 An id is `<key>-<n>`, n counted from 1 per key, worked out from the store
-(`Store.TicketIDs`) rather than stored anywhere. A key removed from
-`project.yaml` only stops new mints under it - its tickets keep working,
-and an id never changes.
+(`Store.TicketIDs`) rather than stored anywhere - one past the highest
+number among both the ids and the aliases that carry the key, so a number
+once minted (even under a since-renamed ticket) is never minted again. A key
+removed from `project.yaml` only stops new mints under it - its tickets keep
+working, and an id never changes.
+
+`ticket.yaml` may carry `aliases:`, a list of a ticket's earlier ids, kept
+unchanged by every rewrite of the record (no command renames a ticket; only
+a later migration writes real ones - until then only a test sets them).
+`Store.ResolveTicket(idOrAlias)` is the one resolver: it turns idOrAlias
+into the ticket's current id, unchanged when nothing claims it (so a
+caller's own "not found" check still fires), and refused
+(`TICKET_ALIAS_COLLISION`, naming every claimant) when more than one ticket
+claims it - two tickets list it under `aliases:`, or it is also another
+ticket's own id. Every command that takes a ticket id (`run`, `gate`,
+`publish`, `solve`, `requeue`, `status`, `validate`) resolves its argument
+here before anything else, printing `<typed> is now <current>` when they
+differ; `jig graduate`'s and `jig validate`'s `blocked_by` refs, and the
+GitHub mirror's blocked-by link and "Waits for" line, resolve each ref the
+same way. `Store.CheckAliases` is the same collision check run over the
+whole store, which `jig validate` reports alongside a ticket's own
+`blocked_by` problems, since a collision can involve two tickets neither of
+which is the one being validated.
 
 Until a store migrates to `keys:` (L3), `ticket_format: <KEY>-{n}` is read
 as `<KEY>` being the project's one declared key - jig's own store,
@@ -408,7 +428,7 @@ exists.
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Dearest`, `Default` | build `Signals` (the slice's failed attempts, invariant match) + `Config` → a builder's model rung: invariant floored to the dearest rung, one rung up per failed attempt, otherwise the first rung; `Dearest` is the gate reviewer's rung on every round |
-| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID`, `TicketIDs`, `Mint`, `Claim` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by; the store root → every id-shaped folder under any key, sorted by key then number (`TicketIDs`); a key + a ticket's own record → the next id under that key, its folder created and its `ticket.yaml` written whole (refused, before anything is written, when jig cannot use the id it computed); a mint (or other write) + a commit message → that id landed on the store's origin, retried after a push the origin rejects, undone and refused (`ID_NOT_CLAIMED`) after too many or any other failed push, committed with no push on a store with no origin |
+| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID`, `TicketIDs`, `Mint`, `Claim`, `ResolveTicket`, `CheckAliases` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by; the store root → every id-shaped folder under any key, sorted by key then number (`TicketIDs`); a key + a ticket's own record → the next id under that key, its folder created and its `ticket.yaml` written whole (refused, before anything is written, when jig cannot use the id it computed); a mint (or other write) + a commit message → that id landed on the store's origin, retried after a push the origin rejects, undone and refused (`ID_NOT_CLAIMED`) after too many or any other failed push, committed with no push on a store with no origin |
 | `internal/termrec/` | `Cast`, `Event`, `ReadAsciicast`, `Cast.WriteAsciicast`, `Cast.Validate`, `Cast.SVG`, `SVGOptions`, `Cast.FinalText`, `NewRecorder`, `Recorder.Stream`, `Recorder.Cast` | a program's writes to its pipes, each stream teed into a `Recorder.Stream` → a terminal recording (its size and each write with its time; asciicast v2); a recording → an animated SVG of the screen as it changed, within `MaxSVGBytes`, or the last frame as text ([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md)) |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one) |
 

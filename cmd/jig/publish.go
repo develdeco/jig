@@ -29,6 +29,10 @@ func cmdPublish(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	ticket, err = resolveTicketArg(st, ticket, stdout)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
 	if err := requireWork(st, ticket); err != nil {
 		return renderErr(stdout, err)
 	}

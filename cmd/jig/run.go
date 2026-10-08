@@ -36,6 +36,10 @@ func cmdRun(args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	ticket, err = resolveTicketArg(st, ticket, stdout)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
 	if err := requireWork(st, ticket); err != nil {
 		return renderErr(stdout, err)
 	}
@@ -76,6 +80,10 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 	}
 
 	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	ticket, err = resolveTicketArg(st, ticket, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

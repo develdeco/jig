@@ -10,6 +10,24 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// resolveTicketArg resolves ticket - as typed on the command line, an id or
+// one of a ticket's aliases - to its current id through st.ResolveTicket,
+// printing one line naming it when it differs from what was typed: every
+// command that takes a ticket id (run, gate, publish, solve, requeue, status
+// and validate) calls this before anything else touches the ticket, so a
+// command reached through an alias always works on the ticket's folder,
+// leases and branch under its current id.
+func resolveTicketArg(st *store.Store, ticket string, stdout io.Writer) (string, error) {
+	resolved, err := st.ResolveTicket(ticket)
+	if err != nil {
+		return "", err
+	}
+	if resolved != ticket {
+		fmt.Fprintf(stdout, "%s is now %s\n", ticket, resolved)
+	}
+	return resolved, nil
+}
+
 // cmdTicket implements `jig ticket new --title <t>`.
 func cmdTicket(args []string, stdout io.Writer) int {
 	sub, rest, err := requirePositional(args, "subcommand (new)")

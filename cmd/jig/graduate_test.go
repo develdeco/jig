@@ -150,6 +150,45 @@ func TestGraduateResolvesSameChartBlockedBy(t *testing.T) {
 	}
 }
 
+// TestGraduateResolvesBlockedByAlias covers a blocked_by ref naming a
+// ticket's alias rather than its current id: the entry's ticket.yaml records
+// the blocker's current id, not the alias it was written as.
+func TestGraduateResolvesBlockedByAlias(t *testing.T) {
+	jig, storeRoot := setupGraduateStore(t)
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateTicketRecord("T-30", store.Ticket{Title: "Renamed", Aliases: []string{"T-9"}}); err != nil {
+		t.Fatal(err)
+	}
+	writeChart(t, storeRoot, "mychart", `tickets:
+  - title: "Slice A"
+    blocked_by:
+      - ref: "T-9"
+`)
+
+	code, out := jig("graduate", "mychart")
+	if code != 0 {
+		t.Fatalf("jig graduate mychart: exit %d\n%s", code, out)
+	}
+
+	entries, err := st.ReadChart("mychart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].ID == "" {
+		t.Fatalf("entries after graduate = %+v, want an id written", entries)
+	}
+	deps, err := st.ReadTicketDeps(entries[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deps) != 1 || deps[0].Ticket != "T-30" {
+		t.Fatalf("ticket.yaml blocked_by = %+v, want [{T-30 merged}]", deps)
+	}
+}
+
 // TestGraduateCrossChartRef covers a ref into another chart that has already
 // graduated, and the self-named-chart spelling of an own-chart ref.
 func TestGraduateCrossChartRef(t *testing.T) {

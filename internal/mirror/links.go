@@ -149,7 +149,7 @@ func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.
 			return err
 		}
 		cur, haveCur := curByWhat[it.id]
-		if err := linkBlockedBy(ctx, client, lt, ticket.BlockedBy, tickets, cur, haveCur, report, dryRun); err != nil {
+		if err := linkBlockedBy(ctx, st, client, lt, ticket.BlockedBy, tickets, cur, haveCur, report, dryRun); err != nil {
 			return err
 		}
 	}
@@ -216,7 +216,7 @@ func linkParent(ctx context.Context, client github.Client, lt *linkTicket, chart
 // the same ownership rule links.go already applies to a chart's extra
 // sub-issue. dryRun previews every report line without calling AddBlockedBy,
 // RemoveBlockedBy or writing the record.
-func linkBlockedBy(ctx context.Context, client github.Client, lt *linkTicket, blockedBy []store.TicketBlockedBy, tickets map[string]*linkTicket, cur github.IssueState, haveCur bool, report *SyncReport, dryRun bool) error {
+func linkBlockedBy(ctx context.Context, st *store.Store, client github.Client, lt *linkTicket, blockedBy []store.TicketBlockedBy, tickets map[string]*linkTicket, cur github.IssueState, haveCur bool, report *SyncReport, dryRun bool) error {
 	priorLinks := currentLinks(lt.rec)
 	prevSynced := map[string]bool{}
 	for _, nodeID := range priorLinks.BlockedBy {
@@ -233,9 +233,13 @@ func linkBlockedBy(ctx context.Context, client github.Client, lt *linkTicket, bl
 	wanted := map[string]bool{}
 	changed := false
 	for _, b := range blockedBy {
-		blocker, ok := tickets[b.Ticket]
+		blockerID, rerr := st.ResolveTicket(b.Ticket)
+		if rerr != nil {
+			return rerr
+		}
+		blocker, ok := tickets[blockerID]
 		if !ok || !blocker.has {
-			report.NotLinked = append(report.NotLinked, NotLinked{Ticket: lt.id, Blocker: b.Ticket})
+			report.NotLinked = append(report.NotLinked, NotLinked{Ticket: lt.id, Blocker: blockerID})
 			continue
 		}
 		nodeID := blocker.rec.NodeID
@@ -255,7 +259,7 @@ func linkBlockedBy(ctx context.Context, client github.Client, lt *linkTicket, bl
 		if prevSynced[nodeID] {
 			report.Drift = append(report.Drift, DriftLine{What: lt.id, Issue: lt.rec.Issue, Field: "blocked_by"})
 		} else {
-			report.LinkedBlockedBy = append(report.LinkedBlockedBy, LinkedBlockedBy{Ticket: lt.id, Blocker: b.Ticket})
+			report.LinkedBlockedBy = append(report.LinkedBlockedBy, LinkedBlockedBy{Ticket: lt.id, Blocker: blockerID})
 		}
 	}
 
