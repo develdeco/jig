@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -190,9 +191,9 @@ func TestCheckpointSyncFailureReportsWarningAndStorePushSucceeds(t *testing.T) {
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginCloneWithGitHubTracker(t, clone)
 
-	hits := 0
+	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits++
+		hits.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -212,7 +213,7 @@ func TestCheckpointSyncFailureReportsWarningAndStorePushSucceeds(t *testing.T) {
 	if err := st.Push("test: checkpoint"); err != nil {
 		t.Fatalf("Push: %v, want nil even though its checkpoint's tracker sync failed", err)
 	}
-	if hits == 0 {
+	if hits.Load() == 0 {
 		t.Fatal("fake GraphQL server saw no request; the checkpoint hook never ran its sync")
 	}
 	if !strings.Contains(buf.String(), "warning") {

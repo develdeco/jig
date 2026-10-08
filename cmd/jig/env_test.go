@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/mirror/github"
 	"github.com/develdeco/jig/internal/project"
 )
 
@@ -34,7 +37,28 @@ func testEnv(jigHome string) env {
 func envFrom(vars map[string]string) env {
 	e := processEnv()
 	e.getenv = func(key string) string { return vars[key] }
+	e.mirrorClient = noGitHub()
 	return e
+}
+
+// noGitHub is the mirror client every test env starts with. It refuses each
+// request before it leaves the process, so a test whose store declares a
+// GitHub tracker and sets no client of its own fails on its sync instead of
+// running the operator's `gh auth token` and calling api.github.com, which
+// the production default (a nil client) would do.
+func noGitHub() github.Client {
+	c := github.New("https://github.invalid/graphql", "test-token")
+	c.HTTPClient = &http.Client{Transport: refuseRoundTripper{}}
+	c.BackoffBase = time.Millisecond
+	c.MutationInterval = time.Millisecond
+	return c
+}
+
+// refuseRoundTripper fails every request: noGitHub's transport.
+type refuseRoundTripper struct{}
+
+func (refuseRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("cmd/jig test env: no GitHub client was set for this test")
 }
 
 // inDir returns e with dir as the working directory a command resolves its
