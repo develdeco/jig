@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -477,4 +478,35 @@ func updateChartEntryInNode(node *yaml.Node, entry ChartEntry) {
 // ChartFile returns the path to charts/<name>/tickets.yaml.
 func (s *Store) ChartFile(name string) string {
 	return filepath.Join(s.Root, "charts", name, "tickets.yaml")
+}
+
+// ChartMapFile returns the path to charts/<name>/map.md.
+func (s *Store) ChartMapFile(name string) string {
+	return filepath.Join(s.Root, "charts", name, "map.md")
+}
+
+// ChartNames lists the store's chart names, in alphabetical order: the
+// order the GitHub mirror syncs charts in, after every ticket. A chart is a
+// subdirectory of charts/ that has a tickets.yaml; an absent charts/
+// directory lists no charts.
+func (s *Store) ChartNames() ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(s.Root, "charts"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: list charts: %w", err)
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(s.ChartFile(e.Name())); err != nil {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	return names, nil
 }

@@ -240,6 +240,104 @@ a negative `fix_rounds`, a `fix_risks` entry that is not `high`, `medium` or
 `low`, a `fix_slice_findings` below 1, or an effort that is not one of `low`,
 `medium`, `high`, `xhigh`, `max` or empty.
 
+## Mirror
+
+`internal/mirror` is jig's own GitHub mirror, replacing a bridge program
+that used to run outside jig and could not run while jig used the store.
+`Store.AfterCheckpoint` (`internal/store/store.go`) is the one hook every
+checkpoint calls, through `Store.RunCheckpointHook`, after its own commit
+(and push, on a store with an origin): `Store.Push` calls it itself (a
+slice queued or changing state, a requeue, a gate round, a demo, a
+publish), and `jig ticket new` and `jig graduate` call it explicitly once
+their own `Store.Claim` lands, since `Claim` stays hook-free - the mirror's own
+claims (`claimIssue`, landing a new issue's record) reach the store through
+`Claim` too, and hooking `Claim` itself would re-enter the mirror. Either
+way it runs `mirror.Sync` in the same process, best-effort - a failure
+prints one warning naming the cause and never fails the command, and the
+next checkpoint retries. The
+`SyncReport` that sync returns is rendered through the resolving command's
+own writer (`cmd/jig/mirror_report.go`'s `renderSyncReport`, which
+`resolveStore` hands `stdout`), so a drift line, a skipped item or an
+unlinked blocker a checkpoint found prints in the output of the command it
+rode in on; `Store.Warn` is wired the same way, so a failed sync's warning
+is a labelled block in that output rather than bare stderr. `jig trackers
+sync [--dry-run] [--store] [--project]` (`cmd/jig/trackers.go`) runs the
+same `Sync` on demand and renders the same report through the same
+function - the second of the two places brief.md names. `--dry-run` reads
+the store and GitHub and writes to neither (a store whose items all still
+need creating reaches no client at all, having nothing to read). The mirror
+depends on the store, never the reverse: `internal/mirror` holds what any
+tracker provider would share, and `internal/mirror/github` is the one
+GitHub client today, a thin GraphQL wrapper
+(`internal/mirror/github/client.go`) over the mutations and queries the
+bridge proved, taking its endpoint and token source as arguments (no `gh`
+on PATH is `GH_NOT_INSTALLED`) so every test points it at a fake GraphQL
+server and none reaches github.com. That client paces itself as GitHub asks
+of a client that creates content: one mutation per second
+(`MutationInterval`, a package default production never overrides), and any
+request that fails with a server error, a 429 or 403, or a GraphQL
+`RATE_LIMITED` error is retried with doubling backoff, four attempts in
+all; a client error is reported at once, since retrying it would only
+repeat it.
+
+`project.yaml`'s `trackers:` list takes at most one `github` entry (`repo:`
+the issue home, `project:` the GitHub Project's URL; both required,
+`VALIDATION_ERROR` otherwise), validated by `internal/project`. A config
+with none is `mirror.Sync`'s own no-op, reported rather than refused, since
+every checkpoint of every store calls it whether or not a tracker is
+configured.
+
+A sync's steps, every time, in order: read the store; create every ticket
+(id order) and chart (name order) with no record yet, its issue opened with
+only its title and footer as a body (so every ticket has a number before a
+body that cites it is rendered), the creation itself claimed like an id
+(`Store.Claim`: committed alone, pushed at once; a rejected push's pull
+bringing in another clone's record for the same ticket or chart closes this
+clone's own issue as not planned, with a `Duplicate of #<number>` comment,
+and adopts the other instead of retrying); update every title, body and
+open/closed state to the store's own rendering (a Done ticket's or chart's
+issue closes as completed, every other reopens); bring each issue's links to match the store -
+each chart's tickets sub-issues of the chart's issue, each `blocked_by`
+edge a native blocked-by link, each link compared against what GitHub
+currently shows rather than against the record alone, so a link removed on
+GitHub is restored and one added there is removed (both as drift), and a
+blocker with no issue yet is only reported, never retried as a failure;
+resolve the GitHub Project (creating its Status and Store ID fields, or
+completing the Status field's options, when missing, and linking the issue
+repo when it is not linked) and place every issue and every open or merged
+pull request on it, with its Status and Store ID - skipping the placement
+entirely when the item already carries both, so an up-to-date store sends
+no board mutation; write every record. A record naming an issue repo other
+than the `trackers:` entry's own `repo:` refuses the sync as
+`MIRROR_REPO_CHANGED` (moving issues to a new repo is T-30) rather than
+opening a second issue elsewhere. The renderer (`internal/mirror/render.go`) and the
+Status/pull-request rules (`internal/mirror/status.go`) match the bridge's
+own output byte for byte, so the cutover changes nothing already on the
+board; see DECISIONS.md for the exact golden format, qualifying and
+truncation rules.
+
+Each record - `<ticket>/tracker/github.yaml` or `charts/<name>/github.yaml`,
+the bridge's own path and shape, until L4 (T-24) moves them - keeps `repo`,
+`issue`, `node_id`, `item` (the board item id), `prs:` (each with `repo`,
+`number`, `node_id`, `item`) and `synced:`: `title`, `body_sha256`,
+`state`, `status`, `store_id`, `links.parent` and `links.blocked_by` - what
+the last sync itself wrote to every field jig owns (an issue's title, body,
+open/closed state, parent and blocked-by links, and a board item's Status
+and Store ID; everything else - labels, assignees, other fields, comments,
+views - is the repo owner's). When jig is about to write the store's value
+and GitHub's current value differs from `synced:`, that is drift: someone
+edited a jig-owned field on GitHub, jig prints `drift, overwritten: ...`
+naming the ticket or chart, the issue number and the field, and writes the
+store's value anyway - through the writer of the command whose checkpoint
+found it. A change made in the store prints no drift line,
+since GitHub still matched what was last written. A record with no
+`synced:` yet (adopted from the bridge, which never kept one) is given no
+benefit of the doubt either way: its first sync populates `synced:` from
+whatever GitHub already shows, silently when that already matches the
+store's own rendering - the cutover's own critical path - and with no
+false drift report when it does not. A recorded issue gone from GitHub
+(deleted, or its repo gone) is opened again rather than failing the sync.
+
 ## Module responsibilities
 
 The dir column is exact; a lint test parses this table and asserts every dir
@@ -263,6 +361,8 @@ exists.
 | `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `VerifiedSlices`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events (a `recorded` line carries the `Recording`s of a builder's green oracle run) → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
 | `internal/manifest/` | `Resolve`, `MatchesInvariant` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes, and invariant-sensitive paths; a file path → whether it matches a declared invariant |
 | `internal/media/` | `Verify`, `Kind`, `PlainName`, `PlainParents` (every directory between an evidence directory and a media directory is a plain one), `LstatPinned`, `HashRegularFile`, `EntryLabel`, `ImageExtensions`, `VideoExtensions` | a directory jig made + a session's listing of files in it → the `File`s that passed what `gh ... --attach` accepts (a plain name, an allowed type, a regular non-empty file within its size limit, hashed from the very file checked), or a refusal naming the first that did not; a standard-library leaf, so `frontier` and `verifydeliver` can both use it |
+| `internal/mirror/` | `Sync`, `ResolveTicketTitleBody`, `RenderTicketBody`, `RenderChartBody`, `TicketStatus`, `ChartStatus`, `IsOpen`, `FindPullRequests`, `ScanTitleAndBody`, `LoadPublishTerms` | `Deps` (a store, `project.Config`, the jig home, a `github.Client`) + `SyncOpts` → a `SyncReport` (issues created, updated, recreated, linked, placed on the board, skipped on a publish-safety hit, and every drift line), the records written under the bridge's own paths and shape, and a GitHub Project kept current - wired into every `Store.AfterCheckpoint` and `jig trackers sync` |
+| `internal/mirror/github/` | `New`, `Client` (`CreateIssue`, `FetchIssue`, `UpdateIssue`, `CloseIssueCompleted`/`CloseIssueNotPlanned`, `ReopenIssue`, `AddComment`, `AddSubIssue`/`RemoveSubIssue`, `AddBlockedBy`/`RemoveBlockedBy`, `PullRequestsByHead`, `LookupProject`, `EnsureProject`, `PlaceItem`, `ItemFieldValues`, `RepositoryIsPublic`) | an endpoint + token (a fake GraphQL server and a fixed token in every test, `api.github.com/graphql` and `gh auth token` in production) → the GraphQL mutations and queries `internal/mirror` drives a sync through, one mutation per second and retried with backoff (4 attempts) on a server error or a rate limit |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket`, `Compare`, `DivergedError`, `RequireBuilt`, `HoldsUnpushedBuilt`, `MustExistOnOrigin`, `RecutUnlessBuilt` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point, and synced with its branch when origin has it; anything git shows is not a repository of its own is moved aside and cloned afresh; a merge, rebase, am, cherry-pick or revert a crashed session left unfinished is ended with `--quit` and an unmerged index reset to HEAD, never moving a branch, and named in `Lease.Recovered`) |
 | `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping under the jig home root → a `Config` |
