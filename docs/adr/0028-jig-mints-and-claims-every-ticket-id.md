@@ -93,3 +93,30 @@ surfaces as a merge or rebase conflict, only as a different id on each.
 
 See [DECISIONS.md](../../DECISIONS.md) for the attempt bound, the lock
 path, and the claim commit's exact shape.
+
+## Amendment: an id gains an area key (T-26)
+
+`Store.Mint` took a `project.yaml` `ticket_format` string (`"JIG-{n}"`),
+parsed it into a regexp, and used that to both scan for the next number and
+shape the id it minted. `project.yaml` now declares `keys:` instead - a map
+of area key to its one-line meaning - and an id is `<key>-<n>`, counted per
+key; `Mint` takes the bare key to mint under, already resolved against the
+project's declared keys (`project.Config.ResolveKey`) before it is ever
+called, and computes `<key>-<n>` itself. `ticket_format` is still read, but
+only as the one key a pre-migration store declares (`<KEY>-{n}`), until L3's
+migration writes `keys:` for it.
+
+`Store.TicketIDs` dropped its `format` parameter: it lists every id-shaped
+store-root folder under any key, declared or not, sorted by key then by
+number, rather than the folders one specific format matched. This is the
+one function minting's own per-key count and A6's mirror both read tickets
+through, so a key removed from `project.yaml` still lists - and keeps - the
+tickets minted under it, where a format-scoped list would have dropped
+them.
+
+`pool.CheckTicket`'s two refusals (a reserved lease suffix, a path-like
+shape) still run before `CreateTicketRecord`, but an id's shape is now
+always `<key>-<n>` - a key is uppercase letters and digits with no `-`, and
+`<n>` is always digits - so neither can trigger through a normal mint any
+longer; they stay as a defensive check on a value this ADR's claim
+guarantee still depends on being safe to write under.

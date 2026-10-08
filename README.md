@@ -132,6 +132,15 @@ need another attempt or a brief gets amended (`jig requeue T-1
 slice and question state at any point, and `jig <command> -h` prints that
 command's flags.
 
+A ticket's id is `<key>-<n>`: the standalone store above declares just one
+key (`T`, from its default `ticket_format`), so `jig ticket new` needs no
+`--key`. A project with `project.yaml`'s `keys:` declaring more than one -
+say a multi-repo project using each repo's acronym as a key - passes
+`--key <KEY>` to pick which one a new ticket mints under; leaving it out
+then is refused, naming the declared keys and their meanings. A key
+removed from `project.yaml` only stops new mints under it: its tickets
+keep working, and an id never changes.
+
 Work spanning tickets starts from a chart instead: the intake skill drafts
 `charts/<name>/map.md` and `charts/<name>/tickets.yaml`, then
 
@@ -143,7 +152,10 @@ creates each entry that has no id yet, in file order, and records any
 blockers it declared into that ticket's own `ticket.yaml`. Each created
 ticket then gets its own `brief.md` and `slices.yaml` and follows the same
 `validate`/`solve` flow above; re-running `jig graduate <name>` after the
-chart's fog clears creates just the new entries.
+chart's fog clears creates just the new entries. An entry's `key:` picks
+which declared key it mints under, same as `jig ticket new --key` (the
+intake skill writes it); an undeclared key on any entry refuses the whole
+run before any of the chart's tickets are created.
 
 ## A branch built outside jig
 
@@ -375,7 +387,7 @@ issue - GitHub keeps whatever it had - and `jig trackers sync` exits
 non-zero when anything was skipped; a private issue repo is never scanned.
 
 Several stores may point at the same issue repo and project, so work kept
-in separate stores shows on one board - keep each store's `ticket_format`
+in separate stores shows on one board - keep each store's declared keys
 distinct (or otherwise ensure the ids never collide), since jig adds no
 store identity of its own to an issue.
 

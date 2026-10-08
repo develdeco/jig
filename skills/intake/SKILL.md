@@ -37,7 +37,7 @@ The section never lists test cases, never asks for a test per rule, and never as
 
 ## Chart output (fog spans tickets)
 
-A chart is `charts/<name>/map.md` (for people; jig never reads it), sectioned Destination · Notes · Decisions so far · Not yet specified (fog) · Out of scope, plus `charts/<name>/tickets.yaml` (the handover jig reads and writes). Decision tickets: one per grilling session, entered into `tickets.yaml` as they resolve. Graduation: `jig graduate <name>` creates the entries without ids and writes the ids back, so re-running it after fog clears creates just the new tickets - the map decides, it never builds.
+A chart is `charts/<name>/map.md` (for people; jig never reads it), sectioned Destination · Notes · Decisions so far · Not yet specified (fog) · Out of scope, plus `charts/<name>/tickets.yaml` (the handover jig reads and writes). Decision tickets: one per grilling session, entered into `tickets.yaml` as they resolve, each with a `key:` naming which of `project.yaml`'s declared keys it mints under (omit it only when the project declares exactly one). Graduation: `jig graduate <name>` creates the entries without ids and writes the ids back, so re-running it after fog clears creates just the new tickets - the map decides, it never builds.
 
 ## Done when
 

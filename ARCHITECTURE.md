@@ -110,7 +110,15 @@ a blocked environment is not such a failure
 
 ## Store schema
 
-A store is a git repo. One chart folder and one ticket folder, in full:
+A store is a git repo. A ticket is any store-root folder whose name is an
+id - 1 to 10 uppercase ASCII letters and digits starting with a letter, a
+`-`, and a number from 1 with no leading zero - under any key declared in
+`project.yaml`'s `keys:` or not: a key removed from `project.yaml` only
+stops new mints under it, so a folder it already named keeps working.
+`Store.TicketIDs` lists every one of them, sorted by key then by number;
+it is the one function minting's per-key counter, A6's mirror and every
+other listing that shows many tickets read tickets through. One chart
+folder and one ticket folder, in full:
 
 ```
 project.yaml
@@ -168,7 +176,7 @@ fifth home above): `demo.yaml` names them and holds their hashes.
 ## Project configuration
 
 `project.yaml` is the project's configuration file. Beyond the required fields
-(`name`, `ticket_format`, `repos`, `platform`), it declares `trackers:`, a list
+(`name`, `repos`, `platform`, and `keys:` or `ticket_format`), it declares `trackers:`, a list
 of mirrors of the store's tickets: absent or `[]` means none, and an entry is
 refused when the config loads (`VALIDATION_ERROR`) until T-24 builds the
 tracker tree and T-22 the GitHub mirror. The old `tracker:` key still reads
@@ -189,6 +197,40 @@ gate:
 All three keys are optional and default to the values shown above. A `gate`
 block with absent keys gains defaults for those keys. An absent gate block
 entirely is equivalent to all defaults.
+
+`keys:` declares the project's area keys, each a key to its one-line
+meaning:
+
+```yaml
+keys:
+  STORE: the store's layout, ids, records and git sync
+  GRAPH: tickets, charts and the order between them
+```
+
+A key is 2 to 10 uppercase ASCII letters and digits, starting with a
+letter (uppercase so a filesystem that ignores case, the Windows and
+macOS default, never confuses `STORE-1` with `store-1`); a key breaking
+that rule, or a meaning that is empty, is refused when the config loads.
+An id is `<key>-<n>`, n counted from 1 per key, worked out from the store
+(`Store.TicketIDs`) rather than stored anywhere. A key removed from
+`project.yaml` only stops new mints under it - its tickets keep working,
+and an id never changes.
+
+Until a store migrates to `keys:` (L3), `ticket_format: <KEY>-{n}` is read
+as `<KEY>` being the project's one declared key - jig's own store,
+`ticket_format: T-{n}`, reads as the key `T`, exempt from the
+2-character minimum since it only names an existing store's ids. Any
+other `ticket_format` (no `-` right before `{n}`, text after `{n}`, or a
+prefix breaking the key rule) is refused at load, with help to declare
+`keys:` instead; `keys:` and `ticket_format` together are refused too.
+
+`jig ticket new --key <KEY>` mints under that key (omittable when the
+project declares exactly one); `jig graduate` reads a `key:` on each
+`tickets.yaml` entry it creates the same way. Either resolves through
+`project.Config.ResolveKey`, which refuses a key the project does not
+declare - listing the declared keys and their meanings - before anything
+is minted; `jig graduate` checks every entry's key this way before it
+creates any of the chart's tickets.
 
 **`fix_rounds`** is the number of gate rounds per ticket that may queue fix
 slices without human intervention. Once this budget is exhausted, remaining fix
@@ -366,7 +408,7 @@ exists.
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Dearest`, `Default` | build `Signals` (the slice's failed attempts, invariant match) + `Config` → a builder's model rung: invariant floored to the dearest rung, one rung up per failed attempt, otherwise the first rung; `Dearest` is the gate reviewer's rung on every round |
-| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID`, `Mint`, `Claim` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by; `ticket_format` + a ticket's own record → the next id, its folder created and its `ticket.yaml` written whole (refused, before anything is written, when jig cannot use the id it computed); a mint (or other write) + a commit message → that id landed on the store's origin, retried after a push the origin rejects, undone and refused (`ID_NOT_CLAIMED`) after too many or any other failed push, committed with no push on a store with no origin |
+| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID`, `TicketIDs`, `Mint`, `Claim` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by; the store root → every id-shaped folder under any key, sorted by key then number (`TicketIDs`); a key + a ticket's own record → the next id under that key, its folder created and its `ticket.yaml` written whole (refused, before anything is written, when jig cannot use the id it computed); a mint (or other write) + a commit message → that id landed on the store's origin, retried after a push the origin rejects, undone and refused (`ID_NOT_CLAIMED`) after too many or any other failed push, committed with no push on a store with no origin |
 | `internal/termrec/` | `Cast`, `Event`, `ReadAsciicast`, `Cast.WriteAsciicast`, `Cast.Validate`, `Cast.SVG`, `SVGOptions`, `Cast.FinalText`, `NewRecorder`, `Recorder.Stream`, `Recorder.Cast` | a program's writes to its pipes, each stream teed into a `Recorder.Stream` → a terminal recording (its size and each write with its time; asciicast v2); a recording → an animated SVG of the screen as it changed, within `MaxSVGBytes`, or the last frame as text ([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md)) |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one) |
 

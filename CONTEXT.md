@@ -13,8 +13,16 @@ A dedicated git repo with a remote holding every ticket artifact; it is the sour
 _Avoid_: database, state dir
 
 **Ticket**:
-jig's record of one unit of work, in the store, under an id jig mints.
+jig's record of one unit of work, in the store, under an id jig mints: a
+key plus a number.
 _Avoid_: issue, which names a tracker's copy of a ticket
+
+**Key**:
+The area part of a ticket id (`STORE` in `STORE-3`), declared in
+`project.yaml`'s `keys:` with a one-line meaning. A ticket's id never
+changes when its ticket's area does - a key only decides what a new
+ticket mints under.
+_Avoid_: prefix, namespace
 
 **Mirror**:
 A tracker's copy of the store, written by jig at every checkpoint and never
