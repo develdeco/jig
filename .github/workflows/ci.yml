@@ -33,10 +33,9 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
         include:
-          # A package a leg leaves to a job of its own, because it alone takes
-          # most of the leg's time: windows-verifydeliver, below. Every other
-          # leg tests every package. lint/workflow_test.go checks that a job
-          # tests each skipped package on the same OS and that ci ok needs it.
+          # A package a leg leaves to a job of its own: windows-verifydeliver,
+          # below. Every other leg tests every package. lint/workflow_test.go
+          # checks that a job tests each skipped package on the same OS.
           - os: windows-latest
             skip-package: github.com/develdeco/jig/internal/verifydeliver
     runs-on: ${{ matrix.os }}
@@ -107,11 +106,13 @@ jobs:
         run: go test -timeout 30m ${{ steps.packages.outputs.list }}
 
   # The package the test job's Windows leg skips, on a Windows runner of its
-  # own. It is the longest package there (843 s of the leg's 1,050-1,110 s),
-  # already parallel inside, and a package alone on the runner runs faster
-  # than inside a shared step (gitx: 61 s alone, 149 s in the full step).
-  # Main's ruleset does not require its check by name: ci ok needs it, as it
-  # needs every job that runs on pull requests.
+  # own. It is one of the leg's two longest (843 s, beside cmd/jig's 852 s,
+  # in a step of 1,050-1,110 s) and the floor once the in-flight diets of
+  # cmd/jig, frontier, e2e and revieweval land; until then cmd/jig bounds the
+  # step and the saving does not show. A package alone on the runner runs
+  # faster than inside a shared step (gitx: 61 s alone, 149 s in the full
+  # step). Main's ruleset does not require this check by name: ci ok needs
+  # it, as it needs every job that runs on pull requests.
   windows-verifydeliver:
     runs-on: windows-latest
     steps:

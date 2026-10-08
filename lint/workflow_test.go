@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -151,8 +152,9 @@ func TestCIWorkflowTriggers(t *testing.T) {
 
 // TestCIWorkflowTestJob asserts the "test" job's matrix covers all three
 // supported platforms (a macOS-only regression has shipped before, commit
-// d920a72), that its legs are named as main's ruleset requires, and that it
-// actually enforces formatting, vet, and tests rather than just building.
+// d920a72), that its legs report the check names main's ruleset requires,
+// and that it actually enforces formatting, vet, and tests rather than just
+// building.
 func TestCIWorkflowTestJob(t *testing.T) {
 	root := repoRoot(t)
 	doc := loadWorkflow(t, root, "ci.yml")
@@ -167,15 +169,23 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	}
 	requireAllPlatforms(t, "ci.yml", "test", job)
 
-	// Main's ruleset requires the legs by check name; a name that drifted
-	// (a matrix key beyond os in it, a reword) leaves the required check
-	// never reported, and no pull request could merge.
-	name, _ := yamlString(job["name"])
-	for _, leg := range []string{"windows-latest", "ubuntu-latest", "macos-latest"} {
-		want := "test (" + leg + ")"
-		if got := strings.ReplaceAll(name, "${{ matrix.os }}", leg); got != want {
-			t.Errorf("ci.yml: the test job's %s leg is named %q, want %q, the check main's ruleset requires, so no pull request could merge", leg, got, want)
-		}
+	// Main's ruleset requires test (windows-latest), test (ubuntu-latest) and
+	// test (macos-latest) by name, so the labels and the name are pinned, not
+	// just the platforms: another label would never report a required check.
+	strategy, _ := yamlMap(job["strategy"])
+	matrix, _ := yamlMap(strategy["matrix"])
+	osList, _ := yamlSlice(matrix["os"])
+	var labels []string
+	for _, v := range osList {
+		label, _ := yamlString(v)
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	if !slices.Equal(labels, []string{"macos-latest", "ubuntu-latest", "windows-latest"}) {
+		t.Errorf("ci.yml: the test job's matrix.os is %v, want exactly windows-latest, ubuntu-latest and macos-latest, the labels of the checks main's ruleset requires, so a pull request would wait on a check that is never reported", labels)
+	}
+	if name, _ := yamlString(job["name"]); name != "test (${{ matrix.os }})" {
+		t.Errorf("ci.yml: the test job is named %q, want \"test (${{ matrix.os }})\", which reports the checks main's ruleset requires, so a pull request would wait on a check that is never reported", name)
 	}
 
 	steps, ok := yamlSlice(job["steps"])
@@ -258,20 +268,6 @@ func workflowJobs(t *testing.T, root, file string) map[string]interface{} {
 // succeeded.
 const gateCheckName = "ci ok"
 
-// gateJobName returns the id of ci.yml's gate job, the one that carries the
-// check name main's ruleset requires.
-func gateJobName(t *testing.T, jobs map[string]interface{}) string {
-	t.Helper()
-	for _, name := range sortedKeys(jobs) {
-		job, _ := yamlMap(jobs[name])
-		if n, _ := yamlString(job["name"]); n == gateCheckName {
-			return name
-		}
-	}
-	t.Fatalf("ci.yml: no job named %q, the check main's ruleset requires, so no pull request could merge", gateCheckName)
-	return ""
-}
-
 // TestCIWorkflowGateJob asserts ci.yml's gate job exists under the check
 // name the ruleset requires, always runs (GitHub counts a skipped required
 // check as passing), needs every job that runs on every change - so a new
@@ -284,7 +280,16 @@ func gateJobName(t *testing.T, jobs map[string]interface{}) string {
 func TestCIWorkflowGateJob(t *testing.T) {
 	root := repoRoot(t)
 	jobs := workflowJobs(t, root, "ci.yml")
-	gate := gateJobName(t, jobs)
+	var gate string
+	for _, name := range sortedKeys(jobs) {
+		job, _ := yamlMap(jobs[name])
+		if n, _ := yamlString(job["name"]); n == gateCheckName {
+			gate = name
+		}
+	}
+	if gate == "" {
+		t.Fatalf("ci.yml: no job named %q, the check main's ruleset requires, so no pull request could merge", gateCheckName)
+	}
 	job, _ := yamlMap(jobs[gate])
 	if ifExpr, _ := yamlString(job["if"]); ifExpr != "always()" {
 		t.Errorf("ci.yml: the %s job's if = %q, want always(): a skipped required check counts as passing", gate, ifExpr)
@@ -568,21 +573,6 @@ func hasContinueOnError(step map[string]interface{}) bool {
 // gating step is what counts.
 func requireUnconditionalStep(t *testing.T, steps []interface{}, label, substr string) {
 	t.Helper()
-	step, found := unconditionalStep(steps, substr)
-	if step != nil {
-		return
-	}
-	if !found {
-		t.Errorf("ci.yml: test job has no step running %s, so a %s failure would merge", substr, label)
-		return
-	}
-	t.Errorf("ci.yml: every %s step has a step-level \"if\" or continue-on-error, so %s could silently skip or fail on some matrix legs instead of gating every one", label, label)
-}
-
-// unconditionalStep returns the first step running substr with no
-// step-level "if" and no continue-on-error, nil if there is none, and
-// whether any step ran substr at all.
-func unconditionalStep(steps []interface{}, substr string) (map[string]interface{}, bool) {
 	found := false
 	for _, sv := range steps {
 		step, ok := yamlMap(sv)
@@ -595,10 +585,14 @@ func unconditionalStep(steps []interface{}, substr string) (map[string]interface
 		}
 		found = true
 		if _, hasIf := step["if"]; !hasIf && !hasContinueOnError(step) {
-			return step, true
+			return
 		}
 	}
-	return nil, found
+	if !found {
+		t.Errorf("ci.yml: test job has no step running %s, so a %s failure would merge", substr, label)
+		return
+	}
+	t.Errorf("ci.yml: every %s step has a step-level \"if\" or continue-on-error, so %s could silently skip or fail on some matrix legs instead of gating every one", label, label)
 }
 
 // requireStepOnExactly asserts ci.yml's test job has a step running substr
@@ -622,321 +616,103 @@ func requireStepOnExactly(t *testing.T, steps []interface{}, label, substr, want
 	}
 }
 
-// skipPackageKey is the key a matrix.include entry of ci.yml's test job
-// gives an OS to name a package that leg leaves to a job of its own. The
-// leg's steps read it as matrix.skip-package.
-const skipPackageKey = "skip-package"
+// goTestListRun matches the test job's go test step: its one package
+// argument is the list another step prints. listFilter matches a command
+// that could drop packages from that list.
+var (
+	goTestListRun = regexp.MustCompile(`^go test -timeout \S+ \$\{\{ steps\.([A-Za-z0-9_-]+)\.outputs\.list \}\}$`)
+	listFilter    = regexp.MustCompile(`\b(awk|grep|sed|head|tail|sort|uniq|cut)\b`)
+)
 
 // TestCIWorkflowTestsEveryPackageOnEveryOS asserts every package is tested
-// on every OS the test job covers. Its go test step runs the packages a
-// step before it lists, all of them less the leg's skip-package, so a
-// package a leg leaves out must be tested by another job that runs on every
-// change, on the same kind of runner, and that ci ok needs. Without that, a
-// package could be moved off the Windows leg to shorten it and never run
-// there again.
+// on every OS. The test job's go test step runs the list its list step
+// prints: go list ./... less the leg's matrix skip-package. So that step
+// pair must stay intact, and each skipped package must be tested on the
+// same OS by a job of its own (ci ok needing it is TestCIWorkflowGateJob's).
 func TestCIWorkflowTestsEveryPackageOnEveryOS(t *testing.T) {
 	root := repoRoot(t)
-	module := modulePath(t, root)
 	jobs := workflowJobs(t, root, "ci.yml")
-	job, ok := yamlMap(jobs["test"])
-	if !ok {
-		t.Fatalf("ci.yml: no \"test\" job, so nothing tests the packages on each OS")
-	}
-	steps, _ := yamlSlice(job["steps"])
-	goTest, _ := unconditionalStep(steps, "go test ")
-	if goTest == nil {
-		t.Fatalf("ci.yml: the test job has no go test step that runs on every leg, so no package is tested on every OS")
-	}
-
-	// The go test step must take every package, from ./... or from a step's
-	// list, and a list step feeding it must run on every leg: skipped or
-	// failing silently, it would leave go test with no packages.
-	run, _ := yamlString(goTest["run"])
-	listSteps := stepRefs(run)
-	if !strings.Contains(run, "./...") && len(listSteps) == 0 {
-		t.Errorf("ci.yml: the test job's go test step %q names neither ./... nor another step's output, so it runs a fixed subset of the packages and the rest would merge untested", run)
-	}
-	for _, id := range listSteps {
-		list, ok := stepByID(steps, id)
-		if !ok {
-			t.Errorf("ci.yml: the test job's go test step reads steps.%s, but no step has that id, so go test would get no packages", id)
-			continue
-		}
-		if _, hasIf := list["if"]; hasIf || hasContinueOnError(list) {
-			t.Errorf("ci.yml: the test job's step %q lists the packages go test runs, but has a step-level \"if\" or continue-on-error, so a leg could run go test with no packages or past a failed list", id)
-		}
-	}
-
-	skips := legSkips(job)
-	if len(skips) > 0 && !readsMatrixKey(steps, skipPackageKey) {
-		t.Errorf("ci.yml: the test job's matrix names a %s, but no step reads matrix.%s, so the matrix says one thing and the leg does another", skipPackageKey, skipPackageKey)
-	}
-	gate := gateJobName(t, jobs)
-	legs := make([]string, 0, len(skips))
-	for leg := range skips {
-		legs = append(legs, leg)
-	}
-	sort.Strings(legs)
-	for _, leg := range legs {
-		for _, skip := range skips[leg] {
-			pkg := importPath(module, skip)
-			dir := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(pkg, module+"/")))
-			if info, err := os.Stat(dir); err != nil || !info.IsDir() || !strings.HasPrefix(pkg, module+"/") {
-				t.Errorf("ci.yml: the test job's %s leg skips %q, which is no package directory of this module, so the skip would name nothing and the package it meant would run twice or never", leg, skip)
-				continue
-			}
-			requirePackageTestedElsewhere(t, jobs, "test", gate, module, leg, pkg)
-		}
-	}
-}
-
-// requirePackageTestedElsewhere asserts that a job other than testJob tests
-// pkg, which testJob's leg skips: a job that runs on every change (no
-// job-level "if" or continue-on-error), on the same kind of runner as the
-// leg, with an unconditional go test step naming the package and no -run or
-// -skip narrowing it; and that the gate job needs it, so its failure blocks
-// a merge.
-func requirePackageTestedElsewhere(t *testing.T, jobs map[string]interface{}, testJob, gate, module, leg, pkg string) {
-	t.Helper()
-	family := runnerFamily(leg)
-	var testers []string
-	for _, name := range sortedKeys(jobs) {
-		job, ok := yamlMap(jobs[name])
-		if !ok || name == testJob {
-			continue
-		}
-		if _, conditional := job["if"]; conditional || hasContinueOnError(job) {
-			continue
-		}
-		if runsOnFamily(job, family) && jobTestsPackage(job, module, pkg) {
-			testers = append(testers, name)
-		}
-	}
-	if len(testers) == 0 {
-		t.Errorf("ci.yml: the test job's %s leg skips %s, but no job that runs on every change tests it on a %s runner (an unconditional go test step naming it, with no -run or -skip), so it would merge untested there", leg, pkg, family)
-		return
-	}
-	gateJob, _ := yamlMap(jobs[gate])
-	for _, n := range needsList(gateJob["needs"]) {
-		for _, name := range testers {
-			if n == name {
-				return
-			}
-		}
-	}
-	t.Errorf("ci.yml: %s tests %s, which the test job's %s leg skips, but the %s job does not need it, so a failure there would not block a merge", strings.Join(testers, ", "), pkg, leg, gate)
-}
-
-// legSkips returns the packages each of job's matrix legs leaves to another
-// job, by the leg's os: the skip-package of every matrix.include entry that
-// applies to that os (one naming it, or naming no os at all).
-func legSkips(job map[string]interface{}) map[string][]string {
-	strategy, _ := yamlMap(job["strategy"])
-	matrix, _ := yamlMap(strategy["matrix"])
-	includes, _ := yamlSlice(matrix["include"])
-	skips := map[string][]string{}
-	for _, leg := range matrixOSes(job) {
-		for _, iv := range includes {
-			entry, _ := yamlMap(iv)
-			if entryOS, named := yamlString(entry["os"]); named && entryOS != leg {
-				continue
-			}
-			if pkg, _ := yamlString(entry[skipPackageKey]); pkg != "" {
-				skips[leg] = append(skips[leg], pkg)
-			}
-		}
-	}
-	return skips
-}
-
-// matrixOSes returns the os values of job's matrix: its matrix.os list and
-// the os of any matrix.include entry that adds a leg of its own.
-func matrixOSes(job map[string]interface{}) []string {
-	strategy, _ := yamlMap(job["strategy"])
-	matrix, _ := yamlMap(strategy["matrix"])
-	var out []string
-	seen := map[string]bool{}
-	add := func(v interface{}) {
-		if s, ok := yamlString(v); ok && !seen[s] {
-			seen[s] = true
-			out = append(out, s)
-		}
-	}
-	osList, _ := yamlSlice(matrix["os"])
-	for _, v := range osList {
-		add(v)
-	}
-	includes, _ := yamlSlice(matrix["include"])
-	for _, iv := range includes {
-		entry, _ := yamlMap(iv)
-		add(entry["os"])
-	}
-	return out
-}
-
-// runnerFamily returns the kind of runner an image label names: "windows"
-// for windows-latest or windows-2025, "ubuntu", "macos".
-func runnerFamily(label string) string {
-	family, _, _ := strings.Cut(strings.ToLower(label), "-")
-	return family
-}
-
-// runsOnFamily reports whether job runs on a runner of the family: its
-// runs-on label, or, when that is an expression, any os of its matrix.
-func runsOnFamily(job map[string]interface{}, family string) bool {
-	runsOn, ok := yamlString(job["runs-on"])
-	if !ok {
-		return false
-	}
-	labels := []string{runsOn}
-	if strings.Contains(runsOn, "${{") {
-		labels = matrixOSes(job)
-	}
-	for _, label := range labels {
-		if runnerFamily(label) == family {
-			return true
-		}
-	}
-	return false
-}
-
-// jobTestsPackage reports whether job has an unconditional step (no
-// step-level "if" or continue-on-error) running go test on pkg.
-func jobTestsPackage(job map[string]interface{}, module, pkg string) bool {
-	steps, _ := yamlSlice(job["steps"])
+	test, _ := yamlMap(jobs["test"])
+	steps, _ := yamlSlice(test["steps"])
+	byID := map[string]map[string]interface{}{}
+	var goTest map[string]interface{}
+	var id string
 	for _, sv := range steps {
-		step, ok := yamlMap(sv)
-		if !ok {
-			continue
-		}
-		if _, hasIf := step["if"]; hasIf || hasContinueOnError(step) {
-			continue
-		}
+		step, _ := yamlMap(sv)
+		sid, _ := yamlString(step["id"])
+		byID[sid] = step
 		run, _ := yamlString(step["run"])
-		if goTestRunsPackage(run, module, pkg) {
-			return true
+		if m := goTestListRun.FindStringSubmatch(strings.TrimSpace(run)); m != nil {
+			goTest, id = step, m[1]
 		}
 	}
-	return false
-}
-
-// goTestRunsPackage reports whether a go test command in run selects the
-// package pkg - by its import path, its path from the module root or a ...
-// pattern over it - and does not narrow the tests it runs with -run or
-// -skip. Only a command that is go test itself counts, after any
-// NAME=value prefixes, not one that merely mentions it.
-func goTestRunsPackage(run, module, pkg string) bool {
-	for _, line := range strings.Split(run, "\n") {
-		for _, command := range splitShellCommands(line) {
-			words := strings.Fields(command)
-			for len(words) > 0 && bashAssignPattern.MatchString(words[0]) {
-				words = words[1:]
-			}
-			if len(words) < 2 || words[0] != "go" || words[1] != "test" {
-				continue
-			}
-			named := false
-			narrowed := false
-			for _, arg := range words[2:] {
-				if strings.HasPrefix(arg, "-") {
-					flag, _, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
-					switch flag {
-					case "run", "skip", "test.run", "test.skip":
-						narrowed = true
-					}
-					continue
-				}
-				if namesPackage(arg, module, pkg) {
-					named = true
-				}
-			}
-			if named && !narrowed {
-				return true
-			}
+	list := byID[id]
+	if goTest == nil || list == nil {
+		t.Fatalf("ci.yml: no test job step runs go test -timeout with only ${{ steps.<id>.outputs.list }} as its packages, naming a step with that id, so the packages it tests are not the list step's and some could go untested")
+	}
+	for _, step := range []map[string]interface{}{list, goTest} {
+		if _, hasIf := step["if"]; hasIf || hasContinueOnError(step) {
+			t.Errorf("ci.yml: the test job's step %q has a step-level \"if\" or continue-on-error, so a leg could run go test on no packages or fail without failing the job", step["name"])
 		}
 	}
-	return false
-}
-
-// namesPackage reports whether word, a go test argument, selects pkg: the
-// import path itself, a path from the module root (./internal/x), or a
-// pattern ending in /... over it or a parent directory (./... included).
-func namesPackage(word, module, pkg string) bool {
-	path := importPath(module, word)
-	if prefix, ok := strings.CutSuffix(path, "/..."); ok {
-		return pkg == prefix || strings.HasPrefix(pkg, prefix+"/")
+	listRun, _ := yamlString(list["run"])
+	env, _ := yamlMap(list["env"])
+	if !strings.Contains(listRun, "$(go list ./...)") || !strings.Contains(listRun, "list=") || env["SKIP_PACKAGE"] != "${{ matrix.skip-package }}" {
+		t.Errorf("ci.yml: step %q does not print go list ./... as an output named list, less the SKIP_PACKAGE its env takes from matrix.skip-package, so a leg would test the wrong packages", id)
 	}
-	return path == pkg
-}
-
-// importPath turns a path from the module root (. or ./internal/x) into an
-// import path, and leaves an import path as it is.
-func importPath(module, word string) string {
-	if word == "." || strings.HasPrefix(word, "./") {
-		return module + strings.TrimPrefix(word, ".")
+	for _, line := range strings.Split(listRun, "\n") {
+		if listFilter.MatchString(line) && !strings.Contains(line, `ENVIRON["SKIP_PACKAGE"]`) {
+			t.Errorf("ci.yml: step %q filters its list with %q, which is not by SKIP_PACKAGE, so a leg could drop a package no job tests", id, strings.TrimSpace(line))
+		}
 	}
-	return word
-}
 
-// modulePath returns the module path go.mod declares.
-func modulePath(t *testing.T, root string) string {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	gomod, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "module "); ok {
-			return strings.Trim(strings.TrimSpace(rest), `"`)
+	module := regexp.MustCompile(`(?m)^module\s+(\S+)`).FindStringSubmatch(string(gomod))[1]
+	strategy, _ := yamlMap(test["strategy"])
+	matrix, _ := yamlMap(strategy["matrix"])
+	includes, _ := yamlSlice(matrix["include"])
+	for _, iv := range includes {
+		entry, _ := yamlMap(iv)
+		skip, _ := yamlString(entry["skip-package"])
+		leg, _ := yamlString(entry["os"])
+		switch {
+		case skip == "":
+		case !strings.HasPrefix(skip, module+"/"):
+			t.Errorf("ci.yml: the test job's %s leg skips %q, which is not an import path under %s, so go list never names it and the list step fails", leg, skip, module)
+		case !testedByAnotherJob(jobs, leg, skip, "./"+strings.TrimPrefix(skip, module+"/")):
+			t.Errorf("ci.yml: the test job's %s leg skips %s, but no job that runs on every change tests it on a %s runner (an unconditional go test step naming it, with no -run or -skip), so it would merge untested there", leg, skip, strings.SplitN(leg, "-", 2)[0])
 		}
 	}
-	t.Fatalf("go.mod: no module line")
-	return ""
 }
 
-// stepRefPattern matches a reference to another step's output in a step's
-// script: steps.<id>.
-var stepRefPattern = regexp.MustCompile(`steps\.([A-Za-z0-9_-]+)\.`)
-
-// stepRefs returns the ids of the steps whose outputs run reads.
-func stepRefs(run string) []string {
-	var ids []string
-	for _, m := range stepRefPattern.FindAllStringSubmatch(run, -1) {
-		ids = append(ids, m[1])
-	}
-	return ids
-}
-
-// stepByID returns the step in steps with the given id.
-func stepByID(steps []interface{}, id string) (map[string]interface{}, bool) {
-	for _, sv := range steps {
-		step, ok := yamlMap(sv)
-		if !ok {
+// testedByAnotherJob reports whether a job other than test - with no
+// job-level "if" or continue-on-error, on a runner of the leg's OS - has an
+// unconditional step whose go test line names pkg (as an import path or as
+// rel) without -run or -skip.
+func testedByAnotherJob(jobs map[string]interface{}, leg, pkg, rel string) bool {
+	narrows := func(w string) bool { return strings.HasPrefix(w, "-run") || strings.HasPrefix(w, "-skip") }
+	for name, jv := range jobs {
+		job, _ := yamlMap(jv)
+		runsOn, _ := yamlString(job["runs-on"])
+		if _, conditional := job["if"]; name == "test" || conditional || hasContinueOnError(job) || !strings.HasPrefix(runsOn, strings.SplitN(leg, "-", 2)[0]+"-") {
 			continue
 		}
-		if got, _ := yamlString(step["id"]); got == id {
-			return step, true
-		}
-	}
-	return nil, false
-}
-
-// readsMatrixKey reports whether any step of steps reads matrix.<key> in
-// its script or its env.
-func readsMatrixKey(steps []interface{}, key string) bool {
-	ref := "matrix." + key
-	for _, sv := range steps {
-		step, ok := yamlMap(sv)
-		if !ok {
-			continue
-		}
-		if run, _ := yamlString(step["run"]); strings.Contains(run, ref) {
-			return true
-		}
-		env, _ := yamlMap(step["env"])
-		for _, k := range sortedKeys(env) {
-			if v, _ := yamlString(env[k]); strings.Contains(v, ref) {
-				return true
+		steps, _ := yamlSlice(job["steps"])
+		for _, sv := range steps {
+			step, _ := yamlMap(sv)
+			if _, hasIf := step["if"]; hasIf || hasContinueOnError(step) {
+				continue
+			}
+			run, _ := yamlString(step["run"])
+			for _, line := range strings.Split(run, "\n") {
+				words := strings.Fields(line)
+				if len(words) > 2 && words[0] == "go" && words[1] == "test" && !slices.ContainsFunc(words, narrows) &&
+					(slices.Contains(words, pkg) || slices.Contains(words, rel)) {
+					return true
+				}
 			}
 		}
 	}
@@ -1403,88 +1179,5 @@ func TestDependsOnTransitive(t *testing.T) {
 	}
 	if dependsOn(jobs, "d", "a") {
 		t.Error("dependsOn(d, a) = true, want false (d has no needs at all)")
-	}
-}
-
-// TestGoTestRunsPackage pins which go test commands goTestRunsPackage counts
-// as testing a package: any way of naming it, but not a command that only
-// mentions go test, runs another tool, names another package (a longer name
-// that starts with it included), or narrows the tests with -run or -skip.
-func TestGoTestRunsPackage(t *testing.T) {
-	const module = "example.com/m"
-	const pkg = "example.com/m/internal/slow"
-	cases := []struct {
-		name string
-		run  string
-		want bool
-	}{
-		{"path from the module root", "go test -timeout 30m ./internal/slow", true},
-		{"import path", "go test " + pkg, true},
-		{"everything", "go test -timeout 30m ./...", true},
-		{"a parent pattern", "go test ./internal/...", true},
-		{"its own pattern", "go test ./internal/slow/...", true},
-		{"among others", "go test ./internal/fast ./internal/slow ./e2e", true},
-		{"after an env prefix", "GOFLAGS=-count=1 go test ./internal/slow", true},
-		{"after another command", "go build ./... && go test ./internal/slow", true},
-		{"on one line of several", "set -eu\ngo test ./internal/slow", true},
-		{"a longer name that starts with it", "go test ./internal/slower", false},
-		{"a subpackage alone", "go test ./internal/slow/sub", false},
-		{"another package", "go test ./internal/fast", false},
-		{"a sibling pattern", "go test ./cmd/...", false},
-		{"go vet", "go vet ./internal/slow", false},
-		{"only mentioned", "echo go test ./internal/slow", false},
-		{"narrowed by -run", "go test -run TestOne ./internal/slow", false},
-		{"narrowed by -skip=", "go test -skip=TestOne ./internal/slow", false},
-		{"narrowed by -test.run", "go test -test.run=TestOne ./internal/slow", false},
-		{"a flag value that is not a package", "go test -count=1 ./internal/fast", false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := goTestRunsPackage(c.run, module, pkg); got != c.want {
-				t.Errorf("goTestRunsPackage(%q) = %v, want %v", c.run, got, c.want)
-			}
-		})
-	}
-}
-
-// TestLegSkips pins how legSkips reads the matrix: an include entry names a
-// leg's skipped package by its os, one with no os applies to every leg, and
-// a leg no entry names skips nothing.
-func TestLegSkips(t *testing.T) {
-	job := func(matrix map[string]interface{}) map[string]interface{} {
-		return map[string]interface{}{"strategy": map[string]interface{}{"matrix": matrix}}
-	}
-	osList := []interface{}{"windows-latest", "ubuntu-latest"}
-	cases := []struct {
-		name   string
-		matrix map[string]interface{}
-		want   map[string][]string
-	}{
-		{"no include", map[string]interface{}{"os": osList}, map[string][]string{}},
-		{"one leg", map[string]interface{}{"os": osList, "include": []interface{}{
-			map[string]interface{}{"os": "windows-latest", skipPackageKey: "p"},
-		}}, map[string][]string{"windows-latest": {"p"}}},
-		{"an entry with no skip", map[string]interface{}{"os": osList, "include": []interface{}{
-			map[string]interface{}{"os": "windows-latest", "other": "x"},
-		}}, map[string][]string{}},
-		{"every leg", map[string]interface{}{"os": osList, "include": []interface{}{
-			map[string]interface{}{skipPackageKey: "p"},
-		}}, map[string][]string{"windows-latest": {"p"}, "ubuntu-latest": {"p"}}},
-		{"a leg the include adds", map[string]interface{}{"os": osList, "include": []interface{}{
-			map[string]interface{}{"os": "windows-2022", skipPackageKey: "p"},
-		}}, map[string][]string{"windows-2022": {"p"}}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := legSkips(job(c.matrix))
-			if len(got) != len(c.want) {
-				t.Fatalf("legSkips = %v, want %v", got, c.want)
-			}
-			for leg, pkgs := range c.want {
-				if strings.Join(got[leg], " ") != strings.Join(pkgs, " ") {
-					t.Errorf("legSkips[%q] = %v, want %v", leg, got[leg], pkgs)
-				}
-			}
-		})
 	}
 }
