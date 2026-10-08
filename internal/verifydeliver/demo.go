@@ -2,12 +2,9 @@ package verifydeliver
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/home"
+	"github.com/develdeco/jig/internal/media"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -28,21 +26,6 @@ const (
 	DemoRecorded = "recorded"
 	DemoRefused  = "refused"
 	DemoExisting = "existing"
-)
-
-// The limits a demo's media are held to: the types and sizes `gh ... --attach`
-// accepts, so a file jig records is one a later publish can attach. Images
-// are at most 10 MiB, videos at most 100 MiB, a file is never empty (gh
-// refuses one), and a demo has at most 50 files.
-const (
-	demoMaxImageBytes = 10 << 20
-	demoMaxVideoBytes = 100 << 20
-	demoMaxFiles      = 50
-)
-
-var (
-	demoImageExts = []string{"png", "jpg", "jpeg", "gif", "webp", "svg"}
-	demoVideoExts = []string{"mp4", "mov", "webm"}
 )
 
 // demoReasonCap bounds a recorded refusal reason: an operating system error
@@ -59,14 +42,15 @@ type DemoLimits struct {
 	MaxFiles        int      `json:"max_files"`
 }
 
-// demoLimits returns the limits every demo is held to.
+// demoLimits returns the limits every demo is held to: the media package's,
+// the types and sizes `gh ... --attach` accepts.
 func demoLimits() DemoLimits {
 	return DemoLimits{
-		ImageExtensions: append([]string{}, demoImageExts...),
-		VideoExtensions: append([]string{}, demoVideoExts...),
-		MaxImageBytes:   demoMaxImageBytes,
-		MaxVideoBytes:   demoMaxVideoBytes,
-		MaxFiles:        demoMaxFiles,
+		ImageExtensions: media.ImageExtensions(),
+		VideoExtensions: media.VideoExtensions(),
+		MaxImageBytes:   media.MaxImageBytes,
+		MaxVideoBytes:   media.MaxVideoBytes,
+		MaxFiles:        media.MaxFiles,
 	}
 }
 
@@ -211,21 +195,10 @@ func ParseDemoResult(data []byte) (DemoResult, error) {
 			return DemoResult{}, demoInvalid(fmt.Sprintf("media entry %d has an empty file", i))
 		}
 		if strings.TrimSpace(m.Caption) == "" {
-			return DemoResult{}, demoInvalid(fmt.Sprintf("%s has an empty caption", demoEntry(i, m.File)))
+			return DemoResult{}, demoInvalid(fmt.Sprintf("%s has an empty caption", media.EntryLabel(i, m.File)))
 		}
 	}
 	return res, nil
-}
-
-// demoEntry names the media entry at index i of a result, listed as file, in a
-// refusal reason: by its index and the last element of file, never by file
-// itself. The session was told media_dir's absolute path, so it may list a
-// file by a full path, in whatever spelling its backend gave it (raw,
-// forward-slash, a WSL mount), and a reason is committed to the store and
-// printed. jig cannot know every spelling to leave out, so it does not repeat
-// a path it did not choose.
-func demoEntry(i int, file string) string {
-	return fmt.Sprintf("media entry %d (%q)", i, filepath.Base(file))
 }
 
 // DemoFile is one recorded media file as demo.yaml lists it: its name in
@@ -367,32 +340,6 @@ func demoMediaDir(d Deps, ticket, head string) (string, error) {
 		return "", err
 	}
 	return absPath(dir), nil
-}
-
-// plainEvidenceParents refuses a media directory reached through a store-id
-// or ticket directory that is a link or a junction, before anything is
-// cleared or made below it. jig made those directories, so a link in their
-// place is one a session swapped in. verifyDemoMedia's identity check catches
-// a swap made during its own attempt, but one that stays would send the next
-// attempt's clearing, mkdir and media through it, so it is refused before
-// that. A directory that does not exist yet is fine, since MkdirAll makes it
-// plain. The head directory itself is not checked: an attempt removes a link
-// there as itself.
-func plainEvidenceParents(mediaDir string) error {
-	ticketDir := filepath.Dir(mediaDir)
-	for _, p := range []string{filepath.Dir(ticketDir), ticketDir} {
-		info, err := os.Lstat(p)
-		if os.IsNotExist(err) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("evidence directory %q cannot be read: %w", filepath.Base(p), err)
-		}
-		if info.Mode().Type() != os.ModeDir {
-			return fmt.Errorf("evidence directory %q is not a plain directory (a link or junction is refused, and left for the operator to remove)", filepath.Base(p))
-		}
-	}
-	return nil
 }
 
 // demoFailure is an attempt that ended because the demo session, or the
@@ -547,7 +494,7 @@ func hostPathSpellings(withWSL bool, dirs ...hostDir) []hostPathSpelling {
 // reason is committed to the store and printed in the report, and the
 // operating system errors it carries name the path they failed on, which for
 // the jig home holds the operator's user name. It is for the paths jig
-// chose. A path the session chose is never put in a reason (demoEntry), and
+// chose. A path the session chose is never put in a reason (media.EntryLabel), and
 // the text of a failure of the session or its backend, which can spell a
 // path any way it likes, is never recorded (demoFailure).
 func leaveOutHostPaths(s string, dirs ...hostDir) string {
@@ -574,158 +521,22 @@ func containsHostPath(s string, dirs ...hostDir) bool {
 	return false
 }
 
-// demoFile is one listed file that passed verification, still under the
-// session's own name.
-type demoFile struct {
-	name    string
-	ext     string
-	size    int64
-	sha256  string
-	caption string
-}
-
-// demoKind classifies a lowercase extension: "image", "video", or "" for a
-// type a demo does not accept.
-func demoKind(ext string) string {
-	for _, e := range demoImageExts {
-		if e == ext {
-			return "image"
-		}
+// verifyDemoMedia checks every file res lists against what a demo may record
+// (media.Verify, which names the directory media_dir in a refusal, as the
+// session was told it) and refuses the whole result on the first that fails
+// one. made is mediaDir as jig made it, pinned by media.LstatPinned. Nothing
+// is renamed here.
+func verifyDemoMedia(mediaDir string, made os.FileInfo, res DemoResult) ([]media.File, error) {
+	// media.Verify has the same check in its own words. A demo's refusal says
+	// "the demo", which demo.yaml records.
+	if len(res.Media) > media.MaxFiles {
+		return nil, fmt.Errorf("the demo lists %d files; at most %d are accepted", len(res.Media), media.MaxFiles)
 	}
-	for _, e := range demoVideoExts {
-		if e == ext {
-			return "video"
-		}
-	}
-	return ""
-}
-
-// plainDemoFileName reports whether name is a single file name: no path
-// separator (either spelling), no drive or stream colon, not a dot name, and
-// - via filepath.IsLocal - not a Windows reserved device name.
-func plainDemoFileName(name string) bool {
-	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\:\x00") {
-		return false
-	}
-	return filepath.IsLocal(name)
-}
-
-// lstatPinned is os.Lstat with the file's identity read now. On Windows a
-// FileInfo from Lstat holds no file id: os.SameFile opens its path to read
-// one the first time it compares, so an identity captured before a swap
-// would be read after it, through whatever then sits at that path, and every
-// comparison would pass. Comparing the info with itself makes it load the id.
-func lstatPinned(path string) (os.FileInfo, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !os.SameFile(info, info) {
-		return nil, fmt.Errorf("the identity of %s cannot be read", path)
-	}
-	return info, nil
-}
-
-// verifyDemoMedia checks every listed file against what a demo may record,
-// and refuses the whole result on the first that fails one: at most
-// demoMaxFiles files; media_dir itself a real directory (never a link or a
-// junction a session swapped in) and the very directory jig made (made,
-// pinned by lstatPinned when it was made), so a directory above it swapped
-// for a link cannot carry the demo outside the evidence tree; each name a
-// plain file name listed once; an allowed extension; a regular file, decided
-// by Lstat, so a symlink or a Windows junction (which reads as irregular) is
-// never followed; not empty (gh refuses an empty file); and within the size
-// limit for its kind. The bytes are hashed from the very file Lstat saw.
-// Nothing is renamed here.
-func verifyDemoMedia(mediaDir string, made os.FileInfo, res DemoResult) ([]demoFile, error) {
-	if len(res.Media) > demoMaxFiles {
-		return nil, fmt.Errorf("the demo lists %d files; at most %d are accepted", len(res.Media), demoMaxFiles)
-	}
-	dirInfo, err := lstatPinned(mediaDir)
-	if err != nil {
-		return nil, fmt.Errorf("media_dir cannot be read: %w", err)
-	}
-	if dirInfo.Mode().Type() != os.ModeDir {
-		return nil, fmt.Errorf("media_dir is not a plain directory (a link or junction is refused)")
-	}
-	if !os.SameFile(made, dirInfo) {
-		return nil, fmt.Errorf("media_dir is not the directory jig made for this demo (it, or a directory above it, was replaced)")
-	}
-
-	seen := map[string]bool{}
-	files := make([]demoFile, 0, len(res.Media))
+	listed := make([]media.Listed, len(res.Media))
 	for i, m := range res.Media {
-		if !plainDemoFileName(m.File) {
-			return nil, fmt.Errorf("%s is not a plain file name directly inside media_dir", demoEntry(i, m.File))
-		}
-		key := strings.ToLower(m.File)
-		if seen[key] {
-			return nil, fmt.Errorf("file %q is listed more than once", m.File)
-		}
-		seen[key] = true
-
-		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(m.File), "."))
-		kind := demoKind(ext)
-		if kind == "" {
-			return nil, fmt.Errorf("file %q has a type that is not an allowed image (%s) or video (%s) type", m.File, strings.Join(demoImageExts, ", "), strings.Join(demoVideoExts, ", "))
-		}
-		limit := int64(demoMaxImageBytes)
-		if kind == "video" {
-			limit = demoMaxVideoBytes
-		}
-
-		path := filepath.Join(mediaDir, m.File)
-		info, err := lstatPinned(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, fmt.Errorf("file %q is not in media_dir", m.File)
-			}
-			return nil, fmt.Errorf("file %q cannot be read: %w", m.File, err)
-		}
-		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("file %q is not a regular file (a directory, link or junction is refused)", m.File)
-		}
-		if info.Size() == 0 {
-			return nil, fmt.Errorf("file %q is empty", m.File)
-		}
-		if info.Size() > limit {
-			return nil, fmt.Errorf("file %q is %d bytes; a %s may be at most %d", m.File, info.Size(), kind, limit)
-		}
-		sum, err := hashRegularFile(path, info)
-		if err != nil {
-			return nil, fmt.Errorf("file %q: %w", m.File, err)
-		}
-		files = append(files, demoFile{name: m.File, ext: ext, size: info.Size(), sha256: sum, caption: m.Caption})
+		listed[i] = media.Listed{File: m.File, Caption: m.Caption}
 	}
-	return files, nil
-}
-
-// hashRegularFile returns the sha256 hex of the file at path, which
-// lstatPinned (info) reported as a regular file of that size. It opens the
-// file and checks it is the same one and still that size, so a swap or a
-// growth between the Lstat and the read is refused instead of hashed.
-func hashRegularFile(path string, info os.FileInfo) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	opened, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	if !os.SameFile(info, opened) {
-		return "", fmt.Errorf("changed while it was being checked")
-	}
-	h := sha256.New()
-	n, err := io.Copy(h, io.LimitReader(f, info.Size()+1))
-	if err != nil {
-		return "", err
-	}
-	if n != info.Size() {
-		return "", fmt.Errorf("changed size while it was being checked")
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return media.Verify(mediaDir, "media_dir", made, listed)
 }
 
 // renameDemoMedia renames the accepted files to demo-<n>.<ext>, n from 1 in
@@ -735,12 +546,12 @@ func hashRegularFile(path string, info os.FileInfo) (string, error) {
 // used a demo-<n> name for a different file in the list (or one that differs
 // only by case) cannot make one rename overwrite another's source, and it
 // refuses beforehand when an unlisted file already holds a final name.
-func renameDemoMedia(mediaDir string, files []demoFile) ([]DemoFile, error) {
+func renameDemoMedia(mediaDir string, files []media.File) ([]DemoFile, error) {
 	listed := make(map[string]bool, len(files))
 	final := make([]string, len(files))
 	for i, f := range files {
-		listed[strings.ToLower(f.name)] = true
-		final[i] = fmt.Sprintf("demo-%d.%s", i+1, f.ext)
+		listed[strings.ToLower(f.Name)] = true
+		final[i] = fmt.Sprintf("demo-%d.%s", i+1, f.Ext)
 	}
 	for _, name := range final {
 		if listed[strings.ToLower(name)] {
@@ -756,16 +567,16 @@ func renameDemoMedia(mediaDir string, files []demoFile) ([]DemoFile, error) {
 	staged := make([]string, len(files))
 	for i, f := range files {
 		staged[i] = fmt.Sprintf(".jig-demo-%d.tmp", i)
-		if err := os.Rename(filepath.Join(mediaDir, f.name), filepath.Join(mediaDir, staged[i])); err != nil {
-			return nil, fmt.Errorf("rename %q: %w", f.name, err)
+		if err := os.Rename(filepath.Join(mediaDir, f.Name), filepath.Join(mediaDir, staged[i])); err != nil {
+			return nil, fmt.Errorf("rename %q: %w", f.Name, err)
 		}
 	}
 	out := make([]DemoFile, len(files))
 	for i, f := range files {
 		if err := os.Rename(filepath.Join(mediaDir, staged[i]), filepath.Join(mediaDir, final[i])); err != nil {
-			return nil, fmt.Errorf("rename %q to %q: %w", f.name, final[i], err)
+			return nil, fmt.Errorf("rename %q to %q: %w", f.Name, final[i], err)
 		}
-		out[i] = DemoFile{Name: final[i], SHA256: f.sha256, Size: f.size, Caption: f.caption}
+		out[i] = DemoFile{Name: final[i], SHA256: f.SHA256, Size: f.Size, Caption: f.Caption}
 	}
 	return out, nil
 }

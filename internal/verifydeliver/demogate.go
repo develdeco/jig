@@ -9,6 +9,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/media"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -208,7 +209,7 @@ func attemptDemo(d Deps, ds DemoSource, in DemoInput, dir, repoName, target stri
 	}
 	in.BaseSHA = base
 	in.MediaDir = dir
-	if err := plainEvidenceParents(dir); err != nil {
+	if err := media.PlainParents(dir); err != nil {
 		return nil, "", err
 	}
 	// A refused or failed earlier attempt at this head may have left files
@@ -224,7 +225,7 @@ func attemptDemo(d Deps, ds DemoSource, in DemoInput, dir, repoName, target stri
 	// The directory as it is now, for verifyDemoMedia to compare: a plain
 	// directory check alone would follow a directory above it that the session
 	// swapped for a link.
-	made, err := lstatPinned(dir)
+	made, err := media.LstatPinned(dir)
 	if err != nil {
 		return nil, "", fmt.Errorf("read media_dir: %w", err)
 	}

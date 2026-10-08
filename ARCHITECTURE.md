@@ -356,6 +356,7 @@ exists.
 | `internal/intent/` | `NewClaudeReader`, `Best`, `RenderExcerpt` | a repo's git common dir + a time window → matching local agent `Session`s; a scope diff's files → the `Match` a model then summarizes |
 | `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `VerifiedSlices`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
 | `internal/manifest/` | `Resolve`, `MatchesInvariant` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes, and invariant-sensitive paths; a file path → whether it matches a declared invariant |
+| `internal/media/` | `Verify`, `Kind`, `PlainParents`, `LstatPinned`, `HashRegularFile`, `EntryLabel`, `ImageExtensions`, `VideoExtensions` | a directory jig made + a session's listing of files in it → the `File`s that passed what `gh ... --attach` accepts (a plain name, an allowed type, a regular non-empty file within its size limit, hashed from the very file checked), or a refusal naming the first that did not; a standard-library leaf, so `frontier` and `verifydeliver` can both use it |
 | `internal/mirror/` | `Sync`, `ResolveTicketTitleBody`, `RenderTicketBody`, `RenderChartBody`, `TicketStatus`, `ChartStatus`, `IsOpen`, `FindPullRequests`, `ScanTitleAndBody`, `LoadPublishTerms` | `Deps` (a store, `project.Config`, the jig home, a `github.Client`) + `SyncOpts` → a `SyncReport` (issues created, updated, recreated, linked, placed on the board, skipped on a publish-safety hit, and every drift line), the records written under the bridge's own paths and shape, and a GitHub Project kept current - wired into every `Store.AfterCheckpoint` and `jig trackers sync` |
 | `internal/mirror/github/` | `New`, `Client` (`CreateIssue`, `FetchIssue`, `UpdateIssue`, `CloseIssueCompleted`/`CloseIssueNotPlanned`, `ReopenIssue`, `AddComment`, `AddSubIssue`/`RemoveSubIssue`, `AddBlockedBy`/`RemoveBlockedBy`, `PullRequestsByHead`, `LookupProject`, `EnsureProject`, `PlaceItem`, `ItemFieldValues`, `RepositoryIsPublic`) | an endpoint + token (a fake GraphQL server and a fixed token in every test, `api.github.com/graphql` and `gh auth token` in production) → the GraphQL mutations and queries `internal/mirror` drives a sync through, one mutation per second and retried with backoff (4 attempts) on a server error or a rate limit |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
@@ -830,7 +831,7 @@ under a subject naming it (see the store push above).
    `demo.yaml`'s own order and under its own recorded name - never
    renumbered from the verified files alone - in the one reference form
    `gh` actually rewrites for its kind (gate finding r1-f3, DECISIONS.md):
-   an image (`demoKind`'s own extension list) as markdown image syntax,
+   an image (`media.Kind`'s own extension list) as markdown image syntax,
    `![caption](./<name>)`, which `gh ... --attach` rewrites to the uploaded
    URL in place; a video as the plain bullet `./<name>: caption` it has
    never reliably rewritten, which a later step (below) reads back and
