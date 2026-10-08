@@ -3,14 +3,17 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -55,19 +58,30 @@ func writeChart(t *testing.T, storeRoot, name, content string) {
 	}
 }
 
-// rewriteTicketFormat replaces storeRoot's project.yaml ticket_format
-// ("T-{n}", jig init --standalone's default) with format, so a test can mint
-// through a ticket_format of its own choosing.
-func rewriteTicketFormat(t *testing.T, storeRoot, format string) {
+// declareKeys replaces storeRoot's project.yaml "ticket_format: T-{n}" line
+// (jig init --standalone's default) with a keys: block declaring keys, so a
+// test can graduate or mint under keys of its own choosing instead of the
+// one ticket_format names.
+func declareKeys(t *testing.T, storeRoot string, keys map[string]string) {
 	t.Helper()
 	path := filepath.Join(storeRoot, "project.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewritten := strings.Replace(string(data), "T-{n}", format, 1)
+	names := make([]string, 0, len(keys))
+	for k := range keys {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	var block strings.Builder
+	block.WriteString("keys:\n")
+	for _, k := range names {
+		fmt.Fprintf(&block, "  %s: %s\n", k, keys[k])
+	}
+	rewritten := strings.Replace(string(data), "ticket_format: T-{n}\n", block.String(), 1)
 	if rewritten == string(data) {
-		t.Fatalf("project.yaml has no T-{n} ticket_format to rewrite:\n%s", data)
+		t.Fatalf("project.yaml has no ticket_format: T-{n} line to replace:\n%s", data)
 	}
 	if err := os.WriteFile(path, []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
@@ -1539,7 +1553,8 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 
 	// The other clone graduates Slice A and pushes it to the origin, standing
 	// in for `jig graduate mychart` run from a second clone.
-	otherID, _, otherDone, err := claimOneChartEntry(otherSt, "T-{n}", "mychart")
+	cfg := project.Config{Keys: map[string]string{"T": ""}}
+	otherID, _, otherDone, err := claimOneChartEntry(otherSt, cfg, "mychart")
 	if err != nil {
 		t.Fatalf("claimOneChartEntry on the other clone: %v", err)
 	}
@@ -1558,7 +1573,7 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 	// storeRoot never synced with the other clone's push: its own claim below
 	// mints against a stale chart, so its push is rejected by what the other
 	// clone already landed on the origin.
-	id, pos, done, err := claimOneChartEntry(st, "T-{n}", "mychart")
+	id, pos, done, err := claimOneChartEntry(st, cfg, "mychart")
 	if err != nil {
 		t.Fatalf("claimOneChartEntry: %v", err)
 	}
@@ -1606,42 +1621,82 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 	}
 }
 
-// TestGraduateRefusesAMintedIDJigCannotUse covers an id ticket_format mints
-// that jig cannot use (pool.CheckTicket: a reserved lease suffix here):
-// graduate refuses it before writing anything under it - no folder or
-// record - and the chart entry stays without an id.
-func TestGraduateRefusesAMintedIDJigCannotUse(t *testing.T) {
+// TestGraduateMintsEachEntryUnderItsOwnKey covers the plain case: a chart
+// entry's key: picks which declared key it mints under, and an entry with
+// no key: defaults as ResolveKey does.
+func TestGraduateMintsEachEntryUnderItsOwnKey(t *testing.T) {
 	jig, storeRoot := setupGraduateStore(t)
-	rewriteTicketFormat(t, storeRoot, "T-{n}-gate")
+	declareKeys(t, storeRoot, map[string]string{"STORE": "the store's layout, ids and git sync", "GRAPH": "tickets, charts and the order between them"})
 	writeChart(t, storeRoot, "mychart", `tickets:
-  - title: "New entry"
+  - title: "Slice A"
+    key: STORE
+  - title: "Slice B"
+    key: GRAPH
 `)
 
 	code, out := jig("graduate", "mychart")
-	if code == 0 {
-		t.Fatalf("jig graduate with ticket_format T-{n}-gate: exit 0, want a refusal:\n%s", out)
+	if code != 0 {
+		t.Fatalf("jig graduate mychart: exit %d\n%s", code, out)
 	}
-	for _, want := range []string{"T-1-gate", "reserves"} {
+	for _, want := range []string{"STORE-1", "GRAPH-1"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("jig graduate with ticket_format T-{n}-gate: output lacks %q:\n%s", want, out)
+			t.Fatalf("jig graduate mychart: output lacks %q:\n%s", want, out)
 		}
-	}
-	if strings.Contains(out, "delete that ticket folder") {
-		t.Fatalf("jig graduate with ticket_format T-{n}-gate gave the orphan help:\n%s", out)
 	}
 
 	st, err := store.Open(storeRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(st.TicketDir("T-1-gate")); !os.IsNotExist(err) {
-		t.Fatalf("the refused ticket T-1-gate left a store folder behind (stat err %v)", err)
+	entries, err := st.ReadChart("mychart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].ID != "STORE-1" || entries[1].ID != "GRAPH-1" {
+		t.Fatalf("entries after graduate = %+v, want ids STORE-1 and GRAPH-1", entries)
+	}
+}
+
+// TestGraduateRefusesAnUndeclaredKeyBeforeMintingAnything covers the
+// critical path: an undeclared key: on any chart entry refuses the whole
+// run - naming the declared keys and their meanings - before graduate
+// creates any ticket, even one for an earlier entry whose own key is fine.
+func TestGraduateRefusesAnUndeclaredKeyBeforeMintingAnything(t *testing.T) {
+	jig, storeRoot := setupGraduateStore(t)
+	declareKeys(t, storeRoot, map[string]string{"STORE": "the store's layout, ids and git sync", "GRAPH": "tickets, charts and the order between them"})
+	writeChart(t, storeRoot, "mychart", `tickets:
+  - title: "Slice A"
+    key: STORE
+  - title: "Slice B"
+    key: NOPE
+`)
+
+	code, out := jig("graduate", "mychart")
+	if code == 0 {
+		t.Fatalf("jig graduate with an undeclared key: exit 0, want a refusal:\n%s", out)
+	}
+	for _, want := range []string{`"NOPE"`, "STORE", "GRAPH"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("jig graduate with an undeclared key: output lacks %q:\n%s", want, out)
+		}
+	}
+
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
 	}
 	entries, err := st.ReadChart("mychart")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entries[0].ID != "" {
-		t.Fatalf("the chart entry was recorded as %q, want no id", entries[0].ID)
+	if entries[0].ID != "" || entries[1].ID != "" {
+		t.Fatalf("entries after the refusal = %+v, want neither to have an id", entries)
+	}
+	ids, err := st.TicketIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("TicketIDs = %v, want none: Slice A must not be minted either, since every entry's key is checked before any of them is", ids)
 	}
 }

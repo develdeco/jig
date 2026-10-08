@@ -27,7 +27,7 @@ func TestClaimNoRemoteCommitsOnlyOncePerCall(t *testing.T) {
 	id, err := st.Claim(
 		func() (string, []string, error) {
 			calls++
-			id, err := st.Mint("JIG-{n}", Ticket{Title: "x"})
+			id, err := st.Mint("JIG", Ticket{Title: "x"})
 			if err != nil {
 				return "", nil, err
 			}
@@ -72,7 +72,7 @@ func TestClaimPushesAlone(t *testing.T) {
 
 	id, err := st.Claim(
 		func() (string, []string, error) {
-			id, err := st.Mint("JIG-{n}", Ticket{Title: "x"})
+			id, err := st.Mint("JIG", Ticket{Title: "x"})
 			if err != nil {
 				return "", nil, err
 			}
@@ -123,7 +123,7 @@ func TestClaimRemintsAfterRejectedPush(t *testing.T) {
 	id, err := st.Claim(
 		func() (string, []string, error) {
 			calls++
-			id, err := st.Mint("JIG-{n}", Ticket{Title: "x"})
+			id, err := st.Mint("JIG", Ticket{Title: "x"})
 			if err != nil {
 				return "", nil, err
 			}
@@ -199,7 +199,7 @@ func TestClaimRemintsAfterRejectedPushPreservesUnrelatedDirtyState(t *testing.T)
 					t.Fatal(err)
 				}
 			}
-			id, err := st.Mint("JIG-{n}", Ticket{Title: "x"})
+			id, err := st.Mint("JIG", Ticket{Title: "x"})
 			if err != nil {
 				return "", nil, err
 			}
@@ -276,7 +276,7 @@ func TestClaimRefusesRatherThanOrphaningAConcurrentCommit(t *testing.T) {
 			runGit(t, work, "add", "-A")
 			runGit(t, work, "-c", "user.name=other-local", "-c", "user.email=other-local@example.invalid", "commit", "-m", "other local commit")
 
-			id, err := st.Mint("JIG-{n}", Ticket{Title: "x"})
+			id, err := st.Mint("JIG", Ticket{Title: "x"})
 			if err != nil {
 				return "", nil, err
 			}
@@ -356,7 +356,7 @@ func TestClaimGivesUpAfterMaxAttempts(t *testing.T) {
 			runGit(t, racer, "commit", "-m", "racer wins again")
 			runGit(t, racer, "push", "origin", "main")
 
-			id, merr := st.Mint("JIG-{n}", Ticket{Title: "x"})
+			id, merr := st.Mint("JIG", Ticket{Title: "x"})
 			if merr != nil {
 				return "", nil, merr
 			}
@@ -411,7 +411,7 @@ func TestClaimRefusesWhenOriginUnreachable(t *testing.T) {
 	_, err := st.Claim(
 		func() (string, []string, error) {
 			calls++
-			id, merr := st.Mint("JIG-{n}", Ticket{Title: "x"})
+			id, merr := st.Mint("JIG", Ticket{Title: "x"})
 			if merr != nil {
 				return "", nil, merr
 			}
@@ -797,7 +797,7 @@ func TestClaimWrapsPullFailureAfterUndoAsIDNotClaimed(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\nextra: from-another-process\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			id, merr := st.Mint("JIG-{n}", Ticket{Title: "x"})
+			id, merr := st.Mint("JIG", Ticket{Title: "x"})
 			if merr != nil {
 				return "", nil, merr
 			}

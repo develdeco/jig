@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -82,7 +83,7 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 	var createdIDs []string
 	created := map[int]bool{}
 	for {
-		id, pos, done, err := claimOneChartEntry(st, cfg.TicketFormat, chart)
+		id, pos, done, err := claimOneChartEntry(st, cfg, chart)
 		if err != nil {
 			// Every ticket already claimed (createdIDs) landed on the origin
 			// before this error; running the checkpoint sync for them now,
@@ -265,14 +266,14 @@ var errChartFullyGraduated = errors.New("graduate: chart fully graduated")
 // ever comes back pending. done reports whether the chart had nothing left
 // to claim; id and pos (the entry's 0-based position) are only meaningful
 // when done is false and err is nil.
-func claimOneChartEntry(st *store.Store, format, chart string) (id string, pos int, done bool, err error) {
+func claimOneChartEntry(st *store.Store, cfg project.Config, chart string) (id string, pos int, done bool, err error) {
 	pos = -1
 	write := func() (string, []string, error) {
 		entries, rerr := st.ReadChart(chart)
 		if rerr != nil {
 			return "", nil, rerr
 		}
-		if rerr := validateChartEntries(st, entries, chart); rerr != nil {
+		if rerr := validateChartEntries(st, cfg, entries, chart); rerr != nil {
 			return "", nil, rerr
 		}
 		refs, rerr := resolveChartEntryRefs(st, chart, entries)
@@ -283,8 +284,15 @@ func claimOneChartEntry(st *store.Store, format, chart string) (id string, pos i
 		if i < 0 {
 			return "", nil, errChartFullyGraduated
 		}
+		// Checked again here (validateChartEntries already checked every
+		// entry's key before any of them minted anything), since the key
+		// this one mints under is this entry's resolved key specifically.
+		key, kerr := cfg.ResolveKey(entries[i].Key)
+		if kerr != nil {
+			return "", nil, kerr
+		}
 		rec := store.Ticket{Title: entries[i].Title, Body: entries[i].Body, BlockedBy: toBlockedBy(refs[i])}
-		newID, merr := st.Mint(format, rec)
+		newID, merr := st.Mint(key, rec)
 		if merr != nil {
 			return "", nil, merr
 		}
@@ -400,7 +408,11 @@ func validateChartName(name string) error {
 }
 
 // validateChartEntries checks all entries are valid before any are created.
-func validateChartEntries(st *store.Store, entries []store.ChartEntry, chart string) error {
+// Every entry that has no id yet has its key checked against cfg's declared
+// keys here too, before claimOneChartEntry's write mints anything: an
+// undeclared key on any entry refuses the whole run, not just the entry it
+// names.
+func validateChartEntries(st *store.Store, cfg project.Config, entries []store.ChartEntry, chart string) error {
 	// Check each entry has a title
 	for i, e := range entries {
 		if e.Title == "" {
@@ -409,6 +421,16 @@ func validateChartEntries(st *store.Store, entries []store.ChartEntry, chart str
 				Code: "VALIDATION_ERROR",
 				Help: []string{fmt.Sprintf("Add a title to entry %d in charts/%s/tickets.yaml", i+1, chart)},
 			}
+		}
+	}
+
+	// Check every not-yet-minted entry's key before any entry mints.
+	for _, e := range entries {
+		if e.ID != "" {
+			continue
+		}
+		if _, err := cfg.ResolveKey(e.Key); err != nil {
+			return err
 		}
 	}
 

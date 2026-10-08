@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -27,100 +26,99 @@ func (s *Store) mintLockPath() string {
 	return filepath.Join(s.Root, ".jig-mint")
 }
 
-// ticketFormatPattern builds the regexp that recognizes a store-root folder
-// minted by format, a project.yaml ticket_format such as "JIG-{n}"
-// ("^JIG-(\d+)$").
-func ticketFormatPattern(format string) (*regexp.Regexp, error) {
-	parts := strings.SplitN(format, "{n}", 2)
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("store: ticket_format %q has no {n} placeholder", format)
-	}
-	pattern := "^" + regexp.QuoteMeta(parts[0]) + `(\d+)` + regexp.QuoteMeta(parts[1]) + "$"
-	return regexp.Compile(pattern)
+// ticketIDPattern matches a store-root folder name that is an id: a key (1
+// to 10 uppercase ASCII letters and digits, starting with a letter - the
+// loose shape of any ticket folder, under any key, declared or not, since a
+// key removed from project.yaml only stops new mints under it) a "-", and a
+// number counted from 1 with no leading zero.
+var ticketIDPattern = regexp.MustCompile(`^([A-Z][A-Z0-9]{0,9})-([1-9][0-9]*)$`)
+
+// ticketIDEntry is one id-shaped store-root folder, its key and number
+// pulled out of its name.
+type ticketIDEntry struct {
+	id  string
+	key string
+	n   int
 }
 
-// nextID scans the store root for folders matching format and returns one
-// past the highest number among them, formatted by format: the next id is
-// one past the highest number among the store-root folders the format
-// matches, as the local tracker counted before minting moved here. A
-// non-directory entry whose name happens to match is skipped, so a plain
-// file left in the way of a ticket folder never shifts the count.
-func (s *Store) nextID(format string) (string, error) {
-	re, err := ticketFormatPattern(format)
-	if err != nil {
-		return "", err
-	}
-	entries, err := os.ReadDir(s.Root)
-	if err != nil {
-		return "", fmt.Errorf("store: mint: read store root: %w", err)
-	}
-	maxN := 0
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		m := re.FindStringSubmatch(e.Name())
-		if m == nil {
-			continue
-		}
-		n, err := strconv.Atoi(m[1])
-		if err != nil {
-			continue
-		}
-		if n > maxN {
-			maxN = n
-		}
-	}
-	return strings.ReplaceAll(format, "{n}", strconv.Itoa(maxN+1)), nil
-}
-
-// TicketIDs scans the store root for folders format mints (the same scan
-// nextID runs) and returns their ids in ascending numeric order: the order
-// the GitHub mirror syncs tickets in. Unlike nextID it is not called under
-// the mint lock - a caller reading the store to decide what to sync does not
-// race a concurrent Mint the way computing the next id would.
-func (s *Store) TicketIDs(format string) ([]string, error) {
-	re, err := ticketFormatPattern(format)
-	if err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(s.Root)
+// scanTicketIDs reads root's entries and returns every id-shaped directory
+// among them, in no particular order. A non-directory entry whose name
+// happens to match is skipped, so a plain file left in the way of a ticket
+// folder never shifts a key's count.
+func scanTicketIDs(root string) ([]ticketIDEntry, error) {
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, fmt.Errorf("store: list tickets: read store root: %w", err)
 	}
-	type numbered struct {
-		id string
-		n  int
-	}
-	var ids []numbered
+	var out []ticketIDEntry
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		m := re.FindStringSubmatch(e.Name())
+		m := ticketIDPattern.FindStringSubmatch(e.Name())
 		if m == nil {
 			continue
 		}
-		n, err := strconv.Atoi(m[1])
+		n, err := strconv.Atoi(m[2])
 		if err != nil {
 			continue
 		}
-		ids = append(ids, numbered{id: e.Name(), n: n})
-	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i].n < ids[j].n })
-	out := make([]string, len(ids))
-	for i, nb := range ids {
-		out[i] = nb.id
+		out = append(out, ticketIDEntry{id: e.Name(), key: m[1], n: n})
 	}
 	return out, nil
 }
 
-// Mint computes the next id per format (project.yaml's ticket_format) and
-// creates that ticket's folder and its first ticket.yaml, holding rec - the
-// one way jig ticket new and jig graduate mint a ticket, whatever
-// project.yaml says about trackers. The scan and the record's write both run
-// under the store's mint lock, so two mints against the same clone never
-// compute the same id.
+// TicketIDs lists every id-shaped store-root folder, under any key -
+// declared in project.yaml or not - sorted by key, then by number: the one
+// function minting's per-key counter (nextID), A6's mirror and every other
+// listing that shows many tickets read tickets through, and nothing else
+// lists them.
+func (s *Store) TicketIDs() ([]string, error) {
+	recs, err := scanTicketIDs(s.Root)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(recs, func(i, j int) bool {
+		if recs[i].key != recs[j].key {
+			return recs[i].key < recs[j].key
+		}
+		return recs[i].n < recs[j].n
+	})
+	out := make([]string, len(recs))
+	for i, r := range recs {
+		out[i] = r.id
+	}
+	return out, nil
+}
+
+// nextID scans the store root (the same scan TicketIDs runs) and returns one
+// past the highest number among the ids already minted under key, formatted
+// as "<key>-<n>": the next number under a key is one past the highest
+// number among the ids - and, once L3 brings aliases, the aliases - that
+// carry it, worked out from the store rather than stored anywhere.
+func (s *Store) nextID(key string) (string, error) {
+	recs, err := scanTicketIDs(s.Root)
+	if err != nil {
+		return "", err
+	}
+	maxN := 0
+	for _, r := range recs {
+		if r.key == key && r.n > maxN {
+			maxN = r.n
+		}
+	}
+	return fmt.Sprintf("%s-%d", key, maxN+1), nil
+}
+
+// Mint computes the next id under key (<key>-<n>, one past the highest
+// number already minted under it) and creates that ticket's folder and its
+// first ticket.yaml, holding rec - the one way jig ticket new and jig
+// graduate mint a ticket, whatever project.yaml says about trackers. The
+// scan and the record's write both run under the store's mint lock, so two
+// mints against the same clone never compute the same id. key is trusted as
+// already checked against project.yaml's declared keys (project.Config.
+// ResolveKey): an undeclared key is refused there, before Mint is ever
+// called.
 //
 // An id jig cannot use (pool.CheckTicket: a reserved lease suffix, or
 // something that is not a single directory name) is refused before anything
@@ -128,22 +126,22 @@ func (s *Store) TicketIDs(format string) ([]string, error) {
 // something already sitting where the ticket's folder must go - is also
 // refused before anything else is written; either way Mint returns an empty
 // id, since nothing was claimed under it.
-func (s *Store) Mint(format string, rec Ticket) (string, error) {
+func (s *Store) Mint(key string, rec Ticket) (string, error) {
 	release, _, err := Lock(s.mintLockPath(), mintLockTimeout)
 	if err != nil {
 		return "", err
 	}
 	defer release()
 
-	id, err := s.nextID(format)
+	id, err := s.nextID(key)
 	if err != nil {
 		return "", err
 	}
 	if err := pool.CheckTicket(id); err != nil {
 		return "", &axi.Error{
-			Msg:  fmt.Sprintf("ticket_format %q mints %s, which jig cannot use: %v", format, id, err),
+			Msg:  fmt.Sprintf("key %q mints %s, which jig cannot use: %v", key, id, err),
 			Code: "VALIDATION_ERROR",
-			Help: []string{"Change ticket_format in project.yaml, then mint again"},
+			Help: []string{"Change the key in project.yaml, then mint again"},
 		}
 	}
 	if err := s.CreateTicketRecord(id, rec); err != nil {

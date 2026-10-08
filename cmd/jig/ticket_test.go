@@ -332,3 +332,117 @@ func TestTicketNewMintsByTicketFormatRegardlessOfTracker(t *testing.T) {
 		t.Fatalf("T-1/tracker exists (stat err %v), want nothing written there", err)
 	}
 }
+
+// initStandaloneWithKeys runs jig init --standalone, then replaces the
+// store's ticket_format with a keys: block declaring keys, returning a jig
+// runner and the store's root.
+func initStandaloneWithKeys(t *testing.T, keys string) (jig func(args ...string) (int, string), storeRoot string) {
+	t.Helper()
+	t.Setenv("JIG_HOME", t.TempDir())
+	repo := filepath.Join(t.TempDir(), "demo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if _, err := gitx.Run(repo, "init", "-b", "main"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	t.Chdir(repo)
+
+	jig = func(args ...string) (int, string) {
+		var buf bytes.Buffer
+		code := Main(args, &buf, strings.NewReader(""))
+		return code, buf.String()
+	}
+	if code, out := jig("init", "--standalone"); code != 0 {
+		t.Fatalf("jig init --standalone: exit %d\n%s", code, out)
+	}
+	cfgs, err := filepath.Glob(filepath.Join(filepath.Dir(repo), "*", "project.yaml"))
+	if err != nil || len(cfgs) != 1 {
+		t.Fatalf("find the standalone store's project.yaml: %v, %v", cfgs, err)
+	}
+	data, err := os.ReadFile(cfgs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewritten := strings.Replace(string(data), "ticket_format: T-{n}\n", keys, 1)
+	if rewritten == string(data) {
+		t.Fatalf("project.yaml has no ticket_format: T-{n} line to replace:\n%s", data)
+	}
+	if err := os.WriteFile(cfgs[0], []byte(rewritten), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return jig, filepath.Dir(cfgs[0])
+}
+
+// TestTicketNewMintsUnderFlaggedKey covers jig ticket new --key: it mints
+// <key>-<n> under the given key when the project declares more than one.
+func TestTicketNewMintsUnderFlaggedKey(t *testing.T) {
+	jig, storeRoot := initStandaloneWithKeys(t, "keys:\n  STORE: the store's layout, ids and git sync\n  GRAPH: tickets, charts and the order between them\n")
+
+	code, out := jig("ticket", "new", "--title", "Fix the thing", "--key", "GRAPH")
+	if code != 0 || !strings.Contains(out, "GRAPH-1") {
+		t.Fatalf("jig ticket new --key GRAPH: exit %d, want id GRAPH-1:\n%s", code, out)
+	}
+
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ReadTicket("GRAPH-1"); err != nil {
+		t.Fatalf("ReadTicket GRAPH-1: %v", err)
+	}
+}
+
+// TestTicketNewDefaultsToTheOneDeclaredKey covers the one-key project: --key
+// may be left out, and jig ticket new mints under the project's only key.
+func TestTicketNewDefaultsToTheOneDeclaredKey(t *testing.T) {
+	jig, _ := initStandaloneWithKeys(t, "keys:\n  STORE: the store's layout, ids and git sync\n")
+
+	code, out := jig("ticket", "new", "--title", "Fix the thing")
+	if code != 0 || !strings.Contains(out, "STORE-1") {
+		t.Fatalf("jig ticket new with one declared key: exit %d, want id STORE-1:\n%s", code, out)
+	}
+}
+
+// TestTicketNewRefusesAnUndeclaredKey covers the refusal: an undeclared
+// --key is rejected before anything is minted, naming the declared keys and
+// their meanings.
+func TestTicketNewRefusesAnUndeclaredKey(t *testing.T) {
+	jig, storeRoot := initStandaloneWithKeys(t, "keys:\n  STORE: the store's layout, ids and git sync\n  GRAPH: tickets, charts and the order between them\n")
+
+	code, out := jig("ticket", "new", "--title", "Fix the thing", "--key", "NOPE")
+	if code == 0 {
+		t.Fatalf("jig ticket new --key NOPE: exit 0, want a refusal:\n%s", out)
+	}
+	for _, want := range []string{`"NOPE"`, "STORE", "GRAPH"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("jig ticket new --key NOPE: output lacks %q:\n%s", want, out)
+		}
+	}
+
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := st.TicketIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("TicketIDs = %v, want none minted", ids)
+	}
+}
+
+// TestTicketNewRefusesAnAmbiguousMissingKey covers a project declaring more
+// than one key: leaving --key out is refused rather than guessing.
+func TestTicketNewRefusesAnAmbiguousMissingKey(t *testing.T) {
+	jig, _ := initStandaloneWithKeys(t, "keys:\n  STORE: the store's layout, ids and git sync\n  GRAPH: tickets, charts and the order between them\n")
+
+	code, out := jig("ticket", "new", "--title", "Fix the thing")
+	if code == 0 {
+		t.Fatalf("jig ticket new with no --key and two declared keys: exit 0, want a refusal:\n%s", out)
+	}
+	if !strings.Contains(out, "required") {
+		t.Fatalf("output does not say --key is required:\n%s", out)
+	}
+}
