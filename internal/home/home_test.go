@@ -62,3 +62,38 @@ func TestEvidenceDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
 		}
 	}
 }
+
+// TestRecordDirIsOneDirectoryPerRunUnderTheTicketsRecordings: a builder's
+// recordings live in a recordings directory of the ticket's evidence, one
+// directory per commit and, below it, one per oracle run, so they never share
+// a name with a gate head's demo media and a later run never lands in an
+// earlier run's directory. The path is derived from the root given alone.
+func TestRecordDirIsOneDirectoryPerRunUnderTheTicketsRecordings(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	got, err := RecordDir(root, "0123456789abcdef", "T-1", "abc123", "a-a1-f0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, "evidence", "0123456789abcdef", "T-1", "recordings", "abc123", "a-a1-f0"); got != want {
+		t.Fatalf("RecordDir = %q, want %q", got, want)
+	}
+	other, err := RecordDir(root, "0123456789abcdef", "T-1", "abc123", "a-a2-f0")
+	if err != nil || other == got {
+		t.Fatalf("a second run's directory = %q, %v; want one of its own", other, err)
+	}
+}
+
+// TestRecordDirRefusesAnythingButASingleDirectoryName holds each of
+// RecordDir's four parts to the rule EvidenceDir's are held to.
+func TestRecordDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
+	t.Parallel()
+	bad := []string{"", ".", "..", ".hidden", "a/b", `a\b`, "C:x", "x.", "x "}
+	for _, name := range bad {
+		for i, parts := range [][4]string{{name, "T-1", "abc", "r"}, {"id", name, "abc", "r"}, {"id", "T-1", name, "r"}, {"id", "T-1", "abc", name}} {
+			if got, err := RecordDir(t.TempDir(), parts[0], parts[1], parts[2], parts[3]); err == nil {
+				t.Errorf("RecordDir with %q in part %d = %q, want a refusal", name, i, got)
+			}
+		}
+	}
+}

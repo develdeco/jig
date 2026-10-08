@@ -71,7 +71,11 @@ _Avoid_: screenshot, proof
 
 **Demo**:
 What a session shows a person reviewing a change: the change working, as a screenshot, a GIF or a video, whichever shows it best. After a clean reviewer round, `jig gate` dispatches a demo session and records what it produced: the media under the jig home's `evidence/` (never in the store's git) and `gate/round-N/demo.yaml`, the manifest of each file's hash, size and caption, or a refused status and why. There is one per reviewed head, and it is best effort: a refused or failed demo is recorded and shown, never a reason for the round's verdict to change. `jig gate --no-demo` skips it.
-_Avoid_: receipt (evidence that a check passed), recording, screencast
+_Avoid_: receipt (evidence that a check passed), screencast
+
+**Recording**:
+What the build's end-to-end scenarios write while they run at a builder's green oracle run: a screenshot, a video or a terminal capture, optionally tagged with its scenario, flow, step and caption. jig gives that run a directory of its own under the jig home's `evidence/` (`JIG_RECORD_DIR`, which jig strips from the environment of every oracle run, env command and headless session it starts (a herdr session runs in herdr's own environment, which jig does not set)), verifies what a passing run left there, and journals it as one `recorded` line with the commit the oracle ran at and the run; a failing run's recordings are discarded, and the gate records nothing. The source the demo is moving to (ADR 0029).
+_Avoid_: demo (the gate session's media for one reviewed head), screencast
 
 **Fix slice**:
 A gate finding turned into a new frontier item. Review has no back-edges - every finding becomes forward work.

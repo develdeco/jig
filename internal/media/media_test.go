@@ -181,8 +181,8 @@ func TestKindClassifiesALowercaseExtension(t *testing.T) {
 func TestPlainNameIsOneFileNameAndNothingElse(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"a.png", "UPPER.PNG", "shot 1.png", ".hidden.png"} {
-		if !plainName(name) {
-			t.Errorf("plainName(%q) = false, want true", name)
+		if !PlainName(name) {
+			t.Errorf("PlainName(%q) = false, want true", name)
 		}
 	}
 	bad := []string{"", ".", "..", "a/b.png", `a\b.png`, "../a.png", `..\a.png`, "/a.png", "C:a.png", "a.png:stream", "a\x00.png"}
@@ -190,8 +190,8 @@ func TestPlainNameIsOneFileNameAndNothingElse(t *testing.T) {
 		bad = append(bad, "NUL")
 	}
 	for _, name := range bad {
-		if plainName(name) {
-			t.Errorf("plainName(%q) = true, want false", name)
+		if PlainName(name) {
+			t.Errorf("PlainName(%q) = true, want false", name)
 		}
 	}
 }
@@ -573,17 +573,17 @@ func TestPlainParentsRefusesALinkedStoreIDOrTicketDirectory(t *testing.T) {
 	}
 
 	t.Run("nothing made yet", func(t *testing.T) {
-		_, mediaDir := newTree(t)
-		if err := PlainParents(mediaDir); err != nil {
+		root, mediaDir := newTree(t)
+		if err := PlainParents(filepath.Join(root, "evidence"), mediaDir); err != nil {
 			t.Fatalf("PlainParents with nothing made: %v", err)
 		}
 	})
 	t.Run("plain directories", func(t *testing.T) {
-		_, mediaDir := newTree(t)
+		root, mediaDir := newTree(t)
 		if err := os.MkdirAll(mediaDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := PlainParents(mediaDir); err != nil {
+		if err := PlainParents(filepath.Join(root, "evidence"), mediaDir); err != nil {
 			t.Fatalf("PlainParents with plain directories: %v", err)
 		}
 	})
@@ -603,7 +603,7 @@ func TestPlainParentsRefusesALinkedStoreIDOrTicketDirectory(t *testing.T) {
 				t.Fatal(err)
 			}
 			linkDirOrSkip(t, elsewhere, link)
-			err := PlainParents(mediaDir)
+			err := PlainParents(filepath.Join(root, "evidence"), mediaDir)
 			if err == nil || !strings.Contains(err.Error(), "is not a plain directory") {
 				t.Fatalf("PlainParents through a linked %s = %v, want a refusal", level.name, err)
 			}
@@ -618,8 +618,104 @@ func TestPlainParentsRefusesALinkedStoreIDOrTicketDirectory(t *testing.T) {
 			t.Fatal(err)
 		}
 		linkDirOrSkip(t, root, mediaDir)
-		if err := PlainParents(mediaDir); err != nil {
+		if err := PlainParents(filepath.Join(root, "evidence"), mediaDir); err != nil {
 			t.Fatalf("PlainParents with a link at the head: %v", err)
+		}
+	})
+}
+
+// TestPlainParentsChecksEveryDirectoryBetweenTopAndDir: the check is not tied
+// to a layout. In a deeper one (the recordings of a ticket sit one directory
+// lower than a head's demo media), each directory strictly between top and dir
+// must be plain, a missing one ends the check, and neither top nor dir is
+// examined; a dir that is not below top is refused.
+func TestPlainParentsChecksEveryDirectoryBetweenTopAndDir(t *testing.T) {
+	t.Parallel()
+	newTree := func(t *testing.T) (top, dir string) {
+		t.Helper()
+		top = filepath.Join(t.TempDir(), "evidence")
+		return top, filepath.Join(top, "id", "JIG-1", "recordings", "head")
+	}
+
+	t.Run("nothing made yet", func(t *testing.T) {
+		top, dir := newTree(t)
+		if err := PlainParents(top, dir); err != nil {
+			t.Fatalf("PlainParents with nothing made: %v", err)
+		}
+	})
+	t.Run("plain directories", func(t *testing.T) {
+		top, dir := newTree(t)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := PlainParents(top, dir); err != nil {
+			t.Fatalf("PlainParents with plain directories: %v", err)
+		}
+	})
+	t.Run("a directory that is not made yet ends the check", func(t *testing.T) {
+		top, dir := newTree(t)
+		if err := os.MkdirAll(filepath.Join(top, "id"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := PlainParents(top, dir); err != nil {
+			t.Fatalf("PlainParents with only the store id directory made: %v", err)
+		}
+	})
+	for _, rel := range []string{
+		"id",
+		filepath.Join("id", "JIG-1"),
+		filepath.Join("id", "JIG-1", "recordings"),
+	} {
+		rel := rel
+		t.Run("a link at "+rel, func(t *testing.T) {
+			top, dir := newTree(t)
+			elsewhere := filepath.Join(filepath.Dir(top), "elsewhere")
+			if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(top, rel)
+			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			linkDirOrSkip(t, elsewhere, link)
+			err := PlainParents(top, dir)
+			if err == nil || !strings.Contains(err.Error(), "is not a plain directory") {
+				t.Fatalf("PlainParents through a link at %s = %v, want a refusal", rel, err)
+			}
+			if strings.Contains(err.Error(), filepath.Dir(top)) {
+				t.Errorf("the refusal names a host path: %v", err)
+			}
+		})
+	}
+	t.Run("a file where a directory belongs", func(t *testing.T) {
+		top, dir := newTree(t)
+		if err := os.MkdirAll(filepath.Join(top, "id"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(top, "id", "JIG-1"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := PlainParents(top, dir); err == nil || !strings.Contains(err.Error(), "is not a plain directory") {
+			t.Fatalf("PlainParents through a file = %v, want a refusal", err)
+		}
+	})
+	t.Run("top itself is not examined", func(t *testing.T) {
+		top, dir := newTree(t)
+		elsewhere := filepath.Join(filepath.Dir(top), "elsewhere")
+		if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		linkDirOrSkip(t, elsewhere, top)
+		if err := PlainParents(top, dir); err != nil {
+			t.Fatalf("PlainParents with a link at top: %v", err)
+		}
+	})
+	t.Run("a dir that is not below top", func(t *testing.T) {
+		top, _ := newTree(t)
+		for _, dir := range []string{filepath.Join(filepath.Dir(top), "other", "x", "y"), filepath.Dir(top)} {
+			if err := PlainParents(top, dir); err == nil {
+				t.Errorf("PlainParents(%q, %q) = nil, want a refusal", top, dir)
+			}
 		}
 	})
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/outcome"
 	"github.com/develdeco/jig/internal/screen"
@@ -258,6 +259,12 @@ func (b *headlessBackend) run(d Dispatch) (string, error) {
 	cmd.Dir = d.Worktree
 	if b.env != nil {
 		cmd.Env = childEnv(b.goos, b.env, d.Worktree)
+	} else {
+		// The inherited environment (with the PWD os/exec sets for cmd.Dir, so
+		// this is built after cmd.Dir is), except the variable that makes a run
+		// record (ADR 0029): a builder session starts the project's tests, and
+		// jig may itself be running inside a recording oracle run.
+		cmd.Env = envrun.ChildEnv(cmd)
 	}
 	newProcessGroup(cmd)
 	// A session spawns children - a shell per Bash call, a test runner,
@@ -503,14 +510,16 @@ func rulePath(goos, p string) string {
 // childEnv renders a headless dispatch's exact child environment from env
 // (Options.Env, never nil here: Run only calls this when it is set) and
 // worktree (d.Worktree, the same directory cmd.Dir already names): env
-// verbatim, minus any PWD or OLDPWD entry, with PWD then appended as
-// worktree. Names are compared case-insensitively on goos == "windows",
-// where environment variable names are not case sensitive, and case-
-// sensitively elsewhere - the same distinction rulePath already makes for
-// this backend. An inherited PWD naming some other directory, or an OLDPWD
-// naming a directory that has nothing to do with this dispatch, would
-// either misreport the child's own cwd to a program that trusts PWD over
-// calling getcwd, or hand it a path the caller never intended it to see.
+// verbatim, minus any PWD or OLDPWD entry, and any JIG_RECORD_DIR one (how a
+// run is told to record, which only jig's own oracle run sets;
+// envrun.RecordDirEnv), with PWD then appended as worktree. Names are
+// compared case-insensitively on goos == "windows", where environment
+// variable names are not case sensitive, and case-sensitively elsewhere -
+// the same distinction rulePath already makes for this backend. An inherited
+// PWD naming some other directory, or an OLDPWD naming a directory that has
+// nothing to do with this dispatch, would either misreport the child's own
+// cwd to a program that trusts PWD over calling getcwd, or hand it a path
+// the caller never intended it to see.
 //
 // On Windows, os/exec's own Env doc adds one more entry beyond this
 // function's control: SYSTEMROOT is always set on the child when the
@@ -525,7 +534,7 @@ func childEnv(goos string, env []string, worktree string) []string {
 	out := make([]string, 0, len(env)+1)
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
-		if sameName(name, "PWD") || sameName(name, "OLDPWD") {
+		if sameName(name, "PWD") || sameName(name, "OLDPWD") || sameName(name, envrun.RecordDirEnv) {
 			continue
 		}
 		out = append(out, kv)

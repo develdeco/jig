@@ -54,6 +54,69 @@ func TestAppendReadRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRecordingsRoundTripAndOldLinesStillRead: a recorded line carries its
+// files under their wire keys; a line written before Recordings existed reads
+// with none, and a line with none writes no recordings key.
+func TestRecordingsRoundTripAndOldLinesStillRead(t *testing.T) {
+	st := newTestStore(t)
+	want := []Recording{
+		{File: "a.svg", SHA256: "abc", Size: 12, Scenario: "login", Flow: "onboarding", Step: 2, Caption: "signs in"},
+		{File: "b.png", SHA256: "def", Size: 7, Scenario: "b"},
+	}
+	if err := Append(st, "JIG-1", Line{Slice: "a", Event: "recorded", Commit: "abc1234", Attempt: 1, RecordRun: "a-a1-f0", Recordings: want}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Append(st, "JIG-1", Line{Slice: "a", Event: "oracle", Outcome: "pass"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(st, "JIG-1")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("Read = %+v, %v", got, err)
+	}
+	if !reflect.DeepEqual(got[0].Recordings, want) {
+		t.Errorf("Recordings = %+v, want %+v", got[0].Recordings, want)
+	}
+	if got[0].RecordRun != "a-a1-f0" || got[1].RecordRun != "" {
+		t.Errorf("RecordRun = %q and %q, want a-a1-f0 and none", got[0].RecordRun, got[1].RecordRun)
+	}
+	if got[1].Recordings != nil {
+		t.Errorf("a line with no recordings read back %+v", got[1].Recordings)
+	}
+
+	raw, err := os.ReadFile(journalPath(st, "JIG-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	written := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	for _, key := range []string{`"record_run":"a-a1-f0"`, `"recordings":[`, `"file":"a.svg"`, `"sha256":"abc"`, `"size":12`, `"scenario":"login"`, `"flow":"onboarding"`, `"step":2`, `"caption":"signs in"`} {
+		if !strings.Contains(written[0], key) {
+			t.Errorf("the recorded line lacks %s: %s", key, written[0])
+		}
+	}
+	if strings.Count(written[0], `"flow"`) != 1 || strings.Count(written[0], `"step"`) != 1 || strings.Count(written[0], `"caption"`) != 1 {
+		t.Errorf("an unset flow, step or caption is written: %s", written[0])
+	}
+	if strings.Contains(written[1], "record_run") {
+		t.Errorf("a line with no record run writes the key: %s", written[1])
+	}
+	if strings.Contains(written[1], "recordings") {
+		t.Errorf("a line with no recordings writes the key: %s", written[1])
+	}
+
+	// A line from before Recordings existed.
+	old := `{"ts":"2026-01-01T00:00:00Z","ticket":"JIG-2","slice":"a","event":"oracle","outcome":"pass","commit":"abc"}` + "\n"
+	if err := os.MkdirAll(filepath.Dir(journalPath(st, "JIG-2")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(journalPath(st, "JIG-2"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gotOld, err := Read(st, "JIG-2")
+	if err != nil || len(gotOld) != 1 || gotOld[0].Recordings != nil || gotOld[0].Outcome != "pass" {
+		t.Fatalf("an old line read as %+v, %v", gotOld, err)
+	}
+}
+
 func TestReadAbsentJournal(t *testing.T) {
 	st := newTestStore(t)
 	got, err := Read(st, "JIG-1")

@@ -209,7 +209,9 @@ func attemptDemo(d Deps, ds DemoSource, in DemoInput, dir, repoName, target stri
 	}
 	in.BaseSHA = base
 	in.MediaDir = dir
-	if err := media.PlainParents(dir); err != nil {
+	// The store-id and ticket directories between the jig home's evidence
+	// directory and the head's must be plain.
+	if err := media.PlainParents(absPath(filepath.Join(d.Home, "evidence")), dir); err != nil {
 		return nil, "", err
 	}
 	// A refused or failed earlier attempt at this head may have left files

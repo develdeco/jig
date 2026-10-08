@@ -71,10 +71,10 @@ func Kind(ext string) string {
 	return ""
 }
 
-// plainName reports whether name is a single file name: no path separator
+// PlainName reports whether name is a single file name: no path separator
 // (either spelling), no drive or stream colon, not a dot name, and - via
 // filepath.IsLocal - not a Windows reserved device name.
-func plainName(name string) bool {
+func PlainName(name string) bool {
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\:\x00") {
 		return false
 	}
@@ -108,17 +108,26 @@ func LstatPinned(path string) (os.FileInfo, error) {
 	return info, nil
 }
 
-// PlainParents refuses a media directory reached through a store-id or ticket
-// directory that is a link or a junction, before anything is cleared or made
-// below it. jig made those directories, so a link in their place is one a
-// session swapped in. Verify's identity check catches a swap made during its
-// own attempt, but one that stays would send the next attempt's clearing,
-// mkdir and media through it, so it is refused before that. A directory that
-// does not exist yet is fine, since MkdirAll makes it plain. The head
-// directory itself is not checked: an attempt removes a link there as itself.
-func PlainParents(mediaDir string) error {
-	ticketDir := filepath.Dir(mediaDir)
-	for _, p := range []string{filepath.Dir(ticketDir), ticketDir} {
+// PlainParents refuses a media directory reached through a directory that is
+// a link or a junction, before anything is cleared or made below it: every
+// directory strictly between top (the evidence directory of the jig home) and
+// dir (the media directory) must be a plain directory. jig made those
+// directories, so a link in their place is one a session swapped in. Verify's
+// identity check catches a swap made during its own attempt, but one that
+// stays would send the next attempt's clearing, mkdir and media through it,
+// so it is refused before that. A directory that does not exist yet is fine,
+// since MkdirAll makes it plain, and so is everything below it. Neither top
+// nor dir itself is checked: an attempt removes a link at dir as itself. A
+// dir that is not below top is refused.
+func PlainParents(top, dir string) error {
+	rel, err := filepath.Rel(top, dir)
+	if err != nil || !filepath.IsLocal(rel) {
+		return fmt.Errorf("media directory is not below the evidence directory")
+	}
+	names := strings.Split(rel, string(filepath.Separator))
+	p := top
+	for _, name := range names[:len(names)-1] {
+		p = filepath.Join(p, name)
 		info, err := os.Lstat(p)
 		if os.IsNotExist(err) {
 			return nil
@@ -165,7 +174,7 @@ func Verify(dir, dirName string, made os.FileInfo, listed []Listed) ([]File, err
 	seen := map[string]bool{}
 	files := make([]File, 0, len(listed))
 	for i, m := range listed {
-		if !plainName(m.File) {
+		if !PlainName(m.File) {
 			return nil, fmt.Errorf("%s is not a plain file name directly inside %s", EntryLabel(i, m.File), dirName)
 		}
 		key := strings.ToLower(m.File)

@@ -98,15 +98,18 @@ type Options struct {
 	ScreenBinary string // headless
 
 	// Env, when non-nil, is the exact environment a headless dispatch's
-	// `claude` child process gets: this list, with any PWD or OLDPWD entry
-	// dropped and PWD then set to the dispatch's own worktree (cmd.Dir) -
-	// never a mix with this process's own environment. Nil, the default,
-	// means the child inherits this process's full environment unchanged. A caller that dispatches against a corpus or
-	// other content it does not fully trust - internal/revieweval's live
-	// path above all - should build this from a filtered copy of its own
-	// environment, never pass its own os.Environ() through untouched: a nil
-	// Env hands a live child everything this process happens to be running
-	// with, including anything naming what is being measured.
+	// `claude` child process gets: this list, with any PWD, OLDPWD or
+	// JIG_RECORD_DIR entry dropped and PWD then set to the dispatch's own
+	// worktree (cmd.Dir) - never a mix with this process's own environment.
+	// Nil, the default, means the child inherits this process's full
+	// environment (and the PWD os/exec sets for the worktree), except
+	// JIG_RECORD_DIR (envrun.RecordDirEnv), which only jig's own oracle run
+	// sets and no session inherits. A caller that dispatches against a
+	// corpus or other content it does not fully trust - internal/revieweval's
+	// live path above all - should build this from a filtered copy of its
+	// own environment, never pass its own os.Environ() through untouched: a
+	// nil Env hands a live child everything this process happens to be
+	// running with, including anything naming what is being measured.
 	Env []string // headless
 }
 

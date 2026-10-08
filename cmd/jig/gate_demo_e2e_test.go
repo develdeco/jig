@@ -195,8 +195,17 @@ func TestGateNoDemoFlagThroughMain(t *testing.T) {
 	if strings.Contains(out, "demo") {
 		t.Errorf("a --no-demo report mentions a demo:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(jigHome, "evidence")); err == nil {
-		t.Error("--no-demo created the evidence directory")
+	// The build records its scenarios under evidence/<store>/<ticket>/recordings
+	// (ADR 0029); a demo's media and demo.json would sit beside that, named by
+	// the reviewed head.
+	left, err := filepath.Glob(filepath.Join(jigHome, "evidence", "*", fx.Ticket, "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range left {
+		if filepath.Base(p) != "recordings" {
+			t.Errorf("--no-demo left demo evidence %q", filepath.Base(p))
+		}
 	}
 	work := filepath.Join(st.TicketDir(fx.Ticket), "work")
 	for _, p := range []string{
