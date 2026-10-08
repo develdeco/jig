@@ -11,6 +11,7 @@ import (
 // variables, and PWD/OLDPWD are all dropped; everything else passes
 // through unchanged.
 func TestDispatchEnvDropsOwnedAndScaffoldingVariables(t *testing.T) {
+	t.Parallel()
 	in := []string{
 		"PATH=/usr/bin",
 		"HOME=/home/dev",
@@ -41,6 +42,7 @@ func TestDispatchEnvDropsOwnedAndScaffoldingVariables(t *testing.T) {
 // one - none of them is anything a dispatch owns or a session needs, only
 // launch scaffolding.
 func TestDispatchEnvDropsLaunchContextEntries(t *testing.T) {
+	t.Parallel()
 	in := []string{
 		`=C:=C:\src\jig\internal\revieweval`,
 		`=D:=D:\src\jig`,
@@ -63,6 +65,7 @@ func TestDispatchEnvDropsLaunchContextEntries(t *testing.T) {
 // windows-only case-insensitive comparison (already pinned for JIG_ and
 // GIT_CONFIG_* below) to GOCOVERDIR.
 func TestDispatchEnvDropsGOCOVERDIRCaseInsensitivelyOnWindows(t *testing.T) {
+	t.Parallel()
 	in := []string{"GoCoverDir=C:\\cover", "FOO=bar"}
 	got := dispatchEnv("windows", in)
 	want := []string{"FOO=bar"}
@@ -85,6 +88,7 @@ func TestDispatchEnvDropsGOCOVERDIRCaseInsensitivelyOnWindows(t *testing.T) {
 // distinction: on windows, a differently-cased name still counts as owned
 // or scaffolding and is dropped; off windows, only an exact-case match is.
 func TestDispatchEnvComparesNamesCaseInsensitivelyOnWindows(t *testing.T) {
+	t.Parallel()
 	in := []string{
 		"Path=C:\\Windows",
 		"Jig_Headless_Timeout=45m",

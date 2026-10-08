@@ -40,11 +40,12 @@ var headlessEditTools = []string{"Edit", "Write", "NotebookEdit"}
 type headlessBackend struct {
 	goos         string   // runtime.GOOS, injectable so rule paths are testable per OS
 	screenBinary string   // Options.ScreenBinary; see hookBinary
+	claudeBinary string   // Options.ClaudeBinary; empty means the `claude` on PATH
 	env          []string // Options.Env; see childEnv. nil means the child inherits this process's environment.
 }
 
 func newHeadlessBackend(opts Options) Backend {
-	return &headlessBackend{goos: runtime.GOOS, screenBinary: opts.ScreenBinary, env: opts.Env}
+	return &headlessBackend{goos: runtime.GOOS, screenBinary: opts.ScreenBinary, claudeBinary: opts.ClaudeBinary, env: opts.Env}
 }
 
 // hookBinary returns the jig binary a screened dispatch's PreToolUse hook
@@ -222,12 +223,16 @@ func (b *headlessBackend) Resume(d Dispatch, sessionID string) error {
 // next turn of that one, and returns the session id the CLI reported.
 func (b *headlessBackend) run(d Dispatch) (string, error) {
 	d = sessionView(d)
-	claudePath, err := exec.LookPath("claude")
-	if err != nil {
-		return "", &axi.Error{
-			Msg:  "claude binary not found on PATH; install the Claude Code CLI to use the headless backend",
-			Code: "CLAUDE_NOT_FOUND",
-			Help: []string{"Install `claude` and ensure it is on PATH, or use `--backend fake --scenario <dir>` for CI."},
+	claudePath := b.claudeBinary
+	if claudePath == "" {
+		var err error
+		claudePath, err = exec.LookPath("claude")
+		if err != nil {
+			return "", &axi.Error{
+				Msg:  "claude binary not found on PATH; install the Claude Code CLI to use the headless backend",
+				Code: "CLAUDE_NOT_FOUND",
+				Help: []string{"Install `claude` and ensure it is on PATH, or use `--backend fake --scenario <dir>` for CI."},
+			}
 		}
 	}
 

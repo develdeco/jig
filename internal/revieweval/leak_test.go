@@ -46,16 +46,31 @@ func leakTokens(s string) []string {
 	return pieces
 }
 
-// leakHits returns one line per leak in text: caseName as a literal
+// leakScan is one leak check's settings: the temp roots it leaves out of
+// the text it reads (withoutTempRoot). A test builds its own, so tests that
+// run side by side each scan against the roots their own run used, never a
+// list the tests share.
+type leakScan struct {
+	roots []string
+}
+
+// launchLeakScan leaves out the operator's launch temp root and nothing
+// else: the scan for a run whose paths sit under the temp root the test
+// binary started with.
+func launchLeakScan() leakScan {
+	return leakScan{roots: spellingsOf(launchTempRoot)}
+}
+
+// hits returns one line per leak in text: caseName as a literal
 // substring (case-insensitive: the hyphenated case name itself, exactly
 // as a session reading its own dispatch or worktree would see it) or any
 // token equal to leakVocabulary. label names what text is, so a failure
 // can be placed without re-running the test.
-func leakHits(label, caseName, text string) []string {
+func (s leakScan) hits(label, caseName, text string) []string {
 	if text == "" {
 		return nil
 	}
-	text = withoutTempRoot(text)
+	text = s.withoutTempRoot(text)
 	var hits []string
 	if caseName != "" && strings.Contains(strings.ToLower(text), strings.ToLower(caseName)) {
 		hits = append(hits, fmt.Sprintf("%s: contains the case name %q", label, caseName))
@@ -78,12 +93,12 @@ func leakHits(label, caseName, text string) []string {
 // a JSON file such as review.json writes them. Windows compares paths
 // case-insensitively, so there the text is lowercased first; the leak
 // check lowercases every token anyway.
-func withoutTempRoot(text string) string {
+func (s leakScan) withoutTempRoot(text string) string {
 	windows := runtime.GOOS == "windows"
 	if windows {
 		text = strings.ToLower(text)
 	}
-	for _, r := range tempRootSpellings {
+	for _, r := range s.roots {
 		if windows {
 			r = strings.ToLower(r)
 			text = replaceAtWordEnd(text, strings.ReplaceAll(r, `\`, `\\`))
@@ -126,18 +141,15 @@ func replaceAtWordEnd(text, root string) string {
 	}
 }
 
-// tempRootSpellings lists the temp roots withoutTempRoot removes: the
-// hostile root the running test chose (useHostileTempRoot), then the
-// operator's launch temp root (launchTempRoot), each as given and with
-// symlinks resolved. Only those two: a temp root anything else chose
-// after launch is not the operator's, so a path under it stays in the
-// scanned text. The hostile root comes first because it sits under the
-// launch root, and removing the launch root first would leave its name
-// behind. It is computed when either root is set, not on every check.
-var tempRootSpellings []string
-
 // spellingsOf returns roots, in order, each as given and with symlinks
-// resolved, skipping empty ones.
+// resolved, skipping empty ones. A leakScan lists the temp roots
+// withoutTempRoot removes this way: the hostile root a test chose
+// (hostileTempRoot) first, then the operator's launch temp root
+// (launchTempRoot). Only those two: a temp root anything else chose after
+// launch is not the operator's, so a path under it stays in the scanned
+// text. The hostile root comes first because it sits under the launch root,
+// and removing the launch root first would leave its name behind. A scan
+// computes the list when it is built, not on every check.
 func spellingsOf(roots ...string) []string {
 	var out []string
 	for _, root := range roots {
@@ -153,39 +165,35 @@ func spellingsOf(roots ...string) []string {
 	return out
 }
 
-// useHostileTempRoot points the test's temp root (TMP, TEMP, TMPDIR) at a
-// fresh directory, directly under the operator's launch temp root, whose
-// name holds a leak word, for the rest of the test. Every path the eval
-// makes then carries that word, so a leak test passes only if its checks
-// leave the temp root out, on every host, instead of passing only where
-// the temp root happens to be harmless.
-func useHostileTempRoot(t *testing.T) {
+// hostileTempRoot makes a fresh directory, directly under the operator's
+// launch temp root, whose name holds a leak word, removed when the test
+// ends, and returns it with the scan that leaves out it and the launch temp
+// root. The test hands the directory to everything that makes a path: the
+// work dir it creates in it and runCase's scratch parent. Every path the
+// eval makes then carries that word, so a leak test passes only if its
+// checks leave the temp root out, on every host, instead of passing only
+// where the temp root happens to be harmless. The directory is passed along
+// rather than set as TMP, TEMP and TMPDIR: that changes the whole process
+// and would move every test running beside this one.
+func hostileTempRoot(t *testing.T) (string, leakScan) {
 	t.Helper()
 	dir, err := os.MkdirTemp(launchTempRoot, "eval-tmp-")
 	if err != nil {
 		t.Fatalf("create hostile temp root: %v", err)
 	}
-	// Tests in this package never run in parallel, so one package-level
-	// list serves the running test.
-	tempRootSpellings = spellingsOf(dir, launchTempRoot)
-	t.Cleanup(func() {
-		tempRootSpellings = spellingsOf(launchTempRoot)
-		_ = os.RemoveAll(dir)
-	})
-	for _, k := range []string{"TMP", "TEMP", "TMPDIR"} {
-		t.Setenv(k, dir)
-	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir, leakScan{roots: spellingsOf(dir, launchTempRoot)}
 }
 
-// assertNoLeak fails t for every leak leakHits finds in text.
-func assertNoLeak(t *testing.T, label, caseName, text string) {
+// assertNoLeak fails t for every leak s finds in text.
+func (s leakScan) assertNoLeak(t *testing.T, label, caseName, text string) {
 	t.Helper()
-	for _, h := range leakHits(label, caseName, text) {
+	for _, h := range s.hits(label, caseName, text) {
 		t.Error(h)
 	}
 }
 
-// leakHitsUnder walks root (tracked and untracked files alike - a plain
+// hitsUnder walks root (tracked and untracked files alike - a plain
 // directory walk sees both) and returns every leak in a directory's name, a
 // file's path relative to root, or a file's content, skipping every .git
 // directory: nothing a session's read tools could reach under root is
@@ -193,7 +201,7 @@ func assertNoLeak(t *testing.T, label, caseName, text string) {
 // session's reads are not bounded to its worktree, so callers walk the
 // whole work root too - the store beside it (project.yaml, the ticket's
 // brief, slices, journal and seeded gate records).
-func leakHitsUnder(caseName, root, what string) ([]string, error) {
+func (s leakScan) hitsUnder(caseName, root, what string) ([]string, error) {
 	var hits []string
 	err := filepath.WalkDir(root, func(p string, de fs.DirEntry, err error) error {
 		if err != nil {
@@ -210,24 +218,24 @@ func leakHitsUnder(caseName, root, what string) ([]string, error) {
 			if de.Name() == ".git" {
 				return filepath.SkipDir
 			}
-			hits = append(hits, leakHits(what+" dir "+rel, caseName, rel)...)
+			hits = append(hits, s.hits(what+" dir "+rel, caseName, rel)...)
 			return nil
 		}
-		hits = append(hits, leakHits(what+" path "+rel, caseName, rel)...)
+		hits = append(hits, s.hits(what+" path "+rel, caseName, rel)...)
 		data, rerr := os.ReadFile(p)
 		if rerr != nil {
 			return rerr
 		}
-		hits = append(hits, leakHits(what+" file "+rel, caseName, string(data))...)
+		hits = append(hits, s.hits(what+" file "+rel, caseName, string(data))...)
 		return nil
 	})
 	return hits, err
 }
 
-// assertNoLeakUnder fails t for every leak leakHitsUnder finds under root.
-func assertNoLeakUnder(t *testing.T, label, caseName, root, what string) {
+// assertNoLeakUnder fails t for every leak s finds under root.
+func (s leakScan) assertNoLeakUnder(t *testing.T, label, caseName, root, what string) {
 	t.Helper()
-	hits, err := leakHitsUnder(caseName, root, what)
+	hits, err := s.hitsUnder(caseName, root, what)
 	if err != nil {
 		t.Fatalf("%s: walk %s: %v", label, what, err)
 	}
@@ -240,13 +248,14 @@ func assertNoLeakUnder(t *testing.T, label, caseName, root, what string) {
 // names, not only files: an empty directory with a telling name is still
 // something a session listing its surroundings would see.
 func TestLeakWalkChecksDirectoryNames(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for _, d := range []string{"gold", filepath.Join("a", "seeded")} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	hits, err := leakHitsUnder("nil-deref", root, "root")
+	hits, err := launchLeakScan().hitsUnder("nil-deref", root, "root")
 	if err != nil {
 		t.Fatalf("walk: %v", err)
 	}
@@ -260,13 +269,13 @@ func TestLeakWalkChecksDirectoryNames(t *testing.T) {
 
 // assertNoLeakInGitLog checks worktree's own git log, author through body,
 // the same fields a session's own `git log` could read.
-func assertNoLeakInGitLog(t *testing.T, label, caseName, worktree string) {
+func (s leakScan) assertNoLeakInGitLog(t *testing.T, label, caseName, worktree string) {
 	t.Helper()
 	out, err := gitx.Run(worktree, "log", "--format=%an %ae %cn %ce %s %b")
 	if err != nil {
 		t.Fatalf("%s: git log: %v", label, err)
 	}
-	assertNoLeak(t, label+" git log", caseName, out)
+	s.assertNoLeak(t, label+" git log", caseName, out)
 }
 
 // leakVerdictEntry and leakVerdictsFile are leakCapturingBackend's own
@@ -291,8 +300,10 @@ type leakVerdictsFile struct {
 // work root, and the worktree's git log.
 type leakCapturingBackend struct {
 	t          *testing.T
+	scan       leakScan
 	caseName   string
-	workDir    string // this case's own RunCase workDir
+	workDir    string // this case's own runCase workDir
+	scratchDir string // the scratch parent runCase was given: a judge dispatch's files sit under it
 	fixtureDir string // resultsDir("perfect")
 	briefPath  string // the case's own brief.md source (Case.BriefPath)
 }
@@ -301,25 +312,25 @@ func (b leakCapturingBackend) Run(d session.Dispatch) error {
 	t := b.t
 	label := fmt.Sprintf("case %s round %d %s dispatch", b.caseName, d.Attempt, d.Slice)
 
-	assertNoLeak(t, label+" prompt", b.caseName, d.Prompt)
+	b.scan.assertNoLeak(t, label+" prompt", b.caseName, d.Prompt)
 
 	for _, p := range []string{d.SliceJSON, d.ResultJSON, d.Worktree} {
 		rel, err := filepath.Rel(b.workDir, p)
 		if err != nil {
 			t.Fatalf("%s: relativize %s to the work root: %v", label, p, err)
 		}
-		assertNoLeak(t, label+" dispatch path "+rel, b.caseName, rel)
+		b.scan.assertNoLeak(t, label+" dispatch path "+rel, b.caseName, rel)
 	}
 
 	sliceData, err := os.ReadFile(d.SliceJSON)
 	if err != nil {
 		return fmt.Errorf("leakCapturingBackend: read %s: %w", d.SliceJSON, err)
 	}
-	assertNoLeak(t, label+" "+filepath.Base(d.SliceJSON)+" content", b.caseName, string(sliceData))
+	b.scan.assertNoLeak(t, label+" "+filepath.Base(d.SliceJSON)+" content", b.caseName, string(sliceData))
 
-	assertNoLeakUnder(t, label, b.caseName, d.Worktree, "worktree")
-	assertNoLeakUnder(t, label, b.caseName, b.workDir, "work root")
-	assertNoLeakInGitLog(t, label, b.caseName, d.Worktree)
+	b.scan.assertNoLeakUnder(t, label, b.caseName, d.Worktree, "worktree")
+	b.scan.assertNoLeakUnder(t, label, b.caseName, b.workDir, "work root")
+	b.scan.assertNoLeakInGitLog(t, label, b.caseName, d.Worktree)
 
 	switch d.Slice {
 	case "gate":
@@ -362,6 +373,13 @@ func (b leakCapturingBackend) Run(d session.Dispatch) error {
 		}
 		return os.WriteFile(d.ResultJSON, data, 0o644)
 	case "judge":
+		// The judge's scratch root sits outside the work root, so the
+		// relative-path check above sees only a "..": that it was made
+		// under the hostile temp root is what puts that root in the judge's
+		// prompt and dispatch files, where the scan must leave it out.
+		if !strings.HasPrefix(d.SliceJSON, b.scratchDir+string(filepath.Separator)) {
+			t.Errorf("%s: judge input %q is not under the scratch directory %q the run was given", label, d.SliceJSON, b.scratchDir)
+		}
 		var jf judgeFileJSON
 		if err := json.Unmarshal(sliceData, &jf); err != nil {
 			return fmt.Errorf("leakCapturingBackend: parse judge.json: %w", err)
@@ -391,21 +409,24 @@ func (b leakCapturingBackend) Run(d session.Dispatch) error {
 // untracked, .git excluded; every file under the store's own ticket dir the
 // request points at; and the worktree's own git log.
 func TestRunCaseNeverLeaksTheCorpusVocabulary(t *testing.T) {
-	useHostileTempRoot(t)
+	t.Parallel()
+	hostile, scan := hostileTempRoot(t)
 	cases, err := LoadCorpus(evalCorpusRoot(t))
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
 			// Not t.TempDir(): its own directory is named after the
 			// subtest, which this loop names after the case - exactly the
 			// kind of path leak this test exists to catch, this time from
 			// its own harness rather than production code. review.json
 			// embeds workDir-derived absolute paths (the intent path and
 			// friends), so a t.TempDir() here would fail every case
-			// through the harness's own doing.
-			workDir, err := os.MkdirTemp("", "jig-")
+			// through the harness's own doing. It sits under the hostile
+			// temp root, as the judge's scratch root does (runCase below).
+			workDir, err := os.MkdirTemp(hostile, "jig-")
 			if err != nil {
 				t.Fatalf("create work dir: %v", err)
 			}
@@ -415,10 +436,10 @@ func TestRunCaseNeverLeaksTheCorpusVocabulary(t *testing.T) {
 				}
 			}()
 
-			backend := leakCapturingBackend{t: t, caseName: c.Name, workDir: workDir, fixtureDir: resultsDir("perfect"), briefPath: c.BriefPath}
+			backend := leakCapturingBackend{t: t, scan: scan, caseName: c.Name, workDir: workDir, scratchDir: hostile, fixtureDir: resultsDir("perfect"), briefPath: c.BriefPath}
 			judge := &ModelJudge{Backend: backend, Model: "fixture-model"}
 
-			cs, err := RunCase(workDir, c, backend, judge, "model-a")
+			cs, err := runCase(workDir, hostile, c, backend, judge, "model-a")
 			if err != nil {
 				t.Fatalf("RunCase: %v", err)
 			}
@@ -436,8 +457,7 @@ func TestRunCaseNeverLeaksTheCorpusVocabulary(t *testing.T) {
 // with the root's last letters is read as the word it is, and removing a
 // root never glues the text around it into one token.
 func TestLeakHitsStripsTheTempRootOnlyWhereItEndsAWord(t *testing.T) {
-	saved := tempRootSpellings
-	t.Cleanup(func() { tempRootSpellings = saved })
+	t.Parallel()
 	for _, tc := range []struct {
 		name, root, text string
 		hit              bool
@@ -449,10 +469,11 @@ func TestLeakHitsStripsTheTempRootOnlyWhereItEndsAWord(t *testing.T) {
 		{"text-around-a-removed-root-never-merges", "/tmp", "/opt/eval/tmp1/x", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tempRootSpellings = []string{filepath.FromSlash(tc.root)}
+			t.Parallel()
+			scan := leakScan{roots: []string{filepath.FromSlash(tc.root)}}
 			text := filepath.FromSlash(tc.text)
-			if got := len(leakHits("t", "", text)) > 0; got != tc.hit {
-				t.Errorf("leakHits(%q) with root %q: hit = %v, want %v", text, tc.root, got, tc.hit)
+			if got := len(scan.hits("t", "", text)) > 0; got != tc.hit {
+				t.Errorf("hits(%q) with root %q: hit = %v, want %v", text, tc.root, got, tc.hit)
 			}
 		})
 	}
