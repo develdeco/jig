@@ -81,10 +81,13 @@ func defaultLiveModel() string {
 // runs through: name's session backend, screened through screenBinary,
 // running the claude program at claudeBinary ("" for the one on PATH, as the
 // live run does), with the child environment dispatchEnv builds from
-// environ. TestEvalLive passes this process's own environment;
-// TestRunCaseRealChildSeesNoLeak passes a synthetic one and a stub claude,
-// and checks what a real child then sees, so the wiring the live run relies
-// on is the wiring that test proves.
+// environ. TestEvalLive passes this process's own environment and no
+// claudeBinary, so it runs the claude on PATH; TestRunCaseRealChildSeesNoLeak
+// passes a synthetic environment and a stub claude by path, and checks what
+// a real child then sees. That proves what liveBackend wires from environ
+// (dispatchEnv, session.Options.Env, the child's working directory) is what
+// reaches a child, the same wiring the live run uses. It does not prove the
+// live run's choice of program: only a live run finds claude on PATH.
 func liveBackend(name, screenBinary, claudeBinary string, environ []string) (session.Backend, error) {
 	return session.New(name, session.Options{ScreenBinary: screenBinary, ClaudeBinary: claudeBinary, Env: dispatchEnv(runtime.GOOS, environ)})
 }

@@ -20,7 +20,7 @@ import (
 )
 
 // This file is the CI structural path: it runs the real corpus
-// (testdata/revieweval, repo root) through RunCorpus/RunCase against
+// (testdata/revieweval, repo root) through RunCase against
 // scripted result.json fixtures under testdata/results/<set>/<case>/, never
 // a real session backend, so it needs no claude CLI and never runs
 // unattended dispatch. Each fixture set exercises one designed shape:
@@ -240,12 +240,13 @@ func TestFixtureLoadCorpusLoadsAllTenCases(t *testing.T) {
 }
 
 // TestFixturePerfectPassesEveryCaseEveryRound drives the whole real corpus
-// through RunCorpus against the "perfect" fixture set with no judge
-// (structural matching alone, since every perfect finding sits on its
-// gold's own line): every round of every case must pass, with nothing
-// missed, lost, dropped, misattributed, a false alarm or re-litigated, and
-// no finding left pending - a perfect round has nothing for a person to
-// label, so its verdict must be a clean PASS, never PROVISIONAL.
+// through RunCase against the "perfect" fixture set (every case at once,
+// scoreCorpus, in perfectCorpusScores) with no judge (structural matching
+// alone, since every perfect finding sits on its gold's own line): every
+// round of every case must pass, with nothing missed, lost, dropped,
+// misattributed, a false alarm or re-litigated, and no finding left
+// pending - a perfect round has nothing for a person to label, so its
+// verdict must be a clean PASS, never PROVISIONAL.
 func TestFixturePerfectPassesEveryCaseEveryRound(t *testing.T) {
 	t.Parallel()
 	scores := perfectCorpusScores(t)
@@ -295,7 +296,8 @@ type regressedWant struct {
 }
 
 // TestFixtureRegressedFailsExactlyAsDesigned drives the whole real corpus
-// through RunCorpus against the "regressed" fixture set: every case fails
+// through RunCase against the "regressed" fixture set (every case at once,
+// scoreCorpus): every case fails
 // with exactly the one designed failure named for it (and nothing else),
 // and a multi-round case's untouched round 1 (a copy of "perfect") still
 // passes, proving teacher-forcing keeps round 2's regression from bleeding

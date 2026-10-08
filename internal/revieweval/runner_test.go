@@ -436,7 +436,7 @@ func TestRunCaseRetiresRoundWorkBeforeTheNextRoundsDispatch(t *testing.T) {
 // the cases at once, scoreCorpus): the scores come back in the order the
 // cases were given, not name order, each case is worked under
 // workRoot/<its run id>, and a case that cannot even start fails the run
-// with its name.
+// with its name and ends it there.
 func TestRunCorpusScoresEveryCaseInOrderUnderItsRunID(t *testing.T) {
 	t.Parallel()
 	cases := []Case{loadEvalCase(t, "nil-deref"), loadEvalCase(t, "clean")}
@@ -477,9 +477,20 @@ func TestRunCorpusScoresEveryCaseInOrderUnderItsRunID(t *testing.T) {
 		}
 	}
 
+	// The first case that cannot start ends the run, and a later case is
+	// never started: its work dir, which RunCorpus makes before it runs the
+	// case, does not exist.
 	broken := Case{Name: "cannot-start", BriefPath: filepath.Join(t.TempDir(), "missing-brief.md")}
-	_, err = RunCorpus(t.TempDir(), []Case{broken}, scriptedReviewerBackend{dir: resultsDir("perfect")}, nil, "fixture-model")
+	later := loadEvalCase(t, "nil-deref")
+	stoppedRoot := t.TempDir()
+	scores, err = RunCorpus(stoppedRoot, []Case{broken, later}, scriptedReviewerBackend{dir: resultsDir("perfect")}, nil, "fixture-model")
 	if err == nil || !strings.Contains(err.Error(), "run case cannot-start") {
 		t.Errorf("RunCorpus with a case that cannot start: error = %v, want one naming the case", err)
+	}
+	if scores != nil {
+		t.Errorf("RunCorpus with a case that cannot start returned scores %+v, want none", scores)
+	}
+	if _, statErr := os.Stat(filepath.Join(stoppedRoot, runID(later.Name))); !os.IsNotExist(statErr) {
+		t.Errorf("the case after the one that cannot start has a work dir (stat err = %v): RunCorpus ran past the first error", statErr)
 	}
 }

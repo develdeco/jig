@@ -100,7 +100,12 @@ type Options struct {
 	// ClaudeBinary is the `claude` program a headless dispatch runs. Empty,
 	// the default, means the one on this process's PATH, looked up for each
 	// dispatch. A caller that must run another - a test driving a stub -
-	// names it here rather than editing PATH for the whole process.
+	// names it here rather than editing PATH for the whole process. It must
+	// be an absolute path: a relative one is resolved against the
+	// dispatch's worktree (the child's working directory), and a bare name
+	// is searched for on PATH by os/exec, not here, so one that is not
+	// found fails the dispatch as "claude ran no session", not as
+	// CLAUDE_NOT_FOUND. Available looks only at PATH and ignores it.
 	ClaudeBinary string // headless
 
 	// Env, when non-nil, is the exact environment a headless dispatch's
