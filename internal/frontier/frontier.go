@@ -760,6 +760,7 @@ func (rc *runCtx) processSlice(sl store.Slice) {
 		Workspace:     sl.Workspace,
 		Env:           sl.Env,
 		Attempt:       attempt,
+		Brief:         sliceBrief(d.Store, ticket),
 		BriefSections: resolveBriefSections(d.Store, ticket, sl),
 		AttemptLog:    buildAttemptLog(d.Store, ticket, sl.ID, attempt),
 		Answer:        answerFor(d.Store, ticket, sl.ID),

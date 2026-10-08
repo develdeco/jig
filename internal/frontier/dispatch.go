@@ -23,7 +23,7 @@ const dispatchPromptTemplate = "You are a jig build session for slice %s of tick
 	"Work ONLY in this worktree. Goal: %s\n" +
 	"Oracle (green = done): %s\n" +
 	"%s\n" +
-	"Read your inputs from slice.json at %s (brief sections by path, attempt log, prior answer, oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first, earlier_slices: what this ticket's verified slices did and the files they changed, and related: the files and symbols a code graph links to your goal, empty when the project keeps none).\n" +
+	"Read your inputs from slice.json at %s (brief: the ticket's brief.md, empty when it has none; brief sections by path, attempt log, prior answer, oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first, earlier_slices: what this ticket's verified slices did and the files they changed, and related: the files and symbols a code graph links to your goal, empty when the project keeps none).\n" +
 	"Commit as you land. When finished write result.json at %s with exactly one JSON object: {\"outcome\": \"green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed\", \"summary\": \"...\", \"commit\": \"<sha>\", \"question\": \"only for needs-input\", \"artifacts\": [\"relative paths\"]}"
 
 // oracleFixPromptTemplate is the next turn jig hands a builder's own session
@@ -77,6 +77,12 @@ type sliceJSONBody struct {
 	BriefSections []string `json:"brief_sections"`
 	AttemptLog    []string `json:"attempt_log"`
 	Answer        string   `json:"answer"`
+	// Brief is the absolute store-side path of the ticket's brief.md, or ""
+	// when the ticket has none. It is set for every slice, not just those
+	// with BriefSections: a slice whose goal cites the brief beyond its own
+	// sections, a gate fix slice for one, can read it where it lives instead
+	// of searching the disk for a file the worktree does not hold.
+	Brief string `json:"brief"`
 	// OracleSeconds is how long jig's latest run of this slice's exact
 	// oracle command took on this ticket, in seconds; 0 before the first
 	// (ADR 0024).
@@ -195,6 +201,26 @@ func invertBriefHashes(st *store.Store, ticket string) map[string]string {
 	return inv
 }
 
+// absBriefPath is "<abs store ticket dir>/brief.md", whether or not the file
+// exists.
+func absBriefPath(st *store.Store, ticket string) string {
+	ticketDir := st.TicketDir(ticket)
+	absTicketDir, err := filepath.Abs(ticketDir)
+	if err != nil {
+		absTicketDir = ticketDir
+	}
+	return filepath.Join(absTicketDir, "brief.md")
+}
+
+// sliceBrief is slice.json's brief field: the absolute store-side path of
+// ticket's brief.md, or "" when the ticket has none (hasBrief).
+func sliceBrief(st *store.Store, ticket string) string {
+	if !hasBrief(st, ticket) {
+		return ""
+	}
+	return absBriefPath(st, ticket)
+}
+
 // resolveBriefSections resolves sl's FromBrief hashes to
 // "<abs store ticket dir>/brief.md#<heading>" paths, via the current
 // brief.md's section hashes. An unknown hash (the section it named has
@@ -204,12 +230,7 @@ func resolveBriefSections(st *store.Store, ticket string, sl store.Slice) []stri
 	if inv == nil {
 		return nil
 	}
-	ticketDir := st.TicketDir(ticket)
-	absTicketDir, err := filepath.Abs(ticketDir)
-	if err != nil {
-		absTicketDir = ticketDir
-	}
-	briefPath := filepath.Join(absTicketDir, "brief.md")
+	briefPath := absBriefPath(st, ticket)
 	var out []string
 	for _, h := range sl.FromBrief {
 		heading, ok := inv[h]
