@@ -1180,18 +1180,18 @@ func TestGraduateCommitAndTable(t *testing.T) {
 // issue recorded before the command returns, rather than waiting on some
 // later, unrelated command's Push.
 func TestGraduateRunsItsOwnCheckpointSync(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginCloneWithGitHubTracker(t, clone)
 	writeChart(t, clone, "mychart", `tickets:
   - title: "Slice A"
 `)
 
-	mirrorClientForTest = &stubGitHub{}
-	defer func() { mirrorClientForTest = nil }()
+	e.mirrorClient = &stubGitHub{}
 
 	var buf bytes.Buffer
-	code := Main([]string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader(""))
+	code := run(e, []string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader(""))
 	if code != 0 {
 		t.Fatalf("jig graduate mychart: exit %d\n%s", code, buf.String())
 	}
@@ -1213,7 +1213,8 @@ func TestGraduateRunsItsOwnCheckpointSync(t *testing.T) {
 // the command returns its failure - the claim landed and was pushed, so a
 // GitHub issue and board card are owed, not just a bare error.
 func TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginCloneWithGitHubTracker(t, clone)
 	writeChart(t, clone, "mychart", `tickets:
@@ -1224,11 +1225,10 @@ func TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mirrorClientForTest = &stubGitHub{}
-	defer func() { mirrorClientForTest = nil }()
+	e.mirrorClient = &stubGitHub{}
 
 	var buf bytes.Buffer
-	code := Main([]string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader(""))
+	code := run(e, []string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader(""))
 	if code == 0 {
 		t.Fatalf("jig graduate mychart: exit 0, want a refusal on entry 2's mint:\n%s", buf.String())
 	}
@@ -1254,14 +1254,15 @@ func TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure(t *testing.T) {
 // must skip the checkpoint sync entirely on this failure, even though entry
 // A landed whole earlier in the same run, rather than risk that.
 //
-// The chart write failure is driven through writeChartForTest (r6-f1):
+// The chart write failure is driven through env.writeChart (r6-f1):
 // entry A's own WriteChart call passes through to the real st.WriteChart, and
 // entry B's is forced to fail, the same write-after-mint shape on every OS -
 // an OS-specific read-only chmod raced against store.AtomicWrite's own
 // os.Rename only fails this way on Windows (POSIX rename needs no write
 // permission on the target file itself, only its directory).
 func TestGraduateSkipsTheCheckpointSyncOnAWriteChartFailureAfterMint(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginCloneWithGitHubTracker(t, clone)
 	writeChart(t, clone, "mychart", `tickets:
@@ -1270,20 +1271,18 @@ func TestGraduateSkipsTheCheckpointSyncOnAWriteChartFailureAfterMint(t *testing.
 `)
 
 	writeCalls := 0
-	writeChartForTest = func(st *store.Store, chart string, entries []store.ChartEntry) error {
+	e.writeChart = func(st *store.Store, chart string, entries []store.ChartEntry) error {
 		writeCalls++
 		if writeCalls == 2 {
 			return errors.New("forced failure on entry B's chart write")
 		}
 		return st.WriteChart(chart, entries)
 	}
-	defer func() { writeChartForTest = nil }()
 
-	mirrorClientForTest = &stubGitHub{}
-	defer func() { mirrorClientForTest = nil }()
+	e.mirrorClient = &stubGitHub{}
 
 	var buf bytes.Buffer
-	code := Main([]string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader(""))
+	code := run(e, []string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader(""))
 
 	if code == 0 {
 		t.Fatalf("jig graduate mychart: exit 0, want a refusal on entry B's chart write:\n%s", buf.String())
@@ -1515,6 +1514,7 @@ func TestGraduateFullyGraduatedWithRemoteStillSyncsPendingState(t *testing.T) {
 // (GIT_AUTHOR_DATE, GIT_COMMITTER_DATE), so it sets them with t.Setenv.
 func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 	_, storeRoot := setupGraduateStore(t)
+	e := testEnv(t.TempDir())
 
 	remote := filepath.Join(t.TempDir(), "remote.git")
 	if _, err := gitx.Run("", "init", "--bare", "-b", "main", remote); err != nil {
@@ -1566,7 +1566,7 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 
 	// The other clone graduates Slice A and pushes it to the origin, standing
 	// in for `jig graduate mychart` run from a second clone.
-	otherID, _, otherDone, err := claimOneChartEntry(otherSt, "T-{n}", "mychart")
+	otherID, _, otherDone, err := claimOneChartEntry(e, otherSt, "T-{n}", "mychart")
 	if err != nil {
 		t.Fatalf("claimOneChartEntry on the other clone: %v", err)
 	}
@@ -1585,7 +1585,7 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 	// storeRoot never synced with the other clone's push: its own claim below
 	// mints against a stale chart, so its push is rejected by what the other
 	// clone already landed on the origin.
-	id, pos, done, err := claimOneChartEntry(st, "T-{n}", "mychart")
+	id, pos, done, err := claimOneChartEntry(e, st, "T-{n}", "mychart")
 	if err != nil {
 		t.Fatalf("claimOneChartEntry: %v", err)
 	}

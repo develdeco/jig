@@ -16,7 +16,6 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/mirror"
-	"github.com/develdeco/jig/internal/mirror/github"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/staircase"
@@ -214,16 +213,6 @@ func splitOnce(s string, sep byte) (before, after string, ok bool) {
 	return s, "", false
 }
 
-// mirrorClientForTest, set only by a cmd/jig test in this package,
-// overrides the GitHub client every checkpoint's sync (and `jig trackers
-// sync`) uses, the same seam mirror.Deps.Client already gives
-// internal/mirror's own tests: production never sets it, so every real
-// invocation still builds the client ghAuthToken and api.github.com give it.
-// This keeps a test that wants a checkpoint sync to fail (or succeed)
-// hermetic - pointed at an httptest server rather than the developer's own
-// gh token and github.com (brief.md's test constraints).
-var mirrorClientForTest github.Client
-
 // resolveStore resolves the store, project config and this machine's clone
 // mapping for cfg's project, honoring an explicit --store flag over cwd
 // resolution, and returns the jig home root it read the mapping from, for
@@ -258,7 +247,7 @@ func resolveStore(e env, storeFlag string, stdout io.Writer) (*store.Store, proj
 	// entry is a no-op (mirror.Sync's own NoTracker report), so this never
 	// reaches the network for the vast majority of stores and tests.
 	st.AfterCheckpoint = func(s *store.Store) error {
-		report, err := mirror.Sync(mirror.Deps{Store: s, Cfg: cfg, Home: jigHome, Client: mirrorClientForTest}, mirror.SyncOpts{})
+		report, err := mirror.Sync(mirror.Deps{Store: s, Cfg: cfg, Home: jigHome, Client: e.mirrorClient}, mirror.SyncOpts{})
 		if err != nil {
 			return err
 		}

@@ -27,12 +27,13 @@ const publishSafetyTestEmail = "someone" + "@" + "example.test"
 // newTestOriginClone's project.yaml) says so and exits 0, reaching no
 // network.
 func TestTrackersSyncNoGitHubEntryIsANoOp(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginClone(t, clone)
 
 	var buf bytes.Buffer
-	code := Main([]string{"trackers", "sync", "--store", clone}, &buf, strings.NewReader(""))
+	code := run(e, []string{"trackers", "sync", "--store", clone}, &buf, strings.NewReader(""))
 	if code != 0 {
 		t.Fatalf("jig trackers sync: exit %d\n%s", code, buf.String())
 	}
@@ -88,14 +89,13 @@ trackers:
 	return remote
 }
 
-// stubFailingMirrorClient points mirrorClientForTest at a fake GraphQL
-// server (httptest) that answers every request with a server error, so a
-// checkpoint's own sync - run by `jig ticket new` once its claim lands,
-// among others - fails fast and hermetically (never reaching gh or
+// stubFailingMirrorClient returns a client for env.mirrorClient pointed at a
+// fake GraphQL server (httptest) that answers every request with a server
+// error, so a checkpoint's own sync - run by `jig ticket new` once its claim
+// lands, among others - fails fast and hermetically (never reaching gh or
 // github.com, per brief.md's test constraints) and leaves no record behind,
-// reported as a warning rather than failing the command. It restores
-// mirrorClientForTest to nil on cleanup.
-func stubFailingMirrorClient(t *testing.T) {
+// reported as a warning rather than failing the command.
+func stubFailingMirrorClient(t *testing.T) github.Client {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -104,8 +104,7 @@ func stubFailingMirrorClient(t *testing.T) {
 	client := github.New(server.URL, "test-token")
 	client.BackoffBase = time.Millisecond
 	client.MutationInterval = time.Millisecond
-	mirrorClientForTest = client
-	t.Cleanup(func() { mirrorClientForTest = nil })
+	return client
 }
 
 // TestTrackersSyncDryRunReportsAWouldCreateTicket checks `jig trackers sync
@@ -113,7 +112,8 @@ func stubFailingMirrorClient(t *testing.T) {
 // a would-create row, reaching no network (mirror.Sync builds no client in
 // a dry run) and writing nothing to the store.
 func TestTrackersSyncDryRunReportsAWouldCreateTicket(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginCloneWithGitHubTracker(t, clone)
 
@@ -121,16 +121,16 @@ func TestTrackersSyncDryRunReportsAWouldCreateTicket(t *testing.T) {
 	// (brief.md's test constraints); pointed at a server that always fails,
 	// it leaves the ticket's record unwritten, which is the state this test
 	// wants `jig trackers sync --dry-run` to see.
-	stubFailingMirrorClient(t)
+	e.mirrorClient = stubFailingMirrorClient(t)
 
 	var buf bytes.Buffer
-	code := Main([]string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader(""))
+	code := run(e, []string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader(""))
 	if code != 0 {
 		t.Fatalf("jig ticket new: exit %d\n%s", code, buf.String())
 	}
 
 	buf.Reset()
-	code = Main([]string{"trackers", "sync", "--dry-run", "--store", clone}, &buf, strings.NewReader(""))
+	code = run(e, []string{"trackers", "sync", "--dry-run", "--store", clone}, &buf, strings.NewReader(""))
 	if code != 0 {
 		t.Fatalf("jig trackers sync --dry-run: exit %d\n%s", code, buf.String())
 	}
@@ -149,19 +149,20 @@ func TestTrackersSyncDryRunReportsAWouldCreateTicket(t *testing.T) {
 // a ticket title that trips the built-in email pattern is reported skipped,
 // and the command exits non-zero.
 func TestTrackersSyncDryRunExitsNonZeroOnAPublishSafetyHit(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginCloneWithGitHubTracker(t, clone)
-	stubFailingMirrorClient(t)
+	e.mirrorClient = stubFailingMirrorClient(t)
 
 	var buf bytes.Buffer
-	code := Main([]string{"ticket", "new", "--title", "Contact " + publishSafetyTestEmail + " for this", "--store", clone}, &buf, strings.NewReader(""))
+	code := run(e, []string{"ticket", "new", "--title", "Contact " + publishSafetyTestEmail + " for this", "--store", clone}, &buf, strings.NewReader(""))
 	if code != 0 {
 		t.Fatalf("jig ticket new: exit %d\n%s", code, buf.String())
 	}
 
 	buf.Reset()
-	code = Main([]string{"trackers", "sync", "--dry-run", "--store", clone}, &buf, strings.NewReader(""))
+	code = run(e, []string{"trackers", "sync", "--dry-run", "--store", clone}, &buf, strings.NewReader(""))
 	if code == 0 {
 		t.Fatalf("jig trackers sync --dry-run: exit 0, want non-zero when a ticket was skipped\n%s", buf.String())
 	}
@@ -175,7 +176,7 @@ func TestTrackersSyncDryRunExitsNonZeroOnAPublishSafetyHit(t *testing.T) {
 // store checkpoint inside a command: it syncs, and a GitHub failure leaves
 // the command successful with a warning" seam (brief.md#Seams), exercised
 // at Store.Push's own checkpoint hook, which resolveStore wires.
-// mirrorClientForTest points the hook's sync at a fake GraphQL server
+// env.mirrorClient points the hook's sync at a fake GraphQL server
 // (httptest) that answers every request with a server error - never gh or
 // github.com, per brief.md's test constraints - so the failure is the
 // code's own doing, not a fact about the machine running the test. Push
@@ -184,7 +185,8 @@ func TestTrackersSyncDryRunExitsNonZeroOnAPublishSafetyHit(t *testing.T) {
 // stderr. TestTicketNewRunsItsOwnCheckpointSync covers the same seam's
 // other caller: `jig ticket new`'s explicit call once its Claim lands.
 func TestCheckpointSyncFailureReportsWarningAndStorePushSucceeds(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginCloneWithGitHubTracker(t, clone)
 
@@ -200,11 +202,10 @@ func TestCheckpointSyncFailureReportsWarningAndStorePushSucceeds(t *testing.T) {
 	// not wait the production 1s, 2s, 4s out.
 	client.BackoffBase = time.Millisecond
 	client.MutationInterval = time.Millisecond
-	mirrorClientForTest = client
-	defer func() { mirrorClientForTest = nil }()
+	e.mirrorClient = client
 
 	var buf bytes.Buffer
-	st, _, _, _, err := resolveStore(processEnv(), clone, &buf)
+	st, _, _, _, err := resolveStore(e, clone, &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,15 +286,15 @@ func (s *stubGitHub) ItemFieldValues(context.Context, string) (string, string, e
 // GitHub issue recorded before the command returns, rather than waiting on
 // some later, unrelated command's Push.
 func TestTicketNewRunsItsOwnCheckpointSync(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginCloneWithGitHubTracker(t, clone)
 
-	mirrorClientForTest = &stubGitHub{}
-	defer func() { mirrorClientForTest = nil }()
+	e.mirrorClient = &stubGitHub{}
 
 	var buf bytes.Buffer
-	code := Main([]string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader(""))
+	code := run(e, []string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader(""))
 	if code != 0 {
 		t.Fatalf("jig ticket new: exit %d\n%s", code, buf.String())
 	}
@@ -319,7 +320,8 @@ func TestTicketNewRunsItsOwnCheckpointSync(t *testing.T) {
 // resolving command handed resolveStore - not swallow the report, as the
 // hook did before this slice.
 func TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginCloneWithGitHubTracker(t, clone)
 
@@ -328,11 +330,11 @@ func TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput(t *testing
 	// fails, it leaves both tickets' records unwritten, which is the state
 	// this test's own manual record (for T-1) and the stubGitHub sync below
 	// (for both T-1 and T-2) need to start from.
-	stubFailingMirrorClient(t)
+	e.mirrorClient = stubFailingMirrorClient(t)
 
 	var setup bytes.Buffer
 	for _, title := range []string{"First ticket", "Contact " + publishSafetyTestEmail + " for this"} {
-		if code := Main([]string{"ticket", "new", "--title", title, "--store", clone}, &setup, strings.NewReader("")); code != 0 {
+		if code := run(e, []string{"ticket", "new", "--title", title, "--store", clone}, &setup, strings.NewReader("")); code != 0 {
 			t.Fatalf("jig ticket new %q: exit %d\n%s", title, code, setup.String())
 		}
 	}
@@ -350,11 +352,10 @@ func TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput(t *testing
 		t.Fatal(err)
 	}
 
-	mirrorClientForTest = &stubGitHub{issueTitle: "Renamed by hand on GitHub"}
-	defer func() { mirrorClientForTest = nil }()
+	e.mirrorClient = &stubGitHub{issueTitle: "Renamed by hand on GitHub"}
 
 	var buf bytes.Buffer
-	st, _, _, _, err := resolveStore(processEnv(), clone, &buf)
+	st, _, _, _, err := resolveStore(e, clone, &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,9 +375,10 @@ func TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput(t *testing
 // TestTrackersSyncUnknownSubcommand checks that a subcommand besides "sync"
 // is refused as a VALIDATION_ERROR.
 func TestTrackersSyncUnknownSubcommand(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	var buf bytes.Buffer
-	code := Main([]string{"trackers", "bogus"}, &buf, strings.NewReader(""))
+	code := run(e, []string{"trackers", "bogus"}, &buf, strings.NewReader(""))
 	if code == 0 {
 		t.Fatalf("jig trackers bogus: exit 0, want a refusal\n%s", buf.String())
 	}

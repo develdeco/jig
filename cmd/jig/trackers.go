@@ -51,7 +51,7 @@ func cmdTrackers(e env, args []string, stdout io.Writer) int {
 	// command, so unlike the checkpoint hook it has no reason to share the
 	// 2-minute bound a first sync of a sizeable store cannot finish inside
 	// (gate finding r2-f5): it runs until it is done.
-	report, err := mirror.Sync(mirror.Deps{Store: st, Cfg: cfg, Home: jigHome, Client: mirrorClientForTest}, mirror.SyncOpts{DryRun: *dryRun, Unbounded: true})
+	report, err := mirror.Sync(mirror.Deps{Store: st, Cfg: cfg, Home: jigHome, Client: e.mirrorClient}, mirror.SyncOpts{DryRun: *dryRun, Unbounded: true})
 	if err != nil {
 		return renderErr(stdout, err)
 	}
