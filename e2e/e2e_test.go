@@ -22,12 +22,21 @@ import (
 // before and after rather than requiring a clean tree, so the suite still
 // passes while a contributor has uncommitted work.
 func TestEndToEndTwice(t *testing.T) {
+	t.Parallel()
 	before := productTreeStatus(t)
-	for i := 1; i <= 2; i++ {
-		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
-			runEndToEndOnce(t)
-		})
-	}
+	// The two iterations share nothing (each has a fixture, a jig home and
+	// an environment of its own), so they run side by side. Their parallel
+	// subtests sit in a group because a group's t.Run returns only once all
+	// of them have finished, which is what keeps the after-check below
+	// honest.
+	t.Run("iterations", func(t *testing.T) {
+		for i := 1; i <= 2; i++ {
+			t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
+				t.Parallel()
+				runEndToEndOnce(t)
+			})
+		}
+	})
 
 	if after := productTreeStatus(t); after != before {
 		t.Fatalf("e2e runs changed the product repo's working tree:\nbefore:\n%s\nafter:\n%s", before, after)
@@ -62,7 +71,7 @@ func productTreeStatus(t *testing.T) string {
 // It is flagged as a follow-up task rather than fixed here since it lives
 // in envrun (and/or fixture's quoting), neither of which is e2e's scope.
 func runEndToEndOnce(t *testing.T) {
-	fx, home := newFixture(t, fixture.Opts{})
+	fx, env := newFixture(t, fixture.Opts{})
 	ticket := fx.Ticket
 	repoName := (project.Repo{Remote: fx.RepoRemote}).Name()
 
@@ -74,7 +83,7 @@ func runEndToEndOnce(t *testing.T) {
 	// form, not the amend-brief-then-requeue one (see resumeCommand);
 	// `jig status` still names q-001 in its questions table (checked via
 	// the status-run1-parked.txt golden below).
-	r1 := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r1 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r1.Code != 2 {
 		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\nstdout:\n%s\nstderr:\n%s", r1.Code, r1.Stdout, r1.Stderr)
 	}
@@ -96,11 +105,11 @@ func runEndToEndOnce(t *testing.T) {
 	assertSliceState(t, st, ticket, "c", "needs-input", 1)
 	assertSliceState(t, st, ticket, "d", "green", 1)
 
-	statusR1 := runJig(t, fx.StoreDir, "status", ticket)
+	statusR1 := runJig(t, env, fx.StoreDir, "status", ticket)
 	assertGolden(t, "status-run1-parked.txt", statusR1.Stdout)
 
 	// --- 2. answer q-001: c goes green, ticket fully green.
-	r2 := runJig(t, fx.StoreDir, "run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r2 := runJig(t, env, fx.StoreDir, "run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r2.Code != 0 {
 		t.Fatalf("run 2 (answer) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r2.Code, r2.Stdout, r2.Stderr)
 	}
@@ -110,7 +119,7 @@ func runEndToEndOnce(t *testing.T) {
 	divergeMsg := "note: scripted divergent store commit"
 	scriptedPush(t, fx.StoreRemote, "platform/note.md", "scripted divergence\n", divergeMsg)
 
-	r3 := runJig(t, fx.StoreDir, "gate", ticket, "--scenario", fx.ScenarioDir)
+	r3 := runJig(t, env, fx.StoreDir, "gate", ticket, "--scenario", fx.ScenarioDir)
 	if r3.Code != 0 {
 		t.Fatalf("gate (round 1) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r3.Code, r3.Stdout, r3.Stderr)
 	}
@@ -130,17 +139,17 @@ func runEndToEndOnce(t *testing.T) {
 
 	round1Findings := readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "gate", "round-1", "findings.md"))
 
-	statusR3 := runJig(t, fx.StoreDir, "status", ticket)
+	statusR3 := runJig(t, env, fx.StoreDir, "status", ticket)
 	assertGolden(t, "status-gate-round1.txt", statusR3.Stdout)
 
 	// --- 4. run clears fix-1; gate again is clean (round 2), round 1 untouched.
-	r4 := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r4 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r4.Code != 0 {
 		t.Fatalf("run (fix-1) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r4.Code, r4.Stdout, r4.Stderr)
 	}
 	assertSliceState(t, st, ticket, "fix-1", "green", 1)
 
-	r5 := runJig(t, fx.StoreDir, "gate", ticket, "--scenario", fx.ScenarioDir)
+	r5 := runJig(t, env, fx.StoreDir, "gate", ticket, "--scenario", fx.ScenarioDir)
 	if r5.Code != 0 {
 		t.Fatalf("gate (round 2, clean) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r5.Code, r5.Stdout, r5.Stderr)
 	}
@@ -162,7 +171,7 @@ func runEndToEndOnce(t *testing.T) {
 	// fork-point sha (stable regardless of later fetches) rather than the
 	// lease's own possibly-stale origin/<target> tracking ref.
 	startSHA := strings.TrimSpace(string(readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "start."+repoName+".sha"))))
-	buildLeaseDir := poolBuildLeaseDir(home, repoName, ticket)
+	buildLeaseDir := poolBuildLeaseDir(env.home, repoName, ticket)
 	preSquashMessages := strings.Split(gitLog(t, buildLeaseDir, "log", "--format=%s", startSHA+"..HEAD"), "\n")
 	wantMessages := expectedSliceCommitMessages(t, fx, ticket)
 	assertSameMessageSet(t, preSquashMessages, wantMessages)
@@ -171,7 +180,7 @@ func runEndToEndOnce(t *testing.T) {
 	scriptedPush(t, fx.RepoRemote, "NOTES.md", "upstream moved on\n", "upstream: unrelated change")
 	movedTip := gitLog(t, fx.RepoRemote, "rev-parse", "main")
 
-	r6 := runJig(t, fx.StoreDir, "publish", ticket, "--yes")
+	r6 := runJig(t, env, fx.StoreDir, "publish", ticket, "--yes")
 	if r6.Code != 0 {
 		t.Fatalf("publish exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r6.Code, r6.Stdout, r6.Stderr)
 	}

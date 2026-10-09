@@ -123,7 +123,8 @@ func TestRetryReturnsTheLastError(t *testing.T) {
 // commits sit on top, origin's branch is fast-forwarded, and the store
 // records it.
 func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
-	fx, home := newFixture(t, fixture.Opts{})
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
 	const ticket = "JIG-2" // the fixture's own ticket is JIG-1, so the next mint is JIG-2
 	const branch = "add-retry"
 
@@ -149,7 +150,7 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 		t.Fatal("test setup: main did not move past the branch's fork point")
 	}
 
-	mint := runJig(t, fx.StoreDir, "ticket", "new", "--title", "Add retry")
+	mint := runJig(t, env, fx.StoreDir, "ticket", "new", "--title", "Add retry")
 	if mint.Code != 0 || !strings.Contains(mint.Stdout, "id: "+ticket) {
 		t.Fatalf("jig ticket new exit = %d, want 0 minting %s\nstdout:\n%s\nstderr:\n%s", mint.Code, ticket, mint.Stdout, mint.Stderr)
 	}
@@ -159,7 +160,7 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	}
 
 	// Round 1 over the author's branch: the scripted round queues fix-1.
-	g1 := runJig(t, fx.StoreDir, "gate", ticket, "--branch", branch, "--scenario", fx.ScenarioDir)
+	g1 := runJig(t, env, fx.StoreDir, "gate", ticket, "--branch", branch, "--scenario", fx.ScenarioDir)
 	if g1.Code != 0 {
 		t.Fatalf("jig gate --branch exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", g1.Code, g1.Stdout, g1.Stderr)
 	}
@@ -177,11 +178,11 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	}
 
 	// The fix slice is built on the reviewed branch, as origin has it now.
-	r := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r.Code != 0 {
 		t.Fatalf("jig run exit = %d, want 0 (fix-1 built)\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
-	lease := poolBuildLeaseDir(home, "fixture-repo", ticket)
+	lease := poolBuildLeaseDir(env.home, "fixture-repo", ticket)
 	if got := gitLog(t, lease, "symbolic-ref", "--short", "HEAD"); got != branch {
 		t.Fatalf("the build lease is on %q, want the reviewed branch %q", got, branch)
 	}
@@ -217,11 +218,11 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	// The next round, with no --branch, reviews the same branch: the build
 	// lease's copy, fix commit included. The scripted source has no round 2,
 	// so it is clean.
-	g2 := runJig(t, fx.StoreDir, "gate", ticket, "--scenario", fx.ScenarioDir)
+	g2 := runJig(t, env, fx.StoreDir, "gate", ticket, "--scenario", fx.ScenarioDir)
 	if g2.Code != 0 || !strings.Contains(g2.Stdout, "verdict: clean") {
 		t.Fatalf("jig gate round 2 exit = %d, want a clean round\nstdout:\n%s\nstderr:\n%s", g2.Code, g2.Stdout, g2.Stderr)
 	}
-	gateLease := filepath.Join(home, "pool", "fixture-repo", ticket+"-gate")
+	gateLease := filepath.Join(env.home, "pool", "fixture-repo", ticket+"-gate")
 	if got := gitLog(t, gateLease, "symbolic-ref", "--short", "HEAD"); got != branch {
 		t.Fatalf("the gate lease is on %q, want the reviewed branch %q", got, branch)
 	}
@@ -231,7 +232,7 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 
 	// The clean round makes the ticket publishable like any other, adopted or
 	// not, and status says so.
-	s := runJig(t, fx.StoreDir, "status", ticket)
+	s := runJig(t, env, fx.StoreDir, "status", ticket)
 	if s.Code != 0 || !strings.Contains(s.Stdout, "branch: "+branch) || !strings.Contains(s.Stdout, "Run `jig publish "+ticket+"` to open or update the PR") {
 		t.Fatalf("jig status exit = %d, want the branch named and `jig publish %s` suggested\nstdout:\n%s\nstderr:\n%s", s.Code, ticket, s.Stdout, s.Stderr)
 	}
@@ -241,7 +242,7 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	// branch - the author's commits, the mid-loop one included, keep their
 	// shas, jig's fix sits on top.
 	jigFix := gitLog(t, lease, "rev-parse", "HEAD")
-	p := runJig(t, fx.StoreDir, "publish", ticket, "--yes")
+	p := runJig(t, env, fx.StoreDir, "publish", ticket, "--yes")
 	if p.Code != 0 {
 		t.Fatalf("jig publish exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", p.Code, p.Stdout, p.Stderr)
 	}
@@ -302,7 +303,7 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 
 	// The ticket goes on working: jig's commits are on origin under their own
 	// shas, so a round over the branch reviews origin's copy, which holds them.
-	g3 := runJig(t, fx.StoreDir, "gate", ticket, "--scenario", fx.ScenarioDir)
+	g3 := runJig(t, env, fx.StoreDir, "gate", ticket, "--scenario", fx.ScenarioDir)
 	if g3.Code != 0 || !strings.Contains(g3.Stdout, "verdict: clean") {
 		t.Fatalf("jig gate after the publish exit = %d, want a clean round\nstdout:\n%s\nstderr:\n%s", g3.Code, g3.Stdout, g3.Stderr)
 	}
