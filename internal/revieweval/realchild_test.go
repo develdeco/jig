@@ -17,13 +17,13 @@ import (
 
 // buildClaudeStub compiles testdata/fixture/claudestub (repo root) - the
 // same fake `claude` internal/session's own hermetic tests drive - into a
-// temp dir and returns that dir, ready to prepend to PATH so it is found
-// under its own, unremarkable name: nothing about this stub, or the dir it
-// builds into, names this package or any case - "jig-claude-stub", not
-// "jig-revieweval-bin", so PATH itself carries no leak-vocabulary token
-// once this dir is prepended to it (the real-child leak test below scans
-// PATH along with everything else in the child's env). Built once per
-// call; the one test below that needs it calls this once.
+// temp dir and returns the stub's path, to hand the headless backend as its
+// claude program (session.Options.ClaudeBinary): the test never edits PATH.
+// It builds under its own, unremarkable name: nothing about this stub, or
+// the dir it builds into, names this package or any case -
+// "jig-claude-stub", not "jig-revieweval-bin" - since the real-child leak
+// test below scans everything its child can see. Built once per call; the
+// one test below that needs it calls this once.
 func buildClaudeStub(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "jig-claude-stub")
@@ -44,7 +44,7 @@ func buildClaudeStub(t *testing.T) string {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("revieweval: build claude stub: %v\n%s", err, output)
 	}
-	return dir
+	return out
 }
 
 // realChildCall is one line of the claude stub's own log: its argv and cwd
@@ -224,21 +224,23 @@ func sameDirOrFatal(t *testing.T, a, b string) bool {
 // name, say) never enters the parent, and no value is judged by the words
 // in it, so the host's temp root does not matter either.
 func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
+	t.Parallel()
 	if launchEnv == nil {
 		t.Fatal("launchEnv is nil: TestMain must snapshot os.Environ() first thing, before gittest.Run or any other harness setup")
 	}
-	// Taken before this test changes anything itself, so the difference
-	// from the launch environment is exactly what the harness introduced.
+	// The difference from the launch environment is exactly what the
+	// harness introduced: this test and the others running beside it leave
+	// the process environment as they found it.
 	atStart := os.Environ()
-	claudeDir := buildClaudeStub(t)
-	// The backend finds the stub on this process's own PATH; the child's
-	// PATH is whatever the synthetic parent environment below says.
-	t.Setenv("PATH", claudeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// The backend runs the stub by path (liveBackend below) and the child's
+	// PATH is whatever the synthetic parent environment says, so this
+	// process's PATH is never involved. The stub's log path reaches it only
+	// through that parent environment as well: if the backend ever ignored
+	// Options.Env, the child would inherit this process's own, find no
+	// CLAUDE_STUB_LOG in it and log nothing, which the log check below
+	// reports.
+	claudeStub := buildClaudeStub(t)
 	logFile := filepath.Join(t.TempDir(), "claude.log")
-	// Also on this process's own environment: if the backend ever ignored
-	// Options.Env, the child would inherit everything here, still log, and
-	// fail below on each variable it should never have had.
-	t.Setenv("CLAUDE_STUB_LOG", logFile)
 
 	// None of these paths has to exist; the child only ever sees them as
 	// strings.
@@ -285,7 +287,7 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 	parentEnv = append(parentEnv, feed...)
 
 	jigBin := buildJigBinary(t)
-	real, err := liveBackend("headless", jigBin, parentEnv)
+	real, err := liveBackend("headless", jigBin, claudeStub, parentEnv)
 	if err != nil {
 		t.Fatalf("liveBackend(headless): %v", err)
 	}
@@ -374,6 +376,7 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 // feeds the scrub from the harness: every variable added or changed since
 // launch, PATH included, and nothing unchanged or removed.
 func TestHarnessChangesIsTheVerbatimDiff(t *testing.T) {
+	t.Parallel()
 	list := func(entries ...string) string { return strings.Join(entries, string(os.PathListSeparator)) }
 	launch := []string{"TMP=/t", "KEEP=1", "GONE=1", "PATH=" + list("/a", "/b")}
 	now := []string{"TMP=/other", "KEEP=1", "NEW=x", "PATH=" + list("/revieweval-bin", "/a", "/b")}

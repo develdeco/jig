@@ -2,21 +2,25 @@ package revieweval
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gittest"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/verifydeliver"
 	"gopkg.in/yaml.v3"
 )
 
 // This file is the CI structural path: it runs the real corpus
-// (testdata/revieweval, repo root) through RunCorpus/RunCase against
+// (testdata/revieweval, repo root) through RunCase against
 // scripted result.json fixtures under testdata/results/<set>/<case>/, never
 // a real session backend, so it needs no claude CLI and never runs
 // unattended dispatch. Each fixture set exercises one designed shape:
@@ -47,6 +51,106 @@ func loadEvalCase(t *testing.T, name string) Case {
 		t.Fatalf("revieweval: LoadCase(%s): %v", name, err)
 	}
 	return c
+}
+
+// scoreCorpus runs every case of cases through RunCase at once, each under
+// its own work dir named the way RunCorpus names it (workRoot/<run id>), and
+// returns the scores in cases' order. RunCorpus runs the same cases one
+// after another; here each case has a store, a repo and a work dir of its
+// own and the backend and judge only read, so no case can see another and
+// the corpus costs about what its slowest case does rather than the sum of
+// its fourteen rounds. RunCorpus's own loop is pinned apart from this, by
+// TestRunCorpusScoresEveryCaseInOrderUnderItsRunID.
+func scoreCorpus(workRoot string, cases []Case, backend session.Backend, judge Judge, model string) ([]CaseScore, error) {
+	scores := make([]CaseScore, len(cases))
+	errs := make([]error, len(cases))
+	var wg sync.WaitGroup
+	for i, c := range cases {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dir := filepath.Join(workRoot, runID(c.Name))
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				errs[i] = fmt.Errorf("revieweval: create work dir for %s: %w", c.Name, err)
+				return
+			}
+			sc, err := RunCase(dir, c, backend, judge, model)
+			if err != nil {
+				errs[i] = fmt.Errorf("revieweval: run case %s: %w", c.Name, err)
+				return
+			}
+			scores[i] = sc
+		}()
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	return scores, nil
+}
+
+// perfectRun is the one scoring of the real corpus against the "perfect"
+// fixture set that perfectCorpusScores hands to the tests reading it, and
+// the tests it has handed it to.
+var perfectRun struct {
+	sync.Mutex
+	scored   bool
+	scores   []CaseScore
+	err      error
+	servedTo map[string]bool
+}
+
+// perfectCorpusScores scores the whole real corpus against the "perfect"
+// fixture set with no judge (structural matching alone), the first time any
+// test asks, and returns that same scoring to the other test that reads it.
+// The two are TestFixturePerfectPassesEveryCaseEveryRound and
+// TestFixtureReportRendersTotals; the run is deterministic (a fixed git
+// identity and date, scripted results, no judge), so a second run would only
+// repeat the first, and each test keeps its own assertions over the result.
+// The scores are shared by tests running at once: a caller only reads them.
+//
+// A test that asks again after it was served has reached a later pass of
+// go test -count=N, so that pass scores the corpus afresh: every pass runs
+// the corpus as a lone test would, and -count=N still shakes it out.
+func perfectCorpusScores(t *testing.T) []CaseScore {
+	t.Helper()
+	root := evalCorpusRoot(t)
+
+	r := &perfectRun
+	r.Lock()
+	defer r.Unlock()
+	if r.servedTo[t.Name()] {
+		r.scored, r.servedTo = false, nil
+	}
+	if !r.scored {
+		r.scores, r.err = scorePerfectCorpus(root)
+		r.scored = true
+	}
+	if r.servedTo == nil {
+		r.servedTo = map[string]bool{}
+	}
+	r.servedTo[t.Name()] = true
+	if r.err != nil {
+		t.Fatalf("scoring the corpus against the perfect fixtures: %v", r.err)
+	}
+	return r.scores
+}
+
+// scorePerfectCorpus is one scoring of the corpus at root against the
+// "perfect" fixture set, in a work root of its own.
+func scorePerfectCorpus(root string) ([]CaseScore, error) {
+	cases, err := LoadCorpus(root)
+	if err != nil {
+		return nil, fmt.Errorf("LoadCorpus: %w", err)
+	}
+	// Not t.TempDir(): it would end with the test that asked first, and the
+	// other may still be reading what is under it.
+	workRoot, err := os.MkdirTemp("", "jig-")
+	if err != nil {
+		return nil, fmt.Errorf("create work root: %w", err)
+	}
+	gittest.AtExit(func() { _ = os.RemoveAll(workRoot) })
+	return scoreCorpus(workRoot, cases, scriptedReviewerBackend{dir: resultsDir("perfect")}, nil, "fixture-model")
 }
 
 // judgeFixtureEntry is one line of a round-<N>.judge.yaml: the candidate it
@@ -107,6 +211,7 @@ func (j fixtureJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 // loading at all, so a broken corpus file would otherwise surface as a
 // confusing failure somewhere else instead of here.
 func TestFixtureLoadCorpusLoadsAllTenCases(t *testing.T) {
+	t.Parallel()
 	cases, err := LoadCorpus(evalCorpusRoot(t))
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
@@ -135,22 +240,16 @@ func TestFixtureLoadCorpusLoadsAllTenCases(t *testing.T) {
 }
 
 // TestFixturePerfectPassesEveryCaseEveryRound drives the whole real corpus
-// through RunCorpus against the "perfect" fixture set with no judge
-// (structural matching alone, since every perfect finding sits on its
-// gold's own line): every round of every case must pass, with nothing
-// missed, lost, dropped, misattributed, a false alarm or re-litigated, and
-// no finding left pending - a perfect round has nothing for a person to
-// label, so its verdict must be a clean PASS, never PROVISIONAL.
+// through RunCase against the "perfect" fixture set (every case at once,
+// scoreCorpus, in perfectCorpusScores) with no judge (structural matching
+// alone, since every perfect finding sits on its gold's own line): every
+// round of every case must pass, with nothing missed, lost, dropped,
+// misattributed, a false alarm or re-litigated, and no finding left
+// pending - a perfect round has nothing for a person to label, so its
+// verdict must be a clean PASS, never PROVISIONAL.
 func TestFixturePerfectPassesEveryCaseEveryRound(t *testing.T) {
-	cases, err := LoadCorpus(evalCorpusRoot(t))
-	if err != nil {
-		t.Fatalf("LoadCorpus: %v", err)
-	}
-	backend := scriptedReviewerBackend{dir: resultsDir("perfect")}
-	scores, err := RunCorpus(t.TempDir(), cases, backend, nil, "fixture-model")
-	if err != nil {
-		t.Fatalf("RunCorpus: %v", err)
-	}
+	t.Parallel()
+	scores := perfectCorpusScores(t)
 
 	roundCount := 0
 	for _, cs := range scores {
@@ -197,20 +296,22 @@ type regressedWant struct {
 }
 
 // TestFixtureRegressedFailsExactlyAsDesigned drives the whole real corpus
-// through RunCorpus against the "regressed" fixture set: every case fails
+// through RunCase against the "regressed" fixture set (every case at once,
+// scoreCorpus): every case fails
 // with exactly the one designed failure named for it (and nothing else),
 // and a multi-round case's untouched round 1 (a copy of "perfect") still
 // passes, proving teacher-forcing keeps round 2's regression from bleeding
 // into round 1's own score.
 func TestFixtureRegressedFailsExactlyAsDesigned(t *testing.T) {
+	t.Parallel()
 	cases, err := LoadCorpus(evalCorpusRoot(t))
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
 	backend := scriptedReviewerBackend{dir: resultsDir("regressed")}
-	scores, err := RunCorpus(t.TempDir(), cases, backend, nil, "fixture-model")
+	scores, err := scoreCorpus(t.TempDir(), cases, backend, nil, "fixture-model")
 	if err != nil {
-		t.Fatalf("RunCorpus: %v", err)
+		t.Fatalf("scoreCorpus: %v", err)
 	}
 
 	byCaseRound := map[string]map[int]RoundScore{}
@@ -308,10 +409,12 @@ func checkStringList(t *testing.T, caseName string, round int, field string, got
 // qualification - proving the judge stage, not the structural window, is
 // what rejects a gamed finding.
 func TestFixtureGamedMissedWithJudgeUnconfirmedWithoutJudge(t *testing.T) {
-	c := loadEvalCase(t, "nil-deref")
+	t.Parallel()
 	backend := scriptedReviewerBackend{dir: resultsDir("gamed")}
 
 	t.Run("scripted-judge-says-different-is-missed", func(t *testing.T) {
+		t.Parallel()
+		c := loadEvalCase(t, "nil-deref")
 		judge := fixtureJudge{dir: resultsDir("gamed")}
 		cs, err := RunCase(t.TempDir(), c, backend, judge, "fixture-model")
 		if err != nil {
@@ -333,6 +436,8 @@ func TestFixtureGamedMissedWithJudgeUnconfirmedWithoutJudge(t *testing.T) {
 	})
 
 	t.Run("nil-judge-matches-but-only-unconfirmed", func(t *testing.T) {
+		t.Parallel()
+		c := loadEvalCase(t, "nil-deref")
 		cs, err := RunCase(t.TempDir(), c, backend, nil, "fixture-model")
 		if err != nil {
 			t.Fatalf("RunCase: %v", err)
@@ -361,6 +466,7 @@ func TestFixtureGamedMissedWithJudgeUnconfirmedWithoutJudge(t *testing.T) {
 // counts as missed, never left out of the denominator the way a zero-over-
 // zero round would.
 func TestFixtureRefusedCountsGoldAsMissed(t *testing.T) {
+	t.Parallel()
 	c := loadEvalCase(t, "nil-deref")
 	backend := scriptedReviewerBackend{dir: resultsDir("refused")}
 
@@ -389,21 +495,15 @@ func TestFixtureRefusedCountsGoldAsMissed(t *testing.T) {
 	}
 }
 
-// TestFixtureReportRendersTotals runs the whole corpus through the
-// "perfect" fixture set and renders it, pinning that RenderReport's totals
-// line actually reflects a full-corpus run (every case and round passed,
-// full recall) rather than only the synthetic single-round inputs
-// score_test.go exercises RenderReport with directly.
+// TestFixtureReportRendersTotals renders the whole corpus scored against the
+// "perfect" fixture set (perfectCorpusScores, the run the perfect test
+// above reads too), pinning that RenderReport's totals line actually
+// reflects a full-corpus run (every case and round passed, full recall)
+// rather than only the synthetic single-round inputs score_test.go
+// exercises RenderReport with directly.
 func TestFixtureReportRendersTotals(t *testing.T) {
-	cases, err := LoadCorpus(evalCorpusRoot(t))
-	if err != nil {
-		t.Fatalf("LoadCorpus: %v", err)
-	}
-	backend := scriptedReviewerBackend{dir: resultsDir("perfect")}
-	scores, err := RunCorpus(t.TempDir(), cases, backend, nil, "fixture-model")
-	if err != nil {
-		t.Fatalf("RunCorpus: %v", err)
-	}
+	t.Parallel()
+	scores := perfectCorpusScores(t)
 
 	report := RenderReport(scores)
 	if !strings.Contains(report, "cases passed 10/10, rounds passed 14/14, recall 1.00") {
@@ -442,12 +542,14 @@ func fileLineCount(path string) (int, error) {
 // finding could ever land inside - and a hand-edited patch.diff is exactly
 // the kind of change that could silently leave one behind.
 func TestCorpusSpansLieInsideTheirFiles(t *testing.T) {
+	t.Parallel()
 	cases, err := LoadCorpus(evalCorpusRoot(t))
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
+			t.Parallel()
 			repoDir := t.TempDir()
 			if _, err := gitx.Run(repoDir, "init", "-q", "-b", "main"); err != nil {
 				t.Fatalf("git init: %v", err)
@@ -515,9 +617,11 @@ func TestCorpusSpansLieInsideTheirFiles(t *testing.T) {
 // skipping only the wire-level reviewer-result check that this probe was
 // never about.
 func TestFixtureProbesEachDesignedOutcome(t *testing.T) {
+	t.Parallel()
 	backend := scriptedReviewerBackend{dir: resultsDir("probes")}
 
 	t.Run("trap-hit-outside-tenant-leak-is-a-false-alarm", func(t *testing.T) {
+		t.Parallel()
 		c := loadEvalCase(t, "forgotten-finding")
 		cs, err := RunCase(t.TempDir(), c, backend, nil, "fixture-model")
 		if err != nil {
@@ -539,6 +643,7 @@ func TestFixtureProbesEachDesignedOutcome(t *testing.T) {
 	})
 
 	t.Run("a-cited-prior-outside-the-window-skips", func(t *testing.T) {
+		t.Parallel()
 		c := loadEvalCase(t, "title-collision")
 		cs, err := RunCase(t.TempDir(), c, backend, nil, "fixture-model")
 		if err != nil {
@@ -566,6 +671,7 @@ func TestFixtureProbesEachDesignedOutcome(t *testing.T) {
 	})
 
 	t.Run("a-repeat-citing-its-dismissed-prior-at-line-zero-skips", func(t *testing.T) {
+		t.Parallel()
 		// One layer lower than the other three sub-tests, per the function
 		// doc comment: MatchRound fed title-collision's own real round-2
 		// gold and its real round-1 recorded dismissal (r1-f1), rather than
@@ -610,6 +716,7 @@ func TestFixtureProbesEachDesignedOutcome(t *testing.T) {
 	})
 
 	t.Run("a-prior-in-another-file-is-a-wrong-prior", func(t *testing.T) {
+		t.Parallel()
 		c := loadEvalCase(t, "reworded-dismissed")
 		cs, err := RunCase(t.TempDir(), c, backend, nil, "fixture-model")
 		if err != nil {

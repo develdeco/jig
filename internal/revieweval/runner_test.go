@@ -19,6 +19,7 @@ import (
 // Verdict at the worse of the two, in either order - "last round wins"
 // would leave PASS after this exact sequence.
 func TestAccumulateCaseVerdictTakesTheWorstRoundNotTheLast(t *testing.T) {
+	t.Parallel()
 	// passedFor mirrors verdictFor's own contract (score.go): a round's
 	// Passed bit is false exactly when its Verdict is FAIL, true for PASS
 	// and PROVISIONAL alike - so each synthetic RoundScore below is an
@@ -57,6 +58,7 @@ func TestAccumulateCaseVerdictTakesTheWorstRoundNotTheLast(t *testing.T) {
 // FAIL's and PROVISIONAL's own ranks would flip which one a mixed case or
 // report line keeps.
 func TestVerdictRankOrdersWorstFirst(t *testing.T) {
+	t.Parallel()
 	if verdictRank(VerdictFail) <= verdictRank(VerdictProvisional) {
 		t.Errorf("verdictRank(FAIL) = %d, want it to outrank verdictRank(PROVISIONAL) = %d", verdictRank(VerdictFail), verdictRank(VerdictProvisional))
 	}
@@ -72,6 +74,7 @@ func TestVerdictRankOrdersWorstFirst(t *testing.T) {
 // judge failure, the judge changing the repo) builds its RoundScore through
 // this helper, and none of them may read as a pass.
 func TestMissedRoundScoreVerdictIsFail(t *testing.T) {
+	t.Parallel()
 	rs := missedRoundScore(1, Gold{Findings: []GoldFinding{{ID: "g1"}}}, nil, "some reason")
 	if rs.Verdict != VerdictFail {
 		t.Errorf("Verdict = %q, want %q", rs.Verdict, VerdictFail)
@@ -87,6 +90,7 @@ func TestMissedRoundScoreVerdictIsFail(t *testing.T) {
 // the same FAIL verdict - the round line's Refused/Failed flags are for a
 // person to tell them apart, not the verdict a program reads.
 func TestReviewerRoundFailureRefusedAndFailedBothScoreFail(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name                    string
 		code                    string
@@ -131,6 +135,7 @@ func (j repoMutatingJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 // --- the judge must not change the case repo --------------------------------
 
 func TestRunCaseFailsRoundWhenJudgeEditsATrackedFile(t *testing.T) {
+	t.Parallel()
 	c := loadEvalCase(t, "nil-deref")
 	backend := scriptedReviewerBackend{dir: resultsDir("perfect")}
 	judge := repoMutatingJudge{mutate: func(repoDir string) error {
@@ -176,6 +181,7 @@ func TestRunCaseFailsRoundWhenJudgeEditsATrackedFile(t *testing.T) {
 // that is not a git repo at all makes both of its own git commands fail,
 // which must come back as a plain error, never violated=true.
 func TestCheckJudgeReadOnlyGitErrorIsReturnedNotViolated(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir() // deliberately not a git repo
 	violated, err := checkJudgeReadOnly(dir, "0000000000000000000000000000000000000000")
 	if err == nil {
@@ -191,6 +197,7 @@ func TestCheckJudgeReadOnlyGitErrorIsReturnedNotViolated(t *testing.T) {
 // still continues into round 2 rather than stopping the whole run, the
 // same as any other Failed round.
 func TestRunCaseJudgeErrorFailsTheRoundAndTheCaseContinues(t *testing.T) {
+	t.Parallel()
 	c := loadEvalCase(t, "forgotten-finding")
 	backend := scriptedReviewerBackend{dir: resultsDir("perfect")}
 	judge := erroringJudge{round: 1, err: fmt.Errorf("judge blew up"), fallback: fixtureJudge{dir: resultsDir("perfect")}}
@@ -245,6 +252,7 @@ func (j erroringJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 // RunCase must return a real error, never a Failed CaseScore with that
 // reason.
 func TestRunCaseGitErrorInReadOnlyCheckIsInfrastructureNotAJudgeViolation(t *testing.T) {
+	t.Parallel()
 	c := loadEvalCase(t, "nil-deref")
 	backend := scriptedReviewerBackend{dir: resultsDir("perfect")}
 	judge := repoMutatingJudge{mutate: func(repoDir string) error {
@@ -268,6 +276,7 @@ func TestRunCaseGitErrorInReadOnlyCheckIsInfrastructureNotAJudgeViolation(t *tes
 // too, widening the diff scope beyond what round 2's scripted
 // reviewed_paths covers, refusing the round).
 func TestRunCaseJudgeUntrackedFileDoesNotFailTheRoundOrBreakTheNext(t *testing.T) {
+	t.Parallel()
 	c := loadEvalCase(t, "forgotten-finding")
 	backend := scriptedReviewerBackend{dir: resultsDir("perfect")}
 	judge := repoMutatingJudge{mutate: func(repoDir string) error {
@@ -343,6 +352,7 @@ func (j recordingJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 // first place (nothing named "judge" ever appears there, beside the
 // reviewer's own worktree), is gone too once the case ends.
 func TestRunCaseDeletesWorkAndJudgeDirsAfterScoring(t *testing.T) {
+	t.Parallel()
 	c := loadEvalCase(t, "nil-deref")
 	backend := scriptedReviewerBackend{dir: resultsDir("perfect")}
 	workDir := t.TempDir()
@@ -402,6 +412,7 @@ func TestRunCaseDeletesWorkAndJudgeDirsAfterScoring(t *testing.T) {
 }
 
 func TestRunCaseRetiresRoundWorkBeforeTheNextRoundsDispatch(t *testing.T) {
+	t.Parallel()
 	c := loadEvalCase(t, "forgotten-finding")
 	var leaked bool
 	backend := workDirLeakBackend{dir: resultsDir("perfect"), leaked: &leaked}
@@ -415,5 +426,71 @@ func TestRunCaseRetiresRoundWorkBeforeTheNextRoundsDispatch(t *testing.T) {
 	}
 	if leaked {
 		t.Error("an earlier round's result file was still readable under the ticket dir at a later round's dispatch time")
+	}
+}
+
+// --- RunCorpus runs the cases in order, each under its run id --------------
+
+// TestRunCorpusScoresEveryCaseInOrderUnderItsRunID pins RunCorpus's own
+// loop, which the full-corpus fixture tests no longer go through (they run
+// the cases at once, scoreCorpus): the scores come back in the order the
+// cases were given, not name order, each case is worked under
+// workRoot/<its run id>, and a case that cannot even start fails the run
+// with its name and ends it there.
+func TestRunCorpusScoresEveryCaseInOrderUnderItsRunID(t *testing.T) {
+	t.Parallel()
+	cases := []Case{loadEvalCase(t, "nil-deref"), loadEvalCase(t, "clean")}
+	workRoot := t.TempDir()
+
+	scores, err := RunCorpus(workRoot, cases, scriptedReviewerBackend{dir: resultsDir("perfect")}, nil, "fixture-model")
+	if err != nil {
+		t.Fatalf("RunCorpus: %v", err)
+	}
+	if len(scores) != len(cases) {
+		t.Fatalf("RunCorpus returned %d scores for %d cases", len(scores), len(cases))
+	}
+	want := map[string]bool{}
+	for i, c := range cases {
+		if scores[i].Name != c.Name {
+			t.Errorf("scores[%d].Name = %q, want %q: the cases' own order", i, scores[i].Name, c.Name)
+		}
+		if !scores[i].Passed {
+			t.Errorf("case %s: Passed = false, want true (perfect fixtures)", c.Name)
+		}
+		want[runID(c.Name)] = true
+	}
+
+	entries, err := os.ReadDir(workRoot)
+	if err != nil {
+		t.Fatalf("read work root: %v", err)
+	}
+	got := map[string]bool{}
+	for _, e := range entries {
+		got[e.Name()] = true
+	}
+	if len(got) != len(want) {
+		t.Errorf("work root holds %v, want exactly the run ids of the cases", got)
+	}
+	for id := range want {
+		if !got[id] {
+			t.Errorf("work root has no directory %s for its case", id)
+		}
+	}
+
+	// The first case that cannot start ends the run, and a later case is
+	// never started: its work dir, which RunCorpus makes before it runs the
+	// case, does not exist.
+	broken := Case{Name: "cannot-start", BriefPath: filepath.Join(t.TempDir(), "missing-brief.md")}
+	later := loadEvalCase(t, "nil-deref")
+	stoppedRoot := t.TempDir()
+	scores, err = RunCorpus(stoppedRoot, []Case{broken, later}, scriptedReviewerBackend{dir: resultsDir("perfect")}, nil, "fixture-model")
+	if err == nil || !strings.Contains(err.Error(), "run case cannot-start") {
+		t.Errorf("RunCorpus with a case that cannot start: error = %v, want one naming the case", err)
+	}
+	if scores != nil {
+		t.Errorf("RunCorpus with a case that cannot start returned scores %+v, want none", scores)
+	}
+	if _, statErr := os.Stat(filepath.Join(stoppedRoot, runID(later.Name))); !os.IsNotExist(statErr) {
+		t.Errorf("the case after the one that cannot start has a work dir (stat err = %v): RunCorpus ran past the first error", statErr)
 	}
 }
