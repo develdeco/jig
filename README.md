@@ -56,7 +56,7 @@ irm https://raw.githubusercontent.com/develdeco/jig/main/scripts/install.ps1 | i
 Set `JIG_VERSION` to install a specific release tag instead of the latest,
 and `JIG_INSTALL_DIR` to change where `jig` is installed.
 
-With Go 1.27 or newer:
+With Go 1.27.2 or newer:
 
 ```sh
 go install github.com/develdeco/jig/cmd/jig@latest
@@ -88,7 +88,7 @@ host and opening pull requests.
 ### Installing an unreleased build
 
 `main` can carry fixes that no release has yet. It has no release
-archives, so it installs with Go 1.27 or newer:
+archives, so it installs with Go 1.27.2 or newer:
 
 ```sh
 go install github.com/develdeco/jig/cmd/jig@main

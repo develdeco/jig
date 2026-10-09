@@ -1,6 +1,6 @@
 # Contributing
 
-jig is a Go project. Building needs only Go 1.27+; testing also needs `git`
+jig is a Go project. Building needs only Go 1.27.2+; testing also needs `git`
 on PATH, since the suite spawns real git commands against local, file-path
 repos.
 
