@@ -321,7 +321,7 @@ func (b *headlessBackend) run(d Dispatch) (string, error) {
 // denied.
 func sessionView(d Dispatch) Dispatch {
 	d.Prompt = respellMentions(d.Prompt, d.paths(), longPath)
-	for _, p := range []*string{&d.Worktree, &d.SliceJSON, &d.ResultJSON, &d.ExtraWriteDir} {
+	for _, p := range []*string{&d.Worktree, &d.SliceJSON, &d.ResultJSON, &d.ExtraWriteDir, &d.ExtraReadFile} {
 		if *p != "" {
 			*p = longPath(*p)
 		}

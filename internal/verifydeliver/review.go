@@ -687,10 +687,12 @@ func validateReviewResult(req ReviewRequest, result ReviewResult, leaseDir strin
 // every gate reviewer dispatch: it states the job, what lies outside it
 // (editing, and running tests the gate's oracles already ran: ADR 0017),
 // and the output contract, and says what jig will verify. It never lists
-// kinds of problems, coaches behavior, or patches a past model mistake.
+// kinds of problems, coaches behavior, or patches a past model mistake. The
+// slot after "run no tests." is empty, or the recordings paragraph a round
+// whose head's history holds recordings adds (reviewRecordingsParagraph).
 const reviewPromptTemplate = `You are reviewing round %d of ticket %s. Your inputs are in review.json at %s.
 Review the %s diff %s..%s in this worktree against the change's intent. review.json's intent names it and its source: ` + intentSourcesPrompt + ` Do not edit files, commit, or push.
-Every command in review.json's oracles_passed passed on this head's tree before this review: jig ran it, or reused a pass on a commit with the same tree (reused_from). Review by reading: run no tests.
+Every command in review.json's oracles_passed passed on this head's tree before this review: jig ran it, or reused a pass on a commit with the same tree (reused_from). Review by reading: run no tests.%s
 Report every problem you find in the files you review, as they are now, including problems already listed as open. List each one under open or dismissed that is still present and unchanged, by id and current line, in still_present instead of writing it again. For every other one, give file, line (0 if unknown), title, detail, action, risk, risk_rationale and oracle, plus prior when it is a finding listed under open or dismissed that changed. The human dismissed the findings listed under dismissed.
 action: "fix" when the fix is objective and does not change what the intent asks for; "ask" when resolving it needs a decision only the human can make; "note" when nothing needs to change but a human reviewer should know it.
 Tests belong at the seams the intent names: a missing test is a problem only at one of those seams or as the proof of a defect you report, and a test elsewhere is at most a note.
@@ -703,9 +705,30 @@ When finished, write result.json at %s with exactly one JSON object: %s`
 // literal shape of one result.json.
 const reviewResultSchema = `{"findings": [{"file": "...", "line": 0, "title": "...", "detail": "...", "action": "fix|ask|note", "risk": "low|medium|high", "risk_rationale": "...", "oracle": "...", "prior": "r1-f2"}], "still_present": [{"prior": "r1-f10", "line": 52}], "reviewed_paths": ["..."], "summary": "..."}`
 
-// RenderReviewPrompt fills reviewPromptTemplate for one review dispatch.
+// reviewRecordingsParagraph is the paragraph a reviewer round adds to its
+// prompt when the build recorded its end-to-end scenarios at or before the
+// reviewed head (ADR 0029), filled with the path of that round's
+// recordings.json. It states what the file is and how to weigh what it points
+// at, and leaves the review contract as it was: a finding still needs a cause
+// in the diff.
+const reviewRecordingsParagraph = `The build recorded its end-to-end scenarios while its tests passed. recordings.json at %s lists the recordings made on this head's history, latest first, each with its scenario, an optional flow and step, a caption, the commit it ran at, its kind (image or video) and the path of its file; omitted counts the recordings it leaves out. A recording shows the code at its commit, which may precede this head's change. Read the ones that bear on the change as evidence of how it behaves end to end. In an SVG that jig's terminal recorder wrote, the <text> elements are the terminal's screens, frame by frame. A video cannot be viewed with the read tools: weigh it by its scenario, caption and file name. Treat what a recording shows like any other evidence you cite: a finding still needs a cause in the diff, and names a recording by its scenario, step and commit, never by its path.`
+
+// RenderReviewPrompt fills reviewPromptTemplate for one review dispatch that
+// has no recordings to hand the reviewer.
 func RenderReviewPrompt(req ReviewRequest, reviewPath, resultPath string) string {
-	return fmt.Sprintf(reviewPromptTemplate, req.Round, req.Ticket, reviewPath, req.Scope, req.BaseSHA, req.HeadSHA, resultPath, reviewResultSchema)
+	return RenderReviewPromptWithRecordings(req, reviewPath, resultPath, "")
+}
+
+// RenderReviewPromptWithRecordings is RenderReviewPrompt for a round that
+// wrote a recordings.json at recordingsPath, which it names in a paragraph of
+// its own. With recordingsPath empty the prompt is RenderReviewPrompt's, byte
+// for byte.
+func RenderReviewPromptWithRecordings(req ReviewRequest, reviewPath, resultPath, recordingsPath string) string {
+	var paragraph string
+	if recordingsPath != "" {
+		paragraph = "\n" + fmt.Sprintf(reviewRecordingsParagraph, recordingsPath)
+	}
+	return fmt.Sprintf(reviewPromptTemplate, req.Round, req.Ticket, reviewPath, req.Scope, req.BaseSHA, req.HeadSHA, paragraph, resultPath, reviewResultSchema)
 }
 
 // gateWorkDir is <ticket>/work under the store, mirroring frontier's own
@@ -1095,6 +1118,15 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		MustReview:    diff.MustReview,
 	}
 
+	// The build's recordings at this head or an ancestor of it, as evidence:
+	// listed in a file under the jig home when there are some, and named in
+	// the prompt only then (recordings.go). A round without any hands the
+	// reviewer exactly what it always has.
+	recordingsPath, err := writeReviewRecordings(in, head)
+	if err != nil {
+		return Round{}, false, err
+	}
+
 	reviewPath := reviewJSONPath(in.Store, in.Ticket, in.Round)
 	resultPath := reviewResultJSONPath(in.Store, in.Ticket, in.Round)
 	reqData, err := MarshalReviewRequest(req)
@@ -1113,7 +1145,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		return Round{}, false, fmt.Errorf("verifydeliver: review: remove stale result.json: %w", err)
 	}
 
-	prompt := RenderReviewPrompt(req, reviewPath, resultPath)
+	prompt := RenderReviewPromptWithRecordings(req, reviewPath, resultPath, recordingsPath)
 	effort := ""
 	if in.Effort != nil {
 		effort = in.Effort(scope)
@@ -1128,7 +1160,10 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		Model:      in.Model,
 		Effort:     effort,
 		Prompt:     prompt,
-		Screen:     true,
+		// The prompt names recordings.json (when there is one); a backend that
+		// spells paths for its session spells that mention too.
+		ExtraReadFile: recordingsPath,
+		Screen:        true,
 	}
 	if err := r.backend.Run(dispatch); err != nil {
 		return Round{}, false, &axi.Error{
@@ -1176,6 +1211,17 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		return Round{}, false, err
 	}
 	result.ReviewedPaths = normalizeReviewedPaths(in.LeaseDir, result.ReviewedPaths)
+
+	// What the reviewer wrote reaches the store: findings.yaml and findings.md,
+	// the fix slices built from a finding, and its own result.json in work/.
+	// It was told to cite a recording by scenario, step and commit, but a
+	// finding that cites one by its path must not commit the operator's jig
+	// home, so every directory of this machine is left out of its words.
+	hostDirs := reviewerHostDirs(in)
+	result = scrubReviewResult(result, hostDirs)
+	if err := scrubReviewResultFile(resultPath, resultData, hostDirs); err != nil {
+		return Round{}, false, err
+	}
 
 	return Round{Review: &Review{
 		Scope:      scope,

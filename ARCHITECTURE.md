@@ -27,7 +27,10 @@ gate           re-verification round: oracles (a pass jig recorded on the same t
   │                    gate/round-N/{findings.yaml,findings.md,report.yaml,diff-changelog.md},
   │                    evidence/round-N/*, slices.yaml (fix slices, findings, from_gate: N),
   │                    intent.md (--intent/--doc, or inferred),
-  │                    ticket.yaml (branch) and start.<repo>.sha (--branch adoption only)
+  │                    ticket.yaml (branch) and start.<repo>.sha (--branch adoption only),
+  │                    and, when the build recorded scenarios on the reviewed head's
+  │                    history (ADR 0029), under <jig home>/evidence/ (not in the
+  │                    store) the round's recordings.json for the reviewer
   │            then, after a clean reviewer round only (best effort, never the verdict):
   │            a demo session shows the change working
   │            writes: work/gate.round-N.demo.result.json, gate/round-N/demo.yaml,
@@ -100,7 +103,9 @@ The files a publish picks from the recordings are copied to
 own input and answer, `<head>.picks.json` and `<head>.result.json`, sit beside
 that directory, and the journal's `publish-picks` line records the pick. As
 `demo.json` does, `picks.json` names an absolute path of this machine (the
-intent file's), so neither stays in the store.
+intent file's), so neither stays in the store. A reviewer round's list of the
+recordings on the reviewed head's history, `recordings.json`, is written to
+`<store id>/<ticket>/reviews/round-<n>/` for the same reason.
 
 ## Manifest and invariants
 
@@ -416,13 +421,18 @@ Three backends implement that same narrow interface:
   turn ends ([ADR 0018](docs/adr/0018-builders-test-narrowly.md)). The shell and reads it
   grants are the operator's own and are not confined to the lease, so this
   backend is not a security boundary.
-- **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); it has no PreToolUse hook to attach a screen to, so herdr sessions are not screened. It scopes no edits, so a dispatch's `ExtraWriteDir` needs no grant there. On Windows it creates the workspace at the worktree's WSL mount and rewrites the prompt's own mentions of every path of the dispatch (worktree, input and result files, `ExtraWriteDir`) to their mounts, as headless does its long spelling; the files jig wrote keep the host spelling of the paths they hold. A failed herdr command is named in an error by its subcommand and herdr's stderr, never by its operands (the prompt, the worktree).
+- **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); it has no PreToolUse hook to attach a screen to, so herdr sessions are not screened. It scopes no edits, so a dispatch's `ExtraWriteDir` needs no grant there. On Windows it creates the workspace at the worktree's WSL mount and rewrites the prompt's own mentions of every path of the dispatch (worktree, input and result files, `ExtraWriteDir`, `ExtraReadFile`) to their mounts, as headless does its long spelling; the files jig wrote keep the host spelling of the paths they hold. A failed herdr command is named in an error by its subcommand and herdr's stderr, never by its operands (the prompt, the worktree).
 
 A `Dispatch` may name one `ExtraWriteDir`: a single absolute directory outside
 the worktree that the session may also write files in, which is where a gate
 demo's media go. The fake backend copies a scenario's demo media into it, and
 a demo's shell tools are governed by the screen wherever one attaches
-(headless, as any session's are), and a session on herdr has none.
+(headless, as any session's are), and a session on herdr has none. It may also
+name one `ExtraReadFile`: a single absolute file the prompt tells the session to
+read, a gate round's `recordings.json`. It grants nothing and no backend opens
+it; it is there so that a backend that spells the prompt's paths for its
+session (headless's long spelling, herdr's WSL mount on Windows) spells that
+one too.
 
 Screens attach only where the backend's tool-call surface allows a
 PreToolUse hook, which today is `headless` alone; `fake` has no tool calls
@@ -471,6 +481,32 @@ known finding, a `still_present` id naming no known finding, repeated, or
 also a finding's `prior`, a `still_present` finding whose file is gone
 without a deletion, or `reviewed_paths` missing a `must_review` path all
 fail the round loudly rather than falling back to a partial result.
+
+**Recordings as evidence.** When the build recorded its end-to-end scenarios
+([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md))
+at the reviewed head or an ancestor of it, the round also hands the reviewer
+a `recordings.json` (`internal/verifydeliver/recordings.go`) and its prompt
+gains one paragraph that names it. The list is publish's selection - the
+latest recording of each flow, scenario and step, each checked again against
+its file under the jig home - latest build first, at most 50, each entry
+`{scenario, flow, step, caption, commit, kind, file}` with the absolute path
+of the file. Only the 50 listed are checked, and `omitted` counts the ones
+left out by the cut or because the screen would refuse the reviewer's read of
+the file's name (`.env*`, `*_key*`). It is written under the jig home
+(`<jig home>/evidence/<store id>/<ticket>/reviews/round-<n>/`), never in
+`work/`: it names files of this machine, and the store is shared. The
+reviewer reads the files by those paths with the read tools it already has,
+so the dispatch gets no extra grant (a headless session's reads are not
+scoped to the lease, [ADR 0008](docs/adr/0008-headless-permission-model.md));
+`Dispatch.ExtraReadFile` carries the list's path only so a backend respells
+the prompt's mention of it. What the recordings show is evidence like any
+other: a finding still needs a cause in the diff and cites a recording by its
+scenario, step and commit, and since a reviewer's words reach the store, the
+lease, the jig home and the store are left out by name from every finding's
+free text, the summary and the `result.json` it leaves in `work/`.
+`review.json`, `result.json`'s shape, `still_present` and the read-only guard
+are unchanged. A round with no recordings writes no file, and its
+`review.json` and prompt are what they were before recordings existed.
 
 **Intent inference.** When `resolveIntent` comes back `"none"` and the
 round is about to dispatch a reviewer (nothing outstanding and the scope

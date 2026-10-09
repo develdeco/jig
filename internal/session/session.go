@@ -38,6 +38,16 @@ type Dispatch struct {
 	// of their own, so the field changes nothing there.
 	ExtraWriteDir string
 
+	// ExtraReadFile, when set, is one absolute file outside the worktree that
+	// the prompt names for the session to read: a gate round's recordings.json
+	// under the jig home. It grants nothing, since a session's read tools are
+	// not scoped to the worktree (ADR 0008), and no backend opens it. It is
+	// in the dispatch so that a backend that spells a path for its session
+	// differently from jig does so for this one's mention in the prompt as
+	// well as for the others (headless: the long spelling of a Windows 8.3
+	// name; herdr on Windows: the WSL mount).
+	ExtraReadFile string
+
 	// Screen attaches the command/secret screens as the session's
 	// PreToolUse hook, where the backend has one (headless only). Every
 	// dispatch jig makes is screened; an unscreened headless session gets
@@ -74,7 +84,7 @@ type Resumer interface {
 // paths is every path d names: the ones a backend may have to spell for its
 // session, in the prompt's own mentions of them.
 func (d Dispatch) paths() []string {
-	return []string{d.Worktree, d.SliceJSON, d.ResultJSON, d.ExtraWriteDir}
+	return []string{d.Worktree, d.SliceJSON, d.ResultJSON, d.ExtraWriteDir, d.ExtraReadFile}
 }
 
 // Backend runs one dispatch. A returned error means infrastructure failure
