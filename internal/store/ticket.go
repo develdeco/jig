@@ -190,7 +190,11 @@ func (s *Store) CreateTicketRecord(ticket string, rec Ticket) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return writeTicketFile(path, rec)
+	if err := writeTicketFile(path, rec); err != nil {
+		return err
+	}
+	s.invalidateAliasClaims()
+	return nil
 }
 
 // mutateTicket reads <ticket>/ticket.yaml, applies fn to the decoded
@@ -212,7 +216,11 @@ func (s *Store) mutateTicket(ticket string, fn func(*Ticket)) error {
 		return err
 	}
 	fn(&cur)
-	return writeTicketFile(path, cur)
+	if err := writeTicketFile(path, cur); err != nil {
+		return err
+	}
+	s.invalidateAliasClaims()
+	return nil
 }
 
 // writeTicketFile marshals t as a ticket.yaml at the current schema version

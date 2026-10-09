@@ -45,7 +45,18 @@ func (s *Store) ResolveTicket(idOrAlias string) (string, error) {
 // its aliases. An id or alias claimed by exactly one ticket is what it
 // resolves to; more than one is the collision ResolveTicket and CheckAliases
 // both refuse.
+//
+// The scan (one TicketIDs plus one ReadTicket per ticket) runs at most once
+// per Store value: the result is memoized on s.aliasClaimsCache, since a
+// single run resolves many refs (jig validate's blocked_by checks and cycle
+// DFS, the mirror's blocker links and "Waits for" line) and re-scanning the
+// whole store for each would cost O(N) ticket.yaml reads per ref rather than
+// per run. invalidateAliasClaims drops the cache after any write that could
+// change it.
 func (s *Store) aliasClaims() (map[string][]string, error) {
+	if s.aliasClaimsCache != nil {
+		return s.aliasClaimsCache, nil
+	}
 	ids, err := s.TicketIDs()
 	if err != nil {
 		return nil, err
@@ -68,6 +79,7 @@ func (s *Store) aliasClaims() (map[string][]string, error) {
 			claims[alias] = append(claims[alias], id)
 		}
 	}
+	s.aliasClaimsCache = claims
 	return claims, nil
 }
 
