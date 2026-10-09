@@ -180,6 +180,7 @@ func TestRunHandsTheBuilderTheCodeTheGraphLinksToItsGoal(t *testing.T) {
 // the workspace its goal is about. It needs graphify on PATH and runs only
 // with JIG_LIVE_GRAPHIFY=1.
 func TestRunWithTheRealGraphify(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("JIG_LIVE_GRAPHIFY") != "1" {
 		t.Skip("set JIG_LIVE_GRAPHIFY=1 to run against the real graphify")
 	}

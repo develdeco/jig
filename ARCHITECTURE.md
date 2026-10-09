@@ -381,8 +381,10 @@ exists.
 ## Session backends
 
 The contract between jig and any backend is pure disk: jig writes
-`slice.json` (goal, oracle, workspace, prior attempt log, any answered
-question, how long jig's last run of the oracle took on this ticket,
+`slice.json` (goal, oracle, workspace, the path of the ticket's `brief.md` and
+of its `intent.md`, each empty when it has none, the brief sections the slice
+builds from, prior attempt log, any answered question, how long jig's last run
+of the oracle took on this ticket,
 [ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md),
 what the ticket's verified slices did and changed,
 [ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md), and,
@@ -1011,11 +1013,13 @@ go test -timeout 30m ./...
 
 Every test gets its own `t.TempDir()` and its own jig home (passed as an
 argument to the packages that use one, as an `env` of its own to `cmd/jig`'s
-`run`, or as `JIG_HOME` via `t.Setenv` to the binary), so a test run never
-touches a real machine's jig home, and every remote used in tests is a bare,
-file-path repo - no test ever talks to a real git host. `cmd/jig` reads the
-environment, the working directory, the terminal check and the solve gate
-source through that `env`, so its tests run in parallel.
+`run`, or as `JIG_HOME` in the jig binary's own subprocess environment in
+`e2e`), so a test run never touches a real machine's jig home, and every
+remote used in tests is a bare, file-path repo - no test ever talks to a
+real git host. `cmd/jig` reads the environment, the working directory, the
+terminal check and the solve gate source through that `env`, and `e2e` hands
+each binary run an environment of its own, so both run their tests in
+parallel.
 
 Product commits on the ticket branch (reconcile, memorize, squash) use the
 operator's git identity, resolved with `gitx.IdentityEnv` from their mapped

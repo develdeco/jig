@@ -60,22 +60,23 @@ func writeSyntheticClaudeSession(t *testing.T, home, sessionID, cwd string, ment
 // ticket, gated through the real jig binary (--backend fake, not the
 // scripted GateSource other suites use), infers its intent from a
 // synthetic local Claude Code transcript under HOME - the same HOME
-// newFixture points at a fresh temp dir, never the real one, since
-// runJig's subprocess inherits this process's environment.
+// newFixture points at a fresh temp dir, never the real one, in the
+// environment runJig hands its subprocess.
 func TestGateInfersIntentBriefLess(t *testing.T) {
-	fx, jigHome := newFixture(t, fixture.Opts{ScenarioBranch: "inferred-intent"})
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "inferred-intent"})
 	ticket := fx.Ticket
 
 	if err := os.Remove(filepath.Join(fx.StoreDir, ticket, "brief.md")); err != nil {
 		t.Fatalf("remove brief.md: %v", err)
 	}
 
-	// newFixture already pointed HOME/USERPROFILE at a fresh temp dir (via
-	// t.Setenv, inherited by runJig's subprocess below); read it back
-	// rather than duplicating that decision here.
-	homeDir := os.Getenv("HOME")
+	// newFixture already pointed HOME/USERPROFILE at a fresh temp dir in the
+	// environment runJig hands the subprocess below; use it rather than
+	// duplicating that decision here.
+	homeDir := env.userHome
 	if homeDir == "" {
-		t.Fatal("HOME not set - expected newFixture to have set it")
+		t.Fatal("no user home - expected newFixture to have set one")
 	}
 	mentioned := []string{"alpha/alpha.go", "alpha/percent.go", "alpha/percent_test.go", "beta/beta.go", "beta/version.go"}
 	writeSyntheticClaudeSession(t, homeDir, "session-inferred", fx.RepoDir, mentioned, time.Date(2026, 1, 1, 0, 30, 0, 0, time.UTC))
@@ -83,16 +84,16 @@ func TestGateInfersIntentBriefLess(t *testing.T) {
 	// Drive the fixture's own a/b/c/d scenario to green, exactly as
 	// TestGateReviewerNonTerminalTriage does: run pauses at slice c's own
 	// question (q-001), answering it completes the frontier.
-	r1 := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r1 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r1.Code != 2 {
 		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\nstdout:\n%s\nstderr:\n%s", r1.Code, r1.Stdout, r1.Stderr)
 	}
-	r2 := runJig(t, fx.StoreDir, "run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r2 := runJig(t, env, fx.StoreDir, "run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r2.Code != 0 {
 		t.Fatalf("run 2 (answer) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r2.Code, r2.Stdout, r2.Stderr)
 	}
 
-	r3 := runJig(t, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r3 := runJig(t, env, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r3.Code != 0 {
 		t.Fatalf("gate exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r3.Code, r3.Stdout, r3.Stderr)
 	}
@@ -135,7 +136,7 @@ func TestGateInfersIntentBriefLess(t *testing.T) {
 	// working tree nor any commit the gate pushed to the store's remote.
 	// The accepted result is in that history, which shows the history check
 	// can see files pushed under work/.
-	excerpt, err := os.ReadFile(filepath.Join(home.IntentExcerptDir(jigHome), ticket, "session-inferred.md"))
+	excerpt, err := os.ReadFile(filepath.Join(home.IntentExcerptDir(env.home), ticket, "session-inferred.md"))
 	if err != nil {
 		t.Fatalf("read the excerpt under the jig home: %v", err)
 	}
