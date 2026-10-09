@@ -97,7 +97,7 @@ type PicksResult struct {
 const picksPromptTemplate = `Choose which of this build's recordings the pull request shows, and compose them into flows. Your input is in picks.json at %s: the change's intent, as a source and the path of the file that states it (` + intentSourcesPrompt + `), and the candidate recordings, each with an id, the scenario it records, an optional flow and step, a caption, and whether it is an image or a video.
 Pick the recordings that show this change to a person reviewing the pull request, and leave out the rest. Put recordings of one flow together in step order, keep scenarios that stand alone as flows of their own, and mix the two where that reads best. Pick at most %d recordings in all. Give each flow a short title, and a caption of your own only where a recording's caption would mislead. Do not edit files, commit, or push; you work in an empty scratch directory.
 When finished, write %s with exactly one JSON object: %s
-jig checks that every id is a candidate and none is used twice, that recordings of one flow keep their step order, that every title and the summary are non-empty and within bounds, and that at least one and at most %d recordings are picked. A result that fails a check is refused whole, and the pull request then carries the gate's demo, if there is one.`
+jig checks that every id is a candidate and none is used twice, that recordings of one flow keep their step order, that every title and the summary are non-empty and within bounds, and that at least one and at most %d recordings are picked. A result that fails a check is refused whole, and the pull request then has no demo section.`
 
 // picksResultSchema is the {schema} filled into picksPromptTemplate: the
 // literal shape of one pick result.
@@ -120,11 +120,12 @@ func picksInvalid(format string, args ...any) error {
 	return fmt.Errorf("the pick result is invalid: %s", fmt.Sprintf(format, args...))
 }
 
-// ParsePicksResult parses a pick result as strictly as ParseDemoResult parses
-// a demo's: exactly one JSON object, no key repeated anywhere in it (exactly
-// or only by case), no key but the recognized ones at any level, "flows" a
-// list and "summary" a string, both present and not null. What it cannot know
-// from the bytes alone, that an id is a candidate, is resolvePicks'.
+// ParsePicksResult parses a pick result as strictly as ParseReviewResult
+// parses a reviewer's: exactly one JSON object, no key repeated anywhere in it
+// (exactly or only by case), no key but the recognized ones at any level,
+// "flows" a list and "summary" a string, both present and not null. What it
+// cannot know from the bytes alone, that an id is a candidate, is
+// resolvePicks'.
 func ParsePicksResult(data []byte) (PicksResult, error) {
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
@@ -329,9 +330,8 @@ func verifiedCandidates(d Deps, ticket string, all []pickCandidate) (cands []pic
 // describes, or "" when it is: a name and type media accepts, a size within
 // the limit for its kind, plain directories down to it, and the file itself a
 // regular file of the recorded size whose bytes hash to the recorded sha256.
-// It is the check renderDemoSection makes of a demo's files, made again here
-// because the files sit where the build's scenarios left them, possibly for
-// days.
+// It is made again at publish because the files sit where the build's scenarios
+// left them, possibly for days.
 func recordingProblem(d Deps, top, storeID, ticket string, c pickCandidate) string {
 	if !media.PlainName(c.rec.File) {
 		return "not a plain file name"
@@ -532,22 +532,21 @@ func reusablePick(lines []journal.Line, head, fp string) *journal.Pick {
 	return nil
 }
 
-// pickLabel makes a title or a caption safe to put in the pull request body
-// the way a demo's caption is: one line, without the characters that could
-// open a link or close an image's alt text, capped, and HTML-escaped last.
+// pickLabel makes a title or a caption safe to put in the pull request body:
+// one line, without the characters that could open a link or close an image's
+// alt text, capped, and HTML-escaped last.
 func pickLabel(s string) string {
-	return escapeDemoHTML(capDemoCaption(sanitizeDemoCaption(demoOneLine(s))))
+	return escapeDemoHTML(capDemoCaption(sanitizeDemoCaption(oneLine(s))))
 }
 
 // renderPicksSection renders the ## Demo section for p, whose items were
-// staged as files (in the order p.items() gives), with the same care a gate
-// demo's section is rendered with. Host paths are left out whole, by exact
-// match, from the summary, every title and every caption (knownHostDirs), and
-// named in the result for publish's output. Each item takes the one reference
+// staged as files (in the order p.items() gives), with care for what a
+// published, public pull request body carries. Host paths are left out whole,
+// by exact match, from the summary, every title and every caption
+// (knownHostDirs), and named in the result for publish's output. Each item takes the one reference
 // form gh rewrites for its kind: an image `![caption](./name)`, a video
 // `./name: caption`, as bullets under its flow's ### heading, so the
-// read-back that patches an unrewritten video reference finds them as it finds
-// a demo's.
+// read-back that patches an unrewritten video reference finds them.
 func renderPicksSection(p pick, dir string, files []DemoFile, knownHostDirs []hostDir) DemoRenderResult {
 	var b strings.Builder
 	b.WriteString("## Demo\n\n")

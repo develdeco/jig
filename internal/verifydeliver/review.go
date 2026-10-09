@@ -817,8 +817,7 @@ func resolveScopeBase(st *store.Store, ticket, leaseDir, repoName, target string
 // resolveFullBase is the base of the whole change: merge-base(origin/target,
 // head), falling back to the ticket's recorded start sha only when the
 // merge-base call itself fails (e.g. no such ref). A full-scope review
-// starts here, and so does a demo, which shows the whole change whatever
-// the round's own scope was.
+// starts here.
 func resolveFullBase(st *store.Store, ticket, leaseDir, repoName, target, head string) (string, error) {
 	mergeBase, mbErr := gitx.MergeBase(leaseDir, "origin/"+target, head)
 	if mbErr == nil {
@@ -837,8 +836,8 @@ func resolveFullBase(st *store.Store, ticket, leaseDir, repoName, target, head s
 // to: it reports whether leaseDir's HEAD is no longer head, or any tracked
 // file differs from it. Untracked files are left out on purpose - a session
 // is expected to leave scratch behind, and the caller restores the lease
-// pristine afterwards. The reviewer round and the demo dispatch both use it,
-// and each prefixes the errors with its own name.
+// pristine afterwards. The reviewer round uses it and prefixes the errors with
+// its own name.
 func leaseChanged(leaseDir, head string) (bool, error) {
 	headAfter, err := gitx.RevParse(leaseDir, "HEAD")
 	if err != nil {

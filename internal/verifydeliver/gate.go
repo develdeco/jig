@@ -124,10 +124,6 @@ type GateOpts struct {
 	Intent    string
 	IntentDoc string
 	PRMode    bool
-	// NoDemo (`jig gate --no-demo`) skips the demo session a clean reviewer
-	// round otherwise runs (demo.go). A scripted round never runs one either
-	// way.
-	NoDemo bool
 	// Triage is the human seam for a reviewer round's fix batch and ask
 	// findings (route.go). nil means DefaultTriage: every fix is
 	// kept, every ask with a full build target is kept, one missing part
@@ -176,10 +172,6 @@ type GateReport struct {
 	// after an inference attempt (round.Review.IntentNote) - empty when
 	// inference was not attempted or it succeeded.
 	IntentNote string
-	// Demo is what the round's demo session came to: set only for a clean
-	// reviewer round that was not run with NoDemo, nil for every other round.
-	// It never changes Verdict.
-	Demo *DemoReport
 	// BudgetParked is how many findings this round parked under the fix
 	// budget (status asked, RoutedWhyBudget): 0 for a round that parked
 	// none, a scripted round (the budget never forces one of its findings),
@@ -647,26 +639,6 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 
 	if err := d.Store.Push(fmt.Sprintf("%s: gate round %d %s", ticket, n, report.Verdict)); err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: push store: %w", err)
-	}
-
-	// The demo runs last, once everything the round wrote is committed and
-	// pushed, and never as part of the round: gateDemo returns no error, and
-	// a failed or refused demo is recorded and reported beside a verdict it
-	// cannot change. Only a reviewer source can dispatch one, and only a
-	// reviewer round (round.Review) that came back clean is worth showing.
-	if round.Review != nil && report.Verdict == "clean" && !o.NoDemo {
-		if ds, ok := src.(DemoSource); ok {
-			demo := gateDemo(d, ds, DemoInput{
-				Store:    d.Store,
-				Ticket:   ticket,
-				Round:    n,
-				LeaseDir: lease.Dir,
-				Model:    model,
-				Intent:   intent,
-				HeadSHA:  round.Review.HeadSHA,
-			}, repoName, target)
-			report.Demo = &demo
-		}
 	}
 
 	return report, nil

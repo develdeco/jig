@@ -3,8 +3,8 @@ package verifydeliver
 // The publish step that picks the build's recordings (ADR 0029, step 5): the
 // candidates from the journal, a reused or a freshly dispatched pick, its
 // validation, the staging of the picked files in a directory of jig's own, one
-// journal line, and the rendered section writePRBody uses in place of the gate
-// demo's. picks.go holds the pieces; this file runs them in order.
+// journal line, and the rendered section writePRBody uses as the pull request's
+// ## Demo. picks.go holds the pieces; this file runs them in order.
 
 import (
 	"crypto/sha256"
@@ -28,7 +28,8 @@ import (
 
 // A publish's pick, as PicksReport.Status says it: made now, taken from an
 // earlier publish of the same head and the same recordings, or refused (and
-// the gate's demo stands in). "" means there was nothing to pick from.
+// the pull request then has no demo section). "" means there was nothing to
+// pick from.
 const (
 	PicksPicked  = "picked"
 	PicksReused  = "reused"
@@ -62,11 +63,11 @@ func pickRefused(format string, args ...any) error {
 	return &pickError{reason: fmt.Sprintf(format, args...)}
 }
 
-// pickFailed is a pick whose session, or the backend that ran it, failed. As
-// with a failed demo, the record carries the failure's code alone: the text of
-// a session's or a backend's error can hold anything.
+// pickFailed is a pick whose session, or the backend that ran it, failed. The
+// record carries the failure's code alone: the text of a session's or a
+// backend's error can hold anything.
 func pickFailed(cause error) error {
-	return &pickError{reason: "the pick session failed: " + failureCode(cause), detail: demoOneLine(cause.Error())}
+	return &pickError{reason: "the pick session failed: " + failureCode(cause), detail: oneLine(cause.Error())}
 }
 
 // picksStep is everything one publish's pick needs. head is the head publish
@@ -88,8 +89,9 @@ type picksStep struct {
 // nothing publishes exactly as before. Otherwise it returns the report and,
 // when a pick stands, the rendered section for writePRBody. A pick that fails
 // or is refused is never an error here: it is journaled, said in the report
-// and the output, and writePRBody then renders the gate's demo instead. The
-// error is publish's own failure, the journal line that could not be written.
+// and the output, and writePRBody then renders no ## Demo section.
+// The error is publish's own failure, the journal line that could not be
+// written.
 func publishPicks(s picksStep) (PicksReport, *DemoRenderResult, error) {
 	cands, dropped, cerr := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head)
 	report := PicksReport{Dropped: dropped}
@@ -106,7 +108,7 @@ func publishPicks(s picksStep) (PicksReport, *DemoRenderResult, error) {
 		if !errors.As(err, &pe) {
 			pe = &pickError{reason: err.Error()}
 		}
-		report.Status, report.Reason = PicksRefused, demoReason(errors.New(hide(pe.reason)))
+		report.Status, report.Reason = PicksRefused, refusalReason(errors.New(hide(pe.reason)))
 		msg := report.Reason
 		if pe.detail != "" {
 			msg += " (" + pe.detail + ")"
@@ -196,8 +198,8 @@ func (s picksStep) picksDir() string {
 }
 
 // hostDirs are the directories of this machine a pick's words must not name,
-// as renderDemoSection's are: the staging directory, the jig home, the gate and
-// publish leases and the store.
+// as a rendered caption's are: the staging directory, the jig home, the gate
+// and publish leases and the store.
 func (s picksStep) hostDirs(dir string) []hostDir {
 	dirs := []hostDir{{dir, "<picks dir>"}, {s.d.Home, "<jig home>"}, {s.leaseDir, "<lease>"}, {s.d.Store.Root, "<store>"}}
 	if gate, err := pool.Dir(s.d.Home, s.repoName, s.ticket, pool.Gate); err == nil {

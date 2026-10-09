@@ -36,38 +36,10 @@ func TestPathsDeriveFromTheRootGiven(t *testing.T) {
 	}
 }
 
-func TestEvidenceDirIsUnderTheRootGiven(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("JIG_HOME", t.TempDir())
-	got, err := EvidenceDir(root, "0123456789abcdef", "T-1", "abc123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(root, "evidence", "0123456789abcdef", "T-1", "abc123"); got != want {
-		t.Fatalf("EvidenceDir = %q, want %q", got, want)
-	}
-}
-
-// TestEvidenceDirRefusesAnythingButASingleDirectoryName checks each of the
-// three caller-supplied parts: a spelling that climbs out of the evidence
-// tree, or names two directories, or a directory Windows would fold onto
-// another, is refused rather than joined.
-func TestEvidenceDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
-	bad := []string{"", ".", "..", ".hidden", "a/b", `a\b`, "C:x", "x.", "x "}
-	for _, name := range bad {
-		for i, parts := range [][3]string{{name, "T-1", "abc"}, {"id", name, "abc"}, {"id", "T-1", name}} {
-			if got, err := EvidenceDir(t.TempDir(), parts[0], parts[1], parts[2]); err == nil {
-				t.Errorf("EvidenceDir with %q in part %d = %q, want a refusal", name, i, got)
-			}
-		}
-	}
-}
-
 // TestRecordDirIsOneDirectoryPerRunUnderTheTicketsRecordings: a builder's
 // recordings live in a recordings directory of the ticket's evidence, one
-// directory per commit and, below it, one per oracle run, so they never share
-// a name with a gate head's demo media and a later run never lands in an
-// earlier run's directory. The path is derived from the root given alone.
+// directory per commit and, below it, one per oracle run, so a later run never
+// lands in an earlier run's directory. The path is derived from the root given alone.
 func TestRecordDirIsOneDirectoryPerRunUnderTheTicketsRecordings(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -85,7 +57,7 @@ func TestRecordDirIsOneDirectoryPerRunUnderTheTicketsRecordings(t *testing.T) {
 }
 
 // TestRecordDirRefusesAnythingButASingleDirectoryName holds each of
-// RecordDir's four parts to the rule EvidenceDir's are held to.
+// RecordDir's four parts to the evidence tree's rule.
 func TestRecordDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
 	t.Parallel()
 	bad := []string{"", ".", "..", ".hidden", "a/b", `a\b`, "C:x", "x.", "x "}
@@ -100,8 +72,7 @@ func TestRecordDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
 
 // TestPicksDirIsOneDirectoryPerHeadUnderTheTicketsPicks: the files a publish
 // picked are staged in a picks directory of the ticket's evidence, one
-// directory per head, never sharing a name with a gate head's demo media or
-// the recordings.
+// directory per head, never sharing a name with the recordings.
 func TestPicksDirIsOneDirectoryPerHeadUnderTheTicketsPicks(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -112,14 +83,10 @@ func TestPicksDirIsOneDirectoryPerHeadUnderTheTicketsPicks(t *testing.T) {
 	if want := filepath.Join(root, "evidence", "0123456789abcdef", "T-1", "picks", "abc123"); got != want {
 		t.Fatalf("PicksDir = %q, want %q", got, want)
 	}
-	media, err := EvidenceDir(root, "0123456789abcdef", "T-1", "abc123")
-	if err != nil || media == got {
-		t.Fatalf("a head's demo media directory = %q, %v; want one other than the picks directory", media, err)
-	}
 }
 
 // TestPicksDirRefusesAnythingButASingleDirectoryName holds each of PicksDir's
-// three parts to the rule EvidenceDir's are held to.
+// three parts to the evidence tree's rule.
 func TestPicksDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
 	t.Parallel()
 	bad := []string{"", ".", "..", ".hidden", "a/b", `a\b`, "C:x", "x.", "x "}
@@ -135,7 +102,7 @@ func TestPicksDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
 // TestReviewDirIsOneDirectoryPerRoundUnderTheTicketsReviews: what a round
 // hands its reviewer from the jig home lives in a directory of the round's own,
 // under a "reviews" directory of the ticket's evidence, never sharing a name
-// with a gate head's demo media, the recordings or the picks.
+// with the recordings or the picks.
 func TestReviewDirIsOneDirectoryPerRoundUnderTheTicketsReviews(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -153,7 +120,7 @@ func TestReviewDirIsOneDirectoryPerRoundUnderTheTicketsReviews(t *testing.T) {
 }
 
 // TestReviewDirRefusesAnythingButASingleDirectoryName holds ReviewDir's store
-// id and ticket to the rule EvidenceDir's are held to.
+// id and ticket to the evidence tree's rule.
 func TestReviewDirRefusesAnythingButASingleDirectoryName(t *testing.T) {
 	t.Parallel()
 	bad := []string{"", ".", "..", ".hidden", "a/b", `a\b`, "C:x", "x.", "x "}

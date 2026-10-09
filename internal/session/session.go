@@ -29,15 +29,6 @@ type Dispatch struct {
 	Effort string
 	Prompt string // rendered dispatch prompt (paths, not contents)
 
-	// ExtraWriteDir, when set, is one absolute directory outside the
-	// worktree the session may also write files in: a gate demo's media
-	// directory. Every other path outside the worktree stays closed. Where a
-	// screen attaches (headless) it governs the shell either way, so this
-	// widens only the backend's own edit tools (headless: one more
-	// path-scoped rule); herdr sessions are not screened, and scope no edits
-	// of their own, so the field changes nothing there.
-	ExtraWriteDir string
-
 	// ExtraReadFile, when set, is one absolute file outside the worktree that
 	// the prompt names for the session to read: a gate round's recordings.json
 	// under the jig home. It grants nothing, since a session's read tools are
@@ -84,7 +75,7 @@ type Resumer interface {
 // paths is every path d names: the ones a backend may have to spell for its
 // session, in the prompt's own mentions of them.
 func (d Dispatch) paths() []string {
-	return []string{d.Worktree, d.SliceJSON, d.ResultJSON, d.ExtraWriteDir, d.ExtraReadFile}
+	return []string{d.Worktree, d.SliceJSON, d.ResultJSON, d.ExtraReadFile}
 }
 
 // Backend runs one dispatch. A returned error means infrastructure failure
@@ -192,12 +183,6 @@ func available(goos, name string) error {
 		Help: []string{install, fmt.Sprintf("Or run with `--backend %s`", other)},
 	}
 }
-
-// GateDemoSlice is the Dispatch.Slice of a gate demo session: the dispatch
-// that follows a clean reviewer round and records what the change looks like
-// working. A backend that plays scenarios back tells it from a slice attempt
-// (any other Slice) and from a gate review (Slice "gate") by this name.
-const GateDemoSlice = "gate-demo"
 
 // PublishPicksSlice is the Dispatch.Slice of a publish picks session: the
 // short dispatch that chooses which of the build's recordings a pull request

@@ -187,8 +187,7 @@ func (pf *picksFixture) warned(substr string) bool {
 // TestPublishRendersAndAttachesThePickedRecordings: a short session is handed
 // the candidates and answers with flows; publish renders the ## Demo section
 // from them, flow by flow in the order picked, stages the files under names of
-// its own and attaches them through the host exactly as it attaches a gate
-// demo's, and journals the pick.
+// its own and attaches them through the host, and journals the pick.
 func TestPublishRendersAndAttachesThePickedRecordings(t *testing.T) {
 	t.Parallel()
 	pf := newPicksFixture(t)
@@ -292,13 +291,21 @@ func TestPublishRendersAndAttachesThePickedRecordings(t *testing.T) {
 	if strings.Contains(body, "./rec-") {
 		t.Errorf("pr body = %q, want no dead relative path left", body)
 	}
+	// The section sits between What changed and Verification, in that order.
+	whatChanged, demo, verification := strings.Index(body, "## What changed"), strings.Index(body, "## Demo"), strings.Index(body, "## Verification")
+	if whatChanged < 0 || !(whatChanged < demo && demo < verification) {
+		t.Errorf("pr body sections out of order (What changed=%d, Demo=%d, Verification=%d):\n%s", whatChanged, demo, verification, body)
+	}
+	if pf.warned("no demo for") {
+		t.Errorf("warnings = %q, want no word about a missing demo when a pick stands", pf.warnings)
+	}
 }
 
-// TestPublishFallsBackToTheGateDemoWhenThePickIsRefused: a pick jig refuses
+// TestPublishLeavesOutTheDemoSectionWhenThePickIsRefused: a pick jig refuses
 // (an id that is no candidate, one used twice, an answer that is not JSON) is
-// journaled with jig's reason and said in the output, and the gate's demo
-// renders and attaches as it always did.
-func TestPublishFallsBackToTheGateDemoWhenThePickIsRefused(t *testing.T) {
+// journaled with jig's reason and said in the output, and the pull request
+// carries no ## Demo section and attaches nothing.
+func TestPublishLeavesOutTheDemoSectionWhenThePickIsRefused(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ name, result, reason string }{
 		{"an id that is no candidate", `{"flows":[{"title":"T","items":[{"id":"r9"}]}],"summary":"S"}`, "flow 1 item 1 is not a candidate"},
@@ -310,7 +317,6 @@ func TestPublishFallsBackToTheGateDemoWhenThePickIsRefused(t *testing.T) {
 			t.Parallel()
 			pf := newPicksFixture(t)
 			pf.onboardingRecordings(t)
-			mediaDir, files := recordDemoForTicket(t, pf.d, pf.fx.Ticket, []demoMediaSpec{{Name: "demo-1.png", Content: "the gate demo"}})
 			spy := picksScenario(t, c.result)
 
 			report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
@@ -328,17 +334,19 @@ func TestPublishFallsBackToTheGateDemoWhenThePickIsRefused(t *testing.T) {
 			if !pf.warned("no recordings were picked") || !pf.warned(c.reason) {
 				t.Errorf("warnings = %q, want the refusal and its reason in the output", pf.warnings)
 			}
+			if pf.warned("no demo for") {
+				t.Errorf("warnings = %q, want the refusal said once, not again as a missing demo", pf.warnings)
+			}
 
-			body := pf.body(t, report)
-			if !strings.Contains(body, "it works") || !strings.Contains(body, "![caption for demo-1.png](./demo-1.png)") || strings.Contains(body, "### ") {
-				t.Errorf("pr body = %q, want the gate demo's section and no flows", body)
+			if body := pf.body(t, report); strings.Contains(body, "## Demo") || strings.Contains(body, "rec-") {
+				t.Errorf("pr body = %q, want no Demo section", body)
 			}
 			create := findGhCall(loggedGhCalls(t, pf.logFile), "pr", "create")
 			if create == nil {
 				t.Fatal("no logged pr create call")
 			}
-			if !sameDir(t, create.Dir, mediaDir) || !reflect.DeepEqual(attachedFiles(create.Argv), []string{files[0].Name}) {
-				t.Errorf("pr create ran in %q attaching %v, want the gate demo's directory %q and %s", create.Dir, attachedFiles(create.Argv), mediaDir, files[0].Name)
+			if got := attachedFiles(create.Argv); len(got) != 0 {
+				t.Errorf("pr create attached %v, want nothing", got)
 			}
 		})
 	}
@@ -376,6 +384,45 @@ func TestPublishWithNoRecordingsDispatchesNoPick(t *testing.T) {
 	}
 	if create := findGhCall(loggedGhCalls(t, pf.logFile), "pr", "create"); create == nil || len(attachedFiles(create.Argv)) != 0 {
 		t.Errorf("pr create = %+v, want one that attaches nothing", create)
+	}
+	// Nothing was recorded that could be shown or left out, and the output
+	// says that, in those words.
+	if !pf.warned("jig: no demo for "+pf.fx.Ticket+": there are no recordings to show") || pf.warned("left out of the choice") {
+		t.Errorf("warnings = %q, want the one line saying there are no recordings to show", pf.warnings)
+	}
+}
+
+// TestPublishSaysNoRecordingIsLeftWhenEveryOneWasDropped: a build that did
+// record, whose every file no longer matches its line, is told apart from one
+// that recorded nothing: the output names what was left out and then says none
+// is left, never that there were none to show. No session is dispatched, and
+// the pull request has no ## Demo section.
+func TestPublishSaysNoRecordingIsLeftWhenEveryOneWasDropped(t *testing.T) {
+	t.Parallel()
+	pf := newPicksFixture(t)
+	spy := &picksSpy{err: fmt.Errorf("a pick was dispatched")}
+	pf.record(t, pf.built[0], "a-a1-f0", recSpec{File: "ghost.svg", Content: "ghost"})
+	if err := os.Remove(recordedFile(t, pf.d, pf.fx.Ticket, pf.built[0], "a-a1-f0", "ghost.svg")); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(spy.dispatches) != 0 {
+		t.Errorf("%d pick sessions were dispatched for a build with nothing left to pick from", len(spy.dispatches))
+	}
+	if !reflect.DeepEqual(report.Picks.Dropped, []string{"ghost.svg (gone)"}) || report.Picks.Status != "" {
+		t.Errorf("report.Picks = %+v, want ghost.svg dropped and no pick", report.Picks)
+	}
+	if !pf.warned("recordings left out of the choice for "+pf.fx.Ticket+": ghost.svg (gone)") ||
+		!pf.warned("jig: no demo for "+pf.fx.Ticket+": no recordings are left to show") ||
+		pf.warned("there are no recordings to show") {
+		t.Errorf("warnings = %q, want the dropped file named and then none left, never none to show", pf.warnings)
+	}
+	if body := pf.body(t, report); strings.Contains(body, "## Demo") {
+		t.Errorf("pr body = %q, want no Demo section", body)
 	}
 }
 

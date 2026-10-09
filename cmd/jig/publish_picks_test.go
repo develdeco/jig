@@ -18,16 +18,15 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
-// TestPublishPicksTheBuildsRecordingsThroughMain drives a clean gate round
-// whose scenario has a gate demo, journals a recording the build made, and
-// publishes with the fake backend answering the pick: the pull request's
-// ## Demo section is the pick's, the gate demo's files are not in it, and the
+// TestPublishPicksTheBuildsRecordingsThroughMain drives a clean gate round,
+// journals a recording the build made, and publishes with the fake backend
+// answering the pick: the pull request's ## Demo section is the pick's and the
 // report says what was picked. It is the CLI half of ADR 0029's publish step:
 // the flags, the backend, the scenario's publish/picks-result.json.
 func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
 	jigHome := t.TempDir()
 	t.Setenv("JIG_HOME", jigHome)
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "demo"})
+	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "clean-round"})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -35,8 +34,8 @@ func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
 	buildFixtureTicket(t, fx)
 
 	gate := []string{"gate", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	if out, code := runMain(t, "", gate...); code != 0 || !strings.Contains(out, "verdict: clean") || !strings.Contains(out, "demo: recorded") {
-		t.Fatalf("gate: exit = %d, want 0 with a recorded demo\n%s", code, out)
+	if out, code := runMain(t, "", gate...); code != 0 || !strings.Contains(out, "verdict: clean") {
+		t.Fatalf("gate: exit = %d, want 0 and a clean verdict\n%s", code, out)
 	}
 
 	lines, err := journal.Read(st, fx.Ticket)
@@ -100,8 +99,45 @@ func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
 			t.Errorf("pr body lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "demo-1.svg") {
-		t.Errorf("pr body still carries the gate demo's files:\n%s", text)
+}
+
+// TestPublishWithoutRecordingsHasNoDemoSectionThroughMain: a ticket whose
+// build recorded nothing publishes a pull request body with no ## Demo
+// section, and no session is dispatched to pick from nothing (the scenario
+// scripts no pick result, so one would fail loudly).
+func TestPublishWithoutRecordingsHasNoDemoSectionThroughMain(t *testing.T) {
+	t.Setenv("JIG_HOME", t.TempDir())
+	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "clean-round"})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	buildFixtureTicket(t, fx)
+
+	gate := []string{"gate", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
+	if out, code := runMain(t, "", gate...); code != 0 || !strings.Contains(out, "verdict: clean") {
+		t.Fatalf("gate: exit = %d, want 0 and a clean verdict\n%s", code, out)
+	}
+	out, code := runMain(t, "", "publish", fx.Ticket, "--yes", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir)
+	if code != 0 {
+		t.Fatalf("publish: exit = %d, want 0\n%s", code, out)
+	}
+	if strings.Contains(out, "picks:") {
+		t.Errorf("publish output reports a pick for a build that recorded nothing:\n%s", out)
+	}
+
+	body, err := os.ReadFile(filepath.Join(st.TicketDir(fx.Ticket), "pr", "fixture-repo.md"))
+	if err != nil {
+		t.Fatalf("read pr/fixture-repo.md: %v", err)
+	}
+	text := string(body)
+	if strings.Contains(text, "## Demo") {
+		t.Errorf("pr body has a ## Demo section although nothing was recorded:\n%s", text)
+	}
+	for _, want := range []string{"## What changed", "## Verification"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("pr body lacks %q:\n%s", want, text)
+		}
 	}
 }
 

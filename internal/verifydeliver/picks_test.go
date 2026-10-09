@@ -153,7 +153,7 @@ func TestPickCandidatesAreTheLatestRecordingOfEachStepOnTheHeadsHistory(t *testi
 }
 
 // TestPickCandidatesDropsAFileThatNoLongerMatchesItsLine: a candidate is
-// checked against its file the way a demo's are at publish, and one that fails
+// checked against its file again at publish, and one that fails
 // is no candidate and is named, with why, for publish's output.
 func TestPickCandidatesDropsAFileThatNoLongerMatchesItsLine(t *testing.T) {
 	t.Parallel()
@@ -461,8 +461,8 @@ func TestRenderPicksPromptNamesTheFilesAndTheContract(t *testing.T) {
 
 // TestRenderPicksSectionComposesFlowsInOrderAndMakesTheWordsSafe: flows come
 // under their own ### headings, each recording in the one reference form gh
-// rewrites for its kind, and the session's words get the treatment a demo's
-// get: one line, no link characters, capped, HTML-escaped, and host paths left
+// rewrites for its kind, and the session's words are made safe for a
+// published body: one line, no link characters, capped, HTML-escaped, and host paths left
 // out whole and named.
 func TestRenderPicksSectionComposesFlowsInOrderAndMakesTheWordsSafe(t *testing.T) {
 	t.Parallel()
@@ -744,5 +744,19 @@ func TestVerifyStagedHoldsEveryStagedFileToWhatWasStaged(t *testing.T) {
 				t.Errorf("verifyStaged = %v, want a refusal naming %q", err, c.want)
 			}
 		})
+	}
+}
+
+// TestSessionPromptsDescribeTheIntentSourcesInOnePlace: the reviewer's prompt
+// and the pick's both hand the session an intent and a source, so both carry
+// the one sentence that says what each source means.
+func TestSessionPromptsDescribeTheIntentSourcesInOnePlace(t *testing.T) {
+	t.Parallel()
+	review := RenderReviewPrompt(ReviewRequest{Ticket: "JIG-1", Round: 1, Scope: "full"}, "/abs/review.json", "/abs/result.json")
+	pick := RenderPicksPrompt("/abs/picks.json", "/abs/picks.result.json")
+	for name, prompt := range map[string]string{"reviewer": review, "pick": pick} {
+		if !strings.Contains(prompt, intentSourcesPrompt) {
+			t.Errorf("the %s prompt does not carry intentSourcesPrompt:\n%s", name, prompt)
+		}
 	}
 }

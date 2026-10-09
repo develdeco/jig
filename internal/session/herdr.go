@@ -38,10 +38,10 @@ const jigWSLDistroEnv = "JIG_WSL_DISTRO"
 // (WSL) branch; off Windows, herdr sees the worktree path unchanged.
 //
 // Exported for other packages that need jig's own notion of the WSL mount
-// spelling herdr hands a session on Windows: verifydeliver's render path
-// checks a demo's summary and captions for it, among the other spellings
-// jig itself handed the session, before they reach a published pull request
-// body (the owner's decision on r1-f13, DECISIONS.md).
+// spelling herdr hands a session on Windows: verifydeliver checks a
+// pick's summary, titles and captions for it, among the other spellings jig
+// itself handed the session, before they reach a published pull request body
+// (the owner's decision on r1-f13, DECISIONS.md).
 func WSLPath(winPath string) string {
 	p := strings.ReplaceAll(winPath, `\`, "/")
 	if len(p) >= 2 && p[1] == ':' {

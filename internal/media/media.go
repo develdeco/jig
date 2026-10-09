@@ -32,12 +32,6 @@ var (
 	videoExts = []string{"mp4", "mov", "webm"}
 )
 
-// ImageExtensions returns the lowercase extensions accepted as images.
-func ImageExtensions() []string { return append([]string{}, imageExts...) }
-
-// VideoExtensions returns the lowercase extensions accepted as videos.
-func VideoExtensions() []string { return append([]string{}, videoExts...) }
-
 // Listed is one file a writer reports: a name inside the directory jig made
 // and the caption a reader sees beside it.
 type Listed struct {

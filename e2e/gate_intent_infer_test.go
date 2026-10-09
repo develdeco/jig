@@ -102,12 +102,6 @@ func TestGateInfersIntentBriefLess(t *testing.T) {
 	if !strings.Contains(r3.Stdout, "intent: inferred") {
 		t.Fatalf("gate stdout missing the inferred intent row:\n%s", r3.Stdout)
 	}
-	// The round is clean, so a demo runs after it, and the scenario scripts
-	// one: an unscripted round would print a refused demo instead, which this
-	// assertion catches.
-	if !strings.Contains(r3.Stdout, "demo: recorded") {
-		t.Fatalf("gate stdout missing the recorded demo row:\n%s", r3.Stdout)
-	}
 
 	data, err := os.ReadFile(filepath.Join(fx.StoreDir, ticket, "intent.md"))
 	if err != nil {
