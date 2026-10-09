@@ -26,7 +26,7 @@ var debtList = map[string]bool{
 	"internal/repohost/repohost_test.go":        true,
 	"internal/revieweval/leak_test.go":          true,
 	"internal/revieweval/realchild_test.go":     true,
-	"internal/session/extradir_test.go":         true,
+	"internal/session/extrareadfile_test.go":    true,
 	"internal/session/headless_test.go":         true,
 	"internal/session/herdr_test.go":            true,
 	"internal/session/kill_windows_test.go":     true,

@@ -165,7 +165,7 @@ func TestGateFoldsAStillPresentEntryLikeAFullReport(t *testing.T) {
 	}}
 	src := NewReviewerGateSource(backend)
 
-	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate round 1: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestGateFoldsAStillPresentEntryLikeAFullReport(t *testing.T) {
 		t.Fatalf("push round 1 fix slice state: %v", err)
 	}
 
-	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
+	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}

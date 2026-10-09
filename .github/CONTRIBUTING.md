@@ -1,6 +1,6 @@
 # Contributing
 
-jig is a Go project. Building needs only Go 1.27+; testing also needs `git`
+jig is a Go project. Building needs only Go 1.27.2+; testing also needs `git`
 on PATH, since the suite spawns real git commands against local, file-path
 repos.
 
@@ -13,6 +13,15 @@ go test -timeout 30m ./...
 
 `gofmt -l .` should print nothing, and `go vet ./...` should be clean. See
 Testing rules below for what the suite does and doesn't touch.
+
+While working, run `go build ./...`, `go vet ./...` and `gofmt -l .`, and test
+what your change can break: the packages you touched (`go test
+./internal/store`, say), the packages that import them when behavior changes,
+and `./lint`, whose checks cover files across the repo (skills, workflows,
+tests). The full suite takes minutes; CI runs it on all three platforms on
+every pull request, and jig's gate runs it as this repo's `test` oracle
+(`.claude/jig.yaml`). A jig build slice's own oracle runs when its builder
+reports green.
 
 ## Making a change
 
@@ -47,12 +56,12 @@ Testing rules below for what the suite does and doesn't touch.
     `gh pr edit --attach` (gh 2.99 or later) rather than committing it.
     Leave the section out when nothing is visible, as with a docs-only or
     purely internal change. CI records nothing. A pull request built
-    through jig gets its demo from jig: today the gate's demo session
-    ([ADR 0014](../docs/adr/0014-demo-session-at-the-gate.md)), and, as
-    [ADR 0029](../docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md)
-    lands step by step, the recordings the build's end-to-end tests make. A
-    hand-built pull request attaches its screenshot, GIF or video by hand
-    as above (an SVG works too).
+    through jig gets its demo from jig: publish picks it from the
+    recordings the build's end-to-end tests make
+    ([ADR 0029](../docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md)),
+    and a ticket with no recordings has no Demo section. A hand-built pull
+    request attaches its screenshot, GIF or video by hand as above (an SVG
+    works too).
   - **Verification**: the gates you ran, and anything you checked beyond
     them.
 - Everything else a reviewer might want - contract changes, where to look,
