@@ -487,7 +487,16 @@ func accumulateCaseVerdict(cs *CaseScore, rs RoundScore) {
 // case: teacher-forcing means the next round's fold comes from the case's
 // recorded history, never from this run's own result, so it is
 // unaffected. Any other error is infrastructure and is returned.
-func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model string) (cs CaseScore, err error) {
+func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model string) (CaseScore, error) {
+	return runCase(workDir, "", c, backend, judge, model)
+}
+
+// runCase is RunCase with the directory the judge's scratch root is made
+// in. RunCase passes "", the operating system's temp directory; a test that
+// needs every path a run makes under a directory of its own choosing passes
+// one, instead of changing the process's TMPDIR for every test running
+// beside it.
+func runCase(workDir, scratchParent string, c Case, backend session.Backend, judge Judge, model string) (cs CaseScore, err error) {
 	ticket := runID(c.Name)
 	st, err := initEvalStore(workDir, c, ticket)
 	if err != nil {
@@ -520,7 +529,7 @@ func RunCase(workDir string, c Case, backend session.Backend, judge Judge, model
 	// nothing stopping it (leak_test.go's own comment on this) - a "judge"
 	// entry sitting there is exactly what it would see. Removed once the
 	// case ends, whatever round it stopped at.
-	judgeRoot, jerr := os.MkdirTemp("", "jig-")
+	judgeRoot, jerr := os.MkdirTemp(scratchParent, "jig-")
 	if jerr != nil {
 		return CaseScore{}, fmt.Errorf("revieweval: create judge scratch root: %w", jerr)
 	}

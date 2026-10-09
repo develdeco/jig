@@ -16,7 +16,8 @@ import (
 // dispatchEnv drops it. Both are taken first thing in TestMain: harness
 // setup belongs after them, never in an init() or a package-level
 // initializer, or it would pass for the operator's launch environment and
-// go unchecked.
+// go unchecked. They are written once, here, before any test runs, and
+// only read afterwards, so tests running side by side share them safely.
 var (
 	launchEnv      []string
 	launchTempRoot string
@@ -25,6 +26,5 @@ var (
 func TestMain(m *testing.M) {
 	launchEnv = os.Environ()
 	launchTempRoot = os.TempDir()
-	tempRootSpellings = spellingsOf(launchTempRoot)
 	os.Exit(gittest.Run(m))
 }

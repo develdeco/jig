@@ -87,7 +87,7 @@ type Backend interface {
 }
 
 // Options configures backend construction. ScenarioDir is used by "fake"
-// only, ScreenBinary and Env by "headless" only.
+// only, ScreenBinary, ClaudeBinary and Env by "headless" only.
 type Options struct {
 	ScenarioDir string // fake
 
@@ -97,6 +97,17 @@ type Options struct {
 	// is the jig binary itself: a test binary or another program running
 	// screened dispatches must pass a built jig.
 	ScreenBinary string // headless
+
+	// ClaudeBinary is the `claude` program a headless dispatch runs. Empty,
+	// the default, means the one on this process's PATH, looked up for each
+	// dispatch. A caller that must run another - a test driving a stub -
+	// names it here rather than editing PATH for the whole process. It must
+	// be an absolute path: a relative one is resolved against the
+	// dispatch's worktree (the child's working directory), and a bare name
+	// is searched for on PATH by os/exec, not here, so one that is not
+	// found fails the dispatch as "claude ran no session", not as
+	// CLAUDE_NOT_FOUND. Available looks only at PATH and ignores it.
+	ClaudeBinary string // headless
 
 	// Env, when non-nil, is the exact environment a headless dispatch's
 	// `claude` child process gets: this list, with any PWD, OLDPWD or

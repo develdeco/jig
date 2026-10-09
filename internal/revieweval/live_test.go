@@ -59,6 +59,7 @@ func defaultReportDir() string {
 // (os.UserCacheDir() succeeds, as it does on every platform this package
 // targets) unconditionally, unlike TestEvalLive itself.
 func TestDefaultReportDirUsesUserCacheDir(t *testing.T) {
+	t.Parallel()
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		t.Skipf("os.UserCacheDir unavailable in this environment: %v", err)
@@ -78,12 +79,17 @@ func defaultLiveModel() string {
 
 // liveBackend constructs the backend a live reviewer or judge dispatch
 // runs through: name's session backend, screened through screenBinary,
-// with the child environment dispatchEnv builds from environ. TestEvalLive
-// passes this process's own environment; TestRunCaseRealChildSeesNoLeak
-// passes a synthetic one and checks what a real child then sees, so the
-// wiring the live run relies on is the wiring that test proves.
-func liveBackend(name, screenBinary string, environ []string) (session.Backend, error) {
-	return session.New(name, session.Options{ScreenBinary: screenBinary, Env: dispatchEnv(runtime.GOOS, environ)})
+// running the claude program at claudeBinary ("" for the one on PATH, as the
+// live run does), with the child environment dispatchEnv builds from
+// environ. TestEvalLive passes this process's own environment and no
+// claudeBinary, so it runs the claude on PATH; TestRunCaseRealChildSeesNoLeak
+// passes a synthetic environment and a stub claude by path, and checks what
+// a real child then sees. That proves what liveBackend wires from environ
+// (dispatchEnv, session.Options.Env, the child's working directory) is what
+// reaches a child, the same wiring the live run uses. It does not prove the
+// live run's choice of program: only a live run finds claude on PATH.
+func liveBackend(name, screenBinary, claudeBinary string, environ []string) (session.Backend, error) {
+	return session.New(name, session.Options{ScreenBinary: screenBinary, ClaudeBinary: claudeBinary, Env: dispatchEnv(runtime.GOOS, environ)})
 }
 
 // TestEvalLive runs the whole corpus through a real session backend,
@@ -122,7 +128,7 @@ func TestEvalLive(t *testing.T) {
 	// which can run its own Bash and read its own environment - never sees
 	// JIG_REVIEWEVAL_BACKEND naming this measurement, or anything else this
 	// process happens to be running with that names it.
-	backend, err := liveBackend(backendName, jigBin, os.Environ())
+	backend, err := liveBackend(backendName, jigBin, "", os.Environ())
 	if err != nil {
 		t.Fatalf("revieweval: construct backend %s: %v", backendName, err)
 	}
@@ -227,6 +233,7 @@ func TestEvalLive(t *testing.T) {
 // default model choice stays covered whether or not a real backend is
 // available.
 func TestDefaultLiveModelIsTheDearestRung(t *testing.T) {
+	t.Parallel()
 	cfg := staircase.Default()
 	if got, want := defaultLiveModel(), cfg.Rungs[len(cfg.Rungs)-1]; got != want {
 		t.Errorf("defaultLiveModel() = %q, want the dearest rung %q: Gate's own pick", got, want)

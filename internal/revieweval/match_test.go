@@ -20,6 +20,7 @@ func openFinding(file string, line int, title string) (verifydeliver.ResultFindi
 }
 
 func TestMatchRejectsTheSameWordingInAnotherFile(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "nil deref"}}}
 	rf, f := openFinding("b.go", 10, "nil deref")
 
@@ -33,6 +34,7 @@ func TestMatchRejectsTheSameWordingInAnotherFile(t *testing.T) {
 }
 
 func TestMatchWindowEdgeThreeLinesOutMatchesFourDoesNot(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d"}}}
 
 	for _, tc := range []struct {
@@ -60,6 +62,7 @@ func TestMatchWindowEdgeThreeLinesOutMatchesFourDoesNot(t *testing.T) {
 }
 
 func TestMatchLineZeroSurvivesOnlyWithJudgeSame(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d"}}}
 	rf, f := openFinding("a.go", 0, "d")
 
@@ -85,6 +88,7 @@ func TestMatchLineZeroSurvivesOnlyWithJudgeSame(t *testing.T) {
 }
 
 func TestMatchDifferentVerdictVetoesAStructuralEdge(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d"}}}
 	rf, f := openFinding("a.go", 10, "d") // a perfect structural match otherwise
 
@@ -99,6 +103,7 @@ func TestMatchDifferentVerdictVetoesAStructuralEdge(t *testing.T) {
 }
 
 func TestMatchOneToOneOneLumpedFindingSatisfiesOnlyOneGold(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{
 		{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d1"},
 		{ID: "g2", File: "a.go", From: 12, To: 12, Action: verifydeliver.ActionFix, Description: "d2"},
@@ -129,6 +134,7 @@ func TestMatchOneToOneOneLumpedFindingSatisfiesOnlyOneGold(t *testing.T) {
 // cannot: finding 0 to g2, freeing g1 for finding 1, so both gold entries
 // are found - the maximum cardinality, not merely a maximal one.
 func TestMatchFindsTheMaximumWhereGreedyWouldMiss(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{
 		{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d1"}, // window [7,13]
 		{ID: "g2", File: "a.go", From: 12, To: 12, Action: verifydeliver.ActionFix, Description: "d2"}, // window [9,15]
@@ -152,6 +158,7 @@ func TestMatchFindsTheMaximumWhereGreedyWouldMiss(t *testing.T) {
 // --- classification (classifyUnmatched's rules, in order) -------------
 
 func TestClassifyUnmatchedRulesInOrder(t *testing.T) {
+	t.Parallel()
 	const (
 		open   = verifydeliver.StatusOpen
 		dismis = verifydeliver.StatusDismissed
@@ -218,6 +225,7 @@ func (j *capturingJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 }
 
 func TestMatchUnlinkedDismissedDescriptionIsTitleAndDetailTogether(t *testing.T) {
+	t.Parallel()
 	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 5, Title: "Loop rebuilds string", Detail: "Highest iterates and concatenates.", Status: verifydeliver.StatusDismissed}}
 	rf, f := openFinding("a.go", 5, "same spot again")
 
@@ -239,6 +247,7 @@ func TestMatchUnlinkedDismissedDescriptionIsTitleAndDetailTogether(t *testing.T)
 }
 
 func TestMatchLinkedDismissedSpanIsUnionAndUsesDecisionDescription(t *testing.T) {
+	t.Parallel()
 	// The fold's own current line (5) intentionally matches what the
 	// loader would have recorded, so this test alone cannot tell the two
 	// apart - TestMatchLinkedDismissedUsesTheRecordedLineNotTheFoldsLatest
@@ -282,6 +291,7 @@ func TestMatchLinkedDismissedSpanIsUnionAndUsesDecisionDescription(t *testing.T)
 // line), so the union must read Decision.RecordedLine, not f.Line, or the
 // span would silently drift with whatever the fold happens to say now.
 func TestMatchLinkedDismissedUsesTheRecordedLineNotTheFoldsLatest(t *testing.T) {
+	t.Parallel()
 	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 50, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	links := map[string]Decision{
 		"r1-f1": {ID: "dec1", File: "a.go", From: 8, To: 9, RecordedLine: 5, Description: "d", Decision: DecisionDismissed, Recorded: "r1-f1"},
@@ -306,6 +316,7 @@ func TestMatchLinkedDismissedUsesTheRecordedLineNotTheFoldsLatest(t *testing.T) 
 // an unlinked dismissed finding - its own bare one-line span and title -
 // rather than trusting a link the loader could not have validated.
 func TestMatchLinkedDismissedSkipsTheLinkOnAFileMismatch(t *testing.T) {
+	t.Parallel()
 	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "b.go", Line: 5, Title: "moved", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	links := map[string]Decision{
 		"r1-f1": {ID: "dec1", File: "a.go", From: 8, To: 9, RecordedLine: 5, Description: "the linked description", Decision: DecisionDismissed, Recorded: "r1-f1"},
@@ -351,6 +362,7 @@ func (j byPointJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 // point, and a nil judge (Undecided) keeps it: the citation is itself
 // location evidence, so it needs no explicit Same, only not Different.
 func TestMatchCitedPriorSurvivesOutsideTheWindow(t *testing.T) {
+	t.Parallel()
 	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	rf := verifydeliver.ResultFinding{File: "a.go", Line: 15, Title: "repeat", Prior: "r1-f1"} // 5 lines off r1-f1's own line
 	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}      // ApplyRound's rule 2: id becomes the cited prior
@@ -371,6 +383,7 @@ func TestMatchCitedPriorSurvivesOutsideTheWindow(t *testing.T) {
 // which needs the judge's explicit Same, since here the citation is
 // itself the location evidence.
 func TestMatchCitedPriorSurvivesAtLineZero(t *testing.T) {
+	t.Parallel()
 	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	rf := verifydeliver.ResultFinding{File: "a.go", Line: 0, Title: "repeat, no line", Prior: "r1-f1"}
 	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}
@@ -389,6 +402,7 @@ func TestMatchCitedPriorSurvivesAtLineZero(t *testing.T) {
 // Different on the cited pair: the citation is rejected, so it is a wrong
 // prior, not a permitted repeat.
 func TestMatchCitedPriorJudgeDifferentIsWrongPrior(t *testing.T) {
+	t.Parallel()
 	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	rf := verifydeliver.ResultFinding{File: "a.go", Line: 15, Title: "repeat", Prior: "r1-f1"}
 	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}
@@ -409,6 +423,7 @@ func TestMatchCitedPriorJudgeDifferentIsWrongPrior(t *testing.T) {
 // touch, so no candidate is built for it at all (same-file
 // requirement) and no structural window reaches it either.
 func TestMatchCitedPriorInAnotherFileIsWrongPrior(t *testing.T) {
+	t.Parallel()
 	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "other.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusDismissed}}
 	rf := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "repeat", Prior: "r1-f1"}
 	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusDismissed}
@@ -431,6 +446,7 @@ func TestMatchCitedPriorInAnotherFileIsWrongPrior(t *testing.T) {
 // surviving dismissed edge - so this stays a wrong prior even though a
 // dismissed edge (to X) did survive.
 func TestMatchCitedPriorPinsIDEqualityAgainstAnotherDismissedPointInTheSameFile(t *testing.T) {
+	t.Parallel()
 	fold := map[string]verifydeliver.Finding{
 		"X": {ID: "X", File: "a.go", Line: 5, Title: "x", Detail: "d", Status: verifydeliver.StatusDismissed},
 		"Y": {ID: "Y", File: "a.go", Line: 20, Title: "y", Detail: "d", Status: verifydeliver.StatusDismissed},
@@ -456,6 +472,7 @@ func TestMatchCitedPriorPinsIDEqualityAgainstAnotherDismissedPointInTheSameFile(
 // candidate for that exact point - the cited-prior mechanism is not
 // special to a dismissed point - and a nil judge (Undecided) keeps it.
 func TestMatchOpenPriorSurvivesOutsideTheWindow(t *testing.T) {
+	t.Parallel()
 	fold := map[string]verifydeliver.Finding{"r1-f1": {ID: "r1-f1", File: "a.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusOpen}}
 	rf := verifydeliver.ResultFinding{File: "a.go", Line: 15, Title: "repeat", Prior: "r1-f1"} // 5 lines off r1-f1's own line
 	reported := verifydeliver.Finding{ID: "r1-f1", Status: verifydeliver.StatusOpen}
@@ -483,6 +500,7 @@ func TestMatchOpenPriorSurvivesOutsideTheWindow(t *testing.T) {
 // (open here, a plain recurrence, ApplyRound's rule 1) never says the
 // citation itself was right.
 func TestMatchOpenPriorOnUnrelatedFindingIsAWrongPrior(t *testing.T) {
+	t.Parallel()
 	fold := map[string]verifydeliver.Finding{
 		"r1-f2": {ID: "r1-f2", File: "inventory/report.go", Line: 10, Title: "t", Detail: "d", Status: verifydeliver.StatusOpen},
 	}
@@ -514,6 +532,7 @@ func TestMatchOpenPriorOnUnrelatedFindingIsAWrongPrior(t *testing.T) {
 // swapped two fields' priority, or compared a field with the wrong sign,
 // fails exactly one of these.
 func TestMatchScoreBetterEachCriterionAlone(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		a, b matchScore
@@ -539,6 +558,7 @@ func TestMatchScoreBetterEachCriterionAlone(t *testing.T) {
 // unset) and on closeness (symmetric, one line off on each side), only one
 // confirmed Same by the judge. The judge's own confirmation must win.
 func TestMatchPrefersJudgeSameOverEverythingButCardinality(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d"}}}
 	above := verifydeliver.ResultFinding{File: "a.go", Line: 9, Title: "above"}  // 1 off
 	below := verifydeliver.ResultFinding{File: "a.go", Line: 11, Title: "below"} // 1 off
@@ -561,6 +581,7 @@ func TestMatchPrefersJudgeSameOverEverythingButCardinality(t *testing.T) {
 // one that does not, so only the prior criterion can explain a preference
 // for it.
 func TestMatchPrefersPriorAgreementOverCloseness(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Prior: "r1-p", Description: "d"}}}
 	closer := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "closer, no prior"}               // inside the span: closeness 4
 	citing := verifydeliver.ResultFinding{File: "a.go", Line: 13, Title: "cites the prior", Prior: "r1-p"} // 3 off: closeness 1
@@ -580,6 +601,7 @@ func TestMatchPrefersPriorAgreementOverCloseness(t *testing.T) {
 // Same, neither with a prior - one inside the span, one 2 lines off. The
 // closer one must win.
 func TestMatchPrefersClosenessWhenSameAndPriorAreTied(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d"}}}
 	inside := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "inside"}
 	off := verifydeliver.ResultFinding{File: "a.go", Line: 12, Title: "2-off"}
@@ -605,6 +627,7 @@ func TestMatchPrefersClosenessWhenSameAndPriorAreTied(t *testing.T) {
 // Closeness alone decides it; status and action never enter the
 // comparison.
 func TestMatchNeverRanksByStatusOrAction(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d"}}}
 	fix := verifydeliver.ResultFinding{File: "a.go", Line: 11, Title: "fix-1-off", Action: verifydeliver.ActionFix}     // closeness 3, gold's own action
 	note := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "note-inside", Action: verifydeliver.ActionNote} // closeness 4, mismatched action
@@ -630,6 +653,7 @@ func TestMatchNeverRanksByStatusOrAction(t *testing.T) {
 // mutant that let earliness outrank closeness, instead of only breaking a
 // tie closeness itself leaves standing, would pick the stray fix instead.
 func TestMatchRealBugAsANoteInsideSpanStaysLost(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "the real bug"}}}
 	stray := verifydeliver.ResultFinding{File: "a.go", Line: 12, Title: "unrelated-stray-fix", Action: verifydeliver.ActionFix}
 	note := verifydeliver.ResultFinding{File: "a.go", Line: 10, Title: "note-on-the-real-bug", Action: verifydeliver.ActionNote}
@@ -656,6 +680,7 @@ func TestMatchRealBugAsANoteInsideSpanStaysLost(t *testing.T) {
 // tell them apart without the prior criterion. Both result orders must
 // resolve to the same, correct pairing.
 func TestMatchCitedPriorsResolveWhichGoldRegardlessOfOrder(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{
 		{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Prior: "r1-f1", Description: "d1"},
 		{ID: "g2", File: "a.go", From: 12, To: 12, Action: verifydeliver.ActionFix, Prior: "r1-f2", Description: "d2"},
@@ -684,6 +709,7 @@ func TestMatchCitedPriorsResolveWhichGoldRegardlessOfOrder(t *testing.T) {
 // citing the right prior, two at different closeness) that no two
 // orderings could tie.
 func TestMatchOrderIndependencePermutation(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{
 		{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "d1"},
 		{ID: "g2", File: "a.go", From: 20, To: 20, Action: verifydeliver.ActionFix, Prior: "r1-p", Description: "d2"},
@@ -762,6 +788,7 @@ func (j titleJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 // repeat, since it carries no structural edge to the point that id names -
 // the citation does not survive contact with where the finding actually is.
 func TestApplyRoundThenMatchWrongPriorFailsTheRound(t *testing.T) {
+	t.Parallel()
 	known := map[string]verifydeliver.Finding{
 		"r1-f1": {ID: "r1-f1", File: "other.go", Line: 5, Title: "dismissed elsewhere", Status: verifydeliver.StatusDismissed},
 	}
@@ -866,6 +893,7 @@ func matchingScore(t *testing.T, optionsByGold [][]matchOption, nFindings int, g
 // assignment reaches. Scores can tie, so the scores are compared, not the
 // assignments.
 func TestBestMatchingAgreesWithExhaustiveSearch(t *testing.T) {
+	t.Parallel()
 	rng := rand.New(rand.NewSource(1))
 	for iter := 0; iter < 2000; iter++ {
 		nGold, nFindings := 1+rng.Intn(5), 1+rng.Intn(6)
@@ -902,6 +930,7 @@ func TestBestMatchingAgreesWithExhaustiveSearch(t *testing.T) {
 // matching that used even one off-diagonal edge would score strictly lower,
 // since cardinality and every field ahead of closeness already tie.
 func TestBestMatchingStaysPolynomialOnALargeRound(t *testing.T) {
+	t.Parallel()
 	const nGold, nFindings = 40, 60
 	options := make([][]matchOption, nGold)
 	for gi := range options {
