@@ -17,6 +17,7 @@ import (
 // have no console attached; the test skips rather than fails when the open
 // itself fails, since that means there is nothing here to check.
 func TestStdinIsTerminalRealConsole(t *testing.T) {
+	t.Parallel()
 	con, err := os.OpenFile("CONIN$", os.O_RDWR, 0)
 	if err != nil {
 		t.Skipf("CONIN$ unavailable (no console attached to this process): %v", err)

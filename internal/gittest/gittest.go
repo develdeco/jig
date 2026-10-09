@@ -17,7 +17,10 @@ var (
 )
 
 // Run writes a git config with maintenance.auto=false, receive.autogc=false
-// and gc.autoDetach=false, points GIT_CONFIG_GLOBAL at it, sets
+// and gc.autoDetach=false, and core.excludesFile and core.attributesFile
+// naming files in its own temp dir (git otherwise reads the user's
+// $XDG_CONFIG_HOME/git/ignore and attributes, or $HOME/.config/git/..., even
+// with no config file), points GIT_CONFIG_GLOBAL at it, sets
 // GIT_CONFIG_NOSYSTEM=1, and runs m. Every git process the binary spawns,
 // including git-receive-pack on the far side of a local push, then runs
 // without detached maintenance or host config. After m.Run() it runs the
@@ -33,7 +36,11 @@ func Run(m *testing.M) int {
 	defer os.RemoveAll(dir)
 
 	cfg := filepath.Join(dir, "gitconfig")
-	const body = "[maintenance]\n\tauto = false\n[receive]\n\tautogc = false\n[gc]\n\tautoDetach = false\n"
+	// The files need not exist: git reads a missing one as empty. Forward
+	// slashes, since a backslash escapes in a config value.
+	body := "[maintenance]\n\tauto = false\n[receive]\n\tautogc = false\n[gc]\n\tautoDetach = false\n" +
+		fmt.Sprintf("[core]\n\texcludesFile = %q\n\tattributesFile = %q\n",
+			filepath.ToSlash(filepath.Join(dir, "ignore")), filepath.ToSlash(filepath.Join(dir, "attributes")))
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "gittest: write %s: %v\n", cfg, err)
 		return 1

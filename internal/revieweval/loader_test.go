@@ -12,6 +12,7 @@ import (
 // broken validator that rejects everything would still make every
 // "rejects" test below pass for the wrong reason.
 func TestLoadCaseAcceptsAMinimalValidCase(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "ok", validGoldYAML)
 	c, err := LoadCase(dir)
 	if err != nil {
@@ -23,6 +24,7 @@ func TestLoadCaseAcceptsAMinimalValidCase(t *testing.T) {
 }
 
 func TestLoadCaseRejectsMissingBrief(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML)
 	if err := os.Remove(filepath.Join(dir, "brief.md")); err != nil {
 		t.Fatal(err)
@@ -33,6 +35,7 @@ func TestLoadCaseRejectsMissingBrief(t *testing.T) {
 }
 
 func TestLoadCaseRejectsMissingPatch(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML)
 	if err := os.Remove(filepath.Join(dir, "round-1", "patch.diff")); err != nil {
 		t.Fatal(err)
@@ -48,6 +51,7 @@ func TestLoadCaseRejectsMissingPatch(t *testing.T) {
 // (os.ReadFile on a missing path fails too), silently losing the dedicated
 // "missing gold.yaml" message the specific os.Stat check below produces.
 func TestLoadCaseRejectsMissingGold(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML)
 	if err := os.Remove(filepath.Join(dir, "round-1", "gold.yaml")); err != nil {
 		t.Fatal(err)
@@ -68,6 +72,7 @@ func TestLoadCaseRejectsMissingGold(t *testing.T) {
 // error can be the one that fires. Telling the two apart means neither
 // message is written to cover both cases.
 func TestLoadCaseDistinguishesAGoldReadErrorFromAMissingFile(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML)
 	goldPath := filepath.Join(dir, "round-1", "gold.yaml")
 	if err := os.Remove(goldPath); err != nil {
@@ -86,6 +91,7 @@ func TestLoadCaseDistinguishesAGoldReadErrorFromAMissingFile(t *testing.T) {
 }
 
 func TestLoadCaseRejectsARoundGap(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML)
 	// round-3 with no round-2 in between.
 	writeFile(t, filepath.Join(dir, "round-1", "findings.yaml"), "scope: full\nreviewed_paths: []\nfindings: []\n")
@@ -97,6 +103,7 @@ func TestLoadCaseRejectsARoundGap(t *testing.T) {
 }
 
 func TestLoadCaseRequiresFindingsYAMLOnANonLastRound(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML) // round-1 has no findings.yaml
 	writeFile(t, filepath.Join(dir, "round-2", "patch.diff"), "diff\n")
 	writeFile(t, filepath.Join(dir, "round-2", "gold.yaml"), validGoldYAML)
@@ -106,6 +113,7 @@ func TestLoadCaseRequiresFindingsYAMLOnANonLastRound(t *testing.T) {
 }
 
 func TestLoadCaseRejectsFindingsYAMLOnTheLastRound(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML)
 	writeFile(t, filepath.Join(dir, "round-1", "findings.yaml"), "scope: full\nreviewed_paths: []\nfindings: []\n")
 	if _, err := LoadCase(dir); err == nil {
@@ -114,6 +122,7 @@ func TestLoadCaseRejectsFindingsYAMLOnTheLastRound(t *testing.T) {
 }
 
 func TestLoadCaseRejectsAnUnknownGoldKeyLikeTitlePattern(t *testing.T) {
+	t.Parallel()
 	gold := `exhaustive: false
 findings:
   - id: f1
@@ -130,6 +139,7 @@ findings:
 }
 
 func TestLoadCaseRejectsAnEmptyGoldFindingID(t *testing.T) {
+	t.Parallel()
 	gold := `exhaustive: false
 findings:
   - id: ""
@@ -145,6 +155,7 @@ findings:
 }
 
 func TestLoadCaseRejectsADuplicateIDAcrossFindingsTrapsAndDecisions(t *testing.T) {
+	t.Parallel()
 	gold := `exhaustive: false
 findings:
   - id: dup
@@ -165,6 +176,7 @@ traps:
 }
 
 func TestLoadCaseRejectsLinesNotExactlyTwoIntegers(t *testing.T) {
+	t.Parallel()
 	gold := `exhaustive: false
 findings:
   - id: f1
@@ -180,6 +192,7 @@ findings:
 }
 
 func TestLoadCaseRejectsNonPositiveLines(t *testing.T) {
+	t.Parallel()
 	gold := `exhaustive: false
 findings:
   - id: f1
@@ -195,6 +208,7 @@ findings:
 }
 
 func TestLoadCaseRejectsLinesFromGreaterThanTo(t *testing.T) {
+	t.Parallel()
 	gold := `exhaustive: false
 findings:
   - id: f1
@@ -210,6 +224,7 @@ findings:
 }
 
 func TestLoadCaseRejectsAnUnknownAction(t *testing.T) {
+	t.Parallel()
 	gold := `exhaustive: false
 findings:
   - id: f1
@@ -225,6 +240,7 @@ findings:
 }
 
 func TestLoadCaseRejectsAnUnknownDecision(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML)
 	writeFile(t, filepath.Join(dir, "round-1", "decisions.yaml"), `decisions:
   - id: extra
@@ -239,6 +255,7 @@ func TestLoadCaseRejectsAnUnknownDecision(t *testing.T) {
 }
 
 func TestLoadCaseRejectsAnEmptyDescription(t *testing.T) {
+	t.Parallel()
 	gold := `exhaustive: false
 findings:
   - id: f1
@@ -254,6 +271,7 @@ findings:
 }
 
 func TestLoadCaseRejectsAFileThatIsNotACleanRepoRelativePath(t *testing.T) {
+	t.Parallel()
 	for _, file := range []string{"/abs.go", "../outside.go", "./a.go", `a\b.go`} {
 		// Single-quoted YAML: a double-quoted scalar would treat the
 		// backslash in the last case as an escape sequence, not a
@@ -267,6 +285,7 @@ func TestLoadCaseRejectsAFileThatIsNotACleanRepoRelativePath(t *testing.T) {
 }
 
 func TestLoadCaseRejectsAPriorThatDoesNotNameAFoldFinding(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML)
 	writeFile(t, filepath.Join(dir, "round-1", "findings.yaml"), "scope: full\nreviewed_paths: []\nfindings: []\n")
 	writeFile(t, filepath.Join(dir, "round-2", "patch.diff"), "diff\n")
@@ -285,6 +304,7 @@ findings:
 }
 
 func TestLoadCaseRejectsAPriorThatNamesADismissedFinding(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML)
 	writeFile(t, filepath.Join(dir, "round-1", "findings.yaml"), `scope: full
 reviewed_paths: []
@@ -316,6 +336,7 @@ findings:
 }
 
 func TestLoadCaseAcceptsAPriorThatNamesAnOpenFoldFinding(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML)
 	writeFile(t, filepath.Join(dir, "round-1", "findings.yaml"), `scope: full
 reviewed_paths: []
@@ -351,6 +372,7 @@ findings:
 }
 
 func TestLoadCorpusRejectsAnEmptyRoot(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if _, err := LoadCorpus(root); err == nil {
 		t.Fatal("LoadCorpus: want an error for a root with no case directories")
@@ -406,6 +428,7 @@ findings:
 }
 
 func TestLoadCaseAcceptsARecordedLinkToADismissedFinding(t *testing.T) {
+	t.Parallel()
 	dir := twoRoundCaseWithFindings(t, "c", `decisions:
   - id: dec1
     file: b.go
@@ -424,6 +447,7 @@ func TestLoadCaseAcceptsARecordedLinkToADismissedFinding(t *testing.T) {
 }
 
 func TestLoadCaseRejectsARecordedLinkOnARoundWithNoFindingsYAML(t *testing.T) {
+	t.Parallel()
 	dir := newMinimalCase(t, "c", validGoldYAML) // single round: the last round, so no findings.yaml
 	writeFile(t, filepath.Join(dir, "round-1", "decisions.yaml"), `decisions:
   - id: dec1
@@ -439,6 +463,7 @@ func TestLoadCaseRejectsARecordedLinkOnARoundWithNoFindingsYAML(t *testing.T) {
 }
 
 func TestLoadCaseRejectsARecordedIDNotInFindingsYAML(t *testing.T) {
+	t.Parallel()
 	dir := twoRoundCaseWithFindings(t, "c", `decisions:
   - id: dec1
     file: b.go
@@ -453,6 +478,7 @@ func TestLoadCaseRejectsARecordedIDNotInFindingsYAML(t *testing.T) {
 }
 
 func TestLoadCaseRejectsARecordedFileMismatch(t *testing.T) {
+	t.Parallel()
 	dir := twoRoundCaseWithFindings(t, "c", `decisions:
   - id: dec1
     file: other.go
@@ -467,6 +493,7 @@ func TestLoadCaseRejectsARecordedFileMismatch(t *testing.T) {
 }
 
 func TestLoadCaseRejectsADismissedDecisionRecordingAnOpenFinding(t *testing.T) {
+	t.Parallel()
 	dir := twoRoundCaseWithFindings(t, "c", `decisions:
   - id: dec1
     file: c.go
@@ -481,6 +508,7 @@ func TestLoadCaseRejectsADismissedDecisionRecordingAnOpenFinding(t *testing.T) {
 }
 
 func TestLoadCaseAcceptsAKeptDecisionRecordingAnOpenFinding(t *testing.T) {
+	t.Parallel()
 	dir := twoRoundCaseWithFindings(t, "c", `decisions:
   - id: dec1
     file: c.go
@@ -495,6 +523,7 @@ func TestLoadCaseAcceptsAKeptDecisionRecordingAnOpenFinding(t *testing.T) {
 }
 
 func TestLoadCaseRejectsAKeptDecisionRecordingADismissedFinding(t *testing.T) {
+	t.Parallel()
 	dir := twoRoundCaseWithFindings(t, "c", `decisions:
   - id: dec1
     file: b.go
@@ -514,6 +543,7 @@ func TestLoadCaseRejectsAKeptDecisionRecordingADismissedFinding(t *testing.T) {
 // field carrying the loader-validated line, not a re-derivation from the
 // decision's Lines.
 func TestLoadCaseAcceptsARecordedLinkSetsRecordedLine(t *testing.T) {
+	t.Parallel()
 	dir := twoRoundCaseWithFindings(t, "c", `decisions:
   - id: dec1
     file: b.go
@@ -537,6 +567,7 @@ func TestLoadCaseAcceptsARecordedLinkSetsRecordedLine(t *testing.T) {
 // so the link must be rejected at load time rather than silently accepted
 // and only ever discovered to be nonsensical at match time.
 func TestLoadCaseRejectsARecordedLineOutsideTheSpanWidened(t *testing.T) {
+	t.Parallel()
 	dir := twoRoundCaseWithFindings(t, "c", `decisions:
   - id: dec1
     file: b.go
@@ -554,6 +585,7 @@ func TestLoadCaseRejectsARecordedLineOutsideTheSpanWidened(t *testing.T) {
 // shape one line inside the boundary: span [8, 11] widened by 3 reaches
 // down to 5, exactly r1-f1's own line, so this must load.
 func TestLoadCaseAcceptsARecordedLineExactlyAtTheWidenedEdge(t *testing.T) {
+	t.Parallel()
 	dir := twoRoundCaseWithFindings(t, "c", `decisions:
   - id: dec1
     file: b.go
@@ -575,6 +607,7 @@ func TestLoadCaseAcceptsARecordedLineExactlyAtTheWidenedEdge(t *testing.T) {
 // reset per round) must reject that, the same way two decisions in one
 // round already do (TestLoadCaseRejectsTwoDecisionsNamingTheSameRecord).
 func TestLoadCaseRejectsTwoDecisionsInDifferentRoundsNamingTheSameRecord(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dir = filepath.Join(dir, "c")
 	writeFile(t, filepath.Join(dir, "brief.md"), "# brief\n")
@@ -646,6 +679,7 @@ findings:
 }
 
 func TestLoadCaseRejectsTwoDecisionsNamingTheSameRecord(t *testing.T) {
+	t.Parallel()
 	dir := twoRoundCaseWithFindings(t, "c", `decisions:
   - id: dec1
     file: b.go
@@ -666,6 +700,7 @@ func TestLoadCaseRejectsTwoDecisionsNamingTheSameRecord(t *testing.T) {
 }
 
 func TestLoadCorpusLoadsEveryCaseInNameOrder(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for _, name := range []string{"zeta", "alpha"} {
 		dir := filepath.Join(root, name)

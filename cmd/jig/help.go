@@ -44,7 +44,6 @@ var commandTable = []cmdSpec{
 	}, false},
 	{"solve", "run the full chain: run, gate, publish", []flagSpec{
 		{"yes", "skip the interactive publish confirm and finding triage", false},
-		{"no-demo", "skip the demo session a clean reviewer round otherwise runs", false},
 		{"answer", "answer a pending question: --answer <qid> <text>", false},
 		{"backend", "session backend: fake, headless, or herdr", false},
 		{"scenario", "scenario dir for the fake backend", false},
@@ -69,7 +68,6 @@ var commandTable = []cmdSpec{
 		{"branch", "review this branch, built outside jig, and adopt it as the ticket's own (recorded on the first round)", false},
 		{"intent", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md); with no brief, --intent or --doc, a reviewer round reads your local Claude Code sessions for this repo and has a model summarize the best match into intent.md", false},
 		{"doc", "doc file whose content becomes the ticket's explicit intent, recorded as intent.md (refused when the ticket has a brief.md)", false},
-		{"no-demo", "skip the demo session a clean reviewer round otherwise runs", false},
 		{"pr", "pr number (not implemented in v0.1)", true},
 		{"yes", "keep every finding jig can route on its own, without the triage prompt", false},
 		{"backend", "session backend for the reviewer: fake, headless, or herdr", false},
@@ -79,6 +77,8 @@ var commandTable = []cmdSpec{
 	}, false},
 	{"publish", "reconcile, revalidate, and open or update the PR", []flagSpec{
 		{"yes", "skip the interactive confirm", false},
+		{"backend", "session backend that picks the recordings the pull request shows: fake, headless, or herdr", false},
+		{"scenario", "scenario dir for the fake backend", false},
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},

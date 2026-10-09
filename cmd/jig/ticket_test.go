@@ -56,12 +56,13 @@ func newTestOriginClone(t *testing.T, dir string) (remote string) {
 // commit, named "<id>: new ticket", and the command's output names only
 // that id.
 func TestTicketNewClaimsOnOrigin(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	remote := newTestOriginClone(t, clone)
 
 	var buf bytes.Buffer
-	code := Main([]string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader(""))
+	code := run(e, []string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader(""))
 	if code != 0 {
 		t.Fatalf("jig ticket new: exit %d\n%s", code, buf.String())
 	}
@@ -95,7 +96,8 @@ func TestTicketNewClaimsOnOrigin(t *testing.T) {
 // the same origin minting one after another: each claims a different id,
 // and the origin ends up with both.
 func TestTicketNewSequentialClonesGetDifferentIDs(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	parent := t.TempDir()
 	cloneA := filepath.Join(parent, "cloneA")
 	remote := newTestOriginClone(t, cloneA)
@@ -106,7 +108,7 @@ func TestTicketNewSequentialClonesGetDifferentIDs(t *testing.T) {
 
 	jig := func(storeDir string, args ...string) (int, string) {
 		var buf bytes.Buffer
-		code := Main(append(args, "--store", storeDir), &buf, strings.NewReader(""))
+		code := run(e, append(args, "--store", storeDir), &buf, strings.NewReader(""))
 		return code, buf.String()
 	}
 
@@ -140,7 +142,8 @@ func TestTicketNewSequentialClonesGetDifferentIDs(t *testing.T) {
 // the origin cannot be reached: the command refuses with ID_NOT_CLAIMED and
 // leaves no ticket folder or commit behind.
 func TestTicketNewRefusesWhenOriginUnreachable(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginClone(t, clone)
 	if _, err := gitx.Run(clone, "remote", "set-url", "--push", "origin", filepath.Join(t.TempDir(), "does-not-exist")); err != nil {
@@ -152,7 +155,7 @@ func TestTicketNewRefusesWhenOriginUnreachable(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	code := Main([]string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader(""))
+	code := run(e, []string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader(""))
 	if code == 0 {
 		t.Fatalf("jig ticket new with an unreachable origin: exit 0, want a refusal:\n%s", buf.String())
 	}
@@ -181,7 +184,8 @@ func TestTicketNewRefusesWhenOriginUnreachable(t *testing.T) {
 // new writes the title into <ticket>/ticket.yaml, and a second ticket gets
 // the next ticket_format id, not a repeat of the first.
 func TestTicketNewRecordsTitleAndMintsNextID(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	repo := filepath.Join(t.TempDir(), "demo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
@@ -189,11 +193,11 @@ func TestTicketNewRecordsTitleAndMintsNextID(t *testing.T) {
 	if _, err := gitx.Run(repo, "init", "-b", "main"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	t.Chdir(repo)
+	e = e.inDir(repo)
 
 	jig := func(args ...string) (int, string) {
 		var buf bytes.Buffer
-		code := Main(args, &buf, strings.NewReader(""))
+		code := run(e, args, &buf, strings.NewReader(""))
 		return code, buf.String()
 	}
 	if code, out := jig("init", "--standalone"); code != 0 {
@@ -237,12 +241,13 @@ func TestTicketNewRecordsTitleAndMintsNextID(t *testing.T) {
 // writes it into the minted ticket.yaml alongside the title, and a ticket
 // minted with no --body gets no body key at all.
 func TestTicketNewWithBodyRecordsItInTheRecord(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
 	newTestOriginClone(t, clone)
 
 	var buf bytes.Buffer
-	code := Main([]string{"ticket", "new", "--title", "Fix the thing", "--body", "Why this matters.", "--store", clone}, &buf, strings.NewReader(""))
+	code := run(e, []string{"ticket", "new", "--title", "Fix the thing", "--body", "Why this matters.", "--store", clone}, &buf, strings.NewReader(""))
 	if code != 0 {
 		t.Fatalf("jig ticket new --body: exit %d\n%s", code, buf.String())
 	}
@@ -260,7 +265,7 @@ func TestTicketNewWithBodyRecordsItInTheRecord(t *testing.T) {
 	}
 
 	buf.Reset()
-	if code := Main([]string{"ticket", "new", "--title", "No body", "--store", clone}, &buf, strings.NewReader("")); code != 0 {
+	if code := run(e, []string{"ticket", "new", "--title", "No body", "--store", clone}, &buf, strings.NewReader("")); code != 0 {
 		t.Fatalf("jig ticket new without --body: exit %d\n%s", code, buf.String())
 	}
 	got, err = st.ReadTicket("T-2")
@@ -278,7 +283,8 @@ func TestTicketNewWithBodyRecordsItInTheRecord(t *testing.T) {
 // trackers: [] jig init itself writes, but of the legacy tracker: local a
 // store may still carry (until L3's migration rewrites project.yaml).
 func TestTicketNewMintsByTicketFormatRegardlessOfTracker(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	repo := filepath.Join(t.TempDir(), "demo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
@@ -286,11 +292,11 @@ func TestTicketNewMintsByTicketFormatRegardlessOfTracker(t *testing.T) {
 	if _, err := gitx.Run(repo, "init", "-b", "main"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	t.Chdir(repo)
+	e = e.inDir(repo)
 
 	jig := func(args ...string) (int, string) {
 		var buf bytes.Buffer
-		code := Main(args, &buf, strings.NewReader(""))
+		code := run(e, args, &buf, strings.NewReader(""))
 		return code, buf.String()
 	}
 	if code, out := jig("init", "--standalone"); code != 0 {
@@ -338,7 +344,7 @@ func TestTicketNewMintsByTicketFormatRegardlessOfTracker(t *testing.T) {
 // runner and the store's root.
 func initStandaloneWithKeys(t *testing.T, keys string) (jig func(args ...string) (int, string), storeRoot string) {
 	t.Helper()
-	t.Setenv("JIG_HOME", t.TempDir())
+	e := testEnv(t.TempDir())
 	repo := filepath.Join(t.TempDir(), "demo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
@@ -346,11 +352,11 @@ func initStandaloneWithKeys(t *testing.T, keys string) (jig func(args ...string)
 	if _, err := gitx.Run(repo, "init", "-b", "main"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	t.Chdir(repo)
+	e = e.inDir(repo)
 
 	jig = func(args ...string) (int, string) {
 		var buf bytes.Buffer
-		code := Main(args, &buf, strings.NewReader(""))
+		code := run(e, args, &buf, strings.NewReader(""))
 		return code, buf.String()
 	}
 	if code, out := jig("init", "--standalone"); code != 0 {

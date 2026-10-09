@@ -24,6 +24,7 @@ import (
 // reason on the slice, and no instruction to amend a brief in the question.
 // The journal still says what the builder reported.
 func TestFlawedBriefWithoutABriefIsAPlainQuestion(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "flawed-brief"})
 	d, st := newDeps(t, fx)
 	if err := os.Remove(filepath.Join(st.TicketDir(fx.Ticket), "brief.md")); err != nil {
@@ -89,6 +90,7 @@ func TestFlawedBriefWithoutABriefIsAPlainQuestion(t *testing.T) {
 // flawed-brief reason (status offers the requeue path) and the question still
 // tells the human to amend the brief and requeue.
 func TestFlawedBriefWithABriefStillPointsAtTheBrief(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "flawed-brief"})
 	d, st := newDeps(t, fx)
 
@@ -121,6 +123,7 @@ func TestFlawedBriefWithABriefStillPointsAtTheBrief(t *testing.T) {
 // answered like any other. This is the rule `jig status` resumes a parked
 // slice by, so the question and the status hint cannot disagree.
 func TestFlawedBriefOnASliceWithNoBriefSectionsIsAPlainQuestion(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "flawed-brief"})
 	d, st := newDeps(t, fx)
 	if _, err := os.Stat(filepath.Join(st.TicketDir(fx.Ticket), "brief.md")); err != nil {
@@ -170,6 +173,7 @@ func TestFlawedBriefOnASliceWithNoBriefSectionsIsAPlainQuestion(t *testing.T) {
 // slices' own remedies, not a raw "no such file" failure. A ticket that has a
 // brief is unaffected.
 func TestRequeueFromBriefDiffWithoutABriefIsRefused(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 

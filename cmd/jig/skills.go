@@ -12,7 +12,7 @@ import (
 )
 
 // cmdSkills implements `jig skills install [--project] [--dest <dir>]`.
-func cmdSkills(args []string, stdout io.Writer) int {
+func cmdSkills(e env, args []string, stdout io.Writer) int {
 	sub, rest, err := requirePositional(args, "subcommand (install)")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -28,7 +28,7 @@ func cmdSkills(args []string, stdout io.Writer) int {
 		})
 	}
 
-	fs := newFlagSet("skills install")
+	fs := newFlagSet(e, "skills install")
 	projectFlag := fs.Bool("project", false, "install under ./.claude/skills of the current directory")
 	destFlag := fs.String("dest", "", "install under <dir>/<name>/SKILL.md instead of the default location")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -37,19 +37,26 @@ func cmdSkills(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	root, err := skillsDestRoot(*projectFlag, *destFlag)
+	root, err := skillsDestRoot(e, *projectFlag, *destFlag)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
-	installed, err := installSkills(root)
+	// Skills are written under the absolute root, so a relative --dest lands
+	// under e's working directory; the table names each file as the root was
+	// given.
+	writeRoot, err := e.abs(root)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	installed, err := installSkills(writeRoot)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
 	var rows [][]string
 	for _, ins := range installed {
-		rows = append(rows, []string{ins.Name, ins.Path})
+		rows = append(rows, []string{ins.Name, filepath.Join(root, ins.Name, "SKILL.md")})
 	}
 	axi.Render(stdout,
 		axi.Table("installed", []string{"name", "path"}, rows),
@@ -62,18 +69,18 @@ func cmdSkills(args []string, stdout io.Writer) int {
 // under: an explicit --dest wins; otherwise --project resolves to
 // ./.claude/skills under the current directory; otherwise it defaults to
 // <user home>/.claude/skills.
-func skillsDestRoot(projectFlag bool, destFlag string) (string, error) {
+func skillsDestRoot(e env, projectFlag bool, destFlag string) (string, error) {
 	if destFlag != "" {
 		return destFlag, nil
 	}
 	if projectFlag {
-		cwd, err := os.Getwd()
+		cwd, err := e.getwd()
 		if err != nil {
 			return "", err
 		}
 		return filepath.Join(cwd, ".claude", "skills"), nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := e.userHomeDir()
 	if err != nil {
 		return "", err
 	}

@@ -94,6 +94,7 @@ func buildLeaseOf(t *testing.T, fx *fixture.Fixture) string {
 // tip, so verifyGreen accepts them only because the start sha is the tip, not
 // the moved main.
 func TestRunBuildsOnAnAdoptedBranchAfterMainMoves(t *testing.T) {
+	t.Parallel()
 	const branch = "add-retry"
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
@@ -133,6 +134,7 @@ func TestRunBuildsOnAnAdoptedBranchAfterMainMoves(t *testing.T) {
 // pool.Acquire's own rule - origin's copy of the branch - not at the target,
 // which a branch built before main moved is not a descendant of.
 func TestRunRecordsTheAdoptedBranchTipAsItsStartSHA(t *testing.T) {
+	t.Parallel()
 	const branch = "add-retry"
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
@@ -159,6 +161,7 @@ func TestRunRecordsTheAdoptedBranchTipAsItsStartSHA(t *testing.T) {
 // branch after jig acquired its lease but before jig built anything on it. The
 // next build fast-forwards the lease and builds on the author's new tip.
 func TestRunFastForwardsAnAdoptedBranchTheAuthorPushedTo(t *testing.T) {
+	t.Parallel()
 	const branch = "add-retry"
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
@@ -197,6 +200,7 @@ func TestRunFastForwardsAnAdoptedBranchTheAuthorPushedTo(t *testing.T) {
 // anything else, and the lease keeps jig's commits: nothing is merged, rebased
 // or reset on the human's behalf.
 func TestRunRefusesAnAdoptedBranchTheAuthorPushedToOverJigsCommits(t *testing.T) {
+	t.Parallel()
 	const branch = "add-retry"
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
@@ -245,6 +249,7 @@ func TestRunRefusesAnAdoptedBranchTheAuthorPushedToOverJigsCommits(t *testing.T)
 // dispatch: it reports nothing green, stalled or parked, and acquires no
 // lease.
 func TestRunAcceptsAnAdoptedTicketWithNoSlices(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 	const ticket = "JIG-2"
@@ -309,6 +314,7 @@ func dispatched(t *testing.T, st *store.Store, ticket string) bool {
 // cutting the branch from the target and building fixes on a branch that lacks
 // the author's code.
 func TestRunRefusesAnAdoptedBranchOriginLost(t *testing.T) {
+	t.Parallel()
 	const branch = "add-retry"
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
@@ -336,6 +342,7 @@ func TestRunRefusesAnAdoptedBranchOriginLost(t *testing.T) {
 // build makes must descend from it, so each attempt failed verification and the
 // slices stalled, with nothing saying why.
 func TestRunFollowsAnAdoptedBranchTheAuthorRewroteBeforeJigBuilt(t *testing.T) {
+	t.Parallel()
 	const branch = "add-retry"
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
@@ -367,6 +374,7 @@ func TestRunFollowsAnAdoptedBranchTheAuthorRewroteBeforeJigBuilt(t *testing.T) {
 // when the branch moves under it - here jig's own commits pushed to origin, as
 // a publish pushes them.
 func TestRunKeepsTheStartSHAOnceJigBuilt(t *testing.T) {
+	t.Parallel()
 	const branch = "add-retry"
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
@@ -404,6 +412,7 @@ func TestRunKeepsTheStartSHAOnceJigBuilt(t *testing.T) {
 // sha followed origin, c's commit would not descend from it and the slice would
 // stall on a green that did not verify.
 func TestRunKeepsAnOrdinaryTicketsStartSHAWhenTheTargetMoves(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 
@@ -473,6 +482,7 @@ func wantAxiCode(t *testing.T, err error, code string) *axi.Error {
 // The way forward the help gives - push them from the machine that built them -
 // works: this machine's lease then follows origin's copy, which holds them.
 func TestRunRefusesABuildLeaseThatLacksWhatJigBuilt(t *testing.T) {
+	t.Parallel()
 	const branch = "add-retry"
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
@@ -537,6 +547,7 @@ func TestRunRefusesABuildLeaseThatLacksWhatJigBuilt(t *testing.T) {
 // remedies: it changes the commits the journal recorded and leaves the start
 // sha where it was.
 func TestRunFollowsTheHelpForABranchRewrittenUnderJigsCommits(t *testing.T) {
+	t.Parallel()
 	const branch = "add-retry"
 	setup := func(t *testing.T) (fx *fixture.Fixture, d Deps, st *store.Store, machineA Deps, leaseA, tip1, tip2 string) {
 		fx = fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
@@ -626,6 +637,7 @@ func leaseCommitT(t *testing.T, dir, file string) string {
 // on it. Refusing it as diverged would send the human to merge the author's
 // discarded history back into the rewritten one.
 func TestRunFollowsAnAdoptedBranchTheAuthorRewroteAfterAParkedFirstRun(t *testing.T) {
+	t.Parallel()
 	const branch = "add-retry"
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
@@ -674,6 +686,7 @@ func TestRunFollowsAnAdoptedBranchTheAuthorRewroteAfterAParkedFirstRun(t *testin
 // is the lease re-cut from origin's, since a copy holding none of jig's
 // verified commits has nothing to protect and the branch is still the author's.
 func TestRunKeepsWhatAnEarlierAttemptLeftInTheLease(t *testing.T) {
+	t.Parallel()
 	const branch = "add-retry"
 	for _, tc := range []struct {
 		name string

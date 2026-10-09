@@ -16,13 +16,13 @@ import (
 )
 
 // cmdGraduate implements `jig graduate <chart> [--store <path>] [--project <name>]`.
-func cmdGraduate(args []string, stdout io.Writer) int {
+func cmdGraduate(e env, args []string, stdout io.Writer) int {
 	chart, rest, err := requirePositional(args, "chart name")
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
-	fs := newFlagSet("graduate")
+	fs := newFlagSet(e, "graduate")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -43,7 +43,7 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, _, _, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
+	st, cfg, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -83,7 +83,7 @@ func cmdGraduate(args []string, stdout io.Writer) int {
 	var createdIDs []string
 	created := map[int]bool{}
 	for {
-		id, pos, done, err := claimOneChartEntry(st, cfg, chart)
+		id, pos, done, err := claimOneChartEntry(e, st, cfg, chart)
 		if err != nil {
 			// Every ticket already claimed (createdIDs) landed on the origin
 			// before this error; running the checkpoint sync for them now,
@@ -240,14 +240,6 @@ type writeChartAfterMintError struct {
 func (e *writeChartAfterMintError) Error() string { return e.err.Error() }
 func (e *writeChartAfterMintError) Unwrap() error { return e.err }
 
-// writeChartForTest, set only by a test in this package, replaces
-// claimOneChartEntry's call to st.WriteChart with its own, so a test can
-// force one particular call to fail deterministically - the same way
-// mirrorClientForTest (main.go) injects a GitHub client for this package's
-// other tests - instead of racing an OS-specific read-only chmod against
-// store.AtomicWrite's own os.Rename, whose failure mode differs by OS.
-var writeChartForTest func(st *store.Store, chart string, entries []store.ChartEntry) error
-
 // errChartFullyGraduated is claimOneChartEntry's internal sentinel: a fresh
 // read of the chart, inside store.Claim's own write (so it is current even
 // after a rejected claim pulled in another clone's work), found no entry
@@ -265,8 +257,10 @@ var errChartFullyGraduated = errors.New("graduate: chart fully graduated")
 // claimOneChartEntry is about to mint already has an id, so none of its refs
 // ever comes back pending. done reports whether the chart had nothing left
 // to claim; id and pos (the entry's 0-based position) are only meaningful
-// when done is false and err is nil.
-func claimOneChartEntry(st *store.Store, cfg project.Config, chart string) (id string, pos int, done bool, err error) {
+// when done is false and err is nil. Its chart write goes through
+// e.writeChart when a test set one, so a test can force one particular call
+// to fail deterministically (see env.writeChart).
+func claimOneChartEntry(e env, st *store.Store, cfg project.Config, chart string) (id string, pos int, done bool, err error) {
 	pos = -1
 	write := func() (string, []string, error) {
 		entries, rerr := st.ReadChart(chart)
@@ -298,9 +292,8 @@ func claimOneChartEntry(st *store.Store, cfg project.Config, chart string) (id s
 		}
 		entries[i].ID = newID
 		writeChart := st.WriteChart
-		if writeChartForTest != nil {
-			wc := writeChartForTest
-			writeChart = func(name string, entries []store.ChartEntry) error { return wc(st, name, entries) }
+		if e.writeChart != nil {
+			writeChart = func(name string, entries []store.ChartEntry) error { return e.writeChart(st, name, entries) }
 		}
 		if werr := writeChart(chart, entries); werr != nil {
 			return "", nil, &writeChartAfterMintError{&axi.Error{

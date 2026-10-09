@@ -1,5 +1,7 @@
 # A demo session at the gate records the change working
 
+**Superseded by [ADR 0029](0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md):** the gate no longer dispatches a demo session. `jig gate --no-demo` (and `jig solve`'s), `Dispatch.ExtraWriteDir`, `gate/round-N/demo.yaml` and the media under `evidence/<store id>/<ticket>/<head sha>/` are gone. A pull request's `## Demo` section is picked at publish from the recordings the build made, and a ticket whose build recorded nothing has none. What follows is the record of the design as it stood. The media rules it set (types, sizes, no links, a file hashed from the very file checked, at most 50 per `gh --attach`) live on in `internal/media`, and the attach path it built (`gh ... --attach`, and the read-back that patches a video's reference) is publish's still.
+
 What a person reviewing a change trusts most is seeing it work: a screenshot
 when one frame shows it, a GIF or a video when it is a flow. A reviewer
 session reads a diff and reports what is wrong with it; it does not produce

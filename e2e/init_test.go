@@ -19,9 +19,10 @@ import (
 // clone and asserts it creates a sibling "<repo>-tickets" store: a fresh git
 // repo on main with project.yaml, ledger.md, and platform/.
 func TestInitStandalone(t *testing.T) {
-	fx, _ := newFixture(t, fixture.Opts{})
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
 
-	r := runJig(t, fx.RepoDir, "init", "--standalone")
+	r := runJig(t, env, fx.RepoDir, "init", "--standalone")
 	if r.Code != 0 {
 		t.Fatalf("jig init --standalone exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
@@ -61,16 +62,17 @@ func TestInitStandalone(t *testing.T) {
 // against a fresh JIG_HOME and asserts the machine mapping it writes there
 // contains the expected entry, keyed by the project's name.
 func TestInitProject(t *testing.T) {
-	// Generate the fixture under its own JIG_HOME (fixture.Generate performs
+	t.Parallel()
+	// Generate the fixture under its own jig home (fixture.Generate performs
 	// its own InitProject call as part of materializing the fixture); then
-	// point a second, fresh JIG_HOME at the `jig init` invocation under test,
+	// point a second, fresh jig home at the `jig init` invocation under test,
 	// so this test actually exercises the CLI's wiring rather than only
 	// re-observing what Generate already did.
-	fx, _ := newFixture(t, fixture.Opts{})
+	fx, env := newFixture(t, fixture.Opts{})
 	targetHome := t.TempDir()
-	t.Setenv("JIG_HOME", targetHome)
+	env.home = targetHome
 
-	r := runJig(t, t.TempDir(), "init", "--store", fx.StoreDir, "--clone", "fixture-repo="+fx.RepoDir)
+	r := runJig(t, env, t.TempDir(), "init", "--store", fx.StoreDir, "--clone", "fixture-repo="+fx.RepoDir)
 	if r.Code != 0 {
 		t.Fatalf("jig init --store --clone exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
@@ -105,7 +107,8 @@ func TestInitProject(t *testing.T) {
 // slices.yaml are written by hand here, the way the intake skill would
 // leave them, so this exercises the real path `jig validate` takes.
 func TestInitStandaloneQuickstart(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	env := jigEnv{home: t.TempDir()}
 
 	parent := t.TempDir()
 	repoDir := filepath.Join(parent, "myrepo")
@@ -113,12 +116,12 @@ func TestInitStandaloneQuickstart(t *testing.T) {
 		t.Fatalf("mkdir repo: %v", err)
 	}
 
-	r := runJig(t, repoDir, "init", "--standalone")
+	r := runJig(t, env, repoDir, "init", "--standalone")
 	if r.Code != 0 {
 		t.Fatalf("jig init --standalone exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
 
-	r = runJig(t, repoDir, "ticket", "new", "--title", "Fix the thing")
+	r = runJig(t, env, repoDir, "ticket", "new", "--title", "Fix the thing")
 	if r.Code != 0 {
 		t.Fatalf("jig ticket new exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
@@ -146,7 +149,7 @@ func TestInitStandaloneQuickstart(t *testing.T) {
 		t.Fatalf("write slices.yaml: %v", err)
 	}
 
-	r = runJig(t, repoDir, "validate", ticket)
+	r = runJig(t, env, repoDir, "validate", ticket)
 	if r.Code != 0 {
 		t.Fatalf("jig validate %s exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", ticket, r.Code, r.Stdout, r.Stderr)
 	}

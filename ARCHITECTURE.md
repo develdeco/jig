@@ -27,20 +27,23 @@ gate           re-verification round: oracles (a pass jig recorded on the same t
   │                    gate/round-N/{findings.yaml,findings.md,report.yaml,diff-changelog.md},
   │                    evidence/round-N/*, slices.yaml (fix slices, findings, from_gate: N),
   │                    intent.md (--intent/--doc, or inferred),
-  │                    ticket.yaml (branch) and start.<repo>.sha (--branch adoption only)
-  │            then, after a clean reviewer round only (best effort, never the verdict):
-  │            a demo session shows the change working
-  │            writes: work/gate.round-N.demo.result.json, gate/round-N/demo.yaml,
-  │                    and, under <jig home>/evidence/ (not in the store), the media and
-  │                    the session's input, demo.json
+  │                    ticket.yaml (branch) and start.<repo>.sha (--branch adoption only),
+  │                    and, when the build recorded scenarios on the reviewed head's
+  │                    history (ADR 0029), under <jig home>/evidence/ (not in the
+  │                    store) the round's recordings.json for the reviewer
   ▼
 publish        reconcile, revalidate, docs, squash (unpushed history only)
                → with a GitHub host, open or update the PR and post
-               pr/review-notes.md as its first comment; with no host, push only
+               pr/review-notes.md as its first comment; with no host, push only.
+               When the build recorded scenarios (ADR 0029), a short session picks
+               the ones the PR's demo shows; with none picked the PR has no
+               Demo section
                reads:  gate/round-N/*, journal.ndjson, ticket.yaml
                writes: changelog/{<ws>.md,consolidated.md},
                        pr/{evidence.md,<repo>.md,review-notes.md},
-                       ledger.md, platform/contract-index.md
+                       ledger.md, platform/contract-index.md,
+                       journal.ndjson (publish-picks), and under <jig home>/evidence/
+                       the picked files and the session's input and result
 ```
 
 A branch built outside jig enters at the gate instead of at the brief: the
@@ -70,21 +73,26 @@ invalidates it:
 Knowledge flows down (repo → session), truth flows sideways (ticket →
 ticket, repo → repo), learning flows up (session → ledger).
 
-One kind of file lives in none of the four, deliberately: a gate demo's media
-(screenshots, GIFs, videos), under `<jig home>/evidence/<store id>/<ticket>/<head sha>/`.
-It is a fifth home, justified by size: the store is a long-lived repo every
-clone carries whole, so a 100 MiB video does not belong in its history, and a
-lease is rewound between rounds. What invalidates a demo is a new reviewed
-head and what can lose it is the machine, so it lives with the machine, like
-the pool; only its small manifest, `gate/round-N/demo.yaml`, lives in the
-store. The session's input, `demo.json`, lives beside the media
-(`<head sha>.demo.json`, in the ticket's evidence directory): it holds the
-absolute `media_dir`, a path that names the operator's jig home, and nothing
-jig itself writes to the store for a demo, which is committed and pushed, does.
-The session's own words (its result file, and the summary and captions
-`demo.yaml` copies from it) are recorded as written, like the reviewer's
-`result.json` summary: jig does not filter or rewrite model prose. See
-[ADR 0014](docs/adr/0014-demo-session-at-the-gate.md).
+One kind of file lives in none of the four, deliberately: a build's recordings
+(screenshots, GIFs, videos, terminal recordings), under
+`<jig home>/evidence/<store id>/<ticket>/`. It is a fifth home, justified by
+size: the store is a long-lived repo every clone carries whole, so a 100 MiB
+video does not belong in its history, and a lease is rewound between rounds.
+What can lose a recording is the machine, so it lives with the machine, like
+the pool. The recordings of a builder's green oracle run
+([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md))
+live in it, one directory per oracle run, under
+`<store id>/<ticket>/recordings/<commit>/<run>/`, and the journal's `recorded`
+line is their manifest: the only thing about them that lives in the store.
+
+The files a publish picks from the recordings are copied to
+`<store id>/<ticket>/picks/<head>/` (as `rec-<n>.<ext>`). The pick session's
+own input and answer, `<head>.picks.json` and `<head>.result.json`, sit beside
+that directory, and the journal's `publish-picks` line records the pick.
+`picks.json` names an absolute path of this machine (the intent file's), so it
+stays out of the store. A reviewer round's list of the
+recordings on the reviewed head's history, `recordings.json`, is written to
+`<store id>/<ticket>/reviews/round-<n>/` for the same reason.
 
 ## Manifest and invariants
 
@@ -145,7 +153,6 @@ charts/
     <id>.attempt-N.result.json
     gate.round-N.review.json
     gate.round-N.result.json
-    gate.round-N.demo.result.json
     intent.json        # intent inference, when attempted
     intent.result.json # kept only when jig accepted it
   gate/
@@ -154,7 +161,6 @@ charts/
       findings.md
       diff-changelog.md
       report.yaml
-      demo.yaml         # a clean reviewer round's demo: recorded (per-file sha256, size, caption) or refused
   evidence/
     round-N/
   changelog/
@@ -170,8 +176,9 @@ charts/
 -A` runs inside its worktree lease, and must never sweep dispatch plumbing
 into a slice's commit. `project.yaml`'s `schema_version` is the compatibility
 contract - a store written by one jig version declares the layout a later
-version must still read. A demo's media are not in this tree at all (see the
-fifth home above): `demo.yaml` names them and holds their hashes.
+version must still read. A build's recordings are not in this tree at all (see
+the fifth home above): the journal's `recorded` line names them and holds their
+hashes.
 
 ## Project configuration
 
@@ -403,40 +410,42 @@ exists.
 
 | Package | Entry points | Input → Output |
 |---|---|---|
-| `cmd/jig/` | `main`, `cmdScreen` | CLI args, or a PreToolUse hook payload on stdin → subcommand dispatch, or a screen allow/deny |
-| `demo/fixture/` | `main` | `-out <dir>` + `-scenario <name>` → a fixture built via `internal/fixture`, and shell `export` lines (JIG_HOME, store dir, scenario dir, the fixture repo's working clone, ticket id) for a VHS tape to eval |
+| `cmd/jig/` | `main`, `Main`, `run`, `cmdScreen` | CLI args and an `env` (the environment, the working directory and the seams a test replaces; the process's for the binary), or a PreToolUse hook payload on stdin → subcommand dispatch, or a screen allow/deny |
 | `e2e/` | (tests only) | the fixture + fake backend → asserts the full brief→publish chain twice; with `JIG_LIVE_CLAUDE`, README's Quickstart through the real `claude` CLI; `JIG_E2E_BINARY` → the same against an installed jig |
 | `internal/axi/` | `Render`, `Table`, `KV`, `Help`, `RenderError`, `ExitCode` | labelled data → jig's plain-text output register and process exit codes |
 | `internal/claudetest/` | `API`, `Session`, `Serve` | scripted sessions (tool calls in order) → a stand-in Messages API on loopback that the real `claude` CLI runs against, for the live CLI tests |
-| `internal/envrun/` | `Up`, `Shell`, `ShellOutput`, `KillTree` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable`; a command with a time limit → its output (an oracle run); a process tree ended whole |
+| `internal/envrun/` | `Up`, `Shell`, `ShellOutput`, `ShellOutputEnv`, `ChildEnv`, `RecordDirEnv`, `KillTree` | a `manifest.EnvClass` + ticket/dir → a running `Handle`, or `Unavailable`; a command with a time limit → its output (an oracle run), `ShellOutputEnv` with extra environment variables for that command alone, no command it runs inherits `JIG_RECORD_DIR` (`ChildEnv`); a process tree ended whole |
 | `internal/fixture/` | `Build`, `Generate`, `RepoRoot` | a dir + `Opts` → a fixture repo, its store, and a scripted attempt scenario (plus the machine mapping under `Opts.Home`, by default the jig home `home.Root` resolves); `Generate` builds into a `t.TempDir()`; `RepoRoot`: a caller's source file → the module root |
-| `internal/frontier/` | `Run`, `Requeue`, `RequeueSlice`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled) |
+| `internal/frontier/` | `Run`, `Requeue`, `RequeueSlice`, `Schedule` | `Deps` + `RunOpts` → a `RunReport` (slices driven to green, parked, env-blocked, or stalled); a builder's green oracle run is given a recording directory in `JIG_RECORD_DIR`, and what the scenarios wrote there, verified by `internal/media`, is journaled as one `recorded` line keyed by the commit the oracle ran at and the run ([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md)) |
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
 | `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `Missing`, `DiffNameOnly`, `FileExistsAtRev`, `PathExistsAtRev`, `IsLocalRemote`, `GuardedPush`, `CommonDir`, `SameDir`, `TopLevel`, `CommitTime`, `OpenRepo` (`Repo`: `State`, `CommitAll`, `Push`, `Fetch`) | argv + a working dir → git plumbing output, or a refused push; a store's directory → the same store operations in process (go-git), or `ErrUseCLI` for the caller's git-program path |
 | `internal/graphify/` | `Detect`, `DetectWith`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that keeps a lease's code graph current and finds the code linked to a slice's goal ([ADR 0026](docs/adr/0026-a-code-graph-gives-the-builder-its-starting-points.md)) or affected by a seed |
-| `internal/home/` | `Root`, `MachinePath`, `PoolDir`, `IntentExcerptDir`, `IntentScratchDir`, `EvidenceDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths, including the directories intent excerpts and summarizer scratch directories go under, and where one reviewed head's demo media live |
+| `internal/home/` | `Root`, `RootFrom`, `UserDirFrom`, `MachinePath`, `PoolDir`, `IntentExcerptDir`, `IntentScratchDir`, `RecordDir`, `PicksDir`, `ReviewDir` | `JIG_HOME` (or the real home dir), read from the process (`Root`) or from a `getenv` it is given (`RootFrom`) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths, including the directories intent excerpts and summarizer scratch directories go under, where the recordings of one builder's oracle run (`RecordDir`: store id, ticket, commit, run) live, where the recordings a publish picked are staged (`PicksDir`: store id, ticket, head), and where a reviewer round's list of the recordings is written (`ReviewDir`: store id, ticket, round) |
 | `internal/intent/` | `NewClaudeReader`, `Best`, `RenderExcerpt` | a repo's git common dir + a time window → matching local agent `Session`s; a scope diff's files → the `Match` a model then summarizes |
-| `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `VerifiedSlices`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
+| `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `VerifiedSlices`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events (a `recorded` line carries the `Recording`s of a builder's green oracle run; a `publish-picks` line carries the `Pick` made of them) → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
 | `internal/manifest/` | `Resolve`, `MatchesInvariant` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes, and invariant-sensitive paths; a file path → whether it matches a declared invariant |
+| `internal/media/` | `Verify`, `Kind`, `PlainName`, `PlainParents` (every directory between an evidence directory and a media directory is a plain one), `LstatPinned`, `HashRegularFile`, `EntryLabel` | a directory jig made + a session's listing of files in it → the `File`s that passed what `gh ... --attach` accepts (a plain name, an allowed type, a regular non-empty file within its size limit, hashed from the very file checked), or a refusal naming the first that did not; a standard-library leaf, so `frontier` and `verifydeliver` can both use it |
 | `internal/mirror/` | `Sync`, `ResolveTicketTitleBody`, `RenderTicketBody`, `RenderChartBody`, `TicketStatus`, `ChartStatus`, `IsOpen`, `FindPullRequests`, `ScanTitleAndBody`, `LoadPublishTerms` | `Deps` (a store, `project.Config`, the jig home, a `github.Client`) + `SyncOpts` → a `SyncReport` (issues created, updated, recreated, linked, placed on the board, skipped on a publish-safety hit, and every drift line), the records written under the bridge's own paths and shape, and a GitHub Project kept current - wired into every `Store.AfterCheckpoint` and `jig trackers sync` |
 | `internal/mirror/github/` | `New`, `Client` (`CreateIssue`, `FetchIssue`, `UpdateIssue`, `CloseIssueCompleted`/`CloseIssueNotPlanned`, `ReopenIssue`, `AddComment`, `AddSubIssue`/`RemoveSubIssue`, `AddBlockedBy`/`RemoveBlockedBy`, `PullRequestsByHead`, `LookupProject`, `EnsureProject`, `PlaceItem`, `ItemFieldValues`, `RepositoryIsPublic`) | an endpoint + token (a fake GraphQL server and a fixed token in every test, `api.github.com/graphql` and `gh auth token` in production) → the GraphQL mutations and queries `internal/mirror` drives a sync through, one mutation per second and retried with backoff (4 attempts) on a server error or a rate limit |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket`, `Compare`, `DivergedError`, `RequireBuilt`, `HoldsUnpushedBuilt`, `MustExistOnOrigin`, `RecutUnlessBuilt` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point, and synced with its branch when origin has it; anything git shows is not a repository of its own is moved aside and cloned afresh; a merge, rebase, am, cherry-pick or revert a crashed session left unfinished is ended with `--quit` and an unmerged index reset to HEAD, never moving a branch, and named in `Lease.Recovered`) |
 | `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping under the jig home root → a `Config` |
-| `internal/repohost/` | `New`, `Host.CreatePR`, `Host.CreatePRWithMedia`, `Host.FindOpenPR`, `Host.UpdatePR`, `Host.UpdatePRWithMedia`, `Host.CommentPR`, `Host.ReadPRBody` | a repo's own `remote:` → a `Host` (a GitHub host, for a remote on github.com over ssh or https; refused up front, `GH_NOT_INSTALLED`, when `gh` is not on PATH) or `nil` (any other remote: a local path, or another host); a branch, base, title and a body file → an opened or updated pull request, with or without the gate's demo media attached, found by its qualified head into a base, or read back |
+| `internal/repohost/` | `New`, `Host.CreatePR`, `Host.CreatePRWithMedia`, `Host.FindOpenPR`, `Host.UpdatePR`, `Host.UpdatePRWithMedia`, `Host.CommentPR`, `Host.ReadPRBody` | a repo's own `remote:` → a `Host` (a GitHub host, for a remote on github.com over ssh or https; refused up front, `GH_NOT_INSTALLED`, when `gh` is not on PATH) or `nil` (any other remote: a local path, or another host); a branch, base, title and a body file → an opened or updated pull request, with or without the picked recordings attached, found by its qualified head into a base, or read back |
 | `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `MatchRound`, `ScoreRound`, `RenderReport` | a labeled corpus (`testdata/revieweval`) + a session backend → a `CaseScore` per case, matched structurally against seeded gold through the real reviewer contract |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
-| `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate demo one extra directory the session may write in) → `result.json` written to disk |
+| `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate round the one file of recordings the reviewer is told to read) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Dearest`, `Default` | build `Signals` (the slice's failed attempts, invariant match) + `Config` → a builder's model rung: invariant floored to the dearest rung, one rung up per failed attempt, otherwise the first rung; `Dearest` is the gate reviewer's rung on every round |
 | `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID`, `TicketIDs`, `Mint`, `Claim`, `ResolveTicket`, `CheckAliases` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by; the store root → every id-shaped folder under any key, sorted by key then number (`TicketIDs`); a key + a ticket's own record → the next id under that key, its folder created and its `ticket.yaml` written whole (refused, before anything is written, when jig cannot use the id it computed); a mint (or other write) + a commit message → that id landed on the store's origin, retried after a push the origin rejects, undone and refused (`ID_NOT_CLAIMED`) after too many or any other failed push, committed with no push on a store with no origin |
 | `internal/termrec/` | `Cast`, `Event`, `ReadAsciicast`, `Cast.WriteAsciicast`, `Cast.Validate`, `Cast.SVG`, `SVGOptions`, `Cast.FinalText`, `NewRecorder`, `Recorder.Stream`, `Recorder.Cast` | a program's writes to its pipes, each stream teed into a `Recorder.Stream` → a terminal recording (its size and each write with its time; asciicast v2); a recording → an animated SVG of the screen as it changed, within `MaxSVGBytes`, or the last frame as text ([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md)) |
-| `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParseDemoResult` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport` (a clean reviewer round also carries its demo: the session's media verified and recorded, or refused), or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one) |
+| `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParsePicksResult`, `RenderPicksPrompt` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport`, or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one: the flows a short session picked from the build's recordings; `PublishOpts.Backend` runs that session and `PublishReport.Picks` says what it did) |
 
 ## Session backends
 
 The contract between jig and any backend is pure disk: jig writes
-`slice.json` (goal, oracle, workspace, prior attempt log, any answered
-question, how long jig's last run of the oracle took on this ticket,
+`slice.json` (goal, oracle, workspace, the path of the ticket's `brief.md` and
+of its `intent.md`, each empty when it has none, the brief sections the slice
+builds from, prior attempt log, any answered question, how long jig's last run
+of the oracle took on this ticket,
 [ADR 0024](docs/adr/0024-builders-are-told-how-long-the-oracle-took.md),
 what the ticket's verified slices did and changed,
 [ADR 0025](docs/adr/0025-a-builder-reads-what-earlier-slices-built.md), and,
@@ -454,20 +463,19 @@ Three backends implement that same narrow interface:
   (`jig _screen`); its allow is jig's own only grant for the session's shell
   and read tools, though the operator's own user settings (which still
   load) can grant more on top. Edits are granted only inside the lease, on
-  the dispatch's own `result.json`, and - for a gate demo - inside its one
-  `ExtraWriteDir` (see Safety). Its shell waits up to 30 minutes on a
+  the dispatch's own `result.json`. Its shell waits up to 30 minutes on a
   command and runs nothing in the background: a command past that bound is
   ended, since nothing collects a background command after the session's
   turn ends ([ADR 0018](docs/adr/0018-builders-test-narrowly.md)). The shell and reads it
   grants are the operator's own and are not confined to the lease, so this
   backend is not a security boundary.
-- **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); it has no PreToolUse hook to attach a screen to, so herdr sessions are not screened. It scopes no edits, so a dispatch's `ExtraWriteDir` needs no grant there. On Windows it creates the workspace at the worktree's WSL mount and rewrites the prompt's own mentions of every path of the dispatch (worktree, input and result files, `ExtraWriteDir`) to their mounts, as headless does its long spelling; the files jig wrote keep the host spelling of the paths they hold. A failed herdr command is named in an error by its subcommand and herdr's stderr, never by its operands (the prompt, the worktree).
+- **herdr** - drives a remote agent through herdr, exec'd natively off Windows and, on Windows, inside a WSL login shell (`JIG_WSL_DISTRO` picks the distro; unset uses WSL's default); it has no PreToolUse hook to attach a screen to, so herdr sessions are not screened. On Windows it creates the workspace at the worktree's WSL mount and rewrites the prompt's own mentions of every path of the dispatch (worktree, input and result files, `ExtraReadFile`) to their mounts, as headless does its long spelling; the files jig wrote keep the host spelling of the paths they hold. A failed herdr command is named in an error by its subcommand and herdr's stderr, never by its operands (the prompt, the worktree).
 
-A `Dispatch` may name one `ExtraWriteDir`: a single absolute directory outside
-the worktree that the session may also write files in, which is where a gate
-demo's media go. The fake backend copies a scenario's demo media into it, and
-a demo's shell tools are governed by the screen wherever one attaches
-(headless, as any session's are), and a session on herdr has none.
+A `Dispatch` may name one `ExtraReadFile`: a single absolute file the prompt tells the session to
+read, a gate round's `recordings.json`. It grants nothing and no backend opens
+it; it is there so that a backend that spells the prompt's paths for its
+session (headless's long spelling, herdr's WSL mount on Windows) spells that
+one too.
 
 Screens attach only where the backend's tool-call surface allows a
 PreToolUse hook, which today is `headless` alone; `fake` has no tool calls
@@ -516,6 +524,32 @@ known finding, a `still_present` id naming no known finding, repeated, or
 also a finding's `prior`, a `still_present` finding whose file is gone
 without a deletion, or `reviewed_paths` missing a `must_review` path all
 fail the round loudly rather than falling back to a partial result.
+
+**Recordings as evidence.** When the build recorded its end-to-end scenarios
+([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md))
+at the reviewed head or an ancestor of it, the round also hands the reviewer
+a `recordings.json` (`internal/verifydeliver/recordings.go`) and its prompt
+gains one paragraph that names it. The list is publish's selection - the
+latest recording of each flow, scenario and step, each checked again against
+its file under the jig home - latest build first, at most 50, each entry
+`{scenario, flow, step, caption, commit, kind, file}` with the absolute path
+of the file. Only the 50 listed are checked, and `omitted` counts the ones
+left out by the cut or because the screen would refuse the reviewer's read of
+the file's name (`.env*`, `*_key*`). It is written under the jig home
+(`<jig home>/evidence/<store id>/<ticket>/reviews/round-<n>/`), never in
+`work/`: it names files of this machine, and the store is shared. The
+reviewer reads the files by those paths with the read tools it already has,
+so the dispatch gets no extra grant (a headless session's reads are not
+scoped to the lease, [ADR 0008](docs/adr/0008-headless-permission-model.md));
+`Dispatch.ExtraReadFile` carries the list's path only so a backend respells
+the prompt's mention of it. What the recordings show is evidence like any
+other: a finding still needs a cause in the diff and cites a recording by its
+scenario, step and commit, and since a reviewer's words reach the store, the
+lease, the jig home and the store are left out by name from every finding's
+free text, the summary and the `result.json` it leaves in `work/`.
+`review.json`, `result.json`'s shape, `still_present` and the read-only guard
+are unchanged. A round with no recordings writes no file, and its
+`review.json` and prompt are what they were before recordings existed.
 
 **Intent inference.** When `resolveIntent` comes back `"none"` and the
 round is about to dispatch a reviewer (nothing outstanding and the scope
@@ -610,69 +644,6 @@ and push best-effort on any error after their own first journal line -
 `Gate`'s `gate-open` line, `Publish`'s own `reconcile` line - under a
 subject naming the ticket and the failure, rather than leaving it for
 the next command's own `Sync` to sweep up anonymously.
-
-## Gate demo contract
-
-After a reviewer round whose verdict is clean, and once everything the round
-wrote is committed and pushed, `Gate` dispatches a demo session
-(`internal/verifydeliver/demo.go`, `demogate.go`) and records what it
-produced, unless a demo is already recorded for that reviewed head or the
-gate ran with `--no-demo` (`jig solve` passes the flag through). Only the
-reviewer source has a `Demo` method, so a scripted round never dispatches
-one. The contract is disk only, like the reviewer's: jig writes `demo.json`
-beside the media, under the jig home (ticket, round, the merge base and the
-head sha, the round's intent `{source, path}` - the very one the reviewer was
-handed, an inferred one included - an absolute `media_dir`, and the
-`limits` - the image and video extensions `gh --attach` accepts, images at
-most 10 MiB, videos at most 100 MiB, at most 50 files; it is not in the store,
-since `media_dir` names the operator's jig home), the session writes
-`work/gate.round-N.demo.result.json` (`{"media": [{"file", "caption"}],
-"summary"}`, where an empty list with a summary saying why nothing is visible
-is valid), and jig reads it back strictly. The prompt states the job, the
-contract and what jig verifies, and says what each intent source means in the
-reviewer prompt's own words (`intentSourcesPrompt`); it names no tool, since a
-repo documents its own demo tooling in its own `CLAUDE.md`.
-
-jig verifies rather than trusts, and refuses a result whole on any failure:
-the gate lease's HEAD and tracked tree are unchanged (the reviewer's own
-guard); the result has a non-empty summary and a non-empty caption on every file;
-`media_dir` is still a plain directory and the very one jig made (a directory
-above it swapped for a link is refused, as is an attempt whose store id or
-ticket directory is already a link); every listed file is a non-empty
-regular file directly inside it (`Lstat`, so a link, a subdirectory or a
-Windows junction is refused; gh refuses an empty file), with an allowed
-extension and within its size limit; at most 50 files. It then renames the
-accepted files `demo-<n>.<ext>` in the order listed and removes everything
-else from `media_dir`, so the directory holds exactly what `demo.yaml` lists. A
-passing result becomes `gate/round-N/demo.yaml`
-(`status: recorded`, `head_sha`, `summary`, and per file `name`, `sha256`,
-`size`, `caption`); anything else becomes `status: refused` with a reason, and
-what the reason holds depends on who refused the demo, since it is committed to
-the store. When the demo session or its backend failed (the dispatch errored,
-or the session wrote no demo result) it is `the demo session failed:` and the
-failure's code (`failureCode`, the code a store commit subject carries for a
-failed gate round), and never the failure's text, which only the gate report
-prints (`demo_detail`) and nothing records; a backend's own stand-in for a
-missing result (a file with the slice result's `outcome` field) is removed from
-`work/` before the demo's own store push. When jig refused what the session wrote, the
-reason is jig's own words: the media directory, the jig home and the store are
-named `media_dir`, `<jig home>` and `<store>` in any operating system or git
-message it quotes, and a file the session listed is named by its index and the
-last element of the string it gave, never by the string, which may be a path
-in any spelling. The `summary` and captions are the session's own words,
-recorded as written.
-A demo is best effort: it never makes a clean round unclean, its refusal is
-recorded and shown in the gate report (`demo: refused`, `demo_reason`, and for
-a failure `demo_detail`), and a
-refused demo does not count as the head's demo, so the next clean round on
-that head tries again. The media themselves live under
-`<jig home>/evidence/<store id>/<ticket>/<head sha>/`, never in the store.
-
-Known v1 limit: env classes are torn down after the oracles, before any
-session runs, so a demo that needs one reports that it cannot record. See
-[ADR 0014](docs/adr/0014-demo-session-at-the-gate.md) for this half of the
-contract, and [Publish](#publish) below for the other: what `jig publish`
-does with a recorded demo when it ships the head it belongs to.
 
 ## A ticket's branch
 
@@ -833,9 +804,9 @@ under a subject naming it (see the store push above).
    `none:branch-on-origin`. `pr/<repo>.md` is then rendered: `## What
    changed` and `## Verification` always, `## Intent` first when the round's
    intent is a binding source with text of its own, and `## Demo` between
-   `## What changed` and `## Verification` when the shipped head has a
-   recorded demo - never more than these four `## ` sections, in this order,
-   and never another. `## Intent` comes from the last clean
+   `## What changed` and `## Verification` when a pick stands (below) -
+   never more than these four `## ` sections, in this order, and never
+   another. `## Intent` comes from the last clean
    round's intent provenance and is left out entirely for `inferred` or
    `none` - an inferred intent summarizes the author's own private agent
    session and never reaches a pull request (`docs/adr/0012-intent-provenance.md`,
@@ -869,35 +840,43 @@ under a subject naming it (see the store push above).
    line per bullet is what keeps a fix slice's goal - the builder prompt
    `buildFixSlices` wrote out of the gate's findings - from dumping those
    findings' own detail into the body, which is what the comment below is for.
-   `## Demo` (`renderDemoSection`) comes from the gate round that recorded
-   one for the shipped head, checked against `checkReviewedHead`'s own: the
-   latest round when its own `gate/round-N/demo.yaml` is `status: recorded`
-   and names that exact head (checked again, not trusted), or - when the
-   latest round ran no demo at all because an earlier one on the same head
-   already had (a later clean round on an unchanged head runs none of its
-   own, ADR 0014's `DemoExisting`) - the earliest earlier round that did.
-   No demo recorded for the head at all (none ever, or one recorded for a
-   different head) and a demo refused outright (`status: refused`) both
-   leave the body with no section, but publish's own output says which:
-   `DemoRenderResult.NoDemo` for the first, `DemoRenderResult.DemoRefused`
-   (carrying demo.yaml's own reason) for the second. Each listed file of a
-   recorded demo is checked again before it is trusted - present in the
-   evidence directory for that head (`demoMediaDir`), with the manifest's
-   own sha256 and size - and a file that fails is left out of the section
-   and named in publish's output rather than rendered as if it were still
-   there (`DemoRenderResult.Omitted`); every listed file failing leaves no
-   section either, which is `DemoRenderResult.AllMediaFailed`, neither of
-   the other two. What renders, when anything does, is the demo's own
-   `summary` and then every verified file with its caption, in
-   `demo.yaml`'s own order and under its own recorded name - never
-   renumbered from the verified files alone - in the one reference form
-   `gh` actually rewrites for its kind (gate finding r1-f3, DECISIONS.md):
-   an image (`demoKind`'s own extension list) as markdown image syntax,
-   `![caption](./<name>)`, which `gh ... --attach` rewrites to the uploaded
-   URL in place; a video as the plain bullet `./<name>: caption` it has
-   never reliably rewritten, which a later step (below) reads back and
-   patches itself where the host can. Neither this function nor
-   `pr/<repo>.md` itself ever names the evidence directory.
+   `## Demo` comes from the recordings the build made, when it made any
+   ([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md),
+   `publishPicks` in `picksrun.go`, run just before the body is written, for
+   the head the gate reviewed). The candidates are the journal's `recorded`
+   lines whose commit that head holds (`gitx.Missing`); of the lines that
+   recorded a flow, scenario and step, the latest one's, every file of it with
+   that key (a screenshot and a video of one step are two candidates), each
+   checked again against its file under the jig
+   home (`pickCandidates`, `recordingProblem`; a failure is named in the
+   output and not offered). With none no session is dispatched and the
+   body has no `## Demo` section. Otherwise one short session (`PublishOpts.Backend`: `jig
+   publish --backend/--scenario`, solve's own backend; the cheapest rung at
+   low effort, an empty scratch directory, no transcript; the fake backend
+   replays `<scenario>/publish/picks-result.json`) is handed `picks.json` and
+   answers `{flows: [{title, items: [{id, caption}]}], summary}`, parsed
+   strictly (`ParsePicksResult`) and validated in jig's words (`resolvePicks`:
+   known ids, none twice, step order within a candidate flow, bounded
+   non-empty words, at most `media.MaxFiles`). The picked files are copied
+   into `PicksDir` (pinned once made, and cleared of whatever an earlier pick
+   of the head left), each hashed as it is copied (`copyRecording`), as
+   `rec-<n>.<ext>` in flow order, and go to the host's attach call; the section
+   (`renderPicksSection`) is the summary, then a `### <title>` per flow with
+   one bullet per recording in the one reference form `gh` actually rewrites
+   for its kind (gate finding r1-f3, DECISIONS.md): an image (`media.Kind`'s
+   own extension list) as markdown image syntax, `![caption](./<name>)`, which
+   `gh ... --attach` rewrites to the uploaded URL in place; a video as the
+   plain bullet `./<name>: caption` it has never reliably rewritten, which a
+   later step (below) reads back and patches itself where the host can. Host
+   paths are left out of the summary, titles and captions whole. Neither this
+   function nor `pr/<repo>.md` itself ever names the staging directory. A refused pick or a failed
+   session is journaled (`publish-picks`, `refused: <reason>`), said on
+   stderr and in `PublishReport.Picks`, and the body has no `## Demo`
+   section. The staged files are checked again after the confirmation and
+   before the push (`verifyStaged`, `PUBLISH_PICKS_CHANGED`: origin untouched,
+   and the next publish reuses the pick and stages afresh). A publish of the same head
+   over the same candidates and intent (their fingerprint) takes the earlier
+   pick from the journal, re-validated, and dispatches nothing.
    `## Verification` names the oracles green at the last clean round
    (`SortedOracleNames`, the manifest Publish itself resolved) and the
    reviewed head, the revalidation tier, and one line counting the review's
@@ -926,9 +905,9 @@ under a subject naming it (see the store push above).
     A pull request with a `## Demo` section's media
     (`DemoRenderResult.MediaFiles`) goes through `CreatePRWithMedia`/
     `UpdatePRWithMedia` instead: both add `--attach <file>` once per
-    verified file to the same `gh pr create`/`gh pr edit` call, run with the
-    evidence directory `renderDemoSection` itself resolved and verified those
-    files against (`DemoRenderResult.MediaDir`, never recomputed from the
+    staged file to the same `gh pr create`/`gh pr edit` call, run with the
+    staging directory the pick copied them to and checked them in
+    (`DemoRenderResult.MediaDir`, never recomputed from the
     branch's own head, which by this point is past the squash) as `gh`'s own
     working directory, after checking that the installed `gh` supports
     `--attach` on the very subcommand about to run (`gh pr create --help` or
@@ -938,7 +917,7 @@ under a subject naming it (see the store push above).
     `UpdatePRWithMedia`'s own `attached` return tells publish to say why. Once
     the call returns, publish reads the pull request's body back (`ReadPRBody`,
     `gh pr view <url> --json body`) - a failed read-back is a warning, not
-    silence - and checks it for any of the demo's own `./<name>` references
+    silence - and checks it for any of the section's own `./<name>` references
     still sitting in it unrewritten (`checkUnrewrittenReferences`), rather than
     parsing `gh`'s own stderr for the same fact. `gh` rewrites a recognized
     image reference in place but not a video's bare path (`gh`'s own "Videos"
@@ -1017,8 +996,7 @@ Claude Code itself launches, with a call the screen must deny, and a hook
 that is missing, fails, answers nothing, or allows it stops the dispatch
 with `SCREEN_UNAVAILABLE` instead of starting the session. The edit tools are
 granted by path-scoped permission rules for the lease worktree, the
-dispatch's `result.json`, and - for a gate demo, and only then - the one
-media directory it names, nothing else in the store. Web access, subagents,
+dispatch's `result.json`, nothing else in the store. Web access, subagents,
 skills and MCP servers are left out of the session entirely. Rules and hook
 travel as one inline `--settings` object, and `--setting-sources user`
 keeps the lease's own `.claude/settings.json` out: that file is content
@@ -1095,11 +1073,14 @@ go test -timeout 30m ./...
 ```
 
 Every test gets its own `t.TempDir()` and its own jig home (passed as an
-argument to the packages that use one, or as `JIG_HOME` via `t.Setenv` to
-`cmd/jig` and the binary), so a test run never touches a real machine's jig
-home, and every
+argument to the packages that use one, as an `env` of its own to `cmd/jig`'s
+`run`, or as `JIG_HOME` in the jig binary's own subprocess environment in
+`e2e`), so a test run never touches a real machine's jig home, and every
 remote used in tests is a bare, file-path repo - no test ever talks to a
-real git host.
+real git host. `cmd/jig` reads the environment, the working directory, the
+terminal check and the solve gate source through that `env`, and `e2e` hands
+each binary run an environment of its own, so both run their tests in
+parallel.
 
 Product commits on the ticket branch (reconcile, memorize, squash) use the
 operator's git identity, resolved with `gitx.IdentityEnv` from their mapped

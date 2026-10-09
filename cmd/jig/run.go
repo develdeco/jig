@@ -11,7 +11,7 @@ import (
 
 // cmdRun implements `jig run <ticket> [--answer <qid> <text>] [--backend
 // fake|headless|herdr] [--scenario <dir>]`.
-func cmdRun(args []string, stdout io.Writer) int {
+func cmdRun(e env, args []string, stdout io.Writer) int {
 	ticket, rest0, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -21,7 +21,7 @@ func cmdRun(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	fs := newFlagSet("run")
+	fs := newFlagSet(e, "run")
 	backendFlag := fs.String("backend", "", "session backend: fake, headless, or herdr")
 	scenario := fs.String("scenario", "", "scenario dir for the fake backend")
 	storeFlag := fs.String("store", "", "explicit store path")
@@ -32,7 +32,10 @@ func cmdRun(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
+	if *scenario, err = e.abs(*scenario); err != nil {
+		return renderErr(stdout, err)
+	}
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -62,13 +65,13 @@ func cmdRun(args []string, stdout io.Writer) int {
 
 // cmdRequeue implements `jig requeue <ticket> --from-brief-diff` and
 // `jig requeue <ticket> --slice <id>`.
-func cmdRequeue(args []string, stdout io.Writer) int {
+func cmdRequeue(e env, args []string, stdout io.Writer) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
-	fs := newFlagSet("requeue")
+	fs := newFlagSet(e, "requeue")
 	fromBriefDiff := fs.Bool("from-brief-diff", false, "requeue slices whose brief section hash changed")
 	sliceFlag := fs.String("slice", "", "requeue one stalled or env-blocked slice by id")
 	storeFlag := fs.String("store", "", "explicit store path")
@@ -79,7 +82,7 @@ func cmdRequeue(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

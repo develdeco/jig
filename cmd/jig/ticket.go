@@ -29,7 +29,7 @@ func resolveTicketArg(st *store.Store, ticket string, stdout io.Writer) (string,
 }
 
 // cmdTicket implements `jig ticket new --title <t>`.
-func cmdTicket(args []string, stdout io.Writer) int {
+func cmdTicket(e env, args []string, stdout io.Writer) int {
 	sub, rest, err := requirePositional(args, "subcommand (new)")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -45,7 +45,7 @@ func cmdTicket(args []string, stdout io.Writer) int {
 		})
 	}
 
-	fs := newFlagSet("ticket new")
+	fs := newFlagSet(e, "ticket new")
 	title := fs.String("title", "", "ticket title (required)")
 	body := fs.String("body", "", "ticket body/description")
 	keyFlag := fs.String("key", "", "key to mint under (required when project.yaml declares more than one)")
@@ -60,7 +60,7 @@ func cmdTicket(args []string, stdout io.Writer) int {
 		return renderErr(stdout, &axi.Error{Msg: "jig ticket new requires --title", Code: "VALIDATION_ERROR"})
 	}
 
-	st, cfg, _, _, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
+	st, cfg, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

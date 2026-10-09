@@ -12,6 +12,7 @@ import (
 // It asserts on the concrete type name via %T rather than reaching into
 // verifydeliver's unexported types.
 func TestGateSourceForCompatibilityRule(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name              string
 		backend, scenario string
@@ -39,6 +40,7 @@ func TestGateSourceForCompatibilityRule(t *testing.T) {
 // --backend - the scripted source runs iff --scenario is set, whatever
 // --backend says; the reviewer runs only without --scenario.
 func TestGateSourceForSolveCompatibilityRule(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		scenario string

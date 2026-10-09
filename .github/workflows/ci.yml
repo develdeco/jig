@@ -23,11 +23,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Named in full so no matrix key beyond os can reach the check names main's
+  # ruleset requires: test (windows-latest), test (ubuntu-latest) and
+  # test (macos-latest). lint/workflow_test.go checks them.
   test:
+    name: test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          # A package a leg leaves to a job of its own: windows-verifydeliver,
+          # below. Every other leg tests every package. lint/workflow_test.go
+          # checks that a job tests each skipped package on the same OS.
+          - os: windows-latest
+            skip-package: github.com/develdeco/jig/internal/verifydeliver
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -62,10 +72,59 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: (git --exec-path) -replace '/', '\' | Add-Content -Path $env:GITHUB_PATH
+      # The packages to test: go list ./... less the matrix's skip-package.
       # go test starts packages in the order it is given them, a few at a
-      # time, so the longest-running package goes first: listed in its
-      # ./... place, it starts among the last, and the step waits on it alone.
-      - run: go test -timeout 30m ./internal/verifydeliver ./...
+      # time, and go list orders them by import path. Putting the
+      # longest-running package first once saved the Windows step 10%, but
+      # that package, verifydeliver, is the one that leg now skips, and the
+      # other legs end in about 200 s and 400 s, far under Windows. The step
+      # fails when go list does (bash runs it with -e), when the skipped
+      # package is not named exactly once (a renamed package would be tested
+      # by no job), and when no package is left.
+      - name: list the packages to test
+        id: packages
+        shell: bash
+        env:
+          SKIP_PACKAGE: ${{ matrix.skip-package }}
+        run: |
+          packages=$(go list ./...)
+          if [ -n "$SKIP_PACKAGE" ]; then
+            found=$(printf '%s\n' "$packages" | awk '$0 == ENVIRON["SKIP_PACKAGE"] { n++ } END { print n + 0 }')
+            if [ "$found" -ne 1 ]; then
+              echo "go list ./... names $SKIP_PACKAGE $found times, want once"
+              exit 1
+            fi
+            packages=$(printf '%s\n' "$packages" | awk '$0 != ENVIRON["SKIP_PACKAGE"]')
+          fi
+          if [ -z "$packages" ]; then
+            echo "no package to test"
+            exit 1
+          fi
+          printf '%s\n' "$packages"
+          echo "list=$(printf '%s\n' "$packages" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+      - name: go test
+        run: go test -timeout 30m ${{ steps.packages.outputs.list }}
+
+  # The package the test job's Windows leg skips, on a Windows runner of its
+  # own. It is one of the leg's two longest (843 s, beside cmd/jig's 852 s,
+  # in a step of 1,050-1,110 s) and the floor once the in-flight diets of
+  # cmd/jig, frontier, e2e and revieweval land; until then cmd/jig bounds the
+  # step and the saving does not show. A package alone on the runner runs
+  # faster than inside a shared step (gitx: 61 s alone, 149 s in the full
+  # step). Main's ruleset does not require this check by name: ci ok needs
+  # it, as it needs every job that runs on pull requests.
+  windows-verifydeliver:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # The test job's step of this name, for the reason given there.
+      - name: git's own binary first on PATH
+        shell: pwsh
+        run: (git --exec-path) -replace '/', '\' | Add-Content -Path $env:GITHUB_PATH
+      - run: go test -timeout 30m ./internal/verifydeliver
 
   # The test job's sessions run against a stub `claude` that accepts any
   # argv. This job runs the real Claude Code CLI, at the latest release (the
@@ -115,7 +174,7 @@ jobs:
   ci-ok:
     name: ci ok
     if: always()
-    needs: [test, claude-cli]
+    needs: [test, windows-verifydeliver, claude-cli]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
