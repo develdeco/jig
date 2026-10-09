@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,8 +24,9 @@ import (
 // and keeping it (with the workspace the human supplies) builds its fix
 // slice.
 func TestOutstandingAskIsOfferedEveryRoundUntilDecided(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "reviewer-no-workspace"})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-no-workspace"})
+	e := testEnv(fx.Home)
 	ticket := fx.Ticket
 
 	gateArgs := []string{"gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
@@ -36,18 +36,18 @@ func TestOutstandingAskIsOfferedEveryRoundUntilDecided(t *testing.T) {
 	// straight through; c pauses on q-001.
 	runArgs := []string{"run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
 	answerArgs := []string{"run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	out, code := runMain(t, "", runArgs...)
+	out, code := runMain(t, e, "", runArgs...)
 	if code != 2 {
 		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\n%s", code, out)
 	}
-	out, code = runMain(t, "", answerArgs...)
+	out, code = runMain(t, e, "", answerArgs...)
 	if code != 0 {
 		t.Fatalf("run (answer) exit = %d, want 0\n%s", code, out)
 	}
 
 	// Round 1: stdin is a strings.Reader, never a terminal, so triage runs
 	// DefaultTriage and the no-workspace ask on go.mod stays undecided.
-	out, code = runMain(t, "", gateArgs...)
+	out, code = runMain(t, e, "", gateArgs...)
 	if code != 2 {
 		t.Fatalf("round 1 exit = %d, want 2 (needs a human)\n%s", code, out)
 	}
@@ -57,7 +57,7 @@ func TestOutstandingAskIsOfferedEveryRoundUntilDecided(t *testing.T) {
 
 	// Between rounds: `jig status` must show the waiting decision, not
 	// "questions: none" and nothing else.
-	statusOut, code := runMain(t, "", "status", ticket, "--store", fx.StoreDir)
+	statusOut, code := runMain(t, e, "", "status", ticket, "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("status exit = %d, want 0\n%s", code, statusOut)
 	}
@@ -86,16 +86,12 @@ func TestOutstandingAskIsOfferedEveryRoundUntilDecided(t *testing.T) {
 	}
 	writeReviewResultAt(t, round2Path, round2)
 
-	prevTerm := stdinIsTerminal
-	stdinIsTerminal = func(io.Reader) bool { return true }
-	defer func() { stdinIsTerminal = prevTerm }()
-
 	// keep the ask, give a decision, then supply the workspace prompt
 	// (go.mod is in no declared workspace) with "alpha". Its oracle
 	// already resolved to the manifest's sole oracle in round 1, so no
 	// oracle prompt follows.
 	stdin := "keep\nBumping the toolchain is intentional.\nalpha\n"
-	out, code = runMain(t, stdin, gateArgs...)
+	out, code = runMain(t, e.atTerminal(), stdin, gateArgs...)
 	if code != 0 {
 		t.Fatalf("round 2 exit = %d, want 0 (the human decided the only outstanding ask)\n%s", code, out)
 	}
@@ -117,7 +113,7 @@ func TestOutstandingAskIsOfferedEveryRoundUntilDecided(t *testing.T) {
 		t.Errorf("r1-f1 decision = %q, want the text typed at the prompt", decision)
 	}
 
-	statusOut, code = runMain(t, "", "status", ticket, "--store", fx.StoreDir)
+	statusOut, code = runMain(t, e, "", "status", ticket, "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("status after round 2 exit = %d, want 0\n%s", code, statusOut)
 	}

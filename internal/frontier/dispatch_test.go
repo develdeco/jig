@@ -1,8 +1,16 @@
 package frontier
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // TestRenderDispatchPromptMatchesGolden pins the build dispatch prompt to a
@@ -16,7 +24,7 @@ func TestRenderDispatchPromptMatchesGolden(t *testing.T) {
 		"Work ONLY in this worktree. Goal: say hello\n" +
 		"Oracle (green = done): go test ./alpha/...\n" +
 		"While you work, run only the tests that cover your change. When you report green, jig runs the oracle and hands you its output if it fails.\n" +
-		"Read your inputs from slice.json at /abs/a.attempt-1.slice.json (brief sections by path, attempt log, prior answer, oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first, earlier_slices: what this ticket's verified slices did and the files they changed, and related: the files and symbols a code graph links to your goal, empty when the project keeps none).\n" +
+		"Read your inputs from slice.json at /abs/a.attempt-1.slice.json (brief: the path of the ticket's brief.md, and intent: the path of its intent.md, each empty when it has none; brief sections by path, attempt log, prior answer, oracle_seconds: how long jig's last run of the oracle took on this ticket, 0 before the first, earlier_slices: what this ticket's verified slices did and the files they changed, and related: the files and symbols a code graph links to your goal, empty when the project keeps none).\n" +
 		"Commit as you land. When finished write result.json at /abs/a.attempt-1.result.json with exactly one JSON object: " +
 		`{"outcome": "green|code-bug|flawed-brief|oracle-wrong|blocked-by-env|needs-input|failed", "summary": "...", "commit": "<sha>", "question": "only for needs-input", "artifacts": ["relative paths"]}`
 	if got != want {
@@ -60,4 +68,149 @@ func TestRenderDirtyTreePromptMatchesGolden(t *testing.T) {
 	if got != want {
 		t.Errorf("prompt does not match the golden text.\ngot:\n%s\nwant:\n%s", got, want)
 	}
+}
+
+// TestRunNamesTheTicketsBriefAndIntentInEverySliceJSON: slice.json's brief is
+// the absolute store-side path of the ticket's brief.md for every slice,
+// whether or not the slice builds from any of its sections. A gate fix slice
+// cites none (it has no from_brief), yet its goal is findings that cite
+// brief.md#<section>; with no path a builder searched the disk for the file.
+// A ticket with no brief.md gets "". Its intent is the same for intent.md: a
+// ticket with no brief can still carry its intent there, which its findings
+// are judged against.
+func TestRunNamesTheTicketsBriefAndIntentInEverySliceJSON(t *testing.T) {
+	t.Parallel()
+
+	// rawEmptyField reports whether slice a's slice.json holds the field with the
+	// value "": present, not left out.
+	rawEmptyField := func(t *testing.T, st *store.Store, ticket, field string) bool {
+		t.Helper()
+		raw, err := os.ReadFile(sliceJSONPath(st, ticket, "a", 1))
+		if err != nil {
+			t.Fatalf("read a's slice.json: %v", err)
+		}
+		return strings.Contains(string(raw), `"`+field+`":""`)
+	}
+
+	t.Run("a slice with no from_brief on a ticket that has a brief", func(t *testing.T) {
+		t.Parallel()
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+		d, st := newDeps(t, fx)
+		slices, err := st.ReadSlices(fx.Ticket)
+		if err != nil {
+			t.Fatalf("ReadSlices: %v", err)
+		}
+		for i := range slices {
+			if slices[i].ID == "a" {
+				slices[i].FromBrief = nil
+			}
+		}
+		data, err := yaml.Marshal(store.SliceFile{Slices: slices})
+		if err != nil {
+			t.Fatalf("marshal slices: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(st.TicketDir(fx.Ticket), "slices.yaml"), data, 0o644); err != nil {
+			t.Fatalf("write slices.yaml: %v", err)
+		}
+		if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+
+		want, err := os.ReadFile(filepath.Join(st.TicketDir(fx.Ticket), "brief.md"))
+		if err != nil || len(want) == 0 {
+			t.Fatalf("test setup: the ticket must have a brief: %v", err)
+		}
+		a := readSliceJSON(t, st, fx.Ticket, "a")
+		if len(a.BriefSections) != 0 {
+			t.Fatalf("a's brief_sections = %v, want none: it builds from no section", a.BriefSections)
+		}
+		if !filepath.IsAbs(a.Brief) {
+			t.Fatalf("a's brief = %q, want an absolute path", a.Brief)
+		}
+		got, err := os.ReadFile(a.Brief)
+		if err != nil {
+			t.Fatalf("a's brief %q does not name a readable file: %v", a.Brief, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("a's brief %q holds %q, want the ticket's brief.md %q", a.Brief, got, want)
+		}
+		if a.Intent != "" || !rawEmptyField(t, st, fx.Ticket, "intent") {
+			t.Errorf("a's intent = %q, want \"\": the ticket has no intent.md", a.Intent)
+		}
+
+		// A slice that does build from sections is told the same path, and its
+		// section paths are under it.
+		b := readSliceJSON(t, st, fx.Ticket, "b")
+		if b.Brief != a.Brief {
+			t.Errorf("b's brief = %q, want a's %q: the ticket has one brief", b.Brief, a.Brief)
+		}
+		if len(b.BriefSections) == 0 {
+			t.Fatalf("b's brief_sections is empty, want its sections")
+		}
+		for _, sec := range b.BriefSections {
+			if !strings.HasPrefix(sec, b.Brief+"#") {
+				t.Errorf("b's brief section %q is not under its brief %q", sec, b.Brief)
+			}
+		}
+	})
+
+	t.Run("a ticket with no brief.md and no intent.md", func(t *testing.T) {
+		t.Parallel()
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+		d, st := newDeps(t, fx)
+		if err := os.Remove(filepath.Join(st.TicketDir(fx.Ticket), "brief.md")); err != nil {
+			t.Fatalf("remove brief.md: %v", err)
+		}
+		if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		got := readSliceJSON(t, st, fx.Ticket, "a")
+		if got.Brief != "" {
+			t.Errorf("a's brief = %q, want \"\": the ticket has no brief.md", got.Brief)
+		}
+		if got.Intent != "" {
+			t.Errorf("a's intent = %q, want \"\": the ticket has no intent.md", got.Intent)
+		}
+		for _, field := range []string{"brief", "intent"} {
+			if !rawEmptyField(t, st, fx.Ticket, field) {
+				t.Errorf("a's slice.json has no \"%s\":\"\" field", field)
+			}
+		}
+	})
+
+	t.Run("a ticket with an intent.md and no brief.md", func(t *testing.T) {
+		t.Parallel()
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+		d, st := newDeps(t, fx)
+		if err := os.Remove(filepath.Join(st.TicketDir(fx.Ticket), "brief.md")); err != nil {
+			t.Fatalf("remove brief.md: %v", err)
+		}
+		if err := st.WriteIntent(fx.Ticket, store.Intent{Source: "explicit", Text: "keep the adopted branch's behavior"}); err != nil {
+			t.Fatalf("WriteIntent: %v", err)
+		}
+		if _, err := Run(d, RunOpts{Ticket: fx.Ticket}); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+
+		want, err := os.ReadFile(st.IntentPath(fx.Ticket))
+		if err != nil || len(want) == 0 {
+			t.Fatalf("test setup: the ticket must have an intent.md: %v", err)
+		}
+		for _, id := range []string{"a", "b"} {
+			body := readSliceJSON(t, st, fx.Ticket, id)
+			if body.Brief != "" {
+				t.Errorf("%s's brief = %q, want \"\": the ticket has no brief.md", id, body.Brief)
+			}
+			if !filepath.IsAbs(body.Intent) {
+				t.Fatalf("%s's intent = %q, want an absolute path", id, body.Intent)
+			}
+			got, err := os.ReadFile(body.Intent)
+			if err != nil {
+				t.Fatalf("%s's intent %q does not name a readable file: %v", id, body.Intent, err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Errorf("%s's intent %q holds %q, want the ticket's intent.md %q", id, body.Intent, got, want)
+			}
+		}
+	})
 }

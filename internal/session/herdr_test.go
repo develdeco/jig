@@ -260,12 +260,12 @@ func readHerdrLoggedArgv(t *testing.T, logFile string) [][]string {
 func TestHerdrErrorsNameTheCommandAndNotItsOperands(t *testing.T) {
 	const (
 		worktree = `C:\demo\pool\repo\T-1-gate`
-		input    = `C:\demo\store\T-1\work\gate.round-1.demo.json`
-		extra    = `D:\jighome\evidence\id\T-1\abc`
+		input    = `C:\demo\store\T-1\work\gate.round-1.review.json`
+		list     = `D:\jighome\evidence\id\T-1\reviews\round-1\recordings.json`
 		marker   = "OPERAND-WORDS-OF-THE-PROMPT"
 	)
-	resultJSON := filepath.Join(t.TempDir(), "gate.round-1.demo.result.json")
-	prompt := fmt.Sprintf("%s: inputs in %s, media into %s, result at %s, worktree %s", marker, input, extra, resultJSON, worktree)
+	resultJSON := filepath.Join(t.TempDir(), "gate.round-1.result.json")
+	prompt := fmt.Sprintf("%s: inputs in %s, list at %s, result at %s, worktree %s", marker, input, list, resultJSON, worktree)
 
 	cases := []struct {
 		name   string
@@ -294,8 +294,8 @@ func TestHerdrErrorsNameTheCommandAndNotItsOperands(t *testing.T) {
 				t.Setenv(c.env, c.sub)
 
 				err := (&herdrBackend{goos: goos}).Run(Dispatch{
-					Ticket: "T-1", Slice: GateDemoSlice, Attempt: 1, Worktree: worktree,
-					SliceJSON: input, ResultJSON: resultJSON, ExtraWriteDir: extra, Prompt: prompt,
+					Ticket: "T-1", Slice: "gate", Attempt: 1, Worktree: worktree,
+					SliceJSON: input, ResultJSON: resultJSON, ExtraReadFile: list, Prompt: prompt,
 				})
 				if err == nil {
 					t.Fatal("Run succeeded, want the failing command's error")
@@ -308,9 +308,9 @@ func TestHerdrErrorsNameTheCommandAndNotItsOperands(t *testing.T) {
 					t.Errorf("error %q dropped herdr's own stderr", got)
 				}
 				for _, operand := range []string{
-					marker, worktree, input, extra, resultJSON,
-					WSLPath(worktree), WSLPath(input), WSLPath(extra), WSLPath(resultJSON),
-					"jig-T-1-gate-demo", "--cwd", "--wait",
+					marker, worktree, input, list, resultJSON,
+					WSLPath(worktree), WSLPath(input), WSLPath(list), WSLPath(resultJSON),
+					"jig-T-1-gate", "--cwd", "--wait",
 				} {
 					if strings.Contains(got, operand) {
 						t.Errorf("error %q echoes the operand %q", got, operand)

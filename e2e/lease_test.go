@@ -40,10 +40,11 @@ func newEnclosingRepo(t *testing.T) string {
 // run` leaves its branch, refs and uncommitted work alone, moves the broken
 // lease aside instead of deleting it, and builds in a fresh clone.
 func TestRunRecoversBrokenLeaseInsideEnclosingRepo(t *testing.T) {
+	t.Parallel()
 	enclosing := newEnclosingRepo(t)
 	home := filepath.Join(enclosing, "jig-home")
-	t.Setenv("JIG_HOME", home)
-	fx := fixture.Generate(t, fixture.Opts{})
+	env := jigEnv{home: home}
+	fx := fixture.Generate(t, fixture.Opts{Home: home})
 
 	lease := poolBuildLeaseDir(home, "fixture-repo", fx.Ticket)
 	pack := filepath.Join(lease, ".git", "objects", "pack", "pack-leftover.pack")
@@ -58,7 +59,7 @@ func TestRunRecoversBrokenLeaseInsideEnclosingRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := runJig(t, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r := runJig(t, env, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 
 	if got := gitLog(t, enclosing, "symbolic-ref", "--short", "HEAD"); got != "main" {
 		t.Errorf("enclosing repo HEAD = %q, want main: jig checked out a branch in it", got)
@@ -114,13 +115,14 @@ func TestRunRecoversBrokenLeaseInsideEnclosingRepo(t *testing.T) {
 // moving it aside would drop a, b and d from the ticket branch while the
 // store still calls them green.
 func TestRunRefusesCorruptHEADBuildLeaseInsideEnclosingRepo(t *testing.T) {
+	t.Parallel()
 	enclosing := newEnclosingRepo(t)
 	home := filepath.Join(enclosing, "jig-home")
-	t.Setenv("JIG_HOME", home)
-	fx := fixture.Generate(t, fixture.Opts{})
+	env := jigEnv{home: home}
+	fx := fixture.Generate(t, fixture.Opts{Home: home})
 
 	lease := poolBuildLeaseDir(home, "fixture-repo", fx.Ticket)
-	r1 := runJig(t, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r1 := runJig(t, env, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r1.Code != 2 {
 		t.Fatalf("run 1 exit %d, want 2 (paused on a question with a, b, d green)\nstdout:\n%s\nstderr:\n%s", r1.Code, r1.Stdout, r1.Stderr)
 	}
@@ -134,7 +136,7 @@ func TestRunRefusesCorruptHEADBuildLeaseInsideEnclosingRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r2 := runJig(t, fx.StoreDir, "run", fx.Ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r2 := runJig(t, env, fx.StoreDir, "run", fx.Ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r2.Code == 0 {
 		t.Fatalf("run 2 (continuing over a corrupt-HEAD lease) exit 0, want an error\nstdout:\n%s\nstderr:\n%s", r2.Stdout, r2.Stderr)
 	}
@@ -164,7 +166,8 @@ func TestRunRefusesCorruptHEADBuildLeaseInsideEnclosingRepo(t *testing.T) {
 // directory X's gate resets and cleans. Every command that takes a ticket
 // must refuse such an id before any lease exists.
 func TestReservedLeaseSuffixTicketRefused(t *testing.T) {
-	fx, home := newFixture(t, fixture.Opts{})
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
 
 	for _, id := range []string{fx.Ticket + "-gate", fx.Ticket + "-GATE", fx.Ticket + "-publish"} {
 		src := filepath.Join(fx.StoreDir, fx.Ticket)
@@ -189,15 +192,15 @@ func TestReservedLeaseSuffixTicketRefused(t *testing.T) {
 			{"publish", id, "--yes"},
 			{"status", id},
 		} {
-			r := runJig(t, fx.StoreDir, args...)
+			r := runJig(t, env, fx.StoreDir, args...)
 			if r.Code == 0 || !strings.Contains(r.Stdout, "reserves") || !strings.Contains(r.Stdout, id) {
 				t.Errorf("jig %s: exit %d, want a non-zero exit naming %s as a reserved id\nstdout:\n%s\nstderr:\n%s",
 					strings.Join(args, " "), r.Code, id, r.Stdout, r.Stderr)
 			}
 		}
 
-		if _, err := os.Stat(poolBuildLeaseDir(home, "fixture-repo", id)); !os.IsNotExist(err) {
-			t.Errorf("a lease exists at %s after refusing ticket %s (stat err %v)", poolBuildLeaseDir(home, "fixture-repo", id), id, err)
+		if _, err := os.Stat(poolBuildLeaseDir(env.home, "fixture-repo", id)); !os.IsNotExist(err) {
+			t.Errorf("a lease exists at %s after refusing ticket %s (stat err %v)", poolBuildLeaseDir(env.home, "fixture-repo", id), id, err)
 		}
 	}
 }

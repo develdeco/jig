@@ -9,8 +9,8 @@ import (
 )
 
 // cmdVersion implements `jig version`.
-func cmdVersion(args []string, stdout io.Writer) int {
-	fs := newFlagSet("version")
+func cmdVersion(e env, args []string, stdout io.Writer) int {
+	fs := newFlagSet(e, "version")
 	if handled, err := parseFlags(stdout, fs, args); handled {
 		return 0
 	} else if err != nil {

@@ -72,17 +72,6 @@ and drives the real `jig` binary every time.
   `--yes`), and no intent is inferred: the reports say `intent: none`, where a
   reviewer round on an adopted branch infers one like any brief-less ticket's.
   The fixture's tracker is local, so no pull request is opened.
-- **`gate-demo.tape`** - a clean gate round with its demo, against the `demo`
-  fixture scenario: the reviewer reports nothing, so the round is clean, and
-  the demo session that follows shows the change working (the fake backend
-  plays back two small SVG frames drawn from the fixture's own test cases).
-  The gate report prints the demo line and the files recorded, `cat` shows the
-  `gate/round-1/demo.yaml` manifest the round left in the store, `ls` shows
-  the media where they live (under the jig home, never in the store), and a
-  second round on the same head says its demo already exists. It mirrors
-  `cmd/jig/gate_demo_e2e_test.go`'s `TestGateDemoThroughMain`, with the same
-  outcome-vs-wording split as the tapes above. No interactive prompt appears
-  on camera, so every `Wait` is bare.
 - **`publish-body.tape`** - what `jig publish` leaves behind: `jig status`
   showing every slice green over the same `reviewer` fixture scenario
   `gate-reviewer.tape` records, `jig publish --yes` on the local tracker (the

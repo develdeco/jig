@@ -11,7 +11,7 @@ The same for any repo, each item pointing at the decision that implements it:
 - **jig runs the oracle** (ADR 0020) at a builder's green, and **the gate reuses that pass** on the same tree (ADR 0021): the full suite runs where its result is evidence.
 - **The review reads** (ADR 0017): the gate's oracles are the test evidence, and the reviewer runs no tests.
 - **A test diet is a refactor.** Its guardrails are the seams. Its PR names, for every test it deletes or merges, the seam test that covers the behavior, or says why no seam needs it, and reports `go test -cover` before and after; coverage is reported, never gated. The list belongs in the PR, never in a brief's Seams section.
-- **Demos come from the build's end-to-end scenarios**, decided 2026-10-05 and built by a later ticket; ADR 0014's gate demo session stands until then.
+- **Demos come from the build's end-to-end scenarios** (ADR 0029), decided 2026-10-05; ADR 0014's gate demo session is retired.
 
 The intake skill carries the chain and diet principles into every brief, sizes slices so one cohesive change is one slice (the REPRO, GUARDRAIL and prefactoring slices stay their own), and has a slice that proves itself with the repo's whole suite name that manifest oracle rather than write its command out, so it gets the repo's declared command and the gate can reuse its pass. The oracle's name is the project's fact: whatever `.claude/jig.yaml` declares, or the detected default, such as `test` for a Go repo.
 
