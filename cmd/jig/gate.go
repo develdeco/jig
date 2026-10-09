@@ -35,20 +35,19 @@ func gateSourceFor(backendFlag, scenario string) (verifydeliver.GateSource, erro
 }
 
 // cmdGate implements `jig gate <ticket> [--early] [--branch <name>] [--intent
-// <text> | --doc <path>] [--no-demo] [--pr <n>] [--yes] [--backend
+// <text> | --doc <path>] [--pr <n>] [--yes] [--backend
 // fake|headless|herdr] [--scenario <dir>]`.
-func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
+func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
-	fs := newFlagSet("gate")
+	fs := newFlagSet(e, "gate")
 	early := fs.Bool("early", false, "gate before the frontier is fully green")
 	branch := fs.String("branch", "", "review this branch, built outside jig, and adopt it as the ticket's own (recorded on the first round)")
 	intent := fs.String("intent", "", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md); with no brief, --intent or --doc, a reviewer round reads your local Claude Code sessions for this repo and has a model summarize the best match into intent.md")
 	doc := fs.String("doc", "", "doc file whose content becomes the ticket's explicit intent, recorded as intent.md (refused when the ticket has a brief.md)")
-	noDemo := fs.Bool("no-demo", false, "skip the demo session a clean reviewer round otherwise runs")
 	prNum := fs.Int("pr", 0, "pr number (not implemented in v0.1)")
 	yes := fs.Bool("yes", false, "keep every finding jig can route on its own, without the triage prompt")
 	backendFlag := fs.String("backend", "", "session backend for the reviewer: fake, headless, or herdr")
@@ -103,7 +102,13 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 		})
 	}
 
-	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
+	if *doc, err = e.abs(*doc); err != nil {
+		return renderErr(stdout, err)
+	}
+	if *scenario, err = e.abs(*scenario); err != nil {
+		return renderErr(stdout, err)
+	}
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -122,16 +127,15 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	deps := verifydeliverDeps(st, cfg, mp, jigHome)
+	deps := verifydeliverDeps(e, st, cfg, mp, jigHome)
 	report, err := verifydeliver.Gate(deps, src, verifydeliver.GateOpts{
 		Ticket:    ticket,
 		Early:     *early,
 		Branch:    *branch,
 		Intent:    *intent,
 		IntentDoc: *doc,
-		NoDemo:    *noDemo,
 		PRMode:    *prNum != 0,
-		Triage:    triageFor(*yes, stdin, stdout),
+		Triage:    triageFor(e, *yes, stdin, stdout),
 	})
 	if err != nil {
 		return renderErr(stdout, err)
@@ -175,7 +179,6 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	if report.BudgetParked > 0 {
 		kv = append(kv, [2]string{"fix_budget", fmt.Sprintf("reached (%d of %d): %d finding(s) parked", report.BudgetUsed, report.BudgetLimit, report.BudgetParked)})
 	}
-	kv = append(kv, demoRows(report.Demo)...)
 	blocks := []string{
 		axi.KV("gate", kv),
 		axi.Table("target_sha", []string{"repo", "sha"}, shaRows),
@@ -208,13 +211,6 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 			needsRows = append(needsRows, []string{f.ID, f.Risk, fileLine(f), f.Title, f.RiskRationale})
 		}
 		blocks = append(blocks, axi.Table("needs_a_human", []string{"id", "risk", "file:line", "title", "risk_rationale"}, needsRows))
-	}
-	if report.Demo != nil && len(report.Demo.Media) > 0 {
-		var mediaRows [][]string
-		for _, m := range report.Demo.Media {
-			mediaRows = append(mediaRows, []string{m.Name, strconv.FormatInt(m.Size, 10), m.Caption})
-		}
-		blocks = append(blocks, axi.Table("demo_media", []string{"name", "bytes", "caption"}, mediaRows))
 	}
 	blocks = append(blocks, axi.Help(gateReportHint(st, ticket, report)...))
 	axi.Render(stdout, blocks...)
@@ -257,36 +253,4 @@ func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateRep
 		return []string{fmt.Sprintf("Run `jig gate %s` at a terminal to decide the listed asks", ticket)}
 	}
 	return []string{hintOrFallback(st, ticket)}
-}
-
-// demoRows renders a round's demo as gate-report key/value rows: nothing for
-// a round that ran no demo (a scripted round, a round that was not clean, or
-// --no-demo), otherwise its status, then the one detail that status carries -
-// the session's summary for a recorded demo (the reason nothing is visible,
-// when there is no media), the reason for a refused one (and, when the demo
-// session or its backend failed, that failure's text, which only this report
-// carries: demo.yaml records the failure's code alone), the earlier round for
-// an existing one - and a warning when demo.yaml was written but the store
-// push carrying it failed. A demo's outcome never changes the verdict
-// row above it.
-func demoRows(demo *verifydeliver.DemoReport) [][2]string {
-	if demo == nil {
-		return nil
-	}
-	rows := [][2]string{{"demo", demo.Status}}
-	switch demo.Status {
-	case verifydeliver.DemoRecorded:
-		rows = append(rows, [2]string{"demo_summary", demo.Summary})
-	case verifydeliver.DemoRefused:
-		rows = append(rows, [2]string{"demo_reason", demo.Reason})
-		if demo.Detail != "" {
-			rows = append(rows, [2]string{"demo_detail", demo.Detail})
-		}
-	case verifydeliver.DemoExisting:
-		rows = append(rows, [2]string{"demo_round", strconv.Itoa(demo.Round)})
-	}
-	if demo.Warning != "" {
-		rows = append(rows, [2]string{"demo_warning", demo.Warning})
-	}
-	return rows
 }

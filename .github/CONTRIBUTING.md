@@ -1,6 +1,6 @@
 # Contributing
 
-jig is a Go project. Building needs only Go 1.27+; testing also needs `git`
+jig is a Go project. Building needs only Go 1.27.2+; testing also needs `git`
 on PATH, since the suite spawns real git commands against local, file-path
 repos.
 
@@ -13,6 +13,15 @@ go test -timeout 30m ./...
 
 `gofmt -l .` should print nothing, and `go vet ./...` should be clean. See
 Testing rules below for what the suite does and doesn't touch.
+
+While working, run `go build ./...`, `go vet ./...` and `gofmt -l .`, and test
+what your change can break: the packages you touched (`go test
+./internal/store`, say), the packages that import them when behavior changes,
+and `./lint`, whose checks cover files across the repo (skills, workflows,
+tests). The full suite takes minutes; CI runs it on all three platforms on
+every pull request, and jig's gate runs it as this repo's `test` oracle
+(`.claude/jig.yaml`). A jig build slice's own oracle runs when its builder
+reports green.
 
 ## Making a change
 
@@ -88,9 +97,22 @@ annotation.
 - Every test gets its own `t.TempDir()`, and its own jig home, so a test
   run never touches a real machine's: packages take the jig home root as an
   argument (`fixture.Opts.Home`, `verifydeliver.Deps.Home`,
-  `frontier.Deps.Home`, `pool.Acquire`), and a test passes a `t.TempDir()`;
-  a test that runs `cmd/jig` or the jig binary, which read `JIG_HOME`, sets
-  it with `t.Setenv`.
+  `frontier.Deps.Home`, `pool.Acquire`), and a test passes a `t.TempDir()`.
+  `cmd/jig` takes what it reads from the process (the environment, the
+  working directory, the terminal check, the solve gate source) as an `env`
+  per run, so a `cmd/jig` test hands `run` an env of its own (`testEnv(home)`)
+  instead of calling `t.Setenv` or `t.Chdir`, and calls `t.Parallel()`.
+  `e2e`'s tests hand the jig binary `JIG_HOME` (and, for the tests built on
+  `newFixture`, `HOME` and `USERPROFILE`) in its own environment (`jigEnv`
+  and `runJig`), never through the test process's, so they run in parallel
+  with each other. Two `cmd/jig` tests must edit the process and stay
+  serial: the one that checks `Main` reads the process's `JIG_HOME`, and the
+  one that sets git's commit dates in the environment, which the `git
+  commit` child reads from it.
+- `e2e` records each jig run it makes, as an SVG with a tag beside it, into
+  the directory named by `JIG_RECORD_DIR` when the build sets it (jig does,
+  for the oracle run at a builder's green; ADR 0029). Unset, it records
+  nothing, and a recording that cannot be made never fails a test.
 
 ## Tests against the real Claude Code CLI
 

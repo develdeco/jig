@@ -7,14 +7,13 @@ import (
 	"path/filepath"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/project"
 )
 
 // cmdInit implements `jig init [--standalone] [--store <path>] [--clone
 // <name>=<path>]...`.
-func cmdInit(args []string, stdout io.Writer) int {
-	fs := newFlagSet("init")
+func cmdInit(e env, args []string, stdout io.Writer) int {
+	fs := newFlagSet(e, "init")
 	standalone := fs.Bool("standalone", false, "create a sibling tickets store next to the current repo")
 	storeFlag := fs.String("store", "", "store path to initialize (used with --clone)")
 	var clones cloneFlag
@@ -26,7 +25,7 @@ func cmdInit(args []string, stdout io.Writer) int {
 	}
 
 	if *standalone {
-		cwd, err := os.Getwd()
+		cwd, err := e.getwd()
 		if err != nil {
 			return renderErr(stdout, err)
 		}
@@ -43,7 +42,7 @@ func cmdInit(args []string, stdout io.Writer) int {
 		}
 		// Resolved before the store is created, so a home that cannot be
 		// resolved leaves nothing half-initialized behind.
-		jigHome, err := home.Root()
+		jigHome, err := e.jigHome()
 		if err != nil {
 			return renderErr(stdout, err)
 		}
@@ -71,11 +70,24 @@ func cmdInit(args []string, stdout io.Writer) int {
 			Code: "VALIDATION_ERROR",
 		})
 	}
-	jigHome, err := home.Root()
+	jigHome, err := e.jigHome()
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	cfg, err := project.InitProject(jigHome, *storeFlag, clones.m)
+	storePath, err := e.abs(*storeFlag)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	var clonePaths map[string]string
+	if clones.m != nil {
+		clonePaths = make(map[string]string, len(clones.m))
+		for name, path := range clones.m {
+			if clonePaths[name], err = e.abs(path); err != nil {
+				return renderErr(stdout, err)
+			}
+		}
+	}
+	cfg, err := project.InitProject(jigHome, storePath, clonePaths)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

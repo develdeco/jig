@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,8 +43,9 @@ func sampleTriageInput() verifydeliver.TriageInput {
 // --- triageFor selection ----------------------------------------------------
 
 func TestTriageForYesKeepsEverythingWithoutTouchingStdin(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
-	f := triageFor(true, strings.NewReader(""), &out)
+	f := triageFor(processEnv(), true, strings.NewReader(""), &out)
 	res := f(sampleTriageInput())
 	if len(res.DismissedFixIDs) != 0 {
 		t.Errorf("DismissedFixIDs = %v, want none", res.DismissedFixIDs)
@@ -64,6 +64,7 @@ func TestTriageForYesKeepsEverythingWithoutTouchingStdin(t *testing.T) {
 // TestTriageForNoteNamesWhyWhenNothingIsLeft pins the note line for a
 // round with nothing left for a human: it still names why no prompt ran.
 func TestTriageForNoteNamesWhyWhenNothingIsLeft(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		yes  bool
 		want string
@@ -73,7 +74,7 @@ func TestTriageForNoteNamesWhyWhenNothingIsLeft(t *testing.T) {
 	} {
 		var out bytes.Buffer
 		in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
-		triageFor(tc.yes, strings.NewReader(""), &out)(in)
+		triageFor(processEnv(), tc.yes, strings.NewReader(""), &out)(in)
 		if out.String() != tc.want {
 			t.Errorf("yes=%v: note = %q, want %q", tc.yes, out.String(), tc.want)
 		}
@@ -81,8 +82,9 @@ func TestTriageForNoteNamesWhyWhenNothingIsLeft(t *testing.T) {
 }
 
 func TestTriageForNonTerminalNeverPrompts(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
-	f := triageFor(false, strings.NewReader("n\nn\nn\n"), &out)
+	f := triageFor(processEnv(), false, strings.NewReader("n\nn\nn\n"), &out)
 	res := f(sampleTriageInput())
 	if len(res.DismissedFixIDs) != 0 {
 		t.Errorf("DismissedFixIDs = %v, want none (non-terminal never dismisses)", res.DismissedFixIDs)
@@ -101,8 +103,9 @@ func TestTriageForNonTerminalNeverPrompts(t *testing.T) {
 // substring check for that text would pass here whether or not a note
 // line was actually printed.
 func TestTriageForYesNothingToTriagePrintsNoNoteLine(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
-	f := triageFor(true, strings.NewReader(""), &out)
+	f := triageFor(processEnv(), true, strings.NewReader(""), &out)
 	f(verifydeliver.TriageInput{})
 	if out.Len() != 0 {
 		t.Fatalf("stdout has a triage note line for nothing to triage:\n%s", out.String())
@@ -115,8 +118,9 @@ func TestTriageForYesNothingToTriagePrintsNoNoteLine(t *testing.T) {
 // non-empty. As above, triageFor writes nothing at all on this path, so
 // the assertion is on stdout being empty.
 func TestTriageForYesNotesOnlyPrintsNoNoteLine(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
-	f := triageFor(true, strings.NewReader(""), &out)
+	f := triageFor(processEnv(), true, strings.NewReader(""), &out)
 	f(verifydeliver.TriageInput{Notes: []verifydeliver.Finding{{ID: "r1-f5", Risk: "low", Title: "just fyi"}}})
 	if out.Len() != 0 {
 		t.Fatalf("stdout has a triage note line for a notes-only round:\n%s", out.String())
@@ -131,8 +135,9 @@ func TestTriageForYesNotesOnlyPrintsNoNoteLine(t *testing.T) {
 // what happened ("dismissed every fix ..."), dropped the reason, or fell
 // back to the count-free shape would not match.
 func TestTriageForYesUndecidedAskDoesNotClaimKept(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
-	f := triageFor(true, strings.NewReader(""), &out)
+	f := triageFor(processEnv(), true, strings.NewReader(""), &out)
 	f(sampleTriageInput()) // r1-f4 has no workspace
 	const want = "triage (--yes): kept every fix and buildable ask; 1 ask(s) left for a human\n"
 	if out.String() != want {
@@ -141,12 +146,9 @@ func TestTriageForYesUndecidedAskDoesNotClaimKept(t *testing.T) {
 }
 
 func TestTriageForTerminalScriptedReachesInteractivePath(t *testing.T) {
-	prev := stdinIsTerminal
-	stdinIsTerminal = func(r io.Reader) bool { return true }
-	defer func() { stdinIsTerminal = prev }()
-
+	t.Parallel()
 	var out bytes.Buffer
-	f := triageFor(false, strings.NewReader("\nk\nd\nk\n"), &out)
+	f := triageFor(processEnv().atTerminal(), false, strings.NewReader("\nk\nd\nk\n"), &out)
 	f(sampleTriageInput())
 	if strings.Contains(out.String(), "not a terminal") || strings.Contains(out.String(), "--yes") {
 		t.Fatalf("expected the interactive path, got a non-interactive note line:\n%s", out.String())
@@ -156,6 +158,7 @@ func TestTriageForTerminalScriptedReachesInteractivePath(t *testing.T) {
 // --- interactiveTriage: fix batch prompt ------------------------------------
 
 func TestInteractiveTriageFixBatchEnterAcceptsAll(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
 	res := interactiveTriage(in, strings.NewReader("\n"), &out)
@@ -168,6 +171,7 @@ func TestInteractiveTriageFixBatchEnterAcceptsAll(t *testing.T) {
 }
 
 func TestInteractiveTriageFixBatchDismissByID(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
 	res := interactiveTriage(in, strings.NewReader("r1-f2\n"), &out)
@@ -180,6 +184,7 @@ func TestInteractiveTriageFixBatchDismissByID(t *testing.T) {
 // dismiss list accepts a comma, a space, or a comma-and-space between ids
 // alike (the prompt advertises "list ids", not one specific separator).
 func TestInteractiveTriageFixBatchDismissListSeparators(t *testing.T) {
+	t.Parallel()
 	for _, line := range []string{"r1-f1,r1-f2", "r1-f1 r1-f2", "r1-f1, r1-f2"} {
 		t.Run(line, func(t *testing.T) {
 			var out bytes.Buffer
@@ -193,6 +198,7 @@ func TestInteractiveTriageFixBatchDismissListSeparators(t *testing.T) {
 }
 
 func TestInteractiveTriageFixBatchUnknownIDReprompts(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
 	res := interactiveTriage(in, strings.NewReader("bogus-id\nr1-f1\n"), &out)
@@ -205,6 +211,7 @@ func TestInteractiveTriageFixBatchUnknownIDReprompts(t *testing.T) {
 }
 
 func TestInteractiveTriageFixBatchEOFKeepsAllAsAuto(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
 	res := interactiveTriage(in, strings.NewReader(""), &out)
@@ -230,6 +237,7 @@ func TestInteractiveTriageFixBatchEOFKeepsAllAsAuto(t *testing.T) {
 // the fix count (DECISIONS.md frees the literal wording but not this answer
 // syntax).
 func TestInteractiveTriageFixBatchPromptExplainsConsequences(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
 	interactiveTriage(in, strings.NewReader("\n"), &out)
@@ -247,6 +255,7 @@ func TestInteractiveTriageFixBatchPromptExplainsConsequences(t *testing.T) {
 // it does not depend on how the prompt ends: the rule is about eofNote, not
 // about the prompt's wording.
 func TestInteractiveTriageEOFNoteStartsItsOwnLine(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Fixes: sampleTriageInput().Fixes}
 	interactiveTriage(in, strings.NewReader(""), &out)
@@ -264,6 +273,7 @@ func TestInteractiveTriageEOFNoteStartsItsOwnLine(t *testing.T) {
 // BudgetUsed/BudgetLimit), and that an ordinary round with no parked
 // finding never prints it at all.
 func TestInteractiveTriagePrintsTheBudgetHeaderOnlyWhenSomethingIsParked(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks: []verifydeliver.Finding{
@@ -289,6 +299,7 @@ func TestInteractiveTriagePrintsTheBudgetHeaderOnlyWhenSomethingIsParked(t *test
 // that a budget-parked ask is decided exactly like any other ask at a
 // terminal: an explicit keep queues its fix slice.
 func TestInteractiveTriageKeepsAParkedAskWhenAHumanExplicitlyKeepsIt(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks: []verifydeliver.Finding{
@@ -314,6 +325,7 @@ func TestInteractiveTriageKeepsAParkedAskWhenAHumanExplicitlyKeepsIt(t *testing.
 // so both of interactiveTriage's EOF branches are covered by the one
 // stdin close.
 func TestInteractiveTriageEOFNeverAutoKeepsAParkedAsk(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks: []verifydeliver.Finding{
@@ -335,6 +347,7 @@ func TestInteractiveTriageEOFNeverAutoKeepsAParkedAsk(t *testing.T) {
 // the stdin-closed note's own count treats a budget-parked ask as always
 // left for a human, not only one missing a workspace or an oracle.
 func TestUndecidedAskCountCountsAParkedAskWhateverItsBuildTarget(t *testing.T) {
+	t.Parallel()
 	asks := []verifydeliver.Finding{
 		{ID: "r1-f1", Workspace: "alpha", Oracle: "test", RoutedWhy: verifydeliver.RoutedWhyBudget},
 	}
@@ -346,6 +359,7 @@ func TestUndecidedAskCountCountsAParkedAskWhateverItsBuildTarget(t *testing.T) {
 // --- interactiveTriage: per-ask prompt --------------------------------------
 
 func TestInteractiveTriageAskKeepWithDecision(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
 	res := interactiveTriage(in, strings.NewReader("k\ngo ahead\n"), &out)
@@ -356,6 +370,7 @@ func TestInteractiveTriageAskKeepWithDecision(t *testing.T) {
 }
 
 func TestInteractiveTriageAskKeepWithNoDecisionText(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
 	res := interactiveTriage(in, strings.NewReader("k\n"), &out)
@@ -392,6 +407,7 @@ func TestInteractiveTriageDecisionPromptSaysItIsOptionalAndEnterSkips(t *testing
 // and eventually hit EOF, which also keeps the ask (auto, not human) -
 // checking Keep alone cannot tell that apart from a real, explicit answer.
 func TestInteractiveTriageAskEnterAloneKeeps(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
 	res := interactiveTriage(in, strings.NewReader("\n\n"), &out)
@@ -405,6 +421,7 @@ func TestInteractiveTriageAskEnterAloneKeeps(t *testing.T) {
 // that a finding is always shown with its rationale: the ask prompt must
 // show enough to decide on, not the title alone.
 func TestInteractiveTriageAskShowsFileLineDetailAndRationale(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{
 		ID: "r1-f3", Workspace: "alpha", File: "beta/beta.go", Line: 4,
@@ -430,6 +447,7 @@ func TestInteractiveTriageAskShowsFileLineDetailAndRationale(t *testing.T) {
 // satisfy a check for "decision", so a mutant that dropped the word from
 // the ask prompt itself would go uncaught.
 func TestInteractiveTriageAskPromptExplainsConsequences(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}, Manifest: oneOracleManifest()}
 	interactiveTriage(in, strings.NewReader("d\n"), &out)
@@ -442,6 +460,7 @@ func TestInteractiveTriageAskPromptExplainsConsequences(t *testing.T) {
 }
 
 func TestInteractiveTriageAskDismiss(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
 	res := interactiveTriage(in, strings.NewReader("d\n"), &out)
@@ -454,6 +473,7 @@ func TestInteractiveTriageAskDismiss(t *testing.T) {
 // TestInteractiveTriageAskNoDismisses pins the rule that "n" and "no" must
 // dismiss, not silently keep with "n"/"no" as the decision text.
 func TestInteractiveTriageAskNoDismisses(t *testing.T) {
+	t.Parallel()
 	for _, word := range []string{"n", "no", "No", "N"} {
 		t.Run(word, func(t *testing.T) {
 			var out bytes.Buffer
@@ -472,6 +492,7 @@ func TestInteractiveTriageAskNoDismisses(t *testing.T) {
 // insensitively: each one decides the ask on the first read (no reprompt)
 // and records Human true, keep or dismiss as the token says.
 func TestInteractiveTriageAskAllAdvertisedTokens(t *testing.T) {
+	t.Parallel()
 	for _, tok := range []string{"k", "keep", "K", "KEEP", ""} {
 		name := tok
 		if name == "" {
@@ -510,6 +531,7 @@ func TestInteractiveTriageAskAllAdvertisedTokens(t *testing.T) {
 // free text that is not one of the keep/dismiss tokens is never read as an
 // implicit keep-with-decision; it reprompts until a real answer arrives.
 func TestInteractiveTriageAskUnrecognizedAnswerReprompts(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{{ID: "r1-f3", Workspace: "alpha", Title: "t"}}}
 	res := interactiveTriage(in, strings.NewReader("go ahead\nd\n"), &out)
@@ -523,6 +545,7 @@ func TestInteractiveTriageAskUnrecognizedAnswerReprompts(t *testing.T) {
 }
 
 func TestInteractiveTriageAskWorkspacePromptForNoWorkspaceAsk(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks: []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}}, // no Workspace
@@ -542,6 +565,7 @@ func TestInteractiveTriageAskWorkspacePromptForNoWorkspaceAsk(t *testing.T) {
 }
 
 func TestInteractiveTriageAskWorkspacePromptRejectsUnknownID(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks: []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}},
@@ -567,6 +591,7 @@ func TestInteractiveTriageAskWorkspacePromptRejectsUnknownID(t *testing.T) {
 // no-workspace ask is prompted for a workspace, and the chosen oracle
 // reaches the triage result.
 func TestInteractiveTriageAskOraclePromptForStaleOracle(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks: []verifydeliver.Finding{{ID: "r1-f4", Workspace: "alpha", Oracle: "old", Title: "t"}},
@@ -585,6 +610,7 @@ func TestInteractiveTriageAskOraclePromptForStaleOracle(t *testing.T) {
 }
 
 func TestInteractiveTriageAskOraclePromptRejectsUnknownName(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks: []verifydeliver.Finding{{ID: "r1-f4", Workspace: "alpha", Title: "t"}},
@@ -603,6 +629,7 @@ func TestInteractiveTriageAskOraclePromptRejectsUnknownName(t *testing.T) {
 }
 
 func TestInteractiveTriageAskEOFOnOraclePromptLeavesItUndecided(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks: []verifydeliver.Finding{{ID: "r1-f4", Workspace: "alpha", Title: "t"}},
@@ -621,6 +648,7 @@ func TestInteractiveTriageAskEOFOnOraclePromptLeavesItUndecided(t *testing.T) {
 // is prompted for the workspace first, then the oracle, and a kept answer
 // to both reaches the triage result.
 func TestInteractiveTriageAskBothPromptsForAFindingMissingWorkspaceAndOracle(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks: []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}}, // no Workspace, no Oracle
@@ -637,6 +665,7 @@ func TestInteractiveTriageAskBothPromptsForAFindingMissingWorkspaceAndOracle(t *
 }
 
 func TestInteractiveTriageAskEOFOnWorkspacePromptLeavesItUndecided(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks:     []verifydeliver.Finding{{ID: "r1-f4", Title: "t"}},
@@ -649,6 +678,7 @@ func TestInteractiveTriageAskEOFOnWorkspacePromptLeavesItUndecided(t *testing.T)
 }
 
 func TestInteractiveTriageAskEOFKeepsRemainingWorkspaceAsksAsAuto(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Asks: []verifydeliver.Finding{
 		{ID: "r1-f3", Workspace: "alpha", Title: "t1"},
@@ -670,6 +700,7 @@ func TestInteractiveTriageAskEOFKeepsRemainingWorkspaceAsksAsAuto(t *testing.T) 
 // EOF the same way a missing workspace already does, not be silently
 // dropped as though the human had agreed with a default nobody chose.
 func TestInteractiveTriageAskEOFDoesNotAutoKeepAStaleOracleAsk(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{
 		Asks: []verifydeliver.Finding{{ID: "r1-f4", Workspace: "alpha", Oracle: "old", Title: "t"}},
@@ -727,6 +758,7 @@ func TestInteractiveTriageAskEOFCountCoversOnlyTheAsksLeft(t *testing.T) {
 // --- notes are only ever listed ---------------------------------------------
 
 func TestInteractiveTriageListsNotes(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	in := verifydeliver.TriageInput{Notes: []verifydeliver.Finding{{ID: "r1-f5", File: "alpha/percent.go", Line: 3, Risk: "low", Title: "just fyi", RiskRationale: "NOTE-RATIONALE"}}}
 	interactiveTriage(in, strings.NewReader(""), &out)
@@ -741,6 +773,7 @@ func TestInteractiveTriageListsNotes(t *testing.T) {
 // --- stdinIsTerminal (generic, per-GOOS isTerminalFile) ---------------------
 
 func TestStdinIsTerminalNonFile(t *testing.T) {
+	t.Parallel()
 	if stdinIsTerminal(strings.NewReader("")) {
 		t.Fatal("stdinIsTerminal(strings.Reader) = true, want false")
 	}
@@ -750,6 +783,7 @@ func TestStdinIsTerminalNonFile(t *testing.T) {
 }
 
 func TestStdinIsTerminalRegularFile(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "not-a-tty.txt")
 	if err := os.WriteFile(path, []byte("data\n"), 0o644); err != nil {
 		t.Fatalf("write temp file: %v", err)
@@ -765,6 +799,7 @@ func TestStdinIsTerminalRegularFile(t *testing.T) {
 }
 
 func TestStdinIsTerminalDevNull(t *testing.T) {
+	t.Parallel()
 	f, err := os.Open(os.DevNull)
 	if err != nil {
 		t.Fatalf("open %s: %v", os.DevNull, err)
@@ -776,6 +811,7 @@ func TestStdinIsTerminalDevNull(t *testing.T) {
 }
 
 func TestStdinIsTerminalPipe(t *testing.T) {
+	t.Parallel()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)

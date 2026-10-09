@@ -82,6 +82,7 @@ func runJigScreenHook(t *testing.T, bin, input string) string {
 // is missing, sent under the wrong key, or sent with a type SecretPath
 // cannot read must come back denied.
 func TestScreenHookBinaryDeniesUnreadableInput(t *testing.T) {
+	t.Parallel()
 	bin := builtJigHookBinary(t)
 	cases := []struct {
 		name     string
@@ -114,6 +115,7 @@ func TestScreenHookBinaryDeniesUnreadableInput(t *testing.T) {
 // well-formed call to each, confirming the allow decision the binary
 // itself prints - not a stand-in.
 func TestScreenHookBinaryGrantsEveryTool(t *testing.T) {
+	t.Parallel()
 	bin := builtJigHookBinary(t)
 	cases := []struct {
 		tool  string

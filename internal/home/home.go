@@ -1,28 +1,65 @@
 // Package home resolves jig's per-machine root. Root reads it once, from the
 // JIG_HOME environment variable or the real home directory; every
-// home-anchored path (the machine mapping, the worktree pool, gate demo
-// media) is derived from a root its caller passes in, so the binary resolves
-// the root once and a test hands each package its own root instead of
+// home-anchored path (the machine mapping, the worktree pool, the
+// evidence tree) is derived from a root its caller passes in, so the binary
+// resolves the root once and a test hands each package its own root instead of
 // touching the environment or the real home directory.
 package home
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 // Root returns the jig home directory: $JIG_HOME if set, else <user home>/.config/jig.
+// It reads the process's environment; a caller that holds an environment of its
+// own resolves the root from that with RootFrom.
 func Root() (string, error) {
-	if v := os.Getenv("JIG_HOME"); v != "" {
+	return RootFrom(os.Getenv)
+}
+
+// RootFrom is Root against the environment getenv reads, in place of the
+// process's: $JIG_HOME if getenv gives one, else <user home>/.config/jig with
+// the user home UserDirFrom finds. The binary passes os.Getenv; a command that
+// runs in a process beside others (a test) passes the environment it was
+// given, so what it resolves never depends on a variable another sets.
+func RootFrom(getenv func(string) string) (string, error) {
+	if v := getenv("JIG_HOME"); v != "" {
 		return v, nil
 	}
-	h, err := os.UserHomeDir()
+	h, err := UserDirFrom(getenv)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(h, ".config", "jig"), nil
+}
+
+// UserDirFrom returns the user's own home directory from the environment
+// getenv reads, by the rule os.UserHomeDir applies to the process's: $HOME
+// (%USERPROFILE% on Windows, $home on Plan 9), else the fixed directory Android
+// and iOS use. It fails when the variable is empty elsewhere.
+func UserDirFrom(getenv func(string) string) (string, error) {
+	env, enverr := "HOME", "$HOME"
+	switch runtime.GOOS {
+	case "windows":
+		env, enverr = "USERPROFILE", "%userprofile%"
+	case "plan9":
+		env, enverr = "home", "$home"
+	}
+	if v := getenv(env); v != "" {
+		return v, nil
+	}
+	switch runtime.GOOS {
+	case "android":
+		return "/sdcard", nil
+	case "ios":
+		return "/", nil
+	}
+	return "", errors.New(enverr + " is not defined")
 }
 
 // PoolDir returns the worktree pool root under the jig home root.
@@ -53,25 +90,70 @@ func IntentScratchDir(root string) string {
 	return filepath.Join(root, "intent-scratch")
 }
 
-// EvidenceDir returns where one reviewed head's demo media live under the
-// jig home root: <root>/evidence/<storeID>/<ticket>/<sha>. It is a fifth
-// home beside the four ARCHITECTURE.md names, kept out of the store's git
-// on purpose (media are large and the store is a long-lived repo) and out
-// of any lease (a lease is rewound between rounds), so it lives with the
-// machine, like the pool. storeID, ticket and sha must each name a single
-// directory, so no caller-supplied spelling can climb out of the evidence
-// tree.
-func EvidenceDir(root, storeID, ticket, sha string) (string, error) {
-	for _, part := range []struct{ what, name string }{
-		{"store id", storeID},
-		{"ticket", ticket},
-		{"sha", sha},
-	} {
+// The evidence tree is <root>/evidence/<storeID>/<ticket>/...: a fifth home
+// beside the four ARCHITECTURE.md names, kept out of the store's git on purpose
+// (media are large and the store is a long-lived repo) and out of any lease (a
+// lease is rewound between rounds), so it lives with the machine, like the
+// pool. RecordDir, PicksDir and ReviewDir name the three kinds of directory in
+// it. Each part a caller supplies (the store id, the ticket, a sha, a run) must
+// name a single directory, so no spelling can climb out of the tree.
+
+// RecordDir returns where the recordings one builder's green oracle run wrote
+// live under the jig home root:
+// <root>/evidence/<storeID>/<ticket>/recordings/<sha>/<run>, sha being the
+// commit the oracle ran at and run a name for that one oracle run (ADR 0029).
+// Each run has a directory of its own, so a later run at the same commit (a
+// retry, a fix turn, another slice that built nothing) never clears what an
+// earlier run's journal line describes. It sits under a "recordings" directory
+// of the ticket, so it never shares a name with the "picks" or "reviews"
+// directory.
+func RecordDir(root, storeID, ticket, sha, run string) (string, error) {
+	if err := evidenceParts([]evidencePart{{"store id", storeID}, {"ticket", ticket}, {"sha", sha}, {"run", run}}); err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "evidence", storeID, ticket, "recordings", sha, run), nil
+}
+
+// PicksDir returns where the recordings one publish picked are staged under
+// the jig home root: <root>/evidence/<storeID>/<ticket>/picks/<sha>, sha being
+// the head publish ships (ADR 0029). Publish copies the picked files here, named
+// for the pull request, and hands this directory to the host's attach call. It
+// sits under a "picks" directory of the ticket, so it never shares a name with
+// the "recordings" or "reviews" directory.
+func PicksDir(root, storeID, ticket, sha string) (string, error) {
+	if err := evidenceParts([]evidencePart{{"store id", storeID}, {"ticket", ticket}, {"sha", sha}}); err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "evidence", storeID, ticket, "picks", sha), nil
+}
+
+// ReviewDir returns where what one gate round hands its reviewer, and the
+// store does not hold, lives under the jig home root:
+// <root>/evidence/<storeID>/<ticket>/reviews/round-<n> (ADR 0029). The round's
+// list of the build's recordings is written here, because it names the
+// absolute paths of files on this machine and the store is shared. It sits
+// under a "reviews" directory of the ticket, so it never shares a name with the
+// "recordings" or "picks" directory.
+func ReviewDir(root, storeID, ticket string, round int) (string, error) {
+	if err := evidenceParts([]evidencePart{{"store id", storeID}, {"ticket", ticket}}); err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "evidence", storeID, ticket, "reviews", fmt.Sprintf("round-%d", round)), nil
+}
+
+// evidencePart is one caller-supplied part of an evidence path, named for
+// the refusal.
+type evidencePart struct{ what, name string }
+
+// evidenceParts refuses a part that is not one plain directory name, so no
+// caller-supplied spelling climbs out of the evidence tree.
+func evidenceParts(parts []evidencePart) error {
+	for _, part := range parts {
 		if !singleDirName(part.name) {
-			return "", fmt.Errorf("home: evidence %s %q must name a single plain directory", part.what, part.name)
+			return fmt.Errorf("home: evidence %s %q must name a single plain directory", part.what, part.name)
 		}
 	}
-	return filepath.Join(root, "evidence", storeID, ticket, sha), nil
+	return nil
 }
 
 // singleDirName reports whether name is one plain, visible directory name:

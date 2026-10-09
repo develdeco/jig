@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/outcome"
 	"github.com/develdeco/jig/internal/screen"
@@ -263,6 +264,12 @@ func (b *headlessBackend) run(d Dispatch) (string, error) {
 	cmd.Dir = d.Worktree
 	if b.env != nil {
 		cmd.Env = childEnv(b.goos, b.env, d.Worktree)
+	} else {
+		// The inherited environment (with the PWD os/exec sets for cmd.Dir, so
+		// this is built after cmd.Dir is), except the variable that makes a run
+		// record (ADR 0029): a builder session starts the project's tests, and
+		// jig may itself be running inside a recording oracle run.
+		cmd.Env = envrun.ChildEnv(cmd)
 	}
 	newProcessGroup(cmd)
 	// A session spawns children - a shell per Bash call, a test runner,
@@ -319,7 +326,7 @@ func (b *headlessBackend) run(d Dispatch) (string, error) {
 // denied.
 func sessionView(d Dispatch) Dispatch {
 	d.Prompt = respellMentions(d.Prompt, d.paths(), longPath)
-	for _, p := range []*string{&d.Worktree, &d.SliceJSON, &d.ResultJSON, &d.ExtraWriteDir} {
+	for _, p := range []*string{&d.Worktree, &d.SliceJSON, &d.ResultJSON, &d.ExtraReadFile} {
 		if *p != "" {
 			*p = longPath(*p)
 		}
@@ -389,15 +396,14 @@ func (b *headlessBackend) args(d Dispatch) (argv []string, cleanup func(), err e
 }
 
 // settings renders the session's `--settings` JSON. Its permission rules
-// grant the edit tools inside the lease worktree, on d.ResultJSON itself,
-// and inside d.ExtraWriteDir when one is named, nowhere else. With d.Screen
-// set, a PreToolUse hook runs `<hookBinary> _screen` (exec form, so no shell
-// parses the path) on every tool call, and its allow is this settings
-// object's only grant for the screen.Granted tools - the operator's own
-// user settings, loaded on top, can still grant more. Without d.Screen
-// those tools get plain allow rules instead, unscreened. Either way its env
-// sets the shell's command timeout (shellCommandTimeout), which the CLI
-// applies over the operator's own settings.
+// grant the edit tools inside the lease worktree and on d.ResultJSON itself,
+// nowhere else. With d.Screen set, a PreToolUse hook runs `<hookBinary> _screen`
+// (exec form, so no shell parses the path) on every tool call, and its allow
+// is this settings object's only grant for the screen.Granted tools - the
+// operator's own user settings, loaded on top, can still grant more. Without
+// d.Screen those tools get plain allow rules instead, unscreened. Either way
+// its env sets the shell's command timeout (shellCommandTimeout), which the
+// CLI applies over the operator's own settings.
 func (b *headlessBackend) settings(d Dispatch) (string, error) {
 	worktree, err := filepath.Abs(d.Worktree)
 	if err != nil {
@@ -413,15 +419,6 @@ func (b *headlessBackend) settings(d Dispatch) (string, error) {
 	}
 	for _, p := range pathForms(result) {
 		allow = append(allow, "Edit("+rulePath(b.goos, p)+")")
-	}
-	if d.ExtraWriteDir != "" {
-		extra, err := filepath.Abs(d.ExtraWriteDir)
-		if err != nil {
-			return "", err
-		}
-		for _, p := range pathForms(extra) {
-			allow = append(allow, "Edit("+rulePath(b.goos, p)+"/**)")
-		}
 	}
 
 	settings := map[string]any{}
@@ -508,14 +505,16 @@ func rulePath(goos, p string) string {
 // childEnv renders a headless dispatch's exact child environment from env
 // (Options.Env, never nil here: Run only calls this when it is set) and
 // worktree (d.Worktree, the same directory cmd.Dir already names): env
-// verbatim, minus any PWD or OLDPWD entry, with PWD then appended as
-// worktree. Names are compared case-insensitively on goos == "windows",
-// where environment variable names are not case sensitive, and case-
-// sensitively elsewhere - the same distinction rulePath already makes for
-// this backend. An inherited PWD naming some other directory, or an OLDPWD
-// naming a directory that has nothing to do with this dispatch, would
-// either misreport the child's own cwd to a program that trusts PWD over
-// calling getcwd, or hand it a path the caller never intended it to see.
+// verbatim, minus any PWD or OLDPWD entry, and any JIG_RECORD_DIR one (how a
+// run is told to record, which only jig's own oracle run sets;
+// envrun.RecordDirEnv), with PWD then appended as worktree. Names are
+// compared case-insensitively on goos == "windows", where environment
+// variable names are not case sensitive, and case-sensitively elsewhere -
+// the same distinction rulePath already makes for this backend. An inherited
+// PWD naming some other directory, or an OLDPWD naming a directory that has
+// nothing to do with this dispatch, would either misreport the child's own
+// cwd to a program that trusts PWD over calling getcwd, or hand it a path
+// the caller never intended it to see.
 //
 // On Windows, os/exec's own Env doc adds one more entry beyond this
 // function's control: SYSTEMROOT is always set on the child when the
@@ -530,7 +529,7 @@ func childEnv(goos string, env []string, worktree string) []string {
 	out := make([]string, 0, len(env)+1)
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
-		if sameName(name, "PWD") || sameName(name, "OLDPWD") {
+		if sameName(name, "PWD") || sameName(name, "OLDPWD") || sameName(name, envrun.RecordDirEnv) {
 			continue
 		}
 		out = append(out, kv)

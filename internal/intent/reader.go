@@ -63,8 +63,9 @@ type Session struct {
 
 // DiscoverOpts scopes one Discover call.
 type DiscoverOpts struct {
-	// Home is the user's home directory (production: os.UserHomeDir()); a
-	// parameter so a reader never reaches a real one on its own.
+	// Home is the user's home directory (production: the operator's home, as
+	// os.UserHomeDir gives it); a parameter so a reader never reaches a real one
+	// on its own.
 	Home string
 	// WindowStart and WindowEnd bound the inclusive file-mtime window a
 	// session's own transcript file must fall in to be discovered at all.

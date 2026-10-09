@@ -199,7 +199,7 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 			t.Fatal("a round whose oracles fail dispatched a reviewer")
 			return nil
 		}}
-		_, err := Gate(d, NewReviewerGateSource(backend), GateOpts{Ticket: fx.Ticket, NoDemo: true})
+		_, err := Gate(d, NewReviewerGateSource(backend), GateOpts{Ticket: fx.Ticket})
 		wantAxiCode(t, err, "GATE_ORACLE_FAILED")
 		if !strings.Contains(err.Error(), "red on purpose") {
 			t.Errorf("GATE_ORACLE_FAILED = %v, want the failing test's output in it", err)
