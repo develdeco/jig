@@ -42,6 +42,12 @@ type Ticket struct {
 	Branch string
 	// BlockedBy is the ticket's own blockers, written by jig graduate.
 	BlockedBy []TicketBlockedBy
+	// Aliases is every earlier id this ticket has carried. Every rewrite of
+	// the record keeps them; nothing but L3's migration (out of scope here)
+	// writes them for real - in this ticket only tests set them. Store.
+	// ResolveTicket is the one place an alias turns back into this ticket's
+	// current id.
+	Aliases []string
 }
 
 // Adopted reports whether the ticket adopted a branch: a recorded branch is
@@ -59,6 +65,7 @@ type ticketFile struct {
 	Body          literalString     `yaml:"body,omitempty"`
 	Branch        string            `yaml:"branch,omitempty"`
 	BlockedBy     []TicketBlockedBy `yaml:"blocked_by,omitempty"`
+	Aliases       []string          `yaml:"aliases,omitempty"`
 }
 
 // literalString marshals as a YAML literal block scalar ("|"), the same
@@ -145,7 +152,7 @@ func (s *Store) ReadTicket(ticket string) (Ticket, error) {
 			Help: []string{"Upgrade jig to a version that understands this ticket.yaml schema"},
 		}
 	}
-	return Ticket{Title: f.Title, Body: string(f.Body), Branch: f.Branch, BlockedBy: f.BlockedBy}, nil
+	return Ticket{Title: f.Title, Body: string(f.Body), Branch: f.Branch, BlockedBy: f.BlockedBy, Aliases: f.Aliases}, nil
 }
 
 // ReadTicketDeps reads <ticket>/ticket.yaml's blockers. An absent file
@@ -183,7 +190,11 @@ func (s *Store) CreateTicketRecord(ticket string, rec Ticket) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return writeTicketFile(path, rec)
+	if err := writeTicketFile(path, rec); err != nil {
+		return err
+	}
+	s.invalidateAliasClaims()
+	return nil
 }
 
 // mutateTicket reads <ticket>/ticket.yaml, applies fn to the decoded
@@ -205,7 +216,11 @@ func (s *Store) mutateTicket(ticket string, fn func(*Ticket)) error {
 		return err
 	}
 	fn(&cur)
-	return writeTicketFile(path, cur)
+	if err := writeTicketFile(path, cur); err != nil {
+		return err
+	}
+	s.invalidateAliasClaims()
+	return nil
 }
 
 // writeTicketFile marshals t as a ticket.yaml at the current schema version
@@ -217,6 +232,7 @@ func writeTicketFile(path string, t Ticket) error {
 		Body:          literalString(t.Body),
 		Branch:        t.Branch,
 		BlockedBy:     t.BlockedBy,
+		Aliases:       t.Aliases,
 	})
 	if err != nil {
 		return err

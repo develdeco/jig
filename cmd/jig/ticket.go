@@ -10,6 +10,24 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// resolveTicketArg resolves ticket - as typed on the command line, an id or
+// one of a ticket's aliases - to its current id through st.ResolveTicket,
+// printing one line naming it when it differs from what was typed: every
+// command that takes a ticket id (run, gate, publish, solve, requeue, status
+// and validate) calls this before anything else touches the ticket, so a
+// command reached through an alias always works on the ticket's folder,
+// leases and branch under its current id.
+func resolveTicketArg(st *store.Store, ticket string, stdout io.Writer) (string, error) {
+	resolved, err := st.ResolveTicket(ticket)
+	if err != nil {
+		return "", err
+	}
+	if resolved != ticket {
+		fmt.Fprintf(stdout, "%s is now %s\n", ticket, resolved)
+	}
+	return resolved, nil
+}
+
 // cmdTicket implements `jig ticket new --title <t>`.
 func cmdTicket(e env, args []string, stdout io.Writer) int {
 	sub, rest, err := requirePositional(args, "subcommand (new)")
@@ -30,6 +48,7 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "ticket new")
 	title := fs.String("title", "", "ticket title (required)")
 	body := fs.String("body", "", "ticket body/description")
+	keyFlag := fs.String("key", "", "key to mint under (required when project.yaml declares more than one)")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -46,20 +65,26 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
+	// An undeclared --key is refused before anything is minted.
+	key, err := cfg.ResolveKey(*keyFlag)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+
 	if err := st.Sync(); err != nil {
 		return renderErr(stdout, err)
 	}
 
-	// jig mints every id itself, through the store package's own
-	// ticket_format counter, whatever project.yaml says about trackers:
-	// Mint computes the next id, refuses one jig cannot use before writing
-	// anything, and creates the ticket's folder and ticket.yaml together.
-	// Claim then commits that folder alone and, on a store with an origin,
-	// pushes it alone, re-minting after a rejected push so two clones
-	// minting at once never collide on the same id (internal/store/claim.go).
+	// jig mints every id itself, through the store package's own per-key
+	// counter, whatever project.yaml says about trackers: Mint computes the
+	// next id, refuses one jig cannot use before writing anything, and
+	// creates the ticket's folder and ticket.yaml together. Claim then
+	// commits that folder alone and, on a store with an origin, pushes it
+	// alone, re-minting after a rejected push so two clones minting at once
+	// never collide on the same id (internal/store/claim.go).
 	id, err := st.Claim(
 		func() (string, []string, error) {
-			mintedID, err := st.Mint(cfg.TicketFormat, store.Ticket{Title: *title, Body: *body})
+			mintedID, err := st.Mint(key, store.Ticket{Title: *title, Body: *body})
 			if err != nil {
 				return "", nil, err
 			}

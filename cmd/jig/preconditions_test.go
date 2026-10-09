@@ -73,12 +73,11 @@ func TestTicketPreconditions(t *testing.T) {
 	}
 }
 
-// TestTicketNewRefusesReservedID covers `jig ticket new` when the tracker
-// mints an id ending in a suffix the pool reserves for a ticket's gate or
-// publish lease (here a local ticket_format of T-{n}-gate): the id would
-// share a lease directory with ticket T-<n>'s gate, so jig must refuse it
-// instead of reporting it as the new ticket.
-func TestTicketNewRefusesReservedID(t *testing.T) {
+// TestTicketNewRefusesAnInvalidTicketFormat covers a ticket_format with text
+// after its "{n}" placeholder (here T-{n}-gate): project.yaml is refused
+// when it loads, before jig ticket new writes anything, with help naming
+// keys: as the fix.
+func TestTicketNewRefusesAnInvalidTicketFormat(t *testing.T) {
 	t.Parallel()
 	e := testEnv(t.TempDir())
 	repo := filepath.Join(t.TempDir(), "demo")
@@ -115,8 +114,8 @@ func TestTicketNewRefusesReservedID(t *testing.T) {
 	}
 
 	code, out := jig("ticket", "new", "--title", "Fix the thing")
-	if code == 0 || !strings.Contains(out, "T-1-gate") || !strings.Contains(out, "reserves") {
-		t.Fatalf("jig ticket new with ticket_format T-{n}-gate: exit %d, want a non-zero exit naming T-1-gate as reserved:\n%s", code, out)
+	if code == 0 || !strings.Contains(out, "T-{n}-gate") || !strings.Contains(out, "keys:") {
+		t.Fatalf("jig ticket new with ticket_format T-{n}-gate: exit %d, want a non-zero exit naming the invalid ticket_format and keys: as the fix:\n%s", code, out)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(cfgs[0]), "T-1-gate")); !os.IsNotExist(err) {
 		t.Fatalf("the refused ticket T-1-gate left a store folder behind (stat err %v)", err)

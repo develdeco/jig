@@ -34,6 +34,7 @@ var commandTable = []cmdSpec{
 	{"ticket", "mint a new ticket: jig ticket new --title <t>", []flagSpec{
 		{"title", "ticket title (required)", false},
 		{"body", "ticket body/description", false},
+		{"key", "key to mint under (required when project.yaml declares more than one)", false},
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},

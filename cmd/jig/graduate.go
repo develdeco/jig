@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -82,7 +83,7 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 	var createdIDs []string
 	created := map[int]bool{}
 	for {
-		id, pos, done, err := claimOneChartEntry(e, st, cfg.TicketFormat, chart)
+		id, pos, done, err := claimOneChartEntry(e, st, cfg, chart)
 		if err != nil {
 			// Every ticket already claimed (createdIDs) landed on the origin
 			// before this error; running the checkpoint sync for them now,
@@ -259,14 +260,14 @@ var errChartFullyGraduated = errors.New("graduate: chart fully graduated")
 // when done is false and err is nil. Its chart write goes through
 // e.writeChart when a test set one, so a test can force one particular call
 // to fail deterministically (see env.writeChart).
-func claimOneChartEntry(e env, st *store.Store, format, chart string) (id string, pos int, done bool, err error) {
+func claimOneChartEntry(e env, st *store.Store, cfg project.Config, chart string) (id string, pos int, done bool, err error) {
 	pos = -1
 	write := func() (string, []string, error) {
 		entries, rerr := st.ReadChart(chart)
 		if rerr != nil {
 			return "", nil, rerr
 		}
-		if rerr := validateChartEntries(st, entries, chart); rerr != nil {
+		if rerr := validateChartEntries(st, cfg, entries, chart); rerr != nil {
 			return "", nil, rerr
 		}
 		refs, rerr := resolveChartEntryRefs(st, chart, entries)
@@ -277,8 +278,15 @@ func claimOneChartEntry(e env, st *store.Store, format, chart string) (id string
 		if i < 0 {
 			return "", nil, errChartFullyGraduated
 		}
+		// Checked again here (validateChartEntries already checked every
+		// entry's key before any of them minted anything), since the key
+		// this one mints under is this entry's resolved key specifically.
+		key, kerr := cfg.ResolveKey(entries[i].Key)
+		if kerr != nil {
+			return "", nil, kerr
+		}
 		rec := store.Ticket{Title: entries[i].Title, Body: entries[i].Body, BlockedBy: toBlockedBy(refs[i])}
-		newID, merr := st.Mint(format, rec)
+		newID, merr := st.Mint(key, rec)
 		if merr != nil {
 			return "", nil, merr
 		}
@@ -393,7 +401,11 @@ func validateChartName(name string) error {
 }
 
 // validateChartEntries checks all entries are valid before any are created.
-func validateChartEntries(st *store.Store, entries []store.ChartEntry, chart string) error {
+// Every entry that has no id yet has its key checked against cfg's declared
+// keys here too, before claimOneChartEntry's write mints anything: an
+// undeclared key on any entry refuses the whole run, not just the entry it
+// names.
+func validateChartEntries(st *store.Store, cfg project.Config, entries []store.ChartEntry, chart string) error {
 	// Check each entry has a title
 	for i, e := range entries {
 		if e.Title == "" {
@@ -402,6 +414,16 @@ func validateChartEntries(st *store.Store, entries []store.ChartEntry, chart str
 				Code: "VALIDATION_ERROR",
 				Help: []string{fmt.Sprintf("Add a title to entry %d in charts/%s/tickets.yaml", i+1, chart)},
 			}
+		}
+	}
+
+	// Check every not-yet-minted entry's key before any entry mints.
+	for _, e := range entries {
+		if e.ID != "" {
+			continue
+		}
+		if _, err := cfg.ResolveKey(e.Key); err != nil {
+			return err
 		}
 	}
 
@@ -526,10 +548,14 @@ func resolveChartEntryRefs(st *store.Store, chart string, entries []store.ChartE
 			refChart, k, isIndexRef := parseRef(r.Ref)
 			switch {
 			case !isIndexRef:
-				if err := requireTicket(st, r.Ref); err != nil {
+				resolved, rerr := st.ResolveTicket(r.Ref)
+				if rerr != nil {
+					return nil, refErr(chart, entries, i, r.Ref, rerr.Error())
+				}
+				if err := requireTicket(st, resolved); err != nil {
 					return nil, refErr(chart, entries, i, r.Ref, err.Error())
 				}
-				er = entryRef{knownID: r.Ref, kind: kind}
+				er = entryRef{knownID: resolved, kind: kind}
 
 			case refChart == "" || sameChartFile(st, refChart, chart):
 				if k < 1 || k > len(entries) {

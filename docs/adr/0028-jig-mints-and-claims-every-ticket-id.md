@@ -93,3 +93,58 @@ surfaces as a merge or rebase conflict, only as a different id on each.
 
 See [DECISIONS.md](../../DECISIONS.md) for the attempt bound, the lock
 path, and the claim commit's exact shape.
+
+## Amendment: an id gains an area key (T-26)
+
+`Store.Mint` took a `project.yaml` `ticket_format` string (`"JIG-{n}"`),
+parsed it into a regexp, and used that to both scan for the next number and
+shape the id it minted. `project.yaml` now declares `keys:` instead - a map
+of area key to its one-line meaning - and an id is `<key>-<n>`, counted per
+key; `Mint` takes the bare key to mint under, already resolved against the
+project's declared keys (`project.Config.ResolveKey`) before it is ever
+called, and computes `<key>-<n>` itself. `ticket_format` is still read, but
+only as the one key a pre-migration store declares (`<KEY>-{n}`), until L3's
+migration writes `keys:` for it.
+
+`Store.TicketIDs` dropped its `format` parameter: it lists every id-shaped
+store-root folder under any key, declared or not, sorted by key then by
+number, rather than the folders one specific format matched. This is the
+one function minting's own per-key count and A6's mirror both read tickets
+through, so a key removed from `project.yaml` still lists - and keeps - the
+tickets minted under it, where a format-scoped list would have dropped
+them.
+
+`pool.CheckTicket`'s two refusals (a reserved lease suffix, a path-like
+shape) still run before `CreateTicketRecord`, but an id's shape is now
+always `<key>-<n>` - a key is uppercase letters and digits with no `-`, and
+`<n>` is always digits - so neither can trigger through a normal mint any
+longer; they stay as a defensive check on a value this ADR's claim
+guarantee still depends on being safe to write under.
+
+## Amendment: a ticket keeps its earlier ids as aliases (T-26)
+
+An id gaining a key (above) only matters once a ticket can actually move to
+a keyed one without losing the id it was minted, found, or talked about
+under before. `ticket.yaml` gains `aliases:`, a list of a ticket's earlier
+ids, kept unchanged by every rewrite of the record the same way every other
+field is; no command in this ticket renames a ticket or writes a real one -
+only a test does, standing in for the migration (L3) that will.
+
+This ADR's claim guarantee - an id, once claimed, names exactly one ticket
+- would otherwise break the moment an alias exists: an id or alias that two
+tickets could both claim is indistinguishable from the id collision this
+ADR exists to prevent. `Store.ResolveTicket` is the guarantee's own
+enforcement point for aliases: it turns an id or alias into the one ticket
+that claims it, and refuses - naming every claimant - when more than one
+does, whether through two tickets' `aliases:` both listing it or an alias
+equal to another ticket's own id. Every command that takes a ticket id
+resolves through it before anything else, so an alias is never silently
+read as whichever ticket happened to be checked first; `jig validate` also
+runs the same claims check store-wide (`Store.CheckAliases`), since a
+collision can involve two tickets neither of which a given validate run is
+looking at.
+
+`Mint`'s own counter extends to match: the next number under a key is one
+past the highest number among both the ids and the aliases that carry it,
+so a number once minted is never minted again under that key even once its
+ticket has moved on to another alias.

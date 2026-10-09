@@ -34,6 +34,23 @@ type Store struct {
 	// "warning: <cause>" to os.Stderr. A command that wants the warning in
 	// its own structured output sets this before calling Push.
 	Warn func(format string, args ...any)
+
+	// aliasClaimsCache memoizes aliasClaims' store-wide scan (internal/store/resolve.go)
+	// for the life of this Store value: a command resolving many refs in one
+	// run (jig validate's blocked_by refs and cycle DFS, the mirror's
+	// blocker links and "Waits for" line) would otherwise re-read every
+	// ticket.yaml once per ref. invalidateAliasClaims clears it whenever a
+	// ticket.yaml write could change what it holds.
+	aliasClaimsCache map[string][]string
+}
+
+// invalidateAliasClaims drops the memoized aliasClaims result, so the next
+// call rescans the store. CreateTicketRecord and mutateTicket, the only
+// writers of ticket.yaml, call this after a successful write: either one can
+// change a ticket's aliases (or, for CreateTicketRecord, add a ticket whose
+// id now claims itself) and so change what aliasClaims resolves.
+func (s *Store) invalidateAliasClaims() {
+	s.aliasClaimsCache = nil
 }
 
 // RunCheckpointHook runs AfterCheckpoint, when set, after a checkpoint has

@@ -1240,6 +1240,47 @@ func TestSyncLinksChartSubIssuesAndBlockedBy(t *testing.T) {
 	}
 }
 
+// TestSyncLinksBlockedByThroughAnAlias covers the refresh's own rule: a
+// blocked_by ref naming a blocker's alias rather than its current id still
+// gets its native blocked-by link, reported (and recorded) under the
+// blocker's current id.
+func TestSyncLinksBlockedByThroughAnAlias(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+	if err := st.CreateTicketRecord("DEMO-1", store.Ticket{Title: "Blocker", Aliases: []string{"DEMO-0"}}); err != nil {
+		t.Fatal(err)
+	}
+	mintTestTicketWithBlockers(t, st, "DEMO-2", "Waiting ticket", []store.TicketBlockedBy{
+		{Ticket: "DEMO-0", Kind: "merged"},
+	})
+	runGit(t, work, "push", "origin", "main")
+
+	cfg := loadCfg(t, st)
+	client := &fakeClient{}
+	report, err := Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	if len(report.LinkedBlockedBy) != 1 || report.LinkedBlockedBy[0] != (LinkedBlockedBy{Ticket: "DEMO-2", Blocker: "DEMO-1"}) {
+		t.Fatalf("LinkedBlockedBy = %+v, want one entry naming the blocker's current id DEMO-1", report.LinkedBlockedBy)
+	}
+	if len(client.blockedBys) != 1 || client.blockedBys[0] != (fakeBlockedBy{IssueID: "NODE_Waiting ticket", BlockingID: "NODE_Blocker"}) {
+		t.Fatalf("blockedBys = %+v, want DEMO-2's issue blocked by DEMO-1's", client.blockedBys)
+	}
+
+	ticket, err := st.ReadTicket("DEMO-2")
+	if err != nil {
+		t.Fatalf("ReadTicket DEMO-2: %v", err)
+	}
+	line, err := waitsForLine(st, ticket.BlockedBy)
+	if err != nil {
+		t.Fatalf("waitsForLine: %v", err)
+	}
+	if !strings.HasPrefix(line, "**Waits for:** DEMO-1 ") {
+		t.Fatalf("waitsForLine = %q, want it to name the current id DEMO-1, not the alias DEMO-0", line)
+	}
+}
+
 // TestSyncDryRunPreviewsLinksWithoutMutating is gate finding r2-f3's own
 // case: TestSyncDryRunPreviewsAgainstExistingRecords's store carries one
 // chartless, blocker-free ticket, so links.go's own dryRun branches

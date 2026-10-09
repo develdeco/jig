@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -161,6 +163,12 @@ type Config struct {
 	// list is empty (or absent, or tracker: local). internal/mirror reads
 	// this to decide whether a store's checkpoints sync to GitHub at all.
 	GitHub *GitHubTracker
+	// Keys is the project's declared area keys, key to its one-line
+	// meaning: written directly as keys:, or - until L3's migration writes
+	// keys: for every project - read from ticket_format as the one key it
+	// names, with an empty meaning. An id is <key>-<n>; ResolveKey is where
+	// every caller that mints or reads a key: resolves one against this.
+	Keys map[string]string
 }
 
 // GitHubTracker is a project.yaml trackers: list's github: entry: the repo
@@ -181,6 +189,7 @@ type configRaw struct {
 	SchemaVersion int            `yaml:"schema_version"`
 	Name          string         `yaml:"name"`
 	TicketFormat  string         `yaml:"ticket_format"`
+	Keys          yaml.Node      `yaml:"keys"`
 	Tracker       yaml.Node      `yaml:"tracker"`
 	Trackers      yaml.Node      `yaml:"trackers"`
 	Repos         []Repo         `yaml:"repos"`
@@ -220,6 +229,10 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 			Code: "VALIDATION_ERROR",
 			Help: []string{"Remove routes: from project.yaml: publish renders the pull request body and the review notes itself"},
 		}
+	}
+
+	if err := c.loadKeys(raw); err != nil {
+		return err
 	}
 
 	trackerPresent, trackersPresent := raw.Tracker.Kind != 0, raw.Trackers.Kind != 0
@@ -319,6 +332,147 @@ func malformedTrackerEntryError(why string) error {
 		Code: "VALIDATION_ERROR",
 		Help: []string{"trackers: takes at most one entry: github:, with repo: <owner>/<name> and project: <url>"},
 	}
+}
+
+// keyRE matches a key: entry's own key: 2 to 10 uppercase ASCII letters and
+// digits, starting with a letter. Keys are uppercase so that a filesystem
+// that ignores case, the Windows and macOS default, never confuses STORE-1
+// with store-1.
+var keyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
+
+// ticketFormatKeyRE matches the prefix of a ticket_format this jig can read
+// as the one key it declares: uppercase ASCII letters and digits, starting
+// with a letter, 1 to 10 characters - keys:' 2-character minimum waived,
+// since this key only names an existing store's ids until L3's migration
+// writes keys: for it.
+var ticketFormatKeyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,9}$`)
+
+// loadKeys resolves c.Keys from raw: keys: when present, else ticket_format
+// read as the one key it declares, refusing the shapes brief.md#Keys in
+// project.yaml and brief.md#ticket_format name.
+func (c *Config) loadKeys(raw configRaw) error {
+	keysPresent := raw.Keys.Kind != 0
+	if keysPresent && raw.TicketFormat != "" {
+		return &axi.Error{
+			Msg:  "project.yaml declares both keys: and ticket_format",
+			Code: "VALIDATION_ERROR",
+			Help: []string{"ticket_format is only read as the one key until keys: is declared; remove it from project.yaml"},
+		}
+	}
+	if keysPresent {
+		var keys map[string]string
+		if err := raw.Keys.Decode(&keys); err != nil {
+			return fmt.Errorf("project: decode keys: %w", err)
+		}
+		for key, meaning := range keys {
+			if err := validateKey(key, meaning); err != nil {
+				return err
+			}
+		}
+		c.Keys = keys
+		return nil
+	}
+	if raw.TicketFormat == "" {
+		return nil
+	}
+	key, err := keyFromTicketFormat(raw.TicketFormat)
+	if err != nil {
+		return err
+	}
+	c.Keys = map[string]string{key: ""}
+	return nil
+}
+
+// validateKey refuses a keys: entry whose key breaks the key rule or whose
+// meaning is empty, naming the key either way.
+func validateKey(key, meaning string) error {
+	if !keyRE.MatchString(key) {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("project.yaml's keys: declares %q, which is not 2 to 10 uppercase letters or digits starting with a letter", key),
+			Code: "VALIDATION_ERROR",
+			Help: []string{"Fix the key in project.yaml's keys:"},
+		}
+	}
+	if meaning == "" {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("project.yaml's keys: entry %q has no meaning", key),
+			Code: "VALIDATION_ERROR",
+			Help: []string{fmt.Sprintf("Add a one-line meaning for key %q in project.yaml's keys:", key)},
+		}
+	}
+	return nil
+}
+
+// keyFromTicketFormat reads format ("<KEY>-{n}") as the one key it declares,
+// refusing any other shape: no "-" right before "{n}", text after "{n}", or
+// a prefix that breaks the key rule.
+func keyFromTicketFormat(format string) (string, error) {
+	if !strings.HasSuffix(format, "{n}") {
+		return "", ticketFormatError(format, "must end in {n}, with nothing after it")
+	}
+	prefix := strings.TrimSuffix(format, "{n}")
+	if !strings.HasSuffix(prefix, "-") {
+		return "", ticketFormatError(format, `needs a "-" right before {n}`)
+	}
+	key := strings.TrimSuffix(prefix, "-")
+	if !ticketFormatKeyRE.MatchString(key) {
+		return "", ticketFormatError(format, fmt.Sprintf("prefix %q must be uppercase letters and digits, starting with a letter", key))
+	}
+	return key, nil
+}
+
+// ticketFormatError is the VALIDATION_ERROR keyFromTicketFormat refuses
+// with, why naming what was wrong and help pointing at keys: instead.
+func ticketFormatError(format, why string) error {
+	return &axi.Error{
+		Msg:  fmt.Sprintf("project.yaml's ticket_format %q is invalid: %s", format, why),
+		Code: "VALIDATION_ERROR",
+		Help: []string{"Declare keys: instead: ticket_format is only read as the one key until that migration"},
+	}
+}
+
+// ResolveKey resolves the key to mint under: key itself when non-empty, or
+// the project's one declared key when it declares exactly one and key is
+// empty. It refuses - before anything is minted - an empty key when the
+// project declares more than one (ambiguous) and any key the project does
+// not declare, listing the declared keys and their meanings and pointing at
+// project.yaml's keys: to add one.
+func (c Config) ResolveKey(key string) (string, error) {
+	if key == "" {
+		if len(c.Keys) == 1 {
+			for k := range c.Keys {
+				return k, nil
+			}
+		}
+		return "", c.undeclaredKeyError(key)
+	}
+	if _, ok := c.Keys[key]; !ok {
+		return "", c.undeclaredKeyError(key)
+	}
+	return key, nil
+}
+
+// undeclaredKeyError is ResolveKey's refusal, naming key when one was given
+// (empty when none was and the project declares more than one), with help
+// listing every declared key and its meaning.
+func (c Config) undeclaredKeyError(key string) error {
+	var msg string
+	if key == "" {
+		msg = "project.yaml declares more than one key: --key (or a key: on the chart entry) is required"
+	} else {
+		msg = fmt.Sprintf("project.yaml does not declare key %q", key)
+	}
+	help := []string{"Declared keys:"}
+	names := make([]string, 0, len(c.Keys))
+	for k := range c.Keys {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		help = append(help, fmt.Sprintf("  %s: %s", k, c.Keys[k]))
+	}
+	help = append(help, "Add the key to project.yaml's keys: to mint under it")
+	return &axi.Error{Msg: msg, Code: "VALIDATION_ERROR", Help: help}
 }
 
 // validateGateConfig validates the gate config.

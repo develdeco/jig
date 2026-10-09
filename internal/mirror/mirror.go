@@ -202,7 +202,7 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 		return SyncReport{}, nil, err
 	}
 
-	items, err := collectItems(d.Store, d.Cfg.TicketFormat)
+	items, err := collectItems(d.Store)
 	if err != nil {
 		return SyncReport{}, nil, err
 	}
@@ -542,10 +542,10 @@ func previewCreateRender(st *store.Store, cfg project.Config, it item, prs []PRR
 	return title, body, err
 }
 
-// collectItems lists every ticket (id order) then every chart (name order),
-// the order brief.md#What an issue shows syncs them in.
-func collectItems(st *store.Store, ticketFormat string) ([]item, error) {
-	tickets, err := st.TicketIDs(ticketFormat)
+// collectItems lists every ticket (key, then number order) then every chart
+// (name order), the order brief.md#What an issue shows syncs them in.
+func collectItems(st *store.Store) ([]item, error) {
+	tickets, err := st.TicketIDs()
 	if err != nil {
 		return nil, err
 	}

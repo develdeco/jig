@@ -21,6 +21,7 @@ type ChartRef struct {
 // ChartEntry is one ticket entry in a chart's tickets.yaml.
 type ChartEntry struct {
 	ID        string     `yaml:"id,omitempty"`
+	Key       string     `yaml:"key,omitempty"`
 	Title     string     `yaml:"title"`
 	Body      string     `yaml:"body,omitempty"`
 	BlockedBy []ChartRef `yaml:"blocked_by,omitempty"`
