@@ -365,8 +365,8 @@ func (b leakCapturingBackend) Run(d session.Dispatch) error {
 	// however it climbs out or where it was made. What is left to scan of a
 	// path is the part below that root.
 	paths := []string{d.SliceJSON, d.ResultJSON, d.Worktree}
-	if d.ExtraWriteDir != "" {
-		paths = append(paths, d.ExtraWriteDir)
+	if d.ExtraReadFile != "" {
+		paths = append(paths, d.ExtraReadFile)
 	}
 	for _, p := range paths {
 		if !b.scan.holds(p) {
