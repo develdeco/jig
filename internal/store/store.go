@@ -20,6 +20,42 @@ import (
 // Store is a truth-repo checkout rooted at Root.
 type Store struct {
 	Root string
+
+	// AfterCheckpoint, when set, runs once after every Push that actually
+	// lands (committed, and pushed when the store has an origin): the
+	// GitHub mirror's full sync hooks in here (internal/mirror), so the
+	// mirror depends on the store and never the reverse. A failure never
+	// fails or stops the command whose Push found it: Push reports it
+	// through Warn instead and returns nil, the same as every other
+	// checkpoint. nil runs no hook.
+	AfterCheckpoint func(s *Store) error
+
+	// Warn reports AfterCheckpoint's failure, naming its cause. nil writes
+	// "warning: <cause>" to os.Stderr. A command that wants the warning in
+	// its own structured output sets this before calling Push.
+	Warn func(format string, args ...any)
+}
+
+// RunCheckpointHook runs AfterCheckpoint, when set, after a checkpoint has
+// landed, reporting any failure through Warn (or its default) rather than
+// propagating it: a sync failure (network, token, a GitHub error, a
+// timeout) must never fail or stop the command that checkpointed. Push
+// calls this itself after every checkpoint it makes; Claim does not, since
+// the mirror's own claims (internal/mirror's claimIssue) reach the store
+// through Claim too, and hooking Claim would re-enter the mirror. A command
+// whose only checkpoint is a Claim, such as `jig ticket new`, calls this
+// explicitly once the claim lands.
+func (s *Store) RunCheckpointHook() {
+	if s.AfterCheckpoint == nil {
+		return
+	}
+	if err := s.AfterCheckpoint(s); err != nil {
+		warn := s.Warn
+		if warn == nil {
+			warn = func(format string, args ...any) { fmt.Fprintf(os.Stderr, "warning: "+format+"\n", args...) }
+		}
+		warn("the tracker sync after this checkpoint failed: %v", err)
+	}
 }
 
 // Open opens the store rooted at root. root must contain a project.yaml.
@@ -398,6 +434,7 @@ func (s *Store) Push(msg string) error {
 		return err
 	}
 	if !cp.hasRemote() {
+		s.RunCheckpointHook()
 		return nil
 	}
 	if err := cp.push(); err != nil {
@@ -410,6 +447,7 @@ func (s *Store) Push(msg string) error {
 	if cp.repo == nil || cp.repo.LooseObjectsPastAutoGC() {
 		_ = gitx.MaintenanceAuto(s.Root)
 	}
+	s.RunCheckpointHook()
 	return nil
 }
 
@@ -581,11 +619,11 @@ func (s *Store) Dirty() (bool, error) {
 // or a differently cased spelling names one id. A Windows junction is not a
 // symlink and is not resolved: a clone reached through one names its own id,
 // as a clone moved elsewhere does. It keys the machine-local files
-// that belong to a store but must stay out of its git, such as a gate demo's
-// media under the jig home (home.EvidenceDir). It is derived from the
-// path, not stored, because those files are per machine like the clone
-// itself: a clone moved elsewhere is a new id, and its media are not found
-// under the old one.
+// that belong to a store but must stay out of its git, such as a ticket's
+// recordings under the jig home's evidence tree (home.RecordDir). It is
+// derived from the path, not stored, because those files are per machine like
+// the clone itself: a clone moved elsewhere is a new id, and its media are not
+// found under the old one.
 func (s *Store) ID() (string, error) {
 	abs, err := filepath.Abs(s.Root)
 	if err != nil {

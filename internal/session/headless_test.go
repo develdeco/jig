@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -804,6 +805,11 @@ func realDispatch(t *testing.T, screen bool) Dispatch {
 // does not, since silently falling back to 90 minutes would only show up as
 // a wait.
 func TestHeadlessTimeoutParsing(t *testing.T) {
+	// Read as unset, whatever the shell running the test has set: a jig
+	// build session sets JIG_HEADLESS_TIMEOUT for its own child, so a test
+	// that asserted the default against the ambient environment would fail
+	// exactly when it ran inside jig. headlessTimeout reads "" as unset.
+	t.Setenv("JIG_HEADLESS_TIMEOUT", "")
 	got, err := headlessTimeout()
 	if err != nil || got != defaultHeadlessTimeout {
 		t.Errorf("headlessTimeout() = %v, %v, want the default and no error", got, err)
@@ -1081,4 +1087,98 @@ func indexOf(args []string, s string) int {
 		}
 	}
 	return -1
+}
+
+// recordDirChildStubEnv marks a run of this test binary as the child that
+// TestHeadlessChildDoesNotInheritTheRecordDir runs the dispatch in, a process
+// whose environment holds a JIG_RECORD_DIR, and carries the directory of the
+// claude stub the parent built, so the child compiles nothing.
+const recordDirChildStubEnv = "JIG_SESSION_TEST_STUB_DIR"
+
+// TestHeadlessChildDoesNotInheritTheRecordDir: JIG_RECORD_DIR is how an oracle
+// run is told to record (ADR 0029), and only jig's own builder-green oracle
+// run sets it. jig can itself run inside such a run (it tests itself), so a
+// dispatched session, which starts the project's tests, must not inherit it,
+// whether Options.Env is nil (the inherited environment) or given. The
+// variable is set on a child process running this test again, never on this
+// one. A session that inherits the environment also gets the PWD of its
+// worktree, as os/exec sets it when Env is nil (Windows has no PWD). The
+// screen is irrelevant to the environment, so the dispatch runs without it.
+func TestHeadlessChildDoesNotInheritTheRecordDir(t *testing.T) {
+	stubDir := os.Getenv(recordDirChildStubEnv)
+	if stubDir == "" {
+		const self = "TestHeadlessChildDoesNotInheritTheRecordDir"
+		cmd := exec.Command(os.Args[0], "-test.run=^"+self+"$", "-test.v")
+		cmd.Env = append(os.Environ(),
+			recordDirChildStubEnv+"="+buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude"),
+			"JIG_RECORD_DIR="+filepath.Join(t.TempDir(), "outer"))
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("the child run failed: %v\n%s", err, out)
+		}
+		// A renamed or skipped test would exit 0 having checked nothing.
+		if !strings.Contains(string(out), "--- PASS: "+self+" ") {
+			t.Fatalf("the child run did not run %s to a pass:\n%s", self, out)
+		}
+		return
+	}
+	if os.Getenv("JIG_RECORD_DIR") == "" {
+		t.Fatal("the child run was not given a JIG_RECORD_DIR")
+	}
+
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	logFile := filepath.Join(t.TempDir(), "claude.log")
+	t.Setenv("CLAUDE_STUB_LOG", logFile)
+	t.Setenv("CLAUDE_STUB_STDOUT", strings.TrimSuffix(cliResultJSON(t, false, "done", nil), "\n"))
+
+	d := realDispatch(t, false)
+	backend, err := New("headless", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.Run(d); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read claude stub log: %v", err)
+	}
+	var call struct {
+		Env []string `json:"env"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &call); err != nil {
+		t.Fatalf("parse claude stub log: %v", err)
+	}
+	kept, pwd := false, ""
+	for _, kv := range call.Env {
+		name, value, _ := strings.Cut(kv, "=")
+		if strings.EqualFold(name, "JIG_RECORD_DIR") {
+			t.Errorf("the child inherited %q", kv)
+		}
+		kept = kept || name == "CLAUDE_STUB_LOG"
+		if name == "PWD" {
+			pwd = value
+		}
+	}
+	if !kept {
+		t.Errorf("the child did not inherit the rest of the environment: %v", call.Env)
+	}
+	if runtime.GOOS != "windows" {
+		want, err := filepath.Abs(sessionView(d).Worktree)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pwd != want {
+			t.Errorf("the child's PWD = %q, want the worktree %q (os/exec's, not jig's own)", pwd, want)
+		}
+	}
+
+	given := childEnv("linux", []string{"FOO=bar", "JIG_RECORD_DIR=outer"}, "wt")
+	if want := []string{"FOO=bar", "PWD=wt"}; !reflect.DeepEqual(given, want) {
+		t.Errorf("childEnv kept JIG_RECORD_DIR: %v, want %v", given, want)
+	}
+	given = childEnv("windows", []string{"FOO=bar", "jig_record_dir=outer"}, "wt")
+	if want := []string{"FOO=bar", "PWD=wt"}; !reflect.DeepEqual(given, want) {
+		t.Errorf("childEnv (windows) kept a differently cased JIG_RECORD_DIR: %v, want %v", given, want)
+	}
 }

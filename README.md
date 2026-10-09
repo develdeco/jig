@@ -56,7 +56,7 @@ irm https://raw.githubusercontent.com/develdeco/jig/main/scripts/install.ps1 | i
 Set `JIG_VERSION` to install a specific release tag instead of the latest,
 and `JIG_INSTALL_DIR` to change where `jig` is installed.
 
-With Go 1.27 or newer:
+With Go 1.27.2 or newer:
 
 ```sh
 go install github.com/develdeco/jig/cmd/jig@latest
@@ -88,7 +88,7 @@ host and opening pull requests.
 ### Installing an unreleased build
 
 `main` can carry fixes that no release has yet. It has no release
-archives, so it installs with Go 1.27 or newer:
+archives, so it installs with Go 1.27.2 or newer:
 
 ```sh
 go install github.com/develdeco/jig/cmd/jig@main
@@ -242,17 +242,19 @@ changed, the change working, and how it was verified.
   from review. One line per bullet: a fix slice's goal is the prompt jig
   wrote from the gate's findings, and those findings belong in the comment
   below, not in the body.
-- **Demo** - present only when the gate round that reviewed the shipped head
-  recorded one (`demo: recorded` in that round's gate report, not a later
-  round's): the demo's own summary, then each of its media files with its
-  caption, an image as a markdown image reference
-  (`![caption](./demo-<n>.<ext>)`) and a video as a plain bullet
-  (`- ./demo-<n>.<ext>: caption`) - the one reference form each kind
-  actually gets rewritten in. A file publish cannot
-  verify against the round's manifest anymore (missing, or changed since)
-  is left out and named on stderr, never rendered as if it were still
-  there; a refused demo, or no demo recorded for this head at all, leaves
-  the section out entirely, and stderr says which. With a GitHub host the
+- **Demo** - present only when the build recorded its end-to-end scenarios
+  and a pick stands: a short session picks, among the recordings made at the
+  shipped head or an ancestor of it, the ones that show the change, and
+  composes them into flows (`--backend` and `--scenario` pick its backend, as
+  for `jig run`). The section is the pick's summary and each flow under a
+  `###` heading, the files staged as `rec-<n>.<ext>`, an image as a markdown
+  image reference (`![caption](./rec-<n>.<ext>)`) and a video as a plain
+  bullet (`- ./rec-<n>.<ext>: caption`) - the one reference form each kind
+  actually gets rewritten in. A recording publish cannot verify anymore
+  (missing, or changed since the build recorded it) is left out of the choice
+  and named on stderr; a pick that is refused or fails, like a build that
+  recorded nothing, leaves the section out entirely, and stderr says why.
+  With a GitHub host the
   media are attached to the pull request itself (`gh ... --attach`),
   which rewrites a recognized image reference to the uploaded URL in place
   but not a video's bare path; publish reads the pull request back, moves
@@ -280,8 +282,7 @@ With no host (the standalone store above) both files are written under
 
 `demo/publish-body.tape` plays this through end to end with no pull-request host:
 a ticket's gate rounds fixing, dismissing, and noting findings - the last of
-them clean, with its own recorded demo - then `jig publish` and both files
-as it leaves them, the body's `## Demo` section included - see
+them clean - then `jig publish` and both files as it leaves them - see
 [demo/README.md](demo/README.md).
 
 ## Session backends
@@ -320,19 +321,77 @@ intent to judge against at all, and the reviewer is told so plainly. Both
 flags work in every mode, not only `--branch`, and each gate report
 prints which one this round resolved to.
 
-After a clean reviewer round, `jig gate` also dispatches a demo session: it
-shows a person reviewing the change that it works, as a screenshot, a GIF or
-a video, whichever shows it best, and jig records what it produced - the
-media under the jig home's `evidence/` directory (never in the store's git)
-and a manifest, `gate/round-N/demo.yaml`, in the store. Your repo documents
-its own demo tooling in its own `CLAUDE.md`. A demo is best effort: one that
-fails, or whose files jig refuses, is recorded and shown in the gate report
-(`demo: refused` and why) and never changes the round's verdict. There is
-one demo per reviewed head, `--no-demo` skips it (on `jig solve` too), and
-the scripted source never runs one. A demo that needs an env class reports
-that it cannot record, since env classes are already down by then.
-`jig publish` attaches a recorded demo to the pull request it ships - see
+The gate records nothing. What a pull request shows of the change working
+comes from the build: the end-to-end scenarios a builder's green oracle run
+executes can leave recordings (screenshots, videos, terminal captures) in the
+directory jig names in `JIG_RECORD_DIR`, and `jig publish` has a short
+session pick among them - see
 [What a published pull request looks like](#what-a-published-pull-request-looks-like).
+
+## GitHub mirror
+
+jig can mirror the store onto GitHub issues and a GitHub Project, from
+inside every command: after each checkpoint it syncs every ticket and
+chart, best-effort - a GitHub failure warns and never fails the command,
+and the next checkpoint retries. Whatever that sync found prints in the
+output of the command it rode in on: every issue created, every drift line,
+anything a publish-safety hit skipped. To turn it on, add a `github` entry
+to `project.yaml`'s `trackers:` list:
+
+```yaml
+trackers:
+  - github:
+      repo: your-org/your-tracking-repo
+      project: https://github.com/users/your-org/projects/7
+```
+
+`repo:` is where issues live - named, not derived, since GitHub cannot
+transfer an issue from a private repo to a public one once one appears.
+The docs' own rule of thumb: the product repo for a one-repo project, a
+dedicated tracking repo for several. `project:` is the GitHub Project's
+URL, `users/<login>` for a personal project or `orgs/<org>` for an
+organization's. Both are required; jig creates the project's `Status` and
+`Store ID` fields itself the first time it syncs - there is no setup
+command.
+
+The token `gh auth token` prints needs the `project` scope (`gh auth
+refresh -s project`) alongside whatever `gh` already needs for pull
+requests; a project jig cannot resolve (gone, or that scope missing) looks
+the same from here and is refused the same way.
+
+When the issue repo is public, put a `publish-terms.txt` in the jig home
+(one term per line, matched case-insensitively, `#` comments and blank
+lines ignored) naming anything project-specific that must never reach a
+public issue - a codename, an internal hostname - beyond the built-in
+checks (email addresses, home directory paths, GitHub/Anthropic/AWS token
+prefixes, private key headers). A hit skips that one ticket's or chart's
+issue - GitHub keeps whatever it had - and `jig trackers sync` exits
+non-zero when anything was skipped; a private issue repo is never scanned.
+
+Several stores may point at the same issue repo and project, so work kept
+in separate stores shows on one board - keep each store's `ticket_format`
+distinct (or otherwise ensure the ids never collide), since jig adds no
+store identity of its own to an issue.
+
+Run `jig trackers sync [--dry-run] [--store <path>] [--project <name>]` to
+sync on demand and see what changed: created, updated and reopened or
+closed issues, links added and removed, board fields set, and every drift
+line - an edit made directly on GitHub to a field jig owns (title, body,
+open/closed state, parent and blocked-by links, a board item's Status or
+Store ID) is reported and overwritten with the store's value again.
+`--dry-run` reads GitHub and the store and reports what it would change,
+writing to neither - the cutover's own check, since a dry run that never
+looked at GitHub could not tell you whether the two already agree.
+
+A sync from inside another command stops after 2 minutes, warning how many
+tickets or charts still have no GitHub issue and pointing at `jig trackers
+sync`; one mutation per second against a first sync's 5 or more per ticket
+(create, update, up to two links, up to three board fields) means a
+sizeable store's first sync needs several checkpoints to drain, each
+making progress. `jig trackers sync` itself runs with no such bound, since
+it is run on demand rather than from inside another command, so the
+cutover and an L3 migration should each run one full `jig trackers sync`
+instead of waiting out the backlog across several commands.
 
 ## Safety
 
@@ -355,8 +414,7 @@ host. See [ADR 0008](docs/adr/0008-headless-permission-model.md) for why a
 denylist of path spellings can't close that gap, and what would. A
 `headless` session gets nothing else it doesn't need: jig's own settings
 grant its shell and file reads only through a passing screen, and its file
-edits only inside the lease, its own `result.json`, and a gate demo's media
-directory - though the operator's own user settings, which still load on
+edits only inside the lease and its own `result.json` - though the operator's own user settings, which still load on
 top, can grant more. The lease's `.claude/settings.json` is not loaded,
 since that file is part of
 the code under review, while its `CLAUDE.md` is carried in from the lease's

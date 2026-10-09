@@ -3,12 +3,16 @@ package main
 import (
 	"io"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
-// cmdPublish implements `jig publish <ticket> [--yes]`.
+// cmdPublish implements `jig publish <ticket> [--yes] [--backend
+// fake|headless|herdr] [--scenario <dir>]`.
 func cmdPublish(args []string, stdout io.Writer) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
@@ -17,6 +21,8 @@ func cmdPublish(args []string, stdout io.Writer) int {
 
 	fs := newFlagSet("publish")
 	yes := fs.Bool("yes", false, "skip the interactive confirm")
+	backendFlag := fs.String("backend", "", "session backend that picks the recordings the pull request shows: fake, headless, or herdr")
+	scenario := fs.String("scenario", "", "scenario dir for the fake backend")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -25,11 +31,15 @@ func cmdPublish(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 	if err := requireWork(st, ticket); err != nil {
+		return renderErr(stdout, err)
+	}
+	backend, err := publishBackend(*backendFlag, *scenario, session.Available)
+	if err != nil {
 		return renderErr(stdout, err)
 	}
 
@@ -40,7 +50,7 @@ func cmdPublish(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	report, err := verifydeliver.Publish(deps, verifydeliver.PublishOpts{Ticket: ticket, Yes: *yes})
+	report, err := verifydeliver.Publish(deps, verifydeliver.PublishOpts{Ticket: ticket, Yes: *yes, Backend: backend})
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -50,13 +60,60 @@ func cmdPublish(args []string, stdout io.Writer) int {
 		prRows = append(prRows, []string{repo, path})
 	}
 	axi.Render(stdout,
-		axi.KV("publish", [][2]string{{"ticket", ticket}, {"tier", report.Tier}}),
+		axi.KV("publish", append([][2]string{{"ticket", ticket}, {"tier", report.Tier}}, picksRows(report.Picks)...)),
 		pushedTable(report),
 		axi.Table("pr_body", []string{"repo", "path"}, prRows),
 		prURLTable(report),
 		axi.Help("Run `jig status "+ticket+"` to confirm the ticket is fully green"),
 	)
 	return 0
+}
+
+// publishBackend is the session backend publish picks the build's recordings
+// with, built the way the other commands build theirs. Publish needs a session
+// only for a ticket whose build recorded something, so a backend that is not
+// installed does not stop a publish: it is handed over as one that fails when
+// it is used, and the pick is then refused with that failure and the pull request
+// has no demo section. A backend name jig does not have is an error at once.
+// available says whether the program a backend runs is there (session.Available).
+func publishBackend(backendFlag, scenario string, available func(name string) error) (session.Backend, error) {
+	kind := backendName(backendFlag, scenario)
+	backend, err := session.New(kind, session.Options{ScenarioDir: scenario})
+	if err != nil {
+		return nil, err
+	}
+	if err := available(kind); err != nil {
+		return unavailableBackend{err}, nil
+	}
+	return backend, nil
+}
+
+// unavailableBackend is a backend that is not there: every dispatch fails with
+// the reason it is not.
+type unavailableBackend struct{ err error }
+
+func (b unavailableBackend) Run(session.Dispatch) error { return b.err }
+
+// picksRows are the publish report's rows for the recordings it picked: none
+// for a build that recorded nothing.
+func picksRows(p verifydeliver.PicksReport) [][2]string {
+	if p.Status == "" && len(p.Dropped) == 0 {
+		return nil
+	}
+	var rows [][2]string
+	if p.Status != "" {
+		rows = append(rows, [2]string{"picks", p.Status})
+	}
+	switch p.Status {
+	case verifydeliver.PicksPicked, verifydeliver.PicksReused:
+		rows = append(rows, [2]string{"picks_flows", strconv.Itoa(p.Flows)}, [2]string{"picks_files", strconv.Itoa(p.Files)})
+	case verifydeliver.PicksRefused:
+		rows = append(rows, [2]string{"picks_reason", p.Reason})
+	}
+	if len(p.Dropped) > 0 {
+		rows = append(rows, [2]string{"picks_dropped", strings.Join(p.Dropped, "; ")})
+	}
+	return rows
 }
 
 // pushedTable is the publish report's account of what each repo's push left on

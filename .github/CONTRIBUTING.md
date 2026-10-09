@@ -1,6 +1,6 @@
 # Contributing
 
-jig is a Go project. Building needs only Go 1.27+; testing also needs `git`
+jig is a Go project. Building needs only Go 1.27.2+; testing also needs `git`
 on PATH, since the suite spawns real git commands against local, file-path
 repos.
 
@@ -13,6 +13,15 @@ go test -timeout 30m ./...
 
 `gofmt -l .` should print nothing, and `go vet ./...` should be clean. See
 Testing rules below for what the suite does and doesn't touch.
+
+While working, run `go build ./...`, `go vet ./...` and `gofmt -l .`, and test
+what your change can break: the packages you touched (`go test
+./internal/store`, say), the packages that import them when behavior changes,
+and `./lint`, whose checks cover files across the repo (skills, workflows,
+tests). The full suite takes minutes; CI runs it on all three platforms on
+every pull request, and jig's gate runs it as this repo's `test` oracle
+(`.claude/jig.yaml`). A jig build slice's own oracle runs when its builder
+reports green.
 
 ## Making a change
 
