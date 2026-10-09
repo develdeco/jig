@@ -48,7 +48,7 @@ func newDeps(t *testing.T, fx *fixture.Fixture) (Deps, *store.Store) {
 		Rungs:   staircase.Default(),
 		Journal: func(l journal.Line) error { return journal.Append(st, fx.Ticket, l) },
 		Home:    fx.Home,
-		Oracle:  func(string, string) (string, error) { return "", nil },
+		Oracle:  func(string, string, []string) (string, error) { return "", nil },
 	}
 	return d, st
 }
@@ -63,6 +63,7 @@ func containsID(ids []string, want string) bool {
 }
 
 func TestRunScenarioMainChain(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 
@@ -132,6 +133,7 @@ func TestRunScenarioMainChain(t *testing.T) {
 // "jig/"+ticket would still leave every one of them green. A recorded branch
 // is on origin by definition, so the test puts it there, at the target's tip.
 func TestRunUsesRecordedBranchForBuildLease(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 	if err := st.WriteTicketBranch(fx.Ticket, "feature/custom"); err != nil {
@@ -168,6 +170,7 @@ func TestRunUsesRecordedBranchForBuildLease(t *testing.T) {
 // exist to prevent; a fallback that tells the two apart and keeps only one
 // refusal is still one.
 func TestRunFailsWithTheRefusalOfTicketBranch(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		record   func(t *testing.T, st *store.Store, ticket string)
@@ -227,6 +230,7 @@ func TestRunFailsWithTheRefusalOfTicketBranch(t *testing.T) {
 // writes it). A Run that resolved the branch per slice attempt would put
 // the later slices, and the build lease's HEAD, on feature/mid-run.
 func TestRunResolvesTheBranchOncePerRun(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 	journalTo := d.Journal
@@ -274,6 +278,7 @@ func TestRunResolvesTheBranchOncePerRun(t *testing.T) {
 // front, so a Run whose frontier is empty (every slice already green, so
 // only a report is due) still succeeds over a ticket.yaml it cannot read.
 func TestRunWithNothingToBuildNeverReadsTheTicketRecord(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 	slices, err := st.ReadSlices(fx.Ticket)
@@ -303,6 +308,7 @@ func TestRunWithNothingToBuildNeverReadsTheTicketRecord(t *testing.T) {
 }
 
 func TestAnswerResume(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 
@@ -345,6 +351,7 @@ func TestAnswerResume(t *testing.T) {
 // own green-route clear (a separate, already pinned mutant) would then mask
 // a regression in answerAndRequeue's own clear.
 func TestAnswerAndRequeueClearsStalledSignature(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 
@@ -396,6 +403,7 @@ func TestAnswerAndRequeueClearsStalledSignature(t *testing.T) {
 }
 
 func TestScheduleUsedByRunSingleRepoFixture(t *testing.T) {
+	t.Parallel()
 	// The default fixture is a single-repo project, so Run's own use of
 	// Schedule always exercises the serial (one-group) path; TestSchedule*
 	// above covers the concurrent path directly against the pure function.
@@ -407,6 +415,7 @@ func TestScheduleUsedByRunSingleRepoFixture(t *testing.T) {
 }
 
 func TestAttemptCapExhaustion(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "cap"})
 	d, st := newDeps(t, fx)
 
@@ -446,6 +455,7 @@ func TestAttemptCapExhaustion(t *testing.T) {
 }
 
 func TestStallStops(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "stall"})
 	d, st := newDeps(t, fx)
 
@@ -485,6 +495,7 @@ func TestStallStops(t *testing.T) {
 }
 
 func TestRequeueFromBriefDiff(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "flawed-brief"})
 	d, st := newDeps(t, fx)
 
@@ -566,6 +577,7 @@ func TestRequeueFromBriefDiff(t *testing.T) {
 // are seeded directly (independent of how c reached its flawed-brief state)
 // so this fails on its own if Requeue's own clear is removed.
 func TestRequeueClearsStalledSignature(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "flawed-brief"})
 	d, st := newDeps(t, fx)
 
@@ -617,6 +629,7 @@ func TestRequeueClearsStalledSignature(t *testing.T) {
 // reason, signature and stall summary cleared, and a second Run then
 // dispatches it again.
 func TestRequeueSliceStalled(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "stall"})
 	d, st := newDeps(t, fx)
 
@@ -664,6 +677,7 @@ func TestRequeueSliceStalled(t *testing.T) {
 // TestRequeueSliceEnvBlocked: RequeueSlice on an env-blocked slice puts it
 // back to queued the same way it does for stalled.
 func TestRequeueSliceEnvBlocked(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), EnvFail: true})
 	d, st := newDeps(t, fx)
 
@@ -699,6 +713,7 @@ func TestRequeueSliceEnvBlocked(t *testing.T) {
 // since it cannot tell a caller's mistake from a stale id, and it must not
 // silently repark an unrelated slice.
 func TestRequeueSliceRefusesOtherStates(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
 
@@ -727,6 +742,7 @@ func TestRequeueSliceRefusesOtherStates(t *testing.T) {
 // "queued" slice and reporting a wrong-state refusal for a slice that was
 // never there.
 func TestRequeueSliceUnknownID(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, _ := newDeps(t, fx)
 
@@ -747,6 +763,7 @@ func TestRequeueSliceUnknownID(t *testing.T) {
 }
 
 func TestEnvPauseDeferCI(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), EnvFail: true})
 	d, st := newDeps(t, fx)
 
@@ -786,6 +803,7 @@ func TestEnvPauseDeferCI(t *testing.T) {
 }
 
 func TestOracleWrongRoundTrip(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "oracle-wrong"})
 	d, st := newDeps(t, fx)
 
@@ -868,6 +886,7 @@ func newTestStore(t *testing.T) *store.Store {
 // env class's down command writes the port it was substituted to a file, so
 // the test can tell a real allocated port from the bug's hardcoded 0.
 func TestBringUpEnvHandleUsedForTeardown(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	portFile := filepath.Join(dir, "port.txt")
 
@@ -916,6 +935,7 @@ func TestBringUpEnvHandleUsedForTeardown(t *testing.T) {
 // runCtx.route (not verifyGreen directly) so the assertion also proves the
 // failure is what actually reaches routeFailure/the journal.
 func TestVerifyGreenRejectsStartSHAItself(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	startSHA := initTestGitRepo(t, dir)
 
@@ -951,6 +971,7 @@ func TestVerifyGreenRejectsStartSHAItself(t *testing.T) {
 // rejected it. The result line, journaled before verification, names the
 // builder's claim either way, which is why it cannot be the record.
 func TestRouteJournalsTheCommitThatVerified(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	startSHA := initTestGitRepo(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("two"), 0o644); err != nil {
@@ -1017,6 +1038,7 @@ func TestRouteJournalsTheCommitThatVerified(t *testing.T) {
 // acquire on an adopted ticket would re-cut that commit away while the slice
 // stays green. The run stops on the journal error, and the slice is not green.
 func TestRouteNeverMarksASliceGreenWhenItsVerifiedLineFails(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	startSHA := initTestGitRepo(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("two"), 0o644); err != nil {
@@ -1069,6 +1091,7 @@ func TestRouteNeverMarksASliceGreenWhenItsVerifiedLineFails(t *testing.T) {
 // green route ever stops clearing them, independent of
 // Requeue's/answerAndRequeue's own clearing.
 func TestRouteGreenClearsStalledSignature(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	startSHA := initTestGitRepo(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("two"), 0o644); err != nil {
@@ -1117,6 +1140,7 @@ func TestRouteGreenClearsStalledSignature(t *testing.T) {
 // fail once with an identical summary must not stall the run - the stall
 // signature's unit must be the slice, not a shared literal context.
 func TestStallSignatureIsPerSlice(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "same-summary-stall"})
 	d, st := newDeps(t, fx)
 
@@ -1153,6 +1177,7 @@ func TestStallSignatureIsPerSlice(t *testing.T) {
 // pre-existed this call (this call's own frontier is empty, so it never
 // exercises the stall-detection path itself).
 func TestReportStoppedForPreExistingStall(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), ScenarioBranch: "stall"})
 	d, _ := newDeps(t, fx)
 
@@ -1277,6 +1302,7 @@ func dispatchedEffort(t *testing.T, rec *recordingBackend, slice string, attempt
 // first to measure a real lease diff - a's commit, under alpha/. The
 // declarations below differ only in whether they cover that path.
 func TestRunFloorsTheRungWhenTheLeaseDiffTouchesAnInvariant(t *testing.T) {
+	t.Parallel()
 	rungs := staircase.Default().Rungs
 	cheapest, dearest := rungs[0], rungs[len(rungs)-1]
 
@@ -1328,6 +1354,7 @@ func TestRunFloorsTheRungWhenTheLeaseDiffTouchesAnInvariant(t *testing.T) {
 // builder's first effort, each retry at its retry effort (ADR 0023). The
 // journal's dispatch lines carry the rung and effort each attempt ran on.
 func TestRunClimbsARungPerFailedAttemptButNotForAQuestion(t *testing.T) {
+	t.Parallel()
 	rungs := staircase.Config{Rungs: []string{"rung-a", "rung-b", "rung-c"}}
 
 	t.Run("failures climb", func(t *testing.T) {
@@ -1377,6 +1404,7 @@ func TestRunClimbsARungPerFailedAttemptButNotForAQuestion(t *testing.T) {
 // summarizer's dispatch asks its backend to keep no transcript. A build
 // session's transcript is the operator's own record of the work and stays.
 func TestRunLeavesSessionPersistenceOnForBuildDispatches(t *testing.T) {
+	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, _ := newDeps(t, fx)
 	rec := &recordingBackend{Backend: d.Backend}

@@ -13,7 +13,6 @@ import (
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -737,44 +736,39 @@ func renderVerificationSection(rep reportYAML, tier string, oracleNames []string
 	return b.String()
 }
 
-// DemoRenderResult holds the outcome of renderDemoSection.
+// DemoFile is one media file the pull request's ## Demo section shows, as
+// publish staged it: its name in the staging directory, its sha256 and size,
+// and the caption shown beside it.
+type DemoFile struct {
+	Name    string
+	SHA256  string
+	Size    int64
+	Caption string
+}
+
+// DemoRenderResult is the ## Demo section publish rendered from the
+// recordings it picked, and what attaching them needs.
 type DemoRenderResult struct {
-	Section string // rendered section, empty when no demo
-	// MediaDir is the evidence directory renderDemoSection resolved and
-	// verified MediaFiles against for the shipped head - the directory
-	// gh's own media-attach calls must run in, so Publish never recomputes
-	// it (and risks a different, post-squash head).
-	MediaDir string
-	Omitted  []string // files that failed verification
-	NoDemo   bool     // no demo recorded for this head at all
-	// DemoRefused is set when demo.yaml itself recorded a refusal for the
-	// shipped head (RefusalReason is why); distinct from NoDemo, which is
-	// true when there is nothing recorded for this head at all.
-	DemoRefused   bool
-	RefusalReason string
-	// AllMediaFailed is set when a recorded demo's every listed file failed
-	// re-verification at publish time: distinct from a demo recorded with
-	// no media at all (ADR 0014, a valid "nothing to show" result), which
-	// renders no section but is neither this nor a refusal.
-	AllMediaFailed bool
-	MediaFiles     []DemoFile // verified media files ready for attachment
-	// ScrubbedSummary is set when the recorded summary named one of jig's own
-	// directories (any spelling jig may have handed the demo session, a WSL
+	Section string // rendered section, empty when there is no demo
+	// MediaDir is the staging directory the picked files were copied to and
+	// checked in, the directory gh's own media-attach calls must run in, so
+	// Publish never recomputes it (and risks a different, post-squash head).
+	MediaDir   string
+	MediaFiles []DemoFile // staged media files ready for attachment
+	// ScrubbedSummary is set when the pick's summary named one of jig's own
+	// directories (any spelling jig may have handed the pick session, a WSL
 	// mount among them) and was left out of the rendered section for it,
 	// rather than published verbatim (the owner's decision on r1-f13,
 	// DECISIONS.md).
 	ScrubbedSummary bool
-	// ScrubbedCaptions names every verified file whose own caption was left
-	// out of the rendered section for the same reason.
+	// ScrubbedCaptions names every staged file whose own caption (or flow
+	// title) was left out of the rendered section for the same reason.
 	ScrubbedCaptions []string
 }
 
 // demoCaptionRenderCap bounds a caption's length in the rendered pull
-// request body. demo.yaml's own copy stays exactly as the session wrote it,
-// unbounded like the reviewer's result.json (ADR 0014); this cap is only
-// for what a published, public pull request shows beside a file, which is
-// meant to be a short label, not a paragraph (the owner's decision on
-// r1-f13, DECISIONS.md).
+// request body. A published, public pull request shows a short label beside a
+// file, not a paragraph (the owner's decision on r1-f13, DECISIONS.md).
 const demoCaptionRenderCap = 200
 
 // capDemoCaption truncates caption to demoCaptionRenderCap runes for the
@@ -803,8 +797,8 @@ func capDemoCaption(caption string) string {
 var demoCaptionBracketStripper = strings.NewReplacer("[", "", "]", "", "(", "", ")", "")
 
 // sanitizeDemoCaption drops the characters demoCaptionBracketStripper names
-// from caption. demo.yaml's own record is untouched; this governs only what
-// gets interpolated into the rendered pull request body.
+// from caption. It governs what gets interpolated into the rendered pull
+// request body.
 func sanitizeDemoCaption(caption string) string {
 	return demoCaptionBracketStripper.Replace(caption)
 }
@@ -821,182 +815,15 @@ func sanitizeDemoCaption(caption string) string {
 // closes a second route to the same result: a caption or summary that
 // already reads `&lt;img src="..."&gt;` would otherwise have that entity
 // sequence decoded back into a live tag by GitHub's own renderer, with no
-// literal "<" or ">" of its own for this function to have caught. demo.yaml's
-// own record is untouched; this governs only what gets interpolated into the
-// rendered pull request body, applied last, after every other transform, so
-// none of the characters those transforms add is itself escaped.
+// literal "<" or ">" of its own for this function to have caught. It governs
+// what gets interpolated into the rendered pull request body, applied last,
+// after every other transform, so none of the characters those transforms add
+// is itself escaped.
 var demoHTMLEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 // escapeDemoHTML applies demoHTMLEscaper to text.
 func escapeDemoHTML(text string) string {
 	return demoHTMLEscaper.Replace(text)
-}
-
-// renderDemoSection renders the ## Demo section when the shipped head has a
-// recorded demo: the latest gate round's own gate/round-<lastRound>/demo.yaml
-// when it names that head, or - when the latest round ran no demo because an
-// earlier round on the same head already recorded one (ADR 0014's one demo
-// per reviewed head; gateDemo reports that as DemoExisting and writes no
-// demo.yaml of its own) - the earliest earlier round that did
-// (recordedDemoRound). Only files that exist and match the manifest (sha256
-// and size) are referenced; omitted files are named in the result for
-// publish's output to report, and so is a demo.yaml recorded as refused for
-// the shipped head, with its own reason.
-//
-// Each verified file renders in the one reference form `gh ... --attach`
-// actually rewrites for its kind (gate finding r1-f3, DECISIONS.md): an
-// image as markdown image syntax, `![caption](./<name>)`, which gh rewrites
-// to the uploaded URL in place; a video as the bare path bullet it has never
-// reliably rewritten, `./<name>: caption`, which publish reads back and
-// patches itself (checkUnrewrittenReferences, rewriteUnrewrittenReferences)
-// once the attach call returns.
-func renderDemoSection(d Deps, st *store.Store, ticket, repoName string, rep reportYAML, lastRound int) (DemoRenderResult, error) {
-	shipHead := rep.ReviewedSHA[repoName]
-	if shipHead == "" {
-		return DemoRenderResult{NoDemo: true}, nil
-	}
-
-	rec, ok, err := readDemoRecord(st, ticket, lastRound)
-	if err != nil {
-		return DemoRenderResult{}, err
-	}
-	if !ok {
-		round, rerr := recordedDemoRound(st, ticket, lastRound+1, shipHead)
-		if rerr != nil {
-			return DemoRenderResult{}, rerr
-		}
-		if round == 0 {
-			return DemoRenderResult{NoDemo: true}, nil
-		}
-		rec, ok, err = readDemoRecord(st, ticket, round)
-		if err != nil {
-			return DemoRenderResult{}, err
-		}
-		if !ok {
-			return DemoRenderResult{NoDemo: true}, nil
-		}
-	}
-	if rec.HeadSHA != shipHead {
-		return DemoRenderResult{NoDemo: true}, nil
-	}
-	if rec.Status == DemoRefused {
-		return DemoRenderResult{DemoRefused: true, RefusalReason: rec.Reason}, nil
-	}
-
-	// Get the media directory where the demo files should be.
-	mediaDir, err := demoMediaDir(d, ticket, shipHead)
-	if err != nil {
-		return DemoRenderResult{}, fmt.Errorf("verifydeliver: render demo section: %w", err)
-	}
-	// The gate lease: where the demo session actually ran (DemoInput.LeaseDir,
-	// session.Dispatch.Worktree), so it is one of the directories a session may
-	// have been told about, in whatever spelling its backend handed it
-	// (herdr's own WSL mount on Windows). It need not exist by publish time;
-	// only its path, jig's own, is being compared against.
-	leaseDir, err := pool.Dir(d.Home, repoName, ticket, pool.Gate)
-	if err != nil {
-		return DemoRenderResult{}, fmt.Errorf("verifydeliver: render demo section: resolve the gate lease directory: %w", err)
-	}
-	knownHostDirs := []hostDir{
-		{mediaDir, "media_dir"},
-		{d.Home, "<jig home>"},
-		{leaseDir, "<lease>"},
-		{d.Store.Root, "<store>"},
-	}
-
-	// Verify files against the manifest: check existence and hash.
-	var verified []DemoFile
-	var omitted []string
-	for _, f := range rec.Media {
-		path := filepath.Join(mediaDir, f.Name)
-		info, err := lstatPinned(path)
-		if err != nil {
-			omitted = append(omitted, f.Name)
-			continue
-		}
-		if !info.Mode().IsRegular() {
-			omitted = append(omitted, f.Name)
-			continue
-		}
-		// Verify the sha256.
-		sum, err := hashRegularFile(path, info)
-		if err != nil || sum != f.SHA256 {
-			omitted = append(omitted, f.Name)
-			continue
-		}
-		// Verify the size.
-		if info.Size() != f.Size {
-			omitted = append(omitted, f.Name)
-			continue
-		}
-		verified = append(verified, f)
-	}
-
-	// If no files verified, report whether that is a failure (something was
-	// listed and none of it held up) or simply nothing to show (an
-	// intentionally empty, valid recorded demo, ADR 0014).
-	if len(verified) == 0 {
-		return DemoRenderResult{MediaDir: mediaDir, Omitted: omitted, AllMediaFailed: len(rec.Media) > 0}, nil
-	}
-
-	// Render the section. The summary and every caption are the session's own
-	// words, recorded as written and unbounded in demo.yaml (ADR 0014); jig
-	// does not filter them going in, but a published pull request body is
-	// public, so before rendering, each is checked here against the exact
-	// paths jig itself knows (knownHostDirs) and left out whole, by exact
-	// string match only, when it names one (the owner's decision on r1-f13,
-	// DECISIONS.md). A caption that clears that check is still collapsed to
-	// one line (demoOneLine), stripped of the characters that could let it
-	// break out of its own bullet or, for an image, out of `![...](...)`'s
-	// alt text (sanitizeDemoCaption), and capped to a short label's length
-	// (capDemoCaption, in that order so the cap governs what is actually
-	// rendered); the summary goes through the same
-	// demoteHeadings+closeOpenFence treatment renderIntentSection gives text
-	// jig did not write, so it cannot forge or outrank one of jig's own
-	// "## " sections or leave a fence open over the rest of the body. Both are
-	// then run through escapeDemoHTML, the last step before either reaches
-	// the body, so no HTML the session wrote - or that any earlier transform
-	// added - renders (the owner's decision on r4-f3, DECISIONS.md).
-	var b strings.Builder
-	b.WriteString("## Demo\n\n")
-	summary := rec.Summary
-	var scrubbedSummary bool
-	if summary != "" && containsHostPath(summary, knownHostDirs...) {
-		scrubbedSummary = true
-		summary = ""
-	}
-	if summary != "" {
-		fmt.Fprintf(&b, "%s\n\n", escapeDemoHTML(closeOpenFence(demoteHeadings(summary))))
-	}
-	var scrubbedCaptions []string
-	for _, f := range verified {
-		caption := f.Caption
-		if caption != "" && containsHostPath(caption, knownHostDirs...) {
-			scrubbedCaptions = append(scrubbedCaptions, f.Name)
-			caption = ""
-		} else {
-			caption = escapeDemoHTML(capDemoCaption(sanitizeDemoCaption(demoOneLine(caption))))
-		}
-		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(f.Name), "."))
-		switch {
-		case demoKind(ext) == "image":
-			fmt.Fprintf(&b, "- ![%s](./%s)\n", caption, f.Name)
-		case caption == "":
-			fmt.Fprintf(&b, "- ./%s\n", f.Name)
-		default:
-			fmt.Fprintf(&b, "- ./%s: %s\n", f.Name, caption)
-		}
-	}
-	b.WriteString("\n")
-
-	return DemoRenderResult{
-		Section:          b.String(),
-		MediaDir:         mediaDir,
-		Omitted:          omitted,
-		MediaFiles:       verified,
-		ScrubbedSummary:  scrubbedSummary,
-		ScrubbedCaptions: scrubbedCaptions,
-	}, nil
 }
 
 // writePRBody writes <ticket>/pr/<repoName>.md: a lean pull request body
@@ -1005,11 +832,12 @@ func renderDemoSection(d Deps, st *store.Store, ticket, repoName string, rep rep
 //
 // Its second return is renderIntentSection's: the body has no ## Intent
 // section although a brief bound as its source, the one omission Publish
-// warns the operator about. The third return is renderDemoSection's result
-// for reporting omitted demo files and demo-unavailability reasons.
+// warns the operator about. The third return is picked itself, the section
+// publish rendered from the recordings it picked (ADR 0029), or the zero
+// value when there is no pick: a body has a ## Demo section only from a pick.
 func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 	rep reportYAML, tier string, commits map[string]string, authorCommits []authorCommit,
-	oracleNames []string, outcomes []findingOutcome, d Deps, lastRound int) (string, bool, DemoRenderResult, error) {
+	oracleNames []string, outcomes []findingOutcome, picked *DemoRenderResult) (string, bool, DemoRenderResult, error) {
 	relPath := filepath.Join(ticket, "pr", repoName+".md")
 	fullPath := filepath.Join(st.Root, relPath)
 
@@ -1025,10 +853,10 @@ func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 	// Render What changed section
 	b.WriteString(renderWhatChangedSection(slices, commits, authorCommits))
 
-	// Render Demo section (if available)
-	demoResult, err := renderDemoSection(d, st, ticket, repoName, rep, lastRound)
-	if err != nil {
-		return "", false, DemoRenderResult{}, err
+	// Render Demo section (if there is a pick): the recordings publish picked.
+	var demoResult DemoRenderResult
+	if picked != nil {
+		demoResult = *picked
 	}
 	b.WriteString(demoResult.Section)
 
@@ -1271,8 +1099,8 @@ var (
 // Every match this package makes against a demo's own ./<name> reference is
 // scoped to this range, never the whole body: the ## Intent section is a
 // brief's or a doc's text verbatim (`jig gate --doc` records a whole file as
-// written), and this repo's own docs and brief use the exact ./demo-<n>.ext
-// shape renderDemoSection renders, so an unscoped match can land in prose
+// written), and this repo's own docs and brief use the exact ./rec-<n>.ext
+// shape renderPicksSection renders, so an unscoped match can land in prose
 // that only happens to quote it.
 func demoSectionBounds(body string) (start, end int, ok bool) {
 	loc := demoHeadingRe.FindStringIndex(body)
@@ -1290,8 +1118,8 @@ func demoSectionBounds(body string) (start, end int, ok bool) {
 // checkUnrewrittenReferences reports which of mediaFiles' own ./<name>
 // references are still literally present in the ## Demo section of body:
 // the exact references writePRBody rendered there, never a substring scan
-// for "./demo-" over the whole body (demoSectionBounds), which would also
-// match a ./demo- mention in the ## Intent section's own text, or a fenced
+// for "./rec-" over the whole body (demoSectionBounds), which would also
+// match a ./rec- mention in the ## Intent section's own text, or a fenced
 // snippet - and would report that prose verbatim rather than the file names
 // actually at issue.
 func checkUnrewrittenReferences(body string, mediaFiles []DemoFile) []string {
@@ -1353,7 +1181,7 @@ func appendedAttachmentURL(body, name string, from int) (url string, start, end 
 // the end of that line. Anchored to a line's own start, and to the literal
 // "- ./" writePRBody itself writes, so a demo summary earlier in the same
 // ## Demo section that merely mentions the file's name in passing - "it
-// recorded ./demo-1.mp4 for this" - is never mistaken for the rendered
+// recorded ./rec-1.mp4 for this" - is never mistaken for the rendered
 // reference itself.
 func demoBulletReferenceRe(name string) *regexp.Regexp {
 	return regexp.MustCompile(`(?m)^- \./` + regexp.QuoteMeta(name) + `(:.*)?$`)

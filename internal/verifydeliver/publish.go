@@ -15,6 +15,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
+	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -22,6 +23,12 @@ import (
 type PublishOpts struct {
 	Ticket string
 	Yes    bool
+	// Backend runs the short session that picks, from the recordings the
+	// build made, the ones the pull request shows (ADR 0029). nil means no
+	// session can be dispatched: a ticket with recordings then has its pick
+	// refused, and the pull request has no demo section. A ticket with no
+	// recordings never dispatches one.
+	Backend session.Backend
 }
 
 // PublishReport is Publish's result.
@@ -44,6 +51,9 @@ type PublishReport struct {
 	// reports why, rather than a silent, unexplained gap where its row would
 	// otherwise be.
 	PRNote map[string]string
+	// Picks is what publish did with the build's recordings: the zero value
+	// when the build recorded nothing that could be offered.
+	Picks PicksReport
 }
 
 // NotSquashed is what the publish report says of a repo whose branch was
@@ -394,17 +404,28 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	prPath, omittedBriefIntent, demoResult, err := writePRBody(d.Store, ticket, repoName, slices, gateRep, tier, commits, authorCommits, oracleNames, outcomes, d, lastRound)
+	// The recordings the build made, picked for the pull request (ADR 0029).
+	// A pick that stands renders the ## Demo section; one that does not, or
+	// none to make, leaves the pull request without one. The pick is
+	// made for the head the gate reviewed (shipHead, before reconcile and
+	// squash rewrote anything), whose history still holds the recorded commits.
+	picksReport, picked, err := publishPicks(picksStep{
+		d: d, backend: o.Backend, ticket: ticket, repoName: repoName,
+		leaseDir: lease.Dir, head: shipHead, lines: lines, warn: warnFn,
+	})
+	if err != nil {
+		return PublishReport{}, err
+	}
+	prPath, omittedBriefIntent, demoResult, err := writePRBody(d.Store, ticket, repoName, slices, gateRep, tier, commits, authorCommits, oracleNames, outcomes, picked)
 	if err != nil {
 		return PublishReport{}, err
 	}
 
-	// The media directory and file names for attachment, when a demo has
-	// verified files: demoResult.MediaDir is the evidence directory
-	// renderDemoSection already resolved and verified these very files
-	// against, for the head the gate reviewed - never recomputed here from
-	// head, which by this point is the post-squash tip and names no
-	// evidence directory that exists.
+	// The media directory and file names for attachment, when a pick staged
+	// files: demoResult.MediaDir is the staging directory (picksStep.stage)
+	// the pick copied and checked them in, for the head the gate reviewed -
+	// never recomputed here from head, which by this point is the post-squash
+	// tip and names no staging directory that exists.
 	mediaDir := demoResult.MediaDir
 	mediaFiles := make([]string, 0, len(demoResult.MediaFiles))
 	for _, f := range demoResult.MediaFiles {
@@ -430,29 +451,23 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 			ticket, intentFilePath(d.Store, ticket, IntentSourceBrief))
 	}
 
-	// Report demo status: no demo recorded, a demo refused outright, every
-	// file of a recorded demo failing verification, or some files omitted
-	// from an otherwise rendered section. The three ways a published body
-	// ends up with no ## Demo section (no demo at all, a demo refused
-	// outright, or one whose media all failed verification) are told apart
-	// here, which half of the pipeline to blame.
-	switch {
-	case demoResult.NoDemo:
-		warnFn("jig: no demo recorded for %s\n", ticket)
-	case demoResult.DemoRefused:
-		warnFn("jig: the demo recorded for %s was refused: %s\n", ticket, demoResult.RefusalReason)
-	case demoResult.AllMediaFailed:
-		warnFn("jig: the pull request body for %s has no ## Demo section: all media files from the recorded demo failed verification: %v\n",
-			ticket, demoResult.Omitted)
-	case len(demoResult.Omitted) > 0:
-		warnFn("jig: media files omitted from the pull request body for %s: %v (missing or changed)\n",
-			ticket, demoResult.Omitted)
+	// A pull request has a ## Demo section only from a pick. One that was
+	// refused or failed has been said where it was (publishPicks); a ticket
+	// with nothing to pick from has none, and is told so here. When the build
+	// did record, the recordings left out of the choice have been named
+	// (publishPicks), so this says none is left rather than none was made.
+	if picked == nil && picksReport.Status == "" {
+		if len(picksReport.Dropped) > 0 {
+			warnFn("jig: no demo for %s: no recordings are left to show\n", ticket)
+		} else {
+			warnFn("jig: no demo for %s: there are no recordings to show\n", ticket)
+		}
 	}
 
 	// Report any summary or caption left out of the rendered section because
 	// it named one of jig's own directories (the owner's decision on r1-f13,
-	// DECISIONS.md): independent of the switch above, since a section can be
-	// otherwise rendered in full.
+	// DECISIONS.md): independent of whether a pick stands, since a section can
+	// be otherwise rendered in full.
 	if demoResult.ScrubbedSummary {
 		warnFn("jig: the demo summary for %s named one of jig's own directories and was left out of the pull request body\n", ticket)
 	}
@@ -479,6 +494,24 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 			return PublishReport{}, &axi.Error{Msg: "publish declined at confirmation", Code: "PUBLISH_DECLINED"}
 		}
 		confirmed = true
+	}
+
+	// The files a pick staged are attached by name from their directory, and
+	// the session and the confirmation have run since they were copied: check
+	// them once more before anything is pushed. A pick's media are never
+	// uploaded unchecked, and a change here refuses the publish with origin
+	// untouched: the next publish reuses the journaled pick (the head and the
+	// recordings are the same) and stages the files afresh, with no gate round.
+	// What is left after this is the push and the host's own read of the files,
+	// which a check made by jig cannot close, since the host opens them by name.
+	if picked != nil && host != nil {
+		if err := verifyStaged(absPath(filepath.Join(d.Home, "evidence")), picked.MediaDir, picked.MediaFiles); err != nil {
+			return PublishReport{}, &axi.Error{
+				Msg:  fmt.Sprintf("the recordings staged for %s changed before they were attached: %v", ticket, err),
+				Code: "PUBLISH_PICKS_CHANGED",
+				Help: []string{fmt.Sprintf("Nothing was pushed. Run `jig publish %s` again: it reuses the pick and stages the recordings afresh.", ticket)},
+			}
+		}
 	}
 
 	if err := guardedPushFn(lease.Dir, "origin", branch, confirmed); err != nil {
@@ -602,6 +635,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		PRURL:     map[string]string{repoName: prURL},
 		PRUpdated: map[string]bool{repoName: prOutcome == "updated"},
 		PRNote:    prNote,
+		Picks:     picksReport,
 	}, nil
 }
 

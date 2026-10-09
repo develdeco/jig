@@ -1,7 +1,0 @@
-{
-  "media": [
-    {"file": "clamp.svg", "caption": "Clamp now holds the upper bound at 10"},
-    {"file": "greeting.svg", "caption": "Greet reads casual"}
-  ],
-  "summary": "two frames drawn from the fixture test cases for the clamp bound and the greeting"
-}

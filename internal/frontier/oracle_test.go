@@ -143,6 +143,7 @@ func oracleLines(t *testing.T, st *store.Store, ticket, slice string, attempt in
 // maxOracleFixes red turns, or with a backend that cannot resume, does the
 // attempt fail.
 func TestRunHandsARedOracleBackToTheSameSession(t *testing.T) {
+	t.Parallel()
 	t.Run("the session fixes it", func(t *testing.T) {
 		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 		d, st := newDeps(t, fx)
@@ -243,7 +244,7 @@ func TestRunTellsTheNextBuilderTheOraclesLastRunTime(t *testing.T) {
 	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d, st := newDeps(t, fx)
-	d.Oracle = func(string, string) (string, error) {
+	d.Oracle = func(string, string, []string) (string, error) {
 		time.Sleep(1100 * time.Millisecond)
 		return "", nil
 	}

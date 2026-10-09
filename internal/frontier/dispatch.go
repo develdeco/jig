@@ -213,15 +213,6 @@ func invertBriefHashes(st *store.Store, ticket string) map[string]string {
 	return inv
 }
 
-// absPath is path made absolute, or path itself when that fails.
-func absPath(path string) string {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return path
-	}
-	return abs
-}
-
 // absBriefPath is "<abs store ticket dir>/brief.md", whether or not the file
 // exists.
 func absBriefPath(st *store.Store, ticket string) string {

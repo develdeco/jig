@@ -48,7 +48,7 @@ func TestGateDispatchesTheReviewerOnTheDearestRungWithEffortByScope(t *testing.T
 	}}
 	src := NewReviewerGateSource(backend)
 
-	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true})
+	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate round 1: %v", err)
 	}
@@ -61,12 +61,12 @@ func TestGateDispatchesTheReviewerOnTheDearestRungWithEffortByScope(t *testing.T
 	if err := d.Store.Push(fx.Ticket + ": mark " + report1.FixSlices[0] + " green"); err != nil {
 		t.Fatalf("push the fix slice state: %v", err)
 	}
-	if _, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true}); err != nil {
+	if _, err := Gate(d, src, GateOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}
 	// Round 3 has nothing outstanding and nothing new to review, so it
 	// dispatches no reviewer and journals no effort.
-	if _, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, NoDemo: true}); err != nil {
+	if _, err := Gate(d, src, GateOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("Gate round 3: %v", err)
 	}
 

@@ -45,11 +45,12 @@ type Deps struct {
 	// Home is the jig home root whose pool holds the build leases:
 	// home.Root() for the binary, a test's own directory in tests.
 	Home string
-	// Oracle runs an oracle command in a lease and returns its combined
-	// output (oracleAtGreen). nil means the real run, envrun.ShellOutput
-	// with the Windows short-path workaround; a test that is not about the
-	// oracle hands one that passes.
-	Oracle func(cmd, dir string) (string, error)
+	// Oracle runs an oracle command in a lease, with env (each "NAME=value")
+	// added to its environment, and returns its combined output
+	// (oracleAtGreen). nil means the real run, envrun.ShellOutputEnv with the
+	// Windows short-path workaround; a test that is not about the oracle hands
+	// one that passes.
+	Oracle func(cmd, dir string, env []string) (string, error)
 	// Graph is the code-graph plane that gives a builder the code linked to
 	// its goal (ADR 0026). nil means graphify.Detect(Cfg): graphify when the
 	// project opts in and the binary is on PATH, else none.
@@ -64,12 +65,13 @@ func (d Deps) graph() graphify.Plane {
 	return graphify.Detect(d.Cfg)
 }
 
-// runOracle runs cmd in dir through d.Oracle, or for real when it is nil.
-func (d Deps) runOracle(cmd, dir string) (string, error) {
+// runOracle runs cmd in dir, with env added to its environment, through
+// d.Oracle, or for real when it is nil.
+func (d Deps) runOracle(cmd, dir string, env []string) (string, error) {
 	if d.Oracle != nil {
-		return d.Oracle(cmd, dir)
+		return d.Oracle(cmd, dir, env)
 	}
-	return envrun.ShellOutput(envrun.ShortenQuotedPath(cmd), dir, oracleLimit)
+	return envrun.ShellOutputEnv(envrun.ShortenQuotedPath(cmd), dir, oracleLimit, env)
 }
 
 // oracleLimit bounds jig's own oracle run: the same bound a headless session's
@@ -843,7 +845,9 @@ func readResult(runErr error, rjPath string) outcome.Result {
 // the backend can resume it. After that, or where it cannot, the attempt
 // fails with the output in its summary, written over result.json so the next
 // attempt's log carries it. Any other result passes through for route to
-// handle (ADR 0020).
+// handle (ADR 0020). A run at a clean commit also gets a directory to record
+// the build's end-to-end scenarios into, which a green run journals and a red
+// one discards (record.go, ADR 0029).
 func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, dispatch session.Dispatch, sessionID, oracleCmd, startSHA string, res outcome.Result) outcome.Result {
 	for fixes := 0; ; fixes++ {
 		if res.Outcome != outcome.Green {
@@ -862,8 +866,9 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 			prompt = renderDirtyTreePrompt(oracleCmd, dirty, dispatch.ResultJSON)
 		} else {
 			evidence := cleanHead(lease.Dir)
+			rec := rc.startRecording(sl.ID, attempt, fixes, evidence)
 			started := time.Now()
-			out, err := rc.d.runOracle(oracleCmd, lease.Dir)
+			out, err := rc.d.runOracle(oracleCmd, lease.Dir, rec.env())
 			// Rounded up, so every run records at least a second and 0
 			// keeps meaning "never ran".
 			seconds := int((time.Since(started) + time.Second - 1) / time.Second)
@@ -872,6 +877,7 @@ func (rc *runCtx) oracleAtGreen(sl store.Slice, lease pool.Lease, attempt int, d
 				result = "fail"
 			}
 			rc.journal(journal.Line{Slice: sl.ID, Event: "oracle", Outcome: result, Commit: evidence, Attempt: attempt, Command: oracleCmd, Env: sl.Env, Seconds: seconds})
+			rc.finishRecording(sl.ID, attempt, evidence, rec, err == nil)
 			if err == nil {
 				return res
 			}
