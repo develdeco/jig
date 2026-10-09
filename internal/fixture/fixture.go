@@ -303,9 +303,10 @@ func buildStore(storeDir, testdataDir, repoRemote string) error {
 	}
 
 	cfg := storeProjectYAML{
-		SchemaVersion: 1,
+		SchemaVersion: project.CurrentSchemaVersion,
 		Name:          "fixture",
-		TicketFormat:  "JIG-{n}",
+		Keys:          map[string]string{"JIG": "everything in fixture"},
+		Trackers:      []string{},
 		Repos:         []project.Repo{{Remote: repoRemote, Target: "main"}},
 		Platform:      "platform/",
 	}
@@ -349,7 +350,7 @@ func buildStore(storeDir, testdataDir, repoRemote string) error {
 		return err
 	}
 
-	ticketDir := filepath.Join(storeDir, Ticket)
+	ticketDir := filepath.Join(storeDir, "tickets", Ticket)
 	if err := os.MkdirAll(ticketDir, 0o755); err != nil {
 		return fmt.Errorf("fixture: create ticket dir: %w", err)
 	}
@@ -363,16 +364,17 @@ func buildStore(storeDir, testdataDir, repoRemote string) error {
 }
 
 // storeProjectYAML is the on-disk shape Build writes for the fixture
-// store's project.yaml; it mirrors project.Config's declared wire format.
-// Trackers always marshals as "trackers: []" (a nil slice, no omitempty),
-// and no tracker: key is ever written, matching jig init.
+// store's project.yaml; it mirrors project.Config's declared wire format at
+// schema_version 2. Trackers always marshals as "trackers: []" (a nil slice,
+// no omitempty), and no tracker: or ticket_format key is ever written,
+// matching jig init.
 type storeProjectYAML struct {
-	SchemaVersion int            `yaml:"schema_version"`
-	Name          string         `yaml:"name"`
-	TicketFormat  string         `yaml:"ticket_format"`
-	Trackers      []string       `yaml:"trackers"`
-	Repos         []project.Repo `yaml:"repos"`
-	Platform      string         `yaml:"platform"`
+	SchemaVersion int               `yaml:"schema_version"`
+	Name          string            `yaml:"name"`
+	Keys          map[string]string `yaml:"keys"`
+	Trackers      []string          `yaml:"trackers"`
+	Repos         []project.Repo    `yaml:"repos"`
+	Platform      string            `yaml:"platform"`
 }
 
 // hashPlaceholder matches slices.yaml's committed @HASH:<heading> markers.

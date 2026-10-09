@@ -1,7 +1,11 @@
 package store
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -137,5 +141,75 @@ func TestCheckAliasesFindsNothingWrongInAnOrdinaryStore(t *testing.T) {
 	}
 	if len(problems) != 0 {
 		t.Fatalf("CheckAliases = %v, want none", problems)
+	}
+}
+
+// TestResolveTicketConcurrentUseIsRaceFree exercises the memoized alias scan
+// from many goroutines sharing one Store at once, as a frontier run's
+// per-slice fan-out does (internal/frontier): run under -race, an unlocked
+// read/write of aliasClaimsCache here would be flagged.
+func TestResolveTicketConcurrentUseIsRaceFree(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	for i := 1; i <= 5; i++ {
+		id := fmt.Sprintf("JIG-%d", i)
+		if err := st.CreateTicketRecord(id, Ticket{Title: id}); err != nil {
+			t.Fatalf("CreateTicketRecord: %v", err)
+		}
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			id := fmt.Sprintf("JIG-%d", n%5+1)
+			if _, err := st.ResolveTicket(id); err != nil {
+				t.Errorf("ResolveTicket: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestSyncPullDropsAliasCache covers the critical path "an alias that arrives
+// by a pull resolves at once": a memoized scan taken before the pull (ticket
+// JIG-1's alias not seen yet) must not shadow one the pull itself just
+// brought in.
+func TestSyncPullDropsAliasCache(t *testing.T) {
+	st, _, remote := newTestRemoteStore(t)
+	if err := st.CreateTicketRecord("JIG-1", Ticket{Title: "First"}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
+	}
+	if err := st.Push("add JIG-1"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	// Prime the memoized scan before anything claims OLD-9.
+	if got, err := st.ResolveTicket("OLD-9"); err != nil || got != "OLD-9" {
+		t.Fatalf("ResolveTicket(OLD-9) = (%q, %v), want (OLD-9, nil)", got, err)
+	}
+
+	// Simulate another clone recording the alias and pushing it directly to
+	// the remote, never through this Store.
+	otherClone := filepath.Join(t.TempDir(), "other")
+	runGit(t, "", "clone", remote, otherClone)
+	runGit(t, otherClone, "config", "user.name", "tester")
+	runGit(t, otherClone, "config", "user.email", "tester@example.invalid")
+	ticketYAML := filepath.Join(otherClone, "tickets", "JIG-1", "ticket.yaml")
+	if err := os.WriteFile(ticketYAML, []byte("schema_version: 1\ntitle: First\naliases:\n  - OLD-9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, otherClone, "add", "-A")
+	runGit(t, otherClone, "commit", "-m", "alias")
+	runGit(t, otherClone, "push", "origin", "main")
+
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	got, err := st.ResolveTicket("OLD-9")
+	if err != nil {
+		t.Fatalf("ResolveTicket: %v", err)
+	}
+	if got != "JIG-1" {
+		t.Fatalf("ResolveTicket(OLD-9) after Sync's pull = %q, want JIG-1 (the pre-pull memoized scan must be dropped)", got)
 	}
 }

@@ -305,7 +305,7 @@ func claimOneChartEntry(e env, st *store.Store, cfg project.Config, chart string
 			}}
 		}
 		pos = i
-		return newID, []string{newID, "charts/" + chart + "/tickets.yaml"}, nil
+		return newID, []string{st.TicketRelDir(newID), "charts/" + chart + "/tickets.yaml"}, nil
 	}
 	msgFn := func(claimedID string) string { return fmt.Sprintf("chart %s: graduate %s", chart, claimedID) }
 

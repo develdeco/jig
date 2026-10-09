@@ -17,9 +17,10 @@ import (
 func newDemoStore(t *testing.T) *store.Store {
 	t.Helper()
 	root := t.TempDir()
-	projectYAML := `schema_version: 1
+	projectYAML := `schema_version: 2
 name: demo
-ticket_format: "DEMO-{n}"
+keys:
+  DEMO: everything in demo
 trackers:
   - github:
       repo: example/tracking
@@ -151,9 +152,10 @@ func TestRenderTicketBodyMatchesTheGolden(t *testing.T) {
 // stay exactly as written.
 func TestRenderTicketBodySameRepoStaysBare(t *testing.T) {
 	root := t.TempDir()
-	projectYAML := `schema_version: 1
+	projectYAML := `schema_version: 2
 name: demo
-ticket_format: "DEMO-{n}"
+keys:
+  DEMO: everything in demo
 trackers:
   - github:
       repo: example/demo

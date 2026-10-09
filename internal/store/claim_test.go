@@ -31,7 +31,7 @@ func TestClaimNoRemoteCommitsOnlyOncePerCall(t *testing.T) {
 			if err != nil {
 				return "", nil, err
 			}
-			return id, []string{id}, nil
+			return id, []string{st.TicketRelDir(id)}, nil
 		},
 		func(id string) string { return id + ": new ticket" },
 	)
@@ -76,7 +76,7 @@ func TestClaimPushesAlone(t *testing.T) {
 			if err != nil {
 				return "", nil, err
 			}
-			return id, []string{id}, nil
+			return id, []string{st.TicketRelDir(id)}, nil
 		},
 		func(id string) string { return id + ": new ticket" },
 	)
@@ -127,7 +127,7 @@ func TestClaimRemintsAfterRejectedPush(t *testing.T) {
 			if err != nil {
 				return "", nil, err
 			}
-			return id, []string{id}, nil
+			return id, []string{st.TicketRelDir(id)}, nil
 		},
 		func(id string) string { return id + ": new ticket" },
 	)
@@ -203,7 +203,7 @@ func TestClaimRemintsAfterRejectedPushPreservesUnrelatedDirtyState(t *testing.T)
 			if err != nil {
 				return "", nil, err
 			}
-			return id, []string{id}, nil
+			return id, []string{st.TicketRelDir(id)}, nil
 		},
 		func(id string) string { return id + ": new ticket" },
 	)
@@ -280,7 +280,7 @@ func TestClaimRefusesRatherThanOrphaningAConcurrentCommit(t *testing.T) {
 			if err != nil {
 				return "", nil, err
 			}
-			return id, []string{id}, nil
+			return id, []string{st.TicketRelDir(id)}, nil
 		},
 		func(id string) string { return id + ": new ticket" },
 	)
@@ -360,7 +360,7 @@ func TestClaimGivesUpAfterMaxAttempts(t *testing.T) {
 			if merr != nil {
 				return "", nil, merr
 			}
-			return id, []string{id}, nil
+			return id, []string{st.TicketRelDir(id)}, nil
 		},
 		func(id string) string { return id + ": new ticket" },
 	)
@@ -415,7 +415,7 @@ func TestClaimRefusesWhenOriginUnreachable(t *testing.T) {
 			if merr != nil {
 				return "", nil, merr
 			}
-			return id, []string{id}, nil
+			return id, []string{st.TicketRelDir(id)}, nil
 		},
 		func(id string) string { return id + ": new ticket" },
 	)
@@ -801,7 +801,7 @@ func TestClaimWrapsPullFailureAfterUndoAsIDNotClaimed(t *testing.T) {
 			if merr != nil {
 				return "", nil, merr
 			}
-			return id, []string{id}, nil
+			return id, []string{st.TicketRelDir(id)}, nil
 		},
 		func(id string) string { return id + ": new ticket" },
 	)

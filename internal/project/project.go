@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -18,6 +17,12 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 )
+
+// CurrentSchemaVersion is the project.yaml schema_version this jig version
+// writes (jig init, internal/fixture) and expects to read. jig store migrate
+// is the one command that opens an older store anyway, to rewrite it onto
+// this version; CheckSchemaVersion's allowOlder parameter is how it says so.
+const CurrentSchemaVersion = 2
 
 // Repo is one repository the project spans.
 type Repo struct {
@@ -147,7 +152,6 @@ func DefaultGateConfig() GateConfig {
 type Config struct {
 	SchemaVersion int
 	Name          string
-	TicketFormat  string
 	Repos         []Repo
 	Platform      string
 	Staircase     []string
@@ -163,11 +167,9 @@ type Config struct {
 	// list is empty (or absent, or tracker: local). internal/mirror reads
 	// this to decide whether a store's checkpoints sync to GitHub at all.
 	GitHub *GitHubTracker
-	// Keys is the project's declared area keys, key to its one-line
-	// meaning: written directly as keys:, or - until L3's migration writes
-	// keys: for every project - read from ticket_format as the one key it
-	// names, with an empty meaning. An id is <key>-<n>; ResolveKey is where
-	// every caller that mints or reads a key: resolves one against this.
+	// Keys is the project's declared area keys, key to its one-line meaning,
+	// written as keys:. An id is <key>-<n>; ResolveKey is where every caller
+	// that mints or reads a key: resolves one against this.
 	Keys map[string]string
 }
 
@@ -188,7 +190,7 @@ type GitHubTracker struct {
 type configRaw struct {
 	SchemaVersion int            `yaml:"schema_version"`
 	Name          string         `yaml:"name"`
-	TicketFormat  string         `yaml:"ticket_format"`
+	TicketFormat  yaml.Node      `yaml:"ticket_format"`
 	Keys          yaml.Node      `yaml:"keys"`
 	Tracker       yaml.Node      `yaml:"tracker"`
 	Trackers      yaml.Node      `yaml:"trackers"`
@@ -203,11 +205,16 @@ type configRaw struct {
 
 // UnmarshalYAML decodes project.yaml: trackers: is a list of mirrors (absent
 // or empty means none; jig mints every id itself and no mirror shape is
-// supported yet, so any entry is refused), tracker: is the key trackers:
-// replaces (tracker: local reads as no mirrors, until L3's migration rewrites
-// project.yaml; any other value is refused), the two keys together are
-// refused, and routes: (which only ever fed publish's now-gone route step)
-// is refused outright.
+// supported yet, so any entry is refused), ticket_format and tracker: are the
+// two keys `jig store migrate` rewrites into keys: and trackers: and so are
+// refused once a project.yaml claims schema_version 2 (brief.md#Schema
+// version 2) - an older schema_version leaves both unread rather than
+// refused, since `jig store migrate` (resolveStoreForProjectAllowingOldSchema)
+// must still Load a v1 project.yaml whole, for project.Config.
+// CheckSchemaVersion (cmd/jig's resolveStore, the one place every command
+// checks it) to be the thing that refuses it for every other command -
+// and routes: (which only ever fed publish's now-gone route step) is refused
+// outright regardless of schema_version.
 func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	var raw configRaw
 	if err := value.Decode(&raw); err != nil {
@@ -215,7 +222,6 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	}
 	c.SchemaVersion = raw.SchemaVersion
 	c.Name = raw.Name
-	c.TicketFormat = raw.TicketFormat
 	c.Repos = raw.Repos
 	c.Platform = raw.Platform
 	c.Staircase = raw.Staircase
@@ -231,19 +237,34 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 		}
 	}
 
+	if raw.SchemaVersion >= CurrentSchemaVersion {
+		if raw.TicketFormat.Kind != 0 {
+			return &axi.Error{
+				Msg:  fmt.Sprintf("project.yaml declares schema_version %d and ticket_format, which that schema no longer supports", raw.SchemaVersion),
+				Code: "VALIDATION_ERROR",
+				Help: []string{
+					"Declare keys: instead of ticket_format",
+					"`jig store migrate` rewrites an older store's ticket_format into keys:",
+				},
+			}
+		}
+		if raw.Tracker.Kind != 0 {
+			return &axi.Error{
+				Msg:  fmt.Sprintf("project.yaml declares schema_version %d and tracker:, which that schema no longer supports", raw.SchemaVersion),
+				Code: "VALIDATION_ERROR",
+				Help: []string{
+					"Declare trackers: instead of tracker: (e.g. trackers: [])",
+					"`jig store migrate` rewrites an older store's tracker: into trackers:",
+				},
+			}
+		}
+	}
+
 	if err := c.loadKeys(raw); err != nil {
 		return err
 	}
 
-	trackerPresent, trackersPresent := raw.Tracker.Kind != 0, raw.Trackers.Kind != 0
-	if trackerPresent && trackersPresent {
-		return &axi.Error{
-			Msg:  "project.yaml declares both tracker: and trackers:",
-			Code: "VALIDATION_ERROR",
-			Help: []string{"trackers: replaces tracker:; remove tracker: from project.yaml"},
-		}
-	}
-	if trackersPresent {
+	if raw.Trackers.Kind != 0 {
 		if raw.Trackers.Kind != yaml.SequenceNode {
 			return &axi.Error{
 				Msg:  "project.yaml's trackers: is not a list",
@@ -270,18 +291,6 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 			c.GitHub = gh
 		}
 	}
-	if trackerPresent && !(raw.Tracker.Kind == yaml.ScalarNode && raw.Tracker.Value == "local") {
-		return &axi.Error{
-			Msg:  "project.yaml's tracker: is no longer supported",
-			Code: "VALIDATION_ERROR",
-			Help: []string{
-				"jig mints ids itself; remove tracker: from project.yaml",
-				"A GitHub remote with gh on PATH gets its pull requests automatically",
-			},
-		}
-	}
-	// tracker: local reads as no mirrors, until L3's migration rewrites
-	// project.yaml.
 
 	if err := c.validateGateConfig(); err != nil {
 		return err
@@ -340,46 +349,22 @@ func malformedTrackerEntryError(why string) error {
 // with store-1.
 var keyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
 
-// ticketFormatKeyRE matches the prefix of a ticket_format this jig can read
-// as the one key it declares: uppercase ASCII letters and digits, starting
-// with a letter, 1 to 10 characters - keys:' 2-character minimum waived,
-// since this key only names an existing store's ids until L3's migration
-// writes keys: for it.
-var ticketFormatKeyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,9}$`)
-
-// loadKeys resolves c.Keys from raw: keys: when present, else ticket_format
-// read as the one key it declares, refusing the shapes brief.md#Keys in
-// project.yaml and brief.md#ticket_format name.
+// loadKeys resolves c.Keys from raw's keys:, refusing the shapes
+// brief.md#Keys in project.yaml names. An absent keys: leaves c.Keys nil.
 func (c *Config) loadKeys(raw configRaw) error {
-	keysPresent := raw.Keys.Kind != 0
-	if keysPresent && raw.TicketFormat != "" {
-		return &axi.Error{
-			Msg:  "project.yaml declares both keys: and ticket_format",
-			Code: "VALIDATION_ERROR",
-			Help: []string{"ticket_format is only read as the one key until keys: is declared; remove it from project.yaml"},
-		}
-	}
-	if keysPresent {
-		var keys map[string]string
-		if err := raw.Keys.Decode(&keys); err != nil {
-			return fmt.Errorf("project: decode keys: %w", err)
-		}
-		for key, meaning := range keys {
-			if err := validateKey(key, meaning); err != nil {
-				return err
-			}
-		}
-		c.Keys = keys
+	if raw.Keys.Kind == 0 {
 		return nil
 	}
-	if raw.TicketFormat == "" {
-		return nil
+	var keys map[string]string
+	if err := raw.Keys.Decode(&keys); err != nil {
+		return fmt.Errorf("project: decode keys: %w", err)
 	}
-	key, err := keyFromTicketFormat(raw.TicketFormat)
-	if err != nil {
-		return err
+	for key, meaning := range keys {
+		if err := validateKey(key, meaning); err != nil {
+			return err
+		}
 	}
-	c.Keys = map[string]string{key: ""}
+	c.Keys = keys
 	return nil
 }
 
@@ -403,32 +388,34 @@ func validateKey(key, meaning string) error {
 	return nil
 }
 
-// keyFromTicketFormat reads format ("<KEY>-{n}") as the one key it declares,
-// refusing any other shape: no "-" right before "{n}", text after "{n}", or
-// a prefix that breaks the key rule.
-func keyFromTicketFormat(format string) (string, error) {
-	if !strings.HasSuffix(format, "{n}") {
-		return "", ticketFormatError(format, "must end in {n}, with nothing after it")
+// deriveProjectKey derives the key jig init (and the test fixture) declare
+// for a project named name, absent an explicit --key: name's letters and
+// digits, uppercased, at most 10 - "jig" becomes "JIG", meaning "everything
+// in jig". A name with fewer than 2 such characters derives no valid key
+// (keyRE's own 2-character minimum), refused so the caller passes --key
+// instead of minting under an empty or one-letter key.
+func deriveProjectKey(name string) (string, error) {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r - 'a' + 'A')
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		}
+		if b.Len() == 10 {
+			break
+		}
 	}
-	prefix := strings.TrimSuffix(format, "{n}")
-	if !strings.HasSuffix(prefix, "-") {
-		return "", ticketFormatError(format, `needs a "-" right before {n}`)
-	}
-	key := strings.TrimSuffix(prefix, "-")
-	if !ticketFormatKeyRE.MatchString(key) {
-		return "", ticketFormatError(format, fmt.Sprintf("prefix %q must be uppercase letters and digits, starting with a letter", key))
+	key := b.String()
+	if !keyRE.MatchString(key) {
+		return "", &axi.Error{
+			Msg:  fmt.Sprintf("project name %q has no key jig can derive from it", name),
+			Code: "VALIDATION_ERROR",
+			Help: []string{"Pass --key <KEY> (2 to 10 uppercase letters or digits, starting with a letter)"},
+		}
 	}
 	return key, nil
-}
-
-// ticketFormatError is the VALIDATION_ERROR keyFromTicketFormat refuses
-// with, why naming what was wrong and help pointing at keys: instead.
-func ticketFormatError(format, why string) error {
-	return &axi.Error{
-		Msg:  fmt.Sprintf("project.yaml's ticket_format %q is invalid: %s", format, why),
-		Code: "VALIDATION_ERROR",
-		Help: []string{"Declare keys: instead: ticket_format is only read as the one key until that migration"},
-	}
 }
 
 // ResolveKey resolves the key to mint under: key itself when non-empty, or
@@ -521,16 +508,17 @@ func (c Config) ResolvedGateConfig() GateConfig {
 	return resolved
 }
 
-// projectYAML is the on-disk shape written by InitStandalone: Trackers
-// always marshals as "trackers: []" (a nil slice, no omitempty), and no
-// tracker: key is ever written.
+// projectYAML is the on-disk shape written by InitStandalone, at
+// CurrentSchemaVersion: Trackers always marshals as "trackers: []" (a nil
+// slice, no omitempty), and no tracker: or ticket_format key is ever
+// written.
 type projectYAML struct {
-	SchemaVersion int      `yaml:"schema_version"`
-	Name          string   `yaml:"name"`
-	TicketFormat  string   `yaml:"ticket_format"`
-	Trackers      []string `yaml:"trackers"`
-	Repos         []Repo   `yaml:"repos"`
-	Platform      string   `yaml:"platform"`
+	SchemaVersion int               `yaml:"schema_version"`
+	Name          string            `yaml:"name"`
+	Keys          map[string]string `yaml:"keys"`
+	Trackers      []string          `yaml:"trackers"`
+	Repos         []Repo            `yaml:"repos"`
+	Platform      string            `yaml:"platform"`
 }
 
 // Load reads and parses a project.yaml file.
@@ -546,9 +534,31 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// MintLocalID renders the project's ticket format with {n} replaced by n.
-func (c Config) MintLocalID(n int) string {
-	return strings.ReplaceAll(c.TicketFormat, "{n}", strconv.Itoa(n))
+// CheckSchemaVersion refuses a schema_version CurrentSchemaVersion cannot
+// work with: newer, always (jig itself would have to be upgraded to
+// understand it), and older than CurrentSchemaVersion unless allowOlder.
+// Every command resolving a store (cmd/jig's resolveStore, the one place
+// every command loads project.yaml) calls this with allowOlder false; `jig
+// store migrate` is the one command that passes true, since migrating a v1
+// store to CurrentSchemaVersion is the whole point of opening it. `jig help`
+// and `jig version` never resolve a store at all, so neither check ever runs
+// for them.
+func (c Config) CheckSchemaVersion(allowOlder bool) error {
+	if c.SchemaVersion > CurrentSchemaVersion {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("project.yaml's schema_version is %d, newer than this jig version understands (%d)", c.SchemaVersion, CurrentSchemaVersion),
+			Code: "VALIDATION_ERROR",
+			Help: []string{"Upgrade jig to a version that supports this store's schema_version"},
+		}
+	}
+	if c.SchemaVersion < CurrentSchemaVersion && !allowOlder {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("project.yaml's schema_version is %d; this store has not been migrated to %d yet", c.SchemaVersion, CurrentSchemaVersion),
+			Code: "VALIDATION_ERROR",
+			Help: []string{"Run `jig store migrate` to migrate this store to the current layout"},
+		}
+	}
+	return nil
 }
 
 // MachineProject is one project's entry in the per-machine mapping
@@ -684,16 +694,30 @@ func siblingStoreDir(absRepo string) string {
 
 // InitStandalone creates a sibling "<repoDir base>-tickets" store next to
 // repoDir: a fresh git repo on branch main, project.yaml pointing back at
-// repoDir, an empty platform/ dir, and an empty ledger.md. It returns the
-// new store's path. Run against an existing store, it resets project.yaml
-// and ledger.md.
-func InitStandalone(repoDir string) (string, error) {
+// repoDir, an empty platform/ dir, and an empty ledger.md. key is the area
+// key project.yaml's keys: declares, meaning "everything in <name>"; ""
+// derives it from repoDir's base name (deriveProjectKey), the --key flag's
+// default. It returns the new store's path. Run against an existing store,
+// it resets project.yaml and ledger.md.
+func InitStandalone(repoDir, key string) (string, error) {
 	absRepo, err := filepath.Abs(repoDir)
 	if err != nil {
 		return "", fmt.Errorf("project: resolve repo dir: %w", err)
 	}
 	base := filepath.Base(absRepo)
 	storeDir := siblingStoreDir(absRepo)
+
+	if key == "" {
+		key, err = deriveProjectKey(base)
+		if err != nil {
+			return "", err
+		}
+	} else if !keyRE.MatchString(key) {
+		return "", &axi.Error{
+			Msg:  fmt.Sprintf("--key %q is not 2 to 10 uppercase letters or digits starting with a letter", key),
+			Code: "VALIDATION_ERROR",
+		}
+	}
 
 	if err := os.MkdirAll(storeDir, 0o755); err != nil {
 		return "", fmt.Errorf("project: create store dir: %w", err)
@@ -703,9 +727,10 @@ func InitStandalone(repoDir string) (string, error) {
 	}
 
 	py := projectYAML{
-		SchemaVersion: 1,
+		SchemaVersion: CurrentSchemaVersion,
 		Name:          base,
-		TicketFormat:  "T-{n}",
+		Keys:          map[string]string{key: fmt.Sprintf("everything in %s", base)},
+		Trackers:      []string{},
 		Repos:         []Repo{{Remote: absRepo}},
 		Platform:      "platform/",
 	}

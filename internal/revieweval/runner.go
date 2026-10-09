@@ -191,7 +191,12 @@ func initEvalStore(workDir string, c Case, id string) (*store.Store, error) {
 		return nil, fmt.Errorf("revieweval: write project.yaml: %w", err)
 	}
 
-	ticketDir := filepath.Join(storeRoot, id)
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	ticketDir := st.TicketDir(id)
 	if err := os.MkdirAll(ticketDir, 0o755); err != nil {
 		return nil, fmt.Errorf("revieweval: create ticket dir: %w", err)
 	}
@@ -209,7 +214,7 @@ func initEvalStore(workDir string, c Case, id string) (*store.Store, error) {
 		return nil, fmt.Errorf("revieweval: write journal.ndjson: %w", err)
 	}
 
-	return store.Open(storeRoot)
+	return st, nil
 }
 
 // initEvalRepo builds workDir/repo: an empty git repo whose base commit

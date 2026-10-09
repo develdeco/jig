@@ -74,6 +74,8 @@ func run(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return cmdSkills(e, rest, stdout)
 	case "trackers":
 		return cmdTrackers(e, rest, stdout)
+	case "store":
+		return cmdStore(e, rest, stdout)
 	case "_screen":
 		return cmdScreen(stdin, stdout)
 	default:
@@ -222,6 +224,19 @@ func splitOnce(s string, sep byte) (before, after string, ok bool) {
 // command whose checkpoint found them"), and a failed sync's warning lands
 // in the command's own structured output rather than bare stderr.
 func resolveStore(e env, storeFlag string, stdout io.Writer) (*store.Store, project.Config, project.MachineProject, string, error) {
+	return resolveStoreChecked(e, storeFlag, stdout, false)
+}
+
+// resolveStoreChecked is resolveStore's and
+// resolveStoreForProjectAllowingOldSchema's shared implementation:
+// allowOlderSchema says whether a schema_version older than
+// project.CurrentSchemaVersion passes the one schema check every command
+// loading project.yaml runs here, rather than each command checking it
+// itself. `jig store migrate` is the one command that passes true: its whole
+// job is opening such a store and rewriting it onto the current schema, the
+// one exemption project.Config.CheckSchemaVersion takes besides `jig help`
+// and `jig version`, neither of which resolves a store at all.
+func resolveStoreChecked(e env, storeFlag string, stdout io.Writer, allowOlderSchema bool) (*store.Store, project.Config, project.MachineProject, string, error) {
 	jigHome, err := e.jigHome()
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
@@ -233,6 +248,9 @@ func resolveStore(e env, storeFlag string, stdout io.Writer) (*store.Store, proj
 	storeFlag = absFrom(cwd, storeFlag)
 	storePath, cfg, err := project.Resolve(jigHome, cwd, storeFlag)
 	if err != nil {
+		return nil, project.Config{}, project.MachineProject{}, "", err
+	}
+	if err := cfg.CheckSchemaVersion(allowOlderSchema); err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
 	st, err := store.Open(storePath)
@@ -271,8 +289,20 @@ func resolveStore(e env, storeFlag string, stdout io.Writer) (*store.Store, proj
 // --store/cwd fallback chain resolveStore falls through to when projectFlag
 // is empty.
 func resolveStoreForProject(e env, projectFlag, storeFlag string, stdout io.Writer) (*store.Store, project.Config, project.MachineProject, string, error) {
+	return resolveStoreForProjectChecked(e, projectFlag, storeFlag, stdout, false)
+}
+
+// resolveStoreForProjectAllowingOldSchema is resolveStoreForProject with
+// resolveStoreForMigrate's own exemption: `jig store migrate` takes --project
+// too, so it needs the --project resolution path, not only the --store/cwd
+// one resolveStoreForMigrate covers alone.
+func resolveStoreForProjectAllowingOldSchema(e env, projectFlag, storeFlag string, stdout io.Writer) (*store.Store, project.Config, project.MachineProject, string, error) {
+	return resolveStoreForProjectChecked(e, projectFlag, storeFlag, stdout, true)
+}
+
+func resolveStoreForProjectChecked(e env, projectFlag, storeFlag string, stdout io.Writer, allowOlderSchema bool) (*store.Store, project.Config, project.MachineProject, string, error) {
 	if projectFlag == "" {
-		return resolveStore(e, storeFlag, stdout)
+		return resolveStoreChecked(e, storeFlag, stdout, allowOlderSchema)
 	}
 	jigHome, err := e.jigHome()
 	if err != nil {
@@ -289,7 +319,7 @@ func resolveStoreForProject(e env, projectFlag, storeFlag string, stdout io.Writ
 			Code: "VALIDATION_ERROR",
 		}
 	}
-	return resolveStore(e, mp.Store, stdout)
+	return resolveStoreChecked(e, mp.Store, stdout, allowOlderSchema)
 }
 
 // rungs returns cfg's staircase rungs, falling back to staircase.Default()

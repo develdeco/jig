@@ -335,13 +335,13 @@ func TestValidateCommandReportsTicketDepsProblem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ents, err := os.ReadDir(storeRoot)
+	ents, err := os.ReadDir(filepath.Join(storeRoot, "tickets"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var ids []string
 	for _, e := range ents {
-		if e.IsDir() && strings.HasPrefix(e.Name(), "T-") {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "DEMO-") {
 			ids = append(ids, e.Name())
 		}
 	}

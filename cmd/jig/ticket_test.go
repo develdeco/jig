@@ -11,9 +11,9 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// newTestOriginClone creates a bare remote with a committed, pushed
-// project.yaml (ticket_format "T-{n}", no trackers), then a plain clone of
-// it at dir, ready for `jig ticket new --store dir` to claim against.
+// newTestOriginClone creates a bare remote with a committed, pushed v2
+// project.yaml (keys: T, no trackers), then a plain clone of it at dir,
+// ready for `jig ticket new --store dir` to claim against.
 func newTestOriginClone(t *testing.T, dir string) (remote string) {
 	t.Helper()
 	parent := filepath.Dir(dir)
@@ -26,7 +26,7 @@ func newTestOriginClone(t *testing.T, dir string) (remote string) {
 	if _, err := gitx.Run("", "clone", remote, seed); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(seed, "project.yaml"), []byte("schema_version: 1\nname: demo\nticket_format: T-{n}\ntrackers: []\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(seed, "project.yaml"), []byte("schema_version: 2\nname: demo\nkeys:\n  DEMO: everything in demo\ntrackers: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(seed, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
@@ -67,23 +67,23 @@ func TestTicketNewClaimsOnOrigin(t *testing.T) {
 		t.Fatalf("jig ticket new: exit %d\n%s", code, buf.String())
 	}
 	out := buf.String()
-	if !strings.Contains(out, "T-1") {
-		t.Fatalf("output missing T-1:\n%s", out)
+	if !strings.Contains(out, "DEMO-1") {
+		t.Fatalf("output missing DEMO-1:\n%s", out)
 	}
 
 	subject, err := gitx.Run("", "--git-dir", remote, "log", "-1", "--pretty=%s")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if subject != "T-1: new ticket" {
-		t.Fatalf("remote HEAD subject = %q, want %q", subject, "T-1: new ticket")
+	if subject != "DEMO-1: new ticket" {
+		t.Fatalf("remote HEAD subject = %q, want %q", subject, "DEMO-1: new ticket")
 	}
 
 	st, err := store.Open(clone)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := st.ReadTicket("T-1")
+	got, err := st.ReadTicket("DEMO-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,25 +113,25 @@ func TestTicketNewSequentialClonesGetDifferentIDs(t *testing.T) {
 	}
 
 	codeA, outA := jig(cloneA, "ticket", "new", "--title", "From A")
-	if codeA != 0 || !strings.Contains(outA, "T-1") {
-		t.Fatalf("jig ticket new (clone A): exit %d, want id T-1:\n%s", codeA, outA)
+	if codeA != 0 || !strings.Contains(outA, "DEMO-1") {
+		t.Fatalf("jig ticket new (clone A): exit %d, want id DEMO-1:\n%s", codeA, outA)
 	}
 	codeB, outB := jig(cloneB, "ticket", "new", "--title", "From B")
 	if codeB != 0 {
 		t.Fatalf("jig ticket new (clone B): exit %d\n%s", codeB, outB)
 	}
-	if strings.Contains(outB, "T-1") {
-		t.Fatalf("clone B minted T-1 again instead of a fresh id:\n%s", outB)
+	if strings.Contains(outB, "DEMO-1") {
+		t.Fatalf("clone B minted DEMO-1 again instead of a fresh id:\n%s", outB)
 	}
-	if !strings.Contains(outB, "T-2") {
-		t.Fatalf("clone B's output missing T-2:\n%s", outB)
+	if !strings.Contains(outB, "DEMO-2") {
+		t.Fatalf("clone B's output missing DEMO-2:\n%s", outB)
 	}
 
 	log, err := gitx.Run("", "--git-dir", remote, "log", "--pretty=%s")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"T-1: new ticket", "T-2: new ticket"} {
+	for _, want := range []string{"DEMO-1: new ticket", "DEMO-2: new ticket"} {
 		if !strings.Contains(log, want) {
 			t.Fatalf("remote log = %q, want it to contain %q", log, want)
 		}
@@ -168,8 +168,8 @@ func TestTicketNewRefusesWhenOriginUnreachable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(st.TicketDir("T-1")); !os.IsNotExist(err) {
-		t.Fatalf("ticket folder T-1 left behind by a failed claim (stat err %v)", err)
+	if _, err := os.Stat(st.TicketDir("DEMO-1")); !os.IsNotExist(err) {
+		t.Fatalf("ticket folder DEMO-1 left behind by a failed claim (stat err %v)", err)
 	}
 	headAfter, err := gitx.Run(clone, "rev-parse", "HEAD")
 	if err != nil {
@@ -209,7 +209,7 @@ func TestTicketNewRecordsTitleAndMintsNextID(t *testing.T) {
 	}
 	// A minted ticket has no work yet, and there are two ways to give it some:
 	// a brief with slices, or a branch built outside jig, which needs neither.
-	for _, want := range []string{"jig validate T-1", "jig gate T-1 --branch <name>"} {
+	for _, want := range []string{"jig validate DEMO-1", "jig gate DEMO-1 --branch <name>"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("jig ticket new's output does not offer %q:\n%s", want, out)
 		}
@@ -224,7 +224,7 @@ func TestTicketNewRecordsTitleAndMintsNextID(t *testing.T) {
 		t.Fatalf("store.Open: %v", err)
 	}
 
-	got, err := st.ReadTicket("T-1")
+	got, err := st.ReadTicket("DEMO-1")
 	if err != nil {
 		t.Fatalf("ReadTicket: %v", err)
 	}
@@ -232,8 +232,8 @@ func TestTicketNewRecordsTitleAndMintsNextID(t *testing.T) {
 		t.Fatalf("ticket.yaml title = %q, want %q", got.Title, "Fix the thing")
 	}
 
-	if code, out := jig("ticket", "new", "--title", "Second thing"); code != 0 || !strings.Contains(out, "T-2") {
-		t.Fatalf("jig ticket new (second): exit %d, want id T-2:\n%s", code, out)
+	if code, out := jig("ticket", "new", "--title", "Second thing"); code != 0 || !strings.Contains(out, "DEMO-2") {
+		t.Fatalf("jig ticket new (second): exit %d, want id DEMO-2:\n%s", code, out)
 	}
 }
 
@@ -256,7 +256,7 @@ func TestTicketNewWithBodyRecordsItInTheRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := st.ReadTicket("T-1")
+	got, err := st.ReadTicket("DEMO-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestTicketNewWithBodyRecordsItInTheRecord(t *testing.T) {
 	if code := run(e, []string{"ticket", "new", "--title", "No body", "--store", clone}, &buf, strings.NewReader("")); code != 0 {
 		t.Fatalf("jig ticket new without --body: exit %d\n%s", code, buf.String())
 	}
-	got, err = st.ReadTicket("T-2")
+	got, err = st.ReadTicket("DEMO-2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,12 +277,11 @@ func TestTicketNewWithBodyRecordsItInTheRecord(t *testing.T) {
 	}
 }
 
-// TestTicketNewMintsByTicketFormatRegardlessOfTracker covers the central
-// change: jig ticket new mints through the store's own ticket_format
-// counter, never asking a tracker for an id - true not just of the
-// trackers: [] jig init itself writes, but of the legacy tracker: local a
-// store may still carry (until L3's migration rewrites project.yaml).
-func TestTicketNewMintsByTicketFormatRegardlessOfTracker(t *testing.T) {
+// TestTicketNewMintsRegardlessOfEmptyTrackers covers the central change: jig
+// ticket new mints through the store's own key counter, never asking a
+// tracker for an id - true of the trackers: [] jig init itself writes,
+// whatever the derived key.
+func TestTicketNewMintsRegardlessOfEmptyTrackers(t *testing.T) {
 	t.Parallel()
 	e := testEnv(t.TempDir())
 	repo := filepath.Join(t.TempDir(), "demo")
@@ -310,38 +309,34 @@ func TestTicketNewMintsByTicketFormatRegardlessOfTracker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewritten := strings.Replace(string(data), "trackers: []", "tracker: local", 1)
-	if rewritten == string(data) {
-		t.Fatalf("project.yaml has no trackers: [] to replace:\n%s", data)
-	}
-	if err := os.WriteFile(cfgs[0], []byte(rewritten), 0o644); err != nil {
-		t.Fatal(err)
+	if !strings.Contains(string(data), "trackers: []") {
+		t.Fatalf("project.yaml has no trackers: []:\n%s", data)
 	}
 
 	code, out := jig("ticket", "new", "--title", "Fix the thing")
-	if code != 0 || !strings.Contains(out, "T-1") {
-		t.Fatalf("jig ticket new with tracker: local: exit %d, want id T-1:\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "DEMO-1") {
+		t.Fatalf("jig ticket new: exit %d, want id DEMO-1:\n%s", code, out)
 	}
 
 	st, err := store.Open(filepath.Dir(cfgs[0]))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	got, err := st.ReadTicket("T-1")
+	got, err := st.ReadTicket("DEMO-1")
 	if err != nil {
 		t.Fatalf("ReadTicket: %v", err)
 	}
 	if got.Title != "Fix the thing" {
 		t.Fatalf("ticket.yaml title = %q, want %q", got.Title, "Fix the thing")
 	}
-	if _, err := os.Stat(filepath.Join(st.TicketDir("T-1"), "tracker")); !os.IsNotExist(err) {
-		t.Fatalf("T-1/tracker exists (stat err %v), want nothing written there", err)
+	if _, err := os.Stat(filepath.Join(st.TicketDir("DEMO-1"), "tracker")); !os.IsNotExist(err) {
+		t.Fatalf("DEMO-1/tracker exists (stat err %v), want nothing written there", err)
 	}
 }
 
 // initStandaloneWithKeys runs jig init --standalone, then replaces the
-// store's ticket_format with a keys: block declaring keys, returning a jig
-// runner and the store's root.
+// store's derived keys: entry with a keys: block declaring keys, returning
+// a jig runner and the store's root.
 func initStandaloneWithKeys(t *testing.T, keys string) (jig func(args ...string) (int, string), storeRoot string) {
 	t.Helper()
 	e := testEnv(t.TempDir())
@@ -370,9 +365,9 @@ func initStandaloneWithKeys(t *testing.T, keys string) (jig func(args ...string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewritten := strings.Replace(string(data), "ticket_format: T-{n}\n", keys, 1)
+	rewritten := strings.Replace(string(data), "keys:\n    DEMO: everything in demo\n", keys, 1)
 	if rewritten == string(data) {
-		t.Fatalf("project.yaml has no ticket_format: T-{n} line to replace:\n%s", data)
+		t.Fatalf("project.yaml has no derived keys: entry to replace:\n%s", data)
 	}
 	if err := os.WriteFile(cfgs[0], []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)

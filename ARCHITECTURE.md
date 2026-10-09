@@ -118,15 +118,22 @@ a blocked environment is not such a failure
 
 ## Store schema
 
-A store is a git repo. A ticket is any store-root folder whose name is an
-id - 1 to 10 uppercase ASCII letters and digits starting with a letter, a
-`-`, and a number from 1 with no leading zero - under any key declared in
-`project.yaml`'s `keys:` or not: a key removed from `project.yaml` only
-stops new mints under it, so a folder it already named keeps working.
-`Store.TicketIDs` lists every one of them, sorted by key then by number;
-it is the one function minting's per-key counter, A6's mirror and every
-other listing that shows many tickets read tickets through. One chart
-folder and one ticket folder, in full:
+A store is a git repo, at `project.yaml`'s `schema_version: 2`. A real
+ticket lives under `tickets/<id>/`, `<id>` an id - 1 to 10 uppercase ASCII
+letters and digits starting with a letter, a `-`, and a number from 1 with
+no leading zero - under any key declared in `project.yaml`'s `keys:` or
+not: a key removed from `project.yaml` only stops new mints under it, so a
+folder it already named keeps working. `Store.TicketDir(id)` is the one
+function that names a ticket's folder, and `Store.TicketRelDir(id)` its
+store-relative form (`tickets/<id>`) for a caller that shells out to git
+against the store (a log/show path, a diff path, a rendered pull request
+note's link); every caller goes through one or the other rather than
+joining `tickets` and an id itself. `Store.TicketIDs` lists every id-shaped
+folder under `tickets/`, sorted by key then by number; it is the one
+function minting's per-key counter, A6's mirror and every other listing
+that shows many tickets read tickets through. `charts/`, `platform/`,
+`ledger.md` and `project.yaml` stay at the store root. One chart folder
+and one ticket folder, in full:
 
 ```
 project.yaml
@@ -137,61 +144,83 @@ charts/
   <name>/
     map.md          # for people and sessions; jig never reads it
     tickets.yaml    # the handover jig reads and writes
-<ticket>/
-  brief.md
-  intent.md         # jig gate --intent/--doc, or inferred; ignored when brief.md exists
-  slices.yaml
-  ticket.yaml       # optional: this ticket's own record - title, body, blockers, adopted branch, aliases
-  start.<repo>.sha  # the sha the ticket's branch started from
-  slices/
-    <id>.state
-  journal.ndjson
-  questions/
-    q-NNN.md
-  work/
-    <id>.attempt-N.slice.json
-    <id>.attempt-N.result.json
-    gate.round-N.review.json
-    gate.round-N.result.json
-    intent.json        # intent inference, when attempted
-    intent.result.json # kept only when jig accepted it
-  gate/
-    round-N/
-      findings.yaml
-      findings.md
-      diff-changelog.md
-      report.yaml
-  evidence/
-    round-N/
-  changelog/
-    <workspace>.md
-    consolidated.md
-  pr/
-    evidence.md
-    <repo>.md
-    review-notes.md
+tickets/
+  <id>/
+    brief.md
+    intent.md         # jig gate --intent/--doc, or inferred; ignored when brief.md exists
+    slices.yaml
+    ticket.yaml       # optional: this ticket's own record - title, body, blockers, adopted branch, aliases
+    start.<repo>.sha  # the sha the ticket's branch started from
+    slices/
+      <id>.state
+    journal.ndjson
+    questions/
+      q-NNN.md
+    work/
+      <id>.attempt-N.slice.json
+      <id>.attempt-N.result.json
+      gate.round-N.review.json
+      gate.round-N.result.json
+      intent.json        # intent inference, when attempted
+      intent.result.json # kept only when jig accepted it
+    gate/
+      round-N/
+        findings.yaml
+        findings.md
+        diff-changelog.md
+        report.yaml
+    evidence/
+      round-N/
+    changelog/
+      <workspace>.md
+      consolidated.md
+    pr/
+      evidence.md
+      <repo>.md
+      review-notes.md
 ```
 
 `work/` is store-side, not lease-side, on purpose: a build session's `git add
 -A` runs inside its worktree lease, and must never sweep dispatch plumbing
 into a slice's commit. `project.yaml`'s `schema_version` is the compatibility
 contract - a store written by one jig version declares the layout a later
-version must still read. A build's recordings are not in this tree at all (see
-the fifth home above): the journal's `recorded` line names them and holds their
-hashes.
+version must still read. `project.Config.CheckSchemaVersion`, called once
+from `cmd/jig`'s `resolveStore` (the one place every command loads
+`project.yaml`), refuses a `schema_version` newer than 2 outright, and one
+older than 2 for every command but `jig store migrate` (which is built to
+open exactly such a store and rewrite it onto schema 2) - `jig help` and
+`jig version` never resolve a store at all, so neither check runs for them.
+A build's recordings are not in this tree at all (see the fifth home
+above): the journal's `recorded` line names them and holds their hashes.
+
+`Store.aliasClaims`' memoized scan (below) is safe for a `Store` shared
+across goroutines (a frontier run's per-slice fan-out): a mutex guards both
+the cache and the scan that fills it. It is dropped after a ticket.yaml
+write, as before, and now also after a checkpoint's pull
+(`checkpoint.pull`), so an alias that arrives by a pull - the shape `jig
+store migrate` leaves for every renamed ticket - resolves at once rather
+than waiting for jig's own next write.
 
 ## Project configuration
 
 `project.yaml` is the project's configuration file. Beyond the required fields
-(`name`, `repos`, `platform`, and `keys:` or `ticket_format`), it declares `trackers:`, a list
+(`name`, `repos`, `platform`, and `keys:`), it declares `trackers:`, a list
 of mirrors of the store's tickets: absent or `[]` means none, and an entry is
 refused when the config loads (`VALIDATION_ERROR`) until T-24 builds the
-tracker tree and T-22 the GitHub mirror. The old `tracker:` key still reads
-`tracker: local` as no mirrors, until L3's migration rewrites `project.yaml`;
-any other `tracker:` value, `tracker:` and `trackers:` together, and `routes:`
-(which only ever fed publish's now-gone route step) are all refused at load,
-each with help naming the fix. `jig init` writes `trackers: []` and no
-`tracker:` key. It may also contain an optional `gate` block configuring the
+tracker tree and T-22 the GitHub mirror. A schema-2 `project.yaml` refuses
+the two keys `jig store migrate` rewrites away: `ticket_format` (keys:'
+predecessor) and `tracker:` (`trackers:`'s predecessor, including its one
+old legal value, `tracker: local`) - both the reads that once made sense of
+them are gone, so a schema-1 store still carrying either loads untouched by
+`project.Load` (the schema check, not this one, is what refuses it outside
+`jig store migrate`). `tracker:` and `trackers:` together, and `routes:`
+(which only ever fed publish's now-gone route step), are refused at load
+regardless of schema version, each with help naming the fix. `jig init` and
+the test fixture (`internal/fixture`) write `schema_version: 2`, `trackers:
+[]`, no `tracker:` or `ticket_format` key, and one key derived from the
+project name - its letters and digits, uppercased, at most 10, so `JIG` for
+jig, meaning "everything in `<name>`" - or the key `--key <KEY>` names
+instead. It may also contain an optional `gate` block configuring the
 gate's fix loop and risk floor:
 
 ```yaml
@@ -242,14 +271,6 @@ same way. `Store.CheckAliases` is the same collision check run over the
 whole store, which `jig validate` reports alongside a ticket's own
 `blocked_by` problems, since a collision can involve two tickets neither of
 which is the one being validated.
-
-Until a store migrates to `keys:` (L3), `ticket_format: <KEY>-{n}` is read
-as `<KEY>` being the project's one declared key - jig's own store,
-`ticket_format: T-{n}`, reads as the key `T`, exempt from the
-2-character minimum since it only names an existing store's ids. Any
-other `ticket_format` (no `-` right before `{n}`, text after `{n}`, or a
-prefix breaking the key rule) is refused at load, with help to declare
-`keys:` instead; `keys:` and `ticket_format` together are refused too.
 
 `jig ticket new --key <KEY>` mints under that key (omittable when the
 project declares exactly one); `jig graduate` reads a `key:` on each
@@ -429,13 +450,13 @@ exists.
 | `internal/mirror/github/` | `New`, `Client` (`CreateIssue`, `FetchIssue`, `UpdateIssue`, `CloseIssueCompleted`/`CloseIssueNotPlanned`, `ReopenIssue`, `AddComment`, `AddSubIssue`/`RemoveSubIssue`, `AddBlockedBy`/`RemoveBlockedBy`, `PullRequestsByHead`, `LookupProject`, `EnsureProject`, `PlaceItem`, `ItemFieldValues`, `RepositoryIsPublic`) | an endpoint + token (a fake GraphQL server and a fixed token in every test, `api.github.com/graphql` and `gh auth token` in production) → the GraphQL mutations and queries `internal/mirror` drives a sync through, one mutation per second and retried with backoff (4 attempts) on a server error or a rate limit |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |
 | `internal/pool/` | `Acquire`, `Dir`, `Usable`, `CheckTicket`, `Compare`, `DivergedError`, `RequireBuilt`, `HoldsUnpushedBuilt`, `MustExistOnOrigin`, `RecutUnlessBuilt` | the jig home root + repo/remote/target/branch + a ticket and its role (build, gate, publish) → a `Lease` (a full clone, re-pointed to its start point, and synced with its branch when origin has it; anything git shows is not a repository of its own is moved aside and cloned afresh; a merge, rebase, am, cherry-pick or revert a crashed session left unfinished is ended with `--quit` and an unmerged index reset to HEAD, never moving a branch, and named in `Lease.Recovered`) |
-| `internal/project/` | `Load`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping under the jig home root → a `Config` |
+| `internal/project/` | `Load`, `Config.CheckSchemaVersion`, `Resolve`, `InitStandalone`, `InitProject` | `project.yaml` + the machine mapping under the jig home root → a `Config`; a `Config` + whether an older schema is allowed → nil, or a refusal naming `jig store migrate` (older) or an upgrade (newer) |
 | `internal/repohost/` | `New`, `Host.CreatePR`, `Host.CreatePRWithMedia`, `Host.FindOpenPR`, `Host.UpdatePR`, `Host.UpdatePRWithMedia`, `Host.CommentPR`, `Host.ReadPRBody` | a repo's own `remote:` → a `Host` (a GitHub host, for a remote on github.com over ssh or https; refused up front, `GH_NOT_INSTALLED`, when `gh` is not on PATH) or `nil` (any other remote: a local path, or another host); a branch, base, title and a body file → an opened or updated pull request, with or without the picked recordings attached, found by its qualified head into a base, or read back |
 | `internal/revieweval/` | `LoadCorpus`, `RunCorpus`, `MatchRound`, `ScoreRound`, `RenderReport` | a labeled corpus (`testdata/revieweval`) + a session backend → a `CaseScore` per case, matched structurally against seeded gold through the real reviewer contract |
 | `internal/screen/` | `Command`, `SecretPath`, `ToolCall`, `Granted`, `Grants` | a shell command, path, or tool-call input → allow, or deny with a reason; a tool name → whether a passing screen grants it |
 | `internal/session/` | `New`, `Backend.Run` | a `Dispatch` (paths to `slice.json`/`result.json`, and for a gate round the one file of recordings the reviewer is told to read) → `result.json` written to disk |
 | `internal/staircase/` | `Select`, `Dearest`, `Default` | build `Signals` (the slice's failed attempts, invariant match) + `Config` → a builder's model rung: invariant floored to the dearest rung, one rung up per failed attempt, otherwise the first rung; `Dearest` is the gate reviewer's rung on every round |
-| `internal/store/` | `Open`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID`, `TicketIDs`, `Mint`, `Claim`, `ResolveTicket`, `CheckAliases` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; a store clone → the stable id its machine-local files are keyed by; the store root → every id-shaped folder under any key, sorted by key then number (`TicketIDs`); a key + a ticket's own record → the next id under that key, its folder created and its `ticket.yaml` written whole (refused, before anything is written, when jig cannot use the id it computed); a mint (or other write) + a commit message → that id landed on the store's origin, retried after a push the origin rejects, undone and refused (`ID_NOT_CLAIMED`) after too many or any other failed push, committed with no push on a store with no origin |
+| `internal/store/` | `Open`, `TicketDir`, `TicketRelDir`, `Lock`, `AtomicWrite`, `BriefSectionHashes`, `ReadSlices`, `ReadChart`, `WriteChart`, `ReadTicket`, `Ticket.Adopted`, `ReadTicketDeps`, `CreateTicketRecord`, `WriteTicketBranch`, `CheckAdoptableBranch`, `TicketBranch`, `ResolveTicketBranch`, `TicketFilePath`, `StartSHAPath`, `WriteStartSHA`, `Store.ID`, `TicketIDs`, `Mint`, `Claim`, `ResolveTicket`, `CheckAliases` | ticket-folder and chart-folder reads/writes → the truth-repo tree described above; an id → its folder under `tickets/`, absolute (`TicketDir`) or store-relative (`TicketRelDir`); a store clone → the stable id its machine-local files are keyed by; `tickets/` → every id-shaped folder under any key, sorted by key then number (`TicketIDs`); a key + a ticket's own record → the next id under that key, its folder created and its `ticket.yaml` written whole (refused, before anything is written, when jig cannot use the id it computed); a mint (or other write) + a commit message → that id landed on the store's origin, retried after a push the origin rejects, undone and refused (`ID_NOT_CLAIMED`) after too many or any other failed push, committed with no push on a store with no origin |
 | `internal/termrec/` | `Cast`, `Event`, `ReadAsciicast`, `Cast.WriteAsciicast`, `Cast.Validate`, `Cast.SVG`, `SVGOptions`, `Cast.FinalText`, `NewRecorder`, `Recorder.Stream`, `Recorder.Cast` | a program's writes to its pipes, each stream teed into a `Recorder.Stream` → a terminal recording (its size and each write with its time; asciicast v2); a recording → an animated SVG of the screen as it changed, within `MaxSVGBytes`, or the last frame as text ([ADR 0029](docs/adr/0029-demos-are-recordings-of-the-builds-end-to-end-scenarios.md)) |
 | `internal/verifydeliver/` | `Gate`, `Publish`, `RebaseOnto`, `ParsePicksResult`, `RenderPicksPrompt` | `Deps` + `GateOpts`/`PublishOpts` → a `GateReport`, or a `PublishReport` with an opened or updated PR (its body carrying a `## Demo` section, and its media attached, when the shipped head has one: the flows a short session picked from the build's recordings; `PublishOpts.Backend` runs that session and `PublishReport.Picks` says what it did) |
 

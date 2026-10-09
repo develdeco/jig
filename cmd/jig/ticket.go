@@ -88,7 +88,7 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 			if err != nil {
 				return "", nil, err
 			}
-			return mintedID, []string{mintedID}, nil
+			return mintedID, []string{st.TicketRelDir(mintedID)}, nil
 		},
 		func(id string) string { return fmt.Sprintf("%s: new ticket", id) },
 	)

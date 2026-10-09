@@ -155,7 +155,7 @@ func findChartEntry(st *store.Store, ticket string) (store.ChartEntry, bool, err
 // issue shows. found is false when there is no such commit: no commit ever
 // touched the path, or every one that did was publish's.
 func latestTicketMD(st *store.Store, ticket string) (title, body string, found bool, err error) {
-	relPath := filepath.Join(ticket, "tracker", "ticket.md")
+	relPath := filepath.Join(st.TicketRelDir(ticket), "tracker", "ticket.md")
 	out, gerr := gitx.Run(st.Root, "log", "--format=%H%x1f%s", "--", relPath)
 	if gerr != nil || strings.TrimSpace(out) == "" {
 		return "", "", false, nil

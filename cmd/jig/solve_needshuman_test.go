@@ -84,7 +84,7 @@ func TestSolveStopsOnNeedsHumanInsteadOfRedispatching(t *testing.T) {
 	// Only one gate round must have run: a second round would mean solve
 	// re-dispatched the reviewer on the same pending human decision instead
 	// of stopping.
-	if _, err := os.Stat(filepath.Join(fx.StoreDir, ticket, "gate", "round-2")); err == nil {
+	if _, err := os.Stat(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-2")); err == nil {
 		t.Fatalf("solve dispatched a second gate round instead of stopping at round 1's needs_a_human")
 	}
 }

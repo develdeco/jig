@@ -548,7 +548,7 @@ func TestPublishContinuesWhenCommentPostingFails(t *testing.T) {
 		t.Fatalf("Publish: %v (expected to succeed despite comment failure)", err)
 	}
 
-	reviewNotesPath := filepath.Join(d.Store.Root, fx.Ticket, "pr", "review-notes.md")
+	reviewNotesPath := filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "review-notes.md")
 	if !strings.HasPrefix(warning, "jig: ") {
 		t.Errorf("warning = %q, want it prefixed %q like every other stderr warning", warning, "jig: ")
 	}

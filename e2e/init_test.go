@@ -125,13 +125,13 @@ func TestInitStandaloneQuickstart(t *testing.T) {
 	if r.Code != 0 {
 		t.Fatalf("jig ticket new exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
-	const ticket = "T-1" // first ticket minted into a fresh store, per project.yaml's default ticket_format
+	const ticket = "MYREPO-1" // first ticket minted into a fresh store, under its derived key (from repoDir's base name "myrepo")
 	if !strings.Contains(r.Stdout, ticket) {
 		t.Fatalf("jig ticket new stdout missing %q:\n%s", ticket, r.Stdout)
 	}
 
 	storeDir := filepath.Join(parent, "myrepo-tickets")
-	ticketDir := filepath.Join(storeDir, ticket)
+	ticketDir := filepath.Join(storeDir, "tickets", ticket)
 	brief := "# Fix the thing\n\n## Goal\n\nMake the thing work.\n"
 	hashes := store.BriefSectionHashes([]byte(brief))
 	slices := fmt.Sprintf(`slices:
