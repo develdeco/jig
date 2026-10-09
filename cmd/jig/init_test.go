@@ -13,17 +13,17 @@ import (
 // silently overwriting its ledger.md and project.yaml back to their fresh
 // defaults (project.InitStandalone always overwrites both).
 func TestCmdInitStandaloneRefusesReinit(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
 
 	parent := t.TempDir()
 	repoDir := filepath.Join(parent, "myrepo")
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
 	}
-	t.Chdir(repoDir)
+	e := testEnv(t.TempDir()).inDir(repoDir)
 
 	var buf bytes.Buffer
-	if code := cmdInit([]string{"--standalone"}, &buf); code != 0 {
+	if code := cmdInit(e, []string{"--standalone"}, &buf); code != 0 {
 		t.Fatalf("first init exit code = %d, output:\n%s", code, buf.String())
 	}
 
@@ -34,7 +34,7 @@ func TestCmdInitStandaloneRefusesReinit(t *testing.T) {
 	}
 
 	buf.Reset()
-	code := cmdInit([]string{"--standalone"}, &buf)
+	code := cmdInit(e, []string{"--standalone"}, &buf)
 	if code == 0 {
 		t.Fatalf("second init exit code = 0, want a refusal; output:\n%s", buf.String())
 	}

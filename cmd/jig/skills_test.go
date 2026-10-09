@@ -43,6 +43,7 @@ func wantSkillNames(t *testing.T) []string {
 // TestCmdSkillsInstallDest installs to a temp --dest and checks that every
 // skill landed, byte-equal to the repo's own SKILL.md.
 func TestCmdSkillsInstallDest(t *testing.T) {
+	t.Parallel()
 	root := skillsRepoRoot(t)
 	names := wantSkillNames(t)
 	if len(names) != 5 {
@@ -51,7 +52,7 @@ func TestCmdSkillsInstallDest(t *testing.T) {
 
 	dest := t.TempDir()
 	var buf bytes.Buffer
-	code := cmdSkills([]string{"install", "--dest", dest}, &buf)
+	code := cmdSkills(testEnv(t.TempDir()), []string{"install", "--dest", dest}, &buf)
 	if code != 0 {
 		t.Fatalf("cmdSkills install exit code = %d, output:\n%s", code, buf.String())
 	}
@@ -85,12 +86,13 @@ func TestCmdSkillsInstallDest(t *testing.T) {
 // TestCmdSkillsInstallIdempotent checks that a second install overwrites in
 // place rather than erroring or duplicating.
 func TestCmdSkillsInstallIdempotent(t *testing.T) {
+	t.Parallel()
 	dest := t.TempDir()
 	var buf1, buf2 bytes.Buffer
-	if code := cmdSkills([]string{"install", "--dest", dest}, &buf1); code != 0 {
+	if code := cmdSkills(testEnv(t.TempDir()), []string{"install", "--dest", dest}, &buf1); code != 0 {
 		t.Fatalf("first install exit code = %d, output:\n%s", code, buf1.String())
 	}
-	if code := cmdSkills([]string{"install", "--dest", dest}, &buf2); code != 0 {
+	if code := cmdSkills(testEnv(t.TempDir()), []string{"install", "--dest", dest}, &buf2); code != 0 {
 		t.Fatalf("second install exit code = %d, output:\n%s", code, buf2.String())
 	}
 	if buf1.String() != buf2.String() {
@@ -112,11 +114,12 @@ func TestCmdSkillsInstallIdempotent(t *testing.T) {
 // TestCmdSkillsInstallProject checks that --project installs under
 // ./.claude/skills of the current directory.
 func TestCmdSkillsInstallProject(t *testing.T) {
+	t.Parallel()
 	cwd := t.TempDir()
-	t.Chdir(cwd)
+	e := testEnv(t.TempDir()).inDir(cwd)
 
 	var buf bytes.Buffer
-	code := cmdSkills([]string{"install", "--project"}, &buf)
+	code := cmdSkills(e, []string{"install", "--project"}, &buf)
 	if code != 0 {
 		t.Fatalf("cmdSkills install --project exit code = %d, output:\n%s", code, buf.String())
 	}
@@ -133,12 +136,34 @@ func TestCmdSkillsInstallProject(t *testing.T) {
 // TestCmdSkillsUnknownSubcommand checks the VALIDATION_ERROR path for a
 // skills subcommand other than "install".
 func TestCmdSkillsUnknownSubcommand(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
-	code := cmdSkills([]string{"bogus"}, &buf)
+	code := cmdSkills(testEnv(t.TempDir()), []string{"bogus"}, &buf)
 	if code != 2 {
 		t.Fatalf("exit code = %d, want 2; output:\n%s", code, buf.String())
 	}
 	if !strings.Contains(buf.String(), "VALIDATION_ERROR") {
 		t.Fatalf("expected VALIDATION_ERROR, got:\n%s", buf.String())
+	}
+}
+
+// TestCmdSkillsInstallDefaultsToTheOperatorsHome checks that with neither
+// --dest nor --project the skills land under <home>/.claude/skills, the home
+// being the env's own: the test never writes to a real home directory.
+func TestCmdSkillsInstallDefaultsToTheOperatorsHome(t *testing.T) {
+	t.Parallel()
+
+	userHome := t.TempDir()
+	e := envFrom(map[string]string{"HOME": userHome, "USERPROFILE": userHome})
+
+	var buf bytes.Buffer
+	if code := cmdSkills(e, []string{"install"}, &buf); code != 0 {
+		t.Fatalf("cmdSkills install exit code = %d, output:\n%s", code, buf.String())
+	}
+	for _, name := range wantSkillNames(t) {
+		path := filepath.Join(userHome, ".claude", "skills", name, "SKILL.md")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s: expected file at %s: %v", name, path, err)
+		}
 	}
 }

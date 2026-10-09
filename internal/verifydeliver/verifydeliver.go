@@ -32,12 +32,14 @@ type Deps struct {
 	Machine project.MachineProject
 	Rungs   staircase.Config
 	// Home is the jig home root whose pool holds the gate and publish
-	// leases: home.Root() for the binary, a test's own directory in tests.
+	// leases: the binary's env resolves it (cmd/jig/env.go), a test's own
+	// directory in tests.
 	Home string
 	// UserHome is the operator's own home directory, where their local
-	// agent sessions keep transcripts (os.UserHomeDir() for the binary, a
-	// test's own directory in tests). "" means it could not be resolved:
-	// gate intent inference then has nowhere to look and says so.
+	// agent sessions keep transcripts (the binary's env resolves it, as
+	// os.UserHomeDir does; a test's own directory in tests). "" means it could
+	// not be resolved: gate intent inference then has nowhere to look and says
+	// so.
 	UserHome string
 	// Host is the pull-request host Publish finds, opens or updates the pull
 	// request with. nil means the host the shipped repo's own remote names

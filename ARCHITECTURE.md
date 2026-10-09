@@ -348,7 +348,7 @@ exists.
 
 | Package | Entry points | Input → Output |
 |---|---|---|
-| `cmd/jig/` | `main`, `cmdScreen` | CLI args, or a PreToolUse hook payload on stdin → subcommand dispatch, or a screen allow/deny |
+| `cmd/jig/` | `main`, `Main`, `run`, `cmdScreen` | CLI args and an `env` (the environment, the working directory and the seams a test replaces; the process's for the binary), or a PreToolUse hook payload on stdin → subcommand dispatch, or a screen allow/deny |
 | `e2e/` | (tests only) | the fixture + fake backend → asserts the full brief→publish chain twice; with `JIG_LIVE_CLAUDE`, README's Quickstart through the real `claude` CLI; `JIG_E2E_BINARY` → the same against an installed jig |
 | `internal/axi/` | `Render`, `Table`, `KV`, `Help`, `RenderError`, `ExitCode` | labelled data → jig's plain-text output register and process exit codes |
 | `internal/claudetest/` | `API`, `Session`, `Serve` | scripted sessions (tool calls in order) → a stand-in Messages API on loopback that the real `claude` CLI runs against, for the live CLI tests |
@@ -358,7 +358,7 @@ exists.
 | `internal/gittest/` | `Run`, `AtExit` | `*testing.M` → a hermetic git config for the whole test binary, then its exit code |
 | `internal/gitx/` | `Run`, `RunEnv`, `RunRaw`, `MaintenanceAuto`, `RevParse`, `MergeBase`, `CommitsIn`, `IsAncestor`, `Missing`, `DiffNameOnly`, `FileExistsAtRev`, `PathExistsAtRev`, `IsLocalRemote`, `GuardedPush`, `CommonDir`, `SameDir`, `TopLevel`, `CommitTime`, `OpenRepo` (`Repo`: `State`, `CommitAll`, `Push`, `Fetch`) | argv + a working dir → git plumbing output, or a refused push; a store's directory → the same store operations in process (go-git), or `ErrUseCLI` for the caller's git-program path |
 | `internal/graphify/` | `Detect`, `DetectWith`, `Plane` | `project.Config` → a `Plane` (real or `Noop`) that keeps a lease's code graph current and finds the code linked to a slice's goal ([ADR 0026](docs/adr/0026-a-code-graph-gives-the-builder-its-starting-points.md)) or affected by a seed |
-| `internal/home/` | `Root`, `MachinePath`, `PoolDir`, `IntentExcerptDir`, `IntentScratchDir`, `RecordDir`, `PicksDir`, `ReviewDir` | `JIG_HOME` (or the real home dir) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths, including the directories intent excerpts and summarizer scratch directories go under, where the recordings of one builder's oracle run (`RecordDir`: store id, ticket, commit, run) live, where the recordings a publish picked are staged (`PicksDir`: store id, ticket, head), and where a reviewer round's list of the recordings is written (`ReviewDir`: store id, ticket, round) |
+| `internal/home/` | `Root`, `RootFrom`, `UserDirFrom`, `MachinePath`, `PoolDir`, `IntentExcerptDir`, `IntentScratchDir`, `RecordDir`, `PicksDir`, `ReviewDir` | `JIG_HOME` (or the real home dir), read from the process (`Root`) or from a `getenv` it is given (`RootFrom`) → the jig home root, which `cmd/jig` resolves once and passes down; a root → per-machine paths, including the directories intent excerpts and summarizer scratch directories go under, where the recordings of one builder's oracle run (`RecordDir`: store id, ticket, commit, run) live, where the recordings a publish picked are staged (`PicksDir`: store id, ticket, head), and where a reviewer round's list of the recordings is written (`ReviewDir`: store id, ticket, round) |
 | `internal/intent/` | `NewClaudeReader`, `Best`, `RenderExcerpt` | a repo's git common dir + a time window → matching local agent `Session`s; a scope diff's files → the `Match` a model then summarizes |
 | `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `VerifiedSlices`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events (a `recorded` line carries the `Recording`s of a builder's green oracle run; a `publish-picks` line carries the `Pick` made of them) → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
 | `internal/manifest/` | `Resolve`, `MatchesInvariant` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes, and invariant-sensitive paths; a file path → whether it matches a declared invariant |
@@ -1011,11 +1011,14 @@ go test -timeout 30m ./...
 ```
 
 Every test gets its own `t.TempDir()` and its own jig home (passed as an
-argument to the packages that use one, or as `JIG_HOME` via `t.Setenv` to
-`cmd/jig` and the binary), so a test run never touches a real machine's jig
-home, and every
+argument to the packages that use one, as an `env` of its own to `cmd/jig`'s
+`run`, or as `JIG_HOME` in the jig binary's own subprocess environment in
+`e2e`), so a test run never touches a real machine's jig home, and every
 remote used in tests is a bare, file-path repo - no test ever talks to a
-real git host.
+real git host. `cmd/jig` reads the environment, the working directory, the
+terminal check and the solve gate source through that `env`, and `e2e` hands
+each binary run an environment of its own, so both run their tests in
+parallel.
 
 Product commits on the ticket branch (reconcile, memorize, squash) use the
 operator's git identity, resolved with `gitx.IdentityEnv` from their mapped

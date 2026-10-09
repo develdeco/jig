@@ -2,6 +2,7 @@ package gittest_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gittest"
@@ -29,6 +30,19 @@ func TestRunSetsHermeticConfig(t *testing.T) {
 		}
 		if got != "false" {
 			t.Errorf("%s = %q, want %q", key, got, "false")
+		}
+	}
+
+	// The ignore and attributes files are gittest's own, beside its config,
+	// so the user's $HOME/.config/git/ignore and attributes never apply.
+	own := filepath.Dir(os.Getenv("GIT_CONFIG_GLOBAL"))
+	for key, name := range map[string]string{"core.excludesFile": "ignore", "core.attributesFile": "attributes"} {
+		got, err := gitx.Run(dir, "config", "--get", key)
+		if err != nil {
+			t.Fatalf("git config --get %s: %v", key, err)
+		}
+		if want := filepath.ToSlash(filepath.Join(own, name)); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
 		}
 	}
 }

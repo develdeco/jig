@@ -27,8 +27,9 @@ func fileLine(f verifydeliver.Finding) string {
 // null device (/dev/null, NUL - itself a character device on every OS, so
 // a mode-bit check alone cannot tell it apart from a real tty), and any
 // non-*os.File reader (a bytes.Buffer, a strings.Reader) are all not a
-// terminal. Tests override this var with a scripted stub.
-var stdinIsTerminal = func(r io.Reader) bool {
+// terminal. It is env.stdinIsTerminal's production value; a test puts a scripted
+// stub there instead.
+func stdinIsTerminal(r io.Reader) bool {
 	f, ok := r.(*os.File)
 	if !ok {
 		return false
@@ -41,12 +42,12 @@ var stdinIsTerminal = func(r io.Reader) bool {
 // when there was something to triage, prints one note line explaining why
 // nothing was prompted; a terminal stdin runs the interactive batch/per-ask
 // prompt.
-func triageFor(yes bool, stdin io.Reader, stdout io.Writer) verifydeliver.Triage {
+func triageFor(e env, yes bool, stdin io.Reader, stdout io.Writer) verifydeliver.Triage {
 	return func(in verifydeliver.TriageInput) verifydeliver.TriageResult {
 		switch {
 		case yes:
 			return defaultTriageWithNote(in, stdout, "--yes")
-		case !stdinIsTerminal(stdin):
+		case !e.stdinIsTerminal(stdin):
 			return defaultTriageWithNote(in, stdout, "stdin is not a terminal")
 		default:
 			return interactiveTriage(in, stdin, stdout)

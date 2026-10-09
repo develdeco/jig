@@ -13,13 +13,13 @@ import (
 
 // cmdPublish implements `jig publish <ticket> [--yes] [--backend
 // fake|headless|herdr] [--scenario <dir>]`.
-func cmdPublish(args []string, stdout io.Writer) int {
+func cmdPublish(e env, args []string, stdout io.Writer) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
-	fs := newFlagSet("publish")
+	fs := newFlagSet(e, "publish")
 	yes := fs.Bool("yes", false, "skip the interactive confirm")
 	backendFlag := fs.String("backend", "", "session backend that picks the recordings the pull request shows: fake, headless, or herdr")
 	scenario := fs.String("scenario", "", "scenario dir for the fake backend")
@@ -31,7 +31,7 @@ func cmdPublish(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -43,7 +43,7 @@ func cmdPublish(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	deps := verifydeliverDeps(st, cfg, mp, jigHome)
+	deps := verifydeliverDeps(e, st, cfg, mp, jigHome)
 
 	// Check identity before acquiring a lease.
 	if err := verifydeliver.CheckIdentity(deps); err != nil {
