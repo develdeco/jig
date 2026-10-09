@@ -252,7 +252,13 @@ changed, the change working, and how it was verified.
   verify against the round's manifest anymore (missing, or changed since)
   is left out and named on stderr, never rendered as if it were still
   there; a refused demo, or no demo recorded for this head at all, leaves
-  the section out entirely, and stderr says which. With a GitHub host the
+  the section out entirely, and stderr says which. When the build recorded
+  its end-to-end scenarios, a short session picks the recordings that show
+  the change and composes them into flows (`--backend` and `--scenario` pick
+  its backend, as for `jig run`): the section is then its summary and each
+  flow under a `###` heading, the files staged as `rec-<n>.<ext>`, and a
+  pick that is refused or fails falls back to the demo above, with the
+  reason on stderr. With a GitHub host the
   media are attached to the pull request itself (`gh ... --attach`),
   which rewrites a recognized image reference to the uploaded URL in place
   but not a video's bare path; publish reads the pull request back, moves

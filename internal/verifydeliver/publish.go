@@ -15,6 +15,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
+	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -22,6 +23,12 @@ import (
 type PublishOpts struct {
 	Ticket string
 	Yes    bool
+	// Backend runs the short session that picks, from the recordings the
+	// build made, the ones the pull request shows (ADR 0029). nil means no
+	// session can be dispatched: a ticket with recordings then has its pick
+	// refused, and the gate's demo, if there is one, stands in. A ticket with
+	// no recordings never dispatches one.
+	Backend session.Backend
 }
 
 // PublishReport is Publish's result.
@@ -44,6 +51,9 @@ type PublishReport struct {
 	// reports why, rather than a silent, unexplained gap where its row would
 	// otherwise be.
 	PRNote map[string]string
+	// Picks is what publish did with the build's recordings: the zero value
+	// when the build recorded nothing that could be offered.
+	Picks PicksReport
 }
 
 // NotSquashed is what the publish report says of a repo whose branch was
@@ -394,7 +404,19 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	prPath, omittedBriefIntent, demoResult, err := writePRBody(d.Store, ticket, repoName, slices, gateRep, tier, commits, authorCommits, oracleNames, outcomes, d, lastRound)
+	// The recordings the build made, picked for the pull request (ADR 0029).
+	// A pick that stands renders the ## Demo section; one that does not, or
+	// none to make, leaves it to the gate's demo as it always was. The pick is
+	// made for the head the gate reviewed (shipHead, before reconcile and
+	// squash rewrote anything), whose history still holds the recorded commits.
+	picksReport, picked, err := publishPicks(picksStep{
+		d: d, backend: o.Backend, ticket: ticket, repoName: repoName,
+		leaseDir: lease.Dir, head: shipHead, lines: lines, warn: warnFn,
+	})
+	if err != nil {
+		return PublishReport{}, err
+	}
+	prPath, omittedBriefIntent, demoResult, err := writePRBody(d.Store, ticket, repoName, slices, gateRep, tier, commits, authorCommits, oracleNames, outcomes, d, lastRound, picked)
 	if err != nil {
 		return PublishReport{}, err
 	}
@@ -404,7 +426,9 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// renderDemoSection already resolved and verified these very files
 	// against, for the head the gate reviewed - never recomputed here from
 	// head, which by this point is the post-squash tip and names no
-	// evidence directory that exists.
+	// evidence directory that exists. A pick's files are staged in a
+	// directory of their own (picksStep.stage), and are handed over the same
+	// way.
 	mediaDir := demoResult.MediaDir
 	mediaFiles := make([]string, 0, len(demoResult.MediaFiles))
 	for _, f := range demoResult.MediaFiles {
@@ -479,6 +503,24 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 			return PublishReport{}, &axi.Error{Msg: "publish declined at confirmation", Code: "PUBLISH_DECLINED"}
 		}
 		confirmed = true
+	}
+
+	// The files a pick staged are attached by name from their directory, and
+	// the session and the confirmation have run since they were copied: check
+	// them once more before anything is pushed. A pick's media are never
+	// uploaded unchecked, and a change here refuses the publish with origin
+	// untouched: the next publish reuses the journaled pick (the head and the
+	// recordings are the same) and stages the files afresh, with no gate round.
+	// What is left after this is the push and the host's own read of the files,
+	// which a check made by jig cannot close, since the host opens them by name.
+	if picked != nil && host != nil {
+		if err := verifyStaged(absPath(filepath.Join(d.Home, "evidence")), picked.MediaDir, picked.MediaFiles); err != nil {
+			return PublishReport{}, &axi.Error{
+				Msg:  fmt.Sprintf("the recordings staged for %s changed before they were attached: %v", ticket, err),
+				Code: "PUBLISH_PICKS_CHANGED",
+				Help: []string{fmt.Sprintf("Nothing was pushed. Run `jig publish %s` again: it reuses the pick and stages the recordings afresh.", ticket)},
+			}
+		}
 	}
 
 	if err := guardedPushFn(lease.Dir, "origin", branch, confirmed); err != nil {
@@ -602,6 +644,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		PRURL:     map[string]string{repoName: prURL},
 		PRUpdated: map[string]bool{repoName: prOutcome == "updated"},
 		PRNote:    prNote,
+		Picks:     picksReport,
 	}, nil
 }
 

@@ -1007,10 +1007,12 @@ func renderDemoSection(d Deps, st *store.Store, ticket, repoName string, rep rep
 // Its second return is renderIntentSection's: the body has no ## Intent
 // section although a brief bound as its source, the one omission Publish
 // warns the operator about. The third return is renderDemoSection's result
-// for reporting omitted demo files and demo-unavailability reasons.
+// for reporting omitted demo files and demo-unavailability reasons - or, when
+// picked is not nil, picked itself: the section publish rendered from the
+// recordings it picked (ADR 0029), which takes the gate demo's place.
 func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 	rep reportYAML, tier string, commits map[string]string, authorCommits []authorCommit,
-	oracleNames []string, outcomes []findingOutcome, d Deps, lastRound int) (string, bool, DemoRenderResult, error) {
+	oracleNames []string, outcomes []findingOutcome, d Deps, lastRound int, picked *DemoRenderResult) (string, bool, DemoRenderResult, error) {
 	relPath := filepath.Join(ticket, "pr", repoName+".md")
 	fullPath := filepath.Join(st.Root, relPath)
 
@@ -1026,9 +1028,12 @@ func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 	// Render What changed section
 	b.WriteString(renderWhatChangedSection(slices, commits, authorCommits))
 
-	// Render Demo section (if available)
-	demoResult, err := renderDemoSection(d, st, ticket, repoName, rep, lastRound)
-	if err != nil {
+	// Render Demo section (if available): the recordings publish picked, else
+	// the gate's demo.
+	var demoResult DemoRenderResult
+	if picked != nil {
+		demoResult = *picked
+	} else if demoResult, err = renderDemoSection(d, st, ticket, repoName, rep, lastRound); err != nil {
 		return "", false, DemoRenderResult{}, err
 	}
 	b.WriteString(demoResult.Section)

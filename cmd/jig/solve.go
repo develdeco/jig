@@ -138,12 +138,13 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 
 	pdeps := vdeps
-	preport, err := verifydeliver.Publish(pdeps, verifydeliver.PublishOpts{Ticket: ticket, Yes: *yes})
+	preport, err := verifydeliver.Publish(pdeps, verifydeliver.PublishOpts{Ticket: ticket, Yes: *yes, Backend: backend})
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
 	solveKV := append([][2]string{{"ticket", ticket}, {"tier", preport.Tier}}, demoRows(lastDemo)...)
+	solveKV = append(solveKV, picksRows(preport.Picks)...)
 	axi.Render(stdout,
 		axi.KV("solve", solveKV),
 		pushedTable(preport),
