@@ -1074,3 +1074,37 @@ func TestWriteChartOverwritesConcurrentlyIntroducedMapping(t *testing.T) {
 		t.Fatalf("entries[0].Title = %q, want the write to have overwritten the concurrently introduced mapping", got[0].Title)
 	}
 }
+
+// TestChartNamesListsOnlyDirsWithTicketsYAML checks that ChartNames lists
+// alphabetically, skipping a charts/ subdirectory with no tickets.yaml, and
+// that an absent charts/ directory lists no charts at all.
+func TestChartNamesListsOnlyDirsWithTicketsYAML(t *testing.T) {
+	st := newTestChartStore(t)
+	writeChartFile(t, st, "demo", "tickets: []\n")
+	writeChartFile(t, st, "alpha", "tickets: []\n")
+	if err := os.MkdirAll(filepath.Join(st.Root, "charts", "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	names, err := st.ChartNames()
+	if err != nil {
+		t.Fatalf("ChartNames: %v", err)
+	}
+	want := []string{"alpha", "demo"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("ChartNames = %v, want %v", names, want)
+	}
+}
+
+// TestChartNamesNoChartsDir checks that a store with no charts/ directory at
+// all lists no charts, rather than erroring.
+func TestChartNamesNoChartsDir(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	names, err := st.ChartNames()
+	if err != nil {
+		t.Fatalf("ChartNames: %v", err)
+	}
+	if len(names) != 0 {
+		t.Fatalf("ChartNames = %v, want none", names)
+	}
+}

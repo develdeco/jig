@@ -56,7 +56,7 @@ irm https://raw.githubusercontent.com/develdeco/jig/main/scripts/install.ps1 | i
 Set `JIG_VERSION` to install a specific release tag instead of the latest,
 and `JIG_INSTALL_DIR` to change where `jig` is installed.
 
-With Go 1.27 or newer:
+With Go 1.27.2 or newer:
 
 ```sh
 go install github.com/develdeco/jig/cmd/jig@latest
@@ -88,7 +88,7 @@ host and opening pull requests.
 ### Installing an unreleased build
 
 `main` can carry fixes that no release has yet. It has no release
-archives, so it installs with Go 1.27 or newer:
+archives, so it installs with Go 1.27.2 or newer:
 
 ```sh
 go install github.com/develdeco/jig/cmd/jig@main
@@ -339,6 +339,71 @@ the scripted source never runs one. A demo that needs an env class reports
 that it cannot record, since env classes are already down by then.
 `jig publish` attaches a recorded demo to the pull request it ships - see
 [What a published pull request looks like](#what-a-published-pull-request-looks-like).
+
+## GitHub mirror
+
+jig can mirror the store onto GitHub issues and a GitHub Project, from
+inside every command: after each checkpoint it syncs every ticket and
+chart, best-effort - a GitHub failure warns and never fails the command,
+and the next checkpoint retries. Whatever that sync found prints in the
+output of the command it rode in on: every issue created, every drift line,
+anything a publish-safety hit skipped. To turn it on, add a `github` entry
+to `project.yaml`'s `trackers:` list:
+
+```yaml
+trackers:
+  - github:
+      repo: your-org/your-tracking-repo
+      project: https://github.com/users/your-org/projects/7
+```
+
+`repo:` is where issues live - named, not derived, since GitHub cannot
+transfer an issue from a private repo to a public one once one appears.
+The docs' own rule of thumb: the product repo for a one-repo project, a
+dedicated tracking repo for several. `project:` is the GitHub Project's
+URL, `users/<login>` for a personal project or `orgs/<org>` for an
+organization's. Both are required; jig creates the project's `Status` and
+`Store ID` fields itself the first time it syncs - there is no setup
+command.
+
+The token `gh auth token` prints needs the `project` scope (`gh auth
+refresh -s project`) alongside whatever `gh` already needs for pull
+requests; a project jig cannot resolve (gone, or that scope missing) looks
+the same from here and is refused the same way.
+
+When the issue repo is public, put a `publish-terms.txt` in the jig home
+(one term per line, matched case-insensitively, `#` comments and blank
+lines ignored) naming anything project-specific that must never reach a
+public issue - a codename, an internal hostname - beyond the built-in
+checks (email addresses, home directory paths, GitHub/Anthropic/AWS token
+prefixes, private key headers). A hit skips that one ticket's or chart's
+issue - GitHub keeps whatever it had - and `jig trackers sync` exits
+non-zero when anything was skipped; a private issue repo is never scanned.
+
+Several stores may point at the same issue repo and project, so work kept
+in separate stores shows on one board - keep each store's `ticket_format`
+distinct (or otherwise ensure the ids never collide), since jig adds no
+store identity of its own to an issue.
+
+Run `jig trackers sync [--dry-run] [--store <path>] [--project <name>]` to
+sync on demand and see what changed: created, updated and reopened or
+closed issues, links added and removed, board fields set, and every drift
+line - an edit made directly on GitHub to a field jig owns (title, body,
+open/closed state, parent and blocked-by links, a board item's Status or
+Store ID) is reported and overwritten with the store's value again.
+`--dry-run` reads GitHub and the store and reports what it would change,
+writing to neither - the cutover's own check, since a dry run that never
+looked at GitHub could not tell you whether the two already agree.
+
+A sync from inside another command stops after 2 minutes, warning how many
+tickets or charts still have no GitHub issue and pointing at `jig trackers
+sync`; one mutation per second against a first sync's 5 or more per ticket
+(create, update, up to two links, up to three board fields) means a
+sizeable store's first sync needs several checkpoints to drain, each
+making progress. `jig trackers sync` itself runs with no such bound, since
+it is run on demand rather than from inside another command, so the
+cutover and an L3 migration should each run one full `jig trackers sync`
+instead of waiting out the backlog across several commands.
 
 ## Safety
 
