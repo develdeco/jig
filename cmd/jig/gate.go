@@ -37,13 +37,13 @@ func gateSourceFor(backendFlag, scenario string) (verifydeliver.GateSource, erro
 // cmdGate implements `jig gate <ticket> [--early] [--branch <name>] [--intent
 // <text> | --doc <path>] [--pr <n>] [--yes] [--backend
 // fake|headless|herdr] [--scenario <dir>]`.
-func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
+func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
-	fs := newFlagSet("gate")
+	fs := newFlagSet(e, "gate")
 	early := fs.Bool("early", false, "gate before the frontier is fully green")
 	branch := fs.String("branch", "", "review this branch, built outside jig, and adopt it as the ticket's own (recorded on the first round)")
 	intent := fs.String("intent", "", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md); with no brief, --intent or --doc, a reviewer round reads your local Claude Code sessions for this repo and has a model summarize the best match into intent.md")
@@ -102,7 +102,13 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 		})
 	}
 
-	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
+	if *doc, err = e.abs(*doc); err != nil {
+		return renderErr(stdout, err)
+	}
+	if *scenario, err = e.abs(*scenario); err != nil {
+		return renderErr(stdout, err)
+	}
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -121,7 +127,7 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	deps := verifydeliverDeps(st, cfg, mp, jigHome)
+	deps := verifydeliverDeps(e, st, cfg, mp, jigHome)
 	report, err := verifydeliver.Gate(deps, src, verifydeliver.GateOpts{
 		Ticket:    ticket,
 		Early:     *early,
@@ -129,7 +135,7 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 		Intent:    *intent,
 		IntentDoc: *doc,
 		PRMode:    *prNum != 0,
-		Triage:    triageFor(*yes, stdin, stdout),
+		Triage:    triageFor(e, *yes, stdin, stdout),
 	})
 	if err != nil {
 		return renderErr(stdout, err)

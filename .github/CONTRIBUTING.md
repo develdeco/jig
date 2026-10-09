@@ -97,12 +97,18 @@ annotation.
 - Every test gets its own `t.TempDir()`, and its own jig home, so a test
   run never touches a real machine's: packages take the jig home root as an
   argument (`fixture.Opts.Home`, `verifydeliver.Deps.Home`,
-  `frontier.Deps.Home`, `pool.Acquire`), and a test passes a `t.TempDir()`;
-  a test that runs `cmd/jig` or the jig binary, which read `JIG_HOME`, sets
-  it with `t.Setenv`, except `e2e`'s: they hand the subprocess `JIG_HOME`
-  (and, for the tests built on `newFixture`, `HOME` and `USERPROFILE`) in its
-  own environment (`jigEnv` and `runJig`), never through the test process's,
-  so they run in parallel with each other.
+  `frontier.Deps.Home`, `pool.Acquire`), and a test passes a `t.TempDir()`.
+  `cmd/jig` takes what it reads from the process (the environment, the
+  working directory, the terminal check, the solve gate source) as an `env`
+  per run, so a `cmd/jig` test hands `run` an env of its own (`testEnv(home)`)
+  instead of calling `t.Setenv` or `t.Chdir`, and calls `t.Parallel()`.
+  `e2e`'s tests hand the jig binary `JIG_HOME` (and, for the tests built on
+  `newFixture`, `HOME` and `USERPROFILE`) in its own environment (`jigEnv`
+  and `runJig`), never through the test process's, so they run in parallel
+  with each other. Two `cmd/jig` tests must edit the process and stay
+  serial: the one that checks `Main` reads the process's `JIG_HOME`, and the
+  one that sets git's commit dates in the environment, which the `git
+  commit` child reads from it.
 - `e2e` records each jig run it makes, as an SVG with a tag beside it, into
   the directory named by `JIG_RECORD_DIR` when the build sets it (jig does,
   for the oracle run at a builder's green; ADR 0029). Unset, it records

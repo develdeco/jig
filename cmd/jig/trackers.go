@@ -10,7 +10,7 @@ import (
 
 // cmdTrackers implements `jig trackers sync [--dry-run] [--store <path>]
 // [--project <name>]`.
-func cmdTrackers(args []string, stdout io.Writer) int {
+func cmdTrackers(e env, args []string, stdout io.Writer) int {
 	sub, rest, err := requirePositional(args, "subcommand (sync)")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -26,7 +26,7 @@ func cmdTrackers(args []string, stdout io.Writer) int {
 		})
 	}
 
-	fs := newFlagSet("trackers sync")
+	fs := newFlagSet(e, "trackers sync")
 	dryRun := fs.Bool("dry-run", false, "read everything and report what would change, writing nothing")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
@@ -36,7 +36,7 @@ func cmdTrackers(args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, _, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
+	st, cfg, _, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -51,7 +51,7 @@ func cmdTrackers(args []string, stdout io.Writer) int {
 	// command, so unlike the checkpoint hook it has no reason to share the
 	// 2-minute bound a first sync of a sizeable store cannot finish inside
 	// (gate finding r2-f5): it runs until it is done.
-	report, err := mirror.Sync(mirror.Deps{Store: st, Cfg: cfg, Home: jigHome, Client: mirrorClientForTest}, mirror.SyncOpts{DryRun: *dryRun, Unbounded: true})
+	report, err := mirror.Sync(mirror.Deps{Store: st, Cfg: cfg, Home: jigHome, Client: e.mirrorClient}, mirror.SyncOpts{DryRun: *dryRun, Unbounded: true})
 	if err != nil {
 		return renderErr(stdout, err)
 	}

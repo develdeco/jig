@@ -20,15 +20,13 @@ var handParsedFlags = map[string]map[string]bool{
 // Every command runs with a valid positional and an unknown flag, so it fails
 // in fs.Parse right after registering its flags and before doing any work.
 func TestCommandTableFlagsMatchRegistration(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-
+	t.Parallel()
 	captured := map[string]*flag.FlagSet{}
-	prev := newFlagSetHook
-	newFlagSetHook = func(name string, fs *flag.FlagSet) { captured[name] = fs }
-	t.Cleanup(func() { newFlagSetHook = prev })
+	e := testEnv(t.TempDir())
+	e.newFlagSetHook = func(name string, fs *flag.FlagSet) { captured[name] = fs }
 
 	invoke := func(args ...string) {
-		Main(append(append([]string{}, args...), "--nonexistent-flag-xyz"), io.Discard, strings.NewReader(""))
+		run(e, append(append([]string{}, args...), "--nonexistent-flag-xyz"), io.Discard, strings.NewReader(""))
 	}
 
 	invoke("init")
@@ -108,7 +106,8 @@ func TestCommandTableFlagsMatchRegistration(t *testing.T) {
 // TestPerCommandHelpFlag checks that "-h"/"--help" prints the command's flags
 // and exits 0, with or without its positional argument.
 func TestPerCommandHelpFlag(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 
 	cases := []struct {
 		name string
@@ -125,7 +124,7 @@ func TestPerCommandHelpFlag(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			code := Main(c.args, &buf, strings.NewReader(""))
+			code := run(e, c.args, &buf, strings.NewReader(""))
 			if code != 0 {
 				t.Fatalf("exit code = %d, want 0; output:\n%s", code, buf.String())
 			}
@@ -145,6 +144,7 @@ func TestPerCommandHelpFlag(t *testing.T) {
 // environment is the source for CLI behavior - says so, in the flags a
 // person reaches for to state an intent themselves.
 func TestGateHelpSaysItReadsLocalSessions(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(flagsBlockFor("gate"), "\n")
 	for _, want := range []string{"local Claude Code sessions", "--intent or --doc"} {
 		if !strings.Contains(got, want) {

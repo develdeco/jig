@@ -19,12 +19,13 @@ import (
 // exercise.
 func buildFixtureTicket(t *testing.T, fx *fixture.Fixture) {
 	t.Helper()
+	e := testEnv(fx.Home)
 	runArgs := []string{"run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	out, code := runMain(t, "", runArgs...)
+	out, code := runMain(t, e, "", runArgs...)
 	if code != 2 {
 		t.Fatalf("run 1: exit = %d, want 2 (paused at q-001)\n%s", code, out)
 	}
-	out, code = runMain(t, "", append(append([]string{}, runArgs...), "--answer", "q-001", "Casual.")...)
+	out, code = runMain(t, e, "", append(append([]string{}, runArgs...), "--answer", "q-001", "Casual.")...)
 	if code != 0 {
 		t.Fatalf("run (answer): exit = %d, want 0\n%s", code, out)
 	}
@@ -47,8 +48,9 @@ func buildFixtureTicket(t *testing.T, fx *fixture.Fixture) {
 //     from the flag never having been passed, so a full round would really
 //     run to completion against the ticket's own brief.md (exit 0).
 func TestGateIntentFlagsRefusedAtTheCLI(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	e := testEnv(fx.Home)
 	buildFixtureTicket(t, fx)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -67,7 +69,7 @@ func TestGateIntentFlagsRefusedAtTheCLI(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			args := append([]string{"gate", fx.Ticket}, tc.args...)
 			args = append(args, "--early", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir)
-			out, code := runMain(t, "", args...)
+			out, code := runMain(t, e, "", args...)
 			if code == 0 || !strings.Contains(out, "code: "+tc.code) {
 				t.Fatalf("gate %q: exit = %d, want a non-zero exit with code: %s:\n%s", tc.args, code, tc.code, out)
 			}
@@ -84,8 +86,9 @@ func TestGateIntentFlagsRefusedAtTheCLI(t *testing.T) {
 // GateOpts.IntentDoc - would pass every other test in this package and in
 // e2e, cmd/jig/gate_test.go included.
 func TestGateDocFlagWritesIntentThroughMain(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	e := testEnv(fx.Home)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -103,7 +106,7 @@ func TestGateDocFlagWritesIntentThroughMain(t *testing.T) {
 		t.Fatalf("write doc: %v", err)
 	}
 
-	out, code := runMain(t, "", "gate", fx.Ticket, "--doc", docPath,
+	out, code := runMain(t, e, "", "gate", fx.Ticket, "--doc", docPath,
 		"--early", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("gate --doc: exit = %d, want 0\n%s", code, out)
@@ -131,8 +134,9 @@ func TestGateDocFlagWritesIntentThroughMain(t *testing.T) {
 // next-step hint at `jig run` instead of `jig publish` - a mismatched
 // frame this test's own final assertion catches.
 func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	e := testEnv(fx.Home)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -144,11 +148,11 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 	}
 
 	runArgs := []string{"run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	out, code := runMain(t, "", runArgs...)
+	out, code := runMain(t, e, "", runArgs...)
 	if code != 2 {
 		t.Fatalf("run 1: exit = %d, want 2 (paused at q-001)\n%s", code, out)
 	}
-	out, code = runMain(t, "", append(append([]string{}, runArgs...), "--answer", "q-001", "Casual.")...)
+	out, code = runMain(t, e, "", append(append([]string{}, runArgs...), "--answer", "q-001", "Casual.")...)
 	if code != 0 {
 		t.Fatalf("run (answer): exit = %d, want 0\n%s", code, out)
 	}
@@ -158,7 +162,7 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 		return append(base, extra...)
 	}
 
-	out, code = runMain(t, "", gateArgs()...)
+	out, code = runMain(t, e, "", gateArgs()...)
 	if code != 0 {
 		t.Fatalf("gate round 1: exit = %d, want 0\n%s", code, out)
 	}
@@ -170,12 +174,12 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 	// green before round 2, the same as a real terminal session would (and
 	// demo/gate-intent.tape does) rather than gating again over unfinished
 	// work.
-	out, code = runMain(t, "", runArgs...)
+	out, code = runMain(t, e, "", runArgs...)
 	if code != 0 {
 		t.Fatalf("run (fix-1): exit = %d, want 0\n%s", code, out)
 	}
 
-	out, code = runMain(t, "", gateArgs("--intent", "make the greeting warmer")...)
+	out, code = runMain(t, e, "", gateArgs("--intent", "make the greeting warmer")...)
 	if code != 0 {
 		t.Fatalf("gate round 2 (--intent): exit = %d, want 0\n%s", code, out)
 	}
@@ -201,7 +205,7 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 	// The frontier is fully green and round 2 was clean, so the next-step
 	// hint must point at publish, not run - the exact frame
 	// demo/gate-intent.tape's own final command shows on camera.
-	out, code = runMain(t, "", "status", fx.Ticket, "--store", fx.StoreDir)
+	out, code = runMain(t, e, "", "status", fx.Ticket, "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("status: exit = %d, want 0\n%s", code, out)
 	}

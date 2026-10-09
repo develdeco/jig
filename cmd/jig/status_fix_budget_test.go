@@ -86,8 +86,8 @@ func writeParkedFindingYAML(t *testing.T, storeDir, ticket string, round int) {
 // fix_budget line - there is nothing yet to report a used/limit count
 // against.
 func TestRenderStatusNoFixBudgetLineBeforeAnyGateRound(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -106,8 +106,8 @@ func TestRenderStatusNoFixBudgetLineBeforeAnyGateRound(t *testing.T) {
 // shape once the ticket has a gate round that used none of its budget:
 // "<used> of <limit> rounds used", with no ", reached" suffix.
 func TestRenderStatusFixBudgetLineNotReached(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -126,8 +126,8 @@ func TestRenderStatusFixBudgetLineNotReached(t *testing.T) {
 // TestRenderStatusFixBudgetLineReached pins the ", reached" suffix once
 // the used count equals a project's own configured gate.fix_rounds.
 func TestRenderStatusFixBudgetLineReached(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	setFixRounds(t, fx.StoreDir, 1)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -153,8 +153,8 @@ func TestRenderStatusFixBudgetLineReached(t *testing.T) {
 // the one that used the ticket's whole (1-round) budget; round 2's own
 // finding is the one the now-reached budget parks.
 func TestRenderStatusOutstandingAsksWhyColumnAndParkedHelpLine(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	setFixRounds(t, fx.StoreDir, 1)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {

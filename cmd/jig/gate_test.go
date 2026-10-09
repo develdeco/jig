@@ -17,8 +17,8 @@ import (
 // title - the triage prompt and notes/fixes tables are covered by
 // triage_test.go.
 func TestPrintGateReportShowsFindingsWithFileLineAndRationale(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -53,8 +53,8 @@ func TestPrintGateReportShowsFindingsWithFileLineAndRationale(t *testing.T) {
 // nothing parked (BudgetParked 0, the ordinary case) never prints the
 // row at all, even if the budget happens to be reached for other reasons.
 func TestPrintGateReportNamesTheBudgetOnlyWhenItParkedSomething(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -85,8 +85,8 @@ func TestPrintGateReportNamesTheBudgetOnlyWhenItParkedSomething(t *testing.T) {
 // how a summarizer dispatch that left the gate lease dirty surfaces, as
 // exactly this row rather than a round failure.
 func TestPrintGateReportShowsIntentRowWithFailOpenNote(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -114,8 +114,8 @@ func TestPrintGateReportShowsIntentRowWithFailOpenNote(t *testing.T) {
 // even when the round built no fix slices at all (every routed finding
 // was an undecided ask).
 func TestGateReportHintNamesDecidingAsksNotFixSlices(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -146,8 +146,8 @@ func TestGateReportHintNamesDecidingAsksNotFixSlices(t *testing.T) {
 // terminal. The printed `jig gate <ticket>` command alone cannot work in
 // this state, since checkFrontier would refuse it.
 func TestGateReportHintNamesTheOrderWhenFixSlicesAreQueuedToo(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -184,6 +184,7 @@ func TestGateReportHintNamesTheOrderWhenFixSlicesAreQueuedToo(t *testing.T) {
 // `jig gate <ticket>` the old hint printed there was refused with
 // GATE_NOT_GREEN the moment anyone ran it.
 func TestGateReportHintReadsTheFrontierNotTheFixSliceCount(t *testing.T) {
+	t.Parallel()
 	report := verifydeliver.GateReport{
 		Round:   1,
 		Verdict: "fix-slices",
@@ -196,8 +197,8 @@ func TestGateReportHintReadsTheFrontierNotTheFixSliceCount(t *testing.T) {
 	}
 
 	t.Run("frontier short of green names the order", func(t *testing.T) {
-		t.Setenv("JIG_HOME", t.TempDir())
-		fx := fixture.Generate(t, fixture.Opts{})
+		t.Parallel()
+		fx := newFixture(t, fixture.Opts{})
 		st, err := store.Open(fx.StoreDir)
 		if err != nil {
 			t.Fatalf("store.Open: %v", err)
@@ -223,8 +224,8 @@ func TestGateReportHintReadsTheFrontierNotTheFixSliceCount(t *testing.T) {
 	// `jig status` prints for the same state. The gate's hint must not
 	// send a person to a command that cannot move anything.
 	t.Run("frontier parked on a question names the answer", func(t *testing.T) {
-		t.Setenv("JIG_HOME", t.TempDir())
-		fx := fixture.Generate(t, fixture.Opts{})
+		t.Parallel()
+		fx := newFixture(t, fixture.Opts{})
 		st, err := store.Open(fx.StoreDir)
 		if err != nil {
 			t.Fatalf("store.Open: %v", err)
@@ -251,8 +252,8 @@ func TestGateReportHintReadsTheFrontierNotTheFixSliceCount(t *testing.T) {
 	})
 
 	t.Run("green frontier names the gate directly", func(t *testing.T) {
-		t.Setenv("JIG_HOME", t.TempDir())
-		fx := fixture.Generate(t, fixture.Opts{})
+		t.Parallel()
+		fx := newFixture(t, fixture.Opts{})
 		st, err := store.Open(fx.StoreDir)
 		if err != nil {
 			t.Fatalf("store.Open: %v", err)
@@ -283,8 +284,8 @@ func TestGateReportHintReadsTheFrontierNotTheFixSliceCount(t *testing.T) {
 // asks" with nothing listed, while `jig status` and the stored round both
 // named the ask.
 func TestPrintGateReportListsWhatTheHintPointsAt(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)

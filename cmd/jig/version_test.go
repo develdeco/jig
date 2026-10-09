@@ -14,8 +14,9 @@ import (
 // formatCommit would derive from this test binary's own build info, and
 // the block is followed by a help hint.
 func TestCmdVersion(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
-	code := cmdVersion(nil, &buf)
+	code := cmdVersion(processEnv(), nil, &buf)
 	if code != 0 {
 		t.Fatalf("cmdVersion exit code = %d, output:\n%s", code, buf.String())
 	}
@@ -44,6 +45,7 @@ func TestCmdVersion(t *testing.T) {
 
 // TestMainVersionCommand drives `jig version` through Main end to end.
 func TestMainVersionCommand(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	code := Main([]string{"version"}, &buf, strings.NewReader(""))
 	if code != 0 {
@@ -61,6 +63,7 @@ func TestMainVersionCommand(t *testing.T) {
 // exact tag, a pseudo-version, a pseudo-version (or tag) with the "+dirty"
 // suffix Go's own toolchain already appends, and the (devel) fallbacks.
 func TestFormatVersion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		info *debug.BuildInfo
@@ -115,6 +118,7 @@ func TestFormatVersion(t *testing.T) {
 // short revision, a long revision truncated to 12 characters, and the
 // "unknown" fallbacks when vcs settings are missing.
 func TestFormatCommit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		info *debug.BuildInfo
@@ -175,6 +179,7 @@ func TestFormatCommit(t *testing.T) {
 // formatCommit must not append its own "+dirty" from vcs.modified. Across
 // both fields combined, "+dirty" must appear exactly once.
 func TestDirtySuffixAppearsOnce(t *testing.T) {
+	t.Parallel()
 	info := &debug.BuildInfo{
 		Main: debug.Module{Version: "v0.0.0-20260101120000-abcdef012345+dirty"},
 		Settings: []debug.BuildSetting{
@@ -193,6 +198,7 @@ func TestDirtySuffixAppearsOnce(t *testing.T) {
 // never panic and always return a non-empty string against this test
 // binary's own real build info, whatever it happens to be.
 func TestFormatVersionAndCommitSmoke(t *testing.T) {
+	t.Parallel()
 	info, _ := debug.ReadBuildInfo()
 	if got := formatVersion(info); got == "" {
 		t.Error("formatVersion() returned an empty string")

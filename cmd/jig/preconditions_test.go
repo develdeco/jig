@@ -15,7 +15,8 @@ import (
 // slices, or on an unknown ticket, explain what to do next instead of
 // failing deep inside a run.
 func TestTicketPreconditions(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	repo := filepath.Join(t.TempDir(), "demo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
@@ -23,11 +24,11 @@ func TestTicketPreconditions(t *testing.T) {
 	if _, err := gitx.Run(repo, "init", "-b", "main"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	t.Chdir(repo)
+	e = e.inDir(repo)
 
 	jig := func(args ...string) (int, string) {
 		var buf bytes.Buffer
-		code := Main(args, &buf, strings.NewReader(""))
+		code := run(e, args, &buf, strings.NewReader(""))
 		return code, buf.String()
 	}
 	if code, out := jig("init", "--standalone"); code != 0 {
@@ -78,7 +79,8 @@ func TestTicketPreconditions(t *testing.T) {
 // share a lease directory with ticket T-<n>'s gate, so jig must refuse it
 // instead of reporting it as the new ticket.
 func TestTicketNewRefusesReservedID(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
+	t.Parallel()
+	e := testEnv(t.TempDir())
 	repo := filepath.Join(t.TempDir(), "demo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
@@ -86,11 +88,11 @@ func TestTicketNewRefusesReservedID(t *testing.T) {
 	if _, err := gitx.Run(repo, "init", "-b", "main"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	t.Chdir(repo)
+	e = e.inDir(repo)
 
 	jig := func(args ...string) (int, string) {
 		var buf bytes.Buffer
-		code := Main(args, &buf, strings.NewReader(""))
+		code := run(e, args, &buf, strings.NewReader(""))
 		return code, buf.String()
 	}
 	if code, out := jig("init", "--standalone"); code != 0 {

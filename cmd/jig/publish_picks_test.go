@@ -24,9 +24,10 @@ import (
 // report says what was picked. It is the CLI half of ADR 0029's publish step:
 // the flags, the backend, the scenario's publish/picks-result.json.
 func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
+	t.Parallel()
 	jigHome := t.TempDir()
-	t.Setenv("JIG_HOME", jigHome)
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "clean-round"})
+	e := testEnv(jigHome)
+	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "clean-round", Home: jigHome})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -34,7 +35,7 @@ func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
 	buildFixtureTicket(t, fx)
 
 	gate := []string{"gate", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	if out, code := runMain(t, "", gate...); code != 0 || !strings.Contains(out, "verdict: clean") {
+	if out, code := runMain(t, e, "", gate...); code != 0 || !strings.Contains(out, "verdict: clean") {
 		t.Fatalf("gate: exit = %d, want 0 and a clean verdict\n%s", code, out)
 	}
 
@@ -77,7 +78,7 @@ func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, code := runMain(t, "", "publish", fx.Ticket, "--yes", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir)
+	out, code := runMain(t, e, "", "publish", fx.Ticket, "--yes", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("publish: exit = %d, want 0\n%s", code, out)
 	}
@@ -106,8 +107,10 @@ func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
 // section, and no session is dispatched to pick from nothing (the scenario
 // scripts no pick result, so one would fail loudly).
 func TestPublishWithoutRecordingsHasNoDemoSectionThroughMain(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "clean-round"})
+	t.Parallel()
+	jigHome := t.TempDir()
+	e := testEnv(jigHome)
+	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "clean-round", Home: jigHome})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -115,10 +118,10 @@ func TestPublishWithoutRecordingsHasNoDemoSectionThroughMain(t *testing.T) {
 	buildFixtureTicket(t, fx)
 
 	gate := []string{"gate", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	if out, code := runMain(t, "", gate...); code != 0 || !strings.Contains(out, "verdict: clean") {
+	if out, code := runMain(t, e, "", gate...); code != 0 || !strings.Contains(out, "verdict: clean") {
 		t.Fatalf("gate: exit = %d, want 0 and a clean verdict\n%s", code, out)
 	}
-	out, code := runMain(t, "", "publish", fx.Ticket, "--yes", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir)
+	out, code := runMain(t, e, "", "publish", fx.Ticket, "--yes", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("publish: exit = %d, want 0\n%s", code, out)
 	}

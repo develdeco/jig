@@ -43,7 +43,8 @@ type Deps struct {
 	Rungs   staircase.Config
 	Journal func(l journal.Line) error
 	// Home is the jig home root whose pool holds the build leases:
-	// home.Root() for the binary, a test's own directory in tests.
+	// the binary's env resolves it (cmd/jig/env.go), a test's own
+	// directory in tests.
 	Home string
 	// Oracle runs an oracle command in a lease, with env (each "NAME=value")
 	// added to its environment, and returns its combined output

@@ -47,8 +47,8 @@ func writeAskedFindingsYAML(t *testing.T, storeDir, ticket string) {
 // deciding command is not a per-row cell: it is named in the help, after
 // the ticket's own next step, the order `jig gate`'s report hint prints.
 func TestRenderStatusOutstandingAskWithQueuedFrontier(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -95,8 +95,8 @@ func TestRenderStatusOutstandingAskWithQueuedFrontier(t *testing.T) {
 // TestRenderStatusOutstandingAskWithGreenFrontier is the other half: once
 // every slice is green the gate runs, so the help names it directly.
 func TestRenderStatusOutstandingAskWithGreenFrontier(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -129,8 +129,8 @@ func TestRenderStatusOutstandingAskWithGreenFrontier(t *testing.T) {
 // A gate round itself still refuses to run on bookkeeping it cannot read;
 // only this read-only view degrades.
 func TestRenderStatusSurvivesAnUnreadableFindingsFile(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -174,8 +174,8 @@ func TestRenderStatusSurvivesAnUnreadableFindingsFile(t *testing.T) {
 // points at the frontier rather than at publish: the safe direction when
 // jig cannot tell.
 func TestRenderStatusSurvivesAnUnreadableReportFile(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -215,8 +215,8 @@ func TestRenderStatusSurvivesAnUnreadableReportFile(t *testing.T) {
 // names a command that finds nothing to do and reprints this same line.
 // The step that moves the ticket is the next gate round.
 func TestRenderStatusAfterAFixSliceRoundPointsAtTheNextRound(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -253,8 +253,8 @@ func TestRenderStatusAfterAFixSliceRoundPointsAtTheNextRound(t *testing.T) {
 // earlier round's findings file, so it refuses outright while one is
 // unreadable: the step is the repair, and the help names the file.
 func TestRenderStatusNamesTheRepairForAnUnreadableRound(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
