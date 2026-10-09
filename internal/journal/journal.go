@@ -39,6 +39,57 @@ type Line struct {
 	// ended: with the attempt's dispatch line's commit (its base), the
 	// range of the attempt's own commits (ADR 0025).
 	Head string `json:"head,omitempty"`
+	// Recordings is a recorded line's files: what the build's end-to-end
+	// scenarios wrote at a builder's green oracle run, with the commit it
+	// ran at in Commit (ADR 0029). RecordRun names the oracle run, one
+	// directory below the commit's, so a reader finds the files at
+	// home.RecordDir(root, storeID, ticket, Commit, RecordRun).
+	RecordRun  string      `json:"record_run,omitempty"`
+	Recordings []Recording `json:"recordings,omitempty"`
+	// Pick is a publish-picks line's choice: which of the build's recordings
+	// a publish picked for the pull request, composed into flows, with the
+	// head it picked for in Commit and the line's Outcome saying whether it
+	// was newly picked, reused or refused (ADR 0029).
+	Pick *Pick `json:"pick,omitempty"`
+}
+
+// Recording is one file a scenario recorded: its name inside the recording
+// directory under the jig home, its hash and size as jig checked them, and
+// the scenario, optional flow and step, and caption its writer tagged it with.
+type Recording struct {
+	File     string `json:"file"`
+	SHA256   string `json:"sha256"`
+	Size     int64  `json:"size"`
+	Scenario string `json:"scenario"`
+	Flow     string `json:"flow,omitempty"`
+	Step     int    `json:"step,omitempty"`
+	Caption  string `json:"caption,omitempty"`
+}
+
+// Pick is what a publish-picks line records of a pick: Candidates fingerprints
+// the candidate recordings the pick was made from (so a re-publish of the same
+// head with the same candidates reuses it), Summary is the session's account
+// of what the recordings show, and Flows are the picked recordings composed
+// into flows, in the order the pull request shows them.
+type Pick struct {
+	Candidates string     `json:"candidates"`
+	Summary    string     `json:"summary"`
+	Flows      []PickFlow `json:"flows"`
+}
+
+// PickFlow is one flow of a pick: a title and the recordings in it, in order.
+type PickFlow struct {
+	Title string     `json:"title"`
+	Items []PickItem `json:"items"`
+}
+
+// PickItem is one picked recording: the id the pick session named it by, the
+// file it is in its recording directory, and the caption the session gave it in
+// place of the recording's own (empty when it kept that one).
+type PickItem struct {
+	ID      string `json:"id"`
+	File    string `json:"file"`
+	Caption string `json:"caption,omitempty"`
 }
 
 func journalPath(st *store.Store, ticket string) string {

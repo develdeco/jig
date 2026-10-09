@@ -328,3 +328,65 @@ func TestFakeBackendIntentMissingRoundErrors(t *testing.T) {
 		t.Error("ResultJSON was written despite the error")
 	}
 }
+
+// TestFakeBackendPublishPicksPlayback checks the publish picks dispatch path:
+// it copies the scenario's publish/picks-result.json verbatim into ResultJSON
+// and never touches the worktree.
+func TestFakeBackendPublishPicksPlayback(t *testing.T) {
+	t.Parallel()
+	worktree := newWorktree(t)
+	before, err := gitx.Run(worktree, "log", "--format=%H")
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+
+	scenarioDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(scenarioDir, "publish"), 0o755); err != nil {
+		t.Fatalf("mkdir publish dir: %v", err)
+	}
+	want := []byte(`{"flows":[{"title":"Rounding","items":[{"id":"r1"}]}],"summary":"the rounding fix"}`)
+	if err := os.WriteFile(filepath.Join(scenarioDir, "publish", "picks-result.json"), want, 0o644); err != nil {
+		t.Fatalf("write picks-result.json: %v", err)
+	}
+
+	backend := newFakeBackend(Options{ScenarioDir: scenarioDir})
+	resultPath := filepath.Join(t.TempDir(), "result.json")
+	d := Dispatch{Ticket: "JIG-1", Slice: PublishPicksSlice, Attempt: 1, Worktree: worktree, ResultJSON: resultPath, NoSessionPersistence: true}
+	if err := backend.Run(d); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read result.json: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("result.json = %s, want verbatim %s", got, want)
+	}
+	after, err := gitx.Run(worktree, "log", "--format=%H")
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	if before != after {
+		t.Errorf("worktree history changed by a publish picks dispatch: before %q after %q", before, after)
+	}
+}
+
+// TestFakeBackendPublishPicksMissingScenarioErrors checks that a scenario with
+// no publish/picks-result.json fails a pick loudly instead of answering
+// "nothing picked".
+func TestFakeBackendPublishPicksMissingScenarioErrors(t *testing.T) {
+	t.Parallel()
+	backend := newFakeBackend(Options{ScenarioDir: t.TempDir()})
+	resultPath := filepath.Join(t.TempDir(), "result.json")
+	err := backend.Run(Dispatch{Ticket: "JIG-1", Slice: PublishPicksSlice, Attempt: 1, Worktree: t.TempDir(), ResultJSON: resultPath})
+	if err == nil {
+		t.Fatal("Run: expected an error for a scenario with no publish picks, got nil")
+	}
+	if !strings.Contains(err.Error(), "scenario has no publish/picks-result.json") {
+		t.Errorf("error = %v, want it to name the missing file", err)
+	}
+	if _, statErr := os.Stat(resultPath); statErr == nil {
+		t.Error("ResultJSON was written despite the error")
+	}
+}
