@@ -124,7 +124,14 @@ func (s *Store) TicketFilePath(ticket string) string {
 // Any other failure (permission denied, a directory where the file should
 // be) is the filesystem's own error, returned as is.
 func (s *Store) ReadTicket(ticket string) (Ticket, error) {
-	path := s.TicketFilePath(ticket)
+	return ReadTicketFile(s.TicketFilePath(ticket))
+}
+
+// ReadTicketFile is ReadTicket against an explicit ticket.yaml path, rather
+// than one TicketDir resolves: `jig store migrate` reads a v1 store's
+// ticket.yaml directly at its old (pre-tickets/) location, before the
+// folder move Store.TicketDir alone could ever name.
+func ReadTicketFile(path string) (Ticket, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -250,6 +257,32 @@ func writeTicketFile(path string, t Ticket) error {
 // is the check a name passes before it is written, since this does none.
 func (s *Store) WriteTicketBranch(ticket string, branch string) error {
 	return s.mutateTicket(ticket, func(t *Ticket) { t.Branch = branch })
+}
+
+// SetMigratedTicket rewrites ticket's whole ticket.yaml as `jig store
+// migrate` leaves it: title and body resolved on the v1 store (fonts filled
+// with the chart entry's or history's text where ticket.yaml itself had
+// none), aliases with oldID appended (deduplicated, so a second migrate
+// attempt or a record that already carried it is idempotent), and blockedBy
+// translated to the new ids. branch is carried over unchanged - the
+// migration renames no branch. It creates the record when ticket has none
+// yet (a ticket folder moved with no ticket.yaml of its own).
+func (s *Store) SetMigratedTicket(ticket, oldID, title, body string, blockedBy []TicketBlockedBy) error {
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		t.Title = title
+		t.Body = body
+		t.BlockedBy = blockedBy
+		hasAlias := false
+		for _, a := range t.Aliases {
+			if a == oldID {
+				hasAlias = true
+				break
+			}
+		}
+		if !hasAlias {
+			t.Aliases = append(t.Aliases, oldID)
+		}
+	})
 }
 
 // TicketBranch returns ticket's working branch, resolved and validated

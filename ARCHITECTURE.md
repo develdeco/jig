@@ -193,6 +193,16 @@ open exactly such a store and rewrite it onto schema 2) - `jig help` and
 A build's recordings are not in this tree at all (see the fifth home
 above): the journal's `recorded` line names them and holds their hashes.
 
+`jig store migrate --map <file> [--dry-run]` (`internal/migrate`, wired by
+`cmd/jig/store.go`) is how a v1 store (tickets at the store root, one
+`ticket_format`) becomes one at schema 2: the operator's rename map assigns
+every existing ticket a new area key, `--dry-run` prints the resulting
+rename and every file the migration would move, delete or rewrite without
+changing anything, and the apply moves each ticket folder to
+`tickets/<new id>/`, keeps the old id as an alias, rewrites `project.yaml`
+and every chart, and commits once without pushing
+([ADR 0031](docs/adr/0031-store-layout-v2-and-its-migration.md)).
+
 `Store.aliasClaims`' memoized scan (below) is safe for a `Store` shared
 across goroutines (a frontier run's per-slice fan-out): a mutex guards both
 the cache and the scan that fills it. It is dropped after a ticket.yaml
@@ -446,6 +456,7 @@ exists.
 | `internal/journal/` | `Append`, `Read`, `BuiltCommits`, `GreenClaims`, `FailedAttempts`, `LastOracleSeconds`, `VerifiedSlices`, `RenderChangelog`, `RenderConsolidated`, `RenderDiffChangelog` | journal `Line` events (a `recorded` line carries the `Recording`s of a builder's green oracle run; a `publish-picks` line carries the `Pick` made of them) → `journal.ndjson` and rendered changelogs; a ticket's journal → the commits jig built and verified |
 | `internal/manifest/` | `Resolve`, `MatchesInvariant` | a repo dir → a `Manifest` of workspaces, oracle commands, env classes, and invariant-sensitive paths; a file path → whether it matches a declared invariant |
 | `internal/media/` | `Verify`, `Kind`, `PlainName`, `PlainParents` (every directory between an evidence directory and a media directory is a plain one), `LstatPinned`, `HashRegularFile`, `EntryLabel` | a directory jig made + a session's listing of files in it → the `File`s that passed what `gh ... --attach` accepts (a plain name, an allowed type, a regular non-empty file within its size limit, hashed from the very file checked), or a refusal naming the first that did not; a standard-library leaf, so `frontier` and `verifydeliver` can both use it |
+| `internal/migrate/` | `LoadMap`, `BuildPlan`, `Apply`, `CheckSchemaVersion`, `CheckClean`, `CheckLevelWithOrigin`, `CheckNoLeases`, `BranchWarnings`, `RewriteProjectYAML`, `OldTicketIDs` | a rename map + a v1 store → a `Plan` (every ticket's old id, new id and title, and every file the migration would move, delete or rewrite), refusing a ticket the map leaves out, one the store lacks, an undeclared key, or a map that declares the key the store's old ids already carry; the refusals `jig store migrate`'s apply alone runs (schema 1, clean, level with origin, no lease held) and the warning it only prints (a `jig/<old id>` branch still on a repo's origin); a `Plan` → every ticket folder moved, its record rewritten (title, body and `aliases:` resolved on the v1 store, `blocked_by` translated), its local tracker files retired, every chart and `project.yaml` rewritten, committed once ([ADR 0031](docs/adr/0031-store-layout-v2-and-its-migration.md)) |
 | `internal/mirror/` | `Sync`, `ResolveTicketTitleBody`, `RenderTicketBody`, `RenderChartBody`, `TicketStatus`, `ChartStatus`, `IsOpen`, `FindPullRequests`, `ScanTitleAndBody`, `LoadPublishTerms` | `Deps` (a store, `project.Config`, the jig home, a `github.Client`) + `SyncOpts` → a `SyncReport` (issues created, updated, recreated, linked, placed on the board, skipped on a publish-safety hit, and every drift line), the records written under the bridge's own paths and shape, and a GitHub Project kept current - wired into every `Store.AfterCheckpoint` and `jig trackers sync` |
 | `internal/mirror/github/` | `New`, `Client` (`CreateIssue`, `FetchIssue`, `UpdateIssue`, `CloseIssueCompleted`/`CloseIssueNotPlanned`, `ReopenIssue`, `AddComment`, `AddSubIssue`/`RemoveSubIssue`, `AddBlockedBy`/`RemoveBlockedBy`, `PullRequestsByHead`, `LookupProject`, `EnsureProject`, `PlaceItem`, `ItemFieldValues`, `RepositoryIsPublic`) | an endpoint + token (a fake GraphQL server and a fixed token in every test, `api.github.com/graphql` and `gh auth token` in production) → the GraphQL mutations and queries `internal/mirror` drives a sync through, one mutation per second and retried with backoff (4 attempts) on a server error or a rate limit |
 | `internal/outcome/` | `ParseJSON`, `ParseText`, `Signature`, `StallCounter` | a session result (JSON or text) → a typed `Result`, and a stall signature |

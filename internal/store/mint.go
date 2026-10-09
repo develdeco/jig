@@ -73,6 +73,23 @@ func scanTicketIDs(root string) ([]ticketIDEntry, error) {
 	return out, nil
 }
 
+// ParseTicketID splits id into its key and number when id is shaped like one
+// (ticketIDPattern: a key, a "-", and a number from 1 with no leading zero),
+// ok false otherwise. `jig store migrate` uses this to read the key and
+// number an old id already carries, since its own ids are shaped the same
+// way TicketIDs already parses.
+func ParseTicketID(id string) (key string, n int, ok bool) {
+	m := ticketIDPattern.FindStringSubmatch(id)
+	if m == nil {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(m[2])
+	if err != nil {
+		return "", 0, false
+	}
+	return m[1], n, true
+}
+
 // TicketIDs lists every id-shaped folder under tickets/, under any key -
 // declared in project.yaml or not - sorted by key, then by number: the one
 // function minting's per-key counter (nextID), A6's mirror and every other
