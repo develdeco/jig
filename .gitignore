@@ -4,6 +4,3 @@
 
 # goreleaser output
 /dist/
-
-# rendered demo tapes (CI artifact only, never committed)
-/demo/out/

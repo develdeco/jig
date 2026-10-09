@@ -280,11 +280,6 @@ pull request stands and the file stays in the store for you to post by hand.
 With no host (the standalone store above) both files are written under
 `<ticket>/pr/` and nothing is posted.
 
-`demo/publish-body.tape` plays this through end to end with no pull-request host:
-a ticket's gate rounds fixing, dismissing, and noting findings - the last of
-them clean - then `jig publish` and both files as it leaves them - see
-[demo/README.md](demo/README.md).
-
 ## Session backends
 
 A build session (`jig run`) runs against one of three backends, picked with

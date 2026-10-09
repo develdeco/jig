@@ -65,18 +65,17 @@ func driveFixSlice(t *testing.T, fx *fixture.Fixture, model, slice string) {
 }
 
 // gateThroughReviewerScenario drives the fixture's "reviewer" scenario
-// branch through all three of its scripted gate rounds, replicating
-// demo/publish-body.tape's own triage script exactly - also pinned end to
-// end through cmd/jig's own CLI by
-// cmd/jig/gate_reviewer_e2e_test.go/TestGateReviewerRoundsThroughMain: a fix
-// kept (r1-f1, high), a second fix dismissed at the batch prompt (r1-f2,
-// low), an ask kept with a decision (r1-f3, medium), a note (r1-f4, low);
-// a delta round where the kept fix recurs and the dismissed one reaches no
-// one; a clean third round. It is the one scenario in this file whose gate
-// rounds write findings.yaml at all (the reviewer source, not the scripted
-// one), so it is the only one exercising the findings-outcome rules a
-// golden render needs to pin: fixed-by-slice, dismissed-by-a-human, noted,
-// and the counts and risk ordering built from them.
+// branch through all three of its scripted gate rounds, with the triage
+// cmd/jig/gate_reviewer_e2e_test.go/TestGateReviewerRoundsThroughMain pins
+// end to end through cmd/jig's own CLI: a fix kept (r1-f1, high), a second
+// fix dismissed at the batch prompt (r1-f2, low), an ask kept with a
+// decision (r1-f3, medium), a note (r1-f4, low); a delta round where the
+// kept fix recurs and the dismissed one reaches no one; a clean third
+// round. It is the one scenario in this file whose gate rounds write
+// findings.yaml at all (the reviewer source, not the scripted one), so it is
+// the only one exercising the findings-outcome rules a golden render needs
+// to pin: fixed-by-slice, dismissed-by-a-human, noted, and the counts and
+// risk ordering built from them.
 func gateThroughReviewerScenario(t *testing.T, fx *fixture.Fixture, d Deps) GateReport {
 	t.Helper()
 	driveBuild(t, fx, "rung-a")
