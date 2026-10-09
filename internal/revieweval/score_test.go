@@ -10,6 +10,7 @@ import (
 )
 
 func TestScoreLostWhenAFixOrAskMatchEndsNotedOrDismissed(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		action string
@@ -38,6 +39,7 @@ func TestScoreLostWhenAFixOrAskMatchEndsNotedOrDismissed(t *testing.T) {
 }
 
 func TestScoreForgottenRequiresThePriorToBeCleared(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g-b", Prior: "r1-f2", Action: verifydeliver.ActionFix}}}
 	match := RoundMatch{MatchedFinding: []int{-1}, StructureOnly: []bool{false}, Classification: map[int]Fate{}}
 
@@ -64,6 +66,7 @@ func TestScoreForgottenRequiresThePriorToBeCleared(t *testing.T) {
 }
 
 func TestScoreDroppedQuestionWhenAnAskMatchIsNotAsked(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", Action: verifydeliver.ActionAsk}}}
 	findings := []verifydeliver.ResultFinding{{Title: "t1"}}
 	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusOpen}} // routed to a fix, not asked
@@ -79,6 +82,7 @@ func TestScoreDroppedQuestionWhenAnAskMatchIsNotAsked(t *testing.T) {
 }
 
 func TestScoreMisattributedWhenTheFindingsPriorDiffersFromGold(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", Prior: "r1-f2", Action: verifydeliver.ActionFix}}}
 	findings := []verifydeliver.ResultFinding{{Title: "t1", Prior: "r1-f9"}}
 	reported := []verifydeliver.Finding{{ID: "r1-f9", Status: verifydeliver.StatusOpen}}
@@ -97,6 +101,7 @@ func TestScoreMisattributedWhenTheFindingsPriorDiffersFromGold(t *testing.T) {
 // wrong one, leaving PriorCited unchanged at 1 and the mutation undetected.
 // Two correct against one wrong breaks that symmetry.
 func TestScorePriorCitationCounting(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{
 		{ID: "g1", Prior: "r1-f1", Action: verifydeliver.ActionFix}, // cited correctly
 		{ID: "g2", Prior: "r1-f2", Action: verifydeliver.ActionFix}, // cited correctly
@@ -124,6 +129,7 @@ func TestScorePriorCitationCounting(t *testing.T) {
 }
 
 func TestScoreTriagePromptsOneForTheFixBatchPlusOnePerAsk(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		statuses []string
@@ -156,6 +162,7 @@ func TestScoreTriagePromptsOneForTheFixBatchPlusOnePerAsk(t *testing.T) {
 // WrongPriors by title and fails the round, the same way a false alarm or
 // a re-litigation would.
 func TestScoreWrongPriorFailsTheRound(t *testing.T) {
+	t.Parallel()
 	findings := []verifydeliver.ResultFinding{{Title: "cites the wrong dismissal"}}
 	reported := []verifydeliver.Finding{{ID: "r1-f1", Status: verifydeliver.StatusDismissed}}
 	match := RoundMatch{Classification: map[int]Fate{0: FateWrongPrior}}
@@ -181,6 +188,7 @@ func TestScoreWrongPriorFailsTheRound(t *testing.T) {
 // in Pending (no structural edge to anything, a non-exhaustive round), and
 // Passed alone could not tell that shotgun apart from a clean round.
 func TestScoreRoundIsProvisionalWithUnlabeledNoise(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", Action: verifydeliver.ActionFix}}}
 	const junk = 18
 	findings := make([]verifydeliver.ResultFinding, junk+1)
@@ -236,6 +244,7 @@ func (j findingIndexJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 // clean PASS - an honest judge that rejects noise cannot make a shotgun
 // round look clean.
 func TestMatchRoundThenScoreIsProvisionalWithAnHonestJudgeRejectingNoise(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", File: "a.go", From: 10, To: 10, Action: verifydeliver.ActionFix, Description: "the real problem"}}}
 
 	var findings []verifydeliver.ResultFinding
@@ -277,6 +286,7 @@ func TestMatchRoundThenScoreIsProvisionalWithAnHonestJudgeRejectingNoise(t *test
 // TestScoreRoundVerdictThreeValued pins verdictFor's own three cases
 // directly, isolated from ScoreRound's own field wiring.
 func TestScoreRoundVerdictThreeValued(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		passed  bool
@@ -302,6 +312,7 @@ func TestScoreRoundVerdictThreeValued(t *testing.T) {
 // as passed in RenderReport's totals line, and RenderJSON's "passed" field
 // must be false for it, whatever the older Passed bit still says.
 func TestRenderHeadlineNeverCountsProvisionalAsPassed(t *testing.T) {
+	t.Parallel()
 	cs := CaseScore{Name: "c", Passed: true, Verdict: VerdictProvisional, Rounds: []RoundScore{
 		{Round: 1, Found: []string{"g"}, Pending: []string{"junk"}, Passed: true, Verdict: VerdictProvisional},
 	}}
@@ -344,6 +355,7 @@ func TestRenderHeadlineNeverCountsProvisionalAsPassed(t *testing.T) {
 // must not render "recall 0.00" - there was nothing to recall, n/a, the
 // same way the other rates already read n/a with a zero denominator.
 func TestRenderReportRecallNAWithZeroSeededGold(t *testing.T) {
+	t.Parallel()
 	scores := []CaseScore{{Name: "c1", Passed: true, Rounds: []RoundScore{
 		{Round: 1, Passed: true},
 	}}}
@@ -360,6 +372,7 @@ func TestRenderReportRecallNAWithZeroSeededGold(t *testing.T) {
 // carries its own pending count, not only the totals: a person scanning
 // per-round lines must be able to see which round has unlabeled findings.
 func TestRenderReportRoundLineShowsPendingCount(t *testing.T) {
+	t.Parallel()
 	scores := []CaseScore{{Name: "c1", Passed: true, Verdict: VerdictProvisional, Rounds: []RoundScore{
 		{Round: 1, Found: []string{"g1"}, Pending: []string{"junk1", "junk2"}, Passed: true, Verdict: VerdictProvisional},
 	}}}
@@ -370,6 +383,7 @@ func TestRenderReportRoundLineShowsPendingCount(t *testing.T) {
 }
 
 func TestRenderReportPrecisionNAWithZeroDenominator(t *testing.T) {
+	t.Parallel()
 	// FalsePositiveGold is true (a trap or exhaustive round could have
 	// produced a false alarm) but nothing was found, extra-true or a false
 	// alarm: 0/0 must read n/a, not a misleading 0.00.
@@ -386,6 +400,7 @@ func TestRenderReportPrecisionNAWithZeroDenominator(t *testing.T) {
 }
 
 func TestRenderReportWithholdsPrecisionWithoutFalsePositiveGold(t *testing.T) {
+	t.Parallel()
 	scores := []CaseScore{{Name: "c1", Passed: true, Rounds: []RoundScore{
 		{Round: 1, Found: []string{"g1"}, Passed: true, FalsePositiveGold: false},
 	}}}
@@ -399,6 +414,7 @@ func TestRenderReportWithholdsPrecisionWithoutFalsePositiveGold(t *testing.T) {
 }
 
 func TestRenderReportComputesPrecisionWithFalsePositiveGold(t *testing.T) {
+	t.Parallel()
 	scores := []CaseScore{{Name: "c1", Rounds: []RoundScore{
 		{Round: 1, Found: []string{"g1"}, FalseAlarms: []string{"bad finding"}, FalsePositiveGold: true},
 	}}}
@@ -409,6 +425,7 @@ func TestRenderReportComputesPrecisionWithFalsePositiveGold(t *testing.T) {
 }
 
 func TestRenderJSONCarriesEachFindingForAPersonToLabel(t *testing.T) {
+	t.Parallel()
 	gold := Gold{Findings: []GoldFinding{{ID: "g1", Action: verifydeliver.ActionFix}}}
 	findings := []verifydeliver.ResultFinding{
 		{File: "a/a.go", Line: 4, Title: "seeded", Detail: "the seeded bug", Action: verifydeliver.ActionFix, Risk: verifydeliver.RiskHigh},

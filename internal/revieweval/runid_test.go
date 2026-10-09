@@ -77,6 +77,7 @@ func (b capturingRunIDBackend) Run(d session.Dispatch) error {
 // review.json/judge.json path, or that file's own content - may contain
 // the case name, and no commit message in the case repo may either.
 func TestRunCaseNeverNamesTheCaseToTheReviewerOrJudge(t *testing.T) {
+	t.Parallel()
 	c := loadEvalCase(t, "nil-deref")
 	var dispatches []capturedRunIDDispatch
 	backend := capturingRunIDBackend{dispatches: &dispatches}
