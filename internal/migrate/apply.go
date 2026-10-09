@@ -16,7 +16,30 @@ import (
 // commits everything once on the current branch. It does not push or sync;
 // the caller's own refusals (CheckSchemaVersion, CheckClean,
 // CheckLevelWithOrigin, CheckNoLeases) must already have passed.
+//
+// A failure partway through (after the first ticket folder has moved, and
+// before the one commit at the end) leaves the store half-migrated on disk,
+// uncommitted. Every such failure is wrapped in one *axi.Error naming the
+// recovery: `git reset --hard && git clean -fd` undoes it safely, exactly
+// because CheckClean and CheckLevelWithOrigin already passed before Apply
+// ran, so the store had nothing uncommitted and was level with origin to
+// begin with.
 func Apply(st *store.Store, plan Plan) error {
+	if err := applyUncommitted(st, plan); err != nil {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("jig store migrate failed partway through, leaving the store at %s half-migrated: %v", st.Root, err),
+			Code: "STORE_MIGRATE_APPLY_FAILED",
+			Help: []string{
+				fmt.Sprintf("Restore the store to what it was before the migration: run `git reset --hard && git clean -fd` in %s, then retry", st.Root),
+			},
+		}
+	}
+	return nil
+}
+
+// applyUncommitted is Apply's actual work, returning its failures plain, for
+// Apply to wrap once in a single *axi.Error.
+func applyUncommitted(st *store.Store, plan Plan) error {
 	for _, r := range plan.Renames {
 		if err := moveTicket(st, r.OldID, r.NewID); err != nil {
 			return err

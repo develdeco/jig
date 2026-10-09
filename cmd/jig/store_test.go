@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/mirror/github"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
@@ -258,5 +260,126 @@ func TestStoreMigrateWarnsAboutABranchStillOnOrigin(t *testing.T) {
 	}
 	if !strings.Contains(out, "jig/T-1") {
 		t.Errorf("output has no warning about jig/T-1 still on origin:\n%s", out)
+	}
+}
+
+// newMigrateFixtureWithMirroredTickets is a v1 store carrying two tickets,
+// T-1 and T-2, both already mirrored to GitHub: each has a
+// tracker/github.yaml record naming an issue on trackers: github:'s repo.
+// project.yaml declares trackers: github: directly, with no tracker: key
+// (RewriteProjectYAML's "already adopted a trackers: list of its own"
+// branch), so the migration's project.yaml rewrite leaves it untouched. This
+// is the seam brief.md#Seams names: "A6's mirror sync against its fake
+// GraphQL server, on a migrated store".
+func newMigrateFixtureWithMirroredTickets(t *testing.T) migrateFixture {
+	t.Helper()
+	dir := t.TempDir()
+	remote := filepath.Join(dir, "store-remote.git")
+	work := filepath.Join(dir, "store-work")
+	run := func(d string, args ...string) string {
+		t.Helper()
+		out, err := gitx.Run(d, args...)
+		if err != nil {
+			t.Fatalf("git %v (in %s): %v", args, d, err)
+		}
+		return out
+	}
+	run("", "init", "--bare", "-b", "main", remote)
+	run("", "clone", remote, work)
+	run(work, "config", "user.name", "tester")
+	run(work, "config", "user.email", "tester@example.invalid")
+
+	projectYAML := `schema_version: 1
+name: demo
+ticket_format: "T-{n}"
+trackers:
+  - github:
+      repo: example/tracking
+      project: https://github.com/users/example/projects/7
+platform: platform/
+`
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte(projectYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, ".gitignore"), []byte("*.lock\n.*.tmp\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []string{"T-1", "T-2"} {
+		trackerDir := filepath.Join(work, id, "tracker")
+		if err := os.MkdirAll(trackerDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		ticketYAML := "schema_version: 1\ntitle: Ticket " + id + "\n"
+		if err := os.WriteFile(filepath.Join(work, id, "ticket.yaml"), []byte(ticketYAML), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(work, id, "brief.md"), []byte("# "+id+"\n\n## Context\n\nhi\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		record := "# This file is written by jig's GitHub mirror; edits here are overwritten.\n" +
+			"repo: example/tracking\nissue: " + string(rune('1'+i)) + "\nnode_id: NODE_" + id + "\n"
+		if err := os.WriteFile(filepath.Join(trackerDir, "github.yaml"), []byte(record), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run(work, "add", "-A")
+	run(work, "commit", "-m", "init")
+	run(work, "push", "origin", "main")
+	return migrateFixture{work: work, remote: remote}
+}
+
+// countingMirrorClient is a stubGitHub that counts its CreateIssue and
+// UpdateIssue calls, so a test can assert on how many of each a sync made.
+type countingMirrorClient struct {
+	stubGitHub
+	creates, updates int
+}
+
+func (c *countingMirrorClient) CreateIssue(ctx context.Context, owner, repo, title, body string) (github.Issue, error) {
+	c.creates++
+	return c.stubGitHub.CreateIssue(ctx, owner, repo, title, body)
+}
+
+func (c *countingMirrorClient) UpdateIssue(ctx context.Context, nodeID, title, body string) error {
+	c.updates++
+	return c.stubGitHub.UpdateIssue(ctx, nodeID, title, body)
+}
+
+// TestStoreMigrateThenSyncUpdatesEachMirroredIssueInPlace covers the gap the
+// gate finding named: brief.md#Seams's "A6's mirror sync against its fake
+// GraphQL server, on a migrated store" and brief.md's critical path "after
+// the migration, a sync updates each mirrored issue in place and creates
+// none". T-1 and T-2 both already carry a tracker/github.yaml record before
+// the migration moves their folders; afterwards, jig trackers sync must find
+// each record at its ticket's new path (through Store.TicketRelDir,
+// internal/mirror/record.go) and update its issue in place, never mistake
+// the moved ticket for a new one and create a duplicate.
+func TestStoreMigrateThenSyncUpdatesEachMirroredIssueInPlace(t *testing.T) {
+	t.Parallel()
+	fx := newMigrateFixtureWithMirroredTickets(t)
+	mapPath := writeMigrateMap(t, migrateMapYAML)
+	jigHome := t.TempDir()
+	env := testEnv(jigHome)
+
+	out, code := runMain(t, env, "", "store", "migrate", "--map", mapPath, "--store", fx.work)
+	if code != 0 {
+		t.Fatalf("apply: exit %d\n%s", code, out)
+	}
+
+	client := &countingMirrorClient{}
+	env.mirrorClient = client
+	out, code = runMain(t, env, "", "trackers", "sync", "--store", fx.work)
+	if code != 0 {
+		t.Fatalf("trackers sync: exit %d\n%s", code, out)
+	}
+	if client.creates != 0 {
+		t.Errorf("sync made %d CreateIssue call(s) on a migrated store, want 0: a moved record must be found and updated, not mistaken for a new ticket", client.creates)
+	}
+	if client.updates != 2 {
+		t.Errorf("sync made %d UpdateIssue call(s), want 2 (one per migrated ticket)", client.updates)
 	}
 }

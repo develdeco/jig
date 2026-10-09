@@ -1,12 +1,15 @@
 package migrate
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -167,6 +170,59 @@ func TestApplyMigratesAStoreEndToEnd(t *testing.T) {
 	log := runGit(t, st.Root, "log", "--oneline", "-1")
 	if log == "" {
 		t.Errorf("no commit landed")
+	}
+}
+
+// TestApplyWrapsAPartwayFailureWithRecoveryHelp covers the gate finding: a
+// failure after Apply has already moved ticket folders (here, project.yaml
+// is corrupted between BuildPlan and Apply, so rewriteProjectYAMLFile fails
+// after every moveTicket/rewriteTicketRecord/rewriteCharts step has already
+// landed on disk, uncommitted) must come back as one *axi.Error with a code
+// and a Help line naming the `git reset --hard && git clean -fd` recovery -
+// safe because CheckClean and CheckLevelWithOrigin already passed before
+// Apply ran, so nothing since is worth keeping.
+func TestApplyWrapsAPartwayFailureWithRecoveryHelp(t *testing.T) {
+	t.Parallel()
+	st := newV1GitStore(t)
+	m := Map{
+		Keys:    map[string]string{"STORE": "the store", "GRAPH": "the graph"},
+		Tickets: map[string]string{"T-1": "STORE", "T-2": "GRAPH"},
+	}
+	plan, err := BuildPlan(st, m)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(st.Root, "project.yaml"), []byte("not: [valid"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err = Apply(st, plan)
+	if err == nil {
+		t.Fatalf("Apply: nil error, want a failure on the corrupted project.yaml")
+	}
+	var ae *axi.Error
+	if !errors.As(err, &ae) {
+		t.Fatalf("Apply error = %T (%v), want an *axi.Error with a code and recovery help", err, err)
+	}
+	if ae.Code == "" {
+		t.Errorf("axi.Error has no code: %+v", ae)
+	}
+	if len(ae.Help) == 0 || !strings.Contains(ae.Help[0], "git reset --hard") || !strings.Contains(ae.Help[0], "git clean -fd") {
+		t.Errorf("axi.Error.Help = %v, want a line naming git reset --hard and git clean -fd", ae.Help)
+	}
+
+	// The ticket folders already moved, uncommitted: proof this is a
+	// partway failure, not a refusal that changed nothing.
+	if _, err := os.Stat(oldTicketDir(st.Root, "T-1")); !os.IsNotExist(err) {
+		t.Errorf("old folder T-1 should already be moved: stat err = %v", err)
+	}
+	if _, err := os.Stat(st.TicketDir("STORE-1")); err != nil {
+		t.Errorf("STORE-1 should already exist on disk: %v", err)
+	}
+	status := runGit(t, st.Root, "status", "--porcelain")
+	if status == "" {
+		t.Errorf("git status --porcelain is empty, want the half-migrated, uncommitted state Apply left behind")
 	}
 }
 
