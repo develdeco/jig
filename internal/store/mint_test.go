@@ -76,6 +76,9 @@ func TestMintKeysCountSeparately(t *testing.T) {
 // than skipping past it to "JIG-2".
 func TestMintSkipsNonDirectoryEntries(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(st.Root, "tickets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(st.TicketDir("JIG-1"), []byte("not a folder"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +101,7 @@ func TestTicketIDsSortsByKeyThenNumber(t *testing.T) {
 		}
 	}
 	// A plain file matching the id shape must not be counted.
-	if err := os.WriteFile(filepath.Join(st.Root, "JIG-99"), []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(st.Root, "tickets", "JIG-99"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

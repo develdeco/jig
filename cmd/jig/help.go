@@ -29,6 +29,7 @@ var commandTable = []cmdSpec{
 	{"init", "initialize a store (standalone, or store + clones)", []flagSpec{
 		{"standalone", "create a sibling tickets store next to the current repo", false},
 		{"store", "store path to initialize (used with --clone)", false},
+		{"key", "area key the store's one project.yaml keys: entry declares (standalone only); default: derived from the project name", false},
 		{"clone", "name=path clone mapping; repeatable", false},
 	}, false},
 	{"ticket", "mint a new ticket: jig ticket new --title <t>", []flagSpec{
@@ -100,6 +101,12 @@ var commandTable = []cmdSpec{
 		{"store", "explicit store path", false},
 		{"project", "project name, resolved via the machine mapping", false},
 	}, false},
+	{"store", "jig store migrate: migrate a v1 store onto schema_version 2", []flagSpec{
+		{"map", "the rename map file (old id to new key)", false},
+		{"dry-run", "print the rename map and every file the migration would move, delete or rewrite, changing nothing", false},
+		{"store", "explicit store path", false},
+		{"project", "project name, resolved via the machine mapping", false},
+	}, false},
 	{"_screen", "hidden PreToolUse hook: reads a tool call on stdin", nil, true},
 }
 
@@ -151,6 +158,8 @@ func flagSetName(cmdName string) string {
 		return "skills install"
 	case "trackers":
 		return "trackers sync"
+	case "store":
+		return "store migrate"
 	default:
 		return cmdName
 	}

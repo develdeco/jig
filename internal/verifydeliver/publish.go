@@ -606,7 +606,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// A failed post is a soft failure, not a publish failure: the pull
 	// request stands, and the file is kept in the store for a manual post.
 	if prURL != "" && host != nil {
-		reviewNotesPath := filepath.Join(d.Store.Root, ticket, "pr", "review-notes.md")
+		reviewNotesPath := filepath.Join(d.Store.TicketDir(ticket), "pr", "review-notes.md")
 		if err := host.CommentPR(prURL, reviewNotesPath); err != nil {
 			warnFn("jig: post %s as a comment on %s: %v\n", reviewNotesPath, prURL, err)
 		}

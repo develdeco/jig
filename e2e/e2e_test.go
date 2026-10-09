@@ -137,7 +137,7 @@ func runEndToEndOnce(t *testing.T) {
 		t.Fatalf("expected gate round 1 to append slice fix-1; got %+v", slices)
 	}
 
-	round1Findings := readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "gate", "round-1", "findings.md"))
+	round1Findings := readFileOrFatal(t, joinPath(fx.StoreDir, "tickets", ticket, "gate", "round-1", "findings.md"))
 
 	statusR3 := runJig(t, env, fx.StoreDir, "status", ticket)
 	assertGolden(t, "status-gate-round1.txt", statusR3.Stdout)
@@ -153,10 +153,10 @@ func runEndToEndOnce(t *testing.T) {
 	if r5.Code != 0 {
 		t.Fatalf("gate (round 2, clean) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r5.Code, r5.Stdout, r5.Stderr)
 	}
-	if _, err := os.Stat(joinPath(fx.StoreDir, ticket, "gate", "round-2")); err != nil {
+	if _, err := os.Stat(joinPath(fx.StoreDir, "tickets", ticket, "gate", "round-2")); err != nil {
 		t.Fatalf("expected gate/round-2 to exist: %v", err)
 	}
-	round1FindingsAfter := readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "gate", "round-1", "findings.md"))
+	round1FindingsAfter := readFileOrFatal(t, joinPath(fx.StoreDir, "tickets", ticket, "gate", "round-1", "findings.md"))
 	if string(round1FindingsAfter) != string(round1Findings) {
 		t.Fatalf("gate round-1 findings.md changed after round 2 ran; rounds must be immutable")
 	}
@@ -170,7 +170,7 @@ func runEndToEndOnce(t *testing.T) {
 	// publish's reconcile/rebase can touch anything, using the recorded
 	// fork-point sha (stable regardless of later fetches) rather than the
 	// lease's own possibly-stale origin/<target> tracking ref.
-	startSHA := strings.TrimSpace(string(readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "start."+repoName+".sha"))))
+	startSHA := strings.TrimSpace(string(readFileOrFatal(t, joinPath(fx.StoreDir, "tickets", ticket, "start."+repoName+".sha"))))
 	buildLeaseDir := poolBuildLeaseDir(env.home, repoName, ticket)
 	preSquashMessages := strings.Split(gitLog(t, buildLeaseDir, "log", "--format=%s", startSHA+"..HEAD"), "\n")
 	wantMessages := expectedSliceCommitMessages(t, fx, ticket)
@@ -216,12 +216,12 @@ func runEndToEndOnce(t *testing.T) {
 
 	// --- changelogs, ledger, contract index, PR body.
 	for _, ws := range []string{"alpha", "beta"} {
-		data := readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "changelog", ws+".md"))
+		data := readFileOrFatal(t, joinPath(fx.StoreDir, "tickets", ticket, "changelog", ws+".md"))
 		if strings.TrimSpace(string(data)) == "" {
 			t.Fatalf("changelog for workspace %s is empty", ws)
 		}
 	}
-	consolidated := readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "changelog", "consolidated.md"))
+	consolidated := readFileOrFatal(t, joinPath(fx.StoreDir, "tickets", ticket, "changelog", "consolidated.md"))
 	if strings.TrimSpace(string(consolidated)) == "" {
 		t.Fatalf("consolidated changelog is empty")
 	}
@@ -245,7 +245,7 @@ func runEndToEndOnce(t *testing.T) {
 		t.Fatalf("contract-index.md entry missing workspace names:\n%s", contractIndex)
 	}
 
-	prBody := string(readFileOrFatal(t, joinPath(fx.StoreDir, ticket, "pr", repoName+".md")))
+	prBody := string(readFileOrFatal(t, joinPath(fx.StoreDir, "tickets", ticket, "pr", repoName+".md")))
 	if strings.TrimSpace(prBody) == "" {
 		t.Fatalf("PR body file is empty")
 	}

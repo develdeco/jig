@@ -188,7 +188,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	if !strings.Contains(out, "code: REVIEW_INVALID") {
 		t.Fatalf("round 1 first (broken) attempt: expected REVIEW_INVALID, got:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(fx.StoreDir, ticket, "gate", "round-1")); err == nil {
+	if _, err := os.Stat(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-1")); err == nil {
 		t.Fatalf("a failed round must not create gate/round-1 on disk")
 	}
 
@@ -252,7 +252,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	// how it got there - assert directly against findings.yaml that the
 	// kept ask's decision text and its human triage actually reached the
 	// store, not merely that it ended up open.
-	triage, decision, found := findingsYAMLEntry(t, filepath.Join(fx.StoreDir, ticket, "gate", "round-1", "findings.yaml"), "r1-f3")
+	triage, decision, found := findingsYAMLEntry(t, filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-1", "findings.yaml"), "r1-f3")
 	if !found {
 		t.Fatalf("round 1 findings.yaml missing r1-f3")
 	}
@@ -321,7 +321,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	// cleared list, which is the only place that distinguishes the two, and
 	// which a mutant that lets a noted repeat (r1-f2, same file) block
 	// clearing actually breaks.
-	cleared2 := findingsYAMLCleared(t, filepath.Join(fx.StoreDir, ticket, "gate", "round-2", "findings.yaml"))
+	cleared2 := findingsYAMLCleared(t, filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-2", "findings.yaml"))
 	foundCleared := false
 	for _, id := range cleared2 {
 		if id == "r1-f3" {
@@ -374,7 +374,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 
 	// The round 1 note is never routed, never cleared, and never blocks
 	// clean: it must still be on record after round 3.
-	round1FindingsMD, err := os.ReadFile(filepath.Join(fx.StoreDir, ticket, "gate", "round-1", "findings.md"))
+	round1FindingsMD, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-1", "findings.md"))
 	if err != nil {
 		t.Fatalf("read gate/round-1/findings.md: %v", err)
 	}

@@ -46,9 +46,10 @@ func newTestRemoteStore(t *testing.T) (st *store.Store, work, remote string) {
 	runGit(t, work, "config", "user.name", "tester")
 	runGit(t, work, "config", "user.email", "tester@example.invalid")
 
-	projectYAML := `schema_version: 1
+	projectYAML := `schema_version: 2
 name: demo
-ticket_format: "DEMO-{n}"
+keys:
+  DEMO: everything in demo
 trackers:
   - github:
       repo: example/tracking
@@ -398,7 +399,7 @@ func loadCfg(t *testing.T, st *store.Store) project.Config {
 // github: entry reports NoTracker and creates nothing, touching no client.
 func TestSyncNoTrackerIsANoOp(t *testing.T) {
 	st := &store.Store{Root: t.TempDir()}
-	cfg := project.Config{TicketFormat: "DEMO-{n}"}
+	cfg := project.Config{Keys: map[string]string{"DEMO": "everything in demo"}}
 
 	report, err := Sync(Deps{Store: st, Cfg: cfg, Client: &fakeClient{}}, SyncOpts{})
 	if err != nil {
@@ -477,7 +478,7 @@ func TestSyncCreatesAnIssuePerTicketAndChart(t *testing.T) {
 	// Each record landed where the bridge keeps it, on the remote too (one
 	// commit per issue, pushed at once - Store.Claim).
 	for i, what := range []string{"DEMO-1", "DEMO-2"} {
-		data, err := os.ReadFile(filepath.Join(st.Root, what, "tracker", "github.yaml"))
+		data, err := os.ReadFile(filepath.Join(st.TicketDir(what), "tracker", "github.yaml"))
 		if err != nil {
 			t.Fatalf("read %s's record: %v", what, err)
 		}
@@ -491,7 +492,7 @@ func TestSyncCreatesAnIssuePerTicketAndChart(t *testing.T) {
 		if !strings.HasPrefix(string(data), "#") {
 			t.Fatalf("%s's record does not start with a comment line: %s", what, data)
 		}
-		out := runGit(t, "", "--git-dir", remote, "log", "--oneline", "--all", "--", what+"/tracker/github.yaml")
+		out := runGit(t, "", "--git-dir", remote, "log", "--oneline", "--all", "--", st.TicketRelDir(what)+"/tracker/github.yaml")
 		if !strings.Contains(out, what+": github issue example/tracking#"+string(rune('1'+i))) {
 			t.Fatalf("remote history for %s = %q, want a commit naming the issue", what, out)
 		}
@@ -530,7 +531,7 @@ func TestSyncDryRunTouchesNeitherGitHubNorTheStore(t *testing.T) {
 	if len(report.Created) != 1 || report.Created[0].What != "DEMO-1" || report.Created[0].Number != 0 {
 		t.Fatalf("Created = %+v, want one would-create entry for DEMO-1 with no issue number", report.Created)
 	}
-	if _, err := os.Stat(filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml")); !os.IsNotExist(err) {
 		t.Fatalf("--dry-run wrote a record (stat err %v), want nothing written", err)
 	}
 }
@@ -553,7 +554,7 @@ func TestSyncDryRunPreviewsAgainstExistingRecords(t *testing.T) {
 		t.Fatalf("first Sync: %v", err)
 	}
 
-	before, err := os.ReadFile(filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml"))
+	before, err := os.ReadFile(filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
 	if err != nil {
 		t.Fatalf("read DEMO-1's record: %v", err)
 	}
@@ -601,7 +602,7 @@ func TestSyncDryRunPreviewsAgainstExistingRecords(t *testing.T) {
 			calls, len(client.calls), updates, len(client.updates), placed, len(client.placedItems))
 	}
 
-	after, err := os.ReadFile(filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml"))
+	after, err := os.ReadFile(filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
 	if err != nil {
 		t.Fatalf("read DEMO-1's record after the dry run: %v", err)
 	}
@@ -693,10 +694,10 @@ func TestSyncAdoptsAnotherClonesIssueOnARejectedPush(t *testing.T) {
 	runGit(t, other, "config", "user.name", "other")
 	runGit(t, other, "config", "user.email", "other@example.invalid")
 	otherRecord := recordHeader + "repo: example/tracking\nissue: 99\nnode_id: NODE_OTHER\n"
-	if err := os.MkdirAll(filepath.Join(other, "DEMO-1", "tracker"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(other, "tickets", "DEMO-1", "tracker"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(other, "DEMO-1", "tracker", "github.yaml"), []byte(otherRecord), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(other, "tickets", "DEMO-1", "tracker", "github.yaml"), []byte(otherRecord), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, other, "add", "-A")
@@ -724,7 +725,7 @@ func TestSyncAdoptsAnotherClonesIssueOnARejectedPush(t *testing.T) {
 		t.Fatalf("comments = %+v, want one comment on the own issue naming #99", client.comments)
 	}
 
-	data, err := os.ReadFile(filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml"))
+	data, err := os.ReadFile(filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
 	if err != nil {
 		t.Fatalf("read DEMO-1's record: %v", err)
 	}
@@ -739,7 +740,7 @@ func TestSyncAdoptsAnotherClonesIssueOnARejectedPush(t *testing.T) {
 		t.Fatalf("DEMO-1's record = %+v, want it placed on the board too (item: set)", rec)
 	}
 
-	remoteLog := runGit(t, "", "--git-dir", remote, "log", "--oneline", "--all", "--", "DEMO-1/tracker/github.yaml")
+	remoteLog := runGit(t, "", "--git-dir", remote, "log", "--oneline", "--all", "--", "tickets/DEMO-1/tracker/github.yaml")
 	if n := strings.Count(remoteLog, "DEMO-1: github issue"); n != 1 {
 		t.Fatalf("remote history for DEMO-1's record has %d claiming commits, want exactly 1 (the rejected attempt left nothing behind)", n)
 	}
@@ -750,7 +751,7 @@ func TestSyncAdoptsAnotherClonesIssueOnARejectedPush(t *testing.T) {
 	// (brief.md#Syncing at every checkpoint), so the only dirty file is
 	// DEMO-1's own record, carrying the item: the board step just set.
 	status := runGit(t, work, "status", "--porcelain")
-	if strings.TrimSpace(status) != "M DEMO-1/tracker/github.yaml" {
+	if strings.TrimSpace(status) != "M tickets/DEMO-1/tracker/github.yaml" {
 		t.Fatalf("store dirty after Sync = %q, want only DEMO-1's record (the board step's item: write)", status)
 	}
 }
@@ -785,7 +786,7 @@ func TestSyncSkipsAPublishSafetyHit(t *testing.T) {
 	if len(client.calls) != 1 || client.calls[0].Title != "A clean title" {
 		t.Fatalf("client saw %+v, want only DEMO-2's CreateIssue call (DEMO-1 never written)", client.calls)
 	}
-	if _, err := os.Stat(filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml")); !os.IsNotExist(err) {
 		t.Fatalf("DEMO-1 got a record (stat err %v), want none: the hit must skip the write", err)
 	}
 }
@@ -950,7 +951,7 @@ func TestSyncRefusesACreateOnABodyHitLikeTheDryRunPreviewsIt(t *testing.T) {
 	if len(client.calls) != 0 {
 		t.Fatalf("CreateIssue calls = %+v, want none", client.calls)
 	}
-	if has, err := hasRecord(filepath.Join(st2.Root, "DEMO-1", "tracker", "github.yaml")); err != nil {
+	if has, err := hasRecord(filepath.Join(st2.TicketDir("DEMO-1"), "tracker", "github.yaml")); err != nil {
 		t.Fatalf("check DEMO-1's record: %v", err)
 	} else if has {
 		t.Fatalf("DEMO-1 got a record, want none written on a publish-safety hit")
@@ -1021,7 +1022,7 @@ func TestSyncRefusesACreateOnAPullRequestHitLikeUpdateIssuesWouldSkip(t *testing
 	if len(liveClient.calls) != 0 {
 		t.Fatalf("CreateIssue calls = %+v, want none", liveClient.calls)
 	}
-	if has, err := hasRecord(filepath.Join(st2.Root, "DEMO-1", "tracker", "github.yaml")); err != nil {
+	if has, err := hasRecord(filepath.Join(st2.TicketDir("DEMO-1"), "tracker", "github.yaml")); err != nil {
 		t.Fatalf("check DEMO-1's record: %v", err)
 	} else if has {
 		t.Fatalf("DEMO-1 got a record, want none written on its pull request's publish-safety hit")
@@ -1077,13 +1078,13 @@ func TestSyncSkipsAPublishSafetyHitOnUpdate(t *testing.T) {
 		t.Fatalf("subIssues after chart setup = %+v, want DEMO-3 linked under the chart", client.subIssues)
 	}
 
-	before, err := os.ReadFile(filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml"))
+	before, err := os.ReadFile(filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
 	if err != nil {
 		t.Fatalf("read DEMO-1's record: %v", err)
 	}
 
 	ticketYAML := "schema_version: 1\ntitle: A clean title\nbody: |\n  Contact " + publishSafetyTestEmail + " for this\n"
-	if err := os.WriteFile(filepath.Join(st.Root, "DEMO-1", "ticket.yaml"), []byte(ticketYAML), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(st.TicketDir("DEMO-1"), "ticket.yaml"), []byte(ticketYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(st.Root, "charts", "demo", "map.md"), []byte("# Chart: demo\n\nContact "+publishSafetyTestEmail+" for this\n"), 0o644); err != nil {
@@ -1135,7 +1136,7 @@ func TestSyncSkipsAPublishSafetyHitOnUpdate(t *testing.T) {
 		t.Fatalf("subIssues went from %d to %d (%+v), want no AddSubIssue for the chart's skipped update: DEMO-4 must not become its sub-issue", subIssuesBefore, len(client.subIssues), client.subIssues)
 	}
 
-	after, err := os.ReadFile(filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml"))
+	after, err := os.ReadFile(filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
 	if err != nil {
 		t.Fatalf("read DEMO-1's record after the third sync: %v", err)
 	}
@@ -1207,7 +1208,7 @@ func TestSyncLinksChartSubIssuesAndBlockedBy(t *testing.T) {
 		t.Fatalf("blockedBys = %+v, want DEMO-2's issue blocked by DEMO-1's", client.blockedBys)
 	}
 
-	data, err := os.ReadFile(filepath.Join(st.Root, "DEMO-2", "tracker", "github.yaml"))
+	data, err := os.ReadFile(filepath.Join(st.TicketDir("DEMO-2"), "tracker", "github.yaml"))
 	if err != nil {
 		t.Fatalf("read DEMO-2's record: %v", err)
 	}
@@ -1319,8 +1320,8 @@ func TestSyncDryRunPreviewsLinksWithoutMutating(t *testing.T) {
 	// links yet), so linkParentsAndBlockers has something to link - without
 	// any CreateIssue, AddSubIssue or AddBlockedBy call ever having been
 	// made on this fakeClient.
-	writeAdoptedRecord(t, st.Root, filepath.Join("DEMO-1", "tracker", "github.yaml"), "example/tracking", 1, "NODE_BLOCKER", "")
-	writeAdoptedRecord(t, st.Root, filepath.Join("DEMO-2", "tracker", "github.yaml"), "example/tracking", 2, "NODE_CHART_TICKET", "")
+	writeAdoptedRecord(t, st.Root, filepath.Join("tickets", "DEMO-1", "tracker", "github.yaml"), "example/tracking", 1, "NODE_BLOCKER", "")
+	writeAdoptedRecord(t, st.Root, filepath.Join("tickets", "DEMO-2", "tracker", "github.yaml"), "example/tracking", 2, "NODE_CHART_TICKET", "")
 	writeAdoptedRecord(t, st.Root, filepath.Join("charts", "demo", "github.yaml"), "example/tracking", 3, "NODE_CHART_DEMO", "")
 
 	client := &fakeClient{
@@ -1367,8 +1368,8 @@ func TestSyncDryRunPreviewsLinksWithoutMutating(t *testing.T) {
 	}
 
 	for _, rel := range []string{
-		filepath.Join("DEMO-1", "tracker", "github.yaml"),
-		filepath.Join("DEMO-2", "tracker", "github.yaml"),
+		filepath.Join(st.TicketRelDir("DEMO-1"), "tracker", "github.yaml"),
+		filepath.Join(st.TicketRelDir("DEMO-2"), "tracker", "github.yaml"),
 		filepath.Join("charts", "demo", "github.yaml"),
 	} {
 		rec := readTestRecord(t, filepath.Join(st.Root, rel))

@@ -67,7 +67,7 @@ func TestGateInfersIntentBriefLess(t *testing.T) {
 	fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "inferred-intent"})
 	ticket := fx.Ticket
 
-	if err := os.Remove(filepath.Join(fx.StoreDir, ticket, "brief.md")); err != nil {
+	if err := os.Remove(filepath.Join(fx.StoreDir, "tickets", ticket, "brief.md")); err != nil {
 		t.Fatalf("remove brief.md: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestGateInfersIntentBriefLess(t *testing.T) {
 		t.Fatalf("gate stdout missing the inferred intent row:\n%s", r3.Stdout)
 	}
 
-	data, err := os.ReadFile(filepath.Join(fx.StoreDir, ticket, "intent.md"))
+	data, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", ticket, "intent.md"))
 	if err != nil {
 		t.Fatalf("read intent.md: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestGateInfersIntentBriefLess(t *testing.T) {
 	// The inferred intent must also reach review.json itself - not only
 	// the printed row and intent.md - since that is what the reviewer
 	// session dispatched for this round was actually given.
-	reviewData, err := os.ReadFile(filepath.Join(fx.StoreDir, ticket, "work", "gate.round-1.review.json"))
+	reviewData, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", ticket, "work", "gate.round-1.review.json"))
 	if err != nil {
 		t.Fatalf("read work/gate.round-1.review.json: %v", err)
 	}

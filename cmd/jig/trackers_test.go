@@ -58,9 +58,10 @@ func newTestOriginCloneWithGitHubTracker(t *testing.T, dir string) (remote strin
 	if _, err := gitx.Run("", "clone", remote, seed); err != nil {
 		t.Fatal(err)
 	}
-	projectYAML := `schema_version: 1
+	projectYAML := `schema_version: 2
 name: demo
-ticket_format: T-{n}
+keys:
+  DEMO: everything in demo
 trackers:
   - github:
       repo: example/tracking
@@ -136,10 +137,10 @@ func TestTrackersSyncDryRunReportsAWouldCreateTicket(t *testing.T) {
 		t.Fatalf("jig trackers sync --dry-run: exit %d\n%s", code, buf.String())
 	}
 	out := buf.String()
-	if !strings.Contains(out, "would_create") || !strings.Contains(out, "T-1") {
-		t.Fatalf("output = %s, want a would_create row naming T-1", out)
+	if !strings.Contains(out, "would_create") || !strings.Contains(out, "DEMO-1") {
+		t.Fatalf("output = %s, want a would_create row naming DEMO-1", out)
 	}
-	if _, err := os.Stat(filepath.Join(clone, "T-1", "tracker", "github.yaml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(clone, "tickets", "DEMO-1", "tracker", "github.yaml")); !os.IsNotExist(err) {
 		t.Fatalf("--dry-run wrote a record (stat err %v), want nothing written", err)
 	}
 }
@@ -168,8 +169,8 @@ func TestTrackersSyncDryRunExitsNonZeroOnAPublishSafetyHit(t *testing.T) {
 		t.Fatalf("jig trackers sync --dry-run: exit 0, want non-zero when a ticket was skipped\n%s", buf.String())
 	}
 	out := buf.String()
-	if !strings.Contains(out, "skipped") || !strings.Contains(out, "T-1") {
-		t.Fatalf("output = %s, want a skipped row naming T-1", out)
+	if !strings.Contains(out, "skipped") || !strings.Contains(out, "DEMO-1") {
+		t.Fatalf("output = %s, want a skipped row naming DEMO-1", out)
 	}
 }
 
@@ -300,9 +301,9 @@ func TestTicketNewRunsItsOwnCheckpointSync(t *testing.T) {
 		t.Fatalf("jig ticket new: exit %d\n%s", code, buf.String())
 	}
 
-	data, err := os.ReadFile(filepath.Join(clone, "T-1", "tracker", "github.yaml"))
+	data, err := os.ReadFile(filepath.Join(clone, "tickets", "DEMO-1", "tracker", "github.yaml"))
 	if err != nil {
-		t.Fatalf("read T-1's github.yaml: %v, want jig ticket new's own checkpoint sync to have created it", err)
+		t.Fatalf("read DEMO-1's github.yaml: %v, want jig ticket new's own checkpoint sync to have created it", err)
 	}
 	if !strings.Contains(string(data), "issue: 1") {
 		t.Fatalf("github.yaml = %s, want issue: 1 from the checkpoint sync's CreateIssue", data)
@@ -329,8 +330,8 @@ func TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput(t *testing
 	// jig ticket new's own checkpoint sync must not reach a real GitHub
 	// either (brief.md's test constraints); pointed at a server that always
 	// fails, it leaves both tickets' records unwritten, which is the state
-	// this test's own manual record (for T-1) and the stubGitHub sync below
-	// (for both T-1 and T-2) need to start from.
+	// this test's own manual record (for DEMO-1) and the stubGitHub sync below
+	// (for both DEMO-1 and DEMO-2) need to start from.
 	e.mirrorClient = stubFailingMirrorClient(t)
 
 	var setup bytes.Buffer
@@ -340,12 +341,12 @@ func TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput(t *testing
 		}
 	}
 
-	// T-1 already has an issue, and the last sync recorded the title it
+	// DEMO-1 already has an issue, and the last sync recorded the title it
 	// wrote; the stub reports GitHub carrying another one, so this sync
-	// finds drift and overwrites it. T-2 has no record, and never gets one.
+	// finds drift and overwrites it. DEMO-2 has no record, and never gets one.
 	record := "# written by jig's GitHub mirror\n" +
 		"repo: example/tracking\nissue: 7\nnode_id: NODE_1\nsynced:\n  title: First ticket\n  state: OPEN\n"
-	recordPath := filepath.Join(clone, "T-1", "tracker", "github.yaml")
+	recordPath := filepath.Join(clone, "tickets", "DEMO-1", "tracker", "github.yaml")
 	if err := os.MkdirAll(filepath.Dir(recordPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -365,11 +366,11 @@ func TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput(t *testing
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "drift[") || !strings.Contains(out, "T-1,7,title") {
-		t.Fatalf("output missing the checkpoint's drift row for T-1's title on issue 7:\n%s", out)
+	if !strings.Contains(out, "drift[") || !strings.Contains(out, "DEMO-1,7,title") {
+		t.Fatalf("output missing the checkpoint's drift row for DEMO-1's title on issue 7:\n%s", out)
 	}
-	if !strings.Contains(out, "skipped[") || !strings.Contains(out, "T-2,1,Contact "+publishSafetyTestEmail+" for this") {
-		t.Fatalf("output missing the checkpoint's skipped row naming T-2, its line number and the line:\n%s", out)
+	if !strings.Contains(out, "skipped[") || !strings.Contains(out, "DEMO-2,1,Contact "+publishSafetyTestEmail+" for this") {
+		t.Fatalf("output missing the checkpoint's skipped row naming DEMO-2, its line number and the line:\n%s", out)
 	}
 }
 

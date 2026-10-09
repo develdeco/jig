@@ -16,7 +16,7 @@ import (
 // `jig status` reads to say what the ticket's next step is.
 func writeRoundReport(t *testing.T, storeDir, ticket string, round int, verdict string) {
 	t.Helper()
-	dir := filepath.Join(storeDir, ticket, "gate", "round-"+string(rune('0'+round)))
+	dir := filepath.Join(storeDir, "tickets", ticket, "gate", "round-"+string(rune('0'+round)))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir round dir: %v", err)
 	}

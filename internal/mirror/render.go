@@ -8,7 +8,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
@@ -77,15 +76,16 @@ func chartFooter(chart string) string {
 // (brief.md#What an issue shows):
 //  1. its ticket.yaml (title:, body:);
 //  2. its entry in a chart's tickets.yaml (title:, body:);
-//  3. the latest committed <ticket>/tracker/ticket.md whose commit is not
-//     publish's (`<id>: publish`): a "# " first line is the title, the
-//     rest the description;
-//  4. the ticket's id, as the title, with no description.
+//  3. the ticket's id, as the title, with no description.
 //
-// A title-only ticket.yaml (store-layout migrations fill title: before
-// body:) must not hide a description still carried in tracker/ticket.md, so
-// the two are resolved independently rather than both taken from whichever
-// source first supplies a title.
+// A fourth rank once read the latest committed <ticket>/tracker/ticket.md
+// (a "# " first line as the title, the rest as the description) whose
+// commit was not publish's own: a v1 store, before every ticket's title and
+// description lived in ticket.yaml. `jig store migrate` carries that step
+// forward one last time, on the v1 store it reads before deleting
+// tracker/ticket.md (brief.md#The migration), and this function no longer
+// needs it - a schema-2 store, the only kind any command but `jig store
+// migrate` ever opens, has already had it rewritten into ticket.yaml.
 func ResolveTicketTitleBody(st *store.Store, ticket string) (title, body string, err error) {
 	rec, err := st.ReadTicket(ticket)
 	if err != nil {
@@ -104,21 +104,6 @@ func ResolveTicketTitleBody(st *store.Store, ticket string) (title, body string,
 			}
 			if body == "" {
 				body = entry.Body
-			}
-		}
-	}
-
-	if title == "" || body == "" {
-		mdTitle, mdBody, found, err := latestTicketMD(st, ticket)
-		if err != nil {
-			return "", "", err
-		}
-		if found {
-			if title == "" {
-				title = mdTitle
-			}
-			if body == "" {
-				body = mdBody
 			}
 		}
 	}
@@ -148,38 +133,6 @@ func findChartEntry(st *store.Store, ticket string) (store.ChartEntry, bool, err
 		}
 	}
 	return store.ChartEntry{}, false, nil
-}
-
-// latestTicketMD reads the latest committed <ticket>/tracker/ticket.md
-// whose commit is not publish's own (`<id>: publish`), per brief.md#What an
-// issue shows. found is false when there is no such commit: no commit ever
-// touched the path, or every one that did was publish's.
-func latestTicketMD(st *store.Store, ticket string) (title, body string, found bool, err error) {
-	relPath := filepath.Join(ticket, "tracker", "ticket.md")
-	out, gerr := gitx.Run(st.Root, "log", "--format=%H%x1f%s", "--", relPath)
-	if gerr != nil || strings.TrimSpace(out) == "" {
-		return "", "", false, nil
-	}
-	publishSubject := ticket + ": publish"
-	for _, line := range strings.Split(out, "\n") {
-		if line == "" {
-			continue
-		}
-		sha, subject, ok := strings.Cut(line, "\x1f")
-		if !ok || subject == publishSubject {
-			continue
-		}
-		content, serr := gitx.Run(st.Root, "show", sha+":"+filepath.ToSlash(relPath))
-		if serr != nil {
-			continue
-		}
-		first, rest, _ := strings.Cut(content, "\n")
-		if !strings.HasPrefix(first, "# ") {
-			continue
-		}
-		return strings.TrimSpace(strings.TrimPrefix(first, "# ")), strings.TrimSpace(rest), true, nil
-	}
-	return "", "", false, nil
 }
 
 // waitsForLine renders "**Waits for:** ..." for blockedBy, or "" when there

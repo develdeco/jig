@@ -116,10 +116,10 @@ func TestGateAdoptsTheBranchItReviews(t *testing.T) {
 	if err != nil || strings.TrimSpace(string(start)) != tip {
 		t.Fatalf("start sha = %q (err %v), want the branch's tip %s, not main's %s", start, err, tip, movedMain)
 	}
-	if got := run(t, fx.StoreRemote, "show", "main:"+ticket+"/ticket.yaml"); !strings.Contains(got, "branch: "+branch) {
+	if got := run(t, fx.StoreRemote, "show", "main:tickets/"+ticket+"/ticket.yaml"); !strings.Contains(got, "branch: "+branch) {
 		t.Fatalf("the store's remote holds ticket.yaml %q, want the adoption pushed", got)
 	}
-	if got := run(t, fx.StoreRemote, "show", "main:"+ticket+"/start.fixture-repo.sha"); got != tip {
+	if got := run(t, fx.StoreRemote, "show", "main:tickets/"+ticket+"/start.fixture-repo.sha"); got != tip {
 		t.Fatalf("the store's remote holds the start sha %q, want %s", got, tip)
 	}
 	if head := run(t, gateLeaseOf(t, fx, ticket), "rev-parse", "HEAD"); head != tip {

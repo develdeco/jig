@@ -54,6 +54,8 @@ func (s *Store) ResolveTicket(idOrAlias string) (string, error) {
 // per run. invalidateAliasClaims drops the cache after any write that could
 // change it.
 func (s *Store) aliasClaims() (map[string][]string, error) {
+	s.aliasClaimsMu.Lock()
+	defer s.aliasClaimsMu.Unlock()
 	if s.aliasClaimsCache != nil {
 		return s.aliasClaimsCache, nil
 	}

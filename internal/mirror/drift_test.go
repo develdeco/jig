@@ -78,7 +78,7 @@ func TestSyncAdoptsBridgeRecordWithNoMutation(t *testing.T) {
 	mintTestTicket(t, st, "DEMO-1", "First ticket")
 	runGit(t, work, "push", "origin", "main")
 
-	writeAdoptedRecord(t, st.Root, filepath.Join("DEMO-1", "tracker", "github.yaml"), "example/tracking", 7, "NODE_ADOPTED", "ITEM_ADOPTED")
+	writeAdoptedRecord(t, st.Root, filepath.Join("tickets", "DEMO-1", "tracker", "github.yaml"), "example/tracking", 7, "NODE_ADOPTED", "ITEM_ADOPTED")
 
 	client := &fakeClient{}
 	*client.issue("NODE_ADOPTED") = fakeIssueState{Title: "First ticket", Body: ticketFooter("DEMO-1"), Open: true}
@@ -115,7 +115,7 @@ func TestSyncAdoptsBridgeRecordWithNoMutation(t *testing.T) {
 			client.subIssues, client.removedSubs, client.blockedBys, client.removedBlockedBys)
 	}
 
-	rec := readTestRecord(t, filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml"))
+	rec := readTestRecord(t, filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
 	if rec.Synced == nil || rec.Synced.Title != "First ticket" || rec.Synced.State != "OPEN" {
 		t.Fatalf("record = %+v, want synced populated from what GitHub already showed", rec.Synced)
 	}
@@ -136,7 +136,7 @@ func TestSyncRestoresTitleBodyAndStateDrift(t *testing.T) {
 		t.Fatalf("first Sync: %v", err)
 	}
 
-	rec := readTestRecord(t, filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml"))
+	rec := readTestRecord(t, filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
 	if rec.Synced == nil || rec.Synced.Title != "First ticket" {
 		t.Fatalf("record after first sync = %+v, want synced.title populated", rec.Synced)
 	}
@@ -392,7 +392,7 @@ func TestSyncRestoresStatusAndStoreIDDrift(t *testing.T) {
 		t.Fatalf("first Sync: %v", err)
 	}
 
-	rec := readTestRecord(t, filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml"))
+	rec := readTestRecord(t, filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
 	if rec.Item == "" {
 		t.Fatalf("record = %+v, want an item id after the first sync", rec)
 	}
@@ -438,7 +438,7 @@ func TestSyncRecreatesAnIssueGoneFromGitHub(t *testing.T) {
 		t.Fatalf("first Sync: %v", err)
 	}
 
-	rec := readTestRecord(t, filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml"))
+	rec := readTestRecord(t, filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
 	delete(client.issues, rec.NodeID)
 	if client.goneNodeIDs == nil {
 		client.goneNodeIDs = map[string]bool{}
@@ -453,7 +453,7 @@ func TestSyncRecreatesAnIssueGoneFromGitHub(t *testing.T) {
 		t.Fatalf("Recreated = %+v, want DEMO-1 recreated", report.Recreated)
 	}
 
-	newRec := readTestRecord(t, filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml"))
+	newRec := readTestRecord(t, filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
 	if newRec.Issue == rec.Issue {
 		t.Fatalf("record after recreation = %+v, want a fresh issue number (was #%d)", newRec, rec.Issue)
 	}
@@ -475,7 +475,7 @@ func TestSyncSucceedsWithARecordedPullRequestMissingANodeID(t *testing.T) {
 	mintTestTicket(t, st, "DEMO-1", "First ticket")
 	runGit(t, work, "push", "origin", "main")
 
-	abs := filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml")
+	abs := filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml")
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		t.Fatal(err)
 	}

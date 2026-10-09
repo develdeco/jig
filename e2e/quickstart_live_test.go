@@ -59,21 +59,21 @@ func TestQuickstartLive(t *testing.T) {
 	store := filepath.Join(ws, "demo-tickets")
 	r := runJig(t, env, repo, "ticket", "new", "--title", "Cover Double with a test")
 	mustExitZero(t, r, "jig ticket new")
-	if !strings.Contains(r.Stdout, "id: T-1") {
-		t.Fatalf("jig ticket new minted something other than T-1:\n%s", r.Stdout)
+	if !strings.Contains(r.Stdout, "id: DEMO-1") {
+		t.Fatalf("jig ticket new minted something other than DEMO-1:\n%s", r.Stdout)
 	}
 
-	ticket := filepath.Join(store, "T-1")
+	ticket := filepath.Join(store, "tickets", "DEMO-1")
 	writeFileOrFatal(t, filepath.Join(ticket, "brief.md"), []byte(quickstartBrief))
 	slices := filepath.Join(ticket, "slices.yaml")
 	writeFileOrFatal(t, slices, []byte(quickstartSlices("")))
-	r = runJig(t, env, repo, "validate", "T-1")
-	mustExitZero(t, r, "jig validate T-1 (to print the section hashes)")
+	r = runJig(t, env, repo, "validate", "DEMO-1")
+	mustExitZero(t, r, "jig validate DEMO-1 (to print the section hashes)")
 	writeFileOrFatal(t, slices, []byte(quickstartSlices(sectionHash(t, r.Stdout, "Slice A - double test"))))
-	r = runJig(t, env, repo, "validate", "T-1")
-	mustExitZero(t, r, "jig validate T-1")
+	r = runJig(t, env, repo, "validate", "DEMO-1")
+	mustExitZero(t, r, "jig validate DEMO-1")
 	if !strings.Contains(r.Stdout, "valid: yes") {
-		t.Fatalf("jig validate T-1 did not print valid: yes:\n%s", r.Stdout)
+		t.Fatalf("jig validate DEMO-1 did not print valid: yes:\n%s", r.Stdout)
 	}
 
 	var (
@@ -96,11 +96,11 @@ func TestQuickstartLive(t *testing.T) {
 		return nil
 	}})
 
-	r = runJig(t, env, repo, "solve", "T-1", "--backend", "headless", "--yes")
+	r = runJig(t, env, repo, "solve", "DEMO-1", "--backend", "headless", "--yes")
 	mu.Lock()
 	defer mu.Unlock()
 	if r.Code != 0 {
-		t.Fatalf("jig solve T-1 --backend headless --yes exit = %d, want 0 (%d build, %d review sessions dispatched)\nstdout:\n%s\nstderr:\n%s", r.Code, len(builds), len(reviews), r.Stdout, r.Stderr)
+		t.Fatalf("jig solve DEMO-1 --backend headless --yes exit = %d, want 0 (%d build, %d review sessions dispatched)\nstdout:\n%s\nstderr:\n%s", r.Code, len(builds), len(reviews), r.Stdout, r.Stderr)
 	}
 	if len(builds) != 1 || len(reviews) != 1 {
 		t.Errorf("dispatched %d build and %d review sessions, want one of each\nstdout:\n%s", len(builds), len(reviews), r.Stdout)
@@ -109,11 +109,11 @@ func TestQuickstartLive(t *testing.T) {
 		s.Check(t)
 	}
 
-	if test := gitLog(t, repo, "show", "jig/T-1:double_test.go"); !strings.Contains(test, "func TestDouble") {
-		t.Errorf("published branch jig/T-1 carries a double_test.go without the session's TestDouble:\n%s", test)
+	if test := gitLog(t, repo, "show", "jig/DEMO-1:double_test.go"); !strings.Contains(test, "func TestDouble") {
+		t.Errorf("published branch jig/DEMO-1 carries a double_test.go without the session's TestDouble:\n%s", test)
 	}
 	if body, err := os.ReadFile(filepath.Join(ticket, "pr", "demo.md")); err != nil || len(body) == 0 {
-		t.Errorf("publish wrote no PR body at T-1/pr/demo.md in the store (%d bytes, %v)", len(body), err)
+		t.Errorf("publish wrote no PR body at tickets/DEMO-1/pr/demo.md in the store (%d bytes, %v)", len(body), err)
 	}
 }
 

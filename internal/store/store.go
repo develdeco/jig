@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
@@ -40,7 +41,12 @@ type Store struct {
 	// run (jig validate's blocked_by refs and cycle DFS, the mirror's
 	// blocker links and "Waits for" line) would otherwise re-read every
 	// ticket.yaml once per ref. invalidateAliasClaims clears it whenever a
-	// ticket.yaml write could change what it holds.
+	// ticket.yaml write, or a checkpoint's pull, could change what it holds.
+	// aliasClaimsMu guards both the cache and the scan that fills it: a
+	// frontier run shares one Store across its per-slice goroutines
+	// (internal/frontier's fan-out), each of which can resolve a ref through
+	// it concurrently.
+	aliasClaimsMu    sync.Mutex
 	aliasClaimsCache map[string][]string
 }
 
@@ -48,8 +54,13 @@ type Store struct {
 // call rescans the store. CreateTicketRecord and mutateTicket, the only
 // writers of ticket.yaml, call this after a successful write: either one can
 // change a ticket's aliases (or, for CreateTicketRecord, add a ticket whose
-// id now claims itself) and so change what aliasClaims resolves.
+// id now claims itself) and so change what aliasClaims resolves. checkpoint's
+// pull calls this too: a pull can bring in a ticket.yaml some other clone
+// wrote (a migration's aliases among them), so an alias that arrives this way
+// resolves at once rather than waiting for jig's own next write.
 func (s *Store) invalidateAliasClaims() {
+	s.aliasClaimsMu.Lock()
+	defer s.aliasClaimsMu.Unlock()
 	s.aliasClaimsCache = nil
 }
 
@@ -83,9 +94,25 @@ func Open(root string) (*Store, error) {
 	return &Store{Root: root}, nil
 }
 
-// TicketDir returns the ticket folder path for id, rooted at Root.
+// ticketsDirName is the store-root folder every real ticket's own folder
+// lives under: tickets/<id>.
+const ticketsDirName = "tickets"
+
+// TicketDir returns the ticket folder path for id, rooted at Root. It is the
+// one function that names a ticket's folder; every caller that needs that
+// path, absolute or (through TicketRelDir) store-relative, goes through one
+// of these two rather than joining "tickets" and id itself.
 func (s *Store) TicketDir(id string) string {
-	return filepath.Join(s.Root, id)
+	return filepath.Join(s.Root, s.TicketRelDir(id))
+}
+
+// TicketRelDir returns a ticket folder's path relative to the store root
+// (tickets/<id>): the store-relative form a caller that shells out to git
+// against the store (a path git log/show takes, a diff path, the slash form
+// a rendered pull request note links) needs instead of TicketDir's absolute
+// one.
+func (s *Store) TicketRelDir(id string) string {
+	return filepath.Join(ticketsDirName, id)
 }
 
 // HasRemote reports whether the store has a git remote named "origin".
@@ -210,8 +237,13 @@ func (cp *checkpoint) commit(msg string) error {
 // pull brings origin's branch in, as `git pull --rebase` would: fetched in
 // process, then nothing more when the store is level with or ahead of it,
 // the git program's fast-forward when it is behind, and its rebase, with
-// its conflict handling (abortFailedPull), when the two diverged.
+// its conflict handling (abortFailedPull), when the two diverged. Either way
+// it drops the memoized alias scan (Store.invalidateAliasClaims): a pull can
+// bring in a ticket.yaml this clone never wrote itself, so an alias arriving
+// this way must resolve as soon as the pull lands, not only after jig's own
+// next write.
 func (cp *checkpoint) pull() error {
+	defer cp.s.invalidateAliasClaims()
 	if cp.repo != nil {
 		rel, err := cp.repo.Fetch("origin", cp.branch)
 		switch {

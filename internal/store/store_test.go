@@ -78,9 +78,24 @@ func TestOpenRequiresProjectYAML(t *testing.T) {
 
 func TestTicketDir(t *testing.T) {
 	st := &Store{Root: filepath.Join("root")}
-	want := filepath.Join("root", "JIG-1")
+	want := filepath.Join("root", "tickets", "JIG-1")
 	if got := st.TicketDir("JIG-1"); got != want {
 		t.Fatalf("TicketDir = %q, want %q", got, want)
+	}
+}
+
+// TestTicketRelDir checks TicketDir's store-relative form: the one path a
+// caller that shells out to git against the store (a git log/show path, a
+// diff path, a rendered pull request note's link) builds from, instead of
+// joining "tickets" and the id itself.
+func TestTicketRelDir(t *testing.T) {
+	st := &Store{Root: filepath.Join("root")}
+	want := filepath.Join("tickets", "JIG-1")
+	if got := st.TicketRelDir("JIG-1"); got != want {
+		t.Fatalf("TicketRelDir = %q, want %q", got, want)
+	}
+	if got := st.TicketDir("JIG-1"); got != filepath.Join(st.Root, want) {
+		t.Fatalf("TicketDir = %q, want Root joined with TicketRelDir", got)
 	}
 }
 

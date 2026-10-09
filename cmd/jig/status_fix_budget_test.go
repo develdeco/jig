@@ -32,7 +32,7 @@ func setFixRounds(t *testing.T, storeDir string, n int) {
 // source), the minimal shape `jig status` and UsedFixBudget both read.
 func writeGateReportYAML(t *testing.T, storeDir, ticket string, round int, fixSlices []string) {
 	t.Helper()
-	dir := filepath.Join(storeDir, ticket, "gate", fmt.Sprintf("round-%d", round))
+	dir := filepath.Join(storeDir, "tickets", ticket, "gate", fmt.Sprintf("round-%d", round))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir round dir: %v", err)
 	}
@@ -53,7 +53,7 @@ func writeGateReportYAML(t *testing.T, storeDir, ticket string, round int, fixSl
 // budget-parked finding: status asked, routed_as ask, routed_why budget.
 func writeParkedFindingYAML(t *testing.T, storeDir, ticket string, round int) {
 	t.Helper()
-	dir := filepath.Join(storeDir, ticket, "gate", fmt.Sprintf("round-%d", round))
+	dir := filepath.Join(storeDir, "tickets", ticket, "gate", fmt.Sprintf("round-%d", round))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir round dir: %v", err)
 	}

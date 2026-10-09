@@ -16,6 +16,7 @@ func cmdInit(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "init")
 	standalone := fs.Bool("standalone", false, "create a sibling tickets store next to the current repo")
 	storeFlag := fs.String("store", "", "store path to initialize (used with --clone)")
+	keyFlag := fs.String("key", "", "area key the store's one project.yaml keys: entry declares (standalone only); default: derived from the project name")
 	var clones cloneFlag
 	fs.Var(&clones, "clone", "name=path clone mapping; repeatable")
 	if handled, err := parseFlags(stdout, fs, args); handled {
@@ -46,7 +47,7 @@ func cmdInit(e env, args []string, stdout io.Writer) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		storeDir, err := project.InitStandalone(cwd)
+		storeDir, err := project.InitStandalone(cwd, *keyFlag)
 		if err != nil {
 			return renderErr(stdout, err)
 		}

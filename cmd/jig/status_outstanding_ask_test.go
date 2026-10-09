@@ -15,7 +15,7 @@ import (
 // what is outstanding.
 func writeAskedFindingsYAML(t *testing.T, storeDir, ticket string) {
 	t.Helper()
-	dir := filepath.Join(storeDir, ticket, "gate", "round-1")
+	dir := filepath.Join(storeDir, "tickets", ticket, "gate", "round-1")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir round dir: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestRenderStatusSurvivesAnUnreadableFindingsFile(t *testing.T) {
 	}
 	// Round 1 holds a real outstanding ask; round 2's file is corrupt.
 	writeAskedFindingsYAML(t, fx.StoreDir, fx.Ticket)
-	corrupt := filepath.Join(fx.StoreDir, fx.Ticket, "gate", "round-2")
+	corrupt := filepath.Join(fx.StoreDir, "tickets", fx.Ticket, "gate", "round-2")
 	if err := os.MkdirAll(corrupt, 0o755); err != nil {
 		t.Fatalf("mkdir round 2: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestRenderStatusSurvivesAnUnreadableReportFile(t *testing.T) {
 			t.Fatalf("write slice state %s: %v", id, err)
 		}
 	}
-	dir := filepath.Join(fx.StoreDir, fx.Ticket, "gate", "round-1")
+	dir := filepath.Join(fx.StoreDir, "tickets", fx.Ticket, "gate", "round-1")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir round 1: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestRenderStatusAfterAFixSliceRoundPointsAtTheNextRound(t *testing.T) {
 			t.Fatalf("write slice state %s: %v", id, err)
 		}
 	}
-	dir := filepath.Join(fx.StoreDir, fx.Ticket, "gate", "round-1")
+	dir := filepath.Join(fx.StoreDir, "tickets", fx.Ticket, "gate", "round-1")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir round 1: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestRenderStatusNamesTheRepairForAnUnreadableRound(t *testing.T) {
 			t.Fatalf("write slice state %s: %v", id, err)
 		}
 	}
-	dir := filepath.Join(fx.StoreDir, fx.Ticket, "gate", "round-1")
+	dir := filepath.Join(fx.StoreDir, "tickets", fx.Ticket, "gate", "round-1")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir round 1: %v", err)
 	}

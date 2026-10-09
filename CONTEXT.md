@@ -9,7 +9,7 @@ A declared set of repos plus trackers (mirrors of the store's tickets) plus plat
 _Avoid_: workspace config, repo group
 
 **Truth repo (store)**:
-A dedicated git repo with a remote holding every ticket artifact; it is the source of truth: jig mints every ticket id and claims it here, trackers only mirror the store outward, and pull requests come from the repo host, not a tracker.
+A dedicated git repo with a remote holding every ticket artifact; it is the source of truth: jig mints every ticket id and claims it here, trackers only mirror the store outward, and pull requests come from the repo host, not a tracker. Real tickets live under `tickets/<id>/`; `charts/`, `platform/`, `ledger.md` and `project.yaml` stay at the store root. `project.yaml`'s `schema_version: 2` is enforced on every command but `jig store migrate`, which rewrites an older store onto it, renaming each ticket to a keyed id and keeping its old id as an alias.
 _Avoid_: database, state dir
 
 **Ticket**:
