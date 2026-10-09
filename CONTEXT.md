@@ -16,6 +16,15 @@ _Avoid_: database, state dir
 jig's record of one unit of work, in the store, under an id jig mints.
 _Avoid_: issue, which names a tracker's copy of a ticket
 
+**Mirror**:
+A tracker's copy of the store, written by jig at every checkpoint and never
+read back. Today's one mirror projects every ticket and chart onto a GitHub
+issue and a GitHub Project board, from inside the command that made the
+checkpoint, best-effort: a GitHub failure warns rather than failing the
+command. An edit made on the tracker side of a jig-owned field is drift,
+reported and overwritten with the store's value at the next sync.
+_Avoid_: tracker as the source of tickets
+
 **Intake**:
 The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several.
 _Avoid_: onboarding

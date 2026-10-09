@@ -157,6 +157,21 @@ type Config struct {
 	// BuilderEffort is the optional builder_effort: block
 	// (BuilderEffortFor applies its defaults).
 	BuilderEffort BuilderEffort
+	// GitHub is the trackers: list's one github: entry, or nil when the
+	// list is empty (or absent, or tracker: local). internal/mirror reads
+	// this to decide whether a store's checkpoints sync to GitHub at all.
+	GitHub *GitHubTracker
+}
+
+// GitHubTracker is a project.yaml trackers: list's github: entry: the repo
+// its issues live in, and the GitHub Project they are placed on. Both are
+// required (brief.md#The trackers entry); a store names its issue home
+// explicitly rather than having jig derive it, since a derived home would
+// move every issue the day a second repo joined the project, and GitHub
+// cannot transfer an issue from a private repo to a public one.
+type GitHubTracker struct {
+	Repo    string `yaml:"repo"`
+	Project string `yaml:"project"`
 }
 
 // configRaw mirrors Config's YAML shape, with Tracker, Trackers and Routes
@@ -227,12 +242,19 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 		if err := raw.Trackers.Decode(&entries); err != nil {
 			return fmt.Errorf("project: decode trackers: %w", err)
 		}
-		if len(entries) > 0 {
+		if len(entries) > 1 {
 			return &axi.Error{
-				Msg:  "project.yaml declares a trackers: entry, which is not supported yet",
+				Msg:  "project.yaml's trackers: declares more than one entry",
 				Code: "VALIDATION_ERROR",
-				Help: []string{"T-24 builds the tracker tree and T-22 the GitHub mirror; leave trackers: empty until then"},
+				Help: []string{"At most one github: entry is supported"},
 			}
+		}
+		if len(entries) == 1 {
+			gh, err := decodeGitHubTrackerEntry(entries[0])
+			if err != nil {
+				return err
+			}
+			c.GitHub = gh
 		}
 	}
 	if trackerPresent && !(raw.Tracker.Kind == yaml.ScalarNode && raw.Tracker.Value == "local") {
@@ -255,6 +277,48 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 	return validateEffort("builder_effort.retry", c.BuilderEffort.Retry)
+}
+
+// decodeGitHubTrackerEntry decodes one trackers: list entry, refusing
+// anything but a mapping with exactly one key, "github", whose value is
+// itself a mapping with only repo: and project:, both non-empty
+// (brief.md#The trackers entry: "a second, an unknown key, or a malformed
+// value is refused when the config loads").
+func decodeGitHubTrackerEntry(node yaml.Node) (*GitHubTracker, error) {
+	if node.Kind != yaml.MappingNode || len(node.Content) != 2 {
+		return nil, malformedTrackerEntryError("each trackers: entry must be a mapping with exactly one key")
+	}
+	key, valueNode := node.Content[0].Value, node.Content[1]
+	if key != "github" {
+		return nil, malformedTrackerEntryError(fmt.Sprintf("trackers: entry key %q is not supported; only github is", key))
+	}
+	if valueNode.Kind != yaml.MappingNode {
+		return nil, malformedTrackerEntryError("trackers: github: entry must be a mapping")
+	}
+	known := map[string]bool{"repo": true, "project": true}
+	for i := 0; i < len(valueNode.Content); i += 2 {
+		if k := valueNode.Content[i].Value; !known[k] {
+			return nil, malformedTrackerEntryError(fmt.Sprintf("trackers: github: entry has unknown key %q", k))
+		}
+	}
+	var gh GitHubTracker
+	if err := valueNode.Decode(&gh); err != nil {
+		return nil, malformedTrackerEntryError(fmt.Sprintf("decode trackers: github: entry: %v", err))
+	}
+	if gh.Repo == "" || gh.Project == "" {
+		return nil, malformedTrackerEntryError("trackers: github: entry requires both repo: and project:")
+	}
+	return &gh, nil
+}
+
+// malformedTrackerEntryError is the VALIDATION_ERROR decodeGitHubTrackerEntry
+// refuses with, why naming what was wrong.
+func malformedTrackerEntryError(why string) error {
+	return &axi.Error{
+		Msg:  "project.yaml's trackers: entry is invalid: " + why,
+		Code: "VALIDATION_ERROR",
+		Help: []string{"trackers: takes at most one entry: github:, with repo: <owner>/<name> and project: <url>"},
+	}
 }
 
 // validateGateConfig validates the gate config.

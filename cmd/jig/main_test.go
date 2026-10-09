@@ -757,7 +757,7 @@ func TestResolveStoreForProjectUsesMachineMapping(t *testing.T) {
 
 	// No --store and a cwd that resolves nothing: --project alone must
 	// still find the store through the machine mapping.
-	st, gotCfg, _, gotHome, err := resolveStoreForProject(cfg.Name, "")
+	st, gotCfg, _, gotHome, err := resolveStoreForProject(cfg.Name, "", &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("resolveStoreForProject: %v", err)
 	}
@@ -777,7 +777,7 @@ func TestResolveStoreForProjectUsesMachineMapping(t *testing.T) {
 func TestResolveStoreForProjectUnknownName(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
 
-	_, _, _, _, err := resolveStoreForProject("no-such-project", "")
+	_, _, _, _, err := resolveStoreForProject("no-such-project", "", &bytes.Buffer{})
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "VALIDATION_ERROR" {
 		t.Fatalf("err = %v, want *axi.Error VALIDATION_ERROR", err)

@@ -102,7 +102,7 @@ func cmdGate(args []string, stdout io.Writer, stdin io.Reader) int {
 		})
 	}
 
-	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

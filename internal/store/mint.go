@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -71,6 +72,47 @@ func (s *Store) nextID(format string) (string, error) {
 		}
 	}
 	return strings.ReplaceAll(format, "{n}", strconv.Itoa(maxN+1)), nil
+}
+
+// TicketIDs scans the store root for folders format mints (the same scan
+// nextID runs) and returns their ids in ascending numeric order: the order
+// the GitHub mirror syncs tickets in. Unlike nextID it is not called under
+// the mint lock - a caller reading the store to decide what to sync does not
+// race a concurrent Mint the way computing the next id would.
+func (s *Store) TicketIDs(format string) ([]string, error) {
+	re, err := ticketFormatPattern(format)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(s.Root)
+	if err != nil {
+		return nil, fmt.Errorf("store: list tickets: read store root: %w", err)
+	}
+	type numbered struct {
+		id string
+		n  int
+	}
+	var ids []numbered
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		m := re.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		ids = append(ids, numbered{id: e.Name(), n: n})
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i].n < ids[j].n })
+	out := make([]string, len(ids))
+	for i, nb := range ids {
+		out[i] = nb.id
+	}
+	return out, nil
 }
 
 // Mint computes the next id per format (project.yaml's ticket_format) and
