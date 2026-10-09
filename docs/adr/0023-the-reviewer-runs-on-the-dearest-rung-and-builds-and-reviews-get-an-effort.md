@@ -24,7 +24,7 @@ jig also passed no reasoning effort to `claude`, so every session ran at the CLI
 
 `session.Dispatch` carries the effort, and the headless backend passes it as `--effort`. The herdr backend starts its agent without flags, so it passes neither the effort nor the model, as before; the journal records what jig chose for both. revieweval's live reviewer gets the default efforts by the same rule, so the eval scores the reviewer production runs.
 
-The other sessions jig starts get no effort and run at the CLI's default: the gate demo, the intent summarizer, and revieweval's judge.
+The other sessions jig starts get no effort and run at the CLI's default: the intent summarizer and revieweval's judge.
 
 ## Test seams
 

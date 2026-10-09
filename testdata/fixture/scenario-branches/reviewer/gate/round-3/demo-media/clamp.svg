@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="360" height="120" viewBox="0 0 360 120">
-  <rect width="360" height="120" fill="#f6f8fa"/>
-  <text x="20" y="40" font-family="monospace" font-size="16" fill="#57606a">alpha.Clamp(15, 0, 10)</text>
-  <text x="20" y="78" font-family="monospace" font-size="16" fill="#cf222e">before: 15</text>
-  <text x="20" y="102" font-family="monospace" font-size="16" fill="#1a7f37">after:  10</text>
-</svg>
