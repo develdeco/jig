@@ -102,7 +102,7 @@ func TestOutstandingAskIsOfferedEveryRoundUntilDecided(t *testing.T) {
 		t.Fatalf("round 2 output missing the fix slice built from the kept ask:\n%s", out)
 	}
 
-	triage, decision, found := findingsYAMLEntry(t, filepath.Join(fx.StoreDir, ticket, "gate", "round-2", "findings.yaml"), "r1-f1")
+	triage, decision, found := findingsYAMLEntry(t, filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-2", "findings.yaml"), "r1-f1")
 	if !found {
 		t.Fatalf("round 2 findings.yaml has no entry for r1-f1 (the decided outstanding ask was never recorded)")
 	}

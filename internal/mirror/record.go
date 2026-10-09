@@ -80,7 +80,7 @@ type syncedLinks struct {
 // and writes).
 func ticketRecordPath(st *store.Store, ticket string) (rel, abs string) {
 	abs = filepath.Join(st.TicketDir(ticket), "tracker", "github.yaml")
-	rel = filepath.Join(ticket, "tracker", "github.yaml")
+	rel = filepath.Join(st.TicketRelDir(ticket), "tracker", "github.yaml")
 	return rel, abs
 }
 

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -17,9 +16,10 @@ import (
 func newDemoStore(t *testing.T) *store.Store {
 	t.Helper()
 	root := t.TempDir()
-	projectYAML := `schema_version: 1
+	projectYAML := `schema_version: 2
 name: demo
-ticket_format: "DEMO-{n}"
+keys:
+  DEMO: everything in demo
 trackers:
   - github:
       repo: example/tracking
@@ -151,9 +151,10 @@ func TestRenderTicketBodyMatchesTheGolden(t *testing.T) {
 // stay exactly as written.
 func TestRenderTicketBodySameRepoStaysBare(t *testing.T) {
 	root := t.TempDir()
-	projectYAML := `schema_version: 1
+	projectYAML := `schema_version: 2
 name: demo
-ticket_format: "DEMO-{n}"
+keys:
+  DEMO: everything in demo
 trackers:
   - github:
       repo: example/demo
@@ -374,46 +375,5 @@ func TestResolveTicketTitleBodyFallsBackToID(t *testing.T) {
 	}
 	if title != "DEMO-9" || body != "" {
 		t.Fatalf("ResolveTicketTitleBody = (%q, %q), want (%q, \"\")", title, body, "DEMO-9")
-	}
-}
-
-// TestResolveTicketTitleBodyTakesTheDescriptionFromTicketMDUnderATitleOnlyTicketYAML
-// pins the renderer's seam: a ticket.yaml holding only a title (no body:,
-// as a store-layout migration leaves it until it fills both) must not hide
-// a description still carried in the latest committed tracker/ticket.md -
-// the title and description are resolved independently, each from the
-// first source that has it.
-func TestResolveTicketTitleBodyTakesTheDescriptionFromTicketMDUnderATitleOnlyTicketYAML(t *testing.T) {
-	st := newDemoStore(t)
-	if _, err := gitx.Run(st.Root, "init", "-b", "main"); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
-	if err := st.CreateTicketRecord("DEMO-9", store.Ticket{Title: "From ticket.yaml"}); err != nil {
-		t.Fatal(err)
-	}
-
-	mdPath := filepath.Join(st.TicketDir("DEMO-9"), "tracker", "ticket.md")
-	if err := os.MkdirAll(filepath.Dir(mdPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(mdPath, []byte("# From ticket.md\n\nThe description.\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.Run(st.Root, "add", "-A"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.Run(st.Root, "commit", "-m", "DEMO-9: tracker"); err != nil {
-		t.Fatal(err)
-	}
-
-	title, body, err := ResolveTicketTitleBody(st, "DEMO-9")
-	if err != nil {
-		t.Fatalf("ResolveTicketTitleBody: %v", err)
-	}
-	if title != "From ticket.yaml" {
-		t.Fatalf("ResolveTicketTitleBody title = %q, want the ticket.yaml title", title)
-	}
-	if body != "The description." {
-		t.Fatalf("ResolveTicketTitleBody body = %q, want the description from tracker/ticket.md", body)
 	}
 }

@@ -170,7 +170,7 @@ func TestReservedLeaseSuffixTicketRefused(t *testing.T) {
 	fx, env := newFixture(t, fixture.Opts{})
 
 	for _, id := range []string{fx.Ticket + "-gate", fx.Ticket + "-GATE", fx.Ticket + "-publish"} {
-		src := filepath.Join(fx.StoreDir, fx.Ticket)
+		src := filepath.Join(fx.StoreDir, "tickets", fx.Ticket)
 		dst := filepath.Join(fx.StoreDir, id)
 		if err := os.MkdirAll(dst, 0o755); err != nil {
 			t.Fatal(err)

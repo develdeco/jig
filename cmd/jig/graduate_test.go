@@ -57,10 +57,10 @@ func writeChart(t *testing.T, storeRoot, name, content string) {
 	}
 }
 
-// declareKeys replaces storeRoot's project.yaml "ticket_format: T-{n}" line
-// (jig init --standalone's default) with a keys: block declaring keys, so a
-// test can graduate or mint under keys of its own choosing instead of the
-// one ticket_format names.
+// declareKeys replaces storeRoot's project.yaml derived "keys: DEMO:
+// everything in demo" entry (jig init --standalone's default, for a repo
+// named "demo") with a keys: block declaring keys, so a test can graduate or
+// mint under keys of its own choosing instead of the one derived key.
 func declareKeys(t *testing.T, storeRoot string, keys map[string]string) {
 	t.Helper()
 	path := filepath.Join(storeRoot, "project.yaml")
@@ -78,9 +78,9 @@ func declareKeys(t *testing.T, storeRoot string, keys map[string]string) {
 	for _, k := range names {
 		fmt.Fprintf(&block, "  %s: %s\n", k, keys[k])
 	}
-	rewritten := strings.Replace(string(data), "ticket_format: T-{n}\n", block.String(), 1)
+	rewritten := strings.Replace(string(data), "keys:\n    DEMO: everything in demo\n", block.String(), 1)
 	if rewritten == string(data) {
-		t.Fatalf("project.yaml has no ticket_format: T-{n} line to replace:\n%s", data)
+		t.Fatalf("project.yaml has no derived keys: entry to replace:\n%s", data)
 	}
 	if err := os.WriteFile(path, []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
@@ -462,12 +462,12 @@ func TestGraduateRefusesBadRefs(t *testing.T) {
 					t.Fatalf("entry %d got an id %q on a refused run", i+1, e.ID)
 				}
 			}
-			ents, err := os.ReadDir(storeRoot)
-			if err != nil {
+			ents, err := os.ReadDir(filepath.Join(storeRoot, "tickets"))
+			if err != nil && !os.IsNotExist(err) {
 				t.Fatal(err)
 			}
 			for _, e := range ents {
-				if e.IsDir() && strings.HasPrefix(e.Name(), "T-") {
+				if e.IsDir() && strings.HasPrefix(e.Name(), "DEMO-") {
 					t.Fatalf("a ticket folder %q was left behind by a refused run", e.Name())
 				}
 			}
@@ -636,7 +636,7 @@ func TestGraduateAdvisesRatherThanAbortsOnUnparseableTicketDeps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(status) != "M "+idA+"/ticket.yaml" {
+	if strings.TrimSpace(status) != "M tickets/"+idA+"/ticket.yaml" {
 		t.Fatalf("status = %q, want only idA's pre-existing hand-broken ticket.yaml left dirty", status)
 	}
 	subject, err := gitx.Run(storeRoot, "log", "-1", "--pretty=%s")
@@ -791,8 +791,8 @@ func TestGraduateFullyGraduatedStillAdvises(t *testing.T) {
 // re-run creates exactly the tickets still missing, rather than minting a
 // duplicate for an entry that already succeeded. store.Mint skips
 // non-directories when it picks max+1 (internal/store/mint.go), so a plain
-// file named T-2 makes entry B's mint fail once entry A has already taken
-// T-1 - no fake adapter needed.
+// file named DEMO-2 makes entry B's mint fail once entry A has already taken
+// DEMO-1 - no fake adapter needed.
 func TestGraduateMidRunFailureIsRecoverable(t *testing.T) {
 	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
@@ -801,7 +801,10 @@ func TestGraduateMidRunFailureIsRecoverable(t *testing.T) {
   - title: "Slice B"
 `)
 
-	blocker := filepath.Join(storeRoot, "T-2")
+	blocker := filepath.Join(storeRoot, "tickets", "DEMO-2")
+	if err := os.MkdirAll(filepath.Dir(blocker), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(blocker, []byte("not a ticket folder"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -997,12 +1000,12 @@ func TestGraduatePushFailureRemovesTheClaim(t *testing.T) {
 	if entries[0].ID != "" {
 		t.Fatalf("entry A got an id %q despite its claim's push failing", entries[0].ID)
 	}
-	ents, err := os.ReadDir(storeRoot)
-	if err != nil {
+	ents, err := os.ReadDir(filepath.Join(storeRoot, "tickets"))
+	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	for _, e := range ents {
-		if e.IsDir() && strings.HasPrefix(e.Name(), "T-") {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "DEMO-") {
 			t.Fatalf("a ticket folder %q was left behind by a failed claim", e.Name())
 		}
 	}
@@ -1106,7 +1109,11 @@ func TestGraduateRefusesUnknownTicketFolder(t *testing.T) {
 func TestGraduateRefusesDuplicateID(t *testing.T) {
 	t.Parallel()
 	jig, storeRoot := setupGraduateStore(t)
-	if err := os.MkdirAll(filepath.Join(storeRoot, "T-1"), 0o755); err != nil {
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(st.TicketDir("T-1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	writeChart(t, storeRoot, "mychart", `tickets:
@@ -1249,9 +1256,9 @@ func TestGraduateRunsItsOwnCheckpointSync(t *testing.T) {
 		t.Fatalf("jig graduate mychart: exit %d\n%s", code, buf.String())
 	}
 
-	data, err := os.ReadFile(filepath.Join(clone, "T-1", "tracker", "github.yaml"))
+	data, err := os.ReadFile(filepath.Join(clone, "tickets", "DEMO-1", "tracker", "github.yaml"))
 	if err != nil {
-		t.Fatalf("read T-1's github.yaml: %v, want jig graduate's own checkpoint sync to have created it", err)
+		t.Fatalf("read DEMO-1's github.yaml: %v, want jig graduate's own checkpoint sync to have created it", err)
 	}
 	if !strings.Contains(string(data), "issue: 1") {
 		t.Fatalf("github.yaml = %s, want issue: 1 from the checkpoint sync's CreateIssue", data)
@@ -1260,7 +1267,7 @@ func TestGraduateRunsItsOwnCheckpointSync(t *testing.T) {
 
 // TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure covers r4-f2: a
 // chart whose first entry claims cleanly but whose second entry's mint fails
-// for a standing reason (here, a plain file named T-2 sitting where that id's
+// for a standing reason (here, a plain file named DEMO-2 sitting where that id's
 // ticket folder must go, so CreateTicketRecord's own MkdirAll refuses it)
 // must still run the checkpoint sync for every ticket already claimed before
 // the command returns its failure - the claim landed and was pushed, so a
@@ -1274,7 +1281,10 @@ func TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure(t *testing.T) {
   - title: "Slice A"
   - title: "Slice B"
 `)
-	if err := os.WriteFile(filepath.Join(clone, "T-2"), []byte("in the way"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(clone, "tickets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(clone, "tickets", "DEMO-2"), []byte("in the way"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1285,13 +1295,13 @@ func TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("jig graduate mychart: exit 0, want a refusal on entry 2's mint:\n%s", buf.String())
 	}
-	if !strings.Contains(buf.String(), "T-1") {
-		t.Fatalf("jig graduate mychart output lacks T-1 as already claimed:\n%s", buf.String())
+	if !strings.Contains(buf.String(), "DEMO-1") {
+		t.Fatalf("jig graduate mychart output lacks DEMO-1 as already claimed:\n%s", buf.String())
 	}
 
-	data, err := os.ReadFile(filepath.Join(clone, "T-1", "tracker", "github.yaml"))
+	data, err := os.ReadFile(filepath.Join(clone, "tickets", "DEMO-1", "tracker", "github.yaml"))
 	if err != nil {
-		t.Fatalf("read T-1's github.yaml: %v, want the checkpoint sync to have run for it despite entry 2's failure", err)
+		t.Fatalf("read DEMO-1's github.yaml: %v, want the checkpoint sync to have run for it despite entry 2's failure", err)
 	}
 	if !strings.Contains(string(data), "issue: 1") {
 		t.Fatalf("github.yaml = %s, want issue: 1 from the checkpoint sync's CreateIssue", data)
@@ -1344,14 +1354,14 @@ func TestGraduateSkipsTheCheckpointSyncOnAWriteChartFailureAfterMint(t *testing.
 		t.Fatalf("output missing \"failed to write chart\":\n%s", buf.String())
 	}
 
-	if _, err := os.Stat(filepath.Join(clone, "T-2")); err != nil {
-		t.Fatalf("T-2's half-minted ticket folder is gone: %v", err)
+	if _, err := os.Stat(filepath.Join(clone, "tickets", "DEMO-2")); err != nil {
+		t.Fatalf("DEMO-2's half-minted ticket folder is gone: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(clone, "T-2", "tracker", "github.yaml")); err == nil {
-		t.Fatal("T-2 (half-minted, uncommitted) got a GitHub issue record despite the WriteChart failure")
+	if _, err := os.Stat(filepath.Join(clone, "tickets", "DEMO-2", "tracker", "github.yaml")); err == nil {
+		t.Fatal("DEMO-2 (half-minted, uncommitted) got a GitHub issue record despite the WriteChart failure")
 	}
-	if _, err := os.Stat(filepath.Join(clone, "T-1", "tracker", "github.yaml")); err == nil {
-		t.Fatal("T-1 got synced despite the checkpoint hook being skipped entirely on this failure")
+	if _, err := os.Stat(filepath.Join(clone, "tickets", "DEMO-1", "tracker", "github.yaml")); err == nil {
+		t.Fatal("DEMO-1 got synced despite the checkpoint hook being skipped entirely on this failure")
 	}
 }
 
@@ -1672,13 +1682,13 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 		t.Fatalf("remote log has %d commits graduating %s, want exactly 1 (the retried claim's own push for Slice B)", n, id)
 	}
 
-	ents, err := os.ReadDir(storeRoot)
+	ents, err := os.ReadDir(filepath.Join(storeRoot, "tickets"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ticketDirs := 0
 	for _, e := range ents {
-		if e.IsDir() && strings.HasPrefix(e.Name(), "T-") {
+		if e.IsDir() {
 			ticketDirs++
 		}
 	}

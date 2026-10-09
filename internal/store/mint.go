@@ -26,7 +26,7 @@ func (s *Store) mintLockPath() string {
 	return filepath.Join(s.Root, ".jig-mint")
 }
 
-// ticketIDPattern matches a store-root folder name that is an id: a key (1
+// ticketIDPattern matches a tickets/ folder name that is an id: a key (1
 // to 10 uppercase ASCII letters and digits, starting with a letter - the
 // loose shape of any ticket folder, under any key, declared or not, since a
 // key removed from project.yaml only stops new mints under it) a "-", and a
@@ -41,14 +41,19 @@ type ticketIDEntry struct {
 	n   int
 }
 
-// scanTicketIDs reads root's entries and returns every id-shaped directory
-// among them, in no particular order. A non-directory entry whose name
-// happens to match is skipped, so a plain file left in the way of a ticket
-// folder never shifts a key's count.
+// scanTicketIDs reads root's tickets/ dir and returns every id-shaped
+// directory among its entries, in no particular order. A non-directory entry
+// whose name happens to match is skipped, so a plain file left in the way of
+// a ticket folder never shifts a key's count. A root with no tickets/ dir
+// yet (a fresh store, before anything is minted) reads as no tickets, rather
+// than an error.
 func scanTicketIDs(root string) ([]ticketIDEntry, error) {
-	entries, err := os.ReadDir(root)
+	entries, err := os.ReadDir(filepath.Join(root, ticketsDirName))
 	if err != nil {
-		return nil, fmt.Errorf("store: list tickets: read store root: %w", err)
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("store: list tickets: read %s: %w", ticketsDirName, err)
 	}
 	var out []ticketIDEntry
 	for _, e := range entries {
@@ -68,7 +73,24 @@ func scanTicketIDs(root string) ([]ticketIDEntry, error) {
 	return out, nil
 }
 
-// TicketIDs lists every id-shaped store-root folder, under any key -
+// ParseTicketID splits id into its key and number when id is shaped like one
+// (ticketIDPattern: a key, a "-", and a number from 1 with no leading zero),
+// ok false otherwise. `jig store migrate` uses this to read the key and
+// number an old id already carries, since its own ids are shaped the same
+// way TicketIDs already parses.
+func ParseTicketID(id string) (key string, n int, ok bool) {
+	m := ticketIDPattern.FindStringSubmatch(id)
+	if m == nil {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(m[2])
+	if err != nil {
+		return "", 0, false
+	}
+	return m[1], n, true
+}
+
+// TicketIDs lists every id-shaped folder under tickets/, under any key -
 // declared in project.yaml or not - sorted by key, then by number: the one
 // function minting's per-key counter (nextID), A6's mirror and every other
 // listing that shows many tickets read tickets through, and nothing else

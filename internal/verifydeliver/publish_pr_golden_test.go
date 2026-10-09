@@ -21,11 +21,11 @@ import (
 // inferred intent (no Intent section); an adopted ticket."
 func readPRFiles(t *testing.T, d Deps, ticket, repo string) (body, notes string) {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(d.Store.Root, ticket, "pr", repo+".md"))
+	b, err := os.ReadFile(filepath.Join(d.Store.TicketDir(ticket), "pr", repo+".md"))
 	if err != nil {
 		t.Fatalf("read pr/%s.md: %v", repo, err)
 	}
-	n, err := os.ReadFile(filepath.Join(d.Store.Root, ticket, "pr", "review-notes.md"))
+	n, err := os.ReadFile(filepath.Join(d.Store.TicketDir(ticket), "pr", "review-notes.md"))
 	if err != nil {
 		t.Fatalf("read pr/review-notes.md: %v", err)
 	}

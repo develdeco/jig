@@ -133,7 +133,7 @@ func TestFlawedBriefRequeue(t *testing.T) {
 	// alongside the scenario tree by fixture.Generate, over the store's
 	// brief.md.
 	amended := readFileOrFatal(t, joinPath(fx.ScenarioDir, "brief-amended.md"))
-	writeFileOrFatal(t, joinPath(fx.StoreDir, fx.Ticket, "brief.md"), amended)
+	writeFileOrFatal(t, joinPath(fx.StoreDir, "tickets", fx.Ticket, "brief.md"), amended)
 
 	r2 := runJig(t, env, fx.StoreDir, "requeue", fx.Ticket, "--from-brief-diff")
 	if r2.Code != 0 {

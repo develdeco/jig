@@ -44,10 +44,15 @@ func wantValidationError(t *testing.T, err error) {
 	}
 }
 
-// TestLoadTrackerLocalMeansNoMirrors checks that the legacy tracker: local
-// still loads (until L3's migration rewrites project.yaml), the one old
-// tracker: value trackers: replacing tracker: leaves standing.
-func TestLoadTrackerLocalMeansNoMirrors(t *testing.T) {
+// TestLoadIgnoresTicketFormatAndTrackerAtSchemaVersion1 checks that a v1
+// project.yaml's ticket_format and tracker: (the two keys `jig store
+// migrate` rewrites into keys: and trackers:) load without error and
+// without populating Config.Keys or Config.GitHub: the v1 reads that once
+// turned them into something are gone, so `jig store migrate`
+// (resolveStoreForProjectAllowingOldSchema) can still Load a v1
+// project.yaml whole, leaving project.Config.CheckSchemaVersion as the one
+// place a v1 store is actually refused.
+func TestLoadIgnoresTicketFormatAndTrackerAtSchemaVersion1(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
@@ -63,12 +68,55 @@ platform: platform/
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Name != "demo" || cfg.SchemaVersion != 1 || cfg.TicketFormat != "JIG-{n}" {
+	if cfg.Name != "demo" || cfg.SchemaVersion != 1 {
 		t.Errorf("cfg = %+v, unexpected", cfg)
+	}
+	if cfg.Keys != nil {
+		t.Errorf("Keys = %+v, want nil: ticket_format is no longer read as a key", cfg.Keys)
+	}
+	if cfg.GitHub != nil {
+		t.Errorf("GitHub = %+v, want nil: tracker: is no longer read at all", cfg.GitHub)
 	}
 	if len(cfg.Repos) != 1 || cfg.Repos[0].Remote != "https://example.invalid/org/demo.git" {
 		t.Errorf("Repos = %+v, unexpected", cfg.Repos)
 	}
+}
+
+// TestLoadRefusesTicketFormatAtSchemaVersion2 checks that a project.yaml
+// declaring schema_version 2 refuses ticket_format outright.
+func TestLoadRefusesTicketFormatAtSchemaVersion2(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 2
+name: demo
+ticket_format: "JIG-{n}"
+keys:
+  JIG: everything in demo
+repos: []
+platform: platform/
+`)
+	_, err := Load(p)
+	wantValidationError(t, err)
+}
+
+// TestLoadRefusesTrackerAtSchemaVersion2 checks that a project.yaml
+// declaring schema_version 2 refuses tracker: outright, even its one old
+// legal value.
+func TestLoadRefusesTrackerAtSchemaVersion2(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 2
+name: demo
+tracker: local
+keys:
+  JIG: everything in demo
+repos: []
+platform: platform/
+`)
+	_, err := Load(p)
+	wantValidationError(t, err)
 }
 
 // TestLoadAbsentTrackersMeansNoMirrors checks that a project.yaml with
@@ -78,9 +126,10 @@ func TestLoadAbsentTrackersMeansNoMirrors(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
+keys:
+  JIG: everything in demo
 repos: []
 platform: platform/
 `)
@@ -95,45 +144,16 @@ func TestLoadTrackersEmptyMeansNoMirrors(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
+keys:
+  JIG: everything in demo
 trackers: []
 repos: []
 platform: platform/
 `)
 	if _, err := Load(p); err != nil {
 		t.Fatalf("Load: %v", err)
-	}
-}
-
-// TestLoadRefusesEveryOtherTrackerValue checks that every tracker: value
-// besides "local" - github, jira, linear, and the old {command: ...} map -
-// is refused when the config loads.
-func TestLoadRefusesEveryOtherTrackerValue(t *testing.T) {
-	cases := []struct {
-		name, trackerYAML string
-	}{
-		{"github", "tracker: github"},
-		{"jira", "tracker: jira"},
-		{"linear", "tracker: linear"},
-		{"command map", "tracker:\n  command: ./scripts/tracker.sh"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			dir := t.TempDir()
-			p := filepath.Join(dir, "project.yaml")
-			writeFile(t, p, fmt.Sprintf(`
-schema_version: 1
-name: demo
-ticket_format: "JIG-{n}"
-%s
-repos: []
-platform: platform/
-`, c.trackerYAML))
-			_, err := Load(p)
-			wantValidationError(t, err)
-		})
 	}
 }
 
@@ -144,9 +164,10 @@ func TestLoadRefusesATrackersEntry(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
+keys:
+  JIG: everything in demo
 trackers:
   - type: github
 repos: []
@@ -172,9 +193,10 @@ func TestLoadRefusesAMalformedTrackersShape(t *testing.T) {
 			dir := t.TempDir()
 			p := filepath.Join(dir, "project.yaml")
 			writeFile(t, p, fmt.Sprintf(`
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
+keys:
+  JIG: everything in demo
 %s
 repos: []
 platform: platform/
@@ -185,25 +207,6 @@ platform: platform/
 	}
 }
 
-// TestLoadRefusesTrackerAndTrackersTogether checks that tracker: and
-// trackers: together are refused, even when tracker: carries its one
-// remaining legal value.
-func TestLoadRefusesTrackerAndTrackersTogether(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "project.yaml")
-	writeFile(t, p, `
-schema_version: 1
-name: demo
-ticket_format: "JIG-{n}"
-tracker: local
-trackers: []
-repos: []
-platform: platform/
-`)
-	_, err := Load(p)
-	wantValidationError(t, err)
-}
-
 // TestLoadRefusesRoutes checks that a project.yaml declaring routes: -
 // which only ever fed publish's now-gone route step - is refused when the
 // config loads.
@@ -211,9 +214,10 @@ func TestLoadRefusesRoutes(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
+keys:
+  JIG: everything in demo
 repos: []
 platform: platform/
 routes:
@@ -230,9 +234,10 @@ func TestLoadAcceptsAGitHubTrackersEntry(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
+keys:
+  JIG: everything in demo
 trackers:
   - github:
       repo: example/tracking
@@ -258,9 +263,10 @@ func TestLoadRefusesASecondTrackersEntry(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
+keys:
+  JIG: everything in demo
 trackers:
   - github:
       repo: example/tracking
@@ -289,9 +295,10 @@ func TestLoadRefusesAGitHubEntryMissingAField(t *testing.T) {
 			dir := t.TempDir()
 			p := filepath.Join(dir, "project.yaml")
 			writeFile(t, p, fmt.Sprintf(`
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
+keys:
+  JIG: everything in demo
 trackers:
   - github:
       %s
@@ -310,9 +317,10 @@ func TestLoadRefusesAGitHubEntryWithAnUnknownKey(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
+keys:
+  JIG: everything in demo
 trackers:
   - github:
       repo: example/tracking
@@ -326,13 +334,12 @@ platform: platform/
 }
 
 // TestLoadKeysDeclaresEachKeyWithItsMeaning checks that keys: loads as
-// Config.Keys, key to meaning, and that no ticket_format-derived key is
-// mixed in.
+// Config.Keys, key to meaning.
 func TestLoadKeysDeclaresEachKeyWithItsMeaning(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
 keys:
   STORE: the store's layout, ids and git sync
@@ -371,7 +378,7 @@ func TestLoadRefusesAMalformedKey(t *testing.T) {
 			dir := t.TempDir()
 			p := filepath.Join(dir, "project.yaml")
 			writeFile(t, p, fmt.Sprintf(`
-schema_version: 1
+schema_version: 2
 name: demo
 keys:
   %s: a meaning
@@ -395,7 +402,7 @@ func TestLoadRefusesAKeyWithNoMeaning(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
 keys:
   STORE: ""
@@ -408,90 +415,6 @@ platform: platform/
 	errors.As(err, &ae)
 	if !strings.Contains(ae.Msg, "STORE") {
 		t.Fatalf("Msg = %q, want it to name STORE", ae.Msg)
-	}
-}
-
-// TestLoadRefusesKeysAndTicketFormatTogether checks that keys: and
-// ticket_format together are refused at load.
-func TestLoadRefusesKeysAndTicketFormatTogether(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "project.yaml")
-	writeFile(t, p, `
-schema_version: 1
-name: demo
-ticket_format: "JIG-{n}"
-keys:
-  STORE: the store's layout, ids and git sync
-repos: []
-platform: platform/
-`)
-	_, err := Load(p)
-	wantValidationError(t, err)
-}
-
-// TestLoadTicketFormatReadsAsTheOneKey checks that, absent keys:,
-// ticket_format "<KEY>-{n}" loads as Config.Keys declaring just that key,
-// with an empty meaning - and that the key it names is exempt from keys:'
-// 2-character minimum, since jig's own store format is "T-{n}".
-func TestLoadTicketFormatReadsAsTheOneKey(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "project.yaml")
-	writeFile(t, p, `
-schema_version: 1
-name: demo
-ticket_format: "T-{n}"
-repos: []
-platform: platform/
-`)
-	cfg, err := Load(p)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	want := map[string]string{"T": ""}
-	if !reflect.DeepEqual(cfg.Keys, want) {
-		t.Fatalf("Keys = %+v, want %+v", cfg.Keys, want)
-	}
-}
-
-// TestLoadRefusesEveryOtherTicketFormatShape checks that a ticket_format
-// with no "-" right before "{n}", text after "{n}", or a prefix breaking the
-// key rule (the 2-character minimum waived) is refused at load, with help
-// pointing at keys: instead.
-func TestLoadRefusesEveryOtherTicketFormatShape(t *testing.T) {
-	cases := []struct {
-		name, format string
-	}{
-		{"no dash before {n}", "JIG{n}"},
-		{"text after {n}", "JIG-{n}-gate"},
-		{"lowercase prefix", "jig-{n}"},
-		{"prefix starts with a digit", "1JIG-{n}"},
-		{"no {n} placeholder at all", "JIG"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			dir := t.TempDir()
-			p := filepath.Join(dir, "project.yaml")
-			writeFile(t, p, fmt.Sprintf(`
-schema_version: 1
-name: demo
-ticket_format: "%s"
-repos: []
-platform: platform/
-`, c.format))
-			_, err := Load(p)
-			wantValidationError(t, err)
-			var ae *axi.Error
-			errors.As(err, &ae)
-			found := false
-			for _, h := range ae.Help {
-				if strings.Contains(h, "keys:") {
-					found = true
-				}
-			}
-			if !found {
-				t.Fatalf("Help = %+v, want a line pointing at keys:", ae.Help)
-			}
-		})
 	}
 }
 
@@ -579,10 +502,54 @@ func TestRepoTargetBranch(t *testing.T) {
 	}
 }
 
-func TestMintLocalID(t *testing.T) {
-	cfg := Config{TicketFormat: "JIG-{n}"}
-	if got := cfg.MintLocalID(7); got != "JIG-7" {
-		t.Errorf("MintLocalID(7) = %q, want JIG-7", got)
+// TestCheckSchemaVersionAcceptsCurrent checks the plain case: a
+// schema_version equal to CurrentSchemaVersion passes, whether or not an
+// older one would be let through too.
+func TestCheckSchemaVersionAcceptsCurrent(t *testing.T) {
+	cfg := Config{SchemaVersion: CurrentSchemaVersion}
+	if err := cfg.CheckSchemaVersion(false); err != nil {
+		t.Fatalf("CheckSchemaVersion(false): %v", err)
+	}
+	if err := cfg.CheckSchemaVersion(true); err != nil {
+		t.Fatalf("CheckSchemaVersion(true): %v", err)
+	}
+}
+
+// TestCheckSchemaVersionRefusesOlderUnlessAllowed is the one exemption
+// project.Config.CheckSchemaVersion carries: `jig store migrate` passes
+// allowOlder true (resolveStoreForProjectAllowingOldSchema); every other
+// command passes false and is refused, with help naming `jig store
+// migrate`.
+func TestCheckSchemaVersionRefusesOlderUnlessAllowed(t *testing.T) {
+	cfg := Config{SchemaVersion: CurrentSchemaVersion - 1}
+	if err := cfg.CheckSchemaVersion(true); err != nil {
+		t.Fatalf("CheckSchemaVersion(true): %v", err)
+	}
+	err := cfg.CheckSchemaVersion(false)
+	wantValidationError(t, err)
+	var ae *axi.Error
+	errors.As(err, &ae)
+	found := false
+	for _, h := range ae.Help {
+		if strings.Contains(h, "jig store migrate") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Help = %+v, want a line naming `jig store migrate`", ae.Help)
+	}
+}
+
+// TestCheckSchemaVersionRefusesNewerEvenWhenOlderIsAllowed checks the other
+// refusal: a schema_version newer than CurrentSchemaVersion is refused
+// regardless of allowOlder, since even `jig store migrate` only ever
+// rewrites an older store onto the current schema, never a newer one back
+// down to it.
+func TestCheckSchemaVersionRefusesNewerEvenWhenOlderIsAllowed(t *testing.T) {
+	cfg := Config{SchemaVersion: CurrentSchemaVersion + 1}
+	for _, allowOlder := range []bool{false, true} {
+		err := cfg.CheckSchemaVersion(allowOlder)
+		wantValidationError(t, err)
 	}
 }
 
@@ -610,7 +577,7 @@ func TestInitStandalone(t *testing.T) {
 		t.Fatalf("mkdir repo: %v", err)
 	}
 
-	storePath, err := InitStandalone(repoDir)
+	storePath, err := InitStandalone(repoDir, "")
 	if err != nil {
 		t.Fatalf("InitStandalone: %v", err)
 	}
@@ -636,8 +603,12 @@ func TestInitStandalone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load generated project.yaml: %v", err)
 	}
-	if cfg.SchemaVersion != 1 || cfg.Name != "myrepo" || cfg.TicketFormat != "T-{n}" || cfg.Platform != "platform/" {
+	if cfg.SchemaVersion != CurrentSchemaVersion || cfg.Name != "myrepo" || cfg.Platform != "platform/" {
 		t.Errorf("cfg = %+v, unexpected", cfg)
+	}
+	wantKeys := map[string]string{"MYREPO": "everything in myrepo"}
+	if !reflect.DeepEqual(cfg.Keys, wantKeys) {
+		t.Errorf("Keys = %+v, want %+v (derived from the project name)", cfg.Keys, wantKeys)
 	}
 	if len(cfg.Repos) != 1 {
 		t.Fatalf("Repos = %+v, want 1 entry", cfg.Repos)
@@ -653,10 +624,48 @@ func TestInitStandalone(t *testing.T) {
 	if strings.Contains(string(data), "tracker:") {
 		t.Errorf("project.yaml = %s, want no tracker: key", data)
 	}
+	if strings.Contains(string(data), "ticket_format") {
+		t.Errorf("project.yaml = %s, want no ticket_format key", data)
+	}
 	absRepo, _ := filepath.Abs(repoDir)
 	if cfg.Repos[0].Remote != absRepo {
 		t.Errorf("Repos[0].Remote = %q, want %q", cfg.Repos[0].Remote, absRepo)
 	}
+}
+
+// TestInitStandaloneExplicitKey checks that --key replaces the key
+// InitStandalone would otherwise derive from the project name.
+func TestInitStandaloneExplicitKey(t *testing.T) {
+	parent := t.TempDir()
+	repoDir := filepath.Join(parent, "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+
+	storePath, err := InitStandalone(repoDir, "CUSTOM")
+	if err != nil {
+		t.Fatalf("InitStandalone: %v", err)
+	}
+	cfg, err := Load(filepath.Join(storePath, "project.yaml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := map[string]string{"CUSTOM": "everything in myrepo"}
+	if !reflect.DeepEqual(cfg.Keys, want) {
+		t.Fatalf("Keys = %+v, want %+v", cfg.Keys, want)
+	}
+}
+
+// TestInitStandaloneRefusesAMalformedExplicitKey checks that an explicit
+// --key breaking the key rule is refused rather than written.
+func TestInitStandaloneRefusesAMalformedExplicitKey(t *testing.T) {
+	parent := t.TempDir()
+	repoDir := filepath.Join(parent, "myrepo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	_, err := InitStandalone(repoDir, "lowercase")
+	wantValidationError(t, err)
 }
 
 // TestInitStandaloneReinitLeavesOtherDirtyFilesAlone checks InitStandalone's
@@ -671,14 +680,14 @@ func TestInitStandaloneReinitLeavesOtherDirtyFilesAlone(t *testing.T) {
 		t.Fatalf("mkdir repo: %v", err)
 	}
 
-	storePath, err := InitStandalone(repoDir)
+	storePath, err := InitStandalone(repoDir, "")
 	if err != nil {
 		t.Fatalf("InitStandalone: %v", err)
 	}
 
 	writeFile(t, filepath.Join(storePath, "unrelated.txt"), "dirty\n")
 
-	if _, err := InitStandalone(repoDir); err != nil {
+	if _, err := InitStandalone(repoDir, ""); err != nil {
 		t.Fatalf("InitStandalone (re-init): %v", err)
 	}
 
@@ -699,7 +708,7 @@ func TestInitStandaloneGitignoreKeepsLockFilesUntracked(t *testing.T) {
 		t.Fatalf("mkdir repo: %v", err)
 	}
 
-	storePath, err := InitStandalone(repoDir)
+	storePath, err := InitStandalone(repoDir, "")
 	if err != nil {
 		t.Fatalf("InitStandalone: %v", err)
 	}
@@ -759,10 +768,11 @@ func TestInitProject(t *testing.T) {
 
 	storeDir := t.TempDir()
 	writeFile(t, filepath.Join(storeDir, "project.yaml"), `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in demo
+trackers: []
 repos:
   - remote: https://example.invalid/org/demo.git
 platform: platform/
@@ -800,10 +810,11 @@ func TestInitProjectRejectsUnknownClone(t *testing.T) {
 
 	storeDir := t.TempDir()
 	writeFile(t, filepath.Join(storeDir, "project.yaml"), `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in demo
+trackers: []
 repos:
   - remote: https://example.invalid/org/demo.git
 platform: platform/
@@ -820,19 +831,21 @@ func TestResolvePrecedence(t *testing.T) {
 	// 1. explicit --store flag wins over everything.
 	explicitStore := t.TempDir()
 	writeFile(t, filepath.Join(explicitStore, "project.yaml"), `
-schema_version: 1
+schema_version: 2
 name: explicit
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in explicit
+trackers: []
 repos: []
 platform: platform/
 `)
 	cwdWithOwnStore := t.TempDir()
 	writeFile(t, filepath.Join(cwdWithOwnStore, "project.yaml"), `
-schema_version: 1
+schema_version: 2
 name: cwdstore
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in cwdstore
+trackers: []
 repos: []
 platform: platform/
 `)
@@ -857,10 +870,11 @@ platform: platform/
 	// 3. cwd inside a machine-mapped clone, no local project.yaml.
 	mappedStore := t.TempDir()
 	writeFile(t, filepath.Join(mappedStore, "project.yaml"), `
-schema_version: 1
+schema_version: 2
 name: mapped
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in mapped
+trackers: []
 repos: []
 platform: platform/
 `)
@@ -903,7 +917,7 @@ func TestResolveFallsBackToSiblingStandaloneStore(t *testing.T) {
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
 	}
-	storePath, err := InitStandalone(repoDir)
+	storePath, err := InitStandalone(repoDir, "")
 	if err != nil {
 		t.Fatalf("InitStandalone: %v", err)
 	}
@@ -943,10 +957,11 @@ func TestLoadGateConfigAbsent(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in demo
+trackers: []
 repos: []
 platform: platform/
 `)
@@ -970,10 +985,11 @@ func TestLoadGateConfigWithValues(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in demo
+trackers: []
 repos: []
 platform: platform/
 gate:
@@ -1005,10 +1021,11 @@ func TestLoadGateConfigPartialDefaults(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "project.yaml")
 	writeFile(t, p, `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in demo
+trackers: []
 repos: []
 platform: platform/
 gate:
@@ -1042,10 +1059,11 @@ func TestLoadGateConfigValidationErrors(t *testing.T) {
 		{
 			"negative fix_rounds",
 			`
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in demo
+trackers: []
 repos: []
 platform: platform/
 gate:
@@ -1056,10 +1074,11 @@ gate:
 		{
 			"invalid fix_risks",
 			`
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in demo
+trackers: []
 repos: []
 platform: platform/
 gate:
@@ -1072,10 +1091,11 @@ gate:
 		{
 			"fix_slice_findings too small",
 			`
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in demo
+trackers: []
 repos: []
 platform: platform/
 gate:
@@ -1107,10 +1127,11 @@ gate:
 // --effort does not accept is refused with the key named.
 func TestLoadEffortConfig(t *testing.T) {
 	head := `
-schema_version: 1
+schema_version: 2
 name: demo
-ticket_format: "JIG-{n}"
-tracker: local
+keys:
+  JIG: everything in demo
+trackers: []
 repos: []
 platform: platform/
 `

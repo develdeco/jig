@@ -838,7 +838,7 @@ func escapeDemoHTML(text string) string {
 func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 	rep reportYAML, tier string, commits map[string]string, authorCommits []authorCommit,
 	oracleNames []string, outcomes []findingOutcome, picked *DemoRenderResult) (string, bool, DemoRenderResult, error) {
-	relPath := filepath.Join(ticket, "pr", repoName+".md")
+	relPath := filepath.Join(st.TicketRelDir(ticket), "pr", repoName+".md")
 	fullPath := filepath.Join(st.Root, relPath)
 
 	var b strings.Builder

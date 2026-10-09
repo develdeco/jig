@@ -17,9 +17,10 @@ import (
 // (brief.md#Status and pull requests).
 func addRepoToProjectYAML(t *testing.T, work string) {
 	t.Helper()
-	projectYAML := `schema_version: 1
+	projectYAML := `schema_version: 2
 name: demo
-ticket_format: "DEMO-{n}"
+keys:
+  DEMO: everything in demo
 trackers:
   - github:
       repo: example/tracking
@@ -101,7 +102,7 @@ func TestSyncPlacesIssuesAndPullRequestsOnTheBoard(t *testing.T) {
 		}
 	}
 
-	data, err := os.ReadFile(filepath.Join(st.Root, "DEMO-1", "tracker", "github.yaml"))
+	data, err := os.ReadFile(filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

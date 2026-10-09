@@ -400,6 +400,45 @@ it is run on demand rather than from inside another command, so the
 cutover and an L3 migration should each run one full `jig trackers sync`
 instead of waiting out the backlog across several commands.
 
+## Upgrading a v1 store
+
+A store's `project.yaml` declares `schema_version: 2`: real tickets live
+under `tickets/<id>/`, every id carries an area key (`keys:`, e.g.
+`STORE-1`), and `trackers:` replaces the older `tracker:`/`ticket_format`
+pair. Every command but `jig store migrate` (and `jig help`/`jig version`)
+refuses a store still at `schema_version: 1`, naming `jig store migrate`
+as the next step.
+
+Write a rename map naming every ticket's new area key:
+
+```yaml
+keys:
+  STORE: the store's layout, ids, records and git sync
+  GRAPH: tickets, charts and the order between them
+tickets:
+  T-1: GRAPH
+  T-23: STORE
+```
+
+Every ticket the store has must appear in `tickets:`, under a key
+`keys:` declares; a ticket left out, one the store does not have, or an
+undeclared key is refused, naming every such entry. `jig store migrate
+--map <file> --dry-run` prints the resulting rename (old id, new id,
+title) and every file the migration would move, delete or rewrite,
+without changing anything - run it first to check the plan.
+
+`jig store migrate --map <file>` then carries it out: it refuses a store
+that is not clean and level with its origin, or whose tickets have a
+lease still held in this machine's pool; it warns, without refusing, about
+any `jig/<old id>` branch still on a repo's origin (merge or close it
+first, since jig works that ticket on `jig/<new id>` from then on); it
+moves each ticket folder to `tickets/<new id>/`, keeps the old id as an
+alias (`jig status`, `jig validate` and every other command resolve it
+from then on), rewrites `project.yaml` and every chart's `blocked_by`
+links, and commits once, on the current branch, without pushing. Push the
+branch yourself and open the usual pull request; the first sync after it
+merges updates each mirrored issue in place.
+
 ## Safety
 
 The `headless` backend is not a security boundary: a granted session's
