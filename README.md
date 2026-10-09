@@ -109,31 +109,31 @@ on its own installed binaries.
 ## Quickstart
 
 ```sh
-jig init --standalone                     # creates a sibling tickets store next to this repo
-jig ticket new --title "Fix the thing"    # mints a ticket (T-1) in the store
-# the intake skill drafts T-1/brief.md and T-1/slices.yaml with you
-jig validate T-1                          # checks the brief, slices, and manifest agree
-jig solve T-1 --backend headless --yes    # runs run, gate, and publish as one chain
+jig init --standalone                        # creates a sibling tickets store next to this repo
+jig ticket new --title "Fix the thing"       # mints a ticket (JIG-1) in the store
+# the intake skill drafts JIG-1/brief.md and JIG-1/slices.yaml with you
+jig validate JIG-1                           # checks the brief, slices, and manifest agree
+jig solve JIG-1 --backend headless --yes     # runs run, gate, and publish as one chain
 ```
 
 `jig solve` dispatches slices, gates the branch, and publishes in one
 chain. `--yes` skips the publish confirm and every gate round's triage
 prompt (keeping every finding jig can route on its own): when a session asks a
 question, `jig solve` stops, and you resume it with
-`jig solve T-1 --yes --answer <qid> "<text>"`. jig infers the pull-request
+`jig solve JIG-1 --yes --answer <qid> "<text>"`. jig infers the pull-request
 host from the shipped repo's own `remote:`: the standalone store above points
-at a local path, so publish only pushes `jig/T-1` and writes the PR body into
+at a local path, so publish only pushes `jig/JIG-1` and writes the PR body into
 the store instead of opening a PR; a repo whose remote is on github.com, with
 `gh` on PATH, gets its pull request opened automatically - no `project.yaml`
-setting is needed either way. Run `jig run T-1` and `jig gate T-1` on their own as slices
-need another attempt or a brief gets amended (`jig requeue T-1
+setting is needed either way. Run `jig run JIG-1` and `jig gate JIG-1` on their own as slices
+need another attempt or a brief gets amended (`jig requeue JIG-1
 --from-brief-diff`), or to clear one stalled or env-blocked slice by id
-(`jig requeue T-1 --slice <id>`). `jig status T-1` prints the ticket's
+(`jig requeue JIG-1 --slice <id>`). `jig status JIG-1` prints the ticket's
 slice and question state at any point, and `jig <command> -h` prints that
 command's flags.
 
-A ticket's id is `<key>-<n>`: the standalone store above declares just one
-key (`T`, from its default `ticket_format`), so `jig ticket new` needs no
+A ticket's id is `<key>-<n>`: the standalone store above derives its one
+key (`JIG`) from the repo's own name, so `jig ticket new` needs no
 `--key`. A project with `project.yaml`'s `keys:` declaring more than one -
 say a multi-repo project using each repo's acronym as a key - passes
 `--key <KEY>` to pick which one a new ticket mints under; leaving it out
