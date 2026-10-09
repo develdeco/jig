@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,9 +52,22 @@ func (e jigEnv) overrides() []string {
 
 // environ returns the process environment with e's variables replacing
 // whatever the process has under the same names (not appended beside them,
-// so the subprocess sees each name once).
+// so the subprocess sees each name once), and without JIG_RECORD_DIR: that
+// names the directory this suite records into, and the jig under test must
+// run the same whether or not the suite records, and never write there.
 func (e jigEnv) environ() []string {
-	return replaceEnv(os.Environ(), e.overrides())
+	return withoutEnv(replaceEnv(os.Environ(), e.overrides()), recordDirEnv)
+}
+
+// withoutEnv returns base without the entries named like one of names.
+func withoutEnv(base []string, names ...string) []string {
+	out := make([]string, 0, len(base))
+	for _, kv := range base {
+		if !slices.ContainsFunc(names, func(n string) bool { return sameEnvName(envName(kv), n) }) {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // replaceEnv returns base without any entry named like one of overrides,
@@ -93,7 +107,9 @@ func sameEnvName(a, b string) bool {
 // runJig runs the built jig binary with cwd and args in the process
 // environment plus env's variables. It never fails the test on a non-zero
 // exit: callers assert Code themselves, since every jig subcommand's
-// pause/stop/error paths are meaningful exit codes, not test failures.
+// pause/stop/error paths are meaningful exit codes, not test failures. While
+// JIG_RECORD_DIR is set it also records the run (record_test.go); the
+// returned output is the same either way.
 func runJig(t *testing.T, env jigEnv, cwd string, args ...string) jigResult {
 	t.Helper()
 	if env.home == "" {
@@ -104,10 +120,12 @@ func runJig(t *testing.T, env jigEnv, cwd string, args ...string) jigResult {
 	cmd.Dir = cwd
 	cmd.Env = env.environ()
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return jigResult{Stdout: stdout.String(), Stderr: stderr.String(), Code: exitCodeOf(t, err)}
+	code := records.run(t, recordCall{env: env, cwd: cwd, args: args}, &stdout, &stderr, func(out, errs io.Writer) int {
+		cmd.Stdout = out
+		cmd.Stderr = errs
+		return exitCodeOf(t, cmd.Run())
+	})
+	return jigResult{Stdout: stdout.String(), Stderr: stderr.String(), Code: code}
 }
 
 // newFixture generates a fresh fixture under a fresh jig home and returns

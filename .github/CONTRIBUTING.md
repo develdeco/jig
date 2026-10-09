@@ -103,6 +103,10 @@ annotation.
   (and, for the tests built on `newFixture`, `HOME` and `USERPROFILE`) in its
   own environment (`jigEnv` and `runJig`), never through the test process's,
   so they run in parallel with each other.
+- `e2e` records each jig run it makes, as an SVG with a tag beside it, into
+  the directory named by `JIG_RECORD_DIR` when the build sets it (jig does,
+  for the oracle run at a builder's green; ADR 0029). Unset, it records
+  nothing, and a recording that cannot be made never fails a test.
 
 ## Tests against the real Claude Code CLI
 
