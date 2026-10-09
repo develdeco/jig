@@ -65,18 +65,17 @@ func driveFixSlice(t *testing.T, fx *fixture.Fixture, model, slice string) {
 }
 
 // gateThroughReviewerScenario drives the fixture's "reviewer" scenario
-// branch through all three of its scripted gate rounds, replicating
-// demo/publish-body.tape's own triage script exactly - also pinned end to
-// end through cmd/jig's own CLI by
-// cmd/jig/gate_reviewer_e2e_test.go/TestGateReviewerRoundsThroughMain: a fix
-// kept (r1-f1, high), a second fix dismissed at the batch prompt (r1-f2,
-// low), an ask kept with a decision (r1-f3, medium), a note (r1-f4, low);
-// a delta round where the kept fix recurs and the dismissed one reaches no
-// one; a clean third round. It is the one scenario in this file whose gate
-// rounds write findings.yaml at all (the reviewer source, not the scripted
-// one), so it is the only one exercising the findings-outcome rules a
-// golden render needs to pin: fixed-by-slice, dismissed-by-a-human, noted,
-// and the counts and risk ordering built from them.
+// branch through all three of its scripted gate rounds, with the triage
+// cmd/jig/gate_reviewer_e2e_test.go/TestGateReviewerRoundsThroughMain pins
+// end to end through cmd/jig's own CLI: a fix kept (r1-f1, high), a second
+// fix dismissed at the batch prompt (r1-f2, low), an ask kept with a
+// decision (r1-f3, medium), a note (r1-f4, low); a delta round where the
+// kept fix recurs and the dismissed one reaches no one; a clean third
+// round. It is the one scenario in this file whose gate rounds write
+// findings.yaml at all (the reviewer source, not the scripted one), so it is
+// the only one exercising the findings-outcome rules a golden render needs
+// to pin: fixed-by-slice, dismissed-by-a-human, noted, and the counts and
+// risk ordering built from them.
 func gateThroughReviewerScenario(t *testing.T, fx *fixture.Fixture, d Deps) GateReport {
 	t.Helper()
 	driveBuild(t, fx, "rung-a")
@@ -143,11 +142,8 @@ func gateThroughReviewerScenario(t *testing.T, fx *fixture.Fixture, d Deps) Gate
 // with real fix slices, so it pins what their bullets are: one line each,
 // the first line of the builder prompt buildFixSlices wrote, with the short
 // sha beside it and none of the gate's own finding text, which belongs to
-// the review-notes comment this body only points at. The "reviewer" scenario
-// also scripts a demo for its clean round 3, so this is the one golden
-// ticket whose body has a ## Demo section: the summary, then each media
-// file (both are svg here) as a markdown image reference with its caption,
-// between What changed and Verification.
+// the review-notes comment this body only points at. Its build recorded
+// nothing, so the body has no ## Demo section.
 func TestGoldenRenderBriefSourcedTicket(t *testing.T) {
 	t.Parallel()
 
@@ -178,13 +174,6 @@ Fixes from review:
 - Fix these gate findings (%[5]s)
 - Gate finding r1-f3, kept by the human (%[6]s)
 - Fix these gate findings (%[7]s)
-
-## Demo
-
-two frames drawn from the fixture test cases for the clamp bound and the greeting
-
-- ![Clamp now holds the upper bound at 10](./demo-1.svg)
-- ![Greet reads casual](./demo-2.svg)
 
 ## Verification
 

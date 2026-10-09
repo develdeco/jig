@@ -192,7 +192,11 @@ func waitsForLine(st *store.Store, blockedBy []store.TicketBlockedBy) (string, e
 	}
 	parts := make([]string, len(blockedBy))
 	for i, b := range blockedBy {
-		_, abs := ticketRecordPath(st, b.Ticket)
+		blockerID, err := st.ResolveTicket(b.Ticket)
+		if err != nil {
+			return "", err
+		}
+		_, abs := ticketRecordPath(st, blockerID)
 		has, err := hasRecord(abs)
 		if err != nil {
 			return "", err
@@ -202,9 +206,9 @@ func waitsForLine(st *store.Store, blockedBy []store.TicketBlockedBy) (string, e
 			if err != nil {
 				return "", err
 			}
-			parts[i] = fmt.Sprintf("%s (#%d, %s)", b.Ticket, rec.Issue, b.Kind)
+			parts[i] = fmt.Sprintf("%s (#%d, %s)", blockerID, rec.Issue, b.Kind)
 		} else {
-			parts[i] = fmt.Sprintf("%s (%s)", b.Ticket, b.Kind)
+			parts[i] = fmt.Sprintf("%s (%s)", blockerID, b.Kind)
 		}
 	}
 	return "**Waits for:** " + strings.Join(parts, ", "), nil

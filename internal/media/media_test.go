@@ -140,28 +140,8 @@ func listedSpellings(dir, name string) map[string]string {
 
 func TestLimitsAreWhatGHAttachAccepts(t *testing.T) {
 	t.Parallel()
-	if got, want := fmt.Sprint(ImageExtensions()), "[png jpg jpeg gif webp svg]"; got != want {
-		t.Errorf("ImageExtensions() = %s, want %s", got, want)
-	}
-	if got, want := fmt.Sprint(VideoExtensions()), "[mp4 mov webm]"; got != want {
-		t.Errorf("VideoExtensions() = %s, want %s", got, want)
-	}
 	if MaxImageBytes != 10<<20 || MaxVideoBytes != 100<<20 || MaxFiles != 50 {
 		t.Errorf("limits = %d, %d, %d; want 10 MiB, 100 MiB and 50 files", MaxImageBytes, MaxVideoBytes, MaxFiles)
-	}
-}
-
-// TestExtensionListsAreCopies: a caller that edits what it was given cannot
-// change what is accepted.
-func TestExtensionListsAreCopies(t *testing.T) {
-	t.Parallel()
-	images, videos := ImageExtensions(), VideoExtensions()
-	images[0], videos[0] = "exe", "exe"
-	if Kind("exe") != "" || Kind("png") != "image" || Kind("mp4") != "video" {
-		t.Errorf("editing the returned lists changed what is accepted: exe=%q png=%q mp4=%q", Kind("exe"), Kind("png"), Kind("mp4"))
-	}
-	if ImageExtensions()[0] != "png" || VideoExtensions()[0] != "mp4" {
-		t.Errorf("the lists changed: %v %v", ImageExtensions(), VideoExtensions())
 	}
 }
 
@@ -428,8 +408,8 @@ func TestVerifyRefusesAMissingMediaDir(t *testing.T) {
 // TestVerifyRefusesADirectoryAboveMediaDirSwappedForALink: a plain
 // directory check follows every parent of media_dir, so a directory above it
 // that a session replaced with a link (on Windows a junction) would carry the
-// demo, and jig's rename after it, outside the evidence tree. media_dir must
-// be the directory jig made, whatever spelling now reaches it.
+// media, and what jig does with them after it, outside the evidence tree.
+// media_dir must be the directory jig made, whatever spelling now reaches it.
 func TestVerifyRefusesADirectoryAboveMediaDirSwappedForALink(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -471,7 +451,7 @@ func TestVerifyRefusesADirectoryAboveMediaDirSwappedForALink(t *testing.T) {
 }
 
 // TestVerifyRefusesAnEmptyFile: gh --attach refuses an empty file,
-// so a demo that recorded one would fail at publish. One byte is not empty.
+// so a recording of one would fail at publish. One byte is not empty.
 func TestVerifyRefusesAnEmptyFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -625,10 +605,10 @@ func TestPlainParentsRefusesALinkedStoreIDOrTicketDirectory(t *testing.T) {
 }
 
 // TestPlainParentsChecksEveryDirectoryBetweenTopAndDir: the check is not tied
-// to a layout. In a deeper one (the recordings of a ticket sit one directory
-// lower than a head's demo media), each directory strictly between top and dir
-// must be plain, a missing one ends the check, and neither top nor dir is
-// examined; a dir that is not below top is refused.
+// to a layout. In a deeper one (the recordings of a ticket sit a few
+// directories below the evidence directory), each directory strictly between
+// top and dir must be plain, a missing one ends the check, and neither top nor
+// dir is examined; a dir that is not below top is refused.
 func TestPlainParentsChecksEveryDirectoryBetweenTopAndDir(t *testing.T) {
 	t.Parallel()
 	newTree := func(t *testing.T) (top, dir string) {

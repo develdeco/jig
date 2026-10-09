@@ -35,8 +35,9 @@ func writeRoundReport(t *testing.T, storeDir, ticket string, round int, verdict 
 // gate round to publish yet), instead of the "no slices" message that would
 // send its owner to write a brief.
 func TestAdoptedTicketIsWorkedWithoutSlices(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	e := testEnv(fx.Home)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -54,18 +55,18 @@ func TestAdoptedTicketIsWorkedWithoutSlices(t *testing.T) {
 		{"solve", ticket, "--yes", "--backend", "fake", "--scenario", fx.ScenarioDir},
 		{"publish", ticket, "--yes"},
 	} {
-		out, code := runMain(t, "", withStore(args...)...)
+		out, code := runMain(t, e, "", withStore(args...)...)
 		for _, want := range []string{"ticket JIG-2 has no slices yet", "intake skill", "`jig gate JIG-2 --branch <name>`"} {
 			if code == 0 || !strings.Contains(out, want) {
 				t.Errorf("jig %s: exit %d, want a refusal saying %q:\n%s", strings.Join(args, " "), code, want, out)
 			}
 		}
 	}
-	out, code := runMain(t, "", withStore("requeue", ticket, "--from-brief-diff")...)
+	out, code := runMain(t, e, "", withStore("requeue", ticket, "--from-brief-diff")...)
 	if code == 0 || !strings.Contains(out, "intake skill") || strings.Contains(out, "--branch") {
 		t.Errorf("jig requeue before adoption: exit %d, want the intake refusal alone (requeue has nothing to adopt):\n%s", code, out)
 	}
-	out, code = runMain(t, "", withStore("status", ticket)...)
+	out, code = runMain(t, e, "", withStore("status", ticket)...)
 	if code != 0 || !strings.Contains(out, "intake skill") || strings.Contains(out, "branch:") {
 		t.Errorf("jig status before adoption: exit %d, want the intake hint and no branch line:\n%s", code, out)
 	}
@@ -75,7 +76,7 @@ func TestAdoptedTicketIsWorkedWithoutSlices(t *testing.T) {
 	}
 
 	// run has nothing to dispatch and says what the next step is.
-	out, code = runMain(t, "", withStore("run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)...)
+	out, code = runMain(t, e, "", withStore("run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)...)
 	if code != 0 || !strings.Contains(out, "Run `jig gate JIG-2` to open a gate round") {
 		t.Errorf("jig run on an adopted ticket: exit %d, want it to accept the ticket and point at the gate:\n%s", code, out)
 	}
@@ -85,16 +86,16 @@ func TestAdoptedTicketIsWorkedWithoutSlices(t *testing.T) {
 		{"gate", ticket, "--scenario", fx.ScenarioDir},
 		{"solve", ticket, "--yes", "--backend", "fake", "--scenario", fx.ScenarioDir},
 	} {
-		out, code := runMain(t, "", withStore(args...)...)
+		out, code := runMain(t, e, "", withStore(args...)...)
 		if code == 0 || strings.Contains(out, "no slices yet") || !strings.Contains(out, "code: BRANCH_NOT_FOUND") {
 			t.Errorf("jig %s: exit %d, want the gate's own BRANCH_NOT_FOUND, not a no-slices refusal:\n%s", strings.Join(args, " "), code, out)
 		}
 	}
-	out, code = runMain(t, "", withStore("publish", ticket, "--yes")...)
+	out, code = runMain(t, e, "", withStore("publish", ticket, "--yes")...)
 	if code == 0 || strings.Contains(out, "no slices yet") || !strings.Contains(out, "no gate rounds recorded for "+ticket) {
 		t.Errorf("jig publish on an adopted ticket: exit %d, want publish's own refusal (no gate round yet), not a no-slices one:\n%s", code, out)
 	}
-	out, code = runMain(t, "", withStore("requeue", ticket, "--from-brief-diff")...)
+	out, code = runMain(t, e, "", withStore("requeue", ticket, "--from-brief-diff")...)
 	if code == 0 || !strings.Contains(out, "adopted branch add-retry") || !strings.Contains(out, "`jig gate JIG-2`") || strings.Contains(out, "intake") {
 		t.Errorf("jig requeue on an adopted ticket: exit %d, want it to say the ticket adopted a branch and point at the gate:\n%s", code, out)
 	}
@@ -105,8 +106,8 @@ func TestAdoptedTicketIsWorkedWithoutSlices(t *testing.T) {
 // gate first, the next round after an unclean one, `jig publish` after a clean
 // one, as for any ticket. A ticket that adopted nothing keeps the intake hint.
 func TestStatusOfAnAdoptedTicket(t *testing.T) {
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -191,9 +192,9 @@ func pushAuthorBranch(t *testing.T, fx *fixture.Fixture, branch string) string {
 // fast-forwarded, the author's commit keeping its sha and jig's fix and the
 // memorize commit on top, and the report says the branch was pushed as it was.
 func TestSolveOfAnAdoptedTicketPublishesIt(t *testing.T) {
-	jigHome := t.TempDir()
-	t.Setenv("JIG_HOME", jigHome)
-	fx := fixture.Generate(t, fixture.Opts{})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	e := testEnv(fx.Home)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -206,12 +207,12 @@ func TestSolveOfAnAdoptedTicketPublishesIt(t *testing.T) {
 	withStore := func(args ...string) []string { return append(args, "--store", fx.StoreDir) }
 
 	// Round 1 adopts the branch and queues fix-1 (the scripted round).
-	out, code := runMain(t, "", withStore("gate", ticket, "--branch", branch, "--scenario", fx.ScenarioDir)...)
+	out, code := runMain(t, e, "", withStore("gate", ticket, "--branch", branch, "--scenario", fx.ScenarioDir)...)
 	if code != 0 || !strings.Contains(out, "verdict: fix-slices") {
 		t.Fatalf("jig gate --branch: exit %d, want a round that queued a fix\n%s", code, out)
 	}
 
-	out, code = runMain(t, "", withStore("solve", ticket, "--yes", "--backend", "fake", "--scenario", fx.ScenarioDir)...)
+	out, code = runMain(t, e, "", withStore("solve", ticket, "--yes", "--backend", "fake", "--scenario", fx.ScenarioDir)...)
 	if code != 0 {
 		t.Fatalf("jig solve on an adopted ticket: exit %d, want 0 - it built the fix, reached a clean round and published\n%s", code, out)
 	}

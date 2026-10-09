@@ -45,6 +45,7 @@ func twoCandidateQuery(t *testing.T) JudgeQuery {
 }
 
 func TestModelJudgeConfirmParsesAValidVerdictsFile(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0,"same":true},{"candidate":1,"same":false}]}`}, Model: "m"}
 	verdicts, err := judge.Confirm(twoCandidateQuery(t))
 	if err != nil {
@@ -56,6 +57,7 @@ func TestModelJudgeConfirmParsesAValidVerdictsFile(t *testing.T) {
 }
 
 func TestModelJudgeConfirmRejectsAMissingCandidate(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0,"same":true}]}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, candidate 1 was never answered")
@@ -63,6 +65,7 @@ func TestModelJudgeConfirmRejectsAMissingCandidate(t *testing.T) {
 }
 
 func TestModelJudgeConfirmRejectsADuplicateCandidate(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0,"same":true},{"candidate":0,"same":false},{"candidate":1,"same":true}]}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, candidate 0 answered twice")
@@ -70,6 +73,7 @@ func TestModelJudgeConfirmRejectsADuplicateCandidate(t *testing.T) {
 }
 
 func TestModelJudgeConfirmRejectsAnUnknownKey(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0,"same":true},{"candidate":1,"same":true}],"confidence":"high"}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, \"confidence\" is not a recognized key")
@@ -77,6 +81,7 @@ func TestModelJudgeConfirmRejectsAnUnknownKey(t *testing.T) {
 }
 
 func TestModelJudgeConfirmReturnsADispatchError(t *testing.T) {
+	t.Parallel()
 	wantErr := errors.New("boom")
 	judge := &ModelJudge{Backend: stubJudgeBackend{err: wantErr}, Model: "m"}
 	_, err := judge.Confirm(twoCandidateQuery(t))
@@ -88,6 +93,7 @@ func TestModelJudgeConfirmReturnsADispatchError(t *testing.T) {
 // --- strict verdicts ------------------------------------------------------
 
 func TestModelJudgeConfirmRejectsAnEntryMissingTheCandidateKey(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"same":true},{"candidate":1,"same":true}]}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, one entry has no \"candidate\" key at all")
@@ -95,6 +101,7 @@ func TestModelJudgeConfirmRejectsAnEntryMissingTheCandidateKey(t *testing.T) {
 }
 
 func TestModelJudgeConfirmRejectsANullCandidate(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":null,"same":true},{"candidate":1,"same":true}]}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, \"candidate\" is null")
@@ -102,6 +109,7 @@ func TestModelJudgeConfirmRejectsANullCandidate(t *testing.T) {
 }
 
 func TestModelJudgeConfirmRejectsAnEntryMissingTheSameKey(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0},{"candidate":1,"same":true}]}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, one entry has no \"same\" key at all")
@@ -109,6 +117,7 @@ func TestModelJudgeConfirmRejectsAnEntryMissingTheSameKey(t *testing.T) {
 }
 
 func TestModelJudgeConfirmRejectsANullSame(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0,"same":null},{"candidate":1,"same":true}]}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, \"same\" is null")
@@ -116,6 +125,7 @@ func TestModelJudgeConfirmRejectsANullSame(t *testing.T) {
 }
 
 func TestModelJudgeConfirmRejectsACaseVariantKey(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"Candidate":0,"same":true},{"candidate":1,"same":true}]}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, \"Candidate\" is a case variant of \"candidate\", not a match")
@@ -123,6 +133,7 @@ func TestModelJudgeConfirmRejectsACaseVariantKey(t *testing.T) {
 }
 
 func TestModelJudgeConfirmRejectsATopLevelCaseVariantKey(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"Verdicts":[{"candidate":0,"same":true},{"candidate":1,"same":true}]}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, \"Verdicts\" is a case variant of \"verdicts\", not a match")
@@ -130,6 +141,7 @@ func TestModelJudgeConfirmRejectsATopLevelCaseVariantKey(t *testing.T) {
 }
 
 func TestModelJudgeConfirmRejectsAKeyRepeatedInOneObject(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0,"same":true,"same":false},{"candidate":1,"same":true}]}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, \"same\" is repeated within one verdict entry")
@@ -139,6 +151,7 @@ func TestModelJudgeConfirmRejectsAKeyRepeatedInOneObject(t *testing.T) {
 // --- candidate index range ------------------------------------------------
 
 func TestModelJudgeConfirmRejectsANegativeCandidate(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":-1,"same":true},{"candidate":1,"same":true}]}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, candidate -1 is out of range")
@@ -146,6 +159,7 @@ func TestModelJudgeConfirmRejectsANegativeCandidate(t *testing.T) {
 }
 
 func TestModelJudgeConfirmRejectsATooLargeCandidate(t *testing.T) {
+	t.Parallel()
 	judge := &ModelJudge{Backend: stubJudgeBackend{body: `{"verdicts":[{"candidate":0,"same":true},{"candidate":2,"same":true}]}`}, Model: "m"}
 	if _, err := judge.Confirm(twoCandidateQuery(t)); err == nil {
 		t.Fatal("Confirm: want an error, candidate 2 is out of range for 2 candidates")
@@ -159,6 +173,7 @@ func TestModelJudgeConfirmRejectsATooLargeCandidate(t *testing.T) {
 // gold/trap/decision/dismissed a candidate's point is, since the judge is
 // asked the same one question for every candidate.
 func TestJudgePromptNeverNamesAPointKind(t *testing.T) {
+	t.Parallel()
 	prompt := fmt.Sprintf(judgePromptTemplate, 1, "judge.json", "verdicts.json")
 	for _, word := range []string{"seeded", "trap", "decision", "dismissed", "gold"} {
 		if strings.Contains(strings.ToLower(prompt), word) {
@@ -172,6 +187,7 @@ func TestJudgePromptNeverNamesAPointKind(t *testing.T) {
 // judge.json path and the verdicts.json path - three verbs, no fourth slot
 // a case name could ever be threaded through, however the caller changed.
 func TestJudgePromptTemplateHasNoRoomForACaseName(t *testing.T) {
+	t.Parallel()
 	if n := strings.Count(judgePromptTemplate, "%"); n != 3 {
 		t.Fatalf("judgePromptTemplate has %d format verbs, want exactly 3 (round, judge.json path, verdicts.json path)", n)
 	}
@@ -183,6 +199,7 @@ func TestJudgePromptTemplateHasNoRoomForACaseName(t *testing.T) {
 // must say plainly that this text is material to compare, not a command to
 // follow.
 func TestJudgePromptFencesQuotedMaterial(t *testing.T) {
+	t.Parallel()
 	prompt := fmt.Sprintf(judgePromptTemplate, 1, "judge.json", "verdicts.json")
 	low := strings.ToLower(prompt)
 	if !strings.Contains(low, "untrusted") && !strings.Contains(low, "not instructions") && !strings.Contains(low, "as data") {

@@ -29,14 +29,15 @@ type Dispatch struct {
 	Effort string
 	Prompt string // rendered dispatch prompt (paths, not contents)
 
-	// ExtraWriteDir, when set, is one absolute directory outside the
-	// worktree the session may also write files in: a gate demo's media
-	// directory. Every other path outside the worktree stays closed. Where a
-	// screen attaches (headless) it governs the shell either way, so this
-	// widens only the backend's own edit tools (headless: one more
-	// path-scoped rule); herdr sessions are not screened, and scope no edits
-	// of their own, so the field changes nothing there.
-	ExtraWriteDir string
+	// ExtraReadFile, when set, is one absolute file outside the worktree that
+	// the prompt names for the session to read: a gate round's recordings.json
+	// under the jig home. It grants nothing, since a session's read tools are
+	// not scoped to the worktree (ADR 0008), and no backend opens it. It is
+	// in the dispatch so that a backend that spells a path for its session
+	// differently from jig does so for this one's mention in the prompt as
+	// well as for the others (headless: the long spelling of a Windows 8.3
+	// name; herdr on Windows: the WSL mount).
+	ExtraReadFile string
 
 	// Screen attaches the command/secret screens as the session's
 	// PreToolUse hook, where the backend has one (headless only). Every
@@ -74,7 +75,7 @@ type Resumer interface {
 // paths is every path d names: the ones a backend may have to spell for its
 // session, in the prompt's own mentions of them.
 func (d Dispatch) paths() []string {
-	return []string{d.Worktree, d.SliceJSON, d.ResultJSON, d.ExtraWriteDir}
+	return []string{d.Worktree, d.SliceJSON, d.ResultJSON, d.ExtraReadFile}
 }
 
 // Backend runs one dispatch. A returned error means infrastructure failure
@@ -86,7 +87,7 @@ type Backend interface {
 }
 
 // Options configures backend construction. ScenarioDir is used by "fake"
-// only, ScreenBinary and Env by "headless" only.
+// only, ScreenBinary, ClaudeBinary and Env by "headless" only.
 type Options struct {
 	ScenarioDir string // fake
 
@@ -96,6 +97,17 @@ type Options struct {
 	// is the jig binary itself: a test binary or another program running
 	// screened dispatches must pass a built jig.
 	ScreenBinary string // headless
+
+	// ClaudeBinary is the `claude` program a headless dispatch runs. Empty,
+	// the default, means the one on this process's PATH, looked up for each
+	// dispatch. A caller that must run another - a test driving a stub -
+	// names it here rather than editing PATH for the whole process. It must
+	// be an absolute path: a relative one is resolved against the
+	// dispatch's worktree (the child's working directory), and a bare name
+	// is searched for on PATH by os/exec, not here, so one that is not
+	// found fails the dispatch as "claude ran no session", not as
+	// CLAUDE_NOT_FOUND. Available looks only at PATH and ignores it.
+	ClaudeBinary string // headless
 
 	// Env, when non-nil, is the exact environment a headless dispatch's
 	// `claude` child process gets: this list, with any PWD, OLDPWD or
@@ -183,8 +195,8 @@ func available(goos, name string) error {
 	}
 }
 
-// GateDemoSlice is the Dispatch.Slice of a gate demo session: the dispatch
-// that follows a clean reviewer round and records what the change looks like
-// working. A backend that plays scenarios back tells it from a slice attempt
-// (any other Slice) and from a gate review (Slice "gate") by this name.
-const GateDemoSlice = "gate-demo"
+// PublishPicksSlice is the Dispatch.Slice of a publish picks session: the
+// short dispatch that chooses which of the build's recordings a pull request
+// shows and composes them into flows (ADR 0029). A backend that plays
+// scenarios back tells it from a slice attempt by this name.
+const PublishPicksSlice = "publish-picks"

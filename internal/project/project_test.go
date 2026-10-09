@@ -325,6 +325,229 @@ platform: platform/
 	wantValidationError(t, err)
 }
 
+// TestLoadKeysDeclaresEachKeyWithItsMeaning checks that keys: loads as
+// Config.Keys, key to meaning, and that no ticket_format-derived key is
+// mixed in.
+func TestLoadKeysDeclaresEachKeyWithItsMeaning(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+keys:
+  STORE: the store's layout, ids and git sync
+  GRAPH: tickets, charts and the order between them
+repos: []
+platform: platform/
+`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := map[string]string{
+		"STORE": "the store's layout, ids and git sync",
+		"GRAPH": "tickets, charts and the order between them",
+	}
+	if !reflect.DeepEqual(cfg.Keys, want) {
+		t.Fatalf("Keys = %+v, want %+v", cfg.Keys, want)
+	}
+}
+
+// TestLoadRefusesAMalformedKey checks that a key breaking the 2-to-10,
+// uppercase-letters-and-digits-starting-with-a-letter rule is refused at
+// load, naming the key.
+func TestLoadRefusesAMalformedKey(t *testing.T) {
+	cases := []struct {
+		name, key string
+	}{
+		{"too short", "S"},
+		{"too long", "ABCDEFGHIJK"},
+		{"lowercase", "store"},
+		{"starts with a digit", "1STORE"},
+		{"has a dash", "ST-RE"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "project.yaml")
+			writeFile(t, p, fmt.Sprintf(`
+schema_version: 1
+name: demo
+keys:
+  %s: a meaning
+repos: []
+platform: platform/
+`, c.key))
+			_, err := Load(p)
+			wantValidationError(t, err)
+			var ae *axi.Error
+			errors.As(err, &ae)
+			if !strings.Contains(ae.Msg, c.key) {
+				t.Fatalf("Msg = %q, want it to name the key %q", ae.Msg, c.key)
+			}
+		})
+	}
+}
+
+// TestLoadRefusesAKeyWithNoMeaning checks that a key: entry whose meaning is
+// empty is refused at load, naming the key.
+func TestLoadRefusesAKeyWithNoMeaning(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+keys:
+  STORE: ""
+repos: []
+platform: platform/
+`)
+	_, err := Load(p)
+	wantValidationError(t, err)
+	var ae *axi.Error
+	errors.As(err, &ae)
+	if !strings.Contains(ae.Msg, "STORE") {
+		t.Fatalf("Msg = %q, want it to name STORE", ae.Msg)
+	}
+}
+
+// TestLoadRefusesKeysAndTicketFormatTogether checks that keys: and
+// ticket_format together are refused at load.
+func TestLoadRefusesKeysAndTicketFormatTogether(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "JIG-{n}"
+keys:
+  STORE: the store's layout, ids and git sync
+repos: []
+platform: platform/
+`)
+	_, err := Load(p)
+	wantValidationError(t, err)
+}
+
+// TestLoadTicketFormatReadsAsTheOneKey checks that, absent keys:,
+// ticket_format "<KEY>-{n}" loads as Config.Keys declaring just that key,
+// with an empty meaning - and that the key it names is exempt from keys:'
+// 2-character minimum, since jig's own store format is "T-{n}".
+func TestLoadTicketFormatReadsAsTheOneKey(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "project.yaml")
+	writeFile(t, p, `
+schema_version: 1
+name: demo
+ticket_format: "T-{n}"
+repos: []
+platform: platform/
+`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := map[string]string{"T": ""}
+	if !reflect.DeepEqual(cfg.Keys, want) {
+		t.Fatalf("Keys = %+v, want %+v", cfg.Keys, want)
+	}
+}
+
+// TestLoadRefusesEveryOtherTicketFormatShape checks that a ticket_format
+// with no "-" right before "{n}", text after "{n}", or a prefix breaking the
+// key rule (the 2-character minimum waived) is refused at load, with help
+// pointing at keys: instead.
+func TestLoadRefusesEveryOtherTicketFormatShape(t *testing.T) {
+	cases := []struct {
+		name, format string
+	}{
+		{"no dash before {n}", "JIG{n}"},
+		{"text after {n}", "JIG-{n}-gate"},
+		{"lowercase prefix", "jig-{n}"},
+		{"prefix starts with a digit", "1JIG-{n}"},
+		{"no {n} placeholder at all", "JIG"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "project.yaml")
+			writeFile(t, p, fmt.Sprintf(`
+schema_version: 1
+name: demo
+ticket_format: "%s"
+repos: []
+platform: platform/
+`, c.format))
+			_, err := Load(p)
+			wantValidationError(t, err)
+			var ae *axi.Error
+			errors.As(err, &ae)
+			found := false
+			for _, h := range ae.Help {
+				if strings.Contains(h, "keys:") {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("Help = %+v, want a line pointing at keys:", ae.Help)
+			}
+		})
+	}
+}
+
+// TestResolveKeyDefaultsToTheOneDeclaredKey checks that an empty key
+// resolves to the project's single declared key, with no --key needed.
+func TestResolveKeyDefaultsToTheOneDeclaredKey(t *testing.T) {
+	cfg := Config{Keys: map[string]string{"STORE": "the store"}}
+	key, err := cfg.ResolveKey("")
+	if err != nil {
+		t.Fatalf("ResolveKey: %v", err)
+	}
+	if key != "STORE" {
+		t.Fatalf("ResolveKey(\"\") = %q, want STORE", key)
+	}
+}
+
+// TestResolveKeyRefusesAnEmptyKeyWhenAmbiguous checks that an empty key is
+// refused, before anything is minted, when the project declares more than
+// one key.
+func TestResolveKeyRefusesAnEmptyKeyWhenAmbiguous(t *testing.T) {
+	cfg := Config{Keys: map[string]string{"STORE": "the store", "GRAPH": "the graph"}}
+	_, err := cfg.ResolveKey("")
+	wantValidationError(t, err)
+}
+
+// TestResolveKeyRefusesAnUndeclaredKey checks that a key the project does
+// not declare is refused, naming it and listing the declared keys and their
+// meanings.
+func TestResolveKeyRefusesAnUndeclaredKey(t *testing.T) {
+	cfg := Config{Keys: map[string]string{"STORE": "the store's layout, ids and git sync"}}
+	_, err := cfg.ResolveKey("NOPE")
+	wantValidationError(t, err)
+	var ae *axi.Error
+	errors.As(err, &ae)
+	if !strings.Contains(ae.Msg, "NOPE") {
+		t.Fatalf("Msg = %q, want it to name NOPE", ae.Msg)
+	}
+	joined := strings.Join(ae.Help, "\n")
+	if !strings.Contains(joined, "STORE") || !strings.Contains(joined, "the store's layout, ids and git sync") {
+		t.Fatalf("Help = %+v, want it to list the declared key STORE and its meaning", ae.Help)
+	}
+}
+
+// TestResolveKeyAcceptsADeclaredKey checks the plain case: a key the
+// project declares resolves to itself.
+func TestResolveKeyAcceptsADeclaredKey(t *testing.T) {
+	cfg := Config{Keys: map[string]string{"STORE": "the store", "GRAPH": "the graph"}}
+	key, err := cfg.ResolveKey("GRAPH")
+	if err != nil {
+		t.Fatalf("ResolveKey: %v", err)
+	}
+	if key != "GRAPH" {
+		t.Fatalf("ResolveKey(\"GRAPH\") = %q, want GRAPH", key)
+	}
+}
+
 func TestRepoName(t *testing.T) {
 	cases := []struct{ remote, want string }{
 		{"https://example.invalid/org/demo.git", "demo"},

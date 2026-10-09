@@ -13,8 +13,17 @@ A dedicated git repo with a remote holding every ticket artifact; it is the sour
 _Avoid_: database, state dir
 
 **Ticket**:
-jig's record of one unit of work, in the store, under an id jig mints.
+jig's record of one unit of work, in the store, under an id jig mints: a
+key plus a number. May carry aliases, its earlier ids, kept forever; an id or
+alias resolves to the ticket's current id wherever jig takes one.
 _Avoid_: issue, which names a tracker's copy of a ticket
+
+**Key**:
+The area part of a ticket id (`STORE` in `STORE-3`), declared in
+`project.yaml`'s `keys:` with a one-line meaning. A ticket's id never
+changes when its ticket's area does - a key only decides what a new
+ticket mints under.
+_Avoid_: prefix, namespace
 
 **Mirror**:
 A tracker's copy of the store, written by jig at every checkpoint and never
@@ -70,12 +79,16 @@ Evidence that a check passed, stored in the ticket's `evidence/`.
 _Avoid_: screenshot, proof
 
 **Demo**:
-What a session shows a person reviewing a change: the change working, as a screenshot, a GIF or a video, whichever shows it best. After a clean reviewer round, `jig gate` dispatches a demo session and records what it produced: the media under the jig home's `evidence/` (never in the store's git) and `gate/round-N/demo.yaml`, the manifest of each file's hash, size and caption, or a refused status and why. There is one per reviewed head, and it is best effort: a refused or failed demo is recorded and shown, never a reason for the round's verdict to change. `jig gate --no-demo` skips it.
+What a pull request shows of the change working: its `## Demo` section, a screenshot, a GIF, a video or a terminal capture per recording, composed into flows. It is a by-product of verification, not a session of its own: the build's end-to-end scenarios write recordings, and `jig publish` renders the section from the ones a short session picks (see **Recording** and **Pick**). A pull request whose build recorded nothing, or whose pick is refused, has no demo section. ADR 0014's gate demo session, which dispatched a model after a clean reviewer round to make the media, is retired (ADR 0029).
 _Avoid_: receipt (evidence that a check passed), screencast
 
 **Recording**:
-What the build's end-to-end scenarios write while they run at a builder's green oracle run: a screenshot, a video or a terminal capture, optionally tagged with its scenario, flow, step and caption. jig gives that run a directory of its own under the jig home's `evidence/` (`JIG_RECORD_DIR`, which jig strips from the environment of every oracle run, env command and headless session it starts (a herdr session runs in herdr's own environment, which jig does not set)), verifies what a passing run left there, and journals it as one `recorded` line with the commit the oracle ran at and the run; a failing run's recordings are discarded, and the gate records nothing. The source the demo is moving to (ADR 0029).
-_Avoid_: demo (the gate session's media for one reviewed head), screencast
+What the build's end-to-end scenarios write while they run at a builder's green oracle run: a screenshot, a video or a terminal capture, optionally tagged with its scenario, flow, step and caption. jig gives that run a directory of its own under the jig home's `evidence/` (`JIG_RECORD_DIR`, which jig strips from the environment of every oracle run, env command and headless session it starts (a herdr session runs in herdr's own environment, which jig does not set)), verifies what a passing run left there, and journals it as one `recorded` line with the commit the oracle ran at and the run; a failing run's recordings are discarded, and the gate records nothing. The source of the demo (ADR 0029): publish picks among them (see **Pick**), and the gate's reviewer reads the ones on the reviewed head's history as evidence.
+_Avoid_: screencast
+
+**Pick**:
+What a short session chooses at `jig publish` from the build's recordings: the ones that show the change to a person reviewing the pull request, composed into flows (recordings of one flow together in step order, scenarios that stand alone apart, mixes allowed). jig validates the answer against the candidates, copies the picked files into a directory of its own under the jig home's `evidence/`, attaches them to the pull request, and renders its `## Demo` section from them, a flow per `###` heading. It is the section's only source: a refused pick, or none to make, leaves the pull request without one (ADR 0029). Journaled as a `publish-picks` line, which a later publish of the same head and recordings reuses.
+_Avoid_: selection, gallery
 
 **Fix slice**:
 A gate finding turned into a new frontier item. Review has no back-edges - every finding becomes forward work.

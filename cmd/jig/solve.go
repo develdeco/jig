@@ -27,13 +27,8 @@ func gateSourceForSolve(scenario string, backend session.Backend) verifydeliver.
 	return verifydeliver.NewReviewerGateSource(backend)
 }
 
-// solveGateSource is how cmdSolve picks its gate source. It is a variable
-// only so a test can put a source that spies on the demo in its place, the
-// way newFlagSetHook lets a test capture flag sets; nothing else assigns it.
-var solveGateSource = gateSourceForSolve
-
-// cmdSolve implements `jig solve <ticket> [--yes] [--no-demo] [--answer <qid>
-// <text>] [--backend <name>] [--scenario <dir>]`. It runs the frontier and the gate
+// cmdSolve implements `jig solve <ticket> [--yes] [--answer <qid> <text>]
+// [--backend <name>] [--scenario <dir>]`. It runs the frontier and the gate
 // until a round is clean, then publishes, an adopted branch included.
 //
 // NOTE: --backend/--scenario are accepted here, beyond solve's own --yes
@@ -44,7 +39,7 @@ var solveGateSource = gateSourceForSolve
 // publish confirm and keeps every finding jig can route on its own, without
 // prompting; an ask whose workspace or oracle jig cannot derive still waits
 // for a human.
-func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
+func cmdSolve(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest0, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -54,9 +49,8 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	fs := newFlagSet("solve")
+	fs := newFlagSet(e, "solve")
 	yes := fs.Bool("yes", false, "skip the interactive publish confirm and finding triage")
-	noDemo := fs.Bool("no-demo", false, "skip the demo session a clean reviewer round otherwise runs")
 	backendFlag := fs.String("backend", "", "session backend: fake, headless, or herdr")
 	scenario := fs.String("scenario", "", "scenario dir for the fake backend")
 	storeFlag := fs.String("store", "", "explicit store path")
@@ -67,7 +61,14 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, jigHome, err := resolveStoreForProject(*projectFlag, *storeFlag, stdout)
+	if *scenario, err = e.abs(*scenario); err != nil {
+		return renderErr(stdout, err)
+	}
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	ticket, err = resolveTicketArg(st, ticket, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -84,9 +85,9 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 
 	fdeps := frontierDeps(st, cfg, mp, jigHome, backend, ticket)
-	vdeps := verifydeliverDeps(st, cfg, mp, jigHome)
-	src := solveGateSource(*scenario, backend)
-	triage := triageFor(*yes, stdin, stdout)
+	vdeps := verifydeliverDeps(e, st, cfg, mp, jigHome)
+	src := e.solveGateSource(*scenario, backend)
+	triage := triageFor(e, *yes, stdin, stdout)
 
 	// Check identity before any session or gate round runs, not only at
 	// publish.
@@ -102,12 +103,9 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 		return printRunReport(stdout, st, ticket, report)
 	}
 
-	var (
-		lastVerdict string
-		lastDemo    *verifydeliver.DemoReport
-	)
+	var lastVerdict string
 	for round := 0; round < maxSolveRounds; round++ {
-		gr, err := verifydeliver.Gate(vdeps, src, verifydeliver.GateOpts{Ticket: ticket, Triage: triage, NoDemo: *noDemo})
+		gr, err := verifydeliver.Gate(vdeps, src, verifydeliver.GateOpts{Ticket: ticket, Triage: triage})
 		if err != nil {
 			return renderErr(stdout, err)
 		}
@@ -120,7 +118,6 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 			return printGateReport(stdout, st, ticket, gr)
 		}
 		lastVerdict = gr.Verdict
-		lastDemo = gr.Demo
 		if gr.Verdict == "clean" {
 			break
 		}
@@ -138,12 +135,12 @@ func cmdSolve(args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 
 	pdeps := vdeps
-	preport, err := verifydeliver.Publish(pdeps, verifydeliver.PublishOpts{Ticket: ticket, Yes: *yes})
+	preport, err := verifydeliver.Publish(pdeps, verifydeliver.PublishOpts{Ticket: ticket, Yes: *yes, Backend: backend})
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 
-	solveKV := append([][2]string{{"ticket", ticket}, {"tier", preport.Tier}}, demoRows(lastDemo)...)
+	solveKV := append([][2]string{{"ticket", ticket}, {"tier", preport.Tier}}, picksRows(preport.Picks)...)
 	axi.Render(stdout,
 		axi.KV("solve", solveKV),
 		pushedTable(preport),

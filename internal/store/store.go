@@ -34,6 +34,23 @@ type Store struct {
 	// "warning: <cause>" to os.Stderr. A command that wants the warning in
 	// its own structured output sets this before calling Push.
 	Warn func(format string, args ...any)
+
+	// aliasClaimsCache memoizes aliasClaims' store-wide scan (internal/store/resolve.go)
+	// for the life of this Store value: a command resolving many refs in one
+	// run (jig validate's blocked_by refs and cycle DFS, the mirror's
+	// blocker links and "Waits for" line) would otherwise re-read every
+	// ticket.yaml once per ref. invalidateAliasClaims clears it whenever a
+	// ticket.yaml write could change what it holds.
+	aliasClaimsCache map[string][]string
+}
+
+// invalidateAliasClaims drops the memoized aliasClaims result, so the next
+// call rescans the store. CreateTicketRecord and mutateTicket, the only
+// writers of ticket.yaml, call this after a successful write: either one can
+// change a ticket's aliases (or, for CreateTicketRecord, add a ticket whose
+// id now claims itself) and so change what aliasClaims resolves.
+func (s *Store) invalidateAliasClaims() {
+	s.aliasClaimsCache = nil
 }
 
 // RunCheckpointHook runs AfterCheckpoint, when set, after a checkpoint has
@@ -619,11 +636,11 @@ func (s *Store) Dirty() (bool, error) {
 // or a differently cased spelling names one id. A Windows junction is not a
 // symlink and is not resolved: a clone reached through one names its own id,
 // as a clone moved elsewhere does. It keys the machine-local files
-// that belong to a store but must stay out of its git, such as a gate demo's
-// media under the jig home (home.EvidenceDir). It is derived from the
-// path, not stored, because those files are per machine like the clone
-// itself: a clone moved elsewhere is a new id, and its media are not found
-// under the old one.
+// that belong to a store but must stay out of its git, such as a ticket's
+// recordings under the jig home's evidence tree (home.RecordDir). It is
+// derived from the path, not stored, because those files are per machine like
+// the clone itself: a clone moved elsewhere is a new id, and its media are not
+// found under the old one.
 func (s *Store) ID() (string, error) {
 	abs, err := filepath.Abs(s.Root)
 	if err != nil {

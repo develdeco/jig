@@ -33,7 +33,7 @@ type Intent struct {
 
 // intentSourcesPrompt is the one sentence every session prompt that hands a
 // session an Intent uses to say what each source means: the reviewer's and
-// the demo's. It is written once so that a source jig gains is described to
+// the pick's. It is written once so that a source jig gains is described to
 // both sessions, or to neither. Adding a source above means describing it
 // here.
 const intentSourcesPrompt = `"brief" or "explicit" is the human's own statement of what was asked for; "inferred" is jig's own summary of the author's own agent session, a hint that may be partial or wrong; "none" means nothing states it.`

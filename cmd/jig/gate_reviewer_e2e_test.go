@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,16 +63,6 @@ func findingsYAMLEntry(t *testing.T, path, id string) (triage, decision string, 
 	return "", "", false
 }
 
-// runMain runs Main in-process with a scripted stdin and returns its stdout
-// and exit code. It never fails the test on a non-zero code: several steps
-// below (the deliberately broken round 1 attempt) expect one.
-func runMain(t *testing.T, stdin string, args ...string) (string, int) {
-	t.Helper()
-	var buf bytes.Buffer
-	code := Main(args, &buf, strings.NewReader(stdin))
-	return buf.String(), code
-}
-
 // reviewResultAt reads and parses one scenario round's review-result.json.
 func reviewResultAt(t *testing.T, path string) verifydeliver.ReviewResult {
 	t.Helper()
@@ -128,7 +116,7 @@ func withoutPrefix(paths []string, prefix string) []string {
 // TestGateReviewerRoundsThroughMain is the decisive end-to-end test for the
 // reviewer path: the real reviewer path (`--backend fake`, playing back
 // testdata/fixture/scenario-branches/reviewer/), driven entirely through
-// cmd/jig's own Main with stdinIsTerminal forced true and a scripted stdin,
+// cmd/jig's own run with its terminal check forced true and a scripted stdin,
 // exactly as a real terminal session would answer the triage prompts.
 //
 // It drives three full gate rounds:
@@ -147,12 +135,9 @@ func withoutPrefix(paths []string, prefix string) []string {
 //     `jig run`.
 //   - round 3: clean, with the round 1 note still on record.
 func TestGateReviewerRoundsThroughMain(t *testing.T) {
-	prevTerm := stdinIsTerminal
-	stdinIsTerminal = func(io.Reader) bool { return true }
-	defer func() { stdinIsTerminal = prevTerm }()
-
-	t.Setenv("JIG_HOME", t.TempDir())
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "reviewer"})
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
+	e := testEnv(fx.Home).atTerminal()
 	ticket := fx.Ticket
 
 	gateArgs := func(extra ...string) []string {
@@ -163,12 +148,12 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 
 	// --- build a, b, c, d to green (same shape as the e2e package's own
 	// TestEndToEndTwice): a, b, d go straight through; c pauses on q-001.
-	out, code := runMain(t, "", runArgs...)
+	out, code := runMain(t, e, "", runArgs...)
 	if code != 2 {
 		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\n%s", code, out)
 	}
 	answerArgs := []string{"run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	out, code = runMain(t, "", answerArgs...)
+	out, code = runMain(t, e, "", answerArgs...)
 	if code != 0 {
 		t.Fatalf("run (answer) exit = %d, want 0\n%s", code, out)
 	}
@@ -196,7 +181,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	broken.ReviewedPaths = withoutPrefix(correct.ReviewedPaths, "alpha/")
 	writeReviewResultAt(t, round1Path, broken)
 
-	out, code = runMain(t, "", gateArgs()...)
+	out, code = runMain(t, e, "", gateArgs()...)
 	if code != 1 {
 		t.Fatalf("round 1 first (broken) attempt: exit = %d, want 1\n%s", code, out)
 	}
@@ -241,7 +226,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	// note), so the batch holds only r1-f1 and Enter accepts it; keep ask
 	// r1-f3 with a decision.
 	writeReviewResultAt(t, round1Path, correct)
-	out, code = runMain(t, "\nk\nUse a warm, casual tone; no exclamation marks.\n", gateArgs()...)
+	out, code = runMain(t, e, "\nk\nUse a warm, casual tone; no exclamation marks.\n", gateArgs()...)
 	if code != 0 {
 		t.Fatalf("round 1 (corrected) exit = %d, want 0\n%s", code, out)
 	}
@@ -290,7 +275,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	}
 
 	// --- drive both round 1 fix slices to green.
-	out, code = runMain(t, "", runArgs...)
+	out, code = runMain(t, e, "", runArgs...)
 	if code != 0 {
 		t.Fatalf("run (fix-1 slices) exit = %d, want 0\n%s", code, out)
 	}
@@ -309,7 +294,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	// file is reviewed with nothing new reported there and clears; the
 	// low-risk fix is re-reported through prior and, below the floor
 	// again, routes straight to a note once more, reaching no one.
-	out, code = runMain(t, "\n", gateArgs()...)
+	out, code = runMain(t, e, "\n", gateArgs()...)
 	if code != 0 {
 		t.Fatalf("round 2 exit = %d, want 0\n%s", code, out)
 	}
@@ -365,7 +350,7 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	}
 
 	// --- drive the round 2 recurrence's fix slice to green.
-	out, code = runMain(t, "", runArgs...)
+	out, code = runMain(t, e, "", runArgs...)
 	if code != 0 {
 		t.Fatalf("run (fix-2-alpha-test) exit = %d, want 0\n%s", code, out)
 	}
@@ -379,17 +364,12 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 
 	// --- round 3: clean. The scenario's own review-result.json reports
 	// nothing new, and nothing is left open or asked, so the round clears.
-	out, code = runMain(t, "", gateArgs()...)
+	out, code = runMain(t, e, "", gateArgs()...)
 	if code != 0 {
 		t.Fatalf("round 3 exit = %d, want 0\n%s", code, out)
 	}
 	if !strings.Contains(out, "round: 3") || !strings.Contains(out, "verdict: clean") {
 		t.Fatalf("round 3 report missing round/verdict kv lines:\n%s", out)
-	}
-	// A clean reviewer round also runs its demo, which the scenario scripts
-	// for this round: it is recorded beside the verdict, not instead of it.
-	if !strings.Contains(out, "demo: recorded") {
-		t.Fatalf("round 3 report missing its recorded demo:\n%s", out)
 	}
 
 	// The round 1 note is never routed, never cleared, and never blocks

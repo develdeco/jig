@@ -8,6 +8,7 @@ import (
 )
 
 func TestScheduleTwoReposConcurrent(t *testing.T) {
+	t.Parallel()
 	slices := []store.Slice{
 		{ID: "a", Workspace: "ws1"},
 		{ID: "b", Workspace: "ws2"},
@@ -25,6 +26,7 @@ func TestScheduleTwoReposConcurrent(t *testing.T) {
 }
 
 func TestScheduleOneRepoTwoWorkspacesSerial(t *testing.T) {
+	t.Parallel()
 	slices := []store.Slice{
 		{ID: "a", Workspace: "alpha"},
 		{ID: "b", Workspace: "beta"},

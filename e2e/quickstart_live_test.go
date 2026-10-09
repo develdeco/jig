@@ -31,10 +31,15 @@ func TestQuickstartLive(t *testing.T) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		t.Fatalf("JIG_LIVE_CLAUDE is set but claude is not on PATH: %v", err)
 	}
-	t.Setenv("JIG_HOME", t.TempDir())
+	// The jig home is this test's own; the user home stays the host's, which
+	// the real claude CLI may need. This test stays serial, with no
+	// t.Parallel: claudetest.Serve below points the claude CLI at its scripted
+	// API with t.Setenv, which edits the process environment (and panics in a
+	// parallel test).
+	env := jigEnv{home: t.TempDir()}
 
 	skills := t.TempDir()
-	mustExitZero(t, runJig(t, skills, "skills", "install", "--project"), "jig skills install --project")
+	mustExitZero(t, runJig(t, env, skills, "skills", "install", "--project"), "jig skills install --project")
 	if _, err := os.Stat(filepath.Join(skills, ".claude", "skills", "intake", "SKILL.md")); err != nil {
 		t.Fatalf("jig skills install --project did not install the intake skill the Quickstart drafts with: %v", err)
 	}
@@ -50,9 +55,9 @@ func TestQuickstartLive(t *testing.T) {
 	gitLog(t, repo, "add", "-A")
 	gitLog(t, repo, "commit", "-q", "-m", "initial commit")
 
-	mustExitZero(t, runJig(t, repo, "init", "--standalone"), "jig init --standalone")
+	mustExitZero(t, runJig(t, env, repo, "init", "--standalone"), "jig init --standalone")
 	store := filepath.Join(ws, "demo-tickets")
-	r := runJig(t, repo, "ticket", "new", "--title", "Cover Double with a test")
+	r := runJig(t, env, repo, "ticket", "new", "--title", "Cover Double with a test")
 	mustExitZero(t, r, "jig ticket new")
 	if !strings.Contains(r.Stdout, "id: T-1") {
 		t.Fatalf("jig ticket new minted something other than T-1:\n%s", r.Stdout)
@@ -62,10 +67,10 @@ func TestQuickstartLive(t *testing.T) {
 	writeFileOrFatal(t, filepath.Join(ticket, "brief.md"), []byte(quickstartBrief))
 	slices := filepath.Join(ticket, "slices.yaml")
 	writeFileOrFatal(t, slices, []byte(quickstartSlices("")))
-	r = runJig(t, repo, "validate", "T-1")
+	r = runJig(t, env, repo, "validate", "T-1")
 	mustExitZero(t, r, "jig validate T-1 (to print the section hashes)")
 	writeFileOrFatal(t, slices, []byte(quickstartSlices(sectionHash(t, r.Stdout, "Slice A - double test"))))
-	r = runJig(t, repo, "validate", "T-1")
+	r = runJig(t, env, repo, "validate", "T-1")
 	mustExitZero(t, r, "jig validate T-1")
 	if !strings.Contains(r.Stdout, "valid: yes") {
 		t.Fatalf("jig validate T-1 did not print valid: yes:\n%s", r.Stdout)
@@ -91,7 +96,7 @@ func TestQuickstartLive(t *testing.T) {
 		return nil
 	}})
 
-	r = runJig(t, repo, "solve", "T-1", "--backend", "headless", "--yes")
+	r = runJig(t, env, repo, "solve", "T-1", "--backend", "headless", "--yes")
 	mu.Lock()
 	defer mu.Unlock()
 	if r.Code != 0 {

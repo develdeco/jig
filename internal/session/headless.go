@@ -41,11 +41,12 @@ var headlessEditTools = []string{"Edit", "Write", "NotebookEdit"}
 type headlessBackend struct {
 	goos         string   // runtime.GOOS, injectable so rule paths are testable per OS
 	screenBinary string   // Options.ScreenBinary; see hookBinary
+	claudeBinary string   // Options.ClaudeBinary; empty means the `claude` on PATH
 	env          []string // Options.Env; see childEnv. nil means the child inherits this process's environment.
 }
 
 func newHeadlessBackend(opts Options) Backend {
-	return &headlessBackend{goos: runtime.GOOS, screenBinary: opts.ScreenBinary, env: opts.Env}
+	return &headlessBackend{goos: runtime.GOOS, screenBinary: opts.ScreenBinary, claudeBinary: opts.ClaudeBinary, env: opts.Env}
 }
 
 // hookBinary returns the jig binary a screened dispatch's PreToolUse hook
@@ -223,12 +224,16 @@ func (b *headlessBackend) Resume(d Dispatch, sessionID string) error {
 // next turn of that one, and returns the session id the CLI reported.
 func (b *headlessBackend) run(d Dispatch) (string, error) {
 	d = sessionView(d)
-	claudePath, err := exec.LookPath("claude")
-	if err != nil {
-		return "", &axi.Error{
-			Msg:  "claude binary not found on PATH; install the Claude Code CLI to use the headless backend",
-			Code: "CLAUDE_NOT_FOUND",
-			Help: []string{"Install `claude` and ensure it is on PATH, or use `--backend fake --scenario <dir>` for CI."},
+	claudePath := b.claudeBinary
+	if claudePath == "" {
+		var err error
+		claudePath, err = exec.LookPath("claude")
+		if err != nil {
+			return "", &axi.Error{
+				Msg:  "claude binary not found on PATH; install the Claude Code CLI to use the headless backend",
+				Code: "CLAUDE_NOT_FOUND",
+				Help: []string{"Install `claude` and ensure it is on PATH, or use `--backend fake --scenario <dir>` for CI."},
+			}
 		}
 	}
 
@@ -321,7 +326,7 @@ func (b *headlessBackend) run(d Dispatch) (string, error) {
 // denied.
 func sessionView(d Dispatch) Dispatch {
 	d.Prompt = respellMentions(d.Prompt, d.paths(), longPath)
-	for _, p := range []*string{&d.Worktree, &d.SliceJSON, &d.ResultJSON, &d.ExtraWriteDir} {
+	for _, p := range []*string{&d.Worktree, &d.SliceJSON, &d.ResultJSON, &d.ExtraReadFile} {
 		if *p != "" {
 			*p = longPath(*p)
 		}
@@ -391,15 +396,14 @@ func (b *headlessBackend) args(d Dispatch) (argv []string, cleanup func(), err e
 }
 
 // settings renders the session's `--settings` JSON. Its permission rules
-// grant the edit tools inside the lease worktree, on d.ResultJSON itself,
-// and inside d.ExtraWriteDir when one is named, nowhere else. With d.Screen
-// set, a PreToolUse hook runs `<hookBinary> _screen` (exec form, so no shell
-// parses the path) on every tool call, and its allow is this settings
-// object's only grant for the screen.Granted tools - the operator's own
-// user settings, loaded on top, can still grant more. Without d.Screen
-// those tools get plain allow rules instead, unscreened. Either way its env
-// sets the shell's command timeout (shellCommandTimeout), which the CLI
-// applies over the operator's own settings.
+// grant the edit tools inside the lease worktree and on d.ResultJSON itself,
+// nowhere else. With d.Screen set, a PreToolUse hook runs `<hookBinary> _screen`
+// (exec form, so no shell parses the path) on every tool call, and its allow
+// is this settings object's only grant for the screen.Granted tools - the
+// operator's own user settings, loaded on top, can still grant more. Without
+// d.Screen those tools get plain allow rules instead, unscreened. Either way
+// its env sets the shell's command timeout (shellCommandTimeout), which the
+// CLI applies over the operator's own settings.
 func (b *headlessBackend) settings(d Dispatch) (string, error) {
 	worktree, err := filepath.Abs(d.Worktree)
 	if err != nil {
@@ -415,15 +419,6 @@ func (b *headlessBackend) settings(d Dispatch) (string, error) {
 	}
 	for _, p := range pathForms(result) {
 		allow = append(allow, "Edit("+rulePath(b.goos, p)+")")
-	}
-	if d.ExtraWriteDir != "" {
-		extra, err := filepath.Abs(d.ExtraWriteDir)
-		if err != nil {
-			return "", err
-		}
-		for _, p := range pathForms(extra) {
-			allow = append(allow, "Edit("+rulePath(b.goos, p)+"/**)")
-		}
 	}
 
 	settings := map[string]any{}

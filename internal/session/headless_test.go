@@ -1089,6 +1089,59 @@ func indexOf(args []string, s string) int {
 	return -1
 }
 
+// TestHeadlessRunsTheClaudeBinaryOptionNotTheOneOnPATH: Options.ClaudeBinary
+// names the program a dispatch runs, so a caller drives a stub without
+// editing the process's PATH. The stub is built under a name no PATH search
+// for "claude" would find, so only the option can have run it, in the
+// dispatch's own worktree.
+func TestHeadlessRunsTheClaudeBinaryOptionNotTheOneOnPATH(t *testing.T) {
+	t.Parallel()
+	stubDir := buildBinary(t, filepath.Join("testdata", "fixture", "claudestub"), "claude-elsewhere")
+	stub := filepath.Join(stubDir, "claude-elsewhere")
+	if runtime.GOOS == "windows" {
+		stub += ".exe"
+	}
+	logFile := filepath.Join(t.TempDir(), "claude.log")
+	b, err := New("headless", Options{ClaudeBinary: stub, Env: []string{"CLAUDE_STUB_LOG=" + logFile}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	worktree := t.TempDir()
+	work := t.TempDir()
+	d := Dispatch{
+		Ticket:     "T-1",
+		Slice:      "a",
+		Attempt:    1,
+		Worktree:   worktree,
+		SliceJSON:  filepath.Join(work, "a.attempt-1.slice.json"),
+		ResultJSON: filepath.Join(work, "a.attempt-1.result.json"),
+		Model:      "claude-haiku-4-5",
+		Prompt:     "do the slice",
+	}
+	// The stub runs no session, so Run reports that; its log is what shows
+	// it was the program run.
+	_ = b.Run(d)
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("the stub named by Options.ClaudeBinary wrote no log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("the stub ran %d times, want 1:\n%s", len(lines), data)
+	}
+	var call struct {
+		Cwd string `json:"cwd"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &call); err != nil {
+		t.Fatalf("parse the stub's log: %v", err)
+	}
+	if !sameDir(t, call.Cwd, worktree) {
+		t.Errorf("the stub ran in %s, want the dispatch worktree %s", call.Cwd, worktree)
+	}
+}
+
 // recordDirChildStubEnv marks a run of this test binary as the child that
 // TestHeadlessChildDoesNotInheritTheRecordDir runs the dispatch in, a process
 // whose environment holds a JIG_RECORD_DIR, and carries the directory of the

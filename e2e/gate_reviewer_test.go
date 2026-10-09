@@ -23,21 +23,22 @@ import (
 // floor, which the "reviewer" branch's own low-risk finding is there to
 // pin, not this one.
 func TestGateReviewerNonTerminalTriage(t *testing.T) {
-	fx, _ := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-nonterminal"})
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-nonterminal"})
 	ticket := fx.Ticket
 
-	r1 := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r1 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r1.Code != 2 {
 		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\nstdout:\n%s\nstderr:\n%s", r1.Code, r1.Stdout, r1.Stderr)
 	}
-	r2 := runJig(t, fx.StoreDir, "run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r2 := runJig(t, env, fx.StoreDir, "run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r2.Code != 0 {
 		t.Fatalf("run 2 (answer) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r2.Code, r2.Stdout, r2.Stderr)
 	}
 
 	// No --yes, no terminal: cmdGate's own triageFor must fall back to
 	// DefaultTriage and print the non-terminal note line, never prompting.
-	r3 := runJig(t, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r3 := runJig(t, env, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r3.Code != 0 {
 		t.Fatalf("gate (round 1, non-terminal) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r3.Code, r3.Stdout, r3.Stderr)
 	}
@@ -75,7 +76,7 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 	// nothing to play back and the slice can only fail every rung and end
 	// up stalled, wedging the ticket - a clean gate is then unreachable no
 	// matter how many more rounds run.
-	r4 := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r4 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r4.Code != 0 {
 		t.Fatalf("run (fix-1 slices) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r4.Code, r4.Stdout, r4.Stderr)
 	}
@@ -95,11 +96,11 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 	// missing an attempt for either one stalls the ticket exactly as a
 	// missing round 1 attempt would. Round 3 is clean, so the default path
 	// ends where the scenario says it ends.
-	r5 := runJig(t, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r5 := runJig(t, env, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r5.Code != 0 {
 		t.Fatalf("gate (round 2) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r5.Code, r5.Stdout, r5.Stderr)
 	}
-	r6 := runJig(t, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r6 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r6.Code != 0 {
 		t.Fatalf("run (fix-2 slices) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r6.Code, r6.Stdout, r6.Stderr)
 	}
@@ -113,7 +114,7 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 		}
 	}
 
-	r7 := runJig(t, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r7 := runJig(t, env, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r7.Code != 0 {
 		t.Fatalf("gate (round 3) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r7.Code, r7.Stdout, r7.Stderr)
 	}
