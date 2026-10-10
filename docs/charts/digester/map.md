@@ -72,10 +72,18 @@ wrong door:
 - Intake is already a skill the session runs; it lacks the store-aware verbs.
 
 **The harness floor.** The CLI on PATH, files on disk and git hooks work in
-every harness, because every harness commits. Claude Code's hooks, user-level
-skills and MCP are enrichment. Every seam holds with the enrichment absent;
-what the enrichment buys is timing (jig speaks into the session instead of
-into `jig status`). The other harnesses' floor is surveyed in the appendix.
+every harness, because every harness commits. The survey in the appendix
+found the floor higher than assumed: Codex, Gemini CLI, Cursor and Copilot
+CLI all have session-start, pre/post-tool and stop hooks as external commands
+speaking JSON over stdin with exit 2 blocking, the same convention as Claude
+Code, and OpenCode has the same points as an in-process plugin. So one `jig
+observe` payload reader serves five harnesses through five thin installers,
+plus one plugin shim. What is not floor: MCP elicitation (undocumented or
+broken in Gemini CLI and OpenCode), a per-harness commit event (none has
+one), and hooks firing before a folder is trusted. The git post-commit hook
+covers the first two gaps, and every seam holds with the hooks absent; what
+the hooks buy is timing (jig speaks into the session instead of into `jig
+status`).
 
 **What Claude Code gives, checked against its docs (2026-10-10).**
 
@@ -161,9 +169,10 @@ Each is marked by provenance as intake requires.
    store's journal gets checkpoint outcomes only. _user-confirmed_
 6. **Project recognition is the machine mapping plus a global SessionStart
    hook; the ticket is the branch.** One hook installed beside the skills runs
-   a read-only verb from the project directory; unmapped means silent exit. A
-   repo-side `AGENTS.md` line is the portable fallback for harnesses without
-   SessionStart, a hint and never a grant. _defaulted: proposed here, grilled
+   a read-only verb from the project directory; unmapped means silent exit.
+   Every surveyed harness has such a hook; a repo-side `AGENTS.md` line (read
+   by all five) is the fallback for an untrusted folder or a harness run with
+   hooks off, a hint and never a grant. _defaulted: proposed here, grilled
    against the multi-repo question, not yet confirmed_
 7. **Verification runs in the background on a detached worktree at the commit,
    started by a git post-commit hook.** Claude Code's PostToolUse is the voice
@@ -263,5 +272,28 @@ Retire: the rule was a box.
 
 ## Appendix: the other harnesses' floor
 
-Pending the survey of Codex CLI, Gemini CLI, OpenCode, Cursor and Copilot CLI
-on hooks, instruction files, MCP and elicitation, skills, and session ids.
+Surveyed 2026-10-10 from the official docs or their sources (the Codex,
+Gemini CLI, OpenCode and Copilot docs repositories at HEAD; Cursor's site
+through search). "Unconfirmed" means no official text was found.
+
+| Harness | Lifecycle hooks | Repo instruction file | MCP and elicitation | Skills (user-level) | Session id and transcript |
+|---|---|---|---|---|---|
+| Codex CLI | `hooks.json` or `[hooks]` in `config.toml`, per layer (`~/.codex`, trusted `.codex/`, managed); SessionStart, SessionEnd, UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest, Stop, Interrupt, SubagentStart/Stop, Pre/PostCompact | `AGENTS.md` from the git root down to cwd, plus `~/.codex/AGENTS.md` | MCP in `config.toml`; elicitation exists, auto-rejected unless `mcp_elicitations` is on | `SKILL.md` skills (`~/.codex/skills` unconfirmed); custom prompts deprecated | `codex exec --json` emits `thread_id`; rollouts under `$CODEX_HOME/sessions/` as JSONL |
+| Gemini CLI | `hooks` in `settings.json` (project, user, system); SessionStart, SessionEnd, BeforeAgent, AfterAgent, BeforeTool, AfterTool, Before/AfterModel, PreCompress, Notification; `GEMINI_SESSION_ID`, `GEMINI_PROJECT_DIR` | `GEMINI.md` by default; `AGENTS.md` only when `context.fileName` names it; stops at `.git` | MCP in `settings.json`; elicitation undocumented, open bug reports "Method not found" | `~/.gemini/skills/` or `~/.agents/skills/`; TOML commands | Sessions under `~/.gemini/tmp/<hash>/chats/`; hooks get `session_id` and `transcript_path` |
+| OpenCode | JS/TS plugins only (`~/.config/opencode/plugins/`): `tool.execute.before/after`, `session.created`, `session.idle` | `AGENTS.md` upward from cwd, `~/.config/opencode/AGENTS.md`, `CLAUDE.md` as fallback | MCP in `opencode.json`; elicitation undocumented, open issues say requests hang | `~/.config/opencode/skills/`, `.agents/skills`, `.claude/skills` | `opencode run --format json`, `opencode export <id>`; storage under `~/.local/share/opencode/` |
+| Cursor CLI | `~/.cursor/hooks.json` or `.cursor/hooks.json`; sessionStart, sessionEnd, stop, pre/postToolUse, before/afterShellExecution, afterFileEdit (CLI fires fewer than the IDE, per forum) | `AGENTS.md` and `CLAUDE.md` at the root, `.cursor/rules`; no global file | MCP in `mcp.json`; elicitation supported since 1.5 | `~/.cursor/skills/`, `~/.agents/skills/` | `agent -p --output-format json` returns `session_id`; transcript path unconfirmed |
+| Copilot CLI | `.github/hooks/*.json`, `~/.copilot/hooks/*.json`, also reads `.claude/settings.json`; sessionStart, sessionEnd, userPromptSubmitted, pre/postToolUse, postToolUseFailure, agentStop (can block), subagentStart/Stop, preCompact | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `~/.copilot/instructions/` | MCP in `~/.copilot/mcp-config.json` or `.mcp.json`; elicitation as a `notification` hook type | `~/.copilot/skills/`, `~/.agents/skills/`, `.claude/skills` | `~/.copilot/session-state/<id>/events.jsonl`; hooks carry `sessionId` |
+
+What this buys the chart:
+
+- **One payload reader, five installers.** Four harnesses speak the Claude
+  Code convention; OpenCode needs a plugin shim that calls the same verb.
+- **`.agents/skills` is the one drop location** honored by Gemini CLI,
+  OpenCode, Cursor and Copilot CLI (Codex unconfirmed), beside
+  `~/.claude/skills` for Claude Code.
+- **Elicitation is not floor.** The question record stays the primary ask;
+  elicitation is enrichment where the harness supports it (ticket 14).
+- **A session id is floor; a transcript path is not.** Every harness exposes
+  the id, so the sessions ledger keys on it; spend from transcripts is only
+  possible where one is readable (Claude Code, Codex, Gemini CLI, OpenCode,
+  Copilot CLI), which bounds ticket 12.

@@ -61,7 +61,10 @@ tickets:
       saying it works with jig. Uninstall reverses all of it. Known limits to
       state in the help: an interactive Claude Code session runs no hooks until
       the folder is trusted, and `--bare` runs none; the git hook is the
-      listener either way.
+      listener either way. Claude Code first; Codex, Gemini CLI, Cursor and
+      Copilot CLI take the same payload reader through their own hook files
+      (map.md's appendix), and OpenCode through a plugin shim; skills also go
+      to `~/.agents/skills`, the location four of them share.
       Done when a fresh Claude Code session in a mapped clone opens knowing its
       ticket, and a plain `git commit` from a shell with no harness reaches jig.
     blocked_by:
@@ -190,8 +193,10 @@ tickets:
     body: |
       An MCP server over the same verbs, so a harness without a CLI door still
       reaches jig, and so a question that needs a person (ADR 0012's provenance)
-      can be asked through elicitation where the harness supports it, falling
-      back to the question record. Shared with the interaction-plane chart.
+      can be asked through elicitation where the harness supports it (Claude
+      Code, Codex, Cursor, Copilot CLI; not Gemini CLI or OpenCode), falling
+      back to the question record, which stays primary. Shared with the
+      interaction-plane chart.
       Done when a Claude Code session answers a `jig ask` question through
       elicitation and the answer lands as a record with person provenance.
     blocked_by:
