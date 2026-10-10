@@ -1,0 +1,199 @@
+# Chart "digester": jig as a harness partner. Entries are decision tickets,
+# one per grilling session; `jig graduate digester` mints them once this file
+# lives in the store's charts/digester/. Refs are positions in this file.
+# Keys are the store's; a project declaring one key omits `key:`.
+tickets:
+  - title: "ADR 0031: jig attaches to the harness instead of spawning the model"
+    body: |
+      Record the switch and the distinction that decides it: a constraint on how
+      the model works is a box and goes; a constraint on what counts as done is a
+      seam and stays, firing at commit time. Carry the verdict map over ADRs
+      0001-0030 as its appendix (map.md). Name what `jig run` becomes.
+      Done when the ADR is merged and ARCHITECTURE.md's pipeline section names
+      the attached path beside the dispatched one.
+
+  - title: "Store safety: one driver per ticket, journal appends safe under concurrent writers"
+    body: |
+      The safety section says one jig session per store clone. Attached mode has
+      a hook appending oracle and verified lines while a gate or a run may also
+      write. Decide the lock (a driver record per ticket in the sessions ledger,
+      an append under a store-side lock, or both), what a second session is told,
+      and what a crashed driver leaves behind. Shared with the interaction-plane
+      chart; grill both together.
+      Done when two processes appending to one ticket's journal are proven safe
+      by a test, and `jig status` names the driver.
+
+  - title: "jig here: a read-only verb that tells a session where it stands"
+    body: |
+      From the working directory alone: the project and store (project.Resolve,
+      the machine mapping's clone rule for multi-repo projects), the clone's
+      workspace name, the branch and the ticket it names (ADR 0013), the slices
+      and their states, verified commits, pending questions, pending
+      verifications. AXI output; exit 0 and print nothing in an unmapped
+      directory so a global hook costs nothing elsewhere.
+      Done when the verb answers in a mapped clone of a two-repo project and
+      stays silent in an unmapped one, by e2e test.
+
+  - title: "A sessions ledger under the jig home"
+    body: |
+      Machine-local, beside the pool and the evidence tree: one record per
+      harness session (harness, session id and agent id, since Claude Code's
+      settings hooks also run inside subagents; cwd, clone, ticket, started,
+      last seen, ended), its model and effort as the harness reports them,
+      and its pending verifications. The non-checkpoint lines the dispatcher
+      journaled (`dispatch`, `graph`) move here. Verbs to register, touch and
+      end a session; `jig here` reads it; the driver lock of #2 lives in it.
+      Only checkpoint outcomes reach the store's journal.
+      Done when a session registered by one process is visible to another and
+      is gone after its end.
+    blocked_by:
+      - ref: "#2"
+      - ref: "#3"
+
+  - title: "jig attach: install the listeners, globally and per clone"
+    body: |
+      One command installs what the harness needs: user-level Claude Code hooks
+      (SessionStart -> jig here, PostToolUse on Bash -> jig observe, Stop -> jig
+      observe --stop, SessionEnd -> ledger end) merged into the user's settings
+      without clobbering their own hooks; the skills beside them (fold `jig
+      skills install` in); a git post-commit hook in each mapped clone as the
+      portable floor; and, offered not imposed, an AGENTS.md line in the repo
+      saying it works with jig. Uninstall reverses all of it. Known limits to
+      state in the help: an interactive Claude Code session runs no hooks until
+      the folder is trusted, and `--bare` runs none; the git hook is the
+      listener either way.
+      Done when a fresh Claude Code session in a mapped clone opens knowing its
+      ticket, and a plain `git commit` from a shell with no harness reaches jig.
+    blocked_by:
+      - ref: "#3"
+
+  - title: "jig verify: run a slice's oracle on a commit, in the background, and journal it"
+    body: |
+      Extract the oracle run and verifyGreen out of the frontier into a package
+      both the frontier and this verb use. Given a ticket, a sha and a slice
+      (from a Jig-Slice trailer, --slice, or the pending claim), check descent
+      from the start sha, run the slice's oracle on a detached worktree at the
+      sha with its env class up, journal `oracle` and `verified` lines exactly
+      as the frontier does, record scenarios (ADR 0029), and detach from the
+      caller's process tree so a hook returns at once. Idempotent per
+      (sha, slice): a second call finds the line and stops.
+      Done when a hand-made commit on a ticket's branch ends as a verified line
+      the gate reuses (ADR 0021) without a `jig run`.
+    blocked_by:
+      - ref: "#2"
+
+  - title: "jig observe: the hook entry that turns harness events into verifications and notes"
+    body: |
+      One verb reads a hook payload on stdin, as `_screen` does. PostToolUse on
+      Bash: HEAD moved, spawn `jig verify`; the command was exactly the slice's
+      oracle on a clean tree at HEAD and passed, count the harness's own record
+      as the run, with its source on the `oracle` line (fog: the Bash record
+      has no documented exit code; decide between PostToolUseFailure and
+      dropping the count). Stop: say what is pending (verifications, tracked edits
+      uncommitted, a question unanswered) as additional context; refuse the stop
+      only when the session was started unattended. SessionStart: `jig here`'s
+      output as context, register the session. Git post-commit carries the
+      same into the floor. Every path exits 0 on a malformed payload.
+      Done when the hooks of #5 drive #6 end to end in an e2e test with a fake
+      harness emitting payloads.
+    blocked_by:
+      - ref: "#4"
+      - ref: "#5"
+      - ref: "#6"
+
+  - title: "Context is pulled: jig context, jig claim, jig ask and jig answer"
+    body: |
+      Everything slice.json carries becomes a verb the session calls: the brief
+      sections a slice builds from, what verified slices did and changed (ADR
+      0025), the code graph's starting points (ADR 0026), the oracle's last wall
+      time (ADR 0024), prior attempts. `jig claim` names the slice the session
+      is on; `jig ask` parks a question as a record (needs-input) and `jig
+      answer` resolves it, both already the frontier's shapes. The dispatch
+      prompt renders from the same verbs, so `jig run` and an attached session
+      read one source.
+      Done when the dispatch prompt's golden test renders from the verbs and an
+      attached session reads the same through the CLI.
+    blocked_by:
+      - ref: "#3"
+
+  - title: "The planning partner: intake over the store"
+    body: |
+      The intake skill runs inside the hand-built session with jig supplying
+      recall (the ledger's Answers tails), open tickets and their blocked_by
+      edges, charts and their fog, platform docs, through a `jig recall` verb.
+      `jig validate` gains store-wide checks: a slice covering what a ticket
+      shipped, a ticket duplicating an open one, a dangling edge. Slices are
+      sized to checkpoints, not to a cold session; the "sized to one session"
+      rule in the skill goes.
+      Done when intake on a real request names an existing ticket it would have
+      duplicated, and validate refuses a plan with a dangling edge.
+    blocked_by:
+      - ref: "#8"
+
+  - title: "The gate reads a branch built in the operator's clone"
+    body: |
+      Decide the fog item: push-first (the gate reviews origin's copy, so an
+      attached session's verified commits must be on origin before a round),
+      clone-as-source (the pool reads the mapped clone as a branch source), or
+      both by rule. ADR 0013's adoption rules (TICKET_ALREADY_BUILT, start sha
+      following the author until jig builds) are re-read for a ticket whose
+      verified commits are the author's own. Publish ships what the round
+      reviewed, unchanged.
+      Done when `jig gate` on a ticket built entirely by hand with verified
+      lines from #6 reviews the right copy, and `jig publish` ships it.
+    blocked_by:
+      - ref: "#6"
+
+  - title: "Correction: stall, brief drift and scope drift as notes into the session"
+    body: |
+      Reuse the stall counter (the same oracle failure signature twice on one
+      slice) to say "different approach" into the session at the next Stop or
+      prompt; a brief section whose hash changed after its slice verified
+      becomes a requeue hint; a commit touching files outside every slice's
+      workspace becomes a note. Advisory by default; enforced when the session
+      was started by `jig run`. Decide where that switch lives.
+      Done when each of the three fires in an e2e test and none blocks an
+      interactive session.
+    blocked_by:
+      - ref: "#7"
+
+  - title: "Cost as records: budgets stated, spend reported"
+    body: |
+      The box capped runaway with a 90-minute bound and no subagents. Attached,
+      the session may fan out. State a ticket budget as a record the way the
+      fix budget is, have the hooks journal spend where the harness exposes it
+      (Claude Code transcripts carry usage), show spend against budget in `jig
+      status`, and say what jig does at the line: a note, never a kill, in an
+      interactive session.
+      Done when a ticket over budget is visible in status and in the Stop
+      hook's context.
+    blocked_by:
+      - ref: "#7"
+
+  - title: "jig run inverts: launch a harness session with jig attached"
+    body: |
+      For unattended work, `jig run` starts a full Claude Code session in a
+      worktree with jig's hooks, skills and settings, the staircase picking the
+      rung (the one place jig still launches a process), the screen attached as
+      a hook jig offers, enforcement on. The stripped tool surface, the
+      no-background setting, the slice.json/result.json contract and the resume
+      turn of ADR 0020 are retired once the fake backend and e2e tests are
+      ported to the fake harness of #7. herdr is decided in the fog.
+      Done when `jig solve` on the fixture runs through the attached path with
+      no `slice.json` written.
+    blocked_by:
+      - ref: "#7"
+      - ref: "#10"
+      - ref: "#11"
+
+  - title: "jig mcp: the verbs as tools, and elicitation for person-provenance answers"
+    body: |
+      An MCP server over the same verbs, so a harness without a CLI door still
+      reaches jig, and so a question that needs a person (ADR 0012's provenance)
+      can be asked through elicitation where the harness supports it, falling
+      back to the question record. Shared with the interaction-plane chart.
+      Done when a Claude Code session answers a `jig ask` question through
+      elicitation and the answer lands as a record with person provenance.
+    blocked_by:
+      - ref: "#8"
+      - ref: "#2"
