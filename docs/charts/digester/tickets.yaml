@@ -112,9 +112,16 @@ tickets:
       0025), the code graph's starting points (ADR 0026), the oracle's last wall
       time (ADR 0024), prior attempts. `jig claim` names the slice the session
       is on; `jig ask` parks a question as a record (needs-input) and `jig
-      answer` resolves it, both already the frontier's shapes. The dispatch
-      prompt renders from the same verbs, so `jig run` and an attached session
-      read one source.
+      answer` resolves it, both already the frontier's shapes. An answer given
+      in the TUI or by `jig answer` carries person provenance and reaches the
+      session by one of three paths, whichever its state allows: `jig ask
+      --wait` returns it as the tool's own output when the session chose to
+      wait; the Stop hook refuses the turn's end and hands it over when the
+      session moved on; the next prompt or session start carries it when the
+      session is idle, and the TUI says so. An unattended session jig launched
+      is resumed with it as its next turn, as ADR 0020 does for a red oracle.
+      The dispatch prompt renders from the same verbs, so `jig run` and an
+      attached session read one source.
       Done when the dispatch prompt's golden test renders from the verbs and an
       attached session reads the same through the CLI.
     blocked_by:

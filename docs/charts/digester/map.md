@@ -247,6 +247,12 @@ Each is marked by provenance as intake requires.
 - **The run bound and the budget-exhausted outcome for ADR 0020**, once 0018's
   number and 0019's climb are gone. Proposed: the manifest's own timeout, and
   a park with `routed_why: budget`.
+- **Waking an idle session.** No harness lets an outside process type into an
+  idle interactive session, so an answer, a red verification or a note waits
+  for the next hook point. Claude Code's SessionStart can return `watchPaths`
+  and a `FileChanged` hook then fires on those files; the docs say it returns
+  only `watchPaths`, not context. Verify whether it can carry a nudge; if it
+  can, the idle case folds into the Stop-hook case.
 - **Spend measurement.** Claude Code transcripts carry token usage; other
   harnesses may not. What a `spend` journal line can promise portably.
 - **Who sets advisory versus enforced.** `project.yaml`, the ticket record, or
