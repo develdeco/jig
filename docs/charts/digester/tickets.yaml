@@ -36,7 +36,8 @@ tickets:
 
   - title: "A sessions ledger under the jig home"
     body: |
-      Machine-local, beside the pool and the evidence tree: one record per
+      Machine-local, beside the pool and the evidence tree, append-only ndjson
+      in the journal's line shape so one reader serves both: one record per
       harness session (harness, session id and agent id, since Claude Code's
       settings hooks also run inside subagents; cwd, clone, ticket, started,
       last seen, ended), its model and effort as the harness reports them,
@@ -202,3 +203,36 @@ tickets:
     blocked_by:
       - ref: "#8"
       - ref: "#2"
+
+  - title: "jig events: one stream over the store journal and the machine ledger"
+    body: |
+      A read verb that merges a ticket's (or every active ticket's) journal
+      lines with the machine ledger's, ordered by time, each tagged with its
+      source, as ndjson; `--follow` tails both files and keeps streaming. It
+      is the bus every interface reads, the TUI first, and the contract later
+      interfaces (an editor pane, a web page, a chat bot) plug into. Decide the
+      envelope (the journal's Line, plus source and session) and what a reader
+      may assume about ordering across the two logs.
+      Done when a verification started by a hook appears in a following
+      `jig events` from another terminal, and the fake harness's e2e test reads
+      its run through the stream alone.
+    blocked_by:
+      - ref: "#4"
+      - ref: "#6"
+
+  - title: "jig tui: the minimum interface, built on the stream"
+    body: |
+      A terminal screen over `jig events --follow` and the verbs every door
+      shares: tickets in flight and their slices, verifications running
+      against the oracle's last wall time, questions waiting for a person
+      (answered here, with person provenance), parked findings to keep or
+      dismiss, the publish confirm, spend against budget, which session drives
+      which ticket. No fact reaches the screen except through the stream or a
+      verb, so what the TUI needs the next interface has. Decide whether the
+      TUI doubles as the resident worker while it is open (fog). Recordable
+      with termrec for the chart's own demos.
+      Done when a hand-built ticket can be taken from first commit through
+      gate and publish without leaving the TUI except to code.
+    blocked_by:
+      - ref: "#15"
+      - ref: "#8"

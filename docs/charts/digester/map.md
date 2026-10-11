@@ -136,6 +136,43 @@ asymmetry: lines that shape the reviewer (ADR 0017's "run no tests", ADR
 0023's rung) are seams of the gate, not boxes, even where a builder-side twin
 of the same sentence (ADR 0018) is a box.
 
+**Events are records; a daemon is a reader, never the truth.** jig already
+has an event log: the ticket's `journal.ndjson`, append-only, one line per
+thing that happened (ADR 0001 resumes by recomputing from it; ADR 0030 hangs
+the mirror off its checkpoints). The digester adds the second log, the
+machine ledger under the jig home, in the same shape. Those two files are the
+bus. Three kinds of process touch it, and none is required for the others to
+be correct:
+
+- **writers** are short-lived: a hook invocation appends a line and exits; a
+  command appends at its checkpoint;
+- **workers** outlive a hook: the background verification is a detached
+  process that takes a per-clone lock, runs the oracle, appends `oracle` and
+  `verified`, and exits. A resident worker (`jig watch`) is the same code run
+  long, draining a queue, so two commits in quick succession serialize on one
+  env class instead of racing. It is an optimization a machine opts into, and
+  a hook falls back to spawning when none is running;
+- **readers** tail the two logs: `jig status` once, `jig events --follow` as
+  a stream, the TUI as a screen, and any other interface the same way.
+
+A daemon-first design (the shape no-mistakes takes) is one worker plus one
+reader resident at all times. jig can run that way, and nothing in the seams
+depends on it: pull the daemon and the hooks still append, the verifier still
+runs detached, the TUI still tails. That is ADR 0001's "resume is recomputing
+the frontier from what's on disk", kept.
+
+**The TUI is the minimum interface, and it is a client.** `jig tui` reads
+`jig events --follow` and the same verbs every other door uses: tickets in
+flight and their slices, verifications running against the oracle's last wall
+time, questions waiting for a person (answered there with person provenance,
+ADR 0012), parked findings to keep or dismiss (today an interactive confirm
+inside `jig gate`), the publish confirm, spend against budget. Building it on
+the stream is what keeps the stream honest for the next interface (an
+editor pane, a web page, a chat bot): if the TUI needs a fact the stream does
+not carry, the stream gains it, not the TUI. This is where the digester and
+the interaction plane meet; the TUI is that chart's first front end as much
+as this one's.
+
 **Why a fifth home.** A session and its pending verifications outlive the
 session's turn and die with the machine, so they live under the jig home
 beside the pool and the evidence tree, not in the store and not in the repo.
@@ -185,6 +222,13 @@ Each is marked by provenance as intake requires.
 10. **The first ticket proves the thesis on a real ticket**: attach, verify in
     the background, journal, and let the existing gate and publish finish.
     _defaulted_
+11. **Events are append-only records in two logs, the store journal and the
+    machine ledger; every interface, jig's own TUI first, is a reader of one
+    stream over both; a resident daemon is an optional worker and reader,
+    never what makes the records true.** The TUI is the minimum interface
+    jig ships; others plug into the same stream. _user-confirmed (TUI as
+    minimum, pluggable interfaces); defaulted (records as the bus, daemon
+    optional)_
 
 ## Not yet specified (fog)
 
@@ -213,6 +257,11 @@ Each is marked by provenance as intake requires.
 - **herdr.** A remote agent with no local hooks and no local commits attaches
   through the store and origin alone. Whether that is attach at all or a
   separate backend that stays as it is.
+- **Detached worker or resident worker by default.** A detached `jig verify`
+  per commit is simplest and needs a per-clone lock; a resident `jig watch`
+  serializes and debounces but must be started by something. Whether `jig
+  attach` installs a user service, or the TUI doubles as the worker while it
+  is open, or neither.
 - **Windows.** Git hooks run under the shell git finds; a background
   verification must detach from the session's process tree the way `kill.go`
   already handles the reverse.
@@ -230,6 +279,8 @@ Each is marked by provenance as intake requires.
 - Review quality (ADR 0009, 0022) and the reviewer's own prompt.
 - Recordings and the PR demo (ADR 0029) beyond moving the recording to the
   background verification.
+- Interfaces beyond the TUI (editor panes, web, chat). They plug into the
+  same stream; which to build is the interaction-plane chart's call.
 
 ## ADR verdict map
 
