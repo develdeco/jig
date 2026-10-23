@@ -149,3 +149,11 @@ func TestHooksLive(t *testing.T) {
 	}
 	h.WaitVerifiers()
 }
+
+// mustExitZero fails t now unless r exited 0.
+func mustExitZero(t *testing.T, r jigResult, what string) {
+	t.Helper()
+	if r.Code != 0 {
+		t.Fatalf("%s exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", what, r.Code, r.Stdout, r.Stderr)
+	}
+}

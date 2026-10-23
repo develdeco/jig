@@ -179,20 +179,27 @@ func TestWithoutIdentityLetsConfigDecideTheAuthor(t *testing.T) {
 // TestHelpersStdinAndStart pins the two ways a test feeds a jig process
 // input: runJigIn hands a payload to a process that reads stdin to the end,
 // and startJig keeps a process running that the test writes to and reads
-// lines from. runJigIn is tried against the hook verb _screen, the one verb
-// that reads stdin today; when it goes, point this at the next one that does.
+// lines from. Both are tried against the hook verb observe, which reads a
+// harness's payload on stdin: given a SessionStart for a session in the
+// fixture's clone it answers with the context to start the session with, and
+// given nothing it prints nothing.
 func TestHelpersStdinAndStart(t *testing.T) {
 	t.Parallel()
-	_, env := newFixture(t, fixture.Opts{})
+	fx, env := newFixture(t, fixture.Opts{})
 	dir := t.TempDir()
 
-	const deny = `{"tool_name":"Bash","tool_input":{"command":"git push"}}`
-	res := runJigIn(t, env, dir, []byte(deny), "_screen")
-	if res.Code != 0 || !strings.Contains(res.Stdout, `"permissionDecision":"deny"`) {
-		t.Errorf("runJigIn(_screen, a git push) = exit %d, %q, want exit 0 and a deny decision", res.Code, res.Stdout)
+	payload, err := json.Marshal(map[string]any{
+		"session_id": "s-probe", "cwd": fx.RepoDir, "hook_event_name": "SessionStart", "source": "startup",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if res := runJigIn(t, env, dir, nil, "_screen"); res.Code != 0 || res.Stdout != "" {
-		t.Errorf("runJigIn(_screen) with no stdin = exit %d, %q, want exit 0 and no decision", res.Code, res.Stdout)
+	res := runJigIn(t, env, dir, payload, "observe", "--harness", "claude")
+	if res.Code != 0 || !strings.Contains(res.Stdout, `"hookEventName":"SessionStart"`) || !strings.Contains(res.Stdout, "s-probe") {
+		t.Errorf("runJigIn(observe, a SessionStart) = exit %d, %q, want exit 0 and the session's context", res.Code, res.Stdout)
+	}
+	if res := runJigIn(t, env, dir, nil, "observe", "--harness", "claude"); res.Code != 0 || res.Stdout != "" {
+		t.Errorf("runJigIn(observe) with no stdin = exit %d, %q, want exit 0 and nothing printed", res.Code, res.Stdout)
 	}
 
 	// A process that runs to completion: its first line, then the rest, then
@@ -214,25 +221,25 @@ func TestHelpersStdinAndStart(t *testing.T) {
 	}
 
 	// A process that reads its stdin: written to, then closed, it answers.
-	screen := startJig(t, env, dir, "_screen")
-	screen.Write([]byte(deny))
-	screen.CloseStdin()
-	line, ok := screen.Line(30 * time.Second)
-	if !ok || !strings.Contains(line, `"permissionDecision":"deny"`) {
-		t.Errorf("startJig(_screen) line = %q, %v, want the deny decision", line, ok)
+	hook := startJig(t, env, dir, "observe", "--harness", "claude")
+	hook.Write(payload)
+	hook.CloseStdin()
+	line, ok := hook.Line(30 * time.Second)
+	if !ok || !strings.Contains(line, `"hookEventName":"SessionStart"`) {
+		t.Errorf("startJig(observe) line = %q, %v, want the session's context", line, ok)
 	}
-	if _, ok := screen.Line(30 * time.Second); ok {
-		t.Errorf("startJig(_screen) had a second line, want the output to end")
+	if _, ok := hook.Line(30 * time.Second); ok {
+		t.Errorf("startJig(observe) had a second line, want the output to end")
 	}
-	if res := screen.Stop(); res.Code != 0 {
-		t.Errorf("startJig(_screen).Stop() exit = %d, want 0", res.Code)
+	if res := hook.Stop(); res.Code != 0 {
+		t.Errorf("startJig(observe).Stop() exit = %d, want 0", res.Code)
 	}
 
 	// A process still waiting for input is ended by Stop: it closes stdin and
 	// the process leaves with nothing to say.
-	idle := startJig(t, env, dir, "_screen")
+	idle := startJig(t, env, dir, "observe", "--harness", "claude")
 	if line, ok := idle.Line(100 * time.Millisecond); ok {
-		t.Errorf("an idle startJig(_screen) had a line %q", line)
+		t.Errorf("an idle startJig(observe) had a line %q", line)
 	}
 	if res := idle.Stop(); res.Code != 0 || res.Stdout != "" {
 		t.Errorf("idle Stop() = exit %d, %q, want exit 0 and no output", res.Code, res.Stdout)

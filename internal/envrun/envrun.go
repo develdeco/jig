@@ -110,9 +110,7 @@ func Shell(cmd, dir string) error {
 // headless session (internal/session), both through ChildEnv. jig can itself
 // run inside a recording oracle run (it tests itself), and these must not
 // record into that run's directory. git, gh and graphify run no scenarios and
-// may inherit it. A
-// herdr terminal session does run the project's tests, but in herdr's own
-// environment, which jig does not set, so jig cannot strip it from there.
+// may inherit it.
 const RecordDirEnv = "JIG_RECORD_DIR"
 
 // ChildEnv is the environment cmd's process will get, for a caller that

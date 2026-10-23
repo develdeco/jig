@@ -808,7 +808,7 @@ func readerDir(d Deps, t *publishTarget) (string, error) {
 // branchTips are the commits the ticket's branch is at in the places a
 // reviewed head can be found: the operator's clone (its branch, and its last
 // view of origin's), the repository dir reads from (its view of origin's) and,
-// for work an earlier `jig run` built, the build lease.
+// for work an earlier jig built, the build lease.
 func branchTips(d Deps, t *publishTarget, dir string) []string {
 	var tips []string
 	add := func(repo, ref string) {

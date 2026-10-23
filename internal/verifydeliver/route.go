@@ -78,9 +78,9 @@ type Triage func(TriageInput) TriageResult
 // ask missing either stays undecided - keeping it needs a human's choice,
 // which nothing here can supply. A budget-parked ask (Finding.RoutedWhy ==
 // RoutedWhyBudget) stays undecided too, whatever its build target: only a
-// person at a terminal can keep one, so --yes, a non-terminal stdin and
-// `jig solve` (which all build on this function) never spend past the
-// budget. Every decision it makes is auto (Human false).
+// person at a terminal can keep one, so --yes and a non-terminal stdin
+// (which both build on this function) never spend past the budget. Every
+// decision it makes is auto (Human false).
 func DefaultTriage(in TriageInput) TriageResult {
 	asks := make(map[string]AskOutcome, len(in.Asks))
 	for _, f := range in.Asks {

@@ -152,7 +152,7 @@ type GateReport struct {
 	// OracleNames are the manifest's oracle names at this round.
 	OracleNames []string
 	// Copy says whose copy of the branch the round reviewed: the clone's,
-	// origin's or (for work an earlier `jig run` built) the build lease's.
+	// origin's or (for work an earlier jig built) the build lease's.
 	Copy string
 	// ReviewedSHA is repoName -> the head sha a reviewer round reviewed, on
 	// every reviewer round, clean or not - the anchor the next round's

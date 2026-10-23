@@ -13,7 +13,7 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// TestVerifydeliverDepsCarriesTheOperatorsHome: jig gate and jig solve both
+// TestVerifydeliverDepsCarriesTheOperatorsHome: jig gate and jig publish
 // build their Deps here, and gate intent inference reads the operator's
 // local agent transcripts under Deps.UserHome, so it must be the operator's
 // own home directory (os.UserHomeDir), beside the jig home root it was
@@ -352,7 +352,7 @@ func TestRenderStatusStalledHint(t *testing.T) {
 
 // TestRenderStatusStalledHintFromGate: a stalled slice with no FromBrief
 // (every gate fix slice) must not be offered the `--from-brief-diff`
-// remedy, since frontier.Requeue only touches a slice whose FromBrief
+// remedy, since ready.Requeue only touches a slice whose FromBrief
 // cites a hash that is gone - a fix slice has none, so that requeue would
 // silently do nothing and the hint would repeat forever. Its way out is
 // `jig requeue --slice`, the only command that can ever touch it, and the

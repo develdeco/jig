@@ -42,15 +42,9 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-nonterminal"})
 	ticket := fx.Ticket
-
-	r1 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
-	if r1.Code != 2 {
-		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\nstdout:\n%s\nstderr:\n%s", r1.Code, r1.Stdout, r1.Stderr)
-	}
-	r2 := runJig(t, env, fx.StoreDir, "run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
-	if r2.Code != 0 {
-		t.Fatalf("run 2 (answer) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r2.Code, r2.Stdout, r2.Stderr)
-	}
+	// The ticket built by hand: the builder session committed the scenario's
+	// patches in the operator clone and had each commit verified.
+	b := buildTicketOn(t, fx, env, true)
 
 	// --yes, no terminal: the round is recorded with DefaultTriage, never
 	// prompting.
@@ -85,17 +79,13 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 	}
 
 	// The documented default path keeps every fix, so fix-1-beta-test is not
-	// merely appended to slices.yaml, it is the ticket's own queued work:
-	// `jig run` must actually be able to drive it to green through this
+	// merely appended to slices.yaml, it is the ticket's own queued work: the
+	// builder must actually be able to take it to green through this
 	// fixture, the same as fix-1-alpha-test and fix-1-r1-f3. Without a
-	// scripted attempt for it, the fake backend has nothing to play back and
-	// the slice can only fail every rung and end up stalled, wedging the
-	// ticket - a clean gate is then unreachable no matter how many more
-	// rounds run.
-	r4 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
-	if r4.Code != 0 {
-		t.Fatalf("run (fix-1 slices) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r4.Code, r4.Stdout, r4.Stderr)
-	}
+	// scripted attempt for it the slice could only fail every verification
+	// and wedge the ticket - a clean gate is then unreachable no matter how
+	// many more rounds run.
+	b.buildFix(t, "fix-1-alpha-test", "fix-1-beta-test", "fix-1-r1-f3")
 	for _, s := range []string{"fix-1-alpha-test", "fix-1-beta-test", "fix-1-r1-f3"} {
 		state, err := st.ReadSliceState(ticket, s)
 		if err != nil {
@@ -116,10 +106,7 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 	if r5.Code != 0 {
 		t.Fatalf("review done (round 2) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r5.Code, r5.Stdout, r5.Stderr)
 	}
-	r6 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
-	if r6.Code != 0 {
-		t.Fatalf("run (fix-2 slices) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r6.Code, r6.Stdout, r6.Stderr)
-	}
+	b.buildFix(t, "fix-2-alpha-test", "fix-2-beta-test")
 	for _, s := range []string{"fix-2-alpha-test", "fix-2-beta-test"} {
 		state, err := st.ReadSliceState(ticket, s)
 		if err != nil {

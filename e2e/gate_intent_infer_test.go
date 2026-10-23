@@ -112,17 +112,9 @@ func TestGatePointsTheReviewerAtTheIntentExcerpt(t *testing.T) {
 	mentioned := []string{"alpha/alpha.go", "alpha/percent.go", "alpha/percent_test.go", "beta/beta.go", "beta/version.go"}
 	writeSyntheticClaudeSession(t, homeDir, "session-inferred", fx.RepoDir, mentioned, time.Date(2026, 1, 1, 0, 30, 0, 0, time.UTC))
 
-	// Drive the fixture's own a/b/c/d scenario to green, exactly as
-	// TestGateReviewerNonTerminalTriage does: run pauses at slice c's own
-	// question (q-001), answering it completes the frontier.
-	r1 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
-	if r1.Code != 2 {
-		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\nstdout:\n%s\nstderr:\n%s", r1.Code, r1.Stdout, r1.Stderr)
-	}
-	r2 := runJig(t, env, fx.StoreDir, "run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
-	if r2.Code != 0 {
-		t.Fatalf("run 2 (answer) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r2.Code, r2.Stdout, r2.Stderr)
-	}
+	// Build the fixture's own a/b/c/d scenario to green by hand, exactly as
+	// TestGateReviewerNonTerminalTriage does.
+	buildTicketOn(t, fx, env, true)
 
 	r3 := runJig(t, env, fx.StoreDir, "gate", ticket)
 	if r3.Code != 0 {
