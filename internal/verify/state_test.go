@@ -1,7 +1,10 @@
 package verify
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -187,5 +190,71 @@ func TestTheSliceIsGreenBeforeTheVerifiedLineSaysSo(t *testing.T) {
 	defer mu.Unlock()
 	if got, ok := stateAt[at.UTC()]; !ok || got != "green" {
 		t.Errorf("slice a when its verified line was written = %q (stamped %v), want green", got, ok)
+	}
+}
+
+// TestAPassStoppedBeforeItsVerifiedLineIsFinished: a run that stopped between
+// marking the slice green and writing the verified line leaves a green slice
+// and an oracle pass line with no verified line. The next jig verify of the
+// commit writes that line, once, with the pass's attempt and session; a slice
+// that is not green is left alone.
+func TestAPassStoppedBeforeItsVerifiedLineIsFinished(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, fixture.Opts{})
+	sha := r.fixClamp()
+	if res, err := Run(r.deps, r.request("a", sha)); err != nil || res.State != journal.VerifyPass {
+		t.Fatalf("Run = %+v, %v, want a pass", res, err)
+	}
+	// The run that stopped: the same journal without its verified line.
+	path := filepath.Join(r.st.TicketDir(r.fx.Ticket), "journal.ndjson")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	for _, line := range strings.SplitAfter(string(body), "\n") {
+		if !strings.Contains(line, `"event":"verified"`) {
+			kept = append(kept, line)
+		}
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(kept, "")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	verifiedLines := func() []journal.Line {
+		var out []journal.Line
+		for _, l := range r.lines() {
+			if l.Event == journal.EventVerified && l.Commit == sha && l.Slice == "a" {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
+
+	// A slice that is not green is not this case: nothing is written.
+	if err := r.st.WriteSliceState(r.fx.Ticket, "a", store.SliceState{State: "building", Attempts: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := Run(r.deps, Request{Ticket: r.fx.Ticket, Slice: "a", SHA: sha, Session: "s-2"}); err != nil || !res.Existing {
+		t.Fatalf("Run on a building slice = %+v, %v, want the existing pass", res, err)
+	}
+	if got := verifiedLines(); len(got) != 0 {
+		t.Fatalf("verified lines with the slice building = %+v, want none", got)
+	}
+
+	// The green slice: the next run finishes the pass, once.
+	if err := r.st.WriteSliceState(r.fx.Ticket, "a", store.SliceState{State: "green", Attempts: 1}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if res, err := Run(r.deps, Request{Ticket: r.fx.Ticket, Slice: "a", SHA: sha, Session: "s-2"}); err != nil || !res.Existing || res.State != journal.VerifyPass {
+			t.Fatalf("Run %d on the stopped pass = %+v, %v, want the existing pass", i, res, err)
+		}
+	}
+	got := verifiedLines()
+	if len(got) != 1 || got[0].Attempt != 1 || got[0].Session != "s-1" || got[0].Agent != "agent-1" {
+		t.Errorf("verified lines = %+v, want one, of attempt 1 by s-1 and agent-1 (the pass's)", got)
+	}
+	if r.state("a").State != "green" {
+		t.Errorf("slice a = %+v, want it still green", r.state("a"))
 	}
 }
