@@ -61,6 +61,10 @@ type Store struct {
 	// ident is the person's git identity, resolved on first use by
 	// identity (identity.go).
 	ident identityCache
+
+	// writer is the name this clone writes under in writers mode, resolved on
+	// first use by writerName (writers.go).
+	writer writerCache
 }
 
 // invalidateAliasClaims drops the memoized aliasClaims result, so the next
@@ -183,12 +187,36 @@ type checkpoint struct {
 	s      *Store
 	repo   *gitx.Repo // nil: the git program does every step
 	branch string
+
+	// writers is set when the store is in writers mode (Store.Mode): branch
+	// is then the branch of this writer, writers/<name>, and pull brings in
+	// the other writers by merging them (pullWriters) rather than rebasing
+	// onto one shared branch.
+	writers bool
 }
 
-// begin opens the store and runs the refusals every Sync and Push starts
+// begin opens the store and runs the refusals every Sync, Push and Claim
+// starts with (beginBranch), then puts a writers store on the branch of its
+// writer.
+func (s *Store) begin() (*checkpoint, error) {
+	cp, err := s.beginBranch()
+	if err != nil {
+		return nil, err
+	}
+	writers, err := s.Mode()
+	if err != nil {
+		return nil, err
+	}
+	if !writers {
+		return cp, nil
+	}
+	return s.enterWriters(cp)
+}
+
+// beginBranch opens the store and runs the refusals every Sync and Push starts
 // with, in this order: an unfinished rebase, merge, cherry-pick, revert,
 // sequence or bisect, then unmerged index entries, then a detached HEAD.
-func (s *Store) begin() (*checkpoint, error) {
+func (s *Store) beginBranch() (*checkpoint, error) {
 	repo, err := gitx.OpenRepo(s.Root)
 	if err != nil && !errors.Is(err, gitx.ErrUseCLI) {
 		return nil, err
@@ -270,6 +298,9 @@ func (cp *checkpoint) commit(msg string) error {
 // this way must resolve as soon as the pull lands, not only after jig's own
 // next write.
 func (cp *checkpoint) pull() error {
+	if cp.writers {
+		return cp.pullWriters()
+	}
 	defer cp.s.invalidateAliasClaims()
 	if cp.repo != nil {
 		rel, err := cp.repo.Fetch("origin", cp.branch)
@@ -310,7 +341,14 @@ func (cp *checkpoint) push() error {
 		}
 	}
 	if _, err := gitx.Run(cp.s.Root, "push", "origin", cp.branch); err != nil {
-		if _, perr := gitx.Run(cp.s.Root, "pull", "--rebase", "origin", cp.branch); perr != nil {
+		if cp.writers {
+			// Only this writer pushes this branch, so there is nothing to
+			// rebase onto: take what moved the way pull does (which refuses a
+			// branch another clone has written to) and push once more.
+			if perr := cp.pull(); perr != nil {
+				return perr
+			}
+		} else if _, perr := gitx.Run(cp.s.Root, "pull", "--rebase", "origin", cp.branch); perr != nil {
 			return cp.s.abortFailedPull(perr, cp.branch)
 		}
 		if _, err2 := gitx.Run(cp.s.Root, "push", "origin", cp.branch); err2 != nil {

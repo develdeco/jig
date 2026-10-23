@@ -107,16 +107,30 @@ func (r *Repo) gitDir() string { return filepath.Join(r.dir, ".git") }
 // which converts nothing, store the same bytes on every host.
 const StoreAttributes = "* -text -filter -ident -working-tree-encoding\n"
 
+// WritersAttributes is the .gitattributes of a store in writers mode: the
+// StoreAttributes, and the union merge driver for NDJSON files. The writers
+// of such a store each append to the same journals on their own branches, and
+// a union merge keeps both sides' lines instead of stopping on two appends at
+// the end of the file (internal/store/writers.go). A merge driver changes no
+// stored or checked-out bytes, so a repository that has this file is still
+// one gitx serves in process.
+const WritersAttributes = StoreAttributes + "*.ndjson merge=union\n"
+
 // convertsNothing reports whether the repository itself rules out every
 // conversion of file contents: its root .gitattributes is exactly
-// StoreAttributes and it has no info/attributes. (A .gitattributes further
-// down is found while staging; see scan.)
+// StoreAttributes or WritersAttributes (the second only adds a merge driver,
+// which converts nothing) and it has no info/attributes. (A .gitattributes
+// further down is found while staging; see scan.)
 func convertsNothing(dir, gitDir string) bool {
 	if exists(filepath.Join(gitDir, "info", "attributes")) {
 		return false
 	}
 	data, err := os.ReadFile(filepath.Join(dir, ".gitattributes"))
-	return err == nil && strings.ReplaceAll(string(data), "\r\n", "\n") == StoreAttributes
+	if err != nil {
+		return false
+	}
+	got := strings.ReplaceAll(string(data), "\r\n", "\n")
+	return got == StoreAttributes || got == WritersAttributes
 }
 
 // needsGitProgram reports whether the repository at gitDir declares, in its

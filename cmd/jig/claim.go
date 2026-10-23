@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,7 +22,7 @@ func init() {
 		Spec: cmdSpec{"claim", "claim a slice to build it, or let it go", []flagSpec{
 			{"slice", sliceFlagUsage, false},
 			{"unattended", "no person is watching: a condition the claim does not meet refuses it instead of warning", false},
-			{"take", "take the slice over from another session that holds it", false},
+			{"take", "take the slice over from another session that holds it, and the ticket from another writer that drives it", false},
 			{"release", "let the slice go: queued again unless green", false},
 			{"session", sessionFlagUsage, false},
 			{"store", "explicit store path", false},
@@ -36,14 +37,16 @@ func init() {
 
 // cmdClaim implements `jig claim [<ticket>] [--slice s] [--unattended]
 // [--take] [--release] [--session id]`. A claim checks the ticket (blockers
-// published and merged, stacked parents clean, the brief approved), makes the
-// slice building, records the claim line, and the start sha of the repo when
-// the ticket has none there yet. Unattended, a condition it does not meet
-// refuses the claim; with a person watching it only warns.
+// published and merged, stacked parents clean, the brief approved), takes the
+// ticket driver (one writer drives a ticket; another writer's drive refuses
+// the claim with DRIVER_HELD unless --take), makes the slice building,
+// records the claim line, and the start sha of the repo when the ticket has
+// none there yet. Unattended, a condition it does not meet refuses the claim;
+// with a person watching it only warns.
 func cmdClaim(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "claim")
 	unattended := fs.Bool("unattended", false, "no person is watching: a condition the claim does not meet refuses it instead of warning")
-	take := fs.Bool("take", false, "take the slice over from another session that holds it")
+	take := fs.Bool("take", false, "take the slice over from another session that holds it, and the ticket from another writer that drives it")
 	release := fs.Bool("release", false, "let the slice go: queued again unless green")
 	flags := addWorkFlags(fs, true, true)
 	positionals, handled, err := parseWithPositionals(stdout, fs, args)
@@ -125,6 +128,9 @@ func claimSlice(e env, stdout io.Writer, w work, sl store.Slice, unattended, tak
 	if len(problems) > 0 && unattended {
 		return renderErr(stdout, refusal(w, sl, problems))
 	}
+	if err := takeDriver(w, sl, take); err != nil {
+		return renderErr(stdout, err)
+	}
 
 	result, tookFrom := "already-claimed", ""
 	if !mine {
@@ -141,6 +147,55 @@ func claimSlice(e env, stdout io.Writer, w work, sl store.Slice, unattended, tak
 		return renderErr(stdout, err)
 	}
 	return printClaim(stdout, w, sl, result, started, recorded, problems, tookFrom)
+}
+
+// takeDriver makes the writer of this clone the driver of the ticket, for the
+// session claiming (store.ClaimDriver): a no-op when it drives it already,
+// the DRIVER_HELD refusal when another writer does and take is not set. The
+// refusal is given the exact command that takes the ticket over.
+func takeDriver(w work, sl store.Slice, take bool) error {
+	err := w.St.ClaimDriver(w.Ticket, w.Session, take)
+	var ae *axi.Error
+	if errors.As(err, &ae) && ae.Code == store.DriverHeldCode {
+		ae.Help = []string{fmt.Sprintf("If they are not working on it any more, take it over: `jig claim %s --slice %s --take`", w.Ticket, sl.ID)}
+	}
+	return err
+}
+
+// releaseDriverIfIdle ends the drive of the ticket by this writer once no
+// slice of it is held any more: lines are the ticket journal, release line
+// included. Only the claims made since the writer became the driver count,
+// the claim lines of a driver it took the ticket over from do not: they name
+// a session of someone else, and a claim of theirs that was never released
+// would otherwise keep the ticket driven for good. A ticket this writer does
+// not drive has nothing to release.
+func releaseDriverIfIdle(w work, lines []journal.Line) error {
+	me, err := w.St.Writer()
+	if err != nil {
+		return err
+	}
+	d, driven, err := w.St.Driver(w.Ticket)
+	if err != nil || !driven || d.Writer != me {
+		return err
+	}
+	since, perr := time.Parse(time.RFC3339Nano, d.TS)
+	var epoch []journal.Line
+	for _, l := range lines {
+		if at, err := time.Parse(time.RFC3339Nano, l.TS); perr == nil && err == nil && at.Before(since) {
+			continue
+		}
+		epoch = append(epoch, l)
+	}
+	slices, err := w.St.ReadSlices(w.Ticket)
+	if err != nil {
+		return err
+	}
+	for _, sl := range slices {
+		if _, held := claimHolder(epoch, sl.ID); held {
+			return nil
+		}
+	}
+	return w.St.ReleaseDriver(w.Ticket, w.Session)
 }
 
 // recordClaim writes what a claim leaves behind: the slice building, the
@@ -285,6 +340,13 @@ func releaseSlice(e env, stdout io.Writer, w work, sl store.Slice) int {
 			TS: stamp(e), Slice: sl.ID, Event: journal.EventRelease, Session: w.Session, Branch: w.Where.Branch,
 		})
 		if err != nil {
+			return renderErr(stdout, err)
+		}
+		after, err := journal.Read(w.St, w.Ticket)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		if err := releaseDriverIfIdle(w, after); err != nil {
 			return renderErr(stdout, err)
 		}
 		if err := w.St.Push(fmt.Sprintf("%s: slice %s released", w.Ticket, sl.ID)); err != nil {
