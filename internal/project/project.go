@@ -764,11 +764,25 @@ func InitStandalone(repoDir, key string) (string, error) {
 		}
 	}
 
+	_, statErr := os.Stat(storeDir)
+	madeStoreDir := os.IsNotExist(statErr)
 	if err := os.MkdirAll(storeDir, 0o755); err != nil {
 		return "", fmt.Errorf("project: create store dir: %w", err)
 	}
 	if _, err := gitx.Run(storeDir, "init", "-b", "main"); err != nil {
 		return "", fmt.Errorf("project: git init: %w", err)
+	}
+	// The scaffold commit below is authored by the person, so a machine with
+	// no git identity is refused before anything is written, and the dir
+	// this call made is taken away again: the person sets an identity and
+	// runs init once more. The identity is resolved in the new store itself,
+	// where the commit lands, the way every later store commit resolves it.
+	id, err := gitx.ResolveIdentity(storeDir)
+	if err != nil {
+		if madeStoreDir {
+			_ = os.RemoveAll(storeDir)
+		}
+		return "", err
 	}
 
 	py := projectYAML{
@@ -805,21 +819,20 @@ func InitStandalone(repoDir, key string) (string, error) {
 		return "", fmt.Errorf("project: write .gitattributes: %w", err)
 	}
 
-	// Commit the scaffold itself, under jig's own identity rather than
-	// whatever (if anything) the host's git config holds: every later write
-	// - store.Claim's claims in particular - stages and commits only the
-	// paths it touches, and so does this one, scoped to the scaffold's own
-	// paths rather than a sweeping `add -A` that would catch whatever else
-	// is dirty in an existing store. The re-init path's reset can leave
-	// nothing staged (project.yaml byte-identical, ledger.md already
-	// empty), which is success, not a failure to report.
+	// Commit the scaffold itself, authored by the person (id, resolved above):
+	// every later write - store.Claim's claims in particular - stages and
+	// commits only the paths it touches, and so does this one, scoped to the
+	// scaffold's own paths rather than a sweeping `add -A` that would catch
+	// whatever else is dirty in an existing store. The re-init path's reset
+	// can leave nothing staged (project.yaml byte-identical, ledger.md
+	// already empty), which is success, not a failure to report.
 	if _, err := gitx.Run(storeDir, "add", "-A", "--", "project.yaml", "platform", "ledger.md", ".gitignore", ".gitattributes"); err != nil {
 		return "", fmt.Errorf("project: stage store scaffold: %w", err)
 	}
 	if staged, err := gitx.Run(storeDir, "diff", "--cached", "--name-only"); err != nil {
 		return "", fmt.Errorf("project: check staged store scaffold: %w", err)
 	} else if staged != "" {
-		if _, err := gitx.Run(storeDir, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "jig: init store"); err != nil {
+		if _, err := gitx.Run(storeDir, "-c", "user.name="+id.Name, "-c", "user.email="+id.Email, "commit", "-m", "jig: init store"); err != nil {
 			return "", fmt.Errorf("project: commit store scaffold: %w", err)
 		}
 	}
