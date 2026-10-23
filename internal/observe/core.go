@@ -41,6 +41,10 @@ type Deps struct {
 	Here func(locate.Where, *store.Store) (string, error)
 	// Sources are the note sources to call; nil means the registered ones.
 	Sources []NamedSource
+	// SetEnv sets variables for the shell commands the session runs later,
+	// through the harness. It reports false when the harness has no way to;
+	// nil is no way. RunEvent fills it from an adapter that is an EnvSetter.
+	SetEnv func(vars map[string]string) (bool, error)
 }
 
 func (d Deps) withDefaults() Deps {
@@ -113,6 +117,10 @@ func RunEvent(d Deps, a Adapter, ev Event) (out []byte, err error) {
 	}()
 	if ev.Kind == "" {
 		return nil, nil
+	}
+	if s, ok := a.(EnvSetter); ok && d.SetEnv == nil {
+		getenv := d.withDefaults().Getenv
+		d.SetEnv = func(vars map[string]string) (bool, error) { return s.SetEnv(ev, getenv, vars) }
 	}
 	res, err := Handle(d, ev)
 	return a.Render(ev, res), err

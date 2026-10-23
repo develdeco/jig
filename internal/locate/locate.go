@@ -20,6 +20,11 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// SessionEnv is the variable a jig command takes its harness session id from
+// when no --session names one. A harness's SessionStart hook sets it for the
+// session's later shell commands where the harness allows (internal/observe).
+const SessionEnv = "JIG_SESSION"
+
 // How a Where was resolved: the first of these that matched, in this order.
 const (
 	// HowFlag: the --store flag named the store.
@@ -220,7 +225,7 @@ func (l *locator) attach() error {
 
 	if id := l.o.Session; id != "" {
 		w.Session, w.SessionHow = id, HowArg
-	} else if id := l.o.Getenv("JIG_SESSION"); id != "" {
+	} else if id := l.o.Getenv(SessionEnv); id != "" {
 		w.Session, w.SessionHow = id, HowEnv
 	}
 
