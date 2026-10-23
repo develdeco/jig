@@ -279,7 +279,7 @@ func TestAnIndexGoGitCannotReadIsTheGitPrograms(t *testing.T) {
 			if _, err := r.State(); !errors.Is(err, ErrUseCLI) {
 				t.Fatalf("State = %v, want ErrUseCLI", err)
 			}
-			if _, err := r.CommitAll("x", "jig", "jig@invalid"); !errors.Is(err, ErrUseCLI) {
+			if _, err := r.CommitAll("x", "tester", "tester@example.invalid"); !errors.Is(err, ErrUseCLI) {
 				t.Fatalf("CommitAll = %v, want ErrUseCLI", err)
 			}
 			if got := mustRun(t, dir, "log", "-1", "--format=%s"); got != "init" {
