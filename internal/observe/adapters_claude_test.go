@@ -16,6 +16,8 @@ func TestClaudeAdapterParsesEveryEvent(t *testing.T) {
 			with(func(e *Event) { e.Kind, e.Tool, e.Command = KindTool, "Bash", "git commit -m x" })},
 		{"bash tool with an exit code", `{` + common + `,"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"false"},"tool_response":{"exit_code":1}}`,
 			with(func(e *Event) { e.Kind, e.Tool, e.Command, e.Exit = KindTool, "Bash", "false", intp(1) })},
+		{"failed bash tool", `{` + common + `,"hook_event_name":"PostToolUseFailure","tool_name":"Bash","tool_input":{"command":"git commit -m x && false"},"error":"exit 1"}`,
+			with(func(e *Event) { e.Kind, e.Tool, e.Command = KindTool, "Bash", "git commit -m x && false" })},
 		{"edit tool", `{` + common + `,"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_path":"/work/repo/a.go","old_string":"a","new_string":"b"}}`,
 			with(func(e *Event) { e.Kind, e.Tool, e.Files = KindTool, "Edit", []string{"/work/repo/a.go"} })},
 		{"subagent tool", `{` + common + `,"agent_id":"a-7","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}`,

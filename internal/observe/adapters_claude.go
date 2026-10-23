@@ -8,6 +8,7 @@ package observe
 //	     SessionStart      source, model
 //	     UserPromptSubmit  prompt
 //	     PostToolUse       tool_name, tool_input.command|file_path, tool_response
+//	     PostToolUseFailure  the same, for a tool call that failed
 //	     Stop              stop_hook_active
 //	     SessionEnd        reason
 //	     agent_id          present when a subagent is speaking
@@ -46,7 +47,9 @@ func (a claudeShape) Parse(data []byte) (Event, error) {
 		ev.Kind = KindSessionStart
 	case "UserPromptSubmit":
 		ev.Kind = KindPrompt
-	case "PostToolUse":
+	case "PostToolUse", "PostToolUseFailure":
+		// A command that fails fires the second of these, not the first; the
+		// command may still have moved HEAD (git commit && go test).
 		ev.Kind = KindTool
 		ev.Tool = p.str("tool_name")
 		ev.Command = p.str("tool_input.command")
