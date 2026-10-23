@@ -4,12 +4,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"regexp"
+	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/frontier"
@@ -25,7 +28,34 @@ import (
 
 func main() {
 	gitx.ClearRepoEnv()
-	os.Exit(Main(os.Args[1:], os.Stdout, os.Stdin))
+	// The first interrupt cancels e.ctx, so a command that waits or streams
+	// can wind down; endAfterInterrupt makes sure one that does not watch it
+	// still ends, as it did when an interrupt simply killed the process.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	go endAfterInterrupt(ctx, stop, interruptGrace, os.Exit)
+	e := processEnv()
+	e.ctx = ctx
+	os.Exit(run(e, os.Args[1:], os.Stdout, os.Stdin))
+}
+
+const (
+	// interruptGrace is how long a command has, after the first interrupt,
+	// to notice its cancelled context and return.
+	interruptGrace = 3 * time.Second
+	// exitInterrupted is the status of a run ended by an interrupt: 128 plus
+	// SIGINT, the shell convention.
+	exitInterrupted = 130
+)
+
+// endAfterInterrupt waits for ctx to be cancelled by the first interrupt,
+// gives the signal back its default action (stop), so a second interrupt
+// ends the process at once, and ends the process itself through exit if the
+// run has not returned within grace.
+func endAfterInterrupt(ctx context.Context, stop func(), grace time.Duration, exit func(int)) {
+	<-ctx.Done()
+	stop()
+	time.Sleep(grace)
+	exit(exitInterrupted)
 }
 
 // Main dispatches one CLI invocation against the process's own environment

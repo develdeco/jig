@@ -37,6 +37,18 @@ func stdinIsTerminal(r io.Reader) bool {
 	return isTerminalFile(f)
 }
 
+// stdoutIsTerminal reports whether w is an interactive terminal, by the same
+// rule as stdinIsTerminal: only an *os.File that is a real console/tty is, so
+// a pipe, a file, the null device and any in-memory writer are not. It is
+// env.stdoutIsTerminal's production value.
+func stdoutIsTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	return isTerminalFile(f)
+}
+
 // triageFor builds the GateOpts.Triage hook cmdGate and cmdSolve wire in:
 // --yes or a non-terminal stdin runs verifydeliver.DefaultTriage and, only
 // when there was something to triage, prints one note line explaining why
