@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "jig observe --harness copilot",
+        "powershell": "jig observe --harness copilot",
+        "timeoutSec": 30,
+        "comment": "jig"
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "jig observe --harness copilot",
+        "powershell": "jig observe --harness copilot",
+        "timeoutSec": 30,
+        "comment": "jig"
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "jig observe --harness copilot",
+        "powershell": "jig observe --harness copilot",
+        "timeoutSec": 30,
+        "comment": "jig"
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "jig observe --harness copilot",
+        "powershell": "jig observe --harness copilot",
+        "timeoutSec": 30,
+        "comment": "jig"
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "jig observe --harness copilot",
+        "powershell": "jig observe --harness copilot",
+        "timeoutSec": 30,
+        "comment": "jig"
+      }
+    ]
+  }
+}

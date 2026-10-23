@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "jig observe --harness cursor"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "jig observe --harness cursor"
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": "jig observe --harness cursor"
+      }
+    ],
+    "stop": [
+      {
+        "command": "jig observe --harness cursor"
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "jig observe --harness cursor"
+      }
+    ]
+  }
+}
