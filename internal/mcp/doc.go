@@ -1,9 +1,8 @@
-// Package mcp serves jig's verbs to an agent harness as an MCP server over
-// stdio: newline-delimited JSON-RPC 2.0 with initialize, tools/list,
-// tools/call and ping, and the server-to-client elicitation request. It backs
-// `jig mcp`.
-//
-// The package holds no code yet; its directory and its place in
-// ARCHITECTURE.md are reserved so the code that fills it lands in files of
-// its own.
+// Package mcp serves jig verbs to an agent harness as a Model Context Protocol
+// server over stdio. It speaks newline-delimited JSON-RPC 2.0 by hand
+// (initialize, tools/list, tools/call, ping, and the notification that cancels
+// a request) and makes one request of the client, elicitation/create, to put a
+// question to the person. It holds no jig logic: each tool is a verb with the
+// arguments a model may give it, run through a Runner the program supplies,
+// and what the verb prints is the tool result. It backs `jig mcp`.
 package mcp
