@@ -261,8 +261,9 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 // Short of green, the first line is the ticket's own next step, exactly
 // what `jig status` would print (hintOrFallback), because that is what
 // actually moves the frontier: one parked on an unanswered question does
-// not advance on a bare `jig run <ticket>`, only on `jig run <ticket>
-// --answer ...`. The gate follows it as the second step. With nothing
+// not advance on a bare `jig run <ticket>`, only once the question is
+// answered (`jig answer <ticket> <question> ...`). The gate follows it as
+// the second step. With nothing
 // undecided the hint is that same next-step line alone.
 func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateReport) []string {
 	if len(report.NeedsHuman) > 0 {
@@ -270,8 +271,8 @@ func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateRep
 			// What actually moves the frontier is the ticket's own
 			// next step, the same one `jig status` prints: a frontier
 			// parked on an unanswered question does not advance on
-			// `jig run <ticket>` at all, it advances on
-			// `jig run <ticket> --answer ...`.
+			// `jig run <ticket>` at all, it advances once the question is
+			// answered (`jig answer <ticket> <question> ...`).
 			return []string{
 				hintOrFallback(st, ticket),
 				fmt.Sprintf("Then run `jig gate %s` at a terminal to decide the listed asks", ticket),
