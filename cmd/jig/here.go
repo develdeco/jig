@@ -86,7 +86,7 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 
 	hc := hereCtx{e: e, Where: where, JigHome: jigHome}
 	if where.StorePath != "" {
-		cfg, err := project.Load(filepath.Join(where.StorePath, "project.yaml"))
+		cfg, err := project.LoadStoreConfig(where.StorePath)
 		if err != nil {
 			return renderErr(stdout, err)
 		}

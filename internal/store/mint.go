@@ -191,7 +191,7 @@ func (s *Store) Mint(key string, rec Ticket) (string, error) {
 		return "", &axi.Error{
 			Msg:  fmt.Sprintf("key %q mints %s, which jig cannot use: %v", key, id, err),
 			Code: "VALIDATION_ERROR",
-			Help: []string{"Change the key in project.yaml, then mint again"},
+			Help: []string{"Change the key in the store's config (keys: in store.yaml, or project.yaml in a v2 store), then mint again"},
 		}
 	}
 	if err := s.CreateTicketRecord(id, rec); err != nil {

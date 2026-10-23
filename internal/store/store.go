@@ -90,10 +90,15 @@ func (s *Store) RunCheckpointHook() {
 	}
 }
 
-// Open opens the store rooted at root. root must contain a project.yaml.
+// Open opens the store rooted at root. root must contain the store's config
+// file: store.yaml of a v3 store, or the project.yaml of a v2 one. (The store
+// does not read either; internal/project does. Both are named here because
+// project imports store, so store cannot ask it.)
 func Open(root string) (*Store, error) {
-	if _, err := os.Stat(filepath.Join(root, "project.yaml")); err != nil {
-		return nil, fmt.Errorf("store: open %s: %w", root, err)
+	if _, err := os.Stat(filepath.Join(root, "store.yaml")); err != nil {
+		if _, err2 := os.Stat(filepath.Join(root, "project.yaml")); err2 != nil {
+			return nil, fmt.Errorf("store: open %s: %w", root, err)
+		}
 	}
 	return &Store{Root: root}, nil
 }

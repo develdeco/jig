@@ -9,9 +9,9 @@ import (
 )
 
 // TestCmdInitStandaloneRefusesReinit checks that a second `jig init
-// --standalone` against an already-initialized store is refused rather than
-// silently overwriting its ledger.md and project.yaml back to their fresh
-// defaults (project.InitStandalone always overwrites both).
+// --standalone` in an already-initialized folder is refused rather than
+// silently overwriting the store's ledger.md and store.yaml back to their
+// fresh defaults.
 func TestCmdInitStandaloneRefusesReinit(t *testing.T) {
 	t.Parallel()
 
@@ -23,7 +23,7 @@ func TestCmdInitStandaloneRefusesReinit(t *testing.T) {
 	e := testEnv(t.TempDir()).inDir(repoDir)
 
 	var buf bytes.Buffer
-	if code := cmdInit(e, []string{"--standalone"}, &buf); code != 0 {
+	if code := cmdInit(e, []string{"--standalone"}, &buf, strings.NewReader("")); code != 0 {
 		t.Fatalf("first init exit code = %d, output:\n%s", code, buf.String())
 	}
 
@@ -34,7 +34,7 @@ func TestCmdInitStandaloneRefusesReinit(t *testing.T) {
 	}
 
 	buf.Reset()
-	code := cmdInit(e, []string{"--standalone"}, &buf)
+	code := cmdInit(e, []string{"--standalone"}, &buf, strings.NewReader(""))
 	if code == 0 {
 		t.Fatalf("second init exit code = 0, want a refusal; output:\n%s", buf.String())
 	}

@@ -93,7 +93,7 @@ func TestGenerate(t *testing.T) {
 
 // TestGenerateStoreGitignoreKeepsLockFilesUntracked asserts the fixture
 // store carries the same "*.lock"/".*.tmp" .gitignore as
-// project.InitStandalone, and that a real locked write never shows up in
+// project.Init, and that a real locked write never shows up in
 // `git status` for the (already-committed) fixture store.
 func TestGenerateStoreGitignoreKeepsLockFilesUntracked(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())

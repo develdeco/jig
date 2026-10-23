@@ -25,7 +25,7 @@ type Rename struct {
 // FileOp is one file the migration would move, delete or rewrite, its path
 // store-relative and slash-separated.
 type FileOp struct {
-	Action string // "move", "delete" or "rewrite"
+	Action string // "move", "delete", "rewrite", "write" or "keep"
 	Path   string // the file's path after the op, slash-separated
 	From   string // for "move": the path before the op; "" otherwise
 }
@@ -42,6 +42,10 @@ type Plan struct {
 	// Keys is the new area keys the migrated project.yaml declares (the
 	// map's own keys:).
 	Keys map[string]string
+
+	// v3 is the v2 to v3 step's own work (v2tov3.go); the v1 to v2 step
+	// leaves it nil.
+	v3 *v3Work
 }
 
 // chartIndexRefRE matches a chart blocked_by ref that names an entry by

@@ -163,7 +163,7 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 			}
 		}
 	} else {
-		problems = append(problems, "project.yaml declares no repos")
+		problems = append(problems, "the project declares no repos")
 	}
 
 	for _, sl := range slices {
