@@ -1,5 +1,7 @@
 # Builders test narrowly, and the shell waits for the oracle
 
+**Superseded by [ADR 0032](0032-jig-attaches-to-the-harness.md):** the dispatch prompt this ADR amended is gone with `jig run`, and the harness keeps its own shell timeout and background behavior. The waiting problem is answered by `jig verify`, which runs the oracle in the background on each commit and never blocks the session; the lost-run problem by the Stop hook, which holds an unattended session back while tracked files are uncommitted; and the advice to test narrowly lives in `skills/build`. What follows is the record of the design as it stood.
+
 A build session was told its oracle and nothing about how to use it. In one measured ticket, its builders made 66 `go test` calls, most of them over whole packages, and about 107 of 271 working minutes went to builders waiting on tests. 13 of those calls hit Claude Code's 2-minute default shell timeout. The CLI moved each one to the background, and the builder then reran it or polled it with a loop. jig's gate runs every oracle again after the build, so the builder's own runs are a check, not the proof.
 
 ## The dispatch prompt

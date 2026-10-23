@@ -1,5 +1,7 @@
 # Demos are recordings of the build's end-to-end scenarios
 
+**Inverted by [ADR 0032](0032-jig-attaches-to-the-harness.md):** recording moves to `jig verify`, which gives each verification a run of its own (`<slice>-v<attempt>`) and journals the `recorded` line; the gate still records nothing, and the pick is a `--picks` file the session writes, not a session jig launches.
+
 ADR 0014 made the demo a model session of its own, run after a clean reviewer round, that decides what to show and makes the media. jig's own flows are shown by VHS tapes that CI renders. Both are a second script beside the tests: a tape breaks whenever a prompt changes (#78 needed a hand fix), and the demo session re-does by hand what the end-to-end tests already drive. The owner settled a different source on 2026-10-05: the demo is a by-product of verification, recorded while the build's end-to-end scenarios run.
 
 ## Decision
