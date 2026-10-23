@@ -497,6 +497,12 @@ func TestPublishTitlesThePullRequestWithTheRecordedTitle(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
 	logFile, _ := useGithubHost(t, &d, "", "")
+	// The title is recorded first: it names the ticket's default branch, so a
+	// title recorded after the gate would move the ticket off the branch the
+	// gate reviewed.
+	if err := d.Store.CreateTicketRecord(fx.Ticket, store.Ticket{Title: "Recorded title"}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
+	}
 	gateToClean(t, fx, d)
 
 	sls, err := d.Store.ReadSlices(fx.Ticket)
@@ -513,11 +519,8 @@ func TestPublishTitlesThePullRequestWithTheRecordedTitle(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "slices.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Store.CreateTicketRecord(fx.Ticket, store.Ticket{Title: "Recorded title"}); err != nil {
-		t.Fatalf("CreateTicketRecord: %v", err)
-	}
-	if err := d.Store.Push(fx.Ticket + ": no slice goals, a recorded title"); err != nil {
-		t.Fatalf("push the recorded title: %v", err)
+	if err := d.Store.Push(fx.Ticket + ": no slice goals"); err != nil {
+		t.Fatalf("push the slices: %v", err)
 	}
 
 	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
