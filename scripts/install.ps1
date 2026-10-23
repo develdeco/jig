@@ -102,7 +102,7 @@ function Install-Jig {
         & $installPath version
 
         Write-Info ''
-        Write-Info 'next: run "jig skills install" to install the session skills'
+        Write-Info 'next: run "jig setup --global --artifacts --yes" to install the skills, hooks and git hook'
     } finally {
         Remove-Item -Path $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
     }

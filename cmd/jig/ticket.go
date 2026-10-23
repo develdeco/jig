@@ -16,7 +16,7 @@ func init() {
 		Spec: cmdSpec{"ticket", "mint a new ticket: jig ticket new --title <t>", []flagSpec{
 			{"title", "ticket title (required)", false},
 			{"body", "ticket body/description", false},
-			{"key", "key to mint under (required when project.yaml declares more than one)", false},
+			{"key", "key to mint under (required when the store declares more than one)", false},
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 		}, false},
@@ -67,7 +67,7 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "ticket new")
 	title := fs.String("title", "", "ticket title (required)")
 	body := fs.String("body", "", "ticket body/description")
-	keyFlag := fs.String("key", "", "key to mint under (required when project.yaml declares more than one)")
+	keyFlag := fs.String("key", "", "key to mint under (required when the store declares more than one)")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
