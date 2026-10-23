@@ -136,25 +136,30 @@ func claimSlice(e env, stdout io.Writer, w work, sl store.Slice, unattended, tak
 			}
 		}
 	}
-	started, err := recordClaim(e, w, sl, ss, unattended, !mine)
+	started, recorded, err := recordClaim(e, w, sl, ss, unattended, !mine)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	return printClaim(stdout, w, sl, result, started, problems, tookFrom)
+	return printClaim(stdout, w, sl, result, started, recorded, problems, tookFrom)
 }
 
 // recordClaim writes what a claim leaves behind: the slice building, the
-// start sha of the repo when the ticket has none there yet, the claim line
-// (newLine; a session claiming again what it holds adds none), and a push.
-// started is the start sha it recorded, "" when it recorded none.
-func recordClaim(e env, w work, sl store.Slice, ss store.SliceState, unattended, newLine bool) (started string, err error) {
+// start sha of the repo when the ticket has none there yet, the branch the
+// work is on when it names no ticket (recordBranch), the claim line (newLine;
+// a session claiming again what it holds adds none), and a push. started is
+// the start sha it recorded and recorded the branch it recorded as the
+// ticket's, "" when it recorded none.
+func recordClaim(e env, w work, sl store.Slice, ss store.SliceState, unattended, newLine bool) (started, recorded string, err error) {
 	if next := claimedState(ss); next != ss {
 		if err := w.St.WriteSliceState(w.Ticket, sl.ID, next); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 	if started, err = ensureStartSHA(w); err != nil {
-		return "", err
+		return "", "", err
+	}
+	if recorded, err = recordBranch(w); err != nil {
+		return "", "", err
 	}
 	if newLine {
 		err = journal.Append(w.St, w.Ticket, journal.Line{
@@ -162,10 +167,10 @@ func recordClaim(e env, w work, sl store.Slice, ss store.SliceState, unattended,
 			Session: w.Session, Unattended: unattended, Branch: w.Where.Branch,
 		})
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
-	return started, w.St.Push(fmt.Sprintf("%s: slice %s claimed", w.Ticket, sl.ID))
+	return started, recorded, w.St.Push(fmt.Sprintf("%s: slice %s claimed", w.Ticket, sl.ID))
 }
 
 // stamp is the time on e as a journal line records it.
@@ -219,7 +224,7 @@ func refusal(w work, sl store.Slice, problems []claimProblem) *axi.Error {
 
 // printClaim reports a claim: where it stands, the conditions it did not meet
 // (a person is watching, so they only warn), and the next step.
-func printClaim(stdout io.Writer, w work, sl store.Slice, result, started string, problems []claimProblem, tookFrom string) int {
+func printClaim(stdout io.Writer, w work, sl store.Slice, result, started, recorded string, problems []claimProblem, tookFrom string) int {
 	ss, err := w.St.ReadSliceState(w.Ticket, sl.ID)
 	if err != nil {
 		return renderErr(stdout, err)
@@ -243,6 +248,9 @@ func printClaim(stdout io.Writer, w work, sl store.Slice, result, started string
 		blocks = append(blocks, axi.Table("warnings", []string{"code", "message", "help"}, rows))
 	}
 	help := []string{fmt.Sprintf("Run `jig context %s --slice %s` for the brief, what is built and the oracle; commit with the trailer `Jig-Slice: %s`", w.Ticket, sl.ID, sl.ID)}
+	if recorded != "" {
+		help = append(help, fmt.Sprintf("Branch %s names no ticket, so it is now %s's branch (ticket.yaml branch:); name later branches for the ticket and they need no claim to bind", recorded, w.Ticket))
+	}
 	if w.Session == "" {
 		help = append(help, "No session id: pass --session or set JIG_SESSION, so `jig here` knows which slice you hold")
 	}
