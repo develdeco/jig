@@ -29,9 +29,9 @@ Everything else happened between the session and jig:
    and runs the slice's oracle on a detached copy of that exact commit, in the
    background. The session keeps working while the TUI shows the verification
    pending, then the oracle's pass.
-4. **It hears the result.** At its next tool call the session is told the commit
-   was verified (or how it failed, with the end of the output), and it moves on
-   to slice b. Green is what jig ran, never what the model said.
+4. **It hears the result.** At its next shell command the session is told the
+   commit was verified (or how it failed, with the end of the output), and it
+   moves on to slice b. Green is what jig ran, never what the model said.
 
 The TUI ends with both slices green and names the next step, `jig gate SHOP-1`.
 
@@ -92,7 +92,8 @@ Cursor, GitHub Copilot and OpenCode are written from their documentation.
 build (sessions, verifications and their output), its review (rounds, findings
 and how each ended) and a single slice, with a color and an icon per state. From
 it you answer a session's question (`a`), keep or dismiss a review finding
-(`k`, `d`), open a gate round (`g`) and approve a publish (`p`). Every action it
+(`k`, `d`), open a gate round (`g`), and approve and publish (`p`: after your
+`y` it pushes the branch and opens the pull request). Every action it
 takes is a jig command, recorded with your provenance.
 
 ## What jig tells your session
@@ -107,7 +108,7 @@ moments, and a directory in no project gets nothing:
   agent where it does not.
 - **A commit lands**: git's post-commit hook or the harness's PostToolUse hook
   starts `jig verify` for it, whichever sees it first.
-- **The next tool call or prompt**: what the session has not heard yet, once - a
+- **The next shell command or prompt**: what the session has not heard yet, once - a
   verification's outcome, an answer to its question, a stall (the same failure
   twice), a brief edited under verified work, a commit outside every slice, a
   ticket over its budget.
@@ -129,16 +130,17 @@ and `--uninstall` takes away exactly what the same flags wrote.
 | You are | Run | What you get |
 |---|---|---|
 | on your own machine in Claude Code | `jig setup --global --artifacts --yes`, then `jig init` in each repo | jig in your own configuration; each repo gets only a `jig.yaml` |
-| in a repo that should show nothing of jig | `jig attach` | skill stub, hooks and hint in files git ignores (`.git/info/exclude`) |
-| on a team repo that should carry jig | `jig attach --tracked` | committed skills, hooks and an `AGENTS.md` line, inert without the binary |
+| in a repo that should carry nothing of jig but `jig.yaml` | `jig attach` | skill stub, hooks and hint in files git ignores (`.git/info/exclude`) |
+| on a team repo that should carry jig | `jig attach --tracked` | committed skills, hooks and an `AGENTS.md` line; each teammate needs the jig binary |
 | in several repos under one directory | `jig init` in that directory, `jig attach --members` | one project and one store over every nested repo |
-| in another harness | `jig setup --global --harness codex,gemini` (`all` for every one) | hook files for that harness |
-| in a cloud session | `jig setup --cloud` | prints the environment setup script; writes nothing |
+| in another harness | `jig setup --global --hooks --harness codex,gemini --yes` (`all` for every one) | hook files for that harness |
+| in a cloud session | `jig setup --cloud` | prints the environment setup script and writes nothing; the script installs the latest release, so it works once a release carries this design |
 | in a harness with no hooks | `jig mcp` | the same commands as MCP tools over stdio |
 | unattended | start the session yourself and claim with `--unattended` | refused claims and Stop for anything left undone |
 | ready to share the project | `jig share` | sets the remotes and pushes the store and the repos |
 
-A project is local until `jig share` publishes it.
+A project is local until `jig share` publishes it, unless its store mirrors to
+GitHub (below), which syncs from inside every command.
 
 ## The commands, for reference
 
@@ -173,9 +175,10 @@ every command. Add to the store's `store.yaml`:
 trackers:
   - github:
       repo: your-org/your-tracking-repo
-      project: https://github.com/users/your-org/projects/7
+      project: https://github.com/orgs/your-org/projects/7
 ```
 
+A project of a personal account is `https://github.com/users/<login>/projects/<n>`.
 Issues live in `repo:`; jig creates the project's `Status` and `Store ID` fields
 on its first sync. The `gh` token needs the `project` scope. A `publish-terms.txt`
 in the jig home names terms that must never reach a public issue. Edits made on
@@ -189,14 +192,19 @@ explains each step.
 
 jig starts no coding session. On your machine it runs `git`, `gh`, your repo's
 own oracle commands (in a detached worktree of the commit, bounded by the
-manifest's `timeout:`, 30 minutes by default) and itself. It edits your settings
+manifest's `timeout:`, 30 minutes by default), `graphify` when the project's
+`context:` names it, and itself. It edits your settings
 and memory files only after a yes, keeps everything in them that is not its
 own, and its uninstall takes out only what it wrote. The machine ledger, under
 the jig home, records for sessions in jig projects the first 400 bytes of each
-command and the files touched; it never enters the store.
+command and the files touched. With git's global hook installed (`--githook`,
+part of `--artifacts`) it also records every commit made on the machine, in any
+repository: its hash, branch and directory. The ledger never enters the store.
 
-The ticket branch is pushed only by `jig publish` after your confirmation, or by
-your own session. jig makes no commit on your branch.
+`jig share` is the one verb that commits to your repository: after your yes it
+commits `jig.yaml` on the branch you have checked out and pushes it. Otherwise
+the ticket branch is pushed only by `jig publish` after your confirmation, or by
+your own session, and jig makes no commit on it.
 
 A review round with no brief and no stated intent reads your local Claude Code
 transcripts to find the session that made the change, and hands the reviewer an
