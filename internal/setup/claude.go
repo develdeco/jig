@@ -4,14 +4,20 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 )
 
-// ClaudeHook is one Claude Code event jig listens to, and the tool matcher
+// HookSpec is one event of a harness that jig listens to, and the tool matcher
 // its entry carries (empty for none).
-type ClaudeHook struct {
+type HookSpec struct {
 	Event   string
 	Matcher string
 }
+
+// ClaudeHook is a HookSpec under the name the Claude Code installer first gave
+// it.
+type ClaudeHook = HookSpec
 
 // ClaudeHooks are the events jig adds an entry for, in the order it adds them.
 // PostToolUse is limited to the Bash tool: a commit or a test run is a shell
@@ -29,7 +35,20 @@ func ClaudeHooks() []ClaudeHook {
 // ClaudeCommand is the command of every Claude Code entry: jig is the program
 // part JigCommand gives, and the event arrives on stdin.
 func ClaudeCommand(jig string) string {
-	return jig + " observe --harness claude"
+	return ObserveCommand(jig, "claude")
+}
+
+// claudeFormat is Claude Code's settings file: grouped entries of type
+// command.
+var claudeFormat = groupedFormat{
+	harness: "claude",
+	hooks:   ClaudeHooks(),
+	entry: func(command string) *object {
+		e := newObject()
+		e.set("type", "command")
+		e.set("command", command)
+		return e
+	},
 }
 
 // parseSettings reads a settings document into its ordered form and the
@@ -68,11 +87,28 @@ func parseSettings(data []byte) (*object, layout, error) {
 // Claude Code reads, is an error and nothing is returned to write: jig does
 // not guess at a file it cannot read.
 func MergeClaude(data []byte, jig string) (out []byte, changed bool, err error) {
+	return claudeFormat.merge(data, jig)
+}
+
+// groupedFormat is a harness whose hook file nests its entries in groups, as
+// Claude Code's does: hooks.<Event> is a list of groups, each an object with an
+// optional matcher and a list of hooks. Codex and the Gemini CLI use the same
+// shape, with other event names and other fields on the entry.
+type groupedFormat struct {
+	harness string
+	hooks   []HookSpec
+	// entry builds the hook entry that runs command.
+	entry func(command string) *object
+}
+
+// merge is MergeClaude for any grouped harness: data with an entry running
+// the harness's observe command through jig for each of its events.
+func (f groupedFormat) merge(data []byte, jig string) (out []byte, changed bool, err error) {
 	root, l, err := parseSettings(data)
 	if err != nil {
 		return nil, false, err
 	}
-	changed, err = mergeClaudeHooks(root, ClaudeCommand(jig))
+	changed, err = f.mergeHooks(root, ObserveCommand(jig, f.harness))
 	if err != nil {
 		return nil, false, err
 	}
@@ -86,7 +122,7 @@ func MergeClaude(data []byte, jig string) (out []byte, changed bool, err error) 
 	return out, true, nil
 }
 
-func mergeClaudeHooks(root *object, command string) (bool, error) {
+func (f groupedFormat) mergeHooks(root *object, command string) (bool, error) {
 	changed := false
 	var hooks *object
 	v, present := root.get("hooks")
@@ -101,7 +137,7 @@ func mergeClaudeHooks(root *object, command string) (bool, error) {
 		}
 		hooks = o
 	}
-	for _, h := range ClaudeHooks() {
+	for _, h := range f.hooks {
 		var groups []any
 		if v, present := hooks.get(h.Event); present && v != nil {
 			list, ok := v.([]any)
@@ -110,7 +146,7 @@ func mergeClaudeHooks(root *object, command string) (bool, error) {
 			}
 			groups = list
 		}
-		next, c := ensureClaudeEntry(groups, h, command)
+		next, c := f.ensureEntry(groups, h, command)
 		if c {
 			hooks.set(h.Event, next)
 			changed = true
@@ -119,9 +155,9 @@ func mergeClaudeHooks(root *object, command string) (bool, error) {
 	return changed, nil
 }
 
-// ensureClaudeEntry returns groups with exactly one owned entry for h running
+// ensureEntry returns groups with exactly one owned entry for h running
 // command, and whether that changed anything.
-func ensureClaudeEntry(groups []any, h ClaudeHook, command string) ([]any, bool) {
+func (f groupedFormat) ensureEntry(groups []any, h HookSpec, command string) ([]any, bool) {
 	changed, found := false, false
 	out := make([]any, 0, len(groups)+1)
 	for _, g := range groups {
@@ -158,7 +194,7 @@ func ensureClaudeEntry(groups []any, h ClaudeHook, command string) ([]any, bool)
 		out = append(out, g)
 	}
 	if !found {
-		out = append(out, newClaudeGroup(h, command))
+		out = append(out, newGroup(h, f.entry(command)))
 		changed = true
 	}
 	return out, changed
@@ -195,10 +231,7 @@ func ownedClaudeEntry(e any) (ent *object, command string, owned bool) {
 	return ent, command, true
 }
 
-func newClaudeGroup(h ClaudeHook, command string) *object {
-	entry := newObject()
-	entry.set("type", "command")
-	entry.set("command", command)
+func newGroup(h HookSpec, entry *object) *object {
 	g := newObject()
 	if h.Matcher != "" {
 		g.set("matcher", h.Matcher)
@@ -338,11 +371,17 @@ type FilePlan struct {
 	// Before is the file as it is (nil when it is not there), After as it
 	// would be. They are the same bytes when there is nothing to do.
 	Before, After []byte
+	// Delete says the file would be removed: what jig wrote was all there was
+	// in it (a hook script of its own, a file that held only its entries).
+	Delete bool
 }
 
 // Changed reports whether applying the plan would write anything: the bytes
-// differ, or the file would be created.
+// differ, the file would be created, or it would be removed.
 func (p FilePlan) Changed() bool {
+	if p.Delete {
+		return p.Exists
+	}
 	return !bytes.Equal(p.Before, p.After) || (!p.Exists && p.After != nil)
 }
 
@@ -355,8 +394,14 @@ func (p FilePlan) LeavesEmptyObject() bool {
 }
 
 // Apply writes the plan: the file replaced atomically, its permissions kept,
-// its directory made if need be.
+// its directory made if need be; or removed, for a plan that deletes it.
 func (p FilePlan) Apply() error {
+	if p.Delete {
+		if err := os.Remove(p.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
 	return writeFile(p.Path, p.After, 0o644, true)
 }
 
@@ -364,15 +409,26 @@ func (p FilePlan) Apply() error {
 // file at path, or taking them out when uninstall is set. A file that is not
 // there is an empty document to install into and nothing to uninstall from.
 func PlanClaude(path, jig string, uninstall bool) (FilePlan, error) {
+	return planFile(path, jig, uninstall, MergeClaude, UnmergeClaude)
+}
+
+// planFile works out a change to the file at path with a harness's merge and
+// unmerge. An unmerge that returns nothing to write, with a change, says the
+// file was all jig's: the plan then deletes it.
+func planFile(path, jig string, uninstall bool, merge func([]byte, string) ([]byte, bool, error), unmerge func([]byte) ([]byte, bool, error)) (FilePlan, error) {
 	data, exists, err := readIfExists(path)
 	if err != nil {
 		return FilePlan{}, err
 	}
 	plan := FilePlan{Path: path, Exists: exists, Before: data}
 	if uninstall {
-		plan.After, _, err = UnmergeClaude(data)
+		var changed bool
+		plan.After, changed, err = unmerge(data)
+		if err == nil && changed && plan.After == nil {
+			plan.Delete = true
+		}
 	} else {
-		plan.After, _, err = MergeClaude(data, jig)
+		plan.After, _, err = merge(data, jig)
 	}
 	if err != nil {
 		return FilePlan{}, fmt.Errorf("%s: %w", path, err)
