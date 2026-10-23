@@ -10,6 +10,25 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"ticket", "mint a new ticket: jig ticket new --title <t>", []flagSpec{
+			{"title", "ticket title (required)", false},
+			{"body", "ticket body/description", false},
+			{"key", "key to mint under (required when project.yaml declares more than one)", false},
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 110,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdTicket(e, args, stdout)
+		},
+		FlagSet: "ticket new",
+		Probe:   []string{"new"},
+	})
+}
+
 // resolveTicketArg resolves ticket - as typed on the command line, an id or
 // one of a ticket's aliases - to its current id through st.ResolveTicket,
 // printing one line naming it when it differs from what was typed: every

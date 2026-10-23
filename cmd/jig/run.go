@@ -9,6 +9,37 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// init registers this file's verbs with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"run", "dispatch the frontier of queued slices", []flagSpec{
+			{"answer", "answer a pending question: --answer <qid> <text>", false},
+			{"backend", "session backend: fake, headless, or herdr", false},
+			{"scenario", "scenario dir for the fake backend", false},
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 140,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdRun(e, args, stdout)
+		},
+		Probe: []string{"T-1"},
+	})
+	registerVerb(verb{
+		Spec: cmdSpec{"requeue", "requeue slices touched by a brief edit, or one stalled/env-blocked slice", []flagSpec{
+			{"from-brief-diff", "requeue slices whose brief section hash changed", false},
+			{"slice", "requeue one stalled or env-blocked slice by id", false},
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 150,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdRequeue(e, args, stdout)
+		},
+		Probe: []string{"T-1"},
+	})
+}
+
 // cmdRun implements `jig run <ticket> [--answer <qid> <text>] [--backend
 // fake|headless|herdr] [--scenario <dir>]`.
 func cmdRun(e env, args []string, stdout io.Writer) int {

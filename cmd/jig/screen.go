@@ -7,6 +7,18 @@ import (
 	"github.com/develdeco/jig/internal/screen"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec:  cmdSpec{"_screen", "hidden PreToolUse hook: reads a tool call on stdin", nil, true},
+		Order: 240,
+		Run: func(_ env, _ []string, stdout io.Writer, stdin io.Reader) int {
+			return cmdScreen(stdin, stdout)
+		},
+		NoFlagSet: true,
+	})
+}
+
 // screenHookInput is the PreToolUse hook payload jig reads on stdin: the
 // tool being called and its input map.
 type screenHookInput struct {

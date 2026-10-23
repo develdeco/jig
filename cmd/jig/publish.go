@@ -11,6 +11,24 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"publish", "reconcile, revalidate, and open or update the PR", []flagSpec{
+			{"yes", "skip the interactive confirm", false},
+			{"backend", "session backend that picks the recordings the pull request shows: fake, headless, or herdr", false},
+			{"scenario", "scenario dir for the fake backend", false},
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 170,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdPublish(e, args, stdout)
+		},
+		Probe: []string{"T-1"},
+	})
+}
+
 // cmdPublish implements `jig publish <ticket> [--yes] [--backend
 // fake|headless|herdr] [--scenario <dir>]`.
 func cmdPublish(e env, args []string, stdout io.Writer) int {

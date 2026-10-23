@@ -722,7 +722,7 @@ func TestHelpContainsCommands(t *testing.T) {
 		t.Fatalf("jig (bare) exit code = %d", code)
 	}
 	out := buf.String()
-	for _, c := range commandTable {
+	for _, c := range commandTable() {
 		if c.Hidden {
 			if strings.Contains(out, c.Name) {
 				t.Errorf("help output unexpectedly contains hidden command %q", c.Name)

@@ -46,45 +46,15 @@ func run(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return 0
 	}
 
-	cmd, rest := args[0], args[1:]
-	switch cmd {
-	case "init":
-		return cmdInit(e, rest, stdout)
-	case "ticket":
-		return cmdTicket(e, rest, stdout)
-	case "graduate":
-		return cmdGraduate(e, rest, stdout)
-	case "solve":
-		return cmdSolve(e, rest, stdout, stdin)
-	case "run":
-		return cmdRun(e, rest, stdout)
-	case "requeue":
-		return cmdRequeue(e, rest, stdout)
-	case "gate":
-		return cmdGate(e, rest, stdout, stdin)
-	case "publish":
-		return cmdPublish(e, rest, stdout)
-	case "status":
-		return cmdStatus(e, rest, stdout)
-	case "validate":
-		return cmdValidate(e, rest, stdout)
-	case "version":
-		return cmdVersion(e, rest, stdout)
-	case "skills":
-		return cmdSkills(e, rest, stdout)
-	case "trackers":
-		return cmdTrackers(e, rest, stdout)
-	case "store":
-		return cmdStore(e, rest, stdout)
-	case "_screen":
-		return cmdScreen(stdin, stdout)
-	default:
+	v, rest, ok := lookupVerb(args)
+	if !ok {
 		return renderErr(stdout, &axi.Error{
-			Msg:  fmt.Sprintf("unknown command %q", cmd),
+			Msg:  fmt.Sprintf("unknown command %q", args[0]),
 			Code: "VALIDATION_ERROR",
 			Help: []string{"Run `jig` with no arguments to see the command list"},
 		})
 	}
+	return v.Run(e, rest, stdout, stdin)
 }
 
 // renderErr writes err through axi.RenderError (wrapping a plain error in an

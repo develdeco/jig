@@ -10,6 +10,22 @@ import (
 	"github.com/develdeco/jig/internal/project"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"init", "initialize a store (standalone, or store + clones)", []flagSpec{
+			{"standalone", "create a sibling tickets store next to the current repo", false},
+			{"store", "store path to initialize (used with --clone)", false},
+			{"key", "area key the store's one project.yaml keys: entry declares (standalone only); default: derived from the project name", false},
+			{"clone", "name=path clone mapping; repeatable", false},
+		}, false},
+		Order: 100,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdInit(e, args, stdout)
+		},
+	})
+}
+
 // cmdInit implements `jig init [--standalone] [--store <path>] [--clone
 // <name>=<path>]...`.
 func cmdInit(e env, args []string, stdout io.Writer) int {

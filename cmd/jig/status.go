@@ -19,6 +19,21 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"status", "print a ticket's slice and question state", []flagSpec{
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 180,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdStatus(e, args, stdout)
+		},
+		Probe: []string{"T-1"},
+	})
+}
+
 // cmdStatus implements `jig status [<ticket>]`.
 func cmdStatus(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "status")
