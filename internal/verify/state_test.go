@@ -2,6 +2,7 @@ package verify
 
 import (
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -137,5 +138,54 @@ func TestAnOlderCommitFinishingLastLeavesTheNewerOnesState(t *testing.T) {
 				t.Errorf("attempts = %d, want 2: both runs count", got.Attempts)
 			}
 		})
+	}
+}
+
+// TestTheSliceIsGreenBeforeTheVerifiedLineSaysSo pins the order of a pass's
+// last two writes: a reader that the verified line wakes (jig events, the
+// TUI, a hook) reads the slice's state next, so the state must already be
+// green when that line is written. The clock is read to stamp each line, so
+// a clock that looks at the slice state at every reading sees what a reader
+// woken by the line would.
+func TestTheSliceIsGreenBeforeTheVerifiedLineSaysSo(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, fixture.Opts{})
+	sha := r.fixClamp()
+	var mu sync.Mutex
+	stateAt := map[time.Time]string{}
+	d := r.deps
+	d.Now = func() time.Time {
+		r.clock.advance(time.Second)
+		now := r.clock.Now().UTC()
+		st, err := r.st.ReadSliceState(r.fx.Ticket, "a")
+		mu.Lock()
+		defer mu.Unlock()
+		if err != nil {
+			stateAt[now] = "unreadable: " + err.Error()
+		} else {
+			stateAt[now] = st.State
+		}
+		return now
+	}
+	if res, err := Run(d, r.request("a", sha)); err != nil || res.State != journal.VerifyPass {
+		t.Fatalf("Run = %+v, %v, want a pass", res, err)
+	}
+	var verified *journal.Line
+	for _, l := range r.lines() {
+		if l.Event == journal.EventVerified && l.Slice == "a" && l.Commit == sha {
+			verified = &l
+		}
+	}
+	if verified == nil {
+		t.Fatalf("no verified line for %s: %v", sha, events(r.lines()))
+	}
+	at, err := time.Parse(time.RFC3339Nano, verified.TS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got, ok := stateAt[at.UTC()]; !ok || got != "green" {
+		t.Errorf("slice a when its verified line was written = %q (stamped %v), want green", got, ok)
 	}
 }

@@ -230,8 +230,9 @@ func (x *run) existing(lines []journal.Line) bool {
 //     with a recording directory in JIG_RECORD_DIR;
 //  4. the oracle line (Source jig, Commit the sha, Command, Env, Seconds,
 //     and on a failure Summary and Signature), then on a pass the recorded
-//     line if the scenarios recorded, the verified line, and the slice's
-//     state green; on a failure the slice's state building;
+//     line if the scenarios recorded, the slice's state green, and the
+//     verified line, so a reader the verified line wakes finds the slice
+//     green; on a failure the slice's state building;
 //  5. a push, tried three times; if it fails the lines stay local for the
 //     next checkpoint (Result.PushErr).
 //
@@ -566,13 +567,13 @@ func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 		return nil
 	}
 
-	// The commit is the ticket's now: the oracle line records the run, this
-	// one that it verified, and only these are the commits jig built
-	// (journal.BuiltCommits). It goes in before the slice is marked green, so
-	// a run that stops in between still has the commit recorded.
-	if err := x.journal(journal.Line{Event: journal.EventVerified, Commit: x.sha}); err != nil {
-		return err
-	}
+	// The commit is the ticket's now: the oracle line records the run, the
+	// verified line that it verified, and only verified lines are the commits
+	// jig built (journal.BuiltCommits). The slice is marked green first: the
+	// verified line is what wakes a reader of the journal (jig events, the
+	// TUI, the hooks), and a reader it wakes must find the slice green, not
+	// the state from before. A run that stops in between leaves the oracle
+	// line, which already stands as the commit's pass (VerificationState).
 	err := x.setState(func(st *store.SliceState) bool {
 		st.Attempts = max(st.Attempts, x.attempt)
 		if newer {
@@ -583,6 +584,9 @@ func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 		return true
 	})
 	if err != nil {
+		return err
+	}
+	if err := x.journal(journal.Line{Event: journal.EventVerified, Commit: x.sha}); err != nil {
 		return err
 	}
 	x.push("oracle passed")
