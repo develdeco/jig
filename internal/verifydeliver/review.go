@@ -12,7 +12,9 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/manifest"
+	"github.com/develdeco/jig/internal/media"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 	"gopkg.in/yaml.v3"
@@ -1048,8 +1050,16 @@ type ReviewPrep struct {
 	// Changed, Deleted and MustReview are the scope diff's coverage lists.
 	Changed, Deleted, MustReview []string
 	// Request is the review.json that was written, at ReviewPath.
-	Request    ReviewRequest
+	Request ReviewRequest
+	// ReviewPath is the review.json in the store's work directory. With a jig
+	// home it names no directory of this machine (the store is shared), so
+	// the worktree, the intent excerpt and the recordings list are left out of
+	// it; RequestPath is the reviewer's copy that carries them.
 	ReviewPath string
+	// RequestPath is the request as the reviewer reads it, in full: a file
+	// under the jig home (home.ReviewDir). It is ReviewPath itself when the
+	// round has no jig home to keep paths of.
+	RequestPath string
 	// ResultPath is where a launched reviewer writes its result.json; a
 	// recorded round has none and records the result in the store's work
 	// directory when the round is done.
@@ -1144,7 +1154,6 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		Scope:         scope,
 		BaseSHA:       base,
 		HeadSHA:       head,
-		Worktree:      absPath(in.LeaseDir),
 		Intent:        in.Intent,
 		IntentExcerpt: excerpt,
 		SlicesPath:    absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "slices.yaml")),
@@ -1156,6 +1165,12 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		MustReview:    diff.MustReview,
 	}
 
+	// A recorded round's reviewer is not started in the lease, so its request
+	// says where to read; a launched reviewer runs there.
+	if in.Recorded {
+		prep.Request.Worktree = absPath(in.LeaseDir)
+	}
+
 	// The build's recordings at this head or an ancestor of it, as evidence:
 	// listed in a file under the jig home when there are some, and named in
 	// the request only then (recordings.go). A round without any hands the
@@ -1164,7 +1179,11 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	if err != nil {
 		return ReviewPrep{}, err
 	}
-	prep.Request.Recordings = prep.RecordingsPath
+	// A launched reviewer's prompt names the list; a recorded round's request
+	// does, for the agent that reads it.
+	if in.Recorded {
+		prep.Request.Recordings = prep.RecordingsPath
+	}
 
 	prep.ReviewPath = reviewJSONPath(in.Store, in.Ticket, in.Round)
 	prep.ResultPath = reviewResultJSONPath(in.Store, in.Ticket, in.Round)
@@ -1173,8 +1192,20 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	// worktree, the intent excerpt and the recordings list are paths under the
 	// jig home, and a recorded round keeps them in its open record as paths
 	// relative to it (openRoundFile), for `jig review context` to spell out.
+	// A reviewer that is handed one of those paths (every recorded round's, and
+	// a launched round's intent excerpt) reads the whole request from a copy
+	// under the jig home; a launched round that has none keeps reading the
+	// store's file exactly as it always has.
 	stored := prep.Request
-	stored.Worktree, stored.IntentExcerpt, stored.Recordings = "", "", ""
+	prep.RequestPath = prep.ReviewPath
+	if in.Home != "" {
+		stored.Worktree, stored.IntentExcerpt, stored.Recordings = "", "", ""
+		if in.Recorded || prep.Request.IntentExcerpt != "" {
+			if prep.RequestPath, err = writeReviewerRequest(in, prep.Request); err != nil {
+				return ReviewPrep{}, err
+			}
+		}
+	}
 	reqData, err := MarshalReviewRequest(stored)
 	if err != nil {
 		return ReviewPrep{}, fmt.Errorf("verifydeliver: review: marshal review.json: %w", err)
@@ -1191,6 +1222,44 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		return ReviewPrep{}, fmt.Errorf("verifydeliver: review: remove stale result.json: %w", err)
 	}
 	return prep, nil
+}
+
+// reviewRequestFile is the reviewer's copy of a round's request, in the round's
+// directory under the jig home (home.ReviewDir), next to recordings.json.
+const reviewRequestFile = "review.json"
+
+// writeReviewerRequest writes the whole request - the worktree, the intent
+// excerpt and the recordings list included - under the jig home, where only
+// this machine's reviewer reads it, and returns its path.
+func writeReviewerRequest(in RoundInput, req ReviewRequest) (string, error) {
+	storeID, err := in.Store.ID()
+	if err != nil {
+		return "", fmt.Errorf("verifydeliver: review: resolve the store id: %w", err)
+	}
+	dir, err := home.ReviewDir(in.Home, storeID, in.Ticket, in.Round)
+	if err != nil {
+		return "", fmt.Errorf("verifydeliver: review: locate the round's directory: %w", err)
+	}
+	path := absPath(filepath.Join(dir, reviewRequestFile))
+	if err := media.PlainParents(absPath(filepath.Join(in.Home, "evidence")), path); err != nil {
+		return "", fmt.Errorf("verifydeliver: review: write the reviewer's request: %w", err)
+	}
+	data, err := MarshalReviewRequest(req)
+	if err != nil {
+		return "", fmt.Errorf("verifydeliver: review: marshal the reviewer's request: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", fmt.Errorf("verifydeliver: review: create the round's directory: %w", err)
+	}
+	// An earlier attempt at this round may have left a copy, or a link in its
+	// place; neither is written through.
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("verifydeliver: review: clear an earlier request: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", fmt.Errorf("verifydeliver: review: write the reviewer's request: %w", err)
+	}
+	return path, nil
 }
 
 // checkReviewResult is what a reviewer's result must pass before findings
@@ -1267,7 +1336,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		}}, true, nil
 	}
 
-	prompt := RenderReviewPromptWithRecordings(prep.Request, prep.ReviewPath, prep.ResultPath, prep.RecordingsPath)
+	prompt := RenderReviewPromptWithRecordings(prep.Request, prep.RequestPath, prep.ResultPath, prep.RecordingsPath)
 	effort := ""
 	if in.Effort != nil {
 		effort = in.Effort(prep.Scope)
@@ -1277,7 +1346,7 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		Slice:      "gate",
 		Attempt:    in.Round,
 		Worktree:   in.LeaseDir,
-		SliceJSON:  prep.ReviewPath,
+		SliceJSON:  prep.RequestPath,
 		ResultJSON: prep.ResultPath,
 		Model:      in.Model,
 		Effort:     effort,

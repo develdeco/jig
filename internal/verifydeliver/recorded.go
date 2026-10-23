@@ -57,6 +57,8 @@ type openRoundFile struct {
 	IntentNote    string `yaml:"intent_note,omitempty"`
 	// Recordings is the list of the build's recordings under the jig home.
 	Recordings string `yaml:"recordings,omitempty"`
+	// Request is the reviewer's copy of the request under the jig home.
+	Request string `yaml:"request,omitempty"`
 	// Yes is `jig gate --yes`.
 	Yes    bool   `yaml:"yes,omitempty"`
 	Opened string `yaml:"opened"`
@@ -89,10 +91,14 @@ type Prepared struct {
 	Opened       time.Time
 	// Reviewer is what the reviewer told jig of itself, if it did.
 	Reviewer Provenance
-	// Request is the review.json at ReviewPath.
+	// Request is the review.json at RequestPath.
 	Request ReviewRequest
+	// RequestPath is the reviewer's copy of the request, under the jig home:
+	// the worktree, the intent excerpt and the recordings list included.
+	RequestPath string
 	// ReviewPath, OpenPath and DraftsPath are the round's files under the
-	// store's work directory.
+	// store's work directory; the review.json there names no directory of
+	// this machine.
 	ReviewPath, OpenPath, DraftsPath string
 }
 
@@ -170,15 +176,20 @@ func preparedOf(jigHome string, st *store.Store, of openRoundFile, req ReviewReq
 	req.Worktree = homeAbs(jigHome, of.Lease)
 	req.IntentExcerpt = homeAbs(jigHome, of.IntentExcerpt)
 	req.Recordings = homeAbs(jigHome, of.Recordings)
+	requestPath := homeAbs(jigHome, of.Request)
+	if requestPath == "" {
+		requestPath = reviewJSONPath(st, of.Ticket, of.Round)
+	}
 	return Prepared{
 		Ticket: of.Ticket, Round: of.Round, Repo: of.Repo, Branch: of.Branch, Copy: of.Copy,
 		Head: of.Head, Base: of.Base, Scope: of.Scope, Target: of.Target, TargetSHA: of.TargetSHA,
 		Lease: req.Worktree, Adopted: of.Adopted,
 		Intent: req.Intent, IntentSHA256: of.Intent.SHA256, IntentNote: of.IntentNote,
 		Yes: of.Yes, Opened: opened, Reviewer: of.Reviewer, Request: req,
-		ReviewPath: reviewJSONPath(st, of.Ticket, of.Round),
-		OpenPath:   openRoundPath(st, of.Ticket, of.Round),
-		DraftsPath: findingsDraftsPath(st, of.Ticket, of.Round),
+		RequestPath: requestPath,
+		ReviewPath:  reviewJSONPath(st, of.Ticket, of.Round),
+		OpenPath:    openRoundPath(st, of.Ticket, of.Round),
+		DraftsPath:  findingsDraftsPath(st, of.Ticket, of.Round),
 	}
 }
 
@@ -216,7 +227,7 @@ func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 		Lease: homeRel(d.Home, absPath(run.lease.Dir)), Adopted: run.gb.Adopted,
 		Intent:        reportIntentYAML{Source: run.intent.Source, SHA256: run.intentSHA256},
 		IntentExcerpt: homeRel(d.Home, prep.Request.IntentExcerpt), IntentNote: prep.IntentNote,
-		Recordings: homeRel(d.Home, prep.RecordingsPath), Yes: o.Yes,
+		Recordings: homeRel(d.Home, prep.RecordingsPath), Request: homeRel(d.Home, prep.RequestPath), Yes: o.Yes,
 		Opened: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if of.TargetSHA, err = originTip(run.lease.Dir, run.target); err != nil {

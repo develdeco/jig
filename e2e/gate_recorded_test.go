@@ -68,9 +68,15 @@ func newBuiltTicket(t *testing.T, whole bool) builtTicket {
 		}
 	}
 	for _, s := range steps {
-		waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-			return l.Event == journal.EventVerified && l.Slice == s.slice && l.Commit == s.sha
+		l := waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
+			if l.Slice != s.slice {
+				return false
+			}
+			return (l.Event == journal.EventVerified && l.Commit == s.sha) || (l.Event == journal.EventOracle && l.Outcome == "fail")
 		})
+		if l.Event != journal.EventVerified {
+			t.Fatalf("slice %s failed its oracle at %s: %s (journal line %+v)", s.slice, s.sha, l.Summary, l)
+		}
 	}
 	h.WaitVerifiers()
 	st, err := store.Open(fx.StoreDir)

@@ -80,7 +80,7 @@ func roundBlocks(p verifydeliver.Prepared, moved string, full bool) []string {
 		{"base", p.Base},
 		{"scope", p.Scope},
 		{"worktree", p.Lease},
-		{"request", p.ReviewPath},
+		{"request", p.RequestPath},
 		{"intent", p.Intent.Source},
 	}
 	if p.Intent.Path != "" {

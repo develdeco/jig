@@ -298,7 +298,7 @@ func TestPrepareReviewRequestPointsAtTheExcerptOnlyWhenNoIntentIsStated(t *testi
 			in := RoundInput{
 				Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 				RepoName: "fixture-repo", Target: "main", OperatorClone: dir,
-				Home: jigHome, UserHome: homeDir, Intent: tc.intent,
+				Home: jigHome, UserHome: homeDir, Intent: tc.intent, Recorded: true,
 			}
 
 			prep, err := PrepareReviewRequest(in)
@@ -316,10 +316,19 @@ func TestPrepareReviewRequestPointsAtTheExcerptOnlyWhenNoIntentIsStated(t *testi
 			} else if got != "" || prep.IntentNote != "" {
 				t.Fatalf("intent_excerpt = %q (note %q), want none when the intent is stated", got, prep.IntentNote)
 			}
-			// The same request is on disk for the reviewer.
-			onDisk := readReviewRequest(t, prep.ReviewPath)
+			// The same request is on disk for the reviewer, under the jig home.
+			onDisk := readReviewRequest(t, prep.RequestPath)
 			if onDisk.IntentExcerpt != got || onDisk.Worktree != absPath(dir) || onDisk.HeadSHA != prep.Head {
-				t.Fatalf("review.json = %+v, want excerpt %q, worktree %q and head %s", onDisk, got, absPath(dir), prep.Head)
+				t.Fatalf("the reviewer's request = %+v, want excerpt %q, worktree %q and head %s", onDisk, got, absPath(dir), prep.Head)
+			}
+			if !strings.HasPrefix(prep.RequestPath, absPath(jigHome)) {
+				t.Errorf("the reviewer's request %s is not under the jig home %s", prep.RequestPath, jigHome)
+			}
+			// The store's review.json is shared: it names none of this
+			// machine's directories, and holds the rest of the request.
+			inStore := readReviewRequest(t, prep.ReviewPath)
+			if inStore.IntentExcerpt != "" || inStore.Worktree != "" || inStore.Recordings != "" || inStore.HeadSHA != prep.Head {
+				t.Fatalf("the store's review.json = %+v, want no excerpt, worktree or recordings path and head %s", inStore, prep.Head)
 			}
 		})
 	}
