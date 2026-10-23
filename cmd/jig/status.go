@@ -99,7 +99,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 	}
 	adopted := rec.Adopted()
 
-	cfg, err := project.Load(filepath.Join(st.Root, "project.yaml"))
+	cfg, err := project.LoadStoreConfig(st.Root)
 	if err != nil {
 		return "", err
 	}
@@ -328,7 +328,7 @@ func resumeCommand(ticket string, sl store.Slice, ss store.SliceState) string {
 	if ss.Reason == "flawed-brief" && len(sl.FromBrief) > 0 {
 		return fmt.Sprintf("jig requeue %s --from-brief-diff", ticket)
 	}
-	return fmt.Sprintf("jig run %s --answer %s '<text>'", ticket, ss.Question)
+	return fmt.Sprintf("jig answer %s %s '<text>'", ticket, ss.Question)
 }
 
 // resumeCell returns the parked table's "resume" column text. For the

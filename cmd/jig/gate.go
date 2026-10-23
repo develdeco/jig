@@ -285,8 +285,12 @@ func reviewerLabel(p verifydeliver.Provenance) string {
 // the frontier is short of green (hintOrFallback, exactly what `jig status`
 // would print), because a round is refused while any slice is short of green
 // and that is what actually moves the frontier; the decisions and the next
-// round follow it. With nothing undecided the hint is that same next-step
-// line alone.
+// round follow it. The hint reads the frontier itself (frontierGreen, the
+// condition the next round's check applies), never a proxy such as this
+// round's fix slices: `jig gate --early` can leave an ask with no fix slice
+// queued while the frontier is still short of green, and one parked on an
+// unanswered question advances only once it is answered (`jig answer`). With
+// nothing undecided the hint is that same next-step line alone.
 func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateReport) []string {
 	if report.Verdict == verifydeliver.VerdictNotIndependent {
 		return []string{fmt.Sprintf("Have a fresh-context reviewer, who did not build the change, review it: `jig gate %s`", ticket)}

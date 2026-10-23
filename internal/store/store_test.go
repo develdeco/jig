@@ -42,12 +42,12 @@ func newTestRemoteStore(t *testing.T) (st *Store, work, remote string) {
 	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// As jig's own stores have (project.InitStandalone): what lets gitx work
+	// As jig's own stores have (project.Init): what lets gitx work
 	// on a store in process.
 	if err := os.WriteFile(filepath.Join(work, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Also as project.InitStandalone's stores have: Lock's own "*.lock"
+	// Also as project.Init's stores have: Lock's own "*.lock"
 	// sidecar files (never removed) must never show up in `git status`.
 	if err := os.WriteFile(filepath.Join(work, ".gitignore"), []byte("*.lock\n.*.tmp\n"), 0o644); err != nil {
 		t.Fatal(err)

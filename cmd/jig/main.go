@@ -189,23 +189,6 @@ func extractAnswer(args []string) (qid, text string, rest []string, err error) {
 	return "", "", args, nil
 }
 
-// cloneFlag is a repeatable "--clone name=path" flag.Value.
-type cloneFlag struct{ m map[string]string }
-
-func (c *cloneFlag) String() string { return "" }
-
-func (c *cloneFlag) Set(v string) error {
-	name, path, ok := splitOnce(v, '=')
-	if !ok || name == "" || path == "" {
-		return fmt.Errorf("--clone must be name=path, got %q", v)
-	}
-	if c.m == nil {
-		c.m = map[string]string{}
-	}
-	c.m[name] = path
-	return nil
-}
-
 func splitOnce(s string, sep byte) (before, after string, ok bool) {
 	for i := 0; i < len(s); i++ {
 		if s[i] == sep {

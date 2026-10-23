@@ -4,13 +4,10 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
-	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/observe"
 	"github.com/develdeco/jig/internal/setup"
 )
 
@@ -197,19 +194,30 @@ func githookUndoFlag(uninstall bool) string {
 }
 
 // cmdGithookPostCommit is the hook git runs after a commit, from jig's wrapper
-// or from the block in a repository's own post-commit: it records the commit in
-// the machine ledger as a git-commit line with the commit, the directory and the
-// branch. It exits 0 whatever happens, since a record of a commit must never
-// fail the commit; what went wrong, if anything, is said on stdout, which git
-// shows beside the commit.
-func cmdGithookPostCommit(e env, stdout io.Writer) int {
-	if err := recordGitCommit(e); err != nil {
-		fmt.Fprintf(stdout, "jig githook post-commit: %v\n", err)
+// or from the block in a repository's own post-commit. It hands the commit to
+// the observe core as a post-commit event: the core records it in the machine
+// ledger as a git-commit line with the commit, the directory and the branch,
+// and, when the commit is on a ticket's branch and names a slice, starts its
+// verification. It exits 0 whatever happens, since a record of a commit must
+// never fail the commit; what went wrong, if anything, is said on stdout as
+// one line, which git shows beside the commit.
+func cmdGithookPostCommit(e env, stdout io.Writer) (code int) {
+	say := func(err error) {
+		fmt.Fprintf(stdout, "jig githook post-commit: %s\n", strings.Join(strings.Fields(err.Error()), " "))
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			say(fmt.Errorf("panic: %v", r))
+			code = 0
+		}
+	}()
+	if err := observeGitCommit(e); err != nil {
+		say(err)
 	}
 	return 0
 }
 
-func recordGitCommit(e env) error {
+func observeGitCommit(e env) error {
 	cwd, err := e.getwd()
 	if err != nil {
 		return err
@@ -218,17 +226,6 @@ func recordGitCommit(e env) error {
 	if err != nil {
 		return err
 	}
-	sha, err := gitx.RevParse(cwd, "HEAD")
-	if err != nil {
-		return err
-	}
-	// A detached HEAD has no branch: the line then carries none.
-	branch, _ := gitx.Run(cwd, "branch", "--show-current")
-	return ledger.Append(root, journal.Line{
-		TS:     e.now().UTC().Format(time.RFC3339Nano),
-		Event:  journal.EventGitCommit,
-		Commit: sha,
-		Cwd:    cwd,
-		Branch: strings.TrimSpace(branch),
-	})
+	_, err = observe.Handle(observeDeps(e, root), observe.Event{Harness: "git", Kind: observe.KindPostCommit, Cwd: cwd})
+	return err
 }

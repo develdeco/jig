@@ -239,7 +239,7 @@ func TestGateReportHintReadsTheFrontierNotTheFixSliceCount(t *testing.T) {
 
 		lines := gateReportHint(st, fx.Ticket, report)
 		joined := strings.Join(lines, "\n")
-		if !strings.Contains(joined, "--answer q-001") {
+		if !strings.Contains(joined, "jig answer "+fx.Ticket+" q-001") {
 			t.Fatalf("hint = %q, want the answer that actually frees the frontier", joined)
 		}
 		want, err := nextStepHint(st, fx.Ticket)

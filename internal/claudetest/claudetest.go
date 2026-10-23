@@ -146,6 +146,12 @@ func (s *Session) Check(t testing.TB) {
 // with t.Errorf, never t.Fatal.
 type API struct {
 	Route func(prompt string) *Session
+	// Observe, when set, sees the text of every message of each request that
+	// offers tools, in order, before the reply is chosen: what a test needs to
+	// assert on what reached the model besides the prompt (the context a hook
+	// added, say). It runs on the server goroutine, so it reports a problem
+	// with t.Errorf, never t.Fatal.
+	Observe func(messages []string)
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -184,8 +190,13 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var results []ToolResult
+	var texts []string
 	for _, msg := range req.Messages {
 		results = append(results, toolResultsOf(msg.Content)...)
+		texts = append(texts, textOf(msg.Content))
+	}
+	if a.Observe != nil && len(req.Tools) > 0 {
+		a.Observe(texts)
 	}
 
 	block := map[string]any{"type": "text", "text": "done"}

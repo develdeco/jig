@@ -74,7 +74,7 @@ func TestRenderStatus(t *testing.T) {
 // command, and the matching hint. Slice c has FromBrief sections (see
 // testdata/fixture/slices.yaml), but this question carries no
 // "flawed-brief" Reason, so resumeCommand's other requirement is unmet and
-// the resume command is the plain --answer form (TestRenderStatusParkedFlawedBrief
+// the resume command is the plain answer form (TestRenderStatusParkedFlawedBrief
 // covers the same slice with that Reason set, where the amend-brief-then-
 // requeue form applies instead). The parked cell also renders with no
 // quoting: resumeCommand's placeholder is single-quoted so the whole value
@@ -111,11 +111,11 @@ func TestRenderStatusParked(t *testing.T) {
 		t.Errorf("expected questions table, got:\n%s", got)
 	}
 	wantParked := "parked[1]{slice,question,resume}:\n" +
-		"  c,q-001,jig run JIG-1 --answer q-001 '<text>'\n"
+		"  c,q-001,jig answer JIG-1 q-001 '<text>'\n"
 	if !strings.Contains(got, wantParked) {
 		t.Errorf("expected parked table %q, got:\n%s", wantParked, got)
 	}
-	wantHint := "  Run `jig run JIG-1 --answer q-001 '<text>'` to answer and resume\n"
+	wantHint := "  Run `jig answer JIG-1 q-001 '<text>'` to answer and resume\n"
 	if !strings.HasSuffix(got, wantHint) {
 		t.Errorf("expected answer hint suffix %q, got:\n%s", wantHint, got)
 	}
@@ -156,11 +156,11 @@ func TestRenderStatusParkedNoFromBrief(t *testing.T) {
 	}
 
 	wantParked := "parked[1]{slice,question,resume}:\n" +
-		"  fix-1,q-001,jig run JIG-1 --answer q-001 '<text>'\n"
+		"  fix-1,q-001,jig answer JIG-1 q-001 '<text>'\n"
 	if !strings.Contains(got, wantParked) {
 		t.Errorf("expected parked table %q, got:\n%s", wantParked, got)
 	}
-	wantHint := "  Run `jig run JIG-1 --answer q-001 '<text>'` to answer and resume\n"
+	wantHint := "  Run `jig answer JIG-1 q-001 '<text>'` to answer and resume\n"
 	if !strings.HasSuffix(got, wantHint) {
 		t.Errorf("expected answer hint suffix %q, got:\n%s", wantHint, got)
 	}
@@ -278,7 +278,7 @@ func TestGateFixSliceFlawedBriefResumesWithAnswer(t *testing.T) {
 		t.Fatalf("fix-1 state = %+v, want needs-input with no flawed-brief reason: it cites no brief section to amend", fix1State)
 	}
 
-	wantResume := fmt.Sprintf("jig run %s --answer %s '<text>'", fx.Ticket, fix1State.Question)
+	wantResume := fmt.Sprintf("jig answer %s %s '<text>'", fx.Ticket, fix1State.Question)
 	for _, reason := range []string{"", "flawed-brief"} {
 		fix1State.Reason = reason
 		if err := st.WriteSliceState(fx.Ticket, "fix-1", fix1State); err != nil {
@@ -342,7 +342,7 @@ func TestRenderStatusStalled(t *testing.T) {
 	// line reports "stalled" (see nextStepHint's doc comment). The open
 	// question is a plain one, so it is answered rather than requeued (see
 	// TestRenderStatusParked).
-	wantHint := "  Run `jig run JIG-1 --answer q-001 '<text>'` to answer and resume\n"
+	wantHint := "  Run `jig answer JIG-1 q-001 '<text>'` to answer and resume\n"
 	if !strings.HasSuffix(got, wantHint) {
 		t.Errorf("expected answer hint suffix %q, got:\n%s", wantHint, got)
 	}
@@ -543,9 +543,9 @@ func TestResumeCommandChoosesFromReasonAndBriefSections(t *testing.T) {
 		want      string
 	}{
 		{"flawed brief with sections", "flawed-brief", []string{"abc"}, "jig requeue T-1 --from-brief-diff"},
-		{"flawed brief without sections", "flawed-brief", nil, "jig run T-1 --answer q-001 '<text>'"},
-		{"plain question with sections", "", []string{"abc"}, "jig run T-1 --answer q-001 '<text>'"},
-		{"plain question without sections", "", nil, "jig run T-1 --answer q-001 '<text>'"},
+		{"flawed brief without sections", "flawed-brief", nil, "jig answer T-1 q-001 '<text>'"},
+		{"plain question with sections", "", []string{"abc"}, "jig answer T-1 q-001 '<text>'"},
+		{"plain question without sections", "", nil, "jig answer T-1 q-001 '<text>'"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

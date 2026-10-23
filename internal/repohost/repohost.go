@@ -389,3 +389,34 @@ func (h *githubHost) PRHead(prURL string) (PRHead, error) {
 	}
 	return PRHead{Branch: result.HeadRefName, SHA: result.HeadRefOid, State: strings.ToUpper(result.State)}, nil
 }
+
+// CreateRepo creates a private repository called name on GitHub with gh (the
+// binary at ghBin, run with env as its whole environment, or this process's
+// when env is nil) and makes it the origin remote of the local repository at
+// dir: gh adds the remote itself, in the protocol its own configuration
+// prefers. Nothing is pushed. `jig share --create` is the caller.
+func CreateRepo(ghBin string, env []string, name, dir string) error {
+	cmd := exec.Command(ghBin, "repo", "create", name, "--private", "--source", dir, "--remote", "origin")
+	cmd.Dir = dir
+	if env != nil {
+		cmd.Env = env
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = strings.TrimSpace(stdout.String())
+		}
+		if msg == "" {
+			msg = err.Error()
+		}
+		return &axi.Error{
+			Msg:  fmt.Sprintf("gh could not create the repository %q: %s", name, msg),
+			Code: "HOST_CREATE_FAILED",
+			Help: []string{"Check `gh auth status`, or create the repository yourself and pass its URL with --store-remote / --remote"},
+		}
+	}
+	return nil
+}

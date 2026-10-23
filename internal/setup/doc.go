@@ -19,7 +19,19 @@
 //     (GitConfig.InstallClone).
 //   - exclude.go: ExcludeFile keeps a file jig made out of a repository's git
 //     status through its .git/info/exclude.
+//   - harness.go: Harness is the table of the six harnesses (Claude Code, Codex,
+//     the Gemini CLI, Cursor, GitHub Copilot, OpenCode): where each keeps its
+//     hook file, and its Merge, Unmerge, Installed and Plan. codex.go and
+//     gemini.go give the grouped shape claude.go has other event names and
+//     entry fields; cursor.go and copilot.go give the flat shape in flat.go;
+//     opencode.go writes the one JavaScript plugin OpenCode loads.
+//   - project.go: the skills (Skill, InstallSkills, RemoveSkills, InspectSkills,
+//     stamped so a file is known as jig's and by which version), the stub a
+//     project gets in its untracked form, and the hint block in a memory file.
+//   - doctor.go: Finding, the costs of each piece and GitConfig.InspectClone,
+//     what `jig doctor` reads.
 //
-// The harnesses other than Claude Code, the skills, the hint, the project forms
-// and the doctor report are the next ticket's files here.
+// The ownership of everything here is by detection: a command that matches
+// OwnedCommand, a skill that carries the stamp, a block between jig's markers, a
+// plugin whose first line is jig's. Nothing records what was written.
 package setup

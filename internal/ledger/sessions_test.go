@@ -316,3 +316,18 @@ func TestGraphLine(t *testing.T) {
 		t.Fatalf("a graph line made sessions: %v", got)
 	}
 }
+
+func TestSessionLinesCarryTheCommitAndTheFoldIgnoresIt(t *testing.T) {
+	root := t.TempDir()
+	if err := StartSession(root, time.Time{}, Registration{ID: "s1", Ticket: "JIG-1", Commit: "abc123"}); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := Read(root)
+	if err != nil || len(lines) != 1 || lines[0].Commit != "abc123" {
+		t.Fatalf("Read = %+v, %v, want the line to carry the commit", lines, err)
+	}
+	got, err := Sessions(root)
+	if err != nil || got["s1"].Ticket != "JIG-1" {
+		t.Errorf("Sessions = %+v, %v", got, err)
+	}
+}

@@ -47,6 +47,14 @@
 // own reference stands. The resulting body is saved to $GH_STUB_BODY_STATE
 // (when set) for a later `pr view` to answer with.
 //
+// `repo create <name> --source <dir> --remote <remote>` (what `jig share
+// --create` runs) adds the remote to the repository at <dir>, the way gh does
+// with --source, and prints its URL, without creating anything anywhere:
+// $GH_STUB_REPO_URLS is a JSON object of repository name to the URL the new
+// repository has (a bare repository the test made, say), and a name it does
+// not list gets https://github.example/owner/<name>. It writes the remote into
+// <dir>/.git/config itself, since this stub never runs git.
+//
 // `pr view` answers the body the adapter's ReadPRBody reads back: literally
 // $GH_STUB_BODY when it is set (so a test can hand it any body, including one
 // that defies what a real gh would do, to pin how a caller reacts to that);
@@ -102,11 +110,49 @@ func main() {
 		// pr comment succeeds silently
 	case len(args) >= 2 && args[0] == "pr" && args[1] == "view" && jsonFields(args) == "headRefName,headRefOid,state":
 		printPRHead()
+	case len(args) >= 3 && args[0] == "repo" && args[1] == "create":
+		createRepo(args[2], args[3:])
 	case len(args) >= 2 && args[0] == "pr" && args[1] == "view":
 		printPRBody()
 	default:
 		fmt.Println("{}")
 	}
+}
+
+// createRepo answers `gh repo create <name> [--source <dir>] [--remote <r>]`
+// (see the package comment).
+func createRepo(name string, flags []string) {
+	url := "https://github.example/owner/" + name
+	if raw := os.Getenv("GH_STUB_REPO_URLS"); raw != "" {
+		var urls map[string]string
+		if err := json.Unmarshal([]byte(raw), &urls); err == nil && urls[name] != "" {
+			url = urls[name]
+		}
+	}
+	source, remote := "", "origin"
+	for i := 0; i+1 < len(flags); i++ {
+		switch flags[i] {
+		case "--source":
+			source = flags[i+1]
+		case "--remote":
+			remote = flags[i+1]
+		}
+	}
+	if source != "" {
+		// Slashes only: a backslash in a config value is an escape.
+		cfg := fmt.Sprintf("[remote %q]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/%s/*\n", remote, strings.ReplaceAll(url, "\\", "/"), remote)
+		f, err := os.OpenFile(source+"/.git/config", os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ghstub: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := f.WriteString(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "ghstub: %v\n", err)
+			os.Exit(1)
+		}
+		_ = f.Close()
+	}
+	fmt.Println(url)
 }
 
 // hasHelp reports whether args asks for help, the way gh itself takes it:
