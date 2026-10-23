@@ -64,6 +64,9 @@ func mintTicket(t *testing.T, st *Store, title string) string {
 func appendJournal(t *testing.T, st *Store, ticket, line string) {
 	t.Helper()
 	path := filepath.Join(st.TicketDir(ticket), "journal.ndjson")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		t.Fatal(err)
@@ -413,6 +416,50 @@ func TestWritersJournalsConvergeWithoutDuplicates(t *testing.T) {
 				t.Errorf("%s journal has %q %d times, want once:\n%s", name, event, n, data)
 			}
 		}
+	}
+}
+
+// TestWritersHealTheAttributesBeforeAMerge: a clone that joined with commits of
+// its own, made while its .gitattributes was still the store attributes, gets
+// the union driver in place before it merges the others - so the journal both
+// wrote from nothing merges by union, not as a conflict.
+func TestWritersHealTheAttributesBeforeAMerge(t *testing.T) {
+	t.Parallel()
+	alice, _, remote := newWritersStore(t)
+	appendJournal(t, alice, "JIG-7", `{"ts":"2026-01-01T00:00:00Z","ticket":"JIG-7","event":"from-alice"}`)
+	if err := alice.Push("jig: alice"); err != nil {
+		t.Fatal(err)
+	}
+	bob, bobDir := newWriter(t, remote, "bob")
+	appendJournal(t, bob, "JIG-7", `{"ts":"2026-01-01T00:00:01Z","ticket":"JIG-7","event":"from-bob"}`)
+	if err := bob.Push("jig: bob"); err != nil {
+		t.Fatal(err)
+	}
+	if attrs, _ := os.ReadFile(filepath.Join(bobDir, ".gitattributes")); string(attrs) != gitx.StoreAttributes {
+		t.Fatalf("bob .gitattributes = %q before the merge; the test needs the store attributes", attrs)
+	}
+
+	if err := bob.Sync(); err != nil {
+		t.Fatalf("Sync with a journal both wrote: %v", err)
+	}
+	attrs, _ := os.ReadFile(filepath.Join(bobDir, ".gitattributes"))
+	if string(attrs) != gitx.WritersAttributes {
+		t.Errorf("bob .gitattributes = %q after the merge, want the writers attributes", attrs)
+	}
+	data, err := os.ReadFile(filepath.Join(bob.TicketDir("JIG-7"), "journal.ndjson"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []string{"from-alice", "from-bob"} {
+		if n := strings.Count(string(data), `"event":"`+event+`"`); n != 1 {
+			t.Errorf("bob journal has %q %d times, want once:\n%s", event, n, data)
+		}
+	}
+	if parents := strings.Fields(runGit(t, bobDir, "log", "-1", "--pretty=%P")); len(parents) != 2 {
+		t.Errorf("bob HEAD has %d parents, want a merge of two", len(parents))
+	}
+	if out := strings.TrimSpace(runGit(t, bobDir, "status", "--porcelain")); out != "" {
+		t.Errorf("bob is dirty after the merge: %q", out)
 	}
 }
 
