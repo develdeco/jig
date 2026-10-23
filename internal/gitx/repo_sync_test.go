@@ -240,7 +240,7 @@ func TestPushAndCommitRespectGitsLocks(t *testing.T) {
 			dir := newStoreRepo(t)
 			writeFileT(t, dir, lock, "")
 			writeFileT(t, dir, "a.txt", "a\n")
-			if _, err := openRepo(t, dir).CommitAll("locked", "jig", "jig@invalid"); !errors.Is(err, ErrUseCLI) {
+			if _, err := openRepo(t, dir).CommitAll("locked", "tester", "tester@example.invalid"); !errors.Is(err, ErrUseCLI) {
 				t.Fatalf("CommitAll with %s held = %v, want ErrUseCLI", lock, err)
 			}
 			if got := mustRun(t, dir, "log", "-1", "--format=%s"); got != "init" {
@@ -256,7 +256,7 @@ func TestPushAndCommitRespectGitsLocks(t *testing.T) {
 		work, remote := newRemotePair(t)
 		writeFileT(t, work, "a.txt", "a\n")
 		r := openRepo(t, work)
-		if _, err := r.CommitAll("a", "jig", "jig@invalid"); err != nil {
+		if _, err := r.CommitAll("a", "tester", "tester@example.invalid"); err != nil {
 			t.Fatalf("CommitAll: %v", err)
 		}
 		if err := r.Push("origin", "main"); err != nil {

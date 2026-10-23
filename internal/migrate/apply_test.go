@@ -34,6 +34,9 @@ func newV1GitStore(t *testing.T) *store.Store {
 	if _, err := gitx.Run(root, "init", "-b", "main"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
+	// The person who runs the migration: its commit carries their identity.
+	runGit(t, root, "config", "user.name", "Store Person")
+	runGit(t, root, "config", "user.email", "store.person@example.invalid")
 	if err := os.WriteFile(filepath.Join(root, "project.yaml"), []byte(
 		"schema_version: 1\nname: demo\nticket_format: \"T-{n}\"\ntracker: local\nrepos: []\nplatform: platform/\n",
 	), 0o644); err != nil {
@@ -170,6 +173,50 @@ func TestApplyMigratesAStoreEndToEnd(t *testing.T) {
 	log := runGit(t, st.Root, "log", "--oneline", "-1")
 	if log == "" {
 		t.Errorf("no commit landed")
+	}
+	// The commit is the person's, as author and committer.
+	wantIdent := "Store Person <store.person@example.invalid>"
+	if got := runGit(t, st.Root, "log", "-1", "--format=%an <%ae>|%cn <%ce>"); got != wantIdent+"|"+wantIdent {
+		t.Errorf("migration commit author|committer = %q, want %q for both", got, wantIdent)
+	}
+}
+
+// TestApplyRefusesWithoutAnIdentityBeforeMovingAnything: a store whose git has
+// no identity to author the migration commit with is refused with
+// IDENTITY_REQUIRED before the first ticket folder moves, so there is
+// nothing half-migrated to undo.
+func TestApplyRefusesWithoutAnIdentityBeforeMovingAnything(t *testing.T) {
+	t.Parallel()
+	st := newV1GitStore(t)
+	runGit(t, st.Root, "config", "--unset", "user.name")
+	runGit(t, st.Root, "config", "--unset", "user.email")
+	runGit(t, st.Root, "config", "user.useConfigOnly", "true")
+	m := Map{
+		Keys:    map[string]string{"STORE": "the store", "GRAPH": "the graph"},
+		Tickets: map[string]string{"T-1": "STORE", "T-2": "GRAPH"},
+	}
+	plan, err := BuildPlan(st, m)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	head := runGit(t, st.Root, "rev-parse", "HEAD")
+
+	err = Apply(st, plan)
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "IDENTITY_REQUIRED" {
+		t.Fatalf("Apply = %v, want the IDENTITY_REQUIRED refusal", err)
+	}
+	if len(ae.Help) != 2 || !strings.Contains(ae.Help[0], "user.name") || !strings.Contains(ae.Help[1], "user.email") {
+		t.Errorf("Help = %q, want the user.name and user.email commands", ae.Help)
+	}
+	if status := runGit(t, st.Root, "status", "--porcelain"); status != "" {
+		t.Errorf("git status --porcelain = %q, want the store untouched", status)
+	}
+	if got := runGit(t, st.Root, "rev-parse", "HEAD"); got != head {
+		t.Errorf("HEAD moved to %s, want %s", got, head)
+	}
+	if _, err := os.Stat(oldTicketDir(st.Root, "T-1")); err != nil {
+		t.Errorf("old folder T-1 should still be in place: %v", err)
 	}
 }
 

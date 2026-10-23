@@ -71,12 +71,12 @@ func TestCommitAllMatchesTheGitProgram(t *testing.T) {
 	// process as well.
 	mustRun(t, inProcess, "update-index", "--index-version", "4")
 
-	committed, err := openRepo(t, inProcess).CommitAll("jig: record", "jig", "jig@invalid")
+	committed, err := openRepo(t, inProcess).CommitAll("jig: record", "tester", "tester@example.invalid")
 	if err != nil || !committed {
 		t.Fatalf("CommitAll = %v, %v; want a commit", committed, err)
 	}
 	mustRun(t, program, "add", "-A")
-	mustRun(t, program, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-q", "-m", "jig: record")
+	mustRun(t, program, "-c", "user.name=tester", "-c", "user.email=tester@example.invalid", "commit", "-q", "-m", "jig: record")
 
 	got, want := mustRun(t, inProcess, "rev-parse", "HEAD^{tree}"), mustRun(t, program, "rev-parse", "HEAD^{tree}")
 	if got != want {
@@ -86,7 +86,7 @@ func TestCommitAllMatchesTheGitProgram(t *testing.T) {
 	if st := mustRun(t, inProcess, "status", "--porcelain", "--untracked-files=all"); st != "" {
 		t.Fatalf("git status after CommitAll = %q, want clean", st)
 	}
-	if msg := mustRun(t, inProcess, "log", "-1", "--format=%an <%ae>|%s|%P"); msg != "jig <jig@invalid>|jig: record|"+mustRun(t, base, "rev-parse", "HEAD") {
+	if msg := mustRun(t, inProcess, "log", "-1", "--format=%an <%ae>|%s|%P"); msg != "tester <tester@example.invalid>|jig: record|"+mustRun(t, base, "rev-parse", "HEAD") {
 		t.Fatalf("commit = %q", msg)
 	}
 	mustRun(t, inProcess, "fsck", "--strict")
@@ -100,7 +100,7 @@ func TestCommitAllNothingToCommit(t *testing.T) {
 	head := mustRun(t, dir, "rev-parse", "HEAD")
 	commitAll := func(when string) {
 		t.Helper()
-		committed, err := openRepo(t, dir).CommitAll("nothing", "jig", "jig@invalid")
+		committed, err := openRepo(t, dir).CommitAll("nothing", "tester", "tester@example.invalid")
 		if err != nil || committed {
 			t.Fatalf("CommitAll %s = %v, %v; want no commit", when, committed, err)
 		}
@@ -140,7 +140,7 @@ func TestCommitAllCommitsTheEmptyTree(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	committed, err := r.CommitAll("empty", "jig", "jig@invalid")
+	committed, err := r.CommitAll("empty", "tester", "tester@example.invalid")
 	if err != nil || !committed {
 		t.Fatalf("CommitAll = %v, %v; want a commit", committed, err)
 	}
@@ -156,7 +156,7 @@ func TestCommitAllCommitsTheEmptyTree(t *testing.T) {
 // program reads it, and its change committed.
 func TestCommitAllCatchesARacilyCleanFile(t *testing.T) {
 	dir := newStoreRepo(t)
-	if _, err := openRepo(t, dir).CommitAll("refresh", "jig", "jig@invalid"); err != nil {
+	if _, err := openRepo(t, dir).CommitAll("refresh", "tester", "tester@example.invalid"); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "project.yaml")
@@ -170,7 +170,7 @@ func TestCommitAllCatchesARacilyCleanFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	committed, err := openRepo(t, dir).CommitAll("racy", "jig", "jig@invalid")
+	committed, err := openRepo(t, dir).CommitAll("racy", "tester", "tester@example.invalid")
 	if err != nil || !committed {
 		t.Fatalf("CommitAll = %v, %v; want the racily clean change committed", committed, err)
 	}
@@ -185,12 +185,12 @@ func TestCommitAllOnAnUnbornBranch(t *testing.T) {
 	dir := t.TempDir()
 	mustRun(t, dir, "init", "-q", "-b", "trunk")
 	// Nothing in the work tree, not even the attributes OpenRepo asks for.
-	if committed, err := (&Repo{dir: dir}).CommitAll("empty", "jig", "jig@invalid"); err != nil || committed {
+	if committed, err := (&Repo{dir: dir}).CommitAll("empty", "tester", "tester@example.invalid"); err != nil || committed {
 		t.Fatalf("CommitAll on an empty unborn branch = %v, %v; want no commit", committed, err)
 	}
 	writeFileT(t, dir, ".gitattributes", StoreAttributes)
 	writeFileT(t, dir, "project.yaml", "schema_version: 1\n")
-	committed, err := openRepo(t, dir).CommitAll("first", "jig", "jig@invalid")
+	committed, err := openRepo(t, dir).CommitAll("first", "tester", "tester@example.invalid")
 	if err != nil || !committed {
 		t.Fatalf("CommitAll = %v, %v; want the first commit", committed, err)
 	}
@@ -307,7 +307,7 @@ func TestCommitAllLeavesWhatTheGitProgramStagesDifferently(t *testing.T) {
 			dir := newStoreRepo(t)
 			head := mustRun(t, dir, "rev-parse", "HEAD")
 			c.lay(t, dir)
-			if _, err := openRepo(t, dir).CommitAll("x", "jig", "jig@invalid"); !errors.Is(err, ErrUseCLI) {
+			if _, err := openRepo(t, dir).CommitAll("x", "tester", "tester@example.invalid"); !errors.Is(err, ErrUseCLI) {
 				t.Fatalf("CommitAll = %v, want ErrUseCLI", err)
 			}
 			if got := mustRun(t, dir, "rev-parse", "HEAD"); got != head {
@@ -333,7 +333,7 @@ func TestCommitAllRecordsAnExecutableAsAFileWhereCoreFileModeIsOff(t *testing.T)
 	if err := os.Chmod(filepath.Join(dir, "run.sh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := openRepo(t, dir).CommitAll("run", "jig", "jig@invalid"); err != nil {
+	if _, err := openRepo(t, dir).CommitAll("run", "tester", "tester@example.invalid"); err != nil {
 		t.Fatalf("CommitAll: %v", err)
 	}
 	if got := mustRun(t, dir, "ls-tree", "HEAD", "run.sh"); got[:6] != "100644" {
@@ -354,7 +354,7 @@ func TestCommitAllHonorsTheIdentityEnvironment(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_EMAIL", "committer@example.invalid")
 	t.Setenv("GIT_COMMITTER_DATE", "1767225600 +0100")
 	writeFileT(t, dir, "a.txt", "a\n")
-	if _, err := openRepo(t, dir).CommitAll("pinned", "jig", "jig@invalid"); err != nil {
+	if _, err := openRepo(t, dir).CommitAll("pinned", "tester", "tester@example.invalid"); err != nil {
 		t.Fatalf("CommitAll: %v", err)
 	}
 	got := mustRun(t, dir, "log", "-1", "--date=raw", "--format=%an <%ae> %ad|%cn <%ce> %cd")
@@ -365,7 +365,7 @@ func TestCommitAllHonorsTheIdentityEnvironment(t *testing.T) {
 
 	t.Setenv("GIT_AUTHOR_DATE", "yesterday noon")
 	writeFileT(t, dir, "b.txt", "b\n")
-	if _, err := openRepo(t, dir).CommitAll("unparsed", "jig", "jig@invalid"); !errors.Is(err, ErrUseCLI) {
+	if _, err := openRepo(t, dir).CommitAll("unparsed", "tester", "tester@example.invalid"); !errors.Is(err, ErrUseCLI) {
 		t.Fatalf("CommitAll with an unreadable date = %v, want ErrUseCLI", err)
 	}
 	if st := mustRun(t, dir, "status", "--porcelain"); st != "?? b.txt" {
@@ -409,7 +409,7 @@ func TestCommitAllRecordsWhatTheGitProgramCompares(t *testing.T) {
 	dir := newStoreRepo(t)
 	writeFileT(t, dir, "T-1/journal.ndjson", "{}\n")
 	writeFileT(t, dir, "project.yaml", "schema_version: 2\n")
-	if _, err := openRepo(t, dir).CommitAll("record", "jig", "jig@invalid"); err != nil {
+	if _, err := openRepo(t, dir).CommitAll("record", "tester", "tester@example.invalid"); err != nil {
 		t.Fatalf("CommitAll: %v", err)
 	}
 	// Past the index's own time, so no entry is racily clean for git.
@@ -442,7 +442,7 @@ func TestCommitAllOnAnUnbornBranchDropsWhatWasStagedAndGone(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "a.txt")); err != nil {
 		t.Fatal(err)
 	}
-	committed, err := (&Repo{dir: dir}).CommitAll("nothing", "jig", "jig@invalid")
+	committed, err := (&Repo{dir: dir}).CommitAll("nothing", "tester", "tester@example.invalid")
 	if err != nil || committed {
 		t.Fatalf("CommitAll = %v, %v; want no commit", committed, err)
 	}
@@ -457,7 +457,7 @@ func TestCommitAllOnAnUnbornBranchDropsWhatWasStagedAndGone(t *testing.T) {
 // replacement, as the git program reads it.
 func TestCommitAllCatchesAFileReplacedWithItsOldTime(t *testing.T) {
 	dir := newStoreRepo(t)
-	if _, err := openRepo(t, dir).CommitAll("refresh", "jig", "jig@invalid"); err != nil {
+	if _, err := openRepo(t, dir).CommitAll("refresh", "tester", "tester@example.invalid"); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "project.yaml")
@@ -481,7 +481,7 @@ func TestCommitAllCatchesAFileReplacedWithItsOldTime(t *testing.T) {
 	if before, after := statOf(old), statOf(now); before.CreatedAt.Equal(after.CreatedAt) && before.Inode == after.Inode {
 		t.Skip("this file system kept the old change time and inode: neither git nor gitx can tell")
 	}
-	committed, err := openRepo(t, dir).CommitAll("replaced", "jig", "jig@invalid")
+	committed, err := openRepo(t, dir).CommitAll("replaced", "tester", "tester@example.invalid")
 	if err != nil || !committed {
 		t.Fatalf("CommitAll = %v, %v; want the replaced file committed", committed, err)
 	}

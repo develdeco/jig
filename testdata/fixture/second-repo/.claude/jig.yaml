@@ -1,0 +1,5 @@
+workspaces:
+  - id: gamma
+    path: gamma
+oracles:
+  test: "@GO test ./{path}/..."

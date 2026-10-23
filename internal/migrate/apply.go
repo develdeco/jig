@@ -25,7 +25,14 @@ import (
 // ran, so the store had nothing uncommitted and was level with origin to
 // begin with.
 func Apply(st *store.Store, plan Plan) error {
-	if err := applyUncommitted(st, plan); err != nil {
+	// The migration's one commit is authored by the person, so a store with
+	// no git identity is refused before the first ticket folder moves,
+	// leaving nothing half-migrated to undo.
+	id, err := gitx.ResolveIdentity(st.Root)
+	if err != nil {
+		return err
+	}
+	if err := applyUncommitted(st, plan, id); err != nil {
 		return &axi.Error{
 			Msg:  fmt.Sprintf("jig store migrate failed partway through, leaving the store at %s half-migrated: %v", st.Root, err),
 			Code: "STORE_MIGRATE_APPLY_FAILED",
@@ -38,8 +45,9 @@ func Apply(st *store.Store, plan Plan) error {
 }
 
 // applyUncommitted is Apply's actual work, returning its failures plain, for
-// Apply to wrap once in a single *axi.Error.
-func applyUncommitted(st *store.Store, plan Plan) error {
+// Apply to wrap once in a single *axi.Error. The migration commit is authored
+// as id.
+func applyUncommitted(st *store.Store, plan Plan, id gitx.Identity) error {
 	for _, r := range plan.Renames {
 		if err := moveTicket(st, r.OldID, r.NewID); err != nil {
 			return err
@@ -59,7 +67,7 @@ func applyUncommitted(st *store.Store, plan Plan) error {
 	if _, err := gitx.Run(st.Root, "add", "-A"); err != nil {
 		return err
 	}
-	if _, err := gitx.Run(st.Root, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "jig: migrate store to schema_version 2"); err != nil {
+	if _, err := gitx.Run(st.Root, "-c", "user.name="+id.Name, "-c", "user.email="+id.Email, "commit", "-m", "jig: migrate store to schema_version 2"); err != nil {
 		return err
 	}
 	return nil

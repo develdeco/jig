@@ -48,6 +48,10 @@ type Store struct {
 	// it concurrently.
 	aliasClaimsMu    sync.Mutex
 	aliasClaimsCache map[string][]string
+
+	// ident is the person's git identity, resolved on first use by
+	// identity (identity.go).
+	ident identityCache
 }
 
 // invalidateAliasClaims drops the memoized aliasClaims result, so the next
@@ -228,10 +232,13 @@ func (cp *checkpoint) hasRemote() bool {
 	return cp.s.HasRemote()
 }
 
-// commit records every change with msg, when there is any.
+// commit records every change with msg, when there is any, authored by the
+// person (Store.identity). A store with nothing to commit needs no identity,
+// and costs no lookup of one: both paths ask for it only once they find
+// something to commit.
 func (cp *checkpoint) commit(msg string) error {
 	if cp.repo != nil {
-		_, err := cp.repo.CommitAll(msg, "jig", "jig@invalid")
+		_, err := cp.repo.CommitAllAs(msg, cp.s.identity)
 		if !errors.Is(err, gitx.ErrUseCLI) {
 			return err
 		}
@@ -452,8 +459,8 @@ func markerPresent(markers []string) (string, error) {
 }
 
 // stageAndCommit stages every change (`add -A`) and, when anything is
-// staged, commits it with jig's identity and msg. It reports whether a
-// commit was made. Its callers, Sync and Push, have already run
+// staged, commits it as the person (Store.identity) with msg. It reports
+// whether a commit was made. Its callers, Sync and Push, have already run
 // refuseIfMidRebaseOrMerge, and only read-only git calls run between that
 // check and this one, so it does not repeat the check's two git calls.
 // Another process working on the same store can still slip in between, as
@@ -469,7 +476,11 @@ func (s *Store) stageAndCommit(msg string) (bool, error) {
 	if !staged {
 		return false, nil
 	}
-	if _, err := gitx.Run(s.Root, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", msg); err != nil {
+	id, err := s.identity()
+	if err != nil {
+		return false, err
+	}
+	if _, err := gitx.Run(s.Root, commitConfig(id, "commit", "-m", msg)...); err != nil {
 		return false, err
 	}
 	return true, nil

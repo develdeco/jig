@@ -92,6 +92,11 @@ func (s *Store) Claim(write func() (id string, paths []string, err error), msg f
 	if err != nil {
 		return "", err
 	}
+	// A claim always commits, so a clone with no identity is refused before
+	// write puts anything on disk, not after.
+	if _, err := s.identity(); err != nil {
+		return "", err
+	}
 	hasRemote := cp.hasRemote()
 
 	for attempt := 1; attempt <= maxClaimAttempts; attempt++ {
@@ -268,8 +273,9 @@ func (s *Store) undoClaim(sha string, paths []string) (resetRan bool, err error)
 }
 
 // stageAndCommitPaths stages exactly paths (never -A) and, when anything of
-// theirs is staged, commits with jig's identity - the commit itself scoped
-// to the same pathspec (`git commit -- <paths>`), not the whole index.
+// theirs is staged, commits as the person (Store.identity) - the commit
+// itself scoped to the same pathspec (`git commit -- <paths>`), not the
+// whole index.
 // Unlike stageAndCommit, it leaves any other dirty state in the store
 // untouched, so a claim's commit holds only what write reported: without
 // the pathspec, a commit here would instead sweep in whatever else the
@@ -293,7 +299,11 @@ func (s *Store) stageAndCommitPaths(paths []string, msg string) (string, error) 
 	if !staged {
 		return "", nil
 	}
-	commitArgs := append([]string{"-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", msg, "--"}, paths...)
+	id, err := s.identity()
+	if err != nil {
+		return "", err
+	}
+	commitArgs := commitConfig(id, append([]string{"commit", "-m", msg, "--"}, paths...)...)
 	if _, err := gitx.Run(s.Root, commitArgs...); err != nil {
 		return "", err
 	}
