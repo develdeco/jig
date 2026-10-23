@@ -109,7 +109,6 @@ func operatorClone(d Deps, repoName string) string {
 	return ""
 }
 
-
 // consolidatedTitle picks the ticket's headline title: the goal of the first
 // slice that did not come from a gate round. A gate round's fix slice records
 // the round in FromGate, and its goal names a batch of findings, not the work,
