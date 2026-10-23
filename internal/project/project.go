@@ -10,12 +10,14 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // CurrentSchemaVersion is the project.yaml schema_version this jig version
@@ -562,11 +564,15 @@ func (c Config) CheckSchemaVersion(allowOlder bool) error {
 }
 
 // MachineProject is one project's entry in the per-machine mapping
-// (JIG_HOME/projects.yaml): where its store lives, and where each of its
-// repos is cloned on this machine.
+// (JIG_HOME/projects.yaml): where its store lives, where each of its repos is
+// cloned on this machine, and, for a project with a jig.yaml marker, the
+// directory the marker is in.
 type MachineProject struct {
 	Store  string            `yaml:"store"`
 	Clones map[string]string `yaml:"clones"`
+	// Root is the directory holding the project's jig.yaml marker on this
+	// machine ("" for a project that has none).
+	Root string `yaml:"root,omitempty"`
 }
 
 // LoadMachine reads the per-machine project mapping under the jig home root
@@ -592,21 +598,60 @@ func LoadMachine(jigHome string) (map[string]MachineProject, error) {
 	return m, nil
 }
 
+// machineLockTimeout is how long a write of the machine mapping waits for
+// another jig process to finish its own.
+const machineLockTimeout = 10 * time.Second
+
 // SaveMachine writes the per-machine project mapping under the jig home root
-// jigHome, creating its parent directory if needed.
+// jigHome, creating its parent directory if needed. It replaces the whole
+// file, atomically and under the mapping's lock, so a reader never sees half
+// of it; a caller that reads the mapping, changes it and writes it back
+// uses UpdateMachine, which holds the lock across all three.
 func SaveMachine(jigHome string, m map[string]MachineProject) error {
 	if jigHome == "" {
 		return fmt.Errorf("project: no jig home given")
 	}
-	path := home.MachinePath(jigHome)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("project: create home dir: %w", err)
+	release, _, err := store.Lock(home.MachinePath(jigHome), machineLockTimeout)
+	if err != nil {
+		return fmt.Errorf("project: lock machine mapping: %w", err)
 	}
+	defer release()
+	return writeMachine(jigHome, m)
+}
+
+// UpdateMachine changes the per-machine project mapping under the jig home
+// root jigHome: it reads the mapping (empty when there is none yet), calls fn
+// to change it, and writes the result back, all under the mapping's lock, so
+// two jig processes that each add a project (`jig init`, `jig here` mapping a
+// fresh clone) both land. fn gets the mapping to change in place; if fn
+// returns an error nothing is written and the error is returned.
+func UpdateMachine(jigHome string, fn func(map[string]MachineProject) error) error {
+	if jigHome == "" {
+		return fmt.Errorf("project: no jig home given")
+	}
+	release, _, err := store.Lock(home.MachinePath(jigHome), machineLockTimeout)
+	if err != nil {
+		return fmt.Errorf("project: lock machine mapping: %w", err)
+	}
+	defer release()
+	m, err := LoadMachine(jigHome)
+	if err != nil {
+		return err
+	}
+	if err := fn(m); err != nil {
+		return err
+	}
+	return writeMachine(jigHome, m)
+}
+
+// writeMachine marshals m and replaces the mapping file with it atomically.
+// Its callers hold the mapping's lock.
+func writeMachine(jigHome string, m map[string]MachineProject) error {
 	data, err := yaml.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("project: marshal machine mapping: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := store.AtomicWrite(home.MachinePath(jigHome), data); err != nil {
 		return fmt.Errorf("project: write machine mapping: %w", err)
 	}
 	return nil
