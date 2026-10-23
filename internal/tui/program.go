@@ -29,7 +29,7 @@ func Run(ctx context.Context, cfg Config, in io.Reader, out io.Writer, screen bo
 	m := New(cfg)
 	defer m.Stop()
 
-	opts := []tea.ProgramOption{tea.WithContext(ctx), tea.WithInput(programInput(in)), tea.WithOutput(out)}
+	opts := []tea.ProgramOption{tea.WithInput(programInput(in)), tea.WithOutput(out)}
 	var model tea.Model = m
 	if screen {
 		opts = append(opts, tea.WithAltScreen())
@@ -37,7 +37,23 @@ func Run(ctx context.Context, cfg Config, in io.Reader, out io.Writer, screen bo
 		opts = append(opts, tea.WithoutRenderer())
 		model = &framed{inner: m, out: out}
 	}
-	_, err := tea.NewProgram(model, opts...).Run()
+	prog := tea.NewProgram(model, opts...)
+	// The context ends the program through the program's own Quit, the way a
+	// q does, and not through tea.WithContext: bubbletea v1.3.4 stops handling
+	// commands the moment that context ends, and an Update in flight then
+	// blocks for ever handing its command over (a hang a loaded machine shows
+	// about once in two thousand runs). A Quit is taken in turn by the event
+	// loop, so nothing is left waiting.
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		select {
+		case <-ctx.Done():
+			prog.Quit()
+		case <-stop:
+		}
+	}()
+	_, err := prog.Run()
 	switch {
 	case err == nil:
 		return nil
