@@ -101,7 +101,7 @@ func TestPublishAttachesPickedMediaOnUpdate(t *testing.T) {
 	run(t, buildLeaseDir(t, pf.fx), "push", "origin", branch)
 	pf.logFile, _ = useGithubHost(t, &pf.d, openPullOf(t, branch), "")
 
-	report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
+	report, err := Publish(pf.d, spy.opts(PublishOpts{Ticket: pf.fx.Ticket, Yes: true}))
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestPublishWarnsAboutAnUnrewrittenMediaReference(t *testing.T) {
 	_, addEnv := useGithubHost(t, &pf.d, "", "")
 	addEnv("GH_STUB_BODY=## Demo\n\n- ./rec-1.png: still here, unrewritten\n")
 
-	if _, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy}); err != nil {
+	if _, err := Publish(pf.d, spy.opts(PublishOpts{Ticket: pf.fx.Ticket, Yes: true})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -166,7 +166,7 @@ func TestPublishWarnsWhenGhLacksAttachSupport(t *testing.T) {
 	pf.logFile, addEnv = useGithubHost(t, &pf.d, "", "")
 	addEnv("GH_STUB_NO_ATTACH=1")
 
-	if _, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy}); err != nil {
+	if _, err := Publish(pf.d, spy.opts(PublishOpts{Ticket: pf.fx.Ticket, Yes: true})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 

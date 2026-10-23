@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -8,15 +9,30 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// TestGateReviewerNonTerminalTriage covers the non-terminal path of the
-// gate reviewer's triage: a real jig subprocess (runJig
-// never sets cmd.Stdin, so the child's stdin is not a terminal) runs a
-// reviewer round through the fake backend and gets DefaultTriage - every
-// fix kept, every workspace ask kept (no decision text), notes only
-// listed - without a single prompt. TestGateReviewerRoundsThroughMain in
-// cmd/jig covers the interactive terminal path (dismissing a fix, keeping
-// an ask with a decision) that the shared "reviewer" scenario's round 1
-// also exercises; this test needs its own "reviewer-nonterminal" branch
+// recordRound records one gate round through the jig binary the way a
+// reviewer's agent does: `jig gate` (with openFlags) opens it and `jig review
+// done --result` closes it with the report in the scenario's file for the
+// round (gate/round-<n>/review-result.json). It returns what `review done`
+// printed; the opening must succeed.
+func recordRound(t *testing.T, env jigEnv, fx *fixture.Fixture, n string, openFlags ...string) jigResult {
+	t.Helper()
+	args := append([]string{"gate", fx.Ticket}, openFlags...)
+	if open := runJig(t, env, fx.StoreDir, args...); open.Code != 0 {
+		t.Fatalf("gate (round %s) exit = %d, want 0 (the round opens)\nstdout:\n%s\nstderr:\n%s", n, open.Code, open.Stdout, open.Stderr)
+	}
+	result := filepath.Join(fx.ScenarioDir, "gate", "round-"+n, "review-result.json")
+	return runJig(t, env, fx.StoreDir, "review", "done", fx.Ticket, "--result", result)
+}
+
+// TestGateReviewerNonTerminalTriage covers the unprompted path of the
+// recorded gate round: a real jig subprocess (stdin is not a terminal, and
+// jig prompts at none) closes a reviewer's round opened with `jig gate --yes`
+// and gets DefaultTriage - every fix kept, every workspace ask kept (no
+// decision text), notes only listed - without a single prompt.
+// TestRecordedGateRoundsThroughMain in cmd/jig covers the same rounds
+// in-process (the refused report, the delta scope, the recurrence), and
+// TestOutstandingAskIsDecidedWithJigTriageAndAppliedByTheNextRound the ask a
+// person decides; this test needs its own "reviewer-nonterminal" branch
 // (identical except the beta.go trim finding is risk medium, not low) so
 // that DefaultTriage still has two fix findings to keep without a human -
 // a low-risk fix never reaches triage at all under the default risk
@@ -36,21 +52,21 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 		t.Fatalf("run 2 (answer) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r2.Code, r2.Stdout, r2.Stderr)
 	}
 
-	// No --yes, no terminal: cmdGate's own triageFor must fall back to
-	// DefaultTriage and print the non-terminal note line, never prompting.
-	r3 := runJig(t, env, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	// --yes, no terminal: the round is recorded with DefaultTriage, never
+	// prompting.
+	r3 := recordRound(t, env, fx, "1", "--yes")
 	if r3.Code != 0 {
-		t.Fatalf("gate (round 1, non-terminal) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r3.Code, r3.Stdout, r3.Stderr)
+		t.Fatalf("review done (round 1) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r3.Code, r3.Stdout, r3.Stderr)
 	}
 	if !strings.Contains(r3.Stdout, "verdict: fix-slices") {
-		t.Fatalf("gate stdout missing verdict: fix-slices:\n%s", r3.Stdout)
+		t.Fatalf("review done stdout missing verdict: fix-slices:\n%s", r3.Stdout)
 	}
 	// DefaultTriage keeps every fix (r1-f1 and r1-f2, in different
 	// workspaces, so two separate fix-slice groups) and every workspace
 	// ask (r1-f3) - nothing is dismissed without a human at the prompt.
 	for _, want := range []string{"r1-f1,open,", "r1-f2,open,", "r1-f3,open,", "r1-f4,noted,"} {
 		if !strings.Contains(r3.Stdout, want) {
-			t.Fatalf("gate stdout missing %q:\n%s", want, r3.Stdout)
+			t.Fatalf("review done stdout missing %q:\n%s", want, r3.Stdout)
 		}
 	}
 
@@ -64,18 +80,18 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 	}
 	for _, want := range []string{"fix-1-alpha-test", "fix-1-beta-test", "fix-1-r1-f3"} {
 		if !hasSlice(slices, want) {
-			t.Fatalf("expected slice %s from default (non-terminal) triage; got %+v", want, slices)
+			t.Fatalf("expected slice %s from default (unprompted) triage; got %+v", want, slices)
 		}
 	}
 
-	// The documented default path (no --yes, no terminal) keeps every fix,
-	// so fix-1-beta-test is not merely appended to slices.yaml, it is the
-	// ticket's own queued work: `jig run` must actually be able to drive it
-	// to green through this fixture, the same as fix-1-alpha-test and
-	// fix-1-r1-f3. Without a scripted attempt for it, the fake backend has
-	// nothing to play back and the slice can only fail every rung and end
-	// up stalled, wedging the ticket - a clean gate is then unreachable no
-	// matter how many more rounds run.
+	// The documented default path keeps every fix, so fix-1-beta-test is not
+	// merely appended to slices.yaml, it is the ticket's own queued work:
+	// `jig run` must actually be able to drive it to green through this
+	// fixture, the same as fix-1-alpha-test and fix-1-r1-f3. Without a
+	// scripted attempt for it, the fake backend has nothing to play back and
+	// the slice can only fail every rung and end up stalled, wedging the
+	// ticket - a clean gate is then unreachable no matter how many more
+	// rounds run.
 	r4 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r4.Code != 0 {
 		t.Fatalf("run (fix-1 slices) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r4.Code, r4.Stdout, r4.Stderr)
@@ -96,9 +112,9 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 	// missing an attempt for either one stalls the ticket exactly as a
 	// missing round 1 attempt would. Round 3 is clean, so the default path
 	// ends where the scenario says it ends.
-	r5 := runJig(t, env, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r5 := recordRound(t, env, fx, "2", "--yes")
 	if r5.Code != 0 {
-		t.Fatalf("gate (round 2) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r5.Code, r5.Stdout, r5.Stderr)
+		t.Fatalf("review done (round 2) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r5.Code, r5.Stdout, r5.Stderr)
 	}
 	r6 := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
 	if r6.Code != 0 {
@@ -114,9 +130,9 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 		}
 	}
 
-	r7 := runJig(t, env, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r7 := recordRound(t, env, fx, "3")
 	if r7.Code != 0 {
-		t.Fatalf("gate (round 3) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r7.Code, r7.Stdout, r7.Stderr)
+		t.Fatalf("review done (round 3) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r7.Code, r7.Stdout, r7.Stderr)
 	}
 	if !strings.Contains(r7.Stdout, "verdict: clean") {
 		t.Fatalf("round 3 is the scenario's clean round, but the default path never reached it:\n%s", r7.Stdout)
