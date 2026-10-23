@@ -3,6 +3,9 @@ package observe
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/develdeco/jig/internal/gitx"
@@ -115,7 +118,41 @@ func RunEvent(d Deps, a Adapter, ev Event) (out []byte, err error) {
 		return nil, nil
 	}
 	res, err := Handle(d, ev)
+	if len(res.Env) > 0 {
+		said, envErr := handOffEnv(d.withDefaults(), a, res.Env)
+		res.Context = joinText(res.Context, said)
+		err = errors.Join(err, envErr)
+	}
 	return a.Render(ev, res), err
+}
+
+// handOffEnv gives vars to the shell commands the agent runs later: through
+// the harness when the adapter can set them, else as a line of context
+// asking the agent to set them itself, which it returns. A harness that
+// failed to set them gets that line too, with the error.
+func handOffEnv(d Deps, a Adapter, vars map[string]string) (string, error) {
+	if s, ok := a.(EnvSetter); ok {
+		set, err := s.SetEnv(d.Getenv, vars)
+		if set && err == nil {
+			return "", nil
+		}
+		if err != nil {
+			return envContext(vars), err
+		}
+	}
+	return envContext(vars), nil
+}
+
+// envContext asks the agent to run its jig commands with vars set, for a
+// harness that could not set them.
+func envContext(vars map[string]string) string {
+	names := slices.Sorted(maps.Keys(vars))
+	pairs := make([]string, len(names))
+	for i, n := range names {
+		pairs[i] = n + "=" + vars[n]
+	}
+	return "Run the jig commands of this session with " + strings.Join(pairs, " ") +
+		" in their environment: the harness could not set it for them."
 }
 
 // The outcomes a note-delivered line records: the note was given as context

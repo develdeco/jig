@@ -6,6 +6,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/locate"
 )
 
 // sessionStart records the session and gives it the context of `jig here`.
@@ -27,12 +28,16 @@ func (h *handler) sessionStart() Result {
 		}))
 	}
 	h.hook("")
-	if h.d.Here == nil {
-		return Result{}
+	var res Result
+	if h.ev.Session != "" {
+		res.Env = map[string]string{locate.SessionEnv: h.ev.Session}
 	}
-	text, err := h.d.Here(h.w, h.st)
-	h.fail(err)
-	return Result{Context: strings.TrimSpace(text)}
+	if h.d.Here != nil {
+		text, err := h.d.Here(h.w, h.st)
+		h.fail(err)
+		res.Context = strings.TrimSpace(text)
+	}
+	return res
 }
 
 // prompt gives the session the notes it has not heard, and records a move to

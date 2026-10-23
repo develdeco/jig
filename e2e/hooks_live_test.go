@@ -26,7 +26,8 @@ const livePrompt = "scripted hooks run: commit the slice"
 // scripted stand-in for the Messages API (claudetest), with the hooks that
 // `jig hooks --here` installs and nothing else: no git hook. It asserts that
 // the SessionStart context, the ticket and its slice table, reaches the API
-// request, and that the scripted Bash `git commit` leaves a ledger tool line
+// request, that the session's Bash commands run with JIG_SESSION set to the
+// harness's session id, and that the scripted Bash `git commit` leaves a ledger tool line
 // and, since only the PostToolUse hook saw the commit, a journal verify-pending
 // line from the worker that hook started. The project defaults to unattended,
 // so the Stop hook refuses to let the session end while that verification
@@ -69,6 +70,7 @@ func TestHooksLive(t *testing.T) {
 	script := &claudetest.Session{Steps: []claudetest.Step{
 		{Name: "commit the slice", Call: claudetest.Bash(
 			"git -c user.name=jig-e2e -c user.email=e2e@example.invalid commit -q --allow-empty -m 'a: scripted' -m 'Jig-Slice: a' && git rev-parse HEAD")},
+		{Name: "read the session id jig set", Call: claudetest.Bash("printenv JIG_SESSION")},
 	}}
 	claudetest.Serve(t, &claudetest.API{Route: func(p string) *claudetest.Session {
 		mu.Lock()
@@ -145,6 +147,12 @@ func TestHooksLive(t *testing.T) {
 	}
 	if tool.Session != start.Session || tool.Tool != "Bash" || tool.Commit != sha {
 		t.Errorf("tool line = %+v, want the scripted Bash commit %s in session %s", tool, sha, start.Session)
+	}
+	// The SessionStart hook set JIG_SESSION for the session's Bash commands,
+	// through the file Claude Code names in CLAUDE_ENV_FILE: a jig command
+	// the session runs knows its session without being told.
+	if got := script.Results()[1].Content; start.Session == "" || !strings.Contains(got, start.Session) {
+		t.Errorf("printenv JIG_SESSION in the session printed %q, want the harness session id %q", got, start.Session)
 	}
 	pending := waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
 		return l.Event == journal.EventVerifyPending && l.Commit == sha

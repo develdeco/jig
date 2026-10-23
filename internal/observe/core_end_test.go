@@ -1,6 +1,8 @@
 package observe
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -127,6 +129,54 @@ func TestRunParsesHandlesAndRenders(t *testing.T) {
 	}
 	if out, err := Run(r.d, a, []byte(`garbage`)); out != nil || err == nil {
 		t.Errorf("Run of garbage = %s, %v, want an error and no output", out, err)
+	}
+}
+
+func TestRunHandsTheSessionIdToTheSessionsCommands(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	a, _ := AdapterFor("claude")
+	payload := []byte(`{"session_id":"s1","cwd":` + jsonString(r.fx.RepoDir) + `,"hook_event_name":"SessionStart"}`)
+	const asked = "Run the jig commands of this session with JIG_SESSION=s1 in their environment"
+
+	// Claude Code names a file it sources before each Bash command: the id
+	// goes there, and the context does not ask for it.
+	envFile := filepath.Join(t.TempDir(), "sessionstart-hook-0.sh")
+	d := r.d
+	d.Getenv = func(k string) string {
+		if k == "CLAUDE_ENV_FILE" {
+			return envFile
+		}
+		return ""
+	}
+	out, err := Run(d, a, payload)
+	if err != nil || strings.Contains(string(out), asked) || !strings.Contains(string(out), "ticket: "+r.fx.Ticket) {
+		t.Errorf("Run with an env file = %s, %v, want the context without the request", out, err)
+	}
+	if got, _ := os.ReadFile(envFile); string(got) != "export JIG_SESSION='s1'\n" {
+		t.Errorf("env file = %q, want the export of JIG_SESSION", got)
+	}
+
+	// With no such file (a hook run by hand, Codex), the context asks.
+	out, err = Run(r.d, a, payload)
+	if err != nil || !strings.Contains(string(out), asked) {
+		t.Errorf("Run with no env file = %s, %v, want the context to ask for %s", out, err, "JIG_SESSION=s1")
+	}
+	// So does a harness with no way to set it at all.
+	gemini, _ := AdapterFor("gemini")
+	if out, _ := Run(r.d, gemini, payload); !strings.Contains(string(out), asked) {
+		t.Errorf("Run for gemini = %s, want the context to ask for JIG_SESSION=s1", out)
+	}
+	// A file that cannot be written is an error, and the context still asks.
+	d.Getenv = func(k string) string {
+		if k == "CLAUDE_ENV_FILE" {
+			return filepath.Join(t.TempDir(), "missing", "env.sh")
+		}
+		return ""
+	}
+	if out, err := Run(d, a, payload); err == nil || !strings.Contains(string(out), asked) {
+		t.Errorf("Run with an unwritable env file = %s, %v, want an error and the context asking", out, err)
 	}
 }
 

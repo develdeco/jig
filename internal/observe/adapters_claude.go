@@ -15,6 +15,8 @@ package observe
 //	out  {"hookSpecificOutput":{"hookEventName","additionalContext"}}   context
 //	     {"systemMessage"}                                              for the person
 //	     {"decision":"block","reason"}                                  keep working (Stop)
+//	env  CLAUDE_ENV_FILE (SessionStart): a file the hook appends export
+//	     lines to; Claude Code sources it before each Bash command
 //
 // Claude Code puts the stdout of a SessionStart or UserPromptSubmit hook that
 // exits 0 into the model context as plain text, so a hook must print
@@ -64,6 +66,22 @@ func (a claudeShape) Parse(data []byte) (Event, error) {
 		return Event{}, nil
 	}
 	return ev, nil
+}
+
+// claudeEnvFile is the variable that names, in the environment of a
+// SessionStart hook, the file Claude Code sources before each Bash command of
+// the session.
+const claudeEnvFile = "CLAUDE_ENV_FILE"
+
+// SetEnv appends an export line per variable to the file CLAUDE_ENV_FILE
+// names. A run of the hook without that variable (by hand, by an older Claude
+// Code, by Codex, which shares the shape but not the file) sets nothing.
+func (a claudeShape) SetEnv(getenv func(string) string, vars map[string]string) (bool, error) {
+	path := getenv(claudeEnvFile)
+	if path == "" {
+		return false, nil
+	}
+	return appendExports(path, vars)
 }
 
 // claudeHookEvents names, by kind of Event, the hook events whose

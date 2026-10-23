@@ -73,7 +73,7 @@ jig is reached reactively, through four doors, and each is a subcommand of the o
 
 | Event | What the core does | What the harness reads |
 |---|---|---|
-| session-start | registers the session in the ledger (harness, agent, cwd, clone, ticket, slice, model, HEAD) and renders `jig here` for the directory | context |
+| session-start | registers the session in the ledger (harness, agent, cwd, clone, ticket, slice, model, HEAD), renders `jig here` for the directory, and sets `JIG_SESSION` to the harness's session id for the session's later shell commands: through the harness where its adapter can (Claude Code sources the file `CLAUDE_ENV_FILE` names before each Bash command), else as a line of the context asking the agent to | context |
 | prompt | a `hook` ledger line; a `session-touch` when the ticket or slice changed; the notes the session has not heard | context |
 | tool | when the tool ran a command and HEAD moved, starts the verification of the new commit; a `tool` ledger line; the notes not yet heard | context |
 | stop | the findings below: a message to the person, or, for an unattended session, a refusal to stop | message or block |

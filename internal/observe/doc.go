@@ -9,9 +9,11 @@
 //
 // What happens at each event:
 //
-//   - session-start: a session-start line in the ledger, and the context of
-//     `jig here` for the directory (the caller supplies it, as the sections of
-//     that text live in cmd/jig).
+//   - session-start: a session-start line in the ledger, the context of `jig
+//     here` for the directory (the caller supplies it, as the sections of that
+//     text live in cmd/jig), and JIG_SESSION for the shell commands the
+//     session runs later, set by the harness where its adapter can (an
+//     EnvSetter), asked of the agent in the context where it cannot.
 //   - prompt: the notes the session has not heard.
 //   - tool: a tool line in the ledger; when the call moved HEAD, the
 //     verification of the new commit (internal/verify), once whoever saw it

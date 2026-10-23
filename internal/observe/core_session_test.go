@@ -9,6 +9,7 @@ import (
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/locate"
 )
 
 func TestSessionStartRecordsTheSessionAndGivesTheContext(t *testing.T) {
@@ -20,6 +21,9 @@ func TestSessionStartRecordsTheSessionAndGivesTheContext(t *testing.T) {
 	res := r.handle(r.ev(KindSessionStart, func(e *Event) { e.Model = "m1" }))
 	if !strings.Contains(res.Context, "ticket: "+r.fx.Ticket) || res.Block != "" || res.Message != "" {
 		t.Fatalf("Result = %+v, want the context of the located ticket", res)
+	}
+	if len(res.Env) != 1 || res.Env[locate.SessionEnv] != "s1" {
+		t.Errorf("Env = %v, want %s=s1 for the session's later commands", res.Env, locate.SessionEnv)
 	}
 	starts := r.ledgerOf(journal.EventSessionStart)
 	if len(starts) != 1 {
