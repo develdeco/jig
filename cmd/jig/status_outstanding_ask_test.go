@@ -74,7 +74,7 @@ func TestRenderStatusOutstandingAskWithQueuedFrontier(t *testing.T) {
 
 	wantHelp := "help[2]:\n" +
 		"  Run `jig run JIG-1` to work the frontier\n" +
-		"  Then run `jig gate JIG-1` at a terminal to decide the outstanding asks\n"
+		"  Then run `jig triage JIG-1 <id> keep|dismiss` to decide the outstanding asks, then `jig gate JIG-1` to apply the decisions\n"
 	if !strings.HasSuffix(got, wantHelp) {
 		t.Errorf("status help does not name the frontier-first ordering:\n--- got ---\n%s--- want suffix ---\n%s", got, wantHelp)
 	}
@@ -115,7 +115,7 @@ func TestRenderStatusOutstandingAskWithGreenFrontier(t *testing.T) {
 	}
 
 	wantHelp := "help[1]:\n" +
-		"  Run `jig gate JIG-1` at a terminal to decide the outstanding asks\n"
+		"  Run `jig triage JIG-1 <id> keep|dismiss` to decide the outstanding asks, then `jig gate JIG-1` to apply the decisions\n"
 	if !strings.HasSuffix(got, wantHelp) {
 		t.Errorf("status help does not name the deciding command:\n--- got ---\n%s--- want suffix ---\n%s", got, wantHelp)
 	}

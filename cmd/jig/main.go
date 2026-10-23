@@ -363,7 +363,6 @@ func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.Ma
 		Store:    st,
 		Cfg:      cfg,
 		Machine:  mp,
-		Rungs:    rungs(cfg),
 		Home:     jigHome,
 		UserHome: userHome,
 	}

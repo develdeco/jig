@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -35,6 +37,66 @@ type Host interface {
 
 	// ReadPRBody returns the current body of the pull request at url.
 	ReadPRBody(url string) (string, error)
+
+	// PRHead returns the branch and commit the pull request at url is from:
+	// what `jig publish --pr` checks a pull request somebody else opened
+	// against the ticket's branch before it records one.
+	PRHead(url string) (PRHead, error)
+}
+
+// PRHead is the head of a pull request: the branch it is from and the commit
+// that branch had when the host last saw it.
+type PRHead struct {
+	// Branch is the head branch's name, without an owner.
+	Branch string
+	// SHA is the head commit.
+	SHA string
+	// State is the host's own word for the pull request's state, upper-cased
+	// (OPEN, CLOSED or MERGED on GitHub).
+	State string
+}
+
+// PRRef names a pull request: the host it is on, the repository, and its
+// number.
+type PRRef struct {
+	Host   string
+	Owner  string
+	Repo   string
+	Number int
+}
+
+// ParsePRURL reads a pull request URL, https://<host>/<owner>/<repo>/pull/<n>
+// (http too, a trailing slash, a /files or /commits tab, a query or a
+// fragment after it), into the host, the repository and the number it names.
+// The host is not checked against anything: an enterprise server's pull
+// requests have the same shape. An error is a PR_URL_INVALID.
+func ParsePRURL(raw string) (PRRef, error) {
+	bad := func(why string) (PRRef, error) {
+		return PRRef{}, &axi.Error{
+			Msg:  fmt.Sprintf("%q is not a pull request URL: %s", raw, why),
+			Code: "PR_URL_INVALID",
+			Help: []string{"A pull request URL looks like https://github.com/<owner>/<repo>/pull/<number>"},
+		}
+	}
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return bad("it does not parse")
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return bad("it is not an http or https URL")
+	}
+	if u.Host == "" {
+		return bad("it names no host")
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 4 || parts[2] != "pull" || parts[0] == "" || parts[1] == "" {
+		return bad("its path is not <owner>/<repo>/pull/<number>")
+	}
+	n, err := strconv.Atoi(parts[3])
+	if err != nil || n <= 0 {
+		return bad("its pull request number is not a positive number")
+	}
+	return PRRef{Host: u.Host, Owner: parts[0], Repo: parts[1], Number: n}, nil
 }
 
 // Remote URL shapes: ssh (git@host:owner/repo[.git] or ssh://user@host/owner/repo[.git]),
@@ -305,6 +367,27 @@ func (h *githubHost) ReadPRBody(url string) (string, error) {
 		return "", fmt.Errorf("repohost: failed to parse pr view output: %w", err)
 	}
 	return result["body"], nil
+}
+
+// PRHead reads the head of the pull request at prURL: its branch, commit and
+// state, as `gh pr view --json` gives them.
+func (h *githubHost) PRHead(prURL string) (PRHead, error) {
+	out, err := h.run("pr", "view", prURL, "--repo", h.repoSpec(), "--json", "headRefName,headRefOid,state")
+	if err != nil {
+		return PRHead{}, err
+	}
+	var result struct {
+		HeadRefName string `json:"headRefName"`
+		HeadRefOid  string `json:"headRefOid"`
+		State       string `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		return PRHead{}, fmt.Errorf("repohost: failed to parse pr view output: %w", err)
+	}
+	if result.HeadRefName == "" {
+		return PRHead{}, fmt.Errorf("repohost: gh pr view %s named no head branch", prURL)
+	}
+	return PRHead{Branch: result.HeadRefName, SHA: result.HeadRefOid, State: strings.ToUpper(result.State)}, nil
 }
 
 // CreateRepo creates a private repository called name on GitHub with gh (the

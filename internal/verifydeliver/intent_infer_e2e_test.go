@@ -1,10 +1,7 @@
 package verifydeliver
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -72,298 +69,6 @@ func gateLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	return dir
 }
 
-// TestGateInfersIntentThroughFakeBackend: a brief-less ticket
-// gated through a real reviewer source (the fake session backend, not the
-// scripted GateSource) infers its intent from a synthetic local Claude Code
-// transcript that mentions the round's own scope-diff files. HOME and
-// USERPROFILE are pointed at a temp dir holding only that synthetic
-// transcript, so this test - like every other in this package - never
-// reads a real home directory.
-func TestGateInfersIntentThroughFakeBackend(t *testing.T) {
-	t.Parallel()
-	tmpHome := t.TempDir()
-
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "inferred-intent", Home: t.TempDir()})
-	d := newDeps(t, fx)
-	d.UserHome = tmpHome
-	d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
-	removeBrief(t, d, fx.Ticket)
-	driveBuild(t, fx, "rung-a")
-
-	// The fixture's own commits (its initial origin/main commit and every
-	// fake-backend slice attempt) are all pinned to exactly
-	// 2026-01-01T00:00:00Z (fixture.identityEnv / session.fakeGitEnv), so
-	// merge-base and head resolve to that same instant: the discovery
-	// window is [2025-12-29T00:00:00Z, 2026-01-01T01:00:00Z], deterministic
-	// across any real wall-clock run.
-	mentioned := []string{"alpha/alpha.go", "alpha/percent.go", "alpha/percent_test.go", "beta/beta.go", "beta/version.go"}
-	sessionMTime := time.Date(2026, 1, 1, 0, 30, 0, 0, time.UTC)
-	writeSyntheticClaudeSession(t, tmpHome, "session-inferred", fx.RepoDir, mentioned, sessionMTime)
-
-	backend, err := session.New("fake", session.Options{ScenarioDir: fx.ScenarioDir})
-	if err != nil {
-		t.Fatalf("session.New: %v", err)
-	}
-
-	var gotReview ReviewRequest
-	captured := false
-	// Wrap the fake backend to also capture review.json's own bytes for the
-	// gate dispatch (Slice "gate"), proving the inferred intent reached the
-	// reviewer's own request, not only GateReport.
-	var summarizerDir string
-	wrapped := stubBackend{run: func(sd session.Dispatch) error {
-		if sd.Slice == "intent" {
-			summarizerDir = sd.Worktree
-		}
-		if sd.Slice == "gate" {
-			data, rerr := os.ReadFile(sd.SliceJSON)
-			if rerr != nil {
-				t.Fatalf("read review.json: %v", rerr)
-			}
-			if jerr := json.Unmarshal(data, &gotReview); jerr != nil {
-				t.Fatalf("parse review.json: %v", jerr)
-			}
-			captured = true
-		}
-		return backend.Run(sd)
-	}}
-
-	report, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if !captured {
-		t.Fatal("the gate reviewer dispatch never ran; review.json was never captured")
-	}
-
-	// The summarizer worked in a directory of its own under the jig home,
-	// not the lease, and that directory is gone with the round.
-	if summarizerDir == "" {
-		t.Fatal("the intent summarizer was never dispatched")
-	}
-	if want := home.IntentScratchDir(fx.Home); filepath.Dir(summarizerDir) != want {
-		t.Errorf("the summarizer's working directory = %q, want a directory directly under %q", summarizerDir, want)
-	}
-	if isWithin(gateLeaseDir(t, fx), summarizerDir) {
-		t.Errorf("the summarizer's working directory %q is the gate lease or inside it", summarizerDir)
-	}
-	if _, err := os.Lstat(summarizerDir); !os.IsNotExist(err) {
-		t.Errorf("the summarizer's working directory %q survived the round (lstat err=%v)", summarizerDir, err)
-	}
-
-	if report.Intent.Source != IntentSourceInferred {
-		t.Fatalf("report.Intent.Source = %q, want %q (note: %s)", report.Intent.Source, IntentSourceInferred, report.IntentNote)
-	}
-	if report.Verdict != "clean" {
-		t.Fatalf("report.Verdict = %q, want clean", report.Verdict)
-	}
-
-	if gotReview.Intent.Source != IntentSourceInferred {
-		t.Fatalf("review.json intent.source = %q, want %q", gotReview.Intent.Source, IntentSourceInferred)
-	}
-	if gotReview.Intent.Path == "" {
-		t.Fatal("review.json intent.path is empty, want the recorded intent.md path")
-	}
-
-	in, ok, err := d.Store.ReadIntent(fx.Ticket)
-	if err != nil || !ok {
-		t.Fatalf("ReadIntent: ok=%v err=%v", ok, err)
-	}
-	if in.Source != IntentSourceInferred {
-		t.Fatalf("intent.md source = %q, want %q", in.Source, IntentSourceInferred)
-	}
-	if in.Agent == "" || in.Session == "" {
-		t.Fatalf("intent.md agent/session = %q/%q, want both recorded", in.Agent, in.Session)
-	}
-	if in.Score < 0.5 {
-		t.Fatalf("intent.md score = %v, want >= 0.5", in.Score)
-	}
-	if strings.TrimSpace(in.Text) == "" {
-		t.Fatal("intent.md text is empty, want the summarizer's own summary")
-	}
-
-	// The report hashes the exact bytes of the file the reviewer was pointed
-	// at.
-	intentBytes, err := os.ReadFile(d.Store.IntentPath(fx.Ticket))
-	if err != nil {
-		t.Fatalf("read intent.md: %v", err)
-	}
-	sum := sha256.Sum256(intentBytes)
-	if want := hex.EncodeToString(sum[:]); report.IntentSHA256 != want {
-		t.Fatalf("report.IntentSHA256 = %q, want %q (intent.md's own bytes)", report.IntentSHA256, want)
-	}
-
-	// The excerpt is under the jig home and nowhere in the store; the accepted
-	// result is in the store's history, which shows the history check sees
-	// files pushed under work/.
-	assertExcerptStaysOutOfTheStore(t, fx, "session-inferred")
-	if history := storeRemoteHistory(t, fx); !strings.Contains(history, "work/intent.result.json") {
-		t.Fatal("the store remote's history holds no work/intent.result.json for the accepted result; the history check cannot see files pushed under work/")
-	}
-}
-
-// TestGateRestoresLeaseWhenIntentSummarizerLeavesItDirty: a summarizer
-// that reaches the lease (its working directory is a scratch directory, so
-// through the lease's own path) and leaves it dirty must not
-// carry that dirt into the reviewer's own dispatch - inferIntent restores
-// the lease itself and keeps failing open, the same way every other
-// inference failure does, rather than letting the reviewer's own
-// read-only guard trip over edits that were never its own.
-func TestGateRestoresLeaseWhenIntentSummarizerLeavesItDirty(t *testing.T) {
-	t.Parallel()
-	tmpHome := t.TempDir()
-
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "inferred-intent", Home: t.TempDir()})
-	d := newDeps(t, fx)
-	d.UserHome = tmpHome
-	d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
-	removeBrief(t, d, fx.Ticket)
-	driveBuild(t, fx, "rung-a")
-
-	mentioned := []string{"alpha/alpha.go", "alpha/percent.go", "alpha/percent_test.go", "beta/beta.go", "beta/version.go"}
-	sessionMTime := time.Date(2026, 1, 1, 0, 30, 0, 0, time.UTC)
-	writeSyntheticClaudeSession(t, tmpHome, "session-inferred", fx.RepoDir, mentioned, sessionMTime)
-
-	backend, err := session.New("fake", session.Options{ScenarioDir: fx.ScenarioDir})
-	if err != nil {
-		t.Fatalf("session.New: %v", err)
-	}
-
-	// Simulate a summarizer dispatch that (against its own prompt) reaches
-	// the lease and edits a tracked file, the shape that would otherwise
-	// fail the round with REVIEW_INVALID at the reviewer's own read-only
-	// guard.
-	dirtied := false
-	wrapped := stubBackend{run: func(sd session.Dispatch) error {
-		if sd.Slice == "intent" {
-			p := filepath.Join(gateLeaseDir(t, fx), "alpha", "alpha.go")
-			data, rerr := os.ReadFile(p)
-			if rerr != nil {
-				t.Fatalf("read alpha/alpha.go in lease: %v", rerr)
-			}
-			if werr := os.WriteFile(p, append(data, []byte("\n// stray summarizer edit\n")...), 0o644); werr != nil {
-				t.Fatalf("dirty alpha/alpha.go in lease: %v", werr)
-			}
-			dirtied = true
-		}
-		return backend.Run(sd)
-	}}
-
-	report, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if !dirtied {
-		t.Fatal("the intent summarizer dispatch never ran; nothing was dirtied")
-	}
-
-	// Failed open, not a REVIEW_INVALID round failure: the round must
-	// still complete clean, with intent left at "none" and a reason
-	// naming what happened.
-	if report.Verdict != "clean" {
-		t.Fatalf("report.Verdict = %q, want clean", report.Verdict)
-	}
-	if report.Intent.Source != IntentSourceNone {
-		t.Fatalf("report.Intent.Source = %q, want %q (summarizer dirtied the lease)", report.Intent.Source, IntentSourceNone)
-	}
-	if !strings.Contains(report.IntentNote, "changed the gate lease") {
-		t.Fatalf("report.IntentNote = %q, want it to say the summarizer changed the gate lease", report.IntentNote)
-	}
-
-	// The lease itself must come out of the round pristine: the stray
-	// edit restored, nothing left dirty for the next round (or the next
-	// gate command) to trip over.
-	leaseDir, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
-	if err != nil {
-		t.Fatalf("pool.Dir: %v", err)
-	}
-	status, err := gitx.Run(leaseDir, "status", "--porcelain")
-	if err != nil {
-		t.Fatalf("git status: %v", err)
-	}
-	if status != "" {
-		t.Fatalf("gate lease status after Gate = %q, want clean (restored)", status)
-	}
-}
-
-// TestGateRestoresLeaseWhenIntentSummarizerDirtiesThenErrors:
-// TestGateRestoresLeaseWhenIntentSummarizerLeavesItDirty above covers a
-// summarizer dispatch that dirties the lease and still returns success;
-// this covers the far more common real shape of a fail-open dispatch (a
-// headless timeout, CLAUDE_NOT_FOUND, a max-turns stop) - one that dirties
-// the lease and then returns an error. The lease must be restored whatever
-// the dispatch returned, or the round's own reviewer dispatch inherits a
-// dirty lease and is blamed for a guard failure that was never its own.
-func TestGateRestoresLeaseWhenIntentSummarizerDirtiesThenErrors(t *testing.T) {
-	t.Parallel()
-	tmpHome := t.TempDir()
-
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "inferred-intent", Home: t.TempDir()})
-	d := newDeps(t, fx)
-	d.UserHome = tmpHome
-	d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
-	removeBrief(t, d, fx.Ticket)
-	driveBuild(t, fx, "rung-a")
-
-	mentioned := []string{"alpha/alpha.go", "alpha/percent.go", "alpha/percent_test.go", "beta/beta.go", "beta/version.go"}
-	sessionMTime := time.Date(2026, 1, 1, 0, 30, 0, 0, time.UTC)
-	writeSyntheticClaudeSession(t, tmpHome, "session-inferred", fx.RepoDir, mentioned, sessionMTime)
-
-	backend, err := session.New("fake", session.Options{ScenarioDir: fx.ScenarioDir})
-	if err != nil {
-		t.Fatalf("session.New: %v", err)
-	}
-
-	dirtied := false
-	wrapped := stubBackend{run: func(sd session.Dispatch) error {
-		if sd.Slice == "intent" {
-			p := filepath.Join(gateLeaseDir(t, fx), "alpha", "alpha.go")
-			data, rerr := os.ReadFile(p)
-			if rerr != nil {
-				t.Fatalf("read alpha/alpha.go in lease: %v", rerr)
-			}
-			if werr := os.WriteFile(p, append(data, []byte("\n// stray summarizer edit\n")...), 0o644); werr != nil {
-				t.Fatalf("dirty alpha/alpha.go in lease: %v", werr)
-			}
-			dirtied = true
-			return errors.New("session timed out")
-		}
-		return backend.Run(sd)
-	}}
-
-	report, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if !dirtied {
-		t.Fatal("the intent summarizer dispatch never ran; nothing was dirtied")
-	}
-
-	// Failed open on the dispatch error itself, not a REVIEW_INVALID
-	// round failure blamed on the reviewer.
-	if report.Verdict != "clean" {
-		t.Fatalf("report.Verdict = %q, want clean", report.Verdict)
-	}
-	if report.Intent.Source != IntentSourceNone {
-		t.Fatalf("report.Intent.Source = %q, want %q (summarizer dispatch failed)", report.Intent.Source, IntentSourceNone)
-	}
-	if !strings.Contains(report.IntentNote, "dispatch failed") {
-		t.Fatalf("report.IntentNote = %q, want it to say the summarizer dispatch failed, not a lease-changed reason meant for a different case", report.IntentNote)
-	}
-
-	leaseDir, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
-	if err != nil {
-		t.Fatalf("pool.Dir: %v", err)
-	}
-	status, err := gitx.Run(leaseDir, "status", "--porcelain")
-	if err != nil {
-		t.Fatalf("git status: %v", err)
-	}
-	if status != "" {
-		t.Fatalf("gate lease status after Gate = %q, want clean (restored despite the dispatch error)", status)
-	}
-}
-
 // storeRemoteHistory returns every commit, with its patch, on every ref of
 // the fixture's store remote: everything the store has ever pushed.
 func storeRemoteHistory(t *testing.T, fx *fixture.Fixture) string {
@@ -425,87 +130,6 @@ func assertExcerptStaysOutOfTheStore(t *testing.T, fx *fixture.Fixture, sessionI
 	if strings.Contains(storeRemoteHistory(t, fx), intentInferExcerptMarker) {
 		t.Errorf("the store remote's history holds the excerpt's text")
 	}
-}
-
-// TestGateDoesNotPushAnUnacceptedSummarizerResult: a summarizer that writes
-// the excerpt's own text as its result and also edits the lease is not
-// accepted, and its result file must not survive the round for the store
-// push to commit: not in the store's working tree, and not in anything
-// pushed to its remote.
-func TestGateDoesNotPushAnUnacceptedSummarizerResult(t *testing.T) {
-	t.Parallel()
-	tmpHome := t.TempDir()
-
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "inferred-intent", Home: t.TempDir()})
-	d := newDeps(t, fx)
-	d.UserHome = tmpHome
-	d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
-	removeBrief(t, d, fx.Ticket)
-	driveBuild(t, fx, "rung-a")
-
-	mentioned := []string{"alpha/alpha.go", "alpha/percent.go", "alpha/percent_test.go", "beta/beta.go", "beta/version.go"}
-	writeSyntheticClaudeSession(t, tmpHome, "session-inferred", fx.RepoDir, mentioned, time.Date(2026, 1, 1, 0, 30, 0, 0, time.UTC))
-
-	backend, err := session.New("fake", session.Options{ScenarioDir: fx.ScenarioDir})
-	if err != nil {
-		t.Fatalf("session.New: %v", err)
-	}
-
-	misbehaved := false
-	wrapped := stubBackend{run: func(sd session.Dispatch) error {
-		if sd.Slice != "intent" {
-			return backend.Run(sd)
-		}
-		var req IntentInferRequest
-		reqData, rerr := os.ReadFile(sd.SliceJSON)
-		if rerr != nil {
-			t.Fatalf("read intent.json: %v", rerr)
-		}
-		if jerr := json.Unmarshal(reqData, &req); jerr != nil {
-			t.Fatalf("parse intent.json: %v", jerr)
-		}
-		excerpt, rerr := os.ReadFile(req.ExcerptPath)
-		if rerr != nil {
-			t.Fatalf("read the excerpt the request names: %v", rerr)
-		}
-		result, merr := json.Marshal(IntentInferResult{Summary: string(excerpt)})
-		if merr != nil {
-			t.Fatal(merr)
-		}
-		if werr := os.WriteFile(sd.ResultJSON, result, 0o644); werr != nil {
-			t.Fatalf("write the result: %v", werr)
-		}
-		p := filepath.Join(gateLeaseDir(t, fx), "alpha", "alpha.go")
-		data, rerr := os.ReadFile(p)
-		if rerr != nil {
-			t.Fatalf("read alpha/alpha.go in lease: %v", rerr)
-		}
-		if werr := os.WriteFile(p, append(data, []byte("\n// stray summarizer edit\n")...), 0o644); werr != nil {
-			t.Fatalf("dirty alpha/alpha.go in lease: %v", werr)
-		}
-		misbehaved = true
-		return nil
-	}}
-
-	report, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if !misbehaved {
-		t.Fatal("the intent summarizer dispatch never ran")
-	}
-	if report.Intent.Source != IntentSourceNone || !strings.Contains(report.IntentNote, "changed the gate lease") {
-		t.Fatalf("report intent = %q note %q, want none: the summarizer changed the lease", report.Intent.Source, report.IntentNote)
-	}
-
-	if _, err := os.Stat(filepath.Join(fx.StoreDir, fx.Ticket, "work", "intent.result.json")); !os.IsNotExist(err) {
-		t.Errorf("work/intent.result.json exists in the store after the round (stat err=%v), want an unaccepted result removed", err)
-	}
-	history := storeRemoteHistory(t, fx)
-	if strings.Contains(history, "intent.result.json") {
-		t.Error("the store remote's history holds an intent.result.json, want none for a result that was never accepted")
-	}
-	assertExcerptStaysOutOfTheStore(t, fx, "session-inferred")
 }
 
 // TestGateReviewerRoundHashesTheIntentItWasGiven: on a reviewer round with
@@ -591,4 +215,92 @@ func TestGateReportsTheIntentTheReviewerWasGiven(t *testing.T) {
 	if rep := reportYAMLAt(t, d, fx.Ticket, 1); rep.Intent.Source != IntentSourceNone || rep.Intent.SHA256 != "" {
 		t.Fatalf("report.yaml intent = %+v, want %q with no hash", rep.Intent, IntentSourceNone)
 	}
+}
+
+// TestGatePointsTheReviewerAtTheIntentExcerpt: a brief-less ticket gated
+// through a real reviewer source (the fake session backend, not the scripted
+// GateSource) is not given an intent: jig summarizes nothing and starts no
+// summarizer. Its review.json names an intent_excerpt instead, the file under
+// the jig home where the operator's own local Claude Code transcript that
+// mentions the round's scope-diff files is excerpted. HOME and USERPROFILE
+// are pointed at a temp dir holding only that synthetic transcript, so this
+// test - like every other in this package - never reads a real home
+// directory.
+func TestGatePointsTheReviewerAtTheIntentExcerpt(t *testing.T) {
+	t.Parallel()
+	tmpHome := t.TempDir()
+
+	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "inferred-intent", Home: t.TempDir()})
+	d := newDeps(t, fx)
+	d.UserHome = tmpHome
+	d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
+	removeBrief(t, d, fx.Ticket)
+	driveBuild(t, fx, "rung-a")
+
+	// The fixture's own commits (its initial origin/main commit and every
+	// fake-backend slice attempt) are all pinned to exactly
+	// 2026-01-01T00:00:00Z (fixture.identityEnv / session.fakeGitEnv), so
+	// merge-base and head resolve to that same instant: the discovery
+	// window is [2025-12-29T00:00:00Z, 2026-01-01T01:00:00Z], deterministic
+	// across any real wall-clock run.
+	mentioned := []string{"alpha/alpha.go", "alpha/percent.go", "alpha/percent_test.go", "beta/beta.go", "beta/version.go"}
+	sessionMTime := time.Date(2026, 1, 1, 0, 30, 0, 0, time.UTC)
+	writeSyntheticClaudeSession(t, tmpHome, "session-inferred", fx.RepoDir, mentioned, sessionMTime)
+
+	backend, err := session.New("fake", session.Options{ScenarioDir: fx.ScenarioDir})
+	if err != nil {
+		t.Fatalf("session.New: %v", err)
+	}
+
+	var (
+		gotReview  ReviewRequest
+		dispatches []string
+	)
+	wrapped := stubBackend{run: func(sd session.Dispatch) error {
+		dispatches = append(dispatches, sd.Slice)
+		if sd.Slice == "gate" {
+			data, rerr := os.ReadFile(sd.SliceJSON)
+			if rerr != nil {
+				t.Fatalf("read review.json: %v", rerr)
+			}
+			if jerr := json.Unmarshal(data, &gotReview); jerr != nil {
+				t.Fatalf("parse review.json: %v", jerr)
+			}
+			if !strings.Contains(sd.Prompt, "intent_excerpt") {
+				t.Errorf("the reviewer's prompt does not tell it how to read an intent_excerpt:\n%s", sd.Prompt)
+			}
+		}
+		return backend.Run(sd)
+	}}
+
+	report, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if len(dispatches) != 1 || dispatches[0] != "gate" {
+		t.Fatalf("sessions dispatched = %v, want only the reviewer: jig launches no summarizer", dispatches)
+	}
+	if report.Verdict != "clean" {
+		t.Fatalf("report.Verdict = %q, want clean", report.Verdict)
+	}
+
+	want := filepath.Join(home.IntentExcerptDir(fx.Home), fx.Ticket, "session-inferred.md")
+	if gotReview.IntentExcerpt != want {
+		t.Fatalf("review.json intent_excerpt = %q, want %q", gotReview.IntentExcerpt, want)
+	}
+	// What the excerpt holds is what the author told their agent.
+	data, err := os.ReadFile(gotReview.IntentExcerpt)
+	if err != nil || !strings.Contains(string(data), "clamp percentages") {
+		t.Fatalf("the excerpt %s = %q (%v), want the author's words", gotReview.IntentExcerpt, data, err)
+	}
+	// Still no intent: nothing states one, and jig records none of its own.
+	if gotReview.Intent.Source != IntentSourceNone || report.Intent.Source != IntentSourceNone || report.IntentSHA256 != "" {
+		t.Fatalf("intent = review %q, report %q (hash %q), want none: an excerpt is a hint, not an intent", gotReview.Intent.Source, report.Intent.Source, report.IntentSHA256)
+	}
+	if _, ok, err := d.Store.ReadIntent(fx.Ticket); err != nil || ok {
+		t.Fatalf("ReadIntent: ok=%v err=%v, want no intent.md", ok, err)
+	}
+
+	// The excerpt is under the jig home and nowhere in the store.
+	assertExcerptStaysOutOfTheStore(t, fx, "session-inferred")
 }

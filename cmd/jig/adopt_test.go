@@ -9,7 +9,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // writeRoundReport records one gate round's report.yaml with verdict, the file
@@ -189,8 +188,8 @@ func pushAuthorBranch(t *testing.T, fx *fixture.Fixture, branch string) string {
 // TestSolveOfAnAdoptedTicketPublishesIt: `jig solve` on a ticket that adopted a
 // branch runs the whole loop - the fix the first round queued is built on the
 // branch, the next round is clean - and publishes it: the branch on origin is
-// fast-forwarded, the author's commit keeping its sha and jig's fix and the
-// memorize commit on top, and the report says the branch was pushed as it was.
+// fast-forwarded, the author's commit keeping its sha and jig's fix on top, and
+// nothing else: publish adds no commit of its own.
 func TestSolveOfAnAdoptedTicketPublishesIt(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{})
@@ -220,13 +219,13 @@ func TestSolveOfAnAdoptedTicketPublishesIt(t *testing.T) {
 	if err != nil || head == tip {
 		t.Fatalf("origin's %s = %q (err %v), want it advanced past the author's %s by the publish", branch, head, err, tip)
 	}
-	want := "pushed[1]{repo,head,squash}:\n  fixture-repo," + head + "," + verifydeliver.NotSquashed + "\n"
+	want := "pushed[1]{repo,head}:\n  fixture-repo," + head + "\n"
 	if !strings.Contains(out, want) {
 		t.Errorf("jig solve's output lacks the pushed table %q:\n%s", want, out)
 	}
 
-	// The author's commit is under jig's fix, and the memorize commit is on
-	// top: fast-forwarded, nothing rewritten.
+	// The author's commit is under jig's fix: fast-forwarded, nothing rewritten
+	// and nothing added.
 	if _, err := gitx.Run(fx.RepoRemote, "merge-base", "--is-ancestor", tip, head); err != nil {
 		t.Fatalf("the author's %s is not under origin's %s: %v", tip, head, err)
 	}
@@ -235,8 +234,8 @@ func TestSolveOfAnAdoptedTicketPublishesIt(t *testing.T) {
 		t.Fatalf("git log: %v", err)
 	}
 	lines := strings.Split(subjects, "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[1], ticket+" fix-1: ") || lines[0] != "docs: memorize "+ticket {
-		t.Errorf("publish added %q on top of the author's commit, want the memorize commit over jig's fix-1", lines)
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], ticket+" fix-1: ") {
+		t.Errorf("publish added %q on top of the author's commit, want only jig's fix-1", lines)
 	}
 	if got, err := gitx.Run(fx.RepoRemote, "for-each-ref", "--format=%(refname)", "refs/heads/jig/"); err != nil || got != "" {
 		t.Errorf("origin has jig/ branches %q (err %v), want none: an adopted ticket ships its own branch", got, err)
