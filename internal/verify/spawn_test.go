@@ -83,7 +83,7 @@ func TestSpawnStartsTheWorkerAndRecordsItsPid(t *testing.T) {
 		t.Fatalf("started %d processes, want 1", len(specs))
 	}
 	spec := specs[0]
-	wantArgs := []string{"verify", "--worker", "--store", r.st.Root, "--repo-dir", r.fx.RepoDir, "--slice", "a", "--session", "s-1", "--agent", "agent-1", r.fx.Ticket, sha}
+	wantArgs := []string{"verify", "--worker", "--store", r.st.Root, "--repo-dir", r.fx.RepoDir, "--slice", "a", "--session", "s-1", "--agent-id", "agent-1", r.fx.Ticket, sha}
 	if spec.Path != r.deps.Executable || !reflect.DeepEqual(spec.Args, wantArgs) || spec.Dir != r.fx.RepoDir || spec.LogPath != wantLog || spec.Env != nil {
 		t.Errorf("Spec = %+v\nwant args %v", spec, wantArgs)
 	}

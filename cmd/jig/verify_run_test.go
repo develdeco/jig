@@ -119,7 +119,7 @@ func TestVerifyWorkerVerifiesInProcessAndWritesItsReportToStdout(t *testing.T) {
 	r := newVerifyRig(t)
 	sha := r.applyScenarioPatch("b")
 
-	out, code := r.run("verify", "--worker", "--store", r.st.Root, "--repo-dir", r.fx.RepoDir, "--slice", "b", "--session", "s-9", "--agent", "ag-1", "JIG-1", sha)
+	out, code := r.run("verify", "--worker", "--store", r.st.Root, "--repo-dir", r.fx.RepoDir, "--slice", "b", "--session", "s-9", "--agent-id", "ag-1", "JIG-1", sha)
 	if code != 0 {
 		t.Fatalf("worker exit = %d, want 0 for a failed oracle\n%s", code, out)
 	}

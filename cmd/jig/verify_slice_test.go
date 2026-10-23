@@ -127,7 +127,7 @@ func TestVerifyHelpListsItsFlagsButNotTheWorkersOwn(t *testing.T) {
 			t.Errorf("jig verify -h lacks %s:\n%s", want, got)
 		}
 	}
-	for _, hidden := range []string{"--worker", "--agent", "--repo-dir"} {
+	for _, hidden := range []string{"--worker", "--agent-id", "--repo-dir"} {
 		if strings.Contains(got, hidden) {
 			t.Errorf("jig verify -h shows the hidden %s:\n%s", hidden, got)
 		}

@@ -47,7 +47,7 @@ func init() {
 			{"store", verifyStoreUsage, false},
 			{"project", verifyProjectUsage, false},
 			{"worker", verifyWorkerUsage, true},
-			{"agent", verifyAgentUsage, true},
+			{"agent-id", verifyAgentUsage, true},
 			{"repo-dir", verifyCloneUsage, true},
 		}, false},
 		Order: 320,
@@ -94,7 +94,7 @@ func cmdVerify(e env, args []string, stdout io.Writer) int {
 	fs.StringVar(&o.storeFlag, "store", "", verifyStoreUsage)
 	fs.StringVar(&o.projectFlag, "project", "", verifyProjectUsage)
 	fs.BoolVar(&o.worker, "worker", false, verifyWorkerUsage)
-	fs.StringVar(&o.agent, "agent", "", verifyAgentUsage)
+	fs.StringVar(&o.agent, "agent-id", "", verifyAgentUsage)
 	fs.StringVar(&o.cloneFlag, "repo-dir", "", verifyCloneUsage)
 	if handled, err := parseFlags(stdout, fs, rest); handled {
 		return 0

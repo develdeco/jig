@@ -20,7 +20,7 @@ func WorkerArgs(d Deps, r Request, sha string) []string {
 		args = append(args, "--session", r.Session)
 	}
 	if r.Agent != "" {
-		args = append(args, "--agent", r.Agent)
+		args = append(args, "--agent-id", r.Agent)
 	}
 	if r.Rerun {
 		args = append(args, "--rerun")
