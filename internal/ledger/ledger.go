@@ -43,9 +43,19 @@ const lockTimeout = 10 * time.Second
 // writer that died mid-line costs that one line and not the next.
 func Append(root string, l journal.Line) error {
 	if l.TS == "" {
-		l.TS = time.Now().UTC().Format(time.RFC3339Nano)
+		l.TS = Stamp(time.Now())
 	}
-	encoded, err := json.Marshal(l)
+	return appendValue(root, l)
+}
+
+// Stamp is the ts a ledger line carries for the instant t: UTC, RFC 3339,
+// with the fractional seconds that are not zero.
+func Stamp(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+
+// appendValue is Append for any value that encodes to one JSON object: the
+// session lines (sessions.go) carry a key journal.Line has none for.
+func appendValue(root string, v any) error {
+	encoded, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("ledger: encode line: %w", err)
 	}
@@ -166,13 +176,19 @@ func ReadFrom(root string, off int64) ([]journal.Line, int64, error) {
 
 // parseLine decodes one ledger line, ok false for a blank or malformed one.
 func parseLine(raw []byte) (journal.Line, bool) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || raw[0] != '{' {
-		return journal.Line{}, false
-	}
 	var l journal.Line
-	if err := json.Unmarshal(raw, &l); err != nil {
+	if !decodeLine(raw, &l) {
 		return journal.Line{}, false
 	}
 	return l, true
+}
+
+// decodeLine decodes one ledger line into v, false for a blank or malformed
+// one (v may then be part filled).
+func decodeLine(raw []byte, v any) bool {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || raw[0] != '{' {
+		return false
+	}
+	return json.Unmarshal(raw, v) == nil
 }
