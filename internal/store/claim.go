@@ -78,7 +78,16 @@ const idNotClaimedCode = "ID_NOT_CLAIMED"
 // itself to do but tell the operator which case it is. Otherwise nothing
 // write wrote survives a failed Claim: no caller ever has to clean up a
 // folder or a file edit Claim itself could not land.
+//
+// Claim holds the checkpoint lock (LockCheckpoint) for the whole of it,
+// every retry included, so no other process's Sync or Push, and no journal
+// append, runs between its commit and its undo.
 func (s *Store) Claim(write func() (id string, paths []string, err error), msg func(id string) string) (string, error) {
+	release, err := s.LockCheckpoint()
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	cp, err := s.begin()
 	if err != nil {
 		return "", err

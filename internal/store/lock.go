@@ -13,8 +13,21 @@ const lockRetryInterval = 50 * time.Millisecond
 // ("<path>.lock", created if absent and never removed). Only writers lock;
 // readers never do. It retries every 50ms until timeout elapses; on timeout
 // it returns held=false so the caller can proceed anyway rather than block a
-// finished write on a stale holder.
+// finished write on a stale holder, after telling the operator on stderr
+// that it is.
 func Lock(path string, timeout time.Duration) (release func(), held bool, err error) {
+	release, held, err = TryLock(path, timeout)
+	if err == nil && !held {
+		warnLockTimeout(path, timeout)
+	}
+	return release, held, err
+}
+
+// TryLock is Lock without the warning: on timeout it returns held=false and
+// says nothing, for a caller that does not proceed unlocked and so has its
+// own word for it (the machine ledger refuses, the checkpoint lock warns in
+// terms of what it guards).
+func TryLock(path string, timeout time.Duration) (release func(), held bool, err error) {
 	release = func() {}
 	lockPath := path + ".lock"
 	if dir := filepath.Dir(lockPath); dir != "" {
@@ -42,7 +55,6 @@ func Lock(path string, timeout time.Duration) (release func(), held bool, err er
 		}
 		if time.Now().After(deadline) {
 			_ = f.Close()
-			warnLockTimeout(path, timeout)
 			return release, false, nil
 		}
 		time.Sleep(lockRetryInterval)
