@@ -109,9 +109,9 @@ func TestPrintGateReportShowsIntentRowWithFailOpenNote(t *testing.T) {
 }
 
 // TestGateReportHintNamesDecidingAsksNotFixSlices pins the rule that a
-// round leaving any ask undecided always names a human decision at a
-// terminal as the way forward, never "work the fix-slice round" - true
-// even when the round built no fix slices at all (every routed finding
+// round leaving any ask undecided always names a human decision, recorded
+// with `jig triage`, as the way forward, never "work the fix-slice round" -
+// true even when the round built no fix slices at all (every routed finding
 // was an undecided ask).
 func TestGateReportHintNamesDecidingAsksNotFixSlices(t *testing.T) {
 	t.Parallel()
@@ -134,17 +134,17 @@ func TestGateReportHintNamesDecidingAsksNotFixSlices(t *testing.T) {
 	if strings.Contains(hint, "fix-slice round") {
 		t.Fatalf("hint = %q, must not point at fix-slice work when only an ask is undecided", hint)
 	}
-	if !strings.Contains(hint, "jig gate "+fx.Ticket) || !strings.Contains(hint, "decide the listed asks") {
-		t.Fatalf("hint = %q, want it to point at a terminal `jig gate` to decide the listed asks", hint)
+	if !strings.Contains(hint, "jig triage "+fx.Ticket) || !strings.Contains(hint, "jig gate "+fx.Ticket) || !strings.Contains(hint, "Decide the listed asks") {
+		t.Fatalf("hint = %q, want it to point at `jig triage` to decide the listed asks and `jig gate` to apply them", hint)
 	}
 }
 
 // TestGateReportHintNamesTheOrderWhenFixSlicesAreQueuedToo pins the rule
 // that when the same round both queues fix slices (which checkFrontier
 // refuses the next `jig gate` until green) and leaves an ask undecided, the
-// hint names the order: work the fix slices first, then gate at a
-// terminal. The printed `jig gate <ticket>` command alone cannot work in
-// this state, since checkFrontier would refuse it.
+// hint names the order: work the fix slices first, then decide the asks and
+// gate. The printed `jig gate <ticket>` command alone cannot work in this
+// state, since checkFrontier would refuse it.
 func TestGateReportHintNamesTheOrderWhenFixSlicesAreQueuedToo(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{})

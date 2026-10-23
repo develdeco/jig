@@ -2,6 +2,7 @@ package verifydeliver
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
@@ -231,6 +232,9 @@ type branchCopy string
 const (
 	originsCopy     branchCopy = "origin's"
 	buildLeasesCopy branchCopy = "the build lease's"
+	// clonesCopy is the copy in the operator's own clone: committed work the
+	// person (or the agent working for them) has not pushed yet.
+	clonesCopy branchCopy = "the clone's"
 )
 
 // pointAtBuildLeasesCopy points leaseDir at the build lease's copy of the
@@ -317,4 +321,150 @@ func pointAtTicketBranch(d Deps, leaseDir, repoName, ticket, branch string, adop
 		return originsCopy, nil
 	}
 	return chooseBuiltCopy(d, leaseDir, repoName, ticket, branch, built, step)
+}
+
+// pointAtBranchCopy points a gate or publish lease, just acquired on the
+// ticket's branch, at the copy of it that command works on, now that the work
+// happens in the operator's own clone and not in a lease of jig's:
+//
+//   - the clone has the branch (a committed ref; whatever is dirty in its
+//     working tree is not part of the branch and is never read): its copy is
+//     compared with origin's the way the pool's sync rule compares a lease's
+//     (pool.Compare). Origin has no copy, or the clone's is ahead of it: the
+//     clone's. Origin's is ahead of the clone's, or the two are one: origin's
+//     (it holds everything the clone's does). Each has commits the other
+//     lacks: refused, BRANCH_DIVERGED, because jig merges nothing that is not
+//     its own and the person decides how their branch and origin's are
+//     joined;
+//   - the clone has no copy of it (no clone is mapped, the work is on another
+//     machine, or a build lease of an earlier jig run holds it): the rule
+//     pointAtTicketBranch always had, over the build lease and origin;
+//   - no copy anywhere: refused, BRANCH_NOT_FOUND. The branch is not cut from
+//     the target, so a round is never made over a branch nobody has.
+//
+// The lease is left pristine at the copy chosen. step names the command,
+// "gate" or "publish"; built is the commits the journal records jig built,
+// which only the build lease's rule holds the copy to. It says whose copy the
+// lease was left at.
+func pointAtBranchCopy(d Deps, leaseDir, repoName, ticket, branch string, adopted bool, built []string, step string) (branchCopy, error) {
+	if clone := operatorClone(d, repoName); clone != "" {
+		tip, err := branchTipIn(clone, branch)
+		if err != nil {
+			return "", fmt.Errorf("verifydeliver: %s: %w", step, err)
+		}
+		if tip != "" {
+			return pointAtClonesCopy(leaseDir, clone, branch, step)
+		}
+	}
+	if err := requireACopy(d, leaseDir, repoName, ticket, branch, adopted, step); err != nil {
+		return "", err
+	}
+	return pointAtTicketBranch(d, leaseDir, repoName, ticket, branch, adopted, built, step)
+}
+
+// branchTipIn is the sha of refs/heads/<branch> in the repository at dir, or
+// "" when it has no such branch.
+func branchTipIn(dir, branch string) (string, error) {
+	tip, err := gitx.Run(dir, "for-each-ref", "--format=%(objectname)", "refs/heads/"+branch)
+	if err != nil {
+		return "", fmt.Errorf("look up %s in %s: %w", branch, dir, err)
+	}
+	return strings.TrimSpace(tip), nil
+}
+
+// requireACopy refuses, BRANCH_NOT_FOUND, a branch that origin, the build
+// lease and the clone all lack. The clone was asked before this, so what is
+// left to look in is origin as the lease last fetched it and the build lease.
+// The build lease's copy counts for a ticket's own jig/<ticket>, which lives
+// there until a publish pushes it, and not for an adopted branch, which is on
+// origin by definition: one that is gone from origin is a branch nobody can
+// open a pull request from.
+func requireACopy(d Deps, leaseDir, repoName, ticket, branch string, adopted bool, step string) error {
+	tip, err := originsTip(leaseDir, branch)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: %s: %w", step, err)
+	}
+	if tip != "" {
+		return nil
+	}
+	if buildDir, err := pool.Dir(d.Home, repoName, ticket, pool.Build); err == nil && !adopted && pool.Usable(buildDir) {
+		if _, err := gitx.RevParse(buildDir, "refs/heads/"+branch); err == nil {
+			return nil
+		}
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("branch %q is neither in your clone nor on origin", branch),
+		Code: "BRANCH_NOT_FOUND",
+		Help: []string{
+			fmt.Sprintf("Commit the work on %s in your clone (a branch's committed state is what the %s reads), or push it, then rerun", branch, step),
+		},
+	}
+}
+
+// pointAtClonesCopy fetches branch from the clone into the lease and points
+// the lease at the copy to work on (pointAtBranchCopy's first rule).
+func pointAtClonesCopy(leaseDir, clone, branch, step string) (branchCopy, error) {
+	if err := fetchBranchFrom(leaseDir, clone, branch); err != nil {
+		return "", err
+	}
+	tip, err := originsTip(leaseDir, branch)
+	if err != nil {
+		return "", fmt.Errorf("verifydeliver: %s: %w", step, err)
+	}
+	if tip == "" {
+		return clonesCopy, restorePristine(leaseDir, "HEAD", step)
+	}
+	standing, err := pool.Compare(leaseDir, branch)
+	if err != nil {
+		return "", fmt.Errorf("verifydeliver: %s: compare the clone's %s with origin's: %w", step, branch, err)
+	}
+	switch standing {
+	case pool.Behind:
+		return originsCopy, restorePristine(leaseDir, "origin/"+branch, step)
+	case pool.Ahead, pool.InStep:
+		return clonesCopy, restorePristine(leaseDir, "HEAD", step)
+	}
+	ours, err := gitx.CommitsIn(leaseDir, "refs/remotes/origin/"+branch+"..refs/heads/"+branch)
+	if err != nil {
+		return "", fmt.Errorf("verifydeliver: %s: list the commits of the clone's %s origin lacks: %w", step, branch, err)
+	}
+	theirs, err := gitx.CommitsIn(leaseDir, "refs/heads/"+branch+"..refs/remotes/origin/"+branch)
+	if err != nil {
+		return "", fmt.Errorf("verifydeliver: %s: list the commits of origin/%s the clone lacks: %w", step, branch, err)
+	}
+	return "", &axi.Error{
+		Msg: fmt.Sprintf("branch %s has diverged: the clone at %s has %d commit(s) origin/%s lacks, and origin/%s has %d the clone lacks",
+			branch, clone, len(ours), branch, branch, len(theirs)),
+		Code: "BRANCH_DIVERGED",
+		Help: []string{
+			"jig merges, rebases and resets neither side: each has commits the other lacks",
+			fmt.Sprintf("Join them in your clone (for example `git -C %s fetch origin && git -C %s merge origin/%s`), then rerun", clone, clone, branch),
+		},
+	}
+}
+
+// restorePristine resets the lease to rev, clean, on behalf of step.
+func restorePristine(leaseDir, rev, step string) error {
+	if err := resetLeasePristine(leaseDir, rev); err != nil {
+		return fmt.Errorf("verifydeliver: %s: restore lease to %s: %w", step, rev, err)
+	}
+	return nil
+}
+
+// fetchBranchFrom points the lease's own branch at the copy the repository at
+// source has: committed work only, whatever source's working tree holds.
+// Fetching into refs/heads/<branch> fails while that branch is the lease's
+// HEAD, so HEAD steps off it first, and the branch is checked out again after.
+func fetchBranchFrom(leaseDir, source, branch string) error {
+	refspec := fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch)
+	if _, err := gitx.Run(leaseDir, "checkout", "--detach", "HEAD"); err != nil {
+		return fmt.Errorf("verifydeliver: detach HEAD before fetch: %w", err)
+	}
+	if _, err := gitx.Run(leaseDir, "fetch", source, refspec); err != nil {
+		return fmt.Errorf("verifydeliver: fetch %s from %s: %w", branch, source, err)
+	}
+	if _, err := gitx.Run(leaseDir, "checkout", branch); err != nil {
+		return fmt.Errorf("verifydeliver: checkout %s: %w", branch, err)
+	}
+	return nil
 }

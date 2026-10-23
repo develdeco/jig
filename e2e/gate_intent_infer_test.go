@@ -56,13 +56,44 @@ func writeSyntheticClaudeSession(t *testing.T, home, sessionID, cwd string, ment
 	}
 }
 
-// TestGateInfersIntentBriefLess is the end-to-end case: a brief-less
-// ticket, gated through the real jig binary (--backend fake, not the
-// scripted GateSource other suites use), infers its intent from a
+// fileHolding returns the path of the first file under dir (its .git
+// directory aside) that holds text, or "".
+func fileHolding(t *testing.T, dir, text string) string {
+	t.Helper()
+	var hit string
+	err := filepath.WalkDir(dir, func(p string, de fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if de.IsDir() {
+			if de.Name() == ".git" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		data, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return rerr
+		}
+		if hit == "" && strings.Contains(string(data), text) {
+			hit = p
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	return hit
+}
+
+// TestGatePointsTheReviewerAtTheIntentExcerpt is the end-to-end case: a
+// brief-less ticket, gated through the real jig binary, is not given an
+// intent. jig summarizes nothing and records no intent.md; the request the
+// reviewer reads (`jig review context --json`) names an excerpt of the
 // synthetic local Claude Code transcript under HOME - the same HOME
 // newFixture points at a fresh temp dir, never the real one, in the
 // environment runJig hands its subprocess.
-func TestGateInfersIntentBriefLess(t *testing.T) {
+func TestGatePointsTheReviewerAtTheIntentExcerpt(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "inferred-intent"})
 	ticket := fx.Ticket
@@ -93,50 +124,46 @@ func TestGateInfersIntentBriefLess(t *testing.T) {
 		t.Fatalf("run 2 (answer) exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r2.Code, r2.Stdout, r2.Stderr)
 	}
 
-	r3 := runJig(t, env, fx.StoreDir, "gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r3 := runJig(t, env, fx.StoreDir, "gate", ticket)
 	if r3.Code != 0 {
 		t.Fatalf("gate exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r3.Code, r3.Stdout, r3.Stderr)
 	}
-	if !strings.Contains(r3.Stdout, "verdict: clean") {
-		t.Fatalf("gate stdout missing verdict: clean:\n%s", r3.Stdout)
+	wantExcerpt := filepath.Join(home.IntentExcerptDir(env.home), ticket, "session-inferred.md")
+	if !strings.Contains(r3.Stdout, "intent: none") || !strings.Contains(r3.Stdout, wantExcerpt) {
+		t.Fatalf("gate stdout missing the intent row (none) and the excerpt %s:\n%s", wantExcerpt, r3.Stdout)
 	}
-	if !strings.Contains(r3.Stdout, "intent: inferred") {
-		t.Fatalf("gate stdout missing the inferred intent row:\n%s", r3.Stdout)
-	}
-
-	data, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", ticket, "intent.md"))
-	if err != nil {
-		t.Fatalf("read intent.md: %v", err)
-	}
-	if !strings.Contains(string(data), "source: inferred") {
-		t.Fatalf("intent.md missing source: inferred:\n%s", data)
+	if _, err := os.Stat(filepath.Join(fx.StoreDir, "tickets", ticket, "intent.md")); err == nil {
+		t.Fatal("an intent.md was written, but jig summarizes nothing")
 	}
 
-	// The inferred intent must also reach review.json itself - not only
-	// the printed row and intent.md - since that is what the reviewer
-	// session dispatched for this round was actually given.
-	reviewData, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", ticket, "work", "gate.round-1.review.json"))
-	if err != nil {
-		t.Fatalf("read work/gate.round-1.review.json: %v", err)
+	// The excerpt reaches the reviewer in the request it reads, spelled out
+	// as the path on this machine; the request kept in the store names no
+	// directory of this machine's jig home.
+	ctx := runJig(t, env, fx.StoreDir, "review", "context", ticket, "--json")
+	if ctx.Code != 0 {
+		t.Fatalf("review context exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", ctx.Code, ctx.Stdout, ctx.Stderr)
 	}
-	var review struct {
+	var request struct {
 		Intent struct {
 			Source string `json:"source"`
 		} `json:"intent"`
+		IntentExcerpt string `json:"intent_excerpt"`
 	}
-	if err := json.Unmarshal(reviewData, &review); err != nil {
-		t.Fatalf("parse gate.round-1.review.json: %v", err)
+	if err := json.Unmarshal([]byte(ctx.Stdout), &request); err != nil {
+		t.Fatalf("parse review context --json: %v\n%s", err, ctx.Stdout)
 	}
-	if review.Intent.Source != "inferred" {
-		t.Fatalf("gate.round-1.review.json intent.source = %q, want %q", review.Intent.Source, "inferred")
+	if request.Intent.Source != "none" || request.IntentExcerpt != wantExcerpt {
+		t.Fatalf("request intent = %q, intent_excerpt = %q, want none and %s", request.Intent.Source, request.IntentExcerpt, wantExcerpt)
+	}
+	stored := readFileOrFatal(t, filepath.Join(fx.StoreDir, "tickets", ticket, "work", "gate.round-1.review.json"))
+	if strings.Contains(string(stored), "intent_excerpt") || strings.Contains(strings.ReplaceAll(string(stored), `\\`, `\`), env.home) {
+		t.Fatalf("the request kept in the store names the excerpt or the jig home:\n%s", stored)
 	}
 
 	// The excerpt of the session sits under the jig home - the transcript's
 	// marker line is in it - and its text reaches neither the store's
 	// working tree nor any commit the gate pushed to the store's remote.
-	// The accepted result is in that history, which shows the history check
-	// can see files pushed under work/.
-	excerpt, err := os.ReadFile(filepath.Join(home.IntentExcerptDir(env.home), ticket, "session-inferred.md"))
+	excerpt, err := os.ReadFile(wantExcerpt)
 	if err != nil {
 		t.Fatalf("read the excerpt under the jig home: %v", err)
 	}
@@ -153,37 +180,7 @@ func TestGateInfersIntentBriefLess(t *testing.T) {
 	if strings.Contains(history, intentExcerptMarker) {
 		t.Error("the store remote's history holds the excerpt's text")
 	}
-	if !strings.Contains(history, "work/intent.result.json") {
-		t.Error("the store remote's history holds no work/intent.result.json for the accepted result; the history check cannot see files pushed under work/")
+	if !strings.Contains(history, "work/gate.round-1.open.yaml") {
+		t.Error("the store remote's history holds no open record for the round; the history check cannot see files pushed under work/")
 	}
-}
-
-// fileHolding returns the path of the first file under dir (its .git
-// directory aside) that holds text, or "".
-func fileHolding(t *testing.T, dir, text string) string {
-	t.Helper()
-	var hit string
-	err := filepath.WalkDir(dir, func(p string, de fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if de.IsDir() {
-			if de.Name() == ".git" {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		data, rerr := os.ReadFile(p)
-		if rerr != nil {
-			return rerr
-		}
-		if hit == "" && strings.Contains(string(data), text) {
-			hit = p
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", dir, err)
-	}
-	return hit
 }

@@ -250,9 +250,10 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 
 	// The help names one way forward, in this order of precedence: a
 	// round jig cannot read blocks everything, so the repair comes first;
-	// otherwise what decides an outstanding ask is `jig gate <ticket>` at
-	// a terminal, named once here rather than in a per-row cell because it
-	// is the same command for every ask. The frontier check refuses that
+	// otherwise what decides an outstanding ask is `jig triage <ticket>
+	// <id>`, and the next `jig gate <ticket>` applies it, named once here
+	// rather than in a per-row cell because it is the same command for
+	// every ask. The frontier check refuses that
 	// gate while any slice is short of green, and a round that queues fix
 	// slices and leaves an ask undecided is the ordinary case, so while
 	// the frontier is not green the ticket's own next step comes first and
@@ -305,15 +306,14 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 // outstanding asks, lead-verb-free ("run ...", for a caller to prepend
 // "Run " or "Then "): while any of them is budget-parked (parked > 0) it
 // says the fix budget is reached and names keeping or dismissing them,
-// rather than the generic "decide the outstanding asks" - the same single
-// `jig gate <ticket>` terminal session offers both kinds together
-// (verifydeliver's own triage header over the parked subset), so this is
-// one line, not two.
+// rather than the generic "decide the outstanding asks" - the same `jig
+// triage` decides both kinds, and the next `jig gate <ticket>` round applies
+// the decisions, so this is one line, not two.
 func outstandingAsksHelpLine(ticket string, parked, budgetUsed, budgetLimit int) string {
 	if parked > 0 {
-		return fmt.Sprintf("`jig gate %s` at a terminal to keep or dismiss the parked finding(s): the fix budget is reached (%d of %d)", ticket, budgetUsed, budgetLimit)
+		return fmt.Sprintf("`jig triage %s <id> keep|dismiss` to keep or dismiss the parked finding(s), then `jig gate %s` to apply the decisions: the fix budget is reached (%d of %d)", ticket, ticket, budgetUsed, budgetLimit)
 	}
-	return fmt.Sprintf("`jig gate %s` at a terminal to decide the outstanding asks", ticket)
+	return fmt.Sprintf("`jig triage %s <id> keep|dismiss` to decide the outstanding asks, then `jig gate %s` to apply the decisions", ticket, ticket)
 }
 
 // resumeCommand returns the exact command that clears a parked

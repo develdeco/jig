@@ -61,6 +61,10 @@
 // else $GH_STUB_BODY_STATE's own saved content, when an attach call wrote
 // one; else a fixed canned body that always carries one unrewritten
 // reference, "- ./demo-1.mp4: test video", when neither applies.
+//
+// `pr view ... --json headRefName,...` (the adapter's PRHead) answers the head
+// of the pull request: $GH_STUB_HEAD_REF as headRefName, $GH_STUB_HEAD_OID as
+// headRefOid, and $GH_STUB_PR_STATE as state (OPEN when not set).
 package main
 
 import (
@@ -104,6 +108,8 @@ func main() {
 		fmt.Println(args[2])
 	case len(args) >= 3 && args[0] == "pr" && args[1] == "comment":
 		// pr comment succeeds silently
+	case len(args) >= 2 && args[0] == "pr" && args[1] == "view" && jsonFields(args) == "headRefName,headRefOid,state":
+		printPRHead()
 	case len(args) >= 3 && args[0] == "repo" && args[1] == "create":
 		createRepo(args[2], args[3:])
 	case len(args) >= 2 && args[0] == "pr" && args[1] == "view":
@@ -185,6 +191,35 @@ func printPRBody() {
 		body = "## Intent\n\nA test intent\n\n## What changed\n\n- test change\n\n## Demo\n\n- ./demo-1.mp4: test video\n\n## Verification\n\ntest"
 	}
 	data, err := json.Marshal(map[string]string{"body": body})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ghstub: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(string(data))
+}
+
+// jsonFields is the value of the --json flag in args, or "".
+func jsonFields(args []string) string {
+	for i, a := range args {
+		if a == "--json" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// printPRHead answers `gh pr view ... --json headRefName,headRefOid,state`
+// from $GH_STUB_HEAD_REF, $GH_STUB_HEAD_OID and $GH_STUB_PR_STATE.
+func printPRHead() {
+	state := os.Getenv("GH_STUB_PR_STATE")
+	if state == "" {
+		state = "OPEN"
+	}
+	data, err := json.Marshal(map[string]string{
+		"headRefName": os.Getenv("GH_STUB_HEAD_REF"),
+		"headRefOid":  os.Getenv("GH_STUB_HEAD_OID"),
+		"state":       state,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ghstub: %v\n", err)
 		os.Exit(1)

@@ -112,11 +112,11 @@ func TestVerifyHandCommitReusedByGate(t *testing.T) {
 		t.Errorf("ledger = %+v, want the one verify-spawned line", ledger)
 	}
 
-	gate := runJig(t, env, fx.StoreDir, "gate", fx.Ticket, "--early", "--backend", "fake", "--scenario", fx.ScenarioDir)
-	if gate.Code != 0 || !strings.Contains(gate.Stdout, "verdict: clean") {
-		t.Fatalf("jig gate exit = %d, want 0 and a clean verdict\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
+	gate := runJig(t, env, fx.StoreDir, "gate", fx.Ticket, "--early")
+	if gate.Code != 0 || !strings.Contains(gate.Stdout, "round: 1") {
+		t.Fatalf("jig gate exit = %d, want 0 and round 1 open\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
 	}
-	// review.json is what the reviewer was handed; its oracles_passed says which
+	// review.json is what the reviewer is handed; its oracles_passed says which
 	// runs the gate made and which it reused.
 	var review struct {
 		OraclesPassed []struct {

@@ -237,25 +237,24 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 		t.Fatalf("jig status exit = %d, want the branch named and `jig publish %s` suggested\nstdout:\n%s\nstderr:\n%s", s.Code, ticket, s.Stdout, s.Stderr)
 	}
 
-	// Publish ships the branch as it is: main has moved past the fork point, so
-	// it merges main in, adds the memorize commit, and fast-forwards origin's
-	// branch - the author's commits, the mid-loop one included, keep their
-	// shas, jig's fix sits on top.
+	// Publish ships the branch as it is: main has moved past the fork point, and
+	// publish merges nothing and adds no commit; it fast-forwards origin's
+	// branch to the reviewed head - the author's commits, the mid-loop one
+	// included, keep their shas, jig's fix sits on top.
 	jigFix := gitLog(t, lease, "rev-parse", "HEAD")
 	p := runJig(t, env, fx.StoreDir, "publish", ticket, "--yes")
 	if p.Code != 0 {
 		t.Fatalf("jig publish exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", p.Code, p.Stdout, p.Stderr)
 	}
 	head := gitLog(t, fx.RepoRemote, "rev-parse", "refs/heads/"+branch)
-	if want := "pushed[1]{repo,head,squash}:\n  fixture-repo," + head + ",not squashed (branch already on origin)\n"; !strings.Contains(p.Stdout, want) {
+	if want := "pushed[1]{repo,head}:\n  fixture-repo," + head + "\n"; !strings.Contains(p.Stdout, want) {
 		t.Fatalf("jig publish did not report the push %q\nstdout:\n%s", want, p.Stdout)
 	}
 	if head == authorNext {
 		t.Fatalf("origin's %s did not move: still the author's latest tip %s", branch, authorNext)
 	}
 	// Fast-forwarded: the author's latest tip is an ancestor of the new head,
-	// and the commits on top are, in order, jig's fix, the merge of main, and
-	// the memorize commit.
+	// and the one commit on top is jig's fix.
 	gitLog(t, fx.RepoRemote, "merge-base", "--is-ancestor", authorNext, head)
 	fork := gitLog(t, fx.RepoRemote, "merge-base", "refs/heads/main", authorTip)
 	authorCommits := strings.Fields(gitLog(t, fx.RepoRemote, "rev-list", "--reverse", fork+".."+authorNext))
@@ -269,16 +268,9 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 		t.Fatalf("origin's %s starts with %v, want the author's commits %v under the same shas", branch, got, authorCommits)
 	}
 	added := strings.Fields(gitLog(t, fx.RepoRemote, "rev-list", "--first-parent", "--reverse", authorNext+".."+head))
-	if len(added) != 3 || added[0] != jigFix {
-		t.Fatalf("publish added %v on top of the author's latest tip, want jig's fix %s, the merge of main, and the memorize commit", added, jigFix)
+	if len(added) != 1 || added[0] != jigFix || head != jigFix {
+		t.Fatalf("publish added %v on top of the author's latest tip, want only jig's fix %s", added, jigFix)
 	}
-	if subject := gitLog(t, fx.RepoRemote, "log", "-1", "--format=%s", added[1]); !strings.HasPrefix(subject, "Merge ") {
-		t.Errorf("the commit after jig's fix is %q, want the merge of main", subject)
-	}
-	if subject := gitLog(t, fx.RepoRemote, "log", "-1", "--format=%s", head); subject != "docs: memorize "+ticket {
-		t.Errorf("the tip of %s is %q, want the memorize commit", branch, subject)
-	}
-	gitLog(t, fx.RepoRemote, "merge-base", "--is-ancestor", movedMain, head)
 	if got := gitLog(t, fx.RepoRemote, "rev-parse", "refs/heads/main"); got != movedMain {
 		t.Fatalf("origin's main = %s, want %s: publish never moves the target", got, movedMain)
 	}
@@ -286,10 +278,12 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 		t.Fatalf("origin has %q, want no jig/<ticket> branch: an adopted ticket ships its own", got)
 	}
 
-	// The store records the publish, and that nothing was squashed.
+	// The store records the publish, and nothing that reshaped the branch.
 	lines := readJournal(t, fx, ticket)
-	if l, ok := findJournalLine(lines, "squash", "", "none:branch-on-origin"); !ok || l.Commit != "" {
-		t.Errorf("journal has no squash line recording none:branch-on-origin, or it names a commit: %+v", l)
+	for _, event := range []string{"reconcile", "memorize", "squash"} {
+		if l, ok := findJournalLine(lines, event, "", ""); ok {
+			t.Errorf("journal has %+v, but publish reshapes nothing", l)
+		}
 	}
 	if l, ok := findJournalLine(lines, "pr", "", ""); !ok || l.Commit != head {
 		t.Errorf("journal pr line = %+v (found %v), want the pushed head %s", l, ok, head)
