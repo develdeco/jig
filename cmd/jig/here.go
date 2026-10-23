@@ -85,21 +85,12 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 	}
 
 	hc := hereCtx{e: e, Where: where, JigHome: jigHome}
-	if where.StorePath != "" {
-		cfg, err := project.Load(filepath.Join(where.StorePath, "project.yaml"))
-		if err != nil {
+	if hc.Store, _, err = openLocatedStore(where); err != nil {
+		return renderErr(stdout, err)
+	}
+	if hc.Store != nil && (where.TicketHow == locate.HowArg || where.TicketHow == locate.HowArgAlias) {
+		if err := requireTicket(hc.Store, where.Ticket); err != nil {
 			return renderErr(stdout, err)
-		}
-		if err := cfg.CheckSchemaVersion(false); err != nil {
-			return renderErr(stdout, err)
-		}
-		if hc.Store, err = store.Open(where.StorePath); err != nil {
-			return renderErr(stdout, err)
-		}
-		if where.TicketHow == locate.HowArg || where.TicketHow == locate.HowArgAlias {
-			if err := requireTicket(hc.Store, where.Ticket); err != nil {
-				return renderErr(stdout, err)
-			}
 		}
 	}
 
@@ -132,6 +123,28 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 	blocks = append(blocks, axi.Help(view.help(hc)...))
 	axi.Render(stdout, blocks...)
 	return 0
+}
+
+// openLocatedStore opens the store a located directory names, after checking
+// that its schema is one this binary reads, with the project config it holds.
+// A directory whose store is not on this machine has none: the store is nil
+// and so is the error.
+func openLocatedStore(where locate.Where) (*store.Store, project.Config, error) {
+	if where.StorePath == "" {
+		return nil, project.Config{}, nil
+	}
+	cfg, err := project.Load(filepath.Join(where.StorePath, "project.yaml"))
+	if err != nil {
+		return nil, project.Config{}, err
+	}
+	if err := cfg.CheckSchemaVersion(false); err != nil {
+		return nil, project.Config{}, err
+	}
+	st, err := store.Open(where.StorePath)
+	if err != nil {
+		return nil, project.Config{}, err
+	}
+	return st, cfg, nil
 }
 
 // parseWithPositionals parses args against fs and returns the positional
