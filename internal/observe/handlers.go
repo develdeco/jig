@@ -59,7 +59,7 @@ func (h *handler) handOverSession() bool {
 // for a harness that could not set JIG_SESSION for them.
 func sessionAsk(id string) string {
 	return "jig knows this session as " + id + ", and the harness could not tell your shell commands: run each jig command with " +
-		locate.SessionEnv + "=" + id + " in its environment, or --session " + id + " (the session argument of a jig MCP tool)."
+		locate.SessionEnv + "=" + id + " in its environment, or with --session " + id + " on the commands that take it (the session argument of a jig MCP tool)."
 }
 
 // prompt gives the session the notes it has not heard, and records a move to
