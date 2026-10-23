@@ -12,11 +12,15 @@ import (
 
 // TestMain intercepts the re-exec used by TestLockRaceTwoProcesses: when
 // JIG_LOCK_CHILD is set, the process runs one rendezvous role instead of the
-// normal test suite. Otherwise it runs the suite hermetically via
-// gittest.Run.
+// normal test suite; JIG_CHECKPOINT_CHILD does the same for
+// TestLockCheckpointReentrantAndExclusive. Otherwise it runs the suite
+// hermetically via gittest.Run.
 func TestMain(m *testing.M) {
 	if role := os.Getenv("JIG_LOCK_CHILD"); role != "" {
 		os.Exit(runLockChild(role))
+	}
+	if root := os.Getenv("JIG_CHECKPOINT_CHILD"); root != "" {
+		os.Exit(runCheckpointChild(root))
 	}
 	os.Exit(gittest.Run(m))
 }

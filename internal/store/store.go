@@ -136,7 +136,13 @@ func (s *Store) HasRemote() bool {
 // store (no origin) in either state is still refused at the start of the
 // command rather than silently let through. Otherwise it is a silent no-op
 // when there is no remote. Callers run it at the start of every command.
+// It holds the checkpoint lock (LockCheckpoint) throughout.
 func (s *Store) Sync() error {
+	release, err := s.LockCheckpoint()
+	if err != nil {
+		return err
+	}
+	defer release()
 	cp, err := s.begin()
 	if err != nil {
 		return err
@@ -473,8 +479,17 @@ func (s *Store) stageAndCommit(msg string) (bool, error) {
 // staged) and, when a remote exists, pushes it, retrying once with a
 // pull --rebase on rejection. Like Sync, it refuses on an unfinished rebase
 // or merge or a detached HEAD before doing anything else, whether or not a
-// remote exists.
+// remote exists. It holds the checkpoint lock (LockCheckpoint) through the
+// commit and the push and lets go of it before RunCheckpointHook: the hook's
+// mirror reaches the store through Claim, which takes the lock itself, and a
+// hook that ran under Push's hold would keep every other process waiting
+// through a network sync.
 func (s *Store) Push(msg string) error {
+	release, err := s.LockCheckpoint()
+	if err != nil {
+		return err
+	}
+	defer release()
 	cp, err := s.begin()
 	if err != nil {
 		return err
@@ -483,6 +498,7 @@ func (s *Store) Push(msg string) error {
 		return err
 	}
 	if !cp.hasRemote() {
+		release()
 		s.RunCheckpointHook()
 		return nil
 	}
@@ -496,6 +512,7 @@ func (s *Store) Push(msg string) error {
 	if cp.repo == nil || cp.repo.LooseObjectsPastAutoGC() {
 		_ = gitx.MaintenanceAuto(s.Root)
 	}
+	release()
 	s.RunCheckpointHook()
 	return nil
 }

@@ -15,7 +15,7 @@ import (
 
 // Line is one NDJSON record in a ticket's journal. Wire keys are exact.
 type Line struct {
-	TS      string `json:"ts"` // RFC3339; filled by Append if empty
+	TS      string `json:"ts"` // RFC3339 with fractional seconds; filled by Append if empty
 	Ticket  string `json:"ticket"`
 	Slice   string `json:"slice,omitempty"`
 	Event   string `json:"event"`
@@ -51,6 +51,59 @@ type Line struct {
 	// head it picked for in Commit and the line's Outcome saying whether it
 	// was newly picked, reused or refused (ADR 0029).
 	Pick *Pick `json:"pick,omitempty"`
+
+	// The fields below belong to the digester's records (the journal's
+	// claim, driver, note, spend and approval lines and the machine
+	// ledger's session and tool lines). Each is omitted when empty, so a
+	// line an older jig wrote reads back with none and a line that carries
+	// none writes none.
+
+	// Session is the harness session id the line was written for; Agent the
+	// id of the agent within it (a subagent's own id, "" for the session
+	// itself); Harness the harness's name (claude, codex, ...).
+	Session string `json:"session,omitempty"`
+	Agent   string `json:"agent,omitempty"`
+	Harness string `json:"harness,omitempty"`
+	// Source is who ran an oracle line's command: "jig" (a verify worker)
+	// or "session" (the session ran it itself and jig observed it).
+	Source string `json:"source,omitempty"`
+	// Signature is a failure's normalized signature, the key repeat
+	// failures are matched on. Summary is the failure's flattened tail,
+	// at most 600 bytes; the full tail lives in a machine-local log.
+	Signature string `json:"signature,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+	// Provenance says who a line speaks for: "person", "agent" or "jig".
+	Provenance string `json:"provenance,omitempty"`
+	// Unattended is set on a claim line made without a person watching.
+	Unattended bool `json:"unattended,omitempty"`
+	// Branch and URL name a branch or a link the line is about.
+	Branch string `json:"branch,omitempty"`
+	URL    string `json:"url,omitempty"`
+	// Ref is the id of the subject the line is about: a question (q-001),
+	// a review finding (r1-f2) or a note's fingerprint.
+	Ref string `json:"ref,omitempty"`
+	// Tool is the harness tool a ledger tool line records; Cwd the
+	// directory it ran in; Exit its exit status when it had one; Files the
+	// files it touched.
+	Tool  string   `json:"tool,omitempty"`
+	Cwd   string   `json:"cwd,omitempty"`
+	Exit  *int     `json:"exit,omitempty"`
+	Files []string `json:"files,omitempty"`
+	// PID is the process id a ledger line records (a spawned verify
+	// worker's, say).
+	PID int `json:"pid,omitempty"`
+	// Spend is what a spend line records: tokens and dollars.
+	Spend *Spend `json:"spend,omitempty"`
+}
+
+// Spend is a spend line's cost: the token counts a transcript's usage
+// records sum to, and the dollars they priced at.
+type Spend struct {
+	Input      int64   `json:"input,omitempty"`
+	Output     int64   `json:"output,omitempty"`
+	CacheRead  int64   `json:"cache_read,omitempty"`
+	CacheWrite int64   `json:"cache_write,omitempty"`
+	USD        float64 `json:"usd,omitempty"`
 }
 
 // Recording is one file a scenario recorded: its name inside the recording
@@ -97,13 +150,21 @@ func journalPath(st *store.Store, ticket string) string {
 }
 
 // Append writes l as one NDJSON line to <ticket>/journal.ndjson, under a
-// lock on the journal file. l.Ticket is set to ticket, and l.TS defaults to
-// now (RFC3339) when empty.
+// lock on the journal file and, outside it, the store's checkpoint lock
+// (Store.LockCheckpoint), so a detached worker's append never lands in the
+// middle of a Sync or Push another process is making. l.Ticket is set to
+// ticket, and l.TS defaults to now (RFC3339 with nanoseconds) when empty.
 func Append(st *store.Store, ticket string, l Line) error {
 	if l.TS == "" {
-		l.TS = time.Now().UTC().Format(time.RFC3339)
+		l.TS = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	l.Ticket = ticket
+
+	unlock, err := st.LockCheckpoint()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	path := journalPath(st, ticket)
 	release, _, err := store.Lock(path, 30*time.Second)
