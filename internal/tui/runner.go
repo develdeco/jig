@@ -43,11 +43,6 @@ type outcome struct {
 	Steps  []ranStep
 }
 
-// failed reports whether a step failed (the run stops at the first).
-func (o outcome) failed() bool {
-	return len(o.Steps) > 0 && o.Steps[len(o.Steps)-1].Code != 0
-}
-
 // shown is the step the screen reports: the one that failed, else the last.
 func (o outcome) shown() ranStep {
 	if len(o.Steps) == 0 {
