@@ -4,7 +4,11 @@
 // pass, the verified line, in the shapes the frontier wrote, so the gate can
 // reuse a pass. It backs `jig verify`.
 //
-// The package holds no code yet; its directory and its place in
-// ARCHITECTURE.md are reserved so the code that fills it lands in files of
-// its own.
+// Run is the whole verification, in the calling process: it is what the
+// detached worker (`jig verify --worker`) and `jig verify --wait` call.
+// Spawn is the foreground half: it checks the journal for a verification of
+// the commit already, and starts the worker. Both leave the same trail: the
+// verify-pending line, the oracle line, the recorded line when the scenarios
+// recorded, the verified line and the slice's state on a pass, and for a run
+// that could not reach the oracle a verify-error line.
 package verify
