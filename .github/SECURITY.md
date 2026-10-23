@@ -119,10 +119,8 @@ these:
   (`--no-session-persistence`), so under the headless backend the excerpt
   is not saved a second time in the operator's Claude Code data
   (`~/.claude/projects`), where each dispatch's fresh scratch directory
-  would otherwise get a project directory of its own that nothing removes;
-  herdr ignores the setting, since its agent is an interactive Claude Code
-  session jig starts without flags, and Claude Code keeps that session's
-  transcript. The summary is never rendered into a PR body directly; a
+  would otherwise get a project directory of its own that nothing removes.
+  The summary is never rendered into a PR body directly; a
   reviewer session's own words, shaped by having read it, still can be.
 - A pick's failure text reaching the store. When the pick session or its
   backend fails (the dispatch errors, or the session writes no pick result),
@@ -158,15 +156,13 @@ Out of scope:
   interprets it, the same accident-guard shape as the credential-path gap
   above - see [ADR 0008](../docs/adr/0008-headless-permission-model.md).
 - Vulnerabilities in Go itself, the `git` binary, or a session backend
-  (`claude`, `herdr`) that jig shells out to - report those upstream.
+  (`claude`) that jig shells out to - report those upstream.
 - Anything that requires an attacker to already control the machine jig
   runs on, or to have write access to the ticket branch or store repo they
   are attacking.
 - A `headless` session doing something unwanted with the shell or file
   tools it was actually granted: that shell is the operator's own, running
-  with the operator's rights, not a sandboxed one. `herdr` sessions run
-  with no screening at all yet; that is a known gap, not something to
-  report here.
+  with the operator's rights, not a sandboxed one.
 - A session's own words recorded as it wrote them: a pick's `summary`, its
   flow titles and its captions in the journal's `publish-picks` line, like a
   reviewer's `result.json` summary. jig does not filter or rewrite model

@@ -8,7 +8,7 @@ on:
   workflow_call:
     inputs:
       release:
-        description: Also build the release archives and run them through the installers and the Quickstart
+        description: Also build the release archives and run them through the installers and the hooks test
         type: boolean
         default: false
   # Daily, for the claude-cli job below: the CLI release it tests can change
@@ -108,7 +108,7 @@ jobs:
   # The package the test job's Windows leg skips, on a Windows runner of its
   # own. It is one of the leg's two longest (843 s, beside cmd/jig's 852 s,
   # in a step of 1,050-1,110 s) and the floor once the in-flight diets of
-  # cmd/jig, frontier, e2e and revieweval land; until then cmd/jig bounds the
+  # cmd/jig, e2e and revieweval land; until then cmd/jig bounds the
   # step and the saving does not show. A package alone on the runner runs
   # faster than inside a shared step (gitx: 61 s alone, 149 s in the full
   # step). Main's ruleset does not require this check by name: ci ok needs
@@ -126,12 +126,12 @@ jobs:
         run: (git --exec-path) -replace '/', '\' | Add-Content -Path $env:GITHUB_PATH
       - run: go test -timeout 30m ./internal/verifydeliver
 
-  # The test job's sessions run against a stub `claude` that accepts any
-  # argv. This job runs the real Claude Code CLI, at the latest release (the
-  # one users' CLIs update to), through jig's headless backend against a
-  # scripted Messages API on loopback: no credentials, and no network past
-  # the install. v0.1.1 shipped with an argv the CLI refuses, so none of its
-  # headless sessions ever started, and nothing before this job ran one.
+  # This job runs the real Claude Code CLI, at the latest release (the one
+  # users' CLIs update to), with jig's hooks installed, against a scripted
+  # Messages API on loopback: no credentials, and no network past the
+  # install. The hook JSON jig prints is what the CLI reads, and the CLI can
+  # change it with no change to jig, so nothing but the real CLI proves the
+  # two still agree (TestHooksLive).
   claude-cli:
     strategy:
       fail-fast: false
@@ -160,10 +160,10 @@ jobs:
           & ([scriptblock]::Create((Invoke-RestMethod https://claude.ai/install.ps1))) latest
           Join-Path $env:USERPROFILE '.local\bin' | Add-Content -Path $env:GITHUB_PATH
       - run: claude --version
-      - name: headless backend and the Quickstart against the real CLI
+      - name: the hooks against the real CLI
         env:
           JIG_LIVE_CLAUDE: "1"
-        run: go test -count=1 -timeout 20m -run Live -v ./internal/session ./e2e
+        run: go test -count=1 -timeout 20m -run TestHooksLive -v ./e2e
 
   # Main's ruleset requires this check beside the test job's legs, which
   # run the lint test that keeps this job's shape. It passes only when every
@@ -195,7 +195,7 @@ jobs:
           done
 
   # The release archives GoReleaser builds, installed by the installers and
-  # run through the Quickstart on each platform: on a manual dispatch, and
+  # run through the hooks test on each platform: on a manual dispatch, and
   # in every release before anything is published.
   snapshot:
     if: github.event_name == 'workflow_dispatch' || inputs.release
@@ -315,8 +315,8 @@ jobs:
           & ([scriptblock]::Create((Invoke-RestMethod https://claude.ai/install.ps1))) latest
           Join-Path $env:USERPROFILE '.local\bin' | Add-Content -Path $env:GITHUB_PATH
       - run: claude --version
-      - name: Quickstart with the installed jig
+      - name: the hooks of the installed jig against the real CLI
         env:
           JIG_LIVE_CLAUDE: "1"
           JIG_E2E_BINARY: ${{ runner.temp }}/jig-install/jig${{ runner.os == 'Windows' && '.exe' || '' }}
-        run: go test -count=1 -timeout 20m -run TestQuickstartLive -v ./e2e
+        run: go test -count=1 -timeout 20m -run TestHooksLive -v ./e2e

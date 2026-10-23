@@ -1,8 +1,7 @@
 // Package lint enforces the mechanical budgets on jig's agent-facing docs:
-// each skills/<dir>/SKILL.md's size and frontmatter, the router's intent
-// table, (once it exists) ARCHITECTURE.md's module table against the real
-// package layout, and the shape of the CI/release/smoke GitHub Actions
-// workflows.
+// each skills/<dir>/SKILL.md's size and frontmatter, ARCHITECTURE.md's module
+// table against the real package layout, the binary's dependencies, and the
+// shape of the CI/release/smoke GitHub Actions workflows.
 package lint
 
 import (
@@ -98,51 +97,6 @@ func TestSkillsBudget(t *testing.T) {
 				t.Errorf("%s: description is %d words, budget is <=50", path, words)
 			}
 		})
-	}
-}
-
-func TestRouterTable(t *testing.T) {
-	root := repoRoot(t)
-	path := filepath.Join(root, "skills", "router", "SKILL.md")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	text := string(normalizeEOL(data))
-
-	for _, phrase := range []string{
-		"fresh work",
-		"status ask",
-		"external work product",
-		"many tickets",
-		"process defect",
-		"recall",
-		"validator side only",
-	} {
-		if !strings.Contains(text, phrase) {
-			t.Errorf("%s: missing intent phrase %q", path, phrase)
-		}
-	}
-
-	rows := map[string]string{
-		"pr-mode": "here's the contractor's PR",
-		"fleet":   "work the backlog today",
-		"retro":   "it keeps making that same mistake",
-	}
-	for label, rowText := range rows {
-		idx := strings.Index(text, rowText)
-		if idx == -1 {
-			t.Errorf("%s: missing %s row (looked for %q)", path, label, rowText)
-			continue
-		}
-		lineEnd := strings.Index(text[idx:], "\n")
-		if lineEnd == -1 {
-			lineEnd = len(text) - idx
-		}
-		line := text[idx : idx+lineEnd]
-		if !strings.Contains(line, "v0.2") {
-			t.Errorf("%s: %s row missing v0.2 annotation:\n%s", path, label, line)
-		}
 	}
 }
 
