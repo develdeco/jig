@@ -989,7 +989,9 @@ func TestSyncRefusesACreateOnAPullRequestHitLikeUpdateIssuesWouldSkip(t *testing
 		return st
 	}
 	prs := map[string][]github.PullRequest{
-		"example/demo@jig/DEMO-1": {{Number: 5, NodeID: "PR_5", State: "OPEN"}},
+		// The create-time scan runs before the issue exists, so the ticket's
+		// branch is still led by its store id.
+		"example/demo@DEMO-1-a-clean-title": {{Number: 5, NodeID: "PR_5", State: "OPEN"}},
 	}
 
 	st := newStoreWithPR(t)

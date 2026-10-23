@@ -218,8 +218,9 @@ func TestNextReadySetsAndTickets(t *testing.T) {
 		t.Errorf("after JIG-1 published: next = %v, want JIG-2", all.Next)
 	}
 	unblocked := nextJSON[nextTicketOut](t, env, fx.RepoDir, "JIG-2")
-	if want := []string{"fixture-repo: x"}; unblocked.State != "ready" || !reflect.DeepEqual(readyRepos(unblocked), want) || unblocked.Branch != "jig/JIG-2" {
-		t.Errorf("jig next JIG-2: state = %q, ready = %v, branch = %q, want ready, %v, jig/JIG-2", unblocked.State, readyRepos(unblocked), unblocked.Branch, want)
+	// JIG-2 has a title ("second"), so its branch is its id and the slug of it.
+	if want := []string{"fixture-repo: x"}; unblocked.State != "ready" || !reflect.DeepEqual(readyRepos(unblocked), want) || unblocked.Branch != "JIG-2-second" {
+		t.Errorf("jig next JIG-2: state = %q, ready = %v, branch = %q, want ready, %v, JIG-2-second", unblocked.State, readyRepos(unblocked), unblocked.Branch, want)
 	}
 
 	if r := runJig(t, env, fx.RepoDir, "next", "JIG-99"); r.Code == 0 || !strings.Contains(r.Stdout, "JIG-99") {

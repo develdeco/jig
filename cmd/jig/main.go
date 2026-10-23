@@ -241,6 +241,9 @@ func resolveStoreChecked(e env, storeFlag string, stdout io.Writer, allowOlderSc
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
+	// The marker says which tracker's ids lead the project's branch names;
+	// the store names every ticket's branch by it.
+	st.BranchesFrom = cfg.BranchesFrom
 	// Every store checkpoint (Store.Push) syncs the GitHub mirror, from
 	// inside the command that made it: the mirror depends on the store
 	// (internal/mirror imports internal/store), never the reverse, so this

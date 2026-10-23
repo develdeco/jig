@@ -231,6 +231,10 @@ func TestTicketNewRecordsTitleAndMintsNextID(t *testing.T) {
 	if got.Title != "Fix the thing" {
 		t.Fatalf("ticket.yaml title = %q, want %q", got.Title, "Fix the thing")
 	}
+	// The slug of its branch is fixed with the title it comes from.
+	if got.Slug != "fix-the-thing" {
+		t.Fatalf("ticket.yaml slug = %q, want %q", got.Slug, "fix-the-thing")
+	}
 
 	if code, out := jig("ticket", "new", "--title", "Second thing"); code != 0 || !strings.Contains(out, "DEMO-2") {
 		t.Fatalf("jig ticket new (second): exit %d, want id DEMO-2:\n%s", code, out)
