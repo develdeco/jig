@@ -193,6 +193,12 @@ type Config struct {
 	// written as keys:. An id is <key>-<n>; ResolveKey is where every caller
 	// that mints or reads a key: resolves one against this.
 	Keys map[string]string
+	// BranchesFrom is the tracker whose ids lead the project's branch names:
+	// the jig.yaml marker's branches: from:, empty when the marker (or no
+	// marker) says none, which names GitHub's issue numbers the lead of a
+	// mirrored ticket's branch. A v2 store has no marker, so it is always
+	// empty there. It is not read from the store's own config.
+	BranchesFrom string
 }
 
 // GitHubTracker is a project.yaml trackers: list's github: entry: the repo

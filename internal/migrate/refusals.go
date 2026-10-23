@@ -114,10 +114,13 @@ func CheckNoLeases(jigHome string, repoNames, oldIDs []string) error {
 
 // BranchWarnings reports one warning line per (repo, old id) whose
 // jig/<old id> branch is still on that repo's origin: after the migration
-// jig works that ticket on jig/<new id> instead (brief.md#The migration
-// step 2). A repo whose origin cannot be reached is skipped silently - this
-// is advisory, and the migration must not fail on a repo nobody can reach
-// right now.
+// the ticket is the new id and jig names its branch <new id>-<slug>
+// (brief.md#The migration step 2). The old branch still binds to the ticket,
+// through the old id the migration leaves as an alias, but it is no longer
+// the name jig offers for new work, so it is better merged or closed first.
+// A repo whose origin cannot be reached is skipped silently - this is
+// advisory, and the migration must not fail on a repo nobody can reach right
+// now.
 func BranchWarnings(dir string, repos []project.Repo, renames []Rename) []string {
 	var warnings []string
 	for _, repo := range repos {
@@ -127,7 +130,7 @@ func BranchWarnings(dir string, repos []project.Repo, renames []Rename) []string
 			if err != nil || strings.TrimSpace(out) == "" {
 				continue
 			}
-			warnings = append(warnings, fmt.Sprintf("%s still has branch %s on %s; after the migration jig works %s on jig/%s - merge or close it first", r.OldID, branch, repo.Name(), r.NewID, r.NewID))
+			warnings = append(warnings, fmt.Sprintf("%s still has branch %s on %s; after the migration the ticket is %s and jig names its branch %s-<slug>, though %s still binds to it through the old id - merge or close it first", r.OldID, branch, repo.Name(), r.NewID, r.NewID, branch))
 		}
 	}
 	return warnings

@@ -300,7 +300,7 @@ func claimOneChartEntry(e env, st *store.Store, cfg project.Config, chart string
 		if kerr != nil {
 			return "", nil, kerr
 		}
-		rec := store.Ticket{Title: entries[i].Title, Body: entries[i].Body, BlockedBy: toBlockedBy(refs[i])}
+		rec := store.Ticket{Title: entries[i].Title, Body: entries[i].Body, Slug: store.Slug(entries[i].Title), BlockedBy: toBlockedBy(refs[i])}
 		newID, merr := st.Mint(key, rec)
 		if merr != nil {
 			return "", nil, merr

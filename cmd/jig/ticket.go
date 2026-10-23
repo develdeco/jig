@@ -103,7 +103,9 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 	// never collide on the same id (internal/store/claim.go).
 	id, err := st.Claim(
 		func() (string, []string, error) {
-			mintedID, err := st.Mint(key, store.Ticket{Title: *title, Body: *body})
+			// The slug is fixed here, with the title it comes from: the
+			// ticket's branch keeps its name when the title is edited.
+			mintedID, err := st.Mint(key, store.Ticket{Title: *title, Body: *body, Slug: store.Slug(*title)})
 			if err != nil {
 				return "", nil, err
 			}

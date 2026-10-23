@@ -65,7 +65,9 @@ func TestSyncPlacesIssuesAndPullRequestsOnTheBoard(t *testing.T) {
 	cfg := loadCfg(t, st)
 	client := &fakeClient{
 		prs: map[string][]github.PullRequest{
-			"example/demo@jig/DEMO-1": {
+			// The ticket's branch is led by its issue's number once the
+			// issue exists, and DEMO-1's is the first the fake hands out.
+			"example/demo@1-first-ticket": {
 				{Number: 5, NodeID: "PR_5", State: "OPEN"},
 				{Number: 3, NodeID: "PR_3", State: "CLOSED"},
 			},

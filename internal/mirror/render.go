@@ -50,25 +50,62 @@ func chartTitle(st *store.Store, chart string) (string, error) {
 }
 
 // footer is the body every issue ends with (brief.md#What an issue shows).
-// where is the ticket id or "charts/<name>/"; marker is
-// "<!-- jig:<id> -->" or "<!-- jig:chart:<name> -->", with no trailing
-// newline.
-func footer(where, marker string) string {
+// where is the ticket id or "charts/<name>/"; branch is the ticket's branch
+// when the footer has to name it (a chart has none, and a ticket whose branch
+// needs no naming passes ""); marker is "<!-- jig:<id> -->" or
+// "<!-- jig:chart:<name> -->", with no trailing newline.
+func footer(where, branch, marker string) string {
+	origin := fmt.Sprintf("`%s`", where)
+	if branch != "" {
+		origin = fmt.Sprintf("`%s`, branch `%s`", where, branch)
+	}
 	return fmt.Sprintf(
-		"---\n<sub>Mirrored from the jig ticket store (`%s`). The store is the source of truth: the sync overwrites edits to this title, body, state, parent, blocked-by links and Status.</sub>\n\n%s",
-		where, marker,
+		"---\n<sub>Mirrored from the jig ticket store (%s). The store is the source of truth: the sync overwrites edits to this title, body, state, parent, blocked-by links and Status.</sub>\n\n%s",
+		origin, marker,
 	)
 }
 
-// ticketFooter is footer for ticket.
+// ticketFooter is footer for ticket, naming no branch.
 func ticketFooter(ticket string) string {
-	return footer(ticket, fmt.Sprintf("<!-- jig:%s -->", ticket))
+	return ticketFooterAt(ticket, "")
+}
+
+// ticketFooterAt is footer for ticket, naming branch (when not empty) as the
+// ticket's branch.
+func ticketFooterAt(ticket, branch string) string {
+	return footer(ticket, branch, fmt.Sprintf("<!-- jig:%s -->", ticket))
 }
 
 // chartFooter is footer for chart.
 func chartFooter(chart string) string {
 	where := "charts/" + chart + "/"
-	return footer(where, fmt.Sprintf("<!-- jig:chart:%s -->", chart))
+	return footer(where, "", fmt.Sprintf("<!-- jig:chart:%s -->", chart))
+}
+
+// footerBranch is the branch ticket's footer names, "" when it names none.
+// GitHub links a branch to an issue by its name when the issue's number leads
+// it, which is how a project's branches are named unless its jig.yaml says
+// another tracker's ids lead them (branches: from:). In that project GitHub
+// cannot find a ticket's branch by its name, so the footer, which already
+// carries the store id, carries the branch too: the link a tracker that does
+// not name the branch has to the work.
+//
+// It is also "" when the branch cannot be worked out (a record naming a branch
+// git rejects, an unreadable tracker record): a footer that names no branch is
+// the footer the issue always had, and rendering the body must not fail for it.
+func footerBranch(st *store.Store, cfg project.Config, ticket string, rec store.Ticket) string {
+	if st.BranchesLedByGitHub() {
+		return ""
+	}
+	target := "main"
+	if len(cfg.Repos) > 0 {
+		target = cfg.Repos[0].TargetBranch()
+	}
+	branch, err := st.ResolveTicketBranch(ticket, rec, target)
+	if err != nil {
+		return ""
+	}
+	return branch
 }
 
 // ResolveTicketTitleBody resolves ticket's title and its description
@@ -293,7 +330,7 @@ func RenderTicketBody(st *store.Store, cfg project.Config, ticket string, prs []
 		parts = append(parts, briefBlock)
 	}
 
-	parts = append(parts, ticketFooter(ticket))
+	parts = append(parts, ticketFooterAt(ticket, footerBranch(st, cfg, ticket, rec)))
 	return strings.Join(parts, "\n\n"), nil
 }
 

@@ -1405,6 +1405,11 @@ func TestGraduateRecordsChartEntryBodyInTheRecord(t *testing.T) {
 	if gotB.Body != "" {
 		t.Fatalf("entry B's ticket.yaml body = %q, want empty (its chart entry has none)", gotB.Body)
 	}
+
+	// Each entry's slug is fixed at mint, from its own title.
+	if gotA.Slug != "slice-a" || gotB.Slug != "slice-b" {
+		t.Fatalf("slugs = %q, %q; want slice-a, slice-b", gotA.Slug, gotB.Slug)
+	}
 }
 
 // TestGraduateFullyGraduatedLeavesStoreUntouched covers the fully-graduated

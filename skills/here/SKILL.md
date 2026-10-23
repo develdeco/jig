@@ -25,11 +25,11 @@ Run it from the repo, a directory in it, or a linked worktree of it: all read as
 | `project`, `how` | the project, and how it was found: `marker` (a committed `jig.yaml`), `map-path` or `map-remote` (this machine's map), `store`, `flag` |
 | `store` | the store's directory; `store_remote` alone means it is not cloned here - run the `git clone` the help line gives, then `jig here` again |
 | `repo`, `repo_dir`, `branch` | which repo of the project this is, its clone, the branch checked out |
-| `ticket`, `ticket_how` | the ticket the branch name leads with (`branch`), or the one you named (`arg`) |
+| `ticket`, `ticket_how` | the ticket the branch name leads with (`branch`: its id, an id it had before, or the number of its GitHub issue), or the one you named (`arg`) |
 | `slices` | every slice of the ticket with its state; `blocked_by` shows what each waits for |
 | `questions`, `pending_verifications` | open questions to answer; commits whose oracle is still running |
 
-A branch that leads with no ticket id (`main`, a feature branch) binds no ticket: name one, or run `jig next`.
+A branch that leads with no ticket (`main`, a feature branch) binds no ticket: name one, or run `jig next`. `jig claim` on such a branch records it as that ticket's branch.
 
 ## What to build next
 
