@@ -485,8 +485,8 @@ type CloneResult struct {
 	Changed bool
 }
 
-// cloneHooks is where git runs one repository's hooks from.
-type cloneHooks struct {
+// hooksLocation is where git runs one repository's hooks from.
+type hooksLocation struct {
 	// Top is the top of the repository's work tree and Common its git common
 	// directory.
 	Top, Common string
@@ -500,8 +500,9 @@ type cloneHooks struct {
 	Shared bool
 }
 
-func (g GitConfig) cloneHooks(clone string) (cloneHooks, error) {
-	var h cloneHooks
+// cloneHooks finds where git runs clone's hooks from.
+func (g GitConfig) cloneHooks(clone string) (hooksLocation, error) {
+	var h hooksLocation
 	top, err := gitx.TopLevel(clone)
 	if err != nil {
 		return h, fmt.Errorf("%s is not a git work tree: %w", clone, err)
