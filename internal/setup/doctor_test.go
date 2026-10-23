@@ -3,6 +3,7 @@ package setup
 import (
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -64,7 +65,7 @@ func TestCostsSayWhatTheyCost(t *testing.T) {
 		t.Errorf("SkillsCost = %q", c)
 	}
 	h, _ := HarnessNamed("claude")
-	if c := HooksCost(h); !strings.Contains(c, "5 events") {
+	if c := HooksCost(h); !strings.Contains(c, strconv.Itoa(len(h.Events))+" events") {
 		t.Errorf("HooksCost = %q", c)
 	}
 	if !strings.Contains(HintCost(), "tokens in every session") || HintTokens() <= 0 || HintTokens() > 150 {

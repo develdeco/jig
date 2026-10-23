@@ -53,7 +53,6 @@ These were named in the chart and no ticket of the build carries them:
 - `jig watch`, a fog item.
 - Counting the session's own run of the oracle; the `source` field on the `oracle` line stays for it.
 - Cloud sessions and Remote Control (chart decision 19: local first; `jig setup --cloud` only prints an environment script), multi-repo v2 stores in `jig store migrate`, and a live check of any harness but Claude Code (the other adapters and hook files are read from each vendor's documentation and pinned by golden files).
-- The installer does not yet register Claude Code's `PostToolUseFailure`, so a commit followed by a failing command in one shell call is seen at the next tool call or by git's hook.
 
 ## Appendix: ADR verdict map
 

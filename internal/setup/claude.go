@@ -20,13 +20,16 @@ type HookSpec struct {
 type ClaudeHook = HookSpec
 
 // ClaudeHooks are the events jig adds an entry for, in the order it adds them.
-// PostToolUse is limited to the Bash tool: a commit or a test run is a shell
-// command, and nothing else the harness runs is jig's business.
+// PostToolUse and PostToolUseFailure are limited to the Bash tool: a commit or
+// a test run is a shell command, and nothing else the harness runs is jig's
+// business. PostToolUseFailure carries a shell call that exited non-zero, so a
+// commit followed by a failing command in one call is still seen at once.
 func ClaudeHooks() []ClaudeHook {
 	return []ClaudeHook{
 		{Event: "SessionStart"},
 		{Event: "UserPromptSubmit"},
 		{Event: "PostToolUse", Matcher: "Bash"},
+		{Event: "PostToolUseFailure", Matcher: "Bash"},
 		{Event: "Stop"},
 		{Event: "SessionEnd"},
 	}

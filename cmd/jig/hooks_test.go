@@ -116,7 +116,7 @@ func TestHooksNeedAScopeAndConsent(t *testing.T) {
 	}
 	data := readFileOrFail(t, ie.settings())
 	events, err := setup.ClaudeEvents([]byte(data))
-	if err != nil || len(events) != 5 {
+	if err != nil || len(events) != len(setup.ClaudeHooks()) {
 		t.Errorf("settings events = %v, %v\n%s", events, err, data)
 	}
 	if want := ie.quotedExe() + " observe --harness claude"; !strings.Contains(data, strings.ReplaceAll(want, `"`, `\"`)) {
@@ -245,7 +245,7 @@ func TestHooksCommandIsBareJigOnPath(t *testing.T) {
 		t.Fatalf("install with another jig on PATH: exit %d\n%s", code, out)
 	}
 	data := readFileOrFail(t, ie.settings())
-	if strings.Contains(data, `"jig observe`) || !strings.Contains(data, `observe --harness claude`) || strings.Count(data, "observe --harness claude") != 5 {
+	if strings.Contains(data, `"jig observe`) || !strings.Contains(data, `observe --harness claude`) || strings.Count(data, "observe --harness claude") != len(setup.ClaudeHooks()) {
 		t.Errorf("the entries did not move to the quoted path (and stay one per event):\n%s", data)
 	}
 }

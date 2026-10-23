@@ -113,7 +113,7 @@ func TestClaudeHooksMergeIdempotent(t *testing.T) {
 		t.Errorf("top-level keys = %v, want the person's order %v", root.keys, wantKeys)
 	}
 	hv, _ := root.get("hooks")
-	wantEvents := []string{"PreToolUse", "Stop", "PostToolUse", "SessionStart", "UserPromptSubmit", "SessionEnd"}
+	wantEvents := []string{"PreToolUse", "Stop", "PostToolUse", "SessionStart", "UserPromptSubmit", "PostToolUseFailure", "SessionEnd"}
 	if got := hv.(*object).keys; !slices.Equal(got, wantEvents) {
 		t.Errorf("hook events = %v, want theirs first, then jig's new ones: %v", got, wantEvents)
 	}
@@ -184,7 +184,7 @@ func TestClaudeMergeCreatesAndEmptiesAFile(t *testing.T) {
 			t.Errorf("a new file has keys %v, want only hooks", root.keys)
 		}
 		events, err := ClaudeEvents(out)
-		if err != nil || !slices.Equal(events, []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"}) {
+		if err != nil || !slices.Equal(events, []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "Stop", "SessionEnd"}) {
 			t.Errorf("ClaudeEvents = %v, %v", events, err)
 		}
 		back, changed, err := UnmergeClaude(out)
