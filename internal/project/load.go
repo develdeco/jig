@@ -160,6 +160,9 @@ func WithMarkerRepos(cfg Config, root string, m Marker) Config {
 		repos = []Repo{{Label: r.Name, Remote: repoRemote(root, r, root), Target: r.Target}}
 	}
 	cfg.Repos = repos
+	if m.Branches != nil {
+		cfg.BranchesFrom = m.Branches.From
+	}
 	return cfg
 }
 

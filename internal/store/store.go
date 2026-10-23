@@ -36,6 +36,15 @@ type Store struct {
 	// its own structured output sets this before calling Push.
 	Warn func(format string, args ...any)
 
+	// BranchesFrom is the tracker whose ids lead the names of this project's
+	// branches: the jig.yaml marker's branches: from:. Empty means the first
+	// tracker jig mirrors to, GitHub, and "github" is the same; any other
+	// value leaves the store's own ids to lead them. The command that
+	// resolves the store sets it from the marker (cmd/jig's
+	// resolveStoreChecked), so every command that names a ticket's branch
+	// (TicketBranch, ResolveTicketBranch) names it by the same rule.
+	BranchesFrom string
+
 	// aliasClaimsCache memoizes aliasClaims' store-wide scan (internal/store/resolve.go)
 	// for the life of this Store value: a command resolving many refs in one
 	// run (jig validate's blocked_by refs and cycle DFS, the mirror's
