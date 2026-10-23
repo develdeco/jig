@@ -8,6 +8,24 @@ import (
 	"github.com/develdeco/jig/internal/migrate"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"store", "jig store migrate: migrate a v1 store onto schema_version 2", []flagSpec{
+			{"map", "the rename map file (old id to new key)", false},
+			{"dry-run", "print the rename map and every file the migration would move, delete or rewrite, changing nothing", false},
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 230,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdStore(e, args, stdout)
+		},
+		FlagSet: "store migrate",
+		Probe:   []string{"migrate"},
+	})
+}
+
 // cmdStore implements `jig store <subcommand>`.
 func cmdStore(e env, args []string, stdout io.Writer) int {
 	sub, rest, err := requirePositional(args, "subcommand (migrate)")

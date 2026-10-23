@@ -8,6 +8,23 @@ import (
 	"github.com/develdeco/jig/internal/mirror"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"trackers", "jig trackers sync: sync the store onto GitHub issues", []flagSpec{
+			{"dry-run", "read everything and report what would change, writing nothing", false},
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 220,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdTrackers(e, args, stdout)
+		},
+		FlagSet: "trackers sync",
+		Probe:   []string{"sync"},
+	})
+}
+
 // cmdTrackers implements `jig trackers sync [--dry-run] [--store <path>]
 // [--project <name>]`.
 func cmdTrackers(e env, args []string, stdout io.Writer) int {

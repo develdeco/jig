@@ -11,6 +11,22 @@ import (
 	skillspkg "github.com/develdeco/jig/skills"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"skills", "jig skills install: ship the session skills with the binary", []flagSpec{
+			{"project", "install under ./.claude/skills of the current directory", false},
+			{"dest", "install under <dir>/<name>/SKILL.md instead of the default location", false},
+		}, false},
+		Order: 210,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdSkills(e, args, stdout)
+		},
+		FlagSet: "skills install",
+		Probe:   []string{"install"},
+	})
+}
+
 // cmdSkills implements `jig skills install [--project] [--dest <dir>]`.
 func cmdSkills(e env, args []string, stdout io.Writer) int {
 	sub, rest, err := requirePositional(args, "subcommand (install)")

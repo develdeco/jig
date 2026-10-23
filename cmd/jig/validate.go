@@ -16,6 +16,21 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"validate", "check a ticket's brief, slices, and manifest", []flagSpec{
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 190,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdValidate(e, args, stdout)
+		},
+		Probe: []string{"T-1"},
+	})
+}
+
 // cmdValidate implements `jig validate <ticket>`.
 func cmdValidate(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "validate")

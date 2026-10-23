@@ -12,6 +12,29 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"gate", "run a gate round over the ticket's branch", []flagSpec{
+			{"early", "gate before the frontier is fully green", false},
+			{"branch", "review this branch, built outside jig, and adopt it as the ticket's own (recorded on the first round)", false},
+			{"intent", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md); with no brief, --intent or --doc, a reviewer round reads your local Claude Code sessions for this repo and has a model summarize the best match into intent.md", false},
+			{"doc", "doc file whose content becomes the ticket's explicit intent, recorded as intent.md (refused when the ticket has a brief.md)", false},
+			{"pr", "pr number (not implemented in v0.1)", true},
+			{"yes", "keep every finding jig can route on its own, without the triage prompt", false},
+			{"backend", "session backend for the reviewer: fake, headless, or herdr", false},
+			{"scenario", "scenario dir for the fake gate source", false},
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 160,
+		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
+			return cmdGate(e, args, stdout, stdin)
+		},
+		Probe: []string{"T-1"},
+	})
+}
+
 // gateSourceFor picks the GateSource for a `jig gate` invocation. The
 // compatibility rule: `jig gate` never had --backend before,
 // so the old scripted source (NewFakeGateSource) runs iff --scenario is

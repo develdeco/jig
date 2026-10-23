@@ -10,6 +10,25 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"solve", "run the full chain: run, gate, publish", []flagSpec{
+			{"yes", "skip the interactive publish confirm and finding triage", false},
+			{"answer", "answer a pending question: --answer <qid> <text>", false},
+			{"backend", "session backend: fake, headless, or herdr", false},
+			{"scenario", "scenario dir for the fake backend", false},
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 130,
+		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
+			return cmdSolve(e, args, stdout, stdin)
+		},
+		Probe: []string{"T-1"},
+	})
+}
+
 // maxSolveRounds caps the run/gate fix-slice loop `jig solve` drives at 5
 // rounds before handing back to the human (see solveShouldPublish).
 const maxSolveRounds = 5

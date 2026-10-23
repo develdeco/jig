@@ -15,41 +15,35 @@ var handParsedFlags = map[string]map[string]bool{
 	"run":   {"answer": true},
 }
 
-// TestCommandTableFlagsMatchRegistration checks that each command's table
-// flags, hidden ones included, match the names and usage it really registers.
-// Every command runs with a valid positional and an unknown flag, so it fails
-// in fs.Parse right after registering its flags and before doing any work.
+// TestCommandTableFlagsMatchRegistration checks that each registered verb's
+// help-row flags, hidden ones included, match the names and usage it really
+// registers. Every verb runs with its Probe positionals and an unknown flag,
+// so it fails in fs.Parse right after registering its flags and before doing
+// any work. A verb that never builds a FlagSet (NoFlagSet) has no Flags to
+// compare and is not run.
 func TestCommandTableFlagsMatchRegistration(t *testing.T) {
 	t.Parallel()
 	captured := map[string]*flag.FlagSet{}
 	e := testEnv(t.TempDir())
 	e.newFlagSetHook = func(name string, fs *flag.FlagSet) { captured[name] = fs }
 
-	invoke := func(args ...string) {
-		run(e, append(append([]string{}, args...), "--nonexistent-flag-xyz"), io.Discard, strings.NewReader(""))
+	verbs := registeredVerbs()
+	for _, v := range verbs {
+		if v.NoFlagSet {
+			continue
+		}
+		args := append(strings.Fields(v.Spec.Name), v.Probe...)
+		run(e, append(args, "--nonexistent-flag-xyz"), io.Discard, strings.NewReader(""))
 	}
 
-	invoke("init")
-	invoke("ticket", "new")
-	invoke("graduate", "test-chart")
-	invoke("solve", "T-1")
-	invoke("run", "T-1")
-	invoke("requeue", "T-1")
-	invoke("gate", "T-1")
-	invoke("publish", "T-1")
-	invoke("status", "T-1")
-	invoke("validate", "T-1")
-	invoke("skills", "install")
-	invoke("trackers", "sync")
-	invoke("store", "migrate")
-	invoke("version")
-
-	for _, c := range commandTable {
-		if c.Name == "_screen" {
-			// _screen reads a hook call on stdin; it never builds a
-			// flag.FlagSet, so there is nothing to capture or compare.
+	for _, v := range verbs {
+		c := v.Spec
+		if v.NoFlagSet {
+			// A hook verb such as _screen reads a call on stdin; it never
+			// builds a flag.FlagSet, so there is nothing to capture or
+			// compare.
 			if c.Flags != nil {
-				t.Errorf("_screen has table Flags but registers no flag.FlagSet")
+				t.Errorf("%s is NoFlagSet but has table Flags", c.Name)
 			}
 			continue
 		}
@@ -76,7 +70,7 @@ func TestCommandTableFlagsMatchRegistration(t *testing.T) {
 		for name, usage := range want {
 			gu, ok := got[name]
 			if !ok {
-				t.Errorf("command %q: commandTable has --%s but it is not registered on the real FlagSet", c.Name, name)
+				t.Errorf("command %q: its help row has --%s but it is not registered on the real FlagSet", c.Name, name)
 				continue
 			}
 			if gu != usage {
@@ -85,21 +79,21 @@ func TestCommandTableFlagsMatchRegistration(t *testing.T) {
 		}
 		for name := range got {
 			if _, ok := want[name]; !ok {
-				t.Errorf("command %q: real FlagSet has --%s but commandTable does not", c.Name, name)
+				t.Errorf("command %q: real FlagSet has --%s but its help row does not", c.Name, name)
 			}
 		}
 	}
 
 	for key := range captured {
 		found := false
-		for _, c := range commandTable {
-			if flagSetName(c.Name) == key {
+		for _, v := range verbs {
+			if !v.NoFlagSet && flagSetName(v.Spec.Name) == key {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("newFlagSet(%q) has no commandTable entry", key)
+			t.Errorf("newFlagSet(%q) has no registered verb", key)
 		}
 	}
 }

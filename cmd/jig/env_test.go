@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,12 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/mirror/github"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/spawn"
 )
 
 // testEnv is the env a test hands run: JIG_HOME is jigHome, the operator's
@@ -33,12 +36,21 @@ func testEnv(jigHome string) env {
 }
 
 // envFrom is the production env with its variable lookup answering only
-// from vars.
+// from vars, no GitHub client, and no way to start a process: a test that
+// spawns hands the env its own spawner (withSpawn).
 func envFrom(vars map[string]string) env {
 	e := processEnv()
 	e.getenv = func(key string) string { return vars[key] }
 	e.mirrorClient = noGitHub()
+	e.spawn = refuseSpawn
 	return e
+}
+
+// refuseSpawn is the spawner every test env starts with, so a command that
+// would start a detached process fails the test that did not expect it,
+// rather than leaving one running.
+func refuseSpawn(spawn.Spec) (int, error) {
+	return 0, errors.New("spawn not allowed in test env")
 }
 
 // noGitHub is the mirror client every test env starts with. It refuses each
@@ -73,6 +85,75 @@ func (e env) inDir(dir string) env {
 func (e env) atTerminal() env {
 	e.stdinIsTerminal = func(io.Reader) bool { return true }
 	return e
+}
+
+// withSpawn returns e with fn as the spawner a command starts detached
+// processes through.
+func (e env) withSpawn(fn func(spawn.Spec) (int, error)) env {
+	e.spawn = fn
+	return e
+}
+
+// withClock returns e with now as its clock.
+func (e env) withClock(now func() time.Time) env {
+	e.now = now
+	return e
+}
+
+// withLookPath returns e with fn as its PATH lookup.
+func (e env) withLookPath(fn func(file string) (string, error)) env {
+	e.lookPath = fn
+	return e
+}
+
+// withContext returns e with ctx as its context, which a test cancels to stop
+// a command that waits or streams.
+func (e env) withContext(ctx context.Context) env {
+	e.ctx = ctx
+	return e
+}
+
+// withExecutable returns e naming path as the running jig binary.
+func (e env) withExecutable(path string) env {
+	e.executable = func() (string, error) { return path, nil }
+	return e
+}
+
+// withStdoutTerminal returns e with every stdout reported as an interactive
+// terminal, or not.
+func (e env) withStdoutTerminal(yes bool) env {
+	e.stdoutIsTerminal = func(io.Writer) bool { return yes }
+	return e
+}
+
+// fixedClock is a clock that always reads t.
+func fixedClock(t time.Time) func() time.Time { return func() time.Time { return t } }
+
+// spawnRecorder is a spawner that records the Specs it was asked to start and
+// answers with a pid (or an error) of the test's choosing, without starting
+// anything.
+type spawnRecorder struct {
+	// PID is the pid every spawn reports; Err, if set, is what it fails with.
+	PID int
+	Err error
+
+	mu    sync.Mutex
+	specs []spawn.Spec
+}
+
+// Spawn is the func to hand withSpawn.
+func (r *spawnRecorder) Spawn(s spawn.Spec) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.specs = append(r.specs, s)
+	return r.PID, r.Err
+}
+
+// Specs returns the Specs spawned so far, oldest first.
+func (r *spawnRecorder) Specs() []spawn.Spec {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]spawn.Spec(nil), r.specs...)
 }
 
 // newFixture is fixture.Generate with the fixture's machine mapping under a
@@ -267,5 +348,124 @@ func TestProcessEnvOperatorHomeAgreesWithTheStdlib(t *testing.T) {
 	want, wantErr := os.UserHomeDir()
 	if got != want || fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
 		t.Errorf("processEnv().userHomeDir() = %q, %v, want os.UserHomeDir's %q, %v", got, gotErr, want, wantErr)
+	}
+}
+
+// TestTestEnvSeamsAndTheirHelpers pins the seams a test env starts with: it
+// cannot start a process, and the helpers replace the context, clock, PATH
+// lookup, executable and terminal checks without changing the env they were
+// called on.
+func TestTestEnvSeamsAndTheirHelpers(t *testing.T) {
+	t.Parallel()
+
+	e := testEnv(t.TempDir())
+	if _, err := e.spawn(spawn.Spec{Path: "x"}); err == nil || !strings.Contains(err.Error(), "spawn not allowed in test env") {
+		t.Errorf("testEnv spawn error = %v, want \"spawn not allowed in test env\"", err)
+	}
+
+	rec := &spawnRecorder{PID: 4242}
+	withSpawn := e.withSpawn(rec.Spawn)
+	pid, err := withSpawn.spawn(spawn.Spec{Path: "jig", Args: []string{"verify"}})
+	if err != nil || pid != 4242 {
+		t.Errorf("recorded spawn = %d, %v, want 4242, nil", pid, err)
+	}
+	if specs := rec.Specs(); len(specs) != 1 || specs[0].Path != "jig" || len(specs[0].Args) != 1 {
+		t.Errorf("recorded specs = %+v, want the one spawned", specs)
+	}
+	if _, err := e.spawn(spawn.Spec{}); err == nil {
+		t.Errorf("withSpawn changed the env it was called on")
+	}
+
+	at := time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC)
+	if got := e.withClock(fixedClock(at)).now(); !got.Equal(at) {
+		t.Errorf("withClock now() = %v, want %v", got, at)
+	}
+
+	if _, err := e.withLookPath(func(string) (string, error) { return "/bin/tool", nil }).lookPath("tool"); err != nil {
+		t.Errorf("withLookPath lookPath = %v, want the stub's answer", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	withCtx := e.withContext(ctx)
+	cancel()
+	if withCtx.ctx.Err() == nil || e.ctx.Err() != nil {
+		t.Errorf("withContext: env ctx err = %v, original ctx err = %v, want the first cancelled and the second not", withCtx.ctx.Err(), e.ctx.Err())
+	}
+
+	if got, err := e.withExecutable("/opt/jig").executable(); err != nil || got != "/opt/jig" {
+		t.Errorf("withExecutable executable() = %q, %v, want /opt/jig", got, err)
+	}
+	if !e.withStdoutTerminal(true).stdoutIsTerminal(io.Discard) || e.withStdoutTerminal(false).stdoutIsTerminal(io.Discard) {
+		t.Errorf("withStdoutTerminal did not set the stdout terminal answer")
+	}
+}
+
+// TestProcessEnvSeamsHaveProductionDefaults pins that processEnv fills every
+// seam: nothing is left nil for a command to trip over, the context is live,
+// the clock is the real one, the executable is this binary, and a writer that
+// is not a console is not a terminal.
+func TestProcessEnvSeamsHaveProductionDefaults(t *testing.T) {
+	t.Parallel()
+
+	e := processEnv()
+	if e.ctx == nil || e.ctx.Err() != nil {
+		t.Errorf("processEnv ctx = %v, want a live context", e.ctx)
+	}
+	if e.spawn == nil || e.lookPath == nil || e.stdoutIsTerminal == nil || e.executable == nil || e.now == nil {
+		t.Fatalf("processEnv left a seam nil: %+v", e)
+	}
+	if before, got, after := time.Now(), e.now(), time.Now(); got.Before(before) || got.After(after) {
+		t.Errorf("processEnv now() = %v, want a time between %v and %v", got, before, after)
+	}
+	want, wantErr := os.Executable()
+	if got, err := e.executable(); got != want || fmt.Sprint(err) != fmt.Sprint(wantErr) {
+		t.Errorf("processEnv executable() = %q, %v, want os.Executable's %q, %v", got, err, want, wantErr)
+	}
+	if _, err := e.lookPath("jig-no-such-program-xyz"); err == nil {
+		t.Errorf("processEnv lookPath found a program that does not exist")
+	}
+	if e.stdoutIsTerminal(&bytes.Buffer{}) {
+		t.Errorf("processEnv stdoutIsTerminal(bytes.Buffer) = true, want false")
+	}
+	f, err := os.CreateTemp(t.TempDir(), "out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if e.stdoutIsTerminal(f) {
+		t.Errorf("processEnv stdoutIsTerminal(a regular file) = true, want false")
+	}
+}
+
+// TestEndAfterInterrupt pins the interrupt watcher: it does nothing until the
+// context is cancelled, then gives the signal back its default action and
+// ends the process with the interrupted status once the grace is out. The
+// exit is a stub, so nothing ends.
+func TestEndAfterInterrupt(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	exited := make(chan int, 1)
+	go endAfterInterrupt(ctx, func() { close(stopped) }, 10*time.Millisecond, func(code int) { exited <- code })
+
+	select {
+	case code := <-exited:
+		t.Fatalf("exited with %d before any interrupt", code)
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case code := <-exited:
+		if code != 130 {
+			t.Errorf("exit code = %d, want 130", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("did not exit after the context was cancelled")
+	}
+	select {
+	case <-stopped:
+	default:
+		t.Errorf("stop was not called before exiting")
 	}
 }

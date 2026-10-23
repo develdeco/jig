@@ -15,6 +15,21 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"graduate", "create tickets from a chart: jig graduate <chart>", []flagSpec{
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 120,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdGraduate(e, args, stdout)
+		},
+		Probe: []string{"test-chart"},
+	})
+}
+
 // cmdGraduate implements `jig graduate <chart> [--store <path>] [--project <name>]`.
 func cmdGraduate(e env, args []string, stdout io.Writer) int {
 	chart, rest, err := requirePositional(args, "chart name")
