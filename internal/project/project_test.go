@@ -599,6 +599,13 @@ func TestInitStandalone(t *testing.T) {
 		t.Errorf("ledger.md missing: %v", err)
 	}
 
+	// The scaffold commit is the person's: the identity git resolves, which
+	// this binary pins to the fixture's, never an identity jig made up.
+	wantIdent := "jig-fixture <fixture@example.invalid>"
+	if got := runGitInProject(t, storePath, "log", "-1", "--format=%an <%ae>|%cn <%ce>"); got != wantIdent+"|"+wantIdent {
+		t.Errorf("scaffold commit author|committer = %q, want %q for both", got, wantIdent)
+	}
+
 	cfg, err := Load(filepath.Join(storePath, "project.yaml"))
 	if err != nil {
 		t.Fatalf("Load generated project.yaml: %v", err)
