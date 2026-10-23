@@ -19,20 +19,25 @@ import (
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"validate", "check a ticket's brief, slices, and manifest", []flagSpec{
+		Spec: cmdSpec{"validate", "check a ticket's brief, slices and manifest against the store, and approve a valid brief", []flagSpec{
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 		}, false},
 		Order: 190,
-		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
-			return cmdValidate(e, args, stdout)
+		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
+			return cmdValidate(e, args, stdout, stdin)
 		},
 		Probe: []string{"T-1"},
 	})
 }
 
-// cmdValidate implements `jig validate <ticket>`.
-func cmdValidate(e env, args []string, stdout io.Writer) int {
+// cmdValidate implements `jig validate <ticket>`. A ticket that is valid has
+// its brief approved: the approval is recorded for the brief as it was when
+// the checks began, so a later edit of brief.md shows as unapproved to
+// `jig claim`. Besides the ticket own files the checks look at the store
+// around it (validate_store.go); what they only advise on is printed under
+// the verdict.
+func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	fs := newFlagSet(e, "validate")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
@@ -55,6 +60,9 @@ func cmdValidate(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
+	// The hash is taken before the checks read the brief: a brief edited
+	// meanwhile is then approved as the older text and shows as changed.
+	sum, sumErr := st.BriefSHA256(ticket)
 	problems, err := validateTicket(st, cfg, mp, ticket)
 	if err != nil {
 		return renderErr(stdout, err)
@@ -66,8 +74,23 @@ func cmdValidate(e env, args []string, stdout io.Writer) int {
 			Help: problems,
 		})
 	}
+	if sumErr != nil {
+		return renderErr(stdout, sumErr)
+	}
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	advisories := validateAdvisories(st, ticket, slices)
+	approval, result, err := recordApproval(e, st, ticket, sum, defaultProvenance(e, stdin))
+	if err != nil {
+		return renderErr(stdout, err)
+	}
 
-	blocks := []string{"valid: yes"}
+	blocks := []string{"valid: yes", axi.KV("approval", [][2]string{
+		{"result", result}, {"by", approval.By}, {"email", approval.Email}, {"at", approval.At},
+		{"provenance", approval.Provenance}, {"brief_sha256", approval.BriefSHA256},
+	})}
 	if data, rerr := os.ReadFile(filepath.Join(st.TicketDir(ticket), "brief.md")); rerr == nil {
 		hashes := store.BriefSectionHashes(data)
 		headings := make([]string, 0, len(hashes))
@@ -81,7 +104,10 @@ func cmdValidate(e env, args []string, stdout io.Writer) int {
 		}
 		blocks = append(blocks, axi.Table("sections", []string{"heading", "sha256"}, rows))
 	}
-	blocks = append(blocks, axi.Help(fmt.Sprintf("Run `jig run %s` to start the frontier", ticket)))
+	if table := advisoryTable(advisories); table != "" {
+		blocks = append(blocks, table)
+	}
+	blocks = append(blocks, axi.Help(fmt.Sprintf("Run `jig next %s` to see what is ready, then `jig claim %s --slice <slice>` to take one", ticket, ticket)))
 	axi.Render(stdout, blocks...)
 	return 0
 }
@@ -116,6 +142,7 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	problems = append(problems, aliasProblems...)
 
 	problems = append(problems, validateTicketDeps(st, ticket)...)
+	problems = append(problems, validateUpstreamEdges(st, ticket)...)
 	problems = append(problems, validateTicketBranch(st, cfg, ticket)...)
 
 	slices, err := st.ReadSlices(ticket)
