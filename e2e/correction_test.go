@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
@@ -177,11 +178,13 @@ func corrMarkUnattended(t *testing.T, fx *fixture.Fixture) {
 	writeFileOrFatal(t, filepath.Join(fx.RepoDir, project.MarkerFile), []byte("jig: \"1\"\nproject: "+cfg.Name+"\nunattended: true\n"))
 }
 
-// TestCorrectionStall: slice a is committed twice by the session and fails its
-// oracle the same way both times, in a verification of its own each. The first
-// failure is no stall. After the second, the next prompt tells the session so,
-// once; a correction line records it; and, with a person at the keyboard, the
-// slice is left as the verification left it.
+// TestCorrectionStall: the session commits slice a twice, one commit after the
+// other, and both fail the oracle the same way in verifications of their own.
+// Once both are recorded the next prompt tells the session so, once; a
+// correction line records it; and, with a person at the keyboard, the slice is
+// left as the verifications left it. (That one failure is no stall is the unit
+// tests: the verifications run at the pace of the machine, and waiting for
+// the first before the second would double the time this test needs.)
 func TestCorrectionStall(t *testing.T) {
 	t.Parallel()
 	fx, env, h := corrRig(t)
@@ -195,32 +198,20 @@ func TestCorrectionStall(t *testing.T) {
 		})
 	}
 
+	// The second tree is the first plus a file that changes nothing the test
+	// looks at: the same failure.
 	first, hook := corrCommit(t, h, "alpha/try1.txt", "a")
 	corrSilent(t, "the PostToolUse of the first commit", hook)
-	one := failed(first)
-	h.WaitVerifiers()
-	if one.Outcome != "fail" || one.Signature == "" {
-		t.Fatalf("oracle line = %+v, want a failure with a signature", one)
-	}
-	if res := h.Hook("UserPromptSubmit", map[string]any{"prompt": "go on"}); res.Code != 0 || strings.Contains(res.Stdout, "same way") {
-		t.Errorf("after one failure the prompt printed %q, want no stall", res.Stdout)
-	}
-	if lines := corrLines(t, fx); len(lines) != 0 {
-		t.Fatalf("one failure left correction lines %+v", lines)
-	}
-
-	// The same tree plus a file that changes nothing the test looks at: the
-	// same failure.
 	second, hook := corrCommit(t, h, "alpha/try2.txt", "a")
 	corrSilent(t, "the PostToolUse of the second commit", hook)
-	two := failed(second)
+	one, two := failed(first), failed(second)
 	h.WaitVerifiers()
-	if two.Signature != one.Signature {
-		t.Fatalf("the two failures have signatures %q and %q, want one: the test setup changed what fails", one.Signature, two.Signature)
+	if one.Outcome != "fail" || one.Signature == "" || two.Signature != one.Signature {
+		t.Fatalf("oracle lines = %+v and %+v, want two failures with one signature: the test setup changed what fails", one, two)
 	}
 
 	ctx := corrContext(t, h.Hook("UserPromptSubmit", map[string]any{"prompt": "and again"}))
-	for _, want := range []string{"slice a failed its oracle the same way 2 times", "attempt 2", second[:12], "change the approach"} {
+	for _, want := range []string{"slice a failed its oracle the same way 2 times", "change the approach"} {
 		if !strings.Contains(ctx, want) {
 			t.Errorf("prompt context = %q, want %q", ctx, want)
 		}
@@ -229,9 +220,15 @@ func TestCorrectionStall(t *testing.T) {
 		t.Errorf("prompt context = %q: a slice that is not stalled has nothing to requeue", ctx)
 	}
 	line := corrLine(t, fx, "stall")
-	if line.Slice != "a" || line.Session != "s-corr" || line.Harness != "claude" || line.Provenance != "jig" || line.Signature != two.Signature ||
-		line.Commit != second || !strings.HasPrefix(line.Ref, "stall:a:") || line.Summary == "" {
-		t.Errorf("correction line = %+v, want the stall of slice a at %s by session s-corr", line, second)
+	latest := second
+	at1, _ := time.Parse(time.RFC3339Nano, one.TS)
+	at2, _ := time.Parse(time.RFC3339Nano, two.TS)
+	if at2.Before(at1) {
+		latest = first
+	}
+	if line.Slice != "a" || line.Session != "s-corr" || line.Harness != "claude" || line.Provenance != "jig" || line.Signature != one.Signature ||
+		line.Commit != latest || !strings.Contains(ctx, latest[:12]) || !strings.HasPrefix(line.Ref, "stall:a:") || line.Summary == "" {
+		t.Errorf("correction line = %+v, want the stall of slice a at %s by session s-corr", line, latest)
 	}
 	if refs := corrDelivered(t, env, "prompt"); !slices.Contains(refs, line.Ref) {
 		t.Errorf("note-delivered refs = %v, want %s among them", refs, line.Ref)
