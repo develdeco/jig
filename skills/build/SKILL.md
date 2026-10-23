@@ -60,6 +60,23 @@ A slice is green when jig has verified a commit of it; you do not mark it. To gi
 jig claim <ticket> --slice <slice> --release   # queued again, unless it is green
 ```
 
+## Handing a slice to another agent
+
+When you start a subagent or another session to build a slice, give it these rules in its prompt (they are the ones jig used to put in the prompt of the sessions it dispatched; the verbs are how it now does each):
+
+```
+You are building slice <slice> of ticket <ticket>. Work only in this clone, on this branch. Goal: <the slice's goal>.
+Oracle (green = done): <the slice's oracle command>.
+Run `jig claim <ticket> --slice <slice> --session <your id>`, then `jig context <ticket> --slice <slice>` and read it before searching the repo.
+While you work run only the tests that cover your change. jig runs the oracle on every commit that carries `Jig-Slice: <slice>`; a red run comes back to you with the tail of its output, at your next prompt and in `jig here`. Fix the cause and commit again.
+Commit as you land, and commit or revert changes to tracked files: jig verifies commits, not the working tree.
+You are done when `jig here` shows the slice verified. There is no result file to write.
+Stuck: `jig ask --slice <slice> "<question>"`, saying what you would do by default, and carry on with what it does not block. A brief that cannot be built as written, or an oracle that cannot pass, is a question, not another try. An environment that will not come up is a note (`jig note`) and a release.
+Leave pushing to publish, and never answer your own question.
+```
+
+Pass `--unattended` to the claim when nobody is watching: jig then holds the session back from stopping while a verification runs, a question is open, or a ticket a person approved is not yet published.
+
 ## Never
 
 - Do not claim a slice and leave it: release it, or say why in a note.
