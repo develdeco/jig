@@ -362,8 +362,8 @@ func TestInitRefusesOutside(t *testing.T) {
 	})
 }
 
-// TestInitStandaloneQuickstart drives the README Quickstart's exact command
-// sequence (init --standalone, ticket new, validate) against a plain repo
+// TestInitStandaloneQuickstart drives the command sequence a new project goes
+// through (init --standalone, ticket new, validate) against a plain repo
 // directory, deliberately without fixture.Generate: Generate performs its
 // own project.InitProject call to write the machine mapping, which would
 // mask a regression in init --standalone's own wiring. brief.md and
