@@ -21,7 +21,6 @@ import (
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/session"
-	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -195,25 +194,6 @@ func readDirBytes(t *testing.T, dir string) map[string][]byte {
 		out[e.Name()] = data
 	}
 	return out
-}
-
-// TestGateModelIsTheDearestRung: the round's report names the staircase's
-// dearest rung as the reviewer's model (ADR 0023).
-func TestGateModelIsTheDearestRung(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-
-	d := newDeps(t, fx)
-	d.Rungs = staircase.Config{Rungs: []string{"rung-a", "rung-b", "rung-c"}}
-	report, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if report.Model != "rung-c" {
-		t.Fatalf("Model = %q, want the dearest rung, rung-c", report.Model)
-	}
 }
 
 func TestGateEarlyAndFrontierGuard(t *testing.T) {
@@ -2663,16 +2643,6 @@ func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *te
 	}
 	if len(ff.Findings) != 1 || ff.Findings[0].Status != StatusOpen || ff.Findings[0].Oracle != "lint" || ff.Findings[0].Triage != TriageHuman {
 		t.Fatalf("round 3 finding = %+v, want open, oracle lint, triage human", ff.Findings[0])
-	}
-}
-
-func TestGatePRModeNotImplemented(t *testing.T) {
-	t.Parallel()
-
-	_, err := Gate(Deps{}, nil, GateOpts{PRMode: true})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "NOT_IMPLEMENTED" {
-		t.Fatalf("err = %v, want *axi.Error NOT_IMPLEMENTED", err)
 	}
 }
 

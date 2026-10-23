@@ -154,7 +154,7 @@ func cmdSolve(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 
 	pdeps := vdeps
-	preport, err := verifydeliver.Publish(pdeps, verifydeliver.PublishOpts{Ticket: ticket, Yes: *yes, Backend: backend})
+	preport, err := verifydeliver.Publish(pdeps, verifydeliver.PublishOpts{Ticket: ticket, Yes: *yes})
 	if err != nil {
 		return renderErr(stdout, err)
 	}

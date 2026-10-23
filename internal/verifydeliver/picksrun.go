@@ -1,10 +1,13 @@
 package verifydeliver
 
 // The publish step that picks the build's recordings (ADR 0029, step 5): the
-// candidates from the journal, a reused or a freshly dispatched pick, its
-// validation, the staging of the picked files in a directory of jig's own, one
-// journal line, and the rendered section writePRBody uses as the pull request's
-// ## Demo. picks.go holds the pieces; this file runs them in order.
+// candidates from the journal, a pick an agent made (a picks file) or an
+// earlier one reused, its validation, the staging of the picked files in a
+// directory of jig's own, one journal line, and the rendered section
+// writePRBody uses as the pull request's ## Demo. jig chooses nothing and
+// asks no model: with candidates and no pick it writes the request an agent
+// picks from (picks.json) and says so. picks.go holds the pieces; this file
+// runs them in order.
 
 import (
 	"crypto/sha256"
@@ -17,28 +20,23 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/media"
 	"github.com/develdeco/jig/internal/pool"
-	"github.com/develdeco/jig/internal/session"
-	"github.com/develdeco/jig/internal/staircase"
 )
 
-// A publish's pick, as PicksReport.Status says it: made now, taken from an
-// earlier publish of the same head and the same recordings, or refused (and
-// the pull request then has no demo section). "" means there was nothing to
-// pick from.
+// A publish's pick, as PicksReport.Status says it: made from a picks file,
+// taken from an earlier publish of the same head and the same recordings,
+// refused (and the pull request then has no demo section), or still to be
+// made: recordings are offered and nobody has picked. "" means there was
+// nothing to pick from.
 const (
 	PicksPicked  = "picked"
 	PicksReused  = "reused"
 	PicksRefused = "refused"
+	PicksPending = "pending"
 )
-
-// picksEffort is the reasoning effort of a pick session: choosing among
-// captions is the cheapest work a session does for jig.
-const picksEffort = "low"
 
 // PicksReport is what a publish says of its pick. The zero value is a publish
 // with no recordings to pick from, which behaves as it always has.
@@ -50,6 +48,11 @@ type PicksReport struct {
 	Flows, Files int
 	// Dropped names the candidate recordings that failed their check, with why.
 	Dropped []string
+	// Candidates counts the recordings a pending pick offers, and Request is
+	// the picks.json that lists them: the file an agent reads, picks from and
+	// answers with a picks file (`jig publish --picks`).
+	Candidates int
+	Request    string
 }
 
 // pickError is a pick that did not stand: reason is what the journal and the
@@ -63,19 +66,13 @@ func pickRefused(format string, args ...any) error {
 	return &pickError{reason: fmt.Sprintf(format, args...)}
 }
 
-// pickFailed is a pick whose session, or the backend that ran it, failed. The
-// record carries the failure's code alone: the text of a session's or a
-// backend's error can hold anything.
-func pickFailed(cause error) error {
-	return &pickError{reason: "the pick session failed: " + failureCode(cause), detail: oneLine(cause.Error())}
-}
-
 // picksStep is everything one publish's pick needs. head is the head publish
-// ships before it reconciles, the one the gate reviewed; leaseDir is the
-// publish lease, where the recorded commits are looked up.
+// ships, the one the gate reviewed; leaseDir is a repository that holds it,
+// where the recorded commits are looked up; result is the pick an agent made
+// (the picks file), nil for none.
 type picksStep struct {
 	d        Deps
-	backend  session.Backend
+	result   *PicksResult
 	ticket   string
 	repoName string
 	leaseDir string
@@ -135,21 +132,30 @@ func publishPicks(s picksStep) (PicksReport, *DemoRenderResult, error) {
 		p      pick
 		reused bool
 	)
-	if jp := reusablePick(s.lines, s.head, fp); jp != nil {
+	// A picks file is the agent's answer for this head and these recordings,
+	// and wins over an earlier pick. With none, the earlier answer is reused.
+	if s.result != nil {
+		var err error
+		if p, err = resolvePicks(*s.result, cands); err != nil {
+			return refuse(err)
+		}
+	} else if jp := reusablePick(s.lines, s.head, fp); jp != nil {
 		// The earlier answer goes through the checks a new one does, so a
 		// journal line edited since cannot show what a pick could not.
 		if rp, err := resolvePicks(picksResultOf(jp), cands); err == nil {
 			p, reused = rp, true
 		}
 	}
-	if !reused {
-		res, err := s.dispatch(cands, intent, dir)
+	if !reused && s.result == nil {
+		// Nobody has picked: write what an agent picks from, and say so. The
+		// pull request goes without a demo until a picks file is given.
+		req, err := s.writeRequest(cands, intent, dir)
 		if err != nil {
 			return refuse(err)
 		}
-		if p, err = resolvePicks(res, cands); err != nil {
-			return refuse(err)
-		}
+		report.Status, report.Candidates, report.Request = PicksPending, len(cands), req
+		s.warn("jig: recordings are waiting to be picked for %s: pick from %s and give the answer with `jig publish --picks <file>`\n", s.ticket, req)
+		return report, nil, nil
 	}
 	files, err := s.stage(dir, p)
 	if err != nil {
@@ -208,20 +214,15 @@ func (s picksStep) hostDirs(dir string) []hostDir {
 	return dirs
 }
 
-// dispatch hands the candidates to a short pick session and returns its
-// strictly parsed result. The session works in an empty scratch directory
-// under the jig home, never in a lease: it reads picks.json and writes its
-// result, nothing else, so there is no lease for it to leave changed. Both
-// files sit beside the staging directory under the jig home, picks.json
-// because it names the intent by its absolute path. It runs on the cheapest
-// rung of the staircase at low effort, and asks the backend to keep no
-// transcript, as the intent summarizer does.
-func (s picksStep) dispatch(cands []pickCandidate, intent Intent, dir string) (PicksResult, error) {
-	if s.backend == nil {
-		return PicksResult{}, pickRefused("no session backend was given to pick the recordings with")
-	}
+// writeRequest writes the picks.json an agent picks from: the ticket, the head,
+// the intent by its source and the absolute path of the file that states it,
+// and the candidate recordings, each with the id a picks file names it by. It
+// sits beside the staging directory under the jig home (never in the store),
+// because it names the intent by its absolute path, and is rewritten by every
+// publish that finds recordings with nobody having picked.
+func (s picksStep) writeRequest(cands []pickCandidate, intent Intent, dir string) (string, error) {
 	if dir == "" {
-		return PicksResult{}, pickRefused("there is no jig home to keep the picked recordings in")
+		return "", pickRefused("there is no jig home to keep the picked recordings in")
 	}
 	req := PicksRequest{Ticket: s.ticket, HeadSHA: s.head, Intent: intent}
 	for _, c := range cands {
@@ -229,60 +230,19 @@ func (s picksStep) dispatch(cands []pickCandidate, intent Intent, dir string) (P
 	}
 	reqData, err := json.MarshalIndent(req, "", "  ")
 	if err != nil {
-		return PicksResult{}, pickRefused("picks.json could not be built: %v", err)
+		return "", pickRefused("picks.json could not be built: %v", err)
 	}
-
-	reqPath, resultPath := dir+".picks.json", dir+".result.json"
+	reqPath := dir + ".picks.json"
 	if err := media.PlainParents(absPath(filepath.Join(s.d.Home, "evidence")), dir); err != nil {
-		return PicksResult{}, err
+		return "", err
 	}
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		return PicksResult{}, pickRefused("the picks directory could not be made: %v", err)
+		return "", pickRefused("the picks directory could not be made: %v", err)
 	}
 	if err := os.WriteFile(reqPath, reqData, 0o644); err != nil {
-		return PicksResult{}, pickRefused("picks.json could not be written: %v", err)
+		return "", pickRefused("picks.json could not be written: %v", err)
 	}
-	// A result left by an earlier publish must never be read as this one's.
-	if err := os.Remove(resultPath); err != nil && !os.IsNotExist(err) {
-		return PicksResult{}, pickRefused("an earlier pick result could not be cleared: %v", err)
-	}
-	scratch, err := makeIntentScratchDir(s.d.Home)
-	if err != nil {
-		return PicksResult{}, pickRefused("the pick session's scratch directory could not be made: %v", err)
-	}
-	defer func() { _ = os.RemoveAll(scratch) }()
-
-	err = s.backend.Run(session.Dispatch{
-		Ticket:     s.ticket,
-		Slice:      session.PublishPicksSlice,
-		Attempt:    1,
-		Worktree:   scratch,
-		SliceJSON:  reqPath,
-		ResultJSON: resultPath,
-		Model:      staircase.Select(s.d.Rungs, staircase.Signals{}),
-		Effort:     picksEffort,
-		Prompt:     RenderPicksPrompt(reqPath, resultPath),
-		Screen:     true,
-		// The session's input is a list of captions; its transcript would be a
-		// directory named after a scratch directory that nothing removes.
-		NoSessionPersistence: true,
-	})
-	if err != nil {
-		return PicksResult{}, pickFailed(err)
-	}
-	data, err := os.ReadFile(resultPath)
-	if err != nil {
-		return PicksResult{}, pickFailed(&axi.Error{Msg: fmt.Sprintf("it wrote no pick result (%v)", err), Code: "PICK_NO_RESULT"})
-	}
-	// A backend writes a result of its own, a slice result's shape, when the
-	// session wrote none: not a pick result that failed the contract.
-	if outcome, summary, ok := backendFallback(data); ok {
-		return PicksResult{}, pickFailed(&axi.Error{
-			Msg:  fmt.Sprintf("it wrote no pick result, and the backend recorded its own outcome in its place (%s: %s)", outcome, summary),
-			Code: "PICK_NO_RESULT",
-		})
-	}
-	return ParsePicksResult(data)
+	return reqPath, nil
 }
 
 // stage copies the files p shows into dir, a fresh directory of jig's own,

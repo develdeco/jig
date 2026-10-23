@@ -15,57 +15,33 @@ import (
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/media"
-	"github.com/develdeco/jig/internal/session"
 )
 
-// picksSpy is the session backend a publish test hands Publish: it records
-// every dispatch and the picks.json it was handed, then plays the scenario
-// back through the real fake backend, or fails like a backend that could not
-// run when err is set. during, when set, runs after the request is read and
-// before the session answers, as a session working in the meantime would.
+// picksSpy is the agent that picks, as a publish test sees it: a picks file
+// holding the answer it gives, verbatim. jig starts no session to pick with,
+// so a publish is handed the file (opts) or none, and the spy counts how many
+// were handed one.
 type picksSpy struct {
-	inner      session.Backend
-	err        error
-	during     func()
-	dispatches []session.Dispatch
-	requests   []PicksRequest
-	scratch    []bool // whether each dispatch's working directory existed while it ran
+	path   string
+	handed int
 }
 
-func (s *picksSpy) Run(d session.Dispatch) error {
-	s.dispatches = append(s.dispatches, d)
-	var req PicksRequest
-	if data, err := os.ReadFile(d.SliceJSON); err == nil {
-		_ = json.Unmarshal(data, &req)
-	}
-	s.requests = append(s.requests, req)
-	fi, err := os.Stat(d.Worktree)
-	s.scratch = append(s.scratch, err == nil && fi.IsDir())
-	if s.during != nil {
-		s.during()
-	}
-	if s.err != nil {
-		return s.err
-	}
-	return s.inner.Run(d)
+// opts is o with the spy's picks file, as `jig publish --picks` gives it.
+func (s *picksSpy) opts(o PublishOpts) PublishOpts {
+	s.handed++
+	o.Picks = s.path
+	return o
 }
 
-// picksScenario makes a fake-backend scenario whose publish picks answer is
-// result, verbatim, and returns a spy that plays it back.
+// picksScenario writes result, verbatim, as a picks file and returns the spy
+// that hands it to a publish.
 func picksScenario(t *testing.T, result string) *picksSpy {
 	t.Helper()
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "publish"), 0o755); err != nil {
+	path := filepath.Join(t.TempDir(), "picks.json")
+	if err := os.WriteFile(path, []byte(result), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "publish", "picks-result.json"), []byte(result), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	backend, err := session.New("fake", session.Options{ScenarioDir: dir})
-	if err != nil {
-		t.Fatalf("session.New: %v", err)
-	}
-	return &picksSpy{inner: backend}
+	return &picksSpy{path: path}
 }
 
 // onboardingPick answers the candidates onboardingRecordings makes: r1 is the
@@ -184,10 +160,10 @@ func (pf *picksFixture) warned(substr string) bool {
 	return false
 }
 
-// TestPublishRendersAndAttachesThePickedRecordings: a short session is handed
-// the candidates and answers with flows; publish renders the ## Demo section
-// from them, flow by flow in the order picked, stages the files under names of
-// its own and attaches them through the host, and journals the pick.
+// TestPublishRendersAndAttachesThePickedRecordings: an agent answers with flows
+// in a picks file; publish renders the ## Demo section from them, flow by flow
+// in the order picked, stages the files under names of its own and attaches
+// them through the host, and journals the pick.
 func TestPublishRendersAndAttachesThePickedRecordings(t *testing.T) {
 	t.Parallel()
 	pf := newPicksFixture(t)
@@ -199,38 +175,9 @@ func TestPublishRendersAndAttachesThePickedRecordings(t *testing.T) {
 	}
 	spy := picksScenario(t, onboardingPick)
 
-	report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
+	report, err := Publish(pf.d, spy.opts(PublishOpts{Ticket: pf.fx.Ticket, Yes: true}))
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
-	}
-
-	// One short session, on the cheapest rung at low effort, in a scratch
-	// directory that is gone again, handed the candidates in a stable order.
-	if len(spy.dispatches) != 1 {
-		t.Fatalf("dispatches = %d, want one", len(spy.dispatches))
-	}
-	disp := spy.dispatches[0]
-	if disp.Slice != session.PublishPicksSlice || disp.Model != "rung-a" || disp.Effort != "low" || !disp.NoSessionPersistence || !disp.Screen {
-		t.Errorf("dispatch = slice %q model %q effort %q persistence-off %v screen %v; want the publish picks slice on rung-a at low effort, screened, keeping no transcript",
-			disp.Slice, disp.Model, disp.Effort, disp.NoSessionPersistence, disp.Screen)
-	}
-	if !spy.scratch[0] {
-		t.Error("the session's working directory did not exist while it ran")
-	}
-	if _, err := os.Stat(disp.Worktree); !os.IsNotExist(err) {
-		t.Errorf("the scratch directory %s outlived the session (err %v)", disp.Worktree, err)
-	}
-	if !strings.Contains(disp.Prompt, disp.SliceJSON) || !strings.Contains(disp.Prompt, disp.ResultJSON) {
-		t.Errorf("prompt = %q, want it to name picks.json and the result", disp.Prompt)
-	}
-	req := spy.requests[0]
-	wantCands := []PicksCandidate{
-		{ID: "r1", Scenario: "dashboard", Commit: pf.built[0], Kind: "video", Name: "lone.mp4"},
-		{ID: "r2", Scenario: "login", Flow: "onboard", Step: 1, Caption: "signs in", Commit: pf.built[len(pf.built)-1], Kind: "image", Name: "onboard-1.png"},
-		{ID: "r3", Scenario: "profile", Flow: "onboard", Step: 2, Commit: pf.built[0], Kind: "image", Name: "onboard-2.svg"},
-	}
-	if req.Ticket != pf.fx.Ticket || req.HeadSHA != pf.head || req.Intent.Source != IntentSourceBrief || !reflect.DeepEqual(req.Candidates, wantCands) {
-		t.Errorf("picks.json = %+v\nwant ticket %s, head %s, the brief, candidates %+v", req, pf.fx.Ticket, pf.head, wantCands)
 	}
 
 	// The report, the journal and the output say what was picked and dropped.
@@ -310,7 +257,6 @@ func TestPublishLeavesOutTheDemoSectionWhenThePickIsRefused(t *testing.T) {
 	cases := []struct{ name, result, reason string }{
 		{"an id that is no candidate", `{"flows":[{"title":"T","items":[{"id":"r9"}]}],"summary":"S"}`, "flow 1 item 1 is not a candidate"},
 		{"an id picked twice", `{"flows":[{"title":"T","items":[{"id":"r1"}]},{"title":"U","items":[{"id":"r1"}]}],"summary":"S"}`, "flow 2 item 1 is a candidate that is already picked"},
-		{"an answer that is not JSON", `I think r1 shows it.`, "it must contain exactly one JSON object"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -319,7 +265,7 @@ func TestPublishLeavesOutTheDemoSectionWhenThePickIsRefused(t *testing.T) {
 			pf.onboardingRecordings(t)
 			spy := picksScenario(t, c.result)
 
-			report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
+			report, err := Publish(pf.d, spy.opts(PublishOpts{Ticket: pf.fx.Ticket, Yes: true}))
 			if err != nil {
 				t.Fatalf("Publish: %v", err)
 			}
@@ -352,12 +298,12 @@ func TestPublishLeavesOutTheDemoSectionWhenThePickIsRefused(t *testing.T) {
 	}
 }
 
-// TestPublishWithNoRecordingsDispatchesNoPick: a ticket whose build recorded
-// nothing publishes as it always did: no session, no journal line, no flows.
-func TestPublishWithNoRecordingsDispatchesNoPick(t *testing.T) {
+// TestPublishWithNoRecordingsOffersNoPick: a ticket whose build recorded
+// nothing publishes as it always did: nothing to pick, no request written, no
+// journal line, no flows.
+func TestPublishWithNoRecordingsOffersNoPick(t *testing.T) {
 	t.Parallel()
 	pf := newPicksFixture(t)
-	spy := &picksSpy{err: fmt.Errorf("a pick was dispatched")}
 	// Lines that are not candidates do not make a pick either: a recording of a
 	// commit the branch does not hold, and a recorded line that was refused.
 	pf.record(t, strings.Repeat("a", 40), "z-a1-f0", recSpec{File: "off.svg", Content: "off"})
@@ -366,12 +312,9 @@ func TestPublishWithNoRecordingsDispatchesNoPick(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
+	report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true})
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
-	}
-	if len(spy.dispatches) != 0 {
-		t.Errorf("%d pick sessions were dispatched for a build with nothing to pick from", len(spy.dispatches))
 	}
 	if !reflect.DeepEqual(report.Picks, PicksReport{}) {
 		t.Errorf("report.Picks = %+v, want the zero value", report.Picks)
@@ -395,23 +338,19 @@ func TestPublishWithNoRecordingsDispatchesNoPick(t *testing.T) {
 // TestPublishSaysNoRecordingIsLeftWhenEveryOneWasDropped: a build that did
 // record, whose every file no longer matches its line, is told apart from one
 // that recorded nothing: the output names what was left out and then says none
-// is left, never that there were none to show. No session is dispatched, and
-// the pull request has no ## Demo section.
+// is left, never that there were none to show. Nothing is offered to pick
+// from, and the pull request has no ## Demo section.
 func TestPublishSaysNoRecordingIsLeftWhenEveryOneWasDropped(t *testing.T) {
 	t.Parallel()
 	pf := newPicksFixture(t)
-	spy := &picksSpy{err: fmt.Errorf("a pick was dispatched")}
 	pf.record(t, pf.built[0], "a-a1-f0", recSpec{File: "ghost.svg", Content: "ghost"})
 	if err := os.Remove(recordedFile(t, pf.d, pf.fx.Ticket, pf.built[0], "a-a1-f0", "ghost.svg")); err != nil {
 		t.Fatal(err)
 	}
 
-	report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
+	report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true})
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
-	}
-	if len(spy.dispatches) != 0 {
-		t.Errorf("%d pick sessions were dispatched for a build with nothing left to pick from", len(spy.dispatches))
 	}
 	if !reflect.DeepEqual(report.Picks.Dropped, []string{"ghost.svg (gone)"}) || report.Picks.Status != "" {
 		t.Errorf("report.Picks = %+v, want ghost.svg dropped and no pick", report.Picks)
@@ -427,9 +366,10 @@ func TestPublishSaysNoRecordingIsLeftWhenEveryOneWasDropped(t *testing.T) {
 }
 
 // TestPublishReusesAPickForTheSameHeadAndRecordings: a publish that stops
-// before it ships (a declined confirmation) and runs again asks the session
-// nothing the second time; recordings that changed in between are a new
-// question.
+// before it ships (a declined confirmation) and runs again needs no picks file
+// the second time, the pick being the same question; recordings that changed
+// in between are a new question, and the publish is pending again until it is
+// given a file.
 func TestPublishReusesAPickForTheSameHeadAndRecordings(t *testing.T) {
 	t.Parallel()
 	pf := newPicksFixture(t)
@@ -437,36 +377,34 @@ func TestPublishReusesAPickForTheSameHeadAndRecordings(t *testing.T) {
 	spy := picksScenario(t, onboardingPick)
 	pf.d.Confirm = func(string, string, string, bool) bool { return false }
 
-	for i := 0; i < 2; i++ {
-		_, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Backend: spy})
-		wantAxiCode(t, err, "PUBLISH_DECLINED")
-	}
-	if len(spy.dispatches) != 1 {
-		t.Fatalf("dispatches = %d after two publishes of the same head and recordings, want one", len(spy.dispatches))
-	}
+	_, err := Publish(pf.d, spy.opts(PublishOpts{Ticket: pf.fx.Ticket}))
+	wantAxiCode(t, err, "PUBLISH_DECLINED")
+	_, err = Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket})
+	wantAxiCode(t, err, "PUBLISH_DECLINED")
 	picks := pf.pickLines(t)
 	if len(picks) != 2 || picks[0].Outcome != PicksPicked || picks[1].Outcome != PicksReused || !reflect.DeepEqual(picks[0].Pick, picks[1].Pick) {
 		t.Fatalf("publish-picks lines = %+v, want picked then reused, the same pick", picks)
 	}
 
-	// A new recording changes the candidates: the pick is made again.
+	// A new recording changes the candidates: the earlier pick answers another
+	// question, so none is reused and the publish is pending again.
 	pf.record(t, pf.built[0], "a-a2-f0", recSpec{File: "extra.svg", Content: "extra", Scenario: "extra", Flow: "extra", Step: 1})
 	pf.d.Confirm = nil
-	report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
+	report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true})
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if len(spy.dispatches) != 2 || report.Picks.Status != PicksPicked {
-		t.Errorf("dispatches = %d, status = %q after the recordings changed; want a second session and a new pick", len(spy.dispatches), report.Picks.Status)
-	}
-	if got := len(spy.requests[1].Candidates); got != 4 {
-		t.Errorf("the second session was offered %d candidates, want the 4 there now", got)
+	if report.Picks.Status != PicksPending || report.Picks.Candidates != 4 {
+		t.Errorf("report.Picks = %+v after the recordings changed; want a pending pick offering the 4 candidates there now", report.Picks)
 	}
 }
 
-// TestPublishWithNoBackendRefusesThePick: recordings but no session to pick
-// with is a refusal in the output and the journal, not a failed publish.
-func TestPublishWithNoBackendRefusesThePick(t *testing.T) {
+// TestPublishWithRecordingsAndNoPickWritesTheRequestAnAgentPicksFrom: recordings
+// but nobody has picked: jig picks nothing and asks no model. It writes the
+// picks.json an agent picks from - the ticket, the head, the intent and the
+// candidates in a stable order - says so in the output and the report, and
+// publishes without a demo; a later publish given the answer shows it.
+func TestPublishWithRecordingsAndNoPickWritesTheRequestAnAgentPicksFrom(t *testing.T) {
 	t.Parallel()
 	pf := newPicksFixture(t)
 	pf.onboardingRecordings(t)
@@ -475,84 +413,97 @@ func TestPublishWithNoBackendRefusesThePick(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if report.Picks.Status != PicksRefused || !strings.Contains(report.Picks.Reason, "no session backend") {
-		t.Errorf("report.Picks = %+v, want a refusal for want of a backend", report.Picks)
+	if report.Picks.Status != PicksPending || report.Picks.Candidates != 3 || report.Picks.Request == "" {
+		t.Fatalf("report.Picks = %+v, want a pending pick offering 3 candidates and naming the request", report.Picks)
 	}
-	if body := pf.body(t, report); strings.Contains(body, "### ") {
-		t.Errorf("pr body = %q, want no flows", body)
+	if want := pf.picksDir(t) + ".picks.json"; report.Picks.Request != want {
+		t.Errorf("request = %q, want it beside the staging directory: %q", report.Picks.Request, want)
 	}
-}
-
-// TestPublishRecordsAFailedPickSessionByItsCodeOnly: the text of a failed
-// session or backend can hold anything, so the journal and the report carry
-// only its failure code, and the output carries the text once.
-func TestPublishRecordsAFailedPickSessionByItsCodeOnly(t *testing.T) {
-	t.Parallel()
-	pf := newPicksFixture(t)
-	pf.onboardingRecordings(t)
-	spy := &picksSpy{err: fmt.Errorf("the backend failed in %s", pf.d.Home)}
-
-	report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
+	var req PicksRequest
+	data, err := os.ReadFile(report.Picks.Request)
 	if err != nil {
-		t.Fatalf("Publish: %v", err)
+		t.Fatalf("read the request: %v", err)
 	}
-	if want := "the pick session failed: INTERNAL"; report.Picks.Status != PicksRefused || report.Picks.Reason != want {
-		t.Errorf("report.Picks = %+v, want a refusal with the reason %q", report.Picks, want)
+	if err := json.Unmarshal(data, &req); err != nil {
+		t.Fatalf("parse the request: %v", err)
 	}
-	picks := pf.pickLines(t)
-	if len(picks) != 1 || picks[0].Outcome != "refused: the pick session failed: INTERNAL" {
-		t.Errorf("publish-picks lines = %+v, want one refusal carrying the code alone", picks)
+	wantCands := []PicksCandidate{
+		{ID: "r1", Scenario: "dashboard", Commit: pf.built[0], Kind: "video", Name: "lone.mp4"},
+		{ID: "r2", Scenario: "login", Flow: "onboard", Step: 1, Caption: "signs in", Commit: pf.built[len(pf.built)-1], Kind: "image", Name: "onboard-1.png"},
+		{ID: "r3", Scenario: "profile", Flow: "onboard", Step: 2, Commit: pf.built[0], Kind: "image", Name: "onboard-2.svg"},
 	}
-	if !pf.warned("the backend failed in") {
-		t.Errorf("warnings = %q, want the failure's text printed", pf.warnings)
+	if req.Ticket != pf.fx.Ticket || req.HeadSHA != pf.head || req.Intent.Source != IntentSourceBrief || !reflect.DeepEqual(req.Candidates, wantCands) {
+		t.Errorf("picks.json = %+v\nwant ticket %s, head %s, the brief, candidates %+v", req, pf.fx.Ticket, pf.head, wantCands)
 	}
-}
-
-// TestPublishRefusesAPickWhoseFileChangedAfterItWasOffered: the session runs
-// for a while, and a file it was offered can change meanwhile. Each file is
-// checked again as it is staged, and a pick holding one that changed is refused
-// whole, so nothing unchecked reaches the pull request.
-func TestPublishRefusesAPickWhoseFileChangedAfterItWasOffered(t *testing.T) {
-	t.Parallel()
-	pf := newPicksFixture(t)
-	pf.onboardingRecordings(t)
-	spy := picksScenario(t, onboardingPick)
-	lone := recordedFile(t, pf.d, pf.fx.Ticket, pf.built[0], "a-a1-f0", "lone.mp4")
-	spy.during = func() {
-		// The same length, so only the bytes tell.
-		if err := os.WriteFile(lone, []byte("DASHBOARD VIDEO BYTES"), 0o644); err != nil {
-			t.Errorf("rewrite the recording: %v", err)
-		}
+	if !pf.warned("waiting to be picked") || !pf.warned(report.Picks.Request) {
+		t.Errorf("warnings = %q, want the output to say recordings wait to be picked, and where", pf.warnings)
 	}
-
-	report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
-	if err != nil {
-		t.Fatalf("Publish: %v", err)
+	if lines := pf.pickLines(t); len(lines) != 0 {
+		t.Errorf("publish-picks lines = %+v, want none: nothing was picked or refused", lines)
 	}
-	if report.Picks.Status != PicksRefused || !strings.Contains(report.Picks.Reason, "the recording lone.mp4 changed while it was being staged") {
-		t.Errorf("report.Picks = %+v, want a refusal naming the file that changed", report.Picks)
+	if body := pf.body(t, report); strings.Contains(body, "## Demo") {
+		t.Errorf("pr body = %q, want no Demo section until a pick is given", body)
 	}
 	if create := findGhCall(loggedGhCalls(t, pf.logFile), "pr", "create"); create == nil || len(attachedFiles(create.Argv)) != 0 {
 		t.Errorf("pr create = %+v, want one that attaches nothing", create)
 	}
-	if body := pf.body(t, report); strings.Contains(body, "### ") {
-		t.Errorf("pr body = %q, want no flows", body)
+}
+
+// TestPublishRefusesAnUnreadableOrInvalidPicksFile: a picks file jig cannot
+// read, or that is not a pick result at all, stops the publish before it writes
+// or pushes anything: the agent gave jig a file, and a publish that went on
+// without it would hide the mistake. A pick that parses and is then refused
+// (an id that is no candidate) is another matter, journaled and published
+// without a demo (TestPublishLeavesOutTheDemoSectionWhenThePickIsRefused).
+func TestPublishRefusesAnUnreadableOrInvalidPicksFile(t *testing.T) {
+	t.Parallel()
+	pf := newPicksFixture(t)
+	pf.onboardingRecordings(t)
+	invalid := picksScenario(t, `{"flows": "none"}`)
+
+	for name, opts := range map[string]PublishOpts{
+		"unreadable": {Ticket: pf.fx.Ticket, Yes: true, Picks: filepath.Join(t.TempDir(), "missing.json")},
+		"invalid":    invalid.opts(PublishOpts{Ticket: pf.fx.Ticket, Yes: true}),
+	} {
+		_, err := Publish(pf.d, opts)
+		want := "PICKS_UNREADABLE"
+		if name == "invalid" {
+			want = "PICKS_INVALID"
+		}
+		wantAxiCode(t, err, want)
+	}
+	if sha := originRef(t, pf.fx.RepoRemote, "refs/heads/"+ticketBranch(pf.fx.Ticket)); sha != "" {
+		t.Errorf("origin has the ticket branch at %s after the refused publishes, want nothing pushed", sha)
+	}
+	if lines := pf.pickLines(t); len(lines) != 0 {
+		t.Errorf("publish-picks lines = %+v, want none", lines)
 	}
 }
 
 // step is the pick step for the fixture's ticket as it stands: its journal read
 // now, the build lease (which holds the commits jig built) as the lease the
-// recorded commits are looked up in, and the head the gate reviewed.
-func (pf *picksFixture) step(t *testing.T, backend session.Backend) picksStep {
+// recorded commits are looked up in, and the head the gate reviewed. result is
+// the pick an agent made, nil for none.
+func (pf *picksFixture) step(t *testing.T, result *PicksResult) picksStep {
 	t.Helper()
 	lines, err := journal.Read(pf.d.Store, pf.fx.Ticket)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return picksStep{
-		d: pf.d, backend: backend, ticket: pf.fx.Ticket, repoName: "fixture-repo",
+		d: pf.d, result: result, ticket: pf.fx.Ticket, repoName: "fixture-repo",
 		leaseDir: buildLeaseDir(t, pf.fx), head: pf.head, lines: lines, warn: pf.d.Warn,
 	}
+}
+
+// pickOf parses answer, a picks file's text, as a pick result.
+func pickOf(t *testing.T, answer string) *PicksResult {
+	t.Helper()
+	res, err := ParsePicksResult([]byte(answer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &res
 }
 
 // onboardingPicks resolves the answers the staging tests stage: all three of
@@ -637,7 +588,7 @@ func TestPublishRefusesStagedMediaThatChangedBeforeThePush(t *testing.T) {
 				return true
 			}
 
-			_, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Backend: spy})
+			_, err := Publish(pf.d, spy.opts(PublishOpts{Ticket: pf.fx.Ticket}))
 			wantAxiCode(t, err, "PUBLISH_PICKS_CHANGED")
 			var ae *axi.Error
 			if errors.As(err, &ae) && !strings.Contains(strings.Join(ae.Help, " "), "Nothing was pushed") {
@@ -653,14 +604,14 @@ func TestPublishRefusesStagedMediaThatChangedBeforeThePush(t *testing.T) {
 				t.Errorf("pr create ran (%v) after the staged media changed", create.Argv)
 			}
 
-			// The next publish asks the session nothing, stages afresh, and ships.
+			// The next publish needs no picks file, stages afresh, and ships.
 			pf.d.Confirm, pf.d.GuardedPush = nil, nil
-			report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true, Backend: spy})
+			report, err := Publish(pf.d, PublishOpts{Ticket: pf.fx.Ticket, Yes: true})
 			if err != nil {
 				t.Fatalf("the publish after the refusal: %v", err)
 			}
-			if report.Picks.Status != PicksReused || len(spy.dispatches) != 1 {
-				t.Errorf("status = %q after %d dispatches, want the pick reused after one", report.Picks.Status, len(spy.dispatches))
+			if report.Picks.Status != PicksReused || spy.handed != 1 {
+				t.Errorf("status = %q after the file was given %d time(s), want the pick reused after one", report.Picks.Status, spy.handed)
 			}
 			if got, err := os.ReadFile(staged); err != nil || string(got) != "login png" {
 				t.Errorf("staged rec-1.png = %q, %v; want the recording staged afresh", got, err)
@@ -784,21 +735,20 @@ func TestAPickIsNotReusedAfterTheIntentChanged(t *testing.T) {
 	t.Parallel()
 	pf := newPicksFixture(t)
 	pf.onboardingRecordings(t)
-	spy := picksScenario(t, onboardingPick)
-	run := func() PicksReport {
+	run := func(result *PicksResult) PicksReport {
 		t.Helper()
-		report, _, err := publishPicks(pf.step(t, spy))
+		report, _, err := publishPicks(pf.step(t, result))
 		if err != nil {
 			t.Fatalf("publishPicks: %v", err)
 		}
 		return report
 	}
 
-	if got := run().Status; got != PicksPicked {
+	if got := run(pickOf(t, onboardingPick)).Status; got != PicksPicked {
 		t.Fatalf("first status = %q, want picked", got)
 	}
-	if got := run().Status; got != PicksReused || len(spy.dispatches) != 1 {
-		t.Fatalf("second status = %q after %d dispatches, want reused after one", got, len(spy.dispatches))
+	if got := run(nil).Status; got != PicksReused {
+		t.Fatalf("second status = %q, want the pick reused without a picks file", got)
 	}
 	brief := filepath.Join(pf.d.Store.TicketDir(pf.fx.Ticket), "brief.md")
 	text, err := os.ReadFile(brief)
@@ -808,8 +758,11 @@ func TestAPickIsNotReusedAfterTheIntentChanged(t *testing.T) {
 	if err := os.WriteFile(brief, append(text, []byte("\nA paragraph added after the first pick.\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := run().Status; got != PicksPicked || len(spy.dispatches) != 2 {
-		t.Errorf("third status = %q after %d dispatches, want a new pick after a second dispatch", got, len(spy.dispatches))
+	if got := run(nil).Status; got != PicksPending {
+		t.Errorf("third status = %q, want a pending pick: the earlier one answered another intent", got)
+	}
+	if got := run(pickOf(t, onboardingPick)).Status; got != PicksPicked {
+		t.Errorf("fourth status = %q, want a new pick from a new picks file", got)
 	}
 }
 
@@ -861,7 +814,7 @@ func TestStagingLeavesNothingOfAnEarlierPickOfTheSameHead(t *testing.T) {
 // TestStagingNeverWritesThroughALink: a link where the staging directory goes
 // is removed as itself and replaced by a real directory, and its target gets
 // nothing; a link above it (the ticket's picks directory) refuses the pick
-// before anything is written, the session included.
+// before anything is written.
 func TestStagingNeverWritesThroughALink(t *testing.T) {
 	t.Parallel()
 	pf := newPicksFixture(t)
@@ -894,16 +847,12 @@ func TestStagingNeverWritesThroughALink(t *testing.T) {
 	}
 	above := t.TempDir()
 	symlinkOrSkip(t, above, filepath.Dir(dir))
-	spy := picksScenario(t, onboardingPick)
-	report, rendered, err := publishPicks(pf.step(t, spy))
+	report, rendered, err := publishPicks(pf.step(t, pickOf(t, onboardingPick)))
 	if err != nil {
 		t.Fatalf("publishPicks: %v", err)
 	}
 	if report.Status != PicksRefused || !strings.Contains(report.Reason, "not a plain directory") || rendered != nil {
 		t.Errorf("report = %+v, rendered = %v; want a refusal because a directory above is a link", report, rendered)
-	}
-	if len(spy.dispatches) != 0 {
-		t.Errorf("%d sessions were dispatched with a link above the picks directory", len(spy.dispatches))
 	}
 	if got := dirNames(t, above); len(got) != 0 {
 		t.Errorf("the link's target received %v, want nothing", got)

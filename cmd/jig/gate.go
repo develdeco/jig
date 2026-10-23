@@ -7,25 +7,35 @@ import (
 	"strconv"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
+)
+
+// The usage lines of `jig gate`'s flags: the help row and the FlagSet carry
+// the same text, which the help parity test compares.
+const (
+	gateEarlyUsage    = "gate before the frontier is fully green"
+	gateBranchUsage   = "review this branch, built outside jig, and adopt it as the ticket's own (recorded on the first round)"
+	gateIntentUsage   = "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md); with no brief, --intent or --doc, the reviewer is pointed at an excerpt of your local Claude Code session that best matches the change"
+	gateDocUsage      = "doc file whose content becomes the ticket's explicit intent, recorded as intent.md (refused when the ticket has a brief.md)"
+	gateYesUsage      = "when the round is recorded, keep every finding jig can route on its own, without waiting for a person's `jig triage` on each ask"
+	gateScenarioUsage = "scenario dir for the scripted gate source (tests)"
+	gateStoreUsage    = "explicit store path"
+	gateProjectUsage  = "project name, resolved via the machine mapping"
 )
 
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"gate", "run a gate round over the ticket's branch", []flagSpec{
-			{"early", "gate before the frontier is fully green", false},
-			{"branch", "review this branch, built outside jig, and adopt it as the ticket's own (recorded on the first round)", false},
-			{"intent", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md); with no brief, --intent or --doc, a reviewer round reads your local Claude Code sessions for this repo and has a model summarize the best match into intent.md", false},
-			{"doc", "doc file whose content becomes the ticket's explicit intent, recorded as intent.md (refused when the ticket has a brief.md)", false},
-			{"pr", "pr number (not implemented in v0.1)", true},
-			{"yes", "keep every finding jig can route on its own, without the triage prompt", false},
-			{"backend", "session backend for the reviewer: fake, headless, or herdr", false},
-			{"scenario", "scenario dir for the fake gate source", false},
-			{"store", "explicit store path", false},
-			{"project", "project name, resolved via the machine mapping", false},
+		Spec: cmdSpec{"gate", "open a gate round: re-verify the branch and hand a reviewer what to review", []flagSpec{
+			{"early", gateEarlyUsage, false},
+			{"branch", gateBranchUsage, false},
+			{"intent", gateIntentUsage, false},
+			{"doc", gateDocUsage, false},
+			{"yes", gateYesUsage, false},
+			{"scenario", gateScenarioUsage, true},
+			{"store", gateStoreUsage, false},
+			{"project", gateProjectUsage, false},
 		}, false},
 		Order: 160,
 		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
@@ -35,31 +45,17 @@ func init() {
 	})
 }
 
-// gateSourceFor picks the GateSource for a `jig gate` invocation. The
-// compatibility rule: `jig gate` never had --backend before,
-// so the old scripted source (NewFakeGateSource) runs iff --scenario is
-// set AND --backend is not - every old invocation behaves exactly as
-// before. Any other combination (including --backend fake --scenario X)
-// dispatches a real reviewer session, played back by whichever backend
-// backendName resolves.
-func gateSourceFor(backendFlag, scenario string) (verifydeliver.GateSource, error) {
-	if scenario != "" && backendFlag == "" {
-		return verifydeliver.NewFakeGateSource(scenario), nil
-	}
-	kind := backendName(backendFlag, scenario)
-	if err := session.Available(kind); err != nil {
-		return nil, err
-	}
-	backend, err := session.New(kind, session.Options{ScenarioDir: scenario})
-	if err != nil {
-		return nil, err
-	}
-	return verifydeliver.NewReviewerGateSource(backend), nil
-}
-
 // cmdGate implements `jig gate <ticket> [--early] [--branch <name>] [--intent
-// <text> | --doc <path>] [--pr <n>] [--yes] [--backend
-// fake|headless|herdr] [--scenario <dir>]`.
+// <text> | --doc <path>] [--yes]`: open a gate round over the ticket's branch.
+// The branch is read from the operator's clone (committed work only), or
+// origin's copy when that is the newer; the oracles are re-verified on its
+// head, reusing the passes `jig verify` recorded; and the request a
+// reviewer reads is written. jig starts no reviewer: a fresh-context agent
+// reads the round with `jig review context`, reports findings with `jig
+// finding` and ends with `jig review done`, which records the round.
+//
+// The hidden --scenario plays back a scripted round instead, for the tests:
+// the one-shot path the gate had before its reviewer was an agent of its own.
 func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
@@ -67,16 +63,14 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 
 	fs := newFlagSet(e, "gate")
-	early := fs.Bool("early", false, "gate before the frontier is fully green")
-	branch := fs.String("branch", "", "review this branch, built outside jig, and adopt it as the ticket's own (recorded on the first round)")
-	intent := fs.String("intent", "", "explicit intent text, recorded as intent.md (refused when the ticket has a brief.md); with no brief, --intent or --doc, a reviewer round reads your local Claude Code sessions for this repo and has a model summarize the best match into intent.md")
-	doc := fs.String("doc", "", "doc file whose content becomes the ticket's explicit intent, recorded as intent.md (refused when the ticket has a brief.md)")
-	prNum := fs.Int("pr", 0, "pr number (not implemented in v0.1)")
-	yes := fs.Bool("yes", false, "keep every finding jig can route on its own, without the triage prompt")
-	backendFlag := fs.String("backend", "", "session backend for the reviewer: fake, headless, or herdr")
-	scenario := fs.String("scenario", "", "scenario dir for the fake gate source")
-	storeFlag := fs.String("store", "", "explicit store path")
-	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
+	early := fs.Bool("early", false, gateEarlyUsage)
+	branch := fs.String("branch", "", gateBranchUsage)
+	intent := fs.String("intent", "", gateIntentUsage)
+	doc := fs.String("doc", "", gateDocUsage)
+	yes := fs.Bool("yes", false, gateYesUsage)
+	scenario := fs.String("scenario", "", gateScenarioUsage)
+	storeFlag := fs.String("store", "", gateStoreUsage)
+	projectFlag := fs.String("project", "", gateProjectUsage)
 	if handled, err := parseFlags(stdout, fs, rest); handled {
 		return 0
 	} else if err != nil {
@@ -149,34 +143,42 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	src, err := gateSourceFor(*backendFlag, *scenario)
-	if err != nil {
-		return renderErr(stdout, err)
-	}
-
 	deps := verifydeliverDeps(e, st, cfg, mp, jigHome)
-	report, err := verifydeliver.Gate(deps, src, verifydeliver.GateOpts{
+	opts := verifydeliver.GateOpts{
 		Ticket:    ticket,
 		Early:     *early,
 		Branch:    *branch,
 		Intent:    *intent,
 		IntentDoc: *doc,
-		PRMode:    *prNum != 0,
-		Triage:    triageFor(e, *yes, stdin, stdout),
-	})
+		Yes:       *yes,
+	}
+	if *scenario != "" {
+		opts.Triage = triageFor(e, *yes, stdin, stdout)
+		report, err := verifydeliver.Gate(deps, verifydeliver.NewFakeGateSource(*scenario), opts)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		return printGateReport(stdout, st, ticket, report)
+	}
+
+	p, err := verifydeliver.GatePrepare(deps, opts)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	return printGateReport(stdout, st, ticket, report)
+	blocks := roundBlocks(p, "", false)
+	blocks = append(blocks, axi.Help(
+		"Spawn a fresh-context reviewer (a subagent or another session) with the `review` skill: it reads the round with `jig review context "+ticket+"` and ends with `jig review done "+ticket+"`",
+		"The agent that built the change must not review it: a reviewer who built part of it makes the round not clean (REVIEW_NOT_INDEPENDENT)",
+	))
+	axi.Render(stdout, blocks...)
+	return 0
 }
 
 // printGateReport prints a completed gate round's report. Gate failures
-// (oracle failures, env pauses, frontier-not-empty, PR mode) surface as
-// errors from verifydeliver.Gate and are handled by the caller via
-// renderErr before this is reached; this function's own return value is
-// the "needs a human" exit code: 2 when the round leaves any ask
-// undecided, matching frontier's own PendingQuestion convention
-// (printRunReport), else 0.
+// (oracle failures, env pauses, frontier-not-empty) surface as errors from
+// verifydeliver.Gate and are handled by the caller via renderErr before this
+// is reached; this function's own return value is the "needs a human" exit
+// code: 2 when the round leaves any ask undecided, else 0.
 func printGateReport(stdout io.Writer, st *store.Store, ticket string, report verifydeliver.GateReport) int {
 	var shaRows [][]string
 	for repo, sha := range report.TargetSHA {
@@ -190,19 +192,36 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	if report.Branch != "" {
 		kv = append(kv, [2]string{"branch", report.Branch})
 	}
+	if report.Copy != "" {
+		kv = append(kv, [2]string{"copy", report.Copy})
+	}
 	kv = append(kv,
 		[2]string{"round", strconv.Itoa(report.Round)},
 		[2]string{"verdict", report.Verdict},
-		[2]string{"model", report.Model},
-		[2]string{"intent", intentRow},
 	)
+	// Who reviewed, as the reviewer said (model and effort are self-reported;
+	// jig chooses none) and as jig found out (the reviewer and whether it
+	// built what it reviewed). A scripted or launched round has none of it.
+	if report.Model != "" {
+		kv = append(kv, [2]string{"model", report.Model})
+	}
+	if report.Effort != "" {
+		kv = append(kv, [2]string{"effort", report.Effort})
+	}
+	if report.Reviewer.Known() {
+		kv = append(kv, [2]string{"reviewer", reviewerLabel(report.Reviewer)})
+	}
+	if report.Independent != "" {
+		kv = append(kv, [2]string{"independent", string(report.Independent)})
+	}
+	kv = append(kv, [2]string{"intent", intentRow})
 	if report.Scope != "" {
 		kv = append(kv, [2]string{"scope", report.Scope})
 	}
 	// The fix budget: named only for a round that actually parked
 	// findings, saying the budget is reached and how many it parked -
-	// jig status and the terminal triage prompt are where the budget's
-	// ongoing state (used of limit, every round until it changes) lives.
+	// jig status is where the budget's ongoing state (used of limit,
+	// every round until it changes) lives.
 	if report.BudgetParked > 0 {
 		kv = append(kv, [2]string{"fix_budget", fmt.Sprintf("reached (%d of %d): %d finding(s) parked", report.BudgetUsed, report.BudgetLimit, report.BudgetParked)})
 	}
@@ -247,37 +266,39 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	return 0
 }
 
-// gateReportHint names the way forward after this round: when it leaves
-// any ask undecided, that is always a human decision at a terminal.
-//
-// The next `jig gate` is refused while the frontier is short of green, so
-// the hint reads the frontier itself (frontierGreen, the condition the
-// check applies) rather than a proxy for it: this round's own fix slices
-// are one way to be short of green and not the only one, and `jig gate
-// --early` runs on an unfinished frontier and can leave an ask with no fix
-// slice queued at all, which a fix-slice count reads as green and the
-// check does not.
-//
-// Short of green, the first line is the ticket's own next step, exactly
-// what `jig status` would print (hintOrFallback), because that is what
-// actually moves the frontier: one parked on an unanswered question does
-// not advance on a bare `jig run <ticket>`, only on `jig run <ticket>
-// --answer ...`. The gate follows it as the second step. With nothing
-// undecided the hint is that same next-step line alone.
+// reviewerLabel names a reviewer for a report row: its session, then its
+// agent when it is a subagent, then how jig learned who it is.
+func reviewerLabel(p verifydeliver.Provenance) string {
+	label := p.Session
+	if p.Agent != "" {
+		label += "/" + p.Agent
+	}
+	if p.How != "" {
+		label += " (" + p.How + ")"
+	}
+	return label
+}
+
+// gateReportHint names the way forward after this round. When it leaves any
+// ask undecided, that is a person's decision, recorded with `jig triage`,
+// which the next round applies. The ticket's own next step comes first when
+// the frontier is short of green (hintOrFallback, exactly what `jig status`
+// would print), because a round is refused while any slice is short of green
+// and that is what actually moves the frontier; the decisions and the next
+// round follow it. With nothing undecided the hint is that same next-step
+// line alone.
 func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateReport) []string {
+	if report.Verdict == verifydeliver.VerdictNotIndependent {
+		return []string{fmt.Sprintf("Have a fresh-context reviewer, who did not build the change, review it: `jig gate %s`", ticket)}
+	}
 	if len(report.NeedsHuman) > 0 {
+		decide := fmt.Sprintf("Decide the listed asks with `jig triage %s <id> keep|dismiss`; the next round applies them", ticket)
 		if !frontierGreen(st, ticket) {
-			// What actually moves the frontier is the ticket's own
-			// next step, the same one `jig status` prints: a frontier
-			// parked on an unanswered question does not advance on
-			// `jig run <ticket>` at all, it advances on
-			// `jig run <ticket> --answer ...`.
-			return []string{
-				hintOrFallback(st, ticket),
-				fmt.Sprintf("Then run `jig gate %s` at a terminal to decide the listed asks", ticket),
-			}
+			// What actually moves the frontier is the ticket's own next
+			// step, the same one `jig status` prints.
+			return []string{hintOrFallback(st, ticket), decide}
 		}
-		return []string{fmt.Sprintf("Run `jig gate %s` at a terminal to decide the listed asks", ticket)}
+		return []string{decide + fmt.Sprintf(": run `jig gate %s`", ticket)}
 	}
 	return []string{hintOrFallback(st, ticket)}
 }
