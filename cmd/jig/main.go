@@ -217,7 +217,9 @@ func splitOnce(s string, sep byte) (before, after string, ok bool) {
 
 // resolveStore resolves the store, project config and this machine's clone
 // mapping for cfg's project, honoring an explicit --store flag over cwd
-// resolution, and returns the jig home root it read the mapping from, for
+// resolution (locate.Locate's order: a jig.yaml marker, the machine map by
+// path and by remote, a store directory), and returns the jig home root it
+// read the mapping from, for
 // the packages that keep leases under it. stdout is the resolving command's
 // own writer: the checkpoint hook renders its sync report through it
 // (brief.md#Ownership and drift: "Drift lines print in the output of the
@@ -245,8 +247,7 @@ func resolveStoreChecked(e env, storeFlag string, stdout io.Writer, allowOlderSc
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
-	storeFlag = absFrom(cwd, storeFlag)
-	storePath, cfg, err := project.Resolve(jigHome, cwd, storeFlag)
+	storePath, cfg, err := locateStore(jigHome, cwd, absFrom(cwd, storeFlag), e.getenv)
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
