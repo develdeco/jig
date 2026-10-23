@@ -1,5 +1,7 @@
 package observe
 
+import "path/filepath"
+
 // The Claude Code adapter, and Codex's, which sends the same shape. Claude
 // Code runs a hook command with a JSON object on stdin and reads JSON from
 // its stdout:
@@ -15,16 +17,25 @@ package observe
 //	out  {"hookSpecificOutput":{"hookEventName","additionalContext"}}   context
 //	     {"systemMessage"}                                              for the person
 //	     {"decision":"block","reason"}                                  keep working (Stop)
+//	env  CLAUDE_ENV_FILE (SessionStart): a file of the session's, in a
+//	     directory named after its id, that the hook appends export lines
+//	     to; Claude Code sources it before each Bash command
 //
 // Claude Code puts the stdout of a SessionStart or UserPromptSubmit hook that
 // exits 0 into the model context as plain text, so a hook must print
 // nothing but its JSON.
 
-type claudeShape struct{ name string }
+// claudeShape is the claude adapter, and codex's: envFile says whether the
+// harness gives a SessionStart hook a CLAUDE_ENV_FILE, which only Claude
+// Code does.
+type claudeShape struct {
+	name    string
+	envFile bool
+}
 
 func init() {
-	registerAdapter(claudeShape{"claude"})
-	registerAdapter(claudeShape{"codex"})
+	registerAdapter(claudeShape{name: "claude", envFile: true})
+	registerAdapter(claudeShape{name: "codex"})
 }
 
 func (a claudeShape) Name() string { return a.name }
@@ -64,6 +75,25 @@ func (a claudeShape) Parse(data []byte) (Event, error) {
 		return Event{}, nil
 	}
 	return ev, nil
+}
+
+// claudeEnvFile is the variable that names, in the environment of a
+// SessionStart hook, the file Claude Code sources before each Bash command of
+// the session.
+const claudeEnvFile = "CLAUDE_ENV_FILE"
+
+// SetEnv appends an export line per variable to the file CLAUDE_ENV_FILE
+// names, when that is the file Claude Code made for this session: one in a
+// directory named after the session id. CLAUDE_ENV_FILE may instead be a
+// script of the person's own, which Claude Code sources before each Bash
+// command and a hook inherits (a hook run under PowerShell, a harness that
+// is not Claude Code); jig never writes to that, and sets nothing.
+func (a claudeShape) SetEnv(ev Event, getenv func(string) string, vars map[string]string) (bool, error) {
+	path := getenv(claudeEnvFile)
+	if !a.envFile || path == "" || ev.Session == "" || filepath.Base(filepath.Dir(path)) != ev.Session {
+		return false, nil
+	}
+	return appendExports(path, vars)
 }
 
 // claudeHookEvents names, by kind of Event, the hook events whose

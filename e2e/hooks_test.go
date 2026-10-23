@@ -7,6 +7,8 @@ package e2e
 // worktree of its own, recorded in the journal.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -53,10 +55,24 @@ func TestHooksDriveVerify(t *testing.T) {
 	if !strings.HasSuffix(start, "observe --harness claude") {
 		t.Fatalf("the installed SessionStart command = %q, want jig observe --harness claude", start)
 	}
-	got := decodeHook(t, runHookCommand(t, env, fx.RepoDir, start, h.Payload("SessionStart", map[string]any{"source": "startup", "model": "claude-test"})))
+	// Claude Code names a file of the session's, in a directory named after
+	// its id, that it sources before each Bash command: the hook puts the
+	// session id there for the jig commands the session runs.
+	sessionDir := filepath.Join(t.TempDir(), "s-hooks")
+	if err := os.Mkdir(sessionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	envFile := filepath.Join(sessionDir, "sessionstart-hook-0.sh")
+	got := decodeHook(t, runHookCommand(t, env.with("CLAUDE_ENV_FILE="+envFile), fx.RepoDir, start, h.Payload("SessionStart", map[string]any{"source": "startup", "model": "claude-test"})))
 	if got.Specific.Name != "SessionStart" || !strings.Contains(got.Specific.Context, fx.Ticket) || !strings.Contains(got.Specific.Context, "slices[4]{id,state,attempts,blocked_by,question}") ||
 		!strings.Contains(got.Specific.Context, "session: s-hooks") {
 		t.Fatalf("SessionStart context = %q, want %s, its slice table and the session id", got.Specific.Context, fx.Ticket)
+	}
+	if exports := string(readFileOrFatal(t, envFile)); exports != "export JIG_SESSION='s-hooks'\n" {
+		t.Errorf("CLAUDE_ENV_FILE = %q, want the export of JIG_SESSION", exports)
+	}
+	if strings.Contains(got.Specific.Context, "JIG_SESSION") {
+		t.Errorf("SessionStart context = %q, asks for JIG_SESSION though the harness set it", got.Specific.Context)
 	}
 
 	// A commit made by git: its global post-commit hook starts the worker.

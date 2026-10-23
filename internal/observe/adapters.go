@@ -24,6 +24,16 @@ type Adapter interface {
 	Render(ev Event, r Result) []byte
 }
 
+// EnvSetter is an Adapter whose harness lets a hook set environment variables
+// for the shell commands the agent runs later in the session.
+type EnvSetter interface {
+	// SetEnv sets vars for the session of ev, the event of the hook being
+	// run, reading the hook's own environment with getenv. It reports false,
+	// and sets nothing, when this run of the hook has no way to (a hook run by
+	// hand, a version of the harness without the feature).
+	SetEnv(ev Event, getenv func(string) string, vars map[string]string) (bool, error)
+}
+
 // The adapters, by name. Each adapters_*.go file adds its own in an init.
 var adapters = map[string]Adapter{}
 
