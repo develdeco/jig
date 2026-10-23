@@ -46,3 +46,31 @@ func TestWriteFileKeepsModeOnlyWhenAsked(t *testing.T) {
 		t.Errorf("temp files left behind: %v", entries)
 	}
 }
+
+func TestWriteFileWritesThroughASymlink(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "dotfiles", "settings.json")
+	link := filepath.Join(dir, "home", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("cannot make a symlink here: %v", err)
+	}
+	if err := writeFile(link, []byte("new"), 0o644, true); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the link was replaced by a file: %v, %v", info, err)
+	}
+	if got := readOrFail(t, target); got != "new" {
+		t.Errorf("the target holds %q, want the new content", got)
+	}
+}

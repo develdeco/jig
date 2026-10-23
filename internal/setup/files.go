@@ -26,7 +26,12 @@ func readIfExists(path string) ([]byte, bool, error) {
 // already there keeps its permission bits, so a settings file its owner made
 // private stays private and a hook script someone else wrote stays as
 // executable as it was; otherwise, and for a new file, the file gets perm.
+// A path that is a symbolic link (a dotfiles manager keeps settings that way)
+// is written through: the file it points to is replaced, not the link.
 func writeFile(path string, data []byte, perm fs.FileMode, keepMode bool) error {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
 	if info, err := os.Stat(path); keepMode && err == nil {
 		perm = info.Mode().Perm()
 	}
