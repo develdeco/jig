@@ -90,10 +90,10 @@ func TestObserveToolStartsTheVerificationThroughTheEnvsSpawner(t *testing.T) {
 	if _, code := runHook("SessionStart", nil); code != 0 {
 		t.Fatalf("SessionStart exit %d", code)
 	}
-	if err := os.WriteFile(filepath.Join(fx.RepoDir, "n.txt"), []byte("n\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(fx.RepoDir, "alpha", "n.txt"), []byte("n\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, a := range [][]string{{"add", "--", "n.txt"}, {"commit", "-q", "-m", "work", "-m", "Jig-Slice: a"}} {
+	for _, a := range [][]string{{"add", "--", "alpha/n.txt"}, {"commit", "-q", "-m", "work", "-m", "Jig-Slice: a"}} {
 		if _, err := gitx.Run(fx.RepoDir, a...); err != nil {
 			t.Fatal(err)
 		}
