@@ -18,6 +18,12 @@ import (
 // internal/store/question.go, internal/journal/journal.go).
 const mintLockTimeout = 30 * time.Second
 
+// maxMintAttempts bounds how many ids Mint tries to reserve on the claims log
+// of a writers store, each one taken by another writer first, before it gives
+// up. Every miss is another writer's id, so this only runs out when many
+// writers mint at one moment.
+const maxMintAttempts = 10
+
 // mintLockPath is the sidecar lock Mint holds across its scan of the store
 // root and the ticket folder and record it then creates, so two mints
 // against the same clone never compute the same next id. It names no real
@@ -123,6 +129,11 @@ func (s *Store) TicketIDs() ([]string, error) {
 // ticket's alias: nextID only cares that the number was once minted under
 // key, not who owns it now - Store.ResolveTicket is where a collision itself
 // is refused.
+//
+// In a writers store the scan is not enough: another writer may have minted
+// an id whose folder has not reached this clone yet. The id lines of the
+// claims log (claims.go) count too, so the number is one past the highest of
+// the folders and the claims.
 func (s *Store) nextID(key string) (string, error) {
 	recs, err := scanTicketIDs(s.Root)
 	if err != nil {
@@ -157,6 +168,19 @@ func (s *Store) nextID(key string) (string, error) {
 			}
 		}
 	}
+	writers, err := s.Mode()
+	if err != nil {
+		return "", err
+	}
+	if writers {
+		n, err := s.claimedIDNumber(key)
+		if err != nil {
+			return "", err
+		}
+		if n > maxN {
+			maxN = n
+		}
+	}
 	return fmt.Sprintf("%s-%d", key, maxN+1), nil
 }
 
@@ -176,6 +200,12 @@ func (s *Store) nextID(key string) (string, error) {
 // something already sitting where the ticket's folder must go - is also
 // refused before anything else is written; either way Mint returns an empty
 // id, since nothing was claimed under it.
+//
+// In a writers store (Mode) the id is reserved on the claims log first, before
+// the folder is made: the reservation the origin accepts is the claim, and an
+// id another writer reserved first is skipped for the next one. A reservation
+// that cannot reach the origin is refused with ID_NOT_CLAIMED, the same code a
+// push the origin rejects gets in single-main mode.
 func (s *Store) Mint(key string, rec Ticket) (string, error) {
 	release, _, err := Lock(s.mintLockPath(), mintLockTimeout)
 	if err != nil {
@@ -183,15 +213,35 @@ func (s *Store) Mint(key string, rec Ticket) (string, error) {
 	}
 	defer release()
 
-	id, err := s.nextID(key)
+	writers, err := s.Mode()
 	if err != nil {
 		return "", err
 	}
-	if err := pool.CheckTicket(id); err != nil {
-		return "", &axi.Error{
-			Msg:  fmt.Sprintf("key %q mints %s, which jig cannot use: %v", key, id, err),
-			Code: "VALIDATION_ERROR",
-			Help: []string{"Change the key in the store's config (keys: in store.yaml, or project.yaml in a v2 store), then mint again"},
+	var id string
+	for attempt := 1; ; attempt++ {
+		id, err = s.nextID(key)
+		if err != nil {
+			return "", err
+		}
+		if err := pool.CheckTicket(id); err != nil {
+			return "", &axi.Error{
+				Msg:  fmt.Sprintf("key %q mints %s, which jig cannot use: %v", key, id, err),
+				Code: "VALIDATION_ERROR",
+				Help: []string{"Change the key in the store's config (keys: in store.yaml, or project.yaml in a v2 store), then mint again"},
+			}
+		}
+		if !writers {
+			break
+		}
+		taken, err := s.reserveID(id)
+		if err != nil {
+			return "", idNotClaimedError(err)
+		}
+		if !taken {
+			break
+		}
+		if attempt >= maxMintAttempts {
+			return "", idNotClaimedError(fmt.Errorf("every id tried was already reserved by another writer (%d tries, the last %s)", attempt, id))
 		}
 	}
 	if err := s.CreateTicketRecord(id, rec); err != nil {
