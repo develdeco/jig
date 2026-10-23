@@ -82,6 +82,14 @@ const idNotClaimedCode = "ID_NOT_CLAIMED"
 // Claim holds the checkpoint lock (LockCheckpoint) for the whole of it,
 // every retry included, so no other process's Sync or Push, and no journal
 // append, runs between its commit and its undo.
+//
+// In a writers store (Mode) the loop is the same one on the branch of this
+// writer, writers/<name>, which only this writer pushes to: what could make
+// its push fail is another clone writing under the same name (the pull that
+// follows refuses it with WRITER_NAME_TAKEN), not another writer minting the
+// same id. Ids are kept apart by the claims log instead: Mint reserves the id
+// there before write has made its folder (mint.go, claims.go), so by the time
+// the commit is pushed the id is already this writer's.
 func (s *Store) Claim(write func() (id string, paths []string, err error), msg func(id string) string) (string, error) {
 	release, err := s.LockCheckpoint()
 	if err != nil {

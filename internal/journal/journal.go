@@ -4,12 +4,14 @@
 package journal
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -149,16 +151,43 @@ func journalPath(st *store.Store, ticket string) string {
 	return filepath.Join(st.TicketDir(ticket), "journal.ndjson")
 }
 
+// lockedCode is Append's refusal when it cannot get the journal's lock.
+const lockedCode = "JOURNAL_LOCKED"
+
+// appendLockTimeout is how long Append waits for another writer of the same
+// journal before it refuses.
+const appendLockTimeout = 30 * time.Second
+
 // Append writes l as one NDJSON line to <ticket>/journal.ndjson, under a
 // lock on the journal file and, outside it, the store's checkpoint lock
 // (Store.LockCheckpoint), so a detached worker's append never lands in the
 // middle of a Sync or Push another process is making. l.Ticket is set to
 // ticket, and l.TS defaults to now (RFC3339 with nanoseconds) when empty.
+//
+// It never writes without the file lock: if another writer still holds it
+// after thirty seconds Append refuses with JOURNAL_LOCKED, because a line
+// written unlocked is how two writers lose each other's lines. The line goes
+// out in a single O_APPEND write, with a newline in front of it when the
+// file ends in a torn line (a writer that died mid-line), so that writer
+// costs its own line and not this one. The file is appended to in place and
+// never rewritten, so a reader that opened it earlier sees at most a torn
+// final line, which Read leaves out.
 func Append(st *store.Store, ticket string, l Line) error {
+	return appendWithin(st, ticket, l, appendLockTimeout)
+}
+
+// appendWithin is Append waiting up to wait for the journal lock, so a test
+// can see the refusal without waiting half a minute.
+func appendWithin(st *store.Store, ticket string, l Line, wait time.Duration) error {
 	if l.TS == "" {
 		l.TS = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	l.Ticket = ticket
+	encoded, err := json.Marshal(l)
+	if err != nil {
+		return err
+	}
+	encoded = append(encoded, '\n')
 
 	unlock, err := st.LockCheckpoint()
 	if err != nil {
@@ -167,29 +196,58 @@ func Append(st *store.Store, ticket string, l Line) error {
 	defer unlock()
 
 	path := journalPath(st, ticket)
-	release, _, err := store.Lock(path, 30*time.Second)
+	release, held, err := store.TryLock(path, wait)
 	if err != nil {
 		return err
 	}
 	defer release()
-
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
+	if !held {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("the journal %s is locked by another process and stayed locked for %s", path, wait),
+			Code: lockedCode,
+			Help: []string{"Retry; if it persists, a jig process on this machine is stuck holding it"},
+		}
 	}
 
-	encoded, err := json.Marshal(l)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o644)
 	if err != nil {
 		return err
 	}
-	data = append(data, encoded...)
-	data = append(data, '\n')
+	defer f.Close()
+	if torn, err := endsMidLine(f); err != nil {
+		return err
+	} else if torn {
+		encoded = append([]byte{'\n'}, encoded...)
+	}
+	_, err = f.Write(encoded)
+	return err
+}
 
-	return store.AtomicWrite(path, data)
+// endsMidLine reports whether f is non-empty and does not end in a newline.
+func endsMidLine(f *os.File) (bool, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	if info.Size() == 0 {
+		return false, nil
+	}
+	var last [1]byte
+	if _, err := f.ReadAt(last[:], info.Size()-1); err != nil {
+		return false, err
+	}
+	return last[0] != '\n', nil
 }
 
 // Read returns every line of a ticket's journal, in append order. Readers
 // never lock. An absent journal reads as no lines.
+//
+// A line that is not a JSON line is left out, and so is a blank one: a final
+// line a writer is still writing, or one a writer died in the middle of, must
+// not hide the lines before it from every reader, and the next Append closes
+// a torn line off with a newline, which makes it a bad line in the middle.
+// The lines of a ticket's journal are appended by several writers and merged
+// by git, so a reader must not assume they are in time order either.
 func Read(st *store.Store, ticket string) ([]Line, error) {
 	data, err := os.ReadFile(journalPath(st, ticket))
 	if err != nil {
@@ -200,13 +258,14 @@ func Read(st *store.Store, ticket string) ([]Line, error) {
 	}
 
 	var lines []Line
-	for _, raw := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(raw) == "" {
+	for _, raw := range bytes.Split(data, []byte{'\n'}) {
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || raw[0] != '{' {
 			continue
 		}
 		var l Line
-		if err := json.Unmarshal([]byte(raw), &l); err != nil {
-			return nil, err
+		if err := json.Unmarshal(raw, &l); err != nil {
+			continue
 		}
 		lines = append(lines, l)
 	}
