@@ -24,7 +24,6 @@ import (
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/media"
-	"github.com/develdeco/jig/internal/screen"
 )
 
 const (
@@ -130,7 +129,7 @@ func writeReviewRecordings(in RoundInput, head string) (string, error) {
 	list := ReviewRecordings{Ticket: in.Ticket, HeadSHA: head}
 	var readable []pickCandidate
 	for _, c := range all {
-		if file, err := c.path(d, storeID, in.Ticket); err == nil && !readByReviewer(file) {
+		if file, err := c.path(d, storeID, in.Ticket); err == nil && in.Readable != nil && !in.Readable(file) {
 			list.Omitted++
 			continue
 		}
@@ -184,13 +183,6 @@ func writeReviewRecordings(in RoundInput, head string) (string, error) {
 	return path, nil
 }
 
-// readByReviewer reports whether the screen that governs a headless reviewer
-// session would let it Read file: the same decision the session's hook makes.
-func readByReviewer(file string) bool {
-	_, ok := screen.ToolCall("Read", map[string]any{"file_path": file})
-	return ok
-}
-
 // reviewerHostDirs are the directories of this machine that a reviewer's
 // words, which reach the store, must not name: the lease it works in, the jig
 // home (the recordings and everything else jig keeps there) and the store.
@@ -203,8 +195,8 @@ func reviewerHostDirs(in RoundInput) []hostDir {
 }
 
 // leaveOutSessionHostPaths is leaveOutHostPaths for text a session wrote: it
-// also replaces the WSL mount spelling of each directory, the one herdr hands
-// a session on Windows and so the one it may repeat.
+// also replaces the WSL mount spelling of each directory, the one a session
+// that runs in WSL on a Windows checkout sees and so the one it may repeat.
 func leaveOutSessionHostPaths(s string, dirs ...hostDir) string {
 	for _, sp := range hostPathSpellings(true, dirs...) {
 		s = strings.ReplaceAll(s, sp.text, sp.name)

@@ -276,7 +276,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		helpLines = []string{"Run " + outstandingAsksHelpLine(ticket, parkedOutstanding, budgetUsed, fixRounds)}
 	} else if len(slices) == 0 && !adopted {
 		// A ticket with nothing to work has the two ways to get work that
-		// `jig ticket new` and the refusal of `jig run` give.
+		// `jig ticket new` and the refusal of `jig claim` give.
 		helpLines = getWorkHints(ticket)
 	} else {
 		hint, err := nextStepHint(st, ticket)
@@ -319,7 +319,7 @@ func outstandingAsksHelpLine(ticket string, parked, budgetUsed, budgetLimit int)
 // resumeCommand returns the exact command that clears a parked
 // (needs-input) slice's custody. Amending the brief and requeuing is the
 // remedy only when the slice was parked for a flawed brief AND has brief
-// sections for --from-brief-diff to notice (frontier.Requeue keys off
+// sections for --from-brief-diff to notice (ready.Requeue keys off
 // FromBrief hashes): a gate fix slice carries the same "flawed-brief"
 // reason but no FromBrief, and a plain question on a slice that does have
 // brief sections is not a brief problem at all. Every other parked slice,
@@ -394,7 +394,8 @@ func sliceByID(slices []store.Slice, id string) (store.Slice, bool) {
 // command that can actually reset it; otherwise, once every slice is
 // green, the hint points at gate (no rounds yet, or a last round that was
 // not clean, whose fix slices are green by now) or publish (last round
-// clean); otherwise it points at run to work the frontier.
+// clean); otherwise it points at next and claim to take a slice of the
+// frontier.
 func nextStepHint(st *store.Store, ticket string) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
@@ -507,14 +508,14 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		default:
 			// Every slice is green and the last round was not clean, so
 			// its fix slices are already built: what moves the ticket is
-			// the next round, not `jig run`, which would find nothing to
+			// the next round, not `jig next`, which would find nothing to
 			// do and reprint this same line. A verdict jig could not read
 			// lands here too, and the next round is the right step there
 			// as well.
 			return fmt.Sprintf("Run `jig gate %s` to open the next gate round", ticket), nil
 		}
 	}
-	return fmt.Sprintf("Run `jig run %s` to work the frontier", ticket), nil
+	return fmt.Sprintf("Run `jig next %s` to see what is ready, then `jig claim %s --slice <slice>` to take one", ticket, ticket), nil
 }
 
 var gateRoundDirRE = regexp.MustCompile(`^round-(\d+)$`)

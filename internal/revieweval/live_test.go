@@ -13,20 +13,20 @@ import (
 	"github.com/develdeco/jig/internal/staircase"
 )
 
-// buildJigBinary compiles cmd/jig into a temp dir and returns its path, so
-// TestEvalLive can pass it as session.Options{ScreenBinary: ...} - every
-// reviewer and judge dispatch is screened, and a screened headless session
-// needs a real jig binary for its PreToolUse hook to re-exec
-// (internal/session/headless_live_test.go builds the same way).
-func buildJigBinary(t *testing.T) string {
+// buildScreenHook compiles testdata/fixture/screenhook into a temp dir and
+// returns its path, so TestEvalLive can pass it as
+// session.Options{ScreenBinary: ...} - every reviewer and judge dispatch is
+// screened, and a screened headless session needs the program its PreToolUse
+// hook re-execs (internal/session/headless_live_test.go builds the same way).
+func buildScreenHook(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "jig-bin")
+	dir, err := os.MkdirTemp("", "jig-screenhook")
 	if err != nil {
 		t.Fatalf("revieweval: create build dir: %v", err)
 	}
 	gittest.AtExit(func() { os.RemoveAll(dir) })
 
-	name := "jig"
+	name := "screenhook"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -35,9 +35,9 @@ func buildJigBinary(t *testing.T) string {
 		goBin += ".exe"
 	}
 	out := filepath.Join(dir, name)
-	cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, filepath.Join(fixture.RepoRoot(t), "cmd", "jig"))
+	cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, filepath.Join(fixture.RepoRoot(t), "testdata", "fixture", "screenhook"))
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("revieweval: build jig: %v\n%s", err, output)
+		t.Fatalf("revieweval: build the screen hook: %v\n%s", err, output)
 	}
 	return out
 }
@@ -115,11 +115,13 @@ func TestEvalLive(t *testing.T) {
 	if backendName == "" {
 		t.Skip("revieweval: JIG_REVIEWEVAL_BACKEND not set")
 	}
-	if err := session.Available(backendName); err != nil {
-		t.Fatalf("revieweval: backend %s not available: %v", backendName, err)
+	if backendName == "headless" {
+		if _, err := exec.LookPath("claude"); err != nil {
+			t.Fatalf("revieweval: backend %s needs claude on PATH: %v", backendName, err)
+		}
 	}
 
-	jigBin := buildJigBinary(t)
+	hookBin := buildScreenHook(t)
 	// Env is built from this test process's own environment, with
 	// everything jig or this package owns (JIG_ vars), the gittest.Run
 	// test scaffolding (GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM) and
@@ -128,7 +130,7 @@ func TestEvalLive(t *testing.T) {
 	// which can run its own Bash and read its own environment - never sees
 	// JIG_REVIEWEVAL_BACKEND naming this measurement, or anything else this
 	// process happens to be running with that names it.
-	backend, err := liveBackend(backendName, jigBin, "", os.Environ())
+	backend, err := liveBackend(backendName, hookBin, "", os.Environ())
 	if err != nil {
 		t.Fatalf("revieweval: construct backend %s: %v", backendName, err)
 	}

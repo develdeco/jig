@@ -168,10 +168,10 @@ func TestGateReportHintNamesTheOrderWhenFixSlicesAreQueuedToo(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("hint = %v, want several lines naming the order", lines)
 	}
-	runIdx := strings.Index(joined, "jig run "+fx.Ticket)
+	nextIdx := strings.Index(joined, "jig next "+fx.Ticket)
 	gateIdx := strings.Index(joined, "jig gate "+fx.Ticket)
-	if runIdx < 0 || gateIdx < 0 || runIdx > gateIdx {
-		t.Fatalf("hint = %q, want `jig run` named before `jig gate`", joined)
+	if nextIdx < 0 || gateIdx < 0 || nextIdx > gateIdx {
+		t.Fatalf("hint = %q, want `jig next` named before `jig gate`", joined)
 	}
 }
 
@@ -212,15 +212,15 @@ func TestGateReportHintReadsTheFrontierNotTheFixSliceCount(t *testing.T) {
 		if len(lines) < 2 {
 			t.Fatalf("hint = %v, want several lines naming the order", lines)
 		}
-		runIdx := strings.Index(joined, "jig run "+fx.Ticket)
+		nextIdx := strings.Index(joined, "jig next "+fx.Ticket)
 		gateIdx := strings.Index(joined, "jig gate "+fx.Ticket)
-		if runIdx < 0 || gateIdx < 0 || runIdx > gateIdx {
-			t.Fatalf("hint = %q, want `jig run` named before `jig gate`", joined)
+		if nextIdx < 0 || gateIdx < 0 || nextIdx > gateIdx {
+			t.Fatalf("hint = %q, want `jig next` named before `jig gate`", joined)
 		}
 	})
 
 	// A frontier parked on an unanswered question does not advance on a
-	// bare `jig run <ticket>`: what frees it is the answer, which is what
+	// bare `jig next <ticket>`: what frees it is the answer, which is what
 	// `jig status` prints for the same state. The gate's hint must not
 	// send a person to a command that cannot move anything.
 	t.Run("frontier parked on a question names the answer", func(t *testing.T) {
@@ -268,7 +268,7 @@ func TestGateReportHintReadsTheFrontierNotTheFixSliceCount(t *testing.T) {
 		if len(lines) != 1 {
 			t.Fatalf("hint = %v, want one line: the gate runs now", lines)
 		}
-		if strings.Contains(lines[0], "jig run ") {
+		if strings.Contains(lines[0], "jig next ") {
 			t.Fatalf("hint = %q, must not send a person to the frontier when it is already green", lines[0])
 		}
 		if !strings.Contains(lines[0], "jig gate "+fx.Ticket) {

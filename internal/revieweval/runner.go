@@ -402,7 +402,7 @@ func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string,
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: the oracles fail, so no gate would review this round: %w", c.Name, n, oerr)
 	}
 
-	rnd, ok, rerr := verifydeliver.NewReviewerGateSource(backend).Round(verifydeliver.RoundInput{
+	rnd, ok, rerr := reviewerSource(backend).Round(verifydeliver.RoundInput{
 		Store: st, Ticket: ticket, Round: n, LeaseDir: repoDir, RepoName: evalRepoName, Target: evalTarget,
 		Model: model, Effort: project.Config{}.ReviewEffortFor, Intent: intent, Manifest: man, OracleRuns: oracleRuns, Open: fold.Open, Dismissed: fold.Dismissed,
 	})

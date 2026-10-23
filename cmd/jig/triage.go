@@ -74,8 +74,8 @@ func stdoutIsTerminal(w io.Writer) bool {
 	return isTerminalFile(f)
 }
 
-// triageFor builds the GateOpts.Triage hook the scripted gate and `jig solve`
-// wire in. jig prompts nobody: verifydeliver.DefaultTriage keeps every fix and
+// triageFor builds the GateOpts.Triage hook the scripted gate (`jig gate
+// --scenario`) wires in. jig prompts nobody: verifydeliver.DefaultTriage keeps every fix and
 // every ask with a full build target, and an ask missing a part of it stays
 // undecided for a person to decide with `jig triage`. It prints one note line
 // naming why nothing was prompted, only when there was something to triage.

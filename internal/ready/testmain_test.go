@@ -1,4 +1,4 @@
-package frontier
+package ready
 
 import (
 	"os"

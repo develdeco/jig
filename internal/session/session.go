@@ -1,20 +1,15 @@
-// Package session dispatches one slice attempt to a coding-agent backend
-// and lets the caller read the result back off disk. Three backends
-// implement the same narrow interface: fake (a deterministic scenario
-// player used in CI and tests), headless (a local `claude -p` subprocess),
-// and herdr (a remote agent driven through herdr, natively off Windows and
-// via WSL on Windows).
+// Package session dispatches one session to a coding-agent backend and lets
+// the caller read the result back off disk. Two backends implement the same
+// narrow interface: fake (a deterministic scenario player used in tests) and
+// headless (a local `claude -p` subprocess). The jig binary links none of it
+// (lint/deps_test.go): jig starts no session, and what is left here serves
+// the reviewer evaluation of internal/revieweval, which launches reviewers
+// to measure them.
 package session
 
-import (
-	"fmt"
-	"os/exec"
-	"runtime"
+import "fmt"
 
-	"github.com/develdeco/jig/internal/axi"
-)
-
-// Dispatch describes one slice attempt for a backend to run. Prompt carries
+// Dispatch describes one session for a backend to run. Prompt carries
 // paths, not file contents; the backend (or the agent it drives) reads
 // SliceJSON itself.
 type Dispatch struct {
@@ -36,7 +31,7 @@ type Dispatch struct {
 	// in the dispatch so that a backend that spells a path for its session
 	// differently from jig does so for this one's mention in the prompt as
 	// well as for the others (headless: the long spelling of a Windows 8.3
-	// name; herdr on Windows: the WSL mount).
+	// name).
 	ExtraReadFile string
 
 	// Screen attaches the command/secret screens as the session's
@@ -50,9 +45,8 @@ type Dispatch struct {
 	// headless backend has anything to turn off: `claude -p` saves every
 	// session under ~/.claude/projects, in a directory named after the
 	// session's working directory, and this passes --no-session-persistence
-	// to it. The fake backend runs no session, and herdr's agent is an
-	// interactive claude session started without flags, so both accept the
-	// field and ignore it. A caller sets it for a dispatch whose input must
+	// to it. The fake backend runs no session, so it accepts the field and
+	// ignores it. A caller sets it for a dispatch whose input must
 	// not be copied into the operator's own Claude Code data (the intent
 	// summarizer's excerpt); every other dispatch leaves it unset.
 	NoSessionPersistence bool
@@ -91,11 +85,13 @@ type Backend interface {
 type Options struct {
 	ScenarioDir string // fake
 
-	// ScreenBinary is the jig binary whose `_screen` verb a screened
-	// headless dispatch's PreToolUse hook runs. Empty means this process's
-	// own executable, which a screened dispatch refuses unless this process
-	// is the jig binary itself: a test binary or another program running
-	// screened dispatches must pass a built jig.
+	// ScreenBinary is the program a screened headless dispatch's PreToolUse
+	// hook runs, as `<ScreenBinary> _screen`: one that prints the decision
+	// of internal/screen's Hook for the tool call on its stdin (the program
+	// of testdata/fixture/screenhook, or a jig binary from before the
+	// verb went). A screened dispatch refuses when it is empty: there is no
+	// default, since the process running the dispatch is rarely such a
+	// program and would otherwise register itself as the hook.
 	ScreenBinary string // headless
 
 	// ClaudeBinary is the `claude` program a headless dispatch runs. Empty,
@@ -106,7 +102,7 @@ type Options struct {
 	// dispatch's worktree (the child's working directory), and a bare name
 	// is searched for on PATH by os/exec, not here, so one that is not
 	// found fails the dispatch as "claude ran no session", not as
-	// CLAUDE_NOT_FOUND. Available looks only at PATH and ignores it.
+	// CLAUDE_NOT_FOUND.
 	ClaudeBinary string // headless
 
 	// Env, when non-nil, is the exact environment a headless dispatch's
@@ -125,16 +121,14 @@ type Options struct {
 	Env []string // headless
 }
 
-// New constructs a Backend by name: "fake", "headless", or "herdr". Only
-// "headless" ever applies Options.Env to a dispatched child (childEnv); a
-// non-nil Env given to a backend that cannot apply it fails closed here,
-// rather than silently dispatching that backend's child under whatever
-// environment it would otherwise inherit - the exact silent drop herdr's
-// own Run demonstrated before this check existed (newHerdrBackend accepted
-// Options but had no env field at all). A caller that filters its own
-// environment before handing it to session.New (internal/revieweval's live
-// path above all) can trust that its filtering either reaches the child or
-// the construction fails, never that it was quietly ignored.
+// New constructs a Backend by name: "fake" or "headless". Only "headless"
+// ever applies Options.Env to a dispatched child (childEnv); a non-nil Env
+// given to a backend that cannot apply it fails closed here, rather than
+// silently dispatching that backend's child under whatever environment it
+// would otherwise inherit. A caller that filters its own environment before
+// handing it to session.New (internal/revieweval's live path above all) can
+// trust that its filtering either reaches the child or the construction
+// fails, never that it was quietly ignored.
 func New(name string, opts Options) (Backend, error) {
 	switch name {
 	case "fake":
@@ -144,11 +138,6 @@ func New(name string, opts Options) (Backend, error) {
 		return newFakeBackend(opts), nil
 	case "headless":
 		return newHeadlessBackend(opts), nil
-	case "herdr":
-		if opts.Env != nil {
-			return nil, envUnsupportedError(name)
-		}
-		return newHerdrBackend(opts), nil
 	default:
 		return nil, fmt.Errorf("session: unknown backend %q", name)
 	}
@@ -158,41 +147,6 @@ func New(name string, opts Options) (Backend, error) {
 // apply it, for New's own fail-closed check above.
 func envUnsupportedError(backend string) error {
 	return fmt.Errorf("session: Options.Env is set, but backend %q cannot apply it; leave Env nil or dispatch through a backend that supports it (headless)", backend)
-}
-
-// Available reports whether the program the named backend runs is on PATH,
-// so a command can stop before it spends attempts on a missing tool. The
-// fake backend needs nothing.
-func Available(name string) error {
-	return available(runtime.GOOS, name)
-}
-
-func available(goos, name string) error {
-	var prog, install string
-	switch name {
-	case "headless":
-		prog, install = "claude", "Install the Claude Code CLI so `claude` is on PATH"
-	case "herdr":
-		if goos == "windows" {
-			prog, install = "wsl", "Install WSL with herdr in its default distro (JIG_WSL_DISTRO picks another)"
-		} else {
-			prog, install = "herdr", "Install herdr so it is on PATH"
-		}
-	default:
-		return nil
-	}
-	if _, err := exec.LookPath(prog); err == nil {
-		return nil
-	}
-	other := "headless"
-	if name == "headless" {
-		other = "herdr"
-	}
-	return &axi.Error{
-		Msg:  fmt.Sprintf("the %s backend needs %s, which is not on PATH", name, prog),
-		Code: "BACKEND_UNAVAILABLE",
-		Help: []string{install, fmt.Sprintf("Or run with `--backend %s`", other)},
-	}
 }
 
 // PublishPicksSlice is the Dispatch.Slice of a publish picks session: the

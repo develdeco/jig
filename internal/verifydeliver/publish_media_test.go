@@ -23,7 +23,7 @@ func gateCleanReviewerRound(t *testing.T, fx *fixture.Fixture, d Deps) {
 		writeMustReviewResult(t, sd)
 		return nil
 	}}
-	report, err := Gate(d, NewReviewerGateSource(reviewer), GateOpts{Ticket: fx.Ticket})
+	report, err := Gate(d, newReviewerGateSource(reviewer), GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate: %v", err)
 	}

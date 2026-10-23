@@ -42,12 +42,9 @@ func TestTicketPreconditions(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"run", "DEMO-1"}, "ticket DEMO-1 has no slices yet"},
-		{[]string{"run", "DEMO-99"}, "ticket DEMO-99 has no slices yet"},
 		{[]string{"requeue", "DEMO-1", "--from-brief-diff"}, "ticket DEMO-1 has no slices yet"},
 		{[]string{"gate", "DEMO-1"}, "ticket DEMO-1 has no slices yet"},
 		{[]string{"publish", "DEMO-1", "--yes"}, "ticket DEMO-1 has no slices yet"},
-		{[]string{"solve", "DEMO-1", "--yes"}, "ticket DEMO-1 has no slices yet"},
 	}
 	for _, c := range cases {
 		code, out := jig(c.args...)

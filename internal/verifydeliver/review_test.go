@@ -848,7 +848,7 @@ func TestReviewerGateSourceRoundHappyPath(t *testing.T) {
 	}}
 
 	briefPath := filepath.Join(dir, "brief.md")
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 	rnd, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -925,7 +925,7 @@ func TestReviewerGateSourceRoundGuardRejectsACommit(t *testing.T) {
 		return nil
 	}}
 
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 	_, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -966,7 +966,7 @@ func TestReviewerGateSourceRoundGuardRejectsDirtyTree(t *testing.T) {
 		return nil
 	}}
 
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 	_, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -999,7 +999,7 @@ func TestReviewerGateSourceRoundBackendFailure(t *testing.T) {
 		return errors.New("boom")
 	}}
 
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 	_, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -1023,7 +1023,7 @@ func TestReviewerGateSourceRoundNoResultWritten(t *testing.T) {
 
 	backend := stubBackend{run: func(d session.Dispatch) error { return nil }}
 
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 	_, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -1052,7 +1052,7 @@ func TestReviewerGateSourceRoundMissingCoverageIsInvalid(t *testing.T) {
 		return os.WriteFile(d.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
 
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 	_, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -1070,7 +1070,7 @@ func TestReviewerGateSourceRoundMissingCoverageIsInvalid(t *testing.T) {
 
 	// A corrected result then passes.
 	backend2 := stubBackend{run: func(d session.Dispatch) error { writeMustReviewResult(t, d); return nil }}
-	src2 := NewReviewerGateSource(backend2)
+	src2 := newReviewerGateSource(backend2)
 	_, ok2, err2 := src2.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -1117,7 +1117,7 @@ func TestReviewerGateSourceRoundPriorNamingNoKnownIDIsInvalid(t *testing.T) {
 		return os.WriteFile(d.ResultJSON, data, 0o644)
 	}}
 
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 	_, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -1145,7 +1145,7 @@ func TestReviewerGateSourceRoundDeltaScopeAcrossRounds(t *testing.T) {
 	round1Head := commitReviewLease(t, dir, "round 1")
 
 	backend := stubBackend{run: func(d session.Dispatch) error { writeMustReviewResult(t, d); return nil }}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	rnd1, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
@@ -1233,7 +1233,7 @@ func TestReviewerGateSourceRoundWithFakeBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session.New: %v", err)
 	}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 	rnd, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -1270,7 +1270,7 @@ func TestReviewerGateSourceRoundCleanWithoutDispatchWhenNothingOutstanding(t *te
 		return errors.New("must not dispatch")
 	}}
 
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 	rnd, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -1319,7 +1319,7 @@ func TestReviewerGateSourceRoundDispatchesWhenOpenFindingsAreOutstanding(t *test
 		return nil
 	}}
 
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 	_, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -1362,7 +1362,7 @@ func TestReviewerGateSourceRoundDispatchesOnDeletionOnlyDiff(t *testing.T) {
 		return nil
 	}}
 
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 	rnd, ok, err := src.Round(RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
@@ -1437,7 +1437,7 @@ func TestReviewerGateSourceRoundReadsStatusNotTheReviewersLabel(t *testing.T) {
 				return nil
 			}}
 
-			src := NewReviewerGateSource(backend)
+			src := newReviewerGateSource(backend)
 			_, ok, err := src.Round(RoundInput{
 				Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: dir,
 				RepoName: "fixture-repo", Target: "main", Model: "rung-a",

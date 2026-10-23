@@ -11,7 +11,7 @@ import (
 // respellMentions returns prompt with every mention of one of paths replaced
 // by spell(path): how a backend tells a session about a path in the spelling
 // the session itself uses, where that differs from jig's (headless: the long
-// spelling of a Windows 8.3 short name; herdr on Windows: the WSL mount). The
+// spelling of a Windows 8.3 short name). The
 // longest path goes first, so a path that contains another one is replaced
 // whole. A path that is empty, or that spell leaves as it is, is skipped.
 func respellMentions(prompt string, paths []string, spell func(string) string) string {

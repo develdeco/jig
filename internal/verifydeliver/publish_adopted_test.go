@@ -147,7 +147,7 @@ func TestPublishOfAnAdoptedBranchHoldsTheHeadToTheReview(t *testing.T) {
 	d := newDeps(t, fx)
 	newAdoptTicket(t, d, ticket)
 	authorBranch(t, fx, branch)
-	src := NewReviewerGateSource(reviewerBackend(t))
+	src := newReviewerGateSource(reviewerBackend(t))
 	first, err := Gate(d, src, GateOpts{Ticket: ticket, Branch: branch})
 	if err != nil || first.Verdict != "clean" || first.ReviewedSHA["fixture-repo"] == "" {
 		t.Fatalf("Gate --branch: verdict %q, reviewed %q, err %v, want a clean reviewer round", first.Verdict, first.ReviewedSHA["fixture-repo"], err)
@@ -191,7 +191,7 @@ func TestPublishOfAnAdoptedBranchShipsTheReviewedHeadAfterTheTargetMoves(t *test
 	d := newDeps(t, fx)
 	newAdoptTicket(t, d, ticket)
 	tip := authorBranch(t, fx, branch)
-	first, err := Gate(d, NewReviewerGateSource(reviewerBackend(t)), GateOpts{Ticket: ticket, Branch: branch})
+	first, err := Gate(d, newReviewerGateSource(reviewerBackend(t)), GateOpts{Ticket: ticket, Branch: branch})
 	if err != nil || first.Verdict != "clean" || first.ReviewedSHA["fixture-repo"] != tip {
 		t.Fatalf("Gate --branch: verdict %q, reviewed %q, err %v, want a clean reviewer round over the author's %s", first.Verdict, first.ReviewedSHA["fixture-repo"], err, tip)
 	}

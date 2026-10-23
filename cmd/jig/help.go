@@ -55,8 +55,8 @@ func usageBlocks() []string {
 
 	blocks = append(blocks, axi.Help(
 		`jig ticket new --title "Fix the thing"`,
-		"jig run T-1",
-		"jig solve T-1 --yes",
+		"jig next T-1",
+		"jig claim T-1 --slice a",
 	))
 	return blocks
 }

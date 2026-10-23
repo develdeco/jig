@@ -1121,7 +1121,7 @@ func TestGateInfersAnAdoptedTicketsIntent(t *testing.T) {
 		return backend.Run(sd)
 	}}
 
-	report, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: ticket, Branch: branch})
+	report, err := Gate(d, newReviewerGateSource(wrapped), GateOpts{Ticket: ticket, Branch: branch})
 	if err != nil {
 		t.Fatalf("Gate --branch on a brief-less ticket: %v", err)
 	}
@@ -1146,7 +1146,7 @@ func TestGateInfersAnAdoptedTicketsIntent(t *testing.T) {
 	}
 
 	// A later round points at the excerpt again.
-	if _, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: ticket}); err != nil {
+	if _, err := Gate(d, newReviewerGateSource(wrapped), GateOpts{Ticket: ticket}); err != nil {
 		t.Fatalf("Gate round 2: %v", err)
 	}
 }

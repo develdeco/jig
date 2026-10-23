@@ -148,33 +148,23 @@ func roundThroughMain(t *testing.T, e env, fx *fixture.Fixture, result string, o
 //     note by the risk floor, an ask kept, and a genuine note - after a first
 //     attempt whose reviewed_paths is missing a must_review path fails
 //     REVIEW_INVALID, leaving the round open, and a corrected report (same
-//     round number) succeeds; the two fix slices it appends are driven green
-//     by `jig run`.
+//     round number) succeeds; the two fix slices it appends are built green
+//     in the clone.
 //   - round 2 (delta): the kept fix recurs through prior (its new fix
 //     slice's goal names the previous one), the kept ask's file clears
 //     since nothing new is reported there, and the low-risk fix is
 //     re-reported through prior and, below the floor again, routes
-//     straight to a note once more; the recurrence's new fix slice is driven
-//     green by `jig run`.
+//     straight to a note once more; the recurrence's new fix slice is built
+//     green in the clone.
 //   - round 3: clean, with the round 1 note still on record.
 func TestRecordedGateRoundsThroughMain(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
 	e := testEnv(fx.Home)
 	ticket := fx.Ticket
-	runArgs := []string{"run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
 
-	// --- build a, b, c, d to green (same shape as the e2e package's own
-	// TestEndToEndTwice): a, b, d go straight through; c pauses on q-001.
-	out, code := runMain(t, e, "", runArgs...)
-	if code != 2 {
-		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\n%s", code, out)
-	}
-	answerArgs := []string{"run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	out, code = runMain(t, e, "", answerArgs...)
-	if code != 0 {
-		t.Fatalf("run (answer) exit = %d, want 0\n%s", code, out)
-	}
+	// --- build a, b, c, d to green, as an agent does in the operator's clone.
+	buildFixtureTicket(t, fx)
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -200,7 +190,7 @@ func TestRecordedGateRoundsThroughMain(t *testing.T) {
 	brokenPath := filepath.Join(t.TempDir(), "broken.json")
 	writeReviewResultAt(t, brokenPath, broken)
 
-	out, code = roundThroughMain(t, e, fx, brokenPath, "--yes")
+	out, code := roundThroughMain(t, e, fx, brokenPath, "--yes")
 	if code != 1 {
 		t.Fatalf("round 1 first (broken) attempt: exit = %d, want 1\n%s", code, out)
 	}
@@ -291,10 +281,9 @@ func TestRecordedGateRoundsThroughMain(t *testing.T) {
 		t.Fatalf("the noted (below-floor) fix (beta workspace) must not build its own slice; got %+v", slices1)
 	}
 
-	// --- drive both round 1 fix slices to green.
-	out, code = runMain(t, e, "", runArgs...)
-	if code != 0 {
-		t.Fatalf("run (fix-1 slices) exit = %d, want 0\n%s", code, out)
+	// --- build both round 1 fix slices to green.
+	for _, s := range []string{"fix-1-alpha-test", "fix-1-r1-f3"} {
+		buildScenarioSlice(t, fx, s, 1)
 	}
 	for _, s := range []string{"fix-1-alpha-test", "fix-1-r1-f3"} {
 		state, err := st.ReadSliceState(ticket, s)
@@ -366,11 +355,8 @@ func TestRecordedGateRoundsThroughMain(t *testing.T) {
 		t.Fatalf("fix-2-alpha-test's goal must name the previous fix slice fix-1-alpha-test:\n%s", fix2Goal)
 	}
 
-	// --- drive the round 2 recurrence's fix slice to green.
-	out, code = runMain(t, e, "", runArgs...)
-	if code != 0 {
-		t.Fatalf("run (fix-2-alpha-test) exit = %d, want 0\n%s", code, out)
-	}
+	// --- build the round 2 recurrence's fix slice to green.
+	buildScenarioSlice(t, fx, "fix-2-alpha-test", 1)
 	state, err := st.ReadSliceState(ticket, "fix-2-alpha-test")
 	if err != nil {
 		t.Fatalf("read slice state fix-2-alpha-test: %v", err)

@@ -62,7 +62,7 @@ func TestRenderStatus(t *testing.T) {
 		"  d,queued,0,-,-\n" +
 		"questions: none\n" +
 		"help[1]:\n" +
-		"  Run `jig run JIG-1` to work the frontier\n"
+		"  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one\n"
 
 	if got != want {
 		t.Fatalf("RenderStatus mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)
@@ -207,50 +207,33 @@ func TestRenderStatusParkedFlawedBrief(t *testing.T) {
 	}
 }
 
-// TestGateFixSliceFlawedBriefResumesWithAnswer drives a real gate round
-// through `jig run`/`jig gate` (fake backend, scripted gate source) until a
-// gate fix slice - which never has FromBrief - reports a flawed brief and
-// parks. Amending the brief is the remedy only for a slice that cites brief
-// sections, so the frontier parks the fix slice on a plain question, with no
-// flawed-brief reason, and status resumes it by answering. Before that, the
-// frontier set Reason "flawed-brief" from the build session's outcome alone, so
-// a fix slice landed on the same Reason as a brief-derived slice, and a
-// Reason-keyed resumeCommand printed `jig requeue ... --from-brief-diff` - a
-// command that can never touch a slice with no FromBrief hash to recompute,
-// wedging the ticket forever. resumeCommand keys off the slice's own
-// structure too, so a store an older jig wrote, whose fix slice still carries
-// the reason, is resumed by answering as well; the test checks both.
+// TestGateFixSliceFlawedBriefResumesWithAnswer: a gate fix slice - which never
+// has FromBrief - that a builder judged flawed-brief and parked on a plain
+// question is resumed by answering it. Amending the brief is the remedy only
+// for a slice that cites brief sections, so the question is plain, with no
+// flawed-brief reason, and status resumes the slice by answering. Before that,
+// the builder's outcome alone set Reason "flawed-brief", so a fix slice landed
+// on the same Reason as a brief-derived slice, and a Reason-keyed
+// resumeCommand printed `jig requeue ... --from-brief-diff` - a command that
+// can never touch a slice with no FromBrief hash to recompute, wedging the
+// ticket forever. resumeCommand keys off the slice's own structure too, so a
+// store an older jig wrote, whose fix slice still carries the reason, is
+// resumed by answering as well; the test checks both.
 func TestGateFixSliceFlawedBriefResumesWithAnswer(t *testing.T) {
 	t.Parallel()
-	fx := newFixture(t, fixture.Opts{ScenarioBranch: "fix-flawed-brief"})
-	e := testEnv(fx.Home)
-
-	runArgs := func(extra ...string) []string {
-		return append([]string{"run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}, extra...)
-	}
-
-	// 1. a, b, d green; c parks on q-001 (see testdata/fixture/scenario).
-	var buf1 bytes.Buffer
-	if code := run(e, runArgs(), &buf1, strings.NewReader("")); code != 2 {
-		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\n%s", code, buf1.String())
-	}
-
-	// 2. answer q-001: every base slice reaches green.
-	var buf2 bytes.Buffer
-	if code := run(e, runArgs("--answer", "q-001", "Casual."), &buf2, strings.NewReader("")); code != 0 {
-		t.Fatalf("run 2 (answer) exit = %d, want 0\n%s", code, buf2.String())
-	}
-
-	// 3. gate round 1 appends fix-1 (see testdata/fixture/scenario/gate).
-	var buf3 bytes.Buffer
-	gateCode := run(e, []string{"gate", fx.Ticket, "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}, &buf3, strings.NewReader(""))
-	if gateCode != 0 {
-		t.Fatalf("gate exit = %d, want 0\n%s", gateCode, buf3.String())
-	}
-
+	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
+	}
+
+	// A gate round's fix slice (see testdata/fixture/scenario/gate): it cites
+	// no brief section, and it is parked on a question.
+	if err := st.AppendSlices(fx.Ticket, []store.Slice{{
+		ID: "fix-1", Workspace: "alpha", Goal: "Add a doc comment to Add explaining its behavior.",
+		Oracle: "test", BlockedBy: []string{}, FromGate: 1,
+	}}); err != nil {
+		t.Fatalf("AppendSlices: %v", err)
 	}
 	slices, err := st.ReadSlices(fx.Ticket)
 	if err != nil {
@@ -258,25 +241,15 @@ func TestGateFixSliceFlawedBriefResumesWithAnswer(t *testing.T) {
 	}
 	fix1, ok := sliceByID(slices, "fix-1")
 	if !ok {
-		t.Fatalf("expected gate round 1 to append fix-1; got %+v", slices)
+		t.Fatalf("fix-1 is not in %+v", slices)
 	}
 	if len(fix1.FromBrief) != 0 {
 		t.Fatalf("fix-1.FromBrief = %v, want none (test setup is wrong)", fix1.FromBrief)
 	}
-
-	// 4. run again: fix-1 dispatches to the scripted flawed-brief outcome
-	// (testdata/fixture/scenario-branches/fix-flawed-brief) and parks.
-	var buf4 bytes.Buffer
-	if code := run(e, runArgs(), &buf4, strings.NewReader("")); code != 2 {
-		t.Fatalf("run 3 (fix-1) exit = %d, want 2 (paused)\n%s", code, buf4.String())
+	if err := st.WriteQuestion(fx.Ticket, store.Question{ID: "q-001", Slice: "fix-1", Status: "open", Body: "The brief is silent on this; which way?"}); err != nil {
+		t.Fatalf("WriteQuestion: %v", err)
 	}
-	fix1State, err := st.ReadSliceState(fx.Ticket, "fix-1")
-	if err != nil {
-		t.Fatalf("ReadSliceState fix-1: %v", err)
-	}
-	if fix1State.State != "needs-input" || fix1State.Reason != "" {
-		t.Fatalf("fix-1 state = %+v, want needs-input with no flawed-brief reason: it cites no brief section to amend", fix1State)
-	}
+	fix1State := store.SliceState{State: "needs-input", Attempts: 1, Question: "q-001"}
 
 	wantResume := fmt.Sprintf("jig answer %s %s '<text>'", fx.Ticket, fix1State.Question)
 	for _, reason := range []string{"", "flawed-brief"} {
@@ -588,136 +561,11 @@ func TestValidateCatchesCycle(t *testing.T) {
 	}
 }
 
-// TestScreenDenyAllow drives the _screen hook handler directly: a denied
-// git-push call gets a deny decision; a passing call to a tool the screen
-// grants (Bash, Read) gets an allow decision, since that allow is the
-// tool's only grant in a headless session; a passing edit-tool call and
-// malformed input get no decision at all, leaving the call to the session's
-// permission rules.
-func TestScreenDenyAllow(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name  string
-		input string
-		want  string // exact stdout
-	}{
-		{
-			"denied git push",
-			`{"tool_name":"Bash","tool_input":{"command":"git push origin main"}}`,
-			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked ` + "`git push`" + `: history must not be pushed from a screened session."},"systemMessage":"Blocked ` + "`git push`" + `: history must not be pushed from a screened session."}` + "\n",
-		},
-		{
-			"denied secret read",
-			`{"tool_name":"Read","tool_input":{"file_path":"/repo/.env"}}`,
-			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: ` + "`/repo/.env`" + ` may hold live credentials."},"systemMessage":"Blocked: ` + "`/repo/.env`" + ` may hold live credentials."}` + "\n",
-		},
-		{
-			"granted Bash",
-			`{"tool_name":"Bash","tool_input":{"command":"git status"}}`,
-			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"screened by jig"}}` + "\n",
-		},
-		{
-			"granted Read",
-			`{"tool_name":"Read","tool_input":{"file_path":"/store/T-1/work/a.attempt-1.slice.json"}}`,
-			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"screened by jig"}}` + "\n",
-		},
-		{
-			"passing Write left to the rules",
-			`{"tool_name":"Write","tool_input":{"file_path":"/wt/main.go","content":"x"}}`,
-			"",
-		},
-		{
-			"denied secret Write",
-			`{"tool_name":"Write","tool_input":{"file_path":"/wt/.env","content":"x"}}`,
-			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: ` + "`/wt/.env`" + ` may hold live credentials."},"systemMessage":"Blocked: ` + "`/wt/.env`" + ` may hold live credentials."}` + "\n",
-		},
-		{
-			"malformed input",
-			`{"tool_name":`,
-			"",
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			var out bytes.Buffer
-			runScreen(strings.NewReader(c.input), &out)
-			if out.String() != c.want {
-				t.Fatalf("runScreen(%s) =\n%q\nwant\n%q", c.input, out.String(), c.want)
-			}
-		})
-	}
-}
-
-// TestScreenDeniesUnreadableInput drives the _screen hook handler - the
-// same runScreen the real `jig _screen` binary runs on its stdin/stdout -
-// with payload shapes an adversarial review found allowed: a known tool
-// whose required argument is missing, sent under the wrong key, or sent
-// with a type SecretPath cannot read (a list instead of a string, and the
-// like) must get a deny decision instead of silently falling through to
-// the session's permission rules.
-func TestScreenDeniesUnreadableInput(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name  string
-		input string
-	}{
-		{"Bash command under the wrong key", `{"tool_name":"Bash","tool_input":{"cmd":"git push"}}`},
-		{"Bash empty tool_input", `{"tool_name":"Bash","tool_input":{}}`},
-		{"Bash no tool_input at all", `{"tool_name":"Bash"}`},
-		{"Bash command is a list", `{"tool_name":"Bash","tool_input":{"command":["git","push"]}}`},
-		{"Read file_path is missing", `{"tool_name":"Read","tool_input":{}}`},
-		{"Read file_path is a number", `{"tool_name":"Read","tool_input":{"file_path":7}}`},
-		{"Glob pattern is missing", `{"tool_name":"Glob","tool_input":{"path":"."}}`},
-		{"Grep path is a number", `{"tool_name":"Grep","tool_input":{"pattern":"x","path":7}}`},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			var out bytes.Buffer
-			runScreen(strings.NewReader(c.input), &out)
-			if !strings.Contains(out.String(), `"permissionDecision":"deny"`) {
-				t.Fatalf("runScreen(%s) = %q, want a deny decision", c.input, out.String())
-			}
-			if !strings.Contains(out.String(), "cannot be judged") {
-				t.Errorf("runScreen(%s) = %q, want a reason saying the call cannot be judged", c.input, out.String())
-			}
-		})
-	}
-}
-
-// TestScreenGrantsEveryToolWithValidInput drives the _screen hook handler
-// for every tool a passing screen grants (screen.Granted), pinning that a
-// well-formed call to each still gets its allow decision through the real
-// hook path, not only Bash and Read.
-func TestScreenGrantsEveryToolWithValidInput(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		tool  string
-		input string
-	}{
-		{"Bash", `{"command":"git status"}`},
-		{"Read", `{"file_path":"/store/T-1/work/a.attempt-1.slice.json"}`},
-		{"Glob", `{"pattern":"**/*.go"}`},
-		{"Grep", `{"pattern":"func main"}`},
-	}
-	for _, c := range cases {
-		t.Run(c.tool, func(t *testing.T) {
-			var out bytes.Buffer
-			runScreen(strings.NewReader(`{"tool_name":"`+c.tool+`","tool_input":`+c.input+`}`), &out)
-			want := `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"screened by jig"}}` + "\n"
-			if out.String() != want {
-				t.Fatalf("runScreen(%s %s) = %q, want %q", c.tool, c.input, out.String(), want)
-			}
-		})
-	}
-}
-
 // TestHelpContainsCommands checks that bare `jig` help output names every
 // non-hidden command and flag in commandTable, and that hidden ones (the
-// _screen command, gate's --scenario flag) are absent from it. A hidden flag
-// shares its name with a visible flag of another command only while that
-// command exists (`jig run` and `jig solve` keep their own --scenario until
-// they go); the help then names the flag for that command, and the check for
-// the hidden one skips it.
+// observe command, gate's --scenario flag) are absent from it. A hidden flag
+// that shares its name with a visible flag of another command is named in the
+// help for that command, and the check for the hidden one skips it.
 func TestHelpContainsCommands(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/pool"
-	"github.com/develdeco/jig/internal/session"
 )
 
 // This file pins, one rule at a time, what renderPicksSection does to the
@@ -77,16 +76,16 @@ func TestRenderPicksSectionLeavesOutACaptionNamingTheStagingDirectory(t *testing
 
 // TestRenderPicksSectionLeavesOutACaptionNamingTheGateLeaseAsAWSLMount: the
 // gate lease is one of the directories a session may have been told about,
-// and on Windows herdr hands it over spelled as a WSL mount
-// (session.respellMentions), not jig's own spelling - so that spelling, not
-// only the raw one, must be checked for too.
+// and a session that runs in WSL on a Windows checkout sees it spelled as a
+// WSL mount, not jig's own spelling - so that spelling, not only the raw one,
+// must be checked for too.
 func TestRenderPicksSectionLeavesOutACaptionNamingTheGateLeaseAsAWSLMount(t *testing.T) {
 	t.Parallel()
 	leaseDir, err := pool.Dir(t.TempDir(), "repo", "JIG-1", pool.Gate)
 	if err != nil {
 		t.Fatalf("pool.Dir: %v", err)
 	}
-	res, name := renderPickWords(t, "r1", "it works", "ran it from "+session.WSLPath(leaseDir), hostDir{leaseDir, "<lease>"})
+	res, name := renderPickWords(t, "r1", "it works", "ran it from "+wslMountPath(leaseDir), hostDir{leaseDir, "<lease>"})
 	if fmt.Sprint(res.ScrubbedCaptions) != "["+name+"]" {
 		t.Errorf("ScrubbedCaptions = %v, want [%s] (the gate lease's WSL mount spelling)", res.ScrubbedCaptions, name)
 	}

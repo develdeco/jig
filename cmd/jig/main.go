@@ -1,6 +1,8 @@
-// Command jig is the CLI entry point for the jig ticket-solving tool: it
-// wires the store, project, session, staircase, frontier and verifydeliver
-// packages into a small set of subcommands.
+// Command jig is the CLI entry point for the jig ticket tool: it wires the
+// store, project, journal, ledger, verify, observe and verifydeliver packages
+// into a small set of subcommands. It starts no coding session and links no
+// code that does (lint/deps_test.go): an agent works the ticket in the
+// person's clone, and jig records and checks what it does.
 package main
 
 import (
@@ -15,13 +17,9 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/frontier"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/mirror"
 	"github.com/develdeco/jig/internal/project"
-	"github.com/develdeco/jig/internal/session"
-	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -165,30 +163,6 @@ func requirePositional(args []string, what string) (string, []string, error) {
 	return args[0], args[1:], nil
 }
 
-// extractAnswer pulls a "--answer <qid> <text>" pair (or "-answer") out of
-// args wherever it appears, since it takes two positional-shaped values and
-// stdlib flag only ever consumes one value per flag. It returns the
-// remaining args with that flag and its two values removed.
-func extractAnswer(args []string) (qid, text string, rest []string, err error) {
-	for i, a := range args {
-		if a != "--answer" && a != "-answer" {
-			continue
-		}
-		if i+2 >= len(args) {
-			return "", "", nil, &axi.Error{
-				Msg:  "--answer requires two values: <qid> <text>",
-				Code: "VALIDATION_ERROR",
-			}
-		}
-		qid, text = args[i+1], args[i+2]
-		rest = make([]string, 0, len(args)-3)
-		rest = append(rest, args[:i]...)
-		rest = append(rest, args[i+3:]...)
-		return qid, text, rest, nil
-	}
-	return "", "", args, nil
-}
-
 func splitOnce(s string, sep byte) (before, after string, ok bool) {
 	for i := 0; i < len(s); i++ {
 		if s[i] == sep {
@@ -309,57 +283,13 @@ func resolveStoreForProjectChecked(e env, projectFlag, storeFlag string, stdout 
 	return resolveStoreChecked(e, mp.Store, stdout, allowOlderSchema)
 }
 
-// rungs returns cfg's staircase rungs, falling back to staircase.Default()
-// when the project has not declared any.
-func rungs(cfg project.Config) staircase.Config {
-	if len(cfg.Staircase) > 0 {
-		return staircase.Config{Rungs: cfg.Staircase}
-	}
-	return staircase.Default()
-}
-
-// backendName resolves the effective session backend name: an explicit
-// --backend flag wins; otherwise "fake" when --scenario was given, else
-// "herdr".
-func backendName(explicit, scenario string) string {
-	if explicit != "" {
-		return explicit
-	}
-	if scenario != "" {
-		return "fake"
-	}
-	return "herdr"
-}
-
-// journalFunc binds a frontier.Deps-shaped journal callback to st and ticket.
-func journalFunc(st *store.Store, ticket string) func(journal.Line) error {
-	return func(l journal.Line) error {
-		return journal.Append(st, ticket, l)
-	}
-}
-
-// frontierDeps assembles frontier.Deps for one ticket.
-func frontierDeps(st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string, backend session.Backend, ticket string) frontier.Deps {
-	return frontier.Deps{
-		Store:   st,
-		Cfg:     cfg,
-		Machine: mp,
-		Backend: backend,
-		Rungs:   rungs(cfg),
-		Journal: journalFunc(st, ticket),
-		Home:    jigHome,
-	}
-}
-
-// verifydeliverDeps assembles verifydeliver.Deps for one ticket. Unlike
-// frontier.Deps, verifydeliver.Deps carries no Backend or injected Journal
-// func: Gate and Publish journal internally, bound to d.Store.
+// verifydeliverDeps assembles verifydeliver.Deps for one ticket.
 //
 // It also resolves the operator's own home directory, once, beside the jig
 // home root it is handed: gate intent inference looks for their local agent
-// transcripts under it, on every command that gates (jig gate and jig
-// solve). e.userHomeDir fails when it cannot say, which leaves UserHome ""
-// and inference reports that as its reason instead of looking anywhere else.
+// transcripts under it, on every command that gates. e.userHomeDir fails
+// when it cannot say, which leaves UserHome "" and inference reports that as
+// its reason instead of looking anywhere else.
 func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string) verifydeliver.Deps {
 	userHome, _ := e.userHomeDir()
 	return verifydeliver.Deps{
