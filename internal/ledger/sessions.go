@@ -28,7 +28,7 @@ import (
 //
 // Line shapes, all journal.Line values in the ledger (ledger.go):
 //
-//	session-start  session, agent?, harness?, cwd?, clone?, ticket?, slice?, model?, effort?
+//	session-start  session, agent?, harness?, cwd?, clone?, ticket?, slice?, model?, effort?, commit?
 //	session-touch  the same keys; every one given replaces what the session had
 //	session-end    session
 //	tool           session, agent?, tool?, files? (the observe hook writes these)
@@ -82,6 +82,10 @@ type Registration struct {
 	Slice   string
 	Model   string
 	Effort  string
+	// Commit is the HEAD of the clone when the line was written, for a
+	// reader that asks later whether HEAD has moved since (the observe hook
+	// does). The session fold ignores it.
+	Commit string
 }
 
 // MintID returns a fresh session id, "s-" and twelve hex digits, for a
@@ -136,6 +140,7 @@ func appendSession(root, event string, at time.Time, r Registration) error {
 			Slice:   r.Slice,
 			Model:   r.Model,
 			Effort:  r.Effort,
+			Commit:  r.Commit,
 		},
 		Clone: r.Clone,
 	})
