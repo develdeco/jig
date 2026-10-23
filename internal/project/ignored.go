@@ -128,10 +128,21 @@ func equalStrings(a, b []string) bool {
 }
 
 // IsIgnored reports whether dir is one of the ignored directories or inside
-// one, by path.
+// one, by path and then by the paths with their symlinks resolved, so a
+// directory reached through a link (on macOS /var is /private/var) is
+// ignored all the same.
 func IsIgnored(ignored []string, dir string) (string, bool) {
 	for _, p := range ignored {
 		if pathContains(p, dir) {
+			return p, true
+		}
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", false
+	}
+	for _, p := range ignored {
+		if realP, err := filepath.EvalSymlinks(p); err == nil && pathContains(realP, realDir) {
 			return p, true
 		}
 	}
