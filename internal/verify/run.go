@@ -214,13 +214,55 @@ func (x *run) existing(lines []journal.Line) bool {
 	return true
 }
 
+// finishPass completes a pass that a run stopped recording halfway: the slice
+// was marked green, and the verified line that comes next was never written.
+// The commit's latest record is then a pass with no verified line for it, and
+// the slice is green. The line is written now, with the attempt, session and
+// agent of that pass, and pushed, so every reader of verified lines
+// (journal.BuiltCommits, the pull request body, the notes a session is told)
+// counts the commit. Anything else is left as it is.
+func (x *run) finishPass(lines []journal.Line) error {
+	if x.res.State != journal.VerifyPass {
+		return nil
+	}
+	for _, l := range lines {
+		if l.Event == journal.EventVerified && l.Commit == x.sha && l.Slice == x.r.Slice {
+			return nil
+		}
+	}
+	st, err := x.d.Store.ReadSliceState(x.r.Ticket, x.r.Slice)
+	if err != nil {
+		return fmt.Errorf("verify: read the state of slice %s: %w", x.r.Slice, err)
+	}
+	if st.State != "green" {
+		return nil
+	}
+	cur := journal.VerificationState(lines, x.sha, x.r.Slice)
+	l := journal.Line{
+		TS:      x.d.now().UTC().Format(time.RFC3339Nano),
+		Event:   journal.EventVerified,
+		Slice:   x.r.Slice,
+		Commit:  x.sha,
+		Attempt: cur.Attempt,
+		Session: cur.Session,
+		Agent:   cur.Agent,
+	}
+	if err := journal.Append(x.d.Store, x.r.Ticket, l); err != nil {
+		return fmt.Errorf("verify: journal %s: %w", l.Event, err)
+	}
+	x.logf("finished the pass of %s for slice %s: its verified line was missing", short(x.sha), x.r.Slice)
+	x.push("verified")
+	return nil
+}
+
 // Run verifies the request in this process.
 //
 // It takes the verification's lock (a lock file beside its worktree, held to
 // the end), so two workers for one (commit, slice) never run together: the
 // second finds the first's lock and reports the verification as pending.
 // Under the lock it reads the journal; a verification already there stands
-// unless Rerun is set (Result.Existing). Otherwise the order is the contract:
+// unless Rerun is set (Result.Existing), and a pass a run stopped recording
+// halfway is finished (finishPass). Otherwise the order is the contract:
 //
 //  1. a verify-pending line, pushed, so the work is visible before it is
 //     done;
@@ -230,8 +272,9 @@ func (x *run) existing(lines []journal.Line) bool {
 //     with a recording directory in JIG_RECORD_DIR;
 //  4. the oracle line (Source jig, Commit the sha, Command, Env, Seconds,
 //     and on a failure Summary and Signature), then on a pass the recorded
-//     line if the scenarios recorded, the verified line, and the slice's
-//     state green; on a failure the slice's state building;
+//     line if the scenarios recorded, the slice's state green, and the
+//     verified line, so a reader the verified line wakes finds the slice
+//     green; on a failure the slice's state building;
 //  5. a push, tried three times; if it fails the lines stay local for the
 //     next checkpoint (Result.PushErr).
 //
@@ -260,7 +303,7 @@ func Run(d Deps, r Request) (Result, error) {
 		return x.res, fmt.Errorf("verify: read the journal of %s: %w", r.Ticket, err)
 	}
 	if x.existing(lines) {
-		return x.res, nil
+		return x.res, x.finishPass(lines)
 	}
 	x.attempt = journal.NextAttempt(lines, r.Slice)
 	x.res.Attempt = x.attempt
@@ -499,10 +542,10 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 	}, "", nil
 }
 
-// runOracle runs the oracle in the worktree and records what came of it, in
-// the order the frontier records a builder's green run: the oracle line, the
-// recorded line of a pass that recorded, then the verified line and the green
-// state; a failure leaves the slice building.
+// runOracle runs the oracle in the worktree and records what came of it: the
+// oracle line, the recorded line of a pass that recorded, then the green
+// state and the verified line, in that order (see the pass below); a failure
+// leaves the slice building.
 func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 	d := x.d
 	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal}
@@ -566,13 +609,13 @@ func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 		return nil
 	}
 
-	// The commit is the ticket's now: the oracle line records the run, this
-	// one that it verified, and only these are the commits jig built
-	// (journal.BuiltCommits). It goes in before the slice is marked green, so
-	// a run that stops in between still has the commit recorded.
-	if err := x.journal(journal.Line{Event: journal.EventVerified, Commit: x.sha}); err != nil {
-		return err
-	}
+	// The commit is the ticket's now: the oracle line records the run, the
+	// verified line that it verified, and only verified lines are the commits
+	// jig built (journal.BuiltCommits). The slice is marked green first: the
+	// verified line is what wakes a reader of the journal (jig events, the
+	// TUI, the hooks), and a reader it wakes must find the slice green, not
+	// the state from before. A run that stops in between leaves the oracle
+	// line, which already stands as the commit's pass (VerificationState).
 	err := x.setState(func(st *store.SliceState) bool {
 		st.Attempts = max(st.Attempts, x.attempt)
 		if newer {
@@ -583,6 +626,9 @@ func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 		return true
 	})
 	if err != nil {
+		return err
+	}
+	if err := x.journal(journal.Line{Event: journal.EventVerified, Commit: x.sha}); err != nil {
 		return err
 	}
 	x.push("oracle passed")
