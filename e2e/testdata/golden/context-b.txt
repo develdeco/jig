@@ -1,0 +1,26 @@
+context:
+  ticket: JIG-1
+  slice: b
+  goal: "Give Clamp a percentage-range caller, once it works."
+  workspace: alpha
+  oracle: test
+  oracle_command: <oracle>
+  state: queued
+  blocked_by: a
+  attempt: 2
+  oracle_seconds: 0
+  brief: <store>/tickets/JIG-1/brief.md
+brief_sections[1]:
+  ## Slice B - clamp callers
+
+  Add a small percentage-range caller on top of the now-working `Clamp`, plus a
+  test that exercises it end to end.
+earlier_slices[1]{slice,commits,files}:
+  a,"<sha> JIG-1 a: Fixed Clamp to enforce the upper bound; TestClamp passes.",alpha/alpha.go
+failed_attempts[1]{attempt,commit,summary}:
+  1,<sha>,"alpha/caller_test.go:9: Percent(5, 0, 10) = 0, want 50"
+questions[1]{id,status,question,answer,provenance}:
+  q-001,answered,Should Percent clamp its input?,"Yes, through Clamp.",person
+help[2]:
+  Claim it first: `jig claim JIG-1 --slice b`
+  Test at the seams and commit with the trailer `Jig-Slice: b`; jig runs the oracle on each commit. `jig ask` takes a question to the person
