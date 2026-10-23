@@ -11,6 +11,7 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -241,14 +242,26 @@ func TestAPassStoppedBeforeItsVerifiedLineIsFinished(t *testing.T) {
 		t.Fatalf("verified lines with the slice building = %+v, want none", got)
 	}
 
-	// The green slice: the next run finishes the pass, once.
+	// The green slice: the next jig verify finishes the pass, once. A plain
+	// jig verify goes through Spawn, which starts no worker for a commit it
+	// finds verified; --wait and the worker go through Run.
 	if err := r.st.WriteSliceState(r.fx.Ticket, "a", store.SliceState{State: "green", Attempts: 1}); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
-		if res, err := Run(r.deps, Request{Ticket: r.fx.Ticket, Slice: "a", SHA: sha, Session: "s-2"}); err != nil || !res.Existing || res.State != journal.VerifyPass {
-			t.Fatalf("Run %d on the stopped pass = %+v, %v, want the existing pass", i, res, err)
-		}
+	d := r.deps
+	d.Executable = "jig"
+	d.Start = func(spawn.Spec) (int, error) {
+		t.Error("Spawn started a worker for a commit the journal has a pass for")
+		return 0, nil
+	}
+	if out, err := Spawn(d, Request{Ticket: r.fx.Ticket, Slice: "a", SHA: sha, Session: "s-2"}); err != nil || !out.Existing || out.State != journal.VerifyPass {
+		t.Fatalf("Spawn on the stopped pass = %+v, %v, want the existing pass", out, err)
+	}
+	if got := verifiedLines(); len(got) != 1 {
+		t.Fatalf("verified lines after Spawn = %+v, want one", got)
+	}
+	if res, err := Run(r.deps, Request{Ticket: r.fx.Ticket, Slice: "a", SHA: sha, Session: "s-2"}); err != nil || !res.Existing || res.State != journal.VerifyPass {
+		t.Fatalf("Run on the finished pass = %+v, %v, want the existing pass", res, err)
 	}
 	got := verifiedLines()
 	if len(got) != 1 || got[0].Attempt != 1 || got[0].Session != "s-1" || got[0].Agent != "agent-1" {
