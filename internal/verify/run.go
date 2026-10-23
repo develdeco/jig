@@ -389,10 +389,11 @@ func short(sha string) string {
 // not be reached ("" when it ran), or an error when a line could not be
 // written.
 func (x *run) execute() (why string, err error) {
+	// Removed on every way out, a checkout that failed half-way included.
+	defer x.removeWorktree()
 	if err := x.addWorktree(); err != nil {
 		return err.Error(), nil
 	}
-	defer x.removeWorktree()
 
 	if why := x.checkCheckout(); why != "" {
 		return why, nil

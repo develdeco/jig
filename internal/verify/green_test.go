@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,5 +169,27 @@ func TestStartShaPrefersTheRecordedOne(t *testing.T) {
 	}
 	if got := startSHA(g.dir, g.past, "", "main"); got != g.work {
 		t.Errorf("startSHA from origin/main = %q, want %s", got, g.work)
+	}
+}
+
+// TestFailureTailKeepsTheReasonOfATimeout: the output of a killed run says
+// nothing of why it was killed, so the tail ends with the reason; a run that
+// printed nothing has only the reason; any other failure is its output.
+func TestFailureTailKeepsTheReasonOfATimeout(t *testing.T) {
+	t.Parallel()
+	timeout := errors.New(`shell "go test ./...": did not finish within 30m0s`)
+	got := failureTail("PASS ok a\nstill running...\n", timeout)
+	if !strings.HasSuffix(got, "did not finish within 30m0s") || !strings.Contains(got, "still running") {
+		t.Errorf("failureTail of a timeout = %q, want the output and then the reason", got)
+	}
+	if got := failureTail("", timeout); got != timeout.Error() {
+		t.Errorf("failureTail of a silent timeout = %q, want the reason", got)
+	}
+	if got := failureTail("--- FAIL: TestX\nFAIL\n", errors.New("exit status 1")); got != "--- FAIL: TestX\nFAIL" {
+		t.Errorf("failureTail of a plain failure = %q, want only the output", got)
+	}
+	long := strings.Repeat("x", 5000)
+	if got := failureTail(long, timeout); len(got) > 4000 || !strings.HasSuffix(got, "30m0s") {
+		t.Errorf("failureTail of a long timed-out output is %d bytes, want at most 4000 ending with the reason", len(got))
 	}
 }
