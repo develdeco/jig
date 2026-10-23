@@ -8,13 +8,6 @@ import (
 	"testing"
 )
 
-// handParsedFlags lists, per command, the table flags extractAnswer parses by
-// hand ("--answer <qid> <text>" takes two values) before any FlagSet exists.
-var handParsedFlags = map[string]map[string]bool{
-	"solve": {"answer": true},
-	"run":   {"answer": true},
-}
-
 // TestCommandTableFlagsMatchRegistration checks that each registered verb's
 // help-row flags, hidden ones included, match the names and usage it really
 // registers. Every verb runs with its Probe positionals and an unknown flag,
@@ -39,9 +32,8 @@ func TestCommandTableFlagsMatchRegistration(t *testing.T) {
 	for _, v := range verbs {
 		c := v.Spec
 		if v.NoFlagSet {
-			// A hook verb such as _screen reads a call on stdin; it never
-			// builds a flag.FlagSet, so there is nothing to capture or
-			// compare.
+			// A hook verb that reads a call on stdin and never builds a
+			// flag.FlagSet has nothing to capture or compare.
 			if c.Flags != nil {
 				t.Errorf("%s is NoFlagSet but has table Flags", c.Name)
 			}
@@ -57,9 +49,6 @@ func TestCommandTableFlagsMatchRegistration(t *testing.T) {
 
 		want := map[string]string{}
 		for _, f := range c.Flags {
-			if handParsedFlags[c.Name][f.Name] {
-				continue
-			}
 			want[f.Name] = f.Usage
 		}
 		got := map[string]string{}

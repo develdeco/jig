@@ -26,7 +26,7 @@ func TestTheScreensReadNoStore(t *testing.T) {
 		"github.com/develdeco/jig/internal/project",
 		"github.com/develdeco/jig/internal/gitx",
 		"github.com/develdeco/jig/internal/verifydeliver",
-		"github.com/develdeco/jig/internal/frontier",
+		"github.com/develdeco/jig/internal/ready",
 		"github.com/develdeco/jig/internal/ledger",
 		"github.com/develdeco/jig/internal/home",
 		"os/exec",

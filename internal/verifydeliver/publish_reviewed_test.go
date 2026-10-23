@@ -38,7 +38,7 @@ func reviewedClean(t *testing.T, fx *fixture.Fixture, d Deps) GateReport {
 // gateReviewedClean runs one reviewer round, which must be clean.
 func gateReviewedClean(t *testing.T, fx *fixture.Fixture, d Deps) GateReport {
 	t.Helper()
-	report, err := Gate(d, NewReviewerGateSource(reviewerBackend(t)), GateOpts{Ticket: fx.Ticket})
+	report, err := Gate(d, newReviewerGateSource(reviewerBackend(t)), GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate: %v", err)
 	}

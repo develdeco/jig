@@ -15,7 +15,6 @@ import (
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/media"
-	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -1012,6 +1011,13 @@ type RoundInput struct {
 	// written even when there is nothing to review, since someone still has
 	// to say so. A launched round skips the reviewer instead.
 	Recorded bool
+	// Readable, when set, says whether the reviewer's session can read a
+	// file: a recording it cannot is left out of the list the reviewer is
+	// handed and counted as omitted, rather than listed as evidence it
+	// cannot read. A launched round sets it from its Launcher; a recorded
+	// one leaves it nil, since the agent that reviews it is not under any
+	// screen of jig's and reads what its harness lets it.
+	Readable func(file string) bool
 	Manifest manifest.Manifest
 	// OracleRuns are the oracle runs that passed on the lease head's tree
 	// just before this round, made by Gate or reused (runGateOracles);
@@ -1027,22 +1033,61 @@ type RoundInput struct {
 	Dismissed []DismissedFinding // findings bookkeeping's cumulative fold, projected (findings.go)
 }
 
-// reviewerGateSource dispatches a real, session-driven gate review for
-// each round.
-type reviewerGateSource struct {
-	backend session.Backend
+// Launch is what a launched reviewer session is handed for one round: where
+// it works, the files it reads and the one it writes, and the prompt that
+// names them. Everything a Launcher needs to start a session, and nothing of
+// how it is started.
+type Launch struct {
+	Ticket string
+	// Round is the gate round, 1-based.
+	Round int
+	// Worktree is the session's working directory: the gate lease.
+	Worktree string
+	// RequestPath is the review.json the session reads, ResultPath the
+	// result.json it writes, and RecordingsPath the recordings.json it is
+	// told to read, or "".
+	RequestPath, ResultPath, RecordingsPath string
+	// Model and Effort are the reviewer's model and reasoning effort; Effort
+	// is "" to pass none.
+	Model, Effort string
+	// Prompt is the rendered review prompt.
+	Prompt string
 }
 
-// NewReviewerGateSource returns a GateSource that dispatches a real
-// reviewer session via b for each round.
-func NewReviewerGateSource(b session.Backend) GateSource {
-	return &reviewerGateSource{backend: b}
+// A Launcher starts the reviewer sessions of a launched round. jig's own
+// binary has none: a round it opens is reviewed by an agent it did not start
+// (GatePrepare, GateFinish). One remains for internal/revieweval, which
+// launches reviewers to measure them, and is the only package that links a
+// session backend.
+type Launcher interface {
+	// Launch runs a reviewer session to its end. An error means the session
+	// could not run (infrastructure); what it wrote, or failed to, is read
+	// from Launch.ResultPath afterwards.
+	Launch(l Launch) error
+	// Readable reports whether the session can read file: the reads it is
+	// allowed are the rule RoundInput.Readable applies to the recordings it
+	// is pointed at.
+	Readable(file string) bool
+}
+
+// launchedGateSource runs a real, session-driven gate review for each round
+// through a Launcher.
+type launchedGateSource struct {
+	launcher Launcher
+}
+
+// NewLaunchedGateSource returns a GateSource that has a reviewer session
+// started by l for each round: it prepares the round's request
+// (PrepareReviewRequest), launches the session, and checks what it wrote the
+// way a recorded reviewer's report is checked (checkReviewResult).
+func NewLaunchedGateSource(l Launcher) GateSource {
+	return &launchedGateSource{launcher: l}
 }
 
 // ReviewPrep is the first half of a review round: everything a reviewer is
 // handed, worked out and written, before anyone reviews. A recorded round
 // (GatePrepare) keeps it for the agent that reads `jig review context`; the
-// launched round (reviewerGateSource) hands the same to a session it starts.
+// launched round (launchedGateSource) hands the same to a session it starts.
 type ReviewPrep struct {
 	// Head is the lease's HEAD the round reviews, Scope and Base what the diff
 	// is taken from (resolveScopeBase).
@@ -1297,12 +1342,12 @@ func checkReviewResult(req ReviewRequest, result ReviewResult, in RoundInput, de
 // have left tracked dirt) and always after, success or failure, so a broken
 // reviewer never leaves the lease for a later operation to trip over.
 //
-// This is the launched reviewer: jig starts a session and reads what it
-// wrote. `jig gate` no longer does; it opens a recorded round
-// (GatePrepare, GateFinish) for an agent jig did not start. The launched
-// source stays for internal/revieweval, which measures reviewers, and for
-// `jig solve`, until both go.
-func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error) {
+// This is the launched reviewer: a Launcher starts a session and jig reads
+// what it wrote. `jig gate` does not: it opens a recorded round (GatePrepare,
+// GateFinish) for an agent jig did not start. The launched source stays for
+// internal/revieweval, which measures reviewers.
+func (r *launchedGateSource) Round(in RoundInput) (rnd Round, ok bool, err error) {
+	in.Readable = r.launcher.Readable
 	prep, err := PrepareReviewRequest(in)
 	if err != nil {
 		return Round{}, false, err
@@ -1341,22 +1386,18 @@ func (r *reviewerGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 	if in.Effort != nil {
 		effort = in.Effort(prep.Scope)
 	}
-	dispatch := session.Dispatch{
-		Ticket:     in.Ticket,
-		Slice:      "gate",
-		Attempt:    in.Round,
-		Worktree:   in.LeaseDir,
-		SliceJSON:  prep.RequestPath,
-		ResultJSON: prep.ResultPath,
-		Model:      in.Model,
-		Effort:     effort,
-		Prompt:     prompt,
-		// The prompt names recordings.json (when there is one); a backend that
-		// spells paths for its session spells that mention too.
-		ExtraReadFile: prep.RecordingsPath,
-		Screen:        true,
+	launch := Launch{
+		Ticket:         in.Ticket,
+		Round:          in.Round,
+		Worktree:       in.LeaseDir,
+		RequestPath:    prep.RequestPath,
+		ResultPath:     prep.ResultPath,
+		RecordingsPath: prep.RecordingsPath,
+		Model:          in.Model,
+		Effort:         effort,
+		Prompt:         prompt,
 	}
-	if err := r.backend.Run(dispatch); err != nil {
+	if err := r.launcher.Launch(launch); err != nil {
 		return Round{}, false, &axi.Error{
 			Msg:  fmt.Sprintf("gate reviewer dispatch failed: %v", err),
 			Code: "REVIEW_FAILED",

@@ -52,9 +52,8 @@ type Store struct {
 	// ticket.yaml once per ref. invalidateAliasClaims clears it whenever a
 	// ticket.yaml write, or a checkpoint's pull, could change what it holds.
 	// aliasClaimsMu guards both the cache and the scan that fills it: a
-	// frontier run shares one Store across its per-slice goroutines
-	// (internal/frontier's fan-out), each of which can resolve a ref through
-	// it concurrently.
+	// process that shares one Store across goroutines (a verification run
+	// beside a command) can resolve a ref through it concurrently.
 	aliasClaimsMu    sync.Mutex
 	aliasClaimsCache map[string][]string
 

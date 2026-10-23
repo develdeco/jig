@@ -29,23 +29,13 @@ func TestOutstandingAskIsDecidedWithJigTriageAndAppliedByTheNextRound(t *testing
 	e := testEnv(fx.Home).atTerminal() // the person at their terminal
 	ticket := fx.Ticket
 
-	// Build the frontier to green first: a, b, d go straight through; c
-	// pauses on q-001.
-	runArgs := []string{"run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	answerArgs := []string{"run", ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	out, code := runMain(t, e, "", runArgs...)
-	if code != 2 {
-		t.Fatalf("run 1 exit = %d, want 2 (paused at q-001)\n%s", code, out)
-	}
-	out, code = runMain(t, e, "", answerArgs...)
-	if code != 0 {
-		t.Fatalf("run (answer) exit = %d, want 0\n%s", code, out)
-	}
+	// Build the frontier to green first, in the operator's clone.
+	buildFixtureTicket(t, fx)
 
 	// Round 1: nothing decides the no-workspace ask on go.mod, so the round
 	// records it undecided and jig exits 2.
 	round1Path := filepath.Join(fx.ScenarioDir, "gate", "round-1", "review-result.json")
-	out, code = roundThroughMain(t, e, fx, round1Path)
+	out, code := roundThroughMain(t, e, fx, round1Path)
 	if code != 2 {
 		t.Fatalf("round 1 exit = %d, want 2 (needs a human)\n%s", code, out)
 	}

@@ -12,7 +12,7 @@
 // reconciles nothing, squashes nothing and commits nothing on the ticket
 // branch, so the person's branch never diverges from origin's because of it.
 // The one launched reviewer left is the source internal/revieweval measures
-// reviewers with and `jig solve` runs, until both go.
+// reviewers with (a Launcher starts its sessions; this package starts none).
 package verifydeliver
 
 import (
@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
@@ -59,8 +58,8 @@ type Deps struct {
 	// Warn reports a soft-failure warning. nil means the default stderr write.
 	Warn func(format string, args ...any)
 	// Oracle runs one of the gate's own oracle commands in a lease and
-	// returns its combined output, the way frontier.Deps.Oracle does for a
-	// slice's run at green. nil means the real run, bounded by oracleLimit
+	// returns its combined output, the way a verification runs a slice's
+	// oracle at a commit. nil means the real run, bounded by oracleLimit
 	// with its process tree killed past it; a test that is not about the
 	// gate's oracle run hands one that passes.
 	Oracle func(cmd, dir string) (string, error)
@@ -108,19 +107,6 @@ func operatorClone(d Deps, repoName string) string {
 		return dir
 	}
 	return ""
-}
-
-// CheckIdentity lets a command fail fast, before any frontier or gate work,
-// when the operator's mapped clone has no git identity. Without a mapped
-// clone it returns nil. `jig solve` calls it before its first session; gate
-// and publish commit nothing on the branch and need no identity.
-func CheckIdentity(d Deps) error {
-	_, repoName, _ := primaryRepo(d.Cfg)
-	dir, ok := d.Machine.Clones[repoName]
-	if !ok || dir == "" {
-		return nil
-	}
-	return gitx.CheckIdentity(dir)
 }
 
 // consolidatedTitle picks the ticket's headline title: the goal of the first

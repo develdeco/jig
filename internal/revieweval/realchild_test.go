@@ -286,8 +286,8 @@ func TestRunCaseRealChildSeesNoLeak(t *testing.T) {
 	}
 	parentEnv = append(parentEnv, feed...)
 
-	jigBin := buildJigBinary(t)
-	real, err := liveBackend("headless", jigBin, claudeStub, parentEnv)
+	hookBin := buildScreenHook(t)
+	real, err := liveBackend("headless", hookBin, claudeStub, parentEnv)
 	if err != nil {
 		t.Fatalf("liveBackend(headless): %v", err)
 	}

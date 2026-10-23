@@ -131,12 +131,20 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens := tuiScreens{t: t, p: tui}
 	screens.until("› " + fx.Ticket)
 
-	// The first commit, verified by a worker the builder starts.
-	sha := h.CommitScenario("a", 1)
-	if res := h.Jig("verify", fx.Ticket, sha, "--slice", "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-		t.Fatalf("jig verify a exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
-	}
-	screens.until("1 of 4 slices green")
+	// The first commit, verified by a worker the builder starts. Like every
+	// verification of the suite it holds one of the slots that bound how many
+	// `go test` runs the parallel tests have going at once: under a loaded
+	// machine the screens would otherwise wait out their minute on a worker
+	// that is queued behind the rest.
+	func() {
+		verifySlots <- struct{}{}
+		defer func() { <-verifySlots }()
+		sha := h.CommitScenario("a", 1)
+		if res := h.Jig("verify", fx.Ticket, sha, "--slice", "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
+			t.Fatalf("jig verify a exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+		}
+		screens.until("1 of 4 slices green")
+	}()
 
 	// The builder asks, the question reaches the screens, and the person
 	// answers it from them.

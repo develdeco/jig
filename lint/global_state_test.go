@@ -24,12 +24,9 @@ var debtList = map[string]bool{
 	"internal/home/home_test.go":                true,
 	"internal/pool/lease_test.go":               true,
 	"internal/repohost/repohost_test.go":        true,
-	"internal/session/extrareadfile_test.go":    true,
 	"internal/session/headless_test.go":         true,
-	"internal/session/herdr_test.go":            true,
 	"internal/session/kill_windows_test.go":     true,
 	"internal/session/longpath_windows_test.go": true,
-	"internal/session/session_test.go":          true,
 	"internal/store/checkpoint_test.go":         true,
 }
 

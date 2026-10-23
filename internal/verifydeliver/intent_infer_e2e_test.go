@@ -153,7 +153,7 @@ func TestGateReviewerRoundHashesTheIntentItWasGiven(t *testing.T) {
 		return backend.Run(sd)
 	}}
 
-	report, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: fx.Ticket})
+	report, err := Gate(d, newReviewerGateSource(wrapped), GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestGateReportsTheIntentTheReviewerWasGiven(t *testing.T) {
 		return backend.Run(sd)
 	}}
 
-	report, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: fx.Ticket})
+	report, err := Gate(d, newReviewerGateSource(wrapped), GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestGatePointsTheReviewerAtTheIntentExcerpt(t *testing.T) {
 		return backend.Run(sd)
 	}}
 
-	report, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: fx.Ticket})
+	report, err := Gate(d, newReviewerGateSource(wrapped), GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate: %v", err)
 	}

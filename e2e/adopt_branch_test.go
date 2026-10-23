@@ -115,12 +115,12 @@ func TestRetryReturnsTheLastError(t *testing.T) {
 // builds branch add-retry outside jig and pushes it, main then moves past
 // the branch's fork point, and jig gates the branch for a ticket minted
 // afterwards. The author pushes once more while the round's fix is still to
-// be built. The fix slice that round queues must be built by `jig run` on
-// add-retry itself, on top of the author's latest commit, and the next gate
-// must review add-retry again - not a jig/<ticket> branch cut from main,
-// which lacks the author's code. `jig publish` then ships add-retry as it
-// is: all the author's commits keep their shas, jig's fix and publish's own
-// commits sit on top, origin's branch is fast-forwarded, and the store
+// be built. The fix slice that round queues is built by a session in the
+// operator's clone on add-retry itself, on top of the author's latest
+// commit, and the next gate must review add-retry again - not a jig/<ticket>
+// branch cut from main, which lacks the author's code. `jig publish` then
+// ships add-retry as it is: all the author's commits keep their shas, the
+// fix commit sits on top, origin's branch is fast-forwarded, and the store
 // records it.
 func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	t.Parallel()
@@ -177,31 +177,36 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 		t.Fatal("test setup: the author's second push did not move the branch")
 	}
 
-	// The fix slice is built on the reviewed branch, as origin has it now.
-	r := runJig(t, env, fx.StoreDir, "run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
-	if r.Code != 0 {
-		t.Fatalf("jig run exit = %d, want 0 (fix-1 built)\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
+	// The fix slice is built on the reviewed branch, as origin has it now: the
+	// builder, a session in the operator's clone, takes the branch the author
+	// pushed, claims the slice the round queued and commits the fix on top of
+	// the author's latest commit, and has the commit verified.
+	h := newHarness(t, fx, env, "s-builder")
+	h.git("fetch", "origin", branch)
+	h.git("checkout", "-B", branch, "origin/"+branch)
+	if got := h.git("rev-parse", "HEAD"); got != authorNext {
+		t.Fatalf("the clone's %s is at %s, want the author's latest tip %s", branch, got, authorNext)
 	}
-	lease := poolBuildLeaseDir(env.home, "fixture-repo", ticket)
-	if got := gitLog(t, lease, "symbolic-ref", "--short", "HEAD"); got != branch {
-		t.Fatalf("the build lease is on %q, want the reviewed branch %q", got, branch)
+	if claim := h.Jig("claim", ticket, "--slice", "fix-1"); claim.Code != 0 || !strings.Contains(claim.Stdout, "branch: "+branch) {
+		t.Fatalf("jig claim fix-1 exit = %d, want 0 on the adopted branch %s\nstdout:\n%s\nstderr:\n%s", claim.Code, branch, claim.Stdout, claim.Stderr)
 	}
-	if got := gitLog(t, lease, "rev-parse", "HEAD~1"); got != authorNext {
+	h.git("apply", filepath.Join(fx.ScenarioDir, "slices", "fix-1", "attempt-1", "patch.diff"))
+	h.git("add", "-A")
+	h.git("commit", "-m", ticket+" fix-1: document Add", "-m", "Jig-Slice: fix-1")
+	jigFix := h.git("rev-parse", "HEAD")
+	if got := h.git("rev-parse", "HEAD~1"); got != authorNext {
 		t.Fatalf("the fix commit's parent is %s, want the author's latest tip %s: the fix was not built on top of the author's commits, the mid-loop push included", got, authorNext)
 	}
-	if got := gitLog(t, lease, "log", "-1", "--format=%s"); !strings.HasPrefix(got, ticket+" fix-1: ") {
-		t.Fatalf("the tip of %s is %q, want the fix slice's commit", branch, got)
+	if verify := h.Jig("verify", ticket, jigFix, "--slice", "fix-1", "--wait"); verify.Code != 0 || !strings.Contains(verify.Stdout, "state: pass") {
+		t.Fatalf("jig verify fix-1 exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", verify.Code, verify.Stdout, verify.Stderr)
 	}
-	// The author's branch on origin is untouched: jig commits stay in the
-	// build lease until a publish pushes them.
+	// The author's branch on origin is untouched: jig's commits stay in the
+	// clone until a publish pushes them.
 	if got := gitLog(t, fx.RepoRemote, "rev-parse", "refs/heads/"+branch); got != authorNext {
 		t.Fatalf("origin's %s = %s, want the author's latest tip %s unchanged", branch, got, authorNext)
 	}
 
-	// The ticket records the branch and the start sha the fix commit builds
-	// on. Until jig builds on an adopted branch its start sha follows the
-	// author's branch, so it is the tip the author pushed mid-loop - not the
-	// tip at adoption, and not the moved main.
+	// The ticket records the branch it adopted.
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -210,14 +215,10 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	if err != nil || rec.Branch != branch || rec.Title != "Add retry" {
 		t.Fatalf("ticket record = %+v (err %v), want title %q and branch %q", rec, err, "Add retry", branch)
 	}
-	start, err := os.ReadFile(filepath.Join(st.TicketDir(ticket), "start.fixture-repo.sha"))
-	if err != nil || strings.TrimSpace(string(start)) != authorNext {
-		t.Fatalf("start sha = %q (err %v), want the author's latest tip %s", start, err, authorNext)
-	}
 
-	// The next round, with no --branch, reviews the same branch: the build
-	// lease's copy, fix commit included. The scripted source has no round 2,
-	// so it is clean.
+	// The next round, with no --branch, reviews the same branch: the clone's
+	// copy, fix commit included. The scripted source has no round 2, so it is
+	// clean.
 	g2 := runJig(t, env, fx.StoreDir, "gate", ticket, "--scenario", fx.ScenarioDir)
 	if g2.Code != 0 || !strings.Contains(g2.Stdout, "verdict: clean") {
 		t.Fatalf("jig gate round 2 exit = %d, want a clean round\nstdout:\n%s\nstderr:\n%s", g2.Code, g2.Stdout, g2.Stderr)
@@ -226,8 +227,8 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	if got := gitLog(t, gateLease, "symbolic-ref", "--short", "HEAD"); got != branch {
 		t.Fatalf("the gate lease is on %q, want the reviewed branch %q", got, branch)
 	}
-	if got, want := gitLog(t, gateLease, "rev-parse", "HEAD"), gitLog(t, lease, "rev-parse", "HEAD"); got != want {
-		t.Fatalf("round 2 reviewed %s, want the branch with the fix commit, %s", got, want)
+	if got := gitLog(t, gateLease, "rev-parse", "HEAD"); got != jigFix {
+		t.Fatalf("round 2 reviewed %s, want the branch with the fix commit, %s", got, jigFix)
 	}
 
 	// The clean round makes the ticket publishable like any other, adopted or
@@ -241,7 +242,6 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	// publish merges nothing and adds no commit; it fast-forwards origin's
 	// branch to the reviewed head - the author's commits, the mid-loop one
 	// included, keep their shas, jig's fix sits on top.
-	jigFix := gitLog(t, lease, "rev-parse", "HEAD")
 	p := runJig(t, env, fx.StoreDir, "publish", ticket, "--yes")
 	if p.Code != 0 {
 		t.Fatalf("jig publish exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", p.Code, p.Stdout, p.Stderr)

@@ -337,7 +337,7 @@ func pointAtTicketBranch(d Deps, leaseDir, repoName, ticket, branch string, adop
 //     its own and the person decides how their branch and origin's are
 //     joined;
 //   - the clone has no copy of it (no clone is mapped, the work is on another
-//     machine, or a build lease of an earlier jig run holds it): the rule
+//     machine, or a build lease of an earlier jig holds it): the rule
 //     pointAtTicketBranch always had, over the build lease and origin;
 //   - no copy anywhere: refused, BRANCH_NOT_FOUND. The branch is not cut from
 //     the target, so a round is never made over a branch nobody has.

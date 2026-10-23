@@ -142,7 +142,7 @@ func TestRegisteredVerbsSortByOrderThenName(t *testing.T) {
 	// The verbs that were in the command table before the registry, in the
 	// order it held them. A later ticket may delete one; the rest keep this
 	// relative order.
-	legacy := []string{"init", "ticket", "graduate", "solve", "run", "requeue", "gate", "publish", "status", "validate", "version", "skills", "trackers", "store", "_screen"}
+	legacy := []string{"init", "ticket", "graduate", "requeue", "gate", "publish", "status", "validate", "version", "skills", "trackers", "store"}
 	var seen []string
 	for _, v := range registeredVerbs() {
 		if slices.Contains(legacy, v.Spec.Name) {

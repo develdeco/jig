@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/develdeco/jig/internal/session"
 )
 
 // hostDir is a directory of this machine that a refusal reason must not
@@ -25,10 +23,10 @@ type hostPathSpelling struct{ text, name string }
 // naming this machine's own directories: as each is given (when absolute),
 // its absolute form, each with forward slashes, and each Go-quoted (the way
 // %q prints a path, where a Windows path's backslashes double) - and, when
-// withWSL, each one's WSL mount spelling too (session.WSLPath): the
-// respelling herdr hands a session on Windows (session.respellMentions), a
-// spelling jig chose for the session rather than jig's own text, so only a
-// caller asking what a session might have repeated needs it. A bare
+// withWSL, each one's WSL mount spelling too (wslMountPath): how a session
+// that runs in WSL on a Windows checkout sees the same directory, a spelling
+// that is the session's rather than jig's own text, so only a caller asking
+// what a session might have repeated needs it. A bare
 // relative dir names nothing of the machine and yields nothing, as does an
 // empty directory (which would resolve to the working directory) or a
 // filesystem root, a prefix of every path that would match them all.
@@ -60,11 +58,11 @@ func hostPathSpellings(withWSL bool, dirs ...hostDir) []hostPathSpelling {
 			add(quoted[1:len(quoted)-1], d.name)
 		}
 		if withWSL {
-			// session.WSLPath is a no-op off a Windows-drive path, so a spelling
+			// wslMountPath is a no-op off a Windows-drive path, so a spelling
 			// that comes back unchanged is already covered by the raw spellings
 			// above, and jig never hands out a bare "/" as one of its own
 			// directories for this to wrongly match everything.
-			for _, text := range []string{session.WSLPath(d.dir), session.WSLPath(abs)} {
+			for _, text := range []string{wslMountPath(d.dir), wslMountPath(abs)} {
 				if text != d.dir && text != abs {
 					add(text, d.name)
 				}
@@ -73,6 +71,22 @@ func hostPathSpellings(withWSL bool, dirs ...hostDir) []hostPathSpelling {
 	}
 	sort.SliceStable(all, func(i, j int) bool { return len(all[i].text) > len(all[j].text) })
 	return all
+}
+
+// wslMountPath mechanically converts a Windows path (`C:\Users\x`) to its WSL
+// mount equivalent (`/mnt/c/Users/x`): lowercase the drive letter, drop the
+// colon, and flip backslashes to slashes. No wslpath subprocess is needed for
+// this shape of path. It is pure string manipulation rather than
+// filepath.ToSlash, which is a no-op on any OS other than Windows and would
+// leave the backslashes untouched when jig is built on Linux (CI, where this
+// helper's own test still runs). A path that is not on a drive comes back with
+// its slashes flipped and nothing else.
+func wslMountPath(winPath string) string {
+	p := strings.ReplaceAll(winPath, `\`, "/")
+	if len(p) >= 2 && p[1] == ':' {
+		return "/mnt/" + strings.ToLower(p[:1]) + p[2:]
+	}
+	return p
 }
 
 // leaveOutHostPaths returns s with every spelling of each directory

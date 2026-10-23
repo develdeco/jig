@@ -32,8 +32,8 @@ func init() {
 // resolveTicketArg resolves ticket - as typed on the command line, an id or
 // one of a ticket's aliases - to its current id through st.ResolveTicket,
 // printing one line naming it when it differs from what was typed: every
-// command that takes a ticket id (run, gate, publish, solve, requeue, status
-// and validate) calls this before anything else touches the ticket, so a
+// command that takes a ticket id (gate, publish, requeue, status and
+// validate) calls this before anything else touches the ticket, so a
 // command reached through an alias always works on the ticket's folder,
 // leases and branch under its current id.
 func resolveTicketArg(st *store.Store, ticket string, stdout io.Writer) (string, error) {

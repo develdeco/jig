@@ -237,11 +237,11 @@ func TestHeadlessArgsSessionPersistence(t *testing.T) {
 	}
 }
 
-// TestHeadlessScreenBinary checks the screen-hook binary resolution. A test
-// binary is not jig, so without Options.ScreenBinary a screened dispatch
-// refuses to register it as the hook, while an unscreened one - which runs
-// no hook - still renders. With Options.ScreenBinary the hook runs exactly
-// that binary.
+// TestHeadlessScreenBinary checks the screen-hook binary resolution. Without
+// Options.ScreenBinary a screened dispatch refuses to register the running
+// process (a test binary, say) as the hook, while an unscreened one - which
+// runs no hook - still renders. With Options.ScreenBinary the hook runs
+// exactly that binary.
 func TestHeadlessScreenBinary(t *testing.T) {
 	backend, err := New("headless", Options{})
 	if err != nil {
@@ -249,10 +249,10 @@ func TestHeadlessScreenBinary(t *testing.T) {
 	}
 	b := backend.(*headlessBackend)
 	if _, err := b.settings(missingDispatch(t, true)); err == nil || !strings.Contains(err.Error(), "Options.ScreenBinary") {
-		t.Fatalf("screened settings from a test binary = %v, want an error naming Options.ScreenBinary", err)
+		t.Fatalf("screened settings with no ScreenBinary = %v, want an error naming Options.ScreenBinary", err)
 	}
 	if _, err := b.settings(missingDispatch(t, false)); err != nil {
-		t.Fatalf("unscreened settings from a test binary: %v", err)
+		t.Fatalf("unscreened settings with no ScreenBinary: %v", err)
 	}
 
 	backend, err = New("headless", Options{ScreenBinary: "/opt/jig/bin/jig"})
@@ -325,7 +325,7 @@ func runClaudeStubAs(t *testing.T, env map[string]string, how stubCall) claudeSt
 		t.Setenv("CLAUDE_STUB_WRITE_PATH", d.ResultJSON)
 	}
 
-	b := &headlessBackend{goos: "linux", screenBinary: builtJigBinary(t)}
+	b := &headlessBackend{goos: "linux", screenBinary: builtScreenHook(t)}
 	var runErr error
 	var sessionID string
 	switch {
@@ -447,7 +447,7 @@ func TestHeadlessRunPassesNoSessionPersistenceToTheCLI(t *testing.T) {
 		Screen:               true,
 		NoSessionPersistence: true,
 	}
-	b := &headlessBackend{goos: "linux", screenBinary: builtJigBinary(t)}
+	b := &headlessBackend{goos: "linux", screenBinary: builtScreenHook(t)}
 	_ = b.Run(d) // the stub writes no result; only the argv it saw matters here
 
 	data, err := os.ReadFile(logFile)
@@ -612,7 +612,7 @@ func TestHeadlessRunGivenEnvIsExact(t *testing.T) {
 		"CLAUDE_STUB_STDOUT=" + stdout,
 	}
 
-	backend, err := New("headless", Options{ScreenBinary: builtJigBinary(t), Env: given})
+	backend, err := New("headless", Options{ScreenBinary: builtScreenHook(t), Env: given})
 	if err != nil {
 		t.Fatalf("New(headless, Env): %v", err)
 	}
@@ -701,14 +701,14 @@ func readResult(t *testing.T, path string) outcome.Result {
 	return outcome.ParseJSON("slice", data)
 }
 
-// builtJigBinary builds cmd/jig once per test binary and returns the path
-// to it. A screened dispatch runs the real `jig _screen` hook, so the tests
-// that drive one exercise the same binary production resolves through build
-// info rather than a stand-in.
-func builtJigBinary(t *testing.T) string {
+// builtScreenHook builds testdata/fixture/screenhook once per test binary and
+// returns the path to it. A screened dispatch runs the real screen hook, so
+// the tests that drive one exercise the program the live runs resolve rather
+// than a stand-in.
+func builtScreenHook(t *testing.T) string {
 	t.Helper()
-	dir := buildBinary(t, filepath.Join("cmd", "jig"), "jig")
-	name := "jig"
+	dir := buildBinary(t, filepath.Join("testdata", "fixture", "screenhook"), "screenhook")
+	name := "screenhook"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -891,7 +891,7 @@ func TestHeadlessTimeoutEndsAWedgedSession(t *testing.T) {
 			}
 			t.Setenv("JIG_HEADLESS_TIMEOUT", "3s")
 
-			b := &headlessBackend{goos: runtime.GOOS, screenBinary: builtJigBinary(t)}
+			b := &headlessBackend{goos: runtime.GOOS, screenBinary: builtScreenHook(t)}
 			start := time.Now()
 			err := b.Run(realDispatch(t, true))
 			elapsed := time.Since(start)
@@ -932,7 +932,7 @@ func TestHeadlessTimeoutKillsTheChildTree(t *testing.T) {
 	t.Setenv("CLAUDE_STUB_CHILD_PID_FILE", pidFile)
 	t.Setenv("JIG_HEADLESS_TIMEOUT", "3s")
 
-	b := &headlessBackend{goos: runtime.GOOS, screenBinary: builtJigBinary(t)}
+	b := &headlessBackend{goos: runtime.GOOS, screenBinary: builtScreenHook(t)}
 	err := b.Run(realDispatch(t, true))
 	var ax *axi.Error
 	if !errors.As(err, &ax) || ax.Code != "SESSION_TIMEOUT" {
@@ -985,7 +985,7 @@ func TestHeadlessTimeoutKeepsFinishedWork(t *testing.T) {
 
 	d := realDispatch(t, true)
 	d.ResultJSON = result
-	b := &headlessBackend{goos: runtime.GOOS, screenBinary: builtJigBinary(t)}
+	b := &headlessBackend{goos: runtime.GOOS, screenBinary: builtScreenHook(t)}
 	if err := b.Run(d); err != nil {
 		t.Fatalf("Run = %v, want the written result to be honored", err)
 	}

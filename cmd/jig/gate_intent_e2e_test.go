@@ -10,27 +10,6 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// buildFixtureTicket drives fx's ticket through `jig run` to completion via
-// Main, exactly as TestGateIntentNoneToExplicitThroughMain's own setup
-// does: run 1 pauses at q-001, then --answer finishes it. Without this, the
-// ticket never has a build lease (no branch for gate to fetch from), so any
-// gate call past the CLI's own flag checks fails on that unrelated,
-// unbuilt-ticket error rather than reaching the rule a test means to
-// exercise.
-func buildFixtureTicket(t *testing.T, fx *fixture.Fixture) {
-	t.Helper()
-	e := testEnv(fx.Home)
-	runArgs := []string{"run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	out, code := runMain(t, e, "", runArgs...)
-	if code != 2 {
-		t.Fatalf("run 1: exit = %d, want 2 (paused at q-001)\n%s", code, out)
-	}
-	out, code = runMain(t, e, "", append(append([]string{}, runArgs...), "--answer", "q-001", "Casual.")...)
-	if code != 0 {
-		t.Fatalf("run (answer): exit = %d, want 0\n%s", code, out)
-	}
-}
-
 // TestGateIntentFlagsRefusedAtTheCLI checks the refusals `jig gate` makes
 // on its own flags, before anything reaches verifydeliver.Gate. Every case
 // runs against one real, built fixture ticket (brief.md still present),
@@ -123,14 +102,14 @@ func TestGateDocFlagWritesIntentThroughMain(t *testing.T) {
 // TestGateIntentNoneToExplicitThroughMain drives a brief-less ticket
 // through `jig gate` twice via Main, exactly as a real terminal session
 // would: round 1 with no brief and no --intent prints "intent: none";
-// a `jig run` in between works round 1's own fix-1 (the base scenario's
-// scripted round) back to green, so round 2 - with --intent, recording
+// building round 1's own fix-1 (the base scenario's scripted round) back to
+// green in between, so round 2 - with --intent, recording
 // intent.md and printing "intent: explicit" - needs no --early either: the
 // frontier is fully green by the time each gate call runs, matching the flow
 // a person types (the raw intent.md is read below). Neither round needs
-// --early for that reason; skipping the `jig run` in between would leave
+// --early for that reason; skipping the build in between would leave
 // fix-1 queued through round 2, which still prints "verdict: clean" but then
-// points the next-step hint at `jig run` instead of `jig publish` - a
+// points the next-step hint at `jig next` instead of `jig publish` - a
 // mismatched hint this test's own final assertion catches.
 func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 	t.Parallel()
@@ -146,22 +125,14 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 		t.Fatalf("remove brief.md: %v", err)
 	}
 
-	runArgs := []string{"run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	out, code := runMain(t, e, "", runArgs...)
-	if code != 2 {
-		t.Fatalf("run 1: exit = %d, want 2 (paused at q-001)\n%s", code, out)
-	}
-	out, code = runMain(t, e, "", append(append([]string{}, runArgs...), "--answer", "q-001", "Casual.")...)
-	if code != 0 {
-		t.Fatalf("run (answer): exit = %d, want 0\n%s", code, out)
-	}
+	buildFixtureTicket(t, fx)
 
 	gateArgs := func(extra ...string) []string {
 		base := []string{"gate", fx.Ticket, "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
 		return append(base, extra...)
 	}
 
-	out, code = runMain(t, e, "", gateArgs()...)
+	out, code := runMain(t, e, "", gateArgs()...)
 	if code != 0 {
 		t.Fatalf("gate round 1: exit = %d, want 0\n%s", code, out)
 	}
@@ -169,13 +140,10 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 		t.Fatalf("round 1 report missing intent: none:\n%s", out)
 	}
 
-	// Round 1's scripted round raised a fix, queuing fix-1: work it back to
-	// green before round 2, the same as a real terminal session would,
-	// rather than gating again over unfinished work.
-	out, code = runMain(t, e, "", runArgs...)
-	if code != 0 {
-		t.Fatalf("run (fix-1): exit = %d, want 0\n%s", code, out)
-	}
+	// Round 1's scripted round raised a fix, queuing fix-1: build it back to
+	// green before round 2, the same as an agent would, rather than gating
+	// again over unfinished work.
+	buildScenarioSlice(t, fx, "fix-1", 1)
 
 	out, code = runMain(t, e, "", gateArgs("--intent", "make the greeting warmer")...)
 	if code != 0 {
@@ -201,7 +169,7 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 	}
 
 	// The frontier is fully green and round 2 was clean, so the next-step
-	// hint must point at publish, not run.
+	// hint must point at publish, not next.
 	out, code = runMain(t, e, "", "status", fx.Ticket, "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("status: exit = %d, want 0\n%s", code, out)

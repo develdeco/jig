@@ -727,7 +727,7 @@ func gateReviewRequest(t *testing.T, d Deps, ticket string, opts GateOpts) Revie
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
 	opts.Ticket = ticket
-	if _, err := Gate(d, NewReviewerGateSource(backend), opts); err != nil {
+	if _, err := Gate(d, newReviewerGateSource(backend), opts); err != nil {
 		t.Fatalf("Gate: %v", err)
 	}
 	return got
@@ -1426,7 +1426,7 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
 
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -1570,7 +1570,7 @@ func TestGateFixBudgetParksAfterRoundsUsed(t *testing.T) {
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -1633,7 +1633,7 @@ func TestGateFixBudgetZeroParksTheFirstRoundsFixImmediately(t *testing.T) {
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -1681,7 +1681,7 @@ func TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached(t *testin
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	// A human at a terminal keeps every parked finding this round.
 	keepTriage := func(in TriageInput) TriageResult {
@@ -1752,7 +1752,7 @@ func TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices(t *testing
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -1857,7 +1857,7 @@ func TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath(t *testing.T) {
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
 
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -1932,7 +1932,7 @@ func TestGateFailedRoundCommitsAndPushesStore(t *testing.T) {
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	_, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err == nil {
@@ -2115,7 +2115,7 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -2261,7 +2261,7 @@ func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerat
 
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -2504,7 +2504,7 @@ func setupStaleOracleThroughRoundTwo(t *testing.T, round3 func(req ReviewRequest
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {

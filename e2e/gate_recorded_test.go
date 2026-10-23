@@ -45,9 +45,17 @@ var verifySlots = make(chan struct{}, 2)
 // be; the ticket is built when every verification has recorded its pass.
 func newBuiltTicket(t *testing.T, whole bool) builtTicket {
 	t.Helper()
+	fx, env := newFixture(t, fixture.Opts{})
+	return buildTicketOn(t, fx, env, whole)
+}
+
+// buildTicketOn builds the ticket on a fixture and an environment the test
+// made (newBuiltTicket's, but for a test that needs to shape them first: a
+// scenario branch, a jig home of its own, a missing brief).
+func buildTicketOn(t *testing.T, fx *fixture.Fixture, env jigEnv, whole bool) builtTicket {
+	t.Helper()
 	verifySlots <- struct{}{}
 	defer func() { <-verifySlots }()
-	fx, env := newFixture(t, fixture.Opts{})
 	dropEnvFromSlices(t, fx)
 	h := newHarness(t, fx, env, "s-builder")
 	branch := "jig/" + fx.Ticket
@@ -84,6 +92,40 @@ func newBuiltTicket(t *testing.T, whole bool) builtTicket {
 		t.Fatal(err)
 	}
 	return builtTicket{whole: whole, fx: fx, env: env, builder: h, branch: branch, sha: steps[len(steps)-1].sha, st: st}
+}
+
+// buildFix has the builder commit the scenario's patch for each slice given -
+// gate fix slices a round queued, which the scenario builds - and have the
+// commits verified, the way newBuiltTicket builds the ticket. It returns the
+// head the builder is at afterwards.
+func (b builtTicket) buildFix(t *testing.T, slices ...string) string {
+	t.Helper()
+	verifySlots <- struct{}{}
+	defer func() { <-verifySlots }()
+	type built struct{ slice, sha string }
+	var steps []built
+	for _, s := range slices {
+		steps = append(steps, built{s, b.builder.CommitScenario(s, 1)})
+	}
+	for _, s := range steps {
+		res := b.builder.Jig("verify", b.fx.Ticket, s.sha, "--slice", s.slice)
+		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
+			t.Fatalf("jig verify %s exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", s.slice, res.Code, res.Stdout, res.Stderr)
+		}
+	}
+	for _, s := range steps {
+		l := waitJournal(t, b.fx, b.fx.Ticket, verifyWait, func(l journal.Line) bool {
+			if l.Slice != s.slice {
+				return false
+			}
+			return (l.Event == journal.EventVerified && l.Commit == s.sha) || (l.Event == journal.EventOracle && l.Outcome == "fail" && l.Commit == s.sha)
+		})
+		if l.Event != journal.EventVerified {
+			t.Fatalf("slice %s failed its oracle at %s: %s (journal line %+v)", s.slice, s.sha, l.Summary, l)
+		}
+	}
+	b.builder.WaitVerifiers()
+	return steps[len(steps)-1].sha
 }
 
 // workFile is a file of the ticket's work directory in the store.
@@ -339,17 +381,24 @@ func TestReviewNotIndependent(t *testing.T) {
 // returns the environment to run jig in, and the path of the fake gh's log.
 func githubClone(t *testing.T, b builtTicket) (jigEnv, string) {
 	t.Helper()
+	return githubRemote(t, b.fx, b.env.withGitGlobal(t))
+}
+
+// githubRemote is githubClone for a test that already gave env a git global
+// config of its own (withGitGlobal) and may have installed settings in it, a
+// core.hooksPath say, which a second withGitGlobal would leave behind.
+func githubRemote(t *testing.T, fx *fixture.Fixture, env jigEnv) (jigEnv, string) {
+	t.Helper()
 	const remoteURL = "https://github.com/acme/fixture-repo.git"
-	env := b.env.withGitGlobal(t)
-	if _, err := gitx.RunReplaceEnv(b.fx.Dir, env.environ(), "config", "--global", "url."+filepath.ToSlash(b.fx.RepoRemote)+".insteadOf", remoteURL); err != nil {
+	if _, err := gitx.RunReplaceEnv(fx.Dir, env.environ(), "config", "--global", "url."+filepath.ToSlash(fx.RepoRemote)+".insteadOf", remoteURL); err != nil {
 		t.Fatalf("git config --global url.insteadOf: %v", err)
 	}
-	path := filepath.Join(b.fx.StoreDir, "project.yaml")
+	path := filepath.Join(fx.StoreDir, "project.yaml")
 	body := string(readFileOrFatal(t, path))
-	if strings.Count(body, b.fx.RepoRemote) != 1 {
-		t.Fatalf("test setup: %s names the repo's remote %s %d times:\n%s", path, b.fx.RepoRemote, strings.Count(body, b.fx.RepoRemote), body)
+	if strings.Count(body, fx.RepoRemote) != 1 {
+		t.Fatalf("test setup: %s names the repo's remote %s %d times:\n%s", path, fx.RepoRemote, strings.Count(body, fx.RepoRemote), body)
 	}
-	writeFileOrFatal(t, path, []byte(strings.Replace(body, b.fx.RepoRemote, remoteURL, 1)))
+	writeFileOrFatal(t, path, []byte(strings.Replace(body, fx.RepoRemote, remoteURL, 1)))
 
 	log := filepath.Join(t.TempDir(), "gh.log")
 	stub := fixture.GhStub(t)

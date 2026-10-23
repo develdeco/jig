@@ -143,7 +143,7 @@ func TestRecordRunRecordsTheCall(t *testing.T) {
 	p := newJigTestPaths(t)
 	other := filepath.Join(os.TempDir(), "elsewhere")
 	sep := string(filepath.Separator)
-	args := []string{"run", "T-1", "--title", "Add retry", "--backend", "fake", "--scenario", p.scenario}
+	args := []string{"gate", "T-1", "--intent", "Add retry", "--scenario", p.scenario}
 	ft := &fakeT{name: "TestScenario/sub case"}
 	rs := newRecordings(dir)
 
@@ -178,7 +178,7 @@ func TestRecordRunRecordsTheCall(t *testing.T) {
 	}
 	rows := svgRows(t, svg)
 	for _, want := range []string{
-		"$ jig run T-1 --title 'Add retry' --backend fake --scenario <scenario>",
+		"$ jig gate T-1 --intent 'Add retry' --scenario <scenario>",
 		"jig home <jig-home>",
 		"scenario <scenario>",
 		"store <store>",
@@ -205,7 +205,7 @@ func TestRecordRunRecordsTheCall(t *testing.T) {
 		Scenario: "TestScenario/sub case",
 		Flow:     "TestScenario/sub case",
 		Step:     1,
-		Caption:  "jig run T-1 --title 'Add retry' --backend fake",
+		Caption:  "jig gate T-1 --intent 'Add retry'",
 	}
 	if tag != want {
 		t.Errorf("tag = %+v, want %+v", tag, want)
@@ -397,7 +397,7 @@ func TestRecordRunNumbersStepsPerTest(t *testing.T) {
 	}{
 		{a, []string{"status", "T-1"}},
 		{b, []string{"validate", "T-1"}},
-		{a, []string{"run", "T-1"}},
+		{a, []string{"next", "T-1"}},
 	} {
 		rs.run(step.ft, recordCall{env: env, cwd: env.home, args: step.args}, io.Discard, io.Discard, func(out, errs io.Writer) int {
 			writeAll(out, "ok\n")
@@ -412,7 +412,7 @@ func TestRecordRunNumbersStepsPerTest(t *testing.T) {
 	}
 	for file, caption := range map[string]string{
 		"TestA-01.svg.json":  "jig status T-1",
-		"TestA-02.svg.json":  "jig run T-1",
+		"TestA-02.svg.json":  "jig next T-1",
 		sub + "-01.svg.json": "jig validate T-1",
 	} {
 		tag := readTagFile(t, filepath.Join(dir, file))
@@ -672,7 +672,7 @@ func TestRecordingCaptionAndTagBounds(t *testing.T) {
 		want string
 	}{
 		{[]string{"status", "T-1"}, "jig status T-1"},
-		{[]string{"run", "T-1", "--backend", "fake", "--scenario", abs}, "jig run T-1 --backend fake"},
+		{[]string{"gate", "T-1", "--early", "--scenario", abs}, "jig gate T-1 --early"},
 		{[]string{"init", "--store", abs, "--clone", "fixture-repo=" + abs}, "jig init"},
 		{[]string{"ticket", "new", "--title", "Fix the thing"}, "jig ticket new --title 'Fix the thing'"},
 	} {

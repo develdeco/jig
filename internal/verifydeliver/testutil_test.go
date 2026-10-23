@@ -14,11 +14,11 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/frontier"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -514,7 +514,7 @@ func dropJournalLines(t *testing.T, st *store.Store, ticket, why string, drop fu
 }
 
 // amendBriefAndRequeue amends every section of ticket's brief and runs the
-// real `jig requeue --from-brief-diff` over it (frontier.Requeue), which sets
+// real `jig requeue --from-brief-diff` over it (ready.Requeue), which sets
 // each slice whose section changed back to queued, green ones included. It
 // returns the slices it touched.
 func amendBriefAndRequeue(t *testing.T, d Deps, ticket string) []string {
@@ -528,10 +528,7 @@ func amendBriefAndRequeue(t *testing.T, d Deps, ticket string) []string {
 	if err := os.WriteFile(path, []byte(amended), 0o644); err != nil {
 		t.Fatalf("write brief.md: %v", err)
 	}
-	touched, err := frontier.Requeue(frontier.Deps{
-		Store:   d.Store,
-		Journal: func(l journal.Line) error { return journal.Append(d.Store, ticket, l) },
-	}, ticket, true)
+	touched, err := ready.Requeue(d.Store, ticket, true)
 	if err != nil {
 		t.Fatalf("Requeue --from-brief-diff: %v", err)
 	}

@@ -301,7 +301,7 @@ func TestCIWorkflowGateJob(t *testing.T) {
 	for _, name := range sortedKeys(jobs) {
 		other, _ := yamlMap(jobs[name])
 		// Only the release and dispatch jobs, whose if reads inputs.release
-		// (TestReleaseRunsQuickstartOnInstalledBinaries), stay out of the
+		// (TestReleaseRunsTheHooksTestOnInstalledBinaries), stay out of the
 		// gate: they never run on a pull request.
 		if ifExpr, _ := yamlString(other["if"]); name == gate || strings.Contains(ifExpr, "inputs.release") {
 			continue
@@ -358,12 +358,13 @@ func requireGateStepFailsClosed(t *testing.T, gate string, job map[string]interf
 	}
 }
 
-// TestCIWorkflowClaudeCLIJob asserts ci.yml runs jig's sessions against the
+// TestCIWorkflowClaudeCLIJob asserts ci.yml runs jig's hooks against the
 // real Claude Code CLI on all three platforms, on every run of the
 // workflow, and fails the run when they fail: a job with no job-level "if"
-// runs them (requireLiveJob). It has bitten: v0.1.1 shipped a headless
-// backend whose argv the CLI refuses, since the test job's stub `claude`
-// accepts any argv and nothing ran the real one.
+// runs them (requireLiveJob). It has bitten: v0.1.1 shipped an argv the CLI
+// refuses, since the test job's stub `claude` accepted any argv and nothing
+// ran the real one; the hook JSON jig prints is likewise what only the real
+// CLI can say it reads (TestHooksLive).
 func TestCIWorkflowClaudeCLIJob(t *testing.T) {
 	root := repoRoot(t)
 	jobs := workflowJobs(t, root, "ci.yml")
@@ -380,18 +381,18 @@ func TestCIWorkflowClaudeCLIJob(t *testing.T) {
 			return
 		}
 	}
-	t.Errorf("ci.yml: no job without a job-level if runs go test with JIG_LIVE_CLAUDE set, so no session runs against the real Claude Code CLI on every change, or before a release")
+	t.Errorf("ci.yml: no job without a job-level if runs go test with JIG_LIVE_CLAUDE set, so nothing runs against the real Claude Code CLI on every change, or before a release")
 }
 
-// TestReleaseRunsQuickstartOnInstalledBinaries asserts a release's own
-// binaries, as they are installed, run README's Quickstart through the
-// real CLI (requireLiveJob with JIG_E2E_BINARY) both before and after it is
-// published: ci.yml's installers job, on the snapshot archives, which
-// release.yml's call turns on with release: true, and smoke.yml, on the
+// TestReleaseRunsTheHooksTestOnInstalledBinaries asserts a release's own
+// binaries, as they are installed, run the hooks test (TestHooksLive)
+// through the real CLI (requireLiveJob with JIG_E2E_BINARY) both before and
+// after it is published: ci.yml's installers job, on the snapshot archives,
+// which release.yml's call turns on with release: true, and smoke.yml, on the
 // published ones, both the installer's and go install's. It has bitten:
 // v0.1.1 installed and printed its version, the most either checked, and
-// failed at its first dispatch.
-func TestReleaseRunsQuickstartOnInstalledBinaries(t *testing.T) {
+// failed at its first use.
+func TestReleaseRunsTheHooksTestOnInstalledBinaries(t *testing.T) {
 	root := repoRoot(t)
 
 	ciDoc := loadWorkflow(t, root, "ci.yml")
@@ -444,10 +445,10 @@ func TestReleaseRunsQuickstartOnInstalledBinaries(t *testing.T) {
 // (findLiveSteps) in at least want steps, on all three platforms, gating
 // every leg and the run: no job-level continue-on-error, no step-level
 // "if" or continue-on-error on a live step, and the CLI installed with
-// both official installers. With installed set, each live step names the
-// binary under test in JIG_E2E_BINARY and runs one e2e test by its exact
+// both official installers. Each live step runs one e2e test by its exact
 // name in ./e2e, so a renamed test or a dropped package argument cannot
-// turn the step into a run of nothing that passes.
+// turn the step into a run of nothing that passes; with installed set, it
+// also names the binary under test in JIG_E2E_BINARY.
 func requireLiveJob(t *testing.T, root, file, name string, job map[string]interface{}, installed bool, want int) {
 	t.Helper()
 	requireAllPlatforms(t, file, name, job)
@@ -462,13 +463,10 @@ func requireLiveJob(t *testing.T, root, file, name string, job map[string]interf
 		if _, hasIf := live["if"]; hasIf || hasContinueOnError(live) {
 			t.Errorf("%s: a live CLI step of the %s job has a step-level \"if\" or continue-on-error, so it could skip or fail on some legs without failing the job", file, name)
 		}
-		if !installed {
-			continue
-		}
 		run, _ := yamlString(live["run"])
 		m := goTestRunFlag.FindStringSubmatch(run)
 		if m == nil || !e2eTestExists(t, root, m[1]) || !strings.Contains(run, "./e2e") {
-			t.Errorf("%s: a JIG_E2E_BINARY step of the %s job does not run an e2e test in ./e2e by a name that exists (%q), so it can pass having run nothing", file, name, run)
+			t.Errorf("%s: a live CLI step of the %s job does not run an e2e test in ./e2e by a name that exists (%q), so it can pass having run nothing", file, name, run)
 		}
 	}
 	steps, _ := yamlSlice(job["steps"])

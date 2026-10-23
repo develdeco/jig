@@ -7,17 +7,13 @@
 // elsewhere - a release's own, as its installer put it - to run the suite
 // against instead.
 //
-// This suite relies on two things about the CLI surface, called out here
-// and marked inline at their point of use as well:
-//
-//  1. `jig solve` accepts the same `--backend`/`--scenario` flags as
-//     `jig run`/`jig gate` (see `jig solve -h`, cmd/jig/help.go). Without
-//     them, TestSolveOneProcess cannot run deterministically in CI.
-//  2. cmd/jig's RenderStatus (status.go) only ever puts a slice's Question
-//     in the status table's 5th column, never its Reason (e.g.
-//     "attempt-cap"), so that value does not currently surface in `jig
-//     status` output at all. TestCapExhaustion documents this as a known
-//     gap rather than asserting a Reason column that does not exist.
+// jig starts no session, so the tests that need a ticket built play the part
+// of the agent that builds it: the fake harness (harness_test.go) commits the
+// fixture scenario's patches in the operator clone, fires the hooks a harness
+// would, and runs jig as a session of its own, against the real binary
+// and file-path remotes. TestDigesterFlow is the whole story of one ticket, from
+// the brief to a recorded pull request; run it with -v to read it as a
+// transcript.
 package e2e
 
 import (

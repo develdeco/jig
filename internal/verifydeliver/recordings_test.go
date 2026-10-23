@@ -79,7 +79,7 @@ func dispatchedRound(t *testing.T, in RoundInput) (session.Dispatch, []byte) {
 		writeMustReviewResult(t, d)
 		return nil
 	}}
-	if _, ok, err := NewReviewerGateSource(backend).Round(in); err != nil || !ok {
+	if _, ok, err := newReviewerGateSource(backend).Round(in); err != nil || !ok {
 		t.Fatalf("Round: ok = %v, err = %v", ok, err)
 	}
 	if got.SliceJSON == "" {
@@ -360,7 +360,7 @@ func TestReviewerRoundNeverWritesThroughALinkOrReadsAnEarlierList(t *testing.T) 
 		t.Error("the reviewer was dispatched after the list could not be written")
 		return nil
 	}}
-	_, _, err := NewReviewerGateSource(backend).Round(l.roundInput(st, jigHome))
+	_, _, err := newReviewerGateSource(backend).Round(l.roundInput(st, jigHome))
 	if err == nil || !strings.Contains(err.Error(), "recordings.json") {
 		t.Fatalf("Round through a linked round directory: err = %v, want a refusal naming recordings.json", err)
 	}
@@ -438,14 +438,14 @@ func TestReviewerRoundLeavesTheMachinesPathsOutOfWhatTheReviewerWrote(t *testing
 				File: "a.go", Line: 1, Action: ActionNote, Risk: RiskLow,
 				Title:         "the screen in " + rec + " is wrong",
 				Detail:        "see " + filepath.ToSlash(rec) + " and " + fmt.Sprintf("%q", rec) + ", checked in " + l.dir,
-				RiskRationale: "from " + session.WSLPath(rec),
+				RiskRationale: "from " + wslMountPath(rec),
 			}},
 			ReviewedPaths: []string{filepath.Join(l.dir, "a.go"), "b.go"},
 			Summary:       "read " + jigHome + " and " + st.Root,
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	rnd, ok, err := NewReviewerGateSource(backend).Round(l.roundInput(st, jigHome))
+	rnd, ok, err := newReviewerGateSource(backend).Round(l.roundInput(st, jigHome))
 	if err != nil || !ok {
 		t.Fatalf("Round: ok = %v, err = %v", ok, err)
 	}
@@ -506,7 +506,7 @@ func TestGateCommitsNoPathOfTheJigHomeWhenAFindingCitesARecording(t *testing.T) 
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	if _, err := Gate(d, NewReviewerGateSource(backend), GateOpts{Ticket: fx.Ticket}); err != nil {
+	if _, err := Gate(d, newReviewerGateSource(backend), GateOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("Gate: %v", err)
 	}
 

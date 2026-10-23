@@ -11,17 +11,15 @@ import (
 
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/mirror/github"
-	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // env is what one run of the CLI takes from the process around it, beyond its
 // arguments and streams, and the seams a test replaces: the environment
 // variables cmd/jig itself reads (JIG_HOME, and the operator's home directory),
 // the working directory it resolves the store, the repo and every relative path
-// flag against, and the seams (the terminal checks, the solve gate source,
+// flag against, and the seams (the terminal checks,
 // the flag-set hook, the mirror's GitHub client, the chart write, and the
 // context, clock, process spawner, executable and PATH lookups below). run
 // hands it to every command, and cmd/jig reads those only through it, never
@@ -31,11 +29,10 @@ import (
 // parallel.
 //
 // env does not reach what a run starts or calls into: the child processes it
-// spawns (git, the session CLI, the oracles, and the `gh auth token` the
-// mirror runs, which reads GH_TOKEN and GITHUB_TOKEN itself) inherit the
-// process's environment and working directory, and internal/session reads
-// JIG_HEADLESS_TIMEOUT and JIG_WSL_DISTRO from the process itself. A test
-// must not use env to set those.
+// spawns (git, the oracles, the verification workers, and the `gh auth token`
+// the mirror runs, which reads GH_TOKEN and GITHUB_TOKEN itself) inherit the
+// process's environment and working directory. A test must not use env to
+// set those.
 type env struct {
 	// getenv looks a variable up as os.Getenv does.
 	getenv func(key string) string
@@ -45,9 +42,6 @@ type env struct {
 	// stdinIsTerminal reports whether stdin is an interactive terminal, which
 	// decides whether the triage prompts run or the defaults apply.
 	stdinIsTerminal func(r io.Reader) bool
-	// solveGateSource picks the GateSource `jig solve` runs its own gate
-	// rounds on.
-	solveGateSource func(scenario string, backend session.Backend) verifydeliver.GateSource
 	// newFlagSetHook, when set, sees every FlagSet newFlagSet builds; a test
 	// uses it to compare real flag registration with the registered verbs'
 	// help rows.
@@ -88,10 +82,10 @@ type env struct {
 // working directory, and every seam at its production default.
 func processEnv() env {
 	return env{
-		getenv:           os.Getenv,
-		getwd:            os.Getwd,
-		stdinIsTerminal:  stdinIsTerminal,
-		solveGateSource:  gateSourceForSolve,
+		getenv:          os.Getenv,
+		getwd:           os.Getwd,
+		stdinIsTerminal: stdinIsTerminal,
+
 		ctx:              context.Background(),
 		now:              time.Now,
 		spawn:            spawn.Detached,

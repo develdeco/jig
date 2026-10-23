@@ -135,7 +135,7 @@ func gatePrepare(d Deps, o GateOpts) (*gateRun, error) {
 	//
 	// The copy the round reviews is the clone's when the clone has the branch
 	// and its copy is the newer, else origin's, else - for work an earlier
-	// `jig run` built - the build lease's (pointAtBranchCopy).
+	// jig built - the build lease's (pointAtBranchCopy).
 	r.copy, err = pointAtBranchCopy(d, lease.Dir, repoName, ticket, r.branch, gb.Adopted, gb.Built, "gate")
 	if err != nil {
 		return r, err
@@ -268,8 +268,8 @@ func (r *gateRun) roundInput() RoundInput {
 // `jig gate` does not use it for a real review: a person's or an agent's
 // review is recorded by GatePrepare, which opens the round, and GateFinish,
 // which closes it once a reviewer jig did not start has reported. Gate stays
-// for the scripted source (`jig gate --scenario`, the tests), the launched
-// reviewer of internal/revieweval and `jig solve`.
+// for the scripted source (`jig gate --scenario`, the tests) and the launched
+// reviewer of internal/revieweval.
 func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	var run *gateRun
 	defer func() { run.pushFailure(err) }()

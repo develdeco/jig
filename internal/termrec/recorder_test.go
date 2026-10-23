@@ -49,22 +49,22 @@ func TestRecorderStampsEachWriteAndKeepsWhatTheTeeSees(t *testing.T) {
 	rec := mustRecorder(t, 80, 24, clock(0, 100*time.Millisecond, 250*time.Millisecond))
 	var stdout bytes.Buffer
 	w := io.MultiWriter(&stdout, rec.Stream())
-	for _, s := range []string{"$ jig run T-1\n", "slice a: green\n", ""} {
+	for _, s := range []string{"$ jig next T-1\n", "slice a: green\n", ""} {
 		if _, err := io.WriteString(w, s); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := stdout.String(); got != "$ jig run T-1\nslice a: green\n" {
+	if got := stdout.String(); got != "$ jig next T-1\nslice a: green\n" {
 		t.Errorf("the teed buffer got %q, want the bytes as written", got)
 	}
 	want := Cast{Width: 80, Height: 24, Events: []Event{
-		{Time: 100 * time.Millisecond, Data: "$ jig run T-1\r\n"},
+		{Time: 100 * time.Millisecond, Data: "$ jig next T-1\r\n"},
 		{Time: 250 * time.Millisecond, Data: "slice a: green\r\n"},
 	}}
 	if got := rec.Cast(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Cast = %+v, want %+v (an empty write records nothing)", got, want)
 	}
-	if text, _ := rec.Cast().FinalText(); text != "$ jig run T-1\nslice a: green" {
+	if text, _ := rec.Cast().FinalText(); text != "$ jig next T-1\nslice a: green" {
 		t.Errorf("FinalText = %q: lines must start at the left margin", text)
 	}
 }

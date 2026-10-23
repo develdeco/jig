@@ -90,7 +90,7 @@ func (j *ModelJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 	verdictsPath := filepath.Join(q.WorkDir, "verdicts.json")
 	// A failed earlier attempt at this round's judge call must never be
 	// read back as this attempt's verdicts, the same guard
-	// reviewerGateSource.Round keeps over a stale result.json.
+	// the launched gate source keeps over a stale result.json.
 	if err := os.Remove(verdictsPath); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("revieweval: judge: remove stale verdicts.json: %w", err)
 	}
