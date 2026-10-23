@@ -23,7 +23,7 @@ func locateStore(jigHome, cwd, storeFlag string, getenv func(string) string) (st
 	if where.StorePath == "" {
 		return "", project.Config{}, noStoreError(where)
 	}
-	cfg, err := project.Load(filepath.Join(where.StorePath, "project.yaml"))
+	cfg, err := project.LoadConfig(jigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
 	if err != nil {
 		return "", project.Config{}, err
 	}
