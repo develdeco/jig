@@ -1,0 +1,545 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strings"
+
+	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/manifest"
+	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/ready"
+	"github.com/develdeco/jig/internal/store"
+)
+
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"next", "name what is ready to build: a ticket's ready slices by repo, or the tickets of the store", []flagSpec{
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+			{"topology", "also print every slice of the ticket with its repo, wave and blockers", false},
+			{"json", "print one JSON object instead of blocks", false},
+		}, false},
+		Order: 301,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdNext(e, args, stdout)
+		},
+	})
+}
+
+// cmdNext implements `jig next [<ticket>]`. With a ticket it prints the
+// slices that are ready to build, grouped by the repo they build in, the
+// branch to create and how the repos can be shared out; without one, every
+// ticket of the store in order with what blocks it and which are ready, and a
+// warning for local branches of different tickets that change the same files.
+// It reads the store and the clones and writes nothing.
+func cmdNext(e env, args []string, stdout io.Writer) int {
+	fs := newFlagSet(e, "next")
+	storeFlag := fs.String("store", "", "explicit store path")
+	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
+	topology := fs.Bool("topology", false, "also print every slice of the ticket with its repo, wave and blockers")
+	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
+	positionals, handled, err := parseWithPositionals(stdout, fs, args)
+	if handled {
+		return 0
+	} else if err != nil {
+		return renderErr(stdout, err)
+	}
+	ticket, err := atMostOne(positionals, "jig next", "ticket")
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+
+	st, cfg, mp, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	distribution := ""
+	if cwd, err := e.getwd(); err == nil {
+		if _, m, ok, err := project.FindMarker(cwd); err == nil && ok {
+			distribution = m.Distribution
+		}
+	}
+
+	var out any
+	var blocks []string
+	if ticket != "" {
+		id, err := st.ResolveTicket(ticket)
+		if err == nil {
+			err = requireTicket(st, id)
+		}
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		n, err := nextForTicket(st, cfg, mp, id, distribution, *topology)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		out, blocks = n, n.blocks(*topology)
+	} else {
+		n, err := nextForStore(st, cfg, mp)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		out, blocks = n, n.blocks()
+	}
+	if *jsonOut {
+		data, err := json.Marshal(out)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		fmt.Fprintf(stdout, "%s\n", data)
+		return 0
+	}
+	axi.Render(stdout, blocks...)
+	return 0
+}
+
+// nextTicket is what `jig next <ticket>` says.
+type nextTicket struct {
+	Ticket       string        `json:"ticket"`
+	Title        string        `json:"title,omitempty"`
+	State        string        `json:"state"`
+	Branch       string        `json:"branch"`
+	Distribution string        `json:"distribution,omitempty"`
+	BlockedBy    []nextBlocker `json:"blocked_by,omitempty"`
+	Ready        []nextBatch   `json:"ready"`
+	Unplaced     []string      `json:"unplaced_workspaces,omitempty"`
+	Ambiguous    []string      `json:"ambiguous_workspaces,omitempty"`
+	Topology     []nextSlice   `json:"topology,omitempty"`
+	Advice       []string      `json:"advice,omitempty"`
+}
+
+type nextBlocker struct {
+	Ticket string `json:"ticket"`
+	Kind   string `json:"kind,omitempty"`
+}
+
+// nextBatch is one repo's ready slices, in the order they build.
+type nextBatch struct {
+	Repo   string   `json:"repo"`
+	Slices []string `json:"slices"`
+}
+
+type nextSlice struct {
+	ID        string   `json:"id"`
+	Workspace string   `json:"workspace"`
+	Repo      string   `json:"repo"`
+	State     string   `json:"state"`
+	Wave      int      `json:"wave"`
+	BlockedBy []string `json:"blocked_by"`
+}
+
+// ticketData is one ticket as readiness sees it, with its title.
+type ticketData struct {
+	in    ready.Ticket
+	title string
+	rec   store.Ticket
+}
+
+// readTicketData reads what the readiness of ticket id depends on.
+func readTicketData(st *store.Store, id string) (ticketData, error) {
+	rec, err := st.ReadTicket(id)
+	if err != nil {
+		return ticketData{}, err
+	}
+	slices, err := st.ReadSlices(id)
+	if err != nil {
+		return ticketData{}, err
+	}
+	states := make(map[string]store.SliceState, len(slices))
+	for _, s := range slices {
+		if states[s.ID], err = st.ReadSliceState(id, s.ID); err != nil {
+			return ticketData{}, err
+		}
+	}
+	published, err := isPublished(st, id)
+	if err != nil {
+		return ticketData{}, err
+	}
+	in := ready.Ticket{ID: id, Published: published, Slices: slices, States: states}
+	for _, b := range rec.BlockedBy {
+		blocker := b.Ticket
+		if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
+			blocker = resolved
+		}
+		in.Blockers = append(in.Blockers, ready.Blocker{Ticket: blocker, Kind: b.Kind})
+	}
+	return ticketData{in: in, title: rec.Title, rec: rec}, nil
+}
+
+// isPublished reports whether ticket's journal has a publish-done line.
+func isPublished(st *store.Store, id string) (bool, error) {
+	lines, err := journal.Read(st, id)
+	if err != nil {
+		return false, err
+	}
+	for _, l := range lines {
+		if l.Event == journal.EventPublishDone {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// projectRepos lists the project's repos with the workspaces each declares in
+// its manifest; a repo with no clone on this machine declares none.
+func projectRepos(cfg project.Config, mp project.MachineProject) []ready.Repo {
+	repos := make([]ready.Repo, 0, len(cfg.Repos))
+	for _, r := range cfg.Repos {
+		repo := ready.Repo{Name: r.Name()}
+		if dir := mp.Clones[repo.Name]; dir != "" {
+			if m, err := manifest.Resolve(dir); err == nil {
+				for _, ws := range m.Workspaces {
+					repo.Workspaces = append(repo.Workspaces, ws.ID)
+				}
+			}
+		}
+		repos = append(repos, repo)
+	}
+	return repos
+}
+
+// nextForTicket works out what is ready to build on ticket id.
+func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProject, id, distribution string, topology bool) (nextTicket, error) {
+	data, err := readTicketData(st, id)
+	if err != nil {
+		return nextTicket{}, err
+	}
+	target := "main"
+	if len(cfg.Repos) > 0 {
+		target = cfg.Repos[0].TargetBranch()
+	}
+	branch, err := st.ResolveTicketBranch(id, data.rec, target)
+	if err != nil {
+		return nextTicket{}, err
+	}
+
+	// Its blockers' own journals say whether they published.
+	inputs := []ready.Ticket{data.in}
+	for _, b := range data.in.Blockers {
+		published, err := isPublished(st, b.Ticket)
+		if err != nil {
+			return nextTicket{}, err
+		}
+		inputs = append(inputs, ready.Ticket{ID: b.Ticket, Published: published})
+	}
+	status := ready.Tickets(inputs)[0]
+
+	place := ready.Place(projectRepos(cfg, mp), data.in.Slices)
+	n := nextTicket{
+		Ticket: id, Title: data.title, State: status.State, Branch: branch, Distribution: distribution,
+		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous,
+	}
+	for _, b := range status.Blocked {
+		n.BlockedBy = append(n.BlockedBy, nextBlocker{Ticket: b.Ticket, Kind: b.Kind})
+	}
+	isReady := map[string]bool{}
+	for _, id := range status.Ready {
+		isReady[id] = true
+	}
+	var readySlices []store.Slice
+	for _, s := range data.in.Slices {
+		if isReady[s.ID] {
+			readySlices = append(readySlices, s)
+		}
+	}
+	for _, b := range ready.Batches(readySlices, place.Repo) {
+		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices})
+	}
+	n.Advice = distributionAdvice(n.Ready)
+	if topology {
+		waves := ready.Waves(data.in.Slices)
+		for _, s := range data.in.Slices {
+			blockedBy := s.BlockedBy
+			if blockedBy == nil {
+				blockedBy = []string{}
+			}
+			n.Topology = append(n.Topology, nextSlice{
+				ID: s.ID, Workspace: s.Workspace, Repo: place.Repo[s.Workspace],
+				State: data.in.States[s.ID].State, Wave: waves[s.ID], BlockedBy: blockedBy,
+			})
+		}
+	}
+	return n, nil
+}
+
+// distributionAdvice says how the repos with ready slices can be shared out:
+// a repo's slices build one after the other, but repos are independent.
+func distributionAdvice(batches []nextBatch) []string {
+	switch len(batches) {
+	case 0:
+		return nil
+	case 1:
+		b := batches[0]
+		return []string{fmt.Sprintf("All ready slices build in %s: one session takes them in order (%s)", b.Repo, strings.Join(b.Slices, ", "))}
+	}
+	repos := make([]string, len(batches))
+	for i, b := range batches {
+		repos[i] = b.Repo
+	}
+	return []string{
+		fmt.Sprintf("%d repos have ready slices (%s): one session per repo can build them in parallel", len(batches), strings.Join(repos, ", ")),
+		"Within a repo the slices build one after the other, in the order listed",
+	}
+}
+
+func (n nextTicket) blocks(topology bool) []string {
+	pairs := [][2]string{{"ticket", n.Ticket}}
+	if n.Title != "" {
+		pairs = append(pairs, [2]string{"title", n.Title})
+	}
+	pairs = append(pairs, [2]string{"state", n.State}, [2]string{"branch", n.Branch})
+	if n.Distribution != "" {
+		pairs = append(pairs, [2]string{"distribution", n.Distribution})
+	}
+	blocks := []string{axi.KV("next", pairs)}
+	if len(n.BlockedBy) > 0 {
+		var rows [][]string
+		for _, b := range n.BlockedBy {
+			rows = append(rows, []string{b.Ticket, b.Kind})
+		}
+		blocks = append(blocks, axi.Table("blocked_by", []string{"ticket", "kind"}, rows))
+	}
+	if len(n.Ready) == 0 {
+		blocks = append(blocks, "ready: none")
+	} else {
+		var rows [][]string
+		for _, b := range n.Ready {
+			rows = append(rows, []string{b.Repo, joinPlus(b.Slices)})
+		}
+		blocks = append(blocks, axi.Table("ready", []string{"repo", "slices"}, rows))
+	}
+	if len(n.Unplaced) > 0 {
+		blocks = append(blocks, "note: no repo declares workspace(s) "+strings.Join(n.Unplaced, ", ")+": their slices are grouped under ?")
+	}
+	if len(n.Ambiguous) > 0 {
+		blocks = append(blocks, "note: more than one repo declares workspace(s) "+strings.Join(n.Ambiguous, ", ")+": the first repo of the project owns them")
+	}
+	if topology {
+		var rows [][]string
+		for _, s := range n.Topology {
+			blocked := "-"
+			if len(s.BlockedBy) > 0 {
+				blocked = joinPlus(s.BlockedBy)
+			}
+			rows = append(rows, []string{s.ID, s.Workspace, s.Repo, s.State, fmt.Sprint(s.Wave), blocked})
+		}
+		blocks = append(blocks, axi.Table("topology", []string{"slice", "workspace", "repo", "state", "wave", "blocked_by"}, rows))
+	}
+	return append(blocks, axi.Help(n.help()...))
+}
+
+// help is the next step for the ticket, after the advice on sharing it out.
+func (n nextTicket) help() []string {
+	switch n.State {
+	case ready.StateDone:
+		return []string{n.Ticket + " is published: run `jig next` to see the tickets that are left"}
+	case ready.StateBlocked:
+		return []string{fmt.Sprintf("%s waits for %s to publish: run `jig next` to see a ticket that is ready", n.Ticket, n.BlockedBy[0].Ticket)}
+	case ready.StateNew:
+		return []string{fmt.Sprintf("%s has no slices yet: draft its brief and slices with the intake skill, then run `jig validate %s`", n.Ticket, n.Ticket)}
+	case ready.StateGreen:
+		return []string{fmt.Sprintf("Every slice of %s is green: run `jig gate %s`, then `jig publish %s`", n.Ticket, n.Ticket, n.Ticket)}
+	case ready.StateActive:
+		return []string{fmt.Sprintf("Nothing is ready: work is in flight or parked; run `jig status %s` for the state", n.Ticket)}
+	}
+	help := append([]string(nil), n.Advice...)
+	return append(help, fmt.Sprintf("Work on branch %s in each repo (`git switch -c %s` where it does not exist), then run `jig here` to confirm", n.Branch, n.Branch))
+}
+
+// nextStore is what `jig next` says without a ticket.
+type nextStore struct {
+	Tickets  []nextRow     `json:"tickets"`
+	Next     []string      `json:"next"`
+	Overlaps []nextOverlap `json:"overlaps,omitempty"`
+}
+
+type nextRow struct {
+	ID        string        `json:"id"`
+	Title     string        `json:"title,omitempty"`
+	State     string        `json:"state"`
+	BlockedBy []nextBlocker `json:"blocked_by,omitempty"`
+	Ready     []string      `json:"ready"`
+}
+
+// nextOverlap is a file that local branches of different tickets both change.
+type nextOverlap struct {
+	Repo     string   `json:"repo"`
+	File     string   `json:"file"`
+	Tickets  []string `json:"tickets"`
+	Branches []string `json:"branches"`
+}
+
+// nextForStore lists the tickets of the store in order with what blocks each,
+// and the files local ticket branches fight over.
+func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject) (nextStore, error) {
+	ids, err := st.TicketIDs()
+	if err != nil {
+		return nextStore{}, err
+	}
+	datas := make([]ticketData, len(ids))
+	inputs := make([]ready.Ticket, len(ids))
+	for i, id := range ids {
+		if datas[i], err = readTicketData(st, id); err != nil {
+			return nextStore{}, fmt.Errorf("ticket %s: %w", id, err)
+		}
+		inputs[i] = datas[i].in
+	}
+	out := nextStore{Tickets: []nextRow{}, Next: []string{}}
+	for i, s := range ready.Tickets(inputs) {
+		row := nextRow{ID: s.ID, Title: datas[i].title, State: s.State, Ready: s.Ready}
+		if row.Ready == nil {
+			row.Ready = []string{}
+		}
+		for _, b := range s.Blocked {
+			row.BlockedBy = append(row.BlockedBy, nextBlocker{Ticket: b.Ticket, Kind: b.Kind})
+		}
+		out.Tickets = append(out.Tickets, row)
+		if s.State == ready.StateReady {
+			out.Next = append(out.Next, s.ID)
+		}
+	}
+	out.Overlaps = findOverlaps(st, cfg, mp)
+	return out, nil
+}
+
+func (n nextStore) blocks() []string {
+	if len(n.Tickets) == 0 {
+		return []string{"tickets: none", axi.Help("Run `jig ticket new --title \"...\"` to mint the first ticket")}
+	}
+	var rows [][]string
+	for _, t := range n.Tickets {
+		blocked, readySlices := "-", "-"
+		if len(t.BlockedBy) > 0 {
+			bs := make([]ready.Blocker, len(t.BlockedBy))
+			for i, b := range t.BlockedBy {
+				bs[i] = ready.Blocker{Ticket: b.Ticket, Kind: b.Kind}
+			}
+			blocked = ready.JoinBlockers(bs)
+		}
+		if len(t.Ready) > 0 {
+			readySlices = joinPlus(t.Ready)
+		}
+		rows = append(rows, []string{t.ID, t.Title, t.State, blocked, readySlices})
+	}
+	blocks := []string{axi.Table("tickets", []string{"id", "title", "state", "blocked_by", "ready"}, rows)}
+	if len(n.Overlaps) > 0 {
+		var orows [][]string
+		for _, o := range n.Overlaps {
+			orows = append(orows, []string{o.Repo, o.File, joinPlus(o.Tickets)})
+		}
+		blocks = append(blocks, "warning: local branches of different tickets change the same files",
+			axi.Table("overlap", []string{"repo", "file", "tickets"}, orows))
+	}
+	var help []string
+	switch {
+	case len(n.Next) > 0:
+		help = append(help, fmt.Sprintf("Run `jig next %s` to see what is ready to build there", n.Next[0]))
+	default:
+		help = append(help, "No ticket has a slice ready: run `jig next <ticket>` for one that is in flight, or `jig status <ticket>`")
+	}
+	if len(n.Overlaps) > 0 {
+		help = append(help, "Build overlapping tickets one after the other, or settle who changes those files first")
+	}
+	return append(blocks, axi.Help(help...))
+}
+
+// findOverlaps looks in each repo's mapped clone for local branches that bind
+// a ticket, and reports every file that branches of two different tickets
+// both change since the repo's target branch (git diff --name-only
+// <target>...<branch>). A repo with no clone here, or whose target is not
+// there, is skipped: this is a warning, not a gate.
+func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject) []nextOverlap {
+	var out []nextOverlap
+	for _, r := range cfg.Repos {
+		dir := mp.Clones[r.Name()]
+		if dir == "" {
+			continue
+		}
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+			continue
+		}
+		target := r.TargetBranch()
+		listing, err := gitx.Run(dir, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+		if err != nil || listing == "" {
+			continue
+		}
+		type bound struct{ ticket, branch string }
+		var bounds []bound
+		tickets := map[string]bool{}
+		for _, b := range strings.Split(listing, "\n") {
+			b = strings.TrimSpace(b)
+			if b == "" || b == target {
+				continue
+			}
+			if id, _, err := st.TicketForBranch(b); err == nil && id != "" {
+				bounds = append(bounds, bound{id, b})
+				tickets[id] = true
+			}
+		}
+		if len(tickets) < 2 {
+			continue
+		}
+		base := ""
+		for _, ref := range []string{target, "origin/" + target} {
+			if _, err := gitx.Run(dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
+				base = ref
+				break
+			}
+		}
+		if base == "" {
+			continue
+		}
+		type touch struct {
+			tickets, branches map[string]bool
+		}
+		files := map[string]*touch{}
+		for _, b := range bounds {
+			mb, err := gitx.MergeBase(dir, base, b.branch)
+			if err != nil {
+				continue
+			}
+			names, err := gitx.DiffNameOnly(dir, mb, b.branch, "ACDMRTUXB")
+			if err != nil {
+				continue
+			}
+			for _, f := range names {
+				t := files[f]
+				if t == nil {
+					t = &touch{tickets: map[string]bool{}, branches: map[string]bool{}}
+					files[f] = t
+				}
+				t.tickets[b.ticket] = true
+				t.branches[b.branch] = true
+			}
+		}
+		for _, f := range sortedStrings(mapKeys(files)) {
+			t := files[f]
+			if len(t.tickets) < 2 {
+				continue
+			}
+			out = append(out, nextOverlap{Repo: r.Name(), File: f, Tickets: sortedStrings(mapKeys(t.tickets)), Branches: sortedStrings(mapKeys(t.branches))})
+		}
+	}
+	return out
+}
+
+func mapKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func sortedStrings(s []string) []string {
+	sort.Strings(s)
+	return s
+}
