@@ -345,7 +345,7 @@ func buildStore(storeDir, testdataDir, repoRemote, secondRemote string) error {
 	}
 
 	cfg := storeProjectYAML{
-		SchemaVersion: project.CurrentSchemaVersion,
+		SchemaVersion: fixtureSchemaVersion,
 		Name:          "fixture",
 		Keys:          map[string]string{"JIG": "everything in fixture"},
 		Trackers:      []string{},
@@ -368,7 +368,7 @@ func buildStore(storeDir, testdataDir, repoRemote, secondRemote string) error {
 	if err := os.MkdirAll(filepath.Join(storeDir, "platform"), 0o755); err != nil {
 		return fmt.Errorf("fixture: create platform dir: %w", err)
 	}
-	// Mirrors project.InitStandalone's store-root .gitignore: store.Lock's
+	// Mirrors project.Init's store-root .gitignore: store.Lock's
 	// sidecar "*.lock" files and store.AtomicWrite's ".*.tmp" scratch files
 	// must never show up as untracked/dirty in a fixture store either.
 	if err := writeFile(filepath.Join(storeDir, ".gitignore"), []byte("*.lock\n.*.tmp\n")); err != nil {
@@ -423,6 +423,13 @@ func secondRepoSlice(fromBrief string) []byte {
     from_brief: [%q]
 `, fromBrief))
 }
+
+// fixtureSchemaVersion is the store schema the fixture is written at: 2, the
+// layout with a project.yaml, whatever project.CurrentSchemaVersion is. A v2
+// store opens unchanged under a jig whose current schema is 3, and the
+// fixture is the standing proof of it: the suite's stores stay v2, and the
+// tests of v3 make their stores with `jig init`.
+const fixtureSchemaVersion = 2
 
 // storeProjectYAML is the on-disk shape Build writes for the fixture
 // store's project.yaml; it mirrors project.Config's declared wire format at

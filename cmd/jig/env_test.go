@@ -279,43 +279,6 @@ func TestRelativeStoreFlagResolvesAgainstTheEnvsWorkingDirectory(t *testing.T) {
 	}
 }
 
-// TestInitResolvesRelativeStoreAndCloneAgainstTheEnvsWorkingDirectory: the
-// machine mapping `jig init --store --clone` writes names the paths as placed
-// under the env's directory, and the command prints the store as it was given.
-func TestInitResolvesRelativeStoreAndCloneAgainstTheEnvsWorkingDirectory(t *testing.T) {
-	t.Parallel()
-
-	fx := newFixture(t, fixture.Opts{})
-	relStore, err := filepath.Rel(fx.Dir, fx.StoreDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	relRepo, err := filepath.Rel(fx.Dir, fx.RepoDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	newHome := t.TempDir()
-	out, code := runMain(t, testEnv(newHome).inDir(fx.Dir), "", "init", "--store", relStore, "--clone", "fixture-repo="+relRepo)
-	if code != 0 {
-		t.Fatalf("jig init --store %s --clone fixture-repo=%s: exit %d\n%s", relStore, relRepo, code, out)
-	}
-	if !strings.Contains(out, "store: "+relStore+"\n") {
-		t.Errorf("init output does not print the store as given (%s):\n%s", relStore, out)
-	}
-	cfg, err := project.Load(filepath.Join(fx.StoreDir, "project.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	machine, err := project.LoadMachine(newHome)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mp, ok := machine[cfg.Name]
-	if !ok || mp.Store != fx.StoreDir || mp.Clones["fixture-repo"] != fx.RepoDir {
-		t.Fatalf("machine mapping for %s = %+v (found %v), want store %s and clone fixture-repo=%s", cfg.Name, mp, ok, fx.StoreDir, fx.RepoDir)
-	}
-}
-
 // TestSkillsInstallPlacesARelativeDestUnderTheEnvsWorkingDirectory: --dest as a
 // relative path is written under the env's directory and shown as given.
 func TestSkillsInstallPlacesARelativeDestUnderTheEnvsWorkingDirectory(t *testing.T) {

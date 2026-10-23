@@ -60,7 +60,7 @@ func (l *locator) byFlag() error {
 	if !filepath.IsAbs(storePath) {
 		storePath = filepath.Join(l.cwd, storePath)
 	}
-	cfg, err := project.Load(filepath.Join(storePath, "project.yaml"))
+	cfg, err := project.LoadStoreConfig(storePath)
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func (l *locator) byMarker(dir string, m project.Marker) error {
 
 	var cfgRepos []project.Repo
 	if storePath != "" {
-		if cfg, err := project.Load(filepath.Join(storePath, "project.yaml")); err == nil {
+		if cfg, err := project.LoadConfig(l.jigHome, storePath, name, dir); err == nil {
 			cfgRepos = cfg.Repos
 		}
 	}
@@ -349,7 +349,7 @@ func (l *locator) byMapRemote() bool {
 		if mp.Store == "" {
 			continue
 		}
-		cfg, err := project.Load(filepath.Join(mp.Store, "project.yaml"))
+		cfg, err := project.LoadConfig(l.jigHome, mp.Store, p, mp.Root)
 		if err != nil {
 			continue
 		}
@@ -395,7 +395,7 @@ func (l *locator) byStoreDir() bool {
 		}
 		l.setStore(sibling)
 		w.RepoDir = d
-		if cfg, err := project.Load(filepath.Join(sibling, "project.yaml")); err == nil && len(cfg.Repos) > 0 {
+		if cfg, err := project.LoadConfig(l.jigHome, sibling, "", d); err == nil && len(cfg.Repos) > 0 {
 			w.Repo = cfg.Repos[0].Name()
 		}
 		w.Root = d
