@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/verify"
 )
 
 // The sources every jig has: what became of the commits the session made, and
@@ -22,8 +23,10 @@ func deliverable(kind string) bool {
 
 // verificationNotes tells the session how its commits fared: a verification
 // that passed (advisory), and one that failed or could not run (enforced),
-// for as long as no later verification of the slice has passed. Only
-// outcomes recorded since the session began count.
+// for as long as no later verification of the slice has passed and no newer
+// commit of the slice has an outcome (workers finish in any order, so the
+// journal's order is not the commits'). Only outcomes recorded since the
+// session began count.
 func verificationNotes(c NoteCtx) ([]Note, error) {
 	if !deliverable(c.Event.Kind) || c.Store == nil || c.Where.Ticket == "" {
 		return nil, nil
@@ -38,6 +41,7 @@ func verificationNotes(c NoteCtx) ([]Note, error) {
 			lastPass[l.Slice] = i
 		}
 	}
+	ancestry := verify.GitAncestry(c.Where.RepoDir)
 	var notes []Note
 	for i, l := range lines {
 		if l.Commit == "" || !since(l.TS, c.Since) {
@@ -56,6 +60,9 @@ func verificationNotes(c NoteCtx) ([]Note, error) {
 		case failed:
 			if at, ok := lastPass[l.Slice]; ok && at > i {
 				continue // a later verification passed: the failure is history
+			}
+			if verify.Superseded(lines, l.Slice, l.Commit, ancestry) {
+				continue // a newer commit of the slice has its own outcome
 			}
 			what := "FAILED"
 			if l.Event == journal.EventVerifyError {

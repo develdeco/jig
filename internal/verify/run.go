@@ -538,9 +538,20 @@ func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 		return err
 	}
 
+	// A newer commit of the slice may already have an outcome: workers finish
+	// in any order. This one is history then, and the slice's state stays
+	// what the newer commit made it.
+	newer := x.superseded()
+	if newer {
+		x.logf("a newer commit of slice %s already has an outcome; its state stays as that one left it", x.r.Slice)
+	}
+
 	if oerr != nil {
 		err := x.setState(func(st *store.SliceState) bool {
 			st.Attempts = max(st.Attempts, x.attempt)
+			if newer {
+				return true
+			}
 			// An open question outranks a failed run: the person's answer is
 			// what a slice that needs input waits for.
 			if st.State != "needs-input" {
@@ -563,8 +574,11 @@ func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 		return err
 	}
 	err := x.setState(func(st *store.SliceState) bool {
-		st.State = "green"
 		st.Attempts = max(st.Attempts, x.attempt)
+		if newer {
+			return true
+		}
+		st.State = "green"
 		st.Question, st.Reason, st.Signature, st.StallSummary = "", "", "", ""
 		return true
 	})
@@ -573,4 +587,15 @@ func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 	}
 	x.push("oracle passed")
 	return nil
+}
+
+// superseded reports whether a newer commit of this slice already has an
+// outcome in the journal (see Superseded). A journal that cannot be read
+// leaves the state to this run, as before.
+func (x *run) superseded() bool {
+	lines, err := journal.Read(x.d.Store, x.r.Ticket)
+	if err != nil {
+		return false
+	}
+	return Superseded(lines, x.r.Slice, x.sha, GitAncestry(x.d.Clone))
 }

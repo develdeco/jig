@@ -144,3 +144,22 @@ type testError string
 func (e testError) Error() string { return string(e) }
 
 const errTest = testError("the source failed")
+
+// TestAFailureOfAnOlderCommitJournaledAfterTheFixIsHistory: verifications
+// finish in any order, so the failure of an older commit can reach the
+// journal after the newer commit's pass. The commits decide, not the lines.
+func TestAFailureOfAnOlderCommitJournaledAfterTheFixIsHistory(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	r.handle(r.ev(KindSessionStart))
+	older := r.commit("b", "b.txt")
+	newer := r.commit("b", "b2.txt")
+	r.add(journal.Line{Event: journal.EventOracle, Slice: "b", Commit: newer, Attempt: 2, Outcome: "pass"})
+	r.add(journal.Line{Event: journal.EventVerified, Slice: "b", Commit: newer, Attempt: 2})
+	r.add(journal.Line{Event: journal.EventOracle, Slice: "b", Commit: older, Attempt: 1, Outcome: "fail", Summary: "bad"})
+	res := r.handle(r.ev(KindPrompt))
+	if strings.Contains(res.Context, "FAILED") || !strings.Contains(res.Context, "verified "+newer[:12]) {
+		t.Errorf("prompt context = %q, want only the newer commit's pass", res.Context)
+	}
+}

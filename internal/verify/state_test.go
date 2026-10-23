@@ -93,3 +93,49 @@ func TestRunMovesTheSliceStateAsTheDesignSays(t *testing.T) {
 		})
 	}
 }
+
+// TestAnOlderCommitFinishingLastLeavesTheNewerOnesState: workers finish in
+// any order. When the run of an older commit of a slice ends after a newer
+// commit's, the slice keeps the state the newer one gave it, pass or fail.
+func TestAnOlderCommitFinishingLastLeavesTheNewerOnesState(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		newerFails bool
+		olderFails bool
+		want       string
+	}{
+		{"an older failure after a newer pass leaves it green", false, true, "green"},
+		{"an older pass after a newer failure leaves it building", true, false, "building"},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			r := newRig(t, fixture.Opts{})
+			older := r.fixClamp()
+			newer := r.commit("a", "a: and a note", map[string]string{"alpha/NOTE.txt": "x\n"})
+			setOutcome := func(fail bool) {
+				r.oracle.err, r.oracle.out = nil, ""
+				if fail {
+					r.oracle.err, r.oracle.out = errExit, "FAIL"
+				}
+			}
+			setOutcome(c.newerFails)
+			if _, err := Run(r.deps, r.request("a", newer)); err != nil {
+				t.Fatalf("Run newer: %v", err)
+			}
+			setOutcome(c.olderFails)
+			if _, err := Run(r.deps, r.request("a", older)); err != nil {
+				t.Fatalf("Run older: %v", err)
+			}
+			got := r.state("a")
+			if got.State != c.want {
+				t.Errorf("state after the older commit finished last = %q, want %q (the newer commit's)", got.State, c.want)
+			}
+			if got.Attempts != 2 {
+				t.Errorf("attempts = %d, want 2: both runs count", got.Attempts)
+			}
+		})
+	}
+}
