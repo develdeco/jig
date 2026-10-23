@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -104,9 +105,13 @@ func TestHooksLive(t *testing.T) {
 		}
 	})
 	script.Check(t)
-	sha := strings.TrimSpace(script.Results()[0].Content)
-	if len(sha) != 40 {
-		t.Fatalf("the scripted commit printed %q, want its sha", sha)
+	// The Bash tool's output can carry the harness's own lines after the
+	// command's (on a Windows runner: "Shell cwd was reset to ..."), so the
+	// sha is the line that is one.
+	content := script.Results()[0].Content
+	sha := shaLine.FindString(content)
+	if sha == "" {
+		t.Fatalf("the scripted commit printed %q, want its sha", content)
 	}
 
 	mu.Lock()
@@ -157,3 +162,6 @@ func mustExitZero(t *testing.T, r jigResult, what string) {
 		t.Fatalf("%s exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", what, r.Code, r.Stdout, r.Stderr)
 	}
 }
+
+// shaLine is a line that is a full commit sha and nothing else.
+var shaLine = regexp.MustCompile(`(?m)^[0-9a-f]{40}\r?$`)

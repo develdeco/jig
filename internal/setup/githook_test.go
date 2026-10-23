@@ -279,7 +279,7 @@ func TestInstallCloneAppendsABlockAndUninstallRestores(t *testing.T) {
 	writeOrFail(t, hook, original, 0o755) // no final newline, on purpose
 
 	res, err := g.InstallClone(repo, hooksDir, "jig")
-	if err != nil || res.State != CloneHasBlock || !res.Changed || !samePathText(res.Path, hook) {
+	if err != nil || res.State != CloneHasBlock || !res.Changed || !sameFileOnDisk(res.Path, hook) {
 		t.Fatalf("install = %+v, %v", res, err)
 	}
 	got := readOrFail(t, hook)
@@ -394,7 +394,7 @@ func TestInstallCloneWithItsOwnHooksPath(t *testing.T) {
 			t.Fatal(err)
 		}
 		res, err := g.InstallClone(repo, hooksDir, "jig")
-		if err != nil || res.State != CloneHasBlock || !samePathText(res.Path, filepath.Join(own, "post-commit")) {
+		if err != nil || res.State != CloneHasBlock || !sameFileOnDisk(res.Path, filepath.Join(own, "post-commit")) {
 			t.Fatalf("install = %+v, %v, want the block in the repository's own hooks path", res, err)
 		}
 		if out, err := g.UninstallClone(repo, hooksDir); err != nil || !out.Changed {
@@ -458,4 +458,13 @@ func TestInstallCloneWithItsOwnHooksPath(t *testing.T) {
 			t.Fatalf("install = %+v, %v, want the block into an ignored hook", res, err)
 		}
 	})
+}
+
+// sameFileOnDisk reports whether a and b are one file. git reports a hook's
+// path with its symlinks resolved (on macOS /var is /private/var), so the
+// paths need not match as text.
+func sameFileOnDisk(a, b string) bool {
+	fa, errA := os.Stat(a)
+	fb, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(fa, fb)
 }
