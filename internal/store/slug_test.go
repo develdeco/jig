@@ -21,9 +21,9 @@ func TestSlug(t *testing.T) {
 		{"nothing ASCII has no slug", "\u65e5\u672c\u8a9e\u306e\u30bf\u30a4\u30c8\u30eb", ""},
 		{"empty", "", ""},
 		{"only punctuation", "?! -- ...", ""},
-		{"exactly forty keeps every word", "aaaa bbbb cccc dddd eeee ffff gggg hhhhh", "aaaa-bbbb-cccc-dddd-eeee-ffff-gggg-hhhhh"},
-		{"over forty is cut at a word boundary", "aaaa bbbb cccc dddd eeee ffff gggg hhhhh iiii", "aaaa-bbbb-cccc-dddd-eeee-ffff-gggg-hhhhh"},
-		{"a word that would cross forty is left out whole", "aaaa bbbb cccc dddd eeee ffff gggg hhhhhh iiii", "aaaa-bbbb-cccc-dddd-eeee-ffff-gggg"},
+		{"exactly forty keeps every word", "aaaa kkkk cccc dddd eeee ffff gggg hhhhh", "aaaa-kkkk-cccc-dddd-eeee-ffff-gggg-hhhhh"},
+		{"over forty is cut at a word boundary", "aaaa kkkk cccc dddd eeee ffff gggg hhhhh iiii", "aaaa-kkkk-cccc-dddd-eeee-ffff-gggg-hhhhh"},
+		{"a word that would cross forty is left out whole", "aaaa kkkk cccc dddd eeee ffff gggg hhhhhh iiii", "aaaa-kkkk-cccc-dddd-eeee-ffff-gggg"},
 		{"a first word over forty is cut where it stands", strings.Repeat("x", 55), strings.Repeat("x", 40)},
 		{"a long first word ends the slug", strings.Repeat("x", 55) + " tail", strings.Repeat("x", 40)},
 	} {
