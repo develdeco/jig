@@ -303,6 +303,10 @@ func TestPushStartsTheRemotesAutomaticMaintenance(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			work, remote := newRemotePair(t)
 			mustRun(t, remote, "config", "gc.auto", "1")
+			// The gc task is the one that packs loose objects. Up to git
+			// 2.55 it is the only task "maintenance run --auto" enables by
+			// default; git 2.56 changed the default tasks, so name it.
+			mustRun(t, remote, "config", "maintenance.gc.enabled", "true")
 			if c.autoGC != "" {
 				mustRun(t, remote, "config", "receive.autoGC", c.autoGC)
 			}

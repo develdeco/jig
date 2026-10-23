@@ -15,8 +15,20 @@ func worktreeListed(t *testing.T, repo, dir string) bool {
 	if err != nil {
 		t.Fatalf("git worktree list: %v", err)
 	}
+	// SameDir needs the directory to exist, and one test deletes it. git
+	// lists the long, symlink-free spelling of a path, so resolve the parent
+	// that still exists: on a Windows runner the temp directory is an 8.3
+	// short name (RUNNER~1), and on macOS /var is a link to /private/var.
+	want := filepath.ToSlash(dir)
+	if parent, err := filepath.EvalSymlinks(filepath.Dir(dir)); err == nil {
+		want = filepath.ToSlash(filepath.Join(parent, filepath.Base(dir)))
+	}
 	for _, line := range strings.Split(out, "\n") {
-		if path, ok := strings.CutPrefix(strings.TrimSpace(line), "worktree "); ok && (SameDir(path, dir) || strings.EqualFold(filepath.ToSlash(path), filepath.ToSlash(dir))) {
+		path, ok := strings.CutPrefix(strings.TrimSpace(line), "worktree ")
+		if !ok {
+			continue
+		}
+		if SameDir(path, dir) || strings.EqualFold(filepath.ToSlash(path), want) || strings.EqualFold(filepath.ToSlash(path), filepath.ToSlash(dir)) {
 			return true
 		}
 	}
