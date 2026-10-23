@@ -78,24 +78,31 @@ func Spawn(d Deps, r Request) (Spawned, error) {
 	}
 
 	// A worker holds the lock for as long as it runs: probe it without
-	// waiting. A rerun cannot take the place of a run that is under way.
+	// waiting. A rerun cannot take the place of a run that is under way. The
+	// lock is kept while the journal is read, so a pass a run stopped
+	// recording halfway is finished here as Run would (finishPass), and let
+	// go before a worker starts, since the worker takes it.
 	release, held, err := store.TryLock(x.dir, 0)
 	if err != nil {
 		return out, fmt.Errorf("verify: lock %s: %w", x.dir, err)
 	}
-	release()
 	if !held {
+		release()
 		out.Existing, out.State = true, journal.VerifyPending
 		return out, nil
 	}
 	lines, err := journal.Read(d.Store, r.Ticket)
 	if err != nil {
+		release()
 		return out, fmt.Errorf("verify: read the journal of %s: %w", r.Ticket, err)
 	}
 	if x.existing(lines) {
+		err := x.finishPass(lines)
+		release()
 		out.Existing, out.State, out.Attempt = true, x.res.State, x.res.Attempt
-		return out, nil
+		return out, err
 	}
+	release()
 
 	if out.Log, err = logPath(d.JigHome, x.storeID, r.Ticket, x.sha, r.Slice); err != nil {
 		return out, err

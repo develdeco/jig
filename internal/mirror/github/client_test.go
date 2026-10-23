@@ -963,20 +963,25 @@ func TestDoRetriesAGraphQLRateLimitedError(t *testing.T) {
 
 // TestDoThrottlesMutationsOneAtATime checks brief.md#The GitHub client's
 // pacing: two mutations sent back to back (AddComment, a single-request
-// call with no query step ahead of it) are at least MutationInterval
-// apart, timed from the fake server's own clock.
+// call with no query step ahead of it) leave the client at least
+// MutationInterval apart. They are timed where the client hands each
+// request to its transport, which is what the pacing governs: the fake
+// server's clock would also count the first request's connection setup,
+// which the second, reusing the connection, does not pay, and on a loaded
+// Windows runner that made the gap the server saw shorter than the pacing
+// by several milliseconds.
 func TestDoThrottlesMutationsOneAtATime(t *testing.T) {
-	const interval = 30 * time.Millisecond
+	const interval = 100 * time.Millisecond
 
-	var times []time.Time
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		times = append(times, time.Now())
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":{"addComment":{"subject":{"id":"ISSUE_1"}}}}`))
 	}))
 	defer srv.Close()
 
+	sent := &sendTimes{base: http.DefaultTransport}
 	c := newFastClient(srv.URL, "test-token")
+	c.HTTPClient = &http.Client{Transport: sent}
 	c.MutationInterval = interval
 	if err := c.AddComment(context.Background(), "ISSUE_1", "one"); err != nil {
 		t.Fatalf("AddComment 1: %v", err)
@@ -985,15 +990,30 @@ func TestDoThrottlesMutationsOneAtATime(t *testing.T) {
 		t.Fatalf("AddComment 2: %v", err)
 	}
 
-	if len(times) != 2 {
-		t.Fatalf("server saw %d request(s), want exactly 2", len(times))
+	if len(sent.at) != 2 {
+		t.Fatalf("the client sent %d request(s), want exactly 2", len(sent.at))
 	}
-	// A few percent under interval is sleep's own scheduling jitter, not a
-	// pacing bug: seen as low as 27.7ms against a 30ms interval under load.
-	const tolerance = 5 * time.Millisecond
-	if gap := times[1].Sub(times[0]); gap < interval-tolerance {
-		t.Fatalf("the two AddComment mutations were %v apart, want at least %v", gap, interval)
+	// The pacing sleeps from the moment the first mutation was let go, but
+	// on Windows the clock it reads moves only on a timer tick, up to 15.6ms
+	// by default, so the moment it noted can be a tick old and the second
+	// request can leave a tick early. Half the interval is past any tick and
+	// still far above what a client that did not pace would show: its second
+	// request leaves one loopback round trip after the first.
+	if gap := sent.at[1].Sub(sent.at[0]); gap < interval/2 {
+		t.Fatalf("the two AddComment mutations were sent %v apart, want them paced %v apart", gap, interval)
 	}
+}
+
+// sendTimes is a RoundTripper that notes when each request reaches it and
+// hands the request to base.
+type sendTimes struct {
+	base http.RoundTripper
+	at   []time.Time
+}
+
+func (s *sendTimes) RoundTrip(r *http.Request) (*http.Response, error) {
+	s.at = append(s.at, time.Now())
+	return s.base.RoundTrip(r)
 }
 
 // TestDoRetriesWithBackoff checks that do waits BackoffBase before its

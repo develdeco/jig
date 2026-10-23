@@ -104,8 +104,10 @@ func resolveGateBranch(d Deps, ticket, target, flag string, slices []store.Slice
 // the store records, whichever machine built. Three facts say so:
 //
 //   - the journal records a verified commit (journal.BuiltCommits). This
-//     version journals it before it marks the slice green, so a run that
-//     stopped between the two writes has built a commit no slice shows yet;
+//     version marks the slice green before it journals the verified line, so
+//     a run that stopped between the two writes shows a green slice whose
+//     commit no verified line names yet (the next jig verify of the commit
+//     writes it), and the green slice below covers it;
 //   - the journal holds a green result line naming a commit
 //     (journal.GreenClaims). Every jig version journals one before it routes
 //     the result, and nothing removes it, so it is the fact that survives for a

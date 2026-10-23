@@ -1,6 +1,8 @@
 package observe
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -127,6 +129,80 @@ func TestRunParsesHandlesAndRenders(t *testing.T) {
 	}
 	if out, err := Run(r.d, a, []byte(`garbage`)); out != nil || err == nil {
 		t.Errorf("Run of garbage = %s, %v, want an error and no output", out, err)
+	}
+}
+
+func TestRunHandsTheSessionIdToTheSessionsCommands(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	claude, _ := AdapterFor("claude")
+	payload := []byte(`{"session_id":"s1","cwd":` + jsonString(r.fx.RepoDir) + `,"hook_event_name":"SessionStart"}`)
+	const asked = "jig knows this session as s1"
+	withEnvFile := func(path string) Deps {
+		d := r.d
+		d.Getenv = func(k string) string {
+			if k == "CLAUDE_ENV_FILE" {
+				return path
+			}
+			return ""
+		}
+		return d
+	}
+
+	// Claude Code names a file of the session's, in a directory named after
+	// its id, that it sources before each Bash command: the id goes there,
+	// and the context does not ask for it.
+	sessionDir := filepath.Join(t.TempDir(), "s1")
+	if err := os.Mkdir(sessionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	envFile := filepath.Join(sessionDir, "sessionstart-hook-0.sh")
+	out, err := Run(withEnvFile(envFile), claude, payload)
+	if err != nil || strings.Contains(string(out), asked) || !strings.Contains(string(out), "ticket: "+r.fx.Ticket) {
+		t.Errorf("Run with the session's env file = %s, %v, want the context without the request", out, err)
+	}
+	if got, _ := os.ReadFile(envFile); string(got) != "export JIG_SESSION='s1'\n" {
+		t.Errorf("env file = %q, want the export of JIG_SESSION", got)
+	}
+
+	// A CLAUDE_ENV_FILE that is not the session's is a script of the
+	// person's own: it is never written, and the context asks.
+	own := filepath.Join(t.TempDir(), "my-env.sh")
+	if err := os.WriteFile(own, []byte("export A=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := Run(withEnvFile(own), claude, payload); err != nil || !strings.Contains(string(out), asked) {
+		t.Errorf("Run with the person's own env file = %s, %v, want the context to ask", out, err)
+	}
+	if got, _ := os.ReadFile(own); string(got) != "export A=1\n" {
+		t.Errorf("the person's env file became %q", got)
+	}
+
+	// With no such file (a hook run by hand), the context asks; so it does
+	// for Codex, which shares the shape but not the file, and for a harness
+	// with no way at all.
+	if out, err := Run(r.d, claude, payload); err != nil || !strings.Contains(string(out), asked) {
+		t.Errorf("Run with no env file = %s, %v, want the context to ask", out, err)
+	}
+	codex, _ := AdapterFor("codex")
+	codexFile := filepath.Join(sessionDir, "codex.sh")
+	if out, _ := Run(withEnvFile(codexFile), codex, payload); !strings.Contains(string(out), asked) {
+		t.Errorf("Run for codex = %s, want the context to ask", out)
+	}
+	if _, err := os.Stat(codexFile); !os.IsNotExist(err) {
+		t.Errorf("codex wrote an env file (stat: %v)", err)
+	}
+	gemini, _ := AdapterFor("gemini")
+	if out, _ := Run(r.d, gemini, payload); !strings.Contains(string(out), asked) {
+		t.Errorf("Run for gemini = %s, want the context to ask", out)
+	}
+
+	// A file of the session's that cannot be written is an error, and the
+	// context still asks.
+	missing := filepath.Join(t.TempDir(), "gone", "s1", "sessionstart-hook-0.sh")
+	if out, err := Run(withEnvFile(missing), claude, payload); err == nil || !strings.Contains(string(out), asked) {
+		t.Errorf("Run with an unwritable env file = %s, %v, want an error and the context asking", out, err)
 	}
 }
 

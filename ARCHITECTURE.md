@@ -73,14 +73,14 @@ jig is reached reactively, through four doors, and each is a subcommand of the o
 
 | Event | What the core does | What the harness reads |
 |---|---|---|
-| session-start | registers the session in the ledger (harness, agent, cwd, clone, ticket, slice, model, HEAD) and renders `jig here` for the directory | context |
+| session-start | registers the session in the ledger (harness, agent, cwd, clone, ticket, slice, model, HEAD), renders `jig here` for the directory, and sets `JIG_SESSION` to the harness's session id for the session's later shell commands. The harness sets it where its adapter can: Claude Code sources the file `CLAUDE_ENV_FILE` names before each Bash command, and jig writes only to the one Claude Code made for the session, in a directory named after its id. Elsewhere a line of the context asks the agent to pass the id | context |
 | prompt | a `hook` ledger line; a `session-touch` when the ticket or slice changed; the notes the session has not heard | context |
 | tool | when the tool ran a command and HEAD moved, starts the verification of the new commit; a `tool` ledger line; the notes not yet heard | context |
 | stop | the findings below: a message to the person, or, for an unattended session, a refusal to stop | message or block |
 | session-end | ends the session; a final call to every note source; a `note` journal line per question still open | none |
 | post-commit | a `git-commit` ledger line, then the verification of HEAD | none |
 
-A directory in no jig project is left alone: no ledger line, no output. The core is stateless - the machine ledger is its only memory of what a session was told and where HEAD was, read back from the end of the file (`ledger.ReadBackward`) - so a hook costs the distance to what it asks for. A commit is verified once whoever sees it first: before `verify.Spawn` the core looks for a `verify-spawned` ledger line of the same commit and slice, because git's hook starts the worker inside `git commit` and the PostToolUse hook runs right after, before the worker has written a journal line.
+A directory in no jig project is left alone: no ledger line, no output. Only `JIG_SESSION` is still set there, for a project the session works in later. The core is stateless - the machine ledger is its only memory of what a session was told and where HEAD was, read back from the end of the file (`ledger.ReadBackward`) - so a hook costs the distance to what it asks for. A commit is verified once whoever sees it first: before `verify.Spawn` the core looks for a `verify-spawned` ledger line of the same commit and slice, because git's hook starts the worker inside `git commit` and the PostToolUse hook runs right after, before the worker has written a journal line.
 
 **Skills.** The project skills (`here`, `intake`, `build`, `review`, `publish`) tell a session when to reach for jig and what to run; the helpers (`jig-init`, `jig-attach`) help it start a project or attach a repository; `retro` and `platform-sync` are installed by name. They are embedded in the binary and `jig skill <name>` prints one as this binary carries it. In a project's untracked form a repo holds one stub named `jig` whose body sends the agent to `jig here` and `jig skill <name>`, so a repo never holds a stale copy of a skill.
 
