@@ -1,0 +1,24 @@
+jig  demo › JIG-2  Config loader                             ! review found asks
+────────────────────────────────────────────────────────────────────────────────
+▸ ● build    1 of 1 slices green
+  ! review   round 1: findings, 2 asks
+  ○ publish  not yet
+
+  needs a person
+  ! r1-f1  high  alpha/a.go:3  Unchecked error  undecided
+  ! r1-f2  low   beta/b.go:9   Name shadows import  undecided
+
+  next  Run `jig triage JIG-2 <id> keep|dismiss` to decide the outstanding asks…
+
+  recent
+  09:10:00 ◐ claimed by s-builder  [a]
+  09:10:30 ● verified ccccccc  [a]
+  09:11:00 ◎ gate round opened
+  09:11:30 ! round 1: findings
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate
+  p publish · t tail · q quit

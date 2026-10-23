@@ -1,0 +1,24 @@
+jig  demo                                                              3 tickets
+────────────────────────────────────────────────────────────────────────────────
+▸ ? JIG-1  Greeting copy  needs input  1 open question
+  ✔ JIG-2  Config loader  published    https://example.test/acme/demo/pull/7
+  ○ JIG-3  Release notes  blocked
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move · enter open · g gate · a answer · t tail · r refresh · q quit
