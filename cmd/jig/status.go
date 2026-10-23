@@ -72,12 +72,19 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 // RenderStatus renders the exact `jig status` golden format for ticket:
 // ticket/state lines, a slices table, a questions table (or "questions:
 // none"), a parked table (present only while a slice is needs-input) and a
-// stalled table (present only while a slice is stalled), and a contextual
-// help hint. A ticket that adopted a branch names it on a branch line under
-// the ticket's. The parked and stalled tables are the custody surface: they
-// make "awaiting a human" (parked) and "stuck" (stalled) unmistakable and
-// distinct from each other and from ordinary in-progress work.
+// stalled table (present only while a slice is stalled), the blocks of every
+// registered status section (registerStatusSection), and a contextual help
+// hint. A ticket that adopted a branch names it on a branch line under the
+// ticket's. The parked and stalled tables are the custody surface: they make
+// "awaiting a human" (parked) and "stuck" (stalled) unmistakable and distinct
+// from each other and from ordinary in-progress work.
 func RenderStatus(st *store.Store, ticket string) (string, error) {
+	return renderStatus(st, ticket, statusSections())
+}
+
+// renderStatus is RenderStatus over the given sections: each one's blocks
+// follow the status blocks and come before the help line.
+func renderStatus(st *store.Store, ticket string, sections []statusSection) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		return "", err
@@ -279,6 +286,13 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		if len(outstanding) > 0 {
 			helpLines = append(helpLines, "Then run "+outstandingAsksHelpLine(ticket, parkedOutstanding, budgetUsed, fixRounds))
 		}
+	}
+	for _, sec := range sections {
+		extra, err := sec.Blocks(st, ticket)
+		if err != nil {
+			return "", err
+		}
+		blocks = append(blocks, extra...)
 	}
 	blocks = append(blocks, axi.Help(helpLines...))
 
