@@ -333,9 +333,9 @@ func (cp *checkpoint) push() error {
 	}
 	if _, err := gitx.Run(cp.s.Root, "push", "origin", cp.branch); err != nil {
 		if cp.writers {
-			// The branch of this writer is nobody else to rebase onto: take
-			// what moved in the way pull does, which refuses a branch someone
-			// else wrote to, and push once more.
+			// Only this writer pushes this branch, so there is nothing to
+			// rebase onto: take what moved the way pull does (which refuses a
+			// branch another clone has written to) and push once more.
 			if perr := cp.pull(); perr != nil {
 				return perr
 			}
