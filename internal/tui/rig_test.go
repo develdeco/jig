@@ -240,7 +240,7 @@ type rig struct {
 func newRig(t *testing.T, ticket string) *rig {
 	t.Helper()
 	r := newRunner()
-	m := New(Config{Run: r.run, Ticket: ticket, Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24})
+	m := New(Config{RetryDelay: time.Millisecond, Run: r.run, Ticket: ticket, Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24})
 	return &rig{t: t, m: m, r: r}
 }
 

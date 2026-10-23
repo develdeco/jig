@@ -294,3 +294,41 @@ func TestKeysThatArriveTogetherArePressedOneByOne(t *testing.T) {
 		t.Errorf("after the paste the text is %q, want %q", got, "Hi qa")
 	}
 }
+
+// TestRunOnAScreenDrawsWithTheRendererAndEndsOnQ: with screen set the
+// bubbletea renderer draws (the alternate screen is entered and left) and keys
+// are taken from the input; here the output is a pipe, which the renderer
+// draws to as well as a terminal.
+func TestRunOnAScreenDrawsWithTheRendererAndEndsOnQ(t *testing.T) {
+	t.Parallel()
+	r := newRunner()
+	cfg := plainConfig(newLiveSource(jig1()...), r)
+	cfg.Ticket = "JIG-1"
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	out := &syncBuffer{}
+	done := make(chan error, 1)
+	go func() { done <- Run(context.Background(), cfg, pr, out, true) }()
+
+	out.until(t, "needs a person")
+	pw.Write([]byte("g"))
+	r.untilRan(t, "gate JIG-1 --store /s")
+	pw.Write([]byte("q"))
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run = %v, want nil after q", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatalf("did not end on q; it drew:\n%q", out.String())
+	}
+	got := out.String()
+	for _, seq := range []string{"\x1b[?1049h", "\x1b[?1049l"} {
+		if !strings.Contains(got, seq) {
+			t.Errorf("the output lacks %q: the alternate screen was not entered and left", seq)
+		}
+	}
+	if strings.Contains(got, "\f") {
+		t.Errorf("a screen run printed plain frames")
+	}
+}

@@ -42,6 +42,9 @@ type Config struct {
 	Renderer *lipgloss.Renderer
 	// Zone is the time zone the screens show times in. Nil is the local one.
 	Zone *time.Location
+	// RetryDelay is how long to wait before a read that failed is made again;
+	// zero is 300ms.
+	RetryDelay time.Duration
 	// Width and Height are the screen's size until the terminal reports one;
 	// zero is 100 by 30.
 	Width, Height int
@@ -124,12 +127,14 @@ type Model struct {
 	notice string
 	tail   bool
 
-	ctx        context.Context
-	cancel     context.CancelFunc
-	stream     chan events.Envelope
-	streamErr  chan error
-	rosterBusy bool
-	quitting   bool
+	ctx         context.Context
+	cancel      context.CancelFunc
+	stream      chan events.Envelope
+	streamErr   chan error
+	rosterBusy  bool
+	rosterFails int
+	retryDelay  time.Duration
+	quitting    bool
 }
 
 // New builds the model for cfg.
@@ -140,6 +145,10 @@ func New(cfg Config) *Model {
 	}
 	if m.height <= 0 {
 		m.height = defaultHeight
+	}
+	m.retryDelay = cfg.RetryDelay
+	if m.retryDelay <= 0 {
+		m.retryDelay = 300 * time.Millisecond
 	}
 	m.zone = cfg.Zone
 	if m.zone == nil {
@@ -269,14 +278,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "the event stream ended: " + msg.err.Error()
 		}
 	case rosterMsg:
-		m.rosterBusy = false
-		if msg.err != nil {
-			m.notice = "tickets: " + msg.err.Error()
-		} else {
-			m.w.setRoster(msg.rows)
-		}
+		return m, m.onRoster(msg)
 	case statusMsg:
 		return m, m.onStatus(msg)
+	case retryMsg:
+		if msg.ticket == "" {
+			return m, m.loadRoster()
+		}
+		if m.watching() == msg.ticket {
+			return m, m.refreshStatus(msg.ticket)
+		}
 	case ranMsg:
 		return m, m.onRan(msg)
 	}
@@ -298,22 +309,57 @@ func (m *Model) onEvents(envs []events.Envelope) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// retryMsg asks for a read that failed to be made again: the ticket's status,
+// or the ticket list when ticket is "".
+type retryMsg struct{ ticket string }
+
+// A read of a store can fail for a moment while another process replaces a
+// file in it (Windows refuses to open a file at the instant it is renamed
+// over), so a read that fails is made again, readRetries times, before the
+// screens say so.
+const readRetries = 5
+
 func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 	t := m.w.tickets[msg.ticket]
 	if t == nil {
 		return nil
 	}
 	t.loading = false
-	switch {
-	case msg.info.Err != nil:
+	if msg.info.Err != nil {
+		t.failures++
+		if t.failures < readRetries {
+			return m.retryAfter(msg.ticket)
+		}
 		m.notice = "status " + msg.ticket + ": " + msg.info.Err.Msg
-	default:
-		t.status = msg.info
+		return nil
 	}
+	t.failures = 0
+	t.status = msg.info
 	if t.dirty && m.watching() == msg.ticket {
 		return m.refreshStatus(msg.ticket)
 	}
 	return nil
+}
+
+func (m *Model) onRoster(msg rosterMsg) tea.Cmd {
+	m.rosterBusy = false
+	if msg.err != nil {
+		m.rosterFails++
+		if m.rosterFails < readRetries {
+			return m.retryAfter("")
+		}
+		m.notice = "tickets: " + msg.err.Error()
+		return nil
+	}
+	m.rosterFails = 0
+	m.w.setRoster(msg.rows)
+	return nil
+}
+
+// retryAfter asks, after a moment, for the read of ticket (or of the ticket
+// list) to be made again.
+func (m *Model) retryAfter(ticket string) tea.Cmd {
+	return tea.Tick(m.retryDelay, func(time.Time) tea.Msg { return retryMsg{ticket: ticket} })
 }
 
 func (m *Model) onRan(msg ranMsg) tea.Cmd {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -140,10 +141,17 @@ func TestEveryStateHasItsOwnLookAndColor(t *testing.T) {
 			t.Errorf("with color the icon of %q is %q, want the glyph in an escape sequence", s, got)
 		}
 	}
-	// A glyph may serve two states only when they are the same thing at
-	// different times (the ask and the findings of a round).
+	// A glyph is shared only by states that are one thing seen in two places:
+	// a round's findings and the ask in it, a published ticket and a command
+	// that worked, a stalled slice and a command that failed. They never stand
+	// side by side in a column.
+	shared := map[string][]string{
+		"!": {StateFindings, StateAsk},
+		"✔": {StatePublished, StateOK},
+		"✖": {StateStalled, StateFail},
+	}
 	for icon, who := range icons {
-		if len(who) > 1 && !(icon == "!" && len(who) == 2) && !(icon == "✔" && len(who) == 2) && !(icon == "✖" && len(who) == 2) {
+		if len(who) > 1 && !reflect.DeepEqual(who, shared[icon]) {
 			t.Errorf("icon %q stands for %v: states must be told apart without color", icon, who)
 		}
 	}

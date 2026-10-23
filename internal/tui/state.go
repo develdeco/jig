@@ -55,6 +55,8 @@ type ticket struct {
 	// loading is set while a status is being read; dirty, when the ticket
 	// changed since the one being read was asked for.
 	loading, dirty bool
+	// failures counts the reads of the status that failed in a row.
+	failures int
 }
 
 // ticketFor returns the ticket id, making it known when it is not.

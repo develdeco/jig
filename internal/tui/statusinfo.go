@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -42,7 +43,11 @@ func parseStatus(out string) *statusInfo {
 		Help:   doc.Help,
 		Err:    doc.Err,
 	}
-	if doc.Err != nil {
+	if doc.Err == nil && doc.Scalars["ticket"] == "" {
+		// Not a status at all: say what it was.
+		info.Err = &axiErr{Msg: "jig status printed " + firstWords(out)}
+	}
+	if info.Err != nil {
 		return info
 	}
 	dash := func(s string) string {
@@ -101,4 +106,16 @@ func parseRoster(out string) ([]rosterRow, error) {
 		rows = append(rows, rosterRow{ID: t.ID, Title: t.Title, State: t.State})
 	}
 	return rows, nil
+}
+
+// firstWords is the start of what a verb printed, for a message about it.
+func firstWords(out string) string {
+	out = strings.Join(strings.Fields(out), " ")
+	if out == "" {
+		return "nothing"
+	}
+	if len(out) > 60 {
+		out = out[:60] + "..."
+	}
+	return strconv.Quote(out)
 }
