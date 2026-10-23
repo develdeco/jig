@@ -965,7 +965,7 @@ func TestGraduatePushFailureRemovesTheClaim(t *testing.T) {
 	if _, err := gitx.Run(storeRoot, "add", "-A"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "chart: add Slice A"); err != nil {
+	if _, err := gitx.Run(storeRoot, "-c", "user.name=tester", "-c", "user.email=tester@example.invalid", "commit", "-m", "chart: add Slice A"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gitx.Run(storeRoot, "push", "origin", "main"); err != nil {
@@ -1600,7 +1600,7 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 	if _, err := gitx.Run(storeRoot, "add", "-A"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "chart: add Slice A and Slice B"); err != nil {
+	if _, err := gitx.Run(storeRoot, "-c", "user.name=tester", "-c", "user.email=tester@example.invalid", "commit", "-m", "chart: add Slice A and Slice B"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gitx.Run(storeRoot, "push", "origin", "main"); err != nil {

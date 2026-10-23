@@ -591,6 +591,39 @@ func identityEnv(dir string, runVar func(name string) (string, error)) ([]string
 	}, nil
 }
 
+// Identity is the name and email a commit is authored with.
+type Identity struct {
+	Name  string
+	Email string
+}
+
+// ResolveIdentity returns the identity a commit in dir is authored with: the
+// name and email "git var GIT_AUTHOR_IDENT" reports, which honor the
+// environment, dir's own config and the user's global config, in git's own
+// order. The store commits with it, so its history names the person at the
+// keyboard and never a name jig made up. It fails with IDENTITY_REQUIRED, and
+// the two commands that set one, when git has none for dir.
+func ResolveIdentity(dir string) (Identity, error) {
+	return resolveIdentity(dir, func(name string) (string, error) {
+		return Run(dir, "var", name)
+	})
+}
+
+// resolveIdentity is ResolveIdentity with runVar standing in for its "git
+// var" call, so a test can resolve dir's identity with an environment of its
+// own choosing.
+func resolveIdentity(dir string, runVar func(name string) (string, error)) (Identity, error) {
+	ident, err := runVar("GIT_AUTHOR_IDENT")
+	if err != nil {
+		return Identity{}, identityRequiredError(dir, err)
+	}
+	name, email, err := parseIdent(ident)
+	if err != nil {
+		return Identity{}, identityRequiredError(dir, err)
+	}
+	return Identity{Name: name, Email: email}, nil
+}
+
 // parseIdent splits one "git var" identity line into name and email.
 func parseIdent(ident string) (name, email string, err error) {
 	m := identRe.FindStringSubmatch(strings.TrimSpace(ident))

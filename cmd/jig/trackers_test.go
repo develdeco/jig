@@ -79,7 +79,7 @@ trackers:
 	if _, err := gitx.Run(seed, "add", "-A"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitx.Run(seed, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "jig: init store"); err != nil {
+	if _, err := gitx.Run(seed, "-c", "user.name=tester", "-c", "user.email=tester@example.invalid", "commit", "-m", "jig: init store"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gitx.Run(seed, "push", "origin", "main"); err != nil {
