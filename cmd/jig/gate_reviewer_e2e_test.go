@@ -113,37 +113,55 @@ func withoutPrefix(paths []string, prefix string) []string {
 	return out
 }
 
-// TestGateReviewerRoundsThroughMain is the decisive end-to-end test for the
-// reviewer path: the real reviewer path (`--backend fake`, playing back
-// testdata/fixture/scenario-branches/reviewer/), driven entirely through
-// cmd/jig's own run with its terminal check forced true and a scripted stdin,
-// exactly as a real terminal session would answer the triage prompts.
+func hasSlice(slices []store.Slice, id string) bool {
+	for _, s := range slices {
+		if s.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// roundThroughMain records one gate round through main the way a reviewer
+// does it: `jig gate` opens it (with the flags given), and `jig review done
+// --result` closes it with the reviewer's report in the file at result. It
+// returns the output and exit code of `review done`; the opening must succeed.
+func roundThroughMain(t *testing.T, e env, fx *fixture.Fixture, result string, openFlags ...string) (string, int) {
+	t.Helper()
+	open := append([]string{"gate", fx.Ticket}, openFlags...)
+	open = append(open, "--store", fx.StoreDir)
+	if out, code := runMain(t, e, "", open...); code != 0 {
+		t.Fatalf("jig gate: exit = %d, want 0 (the round opens)\n%s", code, out)
+	}
+	return runMain(t, e, "", "review", "done", fx.Ticket, "--result", result, "--store", fx.StoreDir)
+}
+
+// TestRecordedGateRoundsThroughMain is the decisive end-to-end test of the
+// findings bookkeeping through the recorded verbs: the reviewer's reports are
+// the scenario's review-result.json files (testdata/fixture/scenario-branches/
+// reviewer/), handed to `jig review done --result`, and the rounds are opened
+// with `jig gate --yes`, which keeps what jig can route on its own, so the
+// rounds keep the shape the interactive test they replace gave them.
 //
 // It drives three full gate rounds:
-//   - round 1 (full): a fix kept at the batch prompt, a second (low-risk)
-//     fix routed straight to a note by the risk floor, below the batch
-//     entirely, an ask kept with a decision, and a genuine note - after a
-//     first attempt whose reviewed_paths is missing a must_review path
-//     fails REVIEW_INVALID and a corrected retry (same round number)
-//     succeeds; the two fix slices it appends are driven green by `jig run`.
+//   - round 1 (full): a fix kept, a second (low-risk) fix routed straight to a
+//     note by the risk floor, an ask kept, and a genuine note - after a first
+//     attempt whose reviewed_paths is missing a must_review path fails
+//     REVIEW_INVALID, leaving the round open, and a corrected report (same
+//     round number) succeeds; the two fix slices it appends are driven green
+//     by `jig run`.
 //   - round 2 (delta): the kept fix recurs through prior (its new fix
 //     slice's goal names the previous one), the kept ask's file clears
 //     since nothing new is reported there, and the low-risk fix is
 //     re-reported through prior and, below the floor again, routes
-//     straight to a note once more (never reaching this round's own
-//     triage either); the recurrence's new fix slice is driven green by
-//     `jig run`.
+//     straight to a note once more; the recurrence's new fix slice is driven
+//     green by `jig run`.
 //   - round 3: clean, with the round 1 note still on record.
-func TestGateReviewerRoundsThroughMain(t *testing.T) {
+func TestRecordedGateRoundsThroughMain(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
-	e := testEnv(fx.Home).atTerminal()
+	e := testEnv(fx.Home)
 	ticket := fx.Ticket
-
-	gateArgs := func(extra ...string) []string {
-		base := []string{"gate", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-		return append(base, extra...)
-	}
 	runArgs := []string{"run", ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
 
 	// --- build a, b, c, d to green (same shape as the e2e package's own
@@ -179,9 +197,10 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	correct := reviewResultAt(t, round1Path)
 	broken := correct
 	broken.ReviewedPaths = withoutPrefix(correct.ReviewedPaths, "alpha/")
-	writeReviewResultAt(t, round1Path, broken)
+	brokenPath := filepath.Join(t.TempDir(), "broken.json")
+	writeReviewResultAt(t, brokenPath, broken)
 
-	out, code = runMain(t, e, "", gateArgs()...)
+	out, code = roundThroughMain(t, e, fx, brokenPath, "--yes")
 	if code != 1 {
 		t.Fatalf("round 1 first (broken) attempt: exit = %d, want 1\n%s", code, out)
 	}
@@ -189,44 +208,45 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 		t.Fatalf("round 1 first (broken) attempt: expected REVIEW_INVALID, got:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-1")); err == nil {
-		t.Fatalf("a failed round must not create gate/round-1 on disk")
+		t.Fatalf("a failed report must not create gate/round-1 on disk")
 	}
 
-	// The failed attempt above still wrote review.json to the store's
-	// working copy and appended this round's gate-open journal line before
-	// failing. Gate's own best-effort push on any error after that journal
-	// line means the store must already be clean and pushed immediately,
-	// under a commit naming this round's own failure - not merely clean
-	// once some later command's Sync sweeps the leftovers up anonymously.
+	// The round is open, not lost: its request and its open record are in the
+	// store, and everything opening it wrote is committed and pushed already
+	// (the report's refusal wrote nothing more).
+	for _, name := range []string{"gate.round-1.review.json", "gate.round-1.open.yaml"} {
+		if _, err := os.Stat(filepath.Join(fx.StoreDir, "tickets", ticket, "work", name)); err != nil {
+			t.Fatalf("the open round has no %s: %v", name, err)
+		}
+	}
 	if status, err := gitx.Run(fx.StoreDir, "status", "--porcelain"); err != nil {
-		t.Fatalf("store status after the failed round: %v", err)
+		t.Fatalf("store status after the refused report: %v", err)
 	} else if status != "" {
-		t.Fatalf("store working copy is dirty after the failed round (the store push on error did not run):\n%s", status)
+		t.Fatalf("store working copy is dirty after the refused report:\n%s", status)
 	}
 	local, err := gitx.Run(fx.StoreDir, "rev-parse", "HEAD")
 	if err != nil {
-		t.Fatalf("store rev-parse HEAD after the failed round: %v", err)
+		t.Fatalf("store rev-parse HEAD after the refused report: %v", err)
 	}
 	remote, err := gitx.Run(fx.StoreDir, "ls-remote", "origin", "refs/heads/main")
 	if err != nil {
-		t.Fatalf("store ls-remote origin main after the failed round: %v", err)
+		t.Fatalf("store ls-remote origin main after the refused report: %v", err)
 	}
 	if fields := strings.Fields(remote); len(fields) == 0 || fields[0] != local {
 		t.Fatalf("store local HEAD %s was not pushed to origin main (ls-remote: %q)", local, remote)
 	}
 	if subject, err := gitx.Run(fx.StoreDir, "log", "-1", "--format=%s"); err != nil {
-		t.Fatalf("store log after the failed round: %v", err)
-	} else if want := ticket + ": gate round 1 failed: REVIEW_INVALID"; subject != want {
-		t.Fatalf("store failure commit subject = %q, want %q", subject, want)
+		t.Fatalf("store log after the refused report: %v", err)
+	} else if want := ticket + ": gate round 1 opened"; subject != want {
+		t.Fatalf("store latest commit subject = %q, want %q", subject, want)
 	}
 
-	// --- round 1, corrected retry (still round 1: the failed attempt above
-	// wrote nothing to gate/round-1/): the real triage script - r1-f2 never
-	// reaches the fix batch at all (the risk floor already routed it to a
-	// note), so the batch holds only r1-f1 and Enter accepts it; keep ask
-	// r1-f3 with a decision.
-	writeReviewResultAt(t, round1Path, correct)
-	out, code = runMain(t, e, "\nk\nUse a warm, casual tone; no exclamation marks.\n", gateArgs()...)
+	// --- round 1, corrected report (still round 1: the refused one wrote
+	// nothing to gate/round-1/): the round was opened with --yes, so the fix
+	// r1-f1 and the ask r1-f3, which both have a full build target, are kept;
+	// r1-f2 never reaches the fix batch at all (the risk floor already routed
+	// it to a note).
+	out, code = runMain(t, e, "", "review", "done", ticket, "--result", round1Path, "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("round 1 (corrected) exit = %d, want 0\n%s", code, out)
 	}
@@ -245,22 +265,19 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 		t.Fatalf("round 1 report missing the kept ask's slice fix-1-r1-f3:\n%s", out)
 	}
 	if strings.Contains(out, "needs_a_human[") && !strings.Contains(out, "needs_a_human[0]") {
-		t.Fatalf("round 1 must leave nothing needing a human (the ask was decided):\n%s", out)
+		t.Fatalf("round 1 must leave nothing needing a human (the ask was kept):\n%s", out)
 	}
 
 	// The round's own report table only ever shows a finding's status, not
 	// how it got there - assert directly against findings.yaml that the
-	// kept ask's decision text and its human triage actually reached the
-	// store, not merely that it ended up open.
+	// ask was kept without a human: nobody was asked, and no decision text
+	// was made up.
 	triage, decision, found := findingsYAMLEntry(t, filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-1", "findings.yaml"), "r1-f3")
 	if !found {
 		t.Fatalf("round 1 findings.yaml missing r1-f3")
 	}
-	if triage != "human" {
-		t.Fatalf("round 1 findings.yaml r1-f3 triage = %q, want human", triage)
-	}
-	if decision != "Use a warm, casual tone; no exclamation marks." {
-		t.Fatalf("round 1 findings.yaml r1-f3 decision = %q, want the scripted decision text", decision)
+	if triage != verifydeliver.TriageAuto || decision != "" {
+		t.Fatalf("round 1 findings.yaml r1-f3 triage = %q, decision = %q, want auto and no decision text", triage, decision)
 	}
 
 	slices1, err := st.ReadSlices(ticket)
@@ -289,12 +306,12 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 		}
 	}
 
-	// --- round 2 (delta): the doc-comment fix recurs through prior (Enter
-	// accepts the batch, since it is the round's only fix); the tone ask's
-	// file is reviewed with nothing new reported there and clears; the
-	// low-risk fix is re-reported through prior and, below the floor
-	// again, routes straight to a note once more, reaching no one.
-	out, code = runMain(t, e, "\n", gateArgs()...)
+	// --- round 2 (delta): the doc-comment fix recurs through prior; the tone
+	// ask's file is reviewed with nothing new reported there and clears; the
+	// low-risk fix is re-reported through prior and, below the floor again,
+	// routes straight to a note once more.
+	round2Path := filepath.Join(fx.ScenarioDir, "gate", "round-2", "review-result.json")
+	out, code = roundThroughMain(t, e, fx, round2Path, "--yes")
 	if code != 0 {
 		t.Fatalf("round 2 exit = %d, want 0\n%s", code, out)
 	}
@@ -364,7 +381,8 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 
 	// --- round 3: clean. The scenario's own review-result.json reports
 	// nothing new, and nothing is left open or asked, so the round clears.
-	out, code = runMain(t, e, "", gateArgs()...)
+	round3Path := filepath.Join(fx.ScenarioDir, "gate", "round-3", "review-result.json")
+	out, code = roundThroughMain(t, e, fx, round3Path)
 	if code != 0 {
 		t.Fatalf("round 3 exit = %d, want 0\n%s", code, out)
 	}
@@ -383,11 +401,74 @@ func TestGateReviewerRoundsThroughMain(t *testing.T) {
 	}
 }
 
-func hasSlice(slices []store.Slice, id string) bool {
-	for _, s := range slices {
-		if s.ID == id {
-			return true
-		}
+// TestFindingsDraftedWithJigFindingBecomeTheRound: a reviewer that reports as it
+// goes - `jig finding` for each problem, `jig review done` with the paths it
+// read and a summary - gets the same round as one that hands over a result
+// file: the drafts are checked as they are taken (a finding with no title is
+// refused at once), and the round is recorded from them.
+func TestFindingsDraftedWithJigFindingBecomeTheRound(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
+	e := testEnv(fx.Home)
+	ticket := fx.Ticket
+	buildFixtureTicket(t, fx)
+	flags := []string{"--store", fx.StoreDir}
+	withFlags := func(args ...string) []string { return append(args, flags...) }
+
+	// Nothing is open yet: a draft has no round to join.
+	out, code := runMain(t, e, "", withFlags("finding", ticket, "--file", "alpha/alpha.go", "--line", "5", "--title", "t", "--action", "note", "--risk", "low", "--risk-rationale", "r")...)
+	if code != 1 || !strings.Contains(out, "REVIEW_NOT_OPEN") {
+		t.Fatalf("jig finding before a round is open: exit = %d, want 1 and REVIEW_NOT_OPEN\n%s", code, out)
 	}
-	return false
+
+	if out, code := runMain(t, e, "", withFlags("gate", ticket)...); code != 0 {
+		t.Fatalf("jig gate: exit = %d\n%s", code, out)
+	}
+	ctx, code := runMain(t, e, "", withFlags("review", "context", ticket, "--json")...)
+	if code != 0 {
+		t.Fatalf("review context: exit = %d\n%s", code, ctx)
+	}
+	var req struct {
+		MustReview []string `json:"must_review"`
+	}
+	if err := json.Unmarshal([]byte(ctx), &req); err != nil {
+		t.Fatalf("review context --json: %v\n%s", err, ctx)
+	}
+
+	out, code = runMain(t, e, "", withFlags("finding", ticket, "--file", "alpha/alpha.go", "--line", "5", "--action", "note", "--risk", "low", "--risk-rationale", "r")...)
+	if code != 1 || !strings.Contains(out, "REVIEW_INVALID") || !strings.Contains(out, "empty title") {
+		t.Fatalf("jig finding with no title: exit = %d, want 1 and REVIEW_INVALID naming the title\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", withFlags("finding", ticket, "--file", "alpha/alpha.go", "--line", "5", "--title", "Add never says how it overflows", "--detail", "Say what happens past the int range.", "--action", "note", "--risk", "low", "--risk-rationale", "documentation only", "--oracle", "test")...)
+	if code != 0 || !strings.Contains(out, "drafts: 1") {
+		t.Fatalf("jig finding: exit = %d, want 0 and one draft\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", withFlags("finding", ticket, "--still-present", "r9-f9", "--line", "3")...)
+	if code != 1 || !strings.Contains(out, "does not name a finding") {
+		t.Fatalf("jig finding --still-present of an id the round does not know: exit = %d, want 1\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", withFlags("finding", ticket, "--still-present", "r1-f1", "--title", "t")...)
+	if code != 2 || !strings.Contains(out, "VALIDATION_ERROR") {
+		t.Fatalf("jig finding --still-present with a finding's flags: exit = %d, want 2\n%s", code, out)
+	}
+
+	// The drafts and a result file are two ways to report, not both.
+	resultPath := filepath.Join(t.TempDir(), "r.json")
+	writeReviewResultAt(t, resultPath, verifydeliver.ReviewResult{ReviewedPaths: req.MustReview})
+	out, code = runMain(t, e, "", withFlags("review", "done", ticket, "--result", resultPath)...)
+	if code != 2 || !strings.Contains(out, "VALIDATION_ERROR") {
+		t.Fatalf("jig review done --result over drafts: exit = %d, want 2\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", withFlags("review", "done", ticket, "--summary", "one note")...)
+	if code != 1 || !strings.Contains(out, "reviewed_paths is missing must_review path") {
+		t.Fatalf("jig review done without the paths read: exit = %d, want 1 naming the path missing\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", withFlags("review", "done", ticket, "--reviewed", strings.Join(req.MustReview, ","), "--summary", "one note")...)
+	if code != 0 || !strings.Contains(out, "verdict: clean") || !strings.Contains(out, "r1-f1,noted,") {
+		t.Fatalf("jig review done from the drafts: exit = %d, want 0, clean, with the note r1-f1\n%s", code, out)
+	}
+	md, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-1", "findings.md"))
+	if err != nil || !strings.Contains(string(md), "Add never says how it overflows") {
+		t.Fatalf("findings.md = %q (err %v), want the drafted note", md, err)
+	}
 }

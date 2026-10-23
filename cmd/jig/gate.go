@@ -292,13 +292,13 @@ func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateRep
 		return []string{fmt.Sprintf("Have a fresh-context reviewer, who did not build the change, review it: `jig gate %s`", ticket)}
 	}
 	if len(report.NeedsHuman) > 0 {
-		decide := fmt.Sprintf("Decide the listed asks with `jig triage %s <id> keep|dismiss`; the next round applies them", ticket)
+		decide := fmt.Sprintf("Decide the listed asks with `jig triage %s <id> keep|dismiss`, then run `jig gate %s`: the next round applies the decisions", ticket, ticket)
 		if !frontierGreen(st, ticket) {
 			// What actually moves the frontier is the ticket's own next
 			// step, the same one `jig status` prints.
 			return []string{hintOrFallback(st, ticket), decide}
 		}
-		return []string{decide + fmt.Sprintf(": run `jig gate %s`", ticket)}
+		return []string{decide}
 	}
 	return []string{hintOrFallback(st, ticket)}
 }

@@ -185,29 +185,26 @@ func runEndToEndOnce(t *testing.T) {
 		t.Fatalf("publish exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r6.Code, r6.Stdout, r6.Stderr)
 	}
 
+	// Publish reconciles, revalidates, memorizes and squashes nothing: the
+	// target moved, and the branch went out exactly as the build left it.
 	lines = readJournal(t, fx, ticket)
-	if _, ok := findJournalLine(lines, "revalidate", "", "oracles-only:target-moved"); !ok {
-		t.Fatalf("no revalidate journal line with outcome oracles-only:target-moved; journal:\n%+v", lines)
+	for _, event := range []string{"reconcile", "revalidate", "memorize", "squash"} {
+		if l, ok := findJournalLine(lines, event, "", ""); ok {
+			t.Fatalf("journal has %+v, but publish reconciles, revalidates, memorizes and squashes nothing", l)
+		}
 	}
 
 	branchRef := "refs/heads/jig/" + ticket
 	if _, err := gitx.Run(fx.RepoRemote, "rev-parse", "--verify", branchRef); err != nil {
 		t.Fatalf("published branch jig/%s missing on repo remote: %v", ticket, err)
 	}
-	beyond := gitLog(t, fx.RepoRemote, "rev-list", "--count", movedTip+"..jig/"+ticket)
-	if beyond != "1" {
-		t.Fatalf("commits beyond moved main tip on jig/%s = %s, want 1 (the squash)", ticket, beyond)
+	if got, want := gitLog(t, fx.RepoRemote, "rev-parse", branchRef), gitLog(t, buildLeaseDir, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("origin's jig/%s = %s, want the build lease's head %s unchanged", ticket, got, want)
 	}
-	squashMsg := gitLog(t, fx.RepoRemote, "log", "-1", "--format=%s", "jig/"+ticket)
-	if !strings.HasPrefix(squashMsg, ticket+": ") {
-		t.Fatalf("squash commit message = %q, want prefix %q", squashMsg, ticket+": ")
-	}
-	retrieval, err := gitx.Run(fx.RepoRemote, "show", "jig/"+ticket+":.claude/retrieval/"+ticket+".md")
-	if err != nil {
-		t.Fatalf("squash commit tree missing .claude/retrieval/%s.md: %v", ticket, err)
-	}
-	if strings.TrimSpace(retrieval) == "" {
-		t.Fatalf("memorize retrieval doc is empty")
+	pushedMessages := strings.Split(gitLog(t, fx.RepoRemote, "log", "--format=%s", startSHA+"..jig/"+ticket), "\n")
+	assertSameMessageSet(t, pushedMessages, wantMessages)
+	if _, err := gitx.Run(fx.RepoRemote, "show", "jig/"+ticket+":.claude/retrieval/"+ticket+".md"); err == nil {
+		t.Fatalf("the published branch holds .claude/retrieval/%s.md: publish committed on it", ticket)
 	}
 	mainTip := gitLog(t, fx.RepoRemote, "rev-parse", "main")
 	if mainTip != movedTip {

@@ -35,11 +35,18 @@ type builtTicket struct {
 	st      *store.Store
 }
 
+// verifySlots bounds how many tickets are being verified at once across the
+// tests of this file: each verification is a `go test` in a worktree, and the
+// whole suite runs its tests in parallel.
+var verifySlots = make(chan struct{}, 2)
+
 // newBuiltTicket builds the ticket described on builtTicket. The commits are
 // verified by detached workers started together, as an agent's commits would
 // be; the ticket is built when every verification has recorded its pass.
 func newBuiltTicket(t *testing.T, whole bool) builtTicket {
 	t.Helper()
+	verifySlots <- struct{}{}
+	defer func() { <-verifySlots }()
 	fx, env := newFixture(t, fixture.Opts{})
 	dropEnvFromSlices(t, fx)
 	h := newHarness(t, fx, env, "s-builder")
@@ -234,7 +241,7 @@ func TestGateReviewsClonesCopy(t *testing.T) {
 	// jig review context again prints the open round and opens no other.
 	r2 := newHarness(t, b.fx, b.env, "s-reviewer")
 	ctx := r2.Jig("review", "context", b.fx.Ticket, "--model", "test-model")
-	if ctx.Code != 0 || !strings.Contains(ctx.Stdout, "round: 1") || !strings.Contains(ctx.Stdout, "reviewer: s-reviewer") || !strings.Contains(ctx.Stdout, "worktree: "+lease) {
+	if ctx.Code != 0 || !strings.Contains(ctx.Stdout, "round: 1") || !strings.Contains(ctx.Stdout, "reviewer: s-reviewer") || !strings.Contains(ctx.Stdout, lease) {
 		t.Fatalf("jig review context exit = %d, want 0, the open round and its worktree %s\nstdout:\n%s\nstderr:\n%s", ctx.Code, lease, ctx.Stdout, ctx.Stderr)
 	}
 	r2.Bash("git log --oneline -3")

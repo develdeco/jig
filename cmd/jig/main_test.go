@@ -713,7 +713,11 @@ func TestScreenGrantsEveryToolWithValidInput(t *testing.T) {
 
 // TestHelpContainsCommands checks that bare `jig` help output names every
 // non-hidden command and flag in commandTable, and that hidden ones (the
-// _screen command, gate's --pr flag) are absent from it.
+// _screen command, gate's --scenario flag) are absent from it. A hidden flag
+// shares its name with a visible flag of another command only while that
+// command exists (`jig run` and `jig solve` keep their own --scenario until
+// they go); the help then names the flag for that command, and the check for
+// the hidden one skips it.
 func TestHelpContainsCommands(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
@@ -722,6 +726,16 @@ func TestHelpContainsCommands(t *testing.T) {
 		t.Fatalf("jig (bare) exit code = %d", code)
 	}
 	out := buf.String()
+	visibleElsewhere := func(name string) bool {
+		for _, c := range commandTable() {
+			for _, f := range c.Flags {
+				if f.Name == name && !f.Hidden && !c.Hidden {
+					return true
+				}
+			}
+		}
+		return false
+	}
 	for _, c := range commandTable() {
 		if c.Hidden {
 			if strings.Contains(out, c.Name) {
@@ -735,7 +749,7 @@ func TestHelpContainsCommands(t *testing.T) {
 		for _, f := range c.Flags {
 			row := "--" + f.Name + ","
 			if f.Hidden {
-				if strings.Contains(out, row) {
+				if strings.Contains(out, row) && !visibleElsewhere(f.Name) {
 					t.Errorf("help output unexpectedly contains hidden flag %q for command %q", f.Name, c.Name)
 				}
 				continue
