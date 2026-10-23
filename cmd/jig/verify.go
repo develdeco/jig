@@ -12,6 +12,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
@@ -159,32 +160,45 @@ func splitVerifyArgs(pos []string) (ticket, rev string, err error) {
 
 // resolveVerify turns the parsed command into what verify runs on: the
 // clone the commit is checked out from, the ticket, the commit, and the
-// slice. Each has a default so the common call is bare `jig verify`.
+// slice. Each has a default so the common call is bare `jig verify`. Where
+// the work is comes from locate, as for `jig here`: the repo and its clone,
+// the ticket the branch binds, the session and the slice it claimed.
 func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string, stdout io.Writer) (verify.Deps, verify.Request, error) {
-	repoName, target := "", ""
-	if len(cfg.Repos) > 0 {
-		repoName, target = cfg.Repos[0].Name(), cfg.Repos[0].TargetBranch()
-	}
+	none := func(err error) (verify.Deps, verify.Request, error) { return verify.Deps{}, verify.Request{}, err }
 	cwd, err := e.getwd()
 	if err != nil {
-		return verify.Deps{}, verify.Request{}, err
+		return none(err)
 	}
-	clone, workDir, err := verifyClone(cwd, o.cloneFlag, repoName, mp)
-	if err != nil {
-		return verify.Deps{}, verify.Request{}, err
-	}
-
 	ticket := o.ticket
-	if ticket == "" {
-		if ticket, err = ticketOfBranch(st, workDir); err != nil {
-			return verify.Deps{}, verify.Request{}, err
+	if ticket != "" {
+		if ticket, err = resolveTicketArg(st, ticket, stdout); err != nil {
+			return none(err)
 		}
 	}
-	if ticket, err = resolveTicketArg(st, ticket, stdout); err != nil {
-		return verify.Deps{}, verify.Request{}, err
+	where, err := locate.Locate(jigHome, cwd, locate.Opts{
+		StoreFlag: st.Root, Ticket: ticket, Slice: o.slice, Session: o.session, Getenv: e.getenv, NoMap: true,
+	})
+	if err != nil {
+		return none(err)
+	}
+	if ticket == "" {
+		if ticket = where.Ticket; ticket == "" {
+			return none(&axi.Error{
+				Msg:  fmt.Sprintf("cannot tell which ticket this is: the branch %q names none", where.Branch),
+				Code: "VALIDATION_ERROR",
+				Help: []string{"Name the ticket: `jig verify T-1`"},
+			})
+		}
 	}
 	if err := requireSlices(st, ticket); err != nil {
-		return verify.Deps{}, verify.Request{}, err
+		return none(err)
+	}
+	o.session = where.Session
+
+	repoName, target := verifyRepo(cfg, where.Repo)
+	clone, workDir, err := verifyClone(cwd, o.cloneFlag, where.RepoDir, mp.Clones[repoName])
+	if err != nil {
+		return none(err)
 	}
 
 	rev := o.rev
@@ -192,16 +206,15 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 		rev = "HEAD"
 	}
 	if strings.HasPrefix(rev, "-") {
-		return verify.Deps{}, verify.Request{}, &axi.Error{Msg: fmt.Sprintf("%q is not a commit", rev), Code: "VALIDATION_ERROR"}
+		return none(&axi.Error{Msg: fmt.Sprintf("%q is not a commit", rev), Code: "VALIDATION_ERROR"})
 	}
 	sha, err := gitx.RevParse(workDir, rev+"^{commit}")
 	if err != nil {
-		return verify.Deps{}, verify.Request{}, &axi.Error{Msg: fmt.Sprintf("commit %s is not in %s", rev, workDir), Code: "VALIDATION_ERROR"}
+		return none(&axi.Error{Msg: fmt.Sprintf("commit %s is not in %s", rev, workDir), Code: "VALIDATION_ERROR"})
 	}
-
-	slice, err := verifySlice(st, ticket, clone, sha, o)
+	slice, err := verifySlice(st, ticket, clone, sha, o, where.Slice)
 	if err != nil {
-		return verify.Deps{}, verify.Request{}, err
+		return none(err)
 	}
 
 	d := verify.Deps{
@@ -214,18 +227,36 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 	return d, verify.Request{Ticket: ticket, Slice: slice, SHA: sha, Session: o.session, Agent: o.agent, Rerun: o.rerun}, nil
 }
 
+// verifyRepo is the repo the commit is in, by its name in the project, and its
+// target branch: the one locate found around the working directory, else the
+// project's first.
+func verifyRepo(cfg project.Config, located string) (name, target string) {
+	for _, r := range cfg.Repos {
+		if located != "" && r.Name() == located {
+			return r.Name(), r.TargetBranch()
+		}
+	}
+	if len(cfg.Repos) > 0 {
+		return cfg.Repos[0].Name(), cfg.Repos[0].TargetBranch()
+	}
+	return located, ""
+}
+
 // verifyClone finds the operator's clone to check the commit out from and the
-// directory to resolve the commit and the ticket's branch in. The clone is
-// the one named (the worker's --clone), else the project's clone of the repo
-// on this machine, else the repository the command runs in. The directory is
-// where the command runs when that is a checkout of the same repository (a
-// linked worktree has a HEAD of its own), else the clone itself.
-func verifyClone(cwd, cloneFlag, repoName string, mp project.MachineProject) (clone, workDir string, err error) {
+// directory to resolve the commit in. The clone is the one named (the worker's
+// --repo-dir), else the one locate found the working directory in, else the
+// project's mapped clone of the repo, else the repository around the working
+// directory. The directory is where the command runs when that is a checkout
+// of the same repository (a linked worktree has a HEAD of its own), else the
+// clone itself.
+func verifyClone(cwd, cloneFlag, located, mapped string) (clone, workDir string, err error) {
 	switch {
 	case cloneFlag != "":
 		clone = cloneFlag
-	case mp.Clones[repoName] != "":
-		clone = mp.Clones[repoName]
+	case located != "":
+		clone = located
+	case mapped != "":
+		clone = mapped
 	default:
 		if clone, err = gitx.TopLevel(cwd); err != nil {
 			return "", "", &axi.Error{
@@ -246,32 +277,12 @@ func verifyClone(cwd, cloneFlag, repoName string, mp project.MachineProject) (cl
 	return clone, workDir, nil
 }
 
-// ticketOfBranch is the ticket the branch checked out in dir is for: its
-// name's leading id, resolved against the store (store.TicketForBranch).
-func ticketOfBranch(st *store.Store, dir string) (string, error) {
-	branch, err := gitx.Run(dir, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		return "", err
-	}
-	id, _, err := st.TicketForBranch(branch)
-	if err != nil {
-		return "", err
-	}
-	if id == "" {
-		return "", &axi.Error{
-			Msg:  fmt.Sprintf("cannot tell which ticket this is: the branch %q names none", branch),
-			Code: "VALIDATION_ERROR",
-			Help: []string{"Name the ticket: `jig verify T-1`"},
-		}
-	}
-	return id, nil
-}
-
 // verifySlice picks the slice to verify: the --slice flag, else the commit's
-// Jig-Slice trailer, else the slice the session has claimed. A trailer or a
-// claim that names a slice the ticket does not have is passed over; a flag that
-// does is refused, since the person asked for it.
-func verifySlice(st *store.Store, ticket, clone, sha string, o verifyOpts) (string, error) {
+// Jig-Slice trailer, else the one locate found for the session (JIG_SLICE, or
+// the slice its latest claim holds). A trailer or a located slice that names a
+// slice the ticket does not have is passed over; a flag that does is refused,
+// since the person asked for it.
+func verifySlice(st *store.Store, ticket, clone, sha string, o verifyOpts, located string) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		return "", err
@@ -294,15 +305,11 @@ func verifySlice(st *store.Store, ticket, clone, sha string, o verifyOpts) (stri
 	if trailer, err := gitx.Trailer(clone, sha, verifySliceTrailer); err == nil && has[trailer] {
 		return trailer, nil
 	}
-	lines, err := journal.Read(st, ticket)
-	if err != nil {
-		return "", err
-	}
-	if claimed := journal.ClaimedSlice(lines, o.session); has[claimed] {
-		return claimed, nil
+	if has[located] {
+		return located, nil
 	}
 	return "", &axi.Error{
-		Msg:  fmt.Sprintf("cannot tell which slice commit %s is for", sha[:min(12, len(sha))]),
+		Msg:  fmt.Sprintf("cannot tell which slice commit %s is for", shortSHA(sha)),
 		Code: "VALIDATION_ERROR",
 		Help: []string{
 			"Add a `Jig-Slice: <slice>` trailer to the commit message, pass `--slice`, or claim a slice first",
@@ -377,10 +384,6 @@ func verifyReportOf(res verify.Result, log string) verifyReport {
 		log: log, pushErr: res.PushErr,
 	}
 }
-
-// shortSHA is the first twelve characters of a sha, how a command line names
-// a commit.
-func shortSHA(sha string) string { return sha[:min(12, len(sha))] }
 
 // runVerifySpawn starts the detached worker, or says what is already there.
 func runVerifySpawn(e env, d verify.Deps, req verify.Request, stdout io.Writer) int {

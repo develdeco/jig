@@ -97,25 +97,3 @@ func TestNextAttempt(t *testing.T) {
 		t.Errorf("NextAttempt on an empty journal = %d, want 1", got)
 	}
 }
-
-// TestClaimedSlice follows a session's claims and releases.
-func TestClaimedSlice(t *testing.T) {
-	t.Parallel()
-	lines := []Line{
-		{Event: EventClaim, Slice: "a", Session: "s1"},
-		{Event: EventClaim, Slice: "b", Session: "s2"},
-		{Event: EventRelease, Slice: "a", Session: "s1"},
-		{Event: EventClaim, Slice: "c", Session: "s1"},
-		{Event: EventRelease, Slice: "b", Session: "s1"}, // s1 does not hold b
-		{Event: EventOracle, Slice: "z", Session: "s1"},
-	}
-	for session, want := range map[string]string{"s1": "c", "s2": "b", "s3": "", "": ""} {
-		if got := ClaimedSlice(lines, session); got != want {
-			t.Errorf("ClaimedSlice(%q) = %q, want %q", session, got, want)
-		}
-	}
-	released := append(lines, Line{Event: EventRelease, Slice: "c", Session: "s1"})
-	if got := ClaimedSlice(released, "s1"); got != "" {
-		t.Errorf("ClaimedSlice after releasing c = %q, want none", got)
-	}
-}

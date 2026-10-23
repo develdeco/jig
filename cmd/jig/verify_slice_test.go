@@ -63,6 +63,17 @@ func TestVerifyPicksTheSliceFromFlagThenTrailerThenClaim(t *testing.T) {
 		t.Errorf("the claim of $JIG_SESSION: exit %d, slice %q, want c\n%s", code, lastSpawnedSlice(r), out)
 	}
 
+	// JIG_SLICE names the slice for a commit with no trailer, ahead of a claim.
+	r.e.getenv = func(key string) string {
+		return map[string]string{"JIG_HOME": r.fx.Home, "JIG_SESSION": "s-1", "JIG_SLICE": "d"}[key]
+	}
+	if out, code := r.run("verify", "JIG-1", bare); code != 0 || lastSpawnedSlice(r) != "d" {
+		t.Errorf("$JIG_SLICE: exit %d, slice %q, want d\n%s", code, lastSpawnedSlice(r), out)
+	}
+	r.e.getenv = func(key string) string {
+		return map[string]string{"JIG_HOME": r.fx.Home, "JIG_SESSION": "s-1"}[key]
+	}
+
 	// A trailer for a slice the ticket does not have is passed over to the claim.
 	wrong := r.commit("zz", "wrong trailer", map[string]string{"zz.txt": "1"})
 	if out, code := r.run("verify", "JIG-1", wrong, "--session", "s-1"); code != 0 || lastSpawnedSlice(r) != "c" {

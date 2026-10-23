@@ -151,28 +151,3 @@ func NextAttempt(lines []Line, slice string) int {
 	}
 	return highest + 1
 }
-
-// ClaimedSlice is the slice session holds a claim on: the slice of the
-// session's latest claim line, unless a release line of the same session
-// for that slice came after it. It is "" for a session with no claim, and
-// for an empty session.
-func ClaimedSlice(lines []Line, session string) string {
-	if session == "" {
-		return ""
-	}
-	held := ""
-	for _, l := range lines {
-		if l.Session != session {
-			continue
-		}
-		switch l.Event {
-		case EventClaim:
-			held = l.Slice
-		case EventRelease:
-			if l.Slice == held {
-				held = ""
-			}
-		}
-	}
-	return held
-}
