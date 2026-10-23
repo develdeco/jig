@@ -37,6 +37,12 @@ func OwnedCommand(command string) bool {
 	return ownedCommandRe.MatchString(command)
 }
 
+// ObserveCommand is the command a harness's hook entry runs: jig is the
+// program part JigCommand gives, and the event arrives on stdin.
+func ObserveCommand(jig, harness string) string {
+	return jig + " observe --harness " + harness
+}
+
 // JigCommand returns the program part of a hook command: the bare word jig
 // when onPath (the jig a shell finds is the running binary, so the entry
 // keeps working when the binary moves or is upgraded in place), otherwise the

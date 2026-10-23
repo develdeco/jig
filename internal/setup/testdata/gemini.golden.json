@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "name": "jig",
+            "type": "command",
+            "command": "jig observe --harness gemini"
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "name": "jig",
+            "type": "command",
+            "command": "jig observe --harness gemini"
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "run_shell_command",
+        "hooks": [
+          {
+            "name": "jig",
+            "type": "command",
+            "command": "jig observe --harness gemini"
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "name": "jig",
+            "type": "command",
+            "command": "jig observe --harness gemini"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "name": "jig",
+            "type": "command",
+            "command": "jig observe --harness gemini"
+          }
+        ]
+      }
+    ]
+  }
+}

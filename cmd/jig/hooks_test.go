@@ -92,9 +92,9 @@ func TestHooksNeedAScopeAndConsent(t *testing.T) {
 	if code != 2 || !strings.Contains(out, "code: VALIDATION_ERROR") {
 		t.Errorf("two scopes: exit %d\n%s", code, out)
 	}
-	out, code = runMain(t, ie.env, "", "hooks", "--global", "--harness", "codex")
-	if code != 2 || !strings.Contains(out, "codex") || !strings.Contains(out, "Supported: claude") {
-		t.Errorf("another harness: exit %d\n%s", code, out)
+	out, code = runMain(t, ie.env, "", "hooks", "--global", "--harness", "emacs")
+	if code != 2 || !strings.Contains(out, "emacs") || !strings.Contains(out, "Supported: claude, codex, gemini, cursor, copilot, opencode") {
+		t.Errorf("a harness jig does not know: exit %d\n%s", code, out)
 	}
 	out, code = runMain(t, ie.env, "", "hooks", "--global", "stray")
 	if code != 2 || !strings.Contains(out, "unexpected argument") {
