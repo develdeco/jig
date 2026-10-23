@@ -102,8 +102,9 @@ type Slice struct {
 	Env           string   `json:"env,omitempty"`
 	State         string   `json:"state"`
 	BlockedBy     []string `json:"blocked_by"`
-	// Attempt is the number of the next verification of the slice: one past
-	// the highest attempt its oracle lines record.
+	// Attempt is the number the next verification of the slice takes
+	// (journal.NextAttempt): one past the highest attempt any of its lines
+	// carries.
 	Attempt int `json:"attempt"`
 }
 
@@ -200,7 +201,7 @@ func Build(in Input) (Context, error) {
 		Title:  rec.Title,
 		Slice: Slice{
 			ID: sl.ID, Goal: sl.Goal, Workspace: sl.Workspace, Oracle: sl.Oracle, Env: sl.Env,
-			State: state.State, BlockedBy: nonNil(sl.BlockedBy), Attempt: nextAttempt(lines, sl.ID),
+			State: state.State, BlockedBy: nonNil(sl.BlockedBy), Attempt: journal.NextAttempt(lines, sl.ID),
 		},
 		BriefSections:  []BriefSection{},
 		EarlierSlices:  []EarlierSlice{},
@@ -281,18 +282,6 @@ func (c *Context) readBrief(st *store.Store, ticket string, sl store.Slice) erro
 		c.Seams = &BriefSection{Heading: seams.Heading, Text: seams.Body}
 	}
 	return nil
-}
-
-// nextAttempt is one past the highest attempt an oracle line of slice
-// records.
-func nextAttempt(lines []journal.Line, slice string) int {
-	highest := 0
-	for _, l := range lines {
-		if l.Slice == slice && l.Event == journal.EventOracle && l.Attempt > highest {
-			highest = l.Attempt
-		}
-	}
-	return highest + 1
 }
 
 // failedAttempts lists the failed oracle runs of slice, oldest first, the

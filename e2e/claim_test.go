@@ -102,7 +102,7 @@ func TestClaimBlockedUnattendedRefusedInteractiveWarns(t *testing.T) {
 		t.Fatalf("interactive claim: exit %d, want 0\n%s", r.Code, r.Stdout)
 	}
 	for _, want := range []string{"claim:\n", "  slice: x\n", "  result: claimed\n", "  state: building\n", "  session: s-1\n",
-		"warnings[1]{code,message}:\n", "CLAIM_BLOCKED_MERGED,"} {
+		"warnings[1]{code,message,help}:\n", "CLAIM_BLOCKED_MERGED,"} {
 		if !strings.Contains(r.Stdout, want) {
 			t.Errorf("interactive claim output lacks %q:\n%s", want, r.Stdout)
 		}
