@@ -7,6 +7,7 @@ package e2e
 // worktree of its own, recorded in the journal.
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,10 +55,14 @@ func TestHooksDriveVerify(t *testing.T) {
 	if !strings.HasSuffix(start, "observe --harness claude") {
 		t.Fatalf("the installed SessionStart command = %q, want jig observe --harness claude", start)
 	}
-	// Claude Code names a file it sources before each Bash command of the
-	// session: the hook puts the session id there for the jig commands the
-	// session runs.
-	envFile := filepath.Join(t.TempDir(), "sessionstart-hook-0.sh")
+	// Claude Code names a file of the session's, in a directory named after
+	// its id, that it sources before each Bash command: the hook puts the
+	// session id there for the jig commands the session runs.
+	sessionDir := filepath.Join(t.TempDir(), "s-hooks")
+	if err := os.Mkdir(sessionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	envFile := filepath.Join(sessionDir, "sessionstart-hook-0.sh")
 	got := decodeHook(t, runHookCommand(t, env.with("CLAUDE_ENV_FILE="+envFile), fx.RepoDir, start, h.Payload("SessionStart", map[string]any{"source": "startup", "model": "claude-test"})))
 	if got.Specific.Name != "SessionStart" || !strings.Contains(got.Specific.Context, fx.Ticket) || !strings.Contains(got.Specific.Context, "slices[4]{id,state,attempts,blocked_by,question}") ||
 		!strings.Contains(got.Specific.Context, "session: s-hooks") {

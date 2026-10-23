@@ -22,9 +22,6 @@ func TestSessionStartRecordsTheSessionAndGivesTheContext(t *testing.T) {
 	if !strings.Contains(res.Context, "ticket: "+r.fx.Ticket) || res.Block != "" || res.Message != "" {
 		t.Fatalf("Result = %+v, want the context of the located ticket", res)
 	}
-	if len(res.Env) != 1 || res.Env[locate.SessionEnv] != "s1" {
-		t.Errorf("Env = %v, want %s=s1 for the session's later commands", res.Env, locate.SessionEnv)
-	}
 	starts := r.ledgerOf(journal.EventSessionStart)
 	if len(starts) != 1 {
 		t.Fatalf("ledger session-start lines = %+v, want one", starts)
@@ -40,6 +37,44 @@ func TestSessionStartRecordsTheSessionAndGivesTheContext(t *testing.T) {
 	// Every event of a harness leaves a hook or a tool line carrying its name.
 	if hooks := r.hooksOf(KindSessionStart); len(hooks) != 1 || hooks[0].Harness != "claude" || hooks[0].Session != "s1" {
 		t.Errorf("hook lines of the start = %+v, want one from claude", hooks)
+	}
+}
+
+func TestSessionStartHandsTheSessionToItsCommands(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	const ask = "jig knows this session as s1"
+	var got []map[string]string
+	d := r.d
+	d.SetEnv = func(vars map[string]string) (bool, error) { got = append(got, vars); return true, nil }
+
+	// The harness sets JIG_SESSION, so the context does not ask for it.
+	res, err := Handle(d, r.ev(KindSessionStart))
+	if err != nil || len(got) != 1 || len(got[0]) != 1 || got[0][locate.SessionEnv] != "s1" {
+		t.Fatalf("SetEnv calls = %v (%v), want one with %s=s1", got, err, locate.SessionEnv)
+	}
+	if strings.Contains(res.Context, ask) || !strings.Contains(res.Context, "ticket: "+r.fx.Ticket) {
+		t.Errorf("context = %q, want the ticket and no request for the session", res.Context)
+	}
+
+	// A harness that cannot set it, or has no way to: the context asks.
+	d.SetEnv = func(map[string]string) (bool, error) { return false, nil }
+	if res := r.handle(r.ev(KindSessionStart)); !strings.Contains(res.Context, ask) {
+		t.Errorf("context with no SetEnv = %q, want it to ask for the session", res.Context)
+	}
+	if res, _ := Handle(d, r.ev(KindSessionStart)); !strings.Contains(res.Context, ask) {
+		t.Errorf("context when SetEnv sets nothing = %q, want it to ask for the session", res.Context)
+	}
+
+	// Outside every project the variable is still set, for a project the
+	// session works in later, and nothing else happens.
+	got = nil
+	d.SetEnv = func(vars map[string]string) (bool, error) { got = append(got, vars); return true, nil }
+	before := len(r.ledger())
+	res, err = Handle(d, r.ev(KindSessionStart, func(e *Event) { e.Cwd = t.TempDir() }))
+	if err != nil || !res.Empty() || len(got) != 1 || got[0][locate.SessionEnv] != "s1" || len(r.ledger()) != before {
+		t.Errorf("start outside a project = %+v, %v, SetEnv %v, ledger %d lines after %d, want only the variable set", res, err, got, len(r.ledger()), before)
 	}
 }
 

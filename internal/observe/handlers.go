@@ -9,8 +9,12 @@ import (
 	"github.com/develdeco/jig/internal/locate"
 )
 
-// sessionStart records the session and gives it the context of `jig here`.
+// sessionStart sets JIG_SESSION for the session's shell commands, records
+// the session and gives it the context of `jig here`. The variable is set
+// wherever the session starts, since it may work in a project later; where
+// the harness cannot set it, a session in a project is asked to.
 func (h *handler) sessionStart() Result {
+	set := h.handOverSession()
 	if !h.locate() {
 		return Result{}
 	}
@@ -29,15 +33,33 @@ func (h *handler) sessionStart() Result {
 	}
 	h.hook("")
 	var res Result
-	if h.ev.Session != "" {
-		res.Env = map[string]string{locate.SessionEnv: h.ev.Session}
-	}
 	if h.d.Here != nil {
 		text, err := h.d.Here(h.w, h.st)
 		h.fail(err)
 		res.Context = strings.TrimSpace(text)
 	}
+	if !set && h.ev.Session != "" {
+		res.Context = joinText(res.Context, sessionAsk(h.ev.Session))
+	}
 	return res
+}
+
+// handOverSession sets JIG_SESSION to the event's session for the session's
+// later shell commands, and reports whether the harness did.
+func (h *handler) handOverSession() bool {
+	if h.ev.Session == "" || h.d.SetEnv == nil {
+		return false
+	}
+	set, err := h.d.SetEnv(map[string]string{locate.SessionEnv: h.ev.Session})
+	h.fail(err)
+	return set && err == nil
+}
+
+// sessionAsk asks the agent to pass its session to the jig commands it runs,
+// for a harness that could not set JIG_SESSION for them.
+func sessionAsk(id string) string {
+	return "jig knows this session as " + id + ", and the harness could not tell your shell commands: run each jig command with " +
+		locate.SessionEnv + "=" + id + " in its environment, or --session " + id + " (the session argument of a jig MCP tool)."
 }
 
 // prompt gives the session the notes it has not heard, and records a move to

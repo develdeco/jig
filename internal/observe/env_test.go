@@ -29,28 +29,48 @@ func TestAppendExportsWritesOneQuotedLinePerVariable(t *testing.T) {
 	}
 }
 
-func TestClaudeSetsTheEnvironmentOnlyThroughItsEnvFile(t *testing.T) {
+func TestClaudeSetsTheEnvironmentOnlyThroughTheSessionsEnvFile(t *testing.T) {
 	t.Parallel()
-	a, _ := AdapterFor("claude")
-	s, ok := a.(EnvSetter)
+	claude, _ := AdapterFor("claude")
+	s, ok := claude.(EnvSetter)
 	if !ok {
 		t.Fatal("the claude adapter is no EnvSetter")
 	}
+	ev := Event{Kind: KindSessionStart, Session: "s1"}
 	vars := map[string]string{"JIG_SESSION": "s1"}
-	if set, err := s.SetEnv(func(string) string { return "" }, vars); set || err != nil {
+	envAt := func(path string) func(string) string {
+		return func(k string) string {
+			if k == "CLAUDE_ENV_FILE" {
+				return path
+			}
+			return ""
+		}
+	}
+	if set, err := s.SetEnv(ev, envAt(""), vars); set || err != nil {
 		t.Errorf("SetEnv with no CLAUDE_ENV_FILE = %v, %v, want nothing set", set, err)
 	}
-	path := filepath.Join(t.TempDir(), "sessionstart-hook-0.sh")
-	getenv := func(k string) string {
-		if k == "CLAUDE_ENV_FILE" {
-			return path
-		}
-		return ""
+	dir := filepath.Join(t.TempDir(), "s1")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
 	}
-	if set, err := s.SetEnv(getenv, vars); !set || err != nil {
+	path := filepath.Join(dir, "sessionstart-hook-0.sh")
+	if set, err := s.SetEnv(Event{Kind: KindSessionStart}, envAt(path), vars); set || err != nil {
+		t.Errorf("SetEnv for an event with no session = %v, %v, want nothing set", set, err)
+	}
+	if set, err := s.SetEnv(Event{Kind: KindSessionStart, Session: "s2"}, envAt(path), vars); set || err != nil {
+		t.Errorf("SetEnv into another session's directory = %v, %v, want nothing set", set, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("a refused SetEnv made the file (stat: %v)", err)
+	}
+	if set, err := s.SetEnv(ev, envAt(path), vars); !set || err != nil {
 		t.Fatalf("SetEnv = %v, %v, want set", set, err)
 	}
 	if got, _ := os.ReadFile(path); string(got) != "export JIG_SESSION='s1'\n" {
 		t.Errorf("file = %q", got)
+	}
+	codex, _ := AdapterFor("codex")
+	if set, err := codex.(EnvSetter).SetEnv(ev, envAt(path), vars); set || err != nil {
+		t.Errorf("codex SetEnv = %v, %v, want nothing set: Codex gives hooks no env file", set, err)
 	}
 }

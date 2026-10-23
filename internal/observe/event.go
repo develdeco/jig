@@ -82,12 +82,6 @@ type Result struct {
 	// Block, when not empty, is the reason the agent should not stop yet; the
 	// harness feeds it to the agent and the agent continues.
 	Block string
-	// Env holds variables for the shell commands the agent runs later in the
-	// session: JIG_SESSION at its start, so a jig command it runs knows the
-	// session without being told. RunEvent hands them to the harness when its
-	// adapter can set them (EnvSetter), and says them in Context when it
-	// cannot.
-	Env map[string]string
 }
 
 // Empty reports whether r says nothing.

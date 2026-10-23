@@ -9,11 +9,13 @@
 //
 // What happens at each event:
 //
-//   - session-start: a session-start line in the ledger, the context of `jig
-//     here` for the directory (the caller supplies it, as the sections of that
-//     text live in cmd/jig), and JIG_SESSION for the shell commands the
-//     session runs later, set by the harness where its adapter can (an
-//     EnvSetter), asked of the agent in the context where it cannot.
+//   - session-start: JIG_SESSION for the shell commands the session runs
+//     later, set through the harness wherever the session starts (Deps.SetEnv,
+//     from an adapter that is an EnvSetter); then, in a project, a
+//     session-start line in the ledger and the context of `jig here` for the
+//     directory (the caller supplies it, as the sections of that text live in
+//     cmd/jig), which asks the agent to pass the id itself when the harness
+//     could not set it.
 //   - prompt: the notes the session has not heard.
 //   - tool: a tool line in the ledger; when the call moved HEAD, the
 //     verification of the new commit (internal/verify), once whoever saw it
@@ -29,7 +31,8 @@
 //
 // Nothing is kept between events but the ledger: what a session was told, and
 // where HEAD was, are read back from the lines it wrote (memory.go). A
-// directory in no jig project is left alone, with nothing written.
+// directory in no jig project is left alone: no ledger line and nothing said,
+// only JIG_SESSION set for the session's commands.
 //
 // A NoteSource (notes.go) is the extension point for what jig has to say to a
 // session: corrections, spend. RegisterNoteSource adds one from an init().
