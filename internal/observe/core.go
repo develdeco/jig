@@ -238,9 +238,10 @@ func (h *handler) base(event string) journal.Line {
 	}
 }
 
-// hook records that a hook of the harness fired, for the events that leave
-// no other line of the harness in the ledger (a prompt, a stop, a session
-// end): what a doctor reads to say the hooks are seen.
+// hook records that a hook of the harness fired. Every event of a harness
+// leaves a hook line or a tool line carrying its name, which is what a doctor
+// reads to say the hooks are seen: a session start, prompt, stop and session
+// end write this one, a tool call its own.
 func (h *handler) hook(summary string) {
 	l := h.base(journal.EventHook)
 	l.Outcome = h.ev.Kind

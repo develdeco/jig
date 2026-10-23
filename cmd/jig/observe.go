@@ -139,6 +139,9 @@ func cmdObserve(e env, args []string, stdout io.Writer, stdin io.Reader) (code i
 	if ev.Kind == "" {
 		return 0 // an event of the harness that jig does not act on
 	}
+	if ev.Cwd, err = e.abs(ev.Cwd); err != nil {
+		return fail(err)
+	}
 	what = a.Name() + " " + ev.Kind
 
 	out, err := observe.RunEvent(observeDeps(e, jigHome), a, ev)

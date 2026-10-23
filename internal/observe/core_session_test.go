@@ -33,6 +33,10 @@ func TestSessionStartRecordsTheSessionAndGivesTheContext(t *testing.T) {
 	if err != nil || got["s1"].Ticket != r.fx.Ticket || got["s1"].Clone == "" || !got["s1"].Live() {
 		t.Errorf("Sessions = %+v, %v, want s1 live on %s with its clone", got["s1"], err, r.fx.Ticket)
 	}
+	// Every event of a harness leaves a hook or a tool line carrying its name.
+	if hooks := r.hooksOf(KindSessionStart); len(hooks) != 1 || hooks[0].Harness != "claude" || hooks[0].Session != "s1" {
+		t.Errorf("hook lines of the start = %+v, want one from claude", hooks)
+	}
 }
 
 func TestEventsOutsideAProjectAreSilentAndWriteNothing(t *testing.T) {

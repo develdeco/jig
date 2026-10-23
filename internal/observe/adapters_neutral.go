@@ -12,10 +12,11 @@ package observe
 // event takes jig's kinds (session-start, prompt, tool, stop, session-end,
 // post-commit) and, for OpenCode, the names of its plugin hooks (session.created,
 // chat.message, tool.execute.after, session.idle, session.deleted). The
-// OpenCode plugin jig installs pipes its hook's input and output in as
-// "input" and "output" objects, and the reads below look there too for the
-// session, the tool and its command. Nothing here is proven against a real
-// OpenCode.
+// OpenCode plugin jig installs (internal/setup/opencode.go) sends one object
+// per hook, {"hook", "cwd", "event" | "input" | "output", "command"}: for the
+// hook "event" the event's own type names the event, and the reads below look
+// in "event.properties", "input" and "output" for the session, the tool and
+// its exit status. Nothing here is proven against a real OpenCode.
 
 type neutralShape struct{ name string }
 
@@ -33,7 +34,8 @@ func (a neutralShape) Parse(data []byte) (Event, error) {
 	}
 	ev := Event{
 		Harness: a.name,
-		Session: p.str("session", "session_id", "sessionID", "sessionId", "input.sessionID", "properties.sessionID", "properties.info.id"),
+		Session: p.str("session", "session_id", "sessionID", "sessionId", "input.sessionID",
+			"properties.sessionID", "properties.info.id", "event.properties.sessionID", "event.properties.info.id"),
 		Agent:   p.str("agent", "agent_id"),
 		Cwd:     p.str("cwd", "directory", "worktree", "properties.directory"),
 		Tool:    p.str("tool", "tool_name", "input.tool"),
@@ -52,7 +54,7 @@ func (a neutralShape) Parse(data []byte) (Event, error) {
 	if n, ok := p.integer("exit", "exit_code", "metadata.exit", "output.metadata.exit"); ok {
 		ev.Exit = &n
 	}
-	switch normalizeName(p.str("event", "kind", "type", "hook", "hook_event_name")) {
+	switch normalizeName(neutralEventName(p)) {
 	case "sessionstart", "sessioncreated":
 		ev.Kind = KindSessionStart
 	case "prompt", "userpromptsubmit", "chatmessage":
@@ -69,6 +71,24 @@ func (a neutralShape) Parse(data []byte) (Event, error) {
 		return Event{}, nil
 	}
 	return ev, nil
+}
+
+// neutralEventName is the name of the event a neutral payload is about: its
+// event, kind or hook_event_name, else its hook (the OpenCode plugin names the
+// hook it was called from, and for the one hook that carries OpenCode's own
+// events, "event", the event's type is the name).
+func neutralEventName(p payload) string {
+	if name := p.str("event", "kind", "hook_event_name"); name != "" {
+		return name
+	}
+	hook := p.str("hook")
+	if normalizeName(hook) == "event" {
+		return p.str("event.type", "type")
+	}
+	if hook == "" {
+		return p.str("type")
+	}
+	return hook
 }
 
 // neutralOut is what jig answers a neutral call with.

@@ -183,3 +183,14 @@ func (r *rig) started() []spawn.Spec {
 	defer r.mu.Unlock()
 	return append([]spawn.Spec(nil), r.starts...)
 }
+
+// hooksOf is the hook lines of the events of one kind.
+func (r *rig) hooksOf(kind string) []journal.Line {
+	var out []journal.Line
+	for _, l := range r.ledgerOf(journal.EventHook) {
+		if l.Outcome == kind {
+			out = append(out, l)
+		}
+	}
+	return out
+}

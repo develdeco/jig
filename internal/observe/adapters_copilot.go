@@ -9,6 +9,7 @@ package observe
 //	sessionStart          source, initialPrompt
 //	userPromptSubmitted   prompt
 //	postToolUse           toolName, toolArgs (a JSON string), toolResult
+//	agentStop             stopReason
 //	sessionEnd            reason
 //	every one             timestamp, cwd, and sessionId when the version sends it
 //
@@ -52,6 +53,8 @@ func (a copilotShape) Parse(data []byte) (Event, error) {
 		switch {
 		case p.str("toolName", "tool_name") != "":
 			ev.Kind = KindTool
+		case p.str("stopReason") != "":
+			ev.Kind = KindStop
 		case p.str("prompt") != "":
 			ev.Kind = KindPrompt
 		case p.str("initialPrompt", "source") != "":

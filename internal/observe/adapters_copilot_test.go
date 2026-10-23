@@ -13,6 +13,8 @@ func TestCopilotAdapter(t *testing.T) {
 			Event{Harness: "copilot", Kind: KindTool, Cwd: "/r", Tool: "bash", Command: "git commit -m x"}},
 		{"edit tool with object arguments", `{"cwd":"/r","toolName":"edit","toolArgs":{"path":"/r/a.go"}}`,
 			Event{Harness: "copilot", Kind: KindTool, Cwd: "/r", Tool: "edit", Files: []string{"/r/a.go"}}},
+		{"agent stop by its fields", `{"timestamp":1,"cwd":"/r","sessionId":"cp1","stopReason":"end_turn"}`,
+			Event{Harness: "copilot", Kind: KindStop, Session: "cp1", Cwd: "/r"}},
 		{"session end by its fields", `{"cwd":"/r","reason":"complete"}`,
 			Event{Harness: "copilot", Kind: KindSessionEnd, Cwd: "/r"}},
 		{"a named event wins, and a session id is read when sent", `{"hookEventName":"sessionEnd","sessionId":"cp1","cwd":"/r","prompt":"x"}`,

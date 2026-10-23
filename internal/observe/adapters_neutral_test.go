@@ -38,6 +38,25 @@ func TestOpenCodePluginHookNamesAndNestedFields(t *testing.T) {
 	})
 }
 
+// The payloads the OpenCode plugin `jig hooks --harness opencode` writes sends
+// (internal/setup/opencode.go): one object per hook, naming the hook.
+func TestOpenCodeReadsThePayloadsOfTheShimJigInstalls(t *testing.T) {
+	t.Parallel()
+	runParseCases(t, "opencode", []parseCase{
+		{"session.created", `{"hook":"event","cwd":"/r","event":{"type":"session.created","properties":{"info":{"id":"ses_1","directory":"/r"}}}}`,
+			Event{Harness: "opencode", Kind: KindSessionStart, Session: "ses_1", Cwd: "/r"}},
+		{"session.idle", `{"hook":"event","cwd":"/r","event":{"type":"session.idle","properties":{"sessionID":"ses_1"}}}`,
+			Event{Harness: "opencode", Kind: KindStop, Session: "ses_1", Cwd: "/r"}},
+		{"session.deleted", `{"hook":"event","cwd":"/r","event":{"type":"session.deleted","properties":{"info":{"id":"ses_1"}}}}`,
+			Event{Harness: "opencode", Kind: KindSessionEnd, Session: "ses_1", Cwd: "/r"}},
+		{"chat.message", `{"hook":"chat.message","cwd":"/r","input":{"sessionID":"ses_1","agent":"build"},"output":{"parts":[{"type":"text","text":"go"}]}}`,
+			Event{Harness: "opencode", Kind: KindPrompt, Session: "ses_1", Cwd: "/r"}},
+		{"tool.execute.after", `{"hook":"tool.execute.after","cwd":"/r","input":{"tool":"bash","sessionID":"ses_1","callID":"c1"},"output":{"title":"git commit","output":"ok","metadata":{"exit":0}},"command":"git commit -m x"}`,
+			Event{Harness: "opencode", Kind: KindTool, Session: "ses_1", Cwd: "/r", Tool: "bash", Command: "git commit -m x", Exit: intp(0)}},
+		{"another event", `{"hook":"event","cwd":"/r","event":{"type":"message.updated","properties":{}}}`, Event{}},
+	})
+}
+
 func TestNeutralAdapterTakesAPostCommit(t *testing.T) {
 	t.Parallel()
 	runParseCases(t, "neutral", []parseCase{

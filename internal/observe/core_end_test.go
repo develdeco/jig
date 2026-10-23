@@ -50,7 +50,7 @@ func TestSessionEndClosesTheSessionAndNotesAnOpenQuestionOnce(t *testing.T) {
 	if count != 1 {
 		t.Errorf("note lines after a second end = %d, want 1", count)
 	}
-	if hooks := r.ledgerOf(journal.EventHook); len(hooks) != 2 || hooks[0].Outcome != "session-end" {
+	if hooks := r.hooksOf(KindSessionEnd); len(hooks) != 2 {
 		t.Errorf("hook lines = %+v, want one per session-end", hooks)
 	}
 }

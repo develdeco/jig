@@ -26,6 +26,7 @@ func (h *handler) sessionStart() Result {
 			Commit:  h.head(),
 		}))
 	}
+	h.hook("")
 	if h.d.Here == nil {
 		return Result{}
 	}

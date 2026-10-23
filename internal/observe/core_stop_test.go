@@ -32,8 +32,8 @@ func TestStopInteractiveSaysWhatIsRunningAndNeverBlocks(t *testing.T) {
 	if again := r.handle(r.ev(KindStop, func(e *Event) { e.StopActive = true })); again.Message != res.Message || again.Block != "" {
 		t.Errorf("second Stop = %+v, want the same message", again)
 	}
-	hooks := r.ledgerOf(journal.EventHook)
-	if len(hooks) != 2 || hooks[0].Outcome != "stop" || hooks[0].Harness != "claude" || !strings.HasPrefix(hooks[0].Summary, "shown: ") {
+	hooks := r.hooksOf(KindStop)
+	if len(hooks) != 2 || hooks[0].Harness != "claude" || !strings.HasPrefix(hooks[0].Summary, "shown: ") {
 		t.Errorf("hook lines = %+v, want two stop lines that say they showed it", hooks)
 	}
 }
