@@ -99,7 +99,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 	}
 	adopted := rec.Adopted()
 
-	cfg, err := project.Load(filepath.Join(st.Root, "project.yaml"))
+	cfg, err := project.LoadStoreConfig(st.Root)
 	if err != nil {
 		return "", err
 	}

@@ -12,7 +12,6 @@ package locate
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/develdeco/jig/internal/gitx"
@@ -136,8 +135,9 @@ type Opts struct {
 //  1. --store (Opts.StoreFlag): HowFlag.
 //  2. A jig.yaml marker found walking up from cwd: HowMarker. The store is the
 //     machine map's entry for the marker's project, else the sibling
-//     <root>/../<project>-tickets holding a project.yaml or store.yaml, else
-//     only the marker's store remote (Where.StoreRemote, no StorePath).
+//     <root>/../<project>-tickets holding a project.yaml (v2) or store.yaml
+//     (v3), else only the marker's store remote (Where.StoreRemote, no
+//     StorePath).
 //  3. The machine map by path: the longest mapped clone containing cwd, or
 //     the clone cwd is a linked worktree of: HowMapPath.
 //  4. The machine map by remote: cwd's git origin against the repo remotes of
@@ -328,24 +328,15 @@ func currentBranch(dir string) string {
 	return out
 }
 
-// isStoreDir reports whether dir holds a store's project file: project.yaml,
-// or store.yaml of the v3 layout.
-func isStoreDir(dir string) bool {
-	if dir == "" {
-		return false
-	}
-	for _, name := range []string{"project.yaml", "store.yaml"} {
-		if fi, err := os.Stat(filepath.Join(dir, name)); err == nil && !fi.IsDir() {
-			return true
-		}
-	}
-	return false
-}
+// isStoreDir reports whether dir holds a store's config file: project.yaml of
+// a v2 store, or store.yaml of a v3 one.
+func isStoreDir(dir string) bool { return project.IsStoreDir(dir) }
 
-// storeName is the project name a store's project.yaml declares, "" when it
-// cannot be read (a store.yaml-only store, which D17 teaches a loader).
+// storeName is the project name a store declares (a v2 store's name:, a v3
+// store's projects: when it serves one), "" when it cannot be read or does
+// not say.
 func storeName(storePath string) string {
-	cfg, err := project.Load(filepath.Join(storePath, "project.yaml"))
+	cfg, err := project.LoadStoreConfig(storePath)
 	if err != nil {
 		return ""
 	}

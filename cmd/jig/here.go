@@ -133,7 +133,7 @@ func openLocatedStore(where locate.Where) (*store.Store, project.Config, error) 
 	if where.StorePath == "" {
 		return nil, project.Config{}, nil
 	}
-	cfg, err := project.Load(filepath.Join(where.StorePath, "project.yaml"))
+	cfg, err := project.LoadStoreConfig(where.StorePath)
 	if err != nil {
 		return nil, project.Config{}, err
 	}
