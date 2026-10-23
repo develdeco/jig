@@ -971,7 +971,7 @@ func TestDoRetriesAGraphQLRateLimitedError(t *testing.T) {
 // Windows runner that made the gap the server saw shorter than the pacing
 // by several milliseconds.
 func TestDoThrottlesMutationsOneAtATime(t *testing.T) {
-	const interval = 30 * time.Millisecond
+	const interval = 100 * time.Millisecond
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -993,15 +993,14 @@ func TestDoThrottlesMutationsOneAtATime(t *testing.T) {
 	if len(sent.at) != 2 {
 		t.Fatalf("the client sent %d request(s), want exactly 2", len(sent.at))
 	}
-	// The pacing sleeps from the moment the first mutation was let go, and
-	// a sleep never ends early; what is left is the time each call spends
-	// between being let go and reaching the transport, which a first call
-	// (or a collection) can stretch by a little. A client that did not pace
-	// would send the second request a round trip after the first, far under
-	// the interval.
-	const tolerance = 3 * time.Millisecond
-	if gap := sent.at[1].Sub(sent.at[0]); gap < interval-tolerance {
-		t.Fatalf("the two AddComment mutations were sent %v apart, want at least %v", gap, interval)
+	// The pacing sleeps from the moment the first mutation was let go, but
+	// on Windows the clock it reads moves only on a timer tick, up to 15.6ms
+	// by default, so the moment it noted can be a tick old and the second
+	// request can leave a tick early. Half the interval is past any tick and
+	// still far above what a client that did not pace would show: its second
+	// request leaves one loopback round trip after the first.
+	if gap := sent.at[1].Sub(sent.at[0]); gap < interval/2 {
+		t.Fatalf("the two AddComment mutations were sent %v apart, want them paced %v apart", gap, interval)
 	}
 }
 
