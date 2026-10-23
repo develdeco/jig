@@ -1,35 +1,38 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/mirror/github"
-	"github.com/develdeco/jig/internal/session"
+	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // env is what one run of the CLI takes from the process around it, beyond its
 // arguments and streams, and the seams a test replaces: the environment
 // variables cmd/jig itself reads (JIG_HOME, and the operator's home directory),
 // the working directory it resolves the store, the repo and every relative path
-// flag against, and five seams (the terminal check, the solve gate source,
-// the flag-set hook, the mirror's GitHub client, the chart write). run hands
-// it to every command, and cmd/jig reads those only through it, never through
-// os.Getenv, os.Getwd, os.UserHomeDir or a package-level variable. The binary
-// runs on processEnv; a test builds an env of its own, so two runs in one
-// process share none of them and their tests can run in parallel.
+// flag against, and the seams (the terminal checks,
+// the flag-set hook, the mirror's GitHub client, the chart write, and the
+// context, clock, process spawner, executable and PATH lookups below). run
+// hands it to every command, and cmd/jig reads those only through it, never
+// through os.Getenv, os.Getwd, os.UserHomeDir, time.Now or a package-level
+// variable. The binary runs on processEnv; a test builds an env of its own,
+// so two runs in one process share none of them and their tests can run in
+// parallel.
 //
 // env does not reach what a run starts or calls into: the child processes it
-// spawns (git, the session CLI, the oracles, and the `gh auth token` the
-// mirror runs, which reads GH_TOKEN and GITHUB_TOKEN itself) inherit the
-// process's environment and working directory, and internal/session reads
-// JIG_HEADLESS_TIMEOUT and JIG_WSL_DISTRO from the process itself. A test
-// must not use env to set those.
+// spawns (git, the oracles, the verification workers, and the `gh auth token`
+// the mirror runs, which reads GH_TOKEN and GITHUB_TOKEN itself) inherit the
+// process's environment and working directory. A test must not use env to
+// set those.
 type env struct {
 	// getenv looks a variable up as os.Getenv does.
 	getenv func(key string) string
@@ -39,11 +42,9 @@ type env struct {
 	// stdinIsTerminal reports whether stdin is an interactive terminal, which
 	// decides whether the triage prompts run or the defaults apply.
 	stdinIsTerminal func(r io.Reader) bool
-	// solveGateSource picks the GateSource `jig solve` runs its own gate
-	// rounds on.
-	solveGateSource func(scenario string, backend session.Backend) verifydeliver.GateSource
 	// newFlagSetHook, when set, sees every FlagSet newFlagSet builds; a test
-	// uses it to compare real flag registration with commandTable.
+	// uses it to compare real flag registration with the registered verbs'
+	// help rows.
 	newFlagSetHook func(name string, fs *flag.FlagSet)
 	// mirrorClient, when set, is the GitHub client every checkpoint's sync
 	// and `jig trackers sync` use, the same seam mirror.Deps.Client gives
@@ -58,6 +59,23 @@ type env struct {
 	// read-only chmod against store.AtomicWrite's own os.Rename, whose
 	// failure mode differs by OS. nil, as in production, writes through st.
 	writeChart func(st *store.Store, chart string, entries []store.ChartEntry) error
+	// ctx is cancelled when the run should wind down: the first interrupt of
+	// the binary (main wires signal.NotifyContext). A command that waits, or
+	// streams until stopped, watches it; a test cancels its own to stop one.
+	ctx context.Context
+	// now is the clock: time.Now in production.
+	now func() time.Time
+	// spawn starts a detached process that outlives this one and returns its
+	// pid: spawn.Detached in production. A test env refuses.
+	spawn func(spawn.Spec) (int, error)
+	// executable is the path of the running jig binary, as os.Executable
+	// gives it, for a command that starts itself as a detached worker.
+	executable func() (string, error)
+	// lookPath finds a program on PATH as exec.LookPath does.
+	lookPath func(file string) (string, error)
+	// stdoutIsTerminal reports whether stdout is an interactive terminal,
+	// which decides whether a command draws a screen or writes plain lines.
+	stdoutIsTerminal func(w io.Writer) bool
 }
 
 // processEnv is the env of the binary: the process's own environment and
@@ -67,7 +85,13 @@ func processEnv() env {
 		getenv:          os.Getenv,
 		getwd:           os.Getwd,
 		stdinIsTerminal: stdinIsTerminal,
-		solveGateSource: gateSourceForSolve,
+
+		ctx:              context.Background(),
+		now:              time.Now,
+		spawn:            spawn.Detached,
+		executable:       os.Executable,
+		lookPath:         exec.LookPath,
+		stdoutIsTerminal: stdoutIsTerminal,
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -100,140 +101,6 @@ func wantFailureCommit(t *testing.T, d Deps, branch, wantSubject string) {
 	}
 }
 
-func TestPublishFullChain(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	gateToClean(t, fx, d)
-	advanceTarget(t, fx)
-
-	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
-	if err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if report.Tier != "oracles-only" {
-		t.Fatalf("Tier = %q, want oracles-only", report.Tier)
-	}
-	sha, ok := report.Squashed["fixture-repo"]
-	if !ok || sha == "" {
-		t.Fatalf("Squashed[fixture-repo] missing, got %v", report.Squashed)
-	}
-	prPath, ok := report.PRBody["fixture-repo"]
-	if !ok || prPath == "" {
-		t.Fatalf("PRBody[fixture-repo] missing, got %v", report.PRBody)
-	}
-	// The fixture repo's remote is a plain local path: repohost.New finds no
-	// pull-request host there, so PRURL is empty and PRNote carries why.
-	if url := report.PRURL["fixture-repo"]; url != "" {
-		t.Fatalf("PRURL[fixture-repo] = %q, want empty: the fixture's remote has no pull-request host", url)
-	}
-	if note := report.PRNote["fixture-repo"]; note == "" {
-		t.Fatalf("PRNote[fixture-repo] empty, want a reason the PR URL is empty")
-	}
-
-	lines, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-	assertJournal := func(event, outcome string) {
-		for _, l := range lines {
-			if l.Event == event && (outcome == "" || l.Outcome == outcome) {
-				return
-			}
-		}
-		t.Fatalf("journal missing event=%q outcome=%q", event, outcome)
-	}
-	assertJournalPrefix := func(event, outcomePrefix string) {
-		for _, l := range lines {
-			if l.Event == event && strings.HasPrefix(l.Outcome, outcomePrefix) {
-				return
-			}
-		}
-		t.Fatalf("journal missing event=%q outcome prefix=%q", event, outcomePrefix)
-	}
-	// The reconcile outcome now carries the divergence file count too
-	// ("<policy>:<n>-files"), so only the policy prefix is pinned here.
-	assertJournalPrefix("reconcile", "local-rebase:")
-	assertJournal("revalidate", "oracles-only:target-moved")
-	assertJournal("memorize", "")
-	assertJournal("squash", "")
-	assertJournal("pr", "")
-	assertJournal("publish-done", "")
-
-	// Memorize landed before the squash: the squash commit's tree
-	// contains the retrieval notes file.
-	show, err := gitx.Run(publishLeaseDir(t, fx), "show", sha+":.claude/retrieval/"+fx.Ticket+".md")
-	if err != nil {
-		t.Fatalf("show retrieval notes in squash commit: %v", err)
-	}
-	if !strings.Contains(show, "# "+fx.Ticket+" - retrieval notes") {
-		t.Fatalf("retrieval notes content = %q, missing heading", show)
-	}
-
-	msg, err := gitx.Run(publishLeaseDir(t, fx), "log", "-1", "--format=%s", sha)
-	if err != nil {
-		t.Fatalf("read squash commit message: %v", err)
-	}
-	if !strings.HasPrefix(msg, fx.Ticket+": ") {
-		t.Fatalf("squash message = %q, want prefix %q", msg, fx.Ticket+": ")
-	}
-
-	// The squash landed on origin's jig/<ticket> branch.
-	remoteHead, err := gitx.Run(fx.RepoRemote, "rev-parse", "refs/heads/jig/"+fx.Ticket)
-	if err != nil {
-		t.Fatalf("resolve origin jig branch: %v", err)
-	}
-	if remoteHead != sha {
-		t.Fatalf("origin jig/%s = %s, want squash sha %s", fx.Ticket, remoteHead, sha)
-	}
-
-	ticketDir := d.Store.TicketDir(fx.Ticket)
-	for _, f := range []string{
-		filepath.Join("changelog", "alpha.md"),
-		filepath.Join("changelog", "beta.md"),
-		filepath.Join("changelog", "consolidated.md"),
-		filepath.Join("pr", "fixture-repo.md"),
-		filepath.Join("pr", "evidence.md"),
-	} {
-		if _, err := os.Stat(filepath.Join(ticketDir, f)); err != nil {
-			t.Fatalf("missing store file %s: %v", f, err)
-		}
-	}
-
-	ledger, err := os.ReadFile(filepath.Join(d.Store.Root, "ledger.md"))
-	if err != nil {
-		t.Fatalf("read ledger.md: %v", err)
-	}
-	if !strings.Contains(string(ledger), "## "+fx.Ticket) {
-		t.Fatalf("ledger.md missing ## %s entry:\n%s", fx.Ticket, ledger)
-	}
-	if !strings.Contains(string(ledger), "**Answers:**") {
-		t.Fatalf("ledger.md missing Answers tail:\n%s", ledger)
-	}
-
-	index, err := os.ReadFile(filepath.Join(d.Store.Root, "platform", "contract-index.md"))
-	if err != nil {
-		t.Fatalf("read contract-index.md: %v", err)
-	}
-	if !strings.Contains(string(index), "- "+fx.Ticket+":") {
-		t.Fatalf("contract-index.md missing entry:\n%s", index)
-	}
-
-	// The store's remote advanced with the publish commits.
-	storeRemoteHead, err := gitx.Run(fx.StoreRemote, "rev-parse", "main")
-	if err != nil {
-		t.Fatalf("resolve store remote main: %v", err)
-	}
-	storeHead, err := gitx.Run(fx.StoreDir, "rev-parse", "main")
-	if err != nil {
-		t.Fatalf("resolve store head: %v", err)
-	}
-	if storeRemoteHead != storeHead {
-		t.Fatalf("store remote main = %s, want it to match local %s", storeRemoteHead, storeHead)
-	}
-}
-
 // TestPublishRefusesARecordedBranchEqualToTheTarget: a recorded branch
 // Store.TicketBranch refuses (here the target itself, where a push would land
 // without the PR) fails publish with the refusal's own code, before it pushes
@@ -311,264 +178,6 @@ func TestPublishRefusesAnUnreadableTicketRecordBeforeWritingAnything(t *testing.
 	}
 	if got := originRef(t, fx.RepoRemote, defaultBranch); got != defaultBefore {
 		t.Fatalf("origin %s = %q after the refused publish, want %q unchanged", defaultBranch, got, defaultBefore)
-	}
-}
-
-// TestPublishTitlesTheSquashWithTheRecordedTitle covers the title fallback
-// through publish itself (consolidatedTitle is only unit-tested with the title
-// handed to it): when no slice has a goal, the squash commit's subject carries
-// the title recorded in ticket.yaml, not the bare ticket id.
-func TestPublishTitlesTheSquashWithTheRecordedTitle(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	gateToClean(t, fx, d)
-
-	slices, err := d.Store.ReadSlices(fx.Ticket)
-	if err != nil {
-		t.Fatalf("ReadSlices: %v", err)
-	}
-	for i := range slices {
-		slices[i].Goal = ""
-	}
-	data, err := yaml.Marshal(store.SliceFile{Slices: slices})
-	if err != nil {
-		t.Fatalf("marshal slices: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "slices.yaml"), data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Store.CreateTicketRecord(fx.Ticket, store.Ticket{Title: "Recorded title"}); err != nil {
-		t.Fatalf("CreateTicketRecord: %v", err)
-	}
-	if err := d.Store.Push(fx.Ticket + ": no slice goals, a recorded title"); err != nil {
-		t.Fatalf("push the recorded title: %v", err)
-	}
-
-	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
-	if err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	sha := report.Squashed["fixture-repo"]
-	if sha == "" {
-		t.Fatalf("Squashed[fixture-repo] missing, got %v", report.Squashed)
-	}
-	msg, err := gitx.Run(publishLeaseDir(t, fx), "log", "-1", "--format=%s", sha)
-	if err != nil {
-		t.Fatalf("read squash commit message: %v", err)
-	}
-	if want := fx.Ticket + ": Recorded title"; msg != want {
-		t.Fatalf("squash message = %q, want %q", msg, want)
-	}
-}
-
-func TestPublishTierNone(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	gateToClean(t, fx, d)
-	// No target move.
-
-	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
-	if err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if report.Tier != "none" {
-		t.Fatalf("Tier = %q, want none", report.Tier)
-	}
-
-	lines, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-	found := false
-	for _, l := range lines {
-		if l.Event == "revalidate" && l.Outcome == "none:target-unmoved" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("journal missing revalidate outcome none:target-unmoved")
-	}
-}
-
-// TestSquashRefusesPushedRange: a never-pushed branch squashes as it always
-// has, and the squash still refuses a range whose commits already reached a
-// remote under another name - commits someone may be building on, which the
-// squash would leave behind in a second copy. The branch is not on origin
-// under its own name, so it is the squash's rule that stops it, not the
-// branch-on-origin rule that lets publish push a branch as it is
-// (TestPublishPushesABranchAlreadyOnOriginAsItIs).
-func TestSquashRefusesPushedRange(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	gateToClean(t, fx, d)
-
-	// Pre-push the build branch once, under another name: a commit mid-range
-	// becomes reachable from a remote-tracking ref.
-	buildDir := buildLeaseDir(t, fx)
-	if _, err := gitx.Run(buildDir, "push", "origin", "jig/"+fx.Ticket+":scratch/"+fx.Ticket); err != nil {
-		t.Fatalf("pre-push build branch: %v", err)
-	}
-
-	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "PUSHED_RANGE" {
-		t.Fatalf("err = %v, want *axi.Error PUSHED_RANGE", err)
-	}
-
-	// Nothing was pushed under the ticket's own name.
-	if got := originRef(t, fx.RepoRemote, "refs/heads/jig/"+fx.Ticket); got != "" {
-		t.Fatalf("origin has jig/%s = %s after the refused publish, want no such branch", fx.Ticket, got)
-	}
-
-	// PUSHED_RANGE fires inside squash, well after recordAndCheckDivergence
-	// set journaled - the store must still end up clean, pushed, and
-	// carrying this failure's own subject rather than left for a later
-	// Sync to sweep anonymously.
-	wantFailureCommit(t, d, "main", fx.Ticket+": publish failed: PUSHED_RANGE")
-}
-
-// TestPublishNoDivergenceStillPushesStore checks that PUBLISH_NO_DIVERGENCE -
-// raised by recordAndCheckDivergence itself, immediately after it appends
-// Publish's own earliest store write and before revalidate, memorize,
-// squash, confirm or any push ever run - still leaves the store committed
-// and pushed under that failure's own subject: journaled must already be
-// true by the time this, the very first post-journal failure Publish can
-// hit, happens - not only once Publish reaches its later steps.
-func TestPublishNoDivergenceStillPushesStore(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	gateToClean(t, fx, d)
-
-	// Fast-forward origin's target branch to exactly the build lease's
-	// ticket-branch tip: reconcile then has nothing to rebase (the branch
-	// is already based on the new origin/main), so its diff against the
-	// target comes out empty - the same integration failure
-	// TestRecordAndCheckDivergenceRefusesEmptyDiff drives directly against
-	// recordAndCheckDivergence, reached here through the whole Publish
-	// pipeline instead, so it also exercises wherever journaled is set.
-	run(t, buildLeaseDir(t, fx), "push", "origin", "jig/"+fx.Ticket+":main")
-
-	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "PUBLISH_NO_DIVERGENCE" {
-		t.Fatalf("err = %v, want *axi.Error PUBLISH_NO_DIVERGENCE", err)
-	}
-
-	wantFailureCommit(t, d, "main", fx.Ticket+": publish failed: PUBLISH_NO_DIVERGENCE")
-}
-
-// TestRecordAndCheckDivergenceRefusesEmptyDiff checks that a reconcile whose
-// merge left the branch with no diff at all against the (moved) target -
-// because the target already carries the identical change - is refused,
-// and that the journalled reconcile outcome still records the policy and
-// file count before the refusal.
-func TestRecordAndCheckDivergenceRefusesEmptyDiff(t *testing.T) {
-	t.Parallel()
-
-	_, remote := tinyRepo(t)
-
-	clone := cloneFrom(t, remote)
-	run(t, clone, "checkout", "-b", "jig/T-1")
-	writeAndCommit(t, clone, "g.txt", "same content", "branch work")
-	run(t, clone, "push", "origin", "jig/T-1")
-
-	// Advance main with the identical change, as if it landed upstream
-	// through another path: the ticket branch's diff against the new
-	// target is empty even though the branch itself has a commit.
-	advance := cloneFrom(t, remote)
-	writeAndCommit(t, advance, "g.txt", "same content", "identical change landed on main")
-	run(t, advance, "push", "origin", "main")
-
-	run(t, clone, "fetch", "origin")
-	policy, err := reconcile(clone, ticketBranch("T-1"), "main", nil)
-	if err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if policy != policyMerge {
-		t.Fatalf("policy = %q, want %q", policy, policyMerge)
-	}
-
-	storeDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(storeDir, "project.yaml"), []byte("schema_version: 1\n"), 0o644); err != nil {
-		t.Fatalf("write project.yaml: %v", err)
-	}
-	st, err := store.Open(storeDir)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	d := Deps{Store: st}
-
-	files, err := diffFiles(clone, "main")
-	if err != nil {
-		t.Fatalf("diffFiles: %v", err)
-	}
-	err = recordAndCheckDivergence(d, "T-1", policy, files)
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "PUBLISH_NO_DIVERGENCE" {
-		t.Fatalf("err = %v, want *axi.Error PUBLISH_NO_DIVERGENCE", err)
-	}
-
-	lines, err := journal.Read(st, "T-1")
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-	found := false
-	for _, l := range lines {
-		if l.Event == "reconcile" && l.Outcome == policy+":0-files" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("journal missing reconcile outcome %s:0-files, got %+v", policy, lines)
-	}
-}
-
-// TestRecordAndCheckDivergenceAllowsRealChange checks the non-empty-diff
-// path stays unblocked: a reconcile that actually integrates new content
-// against the target must not trip PUBLISH_NO_DIVERGENCE.
-func TestRecordAndCheckDivergenceAllowsRealChange(t *testing.T) {
-	t.Parallel()
-
-	_, remote := tinyRepo(t)
-
-	clone := cloneFrom(t, remote)
-	run(t, clone, "checkout", "-b", "jig/T-1")
-	writeAndCommit(t, clone, "g.txt", "branch work", "branch work")
-
-	advance := cloneFrom(t, remote)
-	writeAndCommit(t, advance, "h.txt", "target moved", "target moved")
-	run(t, advance, "push", "origin", "main")
-
-	run(t, clone, "fetch", "origin")
-	policy, err := reconcile(clone, ticketBranch("T-1"), "main", nil)
-	if err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-
-	storeDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(storeDir, "project.yaml"), []byte("schema_version: 1\n"), 0o644); err != nil {
-		t.Fatalf("write project.yaml: %v", err)
-	}
-	st, err := store.Open(storeDir)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	d := Deps{Store: st}
-
-	files, err := diffFiles(clone, "main")
-	if err != nil {
-		t.Fatalf("diffFiles: %v", err)
-	}
-	if err := recordAndCheckDivergence(d, "T-1", policy, files); err != nil {
-		t.Fatalf("recordAndCheckDivergence: %v", err)
 	}
 }
 
@@ -724,7 +333,7 @@ func TestCheckNonEmptyRangeRefusesEmptyRange(t *testing.T) {
 	run(t, clone, "checkout", "-b", "jig/T-1")
 	run(t, clone, "fetch", "origin")
 
-	err := checkNonEmptyRange(clone, "main")
+	err := checkNonEmptyRange(clone, "main", "HEAD")
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "NOTHING_TO_PUBLISH" {
 		t.Fatalf("err = %v, want *axi.Error NOTHING_TO_PUBLISH", err)
@@ -742,7 +351,7 @@ func TestCheckNonEmptyRangeAllowsRealCommits(t *testing.T) {
 	writeAndCommit(t, clone, "g.txt", "branch work", "branch work")
 	run(t, clone, "fetch", "origin")
 
-	if err := checkNonEmptyRange(clone, "main"); err != nil {
+	if err := checkNonEmptyRange(clone, "main", "HEAD"); err != nil {
 		t.Fatalf("checkNonEmptyRange: %v", err)
 	}
 }
@@ -757,17 +366,249 @@ func publishLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	return dir
 }
 
-// TestBuildAcquireAfterPublishIsRefusedAsDiverged documents where a published
-// ticket stands. Publish rebases and squashes jig/<ticket> in its own lease
-// and pushes the squash, while the build lease keeps the unsquashed originals,
-// so the ticket's branch is on origin and the build lease's copy has diverged
-// from it: the next build acquire (a `jig run` after a post-publish gate round
-// or requeue) stops with BRANCH_DIVERGED rather than merge a squash with its
-// own originals. The sync rule is the branch's, the ordinary jig/<ticket>
-// included once it is on origin. Merging origin's branch into the build lease,
-// which the refusal says to do, is the way on: a publish from there is a
-// fast-forward (TestPublishRepublishesAPublishedTicket).
-func TestBuildAcquireAfterPublishIsRefusedAsDiverged(t *testing.T) {
+// TestPublishFullChain: a clean ticket publishes its reviewed head as it is.
+// The target has moved on since the gate, and publish still reconciles
+// nothing, squashes nothing and commits nothing: origin's branch is exactly
+// the build lease's, commit for commit, the journal holds no reconcile,
+// revalidate, memorize or squash line, and no retrieval notes were added to
+// the branch. What a publish leaves in the store - changelogs, the ledger
+// entry, the contract index, the evidence - is written once the branch is out.
+func TestPublishFullChain(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	gateToClean(t, fx, d)
+	buildHead := run(t, buildLeaseDir(t, fx), "rev-parse", "HEAD")
+	buildLog := run(t, buildLeaseDir(t, fx), "log", "--format=%H", "jig/"+fx.Ticket)
+	advanceTarget(t, fx)
+
+	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if report.Tier != "none" {
+		t.Fatalf("Tier = %q, want none: publish revalidates nothing", report.Tier)
+	}
+	if head := report.Head["fixture-repo"]; head != buildHead {
+		t.Fatalf("Head[fixture-repo] = %q, want the reviewed head %s", head, buildHead)
+	}
+	prPath, ok := report.PRBody["fixture-repo"]
+	if !ok || prPath == "" {
+		t.Fatalf("PRBody[fixture-repo] missing, got %v", report.PRBody)
+	}
+	// The fixture repo's remote is a plain local path: repohost.New finds no
+	// pull-request host there, so PRURL is empty and PRNote carries why.
+	if url := report.PRURL["fixture-repo"]; url != "" {
+		t.Fatalf("PRURL[fixture-repo] = %q, want empty: the fixture's remote has no pull-request host", url)
+	}
+	if note := report.PRNote["fixture-repo"]; note == "" {
+		t.Fatalf("PRNote[fixture-repo] empty, want a reason the PR URL is empty")
+	}
+
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatalf("journal.Read: %v", err)
+	}
+	seen := map[string]journal.Line{}
+	for _, l := range lines {
+		seen[l.Event] = l
+	}
+	for _, event := range []string{"pr", "changelog", "publish-done"} {
+		if _, ok := seen[event]; !ok {
+			t.Fatalf("journal missing event %q", event)
+		}
+	}
+	for _, event := range []string{"reconcile", "revalidate", "memorize", "squash"} {
+		if l, ok := seen[event]; ok {
+			t.Fatalf("journal has %+v, but publish reconciles, revalidates, memorizes and squashes nothing", l)
+		}
+	}
+	if pr := seen["pr"]; pr.Outcome != "none:no-host" || pr.Commit != buildHead || pr.Branch != "jig/"+fx.Ticket {
+		t.Fatalf("pr line = %+v, want none:no-host for %s from jig/%s", pr, buildHead, fx.Ticket)
+	}
+
+	// The reviewed head went out as it is, on top of nothing: origin's history
+	// of the branch is the build lease's, with no memorize or squash commit.
+	if remoteHead := originRef(t, fx.RepoRemote, "refs/heads/jig/"+fx.Ticket); remoteHead != buildHead {
+		t.Fatalf("origin jig/%s = %s, want the reviewed head %s", fx.Ticket, remoteHead, buildHead)
+	}
+	if got := run(t, fx.RepoRemote, "log", "--format=%H", "jig/"+fx.Ticket); got != buildLog {
+		t.Fatalf("origin's history of jig/%s is\n%s\nwant the build lease's\n%s", fx.Ticket, got, buildLog)
+	}
+	if _, err := gitx.Run(publishLeaseDir(t, fx), "cat-file", "-e", buildHead+":.claude/retrieval/"+fx.Ticket+".md"); err == nil {
+		t.Fatal("the reviewed head holds retrieval notes: publish committed on the branch")
+	}
+
+	ticketDir := d.Store.TicketDir(fx.Ticket)
+	for _, f := range []string{
+		filepath.Join("changelog", "alpha.md"),
+		filepath.Join("changelog", "beta.md"),
+		filepath.Join("changelog", "consolidated.md"),
+		filepath.Join("pr", "fixture-repo.md"),
+		filepath.Join("pr", "evidence.md"),
+	} {
+		if _, err := os.Stat(filepath.Join(ticketDir, f)); err != nil {
+			t.Fatalf("missing store file %s: %v", f, err)
+		}
+	}
+
+	ledger, err := os.ReadFile(filepath.Join(d.Store.Root, "ledger.md"))
+	if err != nil {
+		t.Fatalf("read ledger.md: %v", err)
+	}
+	if !strings.Contains(string(ledger), "## "+fx.Ticket) {
+		t.Fatalf("ledger.md missing ## %s entry:\n%s", fx.Ticket, ledger)
+	}
+	if !strings.Contains(string(ledger), "**Answers:**") {
+		t.Fatalf("ledger.md missing Answers tail:\n%s", ledger)
+	}
+
+	index, err := os.ReadFile(filepath.Join(d.Store.Root, "platform", "contract-index.md"))
+	if err != nil {
+		t.Fatalf("read contract-index.md: %v", err)
+	}
+	if !strings.Contains(string(index), "- "+fx.Ticket+":") {
+		t.Fatalf("contract-index.md missing entry:\n%s", index)
+	}
+
+	// The store's remote advanced with the publish commits.
+	storeRemoteHead, err := gitx.Run(fx.StoreRemote, "rev-parse", "main")
+	if err != nil {
+		t.Fatalf("resolve store remote main: %v", err)
+	}
+	storeHead, err := gitx.Run(fx.StoreDir, "rev-parse", "main")
+	if err != nil {
+		t.Fatalf("resolve store head: %v", err)
+	}
+	if storeRemoteHead != storeHead {
+		t.Fatalf("store remote main = %s, want it to match local %s", storeRemoteHead, storeHead)
+	}
+}
+
+// TestPublishTitlesThePullRequestWithTheRecordedTitle covers the title
+// fallback through publish itself (consolidatedTitle is only unit-tested with
+// the title handed to it): when no slice has a goal, the pull request opened
+// through the host carries the title recorded in ticket.yaml, not the bare
+// ticket id.
+func TestPublishTitlesThePullRequestWithTheRecordedTitle(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	logFile, _ := useGithubHost(t, &d, "", "")
+	// The title is recorded first: it names the ticket's default branch, so a
+	// title recorded after the gate would move the ticket off the branch the
+	// gate reviewed.
+	if err := d.Store.CreateTicketRecord(fx.Ticket, store.Ticket{Title: "Recorded title"}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
+	}
+	gateToClean(t, fx, d)
+
+	sls, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadSlices: %v", err)
+	}
+	for i := range sls {
+		sls[i].Goal = ""
+	}
+	data, err := yaml.Marshal(store.SliceFile{Slices: sls})
+	if err != nil {
+		t.Fatalf("marshal slices: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "slices.yaml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Store.Push(fx.Ticket + ": no slice goals"); err != nil {
+		t.Fatalf("push the slices: %v", err)
+	}
+
+	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	var create []string
+	for _, argv := range loggedGh(t, logFile) {
+		if len(argv) >= 2 && argv[0] == "pr" && argv[1] == "create" {
+			create = argv
+		}
+	}
+	titleAt := slices.Index(create, "--title")
+	if titleAt < 0 || titleAt+1 >= len(create) || create[titleAt+1] != "Recorded title" {
+		t.Fatalf("gh pr create = %v, want --title \"Recorded title\"", create)
+	}
+}
+
+// TestPublishDoesNotRevalidateAfterTheTargetMoves: publish rebases and merges
+// nothing, so a target that moved since the gate changes nothing it does: the
+// oracles are not run again, no revalidate line is journaled, and the report's
+// tier is none whether the target moved or not.
+func TestPublishDoesNotRevalidateAfterTheTargetMoves(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	gateToClean(t, fx, d)
+	rec := &oracleRecorder{}
+	d.Oracle = rec.run
+	advanceTarget(t, fx)
+
+	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if report.Tier != "none" {
+		t.Fatalf("Tier = %q, want none", report.Tier)
+	}
+	if ran := rec.ran(); len(ran) != 0 {
+		t.Fatalf("publish ran oracles %v, want none", ran)
+	}
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatalf("journal.Read: %v", err)
+	}
+	for _, l := range lines {
+		if l.Event == "revalidate" {
+			t.Fatalf("journal has %+v", l)
+		}
+	}
+}
+
+// TestPublishNoDivergenceLeavesTheStoreUntouched checks that
+// PUBLISH_NO_DIVERGENCE - a branch that changes nothing against the target -
+// is raised before publish writes anything to the store: a refusal leaves no
+// trace, so the store is clean, pushed, and its latest commit is still the
+// gate's, not a failure commit.
+func TestPublishNoDivergenceLeavesTheStoreUntouched(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	gateToClean(t, fx, d)
+	// Fast-forward origin's target branch to exactly the build lease's
+	// ticket-branch tip: the branch then differs from the target by nothing.
+	run(t, buildLeaseDir(t, fx), "push", "origin", "jig/"+fx.Ticket+":main")
+	subjectBefore := run(t, d.Store.Root, "log", "-1", "--format=%s")
+
+	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+	var ae *axi.Error
+	if !errors.As(err, &ae) || (ae.Code != "PUBLISH_NO_DIVERGENCE" && ae.Code != "NOTHING_TO_PUBLISH") {
+		t.Fatalf("err = %v, want *axi.Error PUBLISH_NO_DIVERGENCE or NOTHING_TO_PUBLISH", err)
+	}
+	if status := run(t, d.Store.Root, "status", "--porcelain"); status != "" {
+		t.Fatalf("the refused publish left the store dirty:\n%s", status)
+	}
+	if subject := run(t, d.Store.Root, "log", "-1", "--format=%s"); subject != subjectBefore {
+		t.Fatalf("the store's latest commit is %q, was %q: a refusal before the first write must leave no commit", subject, subjectBefore)
+	}
+}
+
+// TestBuildAcquireAfterPublishIsInStep documents where a published ticket
+// stands. Publish pushes the reviewed head as it is, without squashing or
+// adding a commit, so origin's copy of jig/<ticket> is exactly the build
+// lease's: the next build acquire (a `jig run` after a post-publish gate round
+// or requeue) finds the two in step and carries on, where a publish that
+// rewrote the branch would have left them diverged.
+func TestBuildAcquireAfterPublishIsInStep(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
@@ -780,12 +621,12 @@ func TestBuildAcquireAfterPublishIsRefusedAsDiverged(t *testing.T) {
 		t.Fatal("test setup: publish left no branch on origin")
 	}
 
-	_, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Build)
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "BRANCH_DIVERGED" {
-		t.Fatalf("build Acquire after a publish: err = %v, want an *axi.Error BRANCH_DIVERGED", err)
+	lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Build)
+	if err != nil {
+		t.Fatalf("build Acquire after a publish: %v, want the build lease in step with origin's branch", err)
 	}
-	if !strings.Contains(ae.Msg, "has 1 the lease lacks") {
-		t.Fatalf("BRANCH_DIVERGED = %q, want origin's one squash commit named as what the lease lacks", ae.Msg)
+	standing, err := pool.Compare(lease.Dir, ticketBranch(fx.Ticket))
+	if err != nil || standing != pool.InStep {
+		t.Fatalf("the build lease stands %v against origin (%v), want in step", standing, err)
 	}
 }

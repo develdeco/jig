@@ -5,19 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/frontier"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
-	"github.com/develdeco/jig/internal/staircase"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -31,12 +32,6 @@ var buildGitEnv = []string{
 	"GIT_COMMITTER_EMAIL=fixture@example.invalid",
 	"GIT_AUTHOR_DATE=2026-01-01T00:00:00Z",
 	"GIT_COMMITTER_DATE=2026-01-01T00:00:00Z",
-}
-
-// testRungs is a synthetic, deterministic staircase used by every test in
-// this package, cheap to dear.
-func testRungs() staircase.Config {
-	return staircase.Config{Rungs: []string{"rung-a", "rung-b", "rung-c"}}
 }
 
 // ticketBranch is the default branch name a ticket with no recorded branch
@@ -102,7 +97,7 @@ func newDeps(t *testing.T, fx *fixture.Fixture) Deps {
 	if err != nil {
 		t.Fatalf("project.Load: %v", err)
 	}
-	return Deps{Store: st, Cfg: cfg, Rungs: testRungs(), Home: fx.Home, Oracle: passingOracle}
+	return Deps{Store: st, Cfg: cfg, Home: fx.Home, Oracle: passingOracle}
 }
 
 // passingOracle stands in for the gate's own oracle runs in tests that are
@@ -519,7 +514,7 @@ func dropJournalLines(t *testing.T, st *store.Store, ticket, why string, drop fu
 }
 
 // amendBriefAndRequeue amends every section of ticket's brief and runs the
-// real `jig requeue --from-brief-diff` over it (frontier.Requeue), which sets
+// real `jig requeue --from-brief-diff` over it (ready.Requeue), which sets
 // each slice whose section changed back to queued, green ones included. It
 // returns the slices it touched.
 func amendBriefAndRequeue(t *testing.T, d Deps, ticket string) []string {
@@ -533,12 +528,28 @@ func amendBriefAndRequeue(t *testing.T, d Deps, ticket string) []string {
 	if err := os.WriteFile(path, []byte(amended), 0o644); err != nil {
 		t.Fatalf("write brief.md: %v", err)
 	}
-	touched, err := frontier.Requeue(frontier.Deps{
-		Store:   d.Store,
-		Journal: func(l journal.Line) error { return journal.Append(d.Store, ticket, l) },
-	}, ticket, true)
+	touched, err := ready.Requeue(d.Store, ticket, true)
 	if err != nil {
 		t.Fatalf("Requeue --from-brief-diff: %v", err)
 	}
 	return touched
+}
+
+// linkDir makes link a link to the directory target: a junction on Windows,
+// which needs no privilege and which neither Go's Lstat (ModeIrregular) nor
+// filepath.EvalSymlinks reads as a link, and a symlink elsewhere.
+func linkDir(t *testing.T, link, target string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+			t.Fatalf("mklink /J %s %s: %v\n%s", link, target, err, out)
+		}
+		return
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink %s -> %s: %v", link, target, err)
+	}
 }

@@ -1,20 +1,45 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/manifest"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
+// The usage lines of `jig triage`'s flags: the help row and the FlagSet carry
+// the same text, which the help parity test compares.
+const (
+	triageReasonUsage    = "why, in a sentence: carried into the fix slice's goal when the ask is kept"
+	triageWorkspaceUsage = "the workspace to build the fix in, for a kept ask whose file lies in none"
+	triageOracleUsage    = "the oracle that proves the fix, for a kept ask the reviewer named none for"
+)
+
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"triage", "keep or dismiss an ask a gate round left for a person to decide", []flagSpec{
+			{"reason", triageReasonUsage, false},
+			{"workspace", triageWorkspaceUsage, false},
+			{"oracle", triageOracleUsage, false},
+			{"store", reviewStoreUsage, false},
+			{"project", reviewProjectUsage, false},
+		}, false},
+		Order: 333,
+		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
+			return cmdTriage(e, args, stdout, stdin)
+		},
+		Probe: []string{"T-1", "r1-f1", "keep"},
+	})
+}
+
 // fileLine renders a finding's location as "file:line" for every place a
-// finding reaches a human: the triage prompt, the notes table,
-// the gate report's findings table and needs_a_human.
+// finding reaches a human: the gate report's findings table and
+// needs_a_human, `jig status`'s asks.
 func fileLine(f verifydeliver.Finding) string {
 	return fmt.Sprintf("%s:%d", f.File, f.Line)
 }
@@ -37,34 +62,42 @@ func stdinIsTerminal(r io.Reader) bool {
 	return isTerminalFile(f)
 }
 
-// triageFor builds the GateOpts.Triage hook cmdGate and cmdSolve wire in:
-// --yes or a non-terminal stdin runs verifydeliver.DefaultTriage and, only
-// when there was something to triage, prints one note line explaining why
-// nothing was prompted; a terminal stdin runs the interactive batch/per-ask
-// prompt.
-func triageFor(e env, yes bool, stdin io.Reader, stdout io.Writer) verifydeliver.Triage {
+// stdoutIsTerminal reports whether w is an interactive terminal, by the same
+// rule as stdinIsTerminal: only an *os.File that is a real console/tty is, so
+// a pipe, a file, the null device and any in-memory writer are not. It is
+// env.stdoutIsTerminal's production value.
+func stdoutIsTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	return isTerminalFile(f)
+}
+
+// triageFor builds the GateOpts.Triage hook the scripted gate (`jig gate
+// --scenario`) wires in. jig prompts nobody: verifydeliver.DefaultTriage keeps every fix and
+// every ask with a full build target, and an ask missing a part of it stays
+// undecided for a person to decide with `jig triage`. It prints one note line
+// naming why nothing was prompted, only when there was something to triage.
+func triageFor(_ env, yes bool, _ io.Reader, stdout io.Writer) verifydeliver.Triage {
 	return func(in verifydeliver.TriageInput) verifydeliver.TriageResult {
-		switch {
-		case yes:
-			return defaultTriageWithNote(in, stdout, "--yes")
-		case !e.stdinIsTerminal(stdin):
-			return defaultTriageWithNote(in, stdout, "stdin is not a terminal")
-		default:
-			return interactiveTriage(in, stdin, stdout)
+		why := "jig does not prompt; decide asks with `jig triage`"
+		if yes {
+			why = "--yes"
 		}
+		return defaultTriageWithNote(in, stdout, why)
 	}
 }
 
 // defaultTriageWithNote runs verifydeliver.DefaultTriage and, only when this
 // round actually had a fix or ask to triage, prints one line saying why
-// nothing was prompted for (why is "--yes" or "stdin is not a terminal").
-// A note is never triaged, so a notes-only round prints no note either,
-// and a round that routed nothing at all (e.g. a dispatched reviewer round
-// that turned up nothing new) prints none. It never claims an ask was
-// kept when DefaultTriage actually left it undecided: undecided is
-// counted straight from what DefaultTriage's own result leaves out of
-// Asks, rather than re-deriving DefaultTriage's own workspace/oracle rule
-// here, so the two can never drift apart.
+// nothing was prompted for (why is "--yes", say). A note is never triaged, so
+// a notes-only round prints no note either, and a round that routed nothing at
+// all (e.g. a dispatched reviewer round that turned up nothing new) prints
+// none. It never claims an ask was kept when DefaultTriage actually left it
+// undecided: undecided is counted straight from what DefaultTriage's own
+// result leaves out of Asks, rather than re-deriving DefaultTriage's own
+// workspace/oracle rule here, so the two can never drift apart.
 func defaultTriageWithNote(in verifydeliver.TriageInput, stdout io.Writer, why string) verifydeliver.TriageResult {
 	if len(in.Fixes) == 0 && len(in.Asks) == 0 {
 		return verifydeliver.DefaultTriage(in)
@@ -84,285 +117,119 @@ func defaultTriageWithNote(in verifydeliver.TriageInput, stdout io.Writer, why s
 	return result
 }
 
-// interactiveTriage runs the terminal flow over a single
-// bufio.Reader (plain line-wise prompts, no raw mode):
-//   - notes are listed for information only.
-//   - fixes are listed sorted by risk with their rationale, then one batch
-//     prompt: Enter accepts every fix; a space/comma separated list of ids
-//     dismisses just those; an unknown id reprompts the whole line.
-//   - each ask prompts individually, keep or dismiss only: "n"/"no"/
-//     "d"/"dismiss" dismisses it; only an explicit "k"/"keep"/Enter keeps
-//     it, and a kept ask is then asked for its decision text on its own
-//     prompt (optional, Enter skips it). A kept ask missing a workspace, an
-//     oracle, or both (verifydeliver.BuildTargetGaps, the same check
-//     DefaultTriage and routeRound use) is then prompted for each missing
-//     part in turn, workspace from the manifest's workspace ids and oracle
-//     from its oracle names, before it can be kept.
-//   - stdin closing at any point keeps every remaining fix and every
-//     remaining ask whose build target already resolves in full (auto, not
-//     human); a remaining ask missing a workspace, an oracle, or both stays
-//     undecided, since keeping it needs a judgment nothing here can supply
-//     once stdin is gone. The stdin-closed note names how many such asks
-//     were left for a human.
-func interactiveTriage(in verifydeliver.TriageInput, stdin io.Reader, stdout io.Writer) verifydeliver.TriageResult {
-	r := bufio.NewReader(stdin)
-	result := verifydeliver.TriageResult{
-		DismissedFixIDs: map[string]bool{},
-		Asks:            map[string]verifydeliver.AskOutcome{},
+// cmdTriage implements `jig triage [T] <finding-id> keep|dismiss [--reason R]
+// [--workspace W] [--oracle O]`: a person's decision on an ask a gate round
+// left undecided, journaled as a triage line. Nothing is prompted and no round
+// is opened: the next round applies the decision, turning a kept ask into a
+// fix slice and a dismissed one into a dismissed finding. Who decided is
+// recorded: a person at a terminal, or an agent.
+func cmdTriage(e env, args []string, stdout io.Writer, stdin io.Reader) int {
+	fs := newFlagSet(e, "triage")
+	reason := fs.String("reason", "", triageReasonUsage)
+	workspace := fs.String("workspace", "", triageWorkspaceUsage)
+	oracle := fs.String("oracle", "", triageOracleUsage)
+	storeFlag := fs.String("store", "", reviewStoreUsage)
+	projectFlag := fs.String("project", "", reviewProjectUsage)
+	positionals, handled, err := parseWithPositionals(stdout, fs, args)
+	if handled {
+		return 0
+	}
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	usage := &axi.Error{
+		Msg:  "jig triage takes [ticket] <finding-id> keep|dismiss",
+		Code: "VALIDATION_ERROR",
+		Help: []string{"For example: `jig triage T-1 r1-f2 keep --reason \"yes, fix it\"`"},
+	}
+	var ticketArg, id, decision string
+	switch len(positionals) {
+	case 2:
+		id, decision = positionals[0], positionals[1]
+	case 3:
+		ticketArg, id, decision = positionals[0], positionals[1], positionals[2]
+	default:
+		return renderErr(stdout, usage)
+	}
+	if decision != verifydeliver.TriageKeep && decision != verifydeliver.TriageDismiss {
+		return renderErr(stdout, &axi.Error{
+			Msg:  fmt.Sprintf("%q is not a decision: say keep or dismiss", decision),
+			Code: "VALIDATION_ERROR",
+			Help: usage.Help,
+		})
+	}
+	if decision == verifydeliver.TriageDismiss && (*workspace != "" || *oracle != "") {
+		return renderErr(stdout, &axi.Error{
+			Msg:  "--workspace and --oracle choose where a kept ask is built; a dismissed one is not built",
+			Code: "VALIDATION_ERROR",
+		})
+	}
+	if *storeFlag, err = e.abs(*storeFlag); err != nil {
+		return renderErr(stdout, err)
+	}
+	st, _, _, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	var tpos []string
+	if ticketArg != "" {
+		tpos = []string{ticketArg}
+	}
+	ticket, err := reviewTicket(e, st, jigHome, tpos, "triage", stdout)
+	if err != nil {
+		return renderErr(stdout, err)
 	}
 
-	if len(in.Notes) > 0 {
-		rows := make([][]string, len(in.Notes))
-		for i, f := range in.Notes {
-			rows[i] = []string{f.ID, f.Risk, fileLine(f), f.Title, f.RiskRationale}
-		}
-		axi.Render(stdout, axi.Table("notes", []string{"id", "risk", "file:line", "title", "risk_rationale"}, rows))
+	asks, _, err := verifydeliver.OutstandingAsks(st, ticket)
+	if err != nil {
+		return renderErr(stdout, err)
 	}
-
-	eof := false
-	if len(in.Fixes) > 0 {
-		rows := make([][]string, len(in.Fixes))
-		for i, f := range in.Fixes {
-			rows[i] = []string{f.ID, f.Risk, fileLine(f), f.Title, f.RiskRationale}
-		}
-		axi.Render(stdout, axi.Table("fixes", []string{"id", "risk", "file:line", "title", "risk_rationale"}, rows))
-
-		validIDs := map[string]bool{}
-		for _, f := range in.Fixes {
-			validIDs[f.ID] = true
-		}
-		for {
-			fmt.Fprintf(stdout, "%d fix(es): Enter queues fix slice(s); list ids to dismiss (gone for good): ", len(in.Fixes))
-			line, err := r.ReadString('\n')
-			trimmed := strings.TrimSpace(line)
-			if err != nil && trimmed == "" {
-				eof = true
-				eofNote(stdout, in.Asks, in.Manifest)
-				break
-			}
-			if trimmed == "" {
-				result.FixHuman = true
-				break
-			}
-			ids := strings.FieldsFunc(trimmed, func(r rune) bool { return r == ',' || r == ' ' })
-			bad := ""
-			for _, id := range ids {
-				if !validIDs[id] {
-					bad = id
-					break
-				}
-			}
-			if bad != "" {
-				fmt.Fprintf(stdout, "unknown fix id %q; try again\n", bad)
-				continue
-			}
-			for _, id := range ids {
-				result.DismissedFixIDs[id] = true
-			}
-			result.FixHuman = true
-			break
-		}
-	}
-
-	// Parked findings (budget-forced asks) are offered right alongside the
-	// rest, under one header naming why: the same per-ask prompt below
-	// decides each one, keep or dismiss, like any other ask - only
-	// DefaultTriage (--yes, a non-terminal stdin, `jig solve`) ever skips
-	// them.
-	if anyParked(in.Asks) {
-		fmt.Fprintf(stdout, "fix budget reached (%d of %d): keeping one queues a fix anyway\n", in.BudgetUsed, in.BudgetLimit)
-	}
-
-askLoop:
-	for i, f := range in.Asks {
-		if eof {
-			if !parked(f) {
-				if noWorkspace, noOracle := verifydeliver.BuildTargetGaps(f, in.Manifest); !noWorkspace && !noOracle {
-					result.Asks[f.ID] = verifydeliver.AskOutcome{Keep: true, Workspace: f.Workspace}
-				}
-			}
-			continue
-		}
-
-		// Every finding reaching the human seam is shown with
-		// file:line, detail and risk rationale, not the title alone.
-		fmt.Fprintf(stdout, "%s [%s] %s %s\n", f.ID, f.Risk, fileLine(f), f.Title)
-		if f.Detail != "" {
-			fmt.Fprintf(stdout, "  %s\n", f.Detail)
-		}
-		fmt.Fprintf(stdout, "  risk (%s): %s\n", f.Risk, f.RiskRationale)
-
-		keep := false
-		for {
-			fmt.Fprint(stdout, "keep (fix slice + decision) or dismiss (gone for good)? [k/keep/Enter, n/no/d/dismiss]: ")
-			line, err := r.ReadString('\n')
-			trimmed := strings.TrimSpace(line)
-			if err != nil && trimmed == "" {
-				eof = true
-				eofNote(stdout, in.Asks[i:], in.Manifest)
-				if !parked(f) {
-					if noWorkspace, noOracle := verifydeliver.BuildTargetGaps(f, in.Manifest); !noWorkspace && !noOracle {
-						result.Asks[f.ID] = verifydeliver.AskOutcome{Keep: true, Workspace: f.Workspace}
-					}
-				}
-				continue askLoop
-			}
-			switch strings.ToLower(trimmed) {
-			case "", "k", "keep":
-				keep = true
-			case "n", "no", "d", "dismiss":
-				keep = false
-			default:
-				fmt.Fprintln(stdout, "please answer keep (k, keep, or Enter) or dismiss (n, no, d, or dismiss)")
-				continue
-			}
-			break
-		}
-
-		if !keep {
-			result.Asks[f.ID] = verifydeliver.AskOutcome{Keep: false, Human: true}
-			continue askLoop
-		}
-
-		fmt.Fprintf(stdout, "decision for %s (optional, Enter to skip): ", f.ID)
-		line, _ := r.ReadString('\n')
-		decision := strings.TrimSpace(line)
-
-		noWorkspace, noOracle := verifydeliver.BuildTargetGaps(f, in.Manifest)
-		ws := f.Workspace
-		if noWorkspace {
-			got, wsEOF := promptWorkspace(in.Manifest, r, stdout)
-			if wsEOF {
-				eof = true
-				eofNote(stdout, in.Asks[i:], in.Manifest)
-				// f cannot be kept without a workspace judgment; leave it
-				// undecided rather than build a slice with no build
-				// target.
-				continue askLoop
-			}
-			ws = got
-		}
-		oracle := ""
-		if noOracle {
-			got, oracleEOF := promptOracle(in.Manifest, r, stdout)
-			if oracleEOF {
-				eof = true
-				eofNote(stdout, in.Asks[i:], in.Manifest)
-				// f cannot be kept without an oracle judgment either; the
-				// same rule as a missing workspace above.
-				continue askLoop
-			}
-			oracle = got
-		}
-		result.Asks[f.ID] = verifydeliver.AskOutcome{Keep: true, Decision: decision, Workspace: ws, Oracle: oracle, Human: true}
-	}
-
-	return result
-}
-
-// parked reports whether f is a fix the budget forced to asked
-// (Finding.RoutedWhy == RoutedWhyBudget): only a person at a terminal can
-// keep one, so stdin closing mid-session must never auto-keep it, the same
-// as a build-target gap EOF already leaves undecided.
-func parked(f verifydeliver.Finding) bool {
-	return f.RoutedWhy == verifydeliver.RoutedWhyBudget
-}
-
-// anyParked reports whether any of asks is budget-parked.
-func anyParked(asks []verifydeliver.Finding) bool {
+	var ids []string
+	found := false
 	for _, f := range asks {
-		if parked(f) {
-			return true
-		}
+		ids = append(ids, f.ID)
+		found = found || f.ID == id
 	}
-	return false
+	if !found {
+		listed := "it has none"
+		if len(ids) > 0 {
+			listed = "its asks are " + strings.Join(ids, ", ")
+		}
+		return renderErr(stdout, &axi.Error{
+			Msg:  fmt.Sprintf("%s is not an outstanding ask of %s (%s)", id, ticket, listed),
+			Code: "TRIAGE_NOT_AN_ASK",
+			Help: []string{fmt.Sprintf("`jig status %s` lists the asks a person has to decide", ticket)},
+		})
+	}
+
+	provenance := "agent"
+	if e.stdinIsTerminal(stdin) {
+		provenance = "person"
+	}
+	line := journal.Line{
+		Event: journal.EventTriage, Ref: id, Outcome: decision, Provenance: provenance,
+		Summary: oneLineText(*reason), Command: verifydeliver.TriageTarget(*workspace, *oracle),
+		Session: e.getenv("JIG_SESSION"),
+	}
+	if err := journal.Append(st, ticket, line); err != nil {
+		return renderErr(stdout, err)
+	}
+	if err := st.Push(fmt.Sprintf("%s: triage %s %s", ticket, id, decision)); err != nil {
+		return renderErr(stdout, err)
+	}
+	axi.Render(stdout,
+		axi.KV("triage", [][2]string{{"ticket", ticket}, {"finding", id}, {"decision", decision}, {"provenance", provenance}}),
+		axi.Help(fmt.Sprintf("The next round applies it: run `jig gate %s`", ticket)),
+	)
+	return 0
 }
 
-// undecidedAskCount reports how many of asks would be left for a human
-// after stdin closes: a budget-parked ask always is, whatever its build
-// target - only a person at a terminal can keep one; otherwise one whose
-// build target already resolves in full (a derived workspace and a
-// resolvable oracle) is kept automatically, the same way DefaultTriage
-// keeps it, and one missing either part cannot be, since that judgment
-// needs a human and none is left to ask. It shares verifydeliver.
-// BuildTargetGaps with DefaultTriage and routeRound, rather than
-// re-deriving that rule here.
-func undecidedAskCount(asks []verifydeliver.Finding, man manifest.Manifest) int {
-	n := 0
-	for _, f := range asks {
-		if parked(f) {
-			n++
-			continue
-		}
-		if noWorkspace, noOracle := verifydeliver.BuildTargetGaps(f, man); noWorkspace || noOracle {
-			n++
-		}
+// oneLineText flattens text to a single line of at most 600 bytes, the shape
+// of a journal summary.
+func oneLineText(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) > 600 {
+		text = text[:600]
 	}
-	return n
-}
-
-// eofNote prints the stdin-closed note, naming how many of the not-yet-
-// decided asks in remaining are left for a human because they are missing a
-// workspace, an oracle, or both. It always starts on its own line: every
-// caller reaches it right after a prompt whose read returned EOF with
-// nothing typed. On a POSIX tty the cursor is still at the end of that
-// prompt after Ctrl-D (Linux echoes nothing; macOS echoes ^D and backs over
-// it); a Windows console echoes the Enter that follows Ctrl-Z, so there the
-// note follows one blank row instead.
-func eofNote(stdout io.Writer, remaining []verifydeliver.Finding, man manifest.Manifest) {
-	fmt.Fprintln(stdout)
-	if n := undecidedAskCount(remaining, man); n > 0 {
-		fmt.Fprintf(stdout, "triage (stdin closed): kept every remaining fix and buildable ask; %d ask(s) left for a human\n", n)
-	} else {
-		fmt.Fprintln(stdout, "triage (stdin closed): kept every remaining fix and buildable ask")
-	}
-}
-
-// promptWorkspace asks for one of man's declared workspace ids: a kept
-// ask whose file lies in no declared workspace needs the human's choice
-// before it can become a fix slice. eof is true when stdin closed before
-// a valid id arrived.
-func promptWorkspace(man manifest.Manifest, r *bufio.Reader, stdout io.Writer) (id string, eof bool) {
-	ids := make([]string, len(man.Workspaces))
-	valid := map[string]bool{}
-	for i, ws := range man.Workspaces {
-		ids[i] = ws.ID
-		valid[ws.ID] = true
-	}
-	for {
-		fmt.Fprintf(stdout, "this finding's file is in no declared workspace; pick one [%s]: ", strings.Join(ids, ","))
-		line, err := r.ReadString('\n')
-		trimmed := strings.TrimSpace(line)
-		if err != nil && trimmed == "" {
-			return "", true
-		}
-		if valid[trimmed] {
-			return trimmed, false
-		}
-		fmt.Fprintf(stdout, "unknown workspace %q; try again\n", trimmed)
-	}
-}
-
-// promptOracle asks for one of man's declared oracle names: a kept ask
-// whose recorded oracle is empty or no longer a manifest oracle needs the
-// human's choice before it can become a fix slice. eof is true when stdin
-// closed before a valid name arrived.
-func promptOracle(man manifest.Manifest, r *bufio.Reader, stdout io.Writer) (name string, eof bool) {
-	names := verifydeliver.SortedOracleNames(man)
-	valid := map[string]bool{}
-	for _, n := range names {
-		valid[n] = true
-	}
-	for {
-		fmt.Fprintf(stdout, "this finding's oracle is missing or no longer in the manifest; pick one [%s]: ", strings.Join(names, ","))
-		line, err := r.ReadString('\n')
-		trimmed := strings.TrimSpace(line)
-		if err != nil && trimmed == "" {
-			return "", true
-		}
-		if valid[trimmed] {
-			return trimmed, false
-		}
-		fmt.Fprintf(stdout, "unknown oracle %q; try again\n", trimmed)
-	}
+	return text
 }

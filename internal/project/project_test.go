@@ -515,13 +515,27 @@ func TestCheckSchemaVersionAcceptsCurrent(t *testing.T) {
 	}
 }
 
+// TestCheckSchemaVersionAcceptsEveryVersionItOpens: a v2 store opens as it
+// is under a jig whose current version is 3 (it keeps its project.yaml); a v3
+// store opens; nothing between the two is refused.
+func TestCheckSchemaVersionAcceptsEveryVersionItOpens(t *testing.T) {
+	if MinSchemaVersion != 2 || CurrentSchemaVersion != 3 {
+		t.Fatalf("schema versions = %d..%d, want 2..3", MinSchemaVersion, CurrentSchemaVersion)
+	}
+	for v := MinSchemaVersion; v <= CurrentSchemaVersion; v++ {
+		if err := (Config{SchemaVersion: v}).CheckSchemaVersion(false); err != nil {
+			t.Errorf("CheckSchemaVersion(false) at schema_version %d: %v", v, err)
+		}
+	}
+}
+
 // TestCheckSchemaVersionRefusesOlderUnlessAllowed is the one exemption
 // project.Config.CheckSchemaVersion carries: `jig store migrate` passes
 // allowOlder true (resolveStoreForProjectAllowingOldSchema); every other
 // command passes false and is refused, with help naming `jig store
 // migrate`.
 func TestCheckSchemaVersionRefusesOlderUnlessAllowed(t *testing.T) {
-	cfg := Config{SchemaVersion: CurrentSchemaVersion - 1}
+	cfg := Config{SchemaVersion: MinSchemaVersion - 1}
 	if err := cfg.CheckSchemaVersion(true); err != nil {
 		t.Fatalf("CheckSchemaVersion(true): %v", err)
 	}
@@ -553,9 +567,8 @@ func TestCheckSchemaVersionRefusesNewerEvenWhenOlderIsAllowed(t *testing.T) {
 	}
 }
 
-// TestStandaloneStoreDir checks that it returns the same path InitStandalone
-// itself creates the store at, so a caller can check for an existing store
-// before calling InitStandalone (which always overwrites one).
+// TestStandaloneStoreDir checks that it returns the same path Init itself
+// creates the store at, so a caller can look for an existing store first.
 func TestStandaloneStoreDir(t *testing.T) {
 	parent := t.TempDir()
 	repoDir := filepath.Join(parent, "myrepo")
@@ -567,170 +580,6 @@ func TestStandaloneStoreDir(t *testing.T) {
 	want := filepath.Join(parent, "myrepo-tickets")
 	if got != want {
 		t.Fatalf("StandaloneStoreDir(%q) = %q, want %q", repoDir, got, want)
-	}
-}
-
-func TestInitStandalone(t *testing.T) {
-	parent := t.TempDir()
-	repoDir := filepath.Join(parent, "myrepo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatalf("mkdir repo: %v", err)
-	}
-
-	storePath, err := InitStandalone(repoDir, "")
-	if err != nil {
-		t.Fatalf("InitStandalone: %v", err)
-	}
-
-	wantStore := filepath.Join(parent, "myrepo-tickets")
-	absWant, _ := filepath.Abs(wantStore)
-	absGot, _ := filepath.Abs(storePath)
-	if absGot != absWant {
-		t.Fatalf("storePath = %q, want %q", absGot, absWant)
-	}
-
-	if fi, err := os.Stat(filepath.Join(storePath, ".git")); err != nil || !fi.IsDir() {
-		t.Errorf(".git missing under store: %v", err)
-	}
-	if fi, err := os.Stat(filepath.Join(storePath, "platform")); err != nil || !fi.IsDir() {
-		t.Errorf("platform/ missing: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(storePath, "ledger.md")); err != nil {
-		t.Errorf("ledger.md missing: %v", err)
-	}
-
-	cfg, err := Load(filepath.Join(storePath, "project.yaml"))
-	if err != nil {
-		t.Fatalf("Load generated project.yaml: %v", err)
-	}
-	if cfg.SchemaVersion != CurrentSchemaVersion || cfg.Name != "myrepo" || cfg.Platform != "platform/" {
-		t.Errorf("cfg = %+v, unexpected", cfg)
-	}
-	wantKeys := map[string]string{"MYREPO": "everything in myrepo"}
-	if !reflect.DeepEqual(cfg.Keys, wantKeys) {
-		t.Errorf("Keys = %+v, want %+v (derived from the project name)", cfg.Keys, wantKeys)
-	}
-	if len(cfg.Repos) != 1 {
-		t.Fatalf("Repos = %+v, want 1 entry", cfg.Repos)
-	}
-
-	data, err := os.ReadFile(filepath.Join(storePath, "project.yaml"))
-	if err != nil {
-		t.Fatalf("read project.yaml: %v", err)
-	}
-	if !strings.Contains(string(data), "trackers: []") {
-		t.Errorf("project.yaml = %s, want trackers: []", data)
-	}
-	if strings.Contains(string(data), "tracker:") {
-		t.Errorf("project.yaml = %s, want no tracker: key", data)
-	}
-	if strings.Contains(string(data), "ticket_format") {
-		t.Errorf("project.yaml = %s, want no ticket_format key", data)
-	}
-	absRepo, _ := filepath.Abs(repoDir)
-	if cfg.Repos[0].Remote != absRepo {
-		t.Errorf("Repos[0].Remote = %q, want %q", cfg.Repos[0].Remote, absRepo)
-	}
-}
-
-// TestInitStandaloneExplicitKey checks that --key replaces the key
-// InitStandalone would otherwise derive from the project name.
-func TestInitStandaloneExplicitKey(t *testing.T) {
-	parent := t.TempDir()
-	repoDir := filepath.Join(parent, "myrepo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatalf("mkdir repo: %v", err)
-	}
-
-	storePath, err := InitStandalone(repoDir, "CUSTOM")
-	if err != nil {
-		t.Fatalf("InitStandalone: %v", err)
-	}
-	cfg, err := Load(filepath.Join(storePath, "project.yaml"))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	want := map[string]string{"CUSTOM": "everything in myrepo"}
-	if !reflect.DeepEqual(cfg.Keys, want) {
-		t.Fatalf("Keys = %+v, want %+v", cfg.Keys, want)
-	}
-}
-
-// TestInitStandaloneRefusesAMalformedExplicitKey checks that an explicit
-// --key breaking the key rule is refused rather than written.
-func TestInitStandaloneRefusesAMalformedExplicitKey(t *testing.T) {
-	parent := t.TempDir()
-	repoDir := filepath.Join(parent, "myrepo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatalf("mkdir repo: %v", err)
-	}
-	_, err := InitStandalone(repoDir, "lowercase")
-	wantValidationError(t, err)
-}
-
-// TestInitStandaloneReinitLeavesOtherDirtyFilesAlone checks InitStandalone's
-// own re-init contract: run again against a store it already scaffolded, it
-// resets project.yaml and ledger.md without error, even though the reset
-// changes nothing (so there is nothing to commit), and it never sweeps an
-// unrelated dirty file in the store into its own commit.
-func TestInitStandaloneReinitLeavesOtherDirtyFilesAlone(t *testing.T) {
-	parent := t.TempDir()
-	repoDir := filepath.Join(parent, "myrepo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatalf("mkdir repo: %v", err)
-	}
-
-	storePath, err := InitStandalone(repoDir, "")
-	if err != nil {
-		t.Fatalf("InitStandalone: %v", err)
-	}
-
-	writeFile(t, filepath.Join(storePath, "unrelated.txt"), "dirty\n")
-
-	if _, err := InitStandalone(repoDir, ""); err != nil {
-		t.Fatalf("InitStandalone (re-init): %v", err)
-	}
-
-	status := runGitInProject(t, storePath, "status", "--porcelain", "unrelated.txt")
-	if !strings.Contains(status, "?? unrelated.txt") {
-		t.Fatalf("status unrelated.txt = %q, want it still untracked", status)
-	}
-}
-
-// TestInitStandaloneGitignoreKeepsLockFilesUntracked asserts InitStandalone
-// writes a store-root .gitignore covering store.Lock's sidecar "*.lock"
-// files and store.AtomicWrite's ".*.tmp" scratch files, and that a real
-// locked write (store.WriteSliceState) never shows up in `git status`.
-func TestInitStandaloneGitignoreKeepsLockFilesUntracked(t *testing.T) {
-	parent := t.TempDir()
-	repoDir := filepath.Join(parent, "myrepo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatalf("mkdir repo: %v", err)
-	}
-
-	storePath, err := InitStandalone(repoDir, "")
-	if err != nil {
-		t.Fatalf("InitStandalone: %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(storePath, ".gitignore"))
-	if err != nil {
-		t.Fatalf("read .gitignore: %v", err)
-	}
-	if !strings.Contains(string(data), "*.lock") || !strings.Contains(string(data), ".*.tmp") {
-		t.Fatalf(".gitignore = %q, want it to ignore *.lock and .*.tmp", data)
-	}
-
-	st := &store.Store{Root: storePath}
-	if err := st.WriteSliceState("T-1", "a", store.SliceState{State: "queued"}); err != nil {
-		t.Fatalf("WriteSliceState: %v", err)
-	}
-
-	statusOut := runGitInProject(t, storePath, "status", "--porcelain")
-	for _, line := range strings.Split(statusOut, "\n") {
-		if strings.Contains(line, ".lock") {
-			t.Fatalf("git status shows a lock file (should be gitignored): %q\nfull status:\n%s", line, statusOut)
-		}
 	}
 }
 
@@ -822,123 +671,6 @@ platform: platform/
 	_, err := InitProject(jigHome, storeDir, map[string]string{"other": t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error for unknown clone name")
-	}
-}
-
-func TestResolvePrecedence(t *testing.T) {
-	jigHome := t.TempDir()
-
-	// 1. explicit --store flag wins over everything.
-	explicitStore := t.TempDir()
-	writeFile(t, filepath.Join(explicitStore, "project.yaml"), `
-schema_version: 2
-name: explicit
-keys:
-  JIG: everything in explicit
-trackers: []
-repos: []
-platform: platform/
-`)
-	cwdWithOwnStore := t.TempDir()
-	writeFile(t, filepath.Join(cwdWithOwnStore, "project.yaml"), `
-schema_version: 2
-name: cwdstore
-keys:
-  JIG: everything in cwdstore
-trackers: []
-repos: []
-platform: platform/
-`)
-	storePath, cfg, err := Resolve(jigHome, cwdWithOwnStore, explicitStore)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if storePath != explicitStore || cfg.Name != "explicit" {
-		t.Fatalf("Resolve with --store = (%q, %q), want explicit store to win", storePath, cfg.Name)
-	}
-
-	// 2. cwd store (project.yaml in cwd) wins over machine mapping, when no
-	// --store flag is given.
-	storePath, cfg, err = Resolve(jigHome, cwdWithOwnStore, "")
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if storePath != cwdWithOwnStore || cfg.Name != "cwdstore" {
-		t.Fatalf("Resolve cwd store = (%q, %q), want cwdstore", storePath, cfg.Name)
-	}
-
-	// 3. cwd inside a machine-mapped clone, no local project.yaml.
-	mappedStore := t.TempDir()
-	writeFile(t, filepath.Join(mappedStore, "project.yaml"), `
-schema_version: 2
-name: mapped
-keys:
-  JIG: everything in mapped
-trackers: []
-repos: []
-platform: platform/
-`)
-	cloneRoot := t.TempDir()
-	subdir := filepath.Join(cloneRoot, "sub", "dir")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	machine := map[string]MachineProject{
-		"mapped": {Store: mappedStore, Clones: map[string]string{"mapped": cloneRoot}},
-	}
-	if err := SaveMachine(jigHome, machine); err != nil {
-		t.Fatalf("SaveMachine: %v", err)
-	}
-	storePath, cfg, err = Resolve(jigHome, subdir, "")
-	if err != nil {
-		t.Fatalf("Resolve via machine mapping: %v", err)
-	}
-	if storePath != mappedStore || cfg.Name != "mapped" {
-		t.Fatalf("Resolve via machine mapping = (%q, %q), want mapped store", storePath, cfg.Name)
-	}
-
-	// 4. nothing matches → error.
-	orphan := t.TempDir()
-	if _, _, err := Resolve(jigHome, orphan, ""); err == nil {
-		t.Fatal("expected error when no store can be resolved")
-	}
-}
-
-// TestResolveFallsBackToSiblingStandaloneStore checks that Resolve finds a
-// repo's own "jig init --standalone" store even when cwd is the repo dir
-// itself, not the store: without this, the worked example in `jig`'s own
-// bare-usage help (init --standalone, then jig ticket new, run, solve, all
-// run from the repo) fails on its very first command.
-func TestResolveFallsBackToSiblingStandaloneStore(t *testing.T) {
-	jigHome := t.TempDir()
-
-	parent := t.TempDir()
-	repoDir := filepath.Join(parent, "myrepo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatalf("mkdir repo: %v", err)
-	}
-	storePath, err := InitStandalone(repoDir, "")
-	if err != nil {
-		t.Fatalf("InitStandalone: %v", err)
-	}
-
-	storeDir, cfg, err := Resolve(jigHome, repoDir, "")
-	if err != nil {
-		t.Fatalf("Resolve(repoDir, \"\"): %v", err)
-	}
-	absStore, _ := filepath.Abs(storePath)
-	absGot, _ := filepath.Abs(storeDir)
-	if absGot != absStore {
-		t.Fatalf("storeDir = %q, want %q", absGot, absStore)
-	}
-	if cfg.Name != "myrepo" {
-		t.Fatalf("cfg.Name = %q, want %q", cfg.Name, "myrepo")
-	}
-
-	// A cwd with neither its own project.yaml, a machine mapping, nor a
-	// sibling standalone store still refuses, same as before.
-	if _, _, err := Resolve(jigHome, t.TempDir(), ""); err == nil {
-		t.Fatal("expected error when no store can be resolved")
 	}
 }
 
@@ -1196,5 +928,216 @@ builder_effort:
 				t.Errorf("Load error = %v, want one naming %s", err, c.key)
 			}
 		})
+	}
+}
+
+// newRepoDir makes an empty folder called name under a fresh parent, the way
+// a project's root starts, and returns the parent and the folder.
+func newRepoDir(t *testing.T, name string) (parent, dir string) {
+	t.Helper()
+	parent = t.TempDir()
+	dir = filepath.Join(parent, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	return parent, dir
+}
+
+// TestInitStandalone: a single-repo project gets a sibling store that is a
+// v3 store (store.yaml, no project.yaml), a jig.yaml marker in the folder with
+// no store: key (nothing is published yet), and an entry in the machine map.
+func TestInitStandalone(t *testing.T) {
+	parent, repoDir := newRepoDir(t, "myrepo")
+	jigHome := t.TempDir()
+
+	res, err := Init(InitOpts{Dir: repoDir, JigHome: jigHome, Kind: KindProject})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	storePath := res.Store
+	if want := filepath.Join(parent, "myrepo-tickets"); storePath != want {
+		t.Fatalf("store = %q, want %q", storePath, want)
+	}
+	if fi, err := os.Stat(filepath.Join(storePath, ".git")); err != nil || !fi.IsDir() {
+		t.Errorf(".git missing under store: %v", err)
+	}
+	if fi, err := os.Stat(filepath.Join(storePath, "platform")); err != nil || !fi.IsDir() {
+		t.Errorf("platform/ missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(storePath, "ledger.md")); err != nil {
+		t.Errorf("ledger.md missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(storePath, "project.yaml")); !os.IsNotExist(err) {
+		t.Errorf("a v3 store has no project.yaml: %v", err)
+	}
+	if got := runGitInProject(t, storePath, "status", "--porcelain"); got != "" {
+		t.Errorf("the new store is dirty:\n%s", got)
+	}
+
+	// The scaffold commit is the person's: the identity git resolves, which
+	// this binary pins to the fixture's, never an identity jig made up.
+	wantIdent := "jig-fixture <fixture@example.invalid>"
+	if got := runGitInProject(t, storePath, "log", "-1", "--format=%an <%ae>|%cn <%ce>"); got != wantIdent+"|"+wantIdent {
+		t.Errorf("scaffold commit author|committer = %q, want %q for both", got, wantIdent)
+	}
+
+	cfg, err := LoadStoreConfig(storePath)
+	if err != nil {
+		t.Fatalf("LoadStoreConfig: %v", err)
+	}
+	if cfg.SchemaVersion != CurrentSchemaVersion || cfg.Name != "myrepo" || cfg.Platform != "platform/" {
+		t.Errorf("cfg = %+v, unexpected", cfg)
+	}
+	if !reflect.DeepEqual(cfg.Projects, []string{"myrepo"}) {
+		t.Errorf("Projects = %v, want [myrepo]", cfg.Projects)
+	}
+	wantKeys := map[string]string{"MYREPO": "everything in myrepo"}
+	if !reflect.DeepEqual(cfg.Keys, wantKeys) {
+		t.Errorf("Keys = %+v, want %+v (derived from the project name)", cfg.Keys, wantKeys)
+	}
+	if len(cfg.Repos) != 0 {
+		t.Errorf("Repos = %+v, want none: a v3 store's repos are the marker's", cfg.Repos)
+	}
+	data, err := os.ReadFile(filepath.Join(storePath, "store.yaml"))
+	if err != nil {
+		t.Fatalf("read store.yaml: %v", err)
+	}
+	for _, want := range []string{"trackers: []", "schema_version: 3", "projects:"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("store.yaml = %s, want %q", data, want)
+		}
+	}
+	for _, not := range []string{"tracker:", "ticket_format", "repos:", "name:"} {
+		if strings.Contains(string(data), not) {
+			t.Errorf("store.yaml = %s, want no %q", data, not)
+		}
+	}
+
+	m, err := LoadMarker(filepath.Join(repoDir, MarkerFile))
+	if err != nil {
+		t.Fatalf("LoadMarker: %v", err)
+	}
+	if m.Project != "myrepo" || m.Kind != KindProject || m.Store != "" || len(m.Repos) != 0 {
+		t.Errorf("marker = %+v, want project myrepo, kind project, no store, no repos", m)
+	}
+
+	machine, err := LoadMachine(jigHome)
+	if err != nil {
+		t.Fatalf("LoadMachine: %v", err)
+	}
+	mp := machine["myrepo"]
+	if mp.Store != storePath || mp.Root != repoDir || mp.Clones["myrepo"] != repoDir {
+		t.Errorf("machine map entry = %+v, want store %s, root and clone %s", mp, storePath, repoDir)
+	}
+
+	// The project's repo comes from the marker: the folder itself, named by
+	// the project, its remote the folder until it has an origin.
+	full, err := LoadConfig(jigHome, storePath, "", repoDir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if len(full.Repos) != 1 || full.Repos[0].Name() != "myrepo" || full.Repos[0].Remote != repoDir {
+		t.Errorf("Repos = %+v, want the one repo myrepo at %s", full.Repos, repoDir)
+	}
+}
+
+// TestInitStandaloneExplicitKey checks that --key replaces the key Init would
+// otherwise derive from the project name.
+func TestInitStandaloneExplicitKey(t *testing.T) {
+	_, repoDir := newRepoDir(t, "myrepo")
+	res, err := Init(InitOpts{Dir: repoDir, JigHome: t.TempDir(), Kind: KindProject, Key: "CUSTOM"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	cfg, err := LoadStoreConfig(res.Store)
+	if err != nil {
+		t.Fatalf("LoadStoreConfig: %v", err)
+	}
+	want := map[string]string{"CUSTOM": "everything in myrepo"}
+	if !reflect.DeepEqual(cfg.Keys, want) {
+		t.Fatalf("Keys = %+v, want %+v", cfg.Keys, want)
+	}
+}
+
+// TestInitRefusesAMalformedExplicitKey checks that an explicit --key breaking
+// the key rule is refused rather than written, with nothing left behind.
+func TestInitRefusesAMalformedExplicitKey(t *testing.T) {
+	parent, repoDir := newRepoDir(t, "myrepo")
+	_, err := Init(InitOpts{Dir: repoDir, JigHome: t.TempDir(), Kind: KindProject, Key: "lowercase"})
+	wantValidationError(t, err)
+	if _, err := os.Stat(filepath.Join(parent, "myrepo-tickets")); !os.IsNotExist(err) {
+		t.Errorf("the refused init left a store behind: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, MarkerFile)); !os.IsNotExist(err) {
+		t.Errorf("the refused init left a marker behind: %v", err)
+	}
+}
+
+// TestInitRefusesWhatIsAlreadyThere: a folder with a marker is a project
+// already, and a store sibling that exists is never reset; init changes none
+// of what is there.
+func TestInitRefusesWhatIsAlreadyThere(t *testing.T) {
+	_, repoDir := newRepoDir(t, "myrepo")
+	jigHome := t.TempDir()
+	res, err := Init(InitOpts{Dir: repoDir, JigHome: jigHome, Kind: KindProject})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeFile(t, filepath.Join(res.Store, "ledger.md"), "real ledger content\n")
+	writeFile(t, filepath.Join(res.Store, "unrelated.txt"), "dirty\n")
+
+	_, err = Init(InitOpts{Dir: repoDir, JigHome: jigHome, Kind: KindProject})
+	wantValidationError(t, err)
+	if !strings.Contains(err.Error(), "already initialized") {
+		t.Errorf("err = %v, want it to say the folder is already initialized", err)
+	}
+
+	// With the marker gone the store is still there, and still refused.
+	if err := os.Remove(filepath.Join(repoDir, MarkerFile)); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Init(InitOpts{Dir: repoDir, JigHome: jigHome, Kind: KindProject})
+	wantValidationError(t, err)
+	if !strings.Contains(err.Error(), "store already initialized") {
+		t.Errorf("err = %v, want the store already initialized", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(res.Store, "ledger.md")); string(data) != "real ledger content\n" {
+		t.Errorf("ledger.md was overwritten: %q", data)
+	}
+	if status := runGitInProject(t, res.Store, "status", "--porcelain", "unrelated.txt"); !strings.Contains(status, "?? unrelated.txt") {
+		t.Errorf("status unrelated.txt = %q, want it still untracked", status)
+	}
+}
+
+// TestInitGitignoreKeepsLockFilesUntracked asserts Init writes a store-root
+// .gitignore covering store.Lock's sidecar "*.lock" files and
+// store.AtomicWrite's ".*.tmp" scratch files, and that a real locked write
+// (store.WriteSliceState) never shows up in `git status`.
+func TestInitGitignoreKeepsLockFilesUntracked(t *testing.T) {
+	_, repoDir := newRepoDir(t, "myrepo")
+	res, err := Init(InitOpts{Dir: repoDir, JigHome: t.TempDir(), Kind: KindProject})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	storePath := res.Store
+
+	data, err := os.ReadFile(filepath.Join(storePath, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if !strings.Contains(string(data), "*.lock") || !strings.Contains(string(data), ".*.tmp") {
+		t.Fatalf(".gitignore = %q, want it to ignore *.lock and .*.tmp", data)
+	}
+
+	st := &store.Store{Root: storePath}
+	if err := st.WriteSliceState("T-1", "a", store.SliceState{State: "queued"}); err != nil {
+		t.Fatalf("WriteSliceState: %v", err)
+	}
+
+	statusOut := runGitInProject(t, storePath, "status", "--porcelain")
+	for _, line := range strings.Split(statusOut, "\n") {
+		if strings.Contains(line, ".lock") {
+			t.Fatalf("git status shows a lock file (should be gitignored): %q\nfull status:\n%s", line, statusOut)
+		}
 	}
 }

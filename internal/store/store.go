@@ -36,6 +36,15 @@ type Store struct {
 	// its own structured output sets this before calling Push.
 	Warn func(format string, args ...any)
 
+	// BranchesFrom is the tracker whose ids lead the names of this project's
+	// branches: the jig.yaml marker's branches: from:. Empty means the first
+	// tracker jig mirrors to, GitHub, and "github" is the same; any other
+	// value leaves the store's own ids to lead them. The command that
+	// resolves the store sets it from the marker (cmd/jig's
+	// resolveStoreChecked), so every command that names a ticket's branch
+	// (TicketBranch, ResolveTicketBranch) names it by the same rule.
+	BranchesFrom string
+
 	// aliasClaimsCache memoizes aliasClaims' store-wide scan (internal/store/resolve.go)
 	// for the life of this Store value: a command resolving many refs in one
 	// run (jig validate's blocked_by refs and cycle DFS, the mirror's
@@ -43,11 +52,18 @@ type Store struct {
 	// ticket.yaml once per ref. invalidateAliasClaims clears it whenever a
 	// ticket.yaml write, or a checkpoint's pull, could change what it holds.
 	// aliasClaimsMu guards both the cache and the scan that fills it: a
-	// frontier run shares one Store across its per-slice goroutines
-	// (internal/frontier's fan-out), each of which can resolve a ref through
-	// it concurrently.
+	// process that shares one Store across goroutines (a verification run
+	// beside a command) can resolve a ref through it concurrently.
 	aliasClaimsMu    sync.Mutex
 	aliasClaimsCache map[string][]string
+
+	// ident is the person's git identity, resolved on first use by
+	// identity (identity.go).
+	ident identityCache
+
+	// writer is the name this clone writes under in writers mode, resolved on
+	// first use by writerName (writers.go).
+	writer writerCache
 }
 
 // invalidateAliasClaims drops the memoized aliasClaims result, so the next
@@ -86,10 +102,15 @@ func (s *Store) RunCheckpointHook() {
 	}
 }
 
-// Open opens the store rooted at root. root must contain a project.yaml.
+// Open opens the store rooted at root. root must contain the store's config
+// file: store.yaml of a v3 store, or the project.yaml of a v2 one. (The store
+// does not read either; internal/project does. Both are named here because
+// project imports store, so store cannot ask it.)
 func Open(root string) (*Store, error) {
-	if _, err := os.Stat(filepath.Join(root, "project.yaml")); err != nil {
-		return nil, fmt.Errorf("store: open %s: %w", root, err)
+	if _, err := os.Stat(filepath.Join(root, "store.yaml")); err != nil {
+		if _, err2 := os.Stat(filepath.Join(root, "project.yaml")); err2 != nil {
+			return nil, fmt.Errorf("store: open %s: %w", root, err)
+		}
 	}
 	return &Store{Root: root}, nil
 }
@@ -136,7 +157,13 @@ func (s *Store) HasRemote() bool {
 // store (no origin) in either state is still refused at the start of the
 // command rather than silently let through. Otherwise it is a silent no-op
 // when there is no remote. Callers run it at the start of every command.
+// It holds the checkpoint lock (LockCheckpoint) throughout.
 func (s *Store) Sync() error {
+	release, err := s.LockCheckpoint()
+	if err != nil {
+		return err
+	}
+	defer release()
 	cp, err := s.begin()
 	if err != nil {
 		return err
@@ -159,12 +186,36 @@ type checkpoint struct {
 	s      *Store
 	repo   *gitx.Repo // nil: the git program does every step
 	branch string
+
+	// writers is set when the store is in writers mode (Store.Mode): branch
+	// is then the branch of this writer, writers/<name>, and pull brings in
+	// the other writers by merging them (pullWriters) rather than rebasing
+	// onto one shared branch.
+	writers bool
 }
 
-// begin opens the store and runs the refusals every Sync and Push starts
+// begin opens the store and runs the refusals every Sync, Push and Claim
+// starts with (beginBranch), then puts a writers store on the branch of its
+// writer.
+func (s *Store) begin() (*checkpoint, error) {
+	cp, err := s.beginBranch()
+	if err != nil {
+		return nil, err
+	}
+	writers, err := s.Mode()
+	if err != nil {
+		return nil, err
+	}
+	if !writers {
+		return cp, nil
+	}
+	return s.enterWriters(cp)
+}
+
+// beginBranch opens the store and runs the refusals every Sync and Push starts
 // with, in this order: an unfinished rebase, merge, cherry-pick, revert,
 // sequence or bisect, then unmerged index entries, then a detached HEAD.
-func (s *Store) begin() (*checkpoint, error) {
+func (s *Store) beginBranch() (*checkpoint, error) {
 	repo, err := gitx.OpenRepo(s.Root)
 	if err != nil && !errors.Is(err, gitx.ErrUseCLI) {
 		return nil, err
@@ -222,10 +273,13 @@ func (cp *checkpoint) hasRemote() bool {
 	return cp.s.HasRemote()
 }
 
-// commit records every change with msg, when there is any.
+// commit records every change with msg, when there is any, authored by the
+// person (Store.identity). A store with nothing to commit needs no identity,
+// and costs no lookup of one: both paths ask for it only once they find
+// something to commit.
 func (cp *checkpoint) commit(msg string) error {
 	if cp.repo != nil {
-		_, err := cp.repo.CommitAll(msg, "jig", "jig@invalid")
+		_, err := cp.repo.CommitAllAs(msg, cp.s.identity)
 		if !errors.Is(err, gitx.ErrUseCLI) {
 			return err
 		}
@@ -243,6 +297,9 @@ func (cp *checkpoint) commit(msg string) error {
 // this way must resolve as soon as the pull lands, not only after jig's own
 // next write.
 func (cp *checkpoint) pull() error {
+	if cp.writers {
+		return cp.pullWriters()
+	}
 	defer cp.s.invalidateAliasClaims()
 	if cp.repo != nil {
 		rel, err := cp.repo.Fetch("origin", cp.branch)
@@ -283,7 +340,14 @@ func (cp *checkpoint) push() error {
 		}
 	}
 	if _, err := gitx.Run(cp.s.Root, "push", "origin", cp.branch); err != nil {
-		if _, perr := gitx.Run(cp.s.Root, "pull", "--rebase", "origin", cp.branch); perr != nil {
+		if cp.writers {
+			// Only this writer pushes this branch, so there is nothing to
+			// rebase onto: take what moved the way pull does (which refuses a
+			// branch another clone has written to) and push once more.
+			if perr := cp.pull(); perr != nil {
+				return perr
+			}
+		} else if _, perr := gitx.Run(cp.s.Root, "pull", "--rebase", "origin", cp.branch); perr != nil {
 			return cp.s.abortFailedPull(perr, cp.branch)
 		}
 		if _, err2 := gitx.Run(cp.s.Root, "push", "origin", cp.branch); err2 != nil {
@@ -446,8 +510,8 @@ func markerPresent(markers []string) (string, error) {
 }
 
 // stageAndCommit stages every change (`add -A`) and, when anything is
-// staged, commits it with jig's identity and msg. It reports whether a
-// commit was made. Its callers, Sync and Push, have already run
+// staged, commits it as the person (Store.identity) with msg. It reports
+// whether a commit was made. Its callers, Sync and Push, have already run
 // refuseIfMidRebaseOrMerge, and only read-only git calls run between that
 // check and this one, so it does not repeat the check's two git calls.
 // Another process working on the same store can still slip in between, as
@@ -463,7 +527,11 @@ func (s *Store) stageAndCommit(msg string) (bool, error) {
 	if !staged {
 		return false, nil
 	}
-	if _, err := gitx.Run(s.Root, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", msg); err != nil {
+	id, err := s.identity()
+	if err != nil {
+		return false, err
+	}
+	if _, err := gitx.Run(s.Root, commitConfig(id, "commit", "-m", msg)...); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -473,8 +541,17 @@ func (s *Store) stageAndCommit(msg string) (bool, error) {
 // staged) and, when a remote exists, pushes it, retrying once with a
 // pull --rebase on rejection. Like Sync, it refuses on an unfinished rebase
 // or merge or a detached HEAD before doing anything else, whether or not a
-// remote exists.
+// remote exists. It holds the checkpoint lock (LockCheckpoint) through the
+// commit and the push and lets go of it before RunCheckpointHook: the hook's
+// mirror reaches the store through Claim, which takes the lock itself, and a
+// hook that ran under Push's hold would keep every other process waiting
+// through a network sync.
 func (s *Store) Push(msg string) error {
+	release, err := s.LockCheckpoint()
+	if err != nil {
+		return err
+	}
+	defer release()
 	cp, err := s.begin()
 	if err != nil {
 		return err
@@ -483,6 +560,7 @@ func (s *Store) Push(msg string) error {
 		return err
 	}
 	if !cp.hasRemote() {
+		release()
 		s.RunCheckpointHook()
 		return nil
 	}
@@ -496,6 +574,7 @@ func (s *Store) Push(msg string) error {
 	if cp.repo == nil || cp.repo.LooseObjectsPastAutoGC() {
 		_ = gitx.MaintenanceAuto(s.Root)
 	}
+	release()
 	s.RunCheckpointHook()
 	return nil
 }

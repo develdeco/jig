@@ -17,92 +17,17 @@ import (
 )
 
 // lastGreenCommits maps each slice id to the commit sha of its last green
-// result line.
+// result line, or of its last verified line: a commit made by hand and
+// verified by `jig verify` has the one and no result line.
 func lastGreenCommits(lines []journal.Line) map[string]string {
 	out := map[string]string{}
 	for _, l := range lines {
-		if l.Event == "result" && l.Outcome == "green" && l.Commit != "" {
+		isGreen := l.Event == journal.EventResult && l.Outcome == "green"
+		if (isGreen || l.Event == journal.EventVerified) && l.Commit != "" {
 			out[l.Slice] = l.Commit
 		}
 	}
 	return out
-}
-
-// renderMemorize builds the ticket's retrieval-notes file: a heading, one
-// section per slice with its goal and final commit sha, and any answered
-// questions.
-func renderMemorize(ticket string, slices []store.Slice, lines []journal.Line, questions []store.Question) string {
-	commits := lastGreenCommits(lines)
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "# %s - retrieval notes\n\n", ticket)
-	for _, s := range slices {
-		fmt.Fprintf(&b, "## %s\n\n", s.ID)
-		fmt.Fprintf(&b, "- goal: %s\n", s.Goal)
-		if sha, ok := commits[s.ID]; ok {
-			fmt.Fprintf(&b, "- commit: %s\n", sha)
-		}
-		b.WriteString("\n")
-	}
-
-	if len(questions) > 0 {
-		b.WriteString("## Questions\n\n")
-		for _, q := range questions {
-			fmt.Fprintf(&b, "- %s (%s): %s", q.ID, q.Slice, q.Body)
-			if q.Answer != "" {
-				fmt.Fprintf(&b, " -> %s", q.Answer)
-			}
-			b.WriteString("\n")
-		}
-	}
-
-	return b.String()
-}
-
-// writeMemorize writes and commits the retrieval-notes file inside the
-// publish lease, before the squash commit so the squash's tree contains
-// it. The commit holds the notes and nothing else. The lease has run every
-// oracle by now, when the target moved, and an oracle can leave anything
-// behind - a file git does not ignore, a rewrite of a tracked file, a change
-// it staged - none of which is the notes' to carry to a branch someone else
-// may have built. The lease is disposable, so it is put back at its head
-// first, as it is before every acquire; what git ignores stays ignored.
-func writeMemorize(leaseDir, ticket string, slices []store.Slice, lines []journal.Line, questions []store.Question, identityEnv []string) error {
-	if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
-		return fmt.Errorf("verifydeliver: memorize: restore the lease after the oracles: %w", err)
-	}
-	content := renderMemorize(ticket, slices, lines, questions)
-	path := filepath.Join(leaseDir, ".claude", "retrieval", ticket+".md")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("verifydeliver: memorize: create retrieval dir: %w", err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("verifydeliver: memorize: write retrieval notes: %w", err)
-	}
-	_, err := commitIfChanged(leaseDir, fmt.Sprintf("docs: memorize %s", ticket), identityEnv)
-	if err != nil {
-		return fmt.Errorf("verifydeliver: memorize: commit: %w", err)
-	}
-	return nil
-}
-
-// commitIfChanged stages every change in dir and commits it with
-// identityEnv, reporting whether a commit was made.
-func commitIfChanged(dir, msg string, identityEnv []string) (bool, error) {
-	if _, err := gitx.Run(dir, "add", "-A"); err != nil {
-		return false, err
-	}
-	out, err := gitx.Run(dir, "diff", "--cached", "--name-only")
-	if err != nil {
-		return false, err
-	}
-	if strings.TrimSpace(out) == "" {
-		return false, nil
-	}
-	if _, err := gitx.RunEnv(dir, identityEnv, "commit", "-m", msg); err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 // writeChangelogs writes one changelog per workspace plus the consolidated

@@ -41,7 +41,7 @@ func TestResolveTicketPassesThroughUnknownID(t *testing.T) {
 	}
 }
 
-// TestResolveTicketFollowsAnAlias is the critical path "jig run <alias>
+// TestResolveTicketFollowsAnAlias is the critical path "jig status <alias>
 // works on the ticket and names its current id", at the resolver's own
 // seam: an alias on a ticket's ticket.yaml resolves to that ticket's id.
 func TestResolveTicketFollowsAnAlias(t *testing.T) {
@@ -145,9 +145,8 @@ func TestCheckAliasesFindsNothingWrongInAnOrdinaryStore(t *testing.T) {
 }
 
 // TestResolveTicketConcurrentUseIsRaceFree exercises the memoized alias scan
-// from many goroutines sharing one Store at once, as a frontier run's
-// per-slice fan-out does (internal/frontier): run under -race, an unlocked
-// read/write of aliasClaimsCache here would be flagged.
+// from many goroutines sharing one Store at once: run under -race, an
+// unlocked read/write of aliasClaimsCache here would be flagged.
 func TestResolveTicketConcurrentUseIsRaceFree(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
 	for i := 1; i <= 5; i++ {

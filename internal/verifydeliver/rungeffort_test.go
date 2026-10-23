@@ -8,22 +8,20 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/session"
-	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
 )
 
-// TestGateDispatchesTheReviewerOnTheDearestRungWithEffortByScope drives
-// three gate rounds over a ticket whose builders all ran on the dearest rung:
-// the reviewer runs on that rung, at the full effort on round 1 and the delta
-// effort on round 2, each round's own journal line records the effort, and
-// round 3, which dispatches no reviewer, records none (ADR 0023).
-func TestGateDispatchesTheReviewerOnTheDearestRungWithEffortByScope(t *testing.T) {
+// TestGateDispatchesTheLaunchedReviewerWithEffortByScope drives three gate
+// rounds over a ticket on the launched reviewer: it runs at the full effort on
+// round 1 and the delta effort on round 2, each round's own journal line
+// records the effort, and round 3, which dispatches no reviewer, records none
+// (ADR 0023). jig chooses no model for it: the dispatch names none.
+func TestGateDispatchesTheLaunchedReviewerWithEffortByScope(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-b")
 	d := newDeps(t, fx)
-	d.Rungs = staircase.Config{Rungs: []string{"rung-a", "rung-b"}}
 
 	type seen struct{ model, effort, scope string }
 	var got []seen
@@ -46,7 +44,7 @@ func TestGateDispatchesTheReviewerOnTheDearestRungWithEffortByScope(t *testing.T
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -70,7 +68,7 @@ func TestGateDispatchesTheReviewerOnTheDearestRungWithEffortByScope(t *testing.T
 		t.Fatalf("Gate round 3: %v", err)
 	}
 
-	want := []seen{{"rung-b", "high", "full"}, {"rung-b", "medium", "delta"}}
+	want := []seen{{"", "high", "full"}, {"", "medium", "delta"}}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("reviewer dispatches = %+v, want %+v", got, want)
 	}

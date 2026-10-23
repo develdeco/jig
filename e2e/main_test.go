@@ -7,17 +7,13 @@
 // elsewhere - a release's own, as its installer put it - to run the suite
 // against instead.
 //
-// This suite relies on two things about the CLI surface, called out here
-// and marked inline at their point of use as well:
-//
-//  1. `jig solve` accepts the same `--backend`/`--scenario` flags as
-//     `jig run`/`jig gate` (see `jig solve -h`, cmd/jig/help.go). Without
-//     them, TestSolveOneProcess cannot run deterministically in CI.
-//  2. cmd/jig's RenderStatus (status.go) only ever puts a slice's Question
-//     in the status table's 5th column, never its Reason (e.g.
-//     "attempt-cap"), so that value does not currently surface in `jig
-//     status` output at all. TestCapExhaustion documents this as a known
-//     gap rather than asserting a Reason column that does not exist.
+// jig starts no session, so the tests that need a ticket built play the part
+// of the agent that builds it: the fake harness (harness_test.go) commits the
+// fixture scenario's patches in the operator clone, fires the hooks a harness
+// would, and runs jig as a session of its own, against the real binary
+// and file-path remotes. TestDigesterFlow is the whole story of one ticket, from
+// the brief to a recorded pull request; run it with -v to read it as a
+// transcript.
 package e2e
 
 import (
@@ -28,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gittest"
@@ -41,6 +38,7 @@ var (
 
 func TestMain(m *testing.M) {
 	repoRoot = findRepoRoot()
+	goCaches = hostGoCaches()
 
 	tmp, err := os.MkdirTemp("", "jig-e2e-bin")
 	if err != nil {
@@ -85,6 +83,32 @@ func TestMain(m *testing.M) {
 	code := gittest.Run(m)
 	os.RemoveAll(tmp)
 	os.Exit(code)
+}
+
+// goCaches is GOCACHE and GOMODCACHE as this test process's go resolves
+// them, set once by TestMain. A test that moves HOME for the jig it runs
+// passes these along: on Linux and macOS go puts both caches under HOME, so
+// every `go test` an oracle runs would otherwise build from a cold cache
+// (Windows keeps them under LOCALAPPDATA, which the tests do not move).
+var goCaches []string
+
+// hostGoCaches asks go for its build and module caches. An answer go cannot
+// give leaves the children to find their own, as before.
+func hostGoCaches() []string {
+	goBin := filepath.Join(runtime.GOROOT(), "bin", "go"+exeSuffix())
+	out, err := exec.Command(goBin, "env", "GOCACHE", "GOMODCACHE").Output()
+	if err != nil {
+		return nil
+	}
+	var kv []string
+	for i, v := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		v = strings.TrimSpace(v)
+		if v == "" || v == "off" || i > 1 {
+			continue
+		}
+		kv = append(kv, []string{"GOCACHE=", "GOMODCACHE="}[i]+v)
+	}
+	return kv
 }
 
 // findRepoRoot locates the product repo root (the directory containing

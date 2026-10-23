@@ -31,22 +31,29 @@ func newEnclosingRepo(t *testing.T) string {
 	return dir
 }
 
-// TestRunRecoversBrokenLeaseInsideEnclosingRepo reproduces the pool's
+// gateLeaseDir is the ticket's gate lease: where a gate round opens its pristine
+// copy of the branch for the reviewer.
+func gateLeaseDir(home, ticket string) string {
+	return filepath.Join(home, "pool", "fixture-repo", ticket+"-gate")
+}
+
+// TestGateRecoversBrokenLeaseInsideEnclosingRepo reproduces the pool's
 // enclosing-repository hazard end to end: JIG_HOME sits inside another git
 // working copy with its own origin (the default ~/.config/jig inside a
-// dotfiles checkout), and the ticket's build lease is a .git directory git
+// dotfiles checkout), and the ticket's gate lease is a .git directory git
 // cannot open (a lease deleted by hand and stopped by a locked pack file).
 // Git's upward discovery must never reach the enclosing repository: `jig
-// run` leaves its branch, refs and uncommitted work alone, moves the broken
-// lease aside instead of deleting it, and builds in a fresh clone.
-func TestRunRecoversBrokenLeaseInsideEnclosingRepo(t *testing.T) {
+// gate` leaves its branch, refs and uncommitted work alone, moves the broken
+// lease aside instead of deleting it, and opens the round in a fresh clone.
+func TestGateRecoversBrokenLeaseInsideEnclosingRepo(t *testing.T) {
 	t.Parallel()
 	enclosing := newEnclosingRepo(t)
 	home := filepath.Join(enclosing, "jig-home")
 	env := jigEnv{home: home}
 	fx := fixture.Generate(t, fixture.Opts{Home: home})
+	b := buildTicketOn(t, fx, env, false)
 
-	lease := poolBuildLeaseDir(home, "fixture-repo", fx.Ticket)
+	lease := gateLeaseDir(home, fx.Ticket)
 	pack := filepath.Join(lease, ".git", "objects", "pack", "pack-leftover.pack")
 	if err := os.MkdirAll(filepath.Dir(pack), 0o755); err != nil {
 		t.Fatal(err)
@@ -59,20 +66,20 @@ func TestRunRecoversBrokenLeaseInsideEnclosingRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := runJig(t, env, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r := b.builder.Jig("gate", fx.Ticket, "--early")
 
 	if got := gitLog(t, enclosing, "symbolic-ref", "--short", "HEAD"); got != "main" {
 		t.Errorf("enclosing repo HEAD = %q, want main: jig checked out a branch in it", got)
 	}
-	if _, err := gitx.Run(enclosing, "rev-parse", "--verify", "--quiet", "refs/heads/jig/"+fx.Ticket); err == nil {
-		t.Errorf("enclosing repo gained branch jig/%s: jig ran its lease checkout there", fx.Ticket)
+	if _, err := gitx.Run(enclosing, "rev-parse", "--verify", "--quiet", "refs/heads/"+b.branch); err == nil {
+		t.Errorf("enclosing repo gained branch %s: jig ran its lease checkout there", b.branch)
 	}
 	if got, err := os.ReadFile(notes); err != nil || string(got) != "uncommitted work\n" {
 		t.Errorf("enclosing repo's uncommitted edit = %q, %v; want it untouched", got, err)
 	}
 
-	if r.Code != 2 {
-		t.Fatalf("jig run exit = %d, want 2 (paused at slice c, as on a clean pool)\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
+	if r.Code != 0 {
+		t.Fatalf("jig gate exit = %d, want 0 (the round opens, as on a clean pool)\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
 	top := gitLog(t, lease, "rev-parse", "--show-toplevel")
 	topInfo, err := os.Stat(top)
@@ -86,8 +93,8 @@ func TestRunRecoversBrokenLeaseInsideEnclosingRepo(t *testing.T) {
 	if !os.SameFile(topInfo, leaseInfo) {
 		t.Fatalf("lease toplevel = %q, want the lease itself (%s)", top, lease)
 	}
-	if got := gitLog(t, lease, "symbolic-ref", "--short", "HEAD"); got != "jig/"+fx.Ticket {
-		t.Fatalf("lease HEAD = %q, want jig/%s", got, fx.Ticket)
+	if got := gitLog(t, lease, "rev-parse", "HEAD"); got != b.sha {
+		t.Fatalf("lease HEAD = %q, want the reviewed head %s", got, b.sha)
 	}
 
 	asides, err := filepath.Glob(lease + ".broken-*")
@@ -103,30 +110,28 @@ func TestRunRecoversBrokenLeaseInsideEnclosingRepo(t *testing.T) {
 	}
 }
 
-// TestRunRefusesCorruptHEADBuildLeaseInsideEnclosingRepo reproduces the same
-// enclosing-repository hazard as TestRunRecoversBrokenLeaseInsideEnclosingRepo,
-// for a build lease whose .git has everything a repository needs except a
-// HEAD git can read (truncated to empty, as a crash mid-write can leave it)
-// after slices a, b and d are already committed there and the run is paused
-// on a question. Git's own upward discovery does not fail on this: from the
-// lease it walks past the broken .git and answers for the enclosing
-// repository instead. `jig run --answer` must stop with an error rather
-// than read that answer as "the lease is not a repository of its own":
-// moving it aside would drop a, b and d from the ticket branch while the
-// store still calls them green.
-func TestRunRefusesCorruptHEADBuildLeaseInsideEnclosingRepo(t *testing.T) {
+// TestGateRefusesCorruptHEADLeaseInsideEnclosingRepo reproduces the same
+// enclosing-repository hazard as TestGateRecoversBrokenLeaseInsideEnclosingRepo,
+// for a gate lease whose .git has everything a repository needs except a HEAD
+// git can read (truncated to empty, as a crash mid-write can leave it). Git's
+// own upward discovery does not fail on this: from the lease it walks past the
+// broken .git and answers for the enclosing repository instead. `jig gate`
+// must stop with an error rather than read that answer as "the lease is not a
+// repository of its own", and leave the lease where it is: a lease git
+// refuses is the person's to look at, not jig's to move aside.
+func TestGateRefusesCorruptHEADLeaseInsideEnclosingRepo(t *testing.T) {
 	t.Parallel()
 	enclosing := newEnclosingRepo(t)
 	home := filepath.Join(enclosing, "jig-home")
 	env := jigEnv{home: home}
 	fx := fixture.Generate(t, fixture.Opts{Home: home})
+	b := buildTicketOn(t, fx, env, false)
 
-	lease := poolBuildLeaseDir(home, "fixture-repo", fx.Ticket)
-	r1 := runJig(t, env, fx.StoreDir, "run", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir)
-	if r1.Code != 2 {
-		t.Fatalf("run 1 exit %d, want 2 (paused on a question with a, b, d green)\nstdout:\n%s\nstderr:\n%s", r1.Code, r1.Stdout, r1.Stderr)
+	lease := gateLeaseDir(home, fx.Ticket)
+	if r1 := b.builder.Jig("gate", fx.Ticket, "--early"); r1.Code != 0 {
+		t.Fatalf("jig gate exit %d, want 0 (the round opens)\nstdout:\n%s\nstderr:\n%s", r1.Code, r1.Stdout, r1.Stderr)
 	}
-	before := gitLog(t, lease, "log", "--format=%s", "jig/"+fx.Ticket)
+	before := gitLog(t, lease, "log", "--format=%s", b.branch)
 
 	if err := os.WriteFile(filepath.Join(lease, ".git", "HEAD"), nil, 0o644); err != nil {
 		t.Fatal(err)
@@ -136,9 +141,9 @@ func TestRunRefusesCorruptHEADBuildLeaseInsideEnclosingRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r2 := runJig(t, env, fx.StoreDir, "run", fx.Ticket, "--answer", "q-001", "Casual.", "--backend", "fake", "--scenario", fx.ScenarioDir)
+	r2 := b.builder.Jig("gate", fx.Ticket, "--early")
 	if r2.Code == 0 {
-		t.Fatalf("run 2 (continuing over a corrupt-HEAD lease) exit 0, want an error\nstdout:\n%s\nstderr:\n%s", r2.Stdout, r2.Stderr)
+		t.Fatalf("jig gate over a corrupt-HEAD lease exit 0, want an error\nstdout:\n%s\nstderr:\n%s", r2.Stdout, r2.Stderr)
 	}
 	if asides, _ := filepath.Glob(lease + ".broken-*"); len(asides) != 0 {
 		t.Fatalf("a lease git refuses was moved aside: %v", asides)
@@ -150,13 +155,13 @@ func TestRunRefusesCorruptHEADBuildLeaseInsideEnclosingRepo(t *testing.T) {
 		t.Errorf("enclosing repo's uncommitted edit = %q, %v; want it untouched", got, err)
 	}
 
-	// Repair HEAD by hand, as a person would, and confirm a, b and d were
-	// never touched.
-	if err := os.WriteFile(filepath.Join(lease, ".git", "HEAD"), []byte("ref: refs/heads/jig/"+fx.Ticket+"\n"), 0o644); err != nil {
+	// Repair HEAD by hand, as a person would, and confirm the lease was never
+	// touched.
+	if err := os.WriteFile(filepath.Join(lease, ".git", "HEAD"), []byte("ref: refs/heads/"+b.branch+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if after := gitLog(t, lease, "log", "--format=%s", "jig/"+fx.Ticket); after != before {
-		t.Fatalf("build lease log after repair = %q, want unchanged from before the corruption:\n%q", after, before)
+	if after := gitLog(t, lease, "log", "--format=%s", b.branch); after != before {
+		t.Fatalf("gate lease log after repair = %q, want unchanged from before the corruption:\n%q", after, before)
 	}
 }
 
@@ -187,7 +192,6 @@ func TestReservedLeaseSuffixTicketRefused(t *testing.T) {
 
 		for _, args := range [][]string{
 			{"validate", id},
-			{"run", id, "--backend", "fake", "--scenario", fx.ScenarioDir},
 			{"gate", id, "--scenario", fx.ScenarioDir},
 			{"publish", id, "--yes"},
 			{"status", id},

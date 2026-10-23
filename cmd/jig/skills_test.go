@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
+
+	skillspkg "github.com/develdeco/jig/skills"
 )
 
 // skillsRepoRoot returns the repository root, found relative to this file
@@ -40,14 +44,34 @@ func wantSkillNames(t *testing.T) []string {
 	return names
 }
 
+// embeddedSkillNames lists the skills the binary embeds (skillspkg.FS), the
+// number `jig skills install` writes: adding or removing a skill changes it
+// with no test edit.
+func embeddedSkillNames(t *testing.T) []string {
+	t.Helper()
+	entries, err := skillspkg.FS.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read embedded skills: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // TestCmdSkillsInstallDest installs to a temp --dest and checks that every
-// skill landed, byte-equal to the repo's own SKILL.md.
+// skill landed, byte-equal to the repo's own SKILL.md. The count it expects
+// is the number of embedded skills, and the embedded ones are the repo's.
 func TestCmdSkillsInstallDest(t *testing.T) {
 	t.Parallel()
 	root := skillsRepoRoot(t)
 	names := wantSkillNames(t)
-	if len(names) != 5 {
-		t.Fatalf("wantSkillNames = %v, want 5 entries", names)
+	if embedded := embeddedSkillNames(t); len(names) == 0 || !slices.Equal(names, embedded) {
+		t.Fatalf("skills/*/SKILL.md on disk = %v, embedded = %v, want the same non-empty list", names, embedded)
 	}
 
 	dest := t.TempDir()
@@ -58,8 +82,8 @@ func TestCmdSkillsInstallDest(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "installed[5]{name,path}:") {
-		t.Errorf("expected an installed[5] table, got:\n%s", out)
+	if want := fmt.Sprintf("installed[%d]{name,path}:", len(names)); !strings.Contains(out, want) {
+		t.Errorf("expected %q table, got:\n%s", want, out)
 	}
 	if !strings.Contains(out, "help[1]:") {
 		t.Errorf("expected a help hint, got:\n%s", out)

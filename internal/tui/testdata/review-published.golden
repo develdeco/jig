@@ -1,0 +1,24 @@
+jig  demo › JIG-2 › review                                           ✔ published
+────────────────────────────────────────────────────────────────────────────────
+  rounds
+  ! round 1  findings  reviewed by s-reviewer at 09:11:30
+  ◆ round 2  clean     reviewed by s-reviewer at 09:13:30
+
+  asks
+  no ask is waiting for a decision
+
+  publish
+  ▲ body rendered for ccccccc
+  ▲ approved by person at ccccccc
+  ✔ pull request opened https://example.test/acme/demo/pull/7
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move · esc back · k keep · d dismiss · g gate · p publish · t tail · q quit

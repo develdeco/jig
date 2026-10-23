@@ -109,4 +109,4 @@ info ""
 "$install_path" version
 
 info ""
-info 'next: run "jig skills install" to install the session skills'
+info 'next: run "jig setup --global --artifacts --yes" to install the skills, hooks and git hook'

@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +17,7 @@ import (
 // TestHeadlessLiveCLI is the headless backend's contract test against the
 // real Claude Code CLI: the local `claude` binary runs a scripted session
 // through jig's generated settings, the CLI's own permission system, and
-// the real `jig _screen` hook, with a mock Messages API on loopback
+// the real screen hook (testdata/fixture/screenhook), with a mock Messages API on loopback
 // (claudetest) standing in for the model - no credentials and no network.
 // It is opt-in, since its result depends on whichever CLI version is
 // installed:
@@ -37,20 +36,17 @@ func TestHeadlessLiveCLI(t *testing.T) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		t.Fatalf("JIG_LIVE_CLAUDE is set but claude is not on PATH: %v", err)
 	}
-	jig := filepath.Join(buildBinary(t, filepath.Join("cmd", "jig"), "jig"), "jig")
-	if runtime.GOOS == "windows" {
-		jig += ".exe"
-	}
+	hook := builtScreenHook(t)
 
-	t.Run("build", func(t *testing.T) { liveBuildSession(t, jig) })
-	t.Run("reviewer", func(t *testing.T) { liveReviewerSession(t, jig) })
+	t.Run("build", func(t *testing.T) { liveBuildSession(t, hook) })
+	t.Run("reviewer", func(t *testing.T) { liveReviewerSession(t, hook) })
 }
 
 // liveBuildSession runs a build-shaped dispatch: the screen denies a push,
 // the shell carries jig's command timeout, reads outside the lease are granted, edits are granted in the lease and
 // on the result file only, and a commit lands with nothing but the
 // session's own change in it.
-func liveBuildSession(t *testing.T, jig string) {
+func liveBuildSession(t *testing.T, hook string) {
 	root := t.TempDir()
 	worktree := filepath.Join(root, "lease")
 	work := filepath.Join(root, "store", "T-1", "work")
@@ -99,7 +95,7 @@ func liveBuildSession(t *testing.T, jig string) {
 			return claudetest.ToolCall{Name: "Write", Input: map[string]any{"file_path": view.ResultJSON, "content": `{"outcome":"green","summary":"live contract","commit":"` + sha + `"}`}}
 		}},
 	}}
-	runLive(t, jig, sess, d)
+	runLive(t, hook, sess, d)
 
 	for _, path := range []string{outsideFile, sibling} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -133,7 +129,7 @@ func liveBuildSession(t *testing.T, jig string) {
 // liveReviewerSession runs a gate-reviewer-shaped dispatch (Slice "gate",
 // review.json as its input): it reads review.json from the store, reads the
 // diff through git, and writes its result.json.
-func liveReviewerSession(t *testing.T, jig string) {
+func liveReviewerSession(t *testing.T, hook string) {
 	root := t.TempDir()
 	worktree := filepath.Join(root, "gate-lease")
 	work := filepath.Join(root, "store", "T-1", "work")
@@ -179,7 +175,7 @@ func liveReviewerSession(t *testing.T, jig string) {
 		{Name: "read the diff", Call: claudetest.Bash("git diff --stat " + base + ".." + head), WantOut: "a.go"},
 		{Name: "write result.json", Call: claudetest.Write(view.ResultJSON, review)},
 	}}
-	runLive(t, jig, sess, d)
+	runLive(t, hook, sess, d)
 
 	if got, err := os.ReadFile(d.ResultJSON); err != nil || string(got) != review {
 		t.Errorf("result.json = %q (%v), want %q", got, err, review)
@@ -213,15 +209,15 @@ func liveRepo(t *testing.T, dir string) string {
 }
 
 // runLive points the CLI at a mock Messages API scripted with sess, runs d
-// through the headless backend with jig as the screen hook, and checks
+// through the headless backend with the screen hook program, and checks
 // every scripted step ran with the expected outcome. It stops the test
 // only when the session ran fewer steps than scripted; a step with the
 // wrong outcome is reported and the caller's own checks on disk still run.
-func runLive(t *testing.T, jig string, sess *claudetest.Session, d Dispatch) {
+func runLive(t *testing.T, hook string, sess *claudetest.Session, d Dispatch) {
 	t.Helper()
 	claudetest.Serve(t, &claudetest.API{Route: func(string) *claudetest.Session { return sess }})
 
-	backend, err := New("headless", Options{ScreenBinary: jig})
+	backend, err := New("headless", Options{ScreenBinary: hook})
 	if err != nil {
 		t.Fatalf("New(headless): %v", err)
 	}

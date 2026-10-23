@@ -1,6 +1,6 @@
 # Contributing
 
-jig is a Go project. Building needs only Go 1.27.2+; testing also needs `git`
+jig is a Go project. Building needs only Go 1.27.3+; testing also needs `git`
 on PATH, since the suite spawns real git commands against local, file-path
 repos.
 
@@ -75,10 +75,7 @@ reports green.
 
 `skills/*/SKILL.md` are lint-enforced (`lint/skills_test.go`): each file must
 be at most 100 lines and 6000 bytes, and its frontmatter needs a `name:`
-matching the directory name and a `description:` of at most 50 words. The
-`router` skill's intent table is also lint-checked for its required rows,
-with the pr-mode, fleet and retro rows each required to carry a `v0.2`
-annotation.
+matching the directory name and a `description:` of at most 50 words.
 
 ## Testing rules
 
@@ -102,9 +99,9 @@ annotation.
 - Every test gets its own `t.TempDir()`, and its own jig home, so a test
   run never touches a real machine's: packages take the jig home root as an
   argument (`fixture.Opts.Home`, `verifydeliver.Deps.Home`,
-  `frontier.Deps.Home`, `pool.Acquire`), and a test passes a `t.TempDir()`.
+  `pool.Acquire`), and a test passes a `t.TempDir()`.
   `cmd/jig` takes what it reads from the process (the environment, the
-  working directory, the terminal check, the solve gate source) as an `env`
+  working directory, the terminal check, the clock, the process spawner) as an `env`
   per run, so a `cmd/jig` test hands `run` an env of its own (`testEnv(home)`)
   instead of calling `t.Setenv` or `t.Chdir`, and calls `t.Parallel()`.
   `e2e`'s tests hand the jig binary `JIG_HOME` (and, for the tests built on
@@ -121,23 +118,25 @@ annotation.
 
 ## Tests against the real Claude Code CLI
 
-`go test ./...` runs every session backend against a stub `claude`. The
-live CLI tests run jig's headless backend through the real `claude` on
-your PATH instead, against a scripted Messages API on loopback, so they
-need no sign-in and spend no tokens:
+`go test ./...` never runs the real `claude`. The live CLI test runs the
+real one on your PATH, with jig's hooks installed, against a scripted
+Messages API on loopback, so it needs no sign-in and spends no tokens:
 
 ```sh
-JIG_LIVE_CLAUDE=1 go test -count=1 -run Live ./internal/session ./e2e
+JIG_LIVE_CLAUDE=1 go test -count=1 -run TestHooksLive ./e2e
 ```
 
-`internal/session`'s test checks the headless permission model against the
-CLI, and `e2e`'s runs README's Quickstart, from `jig skills install` to a
-published branch. Set `JIG_E2E_BINARY` to an installed jig to run the e2e
-suite against it instead of a binary built from the tree. CI's
-`claude-cli` job runs both on all three platforms, on every pull request,
+`e2e`'s `TestHooksLive` is the only proof that the hook JSON jig prints is
+what Claude Code reads: the session start context reaches the model, a
+commit the session makes is verified, and an unattended session is held back
+from stopping with the reason jig gives. Set `JIG_E2E_BINARY` to an installed
+jig to run the e2e suite against it instead of a binary built from the tree.
+CI's `claude-cli` job runs it on all three platforms, on every pull request,
 every push to main and once a day, with the latest CLI release installed,
-and every release runs the Quickstart with its own binaries, as they are
-installed, before and after it is published.
+and every release runs it with its own binaries, as they are installed,
+before and after it is published. The headless backend of `internal/session`
+has its own opt-in live test (`TestHeadlessLiveCLI`, run with `-run Live
+./internal/session`) for the reviewer evaluation below.
 
 ## Live review eval
 

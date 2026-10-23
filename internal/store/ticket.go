@@ -35,10 +35,20 @@ type Ticket struct {
 	// Empty means no body was given; nothing distinguishes that from an
 	// older ticket minted before this field existed.
 	Body string
+	// Slug is the short kebab-case tail of the ticket's default branch name,
+	// <id>-<slug>; the function Slug derives it from the title. jig ticket
+	// new and jig graduate record it when they mint the ticket, so a later
+	// change of the title never renames the branch. A ticket minted before
+	// the field existed has none: its slug is derived from its title when
+	// the branch is named, and recorded when the branch is
+	// (WriteTicketBranch). Empty is also what a title with no ASCII word
+	// gives.
+	Slug string
 	// Branch is the ticket's adopted working branch. Empty means none is
 	// recorded: callers resolve the branch through Store.TicketBranch,
-	// never by reading this field directly, so the default ("jig/<ticket>")
-	// stays in the one place that knows it.
+	// never by reading this field directly, so the default ("<id>-<slug>")
+	// stays in the one place that knows it. The default is never written
+	// here: a recorded branch is an adopted one (Adopted).
 	Branch string
 	// BlockedBy is the ticket's own blockers, written by jig graduate.
 	BlockedBy []TicketBlockedBy
@@ -63,6 +73,7 @@ type ticketFile struct {
 	SchemaVersion int               `yaml:"schema_version"`
 	Title         string            `yaml:"title,omitempty"`
 	Body          literalString     `yaml:"body,omitempty"`
+	Slug          string            `yaml:"slug,omitempty"`
 	Branch        string            `yaml:"branch,omitempty"`
 	BlockedBy     []TicketBlockedBy `yaml:"blocked_by,omitempty"`
 	Aliases       []string          `yaml:"aliases,omitempty"`
@@ -159,7 +170,7 @@ func ReadTicketFile(path string) (Ticket, error) {
 			Help: []string{"Upgrade jig to a version that understands this ticket.yaml schema"},
 		}
 	}
-	return Ticket{Title: f.Title, Body: string(f.Body), Branch: f.Branch, BlockedBy: f.BlockedBy, Aliases: f.Aliases}, nil
+	return Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, BlockedBy: f.BlockedBy, Aliases: f.Aliases}, nil
 }
 
 // ReadTicketDeps reads <ticket>/ticket.yaml's blockers. An absent file
@@ -237,6 +248,7 @@ func writeTicketFile(path string, t Ticket) error {
 		SchemaVersion: ticketSchemaVersion,
 		Title:         t.Title,
 		Body:          literalString(t.Body),
+		Slug:          t.Slug,
 		Branch:        t.Branch,
 		BlockedBy:     t.BlockedBy,
 		Aliases:       t.Aliases,
@@ -253,10 +265,20 @@ func writeTicketFile(path string, t Ticket) error {
 // a ticket's title and blockers are written once, whole, by
 // CreateTicketRecord when the ticket is minted, and nothing changes them
 // afterwards. A ticket records a branch when it adopts one (`jig gate
-// --branch`), so a recorded branch is an adopted one; CheckAdoptableBranch
-// is the check a name passes before it is written, since this does none.
+// --branch`) or when a session claims a slice on a branch no ticket's id
+// leads, so a recorded branch is an adopted one; CheckAdoptableBranch is the
+// check a name passes before it is written, since this does none.
+//
+// A ticket that has no slug yet (one minted before the field existed) gets
+// the one its title gives, now: the slug is fixed when the branch is
+// recorded, and a later change of the title does not move it.
 func (s *Store) WriteTicketBranch(ticket string, branch string) error {
-	return s.mutateTicket(ticket, func(t *Ticket) { t.Branch = branch })
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		t.Branch = branch
+		if t.Slug == "" {
+			t.Slug = Slug(t.Title)
+		}
+	})
 }
 
 // SetMigratedTicket rewrites ticket's whole ticket.yaml as `jig store
@@ -286,15 +308,19 @@ func (s *Store) SetMigratedTicket(ticket, oldID, title, body string, blockedBy [
 }
 
 // TicketBranch returns ticket's working branch, resolved and validated
-// against target: the branch recorded in its ticket.yaml, or "jig/<ticket>"
-// when none is recorded. Every caller that names a ticket's branch resolves
-// it here instead of hardcoding "jig/"+ticket, so a branch the ticket
-// adopted is picked up by every one of them - and every one of them gets
-// this same validation for free, rather than each having to remember to run
-// it after its own read. A caller that names the branch more than once in
-// one command (publish, gate) resolves it once and passes the result down,
-// so the whole command works on one branch even if ticket.yaml changes under
-// it.
+// against target: the branch recorded in its ticket.yaml, or the default
+// name when none is recorded: <id>-<slug>, where id is the ticket's GitHub
+// issue number once the mirror has given it one (and the project's branches
+// are led by GitHub's ids, Store.BranchesFrom) and the ticket's own id
+// before that, and slug is Slug of its title; a ticket with no slug to give
+// keeps the name jig always gave it, "jig/<ticket>". Every caller that names
+// a ticket's branch resolves it here instead of building the name itself, so
+// a branch the ticket adopted is picked up by every one of them - and every
+// one of them gets this same validation for free, rather than each having to
+// remember to run it after its own read. A caller that names the branch more
+// than once in one command (publish, gate) resolves it once and passes the
+// result down, so the whole command works on one branch even if ticket.yaml
+// changes under it.
 //
 // A ticket.yaml ReadTicket refuses (an unknown key, a newer schema_version)
 // is returned as is: its *axi.Error already carries its own code and the
@@ -328,7 +354,7 @@ func (s *Store) TicketBranch(ticket, target string) (string, error) {
 // ReadTicket returned it.
 func (s *Store) ResolveTicketBranch(ticket string, rec Ticket, target string) (string, error) {
 	if !rec.Adopted() {
-		return "jig/" + ticket, nil
+		return s.defaultBranch(ticket, rec)
 	}
 	fault := s.branchNameFault(rec.Branch, target)
 	if fault == nil {
@@ -341,7 +367,7 @@ func (s *Store) ResolveTicketBranch(ticket string, rec Ticket, target string) (s
 			Msg:  fmt.Sprintf("%s's ticket.yaml records branch %q, which is also the target branch", ticket, rec.Branch),
 			Code: "TICKET_BRANCH_INVALID",
 			Help: []string{
-				fmt.Sprintf("Record a branch other than %q in %s, or remove the branch key to use the default jig/%s", target, recordPath, ticket),
+				fmt.Sprintf("Record a branch other than %q in %s, or remove the branch key to use the default %s", target, recordPath, s.defaultBranchOr(ticket, rec)),
 			},
 		}
 	case faultRejected:
@@ -422,4 +448,40 @@ func (s *Store) branchNameFault(branch, target string) *branchFault {
 		return &branchFault{kind: faultShorthand, detail: name}
 	}
 	return nil
+}
+
+// defaultBranch names the branch of a ticket that records none: <id>-<slug>.
+// The id is the one that leads the project's branches (branchID): the
+// ticket's GitHub issue number once it is mirrored, else its store id. The
+// slug is the ticket's own, or the one its title gives for a ticket minted
+// before the field existed. The default is derived, never written to
+// ticket.yaml's branch: that key marks an adopted branch.
+//
+// A ticket with no slug to give (no title, or a title with no ASCII word) has
+// nothing to put after an id, and keeps "jig/<ticket>", the name every ticket
+// had before branches were named for their titles. Tickets minted through
+// jig have a title, so this is a hand-built store's ticket, or one titled in
+// a script with no Latin letter in it.
+func (s *Store) defaultBranch(ticket string, rec Ticket) (string, error) {
+	slug := rec.Slug
+	if slug == "" {
+		slug = Slug(rec.Title)
+	}
+	if slug == "" {
+		return branchPrefix + ticket, nil
+	}
+	lead, err := s.branchID(ticket)
+	if err != nil {
+		return "", err
+	}
+	return lead + "-" + slug, nil
+}
+
+// defaultBranchOr is defaultBranch for a message that only wants to name the
+// default: when the name cannot be worked out, the one every ticket once had.
+func (s *Store) defaultBranchOr(ticket string, rec Ticket) string {
+	if name, err := s.defaultBranch(ticket, rec); err == nil {
+		return name
+	}
+	return branchPrefix + ticket
 }

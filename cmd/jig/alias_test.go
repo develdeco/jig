@@ -9,7 +9,7 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// TestStatusResolvesAnAliasToItsCurrentID is the critical path "jig run
+// TestStatusResolvesAnAliasToItsCurrentID is the critical path "jig status
 // <alias> works on the ticket and names its current id", exercised at jig
 // status (the cheapest command needing only a ticket folder to run): an
 // alias recorded in some ticket's ticket.yaml resolves to that ticket's

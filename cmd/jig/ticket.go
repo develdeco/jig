@@ -10,11 +10,30 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"ticket", "mint a new ticket: jig ticket new --title <t>", []flagSpec{
+			{"title", "ticket title (required)", false},
+			{"body", "ticket body/description", false},
+			{"key", "key to mint under (required when the store declares more than one)", false},
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 110,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdTicket(e, args, stdout)
+		},
+		FlagSet: "ticket new",
+		Probe:   []string{"new"},
+	})
+}
+
 // resolveTicketArg resolves ticket - as typed on the command line, an id or
 // one of a ticket's aliases - to its current id through st.ResolveTicket,
 // printing one line naming it when it differs from what was typed: every
-// command that takes a ticket id (run, gate, publish, solve, requeue, status
-// and validate) calls this before anything else touches the ticket, so a
+// command that takes a ticket id (gate, publish, requeue, status and
+// validate) calls this before anything else touches the ticket, so a
 // command reached through an alias always works on the ticket's folder,
 // leases and branch under its current id.
 func resolveTicketArg(st *store.Store, ticket string, stdout io.Writer) (string, error) {
@@ -48,7 +67,7 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "ticket new")
 	title := fs.String("title", "", "ticket title (required)")
 	body := fs.String("body", "", "ticket body/description")
-	keyFlag := fs.String("key", "", "key to mint under (required when project.yaml declares more than one)")
+	keyFlag := fs.String("key", "", "key to mint under (required when the store declares more than one)")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -84,7 +103,9 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 	// never collide on the same id (internal/store/claim.go).
 	id, err := st.Claim(
 		func() (string, []string, error) {
-			mintedID, err := st.Mint(key, store.Ticket{Title: *title, Body: *body})
+			// The slug is fixed here, with the title it comes from: the
+			// ticket's branch keeps its name when the title is edited.
+			mintedID, err := st.Mint(key, store.Ticket{Title: *title, Body: *body, Slug: store.Slug(*title)})
 			if err != nil {
 				return "", nil, err
 			}

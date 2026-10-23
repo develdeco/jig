@@ -4,18 +4,20 @@
 package journal
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/store"
 )
 
 // Line is one NDJSON record in a ticket's journal. Wire keys are exact.
 type Line struct {
-	TS      string `json:"ts"` // RFC3339; filled by Append if empty
+	TS      string `json:"ts"` // RFC3339 with fractional seconds; filled by Append if empty
 	Ticket  string `json:"ticket"`
 	Slice   string `json:"slice,omitempty"`
 	Event   string `json:"event"`
@@ -51,6 +53,59 @@ type Line struct {
 	// head it picked for in Commit and the line's Outcome saying whether it
 	// was newly picked, reused or refused (ADR 0029).
 	Pick *Pick `json:"pick,omitempty"`
+
+	// The fields below belong to the digester's records (the journal's
+	// claim, driver, note, spend and approval lines and the machine
+	// ledger's session and tool lines). Each is omitted when empty, so a
+	// line an older jig wrote reads back with none and a line that carries
+	// none writes none.
+
+	// Session is the harness session id the line was written for; Agent the
+	// id of the agent within it (a subagent's own id, "" for the session
+	// itself); Harness the harness's name (claude, codex, ...).
+	Session string `json:"session,omitempty"`
+	Agent   string `json:"agent,omitempty"`
+	Harness string `json:"harness,omitempty"`
+	// Source is who ran an oracle line's command: "jig" (a verify worker)
+	// or "session" (the session ran it itself and jig observed it).
+	Source string `json:"source,omitempty"`
+	// Signature is a failure's normalized signature, the key repeat
+	// failures are matched on. Summary is the failure's flattened tail,
+	// at most 600 bytes; the full tail lives in a machine-local log.
+	Signature string `json:"signature,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+	// Provenance says who a line speaks for: "person", "agent" or "jig".
+	Provenance string `json:"provenance,omitempty"`
+	// Unattended is set on a claim line made without a person watching.
+	Unattended bool `json:"unattended,omitempty"`
+	// Branch and URL name a branch or a link the line is about.
+	Branch string `json:"branch,omitempty"`
+	URL    string `json:"url,omitempty"`
+	// Ref is the id of the subject the line is about: a question (q-001),
+	// a review finding (r1-f2) or a note's fingerprint.
+	Ref string `json:"ref,omitempty"`
+	// Tool is the harness tool a ledger tool line records; Cwd the
+	// directory it ran in; Exit its exit status when it had one; Files the
+	// files it touched.
+	Tool  string   `json:"tool,omitempty"`
+	Cwd   string   `json:"cwd,omitempty"`
+	Exit  *int     `json:"exit,omitempty"`
+	Files []string `json:"files,omitempty"`
+	// PID is the process id a ledger line records (a spawned verify
+	// worker's, say).
+	PID int `json:"pid,omitempty"`
+	// Spend is what a spend line records: tokens and dollars.
+	Spend *Spend `json:"spend,omitempty"`
+}
+
+// Spend is a spend line's cost: the token counts a transcript's usage
+// records sum to, and the dollars they priced at.
+type Spend struct {
+	Input      int64   `json:"input,omitempty"`
+	Output     int64   `json:"output,omitempty"`
+	CacheRead  int64   `json:"cache_read,omitempty"`
+	CacheWrite int64   `json:"cache_write,omitempty"`
+	USD        float64 `json:"usd,omitempty"`
 }
 
 // Recording is one file a scenario recorded: its name inside the recording
@@ -96,39 +151,103 @@ func journalPath(st *store.Store, ticket string) string {
 	return filepath.Join(st.TicketDir(ticket), "journal.ndjson")
 }
 
+// lockedCode is Append's refusal when it cannot get the journal's lock.
+const lockedCode = "JOURNAL_LOCKED"
+
+// appendLockTimeout is how long Append waits for another writer of the same
+// journal before it refuses.
+const appendLockTimeout = 30 * time.Second
+
 // Append writes l as one NDJSON line to <ticket>/journal.ndjson, under a
-// lock on the journal file. l.Ticket is set to ticket, and l.TS defaults to
-// now (RFC3339) when empty.
+// lock on the journal file and, outside it, the store's checkpoint lock
+// (Store.LockCheckpoint), so a detached worker's append never lands in the
+// middle of a Sync or Push another process is making. l.Ticket is set to
+// ticket, and l.TS defaults to now (RFC3339 with nanoseconds) when empty.
+//
+// It never writes without the file lock: if another writer still holds it
+// after thirty seconds Append refuses with JOURNAL_LOCKED, because a line
+// written unlocked is how two writers lose each other's lines. The line goes
+// out in a single O_APPEND write, with a newline in front of it when the
+// file ends in a torn line (a writer that died mid-line), so that writer
+// costs its own line and not this one. The file is appended to in place and
+// never rewritten, so a reader that opened it earlier sees at most a torn
+// final line, which Read leaves out.
 func Append(st *store.Store, ticket string, l Line) error {
+	return appendWithin(st, ticket, l, appendLockTimeout)
+}
+
+// appendWithin is Append waiting up to wait for the journal lock, so a test
+// can see the refusal without waiting half a minute.
+func appendWithin(st *store.Store, ticket string, l Line, wait time.Duration) error {
 	if l.TS == "" {
-		l.TS = time.Now().UTC().Format(time.RFC3339)
+		l.TS = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	l.Ticket = ticket
-
-	path := journalPath(st, ticket)
-	release, _, err := store.Lock(path, 30*time.Second)
-	if err != nil {
-		return err
-	}
-	defer release()
-
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
 	encoded, err := json.Marshal(l)
 	if err != nil {
 		return err
 	}
-	data = append(data, encoded...)
-	data = append(data, '\n')
+	encoded = append(encoded, '\n')
 
-	return store.AtomicWrite(path, data)
+	unlock, err := st.LockCheckpoint()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	path := journalPath(st, ticket)
+	release, held, err := store.TryLock(path, wait)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if !held {
+		return &axi.Error{
+			Msg:  fmt.Sprintf("the journal %s is locked by another process and stayed locked for %s", path, wait),
+			Code: lockedCode,
+			Help: []string{"Retry; if it persists, a jig process on this machine is stuck holding it"},
+		}
+	}
+
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if torn, err := endsMidLine(f); err != nil {
+		return err
+	} else if torn {
+		encoded = append([]byte{'\n'}, encoded...)
+	}
+	_, err = f.Write(encoded)
+	return err
+}
+
+// endsMidLine reports whether f is non-empty and does not end in a newline.
+func endsMidLine(f *os.File) (bool, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	if info.Size() == 0 {
+		return false, nil
+	}
+	var last [1]byte
+	if _, err := f.ReadAt(last[:], info.Size()-1); err != nil {
+		return false, err
+	}
+	return last[0] != '\n', nil
 }
 
 // Read returns every line of a ticket's journal, in append order. Readers
 // never lock. An absent journal reads as no lines.
+//
+// A line that is not a JSON line is left out, and so is a blank one: a final
+// line a writer is still writing, or one a writer died in the middle of, must
+// not hide the lines before it from every reader, and the next Append closes
+// a torn line off with a newline, which makes it a bad line in the middle.
+// The lines of a ticket's journal are appended by several writers and merged
+// by git, so a reader must not assume they are in time order either.
 func Read(st *store.Store, ticket string) ([]Line, error) {
 	data, err := os.ReadFile(journalPath(st, ticket))
 	if err != nil {
@@ -139,13 +258,14 @@ func Read(st *store.Store, ticket string) ([]Line, error) {
 	}
 
 	var lines []Line
-	for _, raw := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(raw) == "" {
+	for _, raw := range bytes.Split(data, []byte{'\n'}) {
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || raw[0] != '{' {
 			continue
 		}
 		var l Line
-		if err := json.Unmarshal([]byte(raw), &l); err != nil {
-			return nil, err
+		if err := json.Unmarshal(raw, &l); err != nil {
+			continue
 		}
 		lines = append(lines, l)
 	}

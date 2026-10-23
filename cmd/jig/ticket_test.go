@@ -38,7 +38,7 @@ func newTestOriginClone(t *testing.T, dir string) (remote string) {
 	if _, err := gitx.Run(seed, "add", "-A"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitx.Run(seed, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "jig: init store"); err != nil {
+	if _, err := gitx.Run(seed, "-c", "user.name=tester", "-c", "user.email=tester@example.invalid", "commit", "-m", "jig: init store"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gitx.Run(seed, "push", "origin", "main"); err != nil {
@@ -215,9 +215,9 @@ func TestTicketNewRecordsTitleAndMintsNextID(t *testing.T) {
 		}
 	}
 
-	cfgs, err := filepath.Glob(filepath.Join(filepath.Dir(repo), "*", "project.yaml"))
+	cfgs, err := filepath.Glob(filepath.Join(filepath.Dir(repo), "*", "store.yaml"))
 	if err != nil || len(cfgs) != 1 {
-		t.Fatalf("find the standalone store's project.yaml: %v, %v", cfgs, err)
+		t.Fatalf("find the standalone store's store.yaml: %v, %v", cfgs, err)
 	}
 	st, err := store.Open(filepath.Dir(cfgs[0]))
 	if err != nil {
@@ -230,6 +230,10 @@ func TestTicketNewRecordsTitleAndMintsNextID(t *testing.T) {
 	}
 	if got.Title != "Fix the thing" {
 		t.Fatalf("ticket.yaml title = %q, want %q", got.Title, "Fix the thing")
+	}
+	// The slug of its branch is fixed with the title it comes from.
+	if got.Slug != "fix-the-thing" {
+		t.Fatalf("ticket.yaml slug = %q, want %q", got.Slug, "fix-the-thing")
 	}
 
 	if code, out := jig("ticket", "new", "--title", "Second thing"); code != 0 || !strings.Contains(out, "DEMO-2") {
@@ -301,16 +305,16 @@ func TestTicketNewMintsRegardlessOfEmptyTrackers(t *testing.T) {
 	if code, out := jig("init", "--standalone"); code != 0 {
 		t.Fatalf("jig init --standalone: exit %d\n%s", code, out)
 	}
-	cfgs, err := filepath.Glob(filepath.Join(filepath.Dir(repo), "*", "project.yaml"))
+	cfgs, err := filepath.Glob(filepath.Join(filepath.Dir(repo), "*", "store.yaml"))
 	if err != nil || len(cfgs) != 1 {
-		t.Fatalf("find the standalone store's project.yaml: %v, %v", cfgs, err)
+		t.Fatalf("find the standalone store's store.yaml: %v, %v", cfgs, err)
 	}
 	data, err := os.ReadFile(cfgs[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), "trackers: []") {
-		t.Fatalf("project.yaml has no trackers: []:\n%s", data)
+		t.Fatalf("store.yaml has no trackers: []:\n%s", data)
 	}
 
 	code, out := jig("ticket", "new", "--title", "Fix the thing")
@@ -357,9 +361,9 @@ func initStandaloneWithKeys(t *testing.T, keys string) (jig func(args ...string)
 	if code, out := jig("init", "--standalone"); code != 0 {
 		t.Fatalf("jig init --standalone: exit %d\n%s", code, out)
 	}
-	cfgs, err := filepath.Glob(filepath.Join(filepath.Dir(repo), "*", "project.yaml"))
+	cfgs, err := filepath.Glob(filepath.Join(filepath.Dir(repo), "*", "store.yaml"))
 	if err != nil || len(cfgs) != 1 {
-		t.Fatalf("find the standalone store's project.yaml: %v, %v", cfgs, err)
+		t.Fatalf("find the standalone store's store.yaml: %v, %v", cfgs, err)
 	}
 	data, err := os.ReadFile(cfgs[0])
 	if err != nil {
@@ -367,7 +371,7 @@ func initStandaloneWithKeys(t *testing.T, keys string) (jig func(args ...string)
 	}
 	rewritten := strings.Replace(string(data), "keys:\n    DEMO: everything in demo\n", keys, 1)
 	if rewritten == string(data) {
-		t.Fatalf("project.yaml has no derived keys: entry to replace:\n%s", data)
+		t.Fatalf("store.yaml has no derived keys: entry to replace:\n%s", data)
 	}
 	if err := os.WriteFile(cfgs[0], []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)

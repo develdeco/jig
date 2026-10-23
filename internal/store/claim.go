@@ -78,9 +78,31 @@ const idNotClaimedCode = "ID_NOT_CLAIMED"
 // itself to do but tell the operator which case it is. Otherwise nothing
 // write wrote survives a failed Claim: no caller ever has to clean up a
 // folder or a file edit Claim itself could not land.
+//
+// Claim holds the checkpoint lock (LockCheckpoint) for the whole of it,
+// every retry included, so no other process's Sync or Push, and no journal
+// append, runs between its commit and its undo.
+//
+// In a writers store (Mode) the loop is the same one on the branch of this
+// writer, writers/<name>, which only this writer pushes to: what could make
+// its push fail is another clone writing under the same name (the pull that
+// follows refuses it with WRITER_NAME_TAKEN), not another writer minting the
+// same id. Ids are kept apart by the claims log instead: Mint reserves the id
+// there before write has made its folder (mint.go, claims.go), so by the time
+// the commit is pushed the id is already this writer's.
 func (s *Store) Claim(write func() (id string, paths []string, err error), msg func(id string) string) (string, error) {
+	release, err := s.LockCheckpoint()
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	cp, err := s.begin()
 	if err != nil {
+		return "", err
+	}
+	// A claim always commits, so a clone with no identity is refused before
+	// write puts anything on disk, not after.
+	if _, err := s.identity(); err != nil {
 		return "", err
 	}
 	hasRemote := cp.hasRemote()
@@ -259,8 +281,9 @@ func (s *Store) undoClaim(sha string, paths []string) (resetRan bool, err error)
 }
 
 // stageAndCommitPaths stages exactly paths (never -A) and, when anything of
-// theirs is staged, commits with jig's identity - the commit itself scoped
-// to the same pathspec (`git commit -- <paths>`), not the whole index.
+// theirs is staged, commits as the person (Store.identity) - the commit
+// itself scoped to the same pathspec (`git commit -- <paths>`), not the
+// whole index.
 // Unlike stageAndCommit, it leaves any other dirty state in the store
 // untouched, so a claim's commit holds only what write reported: without
 // the pathspec, a commit here would instead sweep in whatever else the
@@ -284,7 +307,11 @@ func (s *Store) stageAndCommitPaths(paths []string, msg string) (string, error) 
 	if !staged {
 		return "", nil
 	}
-	commitArgs := append([]string{"-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", msg, "--"}, paths...)
+	id, err := s.identity()
+	if err != nil {
+		return "", err
+	}
+	commitArgs := commitConfig(id, append([]string{"commit", "-m", msg, "--"}, paths...)...)
 	if _, err := gitx.Run(s.Root, commitArgs...); err != nil {
 		return "", err
 	}

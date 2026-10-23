@@ -42,12 +42,12 @@ func newTestRemoteStore(t *testing.T) (st *Store, work, remote string) {
 	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// As jig's own stores have (project.InitStandalone): what lets gitx work
+	// As jig's own stores have (project.Init): what lets gitx work
 	// on a store in process.
 	if err := os.WriteFile(filepath.Join(work, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Also as project.InitStandalone's stores have: Lock's own "*.lock"
+	// Also as project.Init's stores have: Lock's own "*.lock"
 	// sidecar files (never removed) must never show up in `git status`.
 	if err := os.WriteFile(filepath.Join(work, ".gitignore"), []byte("*.lock\n.*.tmp\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -637,9 +637,10 @@ func TestSync(t *testing.T) {
 // TestSyncCommitsUncommittedLeftoversBeforeRebase reproduces the store wedge
 // left by a command that failed after writing to the store (a dirty
 // tracked file plus an untracked attempt work file) at the same time as a
-// divergent remote commit: Sync must stage and commit the leftovers with
-// jig's identity, then still pull the other writer's commit, instead of
-// failing "cannot pull with rebase: You have unstaged changes.".
+// divergent remote commit: Sync must stage and commit the leftovers as the
+// person (the clone's own identity), then still pull the other writer's
+// commit, instead of failing "cannot pull with rebase: You have unstaged
+// changes.".
 func TestSyncCommitsUncommittedLeftoversBeforeRebase(t *testing.T) {
 	st, work, remote := newTestRemoteStore(t)
 
@@ -688,8 +689,8 @@ func TestSyncCommitsUncommittedLeftoversBeforeRebase(t *testing.T) {
 		t.Fatal("Sync did not commit the leftovers with the expected message")
 	}
 	author := runGit(t, work, "log", "-1", "--grep=jig: record uncommitted store state", "--pretty=%an <%ae>")
-	if strings.TrimSpace(author) != "jig <jig@invalid>" {
-		t.Fatalf("leftover commit author = %q, want jig <jig@invalid>", strings.TrimSpace(author))
+	if strings.TrimSpace(author) != "tester <tester@example.invalid>" {
+		t.Fatalf("leftover commit author = %q, want the clone's own tester <tester@example.invalid>", strings.TrimSpace(author))
 	}
 }
 

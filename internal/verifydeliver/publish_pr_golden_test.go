@@ -84,7 +84,7 @@ func gateThroughReviewerScenario(t *testing.T, fx *fixture.Fixture, d Deps) Gate
 	if err != nil {
 		t.Fatalf("session.New: %v", err)
 	}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	// The scenario's own low-risk fix (whitespace trimming) is below the
 	// default floor and routes straight to a note, never reaching this

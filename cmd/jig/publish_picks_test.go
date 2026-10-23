@@ -3,42 +3,65 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
-// TestPublishPicksTheBuildsRecordingsThroughMain drives a clean gate round,
-// journals a recording the build made, and publishes with the fake backend
-// answering the pick: the pull request's ## Demo section is the pick's and the
-// report says what was picked. It is the CLI half of ADR 0029's publish step:
-// the flags, the backend, the scenario's publish/picks-result.json.
-func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
-	t.Parallel()
-	jigHome := t.TempDir()
-	e := testEnv(jigHome)
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "clean-round", Home: jigHome})
+// gateCleanThroughMain takes the fixture ticket, built by buildFixtureTicket,
+// through one recorded gate round the way an agent does: `jig gate` opens it,
+// `jig review context` reads it, and `jig review done --result` closes it with
+// a report that found nothing and read every file the request names.
+func gateCleanThroughMain(t *testing.T, e env, fx *fixture.Fixture) {
+	t.Helper()
+	flags := []string{"--store", fx.StoreDir}
+	if out, code := runMain(t, e, "", append([]string{"gate", fx.Ticket}, flags...)...); code != 0 {
+		t.Fatalf("gate: exit = %d, want 0\n%s", code, out)
+	}
+	ctx, code := runMain(t, e, "", append([]string{"review", "context", fx.Ticket, "--json"}, flags...)...)
+	if code != 0 {
+		t.Fatalf("review context: exit = %d, want 0\n%s", code, ctx)
+	}
+	var req struct {
+		MustReview []string `json:"must_review"`
+	}
+	if err := json.Unmarshal([]byte(ctx), &req); err != nil {
+		t.Fatalf("review context --json is not the request: %v\n%s", err, ctx)
+	}
+	result, err := json.Marshal(map[string]any{
+		"findings": []any{}, "still_present": []any{}, "reviewed_paths": req.MustReview, "summary": "nothing found",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "clean.json")
+	if err := os.WriteFile(path, result, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code := runMain(t, e, "", append([]string{"review", "done", fx.Ticket, "--result", path}, flags...)...)
+	if code != 0 || !strings.Contains(out, "verdict: clean") {
+		t.Fatalf("review done: exit = %d, want 0 and a clean verdict\n%s", code, out)
+	}
+}
+
+// recordGreeting journals one recording the build made at its first verified
+// commit, a small svg tagged with a scenario and a caption, and returns the
+// store it was journaled in.
+func recordGreeting(t *testing.T, jigHome string, fx *fixture.Fixture) *store.Store {
+	t.Helper()
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	buildFixtureTicket(t, fx)
-
-	gate := []string{"gate", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	if out, code := runMain(t, e, "", gate...); code != 0 || !strings.Contains(out, "verdict: clean") {
-		t.Fatalf("gate: exit = %d, want 0 and a clean verdict\n%s", code, out)
-	}
-
 	lines, err := journal.Read(st, fx.Ticket)
 	if err != nil {
 		t.Fatal(err)
@@ -69,16 +92,29 @@ func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	return st
+}
 
-	if err := os.MkdirAll(filepath.Join(fx.ScenarioDir, "publish"), 0o755); err != nil {
+// TestPublishPicksTheBuildsRecordingsThroughMain drives a clean gate round,
+// journals a recording the build made, and publishes with the picks file an
+// agent wrote: the pull request's ## Demo section is the pick's and the report
+// says what was picked. It is the CLI half of ADR 0029's publish step: the
+// --picks flag, the file's strict parse, the report.
+func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
+	t.Parallel()
+	jigHome := t.TempDir()
+	e := testEnv(jigHome)
+	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
+	buildFixtureTicket(t, fx)
+	gateCleanThroughMain(t, e, fx)
+	st := recordGreeting(t, jigHome, fx)
+
+	answer := filepath.Join(t.TempDir(), "picks.json")
+	if err := os.WriteFile(answer, []byte(`{"flows":[{"title":"Greeting","items":[{"id":"r1"}]}],"summary":"The greeting reads casual."}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	answer := `{"flows":[{"title":"Greeting","items":[{"id":"r1"}]}],"summary":"The greeting reads casual."}`
-	if err := os.WriteFile(filepath.Join(fx.ScenarioDir, "publish", "picks-result.json"), []byte(answer), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
-	out, code := runMain(t, e, "", "publish", fx.Ticket, "--yes", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir)
+	out, code := runMain(t, e, "", "publish", fx.Ticket, "--yes", "--picks", answer, "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("publish: exit = %d, want 0\n%s", code, out)
 	}
@@ -102,26 +138,72 @@ func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
 	}
 }
 
+// TestPublishBodyOffersTheRecordingsToPickFromThroughMain: `jig publish --body`
+// for a build that recorded something, with no picks file, writes the
+// picks.json an agent picks from and says where it is; the same command given
+// the answer renders the demo. Nothing is pushed by either.
+func TestPublishBodyOffersTheRecordingsToPickFromThroughMain(t *testing.T) {
+	t.Parallel()
+	jigHome := t.TempDir()
+	e := testEnv(jigHome)
+	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
+	buildFixtureTicket(t, fx)
+	gateCleanThroughMain(t, e, fx)
+	st := recordGreeting(t, jigHome, fx)
+
+	out, code := runMain(t, e, "", "publish", fx.Ticket, "--body", "--store", fx.StoreDir)
+	if code != 0 {
+		t.Fatalf("publish --body: exit = %d, want 0\n%s", code, out)
+	}
+	for _, want := range []string{"picks: pending", "picks_candidates: 1", "picks_request: "} {
+		if !strings.Contains(out, want) {
+			t.Errorf("publish --body output lacks %q:\n%s", want, out)
+		}
+	}
+	var request string
+	for _, line := range strings.Split(out, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "picks_request: "); ok {
+			request = strings.Trim(v, `"`)
+		}
+	}
+	data, err := os.ReadFile(request)
+	if err != nil || !strings.Contains(string(data), `"name": "greet.svg"`) {
+		t.Fatalf("the request %q = %q (err %v), want the candidate greet.svg", request, data, err)
+	}
+	if body, err := os.ReadFile(filepath.Join(st.TicketDir(fx.Ticket), "pr", "fixture-repo.md")); err != nil || strings.Contains(string(body), "## Demo") {
+		t.Errorf("pr body = %q (err %v), want one with no demo until a pick is given", body, err)
+	}
+
+	answer := filepath.Join(t.TempDir(), "picks.json")
+	if err := os.WriteFile(answer, []byte(`{"flows":[{"title":"Greeting","items":[{"id":"r1"}]}],"summary":"The greeting reads casual."}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := runMain(t, e, "", "publish", fx.Ticket, "--body", "--picks", answer, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "picks: picked") {
+		t.Fatalf("publish --body --picks: exit = %d, want 0 and a pick\n%s", code, out)
+	}
+	if body, err := os.ReadFile(filepath.Join(st.TicketDir(fx.Ticket), "pr", "fixture-repo.md")); err != nil || !strings.Contains(string(body), "### Greeting") {
+		t.Errorf("pr body = %q (err %v), want the demo section", body, err)
+	}
+	if got, err := gitx.Run(fx.RepoRemote, "for-each-ref", "--format=%(objectname)", "refs/heads/jig/"+fx.Ticket); err != nil || got != "" {
+		t.Errorf("origin has the ticket branch at %q (err %v) after --body, want nothing pushed", got, err)
+	}
+}
+
 // TestPublishWithoutRecordingsHasNoDemoSectionThroughMain: a ticket whose
 // build recorded nothing publishes a pull request body with no ## Demo
-// section, and no session is dispatched to pick from nothing (the scenario
-// scripts no pick result, so one would fail loudly).
+// section, and nothing is offered to pick from.
 func TestPublishWithoutRecordingsHasNoDemoSectionThroughMain(t *testing.T) {
 	t.Parallel()
 	jigHome := t.TempDir()
 	e := testEnv(jigHome)
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "clean-round", Home: jigHome})
+	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
 	buildFixtureTicket(t, fx)
-
-	gate := []string{"gate", fx.Ticket, "--backend", "fake", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir}
-	if out, code := runMain(t, e, "", gate...); code != 0 || !strings.Contains(out, "verdict: clean") {
-		t.Fatalf("gate: exit = %d, want 0 and a clean verdict\n%s", code, out)
-	}
-	out, code := runMain(t, e, "", "publish", fx.Ticket, "--yes", "--scenario", fx.ScenarioDir, "--store", fx.StoreDir)
+	gateCleanThroughMain(t, e, fx)
+	out, code := runMain(t, e, "", "publish", fx.Ticket, "--yes", "--store", fx.StoreDir)
 	if code != 0 {
 		t.Fatalf("publish: exit = %d, want 0\n%s", code, out)
 	}
@@ -144,45 +226,6 @@ func TestPublishWithoutRecordingsHasNoDemoSectionThroughMain(t *testing.T) {
 	}
 }
 
-// TestPublishBackendFailsOnlyWhenUsed: a backend that is not installed does
-// not stop a publish that has no recordings to pick from, and a backend name
-// jig does not have is refused at once. The availability check is the
-// caller's, so the branch of a backend that is not there is reached here with
-// one that is missing.
-func TestPublishBackendFailsOnlyWhenUsed(t *testing.T) {
-	t.Parallel()
-	gone := &axi.Error{Msg: "the headless backend needs claude, which is not on PATH", Code: "BACKEND_UNAVAILABLE"}
-	missing := func(string) error { return gone }
-	present := func(string) error { return nil }
-
-	if _, err := publishBackend("nonesuch", "", present); err == nil {
-		t.Error("an unknown backend name was accepted")
-	}
-	if _, err := publishBackend("nonesuch", "", missing); err == nil {
-		t.Error("an unknown backend name was accepted because its program was not checked first")
-	}
-
-	b, err := publishBackend("headless", "", missing)
-	if err != nil {
-		t.Fatalf("a backend that is not installed stopped publish: %v", err)
-	}
-	if _, ok := b.(unavailableBackend); !ok {
-		t.Fatalf("publishBackend(headless, missing) = %T, want an unavailableBackend", b)
-	}
-	var ae *axi.Error
-	if err := b.Run(session.Dispatch{}); !errors.As(err, &ae) || ae.Code != "BACKEND_UNAVAILABLE" {
-		t.Errorf("an unavailable backend ran with %v, want it to fail with BACKEND_UNAVAILABLE", err)
-	}
-
-	b, err = publishBackend("fake", t.TempDir(), present)
-	if err != nil {
-		t.Fatalf("publishBackend(fake): %v", err)
-	}
-	if _, ok := b.(unavailableBackend); ok || b == nil {
-		t.Errorf("publishBackend(fake) = %T, want the fake backend", b)
-	}
-}
-
 // TestPicksRowsSayWhatWasPickedOrWhy: none for a build that recorded nothing,
 // and for one that did the status and the one thing each status adds.
 func TestPicksRowsSayWhatWasPickedOrWhy(t *testing.T) {
@@ -200,6 +243,8 @@ func TestPicksRowsSayWhatWasPickedOrWhy(t *testing.T) {
 			[][2]string{{"picks", "reused"}, {"picks_flows", "1"}, {"picks_files", "1"}, {"picks_dropped", "a.svg (gone); b.svg (changed)"}}},
 		{verifydeliver.PicksReport{Status: verifydeliver.PicksRefused, Reason: "it picked no recording"},
 			[][2]string{{"picks", "refused"}, {"picks_reason", "it picked no recording"}}},
+		{verifydeliver.PicksReport{Status: verifydeliver.PicksPending, Candidates: 3, Request: "/home/picks.json"},
+			[][2]string{{"picks", "pending"}, {"picks_candidates", "3"}, {"picks_request", "/home/picks.json"}}},
 		{verifydeliver.PicksReport{Dropped: []string{"a.svg (gone)"}},
 			[][2]string{{"picks_dropped", "a.svg (gone)"}}},
 	}

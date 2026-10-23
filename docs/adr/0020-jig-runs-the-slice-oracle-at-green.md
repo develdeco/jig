@@ -1,5 +1,7 @@
 # jig runs the slice's oracle at green, and a red run goes back to the same session
 
+**Inverted by [ADR 0032](0032-jig-attaches-to-the-harness.md):** the oracle runs when a commit that names a slice is observed (`jig verify`, detached, started by git's post-commit hook or the harness's PostToolUse), not when a builder reports green. A red run is journaled with its summary and failure signature and read by the session at its next turn; jig resumes no session, and `maxOracleFixes` is gone. What follows is the record of the design as it stood.
+
 A builder reported green and jig checked only that the commit existed and descended from the start sha (`verifyGreen`). Nothing ran the oracle until the gate. So builders ran it themselves, often several times. BS-1's builders ran a whole package 4 to 5 times per slice, and `go test` took 143 of the build's 200 minutes. A prompt line asking for one run at the end (ADR 0018) was not followed. Meanwhile a green that was not green reached the gate, and came back as a fix round.
 
 Matt Pocock's `implement` runs the full suite once, at the end. no-mistakes treats executed tests as the evidence, not the agent's confidence, and lets a step iterate on its own findings inside a bounded budget before the run moves on.

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -301,4 +302,61 @@ func TestMatchesInvariant(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestResolveTimeout covers the optional timeout: a duration with a unit
+// bounds one oracle run, a manifest that declares none gets the default, and
+// a value that is not a positive duration is refused where it is read.
+func TestResolveTimeout(t *testing.T) {
+	t.Parallel()
+	resolve := func(t *testing.T, decl string) (Manifest, error) {
+		t.Helper()
+		dir := t.TempDir()
+		if decl != "" {
+			writeFile(t, filepath.Join(dir, ".claude", "jig.yaml"), decl)
+		}
+		return Resolve(dir)
+	}
+
+	t.Run("a declared duration is the limit", func(t *testing.T) {
+		t.Parallel()
+		m, err := resolve(t, "timeout: 45m\n")
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if m.Timeout != 45*time.Minute || m.OracleLimit() != 45*time.Minute {
+			t.Errorf("Timeout = %s, OracleLimit = %s, want 45m", m.Timeout, m.OracleLimit())
+		}
+		m, err = resolve(t, "timeout: 1h30m\n")
+		if err != nil || m.OracleLimit() != 90*time.Minute {
+			t.Errorf("1h30m: limit = %s, err = %v, want 1h30m", m.OracleLimit(), err)
+		}
+	})
+	t.Run("none declared is the default of 30 minutes", func(t *testing.T) {
+		t.Parallel()
+		for _, decl := range []string{"", "oracles:\n  test: go test ./...\n"} {
+			m, err := resolve(t, decl)
+			if err != nil {
+				t.Fatalf("Resolve(%q): %v", decl, err)
+			}
+			if m.Timeout != 0 || m.OracleLimit() != 30*time.Minute || m.OracleLimit() != DefaultOracleLimit {
+				t.Errorf("Resolve(%q): Timeout = %s, OracleLimit = %s, want none and 30m", decl, m.Timeout, m.OracleLimit())
+			}
+		}
+	})
+	t.Run("a zero timeout is none", func(t *testing.T) {
+		t.Parallel()
+		m, err := resolve(t, "timeout: 0s\n")
+		if err != nil || m.OracleLimit() != DefaultOracleLimit {
+			t.Errorf("limit = %s, err = %v, want the default", m.OracleLimit(), err)
+		}
+	})
+	t.Run("what is not a positive duration is refused", func(t *testing.T) {
+		t.Parallel()
+		for _, decl := range []string{"timeout: -5m\n", "timeout: 30\n", "timeout: soon\n", "timeout: [1]\n"} {
+			if _, err := resolve(t, decl); err == nil {
+				t.Errorf("Resolve(%q) accepted it, want an error", decl)
+			}
+		}
+	})
 }

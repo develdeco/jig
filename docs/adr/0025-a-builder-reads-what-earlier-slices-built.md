@@ -1,5 +1,7 @@
 # A builder reads what earlier slices built
 
+**Inverted by [ADR 0032](0032-jig-attaches-to-the-harness.md):** `jig context` returns the earlier slices, found by the `Jig-Slice` trailer of the clone's commits since the ticket's start sha (a slice none of whose commits the clone has lists the shas of its verified lines and no files); `slice.json` and the journal's attempt ranges are gone.
+
 Every build session starts cold. BS-3's builder spent its first ten minutes learning the code it was about to change (36 file reads, 18 greps and dozens of shell reads), and on a multi-slice ticket each later slice pays that again for code an earlier slice of the same ticket just wrote. Matt Pocock's implement flow shares exploration notes between steps, and kun prefers reusing what is known to a cold restart.
 
 ## The rule

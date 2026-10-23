@@ -16,7 +16,6 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
-	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -123,20 +122,38 @@ type GateOpts struct {
 	// literal text; IntentDoc is a file whose content becomes that text.
 	Intent    string
 	IntentDoc string
-	PRMode    bool
-	// Triage is the human seam for a reviewer round's fix batch and ask
+	// Yes is `jig gate --yes`: the round keeps every finding jig can route on
+	// its own when it is recorded, without waiting for a person's decision on
+	// each ask (DefaultTriage). A recorded round carries it from the opening
+	// to the `review done` that closes it.
+	Yes bool
+	// Triage is the seam for a reviewer round's fix batch and ask
 	// findings (route.go). nil means DefaultTriage: every fix is
 	// kept, every ask with a full build target is kept, one missing part
-	// of it stays undecided. Unused for a scripted (--scenario) round.
+	// of it stays undecided. Used by Gate only: a recorded round decides its
+	// asks from the decisions `jig triage` journaled (recordedTriage).
 	Triage Triage
 }
 
 // GateReport is Gate's result.
 type GateReport struct {
 	Round     int
-	Verdict   string // clean|fix-slices
+	Verdict   string // clean|fix-slices|not-independent
 	TargetSHA map[string]string
-	Model     string
+	// Model and Effort are what the reviewer said it ran on: self-reported,
+	// "" when it said nothing or no reviewer ran. jig chooses no model.
+	Model  string
+	Effort string
+	// Reviewer is who reported a recorded round, and Independent whether they
+	// are independent of the agents that built what they reviewed. Both are
+	// the zero value for a scripted or launched round.
+	Reviewer    Provenance
+	Independent Independence
+	// OracleNames are the manifest's oracle names at this round.
+	OracleNames []string
+	// Copy says whose copy of the branch the round reviewed: the clone's,
+	// origin's or (for work an earlier jig built) the build lease's.
+	Copy string
 	// ReviewedSHA is repoName -> the head sha a reviewer round reviewed, on
 	// every reviewer round, clean or not - the anchor the next round's
 	// scope resolves against (review.go's resolveScopeBase). nil for a
@@ -187,10 +204,22 @@ type GateReport struct {
 type reportYAML struct {
 	Round       int               `yaml:"round"`
 	Verdict     string            `yaml:"verdict"`
-	Model       string            `yaml:"model"`
+	Model       string            `yaml:"model,omitempty"`
+	Effort      string            `yaml:"effort,omitempty"`
 	TargetSHA   map[string]string `yaml:"target_sha"`
 	ReviewedSHA map[string]string `yaml:"reviewed_sha,omitempty"`
 	Intent      reportIntentYAML  `yaml:"intent"`
+	// Independent says whether the reviewer of a recorded round is
+	// independent of the builders (true, false or unknown); absent for a
+	// scripted or launched round. Publish refuses a round whose reviewer
+	// built what it reviewed.
+	Independent Independence `yaml:"independent,omitempty"`
+	// Reviewer is who reported the round, as the reviewer's session and
+	// agent ids and how jig learned them.
+	Reviewer *Provenance `yaml:"reviewer,omitempty"`
+	// OracleNames are the manifest's oracle names, kept so the pull request
+	// body can name the oracles a publish rendered without a checkout.
+	OracleNames []string `yaml:"oracle_names,omitempty"`
 	// FixSlices is the ids of the fix slices this round appended, whoever
 	// kept them (a reviewer round's own routing, or a scripted round's
 	// scenario fix slices): the fix budget's own used-rounds count
@@ -239,411 +268,6 @@ func UsedFixBudget(st *store.Store, ticket string, round int) (used int, unreada
 	return used, unreadable
 }
 
-// Gate runs one gate round for ticket: it re-verifies every manifest
-// oracle in a fresh gate lease checked out to the ticket's branch, then
-// asks src for this round's review content.
-func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
-	if o.PRMode {
-		return GateReport{}, &axi.Error{Msg: "gate pr-mode ships in v0.2", Code: "NOT_IMPLEMENTED"}
-	}
-
-	ticket := o.Ticket
-	// journaled and roundNum back the deferred best-effort push below: once
-	// this round's own gate-open journal line has been appended (a tracked
-	// change to the store's working copy), any later error in this
-	// function - REVIEW_INVALID, REVIEW_FAILED, GATE_NO_ORACLE, an oracle
-	// failure, a routing error - would otherwise leave that journal line
-	// (and any review.json/result.json this round wrote) uncommitted until
-	// whatever later command next calls Store.Sync, on this ticket or any
-	// other (see failureCode for why this push runs here rather than
-	// waiting on Sync; Publish runs the same pattern on its own failures).
-	var (
-		journaled bool
-		roundNum  int
-	)
-	defer func() {
-		if err == nil || !journaled {
-			return
-		}
-		// Best-effort: if this push itself fails, the original error is
-		// still the one that reaches the caller; there is nothing more to
-		// do here but try.
-		_ = d.Store.Push(fmt.Sprintf("%s: gate round %d failed: %s", ticket, roundNum, failureCode(err)))
-	}()
-
-	if err := d.Store.Sync(); err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: sync store: %w", err)
-	}
-
-	// Preconditions before anything this round does is recorded or pushed:
-	// a ticket short of green refuses with GATE_NOT_GREEN below, and that
-	// refusal must leave no trace - not a pushed intent.md, not a journal
-	// line - for a plain rerun to be the whole recovery.
-	slices, err := d.Store.ReadSlices(ticket)
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: read slices: %w", err)
-	}
-	if err := checkFrontier(d, ticket, slices, o.Early); err != nil {
-		return GateReport{}, err
-	}
-
-	repo, repoName, target := primaryRepo(d.Cfg)
-	// Resolved once: the lease and the fetch from the build lease both name
-	// this one branch. The ticket's own record names it, or --branch adopts
-	// one (resolveGateBranch); an adoption is recorded further down, once
-	// every precondition of the round has passed.
-	gb, err := resolveGateBranch(d, ticket, target, o.Branch, slices)
-	if err != nil {
-		return GateReport{}, err
-	}
-	branch := gb.Name
-	// An existing gate lease is restored pristine, and forgets its own copy of
-	// the branch, before Acquire ever touches it (restoreLeaseBeforeAcquire):
-	// the round re-points the lease at its source below whatever the copy
-	// holds.
-	if err := restoreLeaseBeforeAcquire(d.Home, repoName, ticket, pool.Gate, branch); err != nil {
-		return GateReport{}, err
-	}
-	// A branch the ticket adopted is on origin by definition, so one that is
-	// not there is refused (BRANCH_NOT_FOUND) instead of being cut from the
-	// target: the round would review a branch that was never pushed.
-	var acquireOpts []pool.Option
-	if gb.Adopted {
-		acquireOpts = append(acquireOpts, pool.MustExistOnOrigin())
-	}
-	lease, err := pool.Acquire(d.Home, repoName, repo.Remote, target, branch, ticket, pool.Gate, acquireOpts...)
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: acquire lease: %w", err)
-	}
-
-	// Restore the gate lease to a pristine, known-correct head right after
-	// acquire and before any oracle runs. pool.Acquire never resets an
-	// existing local branch (a deliberate rule so a same-run slice's commits
-	// on it survive later acquires), so without this, a reviewer or an
-	// oracle that left the lease dirty or ahead on an earlier, killed jig
-	// has its leftovers reviewed by this round's own oracles, or on an
-	// adopted branch makes this gate review the stale local copy instead of
-	// origin's current branch tip.
-	//
-	// The copy the round reviews is an adopted branch jig has built nothing on,
-	// which is the author's, origin's copy exactly (the gate lease never
-	// commits); and any other is whichever copy holds jig's commits
-	// (chooseBuiltCopy): the build lease's while origin has no copy of the
-	// branch, as the ticket's own jig/<ticket> does until a publish pushes it,
-	// and after that whichever copy the build lease's stands to origin's says
-	// holds them.
-	if _, err := pointAtTicketBranch(d, lease.Dir, repoName, ticket, branch, gb.Adopted, gb.Built, "gate"); err != nil {
-		return GateReport{}, err
-	}
-
-	// `--intent`/`--doc`: record an explicit intent.md once every
-	// precondition above has passed - GATE_NOT_GREEN, and, in --branch
-	// mode, BRANCH_NOT_FOUND - so a refusal on either still leaves no
-	// trace: not a written intent.md, not a journal line, for a plain
-	// rerun to be the whole recovery. It is a ticket-level record, not
-	// specific to this round's branch or frontier state, so nothing here
-	// reads lease or branch state; the write only needs to happen after
-	// every precondition that can still refuse the round. No separate
-	// push: the write is a tracked change like any other this round makes,
-	// carried by the round's own end-of-Gate push on success, or by the
-	// deferred failure push below once journaled is true.
-	// writeExplicitIntent itself refuses INTENT_CONFLICT when the ticket
-	// already has a brief.md, which always wins resolution below
-	// regardless.
-	if o.Intent != "" || o.IntentDoc != "" {
-		if err := writeExplicitIntent(d.Store, ticket, o.Intent, o.IntentDoc); err != nil {
-			return GateReport{}, err
-		}
-	}
-
-	// Intent resolution, once per round, before the round's source runs
-	// and before journaling below: the ticket's own brief.md, else its
-	// intent.md (including whatever --intent/--doc just wrote above), else
-	// none (resolveIntent's own precedence doc comment). Resolving this
-	// before journaling means a malformed intent.md fails the round before
-	// a gate-open journal line is appended or an oracle suite runs, rather
-	// than after paying for both.
-	intent, intentText, err := resolveIntent(d.Store, ticket)
-	if err != nil {
-		return GateReport{}, err
-	}
-
-	// Adoption is recorded last of the round's preconditions and first of its
-	// effects: a refusal above leaves nothing behind, so a plain rerun is the
-	// whole recovery, and every later round and command - `jig run` above
-	// all - finds the branch and where it started. The start sha is the
-	// branch's tip as the author left it, not the target's: what jig builds
-	// on the branch descends from the tip, and frontier's verifyGreen holds
-	// it to that. It replaces any start sha an earlier dispatch left before
-	// jig had built anything, which resolveGateBranch has established.
-	// origin/<branch> is the tip the lease was just reset to. The start sha
-	// is written first: a failure between the two writes leaves a start sha
-	// no record points at, which rerunning the adoption replaces. It is
-	// frontier that keeps it current until jig builds: see ensureStartSHA.
-	if gb.Adopting {
-		tip, err := gitx.RevParse(lease.Dir, "origin/"+branch)
-		if err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: resolve origin/%s: %w", branch, err)
-		}
-		if err := d.Store.WriteStartSHA(ticket, repoName, tip); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: record the start sha: %w", err)
-		}
-		if err := d.Store.WriteTicketBranch(ticket, branch); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: record the adopted branch: %w", err)
-		}
-	}
-
-	// Resolved before the journal line below (not after, as manifest
-	// resolution and oracle runs once were) so roundNum is always this
-	// round's real number, never the zero value, by the time journaled
-	// becomes true and the deferred push above can fire.
-	n, err := existingGateRounds(d.Store, ticket)
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: count rounds: %w", err)
-	}
-	n++
-	roundNum = n
-
-	model := staircase.Dearest(d.Rungs)
-	if err := journal.Append(d.Store, ticket, journal.Line{Slice: "", Event: "gate-open", Model: model}); err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-open: %w", err)
-	}
-	journaled = true
-
-	man, err := manifest.Resolve(lease.Dir)
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: resolve manifest: %w", err)
-	}
-
-	oracleRuns, err := runGateOracles(d, ticket, lease.Dir, man, slices)
-	if err != nil {
-		return GateReport{}, err
-	}
-
-	roundDir := gateRoundDir(d.Store, ticket, n)
-	if _, err := os.Stat(roundDir); err == nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: round %d already exists", n)
-	}
-
-	// The cumulative fold over every earlier reviewer round: its open,
-	// asked and noted findings become review.json's own open list (a noted
-	// finding stays a citable prior target, findings.go's
-	// openAndNotedFindingsList), and its dismissed findings become
-	// review.json's dismissed list. A ticket with no reviewer rounds yet,
-	// or one driven entirely by the scripted source, folds to nothing.
-	fold, err := FoldBefore(d.Store, ticket, n)
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: fold findings: %w", err)
-	}
-	cum := fold.Known
-
-	round, ok, err := src.Round(RoundInput{
-		Store:         d.Store,
-		Ticket:        ticket,
-		Round:         n,
-		LeaseDir:      lease.Dir,
-		RepoName:      repoName,
-		Target:        target,
-		Model:         model,
-		Effort:        d.Cfg.ReviewEffortFor,
-		Intent:        intent,
-		IntentText:    intentText,
-		OperatorClone: operatorClone(d, repoName),
-		Home:          d.Home,
-		UserHome:      d.UserHome,
-		Manifest:      man,
-		OracleRuns:    oracleRuns,
-		Open:          fold.Open,
-		Dismissed:     fold.Dismissed,
-	})
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: read round %d: %w", n, err)
-	}
-
-	// The reviewer source may have just inferred and recorded an intent.md
-	// before its dispatch (review.go's inferIntent), so this round's report
-	// carries the intent and the exact bytes the round itself handed the
-	// reviewer (round.Review), not the pre-dispatch resolution above -
-	// never a second read of brief.md or intent.md, which anything running
-	// during the round could have rewritten since. The scripted source runs
-	// no reviewer: its round keeps the resolution above.
-	if round.Review != nil {
-		intent, intentText = round.Review.Intent, round.Review.IntentText
-	}
-
-	targetSHA, err := gitx.RevParse(lease.Dir, "origin/"+target)
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: resolve origin/%s: %w", target, err)
-	}
-
-	report = GateReport{
-		Round: n, Model: model, TargetSHA: map[string]string{repoName: targetSHA},
-		Intent: intent, IntentSHA256: intentSHA256(intent.Source, intentText),
-	}
-	if gb.Adopted {
-		report.Branch = branch
-	}
-	if round.Review != nil {
-		report.IntentNote = round.Review.IntentNote
-	}
-	switch {
-	case !ok:
-		// No round ran at all. The reviewer source reaches this only when
-		// it has already established that nothing is outstanding, so it
-		// is the scripted source - no round directory for this number, or
-		// an empty one - that can arrive here with the fold still holding
-		// something. Either way, a source having nothing to play says
-		// nothing about what earlier rounds left behind, so the verdict
-		// comes from the fold, exactly
-		// as the reviewer arm's does below. Writing "clean" here without
-		// consulting it declared a ticket clean over an undecided ask,
-		// and `jig publish` gates on that verdict: the ticket shipped
-		// with the question never answered, while `jig status`, which
-		// reads the fold, said otherwise the whole time.
-		if !isClean(cum) {
-			report.Verdict = "fix-slices"
-			report.Findings = openFindingsList(cum)
-			sortByRiskThenID(report.Findings)
-			report.NeedsHuman = askedFindingsList(cum)
-			sortByRiskThenID(report.NeedsHuman)
-			if err := writeNoRound(d, ticket, n, report); err != nil {
-				return GateReport{}, err
-			}
-			break
-		}
-		report.Verdict = "clean"
-		if err := writeCleanRound(d, ticket, n, report); err != nil {
-			return GateReport{}, err
-		}
-		if err := journal.Append(d.Store, ticket, journal.Line{Event: "gate-clean", Attempt: n}); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-clean: %w", err)
-		}
-	case round.Review != nil:
-		// Findings bookkeeping: apply this round onto the fold. Routing and
-		// triage (route.go) then turn kept fixes and asks into fix slices,
-		// mutating each reported finding's final Status/Triage/Decision/
-		// RoutedAs - entirely in memory, before anything is persisted or
-		// pushed. Rule 3's clearing runs only after that, against those
-		// final statuses: a finding dismissed at triage must not go on
-		// blocking an unrelated open finding in the same file. The
-		// post-round fold is then checked for what's still outstanding:
-		// that, not whether the round dispatched a reviewer, decides clean
-		// vs fix-slices.
-		reviewHead := round.Review.HeadSHA
-		existsAtHead := func(file string) (bool, error) {
-			return gitx.FileExistsAtRev(lease.Dir, reviewHead, file)
-		}
-		sliceGreen := func(sliceID string) (bool, error) {
-			st, err := d.Store.ReadSliceState(ticket, sliceID)
-			if err != nil {
-				return false, err
-			}
-			return st.State == "green", nil
-		}
-		gateCfg := d.Cfg.ResolvedGateConfig()
-		// The fix budget: a ticket's used budget is the count of its
-		// earlier gate rounds (1..n-1) that appended at least one fix
-		// slice; once that equals gate.fix_rounds, this round parks every
-		// would-be open fix instead of queuing it (ApplyRound's own
-		// budgetReached parameter).
-		budgetUsed, _ := UsedFixBudget(d.Store, ticket, n)
-		budgetReached := budgetUsed >= *gateCfg.FixRounds
-		// still_present entries are expanded into full ResultFindings here,
-		// right before ApplyRound, so recurrence counting, routing, triage,
-		// the fix budget and findings.yaml all see exactly what a full
-		// re-report of each confirmed finding would give them;
-		// round.Review.Result (and the reviewer's raw result.json on disk)
-		// stays as the reviewer actually wrote it.
-		expanded := ExpandStillPresent(round.Review.Result, cum)
-		reported, err := ApplyRound(n, cum, expanded, slices, sliceGreen, man, gateCfg.FixRisks, budgetReached)
-		if err != nil {
-			return GateReport{}, err
-		}
-		outstanding := outstandingAsks(cum, reported)
-		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, outstanding, o.Triage, man, budgetUsed, *gateCfg.FixRounds, *gateCfg.FixSliceFindings)
-		if err != nil {
-			return GateReport{}, err
-		}
-		for _, f := range routed {
-			if f.Status == StatusAsked && f.RoutedWhy == RoutedWhyBudget {
-				report.BudgetParked++
-			}
-		}
-		if report.BudgetParked > 0 {
-			report.BudgetUsed, report.BudgetLimit = budgetUsed, *gateCfg.FixRounds
-		}
-		cleared, err := ClearingAfterTriage(cum, routed, round.Review.Result.ReviewedPaths, existsAtHead)
-		if err != nil {
-			return GateReport{}, err
-		}
-		updated := cloneFindings(cum)
-		foldFindings(updated, routed, cleared)
-		if isClean(updated) {
-			report.Verdict = "clean"
-		} else {
-			report.Verdict = "fix-slices"
-		}
-		// reviewed_sha is recorded on every reviewer round, clean or not,
-		// so the next round's scope can resolve a delta against it.
-		report.ReviewedSHA = map[string]string{repoName: round.Review.HeadSHA}
-		report.Scope = round.Review.Scope
-		// Findings and NeedsHuman are sorted by risk, high first, then id
-		// (sortByRiskThenID, the same helper routing sorts the human seam
-		// with): "always shown sorted by risk, high first" applies to every
-		// place findings reach a human, not only the triage prompt - the
-		// gate report's own tables (cmd/jig) render these two lists as
-		// given, so the ordering has to be right here.
-		report.Findings = append([]Finding(nil), routed...)
-		sortByRiskThenID(report.Findings)
-		report.NeedsHuman = askedFindingsList(updated)
-		sortByRiskThenID(report.NeedsHuman)
-		for _, fs := range fixSlices {
-			report.FixSlices = append(report.FixSlices, fs.ID)
-		}
-		if err := writeReviewerRound(d, ticket, n, report, round.Review.Scope, round.Review.Result.ReviewedPaths, routed, cleared, round.Review.Result.Summary); err != nil {
-			return GateReport{}, err
-		}
-		event := "gate-round"
-		if report.Verdict == "clean" {
-			event = "gate-clean"
-		}
-		if err := journal.Append(d.Store, ticket, journal.Line{Event: event, Effort: round.Review.Effort, Attempt: n}); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal %s: %w", event, err)
-		}
-		// Routing and triage are already finished above; appending these
-		// slices and, at the end of Gate, pushing the store are the only
-		// on-disk/store-visible effects that follow.
-		if err := appendFixSlices(d, ticket, n, fixSlices); err != nil {
-			return GateReport{}, err
-		}
-	default:
-		report.Verdict = "fix-slices"
-		// The scripted (scenario) source keeps appending its own fix
-		// slices unchanged, with no budget enforcement of its own, but
-		// they still count toward the budget for a later, reviewer-driven
-		// round: report.yaml has to list them the same way a reviewer
-		// round's own routing does, for UsedFixBudget to see them.
-		for _, fs := range round.FixSlices {
-			report.FixSlices = append(report.FixSlices, fs.ID)
-		}
-		if err := writeFixRound(d, ticket, n, report, round); err != nil {
-			return GateReport{}, err
-		}
-		if err := journal.Append(d.Store, ticket, journal.Line{Event: "gate-round", Attempt: n}); err != nil {
-			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal gate-round: %w", err)
-		}
-		if err := appendFixSlices(d, ticket, n, round.FixSlices); err != nil {
-			return GateReport{}, err
-		}
-	}
-
-	if err := d.Store.Push(fmt.Sprintf("%s: gate round %d %s", ticket, n, report.Verdict)); err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: gate: push store: %w", err)
-	}
-
-	return report, nil
-}
-
 // checkFrontier errors when any slice - including a fix slice raised by an
 // earlier gate round - is not yet green and early is false: a slice left
 // queued, stalled, needs-input, env-blocked or otherwise unfinished means
@@ -661,9 +285,9 @@ func checkFrontier(d Deps, ticket string, slices []store.Slice, early bool) erro
 		}
 		if st.State != "green" {
 			return &axi.Error{
-				Msg:  fmt.Sprintf("slice %s is %s, not green; run `jig run %s` first or pass --early", s.ID, st.State, ticket),
+				Msg:  fmt.Sprintf("slice %s is %s, not green; finish it first or pass --early", s.ID, st.State),
 				Code: "GATE_NOT_GREEN",
-				Help: []string{fmt.Sprintf("Run `jig run %s` to finish the frontier, or `jig gate %s --early` to review anyway.", ticket, ticket)},
+				Help: []string{fmt.Sprintf("Run `jig next %s` to see what is left to build, or `jig gate %s --early` to review anyway.", ticket, ticket)},
 			}
 		}
 	}
@@ -1033,15 +657,23 @@ func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope s
 }
 
 func writeReportYAML(dir string, report GateReport) error {
-	out, err := yaml.Marshal(reportYAML{
+	rep := reportYAML{
 		Round:       report.Round,
 		Verdict:     report.Verdict,
 		Model:       report.Model,
+		Effort:      report.Effort,
 		TargetSHA:   report.TargetSHA,
 		ReviewedSHA: report.ReviewedSHA,
 		Intent:      reportIntentYAML{Source: report.Intent.Source, SHA256: report.IntentSHA256},
 		FixSlices:   report.FixSlices,
-	})
+		Independent: report.Independent,
+		OracleNames: report.OracleNames,
+	}
+	if report.Independent != "" {
+		reviewer := report.Reviewer
+		rep.Reviewer = &reviewer
+	}
+	out, err := yaml.Marshal(rep)
 	if err != nil {
 		return fmt.Errorf("verifydeliver: gate: marshal report.yaml: %w", err)
 	}

@@ -1,5 +1,7 @@
 # The reviewer runs on the dearest rung, and builds and reviews get an effort
 
+**Amended by [ADR 0032](0032-jig-attaches-to-the-harness.md):** a builder's effort is gone with the builders jig started; the harness's model and effort are recorded when the session says them, never chosen. The reviewer's model and effort are what the agent that records the round reports of itself, and `staircase.Dearest` remains only the reviewer evaluation's default.
+
 The gate picked its reviewer's model with `staircase.Disjoint`: the first rung no builder of the ticket used. With Haiku builders that gave BS-1 a Sonnet reviewer on round 1 and Opus on rounds 2 and 3, weaker on the full review and stronger on the small re-checks. Since ADR 0019 the default staircase has two rungs, so `Disjoint` gave an invariant-floored Opus build a Sonnet reviewer.
 
 jig also passed no reasoning effort to `claude`, so every session ran at the CLI's default whatever its job. Most of a builder's time is the model thinking, not tools: BS-3's builder spent 863 s generating and 28 s in tools in its first 15 minutes, with 112k output tokens, mostly thinking, before its first test run. Claude Code takes `--effort low|medium|high|xhigh|max`.

@@ -38,9 +38,9 @@ func setupGraduateStore(t *testing.T) (jig func(args ...string) (int, string), s
 	if code, out := jig("init", "--standalone"); code != 0 {
 		t.Fatalf("jig init --standalone: exit %d\n%s", code, out)
 	}
-	cfgs, err := filepath.Glob(filepath.Join(filepath.Dir(repo), "*", "project.yaml"))
+	cfgs, err := filepath.Glob(filepath.Join(filepath.Dir(repo), "*", "store.yaml"))
 	if err != nil || len(cfgs) != 1 {
-		t.Fatalf("find the standalone store's project.yaml: %v, %v", cfgs, err)
+		t.Fatalf("find the standalone store's store.yaml: %v, %v", cfgs, err)
 	}
 	return jig, filepath.Dir(cfgs[0])
 }
@@ -57,13 +57,13 @@ func writeChart(t *testing.T, storeRoot, name, content string) {
 	}
 }
 
-// declareKeys replaces storeRoot's project.yaml derived "keys: DEMO:
+// declareKeys replaces storeRoot's store.yaml derived "keys: DEMO:
 // everything in demo" entry (jig init --standalone's default, for a repo
 // named "demo") with a keys: block declaring keys, so a test can graduate or
 // mint under keys of its own choosing instead of the one derived key.
 func declareKeys(t *testing.T, storeRoot string, keys map[string]string) {
 	t.Helper()
-	path := filepath.Join(storeRoot, "project.yaml")
+	path := filepath.Join(storeRoot, "store.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func declareKeys(t *testing.T, storeRoot string, keys map[string]string) {
 	}
 	rewritten := strings.Replace(string(data), "keys:\n    DEMO: everything in demo\n", block.String(), 1)
 	if rewritten == string(data) {
-		t.Fatalf("project.yaml has no derived keys: entry to replace:\n%s", data)
+		t.Fatalf("store.yaml has no derived keys: entry to replace:\n%s", data)
 	}
 	if err := os.WriteFile(path, []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
@@ -965,7 +965,7 @@ func TestGraduatePushFailureRemovesTheClaim(t *testing.T) {
 	if _, err := gitx.Run(storeRoot, "add", "-A"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "chart: add Slice A"); err != nil {
+	if _, err := gitx.Run(storeRoot, "-c", "user.name=tester", "-c", "user.email=tester@example.invalid", "commit", "-m", "chart: add Slice A"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gitx.Run(storeRoot, "push", "origin", "main"); err != nil {
@@ -1405,6 +1405,11 @@ func TestGraduateRecordsChartEntryBodyInTheRecord(t *testing.T) {
 	if gotB.Body != "" {
 		t.Fatalf("entry B's ticket.yaml body = %q, want empty (its chart entry has none)", gotB.Body)
 	}
+
+	// Each entry's slug is fixed at mint, from its own title.
+	if gotA.Slug != "slice-a" || gotB.Slug != "slice-b" {
+		t.Fatalf("slugs = %q, %q; want slice-a, slice-b", gotA.Slug, gotB.Slug)
+	}
 }
 
 // TestGraduateFullyGraduatedLeavesStoreUntouched covers the fully-graduated
@@ -1600,7 +1605,7 @@ func TestClaimOneChartEntryRediscoversAnotherClonesGraduation(t *testing.T) {
 	if _, err := gitx.Run(storeRoot, "add", "-A"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitx.Run(storeRoot, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "chart: add Slice A and Slice B"); err != nil {
+	if _, err := gitx.Run(storeRoot, "-c", "user.name=tester", "-c", "user.email=tester@example.invalid", "commit", "-m", "chart: add Slice A and Slice B"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gitx.Run(storeRoot, "push", "origin", "main"); err != nil {

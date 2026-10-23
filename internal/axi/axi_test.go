@@ -47,8 +47,8 @@ func TestTableQuotesCells(t *testing.T) {
 }
 
 func TestHelp(t *testing.T) {
-	got := Help("Run `jig run JIG-1` to continue")
-	want := "help[1]:\n  Run `jig run JIG-1` to continue"
+	got := Help("Run `jig next JIG-1` to continue")
+	want := "help[1]:\n  Run `jig next JIG-1` to continue"
 	if got != want {
 		t.Fatalf("Help = %q, want %q", got, want)
 	}

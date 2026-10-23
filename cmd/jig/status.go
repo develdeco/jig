@@ -19,6 +19,21 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec: cmdSpec{"status", "print a ticket's slice and question state", []flagSpec{
+			{"store", "explicit store path", false},
+			{"project", "project name, resolved via the machine mapping", false},
+		}, false},
+		Order: 180,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdStatus(e, args, stdout)
+		},
+		Probe: []string{"T-1"},
+	})
+}
+
 // cmdStatus implements `jig status [<ticket>]`.
 func cmdStatus(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "status")
@@ -57,12 +72,19 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 // RenderStatus renders the exact `jig status` golden format for ticket:
 // ticket/state lines, a slices table, a questions table (or "questions:
 // none"), a parked table (present only while a slice is needs-input) and a
-// stalled table (present only while a slice is stalled), and a contextual
-// help hint. A ticket that adopted a branch names it on a branch line under
-// the ticket's. The parked and stalled tables are the custody surface: they
-// make "awaiting a human" (parked) and "stuck" (stalled) unmistakable and
-// distinct from each other and from ordinary in-progress work.
+// stalled table (present only while a slice is stalled), the blocks of every
+// registered status section (registerStatusSection), and a contextual help
+// hint. A ticket that adopted a branch names it on a branch line under the
+// ticket's. The parked and stalled tables are the custody surface: they make
+// "awaiting a human" (parked) and "stuck" (stalled) unmistakable and distinct
+// from each other and from ordinary in-progress work.
 func RenderStatus(st *store.Store, ticket string) (string, error) {
+	return renderStatus(st, ticket, statusSections())
+}
+
+// renderStatus is RenderStatus over the given sections: each one's blocks
+// follow the status blocks and come before the help line.
+func renderStatus(st *store.Store, ticket string, sections []statusSection) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		return "", err
@@ -77,7 +99,7 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 	}
 	adopted := rec.Adopted()
 
-	cfg, err := project.Load(filepath.Join(st.Root, "project.yaml"))
+	cfg, err := project.LoadStoreConfig(st.Root)
 	if err != nil {
 		return "", err
 	}
@@ -228,9 +250,10 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 
 	// The help names one way forward, in this order of precedence: a
 	// round jig cannot read blocks everything, so the repair comes first;
-	// otherwise what decides an outstanding ask is `jig gate <ticket>` at
-	// a terminal, named once here rather than in a per-row cell because it
-	// is the same command for every ask. The frontier check refuses that
+	// otherwise what decides an outstanding ask is `jig triage <ticket>
+	// <id>`, and the next `jig gate <ticket>` applies it, named once here
+	// rather than in a per-row cell because it is the same command for
+	// every ask. The frontier check refuses that
 	// gate while any slice is short of green, and a round that queues fix
 	// slices and leaves an ask undecided is the ordinary case, so while
 	// the frontier is not green the ticket's own next step comes first and
@@ -253,7 +276,7 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		helpLines = []string{"Run " + outstandingAsksHelpLine(ticket, parkedOutstanding, budgetUsed, fixRounds)}
 	} else if len(slices) == 0 && !adopted {
 		// A ticket with nothing to work has the two ways to get work that
-		// `jig ticket new` and the refusal of `jig run` give.
+		// `jig ticket new` and the refusal of `jig claim` give.
 		helpLines = getWorkHints(ticket)
 	} else {
 		hint, err := nextStepHint(st, ticket)
@@ -264,6 +287,13 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 		if len(outstanding) > 0 {
 			helpLines = append(helpLines, "Then run "+outstandingAsksHelpLine(ticket, parkedOutstanding, budgetUsed, fixRounds))
 		}
+	}
+	for _, sec := range sections {
+		extra, err := sec.Blocks(st, ticket)
+		if err != nil {
+			return "", err
+		}
+		blocks = append(blocks, extra...)
 	}
 	blocks = append(blocks, axi.Help(helpLines...))
 
@@ -276,21 +306,20 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 // outstanding asks, lead-verb-free ("run ...", for a caller to prepend
 // "Run " or "Then "): while any of them is budget-parked (parked > 0) it
 // says the fix budget is reached and names keeping or dismissing them,
-// rather than the generic "decide the outstanding asks" - the same single
-// `jig gate <ticket>` terminal session offers both kinds together
-// (verifydeliver's own triage header over the parked subset), so this is
-// one line, not two.
+// rather than the generic "decide the outstanding asks" - the same `jig
+// triage` decides both kinds, and the next `jig gate <ticket>` round applies
+// the decisions, so this is one line, not two.
 func outstandingAsksHelpLine(ticket string, parked, budgetUsed, budgetLimit int) string {
 	if parked > 0 {
-		return fmt.Sprintf("`jig gate %s` at a terminal to keep or dismiss the parked finding(s): the fix budget is reached (%d of %d)", ticket, budgetUsed, budgetLimit)
+		return fmt.Sprintf("`jig triage %s <id> keep|dismiss` to keep or dismiss the parked finding(s), then `jig gate %s` to apply the decisions: the fix budget is reached (%d of %d)", ticket, ticket, budgetUsed, budgetLimit)
 	}
-	return fmt.Sprintf("`jig gate %s` at a terminal to decide the outstanding asks", ticket)
+	return fmt.Sprintf("`jig triage %s <id> keep|dismiss` to decide the outstanding asks, then `jig gate %s` to apply the decisions", ticket, ticket)
 }
 
 // resumeCommand returns the exact command that clears a parked
 // (needs-input) slice's custody. Amending the brief and requeuing is the
 // remedy only when the slice was parked for a flawed brief AND has brief
-// sections for --from-brief-diff to notice (frontier.Requeue keys off
+// sections for --from-brief-diff to notice (ready.Requeue keys off
 // FromBrief hashes): a gate fix slice carries the same "flawed-brief"
 // reason but no FromBrief, and a plain question on a slice that does have
 // brief sections is not a brief problem at all. Every other parked slice,
@@ -299,7 +328,7 @@ func resumeCommand(ticket string, sl store.Slice, ss store.SliceState) string {
 	if ss.Reason == "flawed-brief" && len(sl.FromBrief) > 0 {
 		return fmt.Sprintf("jig requeue %s --from-brief-diff", ticket)
 	}
-	return fmt.Sprintf("jig run %s --answer %s '<text>'", ticket, ss.Question)
+	return fmt.Sprintf("jig answer %s %s '<text>'", ticket, ss.Question)
 }
 
 // resumeCell returns the parked table's "resume" column text. For the
@@ -365,7 +394,8 @@ func sliceByID(slices []store.Slice, id string) (store.Slice, bool) {
 // command that can actually reset it; otherwise, once every slice is
 // green, the hint points at gate (no rounds yet, or a last round that was
 // not clean, whose fix slices are green by now) or publish (last round
-// clean); otherwise it points at run to work the frontier.
+// clean); otherwise it points at next and claim to take a slice of the
+// frontier.
 func nextStepHint(st *store.Store, ticket string) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
@@ -478,14 +508,14 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		default:
 			// Every slice is green and the last round was not clean, so
 			// its fix slices are already built: what moves the ticket is
-			// the next round, not `jig run`, which would find nothing to
+			// the next round, not `jig next`, which would find nothing to
 			// do and reprint this same line. A verdict jig could not read
 			// lands here too, and the next round is the right step there
 			// as well.
 			return fmt.Sprintf("Run `jig gate %s` to open the next gate round", ticket), nil
 		}
 	}
-	return fmt.Sprintf("Run `jig run %s` to work the frontier", ticket), nil
+	return fmt.Sprintf("Run `jig next %s` to see what is ready, then `jig claim %s --slice <slice>` to take one", ticket, ticket), nil
 }
 
 var gateRoundDirRE = regexp.MustCompile(`^round-(\d+)$`)

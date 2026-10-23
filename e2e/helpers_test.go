@@ -13,10 +13,12 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -39,6 +41,45 @@ type jigResult struct {
 type jigEnv struct {
 	home     string // JIG_HOME: the jig home root the subprocess resolves
 	userHome string // HOME and USERPROFILE, so the subprocess never reaches the real user home; "" leaves the host's
+
+	// extra is KEY=VALUE entries laid over the process environment after
+	// home and userHome (so one may replace them), set with with.
+	extra []string
+	// unset names variables taken out of the subprocess environment, set
+	// with without; it wins over everything else, so an unset name stays
+	// unset whatever the process or the other fields say.
+	unset []string
+}
+
+// with returns e with the KEY=VALUE entries kv laid over the subprocess
+// environment, each replacing an earlier entry of the same name, and no name
+// in kv left unset. e itself is not changed.
+func (e jigEnv) with(kv ...string) jigEnv {
+	extra := slices.Clone(e.extra)
+	unset := slices.Clone(e.unset)
+	for _, entry := range kv {
+		if !strings.Contains(entry, "=") {
+			panic(fmt.Sprintf("jigEnv.with: %q is not KEY=VALUE", entry))
+		}
+		extra = replaceEnv(extra, []string{entry})
+		unset = withoutEnv(unset, envName(entry))
+	}
+	e.extra, e.unset = extra, unset
+	return e
+}
+
+// without returns e with the variables names taken out of the subprocess
+// environment, whatever the process has under them. e itself is not changed.
+func (e jigEnv) without(names ...string) jigEnv {
+	e.extra = withoutEnv(e.extra, names...)
+	unset := slices.Clone(e.unset)
+	for _, name := range names {
+		if !slices.ContainsFunc(unset, func(have string) bool { return sameEnvName(have, name) }) {
+			unset = append(unset, name)
+		}
+	}
+	e.unset = unset
+	return e
 }
 
 // overrides is the KEY=VALUE list e lays over the process environment.
@@ -46,17 +87,21 @@ func (e jigEnv) overrides() []string {
 	out := []string{"JIG_HOME=" + e.home}
 	if e.userHome != "" {
 		out = append(out, "HOME="+e.userHome, "USERPROFILE="+e.userHome)
+		// Moving HOME would move go's caches with it (see goCaches).
+		out = append(out, goCaches...)
 	}
-	return out
+	return replaceEnv(out, e.extra)
 }
 
 // environ returns the process environment with e's variables replacing
 // whatever the process has under the same names (not appended beside them,
-// so the subprocess sees each name once), and without JIG_RECORD_DIR: that
-// names the directory this suite records into, and the jig under test must
-// run the same whether or not the suite records, and never write there.
+// so the subprocess sees each name once), and without the names e leaves
+// unset and JIG_RECORD_DIR: that names the directory this suite records
+// into, and the jig under test must run the same whether or not the suite
+// records, and never write there.
 func (e jigEnv) environ() []string {
-	return withoutEnv(replaceEnv(os.Environ(), e.overrides()), recordDirEnv)
+	drop := append(slices.Clone(e.unset), recordDirEnv)
+	return withoutEnv(replaceEnv(os.Environ(), e.overrides()), drop...)
 }
 
 // withoutEnv returns base without the entries named like one of names.
@@ -109,8 +154,18 @@ func sameEnvName(a, b string) bool {
 // exit: callers assert Code themselves, since every jig subcommand's
 // pause/stop/error paths are meaningful exit codes, not test failures. While
 // JIG_RECORD_DIR is set it also records the run (record_test.go); the
-// returned output is the same either way.
+// returned output is the same either way. The process reads the null device
+// for stdin; runJigIn gives it input.
 func runJig(t *testing.T, env jigEnv, cwd string, args ...string) jigResult {
+	t.Helper()
+	return runJigIn(t, env, cwd, nil, args...)
+}
+
+// runJigIn is runJig with stdin as the subprocess standard input: the
+// payload of a hook, the lines of a protocol. A nil stdin gives the process
+// the null device, as runJig does; the process sees the end of input once it
+// has read stdin. It never fails the test on a non-zero exit either.
+func runJigIn(t *testing.T, env jigEnv, cwd string, stdin []byte, args ...string) jigResult {
 	t.Helper()
 	if env.home == "" {
 		// An empty JIG_HOME makes jig fall back to the real home's jig dir.
@@ -119,6 +174,9 @@ func runJig(t *testing.T, env jigEnv, cwd string, args ...string) jigResult {
 	cmd := exec.Command(jigBinary, args...)
 	cmd.Dir = cwd
 	cmd.Env = env.environ()
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	var stdout, stderr bytes.Buffer
 	code := records.run(t, recordCall{env: env, cwd: cwd, args: args}, &stdout, &stderr, func(out, errs io.Writer) int {
 		cmd.Stdout = out
@@ -415,4 +473,111 @@ func keysOf(m map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// identityEnvNames are the variables that give git an author and committer
+// name and email; the dates are left alone.
+var identityEnvNames = []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"}
+
+// withoutIdentity returns e without the GIT_AUTHOR_* and GIT_COMMITTER_* name
+// and email the test binary pinned (gittest.PinIdentity), keeping the dates,
+// so the subprocess commits take their identity from git config: a test of
+// "authored by the person" sets that config in the repo it runs in.
+func (e jigEnv) withoutIdentity() jigEnv { return e.without(identityEnvNames...) }
+
+// withGitGlobal returns e with a git global config of the test's own. The
+// test binary hermetic global config (gittest.Run) is shared by every test
+// and must stay as it is; a test that installs global git settings (a
+// core.hooksPath, say) would otherwise hand them to every parallel test's
+// commits. The returned env points GIT_CONFIG_GLOBAL at a file in the test
+// temp dir that includes the hermetic one, so `git config --global` from the
+// subprocess, or from a harness using the same env, writes only there.
+func (e jigEnv) withGitGlobal(t *testing.T) jigEnv {
+	t.Helper()
+	hermetic := os.Getenv("GIT_CONFIG_GLOBAL")
+	if hermetic == "" {
+		t.Fatal("withGitGlobal: GIT_CONFIG_GLOBAL is unset: TestMain must run the tests through gittest.Run")
+	}
+	path := filepath.Join(t.TempDir(), "gitconfig")
+	// Forward slashes, since a backslash escapes in a config value.
+	body := fmt.Sprintf("[include]\n\tpath = %q\n", filepath.ToSlash(hermetic))
+	writeFileOrFatal(t, path, []byte(body))
+	return e.with("GIT_CONFIG_GLOBAL=" + path)
+}
+
+// pollInterval is how often waitFor and the helpers built on it look again.
+const pollInterval = 50 * time.Millisecond
+
+// pollUntil calls cond until it reports true or d has passed, and reports
+// whether it did. It always calls cond once more at the deadline.
+func pollUntil(d time.Duration, cond func() bool) bool {
+	deadline := time.Now().Add(d)
+	for {
+		if cond() {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(pollInterval)
+	}
+}
+
+// waitFor fails the test unless cond becomes true within d; what names the
+// thing waited for, for the failure message. It is the one way an e2e test
+// waits on a detached process: it polls, never sleeps a fixed time.
+func waitFor(t *testing.T, d time.Duration, what string, cond func() bool) {
+	t.Helper()
+	if !pollUntil(d, cond) {
+		t.Fatalf("timed out after %s waiting for %s", d, what)
+	}
+}
+
+// waitJournal waits up to d for a line of ticket's journal in fx's store that
+// satisfies pred, and returns the first such line. A read that fails (a line
+// being written as it is read) is retried; the failure message shows the
+// last error and every line the journal had.
+func waitJournal(t *testing.T, fx *fixture.Fixture, ticket string, d time.Duration, pred func(journal.Line) bool) journal.Line {
+	t.Helper()
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("waitJournal: store.Open: %v", err)
+	}
+	var (
+		found   journal.Line
+		lines   []journal.Line
+		readErr error
+	)
+	if pollUntil(d, func() bool {
+		lines, readErr = journal.Read(st, ticket)
+		if readErr != nil {
+			return false
+		}
+		for _, l := range lines {
+			if pred(l) {
+				found = l
+				return true
+			}
+		}
+		return false
+	}) {
+		return found
+	}
+	var have []string
+	for _, l := range lines {
+		have = append(have, fmt.Sprintf("  %s %s slice=%s outcome=%s", l.TS, l.Event, l.Slice, l.Outcome))
+	}
+	t.Fatalf("timed out after %s waiting for a matching journal line of %s (last read error: %v); the journal has %d lines:\n%s",
+		d, ticket, readErr, len(lines), strings.Join(have, "\n"))
+	return journal.Line{}
+}
+
+// readLedger reads the machine ledger under env's jig home.
+func readLedger(t *testing.T, env jigEnv) []journal.Line {
+	t.Helper()
+	lines, err := ledger.Read(env.home)
+	if err != nil {
+		t.Fatalf("readLedger: %v", err)
+	}
+	return lines
 }

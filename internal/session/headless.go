@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -21,10 +20,6 @@ import (
 	"github.com/develdeco/jig/internal/outcome"
 	"github.com/develdeco/jig/internal/screen"
 )
-
-// jigMainPackage is the jig binary's main package path as Go's build info
-// records it. A test binary records "<package>.test" instead.
-const jigMainPackage = "github.com/develdeco/jig/cmd/jig"
 
 // headlessEditTools are the file-edit tools a headless session can see.
 // Their grant is path-scoped by the session's permission rules (see
@@ -49,14 +44,14 @@ func newHeadlessBackend(opts Options) Backend {
 	return &headlessBackend{goos: runtime.GOOS, screenBinary: opts.ScreenBinary, claudeBinary: opts.ClaudeBinary, env: opts.Env}
 }
 
-// hookBinary returns the jig binary a screened dispatch's PreToolUse hook
-// runs: Options.ScreenBinary when set, else this process's own executable.
-// It is resolved per screened dispatch, so an unscreened one never needs it.
+// hookBinary returns the program a screened dispatch's PreToolUse hook runs:
+// Options.ScreenBinary, which a screened dispatch cannot do without. It is
+// resolved per screened dispatch, so an unscreened one never needs it.
 func (b *headlessBackend) hookBinary() (string, error) {
-	if b.screenBinary != "" {
-		return b.screenBinary, nil
+	if b.screenBinary == "" {
+		return "", errors.New("session/headless: a screened dispatch needs the program its PreToolUse hook runs; set Options.ScreenBinary to a built testdata/fixture/screenhook")
 	}
-	return selfJigBinary()
+	return b.screenBinary, nil
 }
 
 // defaultHeadlessTimeout bounds one headless session. It is generous: a
@@ -129,7 +124,7 @@ func (b *headlessBackend) verifyScreen() error {
 		return &axi.Error{
 			Msg:  fmt.Sprintf("the screen hook %q is unusable (%s), so a screened session would run unscreened", bin, why),
 			Code: "SCREEN_UNAVAILABLE",
-			Help: []string{"Check that the jig binary the hook names exists and runs `jig _screen`, then rerun."},
+			Help: []string{"Check that the program the hook names exists and prints the screen's decision when run with `_screen`, then rerun."},
 		}
 	}
 	if ctx.Err() != nil {
@@ -146,25 +141,6 @@ func (b *headlessBackend) verifyScreen() error {
 		return unusable(fmt.Sprintf("it answered %q to a call it must deny", decision.HookSpecificOutput.PermissionDecision))
 	}
 	return nil
-}
-
-// selfJigBinary returns this process's executable when this process is the
-// jig binary. Any other program - a test binary above all - would register
-// itself as the screen hook and rerun itself on every tool call.
-func selfJigBinary() (string, error) {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok || bi.Path != jigMainPackage {
-		self := "a binary without build info"
-		if ok {
-			self = bi.Path
-		}
-		return "", fmt.Errorf("session/headless: the screen hook runs `jig _screen`, but this process is %s, not jig; set Options.ScreenBinary to a built jig binary", self)
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("session/headless: resolve the jig executable for the screen hook: %w", err)
-	}
-	return exe, nil
 }
 
 // headlessTools is a headless session's whole tool surface (`--tools`): the

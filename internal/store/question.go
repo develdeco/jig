@@ -20,12 +20,17 @@ type Question struct {
 	Status string // open|answered
 	Body   string
 	Answer string
+	// Provenance says who the answer speaks for: "person" (a person typed
+	// it), "agent" (an agent relayed what a person said) or "" (an answer
+	// recorded before provenance existed, or no answer yet).
+	Provenance string
 }
 
 type questionFrontMatter struct {
-	ID     string `yaml:"id"`
-	Slice  string `yaml:"slice"`
-	Status string `yaml:"status"`
+	ID         string `yaml:"id"`
+	Slice      string `yaml:"slice"`
+	Status     string `yaml:"status"`
+	Provenance string `yaml:"provenance,omitempty"`
 }
 
 func (s *Store) questionsDir(ticket string) string {
@@ -57,6 +62,33 @@ func (s *Store) NextQuestionID(ticket string) string {
 	return fmt.Sprintf("q-%03d", max+1)
 }
 
+// AddQuestion records a new open question about slice with body, under the
+// next unused id, and returns it. The id is allocated and the file written
+// under one lock on the ticket's questions, so two processes asking at once
+// get two ids rather than one id written twice.
+func (s *Store) AddQuestion(ticket, slice, body string) (Question, error) {
+	release, _, err := Lock(filepath.Join(s.questionsDir(ticket), "next"), 30*time.Second)
+	if err != nil {
+		return Question{}, err
+	}
+	defer release()
+	q := Question{ID: s.NextQuestionID(ticket), Slice: slice, Status: "open", Body: body}
+	if err := s.WriteQuestion(ticket, q); err != nil {
+		return Question{}, err
+	}
+	return q, nil
+}
+
+// ReadQuestion reads the one question qid of ticket. A question that is not
+// there is an error that satisfies os.IsNotExist.
+func (s *Store) ReadQuestion(ticket, qid string) (Question, error) {
+	data, err := readFile(s.questionPath(ticket, qid))
+	if err != nil {
+		return Question{}, err
+	}
+	return parseQuestion(qid, data)
+}
+
 // WriteQuestion writes q as markdown with a YAML front-matter header,
 // appending an "## Answer" section when answered.
 func (s *Store) WriteQuestion(ticket string, q Question) error {
@@ -70,7 +102,7 @@ func (s *Store) WriteQuestion(ticket string, q Question) error {
 }
 
 func renderQuestion(q Question) string {
-	fm := questionFrontMatter{ID: q.ID, Slice: q.Slice, Status: q.Status}
+	fm := questionFrontMatter{ID: q.ID, Slice: q.Slice, Status: q.Status, Provenance: q.Provenance}
 	fmYAML, _ := yaml.Marshal(fm)
 	var b strings.Builder
 	b.WriteString("---\n")
@@ -118,11 +150,12 @@ func parseQuestion(id string, data []byte) (Question, error) {
 	body = strings.TrimRight(body, "\n")
 
 	return Question{
-		ID:     fm.ID,
-		Slice:  fm.Slice,
-		Status: fm.Status,
-		Body:   body,
-		Answer: answer,
+		ID:         fm.ID,
+		Slice:      fm.Slice,
+		Status:     fm.Status,
+		Body:       body,
+		Answer:     answer,
+		Provenance: fm.Provenance,
 	}, nil
 }
 
@@ -142,7 +175,7 @@ func (s *Store) ReadQuestions(ticket string) ([]Question, error) {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".md")
-		data, err := os.ReadFile(s.questionPath(ticket, id))
+		data, err := readFile(s.questionPath(ticket, id))
 		if err != nil {
 			return nil, err
 		}
@@ -159,7 +192,15 @@ func (s *Store) ReadQuestions(ticket string) ([]Question, error) {
 // Answer marks question qid as answered with text and returns its slice so
 // the caller can re-queue it. It fails if the question is not currently
 // open (e.g. already answered or superseded), naming the current status.
+// The answer carries no provenance; AnswerAs records one.
 func (s *Store) Answer(ticket, qid, text string) (slice string, err error) {
+	return s.AnswerAs(ticket, qid, text, "")
+}
+
+// AnswerAs is Answer that also records who the answer speaks for: "person",
+// "agent" or "" for unknown. The provenance rides in the question's file, so
+// whoever reads the answer reads where it came from with it.
+func (s *Store) AnswerAs(ticket, qid, text, provenance string) (slice string, err error) {
 	path := s.questionPath(ticket, qid)
 	release, _, err := Lock(path, 30*time.Second)
 	if err != nil {
@@ -167,7 +208,7 @@ func (s *Store) Answer(ticket, qid, text string) (slice string, err error) {
 	}
 	defer release()
 
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -180,6 +221,7 @@ func (s *Store) Answer(ticket, qid, text string) (slice string, err error) {
 	}
 	q.Status = "answered"
 	q.Answer = text
+	q.Provenance = provenance
 	if err := AtomicWrite(path, []byte(renderQuestion(q))); err != nil {
 		return "", err
 	}
@@ -196,7 +238,7 @@ func (s *Store) Supersede(ticket, qid string) error {
 	}
 	defer release()
 
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		return err
 	}

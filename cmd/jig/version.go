@@ -8,6 +8,17 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 )
 
+// init registers this file's verb with the registry (registry.go).
+func init() {
+	registerVerb(verb{
+		Spec:  cmdSpec{"version", "print jig's version, commit, and go runtime", nil, false},
+		Order: 200,
+		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
+			return cmdVersion(e, args, stdout)
+		},
+	})
+}
+
 // cmdVersion implements `jig version`.
 func cmdVersion(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "version")

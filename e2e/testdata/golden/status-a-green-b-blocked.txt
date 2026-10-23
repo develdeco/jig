@@ -7,4 +7,4 @@ slices[4]{id,state,attempts,blocked_by,question}:
   d,queued,0,-,-
 questions: none
 help[1]:
-  Run `jig run JIG-1` to work the frontier
+  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one

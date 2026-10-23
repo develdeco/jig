@@ -163,7 +163,7 @@ func TestGateFoldsAStillPresentEntryLikeAFullReport(t *testing.T) {
 		}
 		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}}
-	src := NewReviewerGateSource(backend)
+	src := newReviewerGateSource(backend)
 
 	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {

@@ -48,29 +48,17 @@ func TestPublishShipsAnAdoptedBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Publish of an adopted branch: %v", err)
 	}
-	if report.Squash("fixture-repo") != NotSquashed || len(report.Squashed) != 0 {
-		t.Errorf("report: squashed %v (%q), want the branch pushed as it is", report.Squashed, report.Squash("fixture-repo"))
-	}
-
 	head := originRef(t, fx.RepoRemote, "refs/heads/"+branch)
 	if report.Head["fixture-repo"] != head || head == tip {
 		t.Fatalf("origin's %s = %s (report head %q), want it advanced past the author's %s to the head publish pushed", branch, head, report.Head["fixture-repo"], tip)
 	}
-	// Fast-forwarded from the author's tip, jig's fix among what was added, all
-	// under the shas they had.
+	// Fast-forwarded from the author's tip by exactly jig's fix, under the sha
+	// it had: the target moved after the round, and publish merged nothing,
+	// squashed nothing and added no commit of its own.
 	run(t, fx.RepoRemote, "merge-base", "--is-ancestor", tip, head)
 	added := strings.Fields(run(t, fx.RepoRemote, "rev-list", "--first-parent", "--reverse", tip+".."+head))
-	if len(added) != 3 || added[0] != built {
-		t.Fatalf("publish added %v on top of the author's tip, want jig's fix %s, the merge of main, and the memorize commit", added, built)
-	}
-	if subject := run(t, fx.RepoRemote, "log", "-1", "--format=%s", added[1]); !strings.HasPrefix(subject, "Merge ") {
-		t.Errorf("the commit after jig's fix is %q, want the merge of the moved target", subject)
-	}
-	if subject := run(t, fx.RepoRemote, "log", "-1", "--format=%s", head); subject != "docs: memorize "+ticket {
-		t.Errorf("the tip of %s is %q, want the memorize commit", branch, subject)
-	}
-	if out := run(t, fx.RepoRemote, "show", head+":.claude/retrieval/"+ticket+".md"); strings.TrimSpace(out) == "" {
-		t.Errorf("the memorize commit's retrieval notes are empty")
+	if len(added) != 1 || added[0] != built || head != built {
+		t.Fatalf("publish added %v on top of the author's tip, want only jig's fix %s", added, built)
 	}
 	// The stale default-named branch was left alone, and main never moved.
 	if got := originRef(t, fx.RepoRemote, "refs/heads/"+ticketBranch(ticket)); got != mainBefore {
@@ -80,7 +68,7 @@ func TestPublishShipsAnAdoptedBranch(t *testing.T) {
 		t.Errorf("origin's main = %s, want %s: publish never moves the target", got, mainBefore)
 	}
 
-	// The store records the publish, and the squash that did not happen.
+	// The store records the publish, and nothing that reshaped the branch.
 	lines, err := journal.Read(d.Store, ticket)
 	if err != nil {
 		t.Fatalf("journal.Read: %v", err)
@@ -89,16 +77,18 @@ func TestPublishShipsAnAdoptedBranch(t *testing.T) {
 	for _, l := range lines {
 		seen[l.Event] = l
 	}
-	for _, event := range []string{"reconcile", "memorize", "changelog", "squash", "pr", "publish-done"} {
+	for _, event := range []string{"changelog", "pr", "publish-done"} {
 		if _, ok := seen[event]; !ok {
 			t.Errorf("journal has no %q line after the publish", event)
 		}
 	}
-	if l := seen["squash"]; l.Outcome != "none:branch-on-origin" || l.Commit != "" {
-		t.Errorf("journal squash line = %+v, want none:branch-on-origin and no commit", l)
+	for _, event := range []string{"reconcile", "memorize", "squash"} {
+		if l, ok := seen[event]; ok {
+			t.Errorf("journal has %+v: publish reshapes nothing", l)
+		}
 	}
-	if l := seen["pr"]; l.Commit != head {
-		t.Errorf("journal pr line = %+v, want the pushed head %s", l, head)
+	if l := seen["pr"]; l.Commit != head || l.Branch != branch {
+		t.Errorf("journal pr line = %+v, want the pushed head %s of %s", l, head, branch)
 	}
 	if ledger, err := os.ReadFile(filepath.Join(d.Store.Root, "ledger.md")); err != nil || !strings.Contains(string(ledger), "## "+ticket+" - Add retry") {
 		t.Errorf("ledger.md lacks the ticket's entry titled with its recorded title (err %v):\n%s", err, ledger)
@@ -117,8 +107,8 @@ func TestPublishShipsAnAdoptedBranch(t *testing.T) {
 
 // TestPublishShipsAnAdoptedBranchJigBuiltNothingOn: the author's branch, and
 // nothing of jig's on it. There is no build lease on this machine and none is
-// needed - the copy publish ships is origin's - and what publish adds (the
-// memorize commit) is the only thing that moves the branch.
+// needed - the copy publish ships is origin's - and nothing moves the branch:
+// it is on origin already, as the author left it, and publish adds no commit.
 func TestPublishShipsAnAdoptedBranchJigBuiltNothingOn(t *testing.T) {
 	t.Parallel()
 
@@ -136,14 +126,8 @@ func TestPublishShipsAnAdoptedBranchJigBuiltNothingOn(t *testing.T) {
 		t.Fatalf("Publish of an adopted branch jig built nothing on: %v", err)
 	}
 	head := originRef(t, fx.RepoRemote, "refs/heads/"+branch)
-	if report.Head["fixture-repo"] != head || head == tip {
-		t.Fatalf("origin's %s = %s (report head %q), want the memorize commit pushed on the author's %s", branch, head, report.Head["fixture-repo"], tip)
-	}
-	if got := run(t, fx.RepoRemote, "rev-parse", head+"~1"); got != tip {
-		t.Errorf("the commit under the memorize commit is %s, want the author's tip %s", got, tip)
-	}
-	if subject := run(t, fx.RepoRemote, "log", "-1", "--format=%s", head); subject != "docs: memorize "+ticket {
-		t.Errorf("the tip of %s is %q, want the memorize commit", branch, subject)
+	if report.Head["fixture-repo"] != head || head != tip {
+		t.Fatalf("origin's %s = %s (report head %q), want the author's %s, unchanged", branch, head, report.Head["fixture-repo"], tip)
 	}
 	if _, err := os.Stat(buildLeaseOf(t, fx, ticket)); !os.IsNotExist(err) {
 		t.Errorf("a build lease exists at %s (stat err %v): publishing a branch jig built nothing on needs none", buildLeaseOf(t, fx, ticket), err)
@@ -163,7 +147,7 @@ func TestPublishOfAnAdoptedBranchHoldsTheHeadToTheReview(t *testing.T) {
 	d := newDeps(t, fx)
 	newAdoptTicket(t, d, ticket)
 	authorBranch(t, fx, branch)
-	src := NewReviewerGateSource(reviewerBackend(t))
+	src := newReviewerGateSource(reviewerBackend(t))
 	first, err := Gate(d, src, GateOpts{Ticket: ticket, Branch: branch})
 	if err != nil || first.Verdict != "clean" || first.ReviewedSHA["fixture-repo"] == "" {
 		t.Fatalf("Gate --branch: verdict %q, reviewed %q, err %v, want a clean reviewer round", first.Verdict, first.ReviewedSHA["fixture-repo"], err)
@@ -195,11 +179,10 @@ func TestPublishOfAnAdoptedBranchHoldsTheHeadToTheReview(t *testing.T) {
 }
 
 // TestPublishOfAnAdoptedBranchShipsTheReviewedHeadAfterTheTargetMoves: the
-// head held to the review is the one publish would ship before reconcile. The
-// target moves after a clean reviewer round, and reconcile then merges it into
-// the branch on origin, so the head publish pushes is not the reviewed one and
-// is still not a refusal; reading the head after reconcile would refuse every
-// publish once the target had moved.
+// head held to the review is the head publish ships. The target moves after a
+// clean reviewer round, and publish merges nothing, so the branch on origin
+// stays exactly the reviewed head: the move of the target is no refusal and no
+// reason to rewrite anything.
 func TestPublishOfAnAdoptedBranchShipsTheReviewedHeadAfterTheTargetMoves(t *testing.T) {
 	t.Parallel()
 
@@ -208,26 +191,22 @@ func TestPublishOfAnAdoptedBranchShipsTheReviewedHeadAfterTheTargetMoves(t *test
 	d := newDeps(t, fx)
 	newAdoptTicket(t, d, ticket)
 	tip := authorBranch(t, fx, branch)
-	first, err := Gate(d, NewReviewerGateSource(reviewerBackend(t)), GateOpts{Ticket: ticket, Branch: branch})
+	first, err := Gate(d, newReviewerGateSource(reviewerBackend(t)), GateOpts{Ticket: ticket, Branch: branch})
 	if err != nil || first.Verdict != "clean" || first.ReviewedSHA["fixture-repo"] != tip {
 		t.Fatalf("Gate --branch: verdict %q, reviewed %q, err %v, want a clean reviewer round over the author's %s", first.Verdict, first.ReviewedSHA["fixture-repo"], err, tip)
 	}
 	advanceTarget(t, fx)
-	moved := originRef(t, fx.RepoRemote, "refs/heads/main")
 
 	report, err := Publish(d, PublishOpts{Ticket: ticket, Yes: true})
 	if err != nil {
 		t.Fatalf("Publish after a clean reviewer round and a moved target: %v", err)
 	}
-	if report.Tier != "oracles-only" {
-		t.Errorf("revalidation tier = %q, want oracles-only: the target moved after the round", report.Tier)
+	if report.Tier != "none" {
+		t.Errorf("revalidation tier = %q, want none: publish revalidates nothing", report.Tier)
 	}
-	head := originRef(t, fx.RepoRemote, "refs/heads/"+branch)
-	if head == tip {
-		t.Fatalf("origin's %s did not move from the reviewed %s", branch, tip)
+	if head := originRef(t, fx.RepoRemote, "refs/heads/"+branch); head != tip || report.Head["fixture-repo"] != tip {
+		t.Fatalf("origin's %s = %s (report head %q), want the reviewed %s unchanged", branch, head, report.Head["fixture-repo"], tip)
 	}
-	run(t, fx.RepoRemote, "merge-base", "--is-ancestor", tip, head)
-	run(t, fx.RepoRemote, "merge-base", "--is-ancestor", moved, head)
 }
 
 // TestPointAtTicketBranchSaysWhoseCopyItChose: the function the gate and
@@ -324,16 +303,14 @@ func TestPointAtTicketBranchSaysWhoseCopyItChose(t *testing.T) {
 			t.Errorf("copy = %v, want origin's: the build lease's is behind it, so it is not the branch's head", got)
 		}
 	})
-	t.Run("a ticket's own branch a publish squashed", func(t *testing.T) {
+	t.Run("a ticket's own branch a publish pushed", func(t *testing.T) {
 		t.Parallel()
-		d, fx, br, buildDir := own(t)
+		d, fx, br, _ := own(t)
 		if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
 			t.Fatalf("Publish: %v", err)
 		}
-		_, err := pointErr(t, d, fx, fx.Ticket, br, false)
-		wantAxiCode(t, err, "BRANCH_DIVERGED")
-		if !strings.Contains(err.Error(), "the build lease at "+buildDir) {
-			t.Errorf("the refusal %q does not name the build lease to integrate in", err)
+		if got := point(t, d, fx, fx.Ticket, br, false); got != originsCopy {
+			t.Errorf("copy = %v, want origin's: publish pushed the build lease's head as it is, so the two are one", got)
 		}
 	})
 	t.Run("a ticket's own branch pushed on, beside a leftover of an attempt", func(t *testing.T) {
@@ -357,7 +334,7 @@ func TestPointAtTicketBranchSaysWhoseCopyItChose(t *testing.T) {
 			t.Errorf("copy = %v, want origin's: it holds every commit jig built", got)
 		}
 	})
-	t.Run("a ticket's own branch a publish squashed, with no build lease here", func(t *testing.T) {
+	t.Run("a ticket's own branch a publish pushed, with no build lease here", func(t *testing.T) {
 		t.Parallel()
 		d, fx, br, buildDir := own(t)
 		if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
@@ -366,8 +343,9 @@ func TestPointAtTicketBranchSaysWhoseCopyItChose(t *testing.T) {
 		if err := os.RemoveAll(buildDir); err != nil {
 			t.Fatalf("remove the build lease: %v", err)
 		}
-		_, err := pointErr(t, d, fx, fx.Ticket, br, false)
-		wantAxiCode(t, err, "BUILD_LEASE_MISSING")
+		if got := point(t, d, fx, fx.Ticket, br, false); got != originsCopy {
+			t.Errorf("copy = %v, want origin's: it holds every commit jig built, exactly as it built them", got)
+		}
 	})
 	t.Run("an adopted branch jig built nothing on", func(t *testing.T) {
 		t.Parallel()

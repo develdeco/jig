@@ -1,12 +1,18 @@
 // Package verifydeliver implements jig's second pipeline: gate (review +
-// re-verification rounds) and publish (reconcile, re-validate, docs,
-// squash, and route). It shares no in-memory state with package frontier;
-// the store on disk is the only interface between them.
+// re-verification rounds) and publish (the pull request body, the push and the
+// pull request). It shares no in-memory state with package frontier; the
+// store on disk is the only interface between them.
 //
-// The commits Publish makes on the ticket branch (reconcile, memorize,
-// squash) carry the operator's identity, resolved from their mapped clone
-// rather than the pool lease, which has none of their repo-local config.
-// The store's own bookkeeping commits keep jig's identity.
+// jig launches no model here. The work happens in the operator's clone, by an
+// agent jig did not start: a gate round is opened (GatePrepare), read and
+// reported on by a reviewer in a fresh context, and recorded when the
+// reviewer says it is done (GateFinish); publish renders the pull request
+// body (PublishBody), records a pull request an agent opened
+// (PublishRecordPR) or pushes the reviewed head and opens it (Publish). Publish
+// reconciles nothing, squashes nothing and commits nothing on the ticket
+// branch, so the person's branch never diverges from origin's because of it.
+// The one launched reviewer left is the source internal/revieweval measures
+// reviewers with (a Launcher starts its sessions; this package starts none).
 package verifydeliver
 
 import (
@@ -17,10 +23,8 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
-	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -30,7 +34,6 @@ type Deps struct {
 	Store   *store.Store
 	Cfg     project.Config
 	Machine project.MachineProject
-	Rungs   staircase.Config
 	// Home is the jig home root whose pool holds the gate and publish
 	// leases: the binary's env resolves it (cmd/jig/env.go), a test's own
 	// directory in tests.
@@ -38,8 +41,8 @@ type Deps struct {
 	// UserHome is the operator's own home directory, where their local
 	// agent sessions keep transcripts (the binary's env resolves it, as
 	// os.UserHomeDir does; a test's own directory in tests). "" means it could
-	// not be resolved: gate intent inference then has nowhere to look and says
-	// so.
+	// not be resolved: the gate's search for an intent excerpt then has
+	// nowhere to look and says so.
 	UserHome string
 	// Host is the pull-request host Publish finds, opens or updates the pull
 	// request with. nil means the host the shipped repo's own remote names
@@ -54,20 +57,11 @@ type Deps struct {
 	FetchOrigin func(dir string) error
 	// Warn reports a soft-failure warning. nil means the default stderr write.
 	Warn func(format string, args ...any)
-	// GitEnv is the whole process environment Publish's identity resolution
-	// runs its "git var" calls under, in place of this process's own
-	// inherited one. nil means inherit it, as production always does. A test
-	// whose own process has an identity pinned for its own commits
-	// (gittest.PinIdentity) sets its own so that pin cannot shadow a mapped
-	// clone's distinct identity, or its absence, while resolving one for
-	// Publish - without editing the process environment to get it.
-	GitEnv []string
 	// Oracle runs one of the gate's own oracle commands in a lease and
-	// returns its combined output, the way frontier.Deps.Oracle does for a
-	// slice's run at green. nil means the real run, bounded by oracleLimit
+	// returns its combined output, the way a verification runs a slice's
+	// oracle at a commit. nil means the real run, bounded by oracleLimit
 	// with its process tree killed past it; a test that is not about the
-	// gate's oracle run hands one that passes. Publish's revalidation always
-	// runs the real oracles.
+	// gate's oracle run hands one that passes.
 	Oracle func(cmd, dir string) (string, error)
 }
 
@@ -90,44 +84,29 @@ func (d Deps) publishHost(remote string) (repohost.Host, error) {
 }
 
 // primaryRepo returns v0.1's single repo and its target branch (defaulting
-// to "main" when unset).
+// to "main" when unset). A v3 project whose jig.yaml was not found on this
+// machine has no repos (project.LoadConfig): it comes back as the zero repo,
+// which the first thing that needs a clone of it refuses, rather than an
+// index out of range.
 func primaryRepo(cfg project.Config) (project.Repo, string, string) {
+	if len(cfg.Repos) == 0 {
+		return project.Repo{}, "", project.Repo{}.TargetBranch()
+	}
 	repo := cfg.Repos[0]
 	return repo, repo.Name(), repo.TargetBranch()
 }
 
 // operatorClone returns the operator's mapped clone directory for
-// repoName, or "" when none is recorded. identityDir and RoundInput's own
-// OperatorClone (review.go) both resolve through this one lookup, so a
-// mapped clone's absence reads the same way in both: nothing to identify
-// commits with, and nothing intent inference can compare a session's own
-// cwd against.
+// repoName, or "" when none is recorded. The branch copy a round reads and
+// RoundInput's own OperatorClone (review.go) both resolve through this one
+// lookup, so a mapped clone's absence reads the same way in both: no copy to
+// read, and nothing the excerpt search can compare a session's own cwd
+// against.
 func operatorClone(d Deps, repoName string) string {
 	if dir, ok := d.Machine.Clones[repoName]; ok && dir != "" {
 		return dir
 	}
 	return ""
-}
-
-// identityDir returns where Publish resolves the operator's identity for
-// repoName: their mapped clone, or leaseDir when none is recorded.
-func identityDir(d Deps, repoName, leaseDir string) string {
-	if dir := operatorClone(d, repoName); dir != "" {
-		return dir
-	}
-	return leaseDir
-}
-
-// CheckIdentity lets a command fail fast, before any frontier or gate work,
-// when the operator's mapped clone has no git identity. Without a mapped
-// clone it returns nil; Publish still checks its lease before committing.
-func CheckIdentity(d Deps) error {
-	_, repoName, _ := primaryRepo(d.Cfg)
-	dir, ok := d.Machine.Clones[repoName]
-	if !ok || dir == "" {
-		return nil
-	}
-	return gitx.CheckIdentity(dir)
 }
 
 // consolidatedTitle picks the ticket's headline title: the goal of the first

@@ -1,5 +1,7 @@
 # Builders open on Sonnet, and climb on failure
 
+**Superseded in part by [ADR 0032](0032-jig-attaches-to-the-harness.md):** jig chooses no model, effort or rung for anyone, so the staircase is gone from the binary (`internal/staircase` is linked only by the reviewer evaluation), and the `staircase:` and `builder_effort:` keys, though they still load, are read by nothing in it. What stays is the line between an attempt that failed at the work and a question, a flawed brief or a blocked environment: correction counts repeated failure signatures on `oracle` lines for the same purpose. What follows is the record of the design as it stood.
+
 The staircase chose every build attempt's model from three rungs (Haiku 4.5, Sonnet 5, Opus 5). Every attempt opened on Haiku. It climbed one rung when the ticket's cumulative lease diff passed 400 lines or 10 files, and floored to Opus when a changed file matched a declared invariant path. A failed attempt did not climb: a retry ran on the same model that had just failed.
 
 The first ticket measured on this (BS-1, build-speed run, 2026-10-06) paid for that order:

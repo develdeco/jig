@@ -2,8 +2,9 @@
 // corpus: for each case, one or more rounds of a diff applied to a small
 // throwaway repo, a brief, and a gold.yaml of findings a correct review
 // must find and traps it must not flag. It drives the reviewer through the
-// SAME code path Gate itself uses - verifydeliver.NewReviewerGateSource's
-// Round, verifydeliver.ApplyRound and verifydeliver.ClearingAfterTriage,
+// SAME code path Gate used for a launched reviewer - the launched gate
+// source (launch.go, on verifydeliver.NewLaunchedGateSource's Round),
+// verifydeliver.ApplyRound and verifydeliver.ClearingAfterTriage,
 // reading a round's history from the store's own gate/round-N/findings.yaml
 // the way verifydeliver.FoldBefore does, and running the case repo's oracles
 // first (verifydeliver.RunOracleSuite) so the reviewer gets the runs a gate

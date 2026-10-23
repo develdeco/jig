@@ -14,7 +14,9 @@ func TestJigEnvReplacesWhatTheProcessHas(t *testing.T) {
 	t.Parallel()
 	base := []string{"PATH=/bin", "JIG_HOME=/old", "HOME=/real", "=C:=C:\\work", "USERPROFILE=/real"}
 	got := replaceEnv(base, jigEnv{home: "/h", userHome: "/u"}.overrides())
-	want := []string{"PATH=/bin", "=C:=C:\\work", "JIG_HOME=/h", "HOME=/u", "USERPROFILE=/u"}
+	// Moving HOME brings go's build and module caches along (goCaches), so
+	// an oracle the subprocess runs does not build from a cold cache.
+	want := append([]string{"PATH=/bin", "=C:=C:\\work", "JIG_HOME=/h", "HOME=/u", "USERPROFILE=/u"}, goCaches...)
 	if !slices.Equal(got, want) {
 		t.Fatalf("replaceEnv = %q, want %q", got, want)
 	}

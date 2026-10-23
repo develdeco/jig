@@ -38,7 +38,7 @@ func reviewedClean(t *testing.T, fx *fixture.Fixture, d Deps) GateReport {
 // gateReviewedClean runs one reviewer round, which must be clean.
 func gateReviewedClean(t *testing.T, fx *fixture.Fixture, d Deps) GateReport {
 	t.Helper()
-	report, err := Gate(d, NewReviewerGateSource(reviewerBackend(t)), GateOpts{Ticket: fx.Ticket})
+	report, err := Gate(d, newReviewerGateSource(reviewerBackend(t)), GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate: %v", err)
 	}
@@ -157,21 +157,18 @@ func TestPublishShipsTheReviewedHeadAfterTheTargetMoves(t *testing.T) {
 	d := newDeps(t, fx)
 	reviewed := reviewedClean(t, fx, d).ReviewedSHA["fixture-repo"]
 	advanceTarget(t, fx)
-	moved := originRef(t, fx.RepoRemote, "refs/heads/main")
 
 	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 	if err != nil {
 		t.Fatalf("Publish after a clean reviewer round and a moved target: %v", err)
 	}
-	if report.Tier != "oracles-only" {
-		t.Errorf("revalidation tier = %q, want oracles-only: the target moved after the round", report.Tier)
+	if report.Tier != "none" {
+		t.Errorf("revalidation tier = %q, want none: publish revalidates nothing", report.Tier)
 	}
 	branch := ticketBranch(fx.Ticket)
-	head := originRef(t, fx.RepoRemote, "refs/heads/"+branch)
-	if head == "" || head == reviewed {
-		t.Fatalf("origin's %s = %q, want the head publish pushed, which is not the reviewed %s: reconcile put the branch on the moved target", branch, head, reviewed)
+	if head := originRef(t, fx.RepoRemote, "refs/heads/"+branch); head != reviewed || report.Head["fixture-repo"] != reviewed {
+		t.Fatalf("origin's %s = %q (report head %q), want the reviewed head %s: publish reconciles nothing, so the moved target changes nothing it ships", branch, head, report.Head["fixture-repo"], reviewed)
 	}
-	run(t, fx.RepoRemote, "merge-base", "--is-ancestor", moved, head)
 }
 
 // TestCheckReviewedHead: the rule on its own. A head equal to the recorded one

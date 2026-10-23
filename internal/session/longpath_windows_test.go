@@ -89,7 +89,7 @@ func TestHeadlessRunSpellsShortPathsLong(t *testing.T) {
 		Screen:        true,
 		ExtraReadFile: list,
 	}
-	b := &headlessBackend{goos: "windows", screenBinary: builtJigBinary(t)}
+	b := &headlessBackend{goos: "windows", screenBinary: builtScreenHook(t)}
 	if err := b.Run(d); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

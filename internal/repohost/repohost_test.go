@@ -2,11 +2,14 @@ package repohost_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/repohost"
 )
@@ -231,6 +234,99 @@ func TestReadPRBody(t *testing.T) {
 	}
 	if body != "## Demo\n\n- https://github.example/user-attachments/assets/1: it works\n" {
 		t.Errorf("ReadPRBody = %q, want $GH_STUB_BODY's text", body)
+	}
+}
+
+// hostWithEnv builds a GitHub host over the fake gh with exactly the
+// variables vars add to the process's own environment, never editing the
+// environment the test itself runs in.
+func hostWithEnv(t *testing.T, vars ...string) (repohost.Host, string) {
+	t.Helper()
+	stubDir := fixture.GhStub(t)
+	ghBin := filepath.Join(stubDir, "gh")
+	if runtime.GOOS == "windows" {
+		ghBin += ".exe"
+	}
+	logFile := filepath.Join(t.TempDir(), "gh.log")
+	env := append(os.Environ(), "GH_STUB_LOG="+logFile, "GH_STUB_STATE="+filepath.Join(t.TempDir(), "gh.state"))
+	h, err := repohost.NewWithEnv("git@github.com:owner/repo.git", ghBin, append(env, vars...))
+	if err != nil || h == nil {
+		t.Fatalf("repohost.NewWithEnv: (%v, %v)", h, err)
+	}
+	return h, logFile
+}
+
+// TestParsePRURL: a pull request URL on any host reads into the host, the
+// repository and the number; a tab, a query or a fragment after the number
+// is ignored; anything that is not a pull request's URL is PR_URL_INVALID.
+func TestParsePRURL(t *testing.T) {
+	good := []struct {
+		raw  string
+		want repohost.PRRef
+	}{
+		{"https://github.com/owner/repo/pull/7", repohost.PRRef{Host: "github.com", Owner: "owner", Repo: "repo", Number: 7}},
+		{"  https://github.com/owner/repo/pull/7/  ", repohost.PRRef{Host: "github.com", Owner: "owner", Repo: "repo", Number: 7}},
+		{"https://github.com/owner/repo/pull/12/files?w=1#diff", repohost.PRRef{Host: "github.com", Owner: "owner", Repo: "repo", Number: 12}},
+		{"http://ghe.example.test/team/service/pull/301/commits", repohost.PRRef{Host: "ghe.example.test", Owner: "team", Repo: "service", Number: 301}},
+	}
+	for _, c := range good {
+		got, err := repohost.ParsePRURL(c.raw)
+		if err != nil || got != c.want {
+			t.Errorf("ParsePRURL(%q) = (%+v, %v), want %+v", c.raw, got, err, c.want)
+		}
+	}
+	bad := []string{
+		"", "not a url", "ftp://github.com/owner/repo/pull/7", "https:///owner/repo/pull/7",
+		"https://github.com/owner/repo", "https://github.com/owner/repo/issues/7",
+		"https://github.com/owner/repo/pull/", "https://github.com/owner/repo/pull/seven",
+		"https://github.com/owner/repo/pull/0", "https://github.com//repo/pull/7",
+	}
+	for _, raw := range bad {
+		_, err := repohost.ParsePRURL(raw)
+		var ae *axi.Error
+		if !errors.As(err, &ae) || ae.Code != "PR_URL_INVALID" {
+			t.Errorf("ParsePRURL(%q) error = %v, want a PR_URL_INVALID", raw, err)
+		}
+	}
+}
+
+// TestPRHeadReadsTheBranchAndTheCommit: PRHead asks gh for the three fields
+// jig compares and reads them back, the state upper-cased and OPEN when the
+// host does not say.
+func TestPRHeadReadsTheBranchAndTheCommit(t *testing.T) {
+	const prURL = "https://github.example/owner/repo/pull/7"
+	oid := strings.Repeat("a1", 20)
+	h, logFile := hostWithEnv(t, "GH_STUB_HEAD_REF=jig/JIG-1", "GH_STUB_HEAD_OID="+oid)
+
+	got, err := h.PRHead(prURL)
+	if err != nil {
+		t.Fatalf("PRHead: %v", err)
+	}
+	if want := (repohost.PRHead{Branch: "jig/JIG-1", SHA: oid, State: "OPEN"}); got != want {
+		t.Errorf("PRHead = %+v, want %+v", got, want)
+	}
+	lines := readLoggedArgv(t, logFile)
+	if len(lines) != 1 || !anyLineHasPrefix(lines, "pr", "view", prURL, "--repo", "owner/repo", "--json", "headRefName,headRefOid,state") {
+		t.Errorf("logged calls = %v, want exactly `pr view %s --repo owner/repo --json headRefName,headRefOid,state`", lines, prURL)
+	}
+
+	merged, _ := hostWithEnv(t, "GH_STUB_HEAD_REF=jig/JIG-1", "GH_STUB_HEAD_OID="+oid, "GH_STUB_PR_STATE=merged")
+	if got, err := merged.PRHead(prURL); err != nil || got.State != "MERGED" {
+		t.Errorf("PRHead of a merged pull request = (%+v, %v), want state MERGED", got, err)
+	}
+}
+
+// TestPRHeadFailsLoudly: a gh that fails, or a pull request that names no
+// head branch, is an error, never an empty head that matches nothing.
+func TestPRHeadFailsLoudly(t *testing.T) {
+	const prURL = "https://github.example/owner/repo/pull/7"
+	failing, _ := hostWithEnv(t, "GH_STUB_FAIL=pr view")
+	if got, err := failing.PRHead(prURL); err == nil || !strings.Contains(err.Error(), "pr view") {
+		t.Errorf("PRHead over a failing gh = (%+v, %v), want an error naming the call", got, err)
+	}
+	headless, _ := hostWithEnv(t, "GH_STUB_HEAD_OID="+strings.Repeat("b2", 20))
+	if got, err := headless.PRHead(prURL); err == nil || !strings.Contains(err.Error(), "no head branch") {
+		t.Errorf("PRHead of a pull request with no head branch = (%+v, %v), want an error saying so", got, err)
 	}
 }
 

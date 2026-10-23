@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -92,7 +93,7 @@ func TestGenerate(t *testing.T) {
 
 // TestGenerateStoreGitignoreKeepsLockFilesUntracked asserts the fixture
 // store carries the same "*.lock"/".*.tmp" .gitignore as
-// project.InitStandalone, and that a real locked write never shows up in
+// project.Init, and that a real locked write never shows up in
 // `git status` for the (already-committed) fixture store.
 func TestGenerateStoreGitignoreKeepsLockFilesUntracked(t *testing.T) {
 	t.Setenv("JIG_HOME", t.TempDir())
@@ -512,5 +513,64 @@ func TestGenerateNeverUsesTheRealHome(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(fx.Home, "projects.yaml")); err != nil {
 		t.Fatalf("no machine mapping under the fixture's own home %s: %v", fx.Home, err)
+	}
+}
+
+// TestGenerateSecondRepo checks Opts.SecondRepo: the project spans two repos
+// whose remotes are real, both clones are mapped, slice e builds in the second
+// repo's gamma workspace, and the base fixture (no SecondRepo) is unchanged.
+func TestGenerateSecondRepo(t *testing.T) {
+	home := t.TempDir()
+	fx := Generate(t, Opts{SecondRepo: true, Home: home})
+
+	if fx.SecondRepoDir == "" || fx.SecondRepoRemote == "" {
+		t.Fatalf("SecondRepoDir = %q, SecondRepoRemote = %q, want both set", fx.SecondRepoDir, fx.SecondRepoRemote)
+	}
+	if origin, err := gitx.Run(fx.SecondRepoDir, "remote", "get-url", "origin"); err != nil || origin != fx.SecondRepoRemote {
+		t.Fatalf("second repo origin = %q (%v), want %q", origin, err, fx.SecondRepoRemote)
+	}
+	if _, err := gitx.Run(fx.SecondRepoRemote, "rev-parse", "main"); err != nil {
+		t.Fatalf("second repo remote has no main: %v", err)
+	}
+
+	cmd := exec.Command(goBinaryPath(), "test", "./gamma/...")
+	cmd.Dir = fx.SecondRepoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go test ./gamma/... in the second repo: %v\n%s", err, out)
+	}
+
+	cfg, err := project.Load(filepath.Join(fx.StoreDir, "project.yaml"))
+	if err != nil {
+		t.Fatalf("project.Load: %v", err)
+	}
+	if len(cfg.Repos) != 2 || cfg.Repos[0].Remote != fx.RepoRemote || cfg.Repos[1].Remote != fx.SecondRepoRemote {
+		t.Fatalf("project.yaml repos = %+v, want the first then the second repo's remote", cfg.Repos)
+	}
+	if cfg.Repos[0].Name() != "fixture-repo" || cfg.Repos[1].Name() != "second-repo" {
+		t.Fatalf("repo names = %q, %q, want fixture-repo, second-repo", cfg.Repos[0].Name(), cfg.Repos[1].Name())
+	}
+
+	machine, err := project.LoadMachine(home)
+	if err != nil {
+		t.Fatalf("LoadMachine: %v", err)
+	}
+	if got := machine["fixture"].Clones; got["fixture-repo"] != fx.RepoDir || got["second-repo"] != fx.SecondRepoDir {
+		t.Fatalf("mapped clones = %v, want both repos", got)
+	}
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	slices, err := st.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadSlices: %v", err)
+	}
+	if len(slices) != 5 {
+		t.Fatalf("got %d slices, want the four base slices and e", len(slices))
+	}
+	e := slices[4]
+	if e.ID != "e" || e.Workspace != "gamma" || len(e.BlockedBy) != 0 || len(e.FromBrief) != 1 || e.FromBrief[0] == "" {
+		t.Fatalf("slice e = %+v, want a gamma slice with no blockers and one brief hash", e)
 	}
 }

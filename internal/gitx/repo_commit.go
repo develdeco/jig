@@ -47,11 +47,22 @@ import (
 // readPatterns), or names that core.ignoreCase or core.precomposeUnicode
 // would match differently.
 func (r *Repo) CommitAll(msg, name, email string) (bool, error) {
-	author, err := signature("AUTHOR", name, email)
+	return r.CommitAllAs(msg, func() (Identity, error) {
+		return Identity{Name: name, Email: email}, nil
+	})
+}
+
+// CommitAllAs is CommitAll for a caller that has to look its identity up: who
+// is called once there is something to commit, and not at all when there is
+// none, so a lookup that costs a process, or can fail, is paid only by a
+// commit that needs it. When who fails, so does CommitAllAs, having changed
+// nothing a reader sees: the objects it wrote stay unreferenced.
+func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, error) {
+	authorTime, err := signatureTime("AUTHOR")
 	if err != nil {
 		return false, err
 	}
-	committer, err := signature("COMMITTER", name, email)
+	committerTime, err := signatureTime("COMMITTER")
 	if err != nil {
 		return false, err
 	}
@@ -140,9 +151,13 @@ func (r *Repo) CommitAll(msg, name, email string) (bool, error) {
 		}
 		return false, nil
 	}
+	id, err := who()
+	if err != nil {
+		return false, err
+	}
 	c := &object.Commit{
-		Author:    *author,
-		Committer: *committer,
+		Author:    *signature("AUTHOR", id, authorTime),
+		Committer: *signature("COMMITTER", id, committerTime),
 		Message:   strings.TrimRight(msg, "\n") + "\n",
 		TreeHash:  tree,
 	}
@@ -639,25 +654,32 @@ func persistTree(repo *git.Repository, node *treeNode, known plumbing.Hash) erro
 	return err
 }
 
+// signatureTime is the git program's date for role ("AUTHOR" or
+// "COMMITTER"): GIT_<role>_DATE when set, else now. A pinned date that does
+// not parse is ErrUseCLI, which CommitAllAs reports before it changes
+// anything.
+func signatureTime(role string) (time.Time, error) {
+	if v := os.Getenv("GIT_" + role + "_DATE"); v != "" {
+		t, ok := parseGitDate(v)
+		if !ok {
+			return time.Time{}, ErrUseCLI
+		}
+		return t, nil
+	}
+	return time.Now(), nil
+}
+
 // signature is the git program's identity for role ("AUTHOR" or
-// "COMMITTER"): GIT_<role>_NAME, _EMAIL and _DATE when set, else name,
-// email and now.
-func signature(role, name, email string) (*object.Signature, error) {
+// "COMMITTER"): GIT_<role>_NAME and _EMAIL when set, else id, stamped when.
+func signature(role string, id Identity, when time.Time) *object.Signature {
+	name, email := id.Name, id.Email
 	if v := os.Getenv("GIT_" + role + "_NAME"); v != "" {
 		name = v
 	}
 	if v := os.Getenv("GIT_" + role + "_EMAIL"); v != "" {
 		email = v
 	}
-	when := time.Now()
-	if v := os.Getenv("GIT_" + role + "_DATE"); v != "" {
-		t, ok := parseGitDate(v)
-		if !ok {
-			return nil, ErrUseCLI
-		}
-		when = t
-	}
-	return &object.Signature{Name: name, Email: email, When: when}, nil
+	return &object.Signature{Name: name, Email: email, When: when}
 }
 
 // parseGitDate parses the date forms jig and its tests pin: RFC 3339, and

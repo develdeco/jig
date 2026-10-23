@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/develdeco/jig/internal/session"
 )
 
 // TestLeaveOutHostPathsNamesDirectoriesByRole: a real operating system error
@@ -121,9 +119,10 @@ func TestLeaveOutHostPathsNamesTheGoQuotedSpelling(t *testing.T) {
 // TestContainsHostPathMatchesEveryHandedSpelling: containsHostPath is the
 // render-time check behind the owner's decision on r1-f13 (DECISIONS.md),
 // and so - unlike leaveOutHostPaths, which composes jig's own reasons - it
-// must also catch a directory's WSL mount spelling, the one herdr hands a
-// session on Windows: that is a spelling jig handed out, not jig's own
-// text, so a session's caption or summary can repeat it back. A path that
+// must also catch a directory's WSL mount spelling, the one a session that
+// runs in WSL on a Windows checkout sees: that is a spelling of the
+// session's, not jig's own text, so its caption or summary can repeat it
+// back. A path that
 // is not one of the known directories, in any spelling, is not matched:
 // comparison is exact strings only, never a pattern.
 func TestContainsHostPathMatchesEveryHandedSpelling(t *testing.T) {
@@ -131,7 +130,7 @@ func TestContainsHostPathMatchesEveryHandedSpelling(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
 	dirs := []hostDir{{home, "<jig home>"}}
-	wsl := session.WSLPath(home)
+	wsl := wslMountPath(home)
 
 	cases := []struct {
 		name string
@@ -150,5 +149,23 @@ func TestContainsHostPathMatchesEveryHandedSpelling(t *testing.T) {
 				t.Errorf("containsHostPath(%q) = %v, want %v", c.text, got, c.want)
 			}
 		})
+	}
+}
+
+// TestWSLMountPath: the WSL mount spelling of a Windows-drive path lowercases
+// the drive, drops the colon and flips the slashes; a path off a drive keeps
+// its shape.
+func TestWSLMountPath(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ in, want string }{
+		{`C:\Users\x`, "/mnt/c/Users/x"},
+		{`D:\work\repos\jig`, "/mnt/d/work/repos/jig"},
+		{`c:\already\lower`, "/mnt/c/already/lower"},
+		{"/mnt/c/already/posix", "/mnt/c/already/posix"},
+	}
+	for _, c := range cases {
+		if got := wslMountPath(c.in); got != c.want {
+			t.Errorf("wslMountPath(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

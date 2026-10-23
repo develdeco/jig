@@ -74,7 +74,9 @@ func TestTicketRecordRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadTicket: %v", err)
 	}
-	want := Ticket{Title: "Fix the thing", Body: "Line one.\nLine two.", Branch: "fix/T-1", BlockedBy: deps}
+	// Recording the branch also fixed the slug the title gives (the ticket
+	// was minted without one).
+	want := Ticket{Title: "Fix the thing", Body: "Line one.\nLine two.", Slug: "fix-the-thing", Branch: "fix/T-1", BlockedBy: deps}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ReadTicket = %+v, want %+v", got, want)
 	}
@@ -295,9 +297,10 @@ func TestTicketMutateRefusesUnreadableRecord(t *testing.T) {
 	}
 }
 
-// TestTicketBranchDefault covers a ticket with no ticket.yaml at all, and
-// one whose ticket.yaml exists but records no branch (title/blocked_by
-// only): both resolve to the conventional "jig/<ticket>".
+// TestTicketBranchDefault covers a ticket with no ticket.yaml at all, which
+// has no title to name a branch for and keeps the conventional "jig/<ticket>",
+// and one whose ticket.yaml exists but records no branch (title/blocked_by
+// only), which resolves to "<ticket>-<slug of its title>".
 func TestTicketBranchDefault(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
 
@@ -316,13 +319,13 @@ func TestTicketBranchDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TicketBranch with a title but no branch: %v", err)
 	}
-	if got != "jig/T-2" {
-		t.Fatalf("TicketBranch = %q, want %q", got, "jig/T-2")
+	if got != "T-2-fix-the-thing" {
+		t.Fatalf("TicketBranch = %q, want %q", got, "T-2-fix-the-thing")
 	}
 }
 
 // TestTicketBranchRecorded covers a ticket with a recorded branch: it wins
-// over the "jig/<ticket>" default.
+// over the "<ticket>-<slug>" default.
 func TestTicketBranchRecorded(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
 	if err := st.WriteTicketBranch("T-1", "feature/custom"); err != nil {

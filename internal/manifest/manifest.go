@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -37,6 +38,25 @@ type Manifest struct {
 	Oracles    map[string]string   `yaml:"oracles"`
 	Envs       map[string]EnvClass `yaml:"envs"`
 	Invariants []string            `yaml:"invariants"`
+	// Timeout is the longest one oracle run of this repo may take, declared
+	// as a duration with a unit ("45m", "1h30m"); zero means it declared none
+	// (OracleLimit gives the default). It is a wedge guard, never a cost
+	// cap: a run past it is killed and counts as failed.
+	Timeout time.Duration `yaml:"timeout"`
+}
+
+// DefaultOracleLimit is how long one oracle run may take when the manifest
+// declares no timeout: the same bound a headless session's shell gives one
+// command (ADR 0018), so an oracle that fits a builder's shell fits here too.
+const DefaultOracleLimit = 30 * time.Minute
+
+// OracleLimit is the longest one oracle run may take: the declared timeout,
+// or DefaultOracleLimit when the manifest declares none.
+func (m Manifest) OracleLimit() time.Duration {
+	if m.Timeout > 0 {
+		return m.Timeout
+	}
+	return DefaultOracleLimit
 }
 
 // declaredPath is where a repo may override detection.
@@ -99,6 +119,10 @@ func Resolve(repoDir string) (Manifest, error) {
 		}
 		m.Invariants = declared.Invariants
 	}
+	if declared.Timeout < 0 {
+		return Manifest{}, fmt.Errorf("manifest: timeout %s is negative", declared.Timeout)
+	}
+	m.Timeout = declared.Timeout
 
 	return m, nil
 }

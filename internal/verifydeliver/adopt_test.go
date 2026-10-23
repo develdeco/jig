@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
@@ -1104,53 +1104,49 @@ func TestGateInfersAnAdoptedTicketsIntent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session.New: %v", err)
 	}
-	var (
-		req        IntentInferRequest
-		summarized int
-	)
+	var requests []ReviewRequest
 	wrapped := stubBackend{run: func(sd session.Dispatch) error {
-		if sd.Slice == "intent" {
-			summarized++
-			data, rerr := os.ReadFile(sd.SliceJSON)
-			if rerr != nil {
-				t.Errorf("read the summarizer's request: %v", rerr)
-			} else if jerr := json.Unmarshal(data, &req); jerr != nil {
-				t.Errorf("parse the summarizer's request: %v", jerr)
-			}
+		if sd.Slice != "gate" {
+			t.Errorf("a %q session was dispatched, but only the reviewer is", sd.Slice)
 		}
+		data, rerr := os.ReadFile(sd.SliceJSON)
+		if rerr != nil {
+			t.Errorf("read the reviewer's request: %v", rerr)
+		}
+		var req ReviewRequest
+		if jerr := json.Unmarshal(data, &req); jerr != nil {
+			t.Errorf("parse the reviewer's request: %v", jerr)
+		}
+		requests = append(requests, req)
 		return backend.Run(sd)
 	}}
 
-	report, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: ticket, Branch: branch})
+	report, err := Gate(d, newReviewerGateSource(wrapped), GateOpts{Ticket: ticket, Branch: branch})
 	if err != nil {
 		t.Fatalf("Gate --branch on a brief-less ticket: %v", err)
 	}
 	if report.Branch != branch {
 		t.Fatalf("report.Branch = %q, want the adopted %q", report.Branch, branch)
 	}
-	if report.Intent.Source != IntentSourceInferred || report.IntentNote != "" {
-		t.Fatalf("intent = %q (note %q), want %q: the author's own session matches the adopted branch's diff", report.Intent.Source, report.IntentNote, IntentSourceInferred)
+	// The author's own session matches the adopted branch's diff (against its
+	// merge base, without main's own change), so the reviewer is pointed at its
+	// excerpt. No intent is stated or recorded: the excerpt is a hint.
+	if report.Intent.Source != IntentSourceNone || report.IntentNote != "" {
+		t.Fatalf("intent = %q (note %q), want none and no note: the author's own session matches the adopted branch's diff", report.Intent.Source, report.IntentNote)
 	}
-	if want := []string{"alpha/alpha.go"}; !slices.Equal(req.DiffFiles, want) {
-		t.Fatalf("the summarizer was given diff files %v, want %v: the adopted branch against its merge base, without main's own change", req.DiffFiles, want)
+	want := filepath.Join(home.IntentExcerptDir(fx.Home), ticket, "session-author.md")
+	if len(requests) != 1 || requests[0].IntentExcerpt != want {
+		t.Fatalf("the reviewer's requests = %+v, want one pointing at the excerpt %s", requests, want)
 	}
-	in, ok, err := d.Store.ReadIntent(ticket)
-	if err != nil || !ok {
-		t.Fatalf("ReadIntent: ok=%v err=%v", ok, err)
-	}
-	if in.Source != IntentSourceInferred || in.Session != "session-author" || strings.TrimSpace(in.Text) == "" {
-		t.Fatalf("intent.md = %+v, want the summary inferred from session-author", in)
+	if _, ok, err := d.Store.ReadIntent(ticket); err != nil || ok {
+		t.Fatalf("ReadIntent: ok=%v err=%v, want no intent.md", ok, err)
 	}
 	if got, err := d.Store.TicketBranch(ticket, "main"); err != nil || got != branch {
 		t.Fatalf("TicketBranch = %q (err %v), want the adopted %q", got, err, branch)
 	}
 
-	// A later round finds intent.md and infers nothing again.
-	again, err := Gate(d, NewReviewerGateSource(wrapped), GateOpts{Ticket: ticket})
-	if err != nil {
+	// A later round points at the excerpt again.
+	if _, err := Gate(d, newReviewerGateSource(wrapped), GateOpts{Ticket: ticket}); err != nil {
 		t.Fatalf("Gate round 2: %v", err)
-	}
-	if again.Intent.Source != IntentSourceInferred || summarized != 1 {
-		t.Fatalf("round 2 intent = %q after %d summarizer dispatch(es), want the recorded inferred intent read, not inferred again", again.Intent.Source, summarized)
 	}
 }

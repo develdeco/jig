@@ -148,7 +148,7 @@ func TestRenderStatusFixBudgetLineReached(t *testing.T) {
 // the outstanding_asks table's own "why" column and the help line's
 // budget-aware wording together: a parked finding's row ends in "budget",
 // and with the frontier green the help line says the budget is reached
-// and names `jig gate <ticket>` at a terminal, rather than the generic
+// and names `jig triage <ticket>` and `jig gate <ticket>`, rather than the generic
 // "decide the outstanding asks" wording an ordinary ask gets. Round 1 is
 // the one that used the ticket's whole (1-round) budget; round 2's own
 // finding is the one the now-reached budget parks.
@@ -180,7 +180,7 @@ func TestRenderStatusOutstandingAsksWhyColumnAndParkedHelpLine(t *testing.T) {
 	}
 
 	wantHelp := "help[1]:\n" +
-		"  Run `jig gate JIG-1` at a terminal to keep or dismiss the parked finding(s): the fix budget is reached (1 of 1)\n"
+		"  Run `jig triage JIG-1 <id> keep|dismiss` to keep or dismiss the parked finding(s), then `jig gate JIG-1` to apply the decisions: the fix budget is reached (1 of 1)\n"
 	if !strings.HasSuffix(got, wantHelp) {
 		t.Fatalf("status help does not name the budget-reached remedy:\n--- got ---\n%s--- want suffix ---\n%s", got, wantHelp)
 	}

@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "\"C:/tools/jig.exe\" observe --harness copilot",
+        "powershell": "& \"C:/tools/jig.exe\" observe --harness copilot",
+        "timeoutSec": 30,
+        "comment": "jig"
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "\"C:/tools/jig.exe\" observe --harness copilot",
+        "powershell": "& \"C:/tools/jig.exe\" observe --harness copilot",
+        "timeoutSec": 30,
+        "comment": "jig"
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "\"C:/tools/jig.exe\" observe --harness copilot",
+        "powershell": "& \"C:/tools/jig.exe\" observe --harness copilot",
+        "timeoutSec": 30,
+        "comment": "jig"
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "\"C:/tools/jig.exe\" observe --harness copilot",
+        "powershell": "& \"C:/tools/jig.exe\" observe --harness copilot",
+        "timeoutSec": 30,
+        "comment": "jig"
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "\"C:/tools/jig.exe\" observe --harness copilot",
+        "powershell": "& \"C:/tools/jig.exe\" observe --harness copilot",
+        "timeoutSec": 30,
+        "comment": "jig"
+      }
+    ]
+  }
+}

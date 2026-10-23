@@ -64,6 +64,11 @@ type Fixture struct {
 	ScenarioDir string // materialized scenario tree for the fake session backend
 	Ticket      string // "JIG-1"
 	Home        string // jig home root the machine mapping was written under
+
+	// SecondRepoDir and SecondRepoRemote are the second repo's working clone
+	// and bare remote; both are "" unless Opts.SecondRepo.
+	SecondRepoDir    string
+	SecondRepoRemote string
 }
 
 // Opts configures a Build or Generate call.
@@ -81,6 +86,12 @@ type Opts struct {
 	// Home is the jig home root the per-machine project mapping is written
 	// under. "" means home.Root() (JIG_HOME, else the real home directory).
 	Home string
+	// SecondRepo makes the project span two repos. The second, "second-repo"
+	// (Fixture.SecondRepoDir, remote SecondRepoRemote), declares one
+	// workspace, gamma, and project.yaml lists it after the first. Ticket
+	// JIG-1 gains a fifth slice, e, that builds in gamma and waits on no
+	// other, and the machine mapping clones both repos.
+	SecondRepo bool
 }
 
 // identityEnv pins the git author/committer identity and date used for every
@@ -182,8 +193,32 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 		return nil, err
 	}
 
+	var secondDir, secondRemote string
+	if opts.SecondRepo {
+		secondDir = filepath.Join(dir, "second-repo")
+		if err := copyTree(filepath.Join(testdataDir, "second-repo"), secondDir); err != nil {
+			return nil, err
+		}
+		if err := rewriteJigYAML(secondDir, envtoolBin, stateFile, false); err != nil {
+			return nil, err
+		}
+		if err := initGitRepo(secondDir); err != nil {
+			return nil, err
+		}
+		if err := commitAll(secondDir, "fixture: initial gamma workspace"); err != nil {
+			return nil, err
+		}
+		secondRemote = filepath.Join(dir, "second-repo.git")
+		if err := runGit(dir, "clone", "--bare", secondDir, secondRemote); err != nil {
+			return nil, err
+		}
+		if err := runGit(secondDir, "remote", "add", "origin", secondRemote); err != nil {
+			return nil, err
+		}
+	}
+
 	storeDir := filepath.Join(dir, "store")
-	if err := buildStore(storeDir, testdataDir, repoRemote); err != nil {
+	if err := buildStore(storeDir, testdataDir, repoRemote, secondRemote); err != nil {
 		return nil, err
 	}
 	if err := initGitRepo(storeDir); err != nil {
@@ -220,19 +255,25 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 			return nil, fmt.Errorf("fixture: resolve jig home: %w", err)
 		}
 	}
-	if _, err := project.InitProject(jigHome, storeDir, map[string]string{"fixture-repo": repoDir}); err != nil {
+	clones := map[string]string{"fixture-repo": repoDir}
+	if secondDir != "" {
+		clones["second-repo"] = secondDir
+	}
+	if _, err := project.InitProject(jigHome, storeDir, clones); err != nil {
 		return nil, fmt.Errorf("fixture: init project machine mapping: %w", err)
 	}
 
 	return &Fixture{
-		Dir:         dir,
-		RepoDir:     repoDir,
-		RepoRemote:  repoRemote,
-		StoreDir:    storeDir,
-		StoreRemote: storeRemote,
-		ScenarioDir: scenarioDir,
-		Ticket:      Ticket,
-		Home:        jigHome,
+		Dir:              dir,
+		RepoDir:          repoDir,
+		RepoRemote:       repoRemote,
+		StoreDir:         storeDir,
+		StoreRemote:      storeRemote,
+		ScenarioDir:      scenarioDir,
+		Ticket:           Ticket,
+		Home:             jigHome,
+		SecondRepoDir:    secondDir,
+		SecondRepoRemote: secondRemote,
 	}, nil
 }
 
@@ -296,19 +337,23 @@ func clearDirContents(dir string) error {
 
 // buildStore writes the store's project.yaml, ledger.md, platform/ dir, and
 // the JIG-1 ticket folder (brief.md + slices.yaml with @HASH placeholders
-// resolved against the brief's own section hashes).
-func buildStore(storeDir, testdataDir, repoRemote string) error {
+// resolved against the brief's own section hashes). A non-empty secondRemote
+// adds the second repo to project.yaml and slice e to slices.yaml.
+func buildStore(storeDir, testdataDir, repoRemote, secondRemote string) error {
 	if err := os.MkdirAll(storeDir, 0o755); err != nil {
 		return fmt.Errorf("fixture: create store dir: %w", err)
 	}
 
 	cfg := storeProjectYAML{
-		SchemaVersion: project.CurrentSchemaVersion,
+		SchemaVersion: fixtureSchemaVersion,
 		Name:          "fixture",
 		Keys:          map[string]string{"JIG": "everything in fixture"},
 		Trackers:      []string{},
 		Repos:         []project.Repo{{Remote: repoRemote, Target: "main"}},
 		Platform:      "platform/",
+	}
+	if secondRemote != "" {
+		cfg.Repos = append(cfg.Repos, project.Repo{Remote: secondRemote, Target: "main"})
 	}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
@@ -323,7 +368,7 @@ func buildStore(storeDir, testdataDir, repoRemote string) error {
 	if err := os.MkdirAll(filepath.Join(storeDir, "platform"), 0o755); err != nil {
 		return fmt.Errorf("fixture: create platform dir: %w", err)
 	}
-	// Mirrors project.InitStandalone's store-root .gitignore: store.Lock's
+	// Mirrors project.Init's store-root .gitignore: store.Lock's
 	// sidecar "*.lock" files and store.AtomicWrite's ".*.tmp" scratch files
 	// must never show up as untracked/dirty in a fixture store either.
 	if err := writeFile(filepath.Join(storeDir, ".gitignore"), []byte("*.lock\n.*.tmp\n")); err != nil {
@@ -349,6 +394,9 @@ func buildStore(storeDir, testdataDir, repoRemote string) error {
 	if err != nil {
 		return err
 	}
+	if secondRemote != "" {
+		slices = append(slices, secondRepoSlice(hashes["Slice C - greeting decision"])...)
+	}
 
 	ticketDir := filepath.Join(storeDir, "tickets", Ticket)
 	if err := os.MkdirAll(ticketDir, 0o755); err != nil {
@@ -362,6 +410,26 @@ func buildStore(storeDir, testdataDir, repoRemote string) error {
 	}
 	return nil
 }
+
+// secondRepoSlice is slice e, the one slice that builds in the second repo's
+// gamma workspace and waits on nothing, as slices.yaml text to append to the
+// base slices. fromBrief is the hash of the brief section it is traced to.
+func secondRepoSlice(fromBrief string) []byte {
+	return []byte(fmt.Sprintf(`  - id: e
+    workspace: gamma
+    goal: Give the second repo's Shout its own caller.
+    oracle: test
+    blocked_by: []
+    from_brief: [%q]
+`, fromBrief))
+}
+
+// fixtureSchemaVersion is the store schema the fixture is written at: 2, the
+// layout with a project.yaml, whatever project.CurrentSchemaVersion is. A v2
+// store opens unchanged under a jig whose current schema is 3, and the
+// fixture is the standing proof of it: the suite's stores stay v2, and the
+// tests of v3 make their stores with `jig init`.
+const fixtureSchemaVersion = 2
 
 // storeProjectYAML is the on-disk shape Build writes for the fixture
 // store's project.yaml; it mirrors project.Config's declared wire format at

@@ -1,33 +1,46 @@
-// Package project resolves jig's project configuration: the store's
-// project.yaml, the per-machine clone mapping, and the two init flows
-// (standalone and store+clones).
+// Package project resolves jig's project configuration: the store's config
+// (store.yaml of a v3 store, project.yaml of a v2 one), the jig.yaml marker in
+// the project's repo, the per-machine clone mapping, and `jig init`, `jig repos`
+// and `jig share`.
 package project
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
+	"github.com/develdeco/jig/internal/store"
 )
 
-// CurrentSchemaVersion is the project.yaml schema_version this jig version
-// writes (jig init, internal/fixture) and expects to read. jig store migrate
-// is the one command that opens an older store anyway, to rewrite it onto
-// this version; CheckSchemaVersion's allowOlder parameter is how it says so.
-const CurrentSchemaVersion = 2
+// The store schema versions this jig version works with. A store older than
+// MinSchemaVersion is refused by every command except `jig store migrate`
+// (CheckSchemaVersion's allowOlder parameter is how it says so), which moves
+// a store up one version at a time. A store at any version from
+// MinSchemaVersion to CurrentSchemaVersion opens as it is: a v2 store keeps its
+// project.yaml, a v3 store has store.yaml and a jig.yaml marker in the
+// project's repo instead (LoadStoreConfig, LoadConfig).
+const (
+	MinSchemaVersion     = 2
+	CurrentSchemaVersion = 3
+)
 
 // Repo is one repository the project spans.
 type Repo struct {
 	Remote string `yaml:"remote"`
 	Target string `yaml:"target,omitempty"`
+	// Label is the repo's name when it is not the basename of its remote: a
+	// v3 project's jig.yaml names its repos (WithMarkerRepos), and the name
+	// has to stay the same on every checkout, whatever the remote says.
+	Label string `yaml:"name,omitempty"`
 }
 
 // TargetBranch returns the branch a ticket's work lands on: Target, or
@@ -40,9 +53,13 @@ func (r Repo) TargetBranch() string {
 	return r.Target
 }
 
-// Name returns the repo's short name: the basename of Remote with a
-// trailing ".git" removed. Works for both URLs and local filesystem paths.
+// Name returns the repo's short name: Label when it has one, else the basename
+// of Remote with a trailing ".git" removed. Works for both URLs and local
+// filesystem paths.
 func (r Repo) Name() string {
+	if r.Label != "" {
+		return r.Label
+	}
 	s := strings.TrimSuffix(r.Remote, "/")
 	s = strings.TrimSuffix(s, "\\")
 	// A remote may be a Windows drive path recorded on another machine, so
@@ -148,14 +165,19 @@ func DefaultGateConfig() GateConfig {
 	}
 }
 
-// Config is a store's project.yaml.
+// Config is a store's configuration: its project.yaml (v2) or store.yaml (v3).
+// A v3 store.yaml has no name and no repos: they are the project's, and come
+// from its jig.yaml marker (WithMarkerRepos).
 type Config struct {
 	SchemaVersion int
 	Name          string
 	Repos         []Repo
-	Platform      string
-	Staircase     []string
-	Context       map[string]any
+	// Projects are the names of the projects a v3 store serves
+	// (store.yaml's projects:); empty for a v2 store.
+	Projects  []string
+	Platform  string
+	Staircase []string
+	Context   map[string]any
 	// Gate is the optional gate: block configuring the gate's fix loop and
 	// risk floor. An absent block is nil; a block with absent keys gains
 	// defaults.
@@ -171,6 +193,12 @@ type Config struct {
 	// written as keys:. An id is <key>-<n>; ResolveKey is where every caller
 	// that mints or reads a key: resolves one against this.
 	Keys map[string]string
+	// BranchesFrom is the tracker whose ids lead the project's branch names:
+	// the jig.yaml marker's branches: from:, empty when the marker (or no
+	// marker) says none, which names GitHub's issue numbers the lead of a
+	// mirrored ticket's branch. A v2 store has no marker, so it is always
+	// empty there. It is not read from the store's own config.
+	BranchesFrom string
 }
 
 // GitHubTracker is a project.yaml trackers: list's github: entry: the repo
@@ -190,6 +218,7 @@ type GitHubTracker struct {
 type configRaw struct {
 	SchemaVersion int            `yaml:"schema_version"`
 	Name          string         `yaml:"name"`
+	Projects      []string       `yaml:"projects"`
 	TicketFormat  yaml.Node      `yaml:"ticket_format"`
 	Keys          yaml.Node      `yaml:"keys"`
 	Tracker       yaml.Node      `yaml:"tracker"`
@@ -222,6 +251,10 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	}
 	c.SchemaVersion = raw.SchemaVersion
 	c.Name = raw.Name
+	c.Projects = raw.Projects
+	if c.Name == "" && len(raw.Projects) == 1 {
+		c.Name = raw.Projects[0]
+	}
 	c.Repos = raw.Repos
 	c.Platform = raw.Platform
 	c.Staircase = raw.Staircase
@@ -237,7 +270,7 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 		}
 	}
 
-	if raw.SchemaVersion >= CurrentSchemaVersion {
+	if raw.SchemaVersion >= MinSchemaVersion {
 		if raw.TicketFormat.Kind != 0 {
 			return &axi.Error{
 				Msg:  fmt.Sprintf("project.yaml declares schema_version %d and ticket_format, which that schema no longer supports", raw.SchemaVersion),
@@ -508,20 +541,9 @@ func (c Config) ResolvedGateConfig() GateConfig {
 	return resolved
 }
 
-// projectYAML is the on-disk shape written by InitStandalone, at
-// CurrentSchemaVersion: Trackers always marshals as "trackers: []" (a nil
-// slice, no omitempty), and no tracker: or ticket_format key is ever
-// written.
-type projectYAML struct {
-	SchemaVersion int               `yaml:"schema_version"`
-	Name          string            `yaml:"name"`
-	Keys          map[string]string `yaml:"keys"`
-	Trackers      []string          `yaml:"trackers"`
-	Repos         []Repo            `yaml:"repos"`
-	Platform      string            `yaml:"platform"`
-}
-
-// Load reads and parses a project.yaml file.
+// Load reads and parses one config file: a project.yaml or a store.yaml. A
+// caller that has a store rather than a file reads it with LoadStoreConfig,
+// which knows which of the two the store has.
 func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -529,31 +551,53 @@ func Load(path string) (Config, error) {
 	}
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		if filepath.Base(path) == StoreFile {
+			err = renameFileInError(err, LegacyStoreFile, StoreFile)
+		}
 		return Config{}, fmt.Errorf("project: parse %s: %w", path, err)
 	}
 	return cfg, nil
 }
 
-// CheckSchemaVersion refuses a schema_version CurrentSchemaVersion cannot
-// work with: newer, always (jig itself would have to be upgraded to
-// understand it), and older than CurrentSchemaVersion unless allowOlder.
-// Every command resolving a store (cmd/jig's resolveStore, the one place
-// every command loads project.yaml) calls this with allowOlder false; `jig
-// store migrate` is the one command that passes true, since migrating a v1
-// store to CurrentSchemaVersion is the whole point of opening it. `jig help`
-// and `jig version` never resolve a store at all, so neither check ever runs
-// for them.
+// renameFileInError rewrites the file name a config validation error names
+// (Config decodes both layouts and its refusals say project.yaml), so a v3
+// store's person is told about store.yaml.
+func renameFileInError(err error, from, to string) error {
+	var ae *axi.Error
+	if !errors.As(err, &ae) {
+		return err
+	}
+	out := *ae
+	out.Msg = strings.ReplaceAll(ae.Msg, from, to)
+	out.Help = make([]string, len(ae.Help))
+	for i, h := range ae.Help {
+		out.Help[i] = strings.ReplaceAll(h, from, to)
+	}
+	return &out
+}
+
+// CheckSchemaVersion refuses a schema_version this jig cannot work with:
+// newer than CurrentSchemaVersion, always (jig itself would have to be
+// upgraded to understand it), and older than MinSchemaVersion unless
+// allowOlder. A schema_version from MinSchemaVersion to CurrentSchemaVersion
+// passes: a v2 store opens as it is, and `jig store migrate` takes it to v3
+// when the person chooses. Every command resolving a store (cmd/jig's
+// resolveStore, the one place every command loads the store's config) calls
+// this with allowOlder false; `jig store migrate` is the one command that
+// passes true, since migrating a store up is the whole point of opening it.
+// `jig help` and `jig version` never resolve a store at all, so neither check
+// ever runs for them.
 func (c Config) CheckSchemaVersion(allowOlder bool) error {
 	if c.SchemaVersion > CurrentSchemaVersion {
 		return &axi.Error{
-			Msg:  fmt.Sprintf("project.yaml's schema_version is %d, newer than this jig version understands (%d)", c.SchemaVersion, CurrentSchemaVersion),
+			Msg:  fmt.Sprintf("the store's schema_version is %d, newer than this jig version understands (%d)", c.SchemaVersion, CurrentSchemaVersion),
 			Code: "VALIDATION_ERROR",
 			Help: []string{"Upgrade jig to a version that supports this store's schema_version"},
 		}
 	}
-	if c.SchemaVersion < CurrentSchemaVersion && !allowOlder {
+	if c.SchemaVersion < MinSchemaVersion && !allowOlder {
 		return &axi.Error{
-			Msg:  fmt.Sprintf("project.yaml's schema_version is %d; this store has not been migrated to %d yet", c.SchemaVersion, CurrentSchemaVersion),
+			Msg:  fmt.Sprintf("the store's schema_version is %d; this store has not been migrated to %d yet", c.SchemaVersion, MinSchemaVersion),
 			Code: "VALIDATION_ERROR",
 			Help: []string{"Run `jig store migrate` to migrate this store to the current layout"},
 		}
@@ -562,11 +606,15 @@ func (c Config) CheckSchemaVersion(allowOlder bool) error {
 }
 
 // MachineProject is one project's entry in the per-machine mapping
-// (JIG_HOME/projects.yaml): where its store lives, and where each of its
-// repos is cloned on this machine.
+// (JIG_HOME/projects.yaml): where its store lives, where each of its repos is
+// cloned on this machine, and, for a project with a jig.yaml marker, the
+// directory the marker is in.
 type MachineProject struct {
 	Store  string            `yaml:"store"`
 	Clones map[string]string `yaml:"clones"`
+	// Root is the directory holding the project's jig.yaml marker on this
+	// machine ("" for a project that has none).
+	Root string `yaml:"root,omitempty"`
 }
 
 // LoadMachine reads the per-machine project mapping under the jig home root
@@ -592,70 +640,63 @@ func LoadMachine(jigHome string) (map[string]MachineProject, error) {
 	return m, nil
 }
 
+// machineLockTimeout is how long a write of the machine mapping waits for
+// another jig process to finish its own.
+const machineLockTimeout = 10 * time.Second
+
 // SaveMachine writes the per-machine project mapping under the jig home root
-// jigHome, creating its parent directory if needed.
+// jigHome, creating its parent directory if needed. It replaces the whole
+// file, atomically and under the mapping's lock, so a reader never sees half
+// of it; a caller that reads the mapping, changes it and writes it back
+// uses UpdateMachine, which holds the lock across all three.
 func SaveMachine(jigHome string, m map[string]MachineProject) error {
 	if jigHome == "" {
 		return fmt.Errorf("project: no jig home given")
 	}
-	path := home.MachinePath(jigHome)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("project: create home dir: %w", err)
+	release, _, err := store.Lock(home.MachinePath(jigHome), machineLockTimeout)
+	if err != nil {
+		return fmt.Errorf("project: lock machine mapping: %w", err)
 	}
+	defer release()
+	return writeMachine(jigHome, m)
+}
+
+// UpdateMachine changes the per-machine project mapping under the jig home
+// root jigHome: it reads the mapping (empty when there is none yet), calls fn
+// to change it, and writes the result back, all under the mapping's lock, so
+// two jig processes that each add a project (`jig init`, `jig here` mapping a
+// fresh clone) both land. fn gets the mapping to change in place; if fn
+// returns an error nothing is written and the error is returned.
+func UpdateMachine(jigHome string, fn func(map[string]MachineProject) error) error {
+	if jigHome == "" {
+		return fmt.Errorf("project: no jig home given")
+	}
+	release, _, err := store.Lock(home.MachinePath(jigHome), machineLockTimeout)
+	if err != nil {
+		return fmt.Errorf("project: lock machine mapping: %w", err)
+	}
+	defer release()
+	m, err := LoadMachine(jigHome)
+	if err != nil {
+		return err
+	}
+	if err := fn(m); err != nil {
+		return err
+	}
+	return writeMachine(jigHome, m)
+}
+
+// writeMachine marshals m and replaces the mapping file with it atomically.
+// Its callers hold the mapping's lock.
+func writeMachine(jigHome string, m map[string]MachineProject) error {
 	data, err := yaml.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("project: marshal machine mapping: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := store.AtomicWrite(home.MachinePath(jigHome), data); err != nil {
 		return fmt.Errorf("project: write machine mapping: %w", err)
 	}
 	return nil
-}
-
-// Resolve locates the store for cwd: an explicit --store flag wins, then a
-// project.yaml directly in cwd, then a clone that contains cwd in the
-// machine mapping under the jig home root jigHome.
-func Resolve(jigHome, cwd, storeFlag string) (string, Config, error) {
-	storePath, err := resolveStorePath(jigHome, cwd, storeFlag)
-	if err != nil {
-		return "", Config{}, err
-	}
-	cfg, err := Load(filepath.Join(storePath, "project.yaml"))
-	if err != nil {
-		return "", Config{}, err
-	}
-	return storePath, cfg, nil
-}
-
-func resolveStorePath(jigHome, cwd, storeFlag string) (string, error) {
-	if storeFlag != "" {
-		return storeFlag, nil
-	}
-	if _, err := os.Stat(filepath.Join(cwd, "project.yaml")); err == nil {
-		return cwd, nil
-	}
-	machine, err := LoadMachine(jigHome)
-	if err != nil {
-		return "", err
-	}
-	for _, mp := range machine {
-		for _, clone := range mp.Clones {
-			if pathContains(clone, cwd) {
-				return mp.Store, nil
-			}
-		}
-	}
-	// Last resort: the store `jig init --standalone` creates next to this
-	// directory, so commands work from the repo it was initialized for.
-	if sibling, err := StandaloneStoreDir(cwd); err == nil {
-		if _, err := os.Stat(filepath.Join(sibling, "project.yaml")); err == nil {
-			return sibling, nil
-		}
-	}
-	return "", &axi.Error{
-		Msg:  "no jig store found for this directory: pass --store or run inside a store or a mapped clone",
-		Code: "VALIDATION_ERROR",
-	}
 }
 
 // pathContains reports whether target is base itself or a descendant of it.
@@ -679,7 +720,7 @@ func pathContains(base, target string) bool {
 }
 
 // StandaloneStoreDir returns the sibling "<repoDir base>-tickets" path
-// InitStandalone creates its store at.
+// Init creates its store at.
 func StandaloneStoreDir(repoDir string) (string, error) {
 	absRepo, err := filepath.Abs(repoDir)
 	if err != nil {
@@ -692,102 +733,14 @@ func siblingStoreDir(absRepo string) string {
 	return filepath.Join(filepath.Dir(absRepo), filepath.Base(absRepo)+"-tickets")
 }
 
-// InitStandalone creates a sibling "<repoDir base>-tickets" store next to
-// repoDir: a fresh git repo on branch main, project.yaml pointing back at
-// repoDir, an empty platform/ dir, and an empty ledger.md. key is the area
-// key project.yaml's keys: declares, meaning "everything in <name>"; ""
-// derives it from repoDir's base name (deriveProjectKey), the --key flag's
-// default. It returns the new store's path. Run against an existing store,
-// it resets project.yaml and ledger.md.
-func InitStandalone(repoDir, key string) (string, error) {
-	absRepo, err := filepath.Abs(repoDir)
-	if err != nil {
-		return "", fmt.Errorf("project: resolve repo dir: %w", err)
-	}
-	base := filepath.Base(absRepo)
-	storeDir := siblingStoreDir(absRepo)
-
-	if key == "" {
-		key, err = deriveProjectKey(base)
-		if err != nil {
-			return "", err
-		}
-	} else if !keyRE.MatchString(key) {
-		return "", &axi.Error{
-			Msg:  fmt.Sprintf("--key %q is not 2 to 10 uppercase letters or digits starting with a letter", key),
-			Code: "VALIDATION_ERROR",
-		}
-	}
-
-	if err := os.MkdirAll(storeDir, 0o755); err != nil {
-		return "", fmt.Errorf("project: create store dir: %w", err)
-	}
-	if _, err := gitx.Run(storeDir, "init", "-b", "main"); err != nil {
-		return "", fmt.Errorf("project: git init: %w", err)
-	}
-
-	py := projectYAML{
-		SchemaVersion: CurrentSchemaVersion,
-		Name:          base,
-		Keys:          map[string]string{key: fmt.Sprintf("everything in %s", base)},
-		Trackers:      []string{},
-		Repos:         []Repo{{Remote: absRepo}},
-		Platform:      "platform/",
-	}
-	data, err := yaml.Marshal(py)
-	if err != nil {
-		return "", fmt.Errorf("project: marshal project.yaml: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(storeDir, "project.yaml"), data, 0o644); err != nil {
-		return "", fmt.Errorf("project: write project.yaml: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Join(storeDir, "platform"), 0o755); err != nil {
-		return "", fmt.Errorf("project: create platform dir: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(storeDir, "ledger.md"), []byte{}, 0o644); err != nil {
-		return "", fmt.Errorf("project: write ledger.md: %w", err)
-	}
-	// store.Lock's sidecar "*.lock" files (never removed) and
-	// store.AtomicWrite's ".*.tmp" scratch files are noise the truth repo
-	// must never track: ignore them at the store root so locked writes never
-	// dirty git status or collide with another clone's own lock files.
-	if err := os.WriteFile(filepath.Join(storeDir, ".gitignore"), []byte("*.lock\n.*.tmp\n"), 0o644); err != nil {
-		return "", fmt.Errorf("project: write .gitignore: %w", err)
-	}
-	// No conversion of any file in the store: its files are jig's data, and
-	// it lets gitx work on the store in process (gitx.Repo).
-	if err := os.WriteFile(filepath.Join(storeDir, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
-		return "", fmt.Errorf("project: write .gitattributes: %w", err)
-	}
-
-	// Commit the scaffold itself, under jig's own identity rather than
-	// whatever (if anything) the host's git config holds: every later write
-	// - store.Claim's claims in particular - stages and commits only the
-	// paths it touches, and so does this one, scoped to the scaffold's own
-	// paths rather than a sweeping `add -A` that would catch whatever else
-	// is dirty in an existing store. The re-init path's reset can leave
-	// nothing staged (project.yaml byte-identical, ledger.md already
-	// empty), which is success, not a failure to report.
-	if _, err := gitx.Run(storeDir, "add", "-A", "--", "project.yaml", "platform", "ledger.md", ".gitignore", ".gitattributes"); err != nil {
-		return "", fmt.Errorf("project: stage store scaffold: %w", err)
-	}
-	if staged, err := gitx.Run(storeDir, "diff", "--cached", "--name-only"); err != nil {
-		return "", fmt.Errorf("project: check staged store scaffold: %w", err)
-	} else if staged != "" {
-		if _, err := gitx.Run(storeDir, "-c", "user.name=jig", "-c", "user.email=jig@invalid", "commit", "-m", "jig: init store"); err != nil {
-			return "", fmt.Errorf("project: commit store scaffold: %w", err)
-		}
-	}
-
-	return storeDir, nil
-}
-
-// InitProject loads storePath's project.yaml, validates that every clone
-// name matches a repo declared there (by Repo.Name), and records the
-// mapping in the per-machine store under the jig home root jigHome, keyed by
-// the project's name.
+// InitProject loads storePath's config (a v2 store's project.yaml), validates
+// that every clone name matches a repo declared there (by Repo.Name), and
+// records the mapping in the per-machine store under the jig home root
+// jigHome, keyed by the project's name. `jig init` makes v3 projects and maps
+// them itself (Init); this is how an existing v2 store, and the test fixture's,
+// gets its clones mapped.
 func InitProject(jigHome, storePath string, clones map[string]string) (Config, error) {
-	cfg, err := Load(filepath.Join(storePath, "project.yaml"))
+	cfg, err := LoadStoreConfig(storePath)
 	if err != nil {
 		return Config{}, err
 	}
@@ -818,12 +771,10 @@ func InitProject(jigHome, storePath string, clones map[string]string) (Config, e
 		absClones[name] = abs
 	}
 
-	machine, err := LoadMachine(jigHome)
-	if err != nil {
-		return Config{}, err
-	}
-	machine[cfg.Name] = MachineProject{Store: absStore, Clones: absClones}
-	if err := SaveMachine(jigHome, machine); err != nil {
+	if err := UpdateMachine(jigHome, func(machine map[string]MachineProject) error {
+		machine[cfg.Name] = MachineProject{Store: absStore, Clones: absClones}
+		return nil
+	}); err != nil {
 		return Config{}, err
 	}
 

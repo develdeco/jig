@@ -73,8 +73,8 @@ func TestRenderStatusOutstandingAskWithQueuedFrontier(t *testing.T) {
 	}
 
 	wantHelp := "help[2]:\n" +
-		"  Run `jig run JIG-1` to work the frontier\n" +
-		"  Then run `jig gate JIG-1` at a terminal to decide the outstanding asks\n"
+		"  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one\n" +
+		"  Then run `jig triage JIG-1 <id> keep|dismiss` to decide the outstanding asks, then `jig gate JIG-1` to apply the decisions\n"
 	if !strings.HasSuffix(got, wantHelp) {
 		t.Errorf("status help does not name the frontier-first ordering:\n--- got ---\n%s--- want suffix ---\n%s", got, wantHelp)
 	}
@@ -115,7 +115,7 @@ func TestRenderStatusOutstandingAskWithGreenFrontier(t *testing.T) {
 	}
 
 	wantHelp := "help[1]:\n" +
-		"  Run `jig gate JIG-1` at a terminal to decide the outstanding asks\n"
+		"  Run `jig triage JIG-1 <id> keep|dismiss` to decide the outstanding asks, then `jig gate JIG-1` to apply the decisions\n"
 	if !strings.HasSuffix(got, wantHelp) {
 		t.Errorf("status help does not name the deciding command:\n--- got ---\n%s--- want suffix ---\n%s", got, wantHelp)
 	}
@@ -211,7 +211,7 @@ func TestRenderStatusSurvivesAnUnreadableReportFile(t *testing.T) {
 
 // TestRenderStatusAfterAFixSliceRoundPointsAtTheNextRound covers the arm
 // that had no test at all: every slice green, the last round not clean.
-// Its fix slices are green by now, so telling a person to run `jig run`
+// Its fix slices are green by now, so telling a person to run `jig next`
 // names a command that finds nothing to do and reprints this same line.
 // The step that moves the ticket is the next gate round.
 func TestRenderStatusAfterAFixSliceRoundPointsAtTheNextRound(t *testing.T) {
@@ -243,8 +243,8 @@ func TestRenderStatusAfterAFixSliceRoundPointsAtTheNextRound(t *testing.T) {
 	if !strings.HasSuffix(got, wantHelp) {
 		t.Errorf("status help does not point at the next round:\n--- got ---\n%s--- want suffix ---\n%s", got, wantHelp)
 	}
-	if strings.Contains(got, "jig run ") {
-		t.Errorf("status points at `jig run` with the frontier already green:\n%s", got)
+	if strings.Contains(got, "jig next ") {
+		t.Errorf("status points at `jig next` with the frontier already green:\n%s", got)
 	}
 }
 

@@ -1,31 +1,59 @@
-// Command jig is the CLI entry point for the jig ticket-solving tool: it
-// wires the store, project, session, staircase, frontier and verifydeliver
-// packages into a small set of subcommands.
+// Command jig is the CLI entry point for the jig ticket tool: it wires the
+// store, project, journal, ledger, verify, observe and verifydeliver packages
+// into a small set of subcommands. It starts no coding session and links no
+// code that does (lint/deps_test.go): an agent works the ticket in the
+// person's clone, and jig records and checks what it does.
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"regexp"
+	"time"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/frontier"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/mirror"
 	"github.com/develdeco/jig/internal/project"
-	"github.com/develdeco/jig/internal/session"
-	"github.com/develdeco/jig/internal/staircase"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 func main() {
 	gitx.ClearRepoEnv()
-	os.Exit(Main(os.Args[1:], os.Stdout, os.Stdin))
+	// The first interrupt cancels e.ctx, so a command that waits or streams
+	// can wind down; endAfterInterrupt makes sure one that does not watch it
+	// still ends, as it did when an interrupt simply killed the process.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	go endAfterInterrupt(ctx, stop, interruptGrace, os.Exit)
+	e := processEnv()
+	e.ctx = ctx
+	os.Exit(run(e, os.Args[1:], os.Stdout, os.Stdin))
+}
+
+const (
+	// interruptGrace is how long a command has, after the first interrupt,
+	// to notice its cancelled context and return.
+	interruptGrace = 3 * time.Second
+	// exitInterrupted is the status of a run ended by an interrupt: 128 plus
+	// SIGINT, the shell convention.
+	exitInterrupted = 130
+)
+
+// endAfterInterrupt waits for ctx to be cancelled by the first interrupt,
+// gives the signal back its default action (stop), so a second interrupt
+// ends the process at once, and ends the process itself through exit if the
+// run has not returned within grace.
+func endAfterInterrupt(ctx context.Context, stop func(), grace time.Duration, exit func(int)) {
+	<-ctx.Done()
+	stop()
+	time.Sleep(grace)
+	exit(exitInterrupted)
 }
 
 // Main dispatches one CLI invocation against the process's own environment
@@ -46,45 +74,15 @@ func run(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return 0
 	}
 
-	cmd, rest := args[0], args[1:]
-	switch cmd {
-	case "init":
-		return cmdInit(e, rest, stdout)
-	case "ticket":
-		return cmdTicket(e, rest, stdout)
-	case "graduate":
-		return cmdGraduate(e, rest, stdout)
-	case "solve":
-		return cmdSolve(e, rest, stdout, stdin)
-	case "run":
-		return cmdRun(e, rest, stdout)
-	case "requeue":
-		return cmdRequeue(e, rest, stdout)
-	case "gate":
-		return cmdGate(e, rest, stdout, stdin)
-	case "publish":
-		return cmdPublish(e, rest, stdout)
-	case "status":
-		return cmdStatus(e, rest, stdout)
-	case "validate":
-		return cmdValidate(e, rest, stdout)
-	case "version":
-		return cmdVersion(e, rest, stdout)
-	case "skills":
-		return cmdSkills(e, rest, stdout)
-	case "trackers":
-		return cmdTrackers(e, rest, stdout)
-	case "store":
-		return cmdStore(e, rest, stdout)
-	case "_screen":
-		return cmdScreen(stdin, stdout)
-	default:
+	v, rest, ok := lookupVerb(args)
+	if !ok {
 		return renderErr(stdout, &axi.Error{
-			Msg:  fmt.Sprintf("unknown command %q", cmd),
+			Msg:  fmt.Sprintf("unknown command %q", args[0]),
 			Code: "VALIDATION_ERROR",
 			Help: []string{"Run `jig` with no arguments to see the command list"},
 		})
 	}
+	return v.Run(e, rest, stdout, stdin)
 }
 
 // renderErr writes err through axi.RenderError (wrapping a plain error in an
@@ -165,47 +163,6 @@ func requirePositional(args []string, what string) (string, []string, error) {
 	return args[0], args[1:], nil
 }
 
-// extractAnswer pulls a "--answer <qid> <text>" pair (or "-answer") out of
-// args wherever it appears, since it takes two positional-shaped values and
-// stdlib flag only ever consumes one value per flag. It returns the
-// remaining args with that flag and its two values removed.
-func extractAnswer(args []string) (qid, text string, rest []string, err error) {
-	for i, a := range args {
-		if a != "--answer" && a != "-answer" {
-			continue
-		}
-		if i+2 >= len(args) {
-			return "", "", nil, &axi.Error{
-				Msg:  "--answer requires two values: <qid> <text>",
-				Code: "VALIDATION_ERROR",
-			}
-		}
-		qid, text = args[i+1], args[i+2]
-		rest = make([]string, 0, len(args)-3)
-		rest = append(rest, args[:i]...)
-		rest = append(rest, args[i+3:]...)
-		return qid, text, rest, nil
-	}
-	return "", "", args, nil
-}
-
-// cloneFlag is a repeatable "--clone name=path" flag.Value.
-type cloneFlag struct{ m map[string]string }
-
-func (c *cloneFlag) String() string { return "" }
-
-func (c *cloneFlag) Set(v string) error {
-	name, path, ok := splitOnce(v, '=')
-	if !ok || name == "" || path == "" {
-		return fmt.Errorf("--clone must be name=path, got %q", v)
-	}
-	if c.m == nil {
-		c.m = map[string]string{}
-	}
-	c.m[name] = path
-	return nil
-}
-
 func splitOnce(s string, sep byte) (before, after string, ok bool) {
 	for i := 0; i < len(s); i++ {
 		if s[i] == sep {
@@ -217,7 +174,9 @@ func splitOnce(s string, sep byte) (before, after string, ok bool) {
 
 // resolveStore resolves the store, project config and this machine's clone
 // mapping for cfg's project, honoring an explicit --store flag over cwd
-// resolution, and returns the jig home root it read the mapping from, for
+// resolution (locate.Locate's order: a jig.yaml marker, the machine map by
+// path and by remote, a store directory), and returns the jig home root it
+// read the mapping from, for
 // the packages that keep leases under it. stdout is the resolving command's
 // own writer: the checkpoint hook renders its sync report through it
 // (brief.md#Ownership and drift: "Drift lines print in the output of the
@@ -245,8 +204,7 @@ func resolveStoreChecked(e env, storeFlag string, stdout io.Writer, allowOlderSc
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
-	storeFlag = absFrom(cwd, storeFlag)
-	storePath, cfg, err := project.Resolve(jigHome, cwd, storeFlag)
+	storePath, cfg, err := locateStore(jigHome, cwd, absFrom(cwd, storeFlag), e.getenv)
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
@@ -257,6 +215,9 @@ func resolveStoreChecked(e env, storeFlag string, stdout io.Writer, allowOlderSc
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
+	// The marker says which tracker's ids lead the project's branch names;
+	// the store names every ticket's branch by it.
+	st.BranchesFrom = cfg.BranchesFrom
 	// Every store checkpoint (Store.Push) syncs the GitHub mirror, from
 	// inside the command that made it: the mirror depends on the store
 	// (internal/mirror imports internal/store), never the reverse, so this
@@ -322,64 +283,19 @@ func resolveStoreForProjectChecked(e env, projectFlag, storeFlag string, stdout 
 	return resolveStoreChecked(e, mp.Store, stdout, allowOlderSchema)
 }
 
-// rungs returns cfg's staircase rungs, falling back to staircase.Default()
-// when the project has not declared any.
-func rungs(cfg project.Config) staircase.Config {
-	if len(cfg.Staircase) > 0 {
-		return staircase.Config{Rungs: cfg.Staircase}
-	}
-	return staircase.Default()
-}
-
-// backendName resolves the effective session backend name: an explicit
-// --backend flag wins; otherwise "fake" when --scenario was given, else
-// "herdr".
-func backendName(explicit, scenario string) string {
-	if explicit != "" {
-		return explicit
-	}
-	if scenario != "" {
-		return "fake"
-	}
-	return "herdr"
-}
-
-// journalFunc binds a frontier.Deps-shaped journal callback to st and ticket.
-func journalFunc(st *store.Store, ticket string) func(journal.Line) error {
-	return func(l journal.Line) error {
-		return journal.Append(st, ticket, l)
-	}
-}
-
-// frontierDeps assembles frontier.Deps for one ticket.
-func frontierDeps(st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string, backend session.Backend, ticket string) frontier.Deps {
-	return frontier.Deps{
-		Store:   st,
-		Cfg:     cfg,
-		Machine: mp,
-		Backend: backend,
-		Rungs:   rungs(cfg),
-		Journal: journalFunc(st, ticket),
-		Home:    jigHome,
-	}
-}
-
-// verifydeliverDeps assembles verifydeliver.Deps for one ticket. Unlike
-// frontier.Deps, verifydeliver.Deps carries no Backend or injected Journal
-// func: Gate and Publish journal internally, bound to d.Store.
+// verifydeliverDeps assembles verifydeliver.Deps for one ticket.
 //
 // It also resolves the operator's own home directory, once, beside the jig
 // home root it is handed: gate intent inference looks for their local agent
-// transcripts under it, on every command that gates (jig gate and jig
-// solve). e.userHomeDir fails when it cannot say, which leaves UserHome ""
-// and inference reports that as its reason instead of looking anywhere else.
+// transcripts under it, on every command that gates. e.userHomeDir fails
+// when it cannot say, which leaves UserHome "" and inference reports that as
+// its reason instead of looking anywhere else.
 func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string) verifydeliver.Deps {
 	userHome, _ := e.userHomeDir()
 	return verifydeliver.Deps{
 		Store:    st,
 		Cfg:      cfg,
 		Machine:  mp,
-		Rungs:    rungs(cfg),
 		Home:     jigHome,
 		UserHome: userHome,
 	}
