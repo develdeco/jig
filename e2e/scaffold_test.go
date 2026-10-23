@@ -575,3 +575,37 @@ func TestHarnessWaitVerifiers(t *testing.T) {
 		t.Errorf("a second WaitVerifiers reported again: %q", reports)
 	}
 }
+
+// TestHarnessNeverKillsAProcessStartedAfterTheWorkerRecord: a verify-spawned
+// line names a pid, and the pid can belong to another process by the time a
+// test ends (Windows reuses them at once). A process that started after the
+// line was written is not the worker: the harness neither waits for it nor
+// kills it.
+func TestHarnessNeverKillsAProcessStartedAfterTheWorkerRecord(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	h := newHarness(t, fx, env, "s-reused")
+	h.VerifierWait = 400 * time.Millisecond
+	var reports []string
+	h.reportf = func(format string, args ...any) { reports = append(reports, fmt.Sprintf(format, args...)) }
+
+	other, otherDone := longLived(t)
+	earlier := time.Now().Add(-time.Minute)
+	if err := ledger.Append(env.home, journal.Line{TS: ledger.Stamp(earlier), Event: journal.EventVerifySpawned, PID: other.Process.Pid}); err != nil {
+		t.Fatalf("ledger.Append: %v", err)
+	}
+
+	h.WaitVerifiers()
+	h.killVerifiers()
+	if len(reports) != 0 {
+		t.Errorf("WaitVerifiers reported %q for a process that started after the worker's line", reports)
+	}
+	select {
+	case <-otherDone:
+		t.Fatal("the harness killed a process that started after the worker's line")
+	case <-time.After(500 * time.Millisecond):
+	}
+	if !pidAlive(other.Process.Pid) {
+		t.Fatal("the later process is gone")
+	}
+}

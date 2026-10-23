@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"errors"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -29,4 +30,25 @@ func pidAlive(pid int) bool {
 		return true
 	}
 	return code == stillActive
+}
+
+// startedBy reports whether pid names a running process that was created no
+// later than t, with a second's slack: a process Windows started later under
+// a reused pid is a different one. A process that cannot be queried is not
+// taken for the one recorded.
+func startedBy(pid int, t time.Time) bool {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(h)
+	var code uint32
+	if err := windows.GetExitCodeProcess(h, &code); err != nil || code != stillActive {
+		return false
+	}
+	var created, exited, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(h, &created, &exited, &kernel, &user); err != nil {
+		return false
+	}
+	return !time.Unix(0, created.Nanoseconds()).After(t.Add(time.Second))
 }

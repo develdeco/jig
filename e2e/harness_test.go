@@ -352,19 +352,40 @@ func (h *fakeHarness) Push(branch string) {
 
 // verifierPIDs lists the pids of the detached verification workers the ledger
 // says were spawned.
-func (h *fakeHarness) verifierPIDs() ([]int, error) {
+func (h *fakeHarness) verifierPIDs() ([]spawnedWorker, error) {
 	lines, err := ledger.Read(h.env.home)
 	if err != nil {
 		return nil, err
 	}
-	var pids []int
+	var workers []spawnedWorker
 	for _, l := range lines {
-		if l.Event == journal.EventVerifySpawned && l.PID > 0 && !slices.Contains(pids, l.PID) {
-			pids = append(pids, l.PID)
+		if l.Event != journal.EventVerifySpawned || l.PID <= 0 {
+			continue
 		}
+		at, err := time.Parse(time.RFC3339Nano, l.TS)
+		if err != nil || slices.ContainsFunc(workers, func(w spawnedWorker) bool { return w.pid == l.PID }) {
+			continue
+		}
+		workers = append(workers, spawnedWorker{pid: l.PID, at: at})
 	}
-	return pids, nil
+	return workers, nil
 }
+
+// spawnedWorker is a verification worker as its verify-spawned line names
+// it: its pid and when the line was written, which is after the worker
+// started.
+type spawnedWorker struct {
+	pid int
+	at  time.Time
+}
+
+// running reports whether w is still running: a live process under its pid
+// that started no later than its line was written. Windows hands a pid out
+// again as soon as it is free, so a later process under the same pid is
+// another test's jig, git or go, and must never be waited for or killed in
+// the worker's place (a force-kill ends it with exit status 1 and no
+// output, which is how it showed).
+func (w spawnedWorker) running() bool { return startedBy(w.pid, w.at) }
 
 // WaitVerifiers waits for the detached verification workers the ledger
 // verify-spawned lines name to exit, up to VerifierWait, and kills (with the
@@ -373,17 +394,17 @@ func (h *fakeHarness) verifierPIDs() ([]int, error) {
 // call it again.
 func (h *fakeHarness) WaitVerifiers() {
 	h.t.Helper()
-	pids, err := h.verifierPIDs()
+	workers, err := h.verifierPIDs()
 	if err != nil {
 		h.t.Fatalf("WaitVerifiers: read the ledger: %v", err)
 	}
-	if pollUntil(h.VerifierWait, func() bool { return !slices.ContainsFunc(pids, pidAlive) }) {
+	if pollUntil(h.VerifierWait, func() bool { return !slices.ContainsFunc(workers, spawnedWorker.running) }) {
 		return
 	}
-	for _, pid := range pids {
-		if pidAlive(pid) {
-			h.reportf("verification worker %d was still running %s after the test waited for it; killed", pid, h.VerifierWait)
-			killTree(pid)
+	for _, w := range workers {
+		if w.running() {
+			h.reportf("verification worker %d was still running %s after the test waited for it; killed", w.pid, h.VerifierWait)
+			killTree(w.pid)
 		}
 	}
 }
@@ -391,10 +412,10 @@ func (h *fakeHarness) WaitVerifiers() {
 // killVerifiers kills, without waiting, every verification worker still
 // running: the cleanup of a test that did not wait for them.
 func (h *fakeHarness) killVerifiers() {
-	pids, _ := h.verifierPIDs()
-	for _, pid := range pids {
-		if pidAlive(pid) {
-			killTree(pid)
+	workers, _ := h.verifierPIDs()
+	for _, w := range workers {
+		if w.running() {
+			killTree(w.pid)
 		}
 	}
 }

@@ -5,10 +5,12 @@ package e2e
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // pidAlive reports whether pid names a running process, for a test that waits
@@ -43,4 +45,22 @@ func pidAlive(pid int) bool {
 		return false
 	}
 	return true
+}
+
+// startedBy reports whether pid names a running process that was started no
+// later than t: ps gives the start to the second, so two seconds' slack. A
+// process ps cannot tell about is not taken for the one recorded.
+func startedBy(pid int, t time.Time) bool {
+	if !pidAlive(pid) {
+		return false
+	}
+	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return false
+	}
+	started, err := time.ParseInLocation("Mon Jan _2 15:04:05 2006", strings.Join(strings.Fields(string(out)), " "), time.Local)
+	if err != nil {
+		return false
+	}
+	return !started.After(t.Add(2 * time.Second))
 }
