@@ -7,6 +7,10 @@ description: Runs the grilling round that turns fresh work or a rushed backlog t
 
 One skill, two destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). Which one is intake's verdict, not a caller's guess - it can surface mid-grilling.
 
+## Recall first
+
+Before the first round run `jig recall <the work in a few words>` (`--json` for one object). It lists the open tickets with their state and `blocked_by` edges, names the ones whose title or body comes near your words (extend one or block on it; do not mint the same work twice), and brings each chart's fog, the platform documents (the lines that mention your words included) and the answers the person already gave on shipped tickets. A question the ledger settled is not asked again.
+
 ## Grilling round
 
 A round asks the whole **frontier** - every question whose prerequisites are settled - numbered, each carrying a recommended answer. Facts are your job: dispatch read-only, repo-rooted scouts to draft per-workspace sections naming real oracles; only decisions go to the human. Structural rounds (slice map, competing proposals) render as markdown tables. Stop when the frontier is empty. Record every decision as user-confirmed or defaulted - never silent.
@@ -32,13 +36,15 @@ The section never lists test cases, never asks for a test per rule, and never as
 ## Brief output (single ticket)
 
 - `brief.md`: `## `-sectioned behavioral spec; every decision tagged user-confirmed or defaulted.
-- `slices.yaml`: one entry per slice - `id`, `workspace`, `goal`, `oracle`, `env`, `blocked_by`, `from_brief`. Slices are tracer bullets: narrow but a COMPLETE path, demoable alone, sized to one session. One cohesive change is one slice: split only where a part builds, verifies and demos on its own, since every slice is a session that starts cold; the REPRO, GUARDRAIL and prefactoring slices stay their own. Prefactoring is its own slice, first. A slice that proves itself with the repo's whole suite names that manifest oracle (its name in `.claude/jig.yaml`, or the detected default such as `test` for a Go repo), so it gets the repo's declared command and the gate can reuse its pass; a literal command is for a narrower proof. `blocked_by` encodes the blocking edges between slices. Every slice lists `Seams` in `from_brief`, so its builder reads it.
+- `slices.yaml`: one entry per slice - `id`, `workspace`, `goal`, `oracle`, `env`, `blocked_by`, `from_brief`. Slices are tracer bullets: narrow but a COMPLETE path, demoable alone. One cohesive change is one slice: split only where a part builds, verifies and demos on its own, since each slice is claimed and verified on its own; the REPRO, GUARDRAIL and prefactoring slices stay their own. Prefactoring is its own slice, first. A slice that proves itself with the repo's whole suite names that manifest oracle (its name in `.claude/jig.yaml`, or the detected default such as `test` for a Go repo), so it gets the repo's declared command and the gate can reuse its pass; a literal command is for a narrower proof. `blocked_by` encodes the blocking edges between slices. Every slice lists `Seams` in `from_brief`, so its builder reads it.
 - `from_brief` hashes come from `jig validate <ticket>`, which prints a heading/sha256 table over `brief.md`'s sections: write `slices.yaml`, run validate, paste the printed hashes into `from_brief`, re-run until it prints `valid: yes`.
 
 ## Chart output (fog spans tickets)
 
-A chart is `charts/<name>/map.md` (for people; jig never reads it), sectioned Destination · Notes · Decisions so far · Not yet specified (fog) · Out of scope, plus `charts/<name>/tickets.yaml` (the handover jig reads and writes). Decision tickets: one per grilling session, entered into `tickets.yaml` as they resolve, each with a `key:` naming which of `project.yaml`'s declared keys it mints under (omit it only when the project declares exactly one). Graduation: `jig graduate <name>` creates the entries without ids and writes the ids back, so re-running it after fog clears creates just the new tickets - the map decides, it never builds.
+A chart is `charts/<name>/map.md` (for people; jig reads only its fog section, for `jig recall`, so keep that heading), sectioned Destination · Notes · Decisions so far · Not yet specified (fog) · Out of scope, plus `charts/<name>/tickets.yaml` (the handover jig reads and writes). Decision tickets: one per grilling session, entered into `tickets.yaml` as they resolve, each with a `key:` naming which of `project.yaml`'s declared keys it mints under (omit it only when the project declares exactly one). Graduation: `jig graduate <name>` creates the entries without ids and writes the ids back, so re-running it after fog clears creates just the new tickets - the map decides, it never builds.
 
 ## Done when
 
-`jig validate <ticket>` prints `valid: yes`, AND every decision recorded in `brief.md` (or a chart's map.md) carries its provenance mark.
+The person has confirmed the brief, `jig validate <ticket>` prints `valid: yes`, AND every decision recorded in `brief.md` (or a chart's map.md) carries its provenance mark.
+
+`valid: yes` also records the approval `jig claim --unattended` requires, by whoever git says you are: `provenance: agent` from your session, `person` when the person runs it at a terminal. Run it only once the person has confirmed. Editing `brief.md` afterwards withdraws the approval, so validate again. Its `advisories` do not fail the ticket but are read: slices no `blocked_by` edge connects may be separate tickets, and a goal near shipped work may already be done.
