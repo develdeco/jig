@@ -1,5 +1,7 @@
 # Store layout v2: tickets/<id>/, schema_version 2, and jig store migrate
 
+**Amended by [ADR 0032](0032-jig-attaches-to-the-harness.md):** schema 3 exists. A v3 store keeps its config in `store.yaml` (the project's name and repos move to the `jig.yaml` marker), and `jig store migrate` moves a store up one step at a time. Schema 2 is no longer "enforced on every command": schema 2 up to the current one is accepted, and a v2 store opens unchanged until its owner migrates it.
+
 A store's real tickets used to sit directly at the store root, next to
 `charts/`, `platform/`, `ledger.md` and `project.yaml` - a holdover from
 before the store carried anything else at its root, and one that no longer

@@ -1,5 +1,7 @@
 # The store runs git in process; users' repositories run the git program
 
+**Amended by [ADR 0032](0032-jig-attaches-to-the-harness.md):** the in-process commit cannot read git config, so it takes its author from one `git var` call, made on a process's first commit that has something to commit (every store commit is authored by the person, never by a name of jig's own). In a writers store the in-process path still commits, while a fetch or push of a history that has merges goes to the git program (`ErrUseCLI`).
+
 jig's store is a git repository jig writes at every checkpoint: a slice
 queued or changing state, a gate round, a publish. Through the git
 program, one store write is nine processes (the checks for an unfinished
