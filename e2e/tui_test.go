@@ -37,13 +37,21 @@ type tuiScreens struct {
 // holds, and what must be seen together is asked for together.
 func (s tuiScreens) until(wants ...string) string {
 	s.t.Helper()
-	deadline := time.Now().Add(tuiWait)
+	return s.untilWithin(tuiWait, wants...)
+}
+
+// untilWithin is until with a wait of its own: a screen that can only change
+// once a detached verification has run waits as long as the suite gives one
+// (verifyWait), since the run queues behind the others for a verify slot.
+func (s tuiScreens) untilWithin(wait time.Duration, wants ...string) string {
+	s.t.Helper()
+	deadline := time.Now().Add(wait)
 	var frame []string
 	last := "(no screen yet)"
 	for {
 		left := time.Until(deadline)
 		if left <= 0 {
-			s.t.Fatalf("no screen showed %q within %s; the last one:\n%s", wants, tuiWait, last)
+			s.t.Fatalf("no screen showed %q within %s; the last one:\n%s", wants, wait, last)
 		}
 		line, ok := s.p.Line(left)
 		if !ok {
@@ -143,7 +151,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		if res := h.Jig("verify", fx.Ticket, sha, "--slice", "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
 			t.Fatalf("jig verify a exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 		}
-		screens.until("1 of 4 slices green")
+		screens.untilWithin(verifyWait, "1 of 4 slices green")
 	}()
 
 	// The builder asks, the question reaches the screens, and the person

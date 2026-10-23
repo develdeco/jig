@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gittest"
@@ -37,6 +38,7 @@ var (
 
 func TestMain(m *testing.M) {
 	repoRoot = findRepoRoot()
+	goCaches = hostGoCaches()
 
 	tmp, err := os.MkdirTemp("", "jig-e2e-bin")
 	if err != nil {
@@ -81,6 +83,32 @@ func TestMain(m *testing.M) {
 	code := gittest.Run(m)
 	os.RemoveAll(tmp)
 	os.Exit(code)
+}
+
+// goCaches is GOCACHE and GOMODCACHE as this test process's go resolves
+// them, set once by TestMain. A test that moves HOME for the jig it runs
+// passes these along: on Linux and macOS go puts both caches under HOME, so
+// every `go test` an oracle runs would otherwise build from a cold cache
+// (Windows keeps them under LOCALAPPDATA, which the tests do not move).
+var goCaches []string
+
+// hostGoCaches asks go for its build and module caches. An answer go cannot
+// give leaves the children to find their own, as before.
+func hostGoCaches() []string {
+	goBin := filepath.Join(runtime.GOROOT(), "bin", "go"+exeSuffix())
+	out, err := exec.Command(goBin, "env", "GOCACHE", "GOMODCACHE").Output()
+	if err != nil {
+		return nil
+	}
+	var kv []string
+	for i, v := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		v = strings.TrimSpace(v)
+		if v == "" || v == "off" || i > 1 {
+			continue
+		}
+		kv = append(kv, []string{"GOCACHE=", "GOMODCACHE="}[i]+v)
+	}
+	return kv
 }
 
 // findRepoRoot locates the product repo root (the directory containing

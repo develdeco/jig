@@ -87,6 +87,8 @@ func (e jigEnv) overrides() []string {
 	out := []string{"JIG_HOME=" + e.home}
 	if e.userHome != "" {
 		out = append(out, "HOME="+e.userHome, "USERPROFILE="+e.userHome)
+		// Moving HOME would move go's caches with it (see goCaches).
+		out = append(out, goCaches...)
 	}
 	return replaceEnv(out, e.extra)
 }
