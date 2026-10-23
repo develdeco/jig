@@ -761,11 +761,11 @@ func runPiece(o runOpts, steps []step, stdout io.Writer) int {
 	if o.uninstall {
 		help = "Run `" + o.undo + "` to put it back"
 	}
-	return render(outcome(changed, o.uninstall), rows, help)
+	return render(runResult(changed, o.uninstall), rows, help)
 }
 
-// outcome names the result of a run as a whole.
-func outcome(changed, uninstall bool) string {
+// runResult names the result of a run as a whole.
+func runResult(changed, uninstall bool) string {
 	switch {
 	case !changed:
 		return resultUnchanged
