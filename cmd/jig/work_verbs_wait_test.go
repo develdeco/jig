@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // TestAskWaitEnds: a wait that is not answered in time exits 2 (NEEDS_INPUT)
@@ -43,9 +44,18 @@ func TestAskWaitEnds(t *testing.T) {
 		t.Fatalf("interrupted wait: exit %d\n%s", code, out)
 	}
 
-	time.AfterFunc(300*time.Millisecond, func() { _ = st.Supersede(T, "q-001") })
-	out, code = runMain(t, e, "", "ask", T, "--slice", "c", "--wait", "--timeout", "30s")
-	if code != 1 || !strings.Contains(out, "code: QUESTION_SUPERSEDED") {
+	// The wait itself, given q-001: the supersede lands while it polls or,
+	// on a slow machine, before its first read, and either way ends it. As
+	// `ask --wait`, a supersede landing before the command found q-001 would
+	// leave the slice nothing to wait on.
+	time.AfterFunc(300*time.Millisecond, func() {
+		if err := st.Supersede(T, "q-001"); err != nil {
+			t.Errorf("supersede q-001: %v", err)
+		}
+	})
+	var buf strings.Builder
+	code = waitForAnswer(e, &buf, work{St: st, Ticket: T, Session: "s-1"}, store.Slice{ID: "c"}, "q-001", 30*time.Second)
+	if out = buf.String(); code != 1 || !strings.Contains(out, "code: QUESTION_SUPERSEDED") {
 		t.Fatalf("superseded wait: exit %d\n%s", code, out)
 	}
 
