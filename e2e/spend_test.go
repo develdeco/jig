@@ -57,7 +57,7 @@ func spendLinesOf(t *testing.T, fx *fixture.Fixture, session string) []journal.L
 // with extra lines of jig.yaml after it.
 func unattendedMarker(t *testing.T, fx *fixture.Fixture, extra string) {
 	t.Helper()
-	cfg, err := project.Load(filepath.Join(fx.StoreDir, "project.yaml"))
+	cfg, err := project.LoadStoreConfig(fx.StoreDir)
 	if err != nil {
 		t.Fatal(err)
 	}
