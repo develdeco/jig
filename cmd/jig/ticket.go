@@ -132,7 +132,7 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 
 // intakeHint is the next step for a ticket that has no slices yet.
 func intakeHint(ticket string) string {
-	return fmt.Sprintf("Write its brief.md and slices.yaml (the intake skill drafts both), then run `jig validate %s`", ticket)
+	return fmt.Sprintf("Write its brief.md and slices.yaml (the intake skill drafts both) and check them with `jig validate %s --check`; run `jig validate %s` once the person has confirmed the brief", ticket, ticket)
 }
 
 // checkTicketID fails when ticket cannot name a ticket's pool leases (see

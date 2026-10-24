@@ -22,7 +22,7 @@ func init() {
 		Spec: cmdSpec{"validate", "check a ticket's brief, slices and manifest against the store, and approve a valid brief", []flagSpec{
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
-			{"check", validateCheckUsage, true},
+			{"check", validateCheckUsage, false},
 		}, false},
 		Order: 190,
 		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {

@@ -231,7 +231,7 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 	}
 
 	helpLines := append([]string{}, advisories...)
-	helpLines = append(helpLines, "Write each ticket's brief.md and slices.yaml (the intake skill drafts both), then run `jig validate <id>`")
+	helpLines = append(helpLines, "Write each ticket's brief.md and slices.yaml (the intake skill drafts both) and check them with `jig validate <id> --check`; run `jig validate <id>` once the person has confirmed the brief")
 	blocks := []string{
 		axi.KV("graduate", [][2]string{{"chart", chart}, {"created", strconv.Itoa(len(createdIDs))}}),
 		axi.Table("entries", []string{"position", "id", "title", "status"}, rows),

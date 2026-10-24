@@ -379,7 +379,7 @@ func (n nextTicket) help() []string {
 	case ready.StateBlocked:
 		return []string{fmt.Sprintf("%s waits for %s to publish: run `jig next` to see a ticket that is ready", n.Ticket, n.BlockedBy[0].Ticket)}
 	case ready.StateNew:
-		return []string{fmt.Sprintf("%s has no slices yet: draft its brief and slices with the intake skill, then run `jig validate %s`", n.Ticket, n.Ticket)}
+		return []string{fmt.Sprintf("%s has no slices yet: draft its brief and slices with the intake skill, checking them with `jig validate %s --check`, and run `jig validate %s` once the person has confirmed the brief", n.Ticket, n.Ticket, n.Ticket)}
 	case ready.StateGreen:
 		return []string{fmt.Sprintf("Every slice of %s is green: run `jig gate %s`, then `jig publish %s`", n.Ticket, n.Ticket, n.Ticket)}
 	case ready.StateActive:
