@@ -39,6 +39,18 @@ The section never lists test cases, never asks for a test per rule, and never as
 - `slices.yaml`: one entry per slice - `id`, `workspace`, `goal`, `oracle`, `env`, `blocked_by`, `from_brief`. Slices are tracer bullets: narrow but a COMPLETE path, demoable alone. One cohesive change is one slice: split only where a part builds, verifies and demos on its own, since each slice is claimed and verified on its own; the REPRO, GUARDRAIL and prefactoring slices stay their own. Prefactoring is its own slice, first. A slice that proves itself with the repo's whole suite names that manifest oracle (its name in `.claude/jig.yaml`, or the detected default such as `test` for a Go repo), so it gets the repo's declared command and the gate can reuse its pass; a literal command is for a narrower proof. `blocked_by` encodes the blocking edges between slices. Every slice lists `Seams` in `from_brief`, so its builder reads it.
 - `from_brief` hashes come from `jig validate <ticket>`, which prints a heading/sha256 table over `brief.md`'s sections: write `slices.yaml`, run validate, paste the printed hashes into `from_brief`, re-run until it prints `valid: yes`.
 
+  Every field is a string or a list of strings; `env` names a manifest env class and is left out when none is needed (never `env: {}`):
+
+  ```yaml
+  slices:
+    - id: round
+      workspace: cart
+      goal: Take the discount once on the order total.
+      oracle: test
+      blocked_by: []
+      from_brief: [<sha256 of its section>, <sha256 of Seams>]
+  ```
+
 ## Chart output (fog spans tickets)
 
 A chart is `charts/<name>/map.md` (for people; jig reads only its fog section, for `jig recall`, so keep that heading), sectioned Destination · Notes · Decisions so far · Not yet specified (fog) · Out of scope, plus `charts/<name>/tickets.yaml` (the handover jig reads and writes). Decision tickets: one per grilling session, entered into `tickets.yaml` as they resolve, each with a `key:` naming which of `project.yaml`'s declared keys it mints under (omit it only when the project declares exactly one). Graduation: `jig graduate <name>` creates the entries without ids and writes the ids back, so re-running it after fog clears creates just the new tickets - the map decides, it never builds.
