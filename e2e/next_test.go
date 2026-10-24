@@ -318,4 +318,27 @@ func TestNextListsATicketItCannotRead(t *testing.T) {
 	if r := runJig(t, env, fx.StoreDir, "recall", "clamp"); r.Code != 0 {
 		t.Errorf("jig recall with an invalid ticket = exit %d\n%s", r.Code, r.Stdout)
 	}
+
+	// What its record says still counts: it waits for JIG-1, as its
+	// ticket.yaml says, though its slices do not read.
+	rec := filepath.Join(st.TicketDir("JIG-2"), "ticket.yaml")
+	data, err := os.ReadFile(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFileOrFatal(t, rec, append(data, []byte("blocked_by:\n  - ticket: JIG-1\n    kind: merged\n")...))
+	again := nextJSON[struct {
+		Tickets []struct {
+			ID        string `json:"id"`
+			State     string `json:"state"`
+			BlockedBy []struct {
+				Ticket string `json:"ticket"`
+			} `json:"blocked_by"`
+		} `json:"tickets"`
+	}](t, env, fx.StoreDir)
+	for _, tk := range again.Tickets {
+		if tk.ID == "JIG-2" && (tk.State != "invalid" || len(tk.BlockedBy) != 1 || tk.BlockedBy[0].Ticket != "JIG-1") {
+			t.Errorf("JIG-2 = %+v, want invalid and still blocked by JIG-1", tk)
+		}
+	}
 }

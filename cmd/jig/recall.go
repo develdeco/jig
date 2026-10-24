@@ -95,7 +95,7 @@ func recallTickets(st *store.Store) ([]recall.Ticket, error) {
 			State: s.State, Shipped: s.State == ready.StateDone,
 		}
 		if datas[i].problem != "" {
-			t.State, t.Shipped = stateInvalid, false
+			t.State = stateInvalid
 		}
 		for _, b := range datas[i].in.Blockers {
 			t.BlockedBy = append(t.BlockedBy, recall.Blocker{Ticket: b.Ticket, Kind: b.Kind})

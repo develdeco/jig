@@ -152,18 +152,37 @@ type ticketData struct {
 const stateInvalid = "invalid"
 
 // readTicketDataOrProblem is readTicketData for a listing of many tickets: a
-// ticket it cannot read comes back with the problem, and its title when its
-// record reads.
+// ticket it cannot read comes back with the problem, no slices, and what its
+// record and journal still say (its title, its blockers, whether it was
+// published), so the tickets around it are classed as before.
 func readTicketDataOrProblem(st *store.Store, id string) ticketData {
 	d, err := readTicketData(st, id)
 	if err == nil {
 		return d
 	}
 	d = ticketData{in: ready.Ticket{ID: id}, problem: err.Error()}
+	if published, perr := isPublished(st, id); perr == nil {
+		d.in.Published = published
+	}
 	if rec, rerr := st.ReadTicket(id); rerr == nil {
 		d.title, d.rec = rec.Title, rec
+		d.in.Blockers = ticketBlockers(st, rec)
 	}
 	return d
+}
+
+// ticketBlockers are the tickets rec's record says block it, each resolved
+// through aliases when it can be.
+func ticketBlockers(st *store.Store, rec store.Ticket) []ready.Blocker {
+	var out []ready.Blocker
+	for _, b := range rec.BlockedBy {
+		blocker := b.Ticket
+		if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
+			blocker = resolved
+		}
+		out = append(out, ready.Blocker{Ticket: blocker, Kind: b.Kind})
+	}
+	return out
 }
 
 // readTicketData reads what the readiness of ticket id depends on.
@@ -186,14 +205,7 @@ func readTicketData(st *store.Store, id string) (ticketData, error) {
 	if err != nil {
 		return ticketData{}, err
 	}
-	in := ready.Ticket{ID: id, Published: published, Slices: slices, States: states}
-	for _, b := range rec.BlockedBy {
-		blocker := b.Ticket
-		if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
-			blocker = resolved
-		}
-		in.Blockers = append(in.Blockers, ready.Blocker{Ticket: blocker, Kind: b.Kind})
-	}
+	in := ready.Ticket{ID: id, Published: published, Slices: slices, States: states, Blockers: ticketBlockers(st, rec)}
 	return ticketData{in: in, title: rec.Title, rec: rec}, nil
 }
 
@@ -421,13 +433,13 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		if row.Ready == nil {
 			row.Ready = []string{}
 		}
+		for _, b := range s.Blocked {
+			row.BlockedBy = append(row.BlockedBy, nextBlocker{Ticket: b.Ticket, Kind: b.Kind})
+		}
 		if datas[i].problem != "" {
 			row.State, row.Problem, row.Ready = stateInvalid, datas[i].problem, []string{}
 			out.Tickets = append(out.Tickets, row)
 			continue
-		}
-		for _, b := range s.Blocked {
-			row.BlockedBy = append(row.BlockedBy, nextBlocker{Ticket: b.Ticket, Kind: b.Kind})
 		}
 		out.Tickets = append(out.Tickets, row)
 		if s.State == ready.StateReady {
@@ -486,7 +498,7 @@ func (n nextStore) blocks() []string {
 		help = append(help, "Build overlapping tickets one after the other, or settle who changes those files first")
 	}
 	if len(invalid) > 0 {
-		help = append(help, fmt.Sprintf("Fix the file the problem of %s names, then run `jig validate %s`", invalid[0][0], invalid[0][0]))
+		help = append(help, fmt.Sprintf("Fix what the problem of %s says (its slices.yaml or a slice's state), then run `jig validate %s`", invalid[0][0], invalid[0][0]))
 	}
 	return append(blocks, axi.Help(help...))
 }
