@@ -178,6 +178,36 @@ func LedgerReviewer(d Deps, ticket string, opened time.Time) (Provenance, bool, 
 	return best, found, nil
 }
 
+// LedgerReviewerAgent is the agent of session that read ticket's open round:
+// the agent on the machine ledger's records of tool calls in that session
+// that ran `jig review context` for the ticket after the round opened, when
+// they all name the same one. Records naming two agents (the session itself
+// and a subagent, or two subagents) say nothing about which one closes the
+// round, and neither does no record: ok is false.
+func LedgerReviewerAgent(d Deps, ticket string, opened time.Time, session string) (agent string, ok bool, err error) {
+	if d.Home == "" || session == "" {
+		return "", false, nil
+	}
+	records, err := ledger.Read(d.Home)
+	if err != nil {
+		return "", false, err
+	}
+	for _, l := range records {
+		if l.Event != journal.EventTool || l.Session != session || !runsReviewContext(l.Command, ticket) {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, l.TS)
+		if err != nil || at.Before(opened) {
+			continue
+		}
+		if ok && l.Agent != agent {
+			return "", false, nil
+		}
+		agent, ok = l.Agent, true
+	}
+	return agent, ok, nil
+}
+
 // runsReviewContext reports whether the shell command line cmd runs `jig
 // review context` for ticket: jig (any path, with or without .exe), then
 // review and context, then the ticket among the words up to the next shell
