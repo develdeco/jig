@@ -111,6 +111,27 @@ func statusJIG1() string {
 	}, "\n") + "\n"
 }
 
+// statusJIG1Brief is statusJIG1 with the slices' goals and the brief block a
+// status of this version prints.
+func statusJIG1Brief() string {
+	return strings.Join([]string{
+		"ticket: JIG-1",
+		"state: parked",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
+			{"a", "green", "1", "-", "-", "Greet by name"},
+			{"b", "building", "2", "-", "-", "Say goodbye, politely"},
+			{"c", "needs-input", "1", "-", "q-001", "Pick the tone"},
+			{"d", "queued", "0", "b+c", "-", "Ship the copy"},
+		}),
+		axi.Table("questions", []string{"id", "slice", "status"}, [][]string{{"q-001", "c", "open"}}),
+		axi.KV("brief", [][2]string{{"approval", "current"}, {"approved_by", "Ada Lovelace"}, {"approved_at", "2026-10-23T09:00:00Z"}, {"provenance", "agent"}}),
+		axi.Table("brief_sections", []string{"heading", "slices"}, [][]string{
+			{"Goal", "-"}, {"Greeting", "a"}, {"Farewell", "b"}, {"Tone", "c+d"},
+		}),
+		axi.Help("Answer q-001: `jig answer JIG-1 q-001 '<text>'`"),
+	}, "\n") + "\n"
+}
+
 // jig2 is a ticket reviewed and published: a first round that found two asks,
 // both decided by a person, a clean second round, and the publish.
 func jig2() []events.Envelope {

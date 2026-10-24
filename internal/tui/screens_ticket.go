@@ -2,14 +2,16 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
-// recentLines is how many of a ticket's latest lines its screen shows.
-const recentLines = 6
+// activityLines is how many of a step's latest lines a screen shows.
+const activityLines = 8
 
-// ticketPage is one ticket: where it stands in build, review and publish, what
-// waits for a person, what to do next, and what happened last.
+// ticketPage is one ticket: its four steps in order, each with where it
+// stands now, what waits for a person, what to do next, and the activity of
+// the step under the cursor (the current step until the cursor moves).
 func (m *Model) ticketPage(id string) page {
 	var p page
 	t := m.w.tickets[id]
@@ -17,21 +19,25 @@ func (m *Model) ticketPage(id string) page {
 		p.add(m.st.dim("no ticket " + id))
 		return p
 	}
-	bs, btext := m.buildSummary(t)
-	rs, rtext := m.reviewSummary(t)
-	ps, ptext := m.publishSummary(t)
-	p.addRow(rowRef{kind: rowBuild, ticket: id}, m.st.icon(bs)+" "+pad("build", 9)+btext)
-	p.addRow(rowRef{kind: rowReview, ticket: id}, m.st.icon(rs)+" "+pad("review", 9)+rtext)
-	p.addRow(rowRef{kind: rowPublish, ticket: id}, m.st.icon(ps)+" "+pad("publish", 9)+ptext)
+	steps := m.steps(t)
+	cur := currentStep(steps)
+	right := fmt.Sprintf("step %d of %d", cur+1, len(steps))
+	if steps[len(steps)-1].Done {
+		right = "done"
+	}
+	p.boxTop("Steps", right)
+	for i, s := range steps {
+		p.boxRow(rowRef{kind: s.Kind, ticket: id}, m.stepLine(s, i == cur))
+	}
+	p.boxEnd()
 
 	qs := t.openQuestions(m.zone, "")
 	asks := t.asks()
 	if len(qs)+len(asks) > 0 {
 		p.add("")
-		p.add(m.st.bold("needs a person"))
+		p.add(m.st.bold("needs you"))
 		for _, q := range qs {
-			p.addRow(rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: q.Slice},
-				m.st.icon(StateNeedsInput)+" "+q.ID+"  "+m.st.dim("slice "+q.Slice)+"  "+firstLine(q.Text))
+			p.addRow(rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: q.Slice}, m.questionLine(t, q))
 		}
 		for i, line := range m.askLines(asks) {
 			p.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
@@ -43,23 +49,66 @@ func (m *Model) ticketPage(id string) page {
 		p.add(m.st.dim("next  ") + t.status.Help[0])
 	}
 
-	if n := len(t.lines); n > 0 {
-		p.add("")
-		p.add(m.st.bold("recent"))
-		from := max(0, n-recentLines)
-		for _, l := range t.lines[from:] {
-			p.add(m.st.dim(clock(l, m.zone)) + " " + m.st.icon(eventState(l)) + " " + describe(l) + sliceTag(l.Slice, m))
-		}
-	}
+	p.add("")
+	m.activityPanel(&p, t, m.ticketFocus(steps, len(qs)))
 	return p
 }
 
-// sliceTag is a dim " [slice]" after a line about a slice.
-func sliceTag(slice string, m *Model) string {
-	if slice == "" {
-		return ""
+// stepLine is a step's row: its icon, number and name, where it stands, and
+// how long it took once done. A step not reached yet is drawn back.
+func (m *Model) stepLine(s stepRow, current bool) string {
+	name := pad(stepNames[s.Step], 8)
+	num := strconv.Itoa(s.Step+1) + " "
+	text := s.Text
+	switch {
+	case current:
+		name, text = m.st.bold(name), m.st.state(s.State, text)
+	case !s.Done:
+		num, name, text = m.st.dim(num), m.st.dim(name), m.st.dim(text)
 	}
-	return m.st.dim("  [" + slice + "]")
+	return m.st.icon(s.State) + " " + num + name + " " + m.st.dim(pad(s.Took, 7)) + " " + text
+}
+
+// ticketFocus is the step whose activity the ticket screen shows: the one
+// under the cursor, the build for a question, the review for an ask, and the
+// current step while the cursor follows it. The screen's rows are the steps,
+// then the open questions, then the asks, so the cursor's place says which.
+func (m *Model) ticketFocus(steps []stepRow, questions int) int {
+	e := m.top()
+	switch {
+	case e.follow:
+		return currentStep(steps)
+	case e.sel < len(steps):
+		return max(0, e.sel)
+	case e.sel < len(steps)+questions:
+		return stepBuild
+	}
+	return stepReview
+}
+
+// activityPanel adds a panel of the latest lines of step to p.
+func (m *Model) activityPanel(p *page, t *ticket, step int) {
+	lines := t.stepLines(step)
+	right := ""
+	if n := len(lines); n > activityLines {
+		right = fmt.Sprintf("latest %d of %d", activityLines, n)
+		lines = lines[n-activityLines:]
+	}
+	p.boxTop(stepTitle(step)+" · activity", right)
+	if len(lines) == 0 {
+		p.boxAdd(m.st.dim("nothing yet"))
+	}
+	for _, l := range lines {
+		p.boxAdd(m.activityLine(t, l))
+	}
+	p.boxEnd()
+}
+
+// questionLine is an open question as a row: who asked about which slice, and
+// the question.
+func (m *Model) questionLine(t *ticket, q questionRow) string {
+	who := firstOf(m.who(t, q.Session), "a session")
+	return m.st.icon(StateNeedsInput) + " " + who + " asks about slice " + q.Slice + ": " + firstLine(q.Text) + m.st.dim("  "+q.ID)
 }
 
 // firstLine is the first line of text.
@@ -69,11 +118,11 @@ func firstLine(text string) string {
 }
 
 // askLines are the asks as rows with their columns aligned: the icon (the
-// ask's decision), id, risk, place and title, and what has been decided.
+// ask's decision), risk, place and title, what has been decided, and the id.
 func (m *Model) askLines(asks []askRow) []string {
-	idW, riskW, whereW := 0, 0, 0
+	riskW, whereW := 0, 0
 	for _, a := range asks {
-		idW, riskW, whereW = max(idW, width(a.ID)), max(riskW, width(a.Risk)), max(whereW, width(a.Where))
+		riskW, whereW = max(riskW, width(a.Risk)), max(whereW, width(a.Where))
 	}
 	out := make([]string, len(asks))
 	for i, a := range asks {
@@ -81,94 +130,21 @@ func (m *Model) askLines(asks []askRow) []string {
 		decision := m.st.dim("undecided")
 		switch a.Decision {
 		case "keep":
-			state, decision = StateKept, m.st.state(StateKept, "keep"+decidedBy(a))
+			state, decision = StateKept, m.st.state(StateKept, "kept"+decidedBy(a))
 		case "dismiss":
-			state, decision = StateDismissed, m.st.state(StateDismissed, "dismiss"+decidedBy(a))
+			state, decision = StateDismissed, m.st.state(StateDismissed, "dismissed"+decidedBy(a))
 		}
-		out[i] = fmt.Sprintf("%s %s  %s  %s  %s  %s", m.st.icon(state), pad(a.ID, idW), pad(a.Risk, riskW), pad(a.Where, whereW), a.Title, decision)
+		out[i] = fmt.Sprintf("%s %s  %s  %s  %s%s", m.st.icon(state), pad(a.Risk, riskW), pad(a.Where, whereW), a.Title, decision, m.st.dim("  "+a.ID))
 	}
 	return out
 }
 
 func decidedBy(a askRow) string {
-	if a.DecidedBy == "" {
+	switch a.DecidedBy {
+	case "":
 		return ""
+	case "person":
+		return " by you"
 	}
-	return " (" + a.DecidedBy + ")"
-}
-
-// buildSummary is the build row: how many slices are green and what holds up
-// the rest.
-func (m *Model) buildSummary(t *ticket) (state, text string) {
-	slices := t.slices(m.zone)
-	if len(slices) == 0 {
-		return StateQueued, "no slices yet"
-	}
-	counts := map[string]int{}
-	for _, s := range slices {
-		counts[s.State]++
-	}
-	state = StateQueued
-	switch {
-	case counts[StateStalled] > 0:
-		state = StateStalled
-	case counts[StateEnvBlocked] > 0:
-		state = StateEnvBlocked
-	case counts[StateNeedsInput] > 0:
-		state = StateNeedsInput
-	case counts[StateVerifying] > 0:
-		state = StateVerifying
-	case counts[StateBuilding] > 0:
-		state = StateBuilding
-	case counts[StateGreen] == len(slices):
-		state = StateGreen
-	case counts[StateGreen] > 0:
-		state = StateBuilding
-	}
-	text = fmt.Sprintf("%d of %d slices green", counts[StateGreen], len(slices))
-	for _, s := range []struct{ state, word string }{
-		{StateNeedsInput, "needs input"}, {StateStalled, "stalled"}, {StateEnvBlocked, "env blocked"},
-		{StateVerifying, "verifying"}, {StateBuilding, "building"},
-	} {
-		if n := counts[s.state]; n > 0 {
-			text += fmt.Sprintf(", %d %s", n, s.word)
-		}
-	}
-	return state, text
-}
-
-// reviewSummary is the review row: the latest gate round and how it ended.
-func (m *Model) reviewSummary(t *ticket) (state, text string) {
-	rounds := t.rounds(m.zone)
-	if len(rounds) == 0 {
-		return StateQueued, "no round yet"
-	}
-	r := rounds[len(rounds)-1]
-	switch r.State {
-	case StateReviewing:
-		return StateReviewing, fmt.Sprintf("round %d is open: waiting for the reviewer", r.N)
-	case StateReady:
-		return StateReady, fmt.Sprintf("round %d: clean", r.N)
-	}
-	text = fmt.Sprintf("round %d: findings", r.N)
-	if asks := t.asks(); len(asks) > 0 {
-		text += fmt.Sprintf(", %d %s", len(asks), plural(len(asks), "ask", "asks"))
-	}
-	return StateFindings, text
-}
-
-// publishSummary is the publish row.
-func (m *Model) publishSummary(t *ticket) (state, text string) {
-	pub := t.publish()
-	switch {
-	case pub.Done:
-		return StatePublished, strings.TrimSpace("published " + pub.PR)
-	case pub.PR != "":
-		return StatePublishing, strings.TrimSpace("pull request " + pub.PROutcome + " " + pub.PR)
-	case pub.ApprovedFor != "":
-		return StatePublishing, "approved by " + firstOf(pub.ApprovedBy, "?") + " at " + short(pub.ApprovedFor)
-	case pub.BodyFor != "":
-		return StatePublishing, "body rendered for " + short(pub.BodyFor)
-	}
-	return StateQueued, "not yet"
+	return " by an " + a.DecidedBy
 }

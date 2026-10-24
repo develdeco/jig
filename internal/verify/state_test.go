@@ -271,3 +271,24 @@ func TestAPassStoppedBeforeItsVerifiedLineIsFinished(t *testing.T) {
 		t.Errorf("slice a = %+v, want it still green", r.state("a"))
 	}
 }
+
+// TestThePendingLineNamesTheCommit: the verify-pending line carries the
+// commit's subject, so a reader of the journal can say which change is being
+// verified.
+func TestThePendingLineNamesTheCommit(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, fixture.Opts{})
+	sha := r.fixClamp()
+	if _, err := Run(r.deps, r.request("a", sha)); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range r.lines() {
+		if l.Event == journal.EventVerifyPending && l.Commit == sha {
+			if l.Summary != "fix Clamp" {
+				t.Errorf("verify-pending summary = %q, want the commit's subject", l.Summary)
+			}
+			return
+		}
+	}
+	t.Fatal("no verify-pending line")
+}

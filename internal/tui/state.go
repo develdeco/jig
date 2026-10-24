@@ -34,10 +34,13 @@ type world struct {
 	// ledger line that carries a session and no ticket (a tool call) can be
 	// shown with the ticket's.
 	sessions map[string]string
+	// sessionInfo is what each session's session-start line in the ledger
+	// said of it (people.go), whatever ticket the line named.
+	sessionInfo map[string]sessionInfo
 }
 
 func newWorld() *world {
-	return &world{tickets: map[string]*ticket{}, sessions: map[string]string{}}
+	return &world{tickets: map[string]*ticket{}, sessions: map[string]string{}, sessionInfo: map[string]sessionInfo{}}
 }
 
 // ticket is what is known of one ticket.
@@ -78,6 +81,9 @@ func (w *world) apply(envs []events.Envelope) (touched map[string]bool, fresh bo
 		w.feed = append(w.feed, e)
 		if len(w.feed) > feedCap {
 			w.feed = w.feed[len(w.feed)-feedCap:]
+		}
+		if e.Src == events.SrcLedger && e.Event == journal.EventSessionStart && e.Session != "" {
+			w.sessionInfo[e.Session] = sessionInfo{Harness: e.Harness, Model: e.Model}
 		}
 		id := e.Ticket
 		if e.Session != "" && id != "" {
@@ -539,7 +545,7 @@ func eventState(l events.Envelope) string {
 		return StateStalled
 	case journal.EventQuestion:
 		return StateNeedsInput
-	case journal.EventAnswer:
+	case journal.EventAnswer, journal.EventApproval, journal.EventRevalidate:
 		return StateOK
 	case journal.EventGateOpen:
 		return StateReviewing

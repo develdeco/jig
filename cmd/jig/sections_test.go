@@ -87,7 +87,7 @@ func TestRenderStatusRendersRegisteredSectionsBeforeTheHelpLine(t *testing.T) {
 		t.Fatalf("store.Open: %v", err)
 	}
 
-	plain, err := RenderStatus(st, fx.Ticket)
+	plain, err := renderStatus(st, fx.Ticket, nil)
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}

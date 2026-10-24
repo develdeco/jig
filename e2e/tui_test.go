@@ -151,7 +151,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		if res := h.Jig("verify", fx.Ticket, sha, "--slice", "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
 			t.Fatalf("jig verify a exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 		}
-		screens.untilWithin(verifyWait, "1 of 4 slices green")
+		screens.untilWithin(verifyWait, "1 of 4 green")
 	}()
 
 	// The builder asks, the question reaches the screens, and the person
@@ -191,12 +191,12 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	}
 	<-verifySlots
 	h.WaitVerifiers()
-	screens.until("4 of 4 slices green")
+	screens.until("4 slices green, each verified by jig")
 
 	// The gate opens from the screens. A reviewer in a session of its own
 	// reads the round and reports one ask.
 	screens.press("g")
-	screens.until("round 1 is open", "✔ jig gate "+fx.Ticket)
+	screens.until("round 1 open", "✓ jig gate "+fx.Ticket)
 	reviewer := newHarness(t, fx, env, "s-reviewer")
 	if res := reviewer.Jig("review", "context", fx.Ticket); res.Code != 0 {
 		t.Fatalf("jig review context exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
@@ -205,32 +205,32 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if res := reviewer.Jig("review", "done", fx.Ticket, "--result", reviewResult(t, st, fx.Ticket, 1, true)); !strings.Contains(res.Stdout, "round: 1") {
 		t.Fatalf("jig review done (round 1) exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	if screen := screens.until("round 1: findings, 1 ask"); !strings.Contains(screen, "Which greeting does the product want?") {
+	if screen := screens.until("round 1 found 1 to decide"); !strings.Contains(screen, "Which greeting does the product want?") {
 		t.Errorf("the screen with the round's findings does not show the ask:\n%s", screen)
 	}
 
 	// The person dismisses the ask from the screens, and opens the next round.
 	screens.press("d")
-	screens.until("dismiss (person)", "✔ jig triage "+fx.Ticket+" r1-f1 dismiss")
+	screens.until("dismissed by you", "✓ jig triage "+fx.Ticket+" r1-f1 dismiss")
 	triage := waitJournal(t, fx, fx.Ticket, tuiWait, func(l journal.Line) bool { return l.Event == journal.EventTriage })
 	if triage.Ref != "r1-f1" || triage.Outcome != "dismiss" || triage.Provenance != "person" {
 		t.Errorf("triage line = %+v, want r1-f1 dismissed by a person", triage)
 	}
 	screens.press("g")
-	screens.until("round 2 is open", "✔ jig gate "+fx.Ticket)
+	screens.until("round 2 open", "✓ jig gate "+fx.Ticket)
 	if res := reviewer.Jig("review", "context", fx.Ticket); res.Code != 0 {
 		t.Fatalf("jig review context (round 2) exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	if res := reviewer.Jig("review", "done", fx.Ticket, "--result", reviewResult(t, st, fx.Ticket, 2, false)); res.Code != 0 || !strings.Contains(res.Stdout, "verdict: clean") {
 		t.Fatalf("jig review done (round 2) exit = %d, want 0 and a clean verdict\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	screens.until("round 2: clean")
+	screens.until("round 2 clean")
 
 	// One key, and a yes to the question, approves and publishes.
 	screens.press("p")
 	screens.until("approve the reviewed head")
 	screens.press("y")
-	screens.until("✔ jig publish "+fx.Ticket+" --approve", "✔ jig publish "+fx.Ticket+" --yes", "✔ published")
+	screens.until("✓ jig publish "+fx.Ticket+" --approve", "✓ jig publish "+fx.Ticket+" --yes", "✓ published")
 	screens.press("q")
 	if res := tui.Stop(); res.Code != 0 {
 		t.Fatalf("jig tui exit = %d, want 0 after q\nstderr:\n%s", res.Code, res.Stderr)

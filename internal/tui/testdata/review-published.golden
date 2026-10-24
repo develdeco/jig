@@ -1,24 +1,24 @@
-jig  demo › JIG-2 › review                                           ✔ published
+jig  demo › JIG-2 › 3 review                                         ✓ published
 ────────────────────────────────────────────────────────────────────────────────
+  ✓ round 2 clean · by reviewer
+
   rounds
-  ! round 1  findings  reviewed by s-reviewer at 09:11:30
-  ◆ round 2  clean     reviewed by s-reviewer at 09:13:30
+  ! round 1  findings  by reviewer at 09:11:30
+  ✓ round 2  clean     by reviewer at 09:13:30
 
-  asks
-  no ask is waiting for a decision
+  to decide
+  nothing: no finding waits for a person
 
-  publish
-  ▲ body rendered for ccccccc
-  ▲ approved by person at ccccccc
-  ✔ pull request opened https://example.test/acme/demo/pull/7
+  sessions
+  reviewer  harness unknown  s-review
 
-
-
-
-
-
-
-
-
+  ╭─ 3 Review · activity ──────────────────────────────────────────────────────╮
+  │  09:11:00 ◎ a review round opened                                          │
+  │  09:11:30 ! reviewer finished round 1: findings to decide                  │
+  │  09:12:00 - you dismissed r1-f1: not a bug                                 │
+  │  09:12:05 + you kept r1-f2                                                 │
+  │  09:13:00 ◎ a review round opened                                          │
+  │  09:13:30 ● reviewer finished round 2: clean                               │
+  ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · esc back · k keep · d dismiss · g gate · p publish · t tail · q quit
+  ↑↓ move · esc back · k keep · d dismiss · g gate · t tail · q quit

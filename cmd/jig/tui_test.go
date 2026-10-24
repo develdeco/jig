@@ -78,7 +78,7 @@ func TestTUIShowsTheStoreAndEndsOnQ(t *testing.T) {
 
 	keys, out, wait := startTUI(t, e)
 	out.until(t, T)
-	out.until(t, "building")
+	out.until(t, "on slice a")
 	if got := out.String(); strings.Contains(got, "\x1b") {
 		t.Errorf("a pipe got an escape sequence:\n%q", got)
 	}
@@ -98,8 +98,8 @@ func TestTUIWithATicketOpensItsScreen(t *testing.T) {
 	fx, _, e := workFixture(t)
 	keys, out, wait := startTUI(t, e, fx.Ticket)
 	out.until(t, "› "+fx.Ticket)
-	out.until(t, "slices green") // the status was read
-	keys.Write([]byte("\x1b"))   // esc: back to the project
+	out.until(t, "waiting for your approval") // the status was read
+	keys.Write([]byte("\x1b"))                // esc: back to the project
 	out.until(t, "1 ticket")
 	keys.Write([]byte("q"))
 	if code := wait(); code != 0 {

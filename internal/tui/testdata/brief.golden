@@ -1,0 +1,24 @@
+jig  demo › JIG-1 › 1 brief                                    ? build needs you
+────────────────────────────────────────────────────────────────────────────────
+  ✓ approved by Ada Lovelace · 4 sections, 4 slices
+    approved 2026-10-23 09:00, recorded by the session that drafted it
+
+  sections  cited by
+  Goal      no slice
+  Greeting  slice a
+  Farewell  slice b
+  Tone      slice c, d
+
+  slices
+▸ ● a  Greet by name
+  ◐ b  Say goodbye, politely
+  ? c  Pick the tone
+  ○ d  Ship the copy  after b, c
+
+  ╭─ 1 Brief · activity ───────────────────────────────────────────────────────╮
+  │  09:00:00 ✓ Ada Lovelace approved the brief, as recorded by planner        │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+
+
+────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move · enter open · esc back · t tail · q quit

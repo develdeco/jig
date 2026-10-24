@@ -26,15 +26,22 @@ func (m *Model) slicePage(id, slice string) page {
 			row = &s
 		}
 	}
+	if g := t.goals()[slice]; g != "" {
+		p.add(m.st.bold(g))
+	}
 	if row == nil {
 		p.add(m.st.dim("slice " + slice + " has no lines yet"))
 	} else {
-		facts := []string{"state " + m.st.state(row.State, row.State), "try " + strconv.Itoa(row.Attempts)}
+		facts := []string{m.st.icon(row.State) + " " + m.st.state(row.State, row.State), strconv.Itoa(row.Attempts) + " " + plural(row.Attempts, "try", "tries")}
 		if row.BlockedBy != "" {
-			facts = append(facts, "blocked by "+row.BlockedBy)
+			facts = append(facts, "after slice "+strings.ReplaceAll(row.BlockedBy, "+", " and "))
 		}
 		if holder, ok := claimHolder(t, slice); ok {
-			facts = append(facts, "held by "+firstOf(holder, "a session with no id"))
+			verb := "held by "
+			if row.State == StateGreen {
+				verb = "built by "
+			}
+			facts = append(facts, verb+firstOf(m.whoWith(t, holder), "a session"))
 		}
 		p.add(strings.Join(facts, m.st.dim(" · ")))
 	}
@@ -52,13 +59,13 @@ func (m *Model) slicePage(id, slice string) page {
 			state, word := StateNeedsInput, "open"
 			if !q.Open {
 				state, word = StateOK, "answered"
-				if q.Provenance != "" {
-					word += " by " + q.Provenance
+				if q.Provenance == "person" {
+					word += " by you"
 				}
 			}
 			head := m.st.icon(state) + " " + q.ID + "  " + m.st.state(state, word)
 			if q.Session != "" {
-				head += m.st.dim("  asked by " + q.Session + " at " + q.At)
+				head += m.st.dim("  asked by " + m.who(t, q.Session) + " at " + q.At)
 			}
 			if q.Open {
 				p.addRow(rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: slice}, head)
@@ -88,7 +95,7 @@ func (m *Model) slicePage(id, slice string) page {
 		}
 		for _, i := range lines {
 			l := t.lines[i]
-			p.add(m.st.dim(clock(l, m.zone)) + " " + m.st.icon(eventState(l)) + " " + describe(l))
+			p.add(m.activityLine(t, l))
 		}
 	}
 	return p

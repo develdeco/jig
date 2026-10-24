@@ -1,13 +1,13 @@
-jig  demo › JIG-1 › build › c                                      ? needs-input
+jig  demo › JIG-1 › 2 build › slice c                              ? needs-input
 ────────────────────────────────────────────────────────────────────────────────
-  state needs-input · try 1
+  ? needs-input · 1 try
 
   questions
-▸ ? q-001  open  asked by s-builder at 09:02:00
+▸ ? q-001  open  asked by builder at 09:02:00
       Formal or casual?
 
   timeline
-  09:02:00 ? q-001 Formal or casual?
+  09:02:00 ? builder asks about slice c: Formal or casual?
 
 
 

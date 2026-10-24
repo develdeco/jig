@@ -167,7 +167,7 @@ func TestRunPrintsEachScreenWholeAndTakesKeysFromTheInput(t *testing.T) {
 
 	s.out.until(t, "published")
 	s.keys("\r") // open JIG-1
-	s.out.until(t, "needs a person")
+	s.out.until(t, "needs you")
 	s.keys("g")
 	r.untilRan(t, "gate JIG-1 --store /s")
 	s.keys("q")
@@ -200,7 +200,7 @@ func TestRunShowsWhatIsWrittenAfterItStarted(t *testing.T) {
 	r := newRunner()
 	src := newLiveSource(jig1()...)
 	s := startRun(t, plainConfig(src, r))
-	s.out.until(t, "needs input")
+	s.out.until(t, "open question")
 
 	src.live <- jl(at(9, 0), "JIG-7", "a", "claim")
 	s.out.until(t, "JIG-7")
@@ -216,7 +216,7 @@ func TestRunTakesKeysThatArriveTogether(t *testing.T) {
 	cfg := plainConfig(newLiveSource(jig1()...), r)
 	cfg.Ticket = "JIG-1"
 	s := startRun(t, cfg)
-	s.out.until(t, "needs a person")
+	s.out.until(t, "needs you")
 
 	// The answer prompt, its text and its end, in one write.
 	s.keys("aOK\r")
@@ -310,7 +310,7 @@ func TestRunOnAScreenDrawsWithTheRendererAndEndsOnQ(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- Run(context.Background(), cfg, pr, out, true) }()
 
-	out.until(t, "needs a person")
+	out.until(t, "needs you")
 	pw.Write([]byte("g"))
 	r.untilRan(t, "gate JIG-1 --store /s")
 	pw.Write([]byte("q"))

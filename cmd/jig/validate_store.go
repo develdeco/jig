@@ -255,7 +255,8 @@ func recordApproval(e env, st *store.Store, ticket, sum, provenance string) (sto
 	}
 	err = journal.Append(st, ticket, journal.Line{
 		TS: stamp(e), Event: journal.EventApproval, Provenance: provenance,
-		Ref: sum[:12], Summary: flatten(fmt.Sprintf("%s <%s>", a.By, a.Email), summaryMax),
+		Session: strings.TrimSpace(e.getenv("JIG_SESSION")),
+		Ref:     sum[:12], Summary: flatten(fmt.Sprintf("%s <%s>", a.By, a.Email), summaryMax),
 	})
 	if err != nil {
 		return store.Approval{}, "", err

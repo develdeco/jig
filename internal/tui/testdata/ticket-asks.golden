@@ -1,22 +1,22 @@
-jig  demo › JIG-2  Config loader                             ! review found asks
+jig  demo › JIG-2  Config loader                              ! review to decide
 ────────────────────────────────────────────────────────────────────────────────
-▸ ● build    1 of 1 slices green
-  ! review   round 1: findings, 2 asks
-  ○ publish  not yet
+  ╭─ Steps ────────────────────────────────────────────────────── step 3 of 4 ─╮
+  │  ✓ 1 Brief            no brief on record                                   │
+  │  ✓ 2 Build    30s     1 slice green, each verified by jig                  │
+  │▸ ! 3 Review           round 1 found 2 to decide · 2 wait for your decision │
+  │  ○ 4 Publish          after a clean review                                 │
+  ╰────────────────────────────────────────────────────────────────────────────╯
 
-  needs a person
-  ! r1-f1  high  alpha/a.go:3  Unchecked error  undecided
-  ! r1-f2  low   beta/b.go:9   Name shadows import  undecided
+  needs you
+  ! high  alpha/a.go:3  Unchecked error  undecided  r1-f1
+  ! low   beta/b.go:9   Name shadows import  undecided  r1-f2
 
   next  Run `jig triage JIG-2 <id> keep|dismiss` to decide the outstanding asks…
 
-  recent
-  09:10:00 ◐ claimed by s-builder  [a]
-  09:10:30 ● verified ccccccc  [a]
-  09:11:00 ◎ gate round opened
-  09:11:30 ! round 1: findings
-
-
+  ╭─ 3 Review · activity ──────────────────────────────────────────────────────╮
+  │  09:11:00 ◎ a review round opened                                          │
+  │  09:11:30 ! reviewer finished round 1: findings to decide                  │
+  ╰────────────────────────────────────────────────────────────────────────────╯
 
 
 ────────────────────────────────────────────────────────────────────────────────

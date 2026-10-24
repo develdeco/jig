@@ -1,12 +1,20 @@
 ticket: JIG-1
 state: stalled
-slices[4]{id,state,attempts,blocked_by,question}:
-  a,stalled,2,-,-
-  b,queued,0,a,-
-  c,queued,0,-,-
-  d,queued,0,-,-
+slices[4]{id,state,attempts,blocked_by,question,goal}:
+  a,stalled,2,-,-,Fix Clamp so TestClamp passes.
+  b,queued,0,a,-,"Give Clamp a percentage-range caller, once it works."
+  c,queued,0,-,-,Decide and implement the greeting's tone.
+  d,queued,0,-,-,Smoke-test the rig environment class.
 questions: none
 stalled[1]{slice,reason,summary}:
   a,stall,"clamp still returns for clamp(, , ); the upper bound check is missing."
+brief:
+  approval: none
+brief_sections[5]{heading,slices}:
+  Goal,-
+  Slice A - failing clamp,a
+  Slice B - clamp callers,b
+  Slice C - greeting decision,c
+  Slice D - rig smoke,d
 help[1]:
   Slice a is stalled (stall): amend the brief, then run `jig requeue JIG-1 --from-brief-diff`
