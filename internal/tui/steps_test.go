@@ -216,3 +216,17 @@ func TestADecidedAskSaysSoBeforeItsTitle(t *testing.T) {
 		t.Errorf("titles start at %d and %d, want them aligned", a, b)
 	}
 }
+
+// TestAnUnreadTicketsBriefSaysWhatTheRosterKnows: before its status is read,
+// a ticket's brief step says what `jig next` told: no slices yet is a brief
+// being drafted, slices with no approval in the journal wait for it.
+func TestAnUnreadTicketsBriefSaysWhatTheRosterKnows(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "")
+	g.m.w.setRoster([]rosterRow{{ID: "JIG-10", Title: "New", State: "new"}, {ID: "JIG-11", Title: "Planned", State: "ready"}})
+	for id, want := range map[string]string{"JIG-10": "being drafted", "JIG-11": "drafted · waiting for your approval"} {
+		if s := g.m.steps(g.m.w.tickets[id])[stepBrief]; s.Text != want {
+			t.Errorf("%s brief = %+v, want %q", id, s, want)
+		}
+	}
+}

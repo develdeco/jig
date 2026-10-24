@@ -2,7 +2,7 @@ jig  demo                                                              3 tickets
 ────────────────────────────────────────────────────────────────────────────────
 ▸ ? JIG-1  Greeting copy  ✓ ? ○ ○  1 open question
   ✓ JIG-2  Config loader  ✓ ✓ ✓ ✓  published https://example.test/acme/demo/pul…
-  ○ JIG-3  Release notes  ○ ○ ○ ○  Brief: not read yet
+  ◐ JIG-3  Release notes  ◐ ○ ○ ○  Brief: drafted · waiting for your approval
 
 
 

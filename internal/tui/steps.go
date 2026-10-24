@@ -92,8 +92,14 @@ func (m *Model) briefStep(t *ticket) stepRow {
 	case started:
 		s.Done, s.State = true, StateOK
 		s.Text = "no brief on record"
+	case t.status == nil && t.rosterState == "new":
+		// Not read yet, but `jig next` says the ticket has no slices.
+		s.State, s.Text = StateBuilding, "being drafted"
+	case t.status == nil && t.rosterState != "":
+		// It has slices, and the journal holds no approval.
+		s.State, s.Text = StateBuilding, "drafted · waiting for your approval"
 	case t.status == nil:
-		s.State, s.Text = StateQueued, "not read yet"
+		s.State, s.Text = StateQueued, "reading"
 	default:
 		s.State, s.Text = StateBuilding, "being drafted"
 	}
