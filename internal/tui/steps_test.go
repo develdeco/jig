@@ -190,4 +190,9 @@ func TestAReviewerTakingTheRoundShowsOnTheReviewStep(t *testing.T) {
 	if stepOfLine(took) != stepReview {
 		t.Errorf("a gate-reviewer line is in step %d, want the review", stepOfLine(took))
 	}
+	// Reopened (a moved head), the round waits for a reviewer again.
+	g.feed(jl(at(41, 0), "JIG-8", "", journal.EventGateOpen, func(l *journal.Line) { l.Attempt = 1 }))
+	if r := g.m.steps(g.m.w.tickets["JIG-8"])[stepReview]; r.Text != "round 1 open · waiting for a reviewer" {
+		t.Errorf("review once reopened = %+v, want round 1 waiting for a reviewer again", r)
+	}
 }

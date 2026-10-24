@@ -2,9 +2,11 @@ package verifydeliver
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -783,8 +785,11 @@ func TestPointAtBranchCopyFallsBackToTheBuildLeaseWithoutAClone(t *testing.T) {
 }
 
 // TestRecordReviewerJournalsWhoReadsTheRound: the first time review context
-// names the reviewer, the journal says so with the round, the session and
-// what it runs on; naming the same one again writes nothing more.
+// names a reviewer, the journal says so with the round, the session and what
+// it runs on; naming the same one again writes nothing more, and another
+// session is another line. A round reopened at the same head keeps its
+// reviewer and says so again after its gate-open; one reopened at a moved
+// head has none.
 func TestRecordReviewerJournalsWhoReadsTheRound(t *testing.T) {
 	t.Parallel()
 	fx, d, _ := cloneBuilt(t)
@@ -797,23 +802,48 @@ func TestRecordReviewerJournalsWhoReadsTheRound(t *testing.T) {
 			t.Fatalf("RecordReviewer: %v", err)
 		}
 	}
-	lines, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var open, readers []journal.Line
-	for _, l := range lines {
-		switch l.Event {
-		case journal.EventGateOpen:
-			open = append(open, l)
-		case journal.EventGateReviewer:
-			readers = append(readers, l)
+	// gate is the round's lines in order: gate-open as "open", gate-reviewer
+	// as its session and round.
+	gate := func() []string {
+		t.Helper()
+		lines, err := journal.Read(d.Store, fx.Ticket)
+		if err != nil {
+			t.Fatal(err)
 		}
+		var out []string
+		for _, l := range lines {
+			switch l.Event {
+			case journal.EventGateOpen:
+				out = append(out, fmt.Sprintf("open %d", l.Attempt))
+			case journal.EventGateReviewer:
+				out = append(out, fmt.Sprintf("%s %d %s %s", l.Session, l.Attempt, l.Model, l.Effort))
+			}
+		}
+		return out
 	}
-	if len(open) != 1 || open[0].Attempt != 1 {
-		t.Errorf("gate-open lines = %+v, want one naming round 1", open)
+	if got, want := gate(), []string{"open 1", "s-rev 1 m high"}; !slices.Equal(got, want) {
+		t.Errorf("after review context = %q, want %q", got, want)
 	}
-	if len(readers) != 1 || readers[0].Attempt != 1 || readers[0].Session != "s-rev" || readers[0].Model != "m" || readers[0].Effort != "high" {
-		t.Errorf("gate-reviewer lines = %+v, want one naming round 1, s-rev, m and high", readers)
+
+	if _, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("GatePrepare again: %v", err)
+	}
+	if got, want := gate(), []string{"open 1", "s-rev 1 m high", "open 1", "s-rev 1 m high"}; !slices.Equal(got, want) {
+		t.Errorf("after reopening at the same head = %q, want %q", got, want)
+	}
+
+	writeAndCommit(t, fx.RepoDir, "moved.txt", "a later commit", "the clone moved on")
+	moved, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare after the clone moved: %v", err)
+	}
+	if got := gate(); got[len(got)-1] != "open 1" {
+		t.Errorf("after reopening at a moved head = %q, want the round open with no reviewer", got)
+	}
+	if _, err := RecordReviewer(d, moved, Provenance{Session: "s-other", How: ReviewerByFlag}); err != nil {
+		t.Fatalf("RecordReviewer: %v", err)
+	}
+	if got := gate(); got[len(got)-1] != "s-other 1  " {
+		t.Errorf("after another session reads it = %q, want its line last", got)
 	}
 }

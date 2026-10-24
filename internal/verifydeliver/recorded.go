@@ -234,7 +234,15 @@ func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 		return Prepared{}, err
 	}
 	if hadPrev && prev.Head == prep.Head {
+		// The round is the same and so is its reviewer, which the journal
+		// says again after this gate-open, so a reader of the journal alone
+		// still knows who is reading the round.
 		of.Reviewer = prev.Reviewer
+		if of.Reviewer.Known() {
+			if err := journalReviewer(d, run.ticket, run.n, of.Reviewer); err != nil {
+				return Prepared{}, err
+			}
+		}
 	} else if err := os.Remove(findingsDraftsPath(d.Store, run.ticket, run.n)); err != nil && !isNotExist(err) {
 		return Prepared{}, fmt.Errorf("verifydeliver: clear the drafts of an earlier head: %w", err)
 	}
@@ -313,25 +321,38 @@ func RecordReviewer(d Deps, p Prepared, who Provenance) (Prepared, error) {
 	if who.Effort != "" {
 		of.Reviewer.Effort = who.Effort
 	}
+	// The journal says who is reading the round as soon as jig knows, so a
+	// watcher (jig tui) shows the round being reviewed rather than waiting
+	// for a reviewer until it closes. The line goes first: a refused append
+	// leaves the open record without the reviewer, so running the command
+	// again writes both.
+	if named {
+		if err := journalReviewer(d, p.Ticket, p.Round, of.Reviewer); err != nil {
+			return Prepared{}, err
+		}
+	}
 	if err := writeOpenFile(d.Store, of); err != nil {
 		return Prepared{}, err
 	}
 	p.Reviewer = of.Reviewer
 	if named {
-		// The journal says who is reading the round as soon as jig knows,
-		// so a watcher (jig tui) shows the round being reviewed rather than
-		// waiting for a reviewer until the round is closed. The push is best
-		// effort: the round's close pushes the line if this one could not.
-		line := journal.Line{
-			Event: journal.EventGateReviewer, Attempt: p.Round,
-			Session: of.Reviewer.Session, Agent: of.Reviewer.Agent, Model: of.Reviewer.Model, Effort: of.Reviewer.Effort,
-		}
-		if err := journal.Append(d.Store, p.Ticket, line); err != nil {
-			return Prepared{}, fmt.Errorf("verifydeliver: review context: journal gate-reviewer: %w", err)
-		}
+		// Best effort: the round's close pushes the line if this one could not.
 		_ = d.Store.Push(fmt.Sprintf("%s: gate round %d is being reviewed", p.Ticket, p.Round))
 	}
 	return p, nil
+}
+
+// journalReviewer writes the gate-reviewer line: who is reading round n of
+// ticket, and what they said they run on.
+func journalReviewer(d Deps, ticket string, n int, who Provenance) error {
+	line := journal.Line{
+		Event: journal.EventGateReviewer, Attempt: n,
+		Session: who.Session, Agent: who.Agent, Model: who.Model, Effort: who.Effort,
+	}
+	if err := journal.Append(d.Store, ticket, line); err != nil {
+		return fmt.Errorf("verifydeliver: journal gate-reviewer: %w", err)
+	}
+	return nil
 }
 
 // originTip is the sha of origin/<branch> as the repository at dir last

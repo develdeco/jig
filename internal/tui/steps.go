@@ -210,11 +210,16 @@ func (m *Model) buildFocus(t *ticket, slices []sliceRow) string {
 	return ""
 }
 
-// roundReviewer is the session that took round n to review it (its latest
-// gate-reviewer line), or "".
+// roundReviewer is the session that took round n to review it: the latest
+// gate-reviewer line since the round last opened, or "". A round reopened at
+// a moved head starts with no reviewer, and one reopened at the same head
+// names its reviewer again.
 func (t *ticket) roundReviewer(n int) string {
 	for i := len(t.lines) - 1; i >= 0; i-- {
-		if l := t.lines[i]; l.Event == journal.EventGateReviewer && l.Attempt == n {
+		switch l := t.lines[i]; {
+		case l.Event == journal.EventGateOpen:
+			return ""
+		case l.Event == journal.EventGateReviewer && l.Attempt == n:
 			return l.Session
 		}
 	}

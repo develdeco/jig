@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"sync"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -33,6 +37,11 @@ func Run(ctx context.Context, cfg Config, in io.Reader, out io.Writer, screen bo
 	var model tea.Model = m
 	if screen {
 		opts = append(opts, tea.WithAltScreen())
+		// What anything in the process writes to stderr meanwhile (a verb's
+		// warning a seam does not reach) waits until the screens give the
+		// terminal back: a line written under them scrolls it, and every
+		// later frame is drawn a row off.
+		defer hold(&os.Stderr)()
 	} else {
 		opts = append(opts, tea.WithoutRenderer())
 		model = &framed{inner: m, out: out}
@@ -109,4 +118,46 @@ func (f *framed) emit() {
 	}
 	f.last = v
 	fmt.Fprint(f.out, v+"\n\f\n")
+}
+
+// hold points *f at a pipe and returns a release that points it back and
+// writes to the original file what arrived meanwhile. A child process that
+// was handed the pipe and outlives the release keeps at most a second of the
+// wait: what it writes after that is dropped.
+func hold(f **os.File) (release func()) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return func() {}
+	}
+	orig := *f
+	*f = w
+	var mu sync.Mutex
+	var held bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer r.Close()
+		buf := make([]byte, 4096)
+		for {
+			n, err := r.Read(buf)
+			mu.Lock()
+			held.Write(buf[:n])
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return func() {
+		*f = orig
+		_ = w.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+		mu.Lock()
+		data := bytes.Clone(held.Bytes())
+		mu.Unlock()
+		_, _ = orig.Write(data)
+	}
 }
