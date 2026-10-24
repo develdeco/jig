@@ -450,6 +450,16 @@ func TestLocateTicketSliceSession(t *testing.T) {
 	if got := w.locate(app, Opts{Getenv: env("JIG_SESSION", "s-env")}); got.Session != "s-env" || got.SessionHow != HowEnv {
 		t.Errorf("session from env: %q (%s)", got.Session, got.SessionHow)
 	}
+	// Then the id the harness sets for its agent's commands, in any shell.
+	if got := w.locate(app, Opts{Getenv: env("CLAUDE_CODE_SESSION_ID", "s-claude")}); got.Session != "s-claude" || got.SessionHow != HowHarness {
+		t.Errorf("session from Claude Code = %q (%s), want s-claude (harness)", got.Session, got.SessionHow)
+	}
+	both := func(k string) string {
+		return map[string]string{"JIG_SESSION": "s-env", "CLAUDE_CODE_SESSION_ID": "s-claude"}[k]
+	}
+	if got := w.locate(app, Opts{Getenv: both}); got.Session != "s-env" || got.SessionHow != HowEnv {
+		t.Errorf("session with JIG_SESSION and Claude Code's = %q (%s), want JIG_SESSION's", got.Session, got.SessionHow)
+	}
 	if got := w.locate(app, Opts{Session: "s-arg", Getenv: env("JIG_SESSION", "s-env")}); got.Session != "s-arg" || got.SessionHow != HowArg {
 		t.Errorf("session from the argument: %q (%s)", got.Session, got.SessionHow)
 	}

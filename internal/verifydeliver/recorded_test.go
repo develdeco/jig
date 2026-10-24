@@ -431,6 +431,48 @@ func TestGateFinishFindsTheReviewerWhenNobodyNamedIt(t *testing.T) {
 			t.Fatalf("report reviewer = %+v (%v), want the latest ledger record of `jig review context`", report.Reviewer, err)
 		}
 	})
+	// A session from the environment is the harness session: a subagent
+	// reviewing in the session its builders ran in is told apart from them by
+	// the agent the ledger recorded reading the round. Reads in another
+	// session name nobody, and reads by two agents of the session (the
+	// builder itself and a subagent) cannot say which one closes the round,
+	// so neither makes a builder's own review independent.
+	t.Run("an environment session's agent from the ledger", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name      string
+			ledger    []journal.Line
+			wantAgent string
+			wantIndep Independence
+		}{
+			{"read by a subagent", []journal.Line{{Session: "s-builder", Agent: "sub-2"}}, "sub-2", IndependentYes},
+			{"read by a subagent, then in another session", []journal.Line{{Session: "s-builder", Agent: "sub-2"}, {Session: "s-other"}}, "sub-2", IndependentYes},
+			{"read in another session", []journal.Line{{Session: "s-other", Agent: "sub-2"}}, "", IndependentNo},
+			{"read by the builder and a subagent", []journal.Line{{Session: "s-builder"}, {Session: "s-builder", Agent: "sub-2"}}, "", IndependentNo},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				fx, d, _ := cloneBuilt(t)
+				if err := journal.Append(d.Store, fx.Ticket, journal.Line{Slice: "a", Event: journal.EventClaim, Session: "s-builder"}); err != nil {
+					t.Fatal(err)
+				}
+				p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i, l := range tc.ledger {
+					l.TS, l.Event, l.Command = p.Opened.Add(time.Duration(i+1)*time.Second).Format(time.RFC3339Nano), journal.EventTool, "jig review context "+fx.Ticket
+					if err := ledger.Append(d.Home, l); err != nil {
+						t.Fatal(err)
+					}
+				}
+				report, _ := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-builder", How: ReviewerByEnv})
+				if report.Reviewer.Session != "s-builder" || report.Reviewer.Agent != tc.wantAgent || report.Reviewer.How != ReviewerByEnv || report.Independent != tc.wantIndep {
+					t.Errorf("report reviewer = %+v, independent %q, want s-builder/%q by env, %q", report.Reviewer, report.Independent, tc.wantAgent, tc.wantIndep)
+				}
+			})
+		}
+	})
 }
 
 // TestRunsReviewContext: the command lines a harness records that count as

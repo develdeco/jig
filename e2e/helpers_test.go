@@ -19,6 +19,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -101,6 +102,13 @@ func (e jigEnv) overrides() []string {
 // records, and never write there.
 func (e jigEnv) environ() []string {
 	drop := append(slices.Clone(e.unset), recordDirEnv)
+	// A harness session the suite runs inside (Claude Code sets its id in the
+	// environment of what its agent runs) is not the jig under test's.
+	for _, name := range locate.HarnessSessionEnv {
+		if !slices.ContainsFunc(e.extra, func(kv string) bool { return sameEnvName(envName(kv), name) }) {
+			drop = append(drop, name)
+		}
+	}
 	return withoutEnv(replaceEnv(os.Environ(), e.overrides()), drop...)
 }
 

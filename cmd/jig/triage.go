@@ -209,7 +209,7 @@ func cmdTriage(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	line := journal.Line{
 		Event: journal.EventTriage, Ref: id, Outcome: decision, Provenance: provenance,
 		Summary: oneLineText(*reason), Command: verifydeliver.TriageTarget(*workspace, *oracle),
-		Session: e.getenv("JIG_SESSION"),
+		Session: envSession(e),
 	}
 	if err := journal.Append(st, ticket, line); err != nil {
 		return renderErr(stdout, err)

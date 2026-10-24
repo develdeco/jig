@@ -10,11 +10,13 @@ import (
 )
 
 // TestReviewerFromFlagsPrefersTheFlagThenTheEnvironment: the reviewer is the
-// session the verb names, else $JIG_SESSION, else nobody - and how jig knows
-// is recorded with it, because a round trusts a flag more than a guess.
+// session the verb names, else $JIG_SESSION, else the id the harness set,
+// else nobody - and how jig knows is recorded with it, because a round trusts
+// a flag more than a guess.
 func TestReviewerFromFlagsPrefersTheFlagThenTheEnvironment(t *testing.T) {
 	t.Parallel()
-	withEnv := envFrom(map[string]string{"JIG_SESSION": "s-from-env"})
+	withEnv := envFrom(map[string]string{"JIG_SESSION": "s-from-env", "CLAUDE_CODE_SESSION_ID": "s-from-claude"})
+	harness := envFrom(map[string]string{"CLAUDE_CODE_SESSION_ID": "s-from-claude"})
 	none := envFrom(nil)
 	cases := []struct {
 		name    string
@@ -24,6 +26,7 @@ func TestReviewerFromFlagsPrefersTheFlagThenTheEnvironment(t *testing.T) {
 	}{
 		{"flag over env", withEnv, "s-flag", verifydeliver.Provenance{Session: "s-flag", How: verifydeliver.ReviewerByFlag}},
 		{"env alone", withEnv, "", verifydeliver.Provenance{Session: "s-from-env", How: verifydeliver.ReviewerByEnv}},
+		{"harness alone", harness, "", verifydeliver.Provenance{Session: "s-from-claude", How: verifydeliver.ReviewerByEnv}},
 		{"nobody", none, "", verifydeliver.Provenance{}},
 	}
 	for _, c := range cases {
