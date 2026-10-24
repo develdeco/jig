@@ -560,11 +560,17 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 	if !prov.Known() {
 		prov.Session, prov.Agent, prov.How = p.Reviewer.Session, p.Reviewer.Agent, p.Reviewer.How
 	}
-	if !prov.Known() {
+	if !prov.Known() || (prov.How == ReviewerByEnv && prov.Agent == "") {
+		// A session from the environment is the harness session, which a
+		// subagent shares with its parent and so with builders it never was:
+		// the ledger's record of who read the round, when it is in that
+		// session, says which agent did.
 		if found, ok, err := LedgerReviewer(d, p.Ticket, p.Opened); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: review done: read the ledger: %w", err)
-		} else if ok {
+		} else if ok && !prov.Known() {
 			prov.Session, prov.Agent, prov.How = found.Session, found.Agent, found.How
+		} else if ok && found.Session == prov.Session {
+			prov.Agent = found.Agent
 		}
 	}
 	if prov.Model == "" {

@@ -21,7 +21,7 @@ func init() {
 		Spec: cmdSpec{"here", "name where the work is: project, store, repo, branch, ticket and slices", []flagSpec{
 			{"store", "explicit store path", false},
 			{"slice", "slice the work is on (default: JIG_SLICE, else the session's latest claim)", false},
-			{"session", "harness session id (default: JIG_SESSION)", false},
+			{"session", "harness session id (default: JIG_SESSION, else CLAUDE_CODE_SESSION_ID)", false},
 			{"json", "print one JSON object instead of blocks", false},
 			{"explain", "also print how each part was found", false},
 			{"no-map", "do not record a recognized clone in the machine map", false},
@@ -41,7 +41,7 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "here")
 	storeFlag := fs.String("store", "", "explicit store path")
 	sliceFlag := fs.String("slice", "", "slice the work is on (default: JIG_SLICE, else the session's latest claim)")
-	sessionFlag := fs.String("session", "", "harness session id (default: JIG_SESSION)")
+	sessionFlag := fs.String("session", "", "harness session id (default: JIG_SESSION, else CLAUDE_CODE_SESSION_ID)")
 	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
 	explain := fs.Bool("explain", false, "also print how each part was found")
 	noMap := fs.Bool("no-map", false, "do not record a recognized clone in the machine map")

@@ -17,7 +17,7 @@ import (
 // rows and the FlagSets carry the same text, which the help parity test
 // compares.
 const (
-	reviewSessionUsage  = "the reviewer's harness session id (default: $JIG_SESSION); the round is judged independent of the builders by it"
+	reviewSessionUsage  = "the reviewer's harness session id (default: $JIG_SESSION, else CLAUDE_CODE_SESSION_ID); the round is judged independent of the builders by it"
 	reviewModelUsage    = "the model the reviewer runs on, as it reports it; jig chooses none"
 	reviewEffortUsage   = "the reasoning effort the reviewer runs at, as it reports it"
 	reviewJSONUsage     = "print the review request as JSON (the review.json the round wrote)"

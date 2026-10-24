@@ -51,8 +51,10 @@ const (
 	// ReviewerByFlag: `--session` (and `--agent-id`) on the verb that closed
 	// the round.
 	ReviewerByFlag = "flag"
-	// ReviewerByEnv: $JIG_SESSION in the environment of the verb that closed
-	// the round.
+	// ReviewerByEnv: the session the environment of the verb that closed the
+	// round names ($JIG_SESSION, else the harness's own variable). It names
+	// the harness session and never the agent in it, since a subagent
+	// inherits its parent's environment.
 	ReviewerByEnv = "env"
 	// ReviewerRecorded: the session the reviewer named when it opened the
 	// round with `jig review context --session`.

@@ -24,8 +24,8 @@ import (
 // must say the same (TestCommandTableFlagsMatchRegistration), so both read
 // these.
 const (
-	sessionUsageStart  = "session id (default $JIG_SESSION, else a new one is minted)"
-	sessionUsageOthers = "session id (default $JIG_SESSION)"
+	sessionUsageStart  = "session id (default $JIG_SESSION, else $CLAUDE_CODE_SESSION_ID, else a new one is minted)"
+	sessionUsageOthers = "session id (default $JIG_SESSION, else $CLAUDE_CODE_SESSION_ID)"
 	sessionUsageCwd    = "directory the session works in (default the working directory)"
 	sessionUsageAgent  = "id of the agent starting it, when it is not the session's own"
 )
