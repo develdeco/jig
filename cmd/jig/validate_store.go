@@ -221,10 +221,12 @@ func advisoryTable(as []advisory) string {
 	return axi.Table("advisories", []string{"code", "message", "help"}, rows)
 }
 
-// Approval results: what recording the approval of a valid brief did.
+// Approval results: what recording the approval of a valid brief did, or
+// that --check left it alone.
 const (
 	approvalRecorded  = "recorded"
 	approvalUnchanged = "unchanged"
+	approvalChecked   = "not recorded (--check)"
 )
 
 // provenanceRank orders who an approval speaks for: the word of a person is
