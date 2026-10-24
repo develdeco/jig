@@ -8,8 +8,8 @@ jig  demo › JIG-2  Config loader                               ! review findin
   ╰────────────────────────────────────────────────────────────────────────────╯
 
   needs you
-  ! high  alpha/a.go:3  Unchecked error  undecided  r1-f1
-  ! low   beta/b.go:9   Name shadows import  undecided  r1-f2
+  ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
+  ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
 
   next  Run `jig triage JIG-2 <id> keep|dismiss` to decide the outstanding asks…
 

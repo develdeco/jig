@@ -1,10 +1,10 @@
 jig  demo › JIG-2 › 3 review                                   ! review findings
 ────────────────────────────────────────────────────────────────────────────────
 
-  to decide
-  ! high  alpha/a.go:3  Unchecked error  undecided  r1-f1
+  asks
+  ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
       needs a human
-▸ ! low   beta/b.go:9   Name shadows import  undecided  r1-f2
+▸ ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
 
   sessions
   reviewer  harness unknown  s-review

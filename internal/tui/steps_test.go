@@ -196,3 +196,23 @@ func TestAReviewerTakingTheRoundShowsOnTheReviewStep(t *testing.T) {
 		t.Errorf("review once reopened = %+v, want round 1 waiting for a reviewer again", r)
 	}
 }
+
+// TestADecidedAskSaysSoBeforeItsTitle: what was decided comes before the
+// title, so a long title cut at the screen's edge never hides it.
+func TestADecidedAskSaysSoBeforeItsTitle(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-9")
+	lines := g.m.askLines([]askRow{
+		{ID: "r1-f2", Risk: "medium", Where: "cart/cart.go:20", Title: strings.Repeat("a long title ", 20), Decision: "dismiss", DecidedBy: "person"},
+		{ID: "r1-f3", Risk: "low", Where: "cart/cart.go:9", Title: "short"},
+	})
+	for i, want := range []string{"dismissed by you", "undecided"} {
+		d, title := strings.Index(lines[i], want), strings.Index(lines[i], []string{"a long title", "short"}[i])
+		if d < 0 || title < d {
+			t.Errorf("row %d = %q, want %q before the title", i, lines[i], want)
+		}
+	}
+	if a, b := strings.Index(lines[0], "a long title"), strings.Index(lines[1], "short"); a != b {
+		t.Errorf("titles start at %d and %d, want them aligned", a, b)
+	}
+}

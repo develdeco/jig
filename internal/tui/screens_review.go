@@ -79,7 +79,7 @@ func (m *Model) reviewPage(id string) page {
 	}
 
 	p.add("")
-	p.add(m.st.bold("to decide"))
+	p.add(m.st.bold("asks"))
 	asks := t.asks()
 	switch {
 	case t.status == nil:
