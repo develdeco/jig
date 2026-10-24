@@ -158,3 +158,20 @@ func TestClaimBlockedUnattendedRefusedInteractiveWarns(t *testing.T) {
 		t.Errorf("claim after the brief changed: exit %d, want 1 with CLAIM_NOT_APPROVED\n%s", r.Code, r.Stdout)
 	}
 }
+
+// TestClaimTakesTheSessionClaudeCodeSets: with neither --session nor
+// JIG_SESSION, a claim run by a Claude Code agent is recorded under the id
+// Claude Code sets in its commands' environment, whichever shell tool ran it.
+func TestClaimTakesTheSessionClaudeCodeSets(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	env = env.without("JIG_SLICE", "JIG_SESSION").with("CLAUDE_CODE_SESSION_ID=s-claude")
+	r := runJig(t, env, fx.RepoDir, "claim", fx.Ticket, "--slice", "a")
+	if r.Code != 0 {
+		t.Fatalf("jig claim exit = %d\n%s", r.Code, r.Stdout)
+	}
+	lines := claimLines(t, fx, fx.Ticket, journal.EventClaim)
+	if len(lines) != 1 || lines[0].Session != "s-claude" {
+		t.Errorf("claim lines = %+v, want one by session s-claude", lines)
+	}
+}

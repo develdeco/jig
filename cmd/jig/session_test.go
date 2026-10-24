@@ -311,3 +311,28 @@ func TestSessionLinesAreLedgerEvents(t *testing.T) {
 		t.Errorf("events = %v, want %v", events, want)
 	}
 }
+
+// TestSessionVerbArgTakesTheHarnessSession: a verb with no --session acts on
+// $JIG_SESSION, else on the id the harness set for its agent's commands, the
+// way locate reads them.
+func TestSessionVerbArgTakesTheHarnessSession(t *testing.T) {
+	t.Parallel()
+	both := envFrom(map[string]string{"JIG_SESSION": "s-env", "CLAUDE_CODE_SESSION_ID": "s-claude"})
+	harness := envFrom(map[string]string{"CLAUDE_CODE_SESSION_ID": " s-claude "})
+	cases := []struct {
+		name string
+		e    env
+		flag string
+		want string
+	}{
+		{"flag first", both, "s-flag", "s-flag"},
+		{"JIG_SESSION over the harness", both, "", "s-env"},
+		{"the harness alone", harness, "", "s-claude"},
+		{"none", envFrom(nil), "", ""},
+	}
+	for _, c := range cases {
+		if got := sessionVerbArg(c.e, c.flag); got != c.want {
+			t.Errorf("%s: sessionVerbArg = %q, want %q", c.name, got, c.want)
+		}
+	}
+}

@@ -25,7 +25,7 @@ const (
 	verifySliceUsage   = "slice to verify (default: the commit's Jig-Slice trailer, then the slice your session claimed)"
 	verifyWaitUsage    = "run the oracle here and wait for its outcome (or for the worker already running), instead of in a detached process"
 	verifyRerunUsage   = "verify again a commit that already has a verification"
-	verifySessionUsage = "harness session id recorded on the lines (default: $JIG_SESSION)"
+	verifySessionUsage = "harness session id recorded on the lines (default: $JIG_SESSION, else CLAUDE_CODE_SESSION_ID)"
 	verifyStoreUsage   = "explicit store path"
 	verifyProjectUsage = "project name, resolved via the machine mapping"
 	verifyWorkerUsage  = "run as the detached worker that does the verification"
@@ -109,7 +109,7 @@ func cmdVerify(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 	if o.session == "" {
-		o.session = e.getenv("JIG_SESSION")
+		o.session = envSession(e)
 	}
 	if o.storeFlag, err = e.abs(o.storeFlag); err != nil {
 		return renderErr(stdout, err)

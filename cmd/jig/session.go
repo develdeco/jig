@@ -9,6 +9,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/locate"
 )
 
 // The `jig session` verbs keep the machine ledger's session records (see
@@ -23,8 +24,8 @@ import (
 // must say the same (TestCommandTableFlagsMatchRegistration), so both read
 // these.
 const (
-	sessionUsageStart  = "session id (default $JIG_SESSION, else a new one is minted)"
-	sessionUsageOthers = "session id (default $JIG_SESSION)"
+	sessionUsageStart  = "session id (default $JIG_SESSION, else $CLAUDE_CODE_SESSION_ID, else a new one is minted)"
+	sessionUsageOthers = "session id (default $JIG_SESSION, else $CLAUDE_CODE_SESSION_ID)"
 	sessionUsageCwd    = "directory the session works in (default the working directory)"
 	sessionUsageAgent  = "id of the agent starting it, when it is not the session's own"
 )
@@ -298,12 +299,28 @@ func cmdSessionList(e env, args []string, stdout io.Writer) int {
 }
 
 // sessionVerbArg is the session a `jig session` verb acts on: the --session
-// flag, else $JIG_SESSION, else "".
+// flag, else the session the environment names (envSession), else "".
 func sessionVerbArg(e env, flagValue string) string {
 	if s := strings.TrimSpace(flagValue); s != "" {
 		return s
 	}
-	return strings.TrimSpace(e.getenv("JIG_SESSION"))
+	return envSession(e)
+}
+
+// envSession is the session the environment names: $JIG_SESSION, else the id
+// the harness sets in its agent's commands (locate.HarnessSessionEnv), else
+// "". It is how locate reads it, for the verbs that take a session without
+// locating a directory.
+func envSession(e env) string {
+	if s := strings.TrimSpace(e.getenv(locate.SessionEnv)); s != "" {
+		return s
+	}
+	for _, name := range locate.HarnessSessionEnv {
+		if s := strings.TrimSpace(e.getenv(name)); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // sessionNoArgs refuses a positional argument after the flags: these verbs

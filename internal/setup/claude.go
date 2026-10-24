@@ -20,20 +20,24 @@ type HookSpec struct {
 type ClaudeHook = HookSpec
 
 // ClaudeHooks are the events jig adds an entry for, in the order it adds them.
-// PostToolUse and PostToolUseFailure are limited to the Bash tool: a commit or
-// a test run is a shell command, and nothing else the harness runs is jig's
-// business. PostToolUseFailure carries a shell call that exited non-zero, so a
-// commit followed by a failing command in one call is still seen at once.
+// PostToolUse and PostToolUseFailure are limited to the shell tools, Bash and,
+// on Windows, PowerShell: a commit or a test run is a shell command, and
+// nothing else the harness runs is jig's business. PostToolUseFailure carries
+// a shell call that exited non-zero, so a commit followed by a failing
+// command in one call is still seen at once.
 func ClaudeHooks() []ClaudeHook {
 	return []ClaudeHook{
 		{Event: "SessionStart"},
 		{Event: "UserPromptSubmit"},
-		{Event: "PostToolUse", Matcher: "Bash"},
-		{Event: "PostToolUseFailure", Matcher: "Bash"},
+		{Event: "PostToolUse", Matcher: claudeShellTools},
+		{Event: "PostToolUseFailure", Matcher: claudeShellTools},
 		{Event: "Stop"},
 		{Event: "SessionEnd"},
 	}
 }
+
+// claudeShellTools matches Claude Code's shell tools by name.
+const claudeShellTools = "Bash|PowerShell"
 
 // ClaudeCommand is the command of every Claude Code entry: jig is the program
 // part JigCommand gives, and the event arrives on stdin.
@@ -162,6 +166,7 @@ func (f groupedFormat) mergeHooks(root *object, command string) (bool, error) {
 // command, and whether that changed anything.
 func (f groupedFormat) ensureEntry(groups []any, h HookSpec, command string) ([]any, bool) {
 	changed, found := false, false
+	var moved []any
 	out := make([]any, 0, len(groups)+1)
 	for _, g := range groups {
 		grp, inner, ok := claudeGroup(g)
@@ -186,6 +191,22 @@ func (f groupedFormat) ensureEntry(groups []any, h HookSpec, command string) ([]
 				ent.set("command", command)
 				changed = true
 			}
+			if groupMatcher(grp) != h.Matcher {
+				// An entry an older jig installed under another matcher: a
+				// group of jig's alone takes the new one; from a group it
+				// shares, jig's entry moves to a group of its own, so the
+				// person's hooks keep their matcher.
+				if len(inner) == 1 {
+					setMatcher(grp, h.Matcher)
+				} else {
+					moved = append(moved, newGroup(h, ent))
+					dropped = true
+				}
+				changed = true
+				if len(inner) != 1 {
+					continue
+				}
+			}
 			kept = append(kept, e)
 		}
 		if dropped {
@@ -196,11 +217,31 @@ func (f groupedFormat) ensureEntry(groups []any, h HookSpec, command string) ([]
 		}
 		out = append(out, g)
 	}
+	out = append(out, moved...)
 	if !found {
 		out = append(out, newGroup(h, f.entry(command)))
 		changed = true
 	}
 	return out, changed
+}
+
+// groupMatcher is a hook group's matcher, "" when it has none.
+func groupMatcher(grp *object) string {
+	v, ok := grp.get("matcher")
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
+}
+
+// setMatcher sets a hook group's matcher, removing it for "".
+func setMatcher(grp *object, matcher string) {
+	if matcher == "" {
+		grp.del("matcher")
+		return
+	}
+	grp.set("matcher", matcher)
 }
 
 // claudeGroup reads g as a hook group: an object with a list under hooks.

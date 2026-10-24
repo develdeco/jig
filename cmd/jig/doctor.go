@@ -369,7 +369,7 @@ func (d *doctorCtx) inspectHooks(h setup.Harness, path, where string) candidate 
 	}
 	if d.program != "" {
 		if _, changed, err := h.Merge(data, d.program); err == nil && changed {
-			return candidate{where: where, state: setup.StateStale, detail: "its entries run another jig than this one"}
+			return candidate{where: where, state: setup.StateStale, detail: "its entries are not what this jig installs (another jig's, or an older one's)"}
 		}
 	}
 	return candidate{where: where, state: setup.StateInstalled}
