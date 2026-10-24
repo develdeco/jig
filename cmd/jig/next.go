@@ -136,11 +136,53 @@ type nextSlice struct {
 	BlockedBy []string `json:"blocked_by"`
 }
 
-// ticketData is one ticket as readiness sees it, with its title.
+// ticketData is one ticket as readiness sees it, with its title. problem is
+// why the ticket could not be read (its slices.yaml does not parse, say): such
+// a ticket is still listed, with no slices, so one broken ticket never hides
+// the rest of the store.
 type ticketData struct {
-	in    ready.Ticket
-	title string
-	rec   store.Ticket
+	in      ready.Ticket
+	title   string
+	rec     store.Ticket
+	problem string
+}
+
+// stateInvalid is the state `jig next` and `jig recall` give a ticket whose
+// files cannot be read.
+const stateInvalid = "invalid"
+
+// readTicketDataOrProblem is readTicketData for a listing of many tickets: a
+// ticket it cannot read comes back with the problem, no slices, and what its
+// record and journal still say (its title, its blockers, whether it was
+// published), so the tickets around it are classed as before.
+func readTicketDataOrProblem(st *store.Store, id string) ticketData {
+	d, err := readTicketData(st, id)
+	if err == nil {
+		return d
+	}
+	d = ticketData{in: ready.Ticket{ID: id}, problem: err.Error()}
+	if published, perr := isPublished(st, id); perr == nil {
+		d.in.Published = published
+	}
+	if rec, rerr := st.ReadTicket(id); rerr == nil {
+		d.title, d.rec = rec.Title, rec
+		d.in.Blockers = ticketBlockers(st, rec)
+	}
+	return d
+}
+
+// ticketBlockers are the tickets rec's record says block it, each resolved
+// through aliases when it can be.
+func ticketBlockers(st *store.Store, rec store.Ticket) []ready.Blocker {
+	var out []ready.Blocker
+	for _, b := range rec.BlockedBy {
+		blocker := b.Ticket
+		if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
+			blocker = resolved
+		}
+		out = append(out, ready.Blocker{Ticket: blocker, Kind: b.Kind})
+	}
+	return out
 }
 
 // readTicketData reads what the readiness of ticket id depends on.
@@ -163,14 +205,7 @@ func readTicketData(st *store.Store, id string) (ticketData, error) {
 	if err != nil {
 		return ticketData{}, err
 	}
-	in := ready.Ticket{ID: id, Published: published, Slices: slices, States: states}
-	for _, b := range rec.BlockedBy {
-		blocker := b.Ticket
-		if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
-			blocker = resolved
-		}
-		in.Blockers = append(in.Blockers, ready.Blocker{Ticket: blocker, Kind: b.Kind})
-	}
+	in := ready.Ticket{ID: id, Published: published, Slices: slices, States: states, Blockers: ticketBlockers(st, rec)}
 	return ticketData{in: in, title: rec.Title, rec: rec}, nil
 }
 
@@ -367,6 +402,8 @@ type nextRow struct {
 	State     string        `json:"state"`
 	BlockedBy []nextBlocker `json:"blocked_by,omitempty"`
 	Ready     []string      `json:"ready"`
+	// Problem is why an invalid ticket could not be read.
+	Problem string `json:"problem,omitempty"`
 }
 
 // nextOverlap is a file that local branches of different tickets both change.
@@ -387,9 +424,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 	datas := make([]ticketData, len(ids))
 	inputs := make([]ready.Ticket, len(ids))
 	for i, id := range ids {
-		if datas[i], err = readTicketData(st, id); err != nil {
-			return nextStore{}, fmt.Errorf("ticket %s: %w", id, err)
-		}
+		datas[i] = readTicketDataOrProblem(st, id)
 		inputs[i] = datas[i].in
 	}
 	out := nextStore{Tickets: []nextRow{}, Next: []string{}}
@@ -400,6 +435,11 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		}
 		for _, b := range s.Blocked {
 			row.BlockedBy = append(row.BlockedBy, nextBlocker{Ticket: b.Ticket, Kind: b.Kind})
+		}
+		if datas[i].problem != "" {
+			row.State, row.Problem, row.Ready = stateInvalid, datas[i].problem, []string{}
+			out.Tickets = append(out.Tickets, row)
+			continue
 		}
 		out.Tickets = append(out.Tickets, row)
 		if s.State == ready.StateReady {
@@ -430,6 +470,15 @@ func (n nextStore) blocks() []string {
 		rows = append(rows, []string{t.ID, t.Title, t.State, blocked, readySlices})
 	}
 	blocks := []string{axi.Table("tickets", []string{"id", "title", "state", "blocked_by", "ready"}, rows)}
+	var invalid [][]string
+	for _, t := range n.Tickets {
+		if t.Problem != "" {
+			invalid = append(invalid, []string{t.ID, t.Problem})
+		}
+	}
+	if len(invalid) > 0 {
+		blocks = append(blocks, axi.Table("invalid", []string{"id", "problem"}, invalid))
+	}
 	if len(n.Overlaps) > 0 {
 		var orows [][]string
 		for _, o := range n.Overlaps {
@@ -447,6 +496,9 @@ func (n nextStore) blocks() []string {
 	}
 	if len(n.Overlaps) > 0 {
 		help = append(help, "Build overlapping tickets one after the other, or settle who changes those files first")
+	}
+	if len(invalid) > 0 {
+		help = append(help, fmt.Sprintf("Fix what the problem of %s says (its slices.yaml or a slice's state), then run `jig validate %s`", invalid[0][0], invalid[0][0]))
 	}
 	return append(blocks, axi.Help(help...))
 }

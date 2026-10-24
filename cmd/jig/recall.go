@@ -85,9 +85,7 @@ func recallTickets(st *store.Store) ([]recall.Ticket, error) {
 	datas := make([]ticketData, len(ids))
 	inputs := make([]ready.Ticket, len(ids))
 	for i, id := range ids {
-		if datas[i], err = readTicketData(st, id); err != nil {
-			return nil, fmt.Errorf("ticket %s: %w", id, err)
-		}
+		datas[i] = readTicketDataOrProblem(st, id)
 		inputs[i] = datas[i].in
 	}
 	out := make([]recall.Ticket, len(ids))
@@ -95,6 +93,9 @@ func recallTickets(st *store.Store) ([]recall.Ticket, error) {
 		t := recall.Ticket{
 			ID: s.ID, Title: datas[i].title, Body: datas[i].rec.Body,
 			State: s.State, Shipped: s.State == ready.StateDone,
+		}
+		if datas[i].problem != "" {
+			t.State = stateInvalid
 		}
 		for _, b := range datas[i].in.Blockers {
 			t.BlockedBy = append(t.BlockedBy, recall.Blocker{Ticket: b.Ticket, Kind: b.Kind})
