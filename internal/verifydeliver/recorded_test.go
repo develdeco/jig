@@ -781,3 +781,39 @@ func TestPointAtBranchCopyFallsBackToTheBuildLeaseWithoutAClone(t *testing.T) {
 	_, err = point(t, true)
 	wantAxiCode(t, err, "BRANCH_NOT_FOUND")
 }
+
+// TestRecordReviewerJournalsWhoReadsTheRound: the first time review context
+// names the reviewer, the journal says so with the round, the session and
+// what it runs on; naming the same one again writes nothing more.
+func TestRecordReviewerJournalsWhoReadsTheRound(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := cloneBuilt(t)
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	for range 2 {
+		if _, err := RecordReviewer(d, p, Provenance{Session: "s-rev", How: ReviewerByFlag, Model: "m", Effort: "high"}); err != nil {
+			t.Fatalf("RecordReviewer: %v", err)
+		}
+	}
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var open, readers []journal.Line
+	for _, l := range lines {
+		switch l.Event {
+		case journal.EventGateOpen:
+			open = append(open, l)
+		case journal.EventGateReviewer:
+			readers = append(readers, l)
+		}
+	}
+	if len(open) != 1 || open[0].Attempt != 1 {
+		t.Errorf("gate-open lines = %+v, want one naming round 1", open)
+	}
+	if len(readers) != 1 || readers[0].Attempt != 1 || readers[0].Session != "s-rev" || readers[0].Model != "m" || readers[0].Effort != "high" {
+		t.Errorf("gate-reviewer lines = %+v, want one naming round 1, s-rev, m and high", readers)
+	}
+}

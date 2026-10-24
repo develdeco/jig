@@ -292,13 +292,17 @@ func resolveStoreForProjectChecked(e env, projectFlag, storeFlag string, stdout 
 // its reason instead of looking anywhere else.
 func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string) verifydeliver.Deps {
 	userHome, _ := e.userHomeDir()
-	return verifydeliver.Deps{
+	d := verifydeliver.Deps{
 		Store:    st,
 		Cfg:      cfg,
 		Machine:  mp,
 		Home:     jigHome,
 		UserHome: userHome,
 	}
+	if w := e.stderr; w != nil {
+		d.Warn = func(format string, args ...any) { fmt.Fprintf(w, format, args...) }
+	}
+	return d
 }
 
 // idRows turns a slice of ids into single-column table rows.

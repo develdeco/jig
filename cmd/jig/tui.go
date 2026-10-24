@@ -106,7 +106,9 @@ type personAtTheKeys struct{}
 func (personAtTheKeys) Read([]byte) (int, error) { return 0, io.EOF }
 
 // tuiRunner runs a verb in process for the screens, with the person at the
-// keys as its terminal, and returns what it printed and its exit code.
+// keys as its terminal, and returns what it printed and its exit code. What
+// the verb would warn on stderr is part of that output: the screens own the
+// terminal, and a line written to it under them shifts every screen after.
 func tuiRunner(e env) tui.Runner {
 	pe := e
 	pe.stdinIsTerminal = func(r io.Reader) bool {
@@ -115,7 +117,9 @@ func tuiRunner(e env) tui.Runner {
 	}
 	return func(args []string) (string, int) {
 		var out bytes.Buffer
-		code := run(pe, args, &out, personAtTheKeys{})
+		ce := pe
+		ce.stderr = &out
+		code := run(ce, args, &out, personAtTheKeys{})
 		return out.String(), code
 	}
 }

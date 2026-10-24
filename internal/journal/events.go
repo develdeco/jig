@@ -22,6 +22,7 @@ const (
 	EventFixSlice       = "fix-slice"
 	EventGateClean      = "gate-clean"
 	EventGateOpen       = "gate-open"
+	EventGateReviewer   = "gate-reviewer"
 	EventGateRound      = "gate-round"
 	EventLeaseRecovered = "lease-recovered"
 	EventMemorize       = "memorize"

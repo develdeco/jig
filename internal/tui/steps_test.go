@@ -153,3 +153,41 @@ func TestGoalLineIsOneLineOfAGoal(t *testing.T) {
 		}
 	}
 }
+
+// TestAReviewerTakingTheRoundShowsOnTheReviewStep: a round the gate opened
+// waits for a reviewer until one takes it with `jig review context`, whose
+// gate-reviewer line names the session; the activity says both in words.
+func TestAReviewerTakingTheRoundShowsOnTheReviewStep(t *testing.T) {
+	t.Parallel()
+	status := strings.Join([]string{"ticket: JIG-8", "state: green",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
+			{"a", "green", "1", "-", "-", "Do a"},
+		}), "questions: none"}, "\n") + "\n"
+	g := newRig(t, "JIG-8")
+	g.r.answer("status JIG-8 --store /s", status, 0)
+	open := jl(at(40, 0), "JIG-8", "", journal.EventGateOpen, func(l *journal.Line) { l.Attempt = 1 })
+	g.feed(
+		jl(at(39, 0), "JIG-8", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
+		jl(at(39, 10), "JIG-8", "a", journal.EventVerified, with("", sha('a'), "", "", "", "")),
+		open,
+	)
+	tk := g.m.w.tickets["JIG-8"]
+	if r := g.m.steps(tk)[stepReview]; r.State != StateReviewing || r.Text != "round 1 open · waiting for a reviewer" {
+		t.Errorf("review before a reviewer = %+v, want round 1 waiting for one", r)
+	}
+	took := jl(at(40, 5), "JIG-8", "", journal.EventGateReviewer, func(l *journal.Line) { l.Attempt, l.Session = 1, "s-rev" })
+	g.feed(took)
+	tk = g.m.w.tickets["JIG-8"]
+	if r := g.m.steps(tk)[stepReview]; r.State != StateReviewing || r.Text != "round 1 open · reviewer is reading the change" {
+		t.Errorf("review once taken = %+v, want the reviewer reading round 1", r)
+	}
+	if got := g.m.say(tk, open); got != "review round 1 opened" {
+		t.Errorf("gate-open says %q", got)
+	}
+	if got := g.m.say(tk, took); got != "reviewer took round 1" {
+		t.Errorf("gate-reviewer says %q", got)
+	}
+	if stepOfLine(took) != stepReview {
+		t.Errorf("a gate-reviewer line is in step %d, want the review", stepOfLine(took))
+	}
+}

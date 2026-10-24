@@ -234,6 +234,10 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.press("q")
 	if res := tui.Stop(); res.Code != 0 {
 		t.Fatalf("jig tui exit = %d, want 0 after q\nstderr:\n%s", res.Code, res.Stderr)
+	} else if res.Stderr != "" {
+		// The screens own the terminal: what a command they ran warned (the
+		// publish's "no demo" here) belongs in its output on the screen.
+		t.Errorf("jig tui wrote to stderr under its screens:\n%s", res.Stderr)
 	}
 
 	// What the keys left in the journal is what the same commands write.

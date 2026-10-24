@@ -32,7 +32,7 @@ func stepOfLine(l events.Envelope) int {
 	switch l.Event {
 	case journal.EventApproval, journal.EventRevalidate:
 		return stepBrief
-	case journal.EventGateOpen, journal.EventGateRound, journal.EventGateClean, journal.EventTriage,
+	case journal.EventGateOpen, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean, journal.EventTriage,
 		journal.EventFixSlice, journal.EventAdopt, journal.EventRoute:
 		return stepReview
 	case journal.EventPrBody, journal.EventPublishApproved, journal.EventPr, journal.EventPublishDone,
@@ -148,7 +148,12 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 	case journal.EventRevalidate:
 		return "the brief was checked again"
 	case journal.EventGateOpen:
+		if l.Attempt > 0 {
+			return "review " + roundName(l) + " opened"
+		}
 		return "a review round opened"
+	case journal.EventGateReviewer:
+		return firstOf(m.whoWith(t, l.Session), "a reviewer") + " took " + roundName(l)
 	case journal.EventGateRound:
 		return firstOf(m.whoWith(t, l.Session), "the reviewer") + " finished " + roundName(l) + " with findings"
 	case journal.EventGateClean:

@@ -303,7 +303,8 @@ func RecordReviewer(d Deps, p Prepared, who Provenance) (Prepared, error) {
 	if !ok {
 		return Prepared{}, errNoOpenRound(p.Ticket)
 	}
-	if who.Session != "" && (who.Session != of.Reviewer.Session || who.Agent != of.Reviewer.Agent) {
+	named := who.Session != "" && (who.Session != of.Reviewer.Session || who.Agent != of.Reviewer.Agent)
+	if named {
 		of.Reviewer = Provenance{Session: who.Session, Agent: who.Agent, How: who.How}
 	}
 	if who.Model != "" {
@@ -316,6 +317,20 @@ func RecordReviewer(d Deps, p Prepared, who Provenance) (Prepared, error) {
 		return Prepared{}, err
 	}
 	p.Reviewer = of.Reviewer
+	if named {
+		// The journal says who is reading the round as soon as jig knows,
+		// so a watcher (jig tui) shows the round being reviewed rather than
+		// waiting for a reviewer until the round is closed. The push is best
+		// effort: the round's close pushes the line if this one could not.
+		line := journal.Line{
+			Event: journal.EventGateReviewer, Attempt: p.Round,
+			Session: of.Reviewer.Session, Agent: of.Reviewer.Agent, Model: of.Reviewer.Model, Effort: of.Reviewer.Effort,
+		}
+		if err := journal.Append(d.Store, p.Ticket, line); err != nil {
+			return Prepared{}, fmt.Errorf("verifydeliver: review context: journal gate-reviewer: %w", err)
+		}
+		_ = d.Store.Push(fmt.Sprintf("%s: gate round %d is being reviewed", p.Ticket, p.Round))
+	}
 	return p, nil
 }
 

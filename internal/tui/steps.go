@@ -210,6 +210,17 @@ func (m *Model) buildFocus(t *ticket, slices []sliceRow) string {
 	return ""
 }
 
+// roundReviewer is the session that took round n to review it (its latest
+// gate-reviewer line), or "".
+func (t *ticket) roundReviewer(n int) string {
+	for i := len(t.lines) - 1; i >= 0; i-- {
+		if l := t.lines[i]; l.Event == journal.EventGateReviewer && l.Attempt == n {
+			return l.Session
+		}
+	}
+	return ""
+}
+
 // reviewStep is the review: no round yet, a round open, findings to decide,
 // or a clean round after the last of the build.
 func (m *Model) reviewStep(t *ticket, ready bool) stepRow {
@@ -230,8 +241,8 @@ func (m *Model) reviewStep(t *ticket, ready bool) stepRow {
 	case StateReviewing:
 		s.State = StateReviewing
 		s.Text = fmt.Sprintf("round %d open · ", r.N)
-		if open := t.latest("", journal.EventGateOpen); open >= 0 && t.lines[open].Session != "" {
-			s.Text += m.who(t, t.lines[open].Session) + " is reading the change"
+		if reader := t.roundReviewer(r.N); reader != "" {
+			s.Text += firstOf(m.whoWith(t, reader), "a reviewer") + " is reading the change"
 		} else {
 			s.Text += "waiting for a reviewer"
 		}
