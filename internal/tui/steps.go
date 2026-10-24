@@ -329,7 +329,7 @@ func (m *Model) stepLabel(t *ticket) (state, label string) {
 	word := map[string]string{
 		StateQueued: "waiting", StateReady: "ready", StateBuilding: "in progress", StateVerifying: "verifying",
 		StateNeedsInput: "needs you", StateStalled: "stalled", StateEnvBlocked: "env blocked",
-		StateReviewing: "in review", StateFindings: "to decide", StatePublishing: "publishing",
+		StateReviewing: "round open", StateFindings: "findings", StatePublishing: "publishing",
 	}[cur.State]
 	return cur.State, strings.ToLower(stepNames[cur.Step]) + " " + firstOf(word, cur.State)
 }

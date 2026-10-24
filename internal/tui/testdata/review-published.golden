@@ -14,7 +14,7 @@ jig  demo › JIG-2 › 3 review                                         ✓ pub
 
   ╭─ 3 Review · activity ──────────────────────────────────────────────────────╮
   │  09:11:00 ◎ a review round opened                                          │
-  │  09:11:30 ! reviewer finished round 1: findings to decide                  │
+  │  09:11:30 ! reviewer finished round 1 with findings                        │
   │  09:12:00 - you dismissed r1-f1: not a bug                                 │
   │  09:12:05 + you kept r1-f2                                                 │
   │  09:13:00 ◎ a review round opened                                          │

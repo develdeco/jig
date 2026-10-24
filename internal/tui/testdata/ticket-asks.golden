@@ -1,4 +1,4 @@
-jig  demo › JIG-2  Config loader                              ! review to decide
+jig  demo › JIG-2  Config loader                               ! review findings
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────────────────────── step 3 of 4 ─╮
   │  ✓ 1 Brief            no brief on record                                   │
@@ -15,7 +15,7 @@ jig  demo › JIG-2  Config loader                              ! review to deci
 
   ╭─ 3 Review · activity ──────────────────────────────────────────────────────╮
   │  09:11:00 ◎ a review round opened                                          │
-  │  09:11:30 ! reviewer finished round 1: findings to decide                  │
+  │  09:11:30 ! reviewer finished round 1 with findings                        │
   ╰────────────────────────────────────────────────────────────────────────────╯
 
 

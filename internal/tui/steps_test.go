@@ -105,3 +105,41 @@ func TestTheLastRowShowsThePanelBelowIt(t *testing.T) {
 		t.Errorf("the last slice, the newest activity line and the panel's edge are not all in view:\n%s", v)
 	}
 }
+
+func TestTheReviewScreenNamesWhatARoundSentBack(t *testing.T) {
+	t.Parallel()
+	status := strings.Join([]string{"ticket: JIG-6", "state: building",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
+			{"a", "green", "1", "-", "-", "Do a"},
+			{"fix-1", "queued", "0", "-", "-", "Fix these gate findings:\n\nalpha/a.go:3 Unchecked error\nThe error is dropped."},
+		}), "questions: none"}, "\n") + "\n"
+	g := newRig(t, "JIG-6")
+	g.r.answer("status JIG-6 --store /s", status, 0)
+	g.feed(
+		jl(at(30, 0), "JIG-6", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
+		jl(at(30, 10), "JIG-6", "a", journal.EventVerified, with("", sha('a'), "", "", "", "")),
+		jl(at(31, 0), "JIG-6", "", journal.EventGateOpen),
+		jl(at(31, 30), "JIG-6", "", journal.EventGateRound, func(l *journal.Line) { l.Attempt, l.Session = 1, "s-reviewer" }),
+		jl(at(31, 31), "JIG-6", "fix-1", journal.EventFixSlice, func(l *journal.Line) { l.Attempt = 1 }),
+	)
+	g.press("down", "enter") // from the build, the current step, to the review
+	v := g.view()
+	for _, want := range []string{"sent back to the build", "fix-1  round 1  alpha/a.go:3 Unchecked error", "the review sent back fix-1: alpha/a.go:3 Unchecked error"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("the review screen lacks %q:\n%s", want, v)
+		}
+	}
+}
+
+func TestFindingTitleIsTheFirstFindingOfAFixGoal(t *testing.T) {
+	t.Parallel()
+	for goal, want := range map[string]string{
+		"Fix these gate findings:\n\nalpha/a.go:3 Unchecked error\nmore": "alpha/a.go:3 Unchecked error",
+		"Plain goal": "Plain goal",
+		"":           "",
+	} {
+		if got := findingTitle(goal); got != want {
+			t.Errorf("findingTitle(%q) = %q, want %q", goal, got, want)
+		}
+	}
+}

@@ -1,6 +1,37 @@
 package tui
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/develdeco/jig/internal/journal"
+)
+
+// fixRow is a fix slice a round sent back: its id and its row.
+type fixRow struct {
+	id, line string
+}
+
+// fixRows are the fix slices the rounds sent back, oldest first: the state
+// each is in, the round, and the finding it fixes.
+func (m *Model) fixRows(t *ticket) []fixRow {
+	states := map[string]string{}
+	for _, s := range t.slices(m.zone) {
+		states[s.ID] = s.State
+	}
+	var out []fixRow
+	seen := map[string]bool{}
+	for _, l := range t.lines {
+		if l.Event != journal.EventFixSlice || l.Slice == "" || seen[l.Slice] {
+			continue
+		}
+		seen[l.Slice] = true
+		state := firstOf(states[l.Slice], StateQueued)
+		line := m.st.icon(state) + " " + l.Slice + m.st.dim("  round "+strconv.Itoa(max(1, l.Attempt))+"  ") + findingTitle(t.goals()[l.Slice])
+		out = append(out, fixRow{id: l.Slice, line: line})
+	}
+	return out
+}
 
 // reviewPage is a ticket's review: each gate round and who reviewed it, the
 // asks a round left for a person and what has been decided about each, the
@@ -37,6 +68,14 @@ func (m *Model) reviewPage(id string) page {
 			line += m.st.dim("  " + r.At)
 		}
 		p.add(line)
+	}
+
+	if fixes := m.fixRows(t); len(fixes) > 0 {
+		p.add("")
+		p.add(m.st.bold("sent back to the build"))
+		for _, f := range fixes {
+			p.addRow(rowRef{kind: rowSlice, id: f.id, ticket: id, slice: f.id}, f.line)
+		}
 	}
 
 	p.add("")

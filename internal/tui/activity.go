@@ -149,7 +149,7 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 	case journal.EventGateOpen:
 		return "a review round opened"
 	case journal.EventGateRound:
-		return firstOf(m.whoWith(t, l.Session), "the reviewer") + " finished " + roundName(l) + ": findings to decide"
+		return firstOf(m.whoWith(t, l.Session), "the reviewer") + " finished " + roundName(l) + " with findings"
 	case journal.EventGateClean:
 		return firstOf(m.whoWith(t, l.Session), "the reviewer") + " finished " + roundName(l) + ": clean"
 	case journal.EventTriage:
@@ -163,7 +163,11 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		}
 		return text
 	case journal.EventFixSlice:
-		return "the review added fix " + slice
+		text := "the review sent back " + l.Slice
+		if f := findingTitle(t.goals()[l.Slice]); f != "" {
+			text += ": " + f
+		}
+		return text
 	case journal.EventPrBody:
 		return "the pull request body was written for " + commitWords(t, l.Commit)
 	case journal.EventPublishApproved:
@@ -174,6 +178,18 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return "published"
 	}
 	return strings.TrimSpace(l.Event + " " + firstOf(l.Summary, l.Outcome))
+}
+
+// findingTitle is the first finding a fix slice's goal names: the line after
+// the goal's opening "Fix these gate findings:", else its first line.
+func findingTitle(goal string) string {
+	for _, line := range strings.Split(goal, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "Fix these gate findings") {
+			return line
+		}
+	}
+	return ""
 }
 
 // goalTail is " · <goal>" for a slice whose goal is known.
