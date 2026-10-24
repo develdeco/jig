@@ -45,7 +45,7 @@ func (s *Store) ReadSlices(ticket string) ([]Slice, error) {
 	}
 	var sf SliceFile
 	if err := yaml.Unmarshal(data, &sf); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", filepath.ToSlash(filepath.Join(s.TicketRelDir(ticket), "slices.yaml")), err)
 	}
 	return sf.Slices, nil
 }

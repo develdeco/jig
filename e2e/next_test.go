@@ -280,3 +280,42 @@ func commitPinned(t *testing.T, dir, msg string) {
 		t.Fatalf("git commit in %s: %v", dir, err)
 	}
 }
+
+// TestNextListsATicketItCannotRead: a ticket whose slices.yaml does not parse
+// is listed as invalid, with the file and the problem, and the store's other
+// tickets are listed as ever; recall reads past it too.
+func TestNextListsATicketItCannotRead(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	mint := runJig(t, env, fx.StoreDir, "ticket", "new", "--title", "Broken slices")
+	if mint.Code != 0 {
+		t.Fatalf("jig ticket new exit = %d\n%s", mint.Code, mint.Stdout)
+	}
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(st.TicketDir("JIG-2"), "slices.yaml")
+	writeFileOrFatal(t, broken, []byte("slices:\n  - id: a\n    workspace: alpha\n    env: {}\n"))
+
+	n := nextJSON[struct {
+		Tickets []struct {
+			ID, State, Problem string
+		} `json:"tickets"`
+	}](t, env, fx.StoreDir)
+	states := map[string]string{}
+	problems := map[string]string{}
+	for _, tk := range n.Tickets {
+		states[tk.ID], problems[tk.ID] = tk.State, tk.Problem
+	}
+	if states["JIG-1"] != "ready" || states["JIG-2"] != "invalid" || !strings.Contains(problems["JIG-2"], "slices.yaml") {
+		t.Fatalf("tickets = %+v, want JIG-1 ready and JIG-2 invalid naming its slices.yaml", n.Tickets)
+	}
+	r := runJig(t, env, fx.StoreDir, "next")
+	if r.Code != 0 || !strings.Contains(r.Stdout, "invalid[1]{id,problem}:") || !strings.Contains(r.Stdout, "jig validate JIG-2") {
+		t.Errorf("jig next = exit %d\n%s\nwant the invalid ticket's problem and a way out", r.Code, r.Stdout)
+	}
+	if r := runJig(t, env, fx.StoreDir, "recall", "clamp"); r.Code != 0 {
+		t.Errorf("jig recall with an invalid ticket = exit %d\n%s", r.Code, r.Stdout)
+	}
+}
