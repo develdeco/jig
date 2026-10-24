@@ -70,13 +70,34 @@ func (h *handler) prompt() Result {
 	}
 	mem := h.memory()
 	h.hook("")
-	moved := h.w.Ticket != "" && mem.ticket != "" && (h.w.Ticket != mem.ticket || h.w.Slice != mem.slice)
-	if moved && h.ev.Session != "" {
-		h.fail(ledger.TouchSession(h.d.JigHome, h.d.Now(), ledger.Registration{
-			ID: h.ev.Session, Harness: h.ev.Harness, Cwd: h.w.Cwd, Clone: h.w.RepoDir, Ticket: h.w.Ticket, Slice: h.w.Slice,
-		}))
-	}
+	h.noteMove(mem)
 	return Result{Context: h.deliver(outcomePrompt, "")}
+}
+
+// noteMove records a session-touch line when the session works on a ticket or
+// a slice its earlier lines did not name: a move from one to another, and
+// the first ticket of a session that started on none. The line carries the
+// harness and model the session started with, so a reader of the ticket's
+// stream, which leaves out lines about no ticket, still learns who the
+// session is.
+func (h *handler) noteMove(mem sessionMemory) {
+	if h.ev.Session == "" || h.w.Ticket == "" || (h.w.Ticket == mem.ticket && h.w.Slice == mem.slice) {
+		return
+	}
+	h.fail(ledger.TouchSession(h.d.JigHome, h.d.Now(), ledger.Registration{
+		ID: h.ev.Session, Harness: firstNonEmpty(h.ev.Harness, mem.harness), Agent: h.ev.Agent, Model: firstNonEmpty(h.ev.Model, mem.model),
+		Cwd: h.w.Cwd, Clone: h.w.RepoDir, Ticket: h.w.Ticket, Slice: h.w.Slice,
+	}))
+}
+
+// firstNonEmpty is the first of ss that is not empty.
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // tool records the tool call, verifies a commit it made, and gives the
@@ -86,6 +107,7 @@ func (h *handler) tool() Result {
 		return Result{}
 	}
 	mem := h.memory()
+	h.noteMove(mem)
 
 	// A tool that ran a command may have moved HEAD. The session last line
 	// that recorded HEAD says where it was; with none, this call is where

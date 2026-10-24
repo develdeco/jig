@@ -128,6 +128,17 @@ func (m *Model) View() string {
 	return strings.Join(out, "\n")
 }
 
+// bodyRows is how many rows the screen's body has: the height less the
+// header, the keys and what the last command printed, and less the tail when
+// it is open.
+func (m *Model) bodyRows() int {
+	h := m.height - 2 - len(m.footer(m.width)) - len(m.panel(m.width))
+	if m.tail && h >= 8 {
+		h = h - h/2 - 1
+	}
+	return h
+}
+
 // window renders the page lines that fit in h rows with the sel-th
 // selectable row in view, marking that row.
 func (m *Model) window(pg page, sel, h, w int) []string {

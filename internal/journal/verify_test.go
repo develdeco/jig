@@ -32,6 +32,8 @@ func TestVerificationState(t *testing.T) {
 		{"no lines", nil, shaA, "a", Verification{}},
 		{"an empty sha matches nothing", []Line{{Slice: "a", Event: EventVerifyPending}}, "", "a", Verification{}},
 		{"pending", []Line{pending}, shaA, "a", Verification{State: VerifyPending, Attempt: 1, TS: "t1", Session: "s1"}},
+		{"a pending line's subject is no outcome", []Line{{TS: "t1", Slice: "a", Event: EventVerifyPending, Commit: shaA, Attempt: 1, Session: "s1", Summary: "cart: fix Total"}}, shaA, "a",
+			Verification{State: VerifyPending, Attempt: 1, TS: "t1", Session: "s1"}},
 		{"pending then a pass", []Line{pending, passed}, shaA, "a", Verification{State: VerifyPass, Attempt: 1, TS: "t2", Seconds: 7}},
 		{"the verified line keeps the oracle line's time", []Line{pending, passed, verified}, shaA, "a", Verification{State: VerifyPass, Attempt: 1, TS: "t3", Seconds: 7}},
 		{"a verified line alone is a pass", []Line{verified}, shaA, "a", Verification{State: VerifyPass, Attempt: 1, TS: "t3"}},

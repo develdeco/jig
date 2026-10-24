@@ -86,13 +86,16 @@ func (m *Model) ticketFocus(steps []stepRow, questions int) int {
 	return stepReview
 }
 
-// activityPanel adds a panel of the latest lines of step to p.
+// activityPanel adds a panel of the latest lines of step to p: as many as
+// the rows left below what p holds allow, activityLines at most and three at
+// least, so the newest line and the panel's edge stay on the screen.
 func (m *Model) activityPanel(p *page, t *ticket, step int) {
 	lines := t.stepLines(step)
+	keep := min(activityLines, max(3, m.bodyRows()-len(p.lines)-2))
 	right := ""
-	if n := len(lines); n > activityLines {
-		right = fmt.Sprintf("latest %d of %d", activityLines, n)
-		lines = lines[n-activityLines:]
+	if n := len(lines); n > keep {
+		right = fmt.Sprintf("latest %d of %d", keep, n)
+		lines = lines[n-keep:]
 	}
 	p.boxTop(stepTitle(step)+" · activity", right)
 	if len(lines) == 0 {

@@ -15,10 +15,10 @@ jig  demo › JIG-1 › 2 build                                    ? build needs
   sessions
   builder  harness unknown  s-builde
 
-  ╭─ 2 Build · activity ───────────────────────────────────────────────────────╮
-  │  09:00:01 ◐ builder took slice a                                           │
-  │  09:00:05 ◑ verifying slice a at aaaaaaa                                   │
-  │  09:00:20 ● slice a: its oracle passed                                     │
-  │  09:00:21 ● slice a is green: jig verified aaaaaaa                         │
+  ╭─ 2 Build · activity ─────────────────────────────────────── latest 3 of 8 ─╮
+  │  09:01:10 ◑ verifying slice b at bbbbbbb                                   │
+  │  09:01:40 ✖ slice b: its oracle failed: TestB: want 2, got 3               │
+  │  09:02:00 ? builder asks about slice c: Formal or casual?                  │
+  ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · enter open · esc back · g gate · t tail · q quit

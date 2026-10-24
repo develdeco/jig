@@ -74,8 +74,8 @@ jig is reached reactively, through four doors, and each is a subcommand of the o
 | Event | What the core does | What the harness reads |
 |---|---|---|
 | session-start | registers the session in the ledger (harness, agent, cwd, clone, ticket, slice, model, HEAD), renders `jig here` for the directory, and sets `JIG_SESSION` to the harness's session id for the session's later shell commands. The harness sets it where its adapter can: Claude Code sources the file `CLAUDE_ENV_FILE` names before each Bash command, and jig writes only to the one Claude Code made for the session, in a directory named after its id. Elsewhere a line of the context asks the agent to pass the id | context |
-| prompt | a `hook` ledger line; a `session-touch` when the ticket or slice changed; the notes the session has not heard | context |
-| tool | when the tool ran a command and HEAD moved, starts the verification of the new commit; a `tool` ledger line; the notes not yet heard | context |
+| prompt | a `hook` ledger line; a `session-touch` when the ticket or slice changed, the first ticket of a session that started on none included, carrying the harness and model the session started with (so a ticket's stream, which leaves out lines about no ticket, still names the session); the notes the session has not heard | context |
+| tool | when the tool ran a command and HEAD moved, starts the verification of the new commit; a `session-touch` as for a prompt; a `tool` ledger line; the notes not yet heard | context |
 | stop | the findings below: a message to the person, or, for an unattended session, a refusal to stop | message or block |
 | session-end | ends the session; a final call to every note source; a `note` journal line per question still open | none |
 | post-commit | a `git-commit` ledger line, then the verification of HEAD | none |

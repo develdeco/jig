@@ -95,6 +95,29 @@ func TestAPromptOnAnotherTicketTouchesTheSession(t *testing.T) {
 	}
 }
 
+func TestASessionThatStartedOnNoTicketIsTouchedOnItsFirst(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	// The session starts on the default branch: its start line names no
+	// ticket, so a reader of the ticket's stream would never see it.
+	r.handle(r.ev(KindSessionStart, func(e *Event) { e.Model = "claude-sonnet-5" }))
+	if starts := r.ledgerOf(journal.EventSessionStart); len(starts) != 1 || starts[0].Ticket != "" {
+		t.Fatalf("session-start lines = %+v, want one naming no ticket", starts)
+	}
+	// It moves onto the ticket's branch and runs a command there.
+	r.onTicketBranch()
+	r.handle(r.ev(KindTool, func(e *Event) { e.Tool, e.Command = "Bash", "jig claim JIG-1 --slice a" }))
+	touches := r.ledgerOf(journal.EventSessionTouch)
+	if len(touches) != 1 || touches[0].Ticket != r.fx.Ticket || touches[0].Model != "claude-sonnet-5" || touches[0].Harness != "claude" {
+		t.Fatalf("session-touch lines = %+v, want one moving the session onto %s with its harness and model", touches, r.fx.Ticket)
+	}
+	// Further calls on the same ticket add none.
+	r.handle(r.ev(KindTool, func(e *Event) { e.Tool, e.Command = "Bash", "go test ./..." }))
+	if got := r.ledgerOf(journal.EventSessionTouch); len(got) != 1 {
+		t.Errorf("session-touch lines = %d after a second call on the same ticket, want 1", len(got))
+	}
+}
+
 func TestHandleNeverPanics(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)

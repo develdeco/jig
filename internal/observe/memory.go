@@ -29,6 +29,9 @@ type sessionMemory struct {
 	// ticket and slice are what the newest line that named a ticket says the
 	// session works on.
 	ticket, slice string
+	// harness and model are what the session's start (or a later touch)
+	// line said it runs.
+	harness, model string
 	// delivered holds the Refs of the notes already given to the session (as
 	// context or in a refusal to stop), blocked the Refs it was refused a
 	// Stop for.
@@ -61,6 +64,12 @@ func readMemory(root, session string) (sessionMemory, error) {
 			}
 			if m.ticket == "" && l.Ticket != "" {
 				m.ticket, m.slice = l.Ticket, l.Slice
+			}
+			if m.model == "" && l.Model != "" {
+				m.model = l.Model
+			}
+			if m.harness == "" && l.Harness != "" {
+				m.harness = l.Harness
 			}
 		}
 		// A session-start line ends the walk: what came before it belongs to

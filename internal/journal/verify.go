@@ -93,6 +93,9 @@ func VerificationState(lines []Line, sha, slice string) Verification {
 			// The verified line that follows its own attempt's oracle line
 			// carries no time of its own: keep the oracle line's.
 			next.Seconds = v.Seconds
+		case state == VerifyPending:
+			// A pending line's summary is the commit's subject, which says
+			// what is verified, not how a run came out.
 		default:
 			next.Seconds, next.Summary = l.Seconds, l.Summary
 		}

@@ -104,9 +104,16 @@ func (m *Model) buildStep(t *ticket, ready bool) stepRow {
 	slices := t.slices(m.zone)
 	lines := t.stepLines(stepBuild)
 	if len(slices) == 0 {
-		s.State, s.Text = StateQueued, "no slices yet"
-		if !ready {
-			s.Text = "after the brief"
+		switch {
+		case t.status != nil && t.status.Branch != "" && ready:
+			// An adopted branch is built: it has no slices until a review
+			// sends fixes back.
+			s.Done, s.State = true, StateOK
+			s.Text = "built on branch " + t.status.Branch + ", adopted"
+		case !ready:
+			s.State, s.Text = StateQueued, "after the brief"
+		default:
+			s.State, s.Text = StateQueued, "no slices yet"
 		}
 		return s
 	}
@@ -116,7 +123,7 @@ func (m *Model) buildStep(t *ticket, ready bool) stepRow {
 	}
 	n := len(slices)
 	if counts[StateGreen] == n && len(lines) > 0 {
-		s.Done, s.State = true, StateOK
+		s.Done, s.State = ready, StateOK
 		s.Text = fmt.Sprintf("%d %s green, each verified by jig", n, plural(n, "slice", "slices"))
 		s.Took = m.stepTook(t, lines, journal.EventVerified)
 		return s
@@ -222,7 +229,7 @@ func (m *Model) reviewStep(t *ticket, ready bool) stepRow {
 		}
 	case StateReady:
 		if builtSince || !ready {
-			s.State, s.Text = StateQueued, fmt.Sprintf("round %d was clean, but the build changed since", r.N)
+			s.State, s.Text = StateQueued, fmt.Sprintf("round %d was clean, but an earlier step changed since", r.N)
 			return s
 		}
 		s.Done, s.State = true, StateOK
@@ -240,14 +247,17 @@ func (m *Model) reviewStep(t *ticket, ready bool) stepRow {
 				undecided++
 			}
 		}
-		s.Text = fmt.Sprintf("round %d found %d to decide", r.N, len(asks))
 		switch {
 		case undecided > 0:
-			s.Text += fmt.Sprintf(" · %d %s your decision", undecided, plural(undecided, "waits for", "wait for"))
+			s.Text = fmt.Sprintf("round %d found %d to decide · %d %s your decision", r.N, len(asks), undecided, plural(undecided, "waits for", "wait for"))
+		case builtSince && !ready:
+			s.Text = fmt.Sprintf("round %d sent fixes back · the build is on them", r.N)
 		case builtSince:
-			s.Text += " · the fixes are being built"
+			s.Text = fmt.Sprintf("round %d's fixes are green · g runs round %d", r.N, r.N+1)
 		case len(asks) > 0:
-			s.Text += " · all decided: g runs the next round"
+			s.Text = fmt.Sprintf("round %d's asks are decided · g runs round %d", r.N, r.N+1)
+		default:
+			s.Text = fmt.Sprintf("round %d found things to fix", r.N)
 		}
 	}
 	return s
@@ -260,10 +270,13 @@ func (m *Model) publishStep(t *ticket, ready bool) stepRow {
 	pub := t.publish()
 	lines := t.stepLines(stepPublish)
 	switch {
-	case pub.Done || (pub.PR != "" && ready):
+	case (pub.Done || pub.PR != "") && ready:
 		s.Done, s.State = true, StatePublished
 		s.Text = strings.TrimSpace("pull request " + firstOf(pub.PROutcome, "opened") + " · " + pub.PR)
 		s.Took = m.stepTook(t, lines, journal.EventPr)
+	case pub.Done || pub.PR != "":
+		s.State = StatePublished
+		s.Text = strings.TrimSpace("published " + pub.PR + ", but an earlier step changed since")
 	case !ready:
 		s.State, s.Text = StateQueued, "after a clean review"
 	case pub.ApprovedFor != "":

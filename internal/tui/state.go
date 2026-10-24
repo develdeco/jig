@@ -82,8 +82,10 @@ func (w *world) apply(envs []events.Envelope) (touched map[string]bool, fresh bo
 		if len(w.feed) > feedCap {
 			w.feed = w.feed[len(w.feed)-feedCap:]
 		}
-		if e.Src == events.SrcLedger && e.Event == journal.EventSessionStart && e.Session != "" {
-			w.sessionInfo[e.Session] = sessionInfo{Harness: e.Harness, Model: e.Model}
+		if e.Src == events.SrcLedger && e.Session != "" && (e.Event == journal.EventSessionStart || e.Event == journal.EventSessionTouch) {
+			info := w.sessionInfo[e.Session]
+			info.Harness, info.Model = firstOf(e.Harness, info.Harness), firstOf(e.Model, info.Model)
+			w.sessionInfo[e.Session] = info
 		}
 		id := e.Ticket
 		if e.Session != "" && id != "" {
