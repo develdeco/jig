@@ -19,9 +19,9 @@ follows the ticket, SHOP-1, from its brief to its pull request. The recording
 runs at twice its speed, with the waits cut. The person started a Claude Code
 session for each part (a fresh one for each review), typed six requests,
 allowed three shell commands Claude Code asked about, and pressed five keys in
-the TUI to act (`g` twice, `d`, `p`, `y`), besides moving between its screens.
-Everything else happened between the sessions and jig, and the TUI shows the
-four steps in order, each with where it stands:
+the TUI to act (`g` twice, `d`, `p`, `y`), besides refreshing it once and moving
+between its screens. Everything else happened between the sessions and jig, and
+the TUI shows the four steps in order, each with where it stands:
 
 1. **Brief.** "Plan a ticket for this bug: cart.Total takes the discount off
    each line and truncates…". A Sonnet session drafts `brief.md` with the
@@ -85,8 +85,8 @@ From then on you talk to your agent, and keep `jig tui` open next to it:
 | "Publish SHOP-1" | renders the body with `jig publish --body`, pushes and opens the PR, records it with `--pr` | or pushes and opens it itself with `jig publish` after your yes (the TUI's `p`) |
 
 Four moments need you: agreeing on the brief, answering a question a session
-asked, deciding what a review asks, and approving the pull request. Everything else is the session's work,
-proven by jig.
+asked, deciding what a review asks, and approving the pull request. Everything
+else is the session's work, proven by jig.
 
 **You need** `git` with an identity (jig authors every store commit as you) and a
 harness. Claude Code is proven end to end; hook files for Codex, Gemini CLI,
@@ -103,9 +103,10 @@ fix-1-cart-test", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading
 the change", "pull request opened · <url>". Under the steps is the activity of
 the one under the cursor, told in words: a session by the role it plays
 (planner, builder, reviewer; a reviewer with its harness and model too), a slice
-by its goal, a commit by its subject. Enter opens a step's screen: the brief's sections and the slices that
-cite them, the build's slices and sessions, each review round with what it sent
-back and the asks it left, the pull request and how it got there.
+by its goal, a commit by its subject. Enter opens a step's screen: the brief's
+sections and the slices that cite them, the build's slices and sessions, each
+review round with what it sent back and the asks it left, the pull request and
+how it got there.
 
 From it you answer a session's question (`a`), keep or dismiss a review's ask
 (`k`, `d`), open a review round (`g`), and approve and publish (`p`: after your
