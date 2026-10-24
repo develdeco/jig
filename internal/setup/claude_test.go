@@ -132,10 +132,10 @@ func TestClaudeHooksMergeIdempotent(t *testing.T) {
 	if got, want := hookCommands(t, root, "PostToolUse"), [][]string{{"fmt --check"}, {command}}; !equalGroups(got, want) {
 		t.Errorf("PostToolUse = %v, want %v", got, want)
 	}
-	// The PostToolUse entry is for the Bash tool only; the others have no matcher.
+	// The PostToolUse entry is for the shell tools only; the others have no matcher.
 	pv, _ := hv.(*object).get("PostToolUse")
-	if m, _ := pv.([]any)[1].(*object).get("matcher"); m != "Bash" {
-		t.Errorf("jig PostToolUse matcher = %v, want Bash", m)
+	if m, _ := pv.([]any)[1].(*object).get("matcher"); m != "Bash|PowerShell" {
+		t.Errorf("jig PostToolUse matcher = %v, want Bash|PowerShell", m)
 	}
 	sv, _ := hv.(*object).get("SessionStart")
 	if _, has := sv.([]any)[0].(*object).get("matcher"); has {
@@ -348,5 +348,48 @@ func TestPlanClaude(t *testing.T) {
 	}
 	if _, err := PlanClaude(bad, "jig", false); err == nil || !strings.Contains(err.Error(), bad) {
 		t.Errorf("plan for an unreadable file: %v, want an error naming it", err)
+	}
+}
+
+// TestClaudeHooksUpgradeTheShellMatcher: an install made when jig matched the
+// Bash tool alone takes the shell tools' matcher. A group of jig's alone
+// changes its matcher; from a group it shares with a hook of the person's,
+// jig's entry moves to a group of its own and the person's keeps "Bash".
+func TestClaudeHooksUpgradeTheShellMatcher(t *testing.T) {
+	t.Parallel()
+	const jig = "jig"
+	command := ClaudeCommand(jig)
+	old := `{"hooks": {` +
+		`"PostToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "` + command + `"}]}],` +
+		`"PostToolUseFailure": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo mine"}, {"type": "command", "command": "` + command + `"}]}]` +
+		`}}`
+	out, changed, err := MergeClaude([]byte(old), jig)
+	if err != nil || !changed {
+		t.Fatalf("merge: changed=%v err=%v", changed, err)
+	}
+	root := mustParse(t, out)
+	hv, _ := root.get("hooks")
+	matchers := func(event string) []string {
+		v, _ := hv.(*object).get(event)
+		var ms []string
+		for _, g := range v.([]any) {
+			m, _ := g.(*object).get("matcher")
+			s, _ := m.(string)
+			ms = append(ms, s)
+		}
+		return ms
+	}
+	if got := matchers("PostToolUse"); !slices.Equal(got, []string{"Bash|PowerShell"}) {
+		t.Errorf("PostToolUse matchers = %v, want jig's group upgraded", got)
+	}
+	if got := matchers("PostToolUseFailure"); !slices.Equal(got, []string{"Bash", "Bash|PowerShell"}) {
+		t.Errorf("PostToolUseFailure matchers = %v, want the person's group kept and jig's moved", got)
+	}
+	if got, want := hookCommands(t, root, "PostToolUseFailure"), [][]string{{"echo mine"}, {command}}; !equalGroups(got, want) {
+		t.Errorf("PostToolUseFailure = %v, want %v", got, want)
+	}
+	again, changed, err := MergeClaude(out, jig)
+	if err != nil || changed || !bytes.Equal(again, out) {
+		t.Errorf("a second merge changed the document: changed=%v err=%v", changed, err)
 	}
 }
