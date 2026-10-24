@@ -257,7 +257,8 @@ func recordApproval(e env, st *store.Store, ticket, sum, provenance string) (sto
 			return store.Approval{}, "", err
 		}
 		if !said {
-			if err := journalApproval(e, st, ticket, sum, prev); err != nil {
+			// Back at the time it was given, so the journal keeps its order.
+			if err := journalApproval(e, st, ticket, sum, prev, prev.At); err != nil {
 				return store.Approval{}, "", err
 			}
 		}
@@ -275,17 +276,17 @@ func recordApproval(e env, st *store.Store, ticket, sum, provenance string) (sto
 	if err := st.WriteApproval(ticket, a); err != nil {
 		return store.Approval{}, "", err
 	}
-	if err := journalApproval(e, st, ticket, sum, a); err != nil {
+	if err := journalApproval(e, st, ticket, sum, a, stamp(e)); err != nil {
 		return store.Approval{}, "", err
 	}
 	return a, approvalRecorded, nil
 }
 
 // journalApproval writes approval a of ticket's brief (hash sum) to the
-// journal and pushes it.
-func journalApproval(e env, st *store.Store, ticket, sum string, a store.Approval) error {
+// journal, stamped ts, and pushes it.
+func journalApproval(e env, st *store.Store, ticket, sum string, a store.Approval, ts string) error {
 	err := journal.Append(st, ticket, journal.Line{
-		TS: stamp(e), Event: journal.EventApproval, Provenance: a.Provenance,
+		TS: ts, Event: journal.EventApproval, Provenance: a.Provenance,
 		Session: envSession(e),
 		Ref:     sum[:12], Summary: flatten(fmt.Sprintf("%s <%s>", a.By, a.Email), summaryMax),
 	})

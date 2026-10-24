@@ -100,6 +100,8 @@ func (m *Model) briefStep(t *ticket) stepRow {
 		// approval (or has not been delivered yet, which the next line
 		// mends).
 		s.State, s.Text = StateBuilding, "drafted · waiting for your approval"
+	case t.status == nil && t.rosterState == "invalid":
+		s.State, s.Text = StateStalled, "its slices.yaml cannot be read"
 	case t.status == nil:
 		// Started or done (its lines are on their way), or not listed yet.
 		s.State, s.Text = StateQueued, "reading"

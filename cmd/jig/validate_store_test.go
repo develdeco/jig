@@ -240,6 +240,15 @@ func TestRecordApprovalWritesOnceAndLetsAPersonUpgradeAnAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	step("the same agent, its line lost", sum, "agent", approvalUnchanged, 1)
+	if lines, err := journal.Read(st, fx.Ticket); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, l := range lines {
+			if l.Event == journal.EventApproval && l.TS != a.At {
+				t.Errorf("restored approval line stamped %s, want the approval's own time %s", l.TS, a.At)
+			}
+		}
+	}
 	step("a person says the same", sum, "person", approvalRecorded, 2)
 	step("an agent after the person", sum, "agent", approvalUnchanged, 2)
 	other := strings.Repeat("ab", 32)

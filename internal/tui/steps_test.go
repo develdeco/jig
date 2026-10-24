@@ -229,10 +229,11 @@ func TestAnUnreadTicketsBriefSaysWhatTheRosterKnows(t *testing.T) {
 		{ID: "JIG-10", Title: "New", State: "new"}, {ID: "JIG-11", Title: "Planned", State: "ready"},
 		{ID: "JIG-12", Title: "Waits", State: "blocked"}, {ID: "JIG-13", Title: "Built", State: "green"},
 		{ID: "JIG-14", Title: "Shipped", State: "done"}, {ID: "JIG-15", Title: "Going", State: "active"},
+		{ID: "JIG-16", Title: "Broken", State: "invalid"},
 	})
 	for id, want := range map[string]string{
 		"JIG-10": "being drafted", "JIG-11": "drafted · waiting for your approval", "JIG-12": "drafted · waiting for your approval",
-		"JIG-13": "reading", "JIG-14": "reading", "JIG-15": "reading",
+		"JIG-13": "reading", "JIG-14": "reading", "JIG-15": "reading", "JIG-16": "its slices.yaml cannot be read",
 	} {
 		if s := g.m.steps(g.m.w.tickets[id])[stepBrief]; s.Text != want {
 			t.Errorf("%s brief = %+v, want %q", id, s, want)
