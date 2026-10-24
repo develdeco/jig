@@ -45,6 +45,28 @@ func hereSessionBlocks(c hereCtx) ([]string, error) {
 	})}, nil
 }
 
+// hereRegisterHarnessSession records a session-start line for a session the
+// harness named in the environment (locate.HowHarness) that the ledger has
+// never heard of: a harness whose hooks are not installed, where `jig here` is
+// the first jig command the session runs. The section prints nothing for it,
+// since the harness already knows its own id.
+func hereRegisterHarnessSession(c hereCtx) error {
+	w := c.Where
+	if w.SessionHow != locate.HowHarness || c.JigHome == "" {
+		return nil
+	}
+	known, err := ledger.Sessions(c.JigHome)
+	if err != nil {
+		return err
+	}
+	if _, ok := known[w.Session]; ok {
+		return nil
+	}
+	return ledger.StartSession(c.JigHome, c.e.now(), ledger.Registration{
+		ID: w.Session, Cwd: w.Cwd, Clone: w.RepoDir, Ticket: w.Ticket, Slice: w.Slice,
+	})
+}
+
 // hereSessionJSON is the section's part of `--json`: the minted session's id
 // and how it came to be, nothing otherwise.
 func hereSessionJSON(c hereCtx) (any, error) {
@@ -65,8 +87,11 @@ func hereSessionJSON(c hereCtx) (any, error) {
 // clone, the ticket and the slice.
 func hereMintSession(c hereCtx) (string, error) {
 	w := c.Where
-	if w.How == "" || w.How == locate.HowNone || w.Session != "" {
+	if w.How == "" || w.How == locate.HowNone {
 		return "", nil
+	}
+	if w.Session != "" {
+		return "", hereRegisterHarnessSession(c)
 	}
 	if c.JigHome == "" {
 		return "", errors.New("jig here: no jig home to record a session in")

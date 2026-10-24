@@ -164,12 +164,12 @@ func reviewTicket(e env, st *store.Store, jigHome string, positionals []string, 
 }
 
 // reviewerFromFlags is who the verb says the reviewer is: the --session flag,
-// else $JIG_SESSION, and how jig knows.
+// else the session the environment names (envSession), and how jig knows.
 func reviewerFromFlags(e env, session string) verifydeliver.Provenance {
 	if session != "" {
 		return verifydeliver.Provenance{Session: session, How: verifydeliver.ReviewerByFlag}
 	}
-	if env := e.getenv("JIG_SESSION"); env != "" {
+	if env := envSession(e); env != "" {
 		return verifydeliver.Provenance{Session: env, How: verifydeliver.ReviewerByEnv}
 	}
 	return verifydeliver.Provenance{}
