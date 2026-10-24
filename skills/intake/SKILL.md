@@ -37,7 +37,7 @@ The section never lists test cases, never asks for a test per rule, and never as
 
 - `brief.md`: `## `-sectioned behavioral spec; every decision tagged user-confirmed or defaulted.
 - `slices.yaml`: one entry per slice - `id`, `workspace`, `goal`, `oracle`, `env`, `blocked_by`, `from_brief`. Slices are tracer bullets: narrow but a COMPLETE path, demoable alone. One cohesive change is one slice: split only where a part builds, verifies and demos on its own, since each slice is claimed and verified on its own; the REPRO, GUARDRAIL and prefactoring slices stay their own. Prefactoring is its own slice, first. A slice that proves itself with the repo's whole suite names that manifest oracle (its name in `.claude/jig.yaml`, or the detected default such as `test` for a Go repo), so it gets the repo's declared command and the gate can reuse its pass; a literal command is for a narrower proof. `blocked_by` encodes the blocking edges between slices. Every slice lists `Seams` in `from_brief`, so its builder reads it.
-- `from_brief` hashes come from `jig validate <ticket>`, which prints a heading/sha256 table over `brief.md`'s sections: write `slices.yaml`, run validate, paste the printed hashes into `from_brief`, re-run until it prints `valid: yes`.
+- `from_brief` hashes come from `jig validate <ticket> --check`, which approves nothing and prints a heading/sha256 table over `brief.md`'s sections: write `slices.yaml`, run it, paste the hashes into `from_brief`, re-run until `valid: yes`.
 
   Every field is a string or a list of strings; `env` names a manifest env class and is left out when none is needed (never `env: {}`):
 
@@ -59,4 +59,4 @@ A chart is `charts/<name>/map.md` (for people; jig reads only its fog section, f
 
 The person has confirmed the brief, `jig validate <ticket>` prints `valid: yes`, AND every decision recorded in `brief.md` (or a chart's map.md) carries its provenance mark.
 
-`valid: yes` also records the approval `jig claim --unattended` requires, by whoever git says you are: `provenance: agent` from your session, `person` when the person runs it at a terminal. Run it only once the person has confirmed. Editing `brief.md` afterwards withdraws the approval, so validate again. Its `advisories` do not fail the ticket but are read: slices no `blocked_by` edge connects may be separate tickets, and a goal near shipped work may already be done.
+Without `--check`, `valid: yes` also records the approval `jig claim --unattended` requires, by whoever git says you are: `provenance: agent` from your session, `person` when the person runs it at a terminal. Run that only once the person has confirmed. Editing `brief.md` afterwards withdraws the approval, so validate again. Its `advisories` do not fail the ticket but are read: slices no `blocked_by` edge connects may be separate tickets, and a goal near shipped work may already be done.

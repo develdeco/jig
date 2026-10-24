@@ -47,7 +47,7 @@ reported and overwritten with the store's value at the next sync.
 _Avoid_: tracker as the source of tickets
 
 **Intake**:
-The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several. It starts from `jig recall`, which shows the open tickets and their edges, near-duplicates, the charts' fog, platform documents and past answers, and it ends when `jig validate` says `valid: yes`, which is the brief's approval.
+The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several. It starts from `jig recall`, which shows the open tickets and their edges, near-duplicates, the charts' fog, platform documents and past answers, and it ends when `jig validate` says `valid: yes` once the person has confirmed the brief, which is the brief's approval (`jig validate --check` checks the same without approving).
 _Avoid_: onboarding
 
 **Shape**:

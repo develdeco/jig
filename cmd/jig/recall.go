@@ -116,5 +116,5 @@ func recallHelp(r recall.Report) []string {
 	case r.Query == "":
 		help = append(help, "Name the work in words, `jig recall <words...>`, to find the open tickets that come near it")
 	}
-	return append(help, "Draft the brief and slices with the intake skill, then `jig validate <ticket>` checks them and records the approval")
+	return append(help, "Draft the brief and slices with the intake skill, checking them with `jig validate <ticket> --check`; `jig validate <ticket>` records the approval once the person has confirmed the brief")
 }
