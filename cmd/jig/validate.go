@@ -22,6 +22,7 @@ func init() {
 		Spec: cmdSpec{"validate", "check a ticket's brief, slices and manifest against the store, and approve a valid brief", []flagSpec{
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
+			{"check", validateCheckUsage, true},
 		}, false},
 		Order: 190,
 		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
@@ -31,16 +32,23 @@ func init() {
 	})
 }
 
-// cmdValidate implements `jig validate <ticket>`. A ticket that is valid has
-// its brief approved: the approval is recorded for the brief as it was when
-// the checks began, so a later edit of brief.md shows as unapproved to
-// `jig claim`. Besides the ticket own files the checks look at the store
+// validateCheckUsage is the --check flag's usage, in the help row and the
+// FlagSet alike.
+const validateCheckUsage = "check only: print the verdict and the brief's section hashes, and record no approval"
+
+// cmdValidate implements `jig validate <ticket> [--check]`. A ticket that is
+// valid has its brief approved: the approval is recorded for the brief as it
+// was when the checks began, so a later edit of brief.md shows as unapproved
+// to `jig claim`. With --check nothing is recorded: the session drafting a
+// brief checks its slices.yaml and reads the section hashes it cites before
+// the person has confirmed the brief. Besides the ticket own files the checks look at the store
 // around it (validate_store.go); what they only advise on is printed under
 // the verdict.
 func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	fs := newFlagSet(e, "validate")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
+	check := fs.Bool("check", false, validateCheckUsage)
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -82,15 +90,21 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 	advisories := validateAdvisories(st, ticket, slices)
-	approval, result, err := recordApproval(e, st, ticket, sum, defaultProvenance(e, stdin))
-	if err != nil {
-		return renderErr(stdout, err)
+	blocks := []string{"valid: yes"}
+	next := fmt.Sprintf("Run `jig next %s` to see what is ready, then `jig claim %s --slice <slice>` to take one", ticket, ticket)
+	if *check {
+		blocks = append(blocks, axi.KV("approval", [][2]string{{"result", approvalChecked}}))
+		next = fmt.Sprintf("Run `jig validate %s` once the person has confirmed the brief, to record its approval", ticket)
+	} else {
+		approval, result, err := recordApproval(e, st, ticket, sum, defaultProvenance(e, stdin))
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		blocks = append(blocks, axi.KV("approval", [][2]string{
+			{"result", result}, {"by", approval.By}, {"email", approval.Email}, {"at", approval.At},
+			{"provenance", approval.Provenance}, {"brief_sha256", approval.BriefSHA256},
+		}))
 	}
-
-	blocks := []string{"valid: yes", axi.KV("approval", [][2]string{
-		{"result", result}, {"by", approval.By}, {"email", approval.Email}, {"at", approval.At},
-		{"provenance", approval.Provenance}, {"brief_sha256", approval.BriefSHA256},
-	})}
 	if data, rerr := os.ReadFile(filepath.Join(st.TicketDir(ticket), "brief.md")); rerr == nil {
 		hashes := store.BriefSectionHashes(data)
 		headings := make([]string, 0, len(hashes))
@@ -107,7 +121,7 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if table := advisoryTable(advisories); table != "" {
 		blocks = append(blocks, table)
 	}
-	blocks = append(blocks, axi.Help(fmt.Sprintf("Run `jig next %s` to see what is ready, then `jig claim %s --slice <slice>` to take one", ticket, ticket)))
+	blocks = append(blocks, axi.Help(next))
 	axi.Render(stdout, blocks...)
 	return 0
 }
