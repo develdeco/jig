@@ -16,27 +16,29 @@ records the review and the publish.
 
 On the left, Claude Code works on a small shop project; on the right, `jig tui`
 follows the ticket, SHOP-1, from its brief to its pull request. The recording
-runs at twice its speed, with the waits cut. The person typed six short
-requests and pressed five keys in the TUI (`g` twice, `d`, `p`, `y`). Everything
-else happened between the sessions and jig, and the TUI shows the four steps in
-order, each with where it stands:
+runs at twice its speed, with the waits cut. The person started a Claude Code
+session for each part (a fresh one for each review), typed six requests,
+allowed three shell commands Claude Code asked about, and pressed five keys in
+the TUI to act (`g` twice, `d`, `p`, `y`), besides moving between its screens.
+Everything else happened between the sessions and jig, and the TUI shows the
+four steps in order, each with where it stands:
 
 1. **Brief.** "Plan a ticket for this bug: cart.Total takes the discount off
    each line and truncates…". A Sonnet session drafts `brief.md` with the
    intake skill and shows it; on "Go with your recommendations" it writes
    `slices.yaml`, checks both with `jig validate --check`, and runs
    `jig validate`, which records the approval. The step goes from "being
-   drafted" to "approved by …, 5 sections, 2 slices".
+   drafted" to "approved by … · 5 sections, 2 slices".
 2. **Build.** "Build SHOP-1, and stop once its slices are green." The same
    session claims each slice and commits with a `Jig-Slice:` trailer. jig runs
    the slice's oracle on a detached copy of each commit and counts the slices
    green: green is what jig ran, never what the model said.
-3. **Review.** The person presses `g` to open a round, and a fresh Opus session
-   reviews the branch ("Review SHOP-1"). Round 1 sends back a fix, a test that
-   pins rounding half up, and asks one question; the person dismisses the
-   question in the TUI with `d`. A new builder session makes the fix green, and
-   round 2 comes back clean. jig checks each reviewer built none of what it
-   reviewed.
+3. **Review.** The person presses `g` to open a round (a session can open one
+   itself), and a fresh Opus session reviews the branch ("Review SHOP-1").
+   Round 1 sends back a fix, a test that pins rounding half up, and asks one
+   question; the person dismisses the question in the TUI with `d`. A new
+   builder session makes the fix green, and round 2 comes back clean. jig
+   checks each reviewer built none of what it reviewed.
 4. **Publish.** `p`, then `y`: jig pushes the reviewed head and opens the pull
    request ([develdeco/jig-demo-shop#2](https://github.com/develdeco/jig-demo-shop/pull/2))
    with a body it writes from the brief, the slices and the review.
@@ -96,12 +98,12 @@ Cursor, GitHub Copilot and OpenCode are written from their documentation.
 `jig tui` is a view of everything in flight, built on the same stream
 `jig events --follow` prints. A ticket is four steps taken in order (brief,
 build, review, publish), each with its state in a few words: "approved by
-you · 5 sections, 3 slices", "2 of 3 green · builder 2 is on slice fix-1",
-"round 2 open · reviewer 2 (Claude Code · Opus 5) is reading the change",
-"pull request opened · <url>". Under the steps is the activity of the one under
-the cursor, told in words: a session by the role it plays (planner, builder,
-reviewer) with its harness and model, a slice by its goal, a commit by its
-subject. Enter opens a step's screen: the brief's sections and the slices that
+<name> · 5 sections, 3 slices", "2 of 3 green · builder 2 is on slice
+fix-1-cart-test", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading
+the change", "pull request opened · <url>". Under the steps is the activity of
+the one under the cursor, told in words: a session by the role it plays
+(planner, builder, reviewer; a reviewer with its harness and model too), a slice
+by its goal, a commit by its subject. Enter opens a step's screen: the brief's sections and the slices that
 cite them, the build's slices and sessions, each review round with what it sent
 back and the asks it left, the pull request and how it got there.
 
