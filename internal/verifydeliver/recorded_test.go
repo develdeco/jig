@@ -846,4 +846,16 @@ func TestRecordReviewerJournalsWhoReadsTheRound(t *testing.T) {
 	if got := gate(); got[len(got)-1] != "s-other 1  " {
 		t.Errorf("after another session reads it = %q, want its line last", got)
 	}
+
+	// A gate-open the record's reviewer was not said after (a reopen that
+	// failed before it could say so): the next review context says it.
+	if err := journal.Append(d.Store, fx.Ticket, journal.Line{Event: journal.EventGateOpen, Attempt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecordReviewer(d, moved, Provenance{Session: "s-other", How: ReviewerByFlag}); err != nil {
+		t.Fatalf("RecordReviewer: %v", err)
+	}
+	if got := gate(); got[len(got)-2] != "open 1" || got[len(got)-1] != "s-other 1  " {
+		t.Errorf("after a gate-open the reviewer was not said after = %q, want it said again", got)
+	}
 }

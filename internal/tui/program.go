@@ -120,10 +120,13 @@ func (f *framed) emit() {
 	fmt.Fprint(f.out, v+"\n\f\n")
 }
 
-// hold points *f at a pipe and returns a release that points it back and
-// writes to the original file what arrived meanwhile. A child process that
-// was handed the pipe and outlives the release keeps at most a second of the
-// wait: what it writes after that is dropped.
+// hold points *f at a pipe for the rest of the process and returns a
+// release: what is written there until then is kept, and the release writes
+// it to the original file and from then on passes every write through. *f is
+// set once, before anything else runs, and the pipe never closes, so a
+// goroutine the screens did not wait for (a command still running after q, a
+// panic's stack) still reaches the original. The release waits, at most a
+// second, for what was written before it to come out of the pipe.
 func hold(f **os.File) (release func()) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -131,17 +134,28 @@ func hold(f **os.File) (release func()) {
 	}
 	orig := *f
 	*f = w
-	var mu sync.Mutex
-	var held bytes.Buffer
-	done := make(chan struct{})
+	var (
+		mu       sync.Mutex
+		held     bytes.Buffer
+		released bool
+	)
+	drained := make(chan struct{}, 1)
 	go func() {
-		defer close(done)
-		defer r.Close()
 		buf := make([]byte, 4096)
 		for {
 			n, err := r.Read(buf)
 			mu.Lock()
-			held.Write(buf[:n])
+			if released {
+				_, _ = orig.Write(buf[:n])
+			} else {
+				held.Write(buf[:n])
+				if i := bytes.Index(held.Bytes(), holdMark); i >= 0 {
+					rest := bytes.Clone(held.Bytes()[i+len(holdMark):])
+					held.Truncate(i)
+					held.Write(rest)
+					drained <- struct{}{}
+				}
+			}
 			mu.Unlock()
 			if err != nil {
 				return
@@ -149,15 +163,20 @@ func hold(f **os.File) (release func()) {
 		}
 	}()
 	return func() {
-		*f = orig
-		_ = w.Close()
-		select {
-		case <-done:
-		case <-time.After(time.Second):
+		if _, err := w.Write(holdMark); err == nil {
+			select {
+			case <-drained:
+			case <-time.After(time.Second):
+			}
 		}
 		mu.Lock()
-		data := bytes.Clone(held.Bytes())
-		mu.Unlock()
-		_, _ = orig.Write(data)
+		defer mu.Unlock()
+		released = true
+		_, _ = orig.Write(held.Bytes())
+		held.Reset()
 	}
 }
+
+// holdMark is what a release writes to the held pipe to know when what was
+// written before it has come out.
+var holdMark = []byte("\x00jig: release the held output\x00")

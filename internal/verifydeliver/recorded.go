@@ -311,8 +311,7 @@ func RecordReviewer(d Deps, p Prepared, who Provenance) (Prepared, error) {
 	if !ok {
 		return Prepared{}, errNoOpenRound(p.Ticket)
 	}
-	named := who.Session != "" && (who.Session != of.Reviewer.Session || who.Agent != of.Reviewer.Agent)
-	if named {
+	if who.Session != "" && (who.Session != of.Reviewer.Session || who.Agent != of.Reviewer.Agent) {
 		of.Reviewer = Provenance{Session: who.Session, Agent: who.Agent, How: who.How}
 	}
 	if who.Model != "" {
@@ -323,9 +322,16 @@ func RecordReviewer(d Deps, p Prepared, who Provenance) (Prepared, error) {
 	}
 	// The journal says who is reading the round as soon as jig knows, so a
 	// watcher (jig tui) shows the round being reviewed rather than waiting
-	// for a reviewer until it closes. The line goes first: a refused append
-	// leaves the open record without the reviewer, so running the command
-	// again writes both.
+	// for a reviewer until it closes. Whether to say it is the journal's
+	// own question, not the open record's: a reopen that failed after its
+	// gate-open, or an append refused before the record was written, leaves
+	// the record naming a reviewer the journal has not named since, and the
+	// next review context says it then.
+	said, err := journaledReviewer(d, p.Ticket, p.Round)
+	if err != nil {
+		return Prepared{}, err
+	}
+	named := of.Reviewer.Known() && (said.Session != of.Reviewer.Session || said.Agent != of.Reviewer.Agent)
 	if named {
 		if err := journalReviewer(d, p.Ticket, p.Round, of.Reviewer); err != nil {
 			return Prepared{}, err
@@ -340,6 +346,25 @@ func RecordReviewer(d Deps, p Prepared, who Provenance) (Prepared, error) {
 		_ = d.Store.Push(fmt.Sprintf("%s: gate round %d is being reviewed", p.Ticket, p.Round))
 	}
 	return p, nil
+}
+
+// journaledReviewer is who the journal last said is reading round n of
+// ticket since the round last opened: the latest gate-reviewer line after
+// the latest gate-open, or no one.
+func journaledReviewer(d Deps, ticket string, n int) (Provenance, error) {
+	lines, err := journal.Read(d.Store, ticket)
+	if err != nil {
+		return Provenance{}, fmt.Errorf("verifydeliver: read the journal: %w", err)
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		switch l := lines[i]; {
+		case l.Event == journal.EventGateOpen:
+			return Provenance{}, nil
+		case l.Event == journal.EventGateReviewer && l.Attempt == n:
+			return Provenance{Session: l.Session, Agent: l.Agent}, nil
+		}
+	}
+	return Provenance{}, nil
 }
 
 // journalReviewer writes the gate-reviewer line: who is reading round n of
