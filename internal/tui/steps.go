@@ -110,6 +110,11 @@ func (m *Model) buildStep(t *ticket, ready bool) stepRow {
 			// sends fixes back.
 			s.Done, s.State = true, StateOK
 			s.Text = "built on branch " + t.status.Branch + ", adopted"
+		case t.status == nil && ready && len(t.stepLines(stepReview)) > 0:
+			// The same, seen from the journal alone (the main screen reads
+			// no status): reviewed with no slice ever built.
+			s.Done, s.State = true, StateOK
+			s.Text = "built on an adopted branch"
 		case !ready:
 			s.State, s.Text = StateQueued, "after the brief"
 		default:

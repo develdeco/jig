@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
@@ -77,5 +79,29 @@ func TestAStepIsNotDoneBeforeTheStepsAheadOfIt(t *testing.T) {
 		if steps[i].Done {
 			t.Errorf("%s is done ahead of the brief: %+v", stepNames[i], steps[i])
 		}
+	}
+}
+
+func TestAnAdoptedBranchSeenWithoutItsStatusIsBuilt(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "") // the main screen reads no ticket's status
+	g.feed(
+		jl(at(20, 0), "JIG-5", "", journal.EventGateOpen),
+		jl(at(20, 30), "JIG-5", "", journal.EventGateClean, func(l *journal.Line) { l.Attempt, l.Session = 1, "s-reviewer" }),
+	)
+	steps := g.m.steps(g.m.w.tickets["JIG-5"])
+	if !steps[stepBuild].Done || !steps[stepReview].Done || currentStep(steps) != stepPublish {
+		t.Errorf("steps = %+v, want the build and the review done and the publish current", steps)
+	}
+}
+
+func TestTheLastRowShowsThePanelBelowIt(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-1")
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 18})
+	g.feed(jig1()...).press("enter", "end") // the build's screen, its last slice
+	v := g.view()
+	if !strings.Contains(v, "▸ ○ d") || !strings.Contains(v, "╰") || !strings.Contains(v, "builder asks about slice c") {
+		t.Errorf("the last slice, the newest activity line and the panel's edge are not all in view:\n%s", v)
 	}
 }

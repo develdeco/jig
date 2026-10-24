@@ -156,6 +156,11 @@ func (m *Model) window(pg page, sel, h, w int) []string {
 	if len(pg.lines) > h {
 		start = selLine - h/2
 		start = max(0, min(start, len(pg.lines)-h))
+		if n > 0 && sel == n-1 {
+			// On the last row, show as much of what follows it as fits
+			// with the row still in view: a panel of activity is below.
+			start = max(0, min(selLine, len(pg.lines)-h))
+		}
 	}
 	end := min(len(pg.lines), start+h)
 	out := make([]string, 0, end-start)

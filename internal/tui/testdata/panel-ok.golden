@@ -1,7 +1,5 @@
 jig  demo › JIG-2 › 3 review                                  ! review to decide
 ────────────────────────────────────────────────────────────────────────────────
-  rounds
-  ! round 1  findings  by reviewer at 09:11:30
 
   to decide
   ! high  alpha/a.go:3  Unchecked error  undecided  r1-f1
@@ -13,6 +11,8 @@ jig  demo › JIG-2 › 3 review                                  ! review to de
 
   ╭─ 3 Review · activity ──────────────────────────────────────────────────────╮
   │  09:11:00 ◎ a review round opened                                          │
+  │  09:11:30 ! reviewer finished round 1: findings to decide                  │
+  ╰────────────────────────────────────────────────────────────────────────────╯
   ✓ jig triage JIG-2 r1-f2 dismiss
     triage:
       ticket: JIG-2

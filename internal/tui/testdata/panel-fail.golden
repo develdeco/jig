@@ -1,6 +1,5 @@
 jig  demo › JIG-2 › 3 review                                  ! review to decide
 ────────────────────────────────────────────────────────────────────────────────
-
   rounds
   ! round 1  findings  by reviewer at 09:11:30
 
@@ -15,6 +14,7 @@ jig  demo › JIG-2 › 3 review                                  ! review to de
   ╭─ 3 Review · activity ──────────────────────────────────────────────────────╮
   │  09:11:00 ◎ a review round opened                                          │
   │  09:11:30 ! reviewer finished round 1: findings to decide                  │
+  ╰────────────────────────────────────────────────────────────────────────────╯
   ✖ jig gate JIG-2
     error: round 1 is not recorded
     code: GATE_NOT_GREEN
