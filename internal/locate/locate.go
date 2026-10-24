@@ -13,12 +13,20 @@ package locate
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
+
+// HarnessSessionEnv are the variables a harness itself sets, in the
+// environment of the commands its agent runs, to the session's id: Claude
+// Code's CLAUDE_CODE_SESSION_ID, the session_id its hooks are given. A jig
+// command takes its session from one of them when neither --session nor
+// JIG_SESSION names it, whatever shell tool ran the command.
+var HarnessSessionEnv = []string{"CLAUDE_CODE_SESSION_ID"}
 
 // SessionEnv is the variable a jig command takes its harness session id from
 // when no --session names one. A harness's SessionStart hook sets it for the
@@ -58,6 +66,9 @@ const (
 	HowBranchAlias = "branch-alias"
 	// HowEnv: the JIG_SLICE or JIG_SESSION variable.
 	HowEnv = "env"
+	// HowHarness: a variable the harness sets to its session's id
+	// (HarnessSessionEnv).
+	HowHarness = "harness"
 	// HowClaim: the session's latest claim line in the ticket's journal.
 	HowClaim = "claim"
 )
@@ -227,6 +238,13 @@ func (l *locator) attach() error {
 		w.Session, w.SessionHow = id, HowArg
 	} else if id := l.o.Getenv(SessionEnv); id != "" {
 		w.Session, w.SessionHow = id, HowEnv
+	} else {
+		for _, name := range HarnessSessionEnv {
+			if id := strings.TrimSpace(l.o.Getenv(name)); id != "" {
+				w.Session, w.SessionHow = id, HowHarness
+				break
+			}
+		}
 	}
 
 	var st *store.Store

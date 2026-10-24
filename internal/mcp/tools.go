@@ -349,7 +349,7 @@ var (
 	sliceParam = Param{Name: "slice", Type: typeString,
 		Desc: "slice the work is on (default: JIG_SLICE, else the session's latest claim)"}
 	sessionParam = Param{Name: "session", Type: typeString,
-		Desc: "harness session id (default: JIG_SESSION)"}
+		Desc: "harness session id (default: JIG_SESSION, else CLAUDE_CODE_SESSION_ID)"}
 	jsonParam = Param{Name: "json", Type: typeBoolean,
 		Desc: "return one JSON object instead of text blocks"}
 )

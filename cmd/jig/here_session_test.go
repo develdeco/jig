@@ -114,6 +114,34 @@ func TestHereSessionSectionLeavesAGivenSessionAlone(t *testing.T) {
 	}
 }
 
+// TestHereSessionSectionRegistersAHarnessSession: a session the harness named
+// in the environment prints nothing, since the harness knows its own id, but
+// one the ledger has never heard of (no hooks installed) is recorded once, so
+// the session list and the TUI see it.
+func TestHereSessionSectionRegistersAHarnessSession(t *testing.T) {
+	t.Parallel()
+	c, root := hereSessionCtx(t)
+	c.Where.Session, c.Where.SessionHow = "h-1", locate.HowHarness
+
+	sec := hereSessionSection(t)
+	if blocks, err := sec.Blocks(c); err != nil || len(blocks) != 0 {
+		t.Errorf("Blocks = %q, %v, want nothing printed", blocks, err)
+	}
+	if v, err := sec.JSON(c); err != nil || v != nil {
+		t.Errorf("JSON = %v, %v, want nothing", v, err)
+	}
+	lines, err := ledger.Read(root)
+	if err != nil || len(lines) != 1 {
+		t.Fatalf("ledger = %+v, %v, want one session-start line for both calls", lines, err)
+	}
+	if l := lines[0]; l.Event != journal.EventSessionStart || l.Session != "h-1" || l.Cwd != "/work/app/sub" || l.Ticket != "JIG-1" || l.Slice != "a" {
+		t.Errorf("line = %+v, want a session-start for h-1 at what here found", l)
+	}
+	if got := sessionsIn(t, root)["h-1"]; got.Clone != "/work/app" || !got.Live() {
+		t.Errorf("session = %+v, want h-1 live in the clone /work/app", got)
+	}
+}
+
 // TestHereSessionSectionIsSilentOutsideProjects: a directory in no project
 // (no How, or none) mints nothing.
 func TestHereSessionSectionIsSilentOutsideProjects(t *testing.T) {

@@ -20,6 +20,8 @@ func TestClaudeAdapterParsesEveryEvent(t *testing.T) {
 			with(func(e *Event) { e.Kind, e.Tool, e.Command = KindTool, "Bash", "git commit -m x && false" })},
 		{"edit tool", `{` + common + `,"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_path":"/work/repo/a.go","old_string":"a","new_string":"b"}}`,
 			with(func(e *Event) { e.Kind, e.Tool, e.Files = KindTool, "Edit", []string{"/work/repo/a.go"} })},
+		{"powershell tool", `{` + common + `,"hook_event_name":"PostToolUse","tool_name":"PowerShell","tool_input":{"command":"git commit -m x"}}`,
+			with(func(e *Event) { e.Kind, e.Tool, e.Command = KindTool, "PowerShell", "git commit -m x" })},
 		{"subagent tool", `{` + common + `,"agent_id":"a-7","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}`,
 			with(func(e *Event) { e.Kind, e.Tool, e.Command, e.Agent = KindTool, "Bash", "ls", "a-7" })},
 		{"stop", `{` + common + `,"hook_event_name":"Stop","stop_hook_active":false}`,
