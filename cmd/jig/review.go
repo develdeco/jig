@@ -17,7 +17,7 @@ import (
 // rows and the FlagSets carry the same text, which the help parity test
 // compares.
 const (
-	reviewSessionUsage  = "the reviewer's harness session id (default: $JIG_SESSION); the round is judged independent of the builders by it"
+	reviewSessionUsage  = "the reviewer's harness session id (default: $JIG_SESSION, else CLAUDE_CODE_SESSION_ID); the round is judged independent of the builders by it"
 	reviewModelUsage    = "the model the reviewer runs on, as it reports it; jig chooses none"
 	reviewEffortUsage   = "the reasoning effort the reviewer runs at, as it reports it"
 	reviewJSONUsage     = "print the review request as JSON (the review.json the round wrote)"
@@ -164,12 +164,12 @@ func reviewTicket(e env, st *store.Store, jigHome string, positionals []string, 
 }
 
 // reviewerFromFlags is who the verb says the reviewer is: the --session flag,
-// else $JIG_SESSION, and how jig knows.
+// else the session the environment names (envSession), and how jig knows.
 func reviewerFromFlags(e env, session string) verifydeliver.Provenance {
 	if session != "" {
 		return verifydeliver.Provenance{Session: session, How: verifydeliver.ReviewerByFlag}
 	}
-	if env := e.getenv("JIG_SESSION"); env != "" {
+	if env := envSession(e); env != "" {
 		return verifydeliver.Provenance{Session: env, How: verifydeliver.ReviewerByEnv}
 	}
 	return verifydeliver.Provenance{}

@@ -44,7 +44,7 @@ func addWorkFlags(fs *flag.FlagSet, withSlice, withSession bool) workFlags {
 
 const (
 	sliceFlagUsage   = "slice the work is on (default: JIG_SLICE, else the session's latest claim)"
-	sessionFlagUsage = "harness session id (default: JIG_SESSION)"
+	sessionFlagUsage = "harness session id (default: JIG_SESSION, else CLAUDE_CODE_SESSION_ID)"
 )
 
 // val reads a flag the verb may not have registered.
