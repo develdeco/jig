@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -58,7 +59,11 @@ func (s *Store) ReadSliceState(ticket, slice string) (SliceState, error) {
 	}
 	var st SliceState
 	if err := yaml.Unmarshal(data, &st); err != nil {
-		return SliceState{}, err
+		rel, rerr := filepath.Rel(s.Root, s.stateFile(ticket, slice))
+		if rerr != nil {
+			rel = s.stateFile(ticket, slice)
+		}
+		return SliceState{}, fmt.Errorf("%s: %w", filepath.ToSlash(rel), err)
 	}
 	return st, nil
 }
