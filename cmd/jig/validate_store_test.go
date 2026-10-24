@@ -159,6 +159,25 @@ func TestValidateAdvisoriesNameShippedWorkTheGoalComesNear(t *testing.T) {
 	}
 }
 
+// TestValidateAdvisoriesLeaveFixSlicesOutOfTheGroups: the slices a gate
+// round appended (from_gate) have no blocked_by edge to the planned work, and
+// say nothing about whether the plan is one concern.
+func TestValidateAdvisoriesLeaveFixSlicesOutOfTheGroups(t *testing.T) {
+	t.Parallel()
+	st := planStore(t)
+	slices := []store.Slice{
+		{ID: "round", Goal: "Discount once"},
+		{ID: "clamp", Goal: "Clamp the percent", BlockedBy: []string{"round"}},
+		{ID: "fix-1-cart-test", Goal: "Fix these gate findings", FromGate: 1},
+		{ID: "fix-2-cart-test", Goal: "Fix these gate findings", FromGate: 2},
+	}
+	for _, a := range validateAdvisories(st, "T-9", slices) {
+		if a.Code == advisorySlicesUnconnected {
+			t.Errorf("advisory %q: fix slices counted as unconnected groups", a.Message)
+		}
+	}
+}
+
 func TestRecordApprovalWritesOnceAndLetsAPersonUpgradeAnAgent(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{})

@@ -88,7 +88,16 @@ func validateUpstreamEdges(st *store.Store, ticket string) []string {
 // shipped work.
 func validateAdvisories(st *store.Store, ticket string, slices []store.Slice) []advisory {
 	var out []advisory
-	if groups := sliceGroups(slices); len(groups) > 1 {
+	// Whether the plan is one concern is a question about the slices the
+	// brief planned: a fix slice is a gate round's (from_gate), joined to the
+	// work it fixes by the round, not by a blocked_by edge.
+	var planned []store.Slice
+	for _, s := range slices {
+		if s.FromGate == 0 {
+			planned = append(planned, s)
+		}
+	}
+	if groups := sliceGroups(planned); len(groups) > 1 {
 		parts := make([]string, len(groups))
 		for i, g := range groups {
 			parts[i] = strings.Join(g, "+")
