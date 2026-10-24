@@ -141,12 +141,20 @@ func hold(f **os.File) (release func()) {
 	)
 	drained := make(chan struct{}, 1)
 	go func() {
+		var tail []byte // the start of a marker split across two reads
 		buf := make([]byte, 4096)
 		for {
 			n, err := r.Read(buf)
 			mu.Lock()
 			if released {
-				_, _ = orig.Write(buf[:n])
+				// A marker the release stopped waiting for still comes out
+				// of the pipe: it is not the original's to print.
+				out := bytes.ReplaceAll(append(tail, buf[:n]...), holdMark, nil)
+				tail = nil
+				if k := partialMark(out); k > 0 {
+					out, tail = out[:len(out)-k], bytes.Clone(out[len(out)-k:])
+				}
+				_, _ = orig.Write(out)
 			} else {
 				held.Write(buf[:n])
 				if i := bytes.Index(held.Bytes(), holdMark); i >= 0 {
@@ -175,6 +183,16 @@ func hold(f **os.File) (release func()) {
 		_, _ = orig.Write(held.Bytes())
 		held.Reset()
 	}
+}
+
+// partialMark is how many bytes at the end of b are the start of holdMark.
+func partialMark(b []byte) int {
+	for k := min(len(b), len(holdMark)-1); k > 0; k-- {
+		if bytes.Equal(b[len(b)-k:], holdMark[:k]) {
+			return k
+		}
+	}
+	return 0
 }
 
 // holdMark is what a release writes to the held pipe to know when what was

@@ -59,3 +59,22 @@ func TestHoldKeepsWhatIsWrittenUntilRelease(t *testing.T) {
 	fmt.Fprint(f, "after\n")
 	read("after\n")
 }
+
+// TestPartialMark: the start of the marker at the end of a read is held back
+// until the next read says whether it is the marker.
+func TestPartialMark(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		b    string
+		want int
+	}{
+		{"text", 0},
+		{"text" + string(holdMark[:1]), 1},
+		{"text" + string(holdMark[:5]), 5},
+		{"", 0},
+	} {
+		if got := partialMark([]byte(c.b)); got != c.want {
+			t.Errorf("partialMark(%q) = %d, want %d", c.b, got, c.want)
+		}
+	}
+}

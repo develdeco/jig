@@ -216,7 +216,7 @@ func TestReopeningARoundKeepsItsDraftsOnlyWhileTheHeadStands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GatePrepare again: %v", err)
 	}
-	if same.Round != 1 || same.Head != head || same.Reviewer.Session != "s-rev" || same.Reviewer.Model != "m" {
+	if same.Round != 1 || same.Head != head || same.Reviewer.Session != "s-rev" || same.Reviewer.Model != "m" || !same.Opened.Equal(p.Opened) {
 		t.Fatalf("reopened at the same head: round %d at %s, reviewer %+v; want round 1, the same head and the reviewer kept", same.Round, same.Head, same.Reviewer)
 	}
 	if drafts, err := ReadDrafts(same); err != nil || len(drafts) != 1 {

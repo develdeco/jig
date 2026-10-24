@@ -236,8 +236,10 @@ func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 	if hadPrev && prev.Head == prep.Head {
 		// The round is the same and so is its reviewer, which the journal
 		// says again after this gate-open, so a reader of the journal alone
-		// still knows who is reading the round.
-		of.Reviewer = prev.Reviewer
+		// still knows who is reading the round. It opened when it first did:
+		// the reads of it since then (the ledger's records of review context,
+		// which tell a subagent reviewer from its session) still count.
+		of.Reviewer, of.Opened = prev.Reviewer, prev.Opened
 		if of.Reviewer.Known() {
 			if err := journalReviewer(d, run.ticket, run.n, of.Reviewer); err != nil {
 				return Prepared{}, err
