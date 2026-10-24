@@ -67,12 +67,13 @@ func (t *ticket) subjects() map[string]string {
 	return out
 }
 
-// goals maps each slice to its goal, once a status has been read.
+// goals maps each slice to its goal in one line (goalLine), once a status
+// has been read.
 func (t *ticket) goals() map[string]string {
 	out := map[string]string{}
 	if t.status != nil {
 		for _, s := range t.status.Slices {
-			out[s.ID] = s.Goal
+			out[s.ID] = goalLine(s.Goal)
 		}
 	}
 	return out
@@ -164,7 +165,7 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return text
 	case journal.EventFixSlice:
 		text := "the review sent back " + l.Slice
-		if f := findingTitle(t.goals()[l.Slice]); f != "" {
+		if f := t.goals()[l.Slice]; f != "" {
 			text += ": " + f
 		}
 		return text
@@ -180,16 +181,25 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 	return strings.TrimSpace(l.Event + " " + firstOf(l.Summary, l.Outcome))
 }
 
-// findingTitle is the first finding a fix slice's goal names: the line after
-// the goal's opening "Fix these gate findings:", else its first line.
-func findingTitle(goal string) string {
+// goalLine is a goal in one line, as a row shows it. A fix slice's goal runs
+// to several lines under a heading that ends in a colon ("Fix these gate
+// findings:", "Gate finding r1-f1, kept by the human:"): its line is the
+// first finding after the heading. Any other goal's is its first line.
+func goalLine(goal string) string {
+	first := ""
 	for _, line := range strings.Split(goal, "\n") {
 		line = strings.TrimSpace(line)
-		if line != "" && !strings.HasPrefix(line, "Fix these gate findings") {
+		if line == "" {
+			continue
+		}
+		if first == "" {
+			first = line
+		}
+		if !strings.HasSuffix(line, ":") {
 			return line
 		}
 	}
-	return ""
+	return first
 }
 
 // goalTail is " · <goal>" for a slice whose goal is known.

@@ -27,7 +27,7 @@ func (m *Model) fixRows(t *ticket) []fixRow {
 		}
 		seen[l.Slice] = true
 		state := firstOf(states[l.Slice], StateQueued)
-		line := m.st.icon(state) + " " + l.Slice + m.st.dim("  round "+strconv.Itoa(max(1, l.Attempt))+"  ") + findingTitle(t.goals()[l.Slice])
+		line := m.st.icon(state) + " " + l.Slice + m.st.dim("  round "+strconv.Itoa(max(1, l.Attempt))+"  ") + t.goals()[l.Slice]
 		out = append(out, fixRow{id: l.Slice, line: line})
 	}
 	return out

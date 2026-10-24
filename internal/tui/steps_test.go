@@ -129,17 +129,27 @@ func TestTheReviewScreenNamesWhatARoundSentBack(t *testing.T) {
 			t.Errorf("the review screen lacks %q:\n%s", want, v)
 		}
 	}
+	// The goal's other lines never reach a row: every screen keeps its height.
+	for _, keys := range [][]string{{"esc"}, {"up", "enter"}} {
+		g.press(keys...)
+		v := g.view()
+		if strings.Contains(v, "The error is dropped.") || strings.Count(v, "\n")+1 != 24 {
+			t.Errorf("after %v a fix slice's goal spills over its row:\n%s", keys, v)
+		}
+	}
 }
 
-func TestFindingTitleIsTheFirstFindingOfAFixGoal(t *testing.T) {
+func TestGoalLineIsOneLineOfAGoal(t *testing.T) {
 	t.Parallel()
 	for goal, want := range map[string]string{
+		"Gate finding r1-f1, kept by the human:\n\nalpha/a.go:3 Unchecked error\nmore": "alpha/a.go:3 Unchecked error",
+		"Two\nlines": "Two",
 		"Fix these gate findings:\n\nalpha/a.go:3 Unchecked error\nmore": "alpha/a.go:3 Unchecked error",
 		"Plain goal": "Plain goal",
 		"":           "",
 	} {
-		if got := findingTitle(goal); got != want {
-			t.Errorf("findingTitle(%q) = %q, want %q", goal, got, want)
+		if got := goalLine(goal); got != want {
+			t.Errorf("goalLine(%q) = %q, want %q", goal, got, want)
 		}
 	}
 }

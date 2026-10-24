@@ -77,6 +77,9 @@ func (m *Model) briefStep(t *ticket) stepRow {
 	case b != nil && started:
 		s.Done, s.State = true, StateFindings
 		s.Text = "never approved: the work started without it" + counts
+	case b != nil && nSlices == 0:
+		s.State = StateBuilding
+		s.Text = "being drafted" + counts
 	case b != nil:
 		s.State = StateBuilding
 		s.Text = "drafted" + counts + " · waiting for your approval"
@@ -331,5 +334,10 @@ func (m *Model) stepLabel(t *ticket) (state, label string) {
 		StateNeedsInput: "needs you", StateStalled: "stalled", StateEnvBlocked: "env blocked",
 		StateReviewing: "round open", StateFindings: "findings", StatePublishing: "publishing",
 	}[cur.State]
+	if cur.Step == stepBrief {
+		// The brief's states are its own: drafted, or changed after it was
+		// approved.
+		word = map[string]string{StateBuilding: "being drafted", StateFindings: "needs approving"}[cur.State]
+	}
 	return cur.State, strings.ToLower(stepNames[cur.Step]) + " " + firstOf(word, cur.State)
 }
