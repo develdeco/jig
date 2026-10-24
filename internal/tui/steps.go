@@ -337,7 +337,9 @@ func (m *Model) stepLabel(t *ticket) (state, label string) {
 	if cur.Step == stepBrief {
 		// The brief's states are its own: drafted, or changed after it was
 		// approved.
-		word = map[string]string{StateBuilding: "being drafted", StateFindings: "needs approving"}[cur.State]
+		if w := map[string]string{StateBuilding: "being drafted", StateFindings: "needs approving"}[cur.State]; w != "" {
+			word = w
+		}
 	}
 	return cur.State, strings.ToLower(stepNames[cur.Step]) + " " + firstOf(word, cur.State)
 }
