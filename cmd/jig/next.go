@@ -498,7 +498,7 @@ func (n nextStore) blocks() []string {
 		help = append(help, "Build overlapping tickets one after the other, or settle who changes those files first")
 	}
 	if len(invalid) > 0 {
-		help = append(help, fmt.Sprintf("Fix what the problem of %s says (its slices.yaml or a slice's state), then run `jig validate %s`", invalid[0][0], invalid[0][0]))
+		help = append(help, fmt.Sprintf("Fix what the problem of %s says (its slices.yaml or a slice's state), then check it with `jig validate %s --check`", invalid[0][0], invalid[0][0]))
 	}
 	return append(blocks, axi.Help(help...))
 }
