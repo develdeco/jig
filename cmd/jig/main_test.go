@@ -55,12 +55,20 @@ func TestRenderStatus(t *testing.T) {
 
 	want := "ticket: JIG-1\n" +
 		"state: building\n" +
-		"slices[4]{id,state,attempts,blocked_by,question}:\n" +
-		"  a,green,1,-,-\n" +
-		"  b,queued,0,a,-\n" +
-		"  c,queued,0,-,-\n" +
-		"  d,queued,0,-,-\n" +
+		"slices[4]{id,state,attempts,blocked_by,question,goal}:\n" +
+		"  a,green,1,-,-,Fix Clamp so TestClamp passes.\n" +
+		"  b,queued,0,a,-,\"Give Clamp a percentage-range caller, once it works.\"\n" +
+		"  c,queued,0,-,-,Decide and implement the greeting's tone.\n" +
+		"  d,queued,0,-,-,Smoke-test the rig environment class.\n" +
 		"questions: none\n" +
+		"brief:\n" +
+		"  approval: none\n" +
+		"brief_sections[5]{heading,slices}:\n" +
+		"  Goal,-\n" +
+		"  Slice A - failing clamp,a\n" +
+		"  Slice B - clamp callers,b\n" +
+		"  Slice C - greeting decision,c\n" +
+		"  Slice D - rig smoke,d\n" +
 		"help[1]:\n" +
 		"  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one\n"
 

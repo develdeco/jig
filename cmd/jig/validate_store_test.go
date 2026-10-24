@@ -224,6 +224,31 @@ func TestRecordApprovalWritesOnceAndLetsAPersonUpgradeAnAgent(t *testing.T) {
 		t.Errorf("approval = %+v, want the brief hash, agent, the clock and the identity git resolves", a)
 	}
 	step("the same agent again", sum, "agent", approvalUnchanged, 1)
+	// An approval whose journal line was lost (an append refused after the
+	// file was written) gets its line back when it is validated again.
+	data, err := os.ReadFile(journal.Path(st, fx.Ticket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	for _, l := range strings.SplitAfter(string(data), "\n") {
+		if !strings.Contains(l, `"event":"approval"`) {
+			kept = append(kept, l)
+		}
+	}
+	if err := os.WriteFile(journal.Path(st, fx.Ticket), []byte(strings.Join(kept, "")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	step("the same agent, its line lost", sum, "agent", approvalUnchanged, 1)
+	if lines, err := journal.Read(st, fx.Ticket); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, l := range lines {
+			if l.Event == journal.EventApproval && l.TS != a.At {
+				t.Errorf("restored approval line stamped %s, want the approval's own time %s", l.TS, a.At)
+			}
+		}
+	}
 	step("a person says the same", sum, "person", approvalRecorded, 2)
 	step("an agent after the person", sum, "agent", approvalUnchanged, 2)
 	other := strings.Repeat("ab", 32)

@@ -76,6 +76,10 @@ type env struct {
 	// stdoutIsTerminal reports whether stdout is an interactive terminal,
 	// which decides whether a command draws a screen or writes plain lines.
 	stdoutIsTerminal func(w io.Writer) bool
+	// stderr is where a command writes a warning that is not its output:
+	// os.Stderr in production. The screens (`jig tui`) own the terminal, so
+	// a command they run writes it into the output they show instead.
+	stderr io.Writer
 }
 
 // processEnv is the env of the binary: the process's own environment and
@@ -92,6 +96,7 @@ func processEnv() env {
 		executable:       os.Executable,
 		lookPath:         exec.LookPath,
 		stdoutIsTerminal: stdoutIsTerminal,
+		stderr:           os.Stderr,
 	}
 }
 

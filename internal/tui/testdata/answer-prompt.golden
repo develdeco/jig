@@ -1,22 +1,22 @@
-jig  demo › JIG-1  Greeting copy                                   ? needs input
+jig  demo › JIG-1  Greeting copy                               ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
-▸ ? build    1 of 4 slices green, 1 needs input, 1 building
-  ○ review   no round yet
-  ○ publish  not yet
+  ╭─ Steps ────────────────────────────────────────────────────── step 2 of 4 ─╮
+  │  ✓ 1 Brief            no brief on record                                   │
+  │▸ ? 2 Build            1 of 4 green · slice c needs your answer             │
+  │  ○ 3 Review           after the build                                      │
+  │  ○ 4 Publish          after a clean review                                 │
+  ╰────────────────────────────────────────────────────────────────────────────╯
 
-  needs a person
-  ? q-001  slice c  Formal or casual?
+  needs you
+  ? builder asks about slice c: Formal or casual?  q-001
 
   next  Answer q-001: `jig answer JIG-1 q-001 '<text>'`
 
-  recent
-  09:00:20 ● oracle pass aaaaaaa  [a]
-  09:00:21 ● verified aaaaaaa  [a]
-  09:01:00 ◐ claimed by s-builder  [b]
-  09:01:10 ◑ verify pending bbbbbbb  [b]
-  09:01:40 ✖ oracle fail TestB: want 2, got 3  [b]
-  09:02:00 ? q-001 Formal or casual?  [c]
-
+  ╭─ 2 Build · activity ─────────────────────────────────────── latest 3 of 8 ─╮
+  │  09:01:10 ◑ verifying slice b at bbbbbbb                                   │
+  │  09:01:40 ✖ slice b: its oracle failed: TestB: want 2, got 3               │
+  │  09:02:00 ? builder asks about slice c: Formal or casual?                  │
+  ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   slice c asked:
   Formal or casual?

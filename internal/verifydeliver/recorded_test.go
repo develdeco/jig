@@ -2,9 +2,11 @@ package verifydeliver
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -214,7 +216,7 @@ func TestReopeningARoundKeepsItsDraftsOnlyWhileTheHeadStands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GatePrepare again: %v", err)
 	}
-	if same.Round != 1 || same.Head != head || same.Reviewer.Session != "s-rev" || same.Reviewer.Model != "m" {
+	if same.Round != 1 || same.Head != head || same.Reviewer.Session != "s-rev" || same.Reviewer.Model != "m" || !same.Opened.Equal(p.Opened) {
 		t.Fatalf("reopened at the same head: round %d at %s, reviewer %+v; want round 1, the same head and the reviewer kept", same.Round, same.Head, same.Reviewer)
 	}
 	if drafts, err := ReadDrafts(same); err != nil || len(drafts) != 1 {
@@ -822,4 +824,80 @@ func TestPointAtBranchCopyFallsBackToTheBuildLeaseWithoutAClone(t *testing.T) {
 	writeAndCommit(t, buildLeaseOf(t, fx, fx.Ticket), "built.txt", "built", "built")
 	_, err = point(t, true)
 	wantAxiCode(t, err, "BRANCH_NOT_FOUND")
+}
+
+// TestRecordReviewerJournalsWhoReadsTheRound: the first time review context
+// names a reviewer, the journal says so with the round, the session and what
+// it runs on; naming the same one again writes nothing more, and another
+// session is another line. A round reopened at the same head keeps its
+// reviewer and says so again after its gate-open; one reopened at a moved
+// head has none.
+func TestRecordReviewerJournalsWhoReadsTheRound(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := cloneBuilt(t)
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	for range 2 {
+		if _, err := RecordReviewer(d, p, Provenance{Session: "s-rev", How: ReviewerByFlag, Model: "m", Effort: "high"}); err != nil {
+			t.Fatalf("RecordReviewer: %v", err)
+		}
+	}
+	// gate is the round's lines in order: gate-open as "open", gate-reviewer
+	// as its session and round.
+	gate := func() []string {
+		t.Helper()
+		lines, err := journal.Read(d.Store, fx.Ticket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, l := range lines {
+			switch l.Event {
+			case journal.EventGateOpen:
+				out = append(out, fmt.Sprintf("open %d", l.Attempt))
+			case journal.EventGateReviewer:
+				out = append(out, fmt.Sprintf("%s %d %s %s", l.Session, l.Attempt, l.Model, l.Effort))
+			}
+		}
+		return out
+	}
+	if got, want := gate(), []string{"open 1", "s-rev 1 m high"}; !slices.Equal(got, want) {
+		t.Errorf("after review context = %q, want %q", got, want)
+	}
+
+	if _, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("GatePrepare again: %v", err)
+	}
+	if got, want := gate(), []string{"open 1", "s-rev 1 m high", "open 1", "s-rev 1 m high"}; !slices.Equal(got, want) {
+		t.Errorf("after reopening at the same head = %q, want %q", got, want)
+	}
+
+	writeAndCommit(t, fx.RepoDir, "moved.txt", "a later commit", "the clone moved on")
+	moved, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare after the clone moved: %v", err)
+	}
+	if got := gate(); got[len(got)-1] != "open 1" {
+		t.Errorf("after reopening at a moved head = %q, want the round open with no reviewer", got)
+	}
+	if _, err := RecordReviewer(d, moved, Provenance{Session: "s-other", How: ReviewerByFlag}); err != nil {
+		t.Fatalf("RecordReviewer: %v", err)
+	}
+	if got := gate(); got[len(got)-1] != "s-other 1  " {
+		t.Errorf("after another session reads it = %q, want its line last", got)
+	}
+
+	// A gate-open the record's reviewer was not said after (a reopen that
+	// failed before it could say so): the next review context says it.
+	if err := journal.Append(d.Store, fx.Ticket, journal.Line{Event: journal.EventGateOpen, Attempt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecordReviewer(d, moved, Provenance{Session: "s-other", How: ReviewerByFlag}); err != nil {
+		t.Fatalf("RecordReviewer: %v", err)
+	}
+	if got := gate(); got[len(got)-2] != "open 1" || got[len(got)-1] != "s-other 1  " {
+		t.Errorf("after a gate-open the reviewer was not said after = %q, want it said again", got)
+	}
 }

@@ -11,6 +11,7 @@ import (
 // The kinds of row a cursor can stand on.
 const (
 	rowTicket   = "ticket"
+	rowBrief    = "brief"
 	rowBuild    = "build"
 	rowReview   = "review"
 	rowPublish  = "publish"
@@ -29,10 +30,13 @@ type rowRef struct {
 }
 
 // pline is one line of a screen's body, with what it is when the cursor can
-// stand on it.
+// stand on it, and its place in a panel (frame.go): box, and for a panel's
+// top edge its title in text and right.
 type pline struct {
-	text string
-	ref  *rowRef
+	text  string
+	ref   *rowRef
+	box   int
+	right string
 }
 
 // page is a screen's body before it is windowed and framed.
@@ -69,6 +73,10 @@ func (m *Model) page() page {
 		return m.reviewPage(e.ticket)
 	case screenSlice:
 		return m.slicePage(e.ticket, e.slice)
+	case screenBrief:
+		return m.briefPage(e.ticket)
+	case screenPublish:
+		return m.publishPage(e.ticket)
 	}
 	return m.mainPage()
 }
@@ -78,6 +86,7 @@ func (m *Model) page() page {
 // terminal has.
 func (m *Model) View() string {
 	w, h := m.width, m.height
+	m.followSel()
 	pg := m.page()
 	refs := pg.refs()
 	sel := m.top().sel
@@ -119,6 +128,17 @@ func (m *Model) View() string {
 	return strings.Join(out, "\n")
 }
 
+// bodyRows is how many rows the screen's body has: the height less the
+// header, the keys and what the last command printed, and less the tail when
+// it is open.
+func (m *Model) bodyRows() int {
+	h := m.height - 2 - len(m.footer(m.width)) - len(m.panel(m.width))
+	if m.tail && h >= 8 {
+		h = h - h/2 - 1
+	}
+	return h
+}
+
 // window renders the page lines that fit in h rows with the sel-th
 // selectable row in view, marking that row.
 func (m *Model) window(pg page, sel, h, w int) []string {
@@ -136,25 +156,31 @@ func (m *Model) window(pg page, sel, h, w int) []string {
 	if len(pg.lines) > h {
 		start = selLine - h/2
 		start = max(0, min(start, len(pg.lines)-h))
+		if n > 0 && sel == n-1 {
+			// On the last row, show as much of what follows it as fits
+			// with the row still in view: a panel of activity is below.
+			start = max(0, min(selLine, len(pg.lines)-h))
+		}
 	}
 	end := min(len(pg.lines), start+h)
 	out := make([]string, 0, end-start)
 	idx := 0
 	for i, l := range pg.lines {
+		marker := "  "
 		if l.ref != nil {
-			if i >= start && i < end {
-				prefix := "  "
-				if idx == sel {
-					prefix = m.st.key("▸") + " "
-				}
-				out = append(out, fit(prefix+l.text, w))
+			if idx == sel {
+				marker = m.st.key("▸") + " "
 			}
 			idx++
+		}
+		if i < start || i >= end {
 			continue
 		}
-		if i >= start && i < end {
-			out = append(out, fit("  "+l.text, w))
+		if l.box != boxNone {
+			out = append(out, fit(m.frameLine(l, marker, w), w))
+			continue
 		}
+		out = append(out, fit(marker+l.text, w))
 	}
 	return out
 }
@@ -178,15 +204,19 @@ func (m *Model) header(w int) []string {
 			crumbs += "  " + t.title
 		}
 		switch e.screen {
+		case screenBrief:
+			crumbs += " › 1 brief"
 		case screenBuild:
-			crumbs += " › build"
+			crumbs += " › 2 build"
 		case screenReview:
-			crumbs += " › review"
+			crumbs += " › 3 review"
+		case screenPublish:
+			crumbs += " › 4 publish"
 		case screenSlice:
-			crumbs += " › build › " + m.st.bold(e.slice)
+			crumbs += " › 2 build › slice " + m.st.bold(e.slice)
 		}
 		if t != nil {
-			state, label := t.phase(m.zone)
+			state, label := m.stepLabel(t)
 			if e.screen == screenSlice {
 				for _, s := range t.slices(m.zone) {
 					if s.ID == e.slice {
@@ -269,10 +299,14 @@ func (m *Model) keyHints() []string {
 		keys = [][]string{move, open, gate, answer, tail, {"r", "refresh"}, quit}
 	case screenTicket:
 		keys = [][]string{move, open, back, answer, keep, dismiss, gate, publish, tail, quit}
+	case screenBrief:
+		keys = [][]string{move, open, back, tail, quit}
 	case screenBuild:
 		keys = [][]string{move, open, back, gate, tail, quit}
 	case screenReview:
-		keys = [][]string{move, back, keep, dismiss, gate, publish, tail, quit}
+		keys = [][]string{move, back, keep, dismiss, gate, tail, quit}
+	case screenPublish:
+		keys = [][]string{back, publish, tail, quit}
 	case screenSlice:
 		keys = [][]string{move, back, answer, tail, quit}
 	}

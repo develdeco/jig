@@ -22,7 +22,7 @@ func screens(g *rig) []string {
 	return out
 }
 
-func TestOpenAndBackWalkTheFiveScreens(t *testing.T) {
+func TestOpenAndBackWalkTheScreens(t *testing.T) {
 	t.Parallel()
 	g := mainRig(t)
 	want := func(screen string, stack ...string) {
@@ -38,7 +38,7 @@ func TestOpenAndBackWalkTheFiveScreens(t *testing.T) {
 	if got := g.m.top().ticket; got != "JIG-1" {
 		t.Fatalf("opened %s, want the first ticket JIG-1", got)
 	}
-	g.press("enter") // the build row
+	g.press("enter") // the cursor follows the current step: the build
 	want("build", "main", "ticket", "build")
 	g.press("down", "enter") // slice b
 	want("slice", "main", "ticket", "build", "slice")
@@ -47,10 +47,12 @@ func TestOpenAndBackWalkTheFiveScreens(t *testing.T) {
 	}
 	g.press("esc", "esc")
 	want("ticket", "main", "ticket")
-	g.press("down", "enter") // the review row
+	g.press("up", "enter") // the brief
+	want("brief", "main", "ticket", "brief")
+	g.press("esc", "down", "down", "enter") // the review
 	want("review", "main", "ticket", "review")
-	g.press("esc", "down", "enter") // the publish row also opens the review
-	want("review", "main", "ticket", "review")
+	g.press("esc", "down", "enter") // the publish
+	want("publish", "main", "ticket", "publish")
 	g.press("esc", "esc")
 	want("main", "main")
 	g.press("esc") // nowhere further back
@@ -200,9 +202,9 @@ func TestAnswerRefusesAQuestionThatIsAnswered(t *testing.T) {
 func TestTriageDecidesTheAskUnderTheCursor(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
-	g.feed(jig2Mid()...).press("down", "enter") // the review screen
-	g.press("down", "d")                        // r1-f2
-	g.press("up", "k")                          // r1-f1
+	g.feed(jig2Mid()...).press("enter") // the cursor follows the current step: the review
+	g.press("down", "d")                // r1-f2
+	g.press("up", "k")                  // r1-f1
 	want := []string{
 		"triage JIG-2 r1-f2 dismiss --store /s",
 		"triage JIG-2 r1-f1 keep --store /s",
@@ -227,7 +229,7 @@ func TestTriageOfTheOnlyUndecidedAskNeedsNoCursor(t *testing.T) {
 	if got := g.r.lines(); !reflect.DeepEqual(got, want) {
 		t.Errorf("commands run = %q, want %q", got, want)
 	}
-	if v := g.view(); !strings.Contains(v, "dismiss (person)") {
+	if v := g.view(); !strings.Contains(v, "dismissed by you") {
 		t.Errorf("the decision recorded for r1-f1 is not on the screen:\n%s", v)
 	}
 }
@@ -399,5 +401,28 @@ func TestACursorBelowTheWindowScrollsIntoView(t *testing.T) {
 	}
 	if lines := strings.Count(v, "\n") + 1; lines != 12 {
 		t.Errorf("drew %d lines in a 12 line window", lines)
+	}
+}
+
+func TestTheCursorFollowsTheCurrentStepUntilItIsMovedAway(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.feed(jig2Mid()...)
+	if ref := g.m.selected(); ref == nil || ref.kind != rowReview {
+		t.Fatalf("cursor on %+v, want the review: the current step", ref)
+	}
+	// Moved away and back: the cursor is on the current step again, and moves
+	// on with it when the step is done.
+	g.press("down", "up")
+	g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
+	g.feed(jig2()[4:8]...) // the asks are decided, and the second round is clean
+	if ref := g.m.selected(); ref == nil || ref.kind != rowPublish {
+		t.Fatalf("cursor on %+v after the review was done, want the publish", ref)
+	}
+	// Left on an earlier step, it stays there.
+	g.press("up", "up")
+	g.feed(jig2()[8:]...) // published
+	if ref := g.m.selected(); ref == nil || ref.kind != rowBuild {
+		t.Errorf("cursor on %+v, want it left on the build", ref)
 	}
 }

@@ -16,6 +16,9 @@ type statusInfo struct {
 	Questions []statusQuestion
 	Stalled   []statusStalled
 	Asks      []statusAsk
+	// Brief is the brief's approval and sections; nil when the ticket has no
+	// brief (or the status predates the block).
+	Brief *statusBrief
 	// Help is the status's own account of the next step.
 	Help []string
 	// Err is set when the status itself was refused.
@@ -23,8 +26,21 @@ type statusInfo struct {
 }
 
 type statusSlice struct {
-	ID, State, BlockedBy, Question string
-	Attempts                       int
+	ID, State, BlockedBy, Question, Goal string
+	Attempts                             int
+}
+
+// statusBrief is the brief block of a status: whether the brief as it is now
+// is the approved one (none, current or changed), who approved it, when and
+// how, and its sections with the slices that cite each.
+type statusBrief struct {
+	Approval, ApprovedBy, ApprovedAt, Provenance string
+	Sections                                     []statusBriefSection
+}
+
+type statusBriefSection struct {
+	Heading string
+	Slices  []string
 }
 
 type statusQuestion struct{ ID, Slice, Status string }
@@ -59,7 +75,7 @@ func parseStatus(out string) *statusInfo {
 	for _, r := range doc.Tables["slices"].Maps() {
 		info.Slices = append(info.Slices, statusSlice{
 			ID: r["id"], State: r["state"], Attempts: atoi(r["attempts"]),
-			BlockedBy: dash(r["blocked_by"]), Question: dash(r["question"]),
+			BlockedBy: dash(r["blocked_by"]), Question: dash(r["question"]), Goal: dash(r["goal"]),
 		})
 	}
 	for _, r := range doc.Tables["questions"].Maps() {
@@ -67,6 +83,17 @@ func parseStatus(out string) *statusInfo {
 	}
 	for _, r := range doc.Tables["stalled"].Maps() {
 		info.Stalled = append(info.Stalled, statusStalled{Slice: r["slice"], Reason: r["reason"], Summary: dash(r["summary"])})
+	}
+	if kv, ok := doc.KV["brief"]; ok {
+		b := &statusBrief{Approval: kv["approval"], ApprovedBy: kv["approved_by"], ApprovedAt: kv["approved_at"], Provenance: kv["provenance"]}
+		for _, r := range doc.Tables["brief_sections"].Maps() {
+			var cited []string
+			if c := dash(r["slices"]); c != "" {
+				cited = strings.Split(c, "+")
+			}
+			b.Sections = append(b.Sections, statusBriefSection{Heading: r["heading"], Slices: cited})
+		}
+		info.Brief = b
 	}
 	for _, r := range doc.Tables["outstanding_asks"].Maps() {
 		info.Asks = append(info.Asks, statusAsk{ID: r["id"], Risk: r["risk"], Where: r["file:line"], Title: r["title"], Why: r["why"]})

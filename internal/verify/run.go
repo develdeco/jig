@@ -214,6 +214,18 @@ func (x *run) existing(lines []journal.Line) bool {
 	return true
 }
 
+// subject is the first line of the commit's message, as the clone has it: the
+// pending line carries it so a reader of the journal can say which change is
+// being verified without a repository at hand. A commit git cannot show
+// leaves it empty.
+func (x *run) subject() string {
+	out, err := gitx.Run(x.d.Clone, "log", "-1", "--format=%s", x.sha)
+	if err != nil {
+		return ""
+	}
+	return oneLine(strings.TrimSpace(out))
+}
+
 // finishPass completes a pass that a run stopped recording halfway: the slice
 // was marked green, and the verified line that comes next was never written.
 // The commit's latest record is then a pass with no verified line for it, and
@@ -308,7 +320,7 @@ func Run(d Deps, r Request) (Result, error) {
 	x.attempt = journal.NextAttempt(lines, r.Slice)
 	x.res.Attempt = x.attempt
 
-	if err := x.journal(journal.Line{Event: journal.EventVerifyPending}); err != nil {
+	if err := x.journal(journal.Line{Event: journal.EventVerifyPending, Summary: x.subject()}); err != nil {
 		return x.res, err
 	}
 	x.res.State = journal.VerifyPending

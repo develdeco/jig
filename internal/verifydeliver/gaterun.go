@@ -205,7 +205,7 @@ func gatePrepare(d Deps, o GateOpts) (*gateRun, error) {
 	}
 	r.n = n + 1
 
-	if err := journal.Append(d.Store, ticket, journal.Line{Slice: "", Event: journal.EventGateOpen}); err != nil {
+	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventGateOpen, Attempt: r.n}); err != nil {
 		return r, fmt.Errorf("verifydeliver: gate: journal gate-open: %w", err)
 	}
 	r.journaled = true

@@ -67,7 +67,7 @@ func lookOf(state string) Look {
 	case StatePublishing:
 		return Look{"▲", "6"}
 	case StatePublished:
-		return Look{"✔", "2"}
+		return Look{"✓", "2"}
 	case StateAsk:
 		return Look{"!", "3"}
 	case StateKept:
@@ -75,7 +75,7 @@ func lookOf(state string) Look {
 	case StateDismissed:
 		return Look{"-", "8"}
 	case StateOK:
-		return Look{"✔", "2"}
+		return Look{"✓", "2"}
 	case StateFail:
 		return Look{"✖", "1"}
 	}

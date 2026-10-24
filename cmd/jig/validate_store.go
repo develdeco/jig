@@ -245,11 +245,23 @@ func provenanceRank(p string) int {
 // valid by the person whose git identity the store resolves, speaking as
 // provenance: the approval file, an approval line in the journal, and a push.
 // A brief already approved as it is, by a word at least as strong, is left as
-// it is. The identity is looked up before anything is written, so a machine
-// with none is refused (IDENTITY_REQUIRED) with the store untouched.
+// it is, but for its journal line when that is missing (an append refused
+// after the file was written): the journal is what a watcher (jig tui) reads.
+// The identity is looked up before anything is written, so a machine with
+// none is refused (IDENTITY_REQUIRED) with the store untouched.
 func recordApproval(e env, st *store.Store, ticket, sum, provenance string) (store.Approval, string, error) {
 	if prev, ok, err := st.ReadApproval(ticket); err == nil && ok &&
 		strings.EqualFold(prev.BriefSHA256, sum) && provenanceRank(prev.Provenance) >= provenanceRank(provenance) {
+		said, err := approvalJournaled(st, ticket, sum)
+		if err != nil {
+			return store.Approval{}, "", err
+		}
+		if !said {
+			// Back at the time it was given, so the journal keeps its order.
+			if err := journalApproval(e, st, ticket, sum, prev, prev.At); err != nil {
+				return store.Approval{}, "", err
+			}
+		}
 		return prev, approvalUnchanged, nil
 	}
 	who, err := gitx.ResolveIdentity(st.Root)
@@ -264,15 +276,37 @@ func recordApproval(e env, st *store.Store, ticket, sum, provenance string) (sto
 	if err := st.WriteApproval(ticket, a); err != nil {
 		return store.Approval{}, "", err
 	}
-	err = journal.Append(st, ticket, journal.Line{
-		TS: stamp(e), Event: journal.EventApproval, Provenance: provenance,
-		Ref: sum[:12], Summary: flatten(fmt.Sprintf("%s <%s>", a.By, a.Email), summaryMax),
-	})
-	if err != nil {
-		return store.Approval{}, "", err
-	}
-	if err := st.Push(fmt.Sprintf("%s: brief approved", ticket)); err != nil {
+	if err := journalApproval(e, st, ticket, sum, a, stamp(e)); err != nil {
 		return store.Approval{}, "", err
 	}
 	return a, approvalRecorded, nil
+}
+
+// journalApproval writes approval a of ticket's brief (hash sum) to the
+// journal, stamped ts, and pushes it.
+func journalApproval(e env, st *store.Store, ticket, sum string, a store.Approval, ts string) error {
+	err := journal.Append(st, ticket, journal.Line{
+		TS: ts, Event: journal.EventApproval, Provenance: a.Provenance,
+		Session: envSession(e),
+		Ref:     sum[:12], Summary: flatten(fmt.Sprintf("%s <%s>", a.By, a.Email), summaryMax),
+	})
+	if err != nil {
+		return err
+	}
+	return st.Push(fmt.Sprintf("%s: brief approved", ticket))
+}
+
+// approvalJournaled reports whether ticket's journal holds an approval line
+// for the brief whose hash is sum.
+func approvalJournaled(st *store.Store, ticket, sum string) (bool, error) {
+	lines, err := journal.Read(st, ticket)
+	if err != nil {
+		return false, err
+	}
+	for _, l := range lines {
+		if l.Event == journal.EventApproval && strings.EqualFold(l.Ref, sum[:12]) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

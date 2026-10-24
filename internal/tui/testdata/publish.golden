@@ -1,0 +1,24 @@
+jig  demo › JIG-2 › 4 publish                                        ✓ published
+────────────────────────────────────────────────────────────────────────────────
+  ✓ pull request opened · https://example.test/acme/demo/pull/7
+
+  ✓ body written from the brief, the slices and the review, for ccccccc  09:14:…
+  ✓ approved by you for ccccccc  09:14:10
+  ✓ branch jig/JIG-2 pushed
+  ✓ pull request opened  https://example.test/acme/demo/pull/7  09:14:20
+
+  ╭─ 4 Publish · activity ─────────────────────────────────────────────────────╮
+  │  09:14:00 ▲ the pull request body was written for ccccccc                  │
+  │  09:14:10 ▲ you approved publishing ccccccc                                │
+  │  09:14:20 ▲ pull request opened https://example.test/acme/demo/pull/7      │
+  │  09:14:21 ● published                                                      │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+  esc back · p publish · t tail · q quit

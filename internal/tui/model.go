@@ -57,15 +57,17 @@ const (
 	batchMax = 512
 )
 
-// screenKind is which of the five screens is showing.
+// screenKind is which of the seven screens is showing.
 type screenKind int
 
 const (
-	screenMain   screenKind = iota // the project: its tickets
-	screenTicket                   // one ticket: build, review, publish, what needs a person
-	screenBuild                    // a ticket's slices
-	screenReview                   // a ticket's gate rounds, its asks and its publish
-	screenSlice                    // one slice: its questions and its timeline
+	screenMain    screenKind = iota // the project: its tickets
+	screenTicket                    // one ticket: its steps, what needs a person, a step's activity
+	screenBuild                     // a ticket's slices and the sessions building them
+	screenReview                    // a ticket's gate rounds and the asks they left
+	screenSlice                     // one slice: its questions and its timeline
+	screenBrief                     // a ticket's brief: its approval, sections and slices
+	screenPublish                   // a ticket's publish: body, approval, pull request
 )
 
 func (s screenKind) String() string {
@@ -80,6 +82,10 @@ func (s screenKind) String() string {
 		return "review"
 	case screenSlice:
 		return "slice"
+	case screenBrief:
+		return "brief"
+	case screenPublish:
+		return "publish"
 	}
 	return "?"
 }
@@ -91,6 +97,11 @@ type navEntry struct {
 	ticket string
 	slice  string
 	sel    int
+	// follow keeps a ticket screen's cursor on the current step until the
+	// person moves it; lastCur is the current step the screen last showed,
+	// so a cursor left on the current step moves on with it.
+	follow  bool
+	lastCur int
 }
 
 // textInput is a line a person is typing: an answer.
@@ -165,7 +176,7 @@ func New(cfg Config) *Model {
 	m.nav = []navEntry{{screen: screenMain}}
 	if cfg.Ticket != "" {
 		m.w.ticketFor(cfg.Ticket)
-		m.nav = append(m.nav, navEntry{screen: screenTicket, ticket: cfg.Ticket})
+		m.nav = append(m.nav, navEntry{screen: screenTicket, ticket: cfg.Ticket, follow: true})
 	}
 	return m
 }
@@ -443,10 +454,13 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// move puts the cursor delta rows on, within the screen's rows.
+// move puts the cursor delta rows on, within the screen's rows. A cursor
+// that was following the current step stays where it moved.
 func (m *Model) move(delta int) {
+	m.followSel()
 	n := len(m.page().refs())
 	e := m.top()
+	e.follow = false
 	e.sel += delta
 	if e.sel >= n {
 		e.sel = n - 1
@@ -456,8 +470,28 @@ func (m *Model) move(delta int) {
 	}
 }
 
+// followSel puts a following cursor on the ticket's current step, and moves
+// a cursor the person left on the current step on to the next one when the
+// step is done.
+func (m *Model) followSel() {
+	e := m.top()
+	if e.screen != screenTicket {
+		return
+	}
+	t := m.w.tickets[e.ticket]
+	if t == nil {
+		return
+	}
+	cur := currentStep(m.steps(t))
+	if e.follow || (e.sel == e.lastCur && cur != e.lastCur) {
+		e.sel = cur
+	}
+	e.lastCur = cur
+}
+
 // selected is the row under the cursor, nil when the screen has none.
 func (m *Model) selected() *rowRef {
+	m.followSel()
 	refs := m.page().refs()
 	sel := m.top().sel
 	if sel < 0 || sel >= len(refs) {
@@ -475,11 +509,15 @@ func (m *Model) open() tea.Cmd {
 	var next navEntry
 	switch ref.kind {
 	case rowTicket:
-		next = navEntry{screen: screenTicket, ticket: ref.id}
+		next = navEntry{screen: screenTicket, ticket: ref.id, follow: true}
+	case rowBrief:
+		next = navEntry{screen: screenBrief, ticket: ref.ticket}
 	case rowBuild:
 		next = navEntry{screen: screenBuild, ticket: ref.ticket}
-	case rowReview, rowPublish, rowAsk:
+	case rowReview, rowAsk:
 		next = navEntry{screen: screenReview, ticket: ref.ticket}
+	case rowPublish:
+		next = navEntry{screen: screenPublish, ticket: ref.ticket}
 	case rowSlice:
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
 	case rowQuestion:

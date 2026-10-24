@@ -4,6 +4,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/develdeco/jig/internal/events"
+	"github.com/develdeco/jig/internal/journal"
 )
 
 // The screens are drawn from a stream and from what the verbs said, and
@@ -63,7 +66,7 @@ func TestSliceScreen(t *testing.T) {
 func TestReviewScreen(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
-	g.feed(jig2Mid()...).press("down", "enter")
+	g.feed(jig2Mid()...).press("enter") // the cursor follows the current step: the review
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}
@@ -74,8 +77,32 @@ func TestReviewScreenPublished(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
-	g.feed(jig2()...).press("down", "enter")
+	g.feed(jig2()...).press("up", "enter") // from the publish, the current step, up to the review
 	golden(t, "review-published", g.view())
+}
+
+func TestPublishScreen(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
+	g.feed(jig2()...).press("enter")
+	if g.m.Screen() != "publish" {
+		t.Fatalf("on %s, want publish", g.m.Screen())
+	}
+	golden(t, "publish", g.view())
+}
+
+func TestBriefScreen(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-1")
+	g.r.answer("status JIG-1 --store /s", statusJIG1Brief(), 0)
+	g.feed(append([]events.Envelope{
+		jl(at(0, 0), "JIG-1", "", journal.EventApproval, with("s-planner", "", "", "Ada Lovelace <ada@example.invalid>", "0123456789ab", "agent")),
+	}, jig1()...)...).press("up", "enter")
+	if g.m.Screen() != "brief" {
+		t.Fatalf("on %s, want brief", g.m.Screen())
+	}
+	golden(t, "brief", g.view())
 }
 
 func TestAnswerPromptScreen(t *testing.T) {
@@ -107,7 +134,7 @@ func TestCommandPanelShowsWhatTheVerbPrinted(t *testing.T) {
 		"triage:", "  ticket: JIG-2", "  finding: r1-f2", "  decision: dismiss", "  provenance: person",
 		"help[1]:", "  The next round applies it: run `jig gate JIG-2`",
 	}, "\n")+"\n", 0)
-	g.feed(jig2Mid()...).press("down", "enter", "down", "down", "d")
+	g.feed(jig2Mid()...).press("enter", "down", "d") // the review, then r1-f2
 	golden(t, "panel-ok", g.view())
 
 	g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\nhelp[1]:\n  Run `jig next JIG-2`\n", 1)
@@ -147,7 +174,7 @@ func TestEveryStateHasItsOwnLookAndColor(t *testing.T) {
 	// side by side in a column.
 	shared := map[string][]string{
 		"!": {StateFindings, StateAsk},
-		"✔": {StatePublished, StateOK},
+		"✓": {StatePublished, StateOK},
 		"✖": {StateStalled, StateFail},
 	}
 	for icon, who := range icons {

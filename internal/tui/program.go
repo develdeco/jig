@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"sync"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -33,6 +37,11 @@ func Run(ctx context.Context, cfg Config, in io.Reader, out io.Writer, screen bo
 	var model tea.Model = m
 	if screen {
 		opts = append(opts, tea.WithAltScreen())
+		// What anything in the process writes to stderr meanwhile (a verb's
+		// warning a seam does not reach) waits until the screens give the
+		// terminal back: a line written under them scrolls it, and every
+		// later frame is drawn a row off.
+		defer hold(&os.Stderr)()
 	} else {
 		opts = append(opts, tea.WithoutRenderer())
 		model = &framed{inner: m, out: out}
@@ -110,3 +119,82 @@ func (f *framed) emit() {
 	f.last = v
 	fmt.Fprint(f.out, v+"\n\f\n")
 }
+
+// hold points *f at a pipe for the rest of the process and returns a
+// release: what is written there until then is kept, and the release writes
+// it to the original file and from then on passes every write through. *f is
+// set once, before anything else runs, and the pipe never closes, so a
+// goroutine the screens did not wait for (a command still running after q, a
+// panic's stack) still reaches the original. The release waits, at most a
+// second, for what was written before it to come out of the pipe.
+func hold(f **os.File) (release func()) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return func() {}
+	}
+	orig := *f
+	*f = w
+	var (
+		mu       sync.Mutex
+		held     bytes.Buffer
+		released bool
+	)
+	drained := make(chan struct{}, 1)
+	go func() {
+		var tail []byte // the start of a marker split across two reads
+		buf := make([]byte, 4096)
+		for {
+			n, err := r.Read(buf)
+			mu.Lock()
+			if released {
+				// A marker the release stopped waiting for still comes out
+				// of the pipe: it is not the original's to print.
+				out := bytes.ReplaceAll(append(tail, buf[:n]...), holdMark, nil)
+				tail = nil
+				if k := partialMark(out); k > 0 {
+					out, tail = out[:len(out)-k], bytes.Clone(out[len(out)-k:])
+				}
+				_, _ = orig.Write(out)
+			} else {
+				held.Write(buf[:n])
+				if i := bytes.Index(held.Bytes(), holdMark); i >= 0 {
+					rest := bytes.Clone(held.Bytes()[i+len(holdMark):])
+					held.Truncate(i)
+					held.Write(rest)
+					drained <- struct{}{}
+				}
+			}
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return func() {
+		if _, err := w.Write(holdMark); err == nil {
+			select {
+			case <-drained:
+			case <-time.After(time.Second):
+			}
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		released = true
+		_, _ = orig.Write(held.Bytes())
+		held.Reset()
+	}
+}
+
+// partialMark is how many bytes at the end of b are the start of holdMark.
+func partialMark(b []byte) int {
+	for k := min(len(b), len(holdMark)-1); k > 0; k-- {
+		if bytes.Equal(b[len(b)-k:], holdMark[:k]) {
+			return k
+		}
+	}
+	return 0
+}
+
+// holdMark is what a release writes to the held pipe to know when what was
+// written before it has come out.
+var holdMark = []byte("\x00jig: release the held output\x00")

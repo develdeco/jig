@@ -1,20 +1,20 @@
-jig  demo › JIG-2  Config loader                                     ✔ published
+jig  demo › JIG-2  Config loader                                     ✓ published
 ────────────────────────────────────────────────────────────────────────────────
-▸ ● build    1 of 1 slices green
-  ◆ review   round 2: clean
-  ✔ publish  published https://example.test/acme/demo/pull/7
+  ╭─ Steps ───────────────────────────────────────────────────────────── done ─╮
+  │  ✓ 1 Brief            no brief on record                                   │
+  │  ✓ 2 Build    30s     1 slice green, each verified by jig                  │
+  │  ✓ 3 Review   2m 30s  round 2 clean · by reviewer                          │
+  │▸ ✓ 4 Publish  20s     pull request opened · https://example.test/acme/dem… │
+  ╰────────────────────────────────────────────────────────────────────────────╯
 
   next  Run `jig status JIG-2` to confirm the ticket is fully green
 
-  recent
-  09:13:00 ◎ gate round opened
-  09:13:30 ● round 2: clean
-  09:14:00 ▲ pr body rendered ccccccc
-  09:14:10 ▲ publish approved ccccccc (person)
-  09:14:20 ▲ pr opened https://example.test/acme/demo/pull/7
-  09:14:21 ● published
-
-
+  ╭─ 4 Publish · activity ─────────────────────────────────────────────────────╮
+  │  09:14:00 ▲ the pull request body was written for ccccccc                  │
+  │  09:14:10 ▲ you approved publishing ccccccc                                │
+  │  09:14:20 ▲ pull request opened https://example.test/acme/demo/pull/7      │
+  │  09:14:21 ● published                                                      │
+  ╰────────────────────────────────────────────────────────────────────────────╯
 
 
 

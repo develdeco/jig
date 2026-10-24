@@ -133,7 +133,11 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		if ss.Question != "" {
 			question = ss.Question
 		}
-		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question})
+		goal := sl.Goal
+		if goal == "" {
+			goal = "-"
+		}
+		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question, goal})
 
 		if ss.State == "needs-input" {
 			parkedRows = append(parkedRows, []string{sl.ID, ss.Question, resumeCell(ticket, sl, ss)})
@@ -178,7 +182,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		}
 		blocks = append(blocks, budgetLine)
 	}
-	blocks = append(blocks, axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question"}, rows))
+	blocks = append(blocks, axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, rows))
 	if len(questions) == 0 {
 		blocks = append(blocks, "questions: none")
 	} else {
