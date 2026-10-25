@@ -19,6 +19,15 @@ type statusInfo struct {
 	// Brief is the brief's approval and sections; nil when the ticket has no
 	// brief (or the status predates the block).
 	Brief *statusBrief
+	// FixBudget is the status's fix_budget line ("1 of 3 rounds used"), ""
+	// before the ticket's first gate round.
+	FixBudget string
+	// Rounds are the recorded gate rounds, oldest first; Findings are what the
+	// latest one raised. Publish is what a publish has written, nil before it
+	// began. All three are empty for a status that predates their sections.
+	Rounds   []statusRound
+	Findings []statusFinding
+	Publish  *statusPublish
 	// Help is the status's own account of the next step.
 	Help []string
 	// Err is set when the status itself was refused.
@@ -27,7 +36,40 @@ type statusInfo struct {
 
 type statusSlice struct {
 	ID, State, BlockedBy, Question, Goal string
-	Attempts                             int
+	// Workspace and Oracle are what slices.yaml names for the slice (the oracle
+	// as written there: a manifest oracle's name, or a command); FromGate is the
+	// round a fix slice came from, 0 for any other.
+	Workspace, Oracle string
+	FromGate          int
+	Attempts          int
+}
+
+// statusRound is a row of the status's rounds table: a recorded gate round, who
+// reported it and what it reviewed. A cell the status did not know is "".
+type statusRound struct {
+	N                                 int
+	Verdict, Reviewer, Harness, Model string
+	Independent                       string // true, false or unknown
+	Fix, Ask, Note                    int
+	Scope, Base, Head                 string
+	Files                             int // -1 when the round has no findings.yaml
+}
+
+// statusFinding is a row of the status's findings table: a finding the latest
+// round raised, and the decision pending for it.
+type statusFinding struct {
+	ID                                 string
+	Round                              int
+	Action, Risk, Where, Title, Status string
+	Rationale, Decision, DecidedBy     string
+}
+
+// statusPublish is the status's publish block: what the publish has written.
+// Body and Changelog are the first lines of the files named beside them.
+type statusPublish struct {
+	PR, PRState, Head, Branch string
+	BodyFile, Body            string
+	ChangelogFile, Changelog  string
 }
 
 // statusBrief is the brief block of a status: whether the brief as it is now
@@ -76,7 +118,32 @@ func parseStatus(out string) *statusInfo {
 		info.Slices = append(info.Slices, statusSlice{
 			ID: r["id"], State: r["state"], Attempts: atoi(r["attempts"]),
 			BlockedBy: dash(r["blocked_by"]), Question: dash(r["question"]), Goal: dash(r["goal"]),
+			Workspace: dash(r["workspace"]), Oracle: dash(r["oracle"]), FromGate: atoi(r["from_gate"]),
 		})
+	}
+	info.FixBudget = doc.Scalars["fix_budget"]
+	for _, r := range doc.Tables["rounds"].Maps() {
+		files := -1
+		if f := dash(r["files"]); f != "" {
+			files = atoi(f)
+		}
+		info.Rounds = append(info.Rounds, statusRound{
+			N: atoi(r["round"]), Verdict: r["verdict"], Reviewer: dash(r["reviewer"]), Harness: dash(r["harness"]), Model: dash(r["model"]),
+			Independent: dash(r["independent"]), Fix: atoi(r["fix"]), Ask: atoi(r["ask"]), Note: atoi(r["note"]),
+			Scope: dash(r["scope"]), Base: dash(r["base"]), Head: dash(r["head"]), Files: files,
+		})
+	}
+	for _, r := range doc.Tables["findings"].Maps() {
+		info.Findings = append(info.Findings, statusFinding{
+			ID: r["id"], Round: atoi(r["round"]), Action: r["action"], Risk: r["risk"], Where: r["file:line"], Title: r["title"],
+			Status: r["status"], Rationale: r["rationale"], Decision: r["decision"], DecidedBy: r["decided_by"],
+		})
+	}
+	if kv, ok := doc.KV["publish"]; ok {
+		info.Publish = &statusPublish{
+			PR: kv["pr"], PRState: kv["pr_state"], Head: kv["head"], Branch: kv["branch"],
+			BodyFile: kv["body_file"], Body: kv["body"], ChangelogFile: kv["changelog_file"], Changelog: kv["changelog"],
+		}
 	}
 	for _, r := range doc.Tables["questions"].Maps() {
 		info.Questions = append(info.Questions, statusQuestion{ID: r["id"], Slice: r["slice"], Status: r["status"]})

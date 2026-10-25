@@ -1,15 +1,15 @@
 jig  demo › JIG-1 › 2 build › slice c                              ? needs-input
 ────────────────────────────────────────────────────────────────────────────────
+  Pick the tone
   ? needs-input · 1 try
+  workspace copy · oracle go test ./...
 
   questions
-▸ ? q-001  open  asked by builder at 09:02:00
+▸ ? q-001  open  asked by builder at 09:02:30
       Formal or casual?
 
   timeline
-  09:02:00 ? builder asks: Formal or casual?
-
-
+  09:02:30 ? builder asks: Formal or casual?
 
 
 

@@ -6,8 +6,9 @@ import (
 	"testing"
 )
 
-// TestDigesterPathsDeriveFromTheRootGiven: the ledger, hooks and logs paths,
-// like every home-anchored path, come from the root passed in.
+// TestDigesterPathsDeriveFromTheRootGiven: the ledger, hooks, logs and pull
+// request cache paths, like every home-anchored path, come from the root passed
+// in.
 func TestDigesterPathsDeriveFromTheRootGiven(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -19,6 +20,9 @@ func TestDigesterPathsDeriveFromTheRootGiven(t *testing.T) {
 	}
 	if got, want := LogsDir(root), filepath.Join(root, "logs"); got != want {
 		t.Errorf("LogsDir = %q, want %q", got, want)
+	}
+	if got, want := PullRequestStatesPath(root), filepath.Join(root, "cache", "pull-requests.json"); got != want {
+		t.Errorf("PullRequestStatesPath = %q, want %q", got, want)
 	}
 }
 

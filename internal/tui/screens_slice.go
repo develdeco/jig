@@ -10,8 +10,9 @@ import (
 // timelineLines is how many of a slice's latest lines its screen shows.
 const timelineLines = 40
 
-// slicePage is one slice: its state and who holds it, the questions asked
-// about it, and its lines in the order they were written.
+// slicePage is one slice: its state and who holds it, where it builds and what
+// checks it, the questions asked about it, and its lines in the order they were
+// written.
 func (m *Model) slicePage(id, slice string) page {
 	var p page
 	t := m.w.tickets[id]
@@ -44,6 +45,9 @@ func (m *Model) slicePage(id, slice string) page {
 			facts = append(facts, verb+firstOf(m.whoWith(t, holder), "a session"))
 		}
 		p.add(strings.Join(facts, m.st.dim(" · ")))
+		if where := sliceFacts(*row, false); where != "" {
+			p.add(m.st.dim(where))
+		}
 	}
 
 	var qs []questionRow

@@ -3,22 +3,22 @@ jig  demo › JIG-1 › 2 build                                    ? build needs
   ? 1 of 4 green · slice c needs your answer
 
   slices
-▸ ● a  green        1 try    no goal
-       09:00:21 verified aaaaaaa
-  ◐ b  building     2 tries  no goal
-       09:01:40 its oracle failed: TestB: want 2, got 3
-  ? c  needs-input  1 try    no goal
-       waits for the answer to q-001 · 09:02:00 builder asks: Formal or casual?
-  ○ d  queued       0 tries  no goal
-       after slice b and c
-
-  sessions
-  builder  harness unknown  s-builde
-
-  ╭─ 2 Build · activity ─────────────────────────────────────── latest 3 of 8 ─╮
-  │  09:01:10 ◑ slice b · verifying bbbbbbb                                    │
-  │  09:01:40 ✖ slice b · its oracle failed: TestB: want 2, got 3              │
-  │  09:02:00 ? slice c · builder asks: Formal or casual?                      │
-  ╰────────────────────────────────────────────────────────────────────────────╯
+▸ ● a  green        1 try    Greet by name  workspace app · oracle unit
+       ● aaaaaaa “Greet the person by name”  09:00:21
+         ● `go test ./...` passed in 15s · jig ran it
+       ✓ q-000 Trim the name? → Yes, trim it.
+  ◐ b  building     2 tries  Say goodbye, politely  workspace app · oracle unit
+       ✖ bbbbbbb “Say goodbye”  09:01:40
+         ✖ `go test ./...` failed in 30s · jig ran it
+       ✖ eeeeeee “Say goodbye, politely”  09:02:15
+         ✖ `go test ./...` failed in 25s · jig ran it
+           --- FAIL: TestB (0.00s) b_test.go:12: want 2, got 3 FAIL exit
+           status 1
+           the end of its output; all of it is in the verify log on the
+           machine that ran it
+  ? c  needs-input  1 try    Pick the tone
+       workspace copy · oracle go test ./...
+       ? q-001 Formal or casual?
+  ○ d  queued       0 tries  Ship the copy
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · enter open · esc back · g gate · t tail · q quit

@@ -43,10 +43,23 @@ func TestTicketScreenWithAsks(t *testing.T) {
 	golden(t, "ticket-asks", g.view())
 }
 
-func TestBuildScreen(t *testing.T) {
+// TestBuildScreenWithoutRecords: a status of a store that predates the sections
+// has no workspace, oracle or goal, and the screen shows the journal's words.
+func TestBuildScreenWithoutRecords(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
 	g.feed(jig1()...).press("enter")
+	if g.m.Screen() != "build" {
+		t.Fatalf("on %s, want build", g.m.Screen())
+	}
+	golden(t, "build-plain", g.view())
+}
+
+func TestBuildScreen(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-1")
+	g.r.answer("status JIG-1 --store /s", statusJIG1Brief(), 0)
+	g.feed(jig1Records()...).press("enter")
 	if g.m.Screen() != "build" {
 		t.Fatalf("on %s, want build", g.m.Screen())
 	}
@@ -56,7 +69,8 @@ func TestBuildScreen(t *testing.T) {
 func TestSliceScreen(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
-	g.feed(jig1()...).press("enter", "down", "down", "enter")
+	g.r.answer("status JIG-1 --store /s", statusJIG1Brief(), 0)
+	g.feed(jig1Records()...).press("enter", "down", "down", "enter")
 	if g.m.Screen() != "slice" {
 		t.Fatalf("on %s, want slice", g.m.Screen())
 	}
@@ -96,6 +110,7 @@ func TestBriefScreen(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", statusJIG1Brief(), 0)
+	g.r.answer("brief show JIG-1 --text --store /s", briefTextJIG1(), 0)
 	g.feed(append([]events.Envelope{
 		jl(at(0, 0), "JIG-1", "", journal.EventApproval, with("s-planner", "", "", "Ada Lovelace <ada@example.invalid>", "0123456789ab", "agent")),
 	}, jig1()...)...).press("up", "enter")

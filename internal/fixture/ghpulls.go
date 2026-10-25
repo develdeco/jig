@@ -13,6 +13,9 @@ import (
 // it is into.
 type GhPull struct {
 	Number int
+	// Repo is the name of the repository the pull request is on, as its URL
+	// has it ("repo" by default), under the owner "owner".
+	Repo string
 	// State is "open" (the default) or "closed".
 	State string
 	// Merged marks a closed pull request as merged, as the endpoint does: still
@@ -33,8 +36,12 @@ func GhPulls(t testing.TB, pulls ...GhPull) string {
 		if state == "" {
 			state = "open"
 		}
+		repo := p.Repo
+		if repo == "" {
+			repo = "repo"
+		}
 		row := map[string]any{
-			"html_url": fmt.Sprintf("https://github.example/owner/repo/pull/%d", p.Number),
+			"html_url": fmt.Sprintf("https://github.example/owner/%s/pull/%d", repo, p.Number),
 			"number":   p.Number,
 			"state":    state,
 			"head":     map[string]any{"ref": p.Head, "user": map[string]any{"login": p.Owner}},

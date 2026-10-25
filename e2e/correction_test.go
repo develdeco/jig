@@ -1,12 +1,12 @@
 package e2e
 
 // End-to-end tests of the correction notes: a slice that fails its oracle the
-// same way twice, a brief that changed under verified work, and a commit
-// outside the workspaces of the slices. The scripted harness works in the
-// fixture clone and fires the hooks a real one fires at jig observe; the
-// notes come back where a real harness reads them, and under an unattended
-// claim (or the project default) the Stop hook holds the session back once
-// for each.
+// same way twice, a brief that changed under verified work, a commit outside
+// the workspaces of the slices, and a commit that names no slice. The scripted
+// harness works in the fixture clone and fires the hooks a real one fires at
+// jig observe; the notes come back where a real harness reads them, and under
+// an unattended claim (or the project default) the Stop hook holds the session
+// back once for each.
 
 import (
 	"os"
@@ -24,9 +24,20 @@ import (
 // corrRig is a session s-corr on the fixture ticket branch, started.
 func corrRig(t *testing.T) (*fixture.Fixture, jigEnv, *fakeHarness) {
 	t.Helper()
+	return corrRigAfter(t, nil)
+}
+
+// corrRigAfter is corrRig with the setup run on the ticket branch before the
+// session starts, so that what it commits is already there when the session
+// begins to watch the branch.
+func corrRigAfter(t *testing.T, setup func(*testing.T, *fixture.Fixture, *fakeHarness)) (*fixture.Fixture, jigEnv, *fakeHarness) {
+	t.Helper()
 	fx, env := newFixture(t, fixture.Opts{})
 	h := newHarness(t, fx, env, "s-corr")
 	h.Branch("jig/" + fx.Ticket)
+	if setup != nil {
+		setup(t, fx, h)
+	}
 	if res := h.Hook("SessionStart", map[string]any{"source": "startup"}); res.Code != 0 {
 		t.Fatalf("SessionStart exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
@@ -52,8 +63,36 @@ func corrSilent(t *testing.T, what string, res jigResult) {
 	}
 }
 
-// corrLines lists the correction lines of the ticket journal.
+// corrLines lists the correction lines of the ticket journal that are the
+// stall, the brief drift and the scope drift. The commits of the tests of
+// those carry no trailer, so each also leaves a slice-missing line, which
+// corrSliceLines lists.
 func corrLines(t *testing.T, fx *fixture.Fixture) []journal.Line {
+	t.Helper()
+	var out []journal.Line
+	for _, l := range corrAllLines(t, fx) {
+		if l.Outcome != "slice-missing" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// corrSliceLines lists the slice-missing correction lines of the ticket
+// journal.
+func corrSliceLines(t *testing.T, fx *fixture.Fixture) []journal.Line {
+	t.Helper()
+	var out []journal.Line
+	for _, l := range corrAllLines(t, fx) {
+		if l.Outcome == "slice-missing" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// corrAllLines lists the correction lines of the ticket journal.
+func corrAllLines(t *testing.T, fx *fixture.Fixture) []journal.Line {
 	t.Helper()
 	var out []journal.Line
 	for _, l := range readJournal(t, fx, fx.Ticket) {
@@ -69,7 +108,7 @@ func corrLines(t *testing.T, fx *fixture.Fixture) []journal.Line {
 func corrLine(t *testing.T, fx *fixture.Fixture, kind string) journal.Line {
 	t.Helper()
 	var got []journal.Line
-	for _, l := range corrLines(t, fx) {
+	for _, l := range corrAllLines(t, fx) {
 		if l.Outcome == kind {
 			got = append(got, l)
 		}
@@ -81,8 +120,35 @@ func corrLine(t *testing.T, fx *fixture.Fixture, kind string) journal.Line {
 }
 
 // corrDelivered lists the refs of the note-delivered ledger lines of the
-// session with the outcome (prompt, tool or stop-block).
+// session with the outcome (prompt, tool or stop-block), other than those of
+// the slice-missing notes, which corrDeliveredSlice lists.
 func corrDelivered(t *testing.T, env jigEnv, outcome string) []string {
+	t.Helper()
+	var refs []string
+	for _, ref := range corrDeliveredAll(t, env, outcome) {
+		if !strings.HasPrefix(ref, "slice:") {
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
+// corrDeliveredSlice lists the refs of the slice-missing notes delivered to the
+// session with the outcome.
+func corrDeliveredSlice(t *testing.T, env jigEnv, outcome string) []string {
+	t.Helper()
+	var refs []string
+	for _, ref := range corrDeliveredAll(t, env, outcome) {
+		if strings.HasPrefix(ref, "slice:") {
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
+// corrDeliveredAll lists the refs of the note-delivered ledger lines of the
+// session with the outcome.
+func corrDeliveredAll(t *testing.T, env jigEnv, outcome string) []string {
 	t.Helper()
 	var refs []string
 	for _, l := range readLedger(t, env) {
@@ -91,6 +157,23 @@ func corrDelivered(t *testing.T, env jigEnv, outcome string) []string {
 		}
 	}
 	return refs
+}
+
+// corrSliceOnly fails the test unless the hook of the commit sha told the
+// session that the commit names no slice, and nothing of the other
+// corrections. The commits of the tests of those carry no trailer and the
+// session claims no slice, so jig has nothing to verify them for.
+func corrSliceOnly(t *testing.T, what, sha string, res jigResult) {
+	t.Helper()
+	ctx := corrContext(t, res)
+	if !strings.Contains(ctx, "commit "+sha[:12]+" on") || !strings.Contains(ctx, "names no slice") {
+		t.Errorf("%s: context = %q, want the note that commit %s names no slice", what, ctx, sha[:12])
+	}
+	for _, other := range []string{corrStallText, corrBriefText, corrScopeText} {
+		if strings.Contains(ctx, other) {
+			t.Errorf("%s: context = %q, want nothing of %q", what, ctx, other)
+		}
+	}
 }
 
 // corrCommit writes the file (clone-relative) and commits it as the agent
@@ -196,7 +279,7 @@ func TestCorrectionStall(t *testing.T) {
 	verify := func(file string) (string, journal.Line) {
 		t.Helper()
 		sha, hook := corrCommit(t, h, file, "")
-		corrSilent(t, "the PostToolUse of the commit of "+file, hook)
+		corrSliceOnly(t, "the PostToolUse of the commit of "+file, sha, hook)
 		res := h.Jig("verify", fx.Ticket, sha, "--slice", "a", "--wait")
 		if res.Code != 1 || !strings.Contains(res.Stdout, "state: fail") {
 			t.Fatalf("jig verify --wait exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
@@ -301,15 +384,15 @@ func TestCorrectionBriefDrift(t *testing.T) {
 }
 
 // TestCorrectionScopeDrift: a commit inside the workspaces of the slices says
-// nothing; a commit that also changes files outside them is told to the session
-// by the PostToolUse hook of the commit that made it, once, and recorded with
-// the files.
+// nothing of scope; a commit that also changes files outside them is told to
+// the session by the PostToolUse hook of the commit that made it, once, and
+// recorded with the files.
 func TestCorrectionScopeDrift(t *testing.T) {
 	t.Parallel()
 	fx, env, h := corrRig(t)
 
-	_, hook := corrCommit(t, h, "alpha/inside.txt", "")
-	corrSilent(t, "the PostToolUse of a commit inside the workspaces", hook)
+	inside, hook := corrCommit(t, h, "alpha/inside.txt", "")
+	corrSliceOnly(t, "the PostToolUse of a commit inside the workspaces", inside, hook)
 	if lines := corrLines(t, fx); len(lines) != 0 {
 		t.Fatalf("a commit inside the workspaces left correction lines %+v", lines)
 	}
@@ -476,5 +559,196 @@ func TestCorrectionBlocksUnattendedOnce(t *testing.T) {
 	}
 	if ss, err := st.ReadSliceState(fx.Ticket, "a"); err != nil || ss.State != "stalled" {
 		t.Errorf("slice a = %+v, %v, want it still stalled", ss, err)
+	}
+}
+
+// corrSoloSlice gives the ticket slice e, which builds in a workspace of its
+// own, delta: a package that tests green. The slices of the fixture ticket
+// share theirs (a and b build in alpha, c and d in beta), so a commit in
+// either points to two slices and not to one. It is the setup of corrRigAfter,
+// so the session starts with the commit that adds the workspace behind it.
+func corrSoloSlice(t *testing.T, fx *fixture.Fixture, h *fakeHarness) {
+	t.Helper()
+	manifest := filepath.Join(h.Clone, ".claude", "jig.yaml")
+	body := string(readFileOrFatal(t, manifest))
+	const beta = "    - id: beta\n      path: beta\n"
+	if !strings.Contains(body, beta) {
+		t.Fatalf("test setup: the manifest lacks the beta workspace:\n%s", body)
+	}
+	writeFileOrFatal(t, manifest, []byte(strings.Replace(body, beta, beta+"    - id: delta\n      path: delta\n", 1)))
+	if err := os.MkdirAll(filepath.Join(h.Clone, "delta"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileOrFatal(t, filepath.Join(h.Clone, "delta", "delta.go"), []byte("package delta\n"))
+	h.git("add", ".claude/jig.yaml", "delta/delta.go")
+	h.git("commit", "-m", "manifest: the delta workspace")
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := st.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendSlices(fx.Ticket, []store.Slice{{ID: "e", Workspace: "delta", Goal: "Add a delta.", Oracle: "test", BlockedBy: []string{}, FromBrief: all[0].FromBrief}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// corrVerifyLines lists the journal lines that say a verification of the
+// commit began or ended, for any slice.
+func corrVerifyLines(t *testing.T, fx *fixture.Fixture, sha string) []journal.Line {
+	t.Helper()
+	var out []journal.Line
+	for _, l := range readJournal(t, fx, fx.Ticket) {
+		switch l.Event {
+		case journal.EventVerifyPending, journal.EventOracle, journal.EventVerified:
+			if l.Commit == sha {
+				out = append(out, l)
+			}
+		}
+	}
+	return out
+}
+
+// TestCommitWithoutSliceGetsANote: a commit on the ticket branch with no
+// Jig-Slice trailer is never verified, and the session is told so by the hook
+// of the commit, once, with the slice its files point to. A commit in the
+// workspace of one slice names it; one in a workspace two slices share names
+// both; one in no workspace names none. A commit with the trailer, a merge and
+// a commit with no file get no note. The note is an inference: nothing is
+// verified for the commit, and no slice moves.
+func TestCommitWithoutSliceGetsANote(t *testing.T) {
+	t.Parallel()
+	fx, env, h := corrRigAfter(t, corrSoloSlice)
+
+	// The workspace of slice e alone.
+	sha, hook := corrCommit(t, h, "delta/one.txt", "")
+	ctx := corrContext(t, hook)
+	for _, want := range []string{
+		"commit " + sha[:12] + " on " + fx.Ticket + " names no slice", "jig verifies nothing for it", "delta/ (slice e's workspace)",
+		"amend it with `Jig-Slice: e`", "jig verify " + fx.Ticket + " " + sha[:12] + " --slice <slice>",
+	} {
+		if !strings.Contains(ctx, want) {
+			t.Errorf("PostToolUse context = %q, want %q", ctx, want)
+		}
+	}
+	line := corrLine(t, fx, "slice-missing")
+	if line.Ref != "slice:"+sha[:12] || line.Commit != sha || line.Slice != "" || len(line.Files) != 1 || line.Files[0] != "delta/one.txt" ||
+		line.Session != "s-corr" || line.Provenance != "jig" || !strings.Contains(ctx, line.Summary) {
+		t.Errorf("correction line = %+v, want the note of %s on delta/one.txt by session s-corr", line, sha)
+	}
+	if refs := corrDeliveredSlice(t, env, "tool"); len(refs) != 1 || refs[0] != line.Ref {
+		t.Errorf("note-delivered refs = %v, want %s once", refs, line.Ref)
+	}
+	corrSilent(t, "the prompt after it", h.Hook("UserPromptSubmit", map[string]any{"prompt": "go on"}))
+	if lines := corrVerifyLines(t, fx, sha); len(lines) != 0 {
+		t.Errorf("journal lines of a verification of %s: %+v, want none: the note only guesses", sha, lines)
+	}
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ss, err := st.ReadSliceState(fx.Ticket, "e"); err != nil || ss.State != "queued" {
+		t.Errorf("slice e = %+v, %v, want queued: the guess moves nothing", ss, err)
+	}
+
+	// A workspace two slices share.
+	sha, hook = corrCommit(t, h, "alpha/two.txt", "")
+	if ctx := corrContext(t, hook); !strings.Contains(ctx, "commit "+sha[:12]+" on "+fx.Ticket+" names no slice") || !strings.Contains(ctx, "the workspaces of slices a (alpha/), b (alpha/)") {
+		t.Errorf("PostToolUse context = %q, want both slices of alpha as the candidates", ctx)
+	}
+
+	// No workspace at all.
+	sha, hook = corrCommit(t, h, "docs/none.md", "")
+	if ctx := corrContext(t, hook); !strings.Contains(ctx, "commit "+sha[:12]+" on "+fx.Ticket+" names no slice") || !strings.Contains(ctx, "It touched no slice's workspace (alpha/, beta/, delta/)") {
+		t.Errorf("PostToolUse context = %q, want that no workspace holds the commit", ctx)
+	}
+	if got := len(corrSliceLines(t, fx)); got != 3 {
+		t.Fatalf("slice-missing lines = %d, want 3, one for each commit", got)
+	}
+
+	// The trailer names the slice: jig verifies the commit, and says nothing.
+	sha, hook = corrCommit(t, h, "delta/three.txt", "e")
+	corrSilent(t, "the PostToolUse of a commit with the trailer", hook)
+	h.WaitVerifiers()
+	if lines := corrVerifyLines(t, fx, sha); len(lines) == 0 {
+		t.Errorf("a commit with the trailer was not verified: no journal line for %s", sha)
+	}
+	if ctx := corrContext(t, h.Hook("UserPromptSubmit", map[string]any{"prompt": "and the verification?"})); !strings.Contains(ctx, "verified "+sha[:12]+" for slice e") || strings.Contains(ctx, "names no slice") {
+		t.Errorf("prompt context = %q, want the verification of %s and no note that it names no slice", ctx, sha)
+	}
+
+	// A merge and a commit with no file are not slice work to name.
+	h.Branch("side")
+	h.Commit("", "side work", map[string]string{"alpha/side.txt": "from the side"})
+	h.Branch("jig/" + fx.Ticket)
+	merge := h.Bash("git merge --no-ff -m 'merge side' side")
+	if merge.Code != 0 {
+		t.Fatalf("git merge: exit %d: %s", merge.Code, merge.Stderr)
+	}
+	corrSilent(t, "the PostToolUse of a merge", merge.Hook)
+	release := h.Bash("git commit --allow-empty -m 'chore: release'")
+	if release.Code != 0 {
+		t.Fatalf("git commit --allow-empty: exit %d: %s", release.Code, release.Stderr)
+	}
+	corrSilent(t, "the PostToolUse of a commit with no file", release.Hook)
+	if got := len(corrSliceLines(t, fx)); got != 3 {
+		t.Errorf("slice-missing lines = %d, want still 3: the trailer, the merge and the empty commit left none", got)
+	}
+}
+
+// TestCommitWithoutSliceHoldsAnUnattendedSessionOnce: when the project
+// defaults to unattended, the note is enforced like the other corrections: the
+// first Stop is refused with it, once, and a commit made later is refused for
+// on its own. A commit put right by saying its slice to jig verify is no longer
+// held against the session.
+func TestCommitWithoutSliceHoldsAnUnattendedSessionOnce(t *testing.T) {
+	t.Parallel()
+	fx, env, h := corrRigAfter(t, corrSoloSlice)
+	corrMarkUnattended(t, fx)
+
+	first, hook := corrCommit(t, h, "delta/first.txt", "")
+	if ctx := corrContext(t, hook); !strings.Contains(ctx, "commit "+first[:12]+" on "+fx.Ticket+" names no slice") {
+		t.Errorf("PostToolUse context = %q, want the note of %s", ctx, first)
+	}
+	stop := decodeHook(t, h.Hook("Stop", map[string]any{"stop_hook_active": false}))
+	if stop.Decision != "block" || !strings.Contains(stop.Reason, "this session is unattended") || !strings.Contains(stop.Reason, "commit "+first[:12]+" on "+fx.Ticket+" names no slice") {
+		t.Fatalf("Stop = %+v, want a refusal for the commit that names no slice", stop)
+	}
+	if refs := corrDeliveredSlice(t, env, "stop-block"); len(refs) != 1 || refs[0] != "slice:"+first[:12] {
+		t.Errorf("stop-block refs = %v, want slice:%s once", refs, first[:12])
+	}
+	corrSilent(t, "the Stop that is continuing for it", h.Hook("Stop", map[string]any{"stop_hook_active": true}))
+	corrSilent(t, "the Stop after it", h.Hook("Stop", map[string]any{"stop_hook_active": false}))
+
+	// A new commit is a new fact, refused for once, and only for it.
+	second, hook := corrCommit(t, h, "delta/second.txt", "")
+	if ctx := corrContext(t, hook); !strings.Contains(ctx, "commit "+second[:12]+" on") {
+		t.Errorf("PostToolUse context = %q, want the note of %s", ctx, second)
+	}
+	stop = decodeHook(t, h.Hook("Stop", map[string]any{"stop_hook_active": false}))
+	if stop.Decision != "block" || !strings.Contains(stop.Reason, "commit "+second[:12]+" on") || strings.Contains(stop.Reason, first[:12]) {
+		t.Errorf("Stop for the new commit = %+v, want a refusal for %s alone", stop, second)
+	}
+	corrSilent(t, "the Stop after the new one", h.Hook("Stop", map[string]any{"stop_hook_active": false}))
+
+	// Said to jig verify before the Stop, a commit is no longer held against
+	// the session: the third commit is verified for slice e, and the Stop
+	// that follows has nothing to refuse for.
+	third, hook := corrCommit(t, h, "delta/third.txt", "")
+	if ctx := corrContext(t, hook); !strings.Contains(ctx, "commit "+third[:12]+" on") {
+		t.Errorf("PostToolUse context = %q, want the note of %s", ctx, third)
+	}
+	if res := h.Jig("verify", fx.Ticket, third, "--slice", "e", "--wait"); res.Code != 0 {
+		t.Fatalf("jig verify --wait exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
+	stop = decodeHook(t, h.Hook("Stop", map[string]any{"stop_hook_active": false}))
+	if stop.Decision != "" || stop.Reason != "" || strings.Contains(stop.SystemMessage, "names no slice") {
+		t.Errorf("Stop after the commit was verified for its slice = %+v, want no refusal and no note that it names no slice", stop)
+	}
+	if got := len(corrSliceLines(t, fx)); got != 3 {
+		t.Errorf("slice-missing lines = %d, want 3, one for each commit", got)
 	}
 }

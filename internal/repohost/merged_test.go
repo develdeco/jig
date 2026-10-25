@@ -5,36 +5,38 @@ import (
 	"testing"
 )
 
-// TestParsePRState: gh's state is merged only for MERGED; an answer with no
-// state, or no JSON, is not known - never "not merged".
+// TestParsePRState: gh's state is one of the three states of a pull request,
+// upper-cased; an answer with no state, or no JSON, is not known - never "not
+// merged".
 func TestParsePRState(t *testing.T) {
 	for _, tc := range []struct {
-		out           string
-		merged, known bool
+		out  string
+		want string
 	}{
-		{`{"state":"MERGED"}`, true, true},
-		{"{\"state\":\"merged\"}\n", true, true},
-		{`{"state":"OPEN"}`, false, true},
-		{`{"state":"CLOSED"}`, false, true},
-		{`{"body":"text"}`, false, false},
-		{`{"state":""}`, false, false},
-		{``, false, false},
-		{`not json`, false, false},
+		{`{"state":"MERGED"}`, StateMerged},
+		{"{\"state\":\"merged\"}\n", StateMerged},
+		{`{"state":"OPEN"}`, StateOpen},
+		{`{"state":"CLOSED"}`, StateClosed},
+		{`{"state":"DRAFT"}`, ""},
+		{`{"body":"text"}`, ""},
+		{`{"state":""}`, ""},
+		{``, ""},
+		{`not json`, ""},
 	} {
-		if merged, known := parsePRState(tc.out); merged != tc.merged || known != tc.known {
-			t.Errorf("parsePRState(%q) = merged %v, known %v, want %v, %v", tc.out, merged, known, tc.merged, tc.known)
+		if got := parsePRState(tc.out); got != tc.want {
+			t.Errorf("parsePRState(%q) = %q, want %q", tc.out, got, tc.want)
 		}
 	}
 }
 
-// TestPRMergedCannotTellWithoutGh: no gh to ask, or a url that is no link,
+// TestPRStateCannotTellWithoutGh: no gh to ask, or a url that is no link,
 // reads as unknown rather than as unmerged.
-func TestPRMergedCannotTellWithoutGh(t *testing.T) {
+func TestPRStateCannotTellWithoutGh(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "no-such-gh")
-	if merged, known := PRMerged(missing, []string{}, "https://github.com/o/r/pull/1"); merged || known {
-		t.Errorf("PRMerged with a gh that does not exist = %v, %v, want false, false", merged, known)
+	if state, known := PRState(missing, []string{}, "https://github.com/o/r/pull/1"); state != "" || known {
+		t.Errorf("PRState with a gh that does not exist = %q, %v, want \"\", false", state, known)
 	}
-	if merged, known := PRMerged("", nil, "--repo=x"); merged || known {
-		t.Errorf("PRMerged of a flag-shaped url = %v, %v, want false, false", merged, known)
+	if state, known := PRState("", nil, "--repo=x"); state != "" || known {
+		t.Errorf("PRState of a flag-shaped url = %q, %v, want \"\", false", state, known)
 	}
 }
