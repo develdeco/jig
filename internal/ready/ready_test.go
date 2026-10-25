@@ -129,6 +129,31 @@ func TestPlace(t *testing.T) {
 	}
 }
 
+// TestBuiltIn: the repos a ticket's slices build in come in the project's
+// order; a project of one repo is that repo, and a ticket with no slice placed
+// in a repo is taken to build in all of them.
+func TestBuiltIn(t *testing.T) {
+	t.Parallel()
+	repos := []Repo{{Name: "api", Workspaces: []string{"server"}}, {Name: "web", Workspaces: []string{"ui"}}, {Name: "docs", Workspaces: []string{"site"}}}
+	for _, c := range []struct {
+		name   string
+		repos  []Repo
+		slices []store.Slice
+		want   []string
+	}{
+		{"several, in the project's order", repos, []store.Slice{{ID: "a", Workspace: "site"}, {ID: "b", Workspace: "server"}}, []string{"api", "docs"}},
+		{"named by its repo", repos, []store.Slice{{ID: "a", Workspace: "web/ui"}}, []string{"web"}},
+		{"none placed", repos, []store.Slice{{ID: "a", Workspace: "stray"}}, []string{"api", "web", "docs"}},
+		{"no slices", repos, nil, []string{"api", "web", "docs"}},
+		{"one repo", []Repo{{Name: "solo"}}, []store.Slice{{ID: "a", Workspace: "anything"}}, []string{"solo"}},
+		{"no repo", nil, []store.Slice{{ID: "a", Workspace: "alpha"}}, []string{}},
+	} {
+		if got := BuiltIn(c.repos, c.slices); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: BuiltIn = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // TestSplitWorkspace: only a repo's own name and a slash make a workspace
 // qualified.
 func TestSplitWorkspace(t *testing.T) {

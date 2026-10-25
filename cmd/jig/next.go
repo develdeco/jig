@@ -16,6 +16,7 @@ import (
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -46,7 +47,10 @@ func init() {
 // different tickets that change the same files.
 // With a ticket it also says which phase the ticket is at, whether that phase
 // can start now, why not, and the prompt that starts it (internal/phase); --for
-// asks about one phase, whatever the ticket is at.
+// asks about one phase, whatever the ticket is at. A ticket stacked on another
+// gets, for each repo it builds in, where its branch starts and where its pull
+// request goes (internal/stack): the parent's branch in a repo they share, the
+// target elsewhere and once the parent merged.
 // It reads the store and the clones and writes nothing.
 func cmdNext(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "next")
@@ -129,10 +133,13 @@ type nextTicket struct {
 	Branch       string        `json:"branch"`
 	Distribution string        `json:"distribution,omitempty"`
 	BlockedBy    []nextBlocker `json:"blocked_by,omitempty"`
-	Ready        []nextBatch   `json:"ready"`
-	Unplaced     []string      `json:"unplaced_workspaces,omitempty"`
-	Ambiguous    []string      `json:"ambiguous_workspaces,omitempty"`
-	Topology     []nextSlice   `json:"topology,omitempty"`
+	// Stack is, for a ticket stacked on another, where its branch starts and
+	// where its pull request goes in each repo it builds in (internal/stack).
+	Stack     []nextStack `json:"stack,omitempty"`
+	Ready     []nextBatch `json:"ready"`
+	Unplaced  []string    `json:"unplaced_workspaces,omitempty"`
+	Ambiguous []string    `json:"ambiguous_workspaces,omitempty"`
+	Topology  []nextSlice `json:"topology,omitempty"`
 	// Advice is how to share the ready slices out, and, when review is the
 	// phase that can start, who reviews (Fresh says whether the calling
 	// session may itself).
@@ -390,6 +397,12 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	}
 	readMerges(merges, inputs)
 	status := ready.Tickets(inputs)[0]
+	// A stacked ticket starts from its parent's branch where they share a
+	// repo, and its pull request goes there, until the parent merges.
+	plan, err := stack.Read(stackInput(st, cfg, mp, merges), id)
+	if err != nil {
+		return nextTicket{}, err
+	}
 
 	n := nextTicket{
 		Ticket: id, Title: data.title, State: status.State, Branch: branch, Distribution: distribution,
@@ -411,8 +424,9 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 			readySlices = append(readySlices, s)
 		}
 	}
+	n.Stack = stackRows(plan)
 	for _, b := range ready.Batches(readySlices, place.Repo) {
-		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices, Start: startPoint(cfg, b.Repo)})
+		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices, Start: startPoint(cfg, plan, b.Repo)})
 	}
 	n.Advice = distributionAdvice(n.Ready)
 	n.setPhase(st, id, asked, merges)
@@ -432,10 +446,14 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	return n, nil
 }
 
-// startPoint is where the ticket's branch starts in repo: the target branch of
-// the repo on its origin. It is "" for a repo the project does not have (the
-// name slices no repo owns are grouped under).
-func startPoint(cfg project.Config, repo string) string {
+// startPoint is where the ticket's branch starts in repo: the branch of the
+// parent it is stacked on there (plan), else the target branch of the repo on
+// its origin. It is "" for a repo the project does not have (the name slices
+// no repo owns are grouped under).
+func startPoint(cfg project.Config, plan stack.Plan, repo string) string {
+	if r, ok := plan.In(repo); ok && r.StartFrom != "" {
+		return r.StartFrom
+	}
 	for _, r := range cfg.Repos {
 		if r.Name() == repo {
 			return "origin/" + r.TargetBranch()
@@ -496,6 +514,7 @@ func (n nextTicket) blocks(topology bool) []string {
 		}
 		blocks = append(blocks, axi.Table("blocked_by", []string{"ticket", "kind", "fact"}, rows))
 	}
+	blocks = append(blocks, stackBlocks(n.Ticket, n.Stack)...)
 	if len(n.Ready) == 0 {
 		blocks = append(blocks, "ready: none")
 	} else {

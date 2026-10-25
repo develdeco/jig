@@ -13,6 +13,7 @@ import (
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -768,7 +769,7 @@ func escapeDemoHTML(text string) string {
 // value when there is no pick: a body has a ## Demo section only from a pick.
 func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 	rep reportYAML, tier string, commits map[string]string, authorCommits []authorCommit,
-	oracleNames []string, outcomes []findingOutcome, picked *DemoRenderResult, links []prLink) (string, bool, DemoRenderResult, error) {
+	oracleNames []string, outcomes []findingOutcome, picked *DemoRenderResult, links []prLink, stacked stack.Repo) (string, bool, DemoRenderResult, error) {
 	relPath := filepath.Join(st.TicketRelDir(ticket), "pr", repoName+".md")
 	fullPath := filepath.Join(st.Root, relPath)
 
@@ -780,6 +781,10 @@ func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 		return "", false, DemoRenderResult{}, err
 	}
 	b.WriteString(intent)
+
+	// Render the Stacked on section, which names the branch the pull request
+	// goes into while the parent the ticket is stacked on has not merged
+	b.WriteString(renderStackedSection(ticket, stacked))
 
 	// Render the Part of section, which names the pull requests of the ticket's
 	// other repos (none for a ticket that publishes one)
@@ -836,6 +841,18 @@ func renderPartOfSection(ticket string, links []prLink) string {
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+// renderStackedSection renders the ## Stacked on <parent> section a pull
+// request has while it goes into the branch of the parent its ticket is
+// stacked on: which branch that is, and that it goes into the target once the
+// parent merges. A pull request into its repo's target has none.
+func renderStackedSection(ticket string, r stack.Repo) string {
+	if !r.Shared() || r.PRTarget == "" {
+		return ""
+	}
+	return fmt.Sprintf("## Stacked on %s\n\n%s builds on %s: this pull request goes into `%s`, the branch of %s. Once %s merges, retarget it to `%s`.\n\n",
+		r.Parent, ticket, r.Parent, r.PRTarget, r.Parent, r.Parent, r.Target)
 }
 
 // findingOutcome pairs one finding with how it ended. status is the bucket

@@ -20,6 +20,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/mirror"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -312,6 +313,12 @@ func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.Ma
 				return ""
 			}
 			return t.Prompt
+		}
+		// A stacked ticket's pull request goes into its parent's branch until
+		// the parent merges, which the host is asked about now: a pull request
+		// opened into a branch that merged already goes nowhere useful.
+		d.Stack = func(ticket string) (stack.Plan, error) {
+			return stack.Read(stackInput(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, 0)), ticket)
 		}
 	}
 	return d

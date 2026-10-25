@@ -25,6 +25,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -67,6 +68,12 @@ type Deps struct {
 	// phase the ticket is at ("Build SHOP-1"): a refusal that sends a person
 	// back to an earlier phase names it. nil, or "", names none.
 	Prompt func(ticket string) string
+	// Stack reads where a ticket stacked on another starts and where its pull
+	// requests go (internal/stack): a publish opens the pull request of a repo
+	// the ticket shares with its parent into the parent's branch, and its body
+	// says so. nil reads none, so every pull request goes into its repo's
+	// target.
+	Stack func(ticket string) (stack.Plan, error)
 }
 
 // oracle is d.Oracle, or the real run when it is nil.

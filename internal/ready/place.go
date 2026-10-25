@@ -116,6 +116,36 @@ func Place(repos []Repo, all []store.Slice) Placement {
 	return p
 }
 
+// BuiltIn names the repos the slices build in, in the order of repos: the
+// repos Place gives one of their workspaces. A project of one repo is that
+// repo whatever the slices say, and a ticket none of whose slices is placed
+// in a repo (it has none yet, say) is taken to build in every repo of the
+// project, so a question asked of its repos still has repos to ask.
+func BuiltIn(repos []Repo, all []store.Slice) []string {
+	names := make([]string, len(repos))
+	for i, r := range repos {
+		names[i] = r.Name
+	}
+	if len(repos) < 2 {
+		return names
+	}
+	place := Place(repos, all)
+	used := map[string]bool{}
+	for _, name := range place.Repo {
+		used[name] = true
+	}
+	var out []string
+	for _, name := range names {
+		if used[name] {
+			out = append(out, name)
+		}
+	}
+	if len(out) == 0 {
+		return names
+	}
+	return out
+}
+
 func appendOnce(list []string, v string) []string {
 	if slices.Contains(list, v) {
 		return list
