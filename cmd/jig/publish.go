@@ -16,10 +16,10 @@ import (
 // the same text, which the help parity test compares.
 const (
 	publishYesUsage     = "skip the interactive confirm"
-	publishBodyUsage    = "render the pull request body and review notes for the reviewed head and stop: nothing is pushed, no lease or branch changes"
-	publishPRUsage      = "record the pull request at this URL, which you opened from the ticket's branch, as the ticket's and finish the publish"
-	publishApproveUsage = "record that you approve publishing the reviewed head, so `jig publish` pushes it without asking"
-	publishRepoUsage    = "the repo to publish, by its name in the project (default: every repo the ticket builds in)"
+	publishBodyUsage    = "render the pull request body and review notes for the reviewed head of each repo and stop: nothing is pushed, no lease or branch changes"
+	publishPRUsage      = "record the pull request at this URL, which you opened from the ticket's branch, as the ticket's (with --repo, for a ticket that builds in several repos) and finish the publish once every repo has one"
+	publishApproveUsage = "record that you approve publishing the reviewed head of each repo, so `jig publish` pushes it without asking"
+	publishRepoUsage    = "publish only this repo, by its name in the project (default: every repo the ticket builds in; --pr needs it when there are several)"
 	publishPicksUsage   = "a picks file: the recordings to show in the pull request's demo, in the pick result's JSON shape"
 	publishStoreUsage   = "explicit store path"
 	publishProjectUsage = "project name, resolved via the machine mapping"
