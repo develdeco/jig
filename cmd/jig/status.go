@@ -163,6 +163,8 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 	// beats "green" only once every slice is; "building" is the fallback.
 	overall := "building"
 	switch {
+	case rec.Closed != nil:
+		overall = "closed"
 	case counts["stalled"] > 0:
 		overall = "stalled"
 	case counts["needs-input"] > 0:
@@ -178,6 +180,19 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		blocks = append(blocks, "branch: "+rec.Branch)
 	}
 	blocks = append(blocks, "state: "+overall)
+	if c := rec.Closed; c != nil {
+		pairs := [][2]string{{"reason", c.Reason}}
+		if c.By != "" {
+			pairs = append(pairs, [2]string{"by", c.By})
+		}
+		if c.Note != "" {
+			pairs = append(pairs, [2]string{"note", c.Note})
+		}
+		if c.At != "" {
+			pairs = append(pairs, [2]string{"at", c.At})
+		}
+		blocks = append(blocks, axi.KV("closed", pairs))
+	}
 	// fix_budget: once the ticket has a gate round, how much of its fix
 	// budget (gate.fix_rounds) is used - the count of its earlier rounds
 	// that appended at least one fix slice - ending in ", reached" exactly
@@ -280,7 +295,10 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 	// the gate is named as the step after it - the order `jig gate`'s own
 	// report hint prints.
 	var helpLines []string
-	if len(blockedRounds) > 0 {
+	if rec.Closed != nil {
+		// A closed ticket is not worked: the way forward is to take it back.
+		helpLines = []string{fmt.Sprintf("%s is closed (%s): run `jig reopen %s` to work it again", ticket, rec.Closed.Phrase(), ticket)}
+	} else if len(blockedRounds) > 0 {
 		// A gate round folds every earlier round's findings file, so it
 		// refuses outright while one cannot be read. Naming the next
 		// command here would name one that cannot run; the step is the

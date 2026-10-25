@@ -277,10 +277,37 @@ func renderBriefBlock(st *store.Store, ticket string, needQualify bool, ownerRep
 	return "<details><summary>Brief</summary>\n\n" + text + "\n\n</details>", nil
 }
 
+// closedBlock renders how a closed ticket was closed: "**Closed:** covered by
+// develdeco/jig#82", then its note as a paragraph of its own when it has one.
+// A ticket superseded by another names it with its issue number when it has
+// one, as "Waits for" does. needQualify and ownerRepo are qualify's.
+func closedBlock(st *store.Store, c store.Closed, needQualify bool, ownerRepo string) (string, error) {
+	phrase := c.Phrase()
+	if c.Reason == store.CloseSuperseded && c.By != "" {
+		by, err := st.ResolveTicket(c.By)
+		if err != nil {
+			return "", err
+		}
+		rec, has, err := githubRecordOf(st, store.TrackerOwner{Ticket: by})
+		if err != nil {
+			return "", err
+		}
+		phrase = fmt.Sprintf("%s by %s", c.Reason, by)
+		if has {
+			phrase = fmt.Sprintf("%s by %s (#%d)", c.Reason, by, rec.Issue)
+		}
+	}
+	block := qualify("**Closed:** "+phrase, needQualify, ownerRepo)
+	if note := trimText(c.Note); note != "" {
+		block += "\n\n" + qualify(unwrap(note), needQualify, ownerRepo)
+	}
+	return block, nil
+}
+
 // RenderTicketBody renders ticket's full issue body (brief.md#What an issue
-// shows): its description, "Waits for", "## Slices", "## Pull requests",
-// the brief, and the footer, each part left out when empty, joined by one
-// blank line.
+// shows): its description, how it was closed when it was, "Waits for",
+// "## Slices", "## Pull requests", the brief, and the footer, each part left
+// out when empty, joined by one blank line.
 func RenderTicketBody(st *store.Store, cfg project.Config, ticket string, prs []PRRef) (string, error) {
 	_, desc, err := ResolveTicketTitleBody(st, ticket)
 	if err != nil {
@@ -296,6 +323,13 @@ func RenderTicketBody(st *store.Store, cfg project.Config, ticket string, prs []
 	rec, err := st.ReadTicket(ticket)
 	if err != nil {
 		return "", err
+	}
+	if rec.Closed != nil {
+		closed, err := closedBlock(st, *rec.Closed, needQualify, ownerRepo)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, closed)
 	}
 	waits, err := waitsForLine(st, rec.BlockedBy)
 	if err != nil {

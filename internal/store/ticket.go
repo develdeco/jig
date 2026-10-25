@@ -58,6 +58,9 @@ type Ticket struct {
 	// ResolveTicket is the one place an alias turns back into this ticket's
 	// current id.
 	Aliases []string
+	// Closed is the ticket's closure: set when it was closed without a pull
+	// request (`jig close`), nil while it is open. See Closed.
+	Closed *Closed
 }
 
 // Adopted reports whether the ticket adopted a branch: a recorded branch is
@@ -77,6 +80,7 @@ type ticketFile struct {
 	Branch        string            `yaml:"branch,omitempty"`
 	BlockedBy     []TicketBlockedBy `yaml:"blocked_by,omitempty"`
 	Aliases       []string          `yaml:"aliases,omitempty"`
+	Closed        *closedFile       `yaml:"closed,omitempty"`
 }
 
 // literalString marshals as a YAML literal block scalar ("|"), the same
@@ -170,7 +174,12 @@ func ReadTicketFile(path string) (Ticket, error) {
 			Help: []string{"Upgrade jig to a version that understands this ticket.yaml schema"},
 		}
 	}
-	return Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, BlockedBy: f.BlockedBy, Aliases: f.Aliases}, nil
+	t := Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, BlockedBy: f.BlockedBy, Aliases: f.Aliases}
+	if f.Closed != nil {
+		c := Closed(*f.Closed)
+		t.Closed = &c
+	}
+	return t, nil
 }
 
 // ReadTicketDeps reads <ticket>/ticket.yaml's blockers. An absent file
@@ -222,6 +231,15 @@ func (s *Store) CreateTicketRecord(ticket string, rec Ticket) error {
 // branch) never has to know or restate the others, and never races another
 // writer's own read-modify-write into dropping whichever field it changed.
 func (s *Store) mutateTicket(ticket string, fn func(*Ticket)) error {
+	return s.updateTicket(ticket, func(t *Ticket) error {
+		fn(t)
+		return nil
+	})
+}
+
+// updateTicket is mutateTicket for a change that can be refused: when fn
+// returns an error nothing is written and the error is returned as it is.
+func (s *Store) updateTicket(ticket string, fn func(*Ticket) error) error {
 	path := s.TicketFilePath(ticket)
 	release, _, err := Lock(path, 30*time.Second)
 	if err != nil {
@@ -233,7 +251,9 @@ func (s *Store) mutateTicket(ticket string, fn func(*Ticket)) error {
 	if err != nil {
 		return err
 	}
-	fn(&cur)
+	if err := fn(&cur); err != nil {
+		return err
+	}
 	if err := writeTicketFile(path, cur); err != nil {
 		return err
 	}
@@ -244,7 +264,7 @@ func (s *Store) mutateTicket(ticket string, fn func(*Ticket)) error {
 // writeTicketFile marshals t as a ticket.yaml at the current schema version
 // and writes it atomically to path. Its callers hold the store lock.
 func writeTicketFile(path string, t Ticket) error {
-	out, err := yaml.Marshal(ticketFile{
+	f := ticketFile{
 		SchemaVersion: ticketSchemaVersion,
 		Title:         t.Title,
 		Body:          literalString(t.Body),
@@ -252,7 +272,12 @@ func writeTicketFile(path string, t Ticket) error {
 		Branch:        t.Branch,
 		BlockedBy:     t.BlockedBy,
 		Aliases:       t.Aliases,
-	})
+	}
+	if t.Closed != nil {
+		c := closedFile(*t.Closed)
+		f.Closed = &c
+	}
+	out, err := yaml.Marshal(f)
 	if err != nil {
 		return err
 	}

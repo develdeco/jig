@@ -44,6 +44,7 @@ func (m *Model) factsOf(t *ticket) (phase.Facts, []journal.Line) {
 	fixes := t.fixRounds()
 	if st := t.status; st != nil {
 		f.Adopted, f.Branch = st.Branch != "", st.Branch
+		f.Closed = st.Closed
 		if b := st.Brief; b != nil {
 			f.BriefExists, f.Sections = true, len(b.Sections)
 			f.Approval, f.ApprovedBy, f.ApprovedHow = b.Approval, b.ApprovedBy, b.Provenance

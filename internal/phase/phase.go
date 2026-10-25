@@ -117,6 +117,9 @@ const (
 	CodeNotReviewed = "PHASE_NOT_REVIEWED"
 	// CodeDone: the ticket is published.
 	CodeDone = "PHASE_DONE"
+	// CodeClosed: the ticket was closed without a pull request (`jig close`),
+	// so no phase of it can run until `jig reopen`.
+	CodeClosed = "PHASE_CLOSED"
 )
 
 // The approval of the brief, as the store holds it.
@@ -249,6 +252,11 @@ type Facts struct {
 	// store to ask.
 	Open      *OpenRound
 	Published bool
+	// Closed says how the ticket was closed without a pull request (`jig
+	// close`), such as "covered by develdeco/jig#82" or "not planned"; "" while
+	// it is open. A closed ticket is done whatever its journal says, and no
+	// phase of it can run.
+	Closed string
 
 	// SessionName words a session id wherever the answer names a session (who
 	// took a round, who holds a slice). Nil is the first eight characters of the
@@ -302,13 +310,16 @@ type Asked struct {
 // For answers whether phase p can run now. For the current phase that is
 // Ready; for a phase already done it is a warning with the prompt that moves
 // the ticket on; for a phase after the current one it is the code that says
-// what that phase waits for.
+// what that phase waits for. For a closed ticket no phase can run: every one is
+// answered with CodeClosed.
 func (t Ticket) For(p Name) Asked {
 	a := Asked{Phase: p, Prompt: t.Prompt}
 	i := p.index()
 	switch {
 	case i < 0:
 		a.Reason = fmt.Sprintf("%q is none of the phases (brief, build, review, publish)", string(p))
+	case t.d != nil && t.d.f.Closed != "":
+		a.Code, a.Reason = CodeClosed, t.d.closedReason()
 	case t.Phases[i].State == StateDone:
 		a.Ready = true
 		a.Warning = fmt.Sprintf("%s is done (%s)", p, t.Phases[i].Text)
@@ -418,10 +429,10 @@ func OpenRoundIn(lines []journal.Line) *OpenRound {
 // ticket's journal lines, in order. A phase is done only when every phase
 // before it is: a review that found fixes takes the build back, and the build
 // is not done again until they are green. A published ticket is done whatever
-// it says of the earlier phases.
+// it says of the earlier phases, and so is a closed one, with no prompt.
 func Derive(f Facts, lines []journal.Line) Ticket {
 	d := newDigest(f, lines)
-	pub := f.Published
+	pub := f.Published || f.Closed != ""
 
 	briefP, own := d.brief()
 	briefDone := pub || own
@@ -453,7 +464,24 @@ func Derive(f Facts, lines []journal.Line) Ticket {
 	}
 	t.Current = Names[cur]
 	d.ready(&t)
+	if f.Closed != "" {
+		t.stand()
+	}
 	return t
+}
+
+// stand puts the sub-steps of a closed ticket at rest: nothing of it is being
+// worked, waits for anyone or can start, so a step that was active, waiting or
+// owed to the person is pending, with no word on where it stood.
+func (t *Ticket) stand() {
+	for i := range t.Phases {
+		for j, s := range t.Phases[i].Subs {
+			switch s.State {
+			case SubActive, SubWaiting, SubNeedsYou:
+				t.Phases[i].Subs[j].State, t.Phases[i].Subs[j].Detail = SubPending, ""
+			}
+		}
+	}
 }
 
 func newDigest(f Facts, lines []journal.Line) *digest {
@@ -1039,6 +1067,9 @@ func (d *digest) publish(prevDone bool) (Phase, bool) {
 	}
 
 	switch {
+	case d.f.Closed != "":
+		p.Text = "closed · " + d.f.Closed
+		return p, true
 	case d.f.Published:
 		p.Text = "published"
 		if pub.pr != "" {
@@ -1063,6 +1094,8 @@ func (d *digest) ready(t *Ticket) {
 	t.Prompt = Prompt(t.Current, f.Ticket)
 	t.Ready = true
 	switch {
+	case f.Closed != "":
+		t.Ready, t.Code, t.Reason, t.Prompt = false, CodeClosed, d.closedReason(), ""
 	case f.Published:
 		t.Ready, t.Code, t.Reason, t.Prompt = false, CodeDone, f.Ticket+" is published", ""
 	case t.Current == Build && len(f.Blockers) > 0:
@@ -1077,6 +1110,11 @@ func (d *digest) ready(t *Ticket) {
 	case t.Current == Review && len(d.undecided()) > 0:
 		t.Ready, t.Code, t.Reason = false, CodeAsksUndecided, d.asksReason()
 	}
+}
+
+// closedReason says the ticket is closed, and what makes it open again.
+func (d *digest) closedReason() string {
+	return fmt.Sprintf("%s is closed (%s): `jig reopen %s` takes it back", d.f.Ticket, d.f.Closed, d.f.Ticket)
 }
 
 // waitFor is the code and reason a phase after cur waits for while the ticket

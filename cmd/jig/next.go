@@ -114,11 +114,14 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 	return 0
 }
 
-// nextTicket is what `jig next <ticket>` says.
+// nextTicket is what `jig next <ticket>` says. Closed is how the ticket was
+// closed (`jig close`), such as "covered by develdeco/jig#82" or "not planned",
+// when it was.
 type nextTicket struct {
 	Ticket       string        `json:"ticket"`
 	Title        string        `json:"title,omitempty"`
 	State        string        `json:"state"`
+	Closed       string        `json:"closed,omitempty"`
 	Branch       string        `json:"branch"`
 	Distribution string        `json:"distribution,omitempty"`
 	BlockedBy    []nextBlocker `json:"blocked_by,omitempty"`
@@ -284,7 +287,7 @@ func readTicketDataOrProblem(st *store.Store, id string) ticketData {
 	}
 	if rec, rerr := st.ReadTicket(id); rerr == nil {
 		d.title, d.rec = rec.Title, rec
-		d.in.Blockers = ticketBlockers(st, rec)
+		d.in.Blockers, d.in.Closed = ticketBlockers(st, rec), rec.Closed
 	}
 	return d
 }
@@ -323,8 +326,22 @@ func readTicketData(st *store.Store, id string) (ticketData, error) {
 	if err != nil {
 		return ticketData{}, err
 	}
-	in := ready.Ticket{ID: id, Published: published, Slices: slices, States: states, Blockers: ticketBlockers(st, rec)}
+	in := ready.Ticket{ID: id, Published: published, Closed: rec.Closed, Slices: slices, States: states, Blockers: ticketBlockers(st, rec)}
 	return ticketData{in: in, title: rec.Title, rec: rec}, nil
+}
+
+// blockerInput is blocker id as readiness sees it from a ticket that waits for
+// it: whether it published and whether it was closed.
+func blockerInput(st *store.Store, id string) (ready.Ticket, error) {
+	published, err := isPublished(st, id)
+	if err != nil {
+		return ready.Ticket{}, err
+	}
+	rec, err := st.ReadTicket(id)
+	if err != nil {
+		return ready.Ticket{}, err
+	}
+	return ready.Ticket{ID: id, Published: published, Closed: rec.Closed}, nil
 }
 
 // isPublished reports whether ticket's journal has a publish-done line.
@@ -361,11 +378,11 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	// their work has merged.
 	inputs := []ready.Ticket{data.in}
 	for _, b := range data.in.Blockers {
-		published, err := isPublished(st, b.Ticket)
+		in, err := blockerInput(st, b.Ticket)
 		if err != nil {
 			return nextTicket{}, err
 		}
-		inputs = append(inputs, ready.Ticket{ID: b.Ticket, Published: published})
+		inputs = append(inputs, in)
 	}
 	readMerges(merges, inputs)
 	status := ready.Tickets(inputs)[0]
@@ -373,6 +390,9 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	n := nextTicket{
 		Ticket: id, Title: data.title, State: status.State, Branch: branch, Distribution: distribution,
 		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous,
+	}
+	if data.rec.Closed != nil {
+		n.Closed = data.rec.Closed.Phrase()
 	}
 	for _, b := range status.Blocked {
 		n.BlockedBy = append(n.BlockedBy, blockerFact(b, status.Why[b.Ticket], inputs))
@@ -452,7 +472,11 @@ func (n nextTicket) blocks(topology bool) []string {
 	if n.Title != "" {
 		pairs = append(pairs, [2]string{"title", n.Title})
 	}
-	pairs = append(pairs, [2]string{"state", n.State}, [2]string{"branch", n.Branch})
+	pairs = append(pairs, [2]string{"state", n.State})
+	if n.Closed != "" {
+		pairs = append(pairs, [2]string{"closed", n.Closed})
+	}
+	pairs = append(pairs, [2]string{"branch", n.Branch})
 	if n.Distribution != "" {
 		pairs = append(pairs, [2]string{"distribution", n.Distribution})
 	}
@@ -549,6 +573,8 @@ func (n nextTicket) help() []string {
 		prompt = promptHint(t.Prompt)
 	}
 	switch n.State {
+	case ready.StateClosed:
+		return []string{fmt.Sprintf("%s is closed (%s): run `jig reopen %s` to work it again, or `jig next` to see a ticket that is ready", n.Ticket, n.Closed, n.Ticket)}
 	case ready.StateDone:
 		return []string{n.Ticket + " is published: run `jig next` to see the tickets that are left"}
 	case ready.StateBlocked:
@@ -605,10 +631,13 @@ type nextStore struct {
 	Overlaps []nextOverlap `json:"overlaps,omitempty"`
 }
 
+// nextRow is one ticket of the listing; Closed is how a closed ticket was
+// closed ("covered by develdeco/jig#82").
 type nextRow struct {
 	ID        string        `json:"id"`
 	Title     string        `json:"title,omitempty"`
 	State     string        `json:"state"`
+	Closed    string        `json:"closed,omitempty"`
 	BlockedBy []nextBlocker `json:"blocked_by,omitempty"`
 	Ready     []string      `json:"ready"`
 	// Problem is why an invalid ticket could not be read.
@@ -640,6 +669,9 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 	out := nextStore{Tickets: []nextRow{}, Next: []string{}}
 	for i, s := range ready.Tickets(inputs) {
 		row := nextRow{ID: s.ID, Title: datas[i].title, State: s.State, Ready: s.Ready}
+		if c := datas[i].rec.Closed; c != nil {
+			row.Closed = c.Phrase()
+		}
 		if row.Ready == nil {
 			row.Ready = []string{}
 		}

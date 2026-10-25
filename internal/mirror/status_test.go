@@ -103,6 +103,10 @@ func TestChartStatus(t *testing.T) {
 		{"one in review", []string{"Backlog", "In review"}, "In progress"},
 		{"one done, one backlog", []string{"Done", "Backlog"}, "In progress"},
 		{"every ticket done", []string{"Done", "Done"}, "Done"},
+		{"done or closed", []string{"Done", "Not planned"}, "Done"},
+		{"every ticket closed", []string{"Not planned", "Not planned"}, "Done"},
+		{"closed, one backlog", []string{"Not planned", "Backlog"}, "Backlog"},
+		{"closed, one in progress", []string{"Not planned", "In progress"}, "In progress"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -114,7 +118,8 @@ func TestChartStatus(t *testing.T) {
 }
 
 // TestIsOpen covers brief.md#Status and pull requests: a Done issue is
-// closed; every other status is open.
+// closed, and so is one whose ticket was closed without being built (Not
+// planned); every other status is open.
 func TestIsOpen(t *testing.T) {
 	cases := []struct {
 		status string
@@ -125,6 +130,7 @@ func TestIsOpen(t *testing.T) {
 		{"In progress", true},
 		{"In review", true},
 		{"Done", false},
+		{"Not planned", false},
 	}
 	for _, tc := range cases {
 		if got := IsOpen(tc.status); got != tc.want {

@@ -62,6 +62,13 @@ func cmdClaim(e env, args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	// A closed ticket cannot be built; a session may still let go of a slice
+	// it holds.
+	if !*release {
+		if err := requireOpen(w.St, w.Ticket); err != nil {
+			return renderErr(stdout, err)
+		}
+	}
 	sl, err := w.slice()
 	if err != nil {
 		return renderErr(stdout, err)

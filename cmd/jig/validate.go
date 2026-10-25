@@ -156,6 +156,7 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	problems = append(problems, aliasProblems...)
 
 	problems = append(problems, validateTicketDeps(st, ticket)...)
+	problems = append(problems, validateTicketClosed(st, ticket)...)
 	problems = append(problems, validateUpstreamEdges(st, ticket)...)
 	problems = append(problems, validateTicketBranch(st, cfg, ticket)...)
 
@@ -311,6 +312,36 @@ func validateTicketDeps(st *store.Store, ticket string) []string {
 
 	if cyc := ticketDepsCycle(st, ticket); cyc != "" {
 		problems = append(problems, "ticket.yaml blocked_by cycle: "+cyc)
+	}
+	return problems
+}
+
+// validateTicketClosed checks the closed entry of ticket.yaml when it has one,
+// returning every problem found (nil means open or valid): a reason that is
+// none of covered, superseded and not-planned, a missing by where the reason
+// needs one (or one where it has none), a date that is no date, and, for
+// superseded, a by that is not another ticket of the store. A ticket.yaml that
+// cannot be read is validateTicketDeps to report.
+func validateTicketClosed(st *store.Store, ticket string) []string {
+	rec, err := st.ReadTicket(ticket)
+	if err != nil || rec.Closed == nil {
+		return nil
+	}
+	var problems []string
+	for _, p := range rec.Closed.Check() {
+		problems = append(problems, "ticket.yaml: "+p)
+	}
+	if rec.Closed.Reason == store.CloseSuperseded && rec.Closed.By != "" {
+		by, rerr := st.ResolveTicket(rec.Closed.By)
+		if rerr == nil {
+			rerr = requireTicket(st, by)
+		}
+		switch {
+		case rerr != nil:
+			problems = append(problems, fmt.Sprintf("ticket.yaml: closed: by %q is not a ticket of the store", rec.Closed.By))
+		case by == ticket:
+			problems = append(problems, "ticket.yaml: closed: a ticket cannot be superseded by itself")
+		}
 	}
 	return problems
 }

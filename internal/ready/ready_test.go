@@ -230,3 +230,54 @@ func TestJoinBlockers(t *testing.T) {
 		t.Errorf("JoinBlockers = %q, want %q", got, want)
 	}
 }
+
+// TestTicketsClosed: a closed ticket is closed whatever else it is, and offers
+// no slices; a covered or superseded blocker releases the tickets that wait for
+// it, of either kind and whatever merge was read for it, and a blocker closed as
+// not planned holds them, saying they need planning again.
+func TestTicketsClosed(t *testing.T) {
+	t.Parallel()
+	open := []store.Slice{{ID: "a"}}
+	covered := &store.Closed{Reason: store.CloseCovered, By: "o/r#82"}
+	superseded := &store.Closed{Reason: store.CloseSuperseded, By: "T-9"}
+	notPlanned := &store.Closed{Reason: store.CloseNotPlanned}
+	queued := states("a", "queued")
+	out := map[string]Status{}
+	for _, s := range Tickets([]Ticket{
+		{ID: "C-1", Closed: covered, Published: true, Merge: &Merge{Published: true, Repos: []RepoMerge{{Why: "its PR is open"}}}, Slices: open, States: queued},
+		{ID: "C-2", Closed: superseded, Slices: open, States: queued},
+		{ID: "C-3", Closed: notPlanned, Slices: open, States: queued},
+		{ID: "C-4", Closed: covered, Published: true, Slices: open, States: states("a", "green")},
+		{ID: "C-5", Closed: covered, Blockers: []Blocker{{"C-3", "merged"}}, Slices: open, States: queued},
+		{ID: "D-1", Blockers: []Blocker{{"C-1", "merged"}}, Slices: open, States: queued},
+		{ID: "D-2", Blockers: []Blocker{{"C-2", "stacked"}}, Slices: open, States: queued},
+		{ID: "D-3", Blockers: []Blocker{{"C-3", "merged"}}, Slices: open, States: queued},
+		{ID: "D-4", Blockers: []Blocker{{"C-3", "stacked"}}, Slices: open, States: queued},
+	}) {
+		out[s.ID] = s
+	}
+	for id, want := range map[string]string{
+		"C-1": StateClosed, "C-2": StateClosed, "C-3": StateClosed, "C-4": StateClosed, "C-5": StateClosed,
+		"D-1": StateReady, "D-2": StateReady, "D-3": StateBlocked, "D-4": StateBlocked,
+	} {
+		if out[id].State != want {
+			t.Errorf("%s: state = %q, want %q", id, out[id].State, want)
+		}
+	}
+	for _, id := range []string{"C-1", "C-2", "C-3", "C-4", "C-5"} {
+		if len(out[id].Ready) != 0 {
+			t.Errorf("%s is closed and offers slices %v, want none", id, out[id].Ready)
+		}
+	}
+	if len(out["C-5"].Blocked) != 0 {
+		t.Errorf("C-5 is closed and still lists blockers %v, want none", out["C-5"].Blocked)
+	}
+	for _, id := range []string{"D-3", "D-4"} {
+		if why := out[id].Why["C-3"]; why != NotPlanned {
+			t.Errorf("%s waits for a ticket closed as not planned: why = %q, want %q", id, why, NotPlanned)
+		}
+	}
+	if !reflect.DeepEqual(out["D-1"].Ready, []string{"a"}) {
+		t.Errorf("D-1 is released by its covered blocker and offers %v, want [a]", out["D-1"].Ready)
+	}
+}
