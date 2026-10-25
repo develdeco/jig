@@ -180,7 +180,7 @@ func TestRouteRoundGroupsFixesByWorkspaceAndOracle(t *testing.T) {
 		{ID: "r1-f2", File: "alpha/b.go", Title: "t2", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "alpha", Status: StatusOpen},
 		{ID: "r1-f3", File: "beta/c.go", Title: "t3", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "beta", Status: StatusOpen},
 	}
-	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, man, 0, 0, 5)
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestRouteRoundSplitsAFixGroupPackingFilesGreedilyByPathOrder(t *testing.T) 
 		{ID: "r1-f5", File: "alpha/b.go", Title: "b1", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
 		{ID: "r1-f6", File: "alpha/c.go", Title: "c3", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
 	}
-	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, man, 0, 0, 2)
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, oneRepoFiles(man), 0, 0, 2)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestRouteRoundGoalNamesEveryFindingAndDismissedFixIsExcluded(t *testing.T) 
 	triage := func(in TriageInput) TriageResult {
 		return TriageResult{DismissedFixIDs: map[string]bool{"r1-f2": true}, FixHuman: true}
 	}
-	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, man, 0, 0, 5)
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 			"r2-f3": {Keep: true, Decision: "go ahead with plan B", Human: true},
 		}}
 	}
-	routed, slices, err := routeRound(2, st, "T-1", nil, reported, nil, triage, man, 0, 0, 5)
+	routed, slices, err := routeRound(2, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestRouteRoundAutoKeptAskGoalDoesNotClaimAHumanDecided(t *testing.T) {
 	reported := []Finding{
 		{ID: "r1-f1", File: "a.go", Title: "needs a call", RiskRationale: "r", Action: ActionAsk, Workspace: "root", Status: StatusAsked},
 	}
-	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, man, 0, 0, 5) // nil = DefaultTriage
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, oneRepoFiles(man), 0, 0, 5) // nil = DefaultTriage
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestRouteRoundDismissedAskNeverBuildsASlice(t *testing.T) {
 	triage := func(in TriageInput) TriageResult {
 		return TriageResult{Asks: map[string]AskOutcome{"r1-f1": {Keep: false, Human: true}}}
 	}
-	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, man, 0, 0, 5)
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestRouteRoundUndecidedNoWorkspaceAskStaysAskedWithNoTriage(t *testing.T) {
 	reported := []Finding{
 		{ID: "r1-f1", File: "orphan.go", Title: "no workspace", RiskRationale: "r", Action: ActionFix, Workspace: "", Status: StatusAsked, RoutedAs: ActionAsk},
 	}
-	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, man, 0, 0, 5) // nil = DefaultTriage
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, oneRepoFiles(man), 0, 0, 5) // nil = DefaultTriage
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestRouteRoundWorkspaceSuppliedByTriageBuildsTheSlice(t *testing.T) {
 			"r1-f1": {Keep: true, Workspace: "beta", Human: true},
 		}}
 	}
-	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, man, 0, 0, 5)
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -462,7 +462,7 @@ func TestRouteRoundUndecidedInvalidOracleAskStaysAskedWithNoTriage(t *testing.T)
 	triage := func(in TriageInput) TriageResult {
 		return TriageResult{Asks: map[string]AskOutcome{"r1-f1": {Keep: true, Human: true}}} // no Oracle supplied
 	}
-	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, man, 0, 0, 5)
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -492,7 +492,7 @@ func TestRouteRoundOracleSuppliedByTriageBuildsTheSlice(t *testing.T) {
 			"r1-f1": {Keep: true, Oracle: "lint", Human: true},
 		}}
 	}
-	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, man, 0, 0, 5)
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestRouteRoundNotesPassThroughUntouched(t *testing.T) {
 		}
 		return TriageResult{}
 	}
-	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, man, 0, 0, 5)
+	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -552,7 +552,7 @@ func TestRouteRoundNoOracleManifestFailsGateNoOracle(t *testing.T) {
 	reported := []Finding{
 		{ID: "r1-f1", File: "a.go", Title: "t", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
 	}
-	_, _, err := routeRound(1, st, "T-1", nil, reported, nil, nil, man, 0, 0, 5)
+	_, _, err := routeRound(1, st, "T-1", nil, reported, nil, nil, oneRepoFiles(man), 0, 0, 5)
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "GATE_NO_ORACLE" {
 		t.Fatalf("err = %v, want *axi.Error GATE_NO_ORACLE", err)
@@ -599,7 +599,7 @@ func TestRouteRoundNoOracleManifestFailsBeforeTriage(t *testing.T) {
 		called = true
 		return TriageResult{}
 	}
-	_, _, err := routeRound(1, st, "T-1", nil, reported, nil, triage, man, 0, 0, 5)
+	_, _, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "GATE_NO_ORACLE" {
 		t.Fatalf("err = %v, want *axi.Error GATE_NO_ORACLE", err)
@@ -620,7 +620,7 @@ func TestRouteRoundNoOracleManifestWithOnlyNotesDoesNotFail(t *testing.T) {
 	reported := []Finding{
 		{ID: "r1-f1", File: "a.go", Title: "t", RiskRationale: "r", Action: ActionNote, Status: StatusNoted},
 	}
-	_, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, man, 0, 0, 5)
+	_, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v, want no error (nothing to route)", err)
 	}
@@ -651,7 +651,7 @@ func TestRouteRoundRecurrenceGoalNamesPreviousFixSlice(t *testing.T) {
 	reported := []Finding{
 		{ID: "r1-f1", File: "a.go", Title: "still broken", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen, Recurrences: 1},
 	}
-	_, slices, err := routeRound(2, st, ticket, existing, reported, nil, nil, man, 0, 0, 5)
+	_, slices, err := routeRound(2, st, ticket, existing, reported, nil, nil, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
@@ -680,7 +680,7 @@ func TestRouteRoundRecurrenceGoalNamesOnlyIDWhenResultMissing(t *testing.T) {
 	reported := []Finding{
 		{ID: "r1-f1", File: "a.go", Title: "still broken", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen, Recurrences: 1},
 	}
-	_, slices, err := routeRound(2, st, ticket, existing, reported, nil, nil, man, 0, 0, 5)
+	_, slices, err := routeRound(2, st, ticket, existing, reported, nil, nil, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}

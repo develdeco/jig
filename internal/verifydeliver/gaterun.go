@@ -488,7 +488,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 			return GateReport{}, err
 		}
 		outstanding := outstandingAsks(cum, reported)
-		routed, fixSlices, err := routeRoundIn(n, d.Store, ticket, slices, reported, outstanding, info.Triage, files, budgetUsed, *gateCfg.FixRounds, *gateCfg.FixSliceFindings)
+		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, outstanding, info.Triage, files, budgetUsed, *gateCfg.FixRounds, *gateCfg.FixSliceFindings)
 		if err != nil {
 			return GateReport{}, err
 		}

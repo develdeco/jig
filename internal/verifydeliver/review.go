@@ -675,24 +675,6 @@ func resolvePath(p string) (string, bool) {
 	return filepath.Join(dir, filepath.Base(p)), true
 }
 
-// validateReviewResult checks result against req and the lease's head, the
-// rules ParseReviewResult cannot check on its own: a finding's file exists at
-// head or was deleted in the scope diff; an oracle, when given, names a
-// manifest oracle, and is required when the manifest has more than one and the
-// finding is fix or ask (no silent fallback); a prior names an id under open or
-// dismissed, and no two findings share one; a still_present entry's prior names
-// an id under open or dismissed, no two still_present entries (nor a
-// still_present entry and a finding's own prior) share one, and that id's own
-// file exists at head or was deleted in the scope diff; reviewed_paths covers
-// every must_review path. atHead reports whether a (normalized) path exists in
-// the lease at head. leaseDir is the lease worktree, used only to relativize an
-// absolute reviewed_paths entry. This is a round over one repo: the checks of a
-// round over several are validateResultIn.
-func validateReviewResult(req ReviewRequest, result ReviewResult, leaseDir string, atHead func(path string) (bool, error), deleted map[string]bool, oracleNames []string) error {
-	rf := roundFiles{repos: []roundRepo{{Dir: leaseDir, Man: oraclesManifest(oracleNames)}}}
-	return validateResultIn(req, result, rf, atHead, deleted)
-}
-
 // oraclesManifest is a manifest that declares the oracles names and nothing
 // else: what a request says of a repo's manifest, as far as a finding's oracle
 // is checked against it.
@@ -704,12 +686,22 @@ func oraclesManifest(names []string) manifest.Manifest {
 	return manifest.Manifest{Oracles: oracles}
 }
 
-// validateResultIn is validateReviewResult over the files of a round, which
-// say which repo a finding is in and so which oracles it can name; atHead
-// reports whether a file, as the round names it, exists at the commit under
-// review, and deleted holds the files, as the round names them, that the scope
-// diff removes.
-func validateResultIn(req ReviewRequest, result ReviewResult, rf roundFiles, atHead func(file string) (bool, error), deleted map[string]bool) error {
+// validateReviewResult checks result against req and the lease's head, the
+// rules ParseReviewResult cannot check on its own: a finding's file exists at
+// head or was deleted in the scope diff; an oracle, when given, names a
+// manifest oracle, and is required when the manifest has more than one and the
+// finding is fix or ask (no silent fallback); a prior names an id under open or
+// dismissed, and no two findings share one; a still_present entry's prior names
+// an id under open or dismissed, no two still_present entries (nor a
+// still_present entry and a finding's own prior) share one, and that id's own
+// file exists at head or was deleted in the scope diff; reviewed_paths covers
+// every must_review path. rf is the files of the round: which repo a finding's
+// file is in, and so which oracles it can name, and the leases an absolute
+// reviewed_paths entry is relativized against. atHead reports whether a
+// (normalized) file, as the round names it, exists at the commit under review,
+// and deleted holds the files, as the round names them, that the scope diff
+// removes.
+func validateReviewResult(req ReviewRequest, result ReviewResult, rf roundFiles, atHead func(file string) (bool, error), deleted map[string]bool) error {
 	openIDs := make(map[string]bool, len(req.Open))
 	fileByID := make(map[string]string, len(req.Open)+len(req.Dismissed))
 	for _, f := range req.Open {
@@ -1651,7 +1643,7 @@ func checkReviewResult(req ReviewRequest, result ReviewResult, in RoundInput, de
 		deletedSet[f] = true
 	}
 	rf := in.requestFiles(req)
-	if err := validateResultIn(req, result, rf, rf.atHead, deletedSet); err != nil {
+	if err := validateReviewResult(req, result, rf, rf.atHead, deletedSet); err != nil {
 		return ReviewResult{}, err
 	}
 	result.ReviewedPaths = rf.normalizeReviewed(result.ReviewedPaths)

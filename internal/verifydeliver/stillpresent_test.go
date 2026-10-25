@@ -75,7 +75,7 @@ func TestValidateReviewResultStillPresentRules(t *testing.T) {
 	t.Run("open and dismissed ids pass", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.StillPresent = []StillPresentEntry{{Prior: "r1-f1", Line: 3}, {Prior: "r1-f2", Line: 4}}
-		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 	})
@@ -83,34 +83,34 @@ func TestValidateReviewResultStillPresentRules(t *testing.T) {
 	t.Run("id names nothing", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.StillPresent = []StillPresentEntry{{Prior: "r9-f9", Line: 1}}
-		invalid(t, validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}))
+		invalid(t, validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted))
 	})
 
 	t.Run("id appears twice", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.StillPresent = []StillPresentEntry{{Prior: "r1-f1", Line: 1}, {Prior: "r1-f1", Line: 2}}
-		invalid(t, validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}))
+		invalid(t, validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted))
 	})
 
 	t.Run("id is also a finding's prior", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Prior = "r1-f1"
 		result.StillPresent = []StillPresentEntry{{Prior: "r1-f1", Line: 1}}
-		invalid(t, validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}))
+		invalid(t, validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted))
 	})
 
 	t.Run("earlier finding's file neither present nor deleted", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings = nil
 		result.StillPresent = []StillPresentEntry{{Prior: "r1-f1", Line: 1}}
-		invalid(t, validateReviewResult(req, result, leaseDir, absent, noDeleted, []string{"test"}))
+		invalid(t, validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), absent, noDeleted))
 	})
 
 	t.Run("earlier finding's file deleted in the scope diff", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings = nil
 		result.StillPresent = []StillPresentEntry{{Prior: "r1-f1", Line: 1}}
-		if err := validateReviewResult(req, result, leaseDir, absent, map[string]bool{"a.go": true}, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), absent, map[string]bool{"a.go": true}); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 	})

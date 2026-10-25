@@ -367,10 +367,10 @@ func TestReviewRequestOfSeveralReposListsThem(t *testing.T) {
 	}
 }
 
-// TestValidateResultInARoundOverSeveralRepos: a finding names its file by its
+// TestValidateReviewResultInARoundOverSeveralRepos: a finding names its file by its
 // repo; a file of no repo, a repo's file the head lacks, an oracle only another
 // repo declares and a must_review file the report did not read are each refused.
-func TestValidateResultInARoundOverSeveralRepos(t *testing.T) {
+func TestValidateReviewResultInARoundOverSeveralRepos(t *testing.T) {
 	t.Parallel()
 	apiDir, webDir := t.TempDir(), t.TempDir()
 	rf := twoRepoFiles(apiDir, webDir)
@@ -393,7 +393,7 @@ func TestValidateResultInARoundOverSeveralRepos(t *testing.T) {
 		return ReviewResult{Findings: findings, StillPresent: []StillPresentEntry{}, ReviewedPaths: read}
 	}
 
-	if err := validateResultIn(req, valid(finding("web/ui/page.go", "test"), finding("api/server/handler.go", "lint")), rf, present, noDeleted); err != nil {
+	if err := validateReviewResult(req, valid(finding("web/ui/page.go", "test"), finding("api/server/handler.go", "lint")), rf, present, noDeleted); err != nil {
 		t.Errorf("a valid report over both repos: %v", err)
 	}
 	for name, c := range map[string]struct {
@@ -407,19 +407,19 @@ func TestValidateResultInARoundOverSeveralRepos(t *testing.T) {
 		"no oracle where two exist":   {valid(finding("api/server/handler.go", "")), `must name one of the manifest's 2 oracles`},
 		"a must_review file not read": {ReviewResult{Findings: []ResultFinding{}, StillPresent: []StillPresentEntry{}, ReviewedPaths: read[:1]}, `missing must_review path "web/ui/page.go"`},
 	} {
-		err := validateResultIn(req, c.result, rf, present, noDeleted)
+		err := validateReviewResult(req, c.result, rf, present, noDeleted)
 		var ae *axi.Error
 		if !errors.As(err, &ae) || ae.Code != "REVIEW_INVALID" || !strings.Contains(ae.Msg, c.want) {
 			t.Errorf("%s: err = %v, want REVIEW_INVALID with %q", name, err, c.want)
 		}
 	}
 	// web has one oracle, so a finding there needs to name none.
-	if err := validateResultIn(req, valid(finding("web/ui/page.go", "")), rf, present, noDeleted); err != nil {
+	if err := validateReviewResult(req, valid(finding("web/ui/page.go", "")), rf, present, noDeleted); err != nil {
 		t.Errorf("a web finding with no oracle (web declares one): %v", err)
 	}
 	// A still_present entry's file is judged by its repo too.
 	still := ReviewResult{Findings: []ResultFinding{}, StillPresent: []StillPresentEntry{{Prior: "r1-f1", Line: 2}}, ReviewedPaths: read}
-	if err := validateResultIn(req, still, rf, present, noDeleted); err != nil {
+	if err := validateReviewResult(req, still, rf, present, noDeleted); err != nil {
 		t.Errorf("a still_present entry for a web file: %v", err)
 	}
 }
@@ -457,7 +457,7 @@ func TestApplyRoundOverSeveralReposKeepsAFindingInItsRepo(t *testing.T) {
 	// The fix slices of the two kept findings build in the repo of each.
 	st := newReviewStore(t)
 	kept := []Finding{byFile["web/ui/page.go"], byFile["api/lib/lib.go"]}
-	routed, slices, err := routeRoundIn(1, st, "JIG-1", nil, kept, nil, nil, rf, 0, 0, 5)
+	routed, slices, err := routeRound(1, st, "JIG-1", nil, kept, nil, nil, rf, 0, 0, 5)
 	if err != nil || len(routed) != 2 {
 		t.Fatalf("routeRoundIn: %v, %d routed", err, len(routed))
 	}
@@ -472,13 +472,13 @@ func TestApplyRoundOverSeveralReposKeepsAFindingInItsRepo(t *testing.T) {
 	// A repo whose manifest declares no oracle can prove no fix.
 	noOracle := twoRepoFiles("", "")
 	noOracle.repos[1].Man.Oracles = nil
-	_, _, err = routeRoundIn(1, st, "JIG-1", nil, kept[:1], nil, nil, noOracle, 0, 0, 5)
+	_, _, err = routeRound(1, st, "JIG-1", nil, kept[:1], nil, nil, noOracle, 0, 0, 5)
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "GATE_NO_ORACLE" || !strings.Contains(ae.Msg, "the manifest of repo web has no oracles") {
 		t.Errorf("a finding in a repo with no oracle: err = %v, want GATE_NO_ORACLE naming web", err)
 	}
 	// The same refusal of a round over one repo does not name one.
-	_, _, err = routeRoundIn(1, st, "JIG-1", nil, kept[:1], nil, nil, oneRepoFiles(manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}}), 0, 0, 5)
+	_, _, err = routeRound(1, st, "JIG-1", nil, kept[:1], nil, nil, oneRepoFiles(manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}}), 0, 0, 5)
 	if !errors.As(err, &ae) || ae.Msg != "cannot build a fix slice, the manifest has no oracles" {
 		t.Errorf("a round over one repo with no oracle: err = %v", err)
 	}
@@ -561,4 +561,10 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	if got := several.heads(); !reflect.DeepEqual(got, map[string]string{"api": "a1", "web": "w1"}) {
 		t.Errorf("heads of two repos = %v", got)
 	}
+}
+
+// oneRepoIn is the files of a round over one repo read in leaseDir, whose
+// manifest declares the oracles named.
+func oneRepoIn(leaseDir string, oracleNames []string) roundFiles {
+	return roundFiles{repos: []roundRepo{{Dir: leaseDir, Man: oraclesManifest(oracleNames)}}}
 }

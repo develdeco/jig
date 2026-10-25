@@ -310,7 +310,7 @@ func (rf roundFiles) relativize(p string) (string, bool) {
 }
 
 // normalizeReviewed relativizes and normalizes every reviewed_paths entry
-// exactly once, right after validateResultIn has accepted the result.
+// exactly once, right after validateReviewResult has accepted the result.
 // Coverage, clearing and persistence all read this one normalized list
 // afterward, so an absolute in-lease path that counted as coverage also counts
 // as clearing evidence and is never written to findings.yaml as a host path. An

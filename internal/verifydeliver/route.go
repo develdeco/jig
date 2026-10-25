@@ -169,21 +169,18 @@ func sortByRiskThenID(fs []Finding) {
 // and triage finish entirely inside this call, before Gate appends any
 // slice or pushes the store.
 //
+// files is the files of the round, which say which repo's manifest a finding
+// is routed against: a round over several repos routes a finding in
+// web/ui/page.go into a fix slice that builds in the workspace web/ui, with an
+// oracle of web's manifest (roundrepos.go).
+//
 // budgetUsed and budgetLimit are this ticket's own fix budget state
 // (Gate's own UsedFixBudget and gate.fix_rounds), passed through to the
 // triage hook's TriageInput unchanged so it can phrase its own
 // budget-parked header without recomputing either number. fixSliceFindings
 // is gate.fix_slice_findings, the most findings one fix slice may carry
 // (buildFixSlices' own splitFixGroupIntoSlices enforces it).
-func routeRound(round int, st *store.Store, ticket string, existingSlices []store.Slice, reported []Finding, outstanding []Finding, triage Triage, man manifest.Manifest, budgetUsed, budgetLimit, fixSliceFindings int) ([]Finding, []store.Slice, error) {
-	return routeRoundIn(round, st, ticket, existingSlices, reported, outstanding, triage, oneRepoFiles(man), budgetUsed, budgetLimit, fixSliceFindings)
-}
-
-// routeRoundIn is routeRound over the files of a round, which say which repo's
-// manifest a finding is routed against: a round over several repos routes a
-// finding in web/ui/page.go into a fix slice that builds in the workspace
-// web/ui, with an oracle of web's manifest (roundrepos.go).
-func routeRoundIn(round int, st *store.Store, ticket string, existingSlices []store.Slice, reported []Finding, outstanding []Finding, triage Triage, files roundFiles, budgetUsed, budgetLimit, fixSliceFindings int) ([]Finding, []store.Slice, error) {
+func routeRound(round int, st *store.Store, ticket string, existingSlices []store.Slice, reported []Finding, outstanding []Finding, triage Triage, files roundFiles, budgetUsed, budgetLimit, fixSliceFindings int) ([]Finding, []store.Slice, error) {
 	if triage == nil {
 		triage = DefaultTriage
 	}
