@@ -20,7 +20,7 @@ jig review context T-1            # opens the round if none is open; --json prin
 jig review context T-1 --session $JIG_SESSION --model <yours> --effort <yours>
 ```
 
-It names the branch and whose copy of it is reviewed (`copy`), the `head` and what it is reviewed against (`base`, `scope` full or delta), a `worktree` that is a pristine checkout of the head, and the `request` file. Tables list `must_review` (every file you must read), `open` and `dismissed` findings from earlier rounds, and `oracles_passed`.
+It names the branch and whose copy of it is reviewed (`copy`), the `head` and what it is reviewed against (`base`, `scope` full or delta), a `worktree` that is a pristine checkout of the head, and the `request` file. Tables list `must_review` (every file you must read), `open` and `dismissed` findings from earlier rounds, and `oracles_passed`. In a project of several repos a `repos` table gives each repo of the ticket its own `worktree`, `head`, `base` and `scope`, and every file is named `<repo>/<path>`: in `must_review`, `--file` and `--reviewed`.
 
 - **Read the code in `worktree`**, at the head. Never in the clone: its working tree is not the branch.
 - **Edit nothing** and run no tests: every oracle in `oracles_passed` passed on this head's tree already.

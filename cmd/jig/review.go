@@ -22,7 +22,7 @@ const (
 	reviewEffortUsage   = "the reasoning effort the reviewer runs at, as it reports it"
 	reviewJSONUsage     = "print the review request as JSON (the review.json the round wrote)"
 	reviewResultUsage   = "the reviewer's whole report as a result.json (findings, still_present, reviewed_paths, summary), instead of findings reported with `jig finding`"
-	reviewReviewedUsage = "a repo-relative path the reviewer read (repeat the flag, or separate with commas); every must_review path must be covered"
+	reviewReviewedUsage = "a repo-relative path the reviewer read, as <repo>/<path> in a project of several repos (repeat the flag, or separate with commas); every must_review path must be covered"
 	reviewSummaryUsage  = "the reviewer's summary of the round, in a sentence or two"
 	reviewStoreUsage    = "explicit store path"
 	reviewProjectUsage  = "project name, resolved via the machine mapping"
@@ -65,24 +65,31 @@ func init() {
 // roundBlocks renders an open round: where it stands (the branch, whose copy
 // of it, the head under review and what it is reviewed against), where to read
 // the code and the request, what the intent is, and who has said they review
-// it. moved is the commit the clone's branch is at now when it moved since the
-// round opened, "" otherwise. full adds the tables a reviewer reads: the files
-// it must cover, the findings still open or dismissed, and the oracles that
-// passed.
-func roundBlocks(p verifydeliver.Prepared, moved string, full bool) []string {
+// it. A round over the repos of a project of several says that of each repo, in
+// a table of its own. moved is the repos whose clone's branch moved since the
+// round opened, with the commit it is at now, none otherwise. full adds the
+// tables a reviewer reads: the files it must cover, the findings still open or
+// dismissed, and the oracles that passed.
+func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full bool) []string {
 	req := p.Request
 	kv := [][2]string{
 		{"ticket", p.Ticket},
 		{"round", strconv.Itoa(p.Round)},
 		{"branch", p.Branch},
-		{"copy", p.Copy},
-		{"head", p.Head},
-		{"base", p.Base},
-		{"scope", p.Scope},
-		{"worktree", p.Lease},
-		{"request", p.RequestPath},
-		{"intent", p.Intent.Source},
 	}
+	if len(p.Repos) == 0 {
+		kv = append(kv,
+			[2]string{"copy", p.Copy},
+			[2]string{"head", p.Head},
+			[2]string{"base", p.Base},
+			[2]string{"scope", p.Scope},
+			[2]string{"worktree", p.Lease},
+		)
+	}
+	kv = append(kv,
+		[2]string{"request", p.RequestPath},
+		[2]string{"intent", p.Intent.Source},
+	)
 	if p.Intent.Path != "" {
 		kv = append(kv, [2]string{"intent_path", p.Intent.Path})
 	}
@@ -104,10 +111,21 @@ func roundBlocks(p verifydeliver.Prepared, moved string, full bool) []string {
 	if p.Reviewer.Effort != "" {
 		kv = append(kv, [2]string{"effort", p.Reviewer.Effort})
 	}
-	if moved != "" {
-		kv = append(kv, [2]string{"stale", fmt.Sprintf("branch %s moved to %s since this round opened; run `jig gate %s` to review it as it is now", p.Branch, shortSHA(moved), p.Ticket)})
+	if len(moved) > 0 {
+		kv = append(kv, [2]string{"stale", staleText(p, moved)})
 	}
 	blocks := []string{axi.KV("review", kv)}
+	if len(p.Repos) > 0 {
+		mustBy := map[string]int{}
+		for _, rr := range req.Repos {
+			mustBy[rr.Repo] = len(rr.MustReview)
+		}
+		var repoRows [][]string
+		for _, r := range p.Repos {
+			repoRows = append(repoRows, []string{r.Repo, r.Copy, r.Head, r.Base, r.Scope, r.Lease, strconv.Itoa(mustBy[r.Repo])})
+		}
+		blocks = append(blocks, axi.Table("repos", []string{"repo", "copy", "head", "base", "scope", "worktree", "must_review"}, repoRows))
+	}
 	if !full {
 		return blocks
 	}
@@ -133,6 +151,19 @@ func roundBlocks(p verifydeliver.Prepared, moved string, full bool) []string {
 	}
 	blocks = append(blocks, axi.Table("oracles_passed", []string{"oracle", "workspace", "reused_from"}, oracleRows))
 	return blocks
+}
+
+// staleText says that the branch moved since the round opened, and in which
+// repos, with what to do.
+func staleText(p verifydeliver.Prepared, moved []verifydeliver.RepoTip) string {
+	if len(p.Repos) == 0 {
+		return fmt.Sprintf("branch %s moved to %s since this round opened; run `jig gate %s` to review it as it is now", p.Branch, shortSHA(moved[0].Tip), p.Ticket)
+	}
+	var where []string
+	for _, m := range moved {
+		where = append(where, fmt.Sprintf("repo %s to %s", m.Repo, shortSHA(m.Tip)))
+	}
+	return fmt.Sprintf("branch %s moved in %s since this round opened; run `jig gate %s` to review it as it is now", p.Branch, strings.Join(where, ", "), p.Ticket)
 }
 
 // reviewTicket is the ticket a review verb is about: the positional when one
@@ -228,7 +259,7 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 			return renderErr(stdout, err)
 		}
 	}
-	moved, err := verifydeliver.BranchMoved(deps, p)
+	moved, err := verifydeliver.MovedRepos(deps, p)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -242,13 +273,26 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 		return 0
 	}
 	blocks := roundBlocks(p, moved, true)
-	blocks = append(blocks, axi.Help(
+	help := []string{
 		"Read the code in the worktree at the head, never in the clone, and edit nothing; run no tests (the oracles above passed)",
 		fmt.Sprintf("Report each problem: `jig finding %s --file F --line N --title T --action fix|ask|note --risk low|medium|high --risk-rationale R --oracle O`; confirm an earlier one with `jig finding %s --still-present ID --line N`", ticket, ticket),
 		fmt.Sprintf("Then close the round: `jig review done %s --reviewed <every file you read> --summary <text>`", ticket),
-	))
+	}
+	if len(p.Repos) > 0 {
+		help = append([]string{help[0], fmt.Sprintf("This round covers the repos %s: read each in its own worktree (the repos table), and name every file as <repo>/<path>, as the must_review paths do - in --file, in --reviewed and in a result file", repoNames(p.Repos))}, help[1:]...)
+	}
+	blocks = append(blocks, axi.Help(help...))
 	axi.Render(stdout, blocks...)
 	return 0
+}
+
+// repoNames lists the names of the repos of a round, for a sentence.
+func repoNames(repos []verifydeliver.PreparedRepo) string {
+	names := make([]string, len(repos))
+	for i, r := range repos {
+		names[i] = r.Repo
+	}
+	return strings.Join(names, ", ")
 }
 
 // stringList is a flag.Value that collects a repeated flag and splits each

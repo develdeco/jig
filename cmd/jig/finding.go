@@ -13,7 +13,7 @@ import (
 // The usage lines of `jig finding`'s flags: the help row and the FlagSet carry
 // the same text, which the help parity test compares.
 const (
-	findingFileUsage       = "the repo-relative file the problem is in"
+	findingFileUsage       = "the repo-relative file the problem is in, as <repo>/<path> in a project of several repos"
 	findingLineUsage       = "the line it is on (0 if unknown); with --still-present, the line the earlier finding is on now"
 	findingTitleUsage      = "what is wrong, in one line"
 	findingDetailUsage     = "the detail: why it is wrong and what would fix it"

@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,26 +29,45 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// openRoundFile is work/gate.round-N.open.yaml: what jig settled when it
-// opened round N, and what `review done` needs to close it in another
-// process.
-type openRoundFile struct {
-	Round  int    `yaml:"round"`
-	Ticket string `yaml:"ticket"`
-	Repo   string `yaml:"repo"`
-	Branch string `yaml:"branch"`
-	// Copy says whose copy of the branch the round reviews.
+// openRepoFile is what an open round settled of one repo of a project of
+// several: the openRoundFile's own repo, copy, head, base, scope, target,
+// target_sha and lease, for each repo the round covers.
+type openRepoFile struct {
+	Repo      string `yaml:"repo"`
 	Copy      string `yaml:"copy"`
 	Head      string `yaml:"head"`
 	Base      string `yaml:"base"`
 	Scope     string `yaml:"scope"`
 	Target    string `yaml:"target"`
 	TargetSHA string `yaml:"target_sha"`
+	Lease     string `yaml:"lease"`
+}
+
+// openRoundFile is work/gate.round-N.open.yaml: what jig settled when it
+// opened round N, and what `review done` needs to close it in another
+// process.
+//
+// A round over the one repo of a project of one writes that repo's settings
+// here, at the top. A round in a project of several writes them in Repos, one
+// entry for each repo the ticket's slices build in, and leaves the top out.
+type openRoundFile struct {
+	Round  int    `yaml:"round"`
+	Ticket string `yaml:"ticket"`
+	Repo   string `yaml:"repo,omitempty"`
+	Branch string `yaml:"branch"`
+	// Copy says whose copy of the branch the round reviews.
+	Copy      string `yaml:"copy,omitempty"`
+	Head      string `yaml:"head,omitempty"`
+	Base      string `yaml:"base,omitempty"`
+	Scope     string `yaml:"scope,omitempty"`
+	Target    string `yaml:"target,omitempty"`
+	TargetSHA string `yaml:"target_sha,omitempty"`
 	// Lease is the gate lease the round's head is checked out in: the
 	// pristine worktree the reviewer reads. It, IntentExcerpt and Recordings
 	// are paths under the jig home, written relative to it: the record is in
 	// the store, which is shared and must not name this machine's directories.
-	Lease   string           `yaml:"lease"`
+	Lease   string           `yaml:"lease,omitempty"`
+	Repos   []openRepoFile   `yaml:"repos,omitempty"`
 	Adopted bool             `yaml:"adopted,omitempty"`
 	Intent  reportIntentYAML `yaml:"intent"`
 	// IntentExcerpt is the excerpt of the author's own agent session the
@@ -67,8 +87,24 @@ type openRoundFile struct {
 	Reviewer Provenance `yaml:"reviewer,omitempty"`
 }
 
+// PreparedRepo is what an open round settled of one repo of a project of
+// several: Prepared's own Repo, Copy, Head, Base, Scope, Target, TargetSHA and
+// Lease.
+type PreparedRepo struct {
+	Repo              string
+	Copy              string
+	Head, Base, Scope string
+	Target, TargetSHA string
+	Lease             string
+}
+
 // Prepared is an open round: what GatePrepare settled, and the request a
 // reviewer is handed. GateFinish closes it.
+//
+// A round in a project of one repo has that repo's settings in Repo, Copy,
+// Head, Base, Scope, Target, TargetSHA and Lease. A round in a project of
+// several has them in Repos, one entry for each repo the ticket's slices
+// build in, and leaves those fields empty (Covered gives either as a list).
 type Prepared struct {
 	Ticket string
 	Round  int
@@ -82,7 +118,9 @@ type Prepared struct {
 	Head, Base, Scope string
 	Target, TargetSHA string
 	// Lease is the pristine worktree of Head the reviewer reads.
-	Lease        string
+	Lease string
+	// Repos are the repos of a round in a project of several.
+	Repos        []PreparedRepo
 	Adopted      bool
 	Intent       Intent
 	IntentSHA256 string
@@ -180,10 +218,26 @@ func preparedOf(jigHome string, st *store.Store, of openRoundFile, req ReviewReq
 	if requestPath == "" {
 		requestPath = reviewJSONPath(st, of.Ticket, of.Round)
 	}
+	var repos []PreparedRepo
+	if len(of.Repos) > 0 {
+		req.Repos = append([]RepoRequest(nil), req.Repos...)
+		leases := map[string]string{}
+		for _, r := range of.Repos {
+			lease := homeAbs(jigHome, r.Lease)
+			leases[r.Repo] = lease
+			repos = append(repos, PreparedRepo{
+				Repo: r.Repo, Copy: r.Copy, Head: r.Head, Base: r.Base, Scope: r.Scope,
+				Target: r.Target, TargetSHA: r.TargetSHA, Lease: lease,
+			})
+		}
+		for i := range req.Repos {
+			req.Repos[i].Worktree = leases[req.Repos[i].Repo]
+		}
+	}
 	return Prepared{
 		Ticket: of.Ticket, Round: of.Round, Repo: of.Repo, Branch: of.Branch, Copy: of.Copy,
 		Head: of.Head, Base: of.Base, Scope: of.Scope, Target: of.Target, TargetSHA: of.TargetSHA,
-		Lease: req.Worktree, Adopted: of.Adopted,
+		Lease: req.Worktree, Repos: repos, Adopted: of.Adopted,
 		Intent: req.Intent, IntentSHA256: of.Intent.SHA256, IntentNote: of.IntentNote,
 		Yes: of.Yes, Opened: opened, Reviewer: of.Reviewer, Request: req,
 		RequestPath: requestPath,
@@ -191,6 +245,48 @@ func preparedOf(jigHome string, st *store.Store, of openRoundFile, req ReviewReq
 		OpenPath:    openRoundPath(st, of.Ticket, of.Round),
 		DraftsPath:  findingsDraftsPath(st, of.Ticket, of.Round),
 	}
+}
+
+// heads is the commit under review in each repo of the round, by repo name.
+func (of openRoundFile) heads() map[string]string {
+	if len(of.Repos) == 0 {
+		return map[string]string{of.Repo: of.Head}
+	}
+	heads := make(map[string]string, len(of.Repos))
+	for _, r := range of.Repos {
+		heads[r.Repo] = r.Head
+	}
+	return heads
+}
+
+// qualified reports whether the round is over the repos of a project of
+// several, whose files are named "<repo>/<path>".
+func (p Prepared) qualified() bool { return len(p.Repos) > 0 }
+
+// Covered lists the repos the round covers: Repos, or for a round over the one
+// repo of a project of one, that repo.
+func (p Prepared) Covered() []PreparedRepo {
+	if p.qualified() {
+		return p.Repos
+	}
+	return []PreparedRepo{{
+		Repo: p.Repo, Copy: p.Copy, Head: p.Head, Base: p.Base, Scope: p.Scope,
+		Target: p.Target, TargetSHA: p.TargetSHA, Lease: p.Lease,
+	}}
+}
+
+// roundInput is the input of the round as far as its files are checked: its
+// leases and where its request is kept.
+func (p Prepared) roundInput(d Deps) RoundInput {
+	in := RoundInput{Store: d.Store, Ticket: p.Ticket, Round: p.Round, Home: d.Home, Branch: p.Branch}
+	if !p.qualified() {
+		in.LeaseDir, in.RepoName, in.Target = p.Lease, p.Repo, p.Target
+		return in
+	}
+	for _, r := range p.Repos {
+		in.Repos = append(in.Repos, RoundRepo{Name: r.Repo, Target: r.Target, LeaseDir: r.Lease})
+	}
+	return in
 }
 
 // GatePrepare opens a gate round for ticket, or re-opens the one already open
@@ -222,18 +318,30 @@ func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 		return Prepared{}, err
 	}
 	of := openRoundFile{
-		Round: run.n, Ticket: run.ticket, Repo: run.repoName, Branch: run.branch, Copy: string(run.copy),
-		Head: prep.Head, Base: prep.Base, Scope: prep.Scope, Target: run.target,
-		Lease: homeRel(d.Home, absPath(run.lease.Dir)), Adopted: run.gb.Adopted,
+		Round: run.n, Ticket: run.ticket, Branch: run.branch, Adopted: run.gb.Adopted,
 		Intent:        reportIntentYAML{Source: run.intent.Source, SHA256: run.intentSHA256},
 		IntentExcerpt: homeRel(d.Home, prep.Request.IntentExcerpt), IntentNote: prep.IntentNote,
 		Recordings: homeRel(d.Home, prep.RecordingsPath), Request: homeRel(d.Home, prep.RequestPath), Yes: o.Yes,
 		Opened: time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if of.TargetSHA, err = originTip(run.lease.Dir, run.target); err != nil {
-		return Prepared{}, err
+	for i, gr := range run.repos {
+		rp := prep.Repos[i]
+		tip, err := originTip(gr.lease.Dir, gr.target)
+		if err != nil {
+			return Prepared{}, inRepo(run.qualified, gr.name, err)
+		}
+		repo := openRepoFile{
+			Repo: gr.name, Copy: string(gr.copy), Head: rp.Head, Base: rp.Base, Scope: rp.Scope,
+			Target: gr.target, TargetSHA: tip, Lease: homeRel(d.Home, absPath(gr.lease.Dir)),
+		}
+		if run.qualified {
+			of.Repos = append(of.Repos, repo)
+			continue
+		}
+		of.Repo, of.Copy, of.Head, of.Base, of.Scope = repo.Repo, repo.Copy, repo.Head, repo.Base, repo.Scope
+		of.Target, of.TargetSHA, of.Lease = repo.Target, repo.TargetSHA, repo.Lease
 	}
-	if hadPrev && prev.Head == prep.Head {
+	if hadPrev && maps.Equal(prev.heads(), of.heads()) {
 		// The round is the same and so is its reviewer, which the journal
 		// says again after this gate-open, so a reader of the journal alone
 		// still knows who is reading the round. It opened when it first did:
@@ -280,27 +388,37 @@ func CurrentRound(d Deps, ticket string) (Prepared, bool, error) {
 	return preparedOf(d.Home, d.Store, of, req), true, nil
 }
 
-// BranchMoved reports the commit the clone's branch is at now when the open
-// round reviewed the clone's copy and the branch has moved since: the round's
-// head is then not the branch's, and a verdict on it would be about code
-// nobody ships. "" means the branch has not moved, or the round did not read
-// the clone's copy, which jig cannot cheaply look at again.
-func BranchMoved(d Deps, p Prepared) (string, error) {
-	if p.Copy != string(clonesCopy) {
-		return "", nil
+// RepoTip is a repo of a round and the commit its branch is at.
+type RepoTip struct {
+	Repo string
+	Tip  string
+}
+
+// MovedRepos reports, for each repo whose clone's branch has moved since the
+// open round reviewed the clone's copy of it, the commit the branch is at now:
+// the round's head is then not the branch's, and a verdict on it would be about
+// code nobody ships. A repo whose branch has not moved, or whose copy the round
+// did not read from the clone, which jig cannot cheaply look at again, is left
+// out.
+func MovedRepos(d Deps, p Prepared) ([]RepoTip, error) {
+	var moved []RepoTip
+	for _, r := range p.Covered() {
+		if r.Copy != string(clonesCopy) {
+			continue
+		}
+		clone := operatorClone(d, r.Repo)
+		if clone == "" {
+			continue
+		}
+		tip, err := branchTipIn(clone, p.Branch)
+		if err != nil {
+			return nil, fmt.Errorf("verifydeliver: %w", err)
+		}
+		if tip != "" && tip != r.Head {
+			moved = append(moved, RepoTip{Repo: r.Repo, Tip: tip})
+		}
 	}
-	clone := operatorClone(d, p.Repo)
-	if clone == "" {
-		return "", nil
-	}
-	tip, err := branchTipIn(clone, p.Branch)
-	if err != nil {
-		return "", fmt.Errorf("verifydeliver: %w", err)
-	}
-	if tip == "" || tip == p.Head {
-		return "", nil
-	}
-	return tip, nil
+	return moved, nil
 }
 
 // RecordReviewer notes what the reviewer said of itself in the open round's
@@ -428,11 +546,22 @@ func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
 		if err := checkResultFinding(len(existing), f); err != nil {
 			return 0, err
 		}
-		if f.Oracle != "" && !inStrings(p.Request.Oracles, f.Oracle) {
-			return 0, reviewInvalid(fmt.Sprintf("oracle %q is not a manifest oracle (%s)", f.Oracle, strings.Join(p.Request.Oracles, ", ")))
+		// A round over several repos names a file "<repo>/<path>", and the
+		// oracles a finding can name are those of its repo.
+		rf := p.Request.files()
+		file, err := normalizeRepoRelPath(f.File)
+		if err != nil {
+			return 0, reviewInvalid(fmt.Sprintf("file %q: %v", f.File, err))
 		}
-		if f.Oracle == "" && len(p.Request.Oracles) > 1 && (f.Action == ActionFix || f.Action == ActionAsk) {
-			return 0, reviewInvalid(fmt.Sprintf("a finding with action %q must name one of the manifest's %d oracles (%s)", f.Action, len(p.Request.Oracles), strings.Join(p.Request.Oracles, ", ")))
+		if _, _, ok := rf.of(file); !ok {
+			return 0, reviewInvalid(rf.unknownRepoFile(f.File))
+		}
+		oracles := rf.oracles(file)
+		if f.Oracle != "" && !inStrings(oracles, f.Oracle) {
+			return 0, reviewInvalid(fmt.Sprintf("oracle %q is not a manifest oracle (%s)", f.Oracle, strings.Join(oracles, ", ")))
+		}
+		if f.Oracle == "" && len(oracles) > 1 && (f.Action == ActionFix || f.Action == ActionAsk) {
+			return 0, reviewInvalid(fmt.Sprintf("a finding with action %q must name one of the manifest's %d oracles (%s)", f.Action, len(oracles), strings.Join(oracles, ", ")))
 		}
 		if f.Prior != "" && !known[f.Prior] {
 			return 0, reviewInvalid(fmt.Sprintf("prior %q does not name a finding under open or dismissed", f.Prior))
@@ -542,12 +671,14 @@ func inStrings(list []string, s string) bool {
 // What replaces the guard that kept a launched reviewer out of the lease is
 // checked first: the lease is still at the round's head with no tracked file
 // changed, and the clone's branch has not moved on (REVIEW_STALE_HEAD), so the
-// round is a verdict on the branch as it is. prov is who the caller says
-// reported (a zero Session: jig looks for them, LedgerReviewer, and otherwise
-// says it does not know); whether they built what they reviewed decides
-// independent, and a reviewer who did makes the round not clean
-// (REVIEW_NOT_INDEPENDENT, returned with the report of the round that was
-// recorded).
+// round is a verdict on the branch as it is. A round over several repos checks
+// each repo's lease and branch. prov is who the caller says reported (a zero
+// Session: jig looks for them, LedgerReviewer, and otherwise says it does not
+// know); whether they built what they reviewed decides independent - over the
+// builders of every repo the ticket's slices build in, since the ledger and the
+// journal name a builder by the ticket and its branch - and a reviewer who did
+// makes the round not clean (REVIEW_NOT_INDEPENDENT, returned with the report
+// of the round that was recorded).
 func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report GateReport, err error) {
 	var run *gateRun
 	defer func() { run.pushFailure(err) }()
@@ -563,57 +694,78 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 		return GateReport{}, errNoOpenRound(p.Ticket)
 	}
 
-	if !pool.Usable(p.Lease) {
-		return GateReport{}, &axi.Error{
-			Msg:  fmt.Sprintf("the gate lease of round %d is gone", p.Round),
-			Code: "REVIEW_NOT_OPEN",
-			Help: []string{fmt.Sprintf("Open the round again with `jig gate %s`", p.Ticket)},
+	qualified := p.qualified()
+	for _, r := range p.Covered() {
+		if !pool.Usable(r.Lease) {
+			return GateReport{}, inRepo(qualified, r.Repo, &axi.Error{
+				Msg:  fmt.Sprintf("the gate lease of round %d is gone", p.Round),
+				Code: "REVIEW_NOT_OPEN",
+				Help: []string{fmt.Sprintf("Open the round again with `jig gate %s`", p.Ticket)},
+			})
+		}
+		changed, err := leaseChanged(r.Lease, r.Head)
+		if err != nil {
+			return GateReport{}, inRepo(qualified, r.Repo, fmt.Errorf("verifydeliver: review done: %w", err))
+		}
+		if changed {
+			return GateReport{}, inRepo(qualified, r.Repo, &axi.Error{
+				Msg:  "the gate lease changed since the round opened; a reviewer reads it and edits nothing",
+				Code: "REVIEW_INVALID",
+				Help: []string{fmt.Sprintf("Open the round again with `jig gate %s`", p.Ticket)},
+			})
 		}
 	}
-	changed, err := leaseChanged(p.Lease, p.Head)
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: review done: %w", err)
-	}
-	if changed {
-		return GateReport{}, &axi.Error{
-			Msg:  "the gate lease changed since the round opened; a reviewer reads it and edits nothing",
-			Code: "REVIEW_INVALID",
-			Help: []string{fmt.Sprintf("Open the round again with `jig gate %s`", p.Ticket)},
-		}
-	}
-	if tip, err := BranchMoved(d, p); err != nil {
+	if moved, err := MovedRepos(d, p); err != nil {
 		return GateReport{}, err
-	} else if tip != "" {
-		return GateReport{}, &axi.Error{
-			Msg:  fmt.Sprintf("branch %s moved to %s since round %d opened on %s", p.Branch, shortSHA(tip), p.Round, shortSHA(p.Head)),
+	} else if len(moved) > 0 {
+		r := p.reposByName()[moved[0].Repo]
+		return GateReport{}, inRepo(qualified, r.Repo, &axi.Error{
+			Msg:  fmt.Sprintf("branch %s moved to %s since round %d opened on %s", p.Branch, shortSHA(moved[0].Tip), p.Round, shortSHA(r.Head)),
 			Code: "REVIEW_STALE_HEAD",
-			Help: []string{fmt.Sprintf("A verdict on %s says nothing of the branch as it is now: run `jig gate %s` to review that", shortSHA(p.Head), p.Ticket)},
-		}
+			Help: []string{fmt.Sprintf("A verdict on %s says nothing of the branch as it is now: run `jig gate %s` to review that", shortSHA(r.Head), p.Ticket)},
+		})
 	}
 
 	slices, err := d.Store.ReadSlices(p.Ticket)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: review done: read slices: %w", err)
 	}
-	man, err := manifest.Resolve(p.Lease)
-	if err != nil {
-		return GateReport{}, fmt.Errorf("verifydeliver: review done: resolve manifest: %w", err)
-	}
 	fold, err := FoldBefore(d.Store, p.Ticket, p.Round)
 	if err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: review done: fold findings: %w", err)
 	}
+	in := p.roundInput(d)
+	rf := in.requestFiles(p.Request)
 	var openFiles []string
 	for _, f := range fold.Open {
 		if f.Status == StatusOpen || f.Status == StatusAsked {
 			openFiles = append(openFiles, f.File)
 		}
 	}
-	diff, err := computeScopeDiff(p.Lease, p.Base, p.Head, openFiles)
-	if err != nil {
-		return GateReport{}, err
+	openByRepo := rf.byRepo(openFiles)
+	covered := p.Covered()
+	repos := make([]*gateRepo, len(covered))
+	var diff scopeDiff
+	for i, r := range covered {
+		man, err := manifest.Resolve(r.Lease)
+		if err != nil {
+			return GateReport{}, inRepo(qualified, r.Repo, fmt.Errorf("verifydeliver: review done: resolve manifest: %w", err))
+		}
+		repos[i] = &gateRepo{
+			name: r.Repo, target: r.Target, man: man, copy: branchCopy(r.Copy),
+			lease: pool.Lease{Dir: r.Lease, Repo: r.Repo, Branch: p.Branch},
+		}
+		one, err := computeScopeDiff(r.Lease, r.Base, r.Head, openByRepo[r.Repo])
+		if err != nil {
+			return GateReport{}, inRepo(qualified, r.Repo, err)
+		}
+		if !qualified {
+			diff = one
+			continue
+		}
+		diff.Changed = append(diff.Changed, rf.qualifyAll(r.Repo, one.Changed)...)
+		diff.Deleted = append(diff.Deleted, rf.qualifyAll(r.Repo, one.Deleted)...)
 	}
-	in := RoundInput{Store: d.Store, Ticket: p.Ticket, Round: p.Round, LeaseDir: p.Lease, Home: d.Home}
 	rr, err = checkReviewResult(p.Request, rr, in, diff.Deleted)
 	if err != nil {
 		return GateReport{}, err
@@ -660,19 +812,24 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 	}
 	run = &gateRun{
 		d: d, o: GateOpts{Ticket: p.Ticket, Yes: p.Yes}, ticket: p.Ticket, slices: slices,
-		repoName: p.Repo, target: p.Target, gb: gateBranch{Name: p.Branch, Adopted: p.Adopted}, branch: p.Branch,
-		lease: pool.Lease{Dir: p.Lease, Repo: p.Repo, Branch: p.Branch}, copy: branchCopy(p.Copy),
+		repos: repos, qualified: qualified, gb: gateBranch{Name: p.Branch, Adopted: p.Adopted}, branch: p.Branch,
 		intent: p.Intent, intentSHA256: p.IntentSHA256,
-		n: p.Round, man: man, fold: fold, journaled: true,
+		n: p.Round, fold: fold, journaled: true,
 	}
 	if err := os.WriteFile(reviewResultJSONPath(d.Store, p.Ticket, p.Round), append(resultData, '\n'), 0o644); err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: review done: write result.json: %w", err)
 	}
 	review := &Review{
-		Scope: p.Scope, BaseSHA: p.Base, HeadSHA: p.Head,
 		Changed: diff.Changed, Deleted: diff.Deleted, MustReview: p.Request.MustReview,
 		Result: rr, Intent: p.Intent, IntentSHA256: p.IntentSHA256, IntentNote: p.IntentNote,
 		Effort: prov.Effort,
+	}
+	if qualified {
+		for _, r := range covered {
+			review.Repos = append(review.Repos, ReviewedRepo{Repo: r.Repo, Scope: r.Scope, BaseSHA: r.Base, HeadSHA: r.Head})
+		}
+	} else {
+		review.Scope, review.BaseSHA, review.HeadSHA = p.Scope, p.Base, p.Head
 	}
 	return run.finish(Round{Review: review}, true, finishInfo{
 		Triage: recordedTriage(d, p.Ticket, p.Yes),
@@ -680,6 +837,15 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 		Reviewer: prov, Independent: independent,
 		OracleNames: p.Request.Oracles,
 	})
+}
+
+// reposByName indexes the repos the round covers by name.
+func (p Prepared) reposByName() map[string]PreparedRepo {
+	by := map[string]PreparedRepo{}
+	for _, r := range p.Covered() {
+		by[r.Repo] = r
+	}
+	return by
 }
 
 // recordedTriage is the Triage of a recorded round. Nobody is asked anything

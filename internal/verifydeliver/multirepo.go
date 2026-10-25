@@ -9,17 +9,17 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// CodeMultiRepoNotYet is the code of the refusal of a gate round or a publish
-// for a ticket whose slices build in more than one repo.
+// CodeMultiRepoNotYet is the code of the refusal of a publish for a ticket whose
+// slices build in more than one repo.
 const CodeMultiRepoNotYet = "MULTI_REPO_NOT_YET"
 
-// checkOneRepo refuses a gate round or a publish for a ticket whose slices
-// build in more than one repo of the project. The gate reviews, and publish
-// ships, the project's one repo (primaryRepo and selectRepo): on a ticket that
-// spans repos they would say nothing of the others and stop short of the work.
-// Until the gate covers every repo the ticket touches and publish opens a pull
-// request for each, that is told here instead. A slice whose workspace no repo
-// owns yet (`jig validate` says so) counts for none.
+// checkOneRepo refuses a publish for a ticket whose slices build in more than
+// one repo of the project. Publish ships one repo (selectRepo): on a ticket
+// that spans repos it would say nothing of the others and stop short of the
+// work. Until publish opens a pull request for each repo, that is told here
+// instead. The gate has no such refusal: it reviews every repo the ticket's
+// slices build in (gateRepos). A slice whose workspace no repo owns yet (`jig
+// validate` says so) counts for none.
 func checkOneRepo(d Deps, ticket string, slices []store.Slice) error {
 	if len(d.Cfg.Repos) < 2 {
 		return nil
@@ -40,9 +40,9 @@ func checkOneRepo(d Deps, ticket string, slices []store.Slice) error {
 		return nil
 	}
 	return &axi.Error{
-		Msg:  fmt.Sprintf("this ticket's slices span repos %s; the gate covers one repo until multi-repo review lands", joinNames(touched)),
+		Msg:  fmt.Sprintf("this ticket's slices span repos %s; publish ships one repo until multi-repo publishing lands", joinNames(touched)),
 		Code: CodeMultiRepoNotYet,
-		Help: []string{fmt.Sprintf("%s can be built and verified in each repo, but `jig gate` and `jig publish` take a ticket that builds in one repo", ticket)},
+		Help: []string{fmt.Sprintf("%s can be built, verified and reviewed in each repo, but `jig publish` takes a ticket that builds in one repo", ticket)},
 	}
 }
 
