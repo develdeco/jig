@@ -1,0 +1,4 @@
+jig: "1"
+project: jig
+store: git@github.com:develdeco/jig-tickets.git
+kind: project
