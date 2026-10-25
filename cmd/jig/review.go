@@ -238,6 +238,9 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if err := requireOpen(st, ticket); err != nil {
+		return renderErr(stdout, err)
+	}
 	if err := requireWork(st, ticket); err != nil {
 		return renderErr(stdout, err)
 	}

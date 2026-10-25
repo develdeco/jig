@@ -63,6 +63,9 @@ func phaseFactsOf(st *store.Store, ticket string, seen map[string]bool, merges m
 		return f, nil, err
 	}
 	f.Adopted, f.Branch = rec.Adopted(), rec.Branch
+	if rec.Closed != nil {
+		f.Closed = rec.Closed.Phrase()
+	}
 
 	if err := briefFacts(st, ticket, &f); err != nil {
 		return f, nil, err
@@ -209,6 +212,8 @@ func promptHint(prompt string) string {
 func phaseAdvice(t phase.Ticket, ticket string) string {
 	prompt := promptHint(t.Prompt)
 	switch {
+	case t.Code == phase.CodeClosed:
+		return t.Reason
 	case t.Code == phase.CodeDone:
 		return ticket + " is published: run `jig next` to see the tickets that are left"
 	case t.Current == phase.Brief && awaitsApproval(t):

@@ -23,6 +23,9 @@ const (
 	claimStackedParentNotClean = "CLAIM_STACKED_PARENT_NOT_CLEAN"
 	// claimNotApproved: the brief has no approval, or was edited after it.
 	claimNotApproved = "CLAIM_NOT_APPROVED"
+	// claimBlockerNotPlanned: a blocker, of either kind, was closed as not
+	// planned, so it will never be done and the ticket needs planning again.
+	claimBlockerNotPlanned = "CLAIM_BLOCKER_NOT_PLANNED"
 )
 
 // claimProblem is one condition a claim does not meet, with the way to meet
@@ -83,11 +86,28 @@ func claimProblems(st *store.Store, ticket string, d claimDeps) ([]claimProblem,
 }
 
 // blockerProblem is the problem blocker of the given kind is for ticket, nil
-// when it is met. A stacked blocker is met by a clean gate round; any other
-// kind (merged, or none) by its work having merged: it published, and its
-// recorded pull request is merged or, with none recorded, its branch is in the
-// target (d.merges). With nothing to read that from, publishing is enough.
+// when it is met. A blocker that is closed is met when it was covered or
+// superseded, whatever its kind, and is the problem of a ticket that needs
+// planning again when it was not planned. A stacked blocker is met by a clean
+// gate round; any other kind (merged, or none) by its work having merged: it
+// published, and its recorded pull request is merged or, with none recorded,
+// its branch is in the target (d.merges). With nothing to read that from,
+// publishing is enough.
 func blockerProblem(st *store.Store, ticket, blocker, kind string, d claimDeps) (*claimProblem, error) {
+	rec, err := st.ReadTicket(blocker)
+	if err != nil {
+		return nil, err
+	}
+	if c := rec.Closed; c != nil {
+		if store.Releases(c.Reason) {
+			return nil, nil
+		}
+		return &claimProblem{
+			Code:    claimBlockerNotPlanned,
+			Message: fmt.Sprintf("%s waits for %s, which was closed as not planned", ticket, blocker),
+			Help:    fmt.Sprintf("Plan %s again without %s, or take %s back with `jig reopen %s`", ticket, blocker, blocker, blocker),
+		}, nil
+	}
 	if kind == "stacked" {
 		rounds, verdict, _, err := latestGateRound(st, blocker)
 		if err != nil {

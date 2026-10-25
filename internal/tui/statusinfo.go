@@ -10,8 +10,9 @@ import (
 // statusInfo is `jig status <ticket>`, read: the store's word on the ticket's
 // slices, its questions and the asks a gate round left for a person.
 type statusInfo struct {
-	State     string // new, queued, building, parked, stalled, env-blocked or green
+	State     string // new, queued, building, parked, stalled, env-blocked, green or closed
 	Branch    string
+	Closed    string // how a closed ticket was closed, such as "covered by develdeco/jig#82"; "" when open
 	Slices    []statusSlice
 	Questions []statusQuestion
 	Stalled   []statusStalled
@@ -122,6 +123,9 @@ func parseStatus(out string) *statusInfo {
 		})
 	}
 	info.FixBudget = doc.Scalars["fix_budget"]
+	if kv, ok := doc.KV["closed"]; ok {
+		info.Closed = closedPhrase(kv["reason"], kv["by"])
+	}
 	for _, r := range doc.Tables["rounds"].Maps() {
 		files := -1
 		if f := dash(r["files"]); f != "" {
@@ -166,6 +170,18 @@ func parseStatus(out string) *statusInfo {
 		info.Asks = append(info.Asks, statusAsk{ID: r["id"], Risk: r["risk"], Where: r["file:line"], Title: r["title"], Why: r["why"]})
 	}
 	return info
+}
+
+// closedPhrase is how a ticket was closed, in the words of its closure:
+// "covered by develdeco/jig#82", "superseded by SHOP-4", "not planned".
+func closedPhrase(reason, by string) string {
+	switch {
+	case reason == "not-planned":
+		return "not planned"
+	case by != "":
+		return reason + " by " + by
+	}
+	return reason
 }
 
 // parseRoster reads `jig next --json` for the store: the tickets, in the order

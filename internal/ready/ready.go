@@ -122,6 +122,10 @@ func Waves(slices []store.Slice) map[string]int {
 
 // The state a ticket is in for `jig next`.
 const (
+	// StateClosed: the ticket was closed without a pull request (`jig close`:
+	// covered, superseded or not planned). It wins over every other state, and
+	// nothing of it is ready to build.
+	StateClosed = "closed"
 	// StateDone: the ticket's pull requests were published (its journal has
 	// publish-done).
 	StateDone = "done"
@@ -156,6 +160,10 @@ type Ticket struct {
 	Blockers []Blocker
 	// Published is whether the ticket's journal has a publish-done line.
 	Published bool
+	// Closed is the ticket's closure, nil while it is open. A closed ticket is
+	// done without a merge: the tickets that wait for it are released when it
+	// is covered or superseded, and held when it is not planned.
+	Closed *store.Closed
 	// Merge is whether the ticket's work has merged, as its caller read it
 	// (the recorded pull request, the branch). A merged blocker is met by it;
 	// nil when the caller read none, and then having published is all that is
@@ -181,8 +189,10 @@ type Status struct {
 // Tickets works out the readiness of each of tickets, in the order given. A
 // merged blocker is met when it is one of tickets and its work has merged
 // (Ticket.Merge), or, with no merge read for it, when it has published. A
-// stacked blocker is met by publishing. One that is not among tickets counts
-// as unmet, so a ticket never reads as free because its blocker went missing.
+// stacked blocker is met by publishing. A blocker that is closed is met when
+// it was covered or superseded, whatever its kind, and unmet when it was not
+// planned. One that is not among tickets counts as unmet, so a ticket never
+// reads as free because its blocker went missing.
 func Tickets(tickets []Ticket) []Status {
 	byID := make(map[string]Ticket, len(tickets))
 	for _, t := range tickets {
@@ -192,6 +202,9 @@ func Tickets(tickets []Ticket) []Status {
 	for _, t := range tickets {
 		st := Status{ID: t.ID}
 		for _, b := range t.Blockers {
+			if t.Closed != nil {
+				break // nothing of a closed ticket waits for anything
+			}
 			if why := unmet(b, byID); why != "" {
 				st.Blocked = append(st.Blocked, b)
 				if st.Why == nil {
@@ -200,14 +213,16 @@ func Tickets(tickets []Ticket) []Status {
 				st.Why[b.Ticket] = why
 			}
 		}
-		// A published ticket has nothing left to build and a blocked one
-		// cannot start, so neither offers slices.
-		if !t.Published && len(st.Blocked) == 0 {
+		// A closed or published ticket has nothing left to build and a blocked
+		// one cannot start, so none of them offers slices.
+		if t.Closed == nil && !t.Published && len(st.Blocked) == 0 {
 			for _, s := range ComputeReady(t.Slices, t.States) {
 				st.Ready = append(st.Ready, s.ID)
 			}
 		}
 		switch {
+		case t.Closed != nil:
+			st.State = StateClosed
 		case t.Published:
 			st.State = StateDone
 		case len(st.Blocked) > 0:
@@ -232,6 +247,10 @@ func unmet(b Blocker, byID map[string]Ticket) string {
 	switch {
 	case !ok:
 		return "it is not a ticket of the store"
+	case t.Closed != nil && store.Releases(t.Closed.Reason):
+		return ""
+	case t.Closed != nil:
+		return NotPlanned
 	case b.Kind != "stacked" && t.Merge != nil:
 		return t.Merge.Why()
 	case !t.Published:

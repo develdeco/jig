@@ -148,6 +148,10 @@ func (m Merge) Met() bool {
 // NotPublished is what a ticket that has not published is waiting for.
 const NotPublished = "it has not published"
 
+// NotPlanned is what a ticket that waits for a ticket closed as not planned is
+// missing: the blocker will not be done, so the ticket needs planning again.
+const NotPlanned = "it was closed as not planned, so this ticket needs planning again"
+
 // Why is what the ticket's merge is missing, in words; "" when it is met. A
 // project of several repos names the repo before each reason.
 func (m Merge) Why() string {

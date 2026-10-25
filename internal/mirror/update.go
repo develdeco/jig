@@ -84,9 +84,14 @@ func openState(open bool) string {
 // linkParentsAndBlockers/placeBoardItems make no write for it either.
 //
 // dryRun withholds every mutation (UpdateIssue, CreateIssue on a recreation,
-// ReopenIssue/CloseIssueCompleted, the record write) while still reading
-// GitHub (FetchIssue, PullRequestsByHead) to report what would change
-// (brief.md#jig trackers sync, brief.md#Cutover).
+// ReopenIssue, CloseIssueCompleted, CloseIssueNotPlanned, the record write)
+// while still reading GitHub (FetchIssue, PullRequestsByHead) to report what
+// would change (brief.md#jig trackers sync, brief.md#Cutover).
+//
+// An issue whose status is Done is closed as completed and one whose status is
+// Not planned is closed as not planned (a ticket closed as covered, superseded
+// or not planned, `jig close`); one that is closed already stays as it is, and
+// a ticket reopened gets its issue back open.
 //
 // It returns, for later steps to reuse rather than querying GitHub again:
 // curByWhat (each item's current GitHub state, fetched before this step's
@@ -238,9 +243,12 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 			}
 			if !dryRun {
 				var operr error
-				if wantOpen {
+				switch {
+				case wantOpen:
 					operr = client.ReopenIssue(ctx, rec.NodeID)
-				} else {
+				case status == StatusNotPlanned:
+					operr = client.CloseIssueNotPlanned(ctx, rec.NodeID)
+				default:
 					operr = client.CloseIssueCompleted(ctx, rec.NodeID)
 				}
 				if operr != nil {

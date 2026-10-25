@@ -135,6 +135,9 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if err := requireOpen(st, ticket); err != nil {
+		return renderErr(stdout, err)
+	}
 	// --branch adopts a branch for a ticket that may have no slices yet, so it
 	// needs only the ticket's folder; without it, the ticket needs work.
 	check := requireWork

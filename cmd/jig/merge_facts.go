@@ -37,12 +37,14 @@ func newMergeReader(e env, st *store.Store, cfg project.Config, mp project.Machi
 	return &mergefacts.Reader{Store: st, Cfg: cfg, Clones: mp.Clones, PRs: cache}
 }
 
-// readMerges reads, for the tickets of inputs that have not published, the
-// merge fact of each blocker that is a ticket of inputs, has published and is
-// not stacked (a stacked blocker is met by publishing, and one that has not
-// published has no merge to look for), and lays it on that input. A fact that
-// cannot be read is one that is not met, saying why, so a ticket never reads as
-// free because its blocker could not be looked at. nil merges reads none.
+// readMerges reads, for the tickets of inputs that have not published and are
+// not closed, the merge fact of each blocker that is a ticket of inputs, has
+// published, is not closed and is not stacked (a stacked blocker is met by
+// publishing, one that has not published has no merge to look for, and a closed
+// one has none either: its closure says whether it releases), and lays it on
+// that input. A fact that cannot be read is one that is not met, saying why, so
+// a ticket never reads as free because its blocker could not be looked at. nil
+// merges reads none.
 func readMerges(merges mergeSource, inputs []ready.Ticket) {
 	if merges == nil {
 		return
@@ -52,12 +54,12 @@ func readMerges(merges mergeSource, inputs []ready.Ticket) {
 		at[in.ID] = i
 	}
 	for _, in := range inputs {
-		if in.Published {
+		if in.Published || in.Closed != nil {
 			continue
 		}
 		for _, b := range in.Blockers {
 			i, ok := at[b.Ticket]
-			if !ok || b.Kind == "stacked" || !inputs[i].Published || inputs[i].Merge != nil {
+			if !ok || b.Kind == "stacked" || !inputs[i].Published || inputs[i].Closed != nil || inputs[i].Merge != nil {
 				continue
 			}
 			m, err := merges.Of(b.Ticket)
