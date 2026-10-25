@@ -99,14 +99,10 @@ func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, c
 	}
 
 	for _, it := range items {
-		has, err := hasRecord(it.recordAbs)
-		if err != nil {
-			return err
-		}
-		if !has || skip[it.what()] {
+		if !it.ref.has() || skip[it.what()] {
 			continue
 		}
-		rec, err := readRecord(it.recordAbs)
+		rec, err := readRecord(st, it)
 		if err != nil {
 			return err
 		}
@@ -159,7 +155,7 @@ func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, c
 			}
 			rec.Synced.Status = status
 			rec.Synced.StoreID = it.what()
-			if err := writeRecord(it.recordAbs, rec); err != nil {
+			if err := writeRecord(st, it, rec); err != nil {
 				return err
 			}
 		}

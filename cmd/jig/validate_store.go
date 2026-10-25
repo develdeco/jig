@@ -108,7 +108,56 @@ func validateAdvisories(st *store.Store, ticket string, slices []store.Slice) []
 			Help:    "If they are, give each group a ticket of its own; if one builds on another, add the blocked_by edge",
 		})
 	}
-	return append(out, coveredAdvisories(st, ticket, slices)...)
+	out = append(out, coveredAdvisories(st, ticket, slices)...)
+	return append(out, trackerTreeAdvisories(st)...)
+}
+
+// advisoryTreeUnreadable: the tracker tree could not be listed, so it could
+// not be checked.
+const advisoryTreeUnreadable = "TRACKER_TREE_UNREADABLE"
+
+// trackerTreeAdvisoryMax is how many things of one kind the tracker tree's
+// advisories name before they say how many more there are: a store whose
+// records have not moved yet would otherwise print a row for each.
+const trackerTreeAdvisoryMax = 3
+
+// trackerTreeAdvisories checks the store's tracker tree, with or without a
+// provider configured, and turns what is wrong in it into advisories under
+// the store's own codes (store.CheckTrackerTree): the tree is a view of the
+// store around the ticket, not part of the brief, so it never refuses a
+// brief or keeps it from being approved.
+func trackerTreeAdvisories(st *store.Store) []advisory {
+	problems, err := st.CheckTrackerTree()
+	if err != nil {
+		return []advisory{{
+			Code:    advisoryTreeUnreadable,
+			Message: fmt.Sprintf("the tracker tree could not be checked: %v", err),
+			Help:    "Check that trackers/ in the store can be listed",
+		}}
+	}
+	var out []advisory
+	shown := map[string]int{}
+	more := map[string]int{}
+	help := map[string]string{}
+	var order []string
+	for _, p := range problems {
+		if shown[p.Code] == 0 && more[p.Code] == 0 {
+			order = append(order, p.Code)
+			help[p.Code] = p.Help
+		}
+		if shown[p.Code] >= trackerTreeAdvisoryMax {
+			more[p.Code]++
+			continue
+		}
+		shown[p.Code]++
+		out = append(out, advisory{Code: p.Code, Message: p.Msg, Help: p.Help})
+	}
+	for _, code := range order {
+		if n := more[code]; n > 0 {
+			out = append(out, advisory{Code: code, Message: fmt.Sprintf("and %d more of the same kind", n), Help: help[code]})
+		}
+	}
+	return out
 }
 
 // sliceGroups splits slices into the groups blocked_by connects, an edge

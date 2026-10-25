@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -144,16 +145,33 @@ type SyncReport struct {
 	// repo and the number, so the operator can remove it by hand if it
 	// really is gone.
 	GoneRecordedPRs []GoneRecordedPR
+	// MovedRecords is every record this sync moved from a ticket's or chart's
+	// own folder into the tracker tree. Empty in a dry run, which moves
+	// nothing.
+	MovedRecords []MovedRecord
+}
+
+// MovedRecord is one record Sync moved into the tracker tree.
+type MovedRecord struct {
+	// What is the ticket id, or "charts/<name>" for a chart.
+	What string
+	// From is the path the record left, and To the one it is at now, both
+	// relative to the store root and with slashes.
+	From, To string
 }
 
 // Sync runs one full sync of d.Cfg's trackers: github entry against d.Store:
 // every ticket (in id order) and chart (in name order, after every ticket)
-// with no tracker/github.yaml (or charts/<name>/github.yaml) record yet gets
-// a new issue, titled and footed per brief.md#What an issue shows, claimed
-// on the store's origin like an id (brief.md#Syncing at every checkpoint). A
-// config with no github entry is a no-op, reported as such rather than
-// refused, since every checkpoint of every store calls this whether or not
-// it configured a tracker.
+// with no record in the tracker tree yet gets a new issue, titled and footed
+// per brief.md#What an issue shows, claimed on the store's origin like an id
+// (brief.md#Syncing at every checkpoint). A record still in a ticket's or
+// chart's own folder is moved into the tree first, and the issue is updated in
+// place, never created again; and every sync that is not a dry run makes the
+// tree's links again from its records once it has written them. A config with
+// no github entry is a no-op as far as GitHub goes, reported as such rather
+// than refused, since every checkpoint of every store calls this whether or
+// not it configured a tracker; it still makes the links, which need no
+// provider.
 //
 // Sync itself only adds the bound (and, on timeout, names how many tickets
 // or charts still have no GitHub issue and points at `jig trackers sync`)
@@ -175,17 +193,14 @@ func Sync(d Deps, opts SyncOpts) (SyncReport, error) {
 	return report, err
 }
 
-// itemsWithNoRecord counts items with no tracker/github.yaml (or
-// charts/<name>/github.yaml) record yet: on a first sync of a sizeable
-// store, these are exactly the items a timeout during issue creation left
-// behind, since doSync creates every item's issue before touching updates,
-// links or the board. A record-read failure counts as 0 rather than
-// failing again on top of the timeout already being reported.
+// itemsWithNoRecord counts items with no record yet: on a first sync of a
+// sizeable store, these are exactly the items a timeout during issue creation
+// left behind, since doSync creates every item's issue before touching
+// updates, links or the board.
 func itemsWithNoRecord(items []item) int {
 	n := 0
 	for _, it := range items {
-		has, err := hasRecord(it.recordAbs)
-		if err == nil && !has {
+		if !it.ref.has() {
 			n++
 		}
 	}
@@ -194,7 +209,15 @@ func itemsWithNoRecord(items []item) int {
 
 // doSync runs Sync's actual work; see Sync for the bound wrapped around it.
 func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
+	// The tree as it is on disk now: another process may have changed it
+	// since this Store last read it.
+	d.Store.ReloadTrackerTree()
 	if d.Cfg.GitHub == nil {
+		if !opts.DryRun {
+			if _, err := d.Store.RebuildTrackerLinks(); err != nil {
+				return SyncReport{NoTracker: true}, nil, fmt.Errorf("mirror: rebuild the tracker tree's links: %w", err)
+			}
+		}
 		return SyncReport{NoTracker: true}, nil, nil
 	}
 	owner, repo, err := splitRepo(d.Cfg.GitHub.Repo)
@@ -202,13 +225,23 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 		return SyncReport{}, nil, err
 	}
 
-	items, err := collectItems(d.Store)
+	if err := refuseUnreadableRecords(d.Store); err != nil {
+		return SyncReport{}, nil, err
+	}
+	items, err := collectItems(d.Store, d.Cfg.GitHub.Repo)
 	if err != nil {
 		return SyncReport{}, nil, err
 	}
 	terms, err := LoadPublishTerms(d.Home)
 	if err != nil {
 		return SyncReport{}, items, fmt.Errorf("mirror: read publish-terms.txt: %w", err)
+	}
+	var report SyncReport
+	if !opts.DryRun {
+		report.MovedRecords, err = moveLegacyRecords(d.Store, items, d.Cfg.GitHub.Repo)
+		if err != nil {
+			return report, items, err
+		}
 	}
 
 	ctx := context.Background()
@@ -222,7 +255,6 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 		defer cancel()
 	}
 
-	var report SyncReport
 	var client github.Client
 	var publicChecked, public bool
 	ensureClient := func() error {
@@ -278,21 +310,13 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 
 	anyHasRecord := false
 	for _, it := range items {
-		has, err := hasRecord(it.recordAbs)
-		if err != nil {
-			return report, items, fmt.Errorf("mirror: check %s's record: %w", it.what(), err)
-		}
-		if has {
-			rec, err := readRecord(it.recordAbs)
+		if it.ref.has() {
+			rec, err := readRecord(d.Store, it)
 			if err != nil {
 				return report, items, fmt.Errorf("mirror: read %s's record: %w", it.what(), err)
 			}
 			if !strings.EqualFold(rec.Repo, d.Cfg.GitHub.Repo) {
-				return report, items, &axi.Error{
-					Msg:  fmt.Sprintf("%s's record names %s, but trackers: github: repo: is now %s", it.what(), rec.Repo, d.Cfg.GitHub.Repo),
-					Code: "MIRROR_REPO_CHANGED",
-					Help: []string{"moving issues to a new repo is T-30"},
-				}
+				return report, items, repoChangedError(it, rec.Repo, d.Cfg.GitHub.Repo)
 			}
 			anyHasRecord = true
 			continue
@@ -368,7 +392,7 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 		rec := githubRecord{Repo: d.Cfg.GitHub.Repo, Issue: issue.Number, NodeID: issue.NodeID}
 		what := it.what()
 		msg := fmt.Sprintf("%s: github issue %s/%s#%d", what, owner, repo, issue.Number)
-		adopted, err := claimIssue(ctx, d.Store, client, it, issue, rec, msg)
+		adopted, err := claimIssue(ctx, d.Store, client, it, d.Cfg.GitHub.Repo, issue, rec, msg)
 		if err != nil {
 			return report, items, fmt.Errorf("mirror: record %s's issue %s/%s#%d: %w", what, owner, repo, issue.Number, err)
 		}
@@ -406,6 +430,11 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 	if err := placeBoardItems(ctx, d.Store, d.Cfg, client, items, statusByTicket, prsByTicket, skip, &report, opts.DryRun); err != nil {
 		return report, items, fmt.Errorf("mirror: place board items: %w", err)
 	}
+	if !opts.DryRun {
+		if _, err := d.Store.RebuildTrackerLinks(); err != nil {
+			return report, items, fmt.Errorf("mirror: rebuild the tracker tree's links: %w", err)
+		}
+	}
 	return report, items, nil
 }
 
@@ -419,33 +448,50 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 // Otherwise Claim's own retry (up to maxClaimAttempts, as L1 tries for an
 // id) runs as it does for a plain id claim. It returns the other issue's
 // number when it adopted one, 0 when issue's own record was claimed.
-func claimIssue(ctx context.Context, st *store.Store, client github.Client, it item, issue github.Issue, rec githubRecord, msg string) (adopted int, err error) {
+func claimIssue(ctx context.Context, st *store.Store, client github.Client, it item, repo string, issue github.Issue, rec githubRecord, msg string) (adopted int, err error) {
 	what := it.what()
 	closed := false
 	_, err = st.Claim(
 		func() (string, []string, error) {
-			has, herr := hasRecord(it.recordAbs)
-			if herr != nil {
-				return "", nil, herr
+			// The tree as it is now, not as this clone last read it: the pull
+			// that follows a rejected push brings in another clone's record,
+			// and a record another process wrote since counts as well.
+			st.ReloadTrackerTree()
+			other, ferr := findRecord(st, it.owner(), repo)
+			if ferr != nil {
+				return "", nil, ferr
 			}
-			if has {
+			if other.has() {
 				if !closed {
-					other, rerr := readRecord(it.recordAbs)
+					theirs, rerr := readRecord(st, item{kind: it.kind, id: it.id, ref: other})
 					if rerr != nil {
 						return "", nil, rerr
 					}
-					if cerr := closeDuplicateIssue(ctx, client, issue, other.Issue); cerr != nil {
+					if cerr := closeDuplicateIssue(ctx, client, issue, theirs.Issue); cerr != nil {
 						return "", nil, cerr
 					}
 					closed = true
-					adopted = other.Issue
+					adopted = theirs.Issue
 				}
+				*it.ref = *other
 				return what, nil, nil
 			}
-			if werr := writeRecord(it.recordAbs, rec); werr != nil {
+			// A first attempt's record is gone once its push was undone.
+			*it.ref = recordRef{}
+			if werr := writeRecord(st, it, rec); werr != nil {
 				return "", nil, werr
 			}
-			return what, []string{it.recordRel}, nil
+			paths := []string{st.TrackerRecordRelPath(it.ref.entry)}
+			// The link goes in the same commit as its record, so the committed
+			// tree is whole at every step.
+			made, lerr := st.LinkTrackerEntry(it.ref.entry, it.owner())
+			if lerr != nil {
+				return "", nil, lerr
+			}
+			if made == store.LinkMade || made == store.LinkReplaced {
+				paths = append(paths, st.TrackerRelPath(it.ref.entry))
+			}
+			return what, paths, nil
 		},
 		func(string) string { return msg },
 	)
@@ -486,13 +532,19 @@ func splitRepo(spec string) (owner, name string, err error) {
 	return owner, name, nil
 }
 
-// item is one ticket or chart Sync considers, with the record path it
-// checks and, on creation, writes.
+// item is one ticket or chart Sync considers, with where its record sits.
 type item struct {
-	kind      string // "ticket" or "chart"
-	id        string // the ticket id, or the chart's name
-	recordRel string // relative to the store root, for Store.Claim
-	recordAbs string
+	kind string // "ticket" or "chart"
+	id   string // the ticket id, or the chart's name
+	ref  *recordRef
+}
+
+// owner is the ticket or chart the item's record names.
+func (it item) owner() store.TrackerOwner {
+	if it.kind == "chart" {
+		return store.TrackerOwner{Chart: it.id}
+	}
+	return store.TrackerOwner{Ticket: it.id}
 }
 
 // what is item's identity the way Sync's report, commit message and footer
@@ -543,8 +595,9 @@ func previewCreateRender(st *store.Store, cfg project.Config, it item, prs []PRR
 }
 
 // collectItems lists every ticket (key, then number order) then every chart
-// (name order), the order brief.md#What an issue shows syncs them in.
-func collectItems(st *store.Store) ([]item, error) {
+// (name order), the order brief.md#What an issue shows syncs them in, each
+// with where its record is (findRecord, for the repository repo).
+func collectItems(st *store.Store, repo string) ([]item, error) {
 	tickets, err := st.TicketIDs()
 	if err != nil {
 		return nil, err
@@ -555,13 +608,112 @@ func collectItems(st *store.Store) ([]item, error) {
 	}
 
 	items := make([]item, 0, len(tickets)+len(charts))
-	for _, id := range tickets {
-		rel, abs := ticketRecordPath(st, id)
-		items = append(items, item{kind: "ticket", id: id, recordRel: rel, recordAbs: abs})
-	}
-	for _, name := range charts {
-		rel, abs := chartRecordPath(st, name)
-		items = append(items, item{kind: "chart", id: name, recordRel: rel, recordAbs: abs})
+	for _, o := range append(ticketOwners(tickets), chartOwners(charts)...) {
+		it := item{kind: "ticket", id: o.Ticket}
+		if o.Chart != "" {
+			it = item{kind: "chart", id: o.Chart}
+		}
+		ref, err := findRecord(st, o, repo)
+		if err != nil {
+			return nil, err
+		}
+		it.ref = ref
+		items = append(items, it)
 	}
 	return items, nil
+}
+
+// ticketOwners lists ids as the owners of ticket records.
+func ticketOwners(ids []string) []store.TrackerOwner {
+	out := make([]store.TrackerOwner, len(ids))
+	for i, id := range ids {
+		out[i] = store.TrackerOwner{Ticket: id}
+	}
+	return out
+}
+
+// chartOwners lists names as the owners of chart records.
+func chartOwners(names []string) []store.TrackerOwner {
+	out := make([]store.TrackerOwner, len(names))
+	for i, name := range names {
+		out[i] = store.TrackerOwner{Chart: name}
+	}
+	return out
+}
+
+// refuseUnreadableRecords refuses a sync while a record of the tracker tree
+// cannot be read: it names no ticket or chart that can be told, so the sync
+// would take its ticket for one with no issue and open a second.
+func refuseUnreadableRecords(st *store.Store) error {
+	recs, err := st.TrackerRecords()
+	if err != nil {
+		return err
+	}
+	for _, rec := range recs {
+		if rec.Err == nil {
+			continue
+		}
+		rel := filepath.ToSlash(st.TrackerRecordRelPath(rec.Entry))
+		return &axi.Error{
+			Msg:  fmt.Sprintf("%s could not be read: %v", rel, rec.Err),
+			Code: "MIRROR_RECORD_INVALID",
+			Help: []string{fmt.Sprintf("Restore %s from the store's history, or remove it and let the sync adopt the issue again", rel)},
+		}
+	}
+	return nil
+}
+
+// repoChangedError refuses a sync whose item has a record for another
+// repository than the one trackers: github: repo: names now.
+func repoChangedError(it item, recorded, configured string) error {
+	return &axi.Error{
+		Msg:  fmt.Sprintf("%s's record names %s, but trackers: github: repo: is now %s", it.what(), recorded, configured),
+		Code: "MIRROR_REPO_CHANGED",
+		Help: []string{"moving issues to a new repo is T-30"},
+	}
+}
+
+// moveLegacyRecords moves every record still in its ticket's or chart's own
+// folder into the tracker tree, adding the key that names its owner, and
+// returns the old paths (slash form) it moved. It is the first thing a sync
+// does, before any record is read for its issue, so the issue is found by its
+// record and updated in place, never created again. The moves are working-tree
+// changes, committed with the next checkpoint like every record change but a
+// creation. A record for another repository than repo is refused before
+// anything moves, as the sync would refuse it later.
+func moveLegacyRecords(st *store.Store, items []item, repo string) ([]MovedRecord, error) {
+	type move struct {
+		it    item
+		entry store.TrackerEntry
+	}
+	var moves []move
+	for _, it := range items {
+		if it.ref.legacy == nil {
+			continue
+		}
+		rec, err := readRecord(st, it)
+		if err != nil {
+			return nil, fmt.Errorf("mirror: read %s's record: %w", it.what(), err)
+		}
+		if !strings.EqualFold(rec.Repo, repo) {
+			return nil, repoChangedError(it, rec.Repo, repo)
+		}
+		if rec.Issue < 1 {
+			return nil, &axi.Error{
+				Msg:  fmt.Sprintf("%s's record in %s names no issue", it.what(), filepath.ToSlash(it.ref.legacy.Rel)),
+				Code: "MIRROR_RECORD_INVALID",
+				Help: []string{fmt.Sprintf("Restore it from the store's history, or remove %s and let the sync adopt the issue again", filepath.ToSlash(it.ref.legacy.Rel))},
+			}
+		}
+		moves = append(moves, move{it, githubEntry(rec.Repo, rec.Issue)})
+	}
+	var moved []MovedRecord
+	for _, m := range moves {
+		if err := st.MoveLegacyTrackerRecord(*m.it.ref.legacy, m.entry, recordHeader); err != nil {
+			return moved, fmt.Errorf("mirror: move %s's record into the tracker tree: %w", m.it.what(), err)
+		}
+		moved = append(moved, MovedRecord{What: m.it.what(), From: filepath.ToSlash(m.it.ref.legacy.Rel), To: filepath.ToSlash(st.TrackerRecordRelPath(m.entry))})
+		m.it.ref.entry, m.it.ref.inTree, m.it.ref.legacy = m.entry, true, nil
+	}
+	return moved, nil
 }
