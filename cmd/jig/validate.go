@@ -38,12 +38,12 @@ const validateCheckUsage = "check only: print the verdict and the brief's sectio
 
 // cmdValidate implements `jig validate <ticket> [--check]`. A ticket that is
 // valid has its brief approved: the approval is recorded for the brief as it
-// was when the checks began, so a later edit of brief.md shows as unapproved
-// to `jig claim`. With --check nothing is recorded: the session drafting a
-// brief checks its slices.yaml and reads the section hashes it cites before
-// the person has confirmed the brief. Besides the ticket own files the checks look at the store
-// around it (validate_store.go); what they only advise on is printed under
-// the verdict.
+// was when the checks began (brief.md, and illustration.html when it has one),
+// so a later edit of either shows as unapproved to `jig claim`. With --check
+// nothing is recorded: the session drafting a brief checks its slices.yaml and
+// reads the section hashes it cites before the person has confirmed the brief.
+// Besides the ticket own files the checks look at the store around it
+// (validate_store.go); what they only advise on is printed under the verdict.
 func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	fs := newFlagSet(e, "validate")
 	storeFlag := fs.String("store", "", "explicit store path")

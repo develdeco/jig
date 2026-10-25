@@ -48,6 +48,29 @@ func Best(sessions []*Session, diffFiles []string, headTime time.Time) *Match {
 	return candidates[0]
 }
 
+// Among picks, among sessions that a record already vouches for as the ones
+// that worked on the change (the machine ledger names the ticket's sessions),
+// the one that mentions the most of diffFiles. Ties break toward the more
+// recently active session, then toward the earlier one in sessions. Unlike
+// Best it applies no acceptance bar and no staleness rule: nothing here
+// searches for a session, so one that mentions none of diffFiles is still the
+// ticket's, and the file overlap only orders the sessions it was given. A
+// session with no messages has nothing to excerpt and is passed over; the
+// result is nil when none is left.
+func Among(sessions []*Session, diffFiles []string) *Match {
+	var best *Match
+	for _, s := range sessions {
+		if s == nil || len(s.Messages) == 0 {
+			continue
+		}
+		score, overlap := scoreSession(s, diffFiles)
+		if best == nil || score > best.Score || (score == best.Score && s.LastActivity.After(best.Session.LastActivity)) {
+			best = &Match{Session: s, Score: score, Overlap: overlap}
+		}
+	}
+	return best
+}
+
 // accepted applies the acceptance rules: at least one overlapping file; a
 // multi-file diff needs at least 2 overlapping files and a score of at
 // least 0.5; a session last active more than 24 hours before headTime

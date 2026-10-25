@@ -88,4 +88,20 @@ type Reader interface {
 	// message bodies already loaded - ready for the matcher, with nothing
 	// further to fetch.
 	Discover(opts DiscoverOpts) ([]*Session, error)
+	// Load reads the one session whose transcript is the file at path, with
+	// message bodies loaded as Discover loads them. It applies no repository
+	// or window: the caller already knows, from a record, which session it
+	// wants. A file that is not a transcript of this agent's gives nil, nil.
+	Load(path string) (*Session, error)
+}
+
+// ReaderFor returns the Reader for the transcripts of the named harness, as
+// the machine ledger names it (ledger.Session.Harness), or nil when jig reads
+// none of that harness's transcripts: a session of such a harness is not
+// excerpted from its recorded path, whatever the path is.
+func ReaderFor(harness string) Reader {
+	if harness == claudeHarness {
+		return NewClaudeReader()
+	}
+	return nil
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // Independence says whether a recorded round's reviewer is independent of the
@@ -89,7 +90,13 @@ type agentID struct{ session, agent string }
 // line that changed no file (a read, a search, `git log`) is no building: a
 // reviewer reads the code with the same tools.
 func Builders(d Deps, ticket, branch string) ([]Provenance, error) {
-	lines, err := journal.Read(d.Store, ticket)
+	return buildersOf(d.Store, d.Home, ticket, branch)
+}
+
+// buildersOf is Builders over the store and the jig home root alone, for a
+// reader that has no Deps (the intent lookup, which has a RoundInput).
+func buildersOf(st *store.Store, jigHome, ticket, branch string) ([]Provenance, error) {
+	lines, err := journal.Read(st, ticket)
 	if err != nil {
 		return nil, err
 	}
@@ -109,10 +116,10 @@ func Builders(d Deps, ticket, branch string) ([]Provenance, error) {
 			add(l.Session, l.Agent)
 		}
 	}
-	if d.Home == "" {
+	if jigHome == "" {
 		return out, nil
 	}
-	records, err := ledger.Read(d.Home)
+	records, err := ledger.Read(jigHome)
 	if err != nil {
 		return nil, err
 	}
