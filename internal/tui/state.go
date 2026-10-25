@@ -60,6 +60,10 @@ type ticket struct {
 	loading, dirty bool
 	// failures counts the reads of the status that failed in a row.
 	failures int
+	// awaiting is set for a ticket the person asked to watch before the store
+	// had a folder for it: it clears when the ticket has a line or a row in the
+	// ticket list.
+	awaiting bool
 }
 
 // ticketFor returns the ticket id, making it known when it is not.
@@ -99,6 +103,7 @@ func (w *world) apply(envs []events.Envelope) (touched map[string]bool, fresh bo
 		}
 		t, isNew := w.ticketFor(id)
 		fresh = fresh || isNew
+		t.awaiting = false
 		touched[id] = true
 		if e.Src == events.SrcJournal {
 			t.lines = insertSorted(t.lines, e)
@@ -120,6 +125,7 @@ func (w *world) setRoster(rows []rosterRow) {
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
 		t.title, t.rosterState = r.Title, r.State
+		t.awaiting = false
 		listed[r.ID] = true
 		order = append(order, r.ID)
 	}
@@ -338,15 +344,20 @@ type askRow struct {
 	Decision, DecidedBy         string // "", keep or dismiss; person or agent
 }
 
-// asks are the asks status lists, each with the latest triage line for it.
-// They are known only once a status has been read.
+// asks are the asks status lists, each with the latest triage line for it
+// that a round has not closed since: a round applies the decisions made before
+// it closed, and an ask it left again is undecided (the rule internal/phase
+// reads). They are known only once a status has been read.
 func (t *ticket) asks() []askRow {
 	if t.status == nil {
 		return nil
 	}
 	decisions := map[string]events.Envelope{}
 	for _, l := range t.lines {
-		if l.Event == journal.EventTriage && l.Ref != "" {
+		switch {
+		case l.Event == journal.EventGateRound || l.Event == journal.EventGateClean:
+			decisions = map[string]events.Envelope{}
+		case l.Event == journal.EventTriage && l.Ref != "":
 			decisions[l.Ref] = l
 		}
 	}

@@ -249,6 +249,11 @@ type Facts struct {
 	// store to ask.
 	Open      *OpenRound
 	Published bool
+
+	// SessionName words a session id wherever the answer names a session (who
+	// took a round, who holds a slice). Nil is the first eight characters of the
+	// id; a caller that knows its sessions by role (the TUI) passes its own words.
+	SessionName func(id string) string
 }
 
 // Ticket is where a ticket stands.
@@ -795,7 +800,7 @@ func (d *digest) sliceState(s sliceView) (state, detail string) {
 		return SubWaiting, "waits for its environment"
 	case s.State == sliceBuilding:
 		if s.claimed && s.claimedBy != "" {
-			return SubActive, "claimed by " + shortSession(s.claimedBy)
+			return SubActive, "claimed by " + d.session(s.claimedBy)
 		}
 		return SubActive, "claimed"
 	case s.State == sliceQueued:
@@ -876,7 +881,7 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 	if open != nil {
 		sub := Sub{Key: fmt.Sprintf("round:%d", open.Round), Label: fmt.Sprintf("round %d", open.Round), State: SubActive, Detail: "opened, waiting for a reviewer"}
 		if open.Reviewer != "" {
-			sub.Detail = "taken by " + shortSession(open.Reviewer)
+			sub.Detail = "taken by " + d.session(open.Reviewer)
 		}
 		p.Subs = append(p.Subs, sub)
 	}
@@ -905,7 +910,7 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 	case open != nil:
 		p.Text = fmt.Sprintf("round %d open · ", open.Round)
 		if open.Reviewer != "" {
-			p.Text += shortSession(open.Reviewer) + " is reading the change"
+			p.Text += d.session(open.Reviewer) + " is reading the change"
 		} else {
 			p.Text += "waiting for a reviewer"
 		}
@@ -918,7 +923,7 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 	case last.Clean:
 		p.Text = fmt.Sprintf("round %d clean", last.N)
 		if last.Session != "" {
-			p.Text += " · by " + shortSession(last.Session)
+			p.Text += " · by " + d.session(last.Session)
 		}
 	case len(undecided) > 0:
 		p.Text = fmt.Sprintf("round %d left %s · %d wait for your decision", last.N, count(len(d.asks), "ask"), len(undecided))
@@ -1135,7 +1140,7 @@ func (d *digest) builtReason() string {
 func (d *digest) roundOpenReason() string {
 	o := d.f.Open
 	if o.Reviewer != "" {
-		return fmt.Sprintf("round %d of %s is open: %s is reading the change", o.Round, d.f.Ticket, shortSession(o.Reviewer))
+		return fmt.Sprintf("round %d of %s is open: %s is reading the change", o.Round, d.f.Ticket, d.session(o.Reviewer))
 	}
 	return fmt.Sprintf("round %d of %s is open and waits for a reviewer", o.Round, d.f.Ticket)
 }
@@ -1179,6 +1184,17 @@ func short(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+// session words a session id: the caller's words when it gave a way to say
+// them, else the first eight characters.
+func (d *digest) session(id string) string {
+	if d.f.SessionName != nil {
+		if s := d.f.SessionName(id); s != "" {
+			return s
+		}
+	}
+	return shortSession(id)
 }
 
 // shortSession is the first eight characters of a session id.

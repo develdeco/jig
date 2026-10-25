@@ -33,6 +33,10 @@ type Config struct {
 	// Ticket, when set, opens that ticket's screen first, with the project's
 	// list one step back.
 	Ticket string
+	// Awaiting says Ticket has no folder in the store yet: its screen waits
+	// for it and fills in as soon as the ticket has a line in its journal or a
+	// row in the ticket list.
+	Awaiting bool
 	// Scope is the flags that keep every verb on the store the screens were
 	// opened on (`--store <path>`); they are added to each command.
 	Scope []string
@@ -45,6 +49,10 @@ type Config struct {
 	// RetryDelay is how long to wait before a read that failed is made again;
 	// zero is 300ms.
 	RetryDelay time.Duration
+	// AwaitEvery is how often the ticket list is read while the ticket is
+	// awaited; zero is 2s, and a negative value never reads it again (a test
+	// that drives the clock itself).
+	AwaitEvery time.Duration
 	// Width and Height are the screen's size until the terminal reports one;
 	// zero is 100 by 30.
 	Width, Height int
@@ -145,6 +153,7 @@ type Model struct {
 	rosterBusy  bool
 	rosterFails int
 	retryDelay  time.Duration
+	awaitEvery  time.Duration
 	quitting    bool
 }
 
@@ -161,6 +170,10 @@ func New(cfg Config) *Model {
 	if m.retryDelay <= 0 {
 		m.retryDelay = 300 * time.Millisecond
 	}
+	m.awaitEvery = cfg.AwaitEvery
+	if m.awaitEvery == 0 {
+		m.awaitEvery = 2 * time.Second
+	}
 	m.zone = cfg.Zone
 	if m.zone == nil {
 		m.zone = time.Local
@@ -175,7 +188,8 @@ func New(cfg Config) *Model {
 	}
 	m.nav = []navEntry{{screen: screenMain}}
 	if cfg.Ticket != "" {
-		m.w.ticketFor(cfg.Ticket)
+		t, _ := m.w.ticketFor(cfg.Ticket)
+		t.awaiting = cfg.Awaiting
 		m.nav = append(m.nav, navEntry{screen: screenTicket, ticket: cfg.Ticket, follow: true})
 	}
 	return m
@@ -193,6 +207,9 @@ func (m *Model) Init() tea.Cmd {
 	if id := m.watching(); id != "" {
 		cmds = append(cmds, m.refreshStatus(id))
 	}
+	if m.awaitingTicket() {
+		cmds = append(cmds, m.awaitAfter())
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -202,6 +219,25 @@ func (m *Model) Stop() {
 	if m.cancel != nil {
 		m.cancel()
 	}
+}
+
+// awaitingTicket is whether the ticket the screens were opened on is one that
+// does not exist yet.
+func (m *Model) awaitingTicket() bool {
+	t := m.w.tickets[m.cfg.Ticket]
+	return m.cfg.Ticket != "" && t != nil && t.awaiting
+}
+
+// awaitMsg asks for the ticket list to be read again while a ticket is awaited.
+type awaitMsg struct{}
+
+// awaitAfter asks, after a moment, to look for the awaited ticket in the
+// ticket list: a ticket that exists but has no line yet shows nowhere else.
+func (m *Model) awaitAfter() tea.Cmd {
+	if m.awaitEvery < 0 {
+		return nil
+	}
+	return tea.Tick(m.awaitEvery, func(time.Time) tea.Msg { return awaitMsg{} })
 }
 
 // Screen reports which screen is showing, for tests and callers that care.
@@ -290,6 +326,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case rosterMsg:
 		return m, m.onRoster(msg)
+	case awaitMsg:
+		if m.awaitingTicket() {
+			return m, tea.Batch(m.loadRoster(), m.awaitAfter())
+		}
 	case statusMsg:
 		return m, m.onStatus(msg)
 	case retryMsg:
@@ -363,7 +403,12 @@ func (m *Model) onRoster(msg rosterMsg) tea.Cmd {
 		return nil
 	}
 	m.rosterFails = 0
+	was := m.awaitingTicket()
 	m.w.setRoster(msg.rows)
+	if was && !m.awaitingTicket() {
+		// The awaited ticket is listed: read it.
+		return m.refreshStatus(m.cfg.Ticket)
+	}
 	return nil
 }
 
@@ -692,6 +737,10 @@ func (m *Model) gate() tea.Cmd {
 		m.notice = "select a ticket first"
 		return nil
 	}
+	if m.w.tickets[id].awaiting {
+		m.notice = id + " does not exist yet"
+		return nil
+	}
 	return m.exec("gate", id, m.verbArgs("gate", id))
 }
 
@@ -701,6 +750,10 @@ func (m *Model) beginPublish() {
 	id := m.targetTicket()
 	if id == "" || m.w.tickets[id] == nil {
 		m.notice = "select a ticket first"
+		return
+	}
+	if m.w.tickets[id].awaiting {
+		m.notice = id + " does not exist yet"
 		return
 	}
 	m.ask = &confirmation{

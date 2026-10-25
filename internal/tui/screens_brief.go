@@ -20,7 +20,7 @@ func (m *Model) briefPage(id string) page {
 		return p
 	}
 	b := t.status.Brief
-	step := m.briefStep(t)
+	step := m.steps(t)[stepBrief]
 	p.add(m.st.icon(step.State) + " " + m.st.state(step.State, step.Text))
 	if b != nil && b.ApprovedAt != "" {
 		when := b.ApprovedAt

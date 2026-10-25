@@ -94,7 +94,7 @@ func (m *Model) exec(label, ticket string, steps ...[]string) tea.Cmd {
 // case the ticket is marked to be read again when it lands.
 func (m *Model) refreshStatus(id string) tea.Cmd {
 	t := m.w.tickets[id]
-	if t == nil || m.run == nil {
+	if t == nil || m.run == nil || t.awaiting {
 		return nil
 	}
 	if t.loading {
