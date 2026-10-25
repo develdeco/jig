@@ -37,6 +37,17 @@ func TestWorkspacePathsPassOverWorkspacesTheManifestLacks(t *testing.T) {
 	}
 }
 
+func TestSliceWorkspacesKeepEverySliceInOrder(t *testing.T) {
+	t.Parallel()
+	m := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "alpha", Path: "alpha"}, {ID: "beta", Path: "./beta/"}}}
+	all := []store.Slice{{ID: "b", Workspace: "beta"}, {ID: "g", Workspace: "gamma"}, {ID: "a", Workspace: "alpha"}, {ID: "a2", Workspace: "alpha"}}
+	got := SliceWorkspaces(m, "", all)
+	want := []SliceWorkspace{{"b", "beta"}, {"a", "alpha"}, {"a2", "alpha"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("SliceWorkspaces = %v, want %v: each slice once, in its order, with its cleaned path, and none for gamma, which is another repo", got, want)
+	}
+}
+
 // TestWorkspacePathsReadAWorkspaceNamedByItsRepo: in a project of several repos
 // a slice writes "<repo>/<id>", and only the repo of that name takes it.
 func TestWorkspacePathsReadAWorkspaceNamedByItsRepo(t *testing.T) {
