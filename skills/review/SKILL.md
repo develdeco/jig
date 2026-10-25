@@ -5,7 +5,13 @@ description: Reviews a ticket's branch in a fresh context and reports to the ope
 
 # review
 
-`jig gate` opens a round and starts no reviewer. You are the reviewer: an agent with a fresh context (a subagent or another session) that did **not** build the change. If you built it, stop and have another agent run this skill: a round reported by a builder is recorded but is not clean (`REVIEW_NOT_INDEPENDENT`), and publish refuses it.
+Run `jig next <T>`. If the phase it names is not review (an open round is review), tell the person what the ticket needs and the prompt that does it, and stop. Do not run an earlier phase on your own.
+
+`jig gate` opens a round and starts no reviewer. The reviewer is an agent with a fresh context that did **not** build the change: a round reported by a builder is recorded but is not clean (`REVIEW_NOT_INDEPENDENT`), and publish refuses it. `jig next` and `jig gate` say whether this session is fresh:
+
+- **Fresh** ("review it in this session"): review below, yourself.
+- **Not fresh, or unknown**: you briefed or built it. Spawn the subagent they advise (the Agent tool, `subagent_type: general-purpose`, `model: opus`, foreground, no worktree), pass it their prompt, and relay its verdict line. Never run `jig review context` yourself: jig sees a session and its subagents as one session, so if you both read the round it cannot tell who closed it, and the round is not independent.
+- **You are that subagent** (your prompt says you did not build the ticket): review below, yourself, and ignore the advice to spawn one. Reply with the verdict line only.
 
 ## Read the round
 
@@ -44,6 +50,10 @@ jig review done T-1 --result result.json     # or: the whole report as one file
 ```
 
 `--reviewed` lists every file you read; it must cover every `must_review` path. A refused report (`REVIEW_INVALID`) leaves the round open: correct it and run the command again. `REVIEW_STALE_HEAD` means the branch moved: run `jig gate T-1` and review the new head. The output is the round's verdict: `clean`, or `fix-slices` with the findings; asks wait for a person (`jig triage`).
+
+## Then
+
+Relay `jig next <T>`'s `prompt:` to the person and stop, unless the person's prompt named later phases (an automatic run): then go on to the next phase's skill the prompt named: build when the round queued fixes, publish when it is clean. A subagent stops at its verdict line.
 
 ## Never
 
