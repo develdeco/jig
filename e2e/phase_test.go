@@ -272,3 +272,31 @@ func TestHintsMatchRefusals(t *testing.T) {
 		}
 	})
 }
+
+// TestATicketFolderOfLocksIsNoTicket: a ticket folder holding nothing but
+// jig's lock files (what a store reset or checkout leaves of a ticket it
+// removed, since the store ignores them) is not a ticket at the brief phase.
+// `jig next` refuses it and points at `jig ticket new`, as for a ticket with no
+// folder, so a session asked to plan it mints the ticket instead of drafting a
+// brief into a folder that has no record.
+func TestATicketFolderOfLocksIsNoTicket(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	dir := filepath.Join(fx.StoreDir, "tickets", "JIG-404")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"ticket.yaml.lock", "journal.ndjson.lock"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := runJig(t, env, fx.RepoDir, "next", "JIG-404")
+	if r.Code != 2 || !strings.Contains(r.Stdout, "not found in the store") || !strings.Contains(r.Stdout, "jig ticket new") {
+		t.Errorf("jig next on a folder of locks: exit %d, want 2 saying it is not found and to mint it\n%s", r.Code, r.Stdout)
+	}
+	// Nor does the store's listing show it.
+	if r := runJig(t, env, fx.RepoDir, "next"); r.Code != 0 || strings.Contains(r.Stdout, "JIG-404") || !strings.Contains(r.Stdout, fx.Ticket) {
+		t.Errorf("jig next lists a folder of locks, or not the fixture's ticket: exit %d\n%s", r.Code, r.Stdout)
+	}
+}

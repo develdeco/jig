@@ -302,7 +302,7 @@ func validateTicketDeps(st *store.Store, ticket string) []string {
 		resolved, rerr := st.ResolveTicket(d.Ticket)
 		if rerr != nil {
 			problems = append(problems, fmt.Sprintf("ticket.yaml: blocked_by %q: %v", d.Ticket, rerr))
-		} else if err := requireTicket(st, resolved); err != nil {
+		} else if err := requireTicketID(st, resolved); err != nil {
 			problems = append(problems, fmt.Sprintf("ticket.yaml: blocked_by %q: %v", d.Ticket, err))
 		}
 		if d.Kind != "merged" && d.Kind != "stacked" {
@@ -334,7 +334,7 @@ func validateTicketClosed(st *store.Store, ticket string) []string {
 	if rec.Closed.Reason == store.CloseSuperseded && rec.Closed.By != "" {
 		by, rerr := st.ResolveTicket(rec.Closed.By)
 		if rerr == nil {
-			rerr = requireTicket(st, by)
+			rerr = requireTicketID(st, by)
 		}
 		switch {
 		case rerr != nil:

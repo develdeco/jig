@@ -195,7 +195,7 @@ func journalOf(st *store.Store, name, ticket string) events.Journal {
 
 // storeJournals names the journal of every ticket in st.
 func storeJournals(st *store.Store, name string) ([]events.Journal, error) {
-	ids, err := st.TicketIDs()
+	ids, err := st.Tickets()
 	if err != nil {
 		return nil, err
 	}

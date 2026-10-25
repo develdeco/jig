@@ -456,7 +456,7 @@ func validateChartEntries(st *store.Store, cfg project.Config, entries []store.C
 			seen[e.ID] = i
 
 			// Check the store has a folder for this ID
-			if err := requireTicket(st, e.ID); err != nil {
+			if err := requireTicketID(st, e.ID); err != nil {
 				return err
 			}
 		}
@@ -567,7 +567,7 @@ func resolveChartEntryRefs(st *store.Store, chart string, entries []store.ChartE
 				if rerr != nil {
 					return nil, refErr(chart, entries, i, r.Ref, rerr.Error())
 				}
-				if err := requireTicket(st, resolved); err != nil {
+				if err := requireTicketID(st, resolved); err != nil {
 					return nil, refErr(chart, entries, i, r.Ref, err.Error())
 				}
 				er = entryRef{knownID: resolved, kind: kind}

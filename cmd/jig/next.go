@@ -703,7 +703,7 @@ type nextOverlap struct {
 // nextForStore lists the tickets of the store in order with what blocks each,
 // and the files local ticket branches fight over.
 func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource) (nextStore, error) {
-	ids, err := st.TicketIDs()
+	ids, err := st.Tickets()
 	if err != nil {
 		return nextStore{}, err
 	}

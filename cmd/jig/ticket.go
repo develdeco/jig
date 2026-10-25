@@ -147,15 +147,36 @@ func checkTicketID(ticket string) error {
 	return nil
 }
 
-// requireTicket fails when ticket is not a usable id or the store has no
-// folder for it.
+// requireTicket fails when ticket is not a usable id or the store holds no
+// ticket by it to work: no folder, or one with nothing but jig's lock and
+// temporary files (store.TicketExists), which a store reset or checkout
+// leaves of a ticket it removed.
 func requireTicket(st *store.Store, ticket string) error {
+	if err := checkTicketID(ticket); err != nil {
+		return err
+	}
+	if st.TicketExists(ticket) {
+		return nil
+	}
+	return ticketNotFound(st, ticket)
+}
+
+// requireTicketID fails when ticket is not a usable id or the store has no
+// folder by it: the check for an id another record names (a blocker, the
+// ticket a closure names, a chart entry's), where any folder, even one a
+// checkout emptied, means the id is a ticket's.
+func requireTicketID(st *store.Store, ticket string) error {
 	if err := checkTicketID(ticket); err != nil {
 		return err
 	}
 	if fi, err := os.Stat(st.TicketDir(ticket)); err == nil && fi.IsDir() {
 		return nil
 	}
+	return ticketNotFound(st, ticket)
+}
+
+// ticketNotFound is the refusal for a ticket the store does not have.
+func ticketNotFound(st *store.Store, ticket string) error {
 	return &axi.Error{
 		Msg:  fmt.Sprintf("ticket %s not found in the store at %s", ticket, st.Root),
 		Code: "VALIDATION_ERROR",

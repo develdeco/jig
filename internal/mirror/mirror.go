@@ -598,7 +598,7 @@ func previewCreateRender(st *store.Store, cfg project.Config, it item, prs []PRR
 // (name order), the order brief.md#What an issue shows syncs them in, each
 // with where its record is (findRecord, for the repository repo).
 func collectItems(st *store.Store, repo string) ([]item, error) {
-	tickets, err := st.TicketIDs()
+	tickets, err := st.Tickets()
 	if err != nil {
 		return nil, err
 	}

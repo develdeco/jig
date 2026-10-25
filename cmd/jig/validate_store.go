@@ -68,7 +68,7 @@ func validateUpstreamEdges(st *store.Store, ticket string) []string {
 			if resolved, err := st.ResolveTicket(d.Ticket); err == nil {
 				next = resolved
 			}
-			if requireTicket(st, next) != nil {
+			if requireTicketID(st, next) != nil {
 				if cur != ticket {
 					problems = append(problems, fmt.Sprintf("upstream ticket %s, which %s waits on: blocked_by %q is not a ticket in the store", cur, ticket, d.Ticket))
 				}
@@ -252,7 +252,7 @@ func coveredAdvisories(st *store.Store, ticket string, slices []store.Slice) []a
 // title comes near one of goals. A journal is read whole, so only the tickets
 // whose title could matter have theirs read.
 func shippedTicketsNear(st *store.Store, goals []string) []recall.Ticket {
-	ids, err := st.TicketIDs()
+	ids, err := st.Tickets()
 	if err != nil {
 		return nil
 	}

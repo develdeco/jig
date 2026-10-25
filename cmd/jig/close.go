@@ -151,7 +151,7 @@ func checkClosure(st *store.Store, ticket string, closure store.Closed) (store.C
 	}
 	by, err := st.ResolveTicket(closure.By)
 	if err == nil {
-		err = requireTicket(st, by)
+		err = requireTicketID(st, by)
 	}
 	switch {
 	case err != nil:
