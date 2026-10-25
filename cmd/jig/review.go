@@ -277,7 +277,7 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 	}
 	blocks := roundBlocks(p, moved, true)
 	help := []string{
-		"Read the code in the worktree at the head, never in the clone, and edit nothing; run no tests (the oracles above passed)",
+		"Read the code in the worktree at the head, never in the clone, and never edit the clone; run no tests (the oracles above passed), and make a mutation check only in the worktree, putting it back",
 		fmt.Sprintf("Report each problem: `jig finding %s --file F --line N --title T --action fix|ask|note --risk low|medium|high --risk-rationale R --oracle O`; confirm an earlier one with `jig finding %s --still-present ID --line N`", ticket, ticket),
 		fmt.Sprintf("Then close the round: `jig review done %s --reviewed <every file you read> --summary <text>`", ticket),
 	}
