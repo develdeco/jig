@@ -219,16 +219,22 @@ func reviewedHeadOf(rep reportYAML) string {
 	if len(heads) == 0 {
 		heads = rep.TargetSHA
 	}
-	switch len(heads) {
+	return namedSHAs(heads)
+}
+
+// namedSHAs is the sha of a round over one repo as it is, and of a round over
+// several as repo:sha for each, joined by "+" in the order of the repos' names.
+func namedSHAs(shas map[string]string) string {
+	switch len(shas) {
 	case 0:
 		return ""
 	case 1:
-		for _, sha := range heads {
+		for _, sha := range shas {
 			return sha
 		}
 	}
-	names := make([]string, 0, len(heads))
-	for name := range heads {
+	names := make([]string, 0, len(shas))
+	for name := range shas {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -237,22 +243,38 @@ func reviewedHeadOf(rep reportYAML) string {
 		if i > 0 {
 			joined += "+"
 		}
-		joined += name + ":" + heads[name]
+		joined += name + ":" + shas[name]
 	}
 	return joined
 }
 
 // roundBase is where round n's review started: the base its request recorded
-// when the request is still in the work folder, else the head the round before
-// reviewed when this round's scope is a delta, else nothing is known.
+// when the request is still in the work folder (with several repos, the base of
+// each, named as the head is), else the head the round before reviewed when this
+// round's scope is a delta, else nothing is known.
 func roundBase(st *store.Store, ticket string, n int, scope, priorHead, head string) string {
 	if data, err := os.ReadFile(reviewJSONPath(st, ticket, n)); err == nil {
 		var req struct {
 			BaseSHA string `json:"base_sha"`
 			HeadSHA string `json:"head_sha"`
+			Repos   []struct {
+				Repo    string `json:"repo"`
+				BaseSHA string `json:"base_sha"`
+				HeadSHA string `json:"head_sha"`
+			} `json:"repos"`
 		}
-		if json.Unmarshal(data, &req) == nil && req.BaseSHA != "" && (req.HeadSHA == "" || req.HeadSHA == head) {
-			return req.BaseSHA
+		if json.Unmarshal(data, &req) == nil {
+			if len(req.Repos) > 0 {
+				bases, heads := map[string]string{}, map[string]string{}
+				for _, r := range req.Repos {
+					bases[r.Repo], heads[r.Repo] = r.BaseSHA, r.HeadSHA
+				}
+				if namedSHAs(heads) == head {
+					return namedSHAs(bases)
+				}
+			} else if req.BaseSHA != "" && (req.HeadSHA == "" || req.HeadSHA == head) {
+				return req.BaseSHA
+			}
 		}
 	}
 	if scope == "delta" {

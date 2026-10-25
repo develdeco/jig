@@ -568,3 +568,35 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 func oneRepoIn(leaseDir string, oracleNames []string) roundFiles {
 	return roundFiles{repos: []roundRepo{{Dir: leaseDir, Man: oraclesManifest(oracleNames)}}}
 }
+
+// TestReadRoundsNamesTheBaseOfEachRepoOfARoundOverSeveralRepos: the request of a
+// round over several repos lists the base and head of each; the round shows them
+// the way it shows the heads, repo:sha joined by "+". A request for another head
+// of any repo is not this round's.
+func TestReadRoundsNamesTheBaseOfEachRepoOfARoundOverSeveralRepos(t *testing.T) {
+	t.Parallel()
+	st, ticket, record := roundStore(t)
+	record(1, "round: 1\nverdict: clean\nreviewed_sha: {api: "+sha40("2")+", web: "+sha40("4")+"}\nreviewer: {session: s-rev}\n", "scope: full\nreviewed_paths: []\nfindings: []\n")
+	path := reviewJSONPath(st, ticket, 1)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(webHead string) {
+		request := `{"repos":[{"repo":"api","base_sha":"` + sha40("1") + `","head_sha":"` + sha40("2") + `"},{"repo":"web","base_sha":"` + sha40("3") + `","head_sha":"` + webHead + `"}]}`
+		if err := os.WriteFile(path, []byte(request), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(sha40("4"))
+	got, _ := ReadRounds(st, ticket)
+	if want := "api:" + sha40("1") + "+web:" + sha40("3"); got[0].Base != want {
+		t.Errorf("base = %q, want %q", got[0].Base, want)
+	}
+	if want := "api:" + sha40("2") + "+web:" + sha40("4"); got[0].Head != want {
+		t.Errorf("head = %q, want %q", got[0].Head, want)
+	}
+	write(sha40("9"))
+	if got, _ := ReadRounds(st, ticket); got[0].Base != "" {
+		t.Errorf("base = %q, want none from a request for another head of the web", got[0].Base)
+	}
+}
