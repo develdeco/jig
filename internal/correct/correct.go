@@ -19,6 +19,7 @@ const (
 	KindStall = "stall"
 	KindBrief = "brief-drift"
 	KindScope = "scope-drift"
+	KindSlice = "slice-missing"
 )
 
 // Input is what Check is given: the session and where it works, the ticket
@@ -91,6 +92,10 @@ var errNone = errors.New("nothing found")
 //   - A scope drift (scope.go) is found for the commit the event made, and
 //     the correction line it leaves is what offers it again at the events that
 //     follow, so a Stop can still hold the session back for it.
+//   - A missing slice (slice.go) is found for the same commit when it names no
+//     slice, and the slices its files point to are offered as the likely one.
+//     It is offered again like a scope drift, until the commit is amended away
+//     or verified for a slice.
 //
 // A detector that fails costs only its own note; the notes of the others are
 // returned with the error that joins what failed. When writing the record of
@@ -141,12 +146,21 @@ func Check(in Input) ([]Note, error) {
 		add(briefFact(in, all, lines))
 		if in.Commit != "" {
 			add(scopeFact(in, all))
+			add(sliceFact(in, all))
 		}
 	}
-	// What this session was told of earlier scope drifts is in the journal.
+	// What this session was told of earlier commits is in the journal.
 	for _, l := range lines {
-		if l.Event == journal.EventCorrection && l.Outcome == KindScope && in.Session != "" && l.Session == in.Session && after(l.TS, in.Since) {
+		if l.Event != journal.EventCorrection || in.Session == "" || l.Session != in.Session || !after(l.TS, in.Since) {
+			continue
+		}
+		switch l.Outcome {
+		case KindScope:
 			add(fact{note: Note{Ref: l.Ref, Kind: KindScope, Text: l.Summary}}, nil)
+		case KindSlice:
+			if stillUnsliced(in, l.Commit, lines) {
+				add(fact{note: Note{Ref: l.Ref, Kind: KindSlice, Text: l.Summary}}, nil)
+			}
 		}
 	}
 
