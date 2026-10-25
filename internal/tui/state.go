@@ -64,6 +64,12 @@ type ticket struct {
 	// had a folder for it: it clears when the ticket has a line or a row in the
 	// ticket list.
 	awaiting bool
+	// brief is the brief's text as `jig brief show --text` printed it, nil
+	// until the brief screen has read it. briefStale is set when a line about
+	// the brief arrived since (it is read again when the screen needs it), and
+	// briefLoading while a read is out.
+	brief                    *briefText
+	briefStale, briefLoading bool
 }
 
 // ticketFor returns the ticket id, making it known when it is not.
@@ -412,10 +418,15 @@ func firstOf(ss ...string) string {
 // sliceRow is a slice as the build screen lists it.
 type sliceRow struct {
 	ID, State, BlockedBy, Question string
-	Attempts                       int
-	Last                           string // what the latest line about it says
-	LastAt                         string
-	LastState                      string // the state that line is drawn in
+	// Workspace and Oracle are what slices.yaml names for the slice, FromGate the
+	// round a fix slice came from; all three are empty once only the journal is
+	// known.
+	Workspace, Oracle string
+	FromGate          int
+	Attempts          int
+	Last              string // what the latest line about it says
+	LastAt            string
+	LastState         string // the state that line is drawn in
 }
 
 // relevantSliceEvents are the lines worth showing as a slice's latest.
@@ -433,7 +444,10 @@ func (t *ticket) slices(zone *time.Location) []sliceRow {
 	var out []sliceRow
 	if t.status != nil && len(t.status.Slices) > 0 {
 		for _, s := range t.status.Slices {
-			out = append(out, sliceRow{ID: s.ID, State: s.State, BlockedBy: s.BlockedBy, Question: s.Question, Attempts: s.Attempts})
+			out = append(out, sliceRow{
+				ID: s.ID, State: s.State, BlockedBy: s.BlockedBy, Question: s.Question, Attempts: s.Attempts,
+				Workspace: s.Workspace, Oracle: s.Oracle, FromGate: s.FromGate,
+			})
 		}
 	} else {
 		for _, id := range t.sliceIDsFromLines() {

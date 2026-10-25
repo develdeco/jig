@@ -70,7 +70,10 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 }
 
 // RenderStatus renders the exact `jig status` golden format for ticket:
-// ticket/state lines, a slices table, a questions table (or "questions:
+// ticket/state lines, a slices table (a slice's id, state, attempts,
+// blocked_by, question and goal, then the workspace and oracle it names as
+// slices.yaml has them and, for a fix slice, the round it came from), a
+// questions table (or "questions:
 // none"), a parked table (present only while a slice is needs-input) and a
 // stalled table (present only while a slice is stalled), the blocks of every
 // registered status section (registerStatusSection), and a contextual help
@@ -137,7 +140,11 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		if goal == "" {
 			goal = "-"
 		}
-		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question, goal})
+		fromGate := "-"
+		if sl.FromGate > 0 {
+			fromGate = strconv.Itoa(sl.FromGate)
+		}
+		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question, goal, dashed(sl.Workspace), dashed(sl.Oracle), fromGate})
 
 		if ss.State == "needs-input" {
 			parkedRows = append(parkedRows, []string{sl.ID, ss.Question, resumeCell(ticket, sl, ss)})
@@ -182,7 +189,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		}
 		blocks = append(blocks, budgetLine)
 	}
-	blocks = append(blocks, axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, rows))
+	blocks = append(blocks, axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal", "workspace", "oracle", "from_gate"}, rows))
 	if len(questions) == 0 {
 		blocks = append(blocks, "questions: none")
 	} else {

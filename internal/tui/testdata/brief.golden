@@ -1,24 +1,24 @@
 jig  demo › JIG-1 › 1 brief                                    ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
   ✓ approved by Ada Lovelace (agent) · 4 sections, 4 slices
-    approved 2026-10-23 09:00, recorded by the session that drafted it
+    approved 2026-10-23 09:00 by Ada Lovelace
+    recorded by the session that drafted it · brief 0123456789ab
 
   sections  cited by
-  Goal      no slice
+▸ Goal      no slice
+      Say hello and goodbye to a person by name, in the tone the product has.
   Greeting  slice a
+      Use the first name. Fall back to "friend" when there is none.
   Farewell  slice b
+      Say goodbye politely, and never twice.
   Tone      slice c, d
+      Casual or formal: the owner decides. Until then neither is shipped, so
+      the copy waits for the answer.
 
   slices
-▸ ● a  Greet by name
-  ◐ b  Say goodbye, politely
-  ? c  Pick the tone
-  ○ d  Ship the copy  after b, c
-
-  ╭─ 1 Brief · activity ───────────────────────────────────────────────────────╮
-  │  09:00:00 ✓ brief approved · by Ada Lovelace, recorded by planner          │
-  ╰────────────────────────────────────────────────────────────────────────────╯
-
-
+  ● a  Greet by name  workspace app · oracle unit
+  ◐ b  Say goodbye, politely  workspace app · oracle unit
+  ? c  Pick the tone  workspace copy · oracle go test ./...
+  ○ d  Ship the copy  workspace copy · oracle go test ./... · after b, c
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · enter open · esc back · t tail · q quit

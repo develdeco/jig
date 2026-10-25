@@ -105,6 +105,9 @@ type navEntry struct {
 	ticket string
 	slice  string
 	sel    int
+	// scroll is how many lines a page with no row to stand on is moved up, so a
+	// screen longer than its window can be read to its end.
+	scroll int
 	// follow keeps a ticket screen's cursor on the current step until the
 	// person moves it; lastCur is the current step the screen last showed,
 	// so a cursor left on the current step moves on with it.
@@ -332,6 +335,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case statusMsg:
 		return m, m.onStatus(msg)
+	case briefMsg:
+		return m, m.onBrief(msg)
 	case retryMsg:
 		if msg.ticket == "" {
 			return m, m.loadRoster()
@@ -350,12 +355,22 @@ func (m *Model) onEvents(envs []events.Envelope) tea.Cmd {
 	for id := range touched {
 		m.w.tickets[id].dirty = true
 	}
+	// A line about the brief (its approval, a check of the slices) says what
+	// the screens read of its text may have changed.
+	for _, e := range envs {
+		if t := m.w.tickets[e.Ticket]; t != nil && e.Src == events.SrcJournal && stepOfLine(e) == stepBrief {
+			t.briefStale = true
+		}
+	}
 	var cmds []tea.Cmd
 	if fresh {
 		cmds = append(cmds, m.loadRoster())
 	}
 	if id := m.watching(); id != "" && touched[id] {
 		cmds = append(cmds, m.refreshStatus(id))
+		if m.top().screen == screenBrief {
+			cmds = append(cmds, m.loadBrief(id))
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -503,8 +518,13 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 // that was following the current step stays where it moved.
 func (m *Model) move(delta int) {
 	m.followSel()
-	n := len(m.page().refs())
+	pg := m.page()
+	n := len(pg.refs())
 	e := m.top()
+	if n == 0 {
+		e.scroll = max(0, min(e.scroll+delta, len(pg.lines)-m.bodyRows()))
+		return
+	}
 	e.follow = false
 	e.sel += delta
 	if e.sel >= n {
@@ -575,10 +595,36 @@ func (m *Model) open() tea.Cmd {
 	}
 	m.nav = append(m.nav, next)
 	m.last = nil
-	if t := m.w.tickets[next.ticket]; t != nil && (t.status == nil || t.dirty) {
-		return m.refreshStatus(next.ticket)
+	if next.screen == screenReview {
+		// What the review screen is for, when something waits, is deciding it.
+		m.top().sel = m.askRow(ref)
 	}
-	return nil
+	var cmds []tea.Cmd
+	if t := m.w.tickets[next.ticket]; t != nil && (t.status == nil || t.dirty) {
+		cmds = append(cmds, m.refreshStatus(next.ticket))
+	}
+	if next.screen == screenBrief {
+		cmds = append(cmds, m.loadBrief(next.ticket))
+	}
+	return tea.Batch(cmds...)
+}
+
+// askRow is the position, among the rows of the review screen on top, of the
+// ask ref names, else of the first ask; 0 when it holds none.
+func (m *Model) askRow(ref *rowRef) int {
+	first := -1
+	for i, r := range m.page().refs() {
+		if r.kind != rowAsk {
+			continue
+		}
+		if ref.kind == rowAsk && r.id == ref.id {
+			return i
+		}
+		if first < 0 {
+			first = i
+		}
+	}
+	return max(0, first)
 }
 
 // back goes up one screen.
@@ -594,6 +640,12 @@ func (m *Model) refreshAll() tea.Cmd {
 	cmds := []tea.Cmd{m.loadRoster()}
 	if id := m.watching(); id != "" {
 		cmds = append(cmds, m.refreshStatus(id))
+		if t := m.w.tickets[id]; t != nil {
+			t.briefStale = true
+		}
+		if m.top().screen == screenBrief {
+			cmds = append(cmds, m.loadBrief(id))
+		}
 	}
 	return tea.Batch(cmds...)
 }

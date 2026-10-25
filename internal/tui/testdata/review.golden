@@ -1,24 +1,24 @@
 jig  demo › JIG-2 › 3 review                                   ! review findings
 ────────────────────────────────────────────────────────────────────────────────
   ! round 1 left 2 asks · 2 wait for your decision
+    fix budget 1 of 3 rounds used
 
   rounds
-  ! round 1  findings  by reviewer at 09:11:30
+  ! round 1  findings  raised 1 fix · 2 asks · 1 note · 09:11:30
+      reviewer (Claude Code · Opus 5) · independent · s-review
+      full 0000000..ccccccc · 4 files read
+
+  round 1 findings
+  ◐ medium  alpha/a.go:12  to fix  Close the file  r1-f3
+      a leaked handle fails the next open
+  ○ low     beta/b.go:2    noted   Rename the helper  r1-f4
+      a clearer name, whenever the file is next touched
 
   asks
 ▸ ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
-      needs a human
+      a failed write would pass silently · needs a human
   ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
-
-  sessions
-  reviewer  harness unknown  s-review
-
-  ╭─ 3 Review · activity ──────────────────────────────────────────────────────╮
-  │  09:11:00 ◎ round 1 · opened                                               │
-  │  09:11:30 ! round 1 · reviewer finished with findings                      │
-  ╰────────────────────────────────────────────────────────────────────────────╯
-
-
+      the import is hidden in this scope
 
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · esc back · k keep · d dismiss · g gate · t tail · q quit
