@@ -116,3 +116,11 @@ carry forward, not jig's to rewrite. jig's own store's migration - the
 owner's rename map and the rehearsal-then-cutover procedure of chart
 decision 13 - runs after this ticket merges, using the command this ADR
 describes.
+
+## Amendment: jig's own store was migrated
+
+The last paragraph above said jig's own store would be migrated after this ticket merged. It was: the owner's rename map gave its 43 tickets nine area keys and kept every old id as an alias, a `pre-v2` tag marks the store as it was, and the v3 step followed. DECISIONS.md has the account.
+
+## Amendment: the tracker tree (L4)
+
+The mirror's records move out of the ticket and chart folders into `trackers/<provider>/<scope>/<remote id>.yaml`, each with a relative symlink at `<remote id>` to its ticket or chart. The record names its owner (`ticket:` or `chart:`) and the provider keeps every other key; the link is rebuilt from the records on every sync, with no provider and no network, and `jig validate` checks the tree and reports what is wrong as advisories. A record still in an old place is read as a fallback and moved into the tree by the next sync. The schema stays at 3 (2 for a v2 store): the tree is part of the layout both read.
