@@ -1,10 +1,10 @@
 ticket: JIG-1
 state: stalled
-slices[4]{id,state,attempts,blocked_by,question,goal}:
-  a,stalled,2,-,-,Fix Clamp so TestClamp passes.
-  b,queued,0,a,-,"Give Clamp a percentage-range caller, once it works."
-  c,queued,0,-,-,Decide and implement the greeting's tone.
-  d,queued,0,-,-,Smoke-test the rig environment class.
+slices[4]{id,state,attempts,blocked_by,question,goal,workspace,oracle,from_gate}:
+  a,stalled,2,-,-,Fix Clamp so TestClamp passes.,alpha,test,-
+  b,queued,0,a,-,"Give Clamp a percentage-range caller, once it works.",alpha,test,-
+  c,queued,0,-,-,Decide and implement the greeting's tone.,beta,test,-
+  d,queued,0,-,-,Smoke-test the rig environment class.,beta,test,-
 questions: none
 stalled[1]{slice,reason,summary}:
   a,stall,"clamp still returns for clamp(, , ); the upper bound check is missing."
