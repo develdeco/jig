@@ -54,6 +54,36 @@ type OpenFinding struct {
 	RiskRationale string `json:"risk_rationale"`
 	Oracle        string `json:"oracle"`
 	Recurrences   int    `json:"recurrences"`
+	// Decision, DecidedBy and DecisionReason are set on an ask that `jig
+	// triage` has already decided and that this round applies when it closes
+	// (TriageDecision.Label, Provenance and Reason): the reviewer does not
+	// raise it again. They are empty for every other row, and for a decision a
+	// round has already taken. The ask itself stays open until the round
+	// closes (ADR 0007).
+	Decision       string `json:"decision,omitempty"`
+	DecidedBy      string `json:"decided_by,omitempty"`
+	DecisionReason string `json:"decision_reason,omitempty"`
+}
+
+// DecisionText is the row's decision as `jig review context` prints it, "" when
+// it has none: "decided: dismiss, by a person: <reason>".
+func (f OpenFinding) DecisionText() string {
+	if f.Decision == "" {
+		return ""
+	}
+	text := "decided: " + f.Decision
+	switch {
+	case f.DecidedBy == "person":
+		text += ", by a person"
+	case f.DecidedBy == "agent":
+		text += ", by an agent"
+	case f.DecidedBy != "":
+		text += ", by " + f.DecidedBy
+	}
+	if f.DecisionReason != "" {
+		text += ": " + f.DecisionReason
+	}
+	return text
 }
 
 // DismissedFinding is one entry of review.json's "dismissed" list: a
@@ -1182,6 +1212,12 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	if err != nil {
 		return ReviewPrep{}, err
 	}
+	// An ask a person has already decided is shown with the decision, so the
+	// reviewer does not raise it again; the round that closes applies it.
+	decisions, err := ReadTriageDecisions(in.Store, in.Ticket)
+	if err != nil {
+		return ReviewPrep{}, err
+	}
 	prep := ReviewPrep{
 		Head: head, Scope: scope, Base: base,
 		Changed: diff.Changed, Deleted: diff.Deleted, MustReview: diff.MustReview,
@@ -1213,7 +1249,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		JournalPath:   absPath(filepath.Join(in.Store.TicketDir(in.Ticket), "journal.ndjson")),
 		Oracles:       SortedOracleNames(in.Manifest),
 		OraclesPassed: in.OracleRuns,
-		Open:          toOpenFindingList(in.Open),
+		Open:          toOpenFindingList(in.Open, decisions),
 		Dismissed:     in.Dismissed,
 		MustReview:    diff.MustReview,
 	}

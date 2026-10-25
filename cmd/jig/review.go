@@ -119,9 +119,9 @@ func roundBlocks(p verifydeliver.Prepared, moved string, full bool) []string {
 	blocks = append(blocks, axi.Table("must_review", []string{"path"}, mustRows))
 	var openRows [][]string
 	for _, f := range req.Open {
-		openRows = append(openRows, []string{f.ID, fmt.Sprintf("%s:%d", f.File, f.Line), f.Action, f.Risk, f.Title})
+		openRows = append(openRows, []string{f.ID, fmt.Sprintf("%s:%d", f.File, f.Line), f.Action, f.Risk, f.Title, f.DecisionText()})
 	}
-	blocks = append(blocks, axi.Table("open", []string{"id", "file:line", "action", "risk", "title"}, openRows))
+	blocks = append(blocks, axi.Table("open", []string{"id", "file:line", "action", "risk", "title", "decision"}, openRows))
 	var dismissedRows [][]string
 	for _, f := range req.Dismissed {
 		dismissedRows = append(dismissedRows, []string{f.ID, fmt.Sprintf("%s:%d", f.File, f.Line), f.Title})
