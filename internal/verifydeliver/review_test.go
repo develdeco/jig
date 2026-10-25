@@ -405,14 +405,14 @@ func TestValidateReviewResultRules(t *testing.T) {
 
 	t.Run("valid passes", func(t *testing.T) {
 		req, result := validRequestAndResult()
-		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 	})
 
 	t.Run("file neither present nor deleted", func(t *testing.T) {
 		req, result := validRequestAndResult()
-		err := validateReviewResult(req, result, leaseDir, absent, noDeleted, []string{"test"})
+		err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), absent, noDeleted)
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -423,7 +423,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 		deleted := map[string]bool{"c.go": true}
 		calledAtHead := false
 		neverCalled := func(path string) (bool, error) { calledAtHead = true; return false, nil }
-		if err := validateReviewResult(req, result, leaseDir, neverCalled, deleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), neverCalled, deleted); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 		if calledAtHead {
@@ -434,7 +434,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("oracle not a manifest oracle", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Oracle = "lint"
-		err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"})
+		err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted)
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -443,7 +443,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("omitted oracle with more than one manifest oracle and action fix", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Oracle = ""
-		err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"lint", "test"})
+		err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"lint", "test"}), present, noDeleted)
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -453,7 +453,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Oracle = ""
 		result.Findings[0].Action = ActionNote
-		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"lint", "test"}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"lint", "test"}), present, noDeleted); err != nil {
 			t.Fatalf("validateReviewResult: %v (a note never needs an oracle)", err)
 		}
 	})
@@ -461,7 +461,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("omitted oracle with exactly one manifest oracle", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Oracle = ""
-		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted); err != nil {
 			t.Fatalf("validateReviewResult: %v (no choice to make with one oracle)", err)
 		}
 	})
@@ -469,7 +469,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("prior names no known id", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Prior = "r1-f9"
-		err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"})
+		err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted)
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -478,7 +478,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("prior names an open id", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Prior = "r1-f1"
-		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 	})
@@ -486,7 +486,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("prior names a dismissed id", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Prior = "r1-f2"
-		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 	})
@@ -497,7 +497,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 		second := result.Findings[0]
 		second.File = "a.go"
 		result.Findings = append(result.Findings, second)
-		err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"})
+		err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted)
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -506,7 +506,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 	t.Run("reviewed_paths missing a must_review path", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.ReviewedPaths = nil
-		err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"})
+		err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted)
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
 		}
@@ -517,7 +517,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 		req.MustReview = []string{"dir/c.go"}
 		result.Findings[0].File = "dir/c.go"
 		result.ReviewedPaths = []string{`dir\c.go`}
-		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 	})
@@ -533,7 +533,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 			`C:\some\other\place\review.json`,
 			"../sibling/x.go",
 		)
-		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted); err != nil {
 			t.Fatalf("validateReviewResult: %v, want these entries merely ignored", err)
 		}
 	})
@@ -546,7 +546,7 @@ func TestValidateReviewResultRules(t *testing.T) {
 			filepath.Join(leaseDir, "c.go"),
 			filepath.Join(leaseDir, "dir", "d.go"),
 		}
-		if err := validateReviewResult(req, result, leaseDir, present, noDeleted, []string{"test"}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted); err != nil {
 			t.Fatalf("validateReviewResult: %v, want an absolute worktree path to cover must_review", err)
 		}
 	})

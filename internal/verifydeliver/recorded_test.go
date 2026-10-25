@@ -224,8 +224,8 @@ func TestReopeningARoundKeepsItsDraftsOnlyWhileTheHeadStands(t *testing.T) {
 	}
 
 	moved := writeAndCommit(t, fx.RepoDir, "moved.txt", "a later commit", "the clone moved on")
-	if tip, err := BranchMoved(d, same); err != nil || tip != moved {
-		t.Fatalf("BranchMoved = %q (%v), want the clone's new head %s", tip, err, moved)
+	if tips, err := MovedRepos(d, same); err != nil || len(tips) != 1 || tips[0].Tip != moved {
+		t.Fatalf("MovedRepos = %+v (%v), want the clone's new head %s", tips, err, moved)
 	}
 	after, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
 	if err != nil {

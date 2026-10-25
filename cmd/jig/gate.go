@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strconv"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -165,7 +167,7 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	blocks := roundBlocks(p, "", false)
+	blocks := roundBlocks(p, nil, false)
 	blocks = append(blocks, axi.Help(gateAdvice(e, deps, ticket)...))
 	axi.Render(stdout, blocks...)
 	return 0
@@ -193,8 +195,8 @@ func gateAdvice(e env, d verifydeliver.Deps, ticket string) []string {
 // code: 2 when the round leaves any ask undecided, else 0.
 func printGateReport(stdout io.Writer, st *store.Store, ticket string, report verifydeliver.GateReport) int {
 	var shaRows [][]string
-	for repo, sha := range report.TargetSHA {
-		shaRows = append(shaRows, []string{repo, sha})
+	for _, repo := range slices.Sorted(maps.Keys(report.TargetSHA)) {
+		shaRows = append(shaRows, []string{repo, report.TargetSHA[repo]})
 	}
 	intentRow := report.Intent.Source
 	if report.IntentNote != "" {

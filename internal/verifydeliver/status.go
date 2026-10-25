@@ -37,13 +37,24 @@ type Status struct {
 }
 
 // OpenStatus is a round that is open: opened by `jig gate` or `jig review
-// context`, and waiting for `jig review done`.
+// context`, and waiting for `jig review done`. A round over the one repo of a
+// project of one has its head and copy here; a round in a project of several
+// repos has them in Repos, one entry for each repo it covers.
 type OpenStatus struct {
-	Round    int        `json:"round"`
-	Head     string     `json:"head"`
-	Copy     string     `json:"copy"`
-	Drafts   int        `json:"drafts"`
-	Reviewer Provenance `json:"reviewer,omitempty"`
+	Round    int              `json:"round"`
+	Head     string           `json:"head,omitempty"`
+	Copy     string           `json:"copy,omitempty"`
+	Repos    []OpenRepoStatus `json:"repos,omitempty"`
+	Drafts   int              `json:"drafts"`
+	Reviewer Provenance       `json:"reviewer,omitempty"`
+}
+
+// OpenRepoStatus is one repo of an open round: the commit under review there
+// and whose copy of the branch it is.
+type OpenRepoStatus struct {
+	Repo string `json:"repo"`
+	Head string `json:"head"`
+	Copy string `json:"copy"`
 }
 
 // ReadStatus reads ticket's gate and publish state from the store.
@@ -70,6 +81,9 @@ func ReadStatus(st *store.Store, ticket string) (Status, error) {
 			return Status{}, err
 		}
 		s.Open = &OpenStatus{Round: of.Round, Head: of.Head, Copy: of.Copy, Drafts: len(drafts), Reviewer: of.Reviewer}
+		for _, r := range of.Repos {
+			s.Open.Repos = append(s.Open.Repos, OpenRepoStatus{Repo: r.Repo, Head: r.Head, Copy: r.Copy})
+		}
 	}
 	lines, err := journal.Read(st, ticket)
 	if err != nil {

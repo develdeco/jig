@@ -10,10 +10,10 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// TestCheckOneRepo: a gate round or a publish is refused for a ticket whose
-// slices build in more than one repo, with the repos named; a ticket that
-// builds in one repo, in a project of one or of several, goes through, and so
-// does one whose workspaces no repo owns yet.
+// TestCheckOneRepo: a publish is refused for a ticket whose slices build in
+// more than one repo, with the repos named; a ticket that builds in one repo, in
+// a project of one or of several, goes through, and so does one whose workspaces
+// no repo owns yet. (The gate has no such refusal: TestGateRepos.)
 func TestCheckOneRepo(t *testing.T) {
 	t.Parallel()
 	two := project.Config{Repos: []project.Repo{{Label: "api"}, {Label: "web"}}}
@@ -43,7 +43,7 @@ func TestCheckOneRepo(t *testing.T) {
 		}
 		var ae *axi.Error
 		if !errors.As(err, &ae) || ae.Code != "MULTI_REPO_NOT_YET" ||
-			!strings.Contains(ae.Msg, "this ticket's slices span "+c.refused) || !strings.Contains(ae.Msg, "the gate covers one repo until multi-repo review lands") {
+			!strings.Contains(ae.Msg, "this ticket's slices span "+c.refused) || !strings.Contains(ae.Msg, "publish ships one repo until multi-repo publishing lands") {
 			t.Errorf("%s: err = %v, want MULTI_REPO_NOT_YET naming %q", c.name, err, c.refused)
 		}
 	}
