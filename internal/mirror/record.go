@@ -150,8 +150,9 @@ func decodeRecord(fields yaml.Node) (githubRecord, error) {
 	return rec, nil
 }
 
-// readRecord decodes it's record: from the tree, or from the item's own folder
-// for one not moved yet. Claim's write calls this after a rejected push's pull
+// readRecord decodes the record of item it: from the tree, or from the item's
+// own folder for one not moved yet. Claim's write calls this after a rejected
+// push's pull
 // to see whether the record it just brought in names another clone's issue for
 // the same ticket or chart (brief.md#Syncing at every checkpoint).
 func readRecord(st *store.Store, it item) (githubRecord, error) {
@@ -174,10 +175,11 @@ func readRecord(st *store.Store, it item) (githubRecord, error) {
 	return githubRecord{}, fmt.Errorf("mirror: read record: %s has no record at %s", it.what(), it.ref.entry)
 }
 
-// writeRecord writes rec as it's record in the tree, with its leading "the
-// mirror wrote this" comment. A record whose issue is not the one its file is
-// named for (an issue opened again, or a record kept under the wrong name) is
-// written under the name of the issue it holds, and the old file and link go.
+// writeRecord writes rec as the record of item it in the tree, with its
+// leading "the mirror wrote this" comment. A record whose issue is not the one
+// its file is named for (an issue opened again, or a record kept under the
+// wrong name) is written under the name of the issue it holds, and the old
+// file and link go.
 func writeRecord(st *store.Store, it item, rec githubRecord) error {
 	entry := it.ref.entry
 	if rec.Issue >= 1 && rec.Repo != "" {
@@ -210,7 +212,7 @@ func writeRecord(st *store.Store, it item, rec githubRecord) error {
 	return nil
 }
 
-// writeRecordLinks updates it's record's synced.links to links, leaving its
+// writeRecordLinks updates item it's record's synced.links to links, leaving its
 // repo, issue and node id untouched, and writes it back (brief.md#Links: "the
 // record keeps the node ids of the links it last wrote"). The write lands in
 // the working tree only; it goes in with the next checkpoint's commit, as

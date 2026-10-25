@@ -17,9 +17,10 @@ import (
 // The checks `jig validate` runs beyond the ticket's own files look at the
 // store around it: the tickets it waits on (a refusal when one of the edges
 // on the way is cut), the work that already shipped (an advisory when a
-// slice goal reads like it) and the shape of the ticket's own slice graph
-// (an advisory when it holds independent concerns). The last step is the
-// approval a valid brief earns.
+// slice goal reads like it), the shape of the ticket's own slice graph
+// (an advisory when it holds independent concerns) and the tracker tree (an
+// advisory for each thing wrong in it). The last step is the approval a
+// valid brief earns.
 
 // Advisory codes: what a valid ticket is told without being refused.
 const (

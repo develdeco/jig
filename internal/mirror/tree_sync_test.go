@@ -367,3 +367,114 @@ func TestSyncRefusesWhileARecordCannotBeRead(t *testing.T) {
 		t.Errorf("CreateIssue calls = %+v, want none: no second issue", client.calls)
 	}
 }
+
+// TestTrackerTreeRebuiltFromRecords: a sync writes its records under the tree
+// and each ticket's and chart's link resolves to its folder; taking every link
+// away and rebuilding from the records gives the same tree, and so does syncing
+// again, which opens no second issue.
+func TestTrackerTreeRebuiltFromRecords(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+	if !st.SymlinksOn() {
+		t.Skip("this machine cannot make a symlink")
+	}
+	mintTestTicket(t, st, "DEMO-1", "First ticket")
+	mintTestTicket(t, st, "DEMO-2", "Second ticket")
+	addDemoChart(t, st, "tickets: []\n")
+	runGit(t, work, "push", "origin", "main")
+
+	client := &fakeClient{}
+	deps := Deps{Store: st, Cfg: loadCfg(t, st), Client: client}
+	if _, err := Sync(deps, SyncOpts{}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	want := map[string]string{
+		"trackers/github/example/tracking/1": "tickets/DEMO-1",
+		"trackers/github/example/tracking/2": "tickets/DEMO-2",
+		"trackers/github/example/tracking/3": "charts/demo",
+	}
+	if got := treeLinks(t, st); !reflect.DeepEqual(got, want) {
+		t.Fatalf("links after a sync = %v, want %v", got, want)
+	}
+
+	clearLinks := func() {
+		t.Helper()
+		for link := range want {
+			if err := os.Remove(filepath.Join(st.Root, filepath.FromSlash(link))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := treeLinks(t, st); len(got) != 0 {
+			t.Fatalf("links after taking them away = %v, want none", got)
+		}
+	}
+	clearLinks()
+	if _, err := st.RebuildTrackerLinks(); err != nil {
+		t.Fatal(err)
+	}
+	if got := treeLinks(t, st); !reflect.DeepEqual(got, want) {
+		t.Errorf("links rebuilt from the records = %v, want the same %v", got, want)
+	}
+
+	clearLinks()
+	if _, err := Sync(deps, SyncOpts{}); err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	if got := treeLinks(t, st); !reflect.DeepEqual(got, want) {
+		t.Errorf("links after syncing again = %v, want the same %v", got, want)
+	}
+	if len(client.calls) != 3 {
+		t.Errorf("CreateIssue calls = %d, want 3: the second sync opens no second issue", len(client.calls))
+	}
+}
+
+// TestSyncWorksOnAV3Store: the tree is the same in a v3 store (store.yaml
+// declares the trackers) as in a v2 one (project.yaml): a record in an old
+// place moves in, a new ticket gets its issue, and the tree checks clean.
+func TestSyncWorksOnAV3Store(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+	storeYAML := `schema_version: 3
+keys:
+  DEMO: everything in demo
+trackers:
+  - github:
+      repo: example/tracking
+      project: https://github.com/users/example/projects/7
+platform: platform/
+projects:
+  - demo
+`
+	if err := os.Remove(filepath.Join(work, "project.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "store.yaml"), []byte(storeYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mintTestTicket(t, st, "DEMO-1", "First ticket")
+	mintTestTicket(t, st, "DEMO-2", "Second ticket")
+	writeLegacyRecord(t, st, "DEMO-1", "example/tracking", 11, "NODE_A", "")
+	runGit(t, work, "add", "-A")
+	runGit(t, work, "commit", "-m", "a v3 store")
+	runGit(t, work, "push", "origin", "main")
+
+	cfg, err := project.Load(filepath.Join(work, "store.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeClient{}
+	*client.issue("NODE_A") = fakeIssueState{Title: "First ticket", Body: ticketFooter("DEMO-1"), Open: true}
+	report, err := Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(report.MovedRecords) != 1 || len(client.calls) != 1 || client.calls[0].Title != "Second ticket" {
+		t.Fatalf("MovedRecords %+v, CreateIssue calls %+v; want DEMO-1's record moved and an issue created for DEMO-2 alone", report.MovedRecords, client.calls)
+	}
+	for _, what := range []string{"DEMO-1", "DEMO-2"} {
+		if !hasTreeRecord(t, st, what) {
+			t.Errorf("%s has no record in the tree", what)
+		}
+	}
+	if problems, err := st.CheckTrackerTree(); err != nil || len(problems) != 0 {
+		t.Errorf("CheckTrackerTree = %+v, %v; want nothing wrong", problems, err)
+	}
+}
