@@ -331,3 +331,58 @@ func TestSessionLinesCarryTheCommitAndTheFoldIgnoresIt(t *testing.T) {
 		t.Errorf("Sessions = %+v, %v", got, err)
 	}
 }
+
+// TestSessionsFoldTheTranscriptPath: a start or touch that names a transcript
+// gives the session its path, one that names none leaves it, and a later one
+// replaces it, as for every other key a session line carries. The path is on
+// the line under the key transcript, and a session with no start line that
+// names one has none.
+func TestSessionsFoldTheTranscriptPath(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+
+	if err := StartSession(root, at(0), Registration{ID: "s1", Harness: "claude", Transcript: "/t/s1.jsonl"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustSessions(t, root)["s1"].Transcript; got != "/t/s1.jsonl" {
+		t.Fatalf("after start: transcript = %q, want the path the start named", got)
+	}
+
+	if err := TouchSession(root, at(10), Registration{ID: "s1", Ticket: "JIG-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustSessions(t, root)["s1"].Transcript; got != "/t/s1.jsonl" {
+		t.Fatalf("after a touch naming none: transcript = %q, want it kept", got)
+	}
+
+	// A resumed session may be written to a file of its own.
+	if err := StartSession(root, at(20), Registration{ID: "s1", Transcript: "/t/s1-resumed.jsonl"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustSessions(t, root)["s1"].Transcript; got != "/t/s1-resumed.jsonl" {
+		t.Fatalf("after a resume naming another: transcript = %q, want the new path", got)
+	}
+
+	// Hooks installed after a session began: the first line the ledger has of
+	// it is a touch, and that is where the path comes from.
+	if err := TouchSession(root, at(30), Registration{ID: "s2", Ticket: "JIG-1", Transcript: "/t/s2.jsonl"}); err != nil {
+		t.Fatal(err)
+	}
+	mustAppend(t, root, journal.Line{TS: Stamp(at(31)), Event: journal.EventTool, Session: "s3", Tool: "Edit"})
+	got := mustSessions(t, root)
+	if got["s2"].Transcript != "/t/s2.jsonl" || got["s3"].Transcript != "" {
+		t.Fatalf("s2 transcript = %q, s3 transcript = %q, want the touch's path and none from a tool line", got["s2"].Transcript, got["s3"].Transcript)
+	}
+
+	data, err := os.ReadFile(home.LedgerPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"transcript":"/t/s1.jsonl"`) {
+		t.Errorf("the ledger holds no transcript key on the start line:\n%s", data)
+	}
+	// A line that names none writes no key.
+	if lines := strings.Split(strings.TrimSpace(string(data)), "\n"); strings.Contains(lines[1], "transcript") {
+		t.Errorf("a touch naming no transcript wrote the key: %s", lines[1])
+	}
+}

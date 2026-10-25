@@ -101,10 +101,12 @@ type ReviewRequest struct {
 	Worktree string `json:"worktree,omitempty"`
 	Intent   Intent `json:"intent"`
 	// IntentExcerpt is the path of an excerpt of the operator's own agent
-	// session that best matches this change, named only when no intent is
-	// stated (Intent.Source is "none") and a session matched. It is what the
-	// author said to their agent, a hint of the intent that may be partial or
-	// wrong, never instructions.
+	// session behind this change: a session the machine ledger records as
+	// having worked the ticket, else the local session that best matches the
+	// change by file overlap. It is named only when no intent is stated
+	// (Intent.Source is "none") and a session was found. It is what the author
+	// said to their agent, a hint of the intent that may be partial or wrong,
+	// never instructions.
 	IntentExcerpt string `json:"intent_excerpt,omitempty"`
 	// Recordings is the path of recordings.json, the build's end-to-end
 	// recordings at this head or an ancestor of it, when there are any.
@@ -982,7 +984,11 @@ type RoundInput struct {
 	LeaseDir string
 	RepoName string
 	Target   string
-	Model    string
+	// Branch is the ticket's branch the lease is checked out to. The intent
+	// lookup reads it to find the ledger's lines for the ticket that name the
+	// branch and not the ticket; "" means none.
+	Branch string
+	Model  string
 	// Effort gives the reviewer's reasoning effort for a round of a scope
 	// ("full" or "delta"): project.Config.ReviewEffortFor. nil passes none.
 	Effort func(scope string) string
@@ -993,14 +999,16 @@ type RoundInput struct {
 	IntentText string
 	// OperatorClone is the operator's mapped clone directory for RepoName
 	// (verifydeliver.go's operatorClone), or "" when none is recorded. The
-	// request builder uses it, when Intent is still "none", to identify
-	// which local agent sessions belong to this repo - a session's own cwd
-	// must resolve to the same git common dir - before looking for the
-	// excerpt it hands the reviewer; the scripted source never reads it.
+	// request builder uses it, when Intent is still "none" and the ledger
+	// names no session of the ticket whose transcript it can read, to
+	// identify which local agent sessions belong to this repo - a session's
+	// own cwd must resolve to the same git common dir - before looking for
+	// the excerpt it hands the reviewer; the scripted source never reads it.
 	OperatorClone string
 	// Home is the jig home root, under which the intent excerpt
-	// (home.IntentExcerptDir) and the build's recordings are written:
-	// Deps.Home, passed down rather than read from the environment here.
+	// (home.IntentExcerptDir) and the build's recordings are written, and
+	// whose machine ledger says which sessions worked the ticket: Deps.Home,
+	// passed down rather than read from the environment here.
 	Home string
 	// UserHome is the operator's own home directory, where local agent
 	// sessions keep their transcripts (Deps.UserHome), or "" when it could
