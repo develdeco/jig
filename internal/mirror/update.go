@@ -105,14 +105,10 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 	}
 
 	for _, it := range items {
-		has, herr := hasRecord(it.recordAbs)
-		if herr != nil {
-			return nil, nil, nil, nil, herr
-		}
-		if !has {
+		if !it.ref.has() {
 			continue
 		}
-		rec, rerr := readRecord(it.recordAbs)
+		rec, rerr := readRecord(st, it)
 		if rerr != nil {
 			return nil, nil, nil, nil, rerr
 		}
@@ -262,7 +258,7 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 
 		if !dryRun {
 			rec.Synced = synced
-			if werr := writeRecord(it.recordAbs, rec); werr != nil {
+			if werr := writeRecord(st, it, rec); werr != nil {
 				return nil, nil, nil, nil, werr
 			}
 		}

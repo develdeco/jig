@@ -13,12 +13,6 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 )
 
-// githubRecordFile is the name of the GitHub mirror's record of a ticket,
-// <ticket>/tracker/github.yaml. The mirror (internal/mirror) writes it and
-// owns its whole shape; the store reads only the two keys a branch name and
-// a branch binding need, and so cannot import the mirror to ask.
-const githubRecordFile = "github.yaml"
-
 // GitHubIssue is the issue a ticket is mirrored to.
 type GitHubIssue struct {
 	// Repo is "owner/name", the repository the issue lives in.
@@ -35,24 +29,49 @@ type TrackerIDs struct {
 	GitHub *GitHubIssue
 }
 
-// githubRecordIDs is the part of tracker/github.yaml TrackerIDs reads. The
-// decode is lenient: the rest of the record is the mirror's.
+// githubRecordIDs is the part of a GitHub record the store reads: which issue
+// it is. The mirror (internal/mirror) writes the record and owns its whole
+// shape, so the decode is lenient and the store cannot import the mirror to
+// ask.
 type githubRecordIDs struct {
 	Repo  string `yaml:"repo"`
 	Issue int    `yaml:"issue"`
 }
 
-// githubRecordPath is <ticket>/tracker/github.yaml.
+// githubRecordPath is the old place of a ticket's GitHub record,
+// <ticket>/tracker/github.yaml.
 func (s *Store) githubRecordPath(ticket string) string {
-	return filepath.Join(s.TicketDir(ticket), "tracker", githubRecordFile)
+	return filepath.Join(s.TicketDir(ticket), "tracker", legacyRecordFile)
 }
 
 // TrackerIDs reads ticket's ids in the trackers that mirror it, from the
-// records under <ticket>/tracker/. A ticket with no record, or a record that
-// names no issue yet, has none. A record that cannot be decoded is an
-// *axi.Error, TRACKER_RECORD_INVALID: the mirror owns the file, so the
-// remedy is the mirror's.
+// records of the tracker tree that name it (the first, in path order, when it
+// has more than one GitHub record). A ticket with no record in the tree falls
+// back to the one the first mirror kept in its own folder,
+// <ticket>/tracker/github.yaml, so a store whose records have not moved yet
+// still binds its branches. A ticket with no record, or a record that names no
+// issue yet, has none. A record in the old place that cannot be decoded is an
+// *axi.Error, TRACKER_RECORD_INVALID: the mirror owns the file, so the remedy
+// is the mirror's; a tree record that cannot be decoded names no ticket, and
+// is the tree check's to report.
 func (s *Store) TrackerIDs(ticket string) (TrackerIDs, error) {
+	recs, err := s.TrackerRecordsFor(TrackerOwner{Ticket: ticket})
+	if err != nil {
+		return TrackerIDs{}, err
+	}
+	for _, rec := range recs {
+		if rec.Entry.Provider != ProviderGitHub {
+			continue
+		}
+		if repo, issue := githubIdentity(rec.Fields); issue >= 1 {
+			return TrackerIDs{GitHub: &GitHubIssue{Repo: repo, Number: issue}}, nil
+		}
+	}
+	return s.legacyTrackerIDs(ticket)
+}
+
+// legacyTrackerIDs reads ticket's ids from the record in its own folder.
+func (s *Store) legacyTrackerIDs(ticket string) (TrackerIDs, error) {
 	path := s.githubRecordPath(ticket)
 	data, err := readFile(path)
 	if err != nil {
@@ -112,9 +131,10 @@ func branchesFromGitHub(from string) bool {
 // remoteLeads maps every id a tracker gives a ticket, spelled the way a
 // branch name leads with it, to the tickets that carry it. Today that is a
 // GitHub issue number; a tracker whose ids are KEY-N keys would add them to
-// the same map. It reads every ticket's tracker records afresh on each call:
-// the mirror writes them without going through the store, so a cache could
-// hold a ticket back from the id its issue was just given.
+// the same map. It reads the tracker tree afresh on each call: a record may
+// have landed in it since the index was last built, and a branch the issue
+// number just made must bind to its ticket at once. A ticket with no record in
+// the tree is read from the old place (TrackerIDs).
 //
 // A ticket whose record cannot be read or decoded costs only its own claim,
 // as with aliasClaims: it is that ticket's problem, and naming some other
@@ -124,14 +144,43 @@ func (s *Store) remoteLeads() (map[string][]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.invalidateTrackerIndex()
+	recs, err := s.TrackerRecords()
+	if err != nil {
+		return nil, err
+	}
 	leads := map[string][]string{}
+	add := func(lead, ticket string) {
+		for _, have := range leads[lead] {
+			if have == ticket {
+				return
+			}
+		}
+		leads[lead] = append(leads[lead], ticket)
+	}
+	known := make(map[string]bool, len(ids))
 	for _, id := range ids {
-		t, err := s.TrackerIDs(id)
+		known[id] = true
+	}
+	inTree := map[string]bool{}
+	for _, rec := range recs {
+		if rec.Err != nil || rec.Entry.Provider != ProviderGitHub || !known[rec.Ticket] || rec.Chart != "" {
+			continue
+		}
+		if _, issue := githubIdentity(rec.Fields); issue >= 1 {
+			add(strconv.Itoa(issue), rec.Ticket)
+			inTree[rec.Ticket] = true
+		}
+	}
+	for _, id := range ids {
+		if inTree[id] {
+			continue
+		}
+		t, err := s.legacyTrackerIDs(id)
 		if err != nil || t.GitHub == nil {
 			continue
 		}
-		lead := strconv.Itoa(t.GitHub.Number)
-		leads[lead] = append(leads[lead], id)
+		add(strconv.Itoa(t.GitHub.Number), id)
 	}
 	return leads, nil
 }

@@ -2,8 +2,8 @@ package mirror
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -14,10 +14,12 @@ import (
 // starts with, saying the mirror wrote it (brief.md#Records).
 const recordHeader = "# This file is written by jig's GitHub mirror; edits here are overwritten.\n"
 
-// githubRecord is <ticket>/tracker/github.yaml or charts/<name>/github.yaml,
-// in the bridge's own shape so its records are adopted as they are. The
-// rest of synced (title, body_sha256, state, status, store_id) is the
-// drift slice's own, left for it to add.
+// githubRecord is the GitHub mirror's part of a record of the tracker tree,
+// trackers/github/<owner>/<repo>/<number>.yaml, in the bridge's own shape so
+// its records are adopted as they are. The tree owns the ticket: or chart: key
+// beside these keys (internal/store); every key below is the mirror's. The
+// rest of synced (title, body_sha256, state, status, store_id) is the drift
+// slice's own, left for it to add.
 type githubRecord struct {
 	Repo   string `yaml:"repo"`
 	Issue  int    `yaml:"issue"`
@@ -75,70 +77,149 @@ type syncedLinks struct {
 	BlockedBy []string `yaml:"blocked_by,omitempty"`
 }
 
-// ticketRecordPath returns <ticket>/tracker/github.yaml, relative to the
-// store root (what Store.Claim's paths want) and absolute (what os reads
-// and writes).
-func ticketRecordPath(st *store.Store, ticket string) (rel, abs string) {
-	abs = filepath.Join(st.TicketDir(ticket), "tracker", "github.yaml")
-	rel = filepath.Join(st.TicketRelDir(ticket), "tracker", "github.yaml")
-	return rel, abs
+// recordRef is where one item's record sits. An item holds it by pointer, so a
+// record created, moved or recreated partway through a sync is the record
+// every later step of the sync finds.
+type recordRef struct {
+	// entry is the record's place in the tracker tree, when inTree.
+	entry  store.TrackerEntry
+	inTree bool
+	// legacy is the record still in the item's own folder, where A6's mirror
+	// first kept it. A sync moves it into the tree before it does anything
+	// else; a dry run, which writes nothing, reads it from there.
+	legacy *store.LegacyTrackerRecord
 }
 
-// chartRecordPath returns charts/<name>/github.yaml, relative and absolute.
-func chartRecordPath(st *store.Store, name string) (rel, abs string) {
-	abs = filepath.Join(st.Root, "charts", name, "github.yaml")
-	rel = filepath.Join("charts", name, "github.yaml")
-	return rel, abs
+// has reports whether the item has a record: jig finds issues by their
+// records only (brief.md#Adoption), never by searching GitHub for a marker,
+// so an item with one is left alone and one with none gets a new issue.
+func (r *recordRef) has() bool { return r.inTree || r.legacy != nil }
+
+// githubEntry returns the tree entry of an issue:
+// trackers/github/<owner>/<repo>/<number>. GitHub's owner and repository
+// names are case-insensitive, so the folder is their lower-case spelling, the
+// same on a file system that folds case and one that does not.
+func githubEntry(repo string, issue int) store.TrackerEntry {
+	return store.TrackerEntry{Provider: store.ProviderGitHub, Scope: strings.ToLower(repo), ID: strconv.Itoa(issue)}
 }
 
-// hasRecord reports whether a record already sits at abs: jig finds issues
-// by their records only (brief.md#Adoption), never by searching GitHub for
-// a marker, so an item with one is left alone and one with none gets a new
-// issue.
-func hasRecord(abs string) (bool, error) {
-	if _, err := os.Stat(abs); err == nil {
-		return true, nil
-	} else if os.IsNotExist(err) {
-		return false, nil
-	} else {
-		return false, err
-	}
-}
-
-// writeRecord marshals rec with its leading "the mirror wrote this" comment
-// and writes it atomically to abs.
-func writeRecord(abs string, rec githubRecord) error {
-	data, err := yaml.Marshal(rec)
+// findRecord locates owner's GitHub record: in the tree, in the folder of the
+// repository the sync is configured for (repo) if the owner has a record
+// there, else the first it has in another (doSync refuses a record that is
+// not repo's), else the one still in the owner's own folder.
+func findRecord(st *store.Store, owner store.TrackerOwner, repo string) (*recordRef, error) {
+	recs, err := st.TrackerRecordsFor(owner)
 	if err != nil {
-		return fmt.Errorf("mirror: marshal record: %w", err)
+		return nil, err
 	}
-	return store.AtomicWrite(abs, append([]byte(recordHeader), data...))
+	var other *store.TrackerEntry
+	for _, rec := range recs {
+		if rec.Entry.Provider != store.ProviderGitHub {
+			continue
+		}
+		if strings.EqualFold(rec.Entry.Scope, repo) {
+			return &recordRef{entry: rec.Entry, inTree: true}, nil
+		}
+		if other == nil {
+			e := rec.Entry
+			other = &e
+		}
+	}
+	if other != nil {
+		return &recordRef{entry: *other, inTree: true}, nil
+	}
+	legacy, ok, err := st.LegacyTrackerRecord(owner)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return &recordRef{legacy: &legacy}, nil
+	}
+	return &recordRef{}, nil
 }
 
-// readRecord decodes the record at abs: Claim's write calls this after a
-// rejected push's pull to see whether the record it just brought in names
-// another clone's issue for the same ticket or chart (brief.md#Syncing at
-// every checkpoint).
-func readRecord(abs string) (githubRecord, error) {
-	data, err := os.ReadFile(abs)
-	if err != nil {
-		return githubRecord{}, fmt.Errorf("mirror: read record: %w", err)
-	}
+// decodeRecord reads the mirror's keys out of a record's mapping.
+func decodeRecord(fields yaml.Node) (githubRecord, error) {
 	var rec githubRecord
-	if err := yaml.Unmarshal(data, &rec); err != nil {
+	if fields.Kind == 0 {
+		return rec, nil
+	}
+	if err := fields.Decode(&rec); err != nil {
 		return githubRecord{}, fmt.Errorf("mirror: decode record: %w", err)
 	}
 	return rec, nil
 }
 
-// writeRecordLinks updates the record at abs's synced.links to links,
-// leaving its repo, issue and node id untouched, and writes it back
-// (brief.md#Links: "the record keeps the node ids of the links it last
-// wrote"). The write lands in the working tree only; it goes in with the
-// next checkpoint's commit, as every record change but a creation does
-// (brief.md#Syncing at every checkpoint).
-func writeRecordLinks(abs string, links syncedLinks) error {
-	rec, err := readRecord(abs)
+// readRecord decodes the record of item it: from the tree, or from the item's
+// own folder for one not moved yet. Claim's write calls this after a rejected
+// push's pull
+// to see whether the record it just brought in names another clone's issue for
+// the same ticket or chart (brief.md#Syncing at every checkpoint).
+func readRecord(st *store.Store, it item) (githubRecord, error) {
+	if it.ref.legacy != nil {
+		fields, err := st.ReadLegacyTrackerRecord(*it.ref.legacy)
+		if err != nil {
+			return githubRecord{}, fmt.Errorf("mirror: read record: %w", err)
+		}
+		return decodeRecord(fields)
+	}
+	recs, err := st.TrackerRecordsFor(it.owner())
+	if err != nil {
+		return githubRecord{}, fmt.Errorf("mirror: read record: %w", err)
+	}
+	for _, rec := range recs {
+		if rec.Entry == it.ref.entry {
+			return decodeRecord(rec.Fields)
+		}
+	}
+	return githubRecord{}, fmt.Errorf("mirror: read record: %s has no record at %s", it.what(), it.ref.entry)
+}
+
+// writeRecord writes rec as the record of item it in the tree, with its
+// leading "the mirror wrote this" comment. A record whose issue is not the one
+// its file is named for (an issue opened again, or a record kept under the
+// wrong name) is written under the name of the issue it holds, and the old
+// file and link go.
+func writeRecord(st *store.Store, it item, rec githubRecord) error {
+	entry := it.ref.entry
+	if rec.Issue >= 1 && rec.Repo != "" {
+		entry = githubEntry(rec.Repo, rec.Issue)
+		if it.ref.inTree && strings.EqualFold(entry.String(), it.ref.entry.String()) {
+			// The same place, spelled in another case: on a file system that
+			// folds case it is one file, which a move would delete.
+			entry = it.ref.entry
+		}
+	}
+	var fields yaml.Node
+	if err := fields.Encode(rec); err != nil {
+		return fmt.Errorf("mirror: marshal record: %w", err)
+	}
+	if err := st.WriteTrackerRecord(entry, it.owner(), &fields, recordHeader); err != nil {
+		return err
+	}
+	if it.ref.inTree && it.ref.entry != entry {
+		if err := st.RemoveTrackerRecord(it.ref.entry); err != nil {
+			return err
+		}
+	}
+	if it.ref.legacy != nil {
+		if err := st.DropLegacyTrackerRecord(*it.ref.legacy); err != nil {
+			return err
+		}
+		it.ref.legacy = nil
+	}
+	it.ref.entry, it.ref.inTree = entry, true
+	return nil
+}
+
+// writeRecordLinks updates item it's record's synced.links to links, leaving its
+// repo, issue and node id untouched, and writes it back (brief.md#Links: "the
+// record keeps the node ids of the links it last wrote"). The write lands in
+// the working tree only; it goes in with the next checkpoint's commit, as
+// every record change but a creation does (brief.md#Syncing at every
+// checkpoint).
+func writeRecordLinks(st *store.Store, it item, links syncedLinks) error {
+	rec, err := readRecord(st, it)
 	if err != nil {
 		return err
 	}
@@ -146,5 +227,22 @@ func writeRecordLinks(abs string, links syncedLinks) error {
 		rec.Synced = &syncedFields{}
 	}
 	rec.Synced.Links = links
-	return writeRecord(abs, rec)
+	return writeRecord(st, it, rec)
+}
+
+// githubRecordOf returns owner's GitHub record, wherever it sits, for a step
+// that reads a record the sync is not working through (the "Waits for" line
+// names a blocker's issue): the first the tree has, else the one in the
+// owner's own folder; ok is false when the owner has none.
+func githubRecordOf(st *store.Store, owner store.TrackerOwner) (rec githubRecord, ok bool, err error) {
+	ref, err := findRecord(st, owner, "")
+	if err != nil || !ref.has() {
+		return githubRecord{}, false, err
+	}
+	it := item{kind: "ticket", id: owner.Ticket, ref: ref}
+	if owner.Chart != "" {
+		it = item{kind: "chart", id: owner.Chart, ref: ref}
+	}
+	rec, err = readRecord(st, it)
+	return rec, err == nil, err
 }

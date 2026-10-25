@@ -44,6 +44,14 @@ func renderSyncReport(w io.Writer, report mirror.SyncReport, dryRun bool) bool {
 		axi.Render(w, axi.Table(createdLabel, []string{"what", "repo", "issue"}, rows))
 	}
 
+	if len(report.MovedRecords) > 0 {
+		rows := make([][]string, len(report.MovedRecords))
+		for i, m := range report.MovedRecords {
+			rows[i] = []string{m.What, m.From, m.To}
+		}
+		axi.Render(w, axi.Table("moved", []string{"what", "from", "to"}, rows))
+	}
+
 	if len(report.Recreated) > 0 {
 		rows := make([][]string, len(report.Recreated))
 		for i, c := range report.Recreated {

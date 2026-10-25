@@ -1256,12 +1256,12 @@ func TestGraduateRunsItsOwnCheckpointSync(t *testing.T) {
 		t.Fatalf("jig graduate mychart: exit %d\n%s", code, buf.String())
 	}
 
-	data, err := os.ReadFile(filepath.Join(clone, "tickets", "DEMO-1", "tracker", "github.yaml"))
-	if err != nil {
-		t.Fatalf("read DEMO-1's github.yaml: %v, want jig graduate's own checkpoint sync to have created it", err)
+	data, ok := treeRecordOf(t, clone, "DEMO-1")
+	if !ok {
+		t.Fatal("DEMO-1 has no record in the tracker tree, want jig graduate's own checkpoint sync to have created it")
 	}
-	if !strings.Contains(string(data), "issue: 1") {
-		t.Fatalf("github.yaml = %s, want issue: 1 from the checkpoint sync's CreateIssue", data)
+	if !strings.Contains(data, "issue: 1") {
+		t.Fatalf("DEMO-1's record = %s, want issue: 1 from the checkpoint sync's CreateIssue", data)
 	}
 }
 
@@ -1299,12 +1299,12 @@ func TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure(t *testing.T) {
 		t.Fatalf("jig graduate mychart output lacks DEMO-1 as already claimed:\n%s", buf.String())
 	}
 
-	data, err := os.ReadFile(filepath.Join(clone, "tickets", "DEMO-1", "tracker", "github.yaml"))
-	if err != nil {
-		t.Fatalf("read DEMO-1's github.yaml: %v, want the checkpoint sync to have run for it despite entry 2's failure", err)
+	data, ok := treeRecordOf(t, clone, "DEMO-1")
+	if !ok {
+		t.Fatal("DEMO-1 has no record in the tracker tree, want the checkpoint sync to have run for it despite entry 2's failure")
 	}
-	if !strings.Contains(string(data), "issue: 1") {
-		t.Fatalf("github.yaml = %s, want issue: 1 from the checkpoint sync's CreateIssue", data)
+	if !strings.Contains(data, "issue: 1") {
+		t.Fatalf("DEMO-1's record = %s, want issue: 1 from the checkpoint sync's CreateIssue", data)
 	}
 }
 
@@ -1357,10 +1357,10 @@ func TestGraduateSkipsTheCheckpointSyncOnAWriteChartFailureAfterMint(t *testing.
 	if _, err := os.Stat(filepath.Join(clone, "tickets", "DEMO-2")); err != nil {
 		t.Fatalf("DEMO-2's half-minted ticket folder is gone: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(clone, "tickets", "DEMO-2", "tracker", "github.yaml")); err == nil {
+	if _, ok := treeRecordOf(t, clone, "DEMO-2"); ok {
 		t.Fatal("DEMO-2 (half-minted, uncommitted) got a GitHub issue record despite the WriteChart failure")
 	}
-	if _, err := os.Stat(filepath.Join(clone, "tickets", "DEMO-1", "tracker", "github.yaml")); err == nil {
+	if _, ok := treeRecordOf(t, clone, "DEMO-1"); ok {
 		t.Fatal("DEMO-1 got synced despite the checkpoint hook being skipped entirely on this failure")
 	}
 }

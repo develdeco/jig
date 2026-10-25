@@ -186,16 +186,11 @@ func waitsForLine(st *store.Store, blockedBy []store.TicketBlockedBy) (string, e
 		if err != nil {
 			return "", err
 		}
-		_, abs := ticketRecordPath(st, blockerID)
-		has, err := hasRecord(abs)
+		rec, has, err := githubRecordOf(st, store.TrackerOwner{Ticket: blockerID})
 		if err != nil {
 			return "", err
 		}
 		if has {
-			rec, err := readRecord(abs)
-			if err != nil {
-				return "", err
-			}
 			parts[i] = fmt.Sprintf("%s (#%d, %s)", blockerID, rec.Issue, b.Kind)
 		} else {
 			parts[i] = fmt.Sprintf("%s (%s)", blockerID, b.Kind)

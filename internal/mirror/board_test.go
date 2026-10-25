@@ -104,7 +104,7 @@ func TestSyncPlacesIssuesAndPullRequestsOnTheBoard(t *testing.T) {
 		}
 	}
 
-	data, err := os.ReadFile(filepath.Join(st.TicketDir("DEMO-1"), "tracker", "github.yaml"))
+	data, err := os.ReadFile(treeRecordPath(t, st, "DEMO-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestSyncPlacesIssuesAndPullRequestsOnTheBoard(t *testing.T) {
 		t.Fatalf("DEMO-1's record prs = %+v, want only the open pull request #5, with its own item id", rec.PRs)
 	}
 
-	chartData, err := os.ReadFile(filepath.Join(st.Root, "charts", "demo", "github.yaml"))
+	chartData, err := os.ReadFile(treeRecordPath(t, st, "charts/demo"))
 	if err != nil {
 		t.Fatal(err)
 	}

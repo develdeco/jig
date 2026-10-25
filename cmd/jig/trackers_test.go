@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -140,8 +141,8 @@ func TestTrackersSyncDryRunReportsAWouldCreateTicket(t *testing.T) {
 	if !strings.Contains(out, "would_create") || !strings.Contains(out, "DEMO-1") {
 		t.Fatalf("output = %s, want a would_create row naming DEMO-1", out)
 	}
-	if _, err := os.Stat(filepath.Join(clone, "tickets", "DEMO-1", "tracker", "github.yaml")); !os.IsNotExist(err) {
-		t.Fatalf("--dry-run wrote a record (stat err %v), want nothing written", err)
+	if _, ok := treeRecordOf(t, clone, "DEMO-1"); ok {
+		t.Fatal("--dry-run wrote a record, want nothing written")
 	}
 }
 
@@ -231,10 +232,14 @@ func TestCheckpointSyncFailureReportsWarningAndStorePushSucceeds(t *testing.T) {
 // and its project resolves with every field in place.
 type stubGitHub struct {
 	issueTitle string
+	// created counts the issues CreateIssue has opened: each gets the next
+	// number, as GitHub gives them.
+	created int
 }
 
 func (s *stubGitHub) CreateIssue(context.Context, string, string, string, string) (github.Issue, error) {
-	return github.Issue{Number: 1, NodeID: "NODE_1"}, nil
+	s.created++
+	return github.Issue{Number: s.created, NodeID: "NODE_" + strconv.Itoa(s.created)}, nil
 }
 func (s *stubGitHub) CloseIssueNotPlanned(context.Context, string) error { return nil }
 func (s *stubGitHub) AddComment(context.Context, string, string) error   { return nil }
@@ -301,12 +306,12 @@ func TestTicketNewRunsItsOwnCheckpointSync(t *testing.T) {
 		t.Fatalf("jig ticket new: exit %d\n%s", code, buf.String())
 	}
 
-	data, err := os.ReadFile(filepath.Join(clone, "tickets", "DEMO-1", "tracker", "github.yaml"))
-	if err != nil {
-		t.Fatalf("read DEMO-1's github.yaml: %v, want jig ticket new's own checkpoint sync to have created it", err)
+	data, ok := treeRecordOf(t, clone, "DEMO-1")
+	if !ok {
+		t.Fatal("DEMO-1 has no record in the tracker tree, want jig ticket new's own checkpoint sync to have created it")
 	}
-	if !strings.Contains(string(data), "issue: 1") {
-		t.Fatalf("github.yaml = %s, want issue: 1 from the checkpoint sync's CreateIssue", data)
+	if !strings.Contains(data, "issue: 1") {
+		t.Fatalf("DEMO-1's record = %s, want issue: 1 from the checkpoint sync's CreateIssue", data)
 	}
 }
 

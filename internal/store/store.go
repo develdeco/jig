@@ -64,6 +64,10 @@ type Store struct {
 	// writer is the name this clone writes under in writers mode, resolved on
 	// first use by writerName (writers.go).
 	writer writerCache
+
+	// tracker is the tracker tree's memoized index and this clone's answer
+	// about symlinks (trackertree.go).
+	tracker trackerState
 }
 
 // invalidateAliasClaims drops the memoized aliasClaims result, so the next
@@ -74,10 +78,15 @@ type Store struct {
 // pull calls this too: a pull can bring in a ticket.yaml some other clone
 // wrote (a migration's aliases among them), so an alias that arrives this way
 // resolves at once rather than waiting for jig's own next write.
+//
+// It drops the tracker tree's memoized index too (invalidateTrackerIndex): a
+// record names its ticket, and that name is resolved through the aliases, so
+// what the index holds goes stale with them.
 func (s *Store) invalidateAliasClaims() {
 	s.aliasClaimsMu.Lock()
-	defer s.aliasClaimsMu.Unlock()
 	s.aliasClaimsCache = nil
+	s.aliasClaimsMu.Unlock()
+	s.invalidateTrackerIndex()
 }
 
 // RunCheckpointHook runs AfterCheckpoint, when set, after a checkpoint has
@@ -134,6 +143,37 @@ func (s *Store) TicketDir(id string) string {
 // one.
 func (s *Store) TicketRelDir(id string) string {
 	return filepath.Join(ticketsDirName, id)
+}
+
+// trackersDirName is the store-root folder of the tracker tree: one record and
+// one link per remote item, trackers/<provider>/<scope>/<remote id>
+// (trackertree.go).
+const trackersDirName = "trackers"
+
+// TrackerRelPath returns a tracker tree entry's path relative to the store
+// root, trackers/<provider>/<scope>/<remote id>: where the link to the
+// entry's ticket or chart sits. Like TicketRelDir, it is the one place the
+// tree's paths are named; TrackerRecordRelPath, TrackerPath and
+// TrackerRecordPath are its other forms.
+func (s *Store) TrackerRelPath(e TrackerEntry) string {
+	return filepath.Join(trackersDirName, e.Provider, filepath.FromSlash(e.Scope), e.ID)
+}
+
+// TrackerRecordRelPath returns the path, relative to the store root, of the
+// record beside an entry's link: <remote id>.yaml.
+func (s *Store) TrackerRecordRelPath(e TrackerEntry) string {
+	return s.TrackerRelPath(e) + trackerRecordSuffix
+}
+
+// TrackerPath returns an entry's absolute path (TrackerRelPath, rooted at
+// Root).
+func (s *Store) TrackerPath(e TrackerEntry) string {
+	return filepath.Join(s.Root, s.TrackerRelPath(e))
+}
+
+// TrackerRecordPath returns an entry's record's absolute path.
+func (s *Store) TrackerRecordPath(e TrackerEntry) string {
+	return filepath.Join(s.Root, s.TrackerRecordRelPath(e))
 }
 
 // HasRemote reports whether the store has a git remote named "origin".

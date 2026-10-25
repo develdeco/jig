@@ -27,12 +27,12 @@ type NotLinked struct {
 }
 
 // linkTicket is what linkParentsAndBlockers needs of one ticket item: its
-// id, record path and, once read, its record.
+// id, the item (for its record) and, once read, its record.
 type linkTicket struct {
-	id        string
-	recordAbs string
-	rec       githubRecord
-	has       bool
+	id  string
+	it  item
+	rec githubRecord
+	has bool
 }
 
 // linkParentsAndBlockers wires brief.md#Links for every item that already
@@ -61,15 +61,12 @@ func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.
 	chartsHave := map[string]bool{}
 
 	for _, it := range items {
-		has, err := hasRecord(it.recordAbs)
-		if err != nil {
-			return err
-		}
+		has := it.ref.has()
 		if it.kind == "chart" {
 			if !has {
 				continue
 			}
-			rec, err := readRecord(it.recordAbs)
+			rec, err := readRecord(st, it)
 			if err != nil {
 				return err
 			}
@@ -77,9 +74,9 @@ func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.
 			chartsHave[it.id] = true
 			continue
 		}
-		lt := &linkTicket{id: it.id, recordAbs: it.recordAbs, has: has}
+		lt := &linkTicket{id: it.id, it: it, has: has}
 		if has {
-			rec, err := readRecord(it.recordAbs)
+			rec, err := readRecord(st, it)
 			if err != nil {
 				return err
 			}
@@ -114,7 +111,7 @@ func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.
 				continue
 			}
 			cur, haveCur := curByWhat[lt.id]
-			if err := linkParent(ctx, client, lt, charts[name], name, cur, haveCur, report, dryRun); err != nil {
+			if err := linkParent(ctx, st, client, lt, charts[name], name, cur, haveCur, report, dryRun); err != nil {
 				return err
 			}
 		}
@@ -165,14 +162,14 @@ func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.
 // otherwise it is a plain new link, reported in LinkedParents. dryRun
 // previews the Drift/LinkedParents line without calling AddSubIssue or
 // writing the record.
-func linkParent(ctx context.Context, client github.Client, lt *linkTicket, chartRec githubRecord, chartName string, cur github.IssueState, haveCur bool, report *SyncReport, dryRun bool) error {
+func linkParent(ctx context.Context, st *store.Store, client github.Client, lt *linkTicket, chartRec githubRecord, chartName string, cur github.IssueState, haveCur bool, report *SyncReport, dryRun bool) error {
 	links := currentLinks(lt.rec)
 	wasSynced := links.Parent == chartRec.NodeID
 
 	if haveCur && cur.ParentID == chartRec.NodeID {
 		if !wasSynced && !dryRun {
 			links.Parent = chartRec.NodeID
-			if err := writeRecordLinks(lt.recordAbs, links); err != nil {
+			if err := writeRecordLinks(st, lt.it, links); err != nil {
 				return err
 			}
 			if lt.rec.Synced == nil {
@@ -189,7 +186,7 @@ func linkParent(ctx context.Context, client github.Client, lt *linkTicket, chart
 		}
 
 		links.Parent = chartRec.NodeID
-		if err := writeRecordLinks(lt.recordAbs, links); err != nil {
+		if err := writeRecordLinks(st, lt.it, links); err != nil {
 			return err
 		}
 		if lt.rec.Synced == nil {
@@ -283,7 +280,7 @@ func linkBlockedBy(ctx context.Context, st *store.Store, client github.Client, l
 	}
 	links := priorLinks
 	links.BlockedBy = newBlockedBy
-	if err := writeRecordLinks(lt.recordAbs, links); err != nil {
+	if err := writeRecordLinks(st, lt.it, links); err != nil {
 		return err
 	}
 	if lt.rec.Synced == nil {
