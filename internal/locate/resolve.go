@@ -221,23 +221,32 @@ func (l *locator) repoNameAt(dir string, cfgRepos []project.Repo, mp project.Mac
 			return name
 		}
 	}
-	if len(cfgRepos) == 1 {
-		return cfgRepos[0].Name()
-	}
-	if len(cfgRepos) > 1 {
-		if origin := originOf(dir); origin != "" {
-			norm := NormalizeRemote(origin)
-			for _, r := range cfgRepos {
-				if NormalizeRemote(r.Remote) == norm {
-					return r.Name()
-				}
-			}
-		}
+	if name := repoOfDir(dir, cfgRepos); name != "" {
+		return name
 	}
 	if len(m.Repos) == 1 && m.Repos[0].Name != "" {
 		return m.Repos[0].Name
 	}
 	return filepath.Base(dir)
+}
+
+// repoOfDir names the repo of repos that the clone at dir is: the only repo
+// there is, else the one whose remote is dir's origin. It is "" when there are
+// several and none is told by its remote: no repo owns a directory by being
+// listed first.
+func repoOfDir(dir string, repos []project.Repo) string {
+	if len(repos) == 1 {
+		return repos[0].Name()
+	}
+	if origin := originOf(dir); origin != "" && len(repos) > 1 {
+		norm := NormalizeRemote(origin)
+		for _, r := range repos {
+			if NormalizeRemote(r.Remote) == norm {
+				return r.Name()
+			}
+		}
+	}
+	return ""
 }
 
 // byMapPath finds the mapped clone that holds cwd: the longest clone path
@@ -395,8 +404,8 @@ func (l *locator) byStoreDir() bool {
 		}
 		l.setStore(sibling)
 		w.RepoDir = d
-		if cfg, err := project.LoadConfig(l.jigHome, sibling, "", d); err == nil && len(cfg.Repos) > 0 {
-			w.Repo = cfg.Repos[0].Name()
+		if cfg, err := project.LoadConfig(l.jigHome, sibling, "", d); err == nil {
+			w.Repo = repoOfDir(d, cfg.Repos)
 		}
 		w.Root = d
 		w.Kind = project.KindProject

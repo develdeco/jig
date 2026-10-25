@@ -11,7 +11,6 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
@@ -207,10 +206,13 @@ type nextBlocker struct {
 	Kind   string `json:"kind,omitempty"`
 }
 
-// nextBatch is one repo's ready slices, in the order they build.
+// nextBatch is one repo's ready slices, in the order they build, and where the
+// ticket's branch starts in that repo: its target branch on the origin. A
+// batch of slices no repo owns has none.
 type nextBatch struct {
 	Repo   string   `json:"repo"`
 	Slices []string `json:"slices"`
+	Start  string   `json:"start,omitempty"`
 }
 
 type nextSlice struct {
@@ -309,24 +311,6 @@ func isPublished(st *store.Store, id string) (bool, error) {
 	return false, nil
 }
 
-// projectRepos lists the project's repos with the workspaces each declares in
-// its manifest; a repo with no clone on this machine declares none.
-func projectRepos(cfg project.Config, mp project.MachineProject) []ready.Repo {
-	repos := make([]ready.Repo, 0, len(cfg.Repos))
-	for _, r := range cfg.Repos {
-		repo := ready.Repo{Name: r.Name()}
-		if dir := mp.Clones[repo.Name]; dir != "" {
-			if m, err := manifest.Resolve(dir); err == nil {
-				for _, ws := range m.Workspaces {
-					repo.Workspaces = append(repo.Workspaces, ws.ID)
-				}
-			}
-		}
-		repos = append(repos, repo)
-	}
-	return repos
-}
-
 // nextForTicket works out what is ready to build on ticket id, and which phase
 // it is at; asked is the phase --for named, "" for none.
 func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProject, id, distribution string, topology bool, asked phase.Name) (nextTicket, error) {
@@ -334,13 +318,13 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	if err != nil {
 		return nextTicket{}, err
 	}
-	target := "main"
-	if len(cfg.Repos) > 0 {
-		target = cfg.Repos[0].TargetBranch()
-	}
-	branch, err := st.ResolveTicketBranch(id, data.rec, target)
-	if err != nil {
-		return nextTicket{}, err
+	place := ready.Place(ready.ProjectRepos(cfg, mp.Clones), data.in.Slices)
+	// The branch is cut in every repo, so it must not be the target of any.
+	var branch string
+	for _, target := range projectTargets(cfg) {
+		if branch, err = st.ResolveTicketBranch(id, data.rec, target); err != nil {
+			return nextTicket{}, err
+		}
 	}
 
 	// Its blockers' own journals say whether they published.
@@ -354,7 +338,6 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	}
 	status := ready.Tickets(inputs)[0]
 
-	place := ready.Place(projectRepos(cfg, mp), data.in.Slices)
 	n := nextTicket{
 		Ticket: id, Title: data.title, State: status.State, Branch: branch, Distribution: distribution,
 		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous,
@@ -373,7 +356,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		}
 	}
 	for _, b := range ready.Batches(readySlices, place.Repo) {
-		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices})
+		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices, Start: startPoint(cfg, b.Repo)})
 	}
 	n.Advice = distributionAdvice(n.Ready)
 	n.setPhase(st, id, asked)
@@ -393,9 +376,28 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	return n, nil
 }
 
+// startPoint is where the ticket's branch starts in repo: the target branch of
+// the repo on its origin. It is "" for a repo the project does not have (the
+// name slices no repo owns are grouped under).
+func startPoint(cfg project.Config, repo string) string {
+	for _, r := range cfg.Repos {
+		if r.Name() == repo {
+			return "origin/" + r.TargetBranch()
+		}
+	}
+	return ""
+}
+
 // distributionAdvice says how the repos with ready slices can be shared out:
-// a repo's slices build one after the other, but repos are independent.
-func distributionAdvice(batches []nextBatch) []string {
+// a repo's slices build one after the other, but repos are independent. Slices
+// that no repo owns yet (ready.Unplaced) are no repo's to share out.
+func distributionAdvice(all []nextBatch) []string {
+	var batches []nextBatch
+	for _, b := range all {
+		if b.Repo != ready.Unplaced {
+			batches = append(batches, b)
+		}
+	}
 	switch len(batches) {
 	case 0:
 		return nil
@@ -436,15 +438,19 @@ func (n nextTicket) blocks(topology bool) []string {
 	} else {
 		var rows [][]string
 		for _, b := range n.Ready {
-			rows = append(rows, []string{b.Repo, joinPlus(b.Slices)})
+			start := b.Start
+			if start == "" {
+				start = "-"
+			}
+			rows = append(rows, []string{b.Repo, joinPlus(b.Slices), start})
 		}
-		blocks = append(blocks, axi.Table("ready", []string{"repo", "slices"}, rows))
+		blocks = append(blocks, axi.Table("ready", []string{"repo", "slices", "start"}, rows))
 	}
 	if len(n.Unplaced) > 0 {
 		blocks = append(blocks, "note: no repo declares workspace(s) "+strings.Join(n.Unplaced, ", ")+": their slices are grouped under ?")
 	}
 	if len(n.Ambiguous) > 0 {
-		blocks = append(blocks, "note: more than one repo declares workspace(s) "+strings.Join(n.Ambiguous, ", ")+": the first repo of the project owns them")
+		blocks = append(blocks, "note: more than one repo declares workspace(s) "+strings.Join(n.Ambiguous, ", ")+": name the repo in the slice, as <repo>/<workspace>; their slices are grouped under ?")
 	}
 	if n.PhaseProblem != "" {
 		blocks = append(blocks, "note: the phase of "+n.Ticket+" could not be told: "+n.PhaseProblem)
@@ -533,7 +539,28 @@ func (n nextTicket) help() []string {
 		prompt = ""
 	}
 	help = append(help, n.Advice...)
-	return append(help, fmt.Sprintf("Work on branch %s in each repo (`git switch -c %s` where it does not exist), then run `jig here` to confirm%s", n.Branch, n.Branch, prompt))
+	return append(help, fmt.Sprintf("Work on branch %s in each repo (%s where it does not exist), then run `jig here` to confirm%s", n.Branch, n.switchAdvice(), prompt))
+}
+
+// switchAdvice names the command that creates the ticket's branch in a repo,
+// from the start point of the ready slices when all of them share one, else
+// from the start of each repo's row in the ready table.
+func (n nextTicket) switchAdvice() string {
+	cmd := "git switch -c " + n.Branch
+	start := ""
+	for _, b := range n.Ready {
+		switch {
+		case b.Start == "":
+		case start == "":
+			start = b.Start
+		case start != b.Start:
+			return fmt.Sprintf("`%s <start>`, with the start of its row in `ready`,", cmd)
+		}
+	}
+	if start != "" {
+		cmd += " " + start
+	}
+	return "`" + cmd + "`"
 }
 
 // nextStore is what `jig next` says without a ticket.

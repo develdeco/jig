@@ -36,6 +36,7 @@ func correctionNotes(c observe.NoteCtx) ([]observe.Note, error) {
 		Harness:    c.Event.Harness,
 		Slice:      c.Where.Slice,
 		Cwd:        c.Where.Cwd,
+		Repo:       c.Where.Repo,
 		Now:        c.Now,
 		Since:      c.Since,
 		Commit:     c.Commit,

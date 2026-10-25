@@ -457,7 +457,7 @@ func (x *run) execute() (why string, err error) {
 	if err != nil {
 		return fmt.Sprintf("the manifest at %s does not resolve: %v", short(x.sha), err), nil
 	}
-	ws, _ := m.Workspace(x.sl.Workspace)
+	ws, _ := m.WorkspaceIn(x.d.Repo, x.sl.Workspace)
 	cmd := m.OracleCmd(x.sl.Oracle, ws)
 	if strings.TrimSpace(cmd) == "" {
 		return fmt.Sprintf("slice %s has no oracle to run", x.r.Slice), nil

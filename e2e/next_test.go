@@ -112,7 +112,7 @@ func TestNextReadySetsAndTickets(t *testing.T) {
 	r := runJig(t, env, fx.RepoDir, "next", "JIG-1")
 	for _, want := range []string{
 		"next:\n  ticket: JIG-1\n  state: ready\n  branch: jig/JIG-1\n",
-		"ready[2]{repo,slices}:\n  fixture-repo,a+c+d\n  second-repo,e\n",
+		"ready[2]{repo,slices,start}:\n  fixture-repo,a+c+d,origin/main\n  second-repo,e,origin/main\n",
 		"2 repos have ready slices (fixture-repo, second-repo)",
 		"git switch -c jig/JIG-1",
 	} {

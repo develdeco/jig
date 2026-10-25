@@ -392,6 +392,30 @@ func TestLocateStoreDir(t *testing.T) {
 	same(t, "RepoDir", got.RepoDir, app)
 }
 
+// TestLocateStandaloneStoreOfSeveralRepos: when the store beside a repo lists
+// several repos, the repo is the one whose remote is the clone's origin, and
+// none when no remote tells: the first one listed owns nothing by being first.
+func TestLocateStandaloneStoreOfSeveralRepos(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	api, web := "https://example.invalid/shop/api.git", "https://example.invalid/shop/web.git"
+
+	clone := w.repo("web", web)
+	w.store("web-tickets", "shop", api, web)
+	got := w.locate(clone, Opts{})
+	if got.How != HowStore || got.Repo != "web" {
+		t.Errorf("a clone of the second repo beside a store of two: %+v, want store and repo web", got)
+	}
+	same(t, "RepoDir", got.RepoDir, clone)
+
+	stray := w.repo("stray", "")
+	w.store("stray-tickets", "shop", api, web)
+	got = w.locate(stray, Opts{})
+	if got.How != HowStore || got.Repo != "" {
+		t.Errorf("a clone with no origin beside a store of two: %+v, want store and no repo", got)
+	}
+}
+
 // TestLocateTicketSliceSession: the ticket is the argument or the branch's;
 // the slice is the flag, JIG_SLICE or the session's claim; the session is the
 // flag or JIG_SESSION.

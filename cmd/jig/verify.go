@@ -15,6 +15,7 @@ import (
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verify"
 )
@@ -195,7 +196,10 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 	}
 	o.session = where.Session
 
-	repoName, target := verifyRepo(cfg, where.Repo)
+	repoName, target, err := verifyRepo(cfg, mp, where.Repo, o.cloneFlag)
+	if err != nil {
+		return none(err)
+	}
 	clone, workDir, err := verifyClone(cwd, o.cloneFlag, where.RepoDir, mp.Clones[repoName])
 	if err != nil {
 		return none(err)
@@ -216,6 +220,9 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 	if err != nil {
 		return none(err)
 	}
+	if err := verifySliceRepo(st, cfg, mp, ticket, slice, repoName); err != nil {
+		return none(err)
+	}
 
 	d := verify.Deps{
 		Store: st, JigHome: jigHome, Clone: clone, Repo: repoName, Target: target,
@@ -229,17 +236,71 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 
 // verifyRepo is the repo the commit is in, by its name in the project, and its
 // target branch: the one locate found around the working directory, else the
-// project's first.
-func verifyRepo(cfg project.Config, located string) (name, target string) {
+// one whose mapped clone is the clone named (--repo-dir), else the project's
+// only repo. A project of several repos with none to go by is refused: no
+// repo is the one that owns what is not placed.
+func verifyRepo(cfg project.Config, mp project.MachineProject, located, cloneFlag string) (name, target string, err error) {
 	for _, r := range cfg.Repos {
 		if located != "" && r.Name() == located {
-			return r.Name(), r.TargetBranch()
+			return r.Name(), r.TargetBranch(), nil
 		}
 	}
-	if len(cfg.Repos) > 0 {
-		return cfg.Repos[0].Name(), cfg.Repos[0].TargetBranch()
+	if cloneFlag != "" {
+		for _, r := range cfg.Repos {
+			if dir := mp.Clones[r.Name()]; dir != "" && gitx.SameDir(dir, cloneFlag) {
+				return r.Name(), r.TargetBranch(), nil
+			}
+		}
 	}
-	return located, ""
+	switch len(cfg.Repos) {
+	case 0:
+		return located, "", nil
+	case 1:
+		return cfg.Repos[0].Name(), cfg.Repos[0].TargetBranch(), nil
+	}
+	names := make([]string, len(cfg.Repos))
+	for i, r := range cfg.Repos {
+		names[i] = r.Name()
+	}
+	return "", "", &axi.Error{
+		Msg:  fmt.Sprintf("cannot tell which repo of the project the commit is in: this directory is in none of %s", strings.Join(names, ", ")),
+		Code: "VALIDATION_ERROR",
+		Help: []string{"Run `jig verify` from inside the clone of the repo the commit is in, or pass --repo-dir"},
+	}
+}
+
+// verifySliceRepo refuses a slice that builds in another repo of the project
+// than the one the commit is in: its oracle would be run on code it is not
+// about. A project of one repo, and a slice no repo owns yet (`jig validate`
+// says so), have nothing to refuse.
+func verifySliceRepo(st *store.Store, cfg project.Config, mp project.MachineProject, ticket, slice, repo string) error {
+	if len(cfg.Repos) < 2 {
+		return nil
+	}
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		return err
+	}
+	place := ready.Place(ready.ProjectRepos(cfg, mp.Clones), slices)
+	for _, s := range slices {
+		if s.ID != slice {
+			continue
+		}
+		owner := place.Repo[s.Workspace]
+		if owner == ready.Unplaced || owner == repo {
+			return nil
+		}
+		help := "Commit it in the clone of " + owner
+		if dir := mp.Clones[owner]; dir != "" {
+			help += ": " + dir
+		}
+		return &axi.Error{
+			Msg:  fmt.Sprintf("slice %s of %s builds in repo %s, but this commit is in repo %s", slice, ticket, owner, repo),
+			Code: "VALIDATION_ERROR",
+			Help: []string{help, "Or name the slice this commit is for: `Jig-Slice: <slice>` in its message, or --slice"},
+		}
+	}
+	return nil
 }
 
 // verifyClone finds the operator's clone to check the commit out from and the

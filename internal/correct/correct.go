@@ -32,8 +32,10 @@ type Input struct {
 	// Slice is the slice the session works on, "" for none.
 	Slice string
 	// Cwd is the directory of the event, in the repository the session
-	// commits to.
-	Cwd string
+	// commits to, and Repo that repository's name in the project ("" when it
+	// is none of its repos).
+	Cwd  string
+	Repo string
 
 	// Now is the clock; Since is when the session began (zero when unknown:
 	// nothing is then known to be the session own).
@@ -187,7 +189,7 @@ func scopeFact(in Input, all []store.Slice) (fact, error) {
 	if in.Cwd == "" {
 		return fact{}, errNone
 	}
-	d, drifted, err := Scope(in.Cwd, in.Commit, all)
+	d, drifted, err := Scope(in.Cwd, in.Repo, in.Commit, all)
 	if err != nil {
 		return fact{}, err
 	}

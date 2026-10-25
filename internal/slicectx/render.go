@@ -60,6 +60,11 @@ type Context struct {
 	Ticket string `json:"ticket"`
 	Title  string `json:"title,omitempty"`
 	Slice  Slice  `json:"slice"`
+	// Repo is the repo the slice builds in and Clone its clone on this
+	// machine, "" when the command that built the context left them out (a
+	// project of one repo has nothing to tell apart).
+	Repo  string `json:"repo,omitempty"`
+	Clone string `json:"clone,omitempty"`
 	// Brief and Intent are the absolute paths of the ticket brief.md and
 	// intent.md, "" when it has none.
 	Brief  string `json:"brief"`
@@ -213,7 +218,7 @@ func Build(in Input) (Context, error) {
 
 	if in.RepoDir != "" {
 		if m, err := manifest.Resolve(in.RepoDir); err == nil {
-			if ws, ok := m.Workspace(sl.Workspace); ok {
+			if ws, ok := m.WorkspaceIn(in.Repo, sl.Workspace); ok {
 				c.Slice.OracleCommand = m.OracleCmd(sl.Oracle, ws)
 			}
 		}
@@ -327,6 +332,8 @@ func (c Context) Blocks() []string {
 	add("title", c.Title)
 	pairs = append(pairs, [2]string{"slice", s.ID}, [2]string{"goal", s.Goal})
 	add("workspace", s.Workspace)
+	add("repo", c.Repo)
+	add("clone", c.Clone)
 	add("oracle", s.Oracle)
 	add("oracle_command", s.OracleCommand)
 	add("env", s.Env)
