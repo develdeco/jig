@@ -166,12 +166,24 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 	blocks := roundBlocks(p, "", false)
-	blocks = append(blocks, axi.Help(
-		"Spawn a fresh-context reviewer (a subagent or another session) with the `review` skill: it reads the round with `jig review context "+ticket+"` and ends with `jig review done "+ticket+"`",
-		"The agent that built the change must not review it: a reviewer who built part of it makes the round not clean (REVIEW_NOT_INDEPENDENT)",
-	))
+	blocks = append(blocks, axi.Help(gateAdvice(e, deps, ticket)...))
 	axi.Render(stdout, blocks...)
 	return 0
+}
+
+// gateAdvice is the help of an opened round: who reviews it. A session the
+// environment names is told whether it may review the ticket itself or has a
+// subagent do it (decision 39). With no session, as when the TUI's `g` opens
+// the round, nobody is advised: the help says only what a reviewer does and
+// who must not be one.
+func gateAdvice(e env, d verifydeliver.Deps, ticket string) []string {
+	if a, ok := sessionAdvice(e, d, ticket); ok {
+		return a.Lines
+	}
+	return []string{
+		"Have a fresh-context reviewer (a subagent or another session) run the `review` skill: it reads the round with `jig review context " + ticket + "` and ends with `jig review done " + ticket + "`",
+		"The agent that built the change must not review it: a reviewer who built part of it makes the round not clean (REVIEW_NOT_INDEPENDENT)",
+	}
 }
 
 // printGateReport prints a completed gate round's report. Gate failures
