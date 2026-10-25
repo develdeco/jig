@@ -361,3 +361,27 @@ func TestValidateCommandReportsTicketDepsProblem(t *testing.T) {
 		t.Fatalf("jig validate %s: output missing a cycle problem naming both tickets:\n%s", idA, out)
 	}
 }
+
+// TestValidateTicketDepsAcceptsARank: a ticket.yaml with a rank is valid, and
+// one whose rank is not an integer is the one problem of a record that cannot
+// be read.
+func TestValidateTicketDepsAcceptsARank(t *testing.T) {
+	t.Parallel()
+	st := &store.Store{Root: t.TempDir()}
+	mustMkdirTicket(t, st, "T-1")
+	rank := 2
+	if err := st.CreateTicketRecord("T-1", store.Ticket{Title: "Ranked", Rank: &rank}); err != nil {
+		t.Fatal(err)
+	}
+	if got := validateTicketDeps(st, "T-1"); got != nil {
+		t.Fatalf("validateTicketDeps with rank 2 = %v, want nil", got)
+	}
+
+	if err := os.WriteFile(st.TicketFilePath("T-1"), []byte("schema_version: 1\nrank: soon\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := validateTicketDeps(st, "T-1")
+	if len(got) == 0 || !strings.Contains(got[0], "ticket.yaml could not be read") {
+		t.Fatalf("validateTicketDeps with rank: soon = %v, want the record could not be read", got)
+	}
+}

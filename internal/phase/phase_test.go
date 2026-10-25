@@ -664,6 +664,48 @@ func TestPublishedIsDoneWhateverTheRest(t *testing.T) {
 	}
 }
 
+// TestClosedIsDoneWithNoPrompt: a closed ticket has four done phases whatever
+// its slices are, nothing to ask, and no phase that can run; its sub-steps are
+// at rest, and asking for any phase is answered with the closure.
+func TestClosedIsDoneWithNoPrompt(t *testing.T) {
+	t.Parallel()
+	f := approved() // three slices still queued, nothing built
+	f.Closed = "covered by develdeco/jig#82"
+	got := Derive(f, nil)
+	for _, p := range got.Phases {
+		if p.State != StateDone {
+			t.Errorf("%s = %s, want done", p.Name, p.State)
+		}
+		for _, s := range p.Subs {
+			switch s.State {
+			case SubActive, SubWaiting, SubNeedsYou:
+				t.Errorf("%s sub-step %s is %s, want a closed ticket at rest", p.Name, s.Key, s.State)
+			}
+		}
+	}
+	if got.Current != Publish || got.Ready || got.Code != CodeClosed || got.Prompt != "" {
+		t.Errorf("closed ticket = %+v, want current publish, not ready, %s, no prompt", got, CodeClosed)
+	}
+	if want := "SHOP-1 is closed (covered by develdeco/jig#82): `jig reopen SHOP-1` takes it back"; got.Reason != want {
+		t.Errorf("reason = %q, want %q", got.Reason, want)
+	}
+	if text := got.Of(Publish).Text; text != "closed · covered by develdeco/jig#82" {
+		t.Errorf("publish text = %q", text)
+	}
+	for _, p := range Names {
+		w := got.For(p)
+		if w.Ready || w.Code != CodeClosed || w.Warning != "" || !strings.Contains(w.Reason, "jig reopen SHOP-1") {
+			t.Errorf("For(%s) = %+v, want it refused as closed with no warning", p, w)
+		}
+	}
+
+	// A ticket closed after it published is closed first.
+	f.Published = true
+	if got = Derive(f, []journal.Line{ln(journal.EventPublishDone)}); got.Code != CodeClosed {
+		t.Errorf("a published ticket that was closed has code %s, want %s", got.Code, CodeClosed)
+	}
+}
+
 // TestAsksTakeTheirDecisionFromTheTriageLines: a decision is pending when its
 // line comes after the last round closed; the caller's own decision stands.
 func TestAsksTakeTheirDecisionFromTheTriageLines(t *testing.T) {
@@ -769,5 +811,33 @@ func TestTheStoresRoundsAreTheWordOnAVerdict(t *testing.T) {
 	fresh := Facts{Ticket: tk, BriefExists: true, Sections: 1, Slices: []Slice{{ID: "a", State: "queued"}, {ID: "r1-fix", State: "queued", FromGate: 1}}}
 	if got := Derive(fresh, nil); got.Current != Build {
 		t.Errorf("a fix slice with no approval: at %s, want build", got.Current)
+	}
+}
+
+// TestEverClaimed: a claim, the dispatch of the era before claims, or a
+// verification of any kind shows a slice was taken up, and a release does not
+// undo it. Approval, notes and the lines that only follow from a claim do not.
+func TestEverClaimed(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		lines []journal.Line
+		want  bool
+	}{
+		{"an empty journal", nil, false},
+		{"an approval and a note", []journal.Line{ln(journal.EventApproval), ln(journal.EventNote)}, false},
+		{"a question, an answer and a stall alone", []journal.Line{ln(journal.EventQuestion, onSlice("a")), ln(journal.EventAnswer, onSlice("a")), ln(journal.EventStall, onSlice("a"))}, false},
+		{"a claim", []journal.Line{ln(journal.EventClaim, onSlice("a"), by("s-1"))}, true},
+		{"a claim released again", []journal.Line{ln(journal.EventClaim, onSlice("a")), ln(journal.EventRelease, onSlice("a"))}, true},
+		{"a dispatch", []journal.Line{ln(journal.EventDispatch, onSlice("a"))}, true},
+		{"a verification pending", []journal.Line{ln(journal.EventVerifyPending, onSlice("a"))}, true},
+		{"an oracle run", []journal.Line{ln(journal.EventOracle, onSlice("a"))}, true},
+		{"a verified commit", []journal.Line{ln(journal.EventVerified, onSlice("a"))}, true},
+		{"a verification that errored", []journal.Line{ln(journal.EventVerifyError, onSlice("a"))}, true},
+	}
+	for _, tc := range tests {
+		if got := EverClaimed(tc.lines); got != tc.want {
+			t.Errorf("%s: EverClaimed = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

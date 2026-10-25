@@ -129,14 +129,34 @@ func prKey(owner, repo string, number int) string {
 	return fmt.Sprintf("%s/%s#%d", owner, repo, number)
 }
 
+// The Status of a ticket that was closed without being built (`jig close`).
+// A ticket covered by other work is Done, as one whose pull request merged is;
+// one that is superseded or not planned has a Status of its own.
+const (
+	StatusDone       = "Done"
+	StatusNotPlanned = "Not planned"
+)
+
 // TicketStatus derives ticket's Status (brief.md#Status and pull requests):
-// Done when any of prs merged; In review when one is open; In progress when
-// its journal is not empty or any slice has left queued; Briefed when it
-// has a brief.md; Backlog otherwise.
+// Done when it was closed as covered or any of prs merged; Not planned when it
+// was closed as superseded or not planned; In review when one of prs is open;
+// In progress when its journal is not empty or any slice has left queued;
+// Briefed when it has a brief.md; Backlog otherwise. A closure wins over every
+// other state: the store says the ticket is closed.
 func TicketStatus(st *store.Store, ticket string, prs []PRRef) (string, error) {
+	rec, err := st.ReadTicket(ticket)
+	if err != nil {
+		return "", err
+	}
+	if c := rec.Closed; c != nil {
+		if c.Reason == store.CloseCovered {
+			return StatusDone, nil
+		}
+		return StatusNotPlanned, nil
+	}
 	for _, pr := range prs {
 		if strings.EqualFold(pr.State, "MERGED") {
-			return "Done", nil
+			return StatusDone, nil
 		}
 	}
 	for _, pr := range prs {
@@ -181,8 +201,8 @@ func hasBrief(st *store.Store, ticket string) bool {
 
 // ChartStatus derives a chart's Status from its own tickets' Statuses
 // (brief.md#Status and pull requests): Done when it has tickets and every
-// one is Done; In progress when any is In progress, In review or Done;
-// Backlog otherwise.
+// one is finished, Done or Not planned (a closed ticket is finished); In
+// progress when any is In progress, In review or Done; Backlog otherwise.
 func ChartStatus(ticketStatuses []string) string {
 	if len(ticketStatuses) == 0 {
 		return "Backlog"
@@ -190,7 +210,7 @@ func ChartStatus(ticketStatuses []string) string {
 	allDone := true
 	anyAdvanced := false
 	for _, s := range ticketStatuses {
-		if s != "Done" {
+		if s != StatusDone && s != StatusNotPlanned {
 			allDone = false
 		}
 		if s == "In progress" || s == "In review" || s == "Done" {
@@ -207,7 +227,8 @@ func ChartStatus(ticketStatuses []string) string {
 }
 
 // IsOpen reports whether status's issue should be open on GitHub
-// (brief.md#Status and pull requests): every status but Done is open.
+// (brief.md#Status and pull requests): every status but Done and Not planned
+// is open.
 func IsOpen(status string) bool {
-	return status != "Done"
+	return status != StatusDone && status != StatusNotPlanned
 }

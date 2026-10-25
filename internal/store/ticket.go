@@ -50,6 +50,12 @@ type Ticket struct {
 	// stays in the one place that knows it. The default is never written
 	// here: a recorded branch is an adopted one (Adopted).
 	Branch string
+	// Rank is the ticket's place in the owner's priority order, written by
+	// jig rank: lower comes first. Nil means unranked, which `jig next`
+	// orders after every ranked ticket. Two tickets may hold the same rank;
+	// `jig next` orders them by id and says the rank is shared. Any integer
+	// is a rank to read; jig rank writes whole numbers from 1.
+	Rank *int
 	// BlockedBy is the ticket's own blockers, written by jig graduate.
 	BlockedBy []TicketBlockedBy
 	// Aliases is every earlier id this ticket has carried. Every rewrite of
@@ -58,6 +64,9 @@ type Ticket struct {
 	// ResolveTicket is the one place an alias turns back into this ticket's
 	// current id.
 	Aliases []string
+	// Closed is the ticket's closure: set when it was closed without a pull
+	// request (`jig close`), nil while it is open. See Closed.
+	Closed *Closed
 }
 
 // Adopted reports whether the ticket adopted a branch: a recorded branch is
@@ -75,8 +84,10 @@ type ticketFile struct {
 	Body          literalString     `yaml:"body,omitempty"`
 	Slug          string            `yaml:"slug,omitempty"`
 	Branch        string            `yaml:"branch,omitempty"`
+	Rank          *int              `yaml:"rank,omitempty"`
 	BlockedBy     []TicketBlockedBy `yaml:"blocked_by,omitempty"`
 	Aliases       []string          `yaml:"aliases,omitempty"`
+	Closed        *closedFile       `yaml:"closed,omitempty"`
 }
 
 // literalString marshals as a YAML literal block scalar ("|"), the same
@@ -170,7 +181,12 @@ func ReadTicketFile(path string) (Ticket, error) {
 			Help: []string{"Upgrade jig to a version that understands this ticket.yaml schema"},
 		}
 	}
-	return Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, BlockedBy: f.BlockedBy, Aliases: f.Aliases}, nil
+	t := Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, Rank: f.Rank, BlockedBy: f.BlockedBy, Aliases: f.Aliases}
+	if f.Closed != nil {
+		c := Closed(*f.Closed)
+		t.Closed = &c
+	}
+	return t, nil
 }
 
 // ReadTicketDeps reads <ticket>/ticket.yaml's blockers. An absent file
@@ -222,6 +238,15 @@ func (s *Store) CreateTicketRecord(ticket string, rec Ticket) error {
 // branch) never has to know or restate the others, and never races another
 // writer's own read-modify-write into dropping whichever field it changed.
 func (s *Store) mutateTicket(ticket string, fn func(*Ticket)) error {
+	return s.updateTicket(ticket, func(t *Ticket) error {
+		fn(t)
+		return nil
+	})
+}
+
+// updateTicket is mutateTicket for a change that can be refused: when fn
+// returns an error nothing is written and the error is returned as it is.
+func (s *Store) updateTicket(ticket string, fn func(*Ticket) error) error {
 	path := s.TicketFilePath(ticket)
 	release, _, err := Lock(path, 30*time.Second)
 	if err != nil {
@@ -233,7 +258,9 @@ func (s *Store) mutateTicket(ticket string, fn func(*Ticket)) error {
 	if err != nil {
 		return err
 	}
-	fn(&cur)
+	if err := fn(&cur); err != nil {
+		return err
+	}
 	if err := writeTicketFile(path, cur); err != nil {
 		return err
 	}
@@ -244,15 +271,21 @@ func (s *Store) mutateTicket(ticket string, fn func(*Ticket)) error {
 // writeTicketFile marshals t as a ticket.yaml at the current schema version
 // and writes it atomically to path. Its callers hold the store lock.
 func writeTicketFile(path string, t Ticket) error {
-	out, err := yaml.Marshal(ticketFile{
+	f := ticketFile{
 		SchemaVersion: ticketSchemaVersion,
 		Title:         t.Title,
 		Body:          literalString(t.Body),
 		Slug:          t.Slug,
 		Branch:        t.Branch,
+		Rank:          t.Rank,
 		BlockedBy:     t.BlockedBy,
 		Aliases:       t.Aliases,
-	})
+	}
+	if t.Closed != nil {
+		c := closedFile(*t.Closed)
+		f.Closed = &c
+	}
+	out, err := yaml.Marshal(f)
 	if err != nil {
 		return err
 	}
@@ -261,8 +294,8 @@ func writeTicketFile(path string, t Ticket) error {
 
 // WriteTicketBranch sets <ticket>/ticket.yaml's branch to branch, leaving
 // any recorded title and blockers untouched, and creating the record when
-// the ticket has none. It is the one update of a record that already exists:
-// a ticket's title and blockers are written once, whole, by
+// the ticket has none. With SetTicketRank it is an update of a record that
+// already exists: a ticket's title and blockers are written once, whole, by
 // CreateTicketRecord when the ticket is minted, and nothing changes them
 // afterwards. A ticket records a branch when it adopts one (`jig gate
 // --branch`) or when a session claims a slice on a branch no ticket's id
@@ -279,6 +312,26 @@ func (s *Store) WriteTicketBranch(ticket string, branch string) error {
 			t.Slug = Slug(t.Title)
 		}
 	})
+}
+
+// TicketFileRelPath returns <ticket>/ticket.yaml relative to the store root:
+// the path a Claim that edits the record stages and commits.
+func (s *Store) TicketFileRelPath(ticket string) string {
+	return filepath.Join(s.TicketRelDir(ticket), "ticket.yaml")
+}
+
+// SetTicketRank sets <ticket>/ticket.yaml's rank to *rank, or removes it when
+// rank is nil, leaving the rest of the record untouched. Setting a rank
+// creates the record when the ticket has none; removing one from a ticket
+// with no record writes nothing. It only writes the file: jig rank commits it
+// through Claim.
+func (s *Store) SetTicketRank(ticket string, rank *int) error {
+	if rank == nil {
+		if _, err := os.Stat(s.TicketFilePath(ticket)); os.IsNotExist(err) {
+			return nil
+		}
+	}
+	return s.mutateTicket(ticket, func(t *Ticket) { t.Rank = rank })
 }
 
 // SetMigratedTicket rewrites ticket's whole ticket.yaml as `jig store

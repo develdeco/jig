@@ -148,6 +148,9 @@ type fakeIssueState struct {
 	Title string
 	Body  string
 	Open  bool
+	// Reason is why a closed issue was closed: "completed" or "not planned";
+	// empty while it is open.
+	Reason string
 }
 
 // fakeUpdate is one UpdateIssue call fakeClient saw.
@@ -217,6 +220,8 @@ func (c *fakeClient) CreateIssue(_ context.Context, owner, repo, title, body str
 
 func (c *fakeClient) CloseIssueNotPlanned(_ context.Context, nodeID string) error {
 	c.closed = append(c.closed, nodeID)
+	st := c.issue(nodeID)
+	st.Open, st.Reason = false, "not planned"
 	return nil
 }
 
@@ -310,13 +315,15 @@ func (c *fakeClient) UpdateIssue(_ context.Context, nodeID, title, body string) 
 
 func (c *fakeClient) CloseIssueCompleted(_ context.Context, nodeID string) error {
 	c.closedDone = append(c.closedDone, nodeID)
-	c.issue(nodeID).Open = false
+	st := c.issue(nodeID)
+	st.Open, st.Reason = false, "completed"
 	return nil
 }
 
 func (c *fakeClient) ReopenIssue(_ context.Context, nodeID string) error {
 	c.reopened = append(c.reopened, nodeID)
-	c.issue(nodeID).Open = true
+	st := c.issue(nodeID)
+	st.Open, st.Reason = true, ""
 	return nil
 }
 
@@ -352,7 +359,7 @@ var fakeProjectV2 = github.ProjectV2{
 	StatusFieldID: "FIELD_STATUS",
 	StatusOptions: map[string]string{
 		"Backlog": "OPT_Backlog", "Briefed": "OPT_Briefed", "In progress": "OPT_In_progress",
-		"In review": "OPT_In_review", "Done": "OPT_Done",
+		"In review": "OPT_In_review", "Done": "OPT_Done", "Not planned": "OPT_Not_planned",
 	},
 	StoreIDFieldID: "FIELD_STOREID",
 }

@@ -684,7 +684,7 @@ func (s *fakeProjectServer) handleUpdateField(vars map[string]any, w http.Respon
 
 // TestEnsureProjectCreatesMissingFieldsAndLinksRepo checks brief.md#The
 // board's own creation path: an empty project gets its Status field (every
-// one of the five options) and its Store ID field created, and the issue
+// one of the six options) and its Store ID field created, and the issue
 // repo linked, since none of that exists yet.
 func TestEnsureProjectCreatesMissingFieldsAndLinksRepo(t *testing.T) {
 	fps := newFakeProjectServer()
@@ -702,10 +702,10 @@ func TestEnsureProjectCreatesMissingFieldsAndLinksRepo(t *testing.T) {
 	if proj.ID != "PROJECT_1" {
 		t.Fatalf("proj.ID = %q, want PROJECT_1", proj.ID)
 	}
-	if len(proj.StatusOptions) != 5 {
-		t.Fatalf("StatusOptions = %v, want all 5", proj.StatusOptions)
+	if len(proj.StatusOptions) != 6 {
+		t.Fatalf("StatusOptions = %v, want all 6", proj.StatusOptions)
 	}
-	for _, name := range []string{"Backlog", "Briefed", "In progress", "In review", "Done"} {
+	for _, name := range []string{"Backlog", "Briefed", "In progress", "In review", "Done", "Not planned"} {
 		if proj.StatusOptions[name] == "" {
 			t.Fatalf("StatusOptions missing %q: %v", name, proj.StatusOptions)
 		}
@@ -757,8 +757,8 @@ func TestEnsureProjectKeepsExistingOptionsAndAddsMissing(t *testing.T) {
 	if proj.StatusOptions["Backlog"] != "OPT_EXISTING_BACKLOG" {
 		t.Fatalf("Backlog option id = %q, want the existing one (OPT_EXISTING_BACKLOG) kept", proj.StatusOptions["Backlog"])
 	}
-	if len(proj.StatusOptions) != 5 {
-		t.Fatalf("StatusOptions = %v, want all 5 after adding the missing 4", proj.StatusOptions)
+	if len(proj.StatusOptions) != 6 {
+		t.Fatalf("StatusOptions = %v, want all 6 after adding the missing 5", proj.StatusOptions)
 	}
 
 	var createFields, updateFields int
@@ -775,6 +775,68 @@ func TestEnsureProjectKeepsExistingOptionsAndAddsMissing(t *testing.T) {
 	}
 	if updateFields != 1 {
 		t.Fatalf("updateField called %d times, want 1 (adding Status's missing options)", updateFields)
+	}
+}
+
+// TestEnsureProjectAddsTheNotPlannedOptionOnce checks that a project made when
+// the Status field had five options gets the sixth, "Not planned" (GRAY,
+// "Closed without being built"), added by the first sync that finds it missing,
+// with every option it had kept by id, name, color and description, and that a
+// project that has it is not touched again.
+func TestEnsureProjectAddsTheNotPlannedOptionOnce(t *testing.T) {
+	fps := newFakeProjectServer()
+	old := []projectFieldOption{
+		{ID: "OPT_OLD_BACKLOG", Name: "Backlog", Color: "GRAY", Description: "In the store, no brief yet"},
+		{ID: "OPT_OLD_BRIEFED", Name: "Briefed", Color: "BLUE", Description: "Brief written, no slice has run"},
+		{ID: "OPT_OLD_PROGRESS", Name: "In progress", Color: "YELLOW", Description: "Slices building or gate rounds running"},
+		{ID: "OPT_OLD_REVIEW", Name: "In review", Color: "PURPLE", Description: "Pull request open"},
+		{ID: "OPT_OLD_DONE", Name: "Done", Color: "GREEN", Description: "Pull request merged"},
+	}
+	fps.fields = []projectFieldNode{
+		{ID: "FIELD_STATUS", Name: "Status", Options: old},
+		{ID: "FIELD_STOREID", Name: "Store ID"},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query, vars := decodeGraphQLRequest(t, r)
+		fps.handle(t, w, query, vars)
+	}))
+	defer srv.Close()
+
+	updates := func() int {
+		n := 0
+		for _, call := range fps.calls {
+			if call == "updateField" {
+				n++
+			}
+		}
+		return n
+	}
+	c := newFastClient(srv.URL, "test-token")
+	for round := 1; round <= 2; round++ {
+		proj, err := c.EnsureProject(context.Background(), "example", false, 7, "example", "tracking")
+		if err != nil {
+			t.Fatalf("EnsureProject (round %d): %v", round, err)
+		}
+		for _, o := range old {
+			if proj.StatusOptions[o.Name] != o.ID {
+				t.Fatalf("round %d: option %q has id %q, want its own %q kept", round, o.Name, proj.StatusOptions[o.Name], o.ID)
+			}
+		}
+		if proj.StatusOptions["Not planned"] == "" || len(proj.StatusOptions) != 6 {
+			t.Fatalf("round %d: StatusOptions = %v, want the six, Not planned among them", round, proj.StatusOptions)
+		}
+		if got := updates(); got != 1 {
+			t.Fatalf("round %d: updateField called %d times in all, want once (the first round adds the option, the second finds it)", round, got)
+		}
+	}
+	var added projectFieldOption
+	for _, o := range fps.fields[0].Options {
+		if o.Name == "Not planned" {
+			added = o
+		}
+	}
+	if added.Color != "GRAY" || added.Description != "Closed without being built" {
+		t.Fatalf("the added option = %+v, want GRAY, \"Closed without being built\"", added)
 	}
 }
 

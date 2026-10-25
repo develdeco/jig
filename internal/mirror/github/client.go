@@ -73,7 +73,7 @@ type ProjectV2 struct {
 	// StatusFieldID is the project's "Status" single-select field.
 	StatusFieldID string
 	// StatusOptions maps each Status option's name (Backlog, Briefed, In
-	// progress, In review, Done) to its own option id.
+	// progress, In review, Done, Not planned) to its own option id.
 	StatusOptions map[string]string
 	// StoreIDFieldID is the project's "Store ID" text field.
 	StoreIDFieldID string
@@ -867,13 +867,17 @@ type statusOptionSpec struct {
 	Name, Color, Description string
 }
 
-// statusOptions are brief.md#The board's five Status options.
+// statusOptions are brief.md#The board's five Status options, then the one a
+// ticket closed without being built (superseded, or not planned) is placed
+// under. A project that has the first five gets the sixth added, keeping
+// every option it has.
 var statusOptions = []statusOptionSpec{
 	{"Backlog", "GRAY", "In the store, no brief yet"},
 	{"Briefed", "BLUE", "Brief written, no slice has run"},
 	{"In progress", "YELLOW", "Slices building or gate rounds running"},
 	{"In review", "PURPLE", "Pull request open"},
 	{"Done", "GREEN", "Pull request merged"},
+	{"Not planned", "GRAY", "Closed without being built"},
 }
 
 // projectFieldOption is one option of a ProjectV2SingleSelectField, as the
