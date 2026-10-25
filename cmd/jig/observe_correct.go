@@ -9,7 +9,8 @@ import (
 
 // The correction notes: a slice that fails its oracle the same way twice, a
 // brief that changed under verified work, a commit outside the workspaces the
-// slices build in. internal/correct decides them; this source hands them to the
+// slices build in, a commit that names no slice. internal/correct decides them;
+// this source hands them to the
 // observe core, which tells the session at its next tool call or prompt and,
 // when the session is unattended, refuses to let it stop once for each.
 func init() {

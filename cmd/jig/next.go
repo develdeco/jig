@@ -87,14 +87,16 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		n, err := nextForTicket(st, cfg, mp, id, distribution, *topology, asked)
+		// A ticket is read for its own sake: the blockers it is held on are asked
+		// of the host now, not taken from what this machine remembers.
+		n, err := nextForTicket(st, cfg, mp, id, distribution, *topology, asked, newMergeReader(e, st, cfg, mp, jigHome, 0))
 		if err != nil {
 			return renderErr(stdout, err)
 		}
 		n.setReviewer(e, verifydeliver.Deps{Store: st, Home: jigHome})
 		out, blocks = n, n.blocks(*topology)
 	} else {
-		n, err := nextForStore(st, cfg, mp)
+		n, err := nextForStore(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge))
 		if err != nil {
 			return renderErr(stdout, err)
 		}
@@ -192,8 +194,8 @@ func parseAskedPhase(word, ticket string) (phase.Name, error) {
 // asked when --for named a phase. It is best-effort: a ticket whose phase
 // cannot be derived (a gate round it cannot read, say) still gets the rest of
 // `jig next`, and says why the phase is missing.
-func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name) {
-	t, err := derivePhase(st, id)
+func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merges mergeSource) {
+	t, err := derivePhaseWith(st, id, merges)
 	if err != nil {
 		n.PhaseProblem = err.Error()
 		return
@@ -224,9 +226,14 @@ func (n *nextTicket) setReviewer(e env, d verifydeliver.Deps) {
 	}
 }
 
+// nextBlocker is a blocker that is not met, with what it is missing (Fact: it
+// has not published, its PR is open, no merge is on record, ...) and, when the
+// host's answer behind that is not from this run, the time it was read.
 type nextBlocker struct {
 	Ticket string `json:"ticket"`
 	Kind   string `json:"kind,omitempty"`
+	Fact   string `json:"fact,omitempty"`
+	AsOf   string `json:"as_of,omitempty"`
 }
 
 // nextBatch is one repo's ready slices, in the order they build, and where the
@@ -336,7 +343,7 @@ func isPublished(st *store.Store, id string) (bool, error) {
 
 // nextForTicket works out what is ready to build on ticket id, and which phase
 // it is at; asked is the phase --for named, "" for none.
-func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProject, id, distribution string, topology bool, asked phase.Name) (nextTicket, error) {
+func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProject, id, distribution string, topology bool, asked phase.Name, merges mergeSource) (nextTicket, error) {
 	data, err := readTicketData(st, id)
 	if err != nil {
 		return nextTicket{}, err
@@ -350,7 +357,8 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		}
 	}
 
-	// Its blockers' own journals say whether they published.
+	// Its blockers' own journals say whether they published, and merges whether
+	// their work has merged.
 	inputs := []ready.Ticket{data.in}
 	for _, b := range data.in.Blockers {
 		published, err := isPublished(st, b.Ticket)
@@ -359,6 +367,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		}
 		inputs = append(inputs, ready.Ticket{ID: b.Ticket, Published: published})
 	}
+	readMerges(merges, inputs)
 	status := ready.Tickets(inputs)[0]
 
 	n := nextTicket{
@@ -366,7 +375,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous,
 	}
 	for _, b := range status.Blocked {
-		n.BlockedBy = append(n.BlockedBy, nextBlocker{Ticket: b.Ticket, Kind: b.Kind})
+		n.BlockedBy = append(n.BlockedBy, blockerFact(b, status.Why[b.Ticket], inputs))
 	}
 	isReady := map[string]bool{}
 	for _, id := range status.Ready {
@@ -382,7 +391,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices, Start: startPoint(cfg, b.Repo)})
 	}
 	n.Advice = distributionAdvice(n.Ready)
-	n.setPhase(st, id, asked)
+	n.setPhase(st, id, asked, merges)
 	if topology {
 		waves := ready.Waves(data.in.Slices)
 		for _, s := range data.in.Slices {
@@ -455,9 +464,9 @@ func (n nextTicket) blocks(topology bool) []string {
 	if len(n.BlockedBy) > 0 {
 		var rows [][]string
 		for _, b := range n.BlockedBy {
-			rows = append(rows, []string{b.Ticket, b.Kind})
+			rows = append(rows, []string{b.Ticket, b.Kind, b.Fact})
 		}
-		blocks = append(blocks, axi.Table("blocked_by", []string{"ticket", "kind"}, rows))
+		blocks = append(blocks, axi.Table("blocked_by", []string{"ticket", "kind", "fact"}, rows))
 	}
 	if len(n.Ready) == 0 {
 		blocks = append(blocks, "ready: none")
@@ -546,7 +555,7 @@ func (n nextTicket) help() []string {
 		if t != nil && t.Code != phase.CodeBlocked {
 			prompt = ""
 		}
-		return []string{fmt.Sprintf("%s waits for %s to publish: run `jig next` to see a ticket that is ready%s", n.Ticket, n.BlockedBy[0].Ticket, prompt)}
+		return []string{fmt.Sprintf("%s waits for %s: %s; run `jig next` to see a ticket that is ready%s", n.Ticket, n.BlockedBy[0].Ticket, n.BlockedBy[0].Fact, prompt)}
 	case ready.StateNew:
 		return []string{fmt.Sprintf("%s has no slices yet: draft its brief and slices with the intake skill, checking them with `jig validate %s --check`, and run `jig validate %s` once the person has confirmed the brief%s",
 			n.Ticket, n.Ticket, n.Ticket, promptHint(phase.Prompt(phase.Brief, n.Ticket)))}
@@ -616,7 +625,7 @@ type nextOverlap struct {
 
 // nextForStore lists the tickets of the store in order with what blocks each,
 // and the files local ticket branches fight over.
-func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject) (nextStore, error) {
+func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource) (nextStore, error) {
 	ids, err := st.TicketIDs()
 	if err != nil {
 		return nextStore{}, err
@@ -627,6 +636,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		datas[i] = readTicketDataOrProblem(st, id)
 		inputs[i] = datas[i].in
 	}
+	readMerges(merges, inputs)
 	out := nextStore{Tickets: []nextRow{}, Next: []string{}}
 	for i, s := range ready.Tickets(inputs) {
 		row := nextRow{ID: s.ID, Title: datas[i].title, State: s.State, Ready: s.Ready}
@@ -634,7 +644,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 			row.Ready = []string{}
 		}
 		for _, b := range s.Blocked {
-			row.BlockedBy = append(row.BlockedBy, nextBlocker{Ticket: b.Ticket, Kind: b.Kind})
+			row.BlockedBy = append(row.BlockedBy, blockerFact(b, s.Why[b.Ticket], inputs))
 		}
 		if datas[i].problem != "" {
 			row.State, row.Problem, row.Ready = stateInvalid, datas[i].problem, []string{}
@@ -670,6 +680,17 @@ func (n nextStore) blocks() []string {
 		rows = append(rows, []string{t.ID, t.Title, t.State, blocked, readySlices})
 	}
 	blocks := []string{axi.Table("tickets", []string{"id", "title", "state", "blocked_by", "ready"}, rows)}
+	// What each blocker that is not met is missing, so the table above (which
+	// names who waits for whom) need not.
+	var waiting [][]string
+	for _, t := range n.Tickets {
+		for _, b := range t.BlockedBy {
+			waiting = append(waiting, []string{t.ID, b.Ticket, b.Fact})
+		}
+	}
+	if len(waiting) > 0 {
+		blocks = append(blocks, axi.Table("waiting", []string{"ticket", "blocker", "fact"}, waiting))
+	}
 	var invalid [][]string
 	for _, t := range n.Tickets {
 		if t.Problem != "" {

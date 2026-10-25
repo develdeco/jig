@@ -208,6 +208,8 @@ func TestCheckScopeDriftIsOfferedAgainToTheSessionThatMadeIt(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	in := w.input()
+	// The session works on slice a, which names it for the commits it makes.
+	in.Slice = "a"
 
 	in.Commit = w.commitFiles("inside", "alpha/a.go")
 	if notes, err := Check(in); err != nil || len(notes) != 0 {
@@ -215,7 +217,6 @@ func TestCheckScopeDriftIsOfferedAgainToTheSessionThatMadeIt(t *testing.T) {
 	}
 
 	in.Commit = w.commitFiles("outside", "alpha/b.go", "docs/readme.md")
-	in.Slice = "a"
 	notes, err := Check(in)
 	if err != nil || len(notes) != 1 || notes[0].Kind != KindScope || notes[0].Ref != "scope:"+in.Commit[:12] || !strings.Contains(notes[0].Text, "docs/readme.md") {
 		t.Fatalf("Check = %+v, %v, want the scope drift of the commit", notes, err)

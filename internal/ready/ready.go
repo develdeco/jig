@@ -125,7 +125,8 @@ const (
 	// StateDone: the ticket's pull requests were published (its journal has
 	// publish-done).
 	StateDone = "done"
-	// StateBlocked: a blocker in its ticket.yaml has not published yet.
+	// StateBlocked: a blocker in its ticket.yaml is not met: it has not
+	// published, or its work has not merged.
 	StateBlocked = "blocked"
 	// StateReady: not blocked, and at least one slice is ready to build.
 	StateReady = "ready"
@@ -155,36 +156,48 @@ type Ticket struct {
 	Blockers []Blocker
 	// Published is whether the ticket's journal has a publish-done line.
 	Published bool
-	Slices    []store.Slice
-	States    map[string]store.SliceState
+	// Merge is whether the ticket's work has merged, as its caller read it
+	// (the recorded pull request, the branch). A merged blocker is met by it;
+	// nil when the caller read none, and then having published is all that is
+	// known of the ticket. A stacked blocker is met by publishing either way.
+	Merge  *Merge
+	Slices []store.Slice
+	States map[string]store.SliceState
 }
 
 // Status is the readiness of one ticket.
 type Status struct {
 	ID    string
 	State string
-	// Blocked is the blockers that have not published, in ticket.yaml order.
+	// Blocked is the blockers that are not met, in ticket.yaml order, and Why
+	// says what each is missing, keyed by the blocking ticket.
 	Blocked []Blocker
+	Why     map[string]string
 	// Ready is the ids of the slices ready to build, in slices.yaml order;
 	// none for a ticket that is done or blocked.
 	Ready []string
 }
 
 // Tickets works out the readiness of each of tickets, in the order given. A
-// blocker is met when it is one of tickets and has published; one that is
-// not among them counts as unmet, so a ticket never reads as free because
-// its blocker went missing.
+// merged blocker is met when it is one of tickets and its work has merged
+// (Ticket.Merge), or, with no merge read for it, when it has published. A
+// stacked blocker is met by publishing. One that is not among tickets counts
+// as unmet, so a ticket never reads as free because its blocker went missing.
 func Tickets(tickets []Ticket) []Status {
-	published := make(map[string]bool, len(tickets))
+	byID := make(map[string]Ticket, len(tickets))
 	for _, t := range tickets {
-		published[t.ID] = t.Published
+		byID[t.ID] = t
 	}
 	out := make([]Status, 0, len(tickets))
 	for _, t := range tickets {
 		st := Status{ID: t.ID}
 		for _, b := range t.Blockers {
-			if !published[b.Ticket] {
+			if why := unmet(b, byID); why != "" {
 				st.Blocked = append(st.Blocked, b)
+				if st.Why == nil {
+					st.Why = map[string]string{}
+				}
+				st.Why[b.Ticket] = why
 			}
 		}
 		// A published ticket has nothing left to build and a blocked one
@@ -211,6 +224,20 @@ func Tickets(tickets []Ticket) []Status {
 		out = append(out, st)
 	}
 	return out
+}
+
+// unmet is what blocker b is missing, "" when it is met.
+func unmet(b Blocker, byID map[string]Ticket) string {
+	t, ok := byID[b.Ticket]
+	switch {
+	case !ok:
+		return "it is not a ticket of the store"
+	case b.Kind != "stacked" && t.Merge != nil:
+		return t.Merge.Why()
+	case !t.Published:
+		return NotPublished
+	}
+	return ""
 }
 
 func allGreen(slices []store.Slice, states map[string]store.SliceState) bool {

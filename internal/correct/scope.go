@@ -24,23 +24,39 @@ type ScopeDrift struct {
 // Ref fingerprints the drift by its commit.
 func (d ScopeDrift) Ref() string { return "scope:" + short12(d.Commit) }
 
-// WorkspacePaths lists the paths, cleaned and with forward slashes, of the
-// workspaces the slices build in, as the manifest m of the repo called repo
-// places them (a slice of a project of several repos writes its workspace as
+// A SliceWorkspace is a slice and the path of the workspace it builds in.
+type SliceWorkspace struct {
+	Slice string
+	// Path is the workspace path, cleaned and with forward slashes.
+	Path string
+}
+
+// SliceWorkspaces lists, in the order of all, each slice with the path of the
+// workspace it builds in, as the manifest m of the repo called repo places it
+// (a slice of a project of several repos writes its workspace as
 // "<repo>/<id>"). A slice whose workspace m does not have builds in another
 // repo of the project, so it says nothing about this one and is passed over.
-func WorkspacePaths(m manifest.Manifest, repo string, all []store.Slice) []string {
-	var out []string
-	seen := map[string]bool{}
+func SliceWorkspaces(m manifest.Manifest, repo string, all []store.Slice) []SliceWorkspace {
+	var out []SliceWorkspace
 	for _, sl := range all {
 		ws, ok := m.WorkspaceIn(repo, sl.Workspace)
 		if !ok {
 			continue
 		}
-		p := path.Clean(strings.ReplaceAll(ws.Path, "\\", "/"))
-		if !seen[p] {
-			seen[p] = true
-			out = append(out, p)
+		out = append(out, SliceWorkspace{Slice: sl.ID, Path: path.Clean(strings.ReplaceAll(ws.Path, "\\", "/"))})
+	}
+	return out
+}
+
+// WorkspacePaths lists the paths, cleaned and with forward slashes, of the
+// workspaces the slices build in, once each, as SliceWorkspaces places them.
+func WorkspacePaths(m manifest.Manifest, repo string, all []store.Slice) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, sw := range SliceWorkspaces(m, repo, all) {
+		if !seen[sw.Path] {
+			seen[sw.Path] = true
+			out = append(out, sw.Path)
 		}
 	}
 	return out

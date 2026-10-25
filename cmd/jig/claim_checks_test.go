@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -50,49 +51,101 @@ func codes(problems []claimProblem) string {
 	return strings.Join(out, ",")
 }
 
-// TestClaimProblemsOfAMergedBlocker: a merged blocker meets the claim once it
-// published, and when it has a pull request the host can tell is not merged
-// it does not; a host that cannot tell blocks nothing.
+// mergesOf is a mergeSource that answers from a table: the merge fact of each
+// ticket it holds, and of any other the zero one (it has not published).
+type mergesOf map[string]ready.Merge
+
+func (m mergesOf) Of(ticket string) (ready.Merge, error) { return m[ticket], nil }
+
+// TestClaimProblemsOfAMergedBlocker: a merged blocker meets the claim once its
+// work has merged (its recorded pull request is merged, or with none recorded
+// its branch is in the target); published is not enough. Each way it is not met
+// is named, with what meets it, and a claim that reads no merge facts judges the
+// blocker by its journal alone.
 func TestClaimProblemsOfAMergedBlocker(t *testing.T) {
 	t.Parallel()
 	st := checkStore(t, "merged")
 	approveBrief(t, st, "JIG-2")
-	never := claimDeps{merged: func(string) (bool, bool) {
-		t.Error("the host was asked about a blocker that had not published")
-		return true, true
-	}}
+	const pr = "https://github.com/o/r/pull/4"
 
-	got, err := claimProblems(st, "JIG-2", never)
-	if err != nil || codes(got) != claimBlockedMerged || !strings.Contains(got[0].Message, "JIG-1") {
-		t.Fatalf("unpublished blocker: %+v, %v, want CLAIM_BLOCKED_MERGED naming JIG-1", got, err)
+	got, err := claimProblems(st, "JIG-2", claimDeps{merges: mergesOf{}})
+	if err != nil || codes(got) != claimBlockedMerged || !strings.Contains(got[0].Message, "JIG-1, which has not published") {
+		t.Fatalf("unpublished blocker: %+v, %v, want CLAIM_BLOCKED_MERGED saying JIG-1 has not published", got, err)
 	}
 
-	for _, l := range []journal.Line{{Event: journal.EventPublishDone}, {Event: journal.EventPr, URL: "https://github.com/o/r/pull/4"}} {
-		if err := journal.Append(st, "JIG-1", l); err != nil {
-			t.Fatal(err)
-		}
+	merge := func(r ready.RepoMerge) mergesOf {
+		return mergesOf{"JIG-1": {Published: true, Repos: []ready.RepoMerge{r}}}
 	}
 	for _, tc := range []struct {
-		name          string
-		merged, known bool
-		want          string
+		name     string
+		fact     ready.RepoMerge
+		want     string
+		message  string
+		helpWith string
 	}{
-		{"merged", true, true, ""},
-		{"not merged yet", false, true, claimBlockedMerged},
-		{"the host cannot tell", false, false, ""},
+		{"its pull request is merged", ready.JudgeRepo(ready.Evidence{Ticket: "JIG-1", PR: pr, State: ready.PRMerged}), "", "", ""},
+		{"its branch is in the target", ready.JudgeRepo(ready.Evidence{Ticket: "JIG-1", Ancestor: true}), "", "", ""},
+		{"its pull request is open", ready.JudgeRepo(ready.Evidence{Ticket: "JIG-1", PR: pr, State: ready.PROpen}), claimBlockedMerged,
+			"JIG-2 waits for JIG-1: its PR is open (" + pr + ")", "Merge " + pr},
+		{"its pull request was closed", ready.JudgeRepo(ready.Evidence{Ticket: "JIG-1", PR: pr, State: ready.PRClosed}), claimBlockedMerged,
+			"JIG-2 waits for JIG-1: its PR was closed without merging (" + pr + ")", "jig publish JIG-1 --pr <url>"},
+		{"the host cannot be asked", ready.JudgeRepo(ready.Evidence{Ticket: "JIG-1", PR: pr, Offline: true}), claimBlockedMerged,
+			"JIG-2 waits for JIG-1: its PR could not be read from the host (" + pr + ")", "gh auth status"},
+		{"nothing is on record", ready.JudgeRepo(ready.Evidence{Ticket: "JIG-1"}), claimBlockedMerged,
+			"JIG-2 waits for JIG-1: no merge on record: record its PR with `jig publish JIG-1 --pr <url>`", "record it with `jig publish JIG-1 --pr <url>`"},
 	} {
-		var asked string
-		deps := claimDeps{merged: func(url string) (bool, bool) { asked = url; return tc.merged, tc.known }}
-		got, err := claimProblems(st, "JIG-2", deps)
+		got, err := claimProblems(st, "JIG-2", claimDeps{merges: merge(tc.fact)})
 		if err != nil || codes(got) != tc.want {
 			t.Errorf("%s: %+v, %v, want %q", tc.name, got, err, tc.want)
+			continue
 		}
-		if asked != "https://github.com/o/r/pull/4" {
-			t.Errorf("%s: the host was asked about %q, want the pull request of the blocker", tc.name, asked)
+		if tc.want != "" && (got[0].Message != tc.message || !strings.Contains(got[0].Help, tc.helpWith)) {
+			t.Errorf("%s: message %q, help %q, want message %q and help naming %q", tc.name, got[0].Message, got[0].Help, tc.message, tc.helpWith)
 		}
 	}
+
+	// With no merge facts to read, publishing is all the journal says.
+	if got, _ := claimProblems(st, "JIG-2", claimDeps{}); codes(got) != claimBlockedMerged {
+		t.Errorf("an unpublished blocker with no facts to read: %+v, want it blocked", got)
+	}
+	if err := journal.Append(st, "JIG-1", journal.Line{Event: journal.EventPublishDone}); err != nil {
+		t.Fatal(err)
+	}
 	if got, _ := claimProblems(st, "JIG-2", claimDeps{}); got != nil {
-		t.Errorf("with no host to ask, a published blocker still blocks: %+v", got)
+		t.Errorf("with no merge facts to read, a published blocker still blocks: %+v", got)
+	}
+}
+
+// TestClaimProblemsOfAMergedBlockerInSeveralRepos: a blocker that built in two
+// repos is met only when each is, and what is missing names its repo.
+func TestClaimProblemsOfAMergedBlockerInSeveralRepos(t *testing.T) {
+	t.Parallel()
+	st := checkStore(t, "merged")
+	approveBrief(t, st, "JIG-2")
+	const (
+		apiPR = "https://github.com/o/api/pull/1"
+		webPR = "https://github.com/o/web/pull/2"
+	)
+	merged := func(repo, pr string) ready.RepoMerge {
+		return ready.JudgeRepo(ready.Evidence{Ticket: "JIG-1", Repo: repo, PR: pr, State: ready.PRMerged})
+	}
+	merges := mergesOf{"JIG-1": {Published: true, Repos: []ready.RepoMerge{
+		merged("api", apiPR),
+		ready.JudgeRepo(ready.Evidence{Ticket: "JIG-1", Repo: "web", PR: webPR, State: ready.PROpen}),
+	}}}
+	got, err := claimProblems(st, "JIG-2", claimDeps{merges: merges})
+	if err != nil || codes(got) != claimBlockedMerged {
+		t.Fatalf("one repo merged, one open: %+v, %v, want CLAIM_BLOCKED_MERGED", got, err)
+	}
+	if want := "JIG-2 waits for JIG-1: web: its PR is open (" + webPR + ")"; got[0].Message != want {
+		t.Errorf("message = %q, want %q (only the repo that is missing)", got[0].Message, want)
+	}
+	if !strings.Contains(got[0].Help, "web: Merge "+webPR) || strings.Contains(got[0].Help, "api") {
+		t.Errorf("help = %q, want it to name the web repo's pull request only", got[0].Help)
+	}
+	merges["JIG-1"] = ready.Merge{Published: true, Repos: []ready.RepoMerge{merged("api", apiPR), merged("web", webPR)}}
+	if got, err := claimProblems(st, "JIG-2", claimDeps{merges: merges}); err != nil || got != nil {
+		t.Errorf("both repos merged: %+v, %v, want none", got, err)
 	}
 }
 

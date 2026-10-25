@@ -72,3 +72,10 @@ func verifyLeaf(storeID, ticket, sha, slice string) (string, error) {
 	}
 	return fmt.Sprintf("%s-%s", short, slice), nil
 }
+
+// PullRequestStatesPath returns the file this machine keeps what it has read
+// of pull requests' states in: <root>/cache/pull-requests.json. It is a cache
+// of the repo host's answers, never a store's record, and is safe to delete.
+func PullRequestStatesPath(root string) string {
+	return filepath.Join(root, "cache", "pull-requests.json")
+}
