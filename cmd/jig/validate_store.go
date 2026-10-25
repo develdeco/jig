@@ -29,6 +29,9 @@ const (
 	advisorySlicesUnconnected = "SLICES_UNCONNECTED"
 	// advisoryWorkCovered: a slice goal comes near work that shipped.
 	advisoryWorkCovered = "WORK_COVERED"
+	// advisoryNotMinted: the ticket has a brief but no ticket.yaml, so it was
+	// made by hand and never minted.
+	advisoryNotMinted = "TICKET_NOT_MINTED"
 )
 
 // advisory is something worth a planner a second look in a ticket that is
@@ -84,11 +87,29 @@ func validateUpstreamEdges(st *store.Store, ticket string) []string {
 	return problems
 }
 
-// validateAdvisories gathers the advisories for the slices of ticket:
-// independent groups of slices first, then every slice goal that reads like
-// shipped work.
+// unmintedAdvisories is the advisory for a ticket that has a brief but no
+// ticket.yaml: its folder was made by hand, so it has no title, no slug and no
+// minted id, and its branch is named from its brief's heading or its bare id.
+// A ticket with no brief is not planned yet, and has nothing to say.
+func unmintedAdvisories(st *store.Store, ticket string) []advisory {
+	if _, err := os.Stat(filepath.Join(st.TicketDir(ticket), "brief.md")); err != nil {
+		return nil
+	}
+	if _, err := os.Stat(st.TicketFilePath(ticket)); !os.IsNotExist(err) {
+		return nil
+	}
+	return []advisory{{
+		Code:    advisoryNotMinted,
+		Message: fmt.Sprintf("not minted: %s has a brief but no ticket.yaml, so it has no title, slug or minted id", ticket),
+		Help:    "Run `jig ticket new --title \"<title>\"`, which mints the id, and plan under the id it prints; never make a ticket's folder by hand",
+	}}
+}
+
+// validateAdvisories gathers the advisories for the slices of ticket: a ticket
+// that was never minted first, then independent groups of slices, then every
+// slice goal that reads like shipped work.
 func validateAdvisories(st *store.Store, ticket string, slices []store.Slice) []advisory {
-	var out []advisory
+	out := unmintedAdvisories(st, ticket)
 	// Whether the plan is one concern is a question about the slices the
 	// brief planned: a fix slice is a gate round's (from_gate), joined to the
 	// work it fixes by the round, not by a blocked_by edge.

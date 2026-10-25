@@ -23,6 +23,11 @@ func TestValidateFixture(t *testing.T) {
 	if !strings.Contains(r.Stdout, "valid: yes") {
 		t.Fatalf("stdout missing \"valid: yes\":\n%s", r.Stdout)
 	}
+	// The fixture ticket has a brief and no ticket.yaml: it passes, and is
+	// advised to be minted.
+	if !strings.Contains(r.Stdout, "TICKET_NOT_MINTED") || !strings.Contains(r.Stdout, "jig ticket new") {
+		t.Fatalf("stdout lacks the advisory for a ticket that was not minted:\n%s", r.Stdout)
+	}
 }
 
 // TestValidateCheckRecordsNoApproval: --check is the drafting session's
