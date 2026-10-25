@@ -128,7 +128,13 @@ func (t *ticket) subKey(l events.Envelope) string {
 		return "body"
 	case journal.EventPublishApproved:
 		return "approval"
-	case journal.EventPr, journal.EventSquash:
+	case journal.EventPr:
+		// A publish of several repos has a pull request sub-step for each.
+		if l.Repo != "" && len(t.publish().Repos) > 0 {
+			return "pr:" + l.Repo
+		}
+		return "pr"
+	case journal.EventSquash:
 		return "pr"
 	case journal.EventChangelog, journal.EventMemorize:
 		return "changelog"
@@ -188,6 +194,9 @@ func (t *ticket) labelOf(ls subLabels, l events.Envelope) string {
 		return label
 	}
 	kind, id, _ := strings.Cut(key, ":")
+	if kind == "pr" {
+		return "pull request " + id
+	}
 	return kind + " " + id
 }
 
@@ -295,11 +304,11 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		}
 		return text
 	case journal.EventPrBody:
-		return "written for " + commitWords(t, l.Commit)
+		return "written for " + repoWords(l) + commitWords(t, l.Commit)
 	case journal.EventPublishPicks:
 		return strings.TrimSpace("demo " + firstOf(l.Outcome, "picked") + ": " + firstOf(pickSummary(l), l.Summary))
 	case journal.EventPublishApproved:
-		return firstOf(m.byWhom(t, l.Provenance, l.Session), "someone") + " approved " + short(l.Commit)
+		return firstOf(m.byWhom(t, l.Provenance, l.Session), "someone") + " approved " + repoWords(l) + short(l.Commit)
 	case journal.EventPr:
 		return strings.TrimSpace(firstOf(l.Outcome, "recorded") + " " + l.URL)
 	case journal.EventSquash:
@@ -312,6 +321,15 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return "finished"
 	}
 	return strings.TrimSpace(l.Event + " " + firstOf(l.Summary, l.Outcome))
+}
+
+// repoWords is the repo a publish line names with a space after it, none for a
+// line that names no repo.
+func repoWords(l events.Envelope) string {
+	if l.Repo == "" {
+		return ""
+	}
+	return l.Repo + " "
 }
 
 // attemptWords is " (attempt n)" for a line of a numbered attempt.

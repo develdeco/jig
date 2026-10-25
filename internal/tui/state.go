@@ -384,23 +384,66 @@ type publishInfo struct {
 	ApprovedFor, ApprovedBy string // the head a person approved, and who
 	PR, PROutcome           string
 	Done                    bool
+	// Repos are the repos the publish lines name, in the order each first
+	// appears, when there are several: a ticket that publishes in several
+	// repos has a pull request for each. A publish of one repo has none.
+	Repos []publishRepo
+}
+
+// publishRepo is what the journal says of one repo of a publish: the same
+// facts as publishInfo, and the position of the line each came from, -1 for
+// none.
+type publishRepo struct {
+	Name                     string
+	BodyFor                  string
+	ApprovedFor, ApprovedBy  string
+	PR, PROutcome            string
+	BodyAt, ApprovedAt, PRAt int
 }
 
 func (t *ticket) publish() publishInfo {
 	var p publishInfo
-	for _, l := range t.lines {
+	by := map[string]*publishRepo{}
+	var order []string
+	repoOf := func(name string) *publishRepo {
+		if name == "" {
+			return nil
+		}
+		r := by[name]
+		if r == nil {
+			r = &publishRepo{Name: name, BodyAt: -1, ApprovedAt: -1, PRAt: -1}
+			by[name] = r
+			order = append(order, name)
+		}
+		return r
+	}
+	for i, l := range t.lines {
 		switch l.Event {
 		case journal.EventPrBody:
 			p.BodyFor, p.Branch = l.Commit, firstOf(l.Branch, p.Branch)
+			if r := repoOf(l.Repo); r != nil {
+				r.BodyFor, r.BodyAt = l.Commit, i
+			}
 		case journal.EventPublishApproved:
 			p.ApprovedFor, p.ApprovedBy, p.Branch = l.Commit, l.Provenance, firstOf(l.Branch, p.Branch)
+			if r := repoOf(l.Repo); r != nil {
+				r.ApprovedFor, r.ApprovedBy, r.ApprovedAt = l.Commit, l.Provenance, i
+			}
 		case journal.EventPr:
 			if l.URL != "" {
 				p.PR, p.PROutcome = l.URL, l.Outcome
 			}
 			p.Branch = firstOf(l.Branch, p.Branch)
+			if r := repoOf(l.Repo); r != nil && l.URL != "" {
+				r.PR, r.PROutcome, r.PRAt = l.URL, l.Outcome, i
+			}
 		case journal.EventPublishDone:
 			p.Done = true
+		}
+	}
+	if len(order) > 1 {
+		for _, name := range order {
+			p.Repos = append(p.Repos, *by[name])
 		}
 	}
 	return p
@@ -529,11 +572,11 @@ func describe(l events.Envelope) string {
 	case journal.EventTriage:
 		return strings.TrimSpace(l.Ref + " " + l.Outcome + who + " " + l.Summary)
 	case journal.EventPrBody:
-		return "pr body rendered " + short(l.Commit)
+		return "pr body rendered " + repoWords(l) + short(l.Commit)
 	case journal.EventPublishApproved:
-		return "publish approved " + short(l.Commit) + who
+		return "publish approved " + repoWords(l) + short(l.Commit) + who
 	case journal.EventPr:
-		return strings.TrimSpace("pr " + l.Outcome + " " + l.URL)
+		return strings.TrimSpace("pr " + repoWords(l) + l.Outcome + " " + l.URL)
 	case journal.EventPublishDone:
 		return "published"
 	}

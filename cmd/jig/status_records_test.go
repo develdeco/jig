@@ -341,3 +341,52 @@ func TestStatusPublishNamesThePullRequestAndTheFirstLinesOfItsBody(t *testing.T)
 		t.Errorf("changelog = %q (%q), want the consolidated changelog's lines without its title", got["changelog"], got["changelog_file"])
 	}
 }
+
+// TestStatusPublishListsThePullRequestOfEachRepo: a publish whose lines name two
+// repos has one pull request for each. The block keeps what is the ticket's (its
+// branch) and a table has a row for each repo, with a dash for what the repo has
+// not done yet; a ticket whose lines name one repo reads as it always did.
+func TestStatusPublishListsThePullRequestOfEachRepo(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	st := openStore(t, fx)
+	branch := "jig/" + fx.Ticket
+	api, web := sha40("a"), sha40("b")
+	lines := []journal.Line{
+		{Event: journal.EventPrBody, Commit: api, Branch: branch, Repo: "api", Ref: "tickets/" + fx.Ticket + "/pr/api.md"},
+		{Event: journal.EventPrBody, Commit: web, Branch: branch, Repo: "web", Ref: "tickets/" + fx.Ticket + "/pr/web.md"},
+		{Event: journal.EventPublishApproved, Commit: web, Branch: branch, Repo: "web", Provenance: "person"},
+		{Event: journal.EventPr, Commit: api, Branch: branch, Repo: "api", Outcome: "opened", URL: "https://example.test/acme/api/pull/7"},
+	}
+	for _, l := range lines {
+		if err := journal.Append(st, fx.Ticket, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := statusOf(t, fx, st)
+	got := strings.Join(block(out, "publish:"), "\n")
+	for _, bad := range []string{"  pr:", "  head:", "  body_file:"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("the publish block of a ticket in two repos has %q:\n%s", bad, got)
+		}
+	}
+	if !strings.Contains(got, "branch: "+branch) || !strings.Contains(got, "ticket: "+fx.Ticket) {
+		t.Errorf("publish block = %s, want the ticket and its branch", got)
+	}
+	want := []string{
+		"publish_prs[2]{repo,pr,state,head,body_file}:",
+		`  api,"https://example.test/acme/api/pull/7",opened,` + api + ",tickets/" + fx.Ticket + "/pr/api.md",
+		"  web,-,-," + web + ",tickets/" + fx.Ticket + "/pr/web.md",
+	}
+	if table := block(out, "publish_prs["); strings.Join(table, "\n") != strings.Join(want, "\n") {
+		t.Errorf("publish_prs:\n%s\nwant\n%s", strings.Join(table, "\n"), strings.Join(want, "\n"))
+	}
+
+	// The second pull request is recorded: both rows have theirs.
+	if err := journal.Append(st, fx.Ticket, journal.Line{Event: journal.EventPr, Commit: web, Branch: branch, Repo: "web", Outcome: "recorded", URL: "https://example.test/acme/web/pull/3"}); err != nil {
+		t.Fatal(err)
+	}
+	if table := block(statusOf(t, fx, st), "publish_prs["); table[2] != `  web,"https://example.test/acme/web/pull/3",recorded,`+web+",tickets/"+fx.Ticket+"/pr/web.md" {
+		t.Errorf("the web's row after its pull request was recorded = %q", table[2])
+	}
+}

@@ -438,3 +438,58 @@ func contextWithTimeout(t *testing.T, d time.Duration) context.Context {
 	t.Cleanup(cancel)
 	return ctx
 }
+
+// jig2Repos is JIG-2 published in two repos: its lines to the clean round, then
+// a body and an approval for each repo, a pull request for each, and the end.
+func jig2Repos() []events.Envelope {
+	in := func(repo string, mod func(*journal.Line)) func(*journal.Line) {
+		return func(l *journal.Line) {
+			l.Repo, l.Branch = repo, "jig/JIG-2"
+			mod(l)
+		}
+	}
+	commit := func(sha string) func(*journal.Line) { return func(l *journal.Line) { l.Commit = sha } }
+	approved := func(sha string) func(*journal.Line) {
+		return func(l *journal.Line) { l.Commit, l.Provenance = sha, "person" }
+	}
+	opened := func(sha, url string) func(*journal.Line) {
+		return func(l *journal.Line) { l.Commit, l.Outcome, l.URL = sha, "opened", url }
+	}
+	return append(jig2()[:8],
+		jl(at(14, 0), "JIG-2", "", journal.EventPrBody, in("api", commit(sha('c')))),
+		jl(at(14, 1), "JIG-2", "", journal.EventPrBody, in("web", commit(sha('d')))),
+		jl(at(14, 10), "JIG-2", "", journal.EventPublishApproved, in("api", approved(sha('c')))),
+		jl(at(14, 11), "JIG-2", "", journal.EventPublishApproved, in("web", approved(sha('d')))),
+		jl(at(14, 20), "JIG-2", "", journal.EventPr, in("api", opened(sha('c'), "https://example.test/acme/api/pull/7"))),
+		jl(at(14, 21), "JIG-2", "", journal.EventPr, in("web", opened(sha('d'), "https://example.test/acme/web/pull/3"))),
+		jl(at(14, 22), "JIG-2", "", journal.EventPublishDone),
+	)
+}
+
+// statusJIG2Repos is `jig status JIG-2` once it is published in two repos: the
+// publish block has the branch and the changelog, and a table the pull request
+// of each repo.
+func statusJIG2Repos() string {
+	return strings.Join([]string{
+		"ticket: JIG-2",
+		"state: green",
+		"fix_budget: 1 of 3 rounds used",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal", "workspace", "oracle", "from_gate"}, [][]string{
+			{"a", "green", "1", "-", "-", "Load the config", "api/alpha", "unit", "-"},
+			{"b", "green", "1", "-", "-", "Show the config", "web/beta", "unit", "-"},
+		}),
+		"questions: none",
+		axi.Table("rounds", roundColumns, [][]string{
+			{"1", "clean", "s-reviewer", "claude", "claude-opus-5", "true", "0", "0", "0", "full", "api:" + sha('0') + "+web:" + sha('0'), "api:" + sha('c') + "+web:" + sha('d'), "4"},
+		}),
+		axi.KV("publish", [][2]string{
+			{"ticket", "JIG-2"}, {"branch", "jig/JIG-2"},
+			{"changelog_file", "tickets/JIG-2/changelog/consolidated.md"}, {"changelog", "## Slices\n- a: ccccccc\n- b: ddddddd"},
+		}),
+		axi.Table("publish_prs", []string{"repo", "pr", "state", "head", "body_file"}, [][]string{
+			{"api", "https://example.test/acme/api/pull/7", "opened", sha('c'), "tickets/JIG-2/pr/api.md"},
+			{"web", "https://example.test/acme/web/pull/3", "opened", sha('d'), "tickets/JIG-2/pr/web.md"},
+		}),
+		axi.Help("JIG-2 is published: run `jig next` to see the tickets that are left"),
+	}, "\n") + "\n"
+}
