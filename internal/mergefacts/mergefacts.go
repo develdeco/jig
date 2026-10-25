@@ -135,9 +135,8 @@ func (r *Reader) builtIn(ticket string) ([]repoRef, error) {
 	if err != nil {
 		return nil, err
 	}
-	place := ready.Place(ready.ProjectRepos(r.Cfg, r.Clones), slices)
 	used := map[string]bool{}
-	for _, name := range place.Repo {
+	for _, name := range ready.BuiltIn(ready.ProjectRepos(r.Cfg, r.Clones), slices) {
 		used[name] = true
 	}
 	var out []repoRef
@@ -145,9 +144,6 @@ func (r *Reader) builtIn(ticket string) ([]repoRef, error) {
 		if used[repo.name] {
 			out = append(out, repo)
 		}
-	}
-	if len(out) == 0 {
-		return all, nil
 	}
 	return out, nil
 }

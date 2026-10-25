@@ -30,6 +30,7 @@ import (
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -98,6 +99,20 @@ type publishTarget struct {
 	// qualified is whether the project has several repos. A journal line of
 	// its publish names the repo, and a round names a file <repo>/<path>.
 	qualified bool
+	// stack is where the ticket stands in this repo against a parent it is
+	// stacked on (Deps.Stack): the zero value when it is stacked on nothing
+	// here.
+	stack stack.Repo
+}
+
+// base is the branch the repo's pull request goes into: the branch of the
+// parent the ticket is stacked on while that has not merged in the repo, else
+// the repo's target.
+func (t *publishTarget) base() string {
+	if t.stack.Shared() && t.stack.PRTarget != "" {
+		return t.stack.PRTarget
+	}
+	return t.target
 }
 
 // reviewedHead is the head the last clean gate round reviewed for the repo:
@@ -273,12 +288,25 @@ func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
 	for i, gr := range covered {
 		names[i] = gr.name
 	}
+	// A ticket stacked on another goes into the parent's branch where they
+	// share a repo: read before anything is written, so a stack that cannot be
+	// read refuses the publish rather than opening a pull request into the
+	// wrong branch.
+	var plan stack.Plan
+	if d.Stack != nil {
+		if plan, err = d.Stack(ticket); err != nil {
+			return nil, fmt.Errorf("verifydeliver: publish: read what %s is stacked on: %w", ticket, err)
+		}
+	}
 	targets := make([]*publishTarget, len(repos))
 	for i, gr := range repos {
 		targets[i] = &publishTarget{
 			ticket: ticket, repo: gr.repo, repoName: gr.name, target: gr.target, rec: rec, branch: branch,
 			slices: slices, repoSlices: gr.slices, gateRep: gateRep, lastRound: lastRound,
 			covered: names, qualified: len(d.Cfg.Repos) > 1,
+		}
+		if r, ok := plan.In(gr.name); ok {
+			targets[i].stack = r
 		}
 	}
 	return targets, nil
@@ -396,6 +424,17 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	if err := fn.fetchOrigin(lease.Dir); err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
 	}
+	// A pull request into the branch of the parent the ticket is stacked on
+	// needs that branch on the origin: jig pushes no branch but the ticket's.
+	if base := pt.base(); base != target {
+		if _, err := gitx.RevParse(lease.Dir, "refs/remotes/origin/"+base); err != nil {
+			return nil, &axi.Error{
+				Msg:  fmt.Sprintf("%s is stacked on %s, whose branch %s is not on the origin of %s, so no pull request can go into it", ticket, pt.stack.Parent, base, repoName),
+				Code: "PUBLISH_PARENT_NOT_PUSHED",
+				Help: []string{fmt.Sprintf("Publish %s first (its branch goes to the origin), then publish %s again", pt.stack.Parent, ticket)},
+			}
+		}
+	}
 
 	// Publish ships what was reviewed: the head it would ship must be the head
 	// the last clean round reviewed (when that round recorded heads), because a
@@ -434,7 +473,7 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	// is on origin.
 	openPR := ""
 	if host != nil {
-		if openPR, err = host.FindOpenPR(branch, target); err != nil {
+		if openPR, err = host.FindOpenPR(branch, pt.base()); err != nil {
 			return nil, fmt.Errorf("verifydeliver: publish: look for an open pull request from %s: %w", branch, err)
 		}
 	}
@@ -823,7 +862,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		return publication{}, err
 	}
 	write := func(links []prLink) (string, bool, DemoRenderResult, error) {
-		return writePRBody(d.Store, ticket, t.repoName, t.bodySlices(), t.report(), "none", commits, authorCommits, in.oracleNames, outcomes, picked, links)
+		return writePRBody(d.Store, ticket, t.repoName, t.bodySlices(), t.report(), "none", commits, authorCommits, in.oracleNames, outcomes, picked, links, t.stack)
 	}
 	prPath, omittedBriefIntent, demoResult, err := write(in.links)
 	if err != nil {
@@ -897,7 +936,8 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 }
 
 // openOrUpdatePR opens the branch's pull request, or updates the one it
-// already has open into the target with this publish's body: none is opened
+// already has open into its base (the target, or the branch of the parent the
+// ticket is stacked on) with this publish's body: none is opened
 // beside an open one. A closed or merged pull request, or one into another
 // base, is not that one (FindOpenPR): the operator asked to publish, so one is
 // opened, and the others are left as they are. A repo with no pull-request
@@ -922,7 +962,7 @@ func openOrUpdatePR(d Deps, host repohost.Host, t *publishTarget, r publication,
 		return openPR, "updated", nil
 	}
 	if len(r.mediaFiles) > 0 {
-		url, attached, err := host.CreatePRWithMedia(t.branch, t.target, r.title, bodyFile, r.mediaDir, r.mediaFiles)
+		url, attached, err := host.CreatePRWithMedia(t.branch, t.base(), r.title, bodyFile, r.mediaDir, r.mediaFiles)
 		if err != nil {
 			return "", "", fmt.Errorf("verifydeliver: publish: create PR with media: %w", err)
 		}
@@ -931,7 +971,7 @@ func openOrUpdatePR(d Deps, host repohost.Host, t *publishTarget, r publication,
 		}
 		return url, "opened", nil
 	}
-	url, err = host.CreatePR(t.branch, t.target, r.title, bodyFile)
+	url, err = host.CreatePR(t.branch, t.base(), r.title, bodyFile)
 	if err != nil {
 		return "", "", fmt.Errorf("verifydeliver: publish: create PR: %w", err)
 	}
@@ -1101,7 +1141,7 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 			return BodyReport{}, fmt.Errorf("verifydeliver: publish: journal pr-body: %w", err)
 		}
 		report.Repos = append(report.Repos, RepoBody{
-			Repo: pt.repoName, Target: pt.target, Head: rd.head, PRBody: r.prPath, Title: r.title,
+			Repo: pt.repoName, Target: pt.base(), Head: rd.head, PRBody: r.prPath, Title: r.title,
 			ReviewNotes: filepath.ToSlash(filepath.Join(d.Store.TicketRelDir(ticket), "pr", r.notesName)),
 		})
 		if report.Picks.Status == "" && len(report.Picks.Dropped) == 0 {

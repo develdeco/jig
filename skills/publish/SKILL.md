@@ -16,11 +16,11 @@ You push and open the pull request yourself, and jig renders and records:
 ```
 jig publish T-1 --body                 # renders pr/<repo>.md and the review notes; touches no lease, branch or remote
 git push origin <branch>               # your own push of the reviewed head
-gh pr create --head <branch> --base main --title "<title>" --body-file <pr_body>
+gh pr create --head <branch> --base <base> --title "<title>" --body-file <pr_body>
 jig publish T-1 --pr <url>             # checks the PR is from the ticket's branch (and the reviewed head), then records it
 ```
 
-The `--body` output gives the branch, base, title and the absolute `pr_body` path to hand to `gh`. The branch is the one the ticket records, else `<id>-<slug>` (the GitHub issue number leads it once the ticket is mirrored); `jig next T-1` names it too. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so.
+The `--body` output gives the branch, base, title and the absolute `pr_body` path to hand to `gh`. The base is the repo's target, or, for a ticket stacked on another, the parent's branch until the parent merges. The branch is the one the ticket records, else `<id>-<slug>` (the GitHub issue number leads it once the ticket is mirrored); `jig next T-1` names it too. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so.
 
 Or jig pushes and opens it:
 
