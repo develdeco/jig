@@ -131,10 +131,23 @@ func TestClaimBlockedUnattendedRefusedInteractiveWarns(t *testing.T) {
 		t.Errorf("claim --take: exit %d, want 0 taken over from s-1\n%s", r.Code, r.Stdout)
 	}
 
-	// JIG-1 publishes: release, then the unattended claim goes through.
+	// JIG-1 publishes, but nothing says its work merged: still refused, naming
+	// the command that records the pull request.
 	if err := journal.Append(st, "JIG-1", journal.Line{Event: journal.EventPublishDone}); err != nil {
 		t.Fatal(err)
 	}
+	r = runJig(t, env, fx.RepoDir, "claim", "JIG-2", "--slice", "y", "--unattended", "--session", "s-3")
+	if r.Code != 1 || !strings.Contains(r.Stdout, "code: CLAIM_BLOCKED_MERGED") || !strings.Contains(r.Stdout, "no merge on record: record its PR with `jig publish JIG-1 --pr <url>`") {
+		t.Fatalf("unattended claim after the publish: exit %d, want CLAIM_BLOCKED_MERGED with the recording command\n%s", r.Code, r.Stdout)
+	}
+
+	// Its pull request is recorded and merged: release, then the unattended
+	// claim goes through.
+	if err := journal.Append(st, "JIG-1", journal.Line{Event: journal.EventPr, Outcome: "recorded", URL: pullURL(1)}); err != nil {
+		t.Fatal(err)
+	}
+	env, _ = ghOnPath(t, env)
+	env = withPulls(t, env, fixture.GhPull{Number: 1, State: "closed", Merged: true})
 	r = runJig(t, env, fx.RepoDir, "claim", "JIG-2", "--slice", "x", "--session", "s-2", "--release")
 	if r.Code != 0 || !strings.Contains(r.Stdout, "result: released") || !strings.Contains(r.Stdout, "state: queued") {
 		t.Fatalf("release: exit %d, want 0 released and queued\n%s", r.Code, r.Stdout)

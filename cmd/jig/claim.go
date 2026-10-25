@@ -12,7 +12,6 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
-	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -117,10 +116,7 @@ func claimSlice(e env, stdout io.Writer, w work, sl store.Slice, unattended, tak
 		})
 	}
 
-	deps := claimDeps{merged: func(url string) (bool, bool) {
-		gh, _ := e.lookPath("gh")
-		return repohost.PRMerged(gh, nil, url)
-	}}
+	deps := claimDeps{merges: newMergeReader(e, w.St, w.Cfg, w.MP, w.JigHome, 0)}
 	problems, err := claimProblems(w.St, w.Ticket, deps)
 	if err != nil {
 		return renderErr(stdout, err)
