@@ -16,6 +16,7 @@ import (
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
+	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // init registers this file's verb with the registry (registry.go).
@@ -66,7 +67,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, cfg, mp, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -91,6 +92,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
+		n.setReviewer(e, verifydeliver.Deps{Store: st, Home: jigHome})
 		out, blocks = n, n.blocks(*topology)
 	} else {
 		n, err := nextForStore(st, cfg, mp)
@@ -123,7 +125,14 @@ type nextTicket struct {
 	Unplaced     []string      `json:"unplaced_workspaces,omitempty"`
 	Ambiguous    []string      `json:"ambiguous_workspaces,omitempty"`
 	Topology     []nextSlice   `json:"topology,omitempty"`
-	Advice       []string      `json:"advice,omitempty"`
+	// Advice is how to share the ready slices out, and, when review is the
+	// phase that can start, who reviews (Fresh says whether the calling
+	// session may itself).
+	Advice []string `json:"advice,omitempty"`
+	// Fresh is "yes", "no" or "unknown": whether the calling session may
+	// review the ticket itself, named only when review is ready and the
+	// environment names a session.
+	Fresh string `json:"fresh,omitempty"`
 	// Phase is where the ticket stands (internal/phase), nil when it could
 	// not be told (PhaseProblem says why). It is a block of its own in the
 	// JSON because `ready` above is already the slices ready to build.
@@ -200,6 +209,20 @@ func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name) {
 		p.For = &nextPhaseAsked{Phase: string(asked), Ready: a.Ready, Code: a.Code, Reason: a.Reason, Warning: a.Warning}
 	}
 	n.Phase = p
+}
+
+// setReviewer says who reviews the ticket when review is the phase that can
+// start now: whether the calling session (envSession) may review it itself, and
+// the advice for it (decision 39). It adds nothing when review is not ready, as
+// while a round is open, whose reviewer is at work already, or when the
+// environment names no session.
+func (n *nextTicket) setReviewer(e env, d verifydeliver.Deps) {
+	if n.derived == nil || n.derived.Current != phase.Review || !n.derived.Ready {
+		return
+	}
+	if a, ok := sessionAdvice(e, d, n.Ticket); ok {
+		n.Fresh, n.Advice = a.State, a.Lines
+	}
 }
 
 type nextBlocker struct {
@@ -423,6 +446,9 @@ func (n nextTicket) blocks(topology bool) []string {
 		pairs = append(pairs, [2]string{"distribution", n.Distribution})
 	}
 	pairs = append(pairs, n.phasePairs()...)
+	if n.Fresh != "" {
+		pairs = append(pairs, [2]string{"fresh", n.Fresh})
+	}
 	blocks := []string{axi.KV("next", pairs)}
 	if len(n.BlockedBy) > 0 {
 		var rows [][]string
@@ -520,7 +546,7 @@ func (n nextTicket) help() []string {
 			n.Ticket, n.Ticket, n.Ticket, promptHint(phase.Prompt(phase.Brief, n.Ticket)))}
 	case ready.StateGreen:
 		if t != nil {
-			return []string{"Every slice of " + n.Ticket + " is green. " + phaseAdvice(*t, n.Ticket)}
+			return append([]string{"Every slice of " + n.Ticket + " is green. " + phaseAdvice(*t, n.Ticket)}, n.Advice...)
 		}
 		return []string{fmt.Sprintf("Every slice of %s is green: run `jig gate %s`, then `jig publish %s`", n.Ticket, n.Ticket, n.Ticket)}
 	case ready.StateActive:

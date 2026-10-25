@@ -240,16 +240,25 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		blocks = append(blocks, "note: asks recorded by an unreadable round are not listed")
 		blocks = append(blocks, axi.Table("unreadable_gate_rounds", []string{"round"}, rows))
 	}
-	parkedOutstanding := 0
+	var asks askCounts
 	if len(outstanding) > 0 {
+		// A decision `jig triage` journaled is pending until the next round
+		// closes and applies it: the ask stays listed, with the decision.
+		decisions, err := verifydeliver.ReadTriageDecisions(st, ticket)
+		if err != nil {
+			return "", err
+		}
 		var askRows [][]string
 		for _, f := range outstanding {
-			askRows = append(askRows, []string{f.ID, f.Risk, fileLine(f), f.Title, f.RoutedWhy})
-			if f.RoutedWhy == verifydeliver.RoutedWhyBudget {
-				parkedOutstanding++
+			d := decisions[f.ID]
+			decision, decidedBy := d.Label(f), ""
+			if decision != "" {
+				decidedBy = d.Provenance
 			}
+			askRows = append(askRows, []string{f.ID, f.Risk, fileLine(f), f.Title, f.RoutedWhy, decision, decidedBy})
+			asks.add(f, d)
 		}
-		blocks = append(blocks, axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title", "why"}, askRows))
+		blocks = append(blocks, axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title", "why", "decision", "decided_by"}, askRows))
 	}
 
 	// The help names one way forward, in this order of precedence: a
@@ -277,7 +286,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 			"Repair or remove %s/gate/{%s}/findings.yaml in the store: `jig gate` cannot open a round until it reads them",
 			ticket, strings.Join(rounds, ","))}
 	} else if len(outstanding) > 0 && frontierGreen(st, ticket) {
-		helpLines = []string{"Run " + outstandingAsksHelpLine(ticket, parkedOutstanding, budgetUsed, fixRounds)}
+		helpLines = []string{"Run " + outstandingAsksHelpLine(ticket, asks, budgetUsed, fixRounds)}
 	} else if len(slices) == 0 && !adopted {
 		// A ticket with nothing to work has the two ways to get work that
 		// `jig ticket new` and the refusal of `jig claim` give.
@@ -289,7 +298,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		}
 		helpLines = []string{hint}
 		if len(outstanding) > 0 {
-			helpLines = append(helpLines, "Then run "+outstandingAsksHelpLine(ticket, parkedOutstanding, budgetUsed, fixRounds))
+			helpLines = append(helpLines, "Then run "+outstandingAsksHelpLine(ticket, asks, budgetUsed, fixRounds))
 		}
 	}
 	for _, sec := range sections {
@@ -306,18 +315,84 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 	return buf.String(), nil
 }
 
+// askCounts is how a ticket's outstanding asks stand against the decisions
+// `jig triage` has journaled for the next round to apply.
+type askCounts struct {
+	// decided are the asks with a pending decision the next round applies.
+	decided int
+	// undecided are the others: no pending decision, or a keep with no build
+	// target, which the round leaves asked.
+	undecided int
+	// noTarget are the undecided asks that have a keep with no build target.
+	noTarget int
+	// parked are the undecided asks the fix budget parked.
+	parked int
+}
+
+// add counts one outstanding ask f, and the decision d journaled for it (the
+// zero decision when none was).
+func (c *askCounts) add(f verifydeliver.Finding, d verifydeliver.TriageDecision) {
+	switch {
+	case !d.Decided():
+		c.undecided++
+	case d.KeepLacksTarget(f):
+		c.undecided++
+		c.noTarget++
+	default:
+		c.decided++
+		return
+	}
+	if f.RoutedWhy == verifydeliver.RoutedWhyBudget {
+		c.parked++
+	}
+}
+
+// asksOf counts n asks of one kind: "1 undecided ask", "3 decided asks".
+func asksOf(n int, kind string) string {
+	if n == 1 {
+		return "1 " + kind + " ask"
+	}
+	return fmt.Sprintf("%d %s asks", n, kind)
+}
+
+// decidedClause says when the decided asks take effect: a decision changes
+// nothing until a round closes.
+func decidedClause(n int) string {
+	verb := "are"
+	if n == 1 {
+		verb = "is"
+	}
+	return fmt.Sprintf("the %s %s applied when the next round closes", asksOf(n, "decided"), verb)
+}
+
 // outstandingAsksHelpLine phrases the command that decides a ticket's
 // outstanding asks, lead-verb-free ("run ...", for a caller to prepend
-// "Run " or "Then "): while any of them is budget-parked (parked > 0) it
-// says the fix budget is reached and names keeping or dismissing them,
-// rather than the generic "decide the outstanding asks" - the same `jig
-// triage` decides both kinds, and the next `jig gate <ticket>` round applies
-// the decisions, so this is one line, not two.
-func outstandingAsksHelpLine(ticket string, parked, budgetUsed, budgetLimit int) string {
-	if parked > 0 {
-		return fmt.Sprintf("`jig triage %s <id> keep|dismiss` to keep or dismiss the parked finding(s), then `jig gate %s` to apply the decisions: the fix budget is reached (%d of %d)", ticket, ticket, budgetUsed, budgetLimit)
+// "Run " or "Then "): it counts the asks nobody has decided, and says the
+// decided ones are applied when the next round closes, since a decision
+// changes nothing before then. While any undecided ask is budget-parked it
+// says the fix budget is reached and names keeping or dismissing them, rather
+// than the generic "decide the undecided asks" - the same `jig triage` decides
+// both kinds, and the next `jig gate <ticket>` round applies the decisions, so
+// this is one line, not two. With every ask decided, only the gate is left.
+func outstandingAsksHelpLine(ticket string, c askCounts, budgetUsed, budgetLimit int) string {
+	apply := fmt.Sprintf("`jig gate %s` to apply the decisions", ticket)
+	if c.undecided == 0 {
+		return apply + ": " + decidedClause(c.decided)
 	}
-	return fmt.Sprintf("`jig triage %s <id> keep|dismiss` to decide the outstanding asks, then `jig gate %s` to apply the decisions", ticket, ticket)
+	triage := fmt.Sprintf("`jig triage %s <id> keep|dismiss`", ticket)
+	var line string
+	if c.parked > 0 {
+		line = fmt.Sprintf("%s to keep or dismiss the parked finding(s), then %s: the fix budget is reached (%d of %d)", triage, apply, budgetUsed, budgetLimit)
+	} else {
+		line = fmt.Sprintf("%s to decide the %s, then %s", triage, asksOf(c.undecided, "undecided"), apply)
+	}
+	if c.noTarget > 0 {
+		line += "; a keep with no build target needs --workspace or --oracle, or the round leaves it asked"
+	}
+	if c.decided > 0 {
+		line += "; " + decidedClause(c.decided)
+	}
+	return line
 }
 
 // resumeCommand returns the exact command that clears a parked

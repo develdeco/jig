@@ -43,6 +43,12 @@ A ticket is `ready` when it has a slice that is queued with every blocker green 
 
 When `jig next` ends with an `overlap` table, two tickets' local branches change the same file: build them one after the other.
 
+## Phases and prompts
+
+A ticket moves through four phases, each with a skill: brief (`intake`), build (`build`), review (`review`) and publish (`publish`). `jig next <T>` names the one it is at (`phase:`), whether it can start (`ready:`) and the prompt that asks for it (`prompt:`, such as "Build SHOP-1"). Each phase's skill starts with `jig next <T>` and stops if the phase is not its own; it ends by relaying the `prompt:` to the person, who decides when the next phase runs. When you only oriented, relay that `prompt:` and stop.
+
+**An automatic run** is a prompt that names several phases ("Take SHOP-1 from brief to PR"): run them in order, each with its skill, and end the run at a refusal or a stop the skill gives. The person's moments stay theirs unless the prompt delegates them: "go with your recommendations" delegates the brief's approval, and a prompt that ends at the PR ("... to PR") or says "and publish it" delegates the publish. A delegated approval is recorded with agent provenance.
+
 ## When here says nothing
 
 No output and exit 0 means the directory is in no jig project. Nothing is wrong; do not look for one. If the repo should belong to a project:
