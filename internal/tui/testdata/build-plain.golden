@@ -1,0 +1,24 @@
+jig  demo › JIG-1 › 2 build                                    ? build needs you
+────────────────────────────────────────────────────────────────────────────────
+  ? 1 of 4 green · slice c needs your answer
+
+  slices
+▸ ● a  green        1 try    no goal
+       ● aaaaaaa  09:00:21
+         ● its oracle passed
+  ◐ b  building     2 tries  no goal
+       ✖ bbbbbbb  09:01:40
+         ✖ its oracle failed
+           TestB: want 2, got 3
+           the end of its output; all of it is in the verify log on the
+           machine that ran it
+  ? c  needs-input  1 try    no goal
+       ? q-001 Formal or casual?
+  ○ d  queued       0 tries  no goal  after b, c
+
+  sessions
+  builder  harness unknown  s-builde
+
+  ╭─ 2 Build · activity ─────────────────────────────────────── latest 3 of 8 ─╮
+────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move · enter open · esc back · g gate · t tail · q quit

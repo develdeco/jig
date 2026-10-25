@@ -18,6 +18,10 @@ const (
 	rowQuestion = "question"
 	rowAsk      = "ask"
 	rowSlice    = "slice"
+	// rowStop is a line the cursor can rest on and that opens nothing: the head
+	// of a record on a screen whose page is longer than its window, so the
+	// window can be moved to it.
+	rowStop = "stop"
 )
 
 // rowRef says what a selectable line is: its kind, its id, and the ticket and
@@ -156,10 +160,18 @@ func (m *Model) window(pg page, sel, h, w int) []string {
 	if len(pg.lines) > h {
 		start = selLine - h/2
 		start = max(0, min(start, len(pg.lines)-h))
+		if selLine < h {
+			// A row in the first screenful leaves the page where it begins.
+			start = 0
+		}
 		if n > 0 && sel == n-1 {
 			// On the last row, show as much of what follows it as fits
 			// with the row still in view: a panel of activity is below.
 			start = max(0, min(selLine, len(pg.lines)-h))
+		}
+		if n == 0 {
+			// A page with no row to stand on is moved by its own offset.
+			start = max(0, min(m.top().scroll, len(pg.lines)-h))
 		}
 	}
 	end := min(len(pg.lines), start+h)
@@ -313,7 +325,7 @@ func (m *Model) keyHints() []string {
 	case screenReview:
 		keys = [][]string{move, back, keep, dismiss, gate, tail, quit}
 	case screenPublish:
-		keys = [][]string{back, publish, tail, quit}
+		keys = [][]string{{"↑↓", "scroll"}, back, publish, tail, quit}
 	case screenSlice:
 		keys = [][]string{move, back, answer, tail, quit}
 	}

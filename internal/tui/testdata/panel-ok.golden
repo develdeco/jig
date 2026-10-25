@@ -1,13 +1,13 @@
 jig  demo › JIG-2 › 3 review                                   ! review findings
 ────────────────────────────────────────────────────────────────────────────────
+  ○ low     beta/b.go:2    noted   Rename the helper  r1-f4
+      a clearer name, whenever the file is next touched
 
   asks
   ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
-      needs a human
+      a failed write would pass silently · needs a human
 ▸ ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
-
-  sessions
-  reviewer  harness unknown  s-review
+      the import is hidden in this scope
 
   ╭─ 3 Review · activity ──────────────────────────────────────────────────────╮
   │  09:11:00 ◎ round 1 · opened                                               │
