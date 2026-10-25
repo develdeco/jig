@@ -299,14 +299,19 @@ func TestDigesterFlow(t *testing.T) {
 		}
 	}
 	// The outcomes reach the session at its next prompt, once; with nothing
-	// left unsaid, a Stop has nothing to add.
+	// left unsaid but the next phase, a Stop has only that to add: every slice
+	// is green and no round is open, so the unattended session is told to open
+	// the gate and review (it built the ticket, so a subagent reviews).
 	heard := h.Hook("UserPromptSubmit", map[string]any{"prompt": "and now?"})
 	f.hook(h.Session, "UserPromptSubmit", heard)
 	if got := decodeHook(t, heard).Specific.Context; !strings.Contains(got, "verified "+shaC[:12]+" for slice c") {
 		t.Errorf("the prompt after the last verification has the context %q, want the outcome for slice c", got)
 	}
-	if res := h.Hook("Stop", map[string]any{"stop_hook_active": false}); res.Code != 0 || res.Stdout != "" {
-		t.Errorf("Stop with every slice verified and heard = exit %d, %q, want silence", res.Code, res.Stdout)
+	review := h.Hook("Stop", map[string]any{"stop_hook_active": false})
+	f.hook(h.Session, "Stop", review)
+	if held := decodeHook(t, review); held.Decision != "block" || !strings.Contains(held.Reason, "open the gate and review") ||
+		!strings.Contains(held.Reason, "jig gate "+ticket) || !strings.Contains(held.Reason, "subagent") {
+		t.Errorf("Stop with every slice verified and heard = %+v, want a block that tells the unattended session to open the gate and have a subagent review", held)
 	}
 
 	f.step("11. every slice is green: jig next names the gate, and the session opens a round")

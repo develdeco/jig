@@ -685,28 +685,25 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 // recordedTriage is the Triage of a recorded round. Nobody is asked anything
 // while it closes: a fix is kept, as DefaultTriage keeps it, and an ask is
 // decided by what a person recorded with `jig triage` (a journal triage line
-// for its finding id, the last one standing), else, when the round was
-// opened with --yes, by DefaultTriage's rule, else left undecided for a
-// person. A decision recorded after the round that raised the ask applies to
-// the next round, whose fold offers the ask again.
+// for its finding id, the last one standing, TriageDecisions), else, when the
+// round was opened with --yes, by DefaultTriage's rule, else left undecided
+// for a person. A decision recorded after the round that raised the ask applies
+// to the next round, whose fold offers the ask again.
+//
+// The line is taken whatever round it was recorded before: a triage line is
+// never marked used, so an ask that a later round raises again silently takes
+// its old decision (TriageDecision.Pending is how `jig status` tells the two
+// apart, and shows only a pending one as decided).
 func recordedTriage(d Deps, ticket string, yes bool) Triage {
 	return func(in TriageInput) TriageResult {
-		decisions := map[string]journal.Line{}
-		if lines, err := journal.Read(d.Store, ticket); err == nil {
-			for _, l := range lines {
-				if l.Event == journal.EventTriage && l.Ref != "" {
-					decisions[l.Ref] = l
-				}
-			}
-		}
+		decisions, _ := ReadTriageDecisions(d.Store, ticket)
 		res := TriageResult{Asks: map[string]AskOutcome{}}
 		fallback := DefaultTriage(in)
 		for _, f := range in.Asks {
 			if l, ok := decisions[f.ID]; ok {
-				ws, oracle := triageTarget(l.Command)
 				res.Asks[f.ID] = AskOutcome{
-					Keep: l.Outcome == TriageKeep, Decision: l.Summary,
-					Workspace: ws, Oracle: oracle, Human: l.Provenance == "person",
+					Keep: l.Outcome == TriageKeep, Decision: l.Reason,
+					Workspace: l.Workspace, Oracle: l.Oracle, Human: l.Human(),
 				}
 				continue
 			}

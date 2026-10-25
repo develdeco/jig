@@ -605,14 +605,21 @@ func askedFindingsList(cum map[string]Finding) []Finding {
 // toOpenFindingList projects fs (cum's open/asked/noted findings, per
 // openAndNotedFindingsList) onto review.json's open shape. Building fs from
 // the cumulative fold, and calling this before every reviewer round, is
-// what keeps review.json's open list honest.
-func toOpenFindingList(fs []Finding) []OpenFinding {
+// what keeps review.json's open list honest. An asked finding with a pending
+// decision in decisions (ReadTriageDecisions; nil for none) carries it: the
+// row stays in the list, annotated, since only the round that applies the
+// decision moves the ask out of the open set.
+func toOpenFindingList(fs []Finding, decisions map[string]TriageDecision) []OpenFinding {
 	out := make([]OpenFinding, 0, len(fs))
 	for _, f := range fs {
-		out = append(out, OpenFinding{
+		row := OpenFinding{
 			ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail, Action: f.Action,
 			Risk: f.Risk, RiskRationale: f.RiskRationale, Oracle: f.Oracle, Recurrences: f.Recurrences,
-		})
+		}
+		if d, ok := decisions[f.ID]; ok && f.Status == StatusAsked && d.Decided() {
+			row.Decision, row.DecidedBy, row.DecisionReason = d.Label(f), d.Provenance, d.Reason
+		}
+		out = append(out, row)
 	}
 	return out
 }
