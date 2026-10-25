@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -126,13 +126,13 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	return 0
 }
 
-// validateTicket checks that ticket's brief, slices.yaml, and manifest
-// agree, returning every problem found (nil means valid). Two ids around a
-// ticket are reserved by jig's own machinery and reported as problems on
-// their own: the ticket id, which names the ticket's pool leases (see
-// pool.CheckTicket for the suffixes it refuses), and the slice id "gate",
-// which the gate reviewer's dispatch uses as its own session slice name
-// (checked below, alongside every other slice id).
+// validateTicket checks that ticket's brief, slices.yaml, and the manifests of
+// the repos its slices build in agree, returning every problem found (nil
+// means valid). Two ids around a ticket are reserved by jig's own machinery
+// and reported as problems on their own: the ticket id, which names the
+// ticket's pool leases (see pool.CheckTicket for the suffixes it refuses), and
+// the slice id "gate", which the gate reviewer's dispatch uses as its own
+// session slice name (checked below, alongside every other slice id).
 func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProject, ticket string) ([]string, error) {
 	// An id that cannot name its leases is the only problem worth reporting
 	// on its own: every path below is derived from it.
@@ -188,24 +188,7 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 		}
 	}
 
-	var m manifest.Manifest
-	manifestOK := false
-	if len(cfg.Repos) > 0 {
-		repoDir := mp.Clones[cfg.Repos[0].Name()]
-		if repoDir == "" {
-			problems = append(problems, fmt.Sprintf("no machine-mapped clone for repo %q", cfg.Repos[0].Name()))
-		} else {
-			resolved, merr := manifest.Resolve(repoDir)
-			if merr != nil {
-				problems = append(problems, fmt.Sprintf("manifest resolve failed: %v", merr))
-			} else {
-				m = resolved
-				manifestOK = true
-			}
-		}
-	} else {
-		problems = append(problems, "the project declares no repos")
-	}
+	problems = append(problems, validateWorkspaces(ready.ProjectRepos(cfg, mp.Clones), slices)...)
 
 	for _, sl := range slices {
 		for _, h := range sl.FromBrief {
@@ -216,11 +199,6 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 		for _, b := range sl.BlockedBy {
 			if !ids[b] {
 				problems = append(problems, fmt.Sprintf("slice %s: blocked_by %q does not exist", sl.ID, b))
-			}
-		}
-		if manifestOK {
-			if _, ok := m.Workspace(sl.Workspace); !ok {
-				problems = append(problems, fmt.Sprintf("slice %s: workspace %q not in manifest", sl.ID, sl.Workspace))
 			}
 		}
 		if strings.TrimSpace(sl.Oracle) == "" {
@@ -339,24 +317,26 @@ func validateTicketDeps(st *store.Store, ticket string) []string {
 
 // validateTicketBranch checks ticket's optional recorded branch through the
 // same Store.TicketBranch validation every build lease, gate round and
-// publish runs, so a bad hand-edited branch (equal to the primary repo's
-// target, or not a name git itself would accept) is reported here, where it
-// is cheap to fix, before one of those fails on it. A record that cannot be
-// read at all is left to validateTicketDeps, which already reports it:
-// reporting it again here would duplicate the same "ticket.yaml could not be
-// read" problem.
+// publish runs, so a bad hand-edited branch (equal to the target of one of the
+// project's repos, or not a name git itself would accept) is reported here,
+// where it is cheap to fix, before one of those fails on it. The branch has
+// the same name in every repo, so it is checked against each target. A record
+// that cannot be read at all is left to validateTicketDeps, which already
+// reports it: reporting it again here would duplicate the same "ticket.yaml
+// could not be read" problem.
 func validateTicketBranch(st *store.Store, cfg project.Config, ticket string) []string {
 	if _, err := st.ReadTicket(ticket); err != nil {
 		return nil
 	}
-	var primary project.Repo
-	if len(cfg.Repos) > 0 {
-		primary = cfg.Repos[0]
+	var problems []string
+	seen := map[string]bool{}
+	for _, target := range projectTargets(cfg) {
+		if _, err := st.TicketBranch(ticket, target); err != nil && !seen[err.Error()] {
+			seen[err.Error()] = true
+			problems = append(problems, err.Error())
+		}
 	}
-	if _, err := st.TicketBranch(ticket, primary.TargetBranch()); err != nil {
-		return []string{err.Error()}
-	}
-	return nil
+	return problems
 }
 
 // ticketDepsCycle runs a DFS over blocked_by edges rooted at ticket, reading

@@ -133,7 +133,9 @@ func openLocatedStore(where locate.Where) (*store.Store, project.Config, error) 
 	if where.StorePath == "" {
 		return nil, project.Config{}, nil
 	}
-	cfg, err := project.LoadStoreConfig(where.StorePath)
+	// The store config is completed with the project's repos from its marker,
+	// as locateStore does for a verb: a v3 store lists none itself.
+	cfg, err := project.LoadConfig(where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
 	if err != nil {
 		return nil, project.Config{}, err
 	}

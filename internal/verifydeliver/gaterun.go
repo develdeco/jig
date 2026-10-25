@@ -94,6 +94,9 @@ func gatePrepare(d Deps, o GateOpts) (*gateRun, error) {
 		return r, fmt.Errorf("verifydeliver: gate: read slices: %w", err)
 	}
 	r.slices = slices
+	if err := checkOneRepo(d, ticket, slices); err != nil {
+		return r, err
+	}
 	if err := checkFrontier(d, ticket, slices, o.Early); err != nil {
 		return r, err
 	}

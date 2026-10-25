@@ -574,3 +574,92 @@ func TestGenerateSecondRepo(t *testing.T) {
 		t.Fatalf("slice e = %+v, want a gamma slice with no blockers and one brief hash", e)
 	}
 }
+
+// TestGenerateOrchestrator checks Opts.Orchestrator: the project is an
+// orchestrator holding two nested repos with a manifest and a remote each, over
+// a v3 store with no remote, and ticket JIG-1 has one slice in each repo naming
+// it as "<repo>/<workspace>". The marker, the machine map and the config the
+// project loads agree.
+func TestGenerateOrchestrator(t *testing.T) {
+	home := t.TempDir()
+	fx := Generate(t, Opts{Orchestrator: true, Home: home})
+
+	if fx.OrchestratorDir == "" || fx.RepoDir != "" || fx.StoreRemote != "" || len(fx.NestedDirs) != 2 || len(fx.NestedRemotes) != 2 {
+		t.Fatalf("fixture = %+v, want an orchestrator with two nested repos and none of the base fixture's repo or store remote", fx)
+	}
+	for _, name := range NestedRepoNames {
+		dir := fx.NestedDirs[name]
+		if filepath.Dir(dir) != fx.OrchestratorDir {
+			t.Errorf("%s is at %s, want it nested in %s", name, dir, fx.OrchestratorDir)
+		}
+		if origin, err := gitx.Run(dir, "remote", "get-url", "origin"); err != nil || origin != fx.NestedRemotes[name] {
+			t.Errorf("%s origin = %q (%v), want %q", name, origin, err, fx.NestedRemotes[name])
+		}
+		if _, err := gitx.Run(fx.NestedRemotes[name], "rev-parse", "main"); err != nil {
+			t.Errorf("the remote of %s has no main: %v", name, err)
+		}
+		workspace := map[string]string{"api": "server", "web": "ui"}[name]
+		for _, ws := range []string{workspace, "lib"} {
+			cmd := exec.Command(goBinaryPath(), "test", "./"+ws+"/...")
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Errorf("go test ./%s/... in %s: %v\n%s", ws, name, err, out)
+			}
+		}
+	}
+
+	m, err := project.LoadMarker(filepath.Join(fx.OrchestratorDir, project.MarkerFile))
+	if err != nil {
+		t.Fatalf("LoadMarker: %v", err)
+	}
+	if m.Project != OrchestratorName || m.Kind != project.KindOrchestrator || len(m.Repos) != 2 || m.Repos[0].Path != "api" || m.Repos[1].Path != "web" {
+		t.Fatalf("marker = %+v, want the orchestrator of api and web", m)
+	}
+	machine, err := project.LoadMachine(home)
+	if err != nil {
+		t.Fatalf("LoadMachine: %v", err)
+	}
+	mp := machine[OrchestratorName]
+	if mp.Store != fx.StoreDir || mp.Root != fx.OrchestratorDir || mp.Clones["api"] != fx.NestedDirs["api"] || mp.Clones["web"] != fx.NestedDirs["web"] {
+		t.Fatalf("machine map = %+v, want the store, the orchestrator and both clones", mp)
+	}
+	cfg, err := project.LoadConfig(home, fx.StoreDir, "", fx.OrchestratorDir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if len(cfg.Repos) != 2 || cfg.Repos[0].Name() != "api" || cfg.Repos[1].Name() != "web" || cfg.Repos[0].Remote != fx.NestedRemotes["api"] {
+		t.Fatalf("repos = %+v, want api then web, each with the remote of its clone's origin", cfg.Repos)
+	}
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if status, err := gitx.Run(fx.StoreDir, "status", "--porcelain"); err != nil || status != "" {
+		t.Fatalf("the store is not clean after Build: %q (%v)", status, err)
+	}
+	slices, err := st.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatalf("ReadSlices: %v", err)
+	}
+	if len(slices) != 2 || slices[0].ID != "server" || slices[0].Workspace != "api/server" || slices[1].ID != "ui" || slices[1].Workspace != "web/ui" {
+		t.Fatalf("slices = %+v, want server in api/server and ui in web/ui", slices)
+	}
+	for _, s := range slices {
+		if len(s.FromBrief) != 1 || s.FromBrief[0] == "" || s.Oracle != "test" {
+			t.Errorf("slice %s = %+v, want one brief hash and the test oracle", s.ID, s)
+		}
+	}
+}
+
+// TestGenerateOrchestratorRefusesOtherShapes: an orchestrator fixture has its
+// own project, store and repos, so the options that shape the base fixture are
+// refused rather than ignored.
+func TestGenerateOrchestratorRefusesOtherShapes(t *testing.T) {
+	for _, o := range []Opts{{SecondRepo: true}, {ScenarioBranch: "stall"}, {EnvFail: true}} {
+		o.Orchestrator, o.Home = true, t.TempDir()
+		if _, err := Build(t.TempDir(), o); err == nil || !strings.Contains(err.Error(), "Orchestrator takes none of") {
+			t.Errorf("Build(%+v) = %v, want a refusal naming the options Orchestrator excludes", o, err)
+		}
+	}
+}

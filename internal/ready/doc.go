@@ -9,5 +9,7 @@
 // states, tickets' blockers and journals) and return an answer, so the
 // callers decide how to read it and a test needs no store. The two that move
 // a slice back to queued by a person's word, Requeue and RequeueSlice
-// (requeue.go), are the exception: they write the slice's state and journal.
+// (requeue.go), are an exception: they write the slice's state and journal.
+// ProjectRepos (repos.go) is the other: it reads the manifest of each repo's
+// clone, for Place to say which repo a slice's workspace belongs to.
 package ready

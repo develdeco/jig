@@ -69,6 +69,14 @@ type Fixture struct {
 	// and bare remote; both are "" unless Opts.SecondRepo.
 	SecondRepoDir    string
 	SecondRepoRemote string
+
+	// OrchestratorDir is the orchestrator's folder, and NestedDirs and
+	// NestedRemotes the clones and bare remotes of the repos nested in it, by
+	// repo name; all are empty unless Opts.Orchestrator, which leaves RepoDir,
+	// RepoRemote, StoreRemote and ScenarioDir empty.
+	OrchestratorDir string
+	NestedDirs      map[string]string
+	NestedRemotes   map[string]string
 }
 
 // Opts configures a Build or Generate call.
@@ -92,6 +100,15 @@ type Opts struct {
 	// JIG-1 gains a fifth slice, e, that builds in gamma and waits on no
 	// other, and the machine mapping clones both repos.
 	SecondRepo bool
+	// Orchestrator makes the project the shape `jig init --orchestrator`
+	// leaves: an orchestrator folder (Fixture.OrchestratorDir) holding two
+	// nested repos, api and web (Fixture.NestedDirs), each with its own remote
+	// and a manifest, over a v3 store that has no remote. Ticket JIG-1 has a
+	// slice in each repo, naming it as "<repo>/<workspace>": server in
+	// api/server and ui in web/ui. Both manifests also declare a workspace
+	// "lib", for a test of a bare workspace two repos declare. It excludes
+	// SecondRepo, ScenarioBranch and EnvFail (orchestrator.go).
+	Orchestrator bool
 }
 
 // identityEnv pins the git author/committer identity and date used for every
@@ -159,6 +176,10 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 		if _, statErr := os.Stat(branchDir); statErr != nil {
 			return nil, fmt.Errorf("%w %q: %w", ErrUnknownScenarioBranch, opts.ScenarioBranch, statErr)
 		}
+	}
+
+	if opts.Orchestrator {
+		return buildOrchestrator(dir, opts, testdataDir)
 	}
 
 	cachedEnvtool, err := buildEnvtool(testdataDir)

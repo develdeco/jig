@@ -138,6 +138,9 @@ func readyToPublish(d Deps, ticket, repoFlag string) (*publishTarget, error) {
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: read slices: %w", err)
 	}
+	if err := checkOneRepo(d, ticket, slices); err != nil {
+		return nil, err
+	}
 	if err := checkFrontier(d, ticket, slices, false); err != nil {
 		return nil, err
 	}

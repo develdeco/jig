@@ -25,14 +25,15 @@ type ScopeDrift struct {
 func (d ScopeDrift) Ref() string { return "scope:" + short12(d.Commit) }
 
 // WorkspacePaths lists the paths, cleaned and with forward slashes, of the
-// workspaces the slices build in, as the repo manifest m places them. A slice
-// whose workspace m does not have builds in another repo of the project, so
-// it says nothing about this one and is passed over.
-func WorkspacePaths(m manifest.Manifest, all []store.Slice) []string {
+// workspaces the slices build in, as the manifest m of the repo called repo
+// places them (a slice of a project of several repos writes its workspace as
+// "<repo>/<id>"). A slice whose workspace m does not have builds in another
+// repo of the project, so it says nothing about this one and is passed over.
+func WorkspacePaths(m manifest.Manifest, repo string, all []store.Slice) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, sl := range all {
-		ws, ok := m.Workspace(sl.Workspace)
+		ws, ok := m.WorkspaceIn(repo, sl.Workspace)
 		if !ok {
 			continue
 		}
@@ -72,12 +73,12 @@ func within(file string, paths []string) bool {
 	return false
 }
 
-// Scope looks at what commit sha changed in the repository around dir against
-// the workspaces the slices build in, as that repository's manifest places
-// them. It reports false when nothing is outside them, and when there is
-// nothing to judge by: the slices build in no workspace this manifest has, or
-// the commit has no parent to compare with.
-func Scope(dir, sha string, all []store.Slice) (ScopeDrift, bool, error) {
+// Scope looks at what commit sha changed in the repository around dir, the
+// repo called repo of the project, against the workspaces the slices build in,
+// as that repository's manifest places them. It reports false when nothing is
+// outside them, and when there is nothing to judge by: the slices build in no
+// workspace this manifest has, or the commit has no parent to compare with.
+func Scope(dir, repo, sha string, all []store.Slice) (ScopeDrift, bool, error) {
 	top, err := gitx.TopLevel(dir)
 	if err != nil {
 		return ScopeDrift{}, false, err
@@ -86,7 +87,7 @@ func Scope(dir, sha string, all []store.Slice) (ScopeDrift, bool, error) {
 	if err != nil {
 		return ScopeDrift{}, false, err
 	}
-	paths := WorkspacePaths(m, all)
+	paths := WorkspacePaths(m, repo, all)
 	if len(paths) == 0 {
 		return ScopeDrift{}, false, nil
 	}
