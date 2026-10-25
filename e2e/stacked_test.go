@@ -137,7 +137,7 @@ func TestStackedChildStartsFromParentBranch(t *testing.T) {
 		}
 
 		// `jig here` on the child's branch, cut from the parent's, says the same.
-		h.Branch("jig/" + fx.Ticket)
+		h.Branch(fx.Branch)
 		here := runJig(t, env, fx.RepoDir, "here")
 		if want := "stack[2]{repo,parent,start_from,pr_target}:\n  fixture-repo,JIG-2," + parentBranch + "," + parentBranch + "\n"; here.Code != 0 || !strings.Contains(here.Stdout, want) {
 			t.Errorf("jig here lacks %q:\nexit %d\n%s%s", want, here.Code, here.Stdout, here.Stderr)
@@ -181,7 +181,7 @@ func TestMovedParentGetsARestackNote(t *testing.T) {
 	fx, env := newFixture(t, fixture.Opts{})
 	h := newHarness(t, fx, env, "s-corr")
 	stackOnAParent(t, fx, h)
-	h.Branch("jig/" + fx.Ticket)
+	h.Branch(fx.Branch)
 	h.Commit("a", "JIG-1 a: on the parent", map[string]string{"alpha/CHILD.md": "the child's work\n"})
 	if res := h.Hook("SessionStart", map[string]any{"source": "startup"}); res.Code != 0 {
 		t.Fatalf("SessionStart exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
@@ -245,7 +245,7 @@ func TestMergedParentRetargets(t *testing.T) {
 	if err := journal.Append(st, "JIG-2", journal.Line{Event: journal.EventPublishDone}); err != nil {
 		t.Fatal(err)
 	}
-	h.Branch("jig/" + fx.Ticket)
+	h.Branch(fx.Branch)
 	h.Commit("a", "JIG-1 a: on the parent", map[string]string{"alpha/CHILD.md": "the child's work\n"})
 	if n := nextJSON[stackedNextOut](t, env, fx.RepoDir, "JIG-1"); len(n.Stack) != 1 || n.Stack[0].PRTarget != parentBranch || n.Stack[0].Merged {
 		t.Fatalf("before the parent merged: stack = %+v, want its pull request into %s", n.Stack, parentBranch)
@@ -256,7 +256,7 @@ func TestMergedParentRetargets(t *testing.T) {
 	h.Branch("main")
 	h.git("merge", "--no-ff", "--no-edit", parentBranch)
 	h.Push("main")
-	h.Branch("jig/" + fx.Ticket)
+	h.Branch(fx.Branch)
 
 	n := nextJSON[stackedNextOut](t, env, fx.RepoDir, "JIG-1")
 	if len(n.Stack) != 1 {
