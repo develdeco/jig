@@ -173,8 +173,8 @@ func TestRenderStatusOutstandingAsksWhyColumnAndParkedHelpLine(t *testing.T) {
 		t.Fatalf("RenderStatus: %v", err)
 	}
 
-	wantTable := "outstanding_asks[1]{id,risk,file:line,title,why}:\n" +
-		"  r1-f1,high,\"a.go:1\",fix me,budget\n"
+	wantTable := "outstanding_asks[1]{id,risk,file:line,title,why,decision,decided_by}:\n" +
+		"  r1-f1,high,\"a.go:1\",fix me,budget,,\n"
 	if !strings.Contains(got, wantTable) {
 		t.Fatalf("status is missing the parked outstanding_asks row %q:\n%s", wantTable, got)
 	}
