@@ -276,6 +276,24 @@ func TestBuild(t *testing.T) {
 	}
 }
 
+// TestBranchIsTheDefaultOfTheTicket pins Branch to what the store names the
+// fixture ticket's branch: the ticket has no record, so its brief's heading
+// gives the slug.
+func TestBranchIsTheDefaultOfTheTicket(t *testing.T) {
+	fx, err := Build(filepath.Join(t.TempDir(), "built"), Opts{Home: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	got, err := st.TicketBranch(fx.Ticket, "main")
+	if err != nil || got != Branch || fx.Branch != Branch {
+		t.Fatalf("TicketBranch = %q, %v, and fx.Branch = %q, want both %q", got, err, fx.Branch, Branch)
+	}
+}
+
 // TestBuildRelativeDir proves Build resolves a relative dir to an absolute
 // path before doing any work, so a git command it runs (whose working
 // directory and whose path arguments must agree on the same root) never

@@ -142,10 +142,11 @@ func TestTicketBranchIsLedByTheIssueNumberOnceMirrored(t *testing.T) {
 	}
 }
 
-// TestTicketBranchOfATicketWithNothingToSayKeepsItsOldName: a ticket whose
-// title gives no slug has no tail to put after an id, and keeps the name every
-// ticket had before branches were named for their titles.
-func TestTicketBranchOfATicketWithNothingToSayKeepsItsOldName(t *testing.T) {
+// TestTicketBranchOfATicketWithNothingToSayIsItsBareId: a ticket whose title
+// gives no slug, and that has no brief heading to give one, has no tail to put
+// after an id, and is named by the id that leads its branches: the GitHub issue
+// number once it is mirrored, else its own id. The "jig/" prefix is retired.
+func TestTicketBranchOfATicketWithNothingToSayIsItsBareId(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
 	for id, rec := range map[string]Ticket{"JIG-1": {}, "JIG-2": {Title: "日本語"}, "JIG-3": {Title: "???"}} {
 		if err := st.CreateTicketRecord(id, rec); err != nil {
@@ -153,14 +154,14 @@ func TestTicketBranchOfATicketWithNothingToSayKeepsItsOldName(t *testing.T) {
 		}
 	}
 	mirrorTo(t, st, "JIG-1", "acme/tracking", 7)
-	for _, id := range []string{"JIG-1", "JIG-2", "JIG-3"} {
-		if got, err := st.TicketBranch(id, "main"); err != nil || got != "jig/"+id {
-			t.Errorf("TicketBranch(%s) = %q, %v; want jig/%s", id, got, err, id)
+	for id, want := range map[string]string{"JIG-1": "7", "JIG-2": "JIG-2", "JIG-3": "JIG-3"} {
+		if got, err := st.TicketBranch(id, "main"); err != nil || got != want {
+			t.Errorf("TicketBranch(%s) = %q, %v; want %s", id, got, err, want)
 		}
 	}
 	// A ticket with no ticket.yaml at all reads as a zero record.
-	if got, err := st.TicketBranch("JIG-9", "main"); err != nil || got != "jig/JIG-9" {
-		t.Errorf("TicketBranch(JIG-9), no record = %q, %v; want jig/JIG-9", got, err)
+	if got, err := st.TicketBranch("JIG-9", "main"); err != nil || got != "JIG-9" {
+		t.Errorf("TicketBranch(JIG-9), no record = %q, %v; want JIG-9", got, err)
 	}
 }
 

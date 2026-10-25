@@ -45,6 +45,18 @@ func BriefSections(briefMD []byte) []BriefSection {
 	return out
 }
 
+// BriefTitle returns the text of briefMD's first "# " heading, trimmed, or ""
+// when it has none. A "## " heading is a section, never the title.
+func BriefTitle(briefMD []byte) string {
+	text := strings.ReplaceAll(string(briefMD), "\r\n", "\n")
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "# ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
+		}
+	}
+	return ""
+}
+
 // BriefSectionHashes returns, for every "## " heading in briefMD, the sha256
 // hex digest of that section's body (BriefSections' Hash). A heading that
 // appears twice keeps its later section's hash.

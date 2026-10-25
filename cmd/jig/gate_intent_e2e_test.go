@@ -75,7 +75,7 @@ func TestGateDocFlagWritesIntentThroughMain(t *testing.T) {
 	// A brief-less ticket, the same as TestGateIntentNoneToExplicitThroughMain:
 	// --doc is refused outright on a ticket with a brief.md, so proving the
 	// flag's own wiring needs one without.
-	if err := os.Remove(filepath.Join(st.TicketDir(fx.Ticket), "brief.md")); err != nil {
+	if err := fixture.RemoveBrief(fx.StoreDir, fx.Ticket); err != nil {
 		t.Fatalf("remove brief.md: %v", err)
 	}
 	buildFixtureTicket(t, fx)
@@ -121,7 +121,7 @@ func TestGateIntentNoneToExplicitThroughMain(t *testing.T) {
 	}
 	// fixture.Generate always writes a brief.md; remove it so this ticket
 	// starts brief-less, the scenario this test demonstrates.
-	if err := os.Remove(filepath.Join(st.TicketDir(fx.Ticket), "brief.md")); err != nil {
+	if err := fixture.RemoveBrief(fx.StoreDir, fx.Ticket); err != nil {
 		t.Fatalf("remove brief.md: %v", err)
 	}
 
