@@ -414,6 +414,27 @@ func OpenRoundIn(lines []journal.Line) *OpenRound {
 	return o
 }
 
+// takenEvents are the lines that show a slice was taken up: a claim (or the
+// dispatch of the era before claims), or a verification of what it built.
+var takenEvents = map[string]bool{
+	journal.EventClaim: true, journal.EventDispatch: true, journal.EventVerifyPending: true,
+	journal.EventOracle: true, journal.EventVerified: true, journal.EventVerifyError: true,
+}
+
+// EverClaimed is whether the journal shows any slice was ever claimed or
+// verified. A release does not undo it: the slice was taken up once, so the
+// build has begun whatever the slices' states say now. It tells a ticket whose
+// slices nobody has started from one with a build under way; the lines that
+// only follow from a claim (a question, a stall, a requeue) add nothing to it.
+func EverClaimed(lines []journal.Line) bool {
+	for _, l := range lines {
+		if takenEvents[l.Event] {
+			return true
+		}
+	}
+	return false
+}
+
 // Derive works out where a ticket stands from the facts the store holds and the
 // ticket's journal lines, in order. A phase is done only when every phase
 // before it is: a review that found fixes takes the build back, and the build

@@ -683,3 +683,31 @@ func TestTheStoresRoundsAreTheWordOnAVerdict(t *testing.T) {
 		t.Errorf("a fix slice with no approval: at %s, want build", got.Current)
 	}
 }
+
+// TestEverClaimed: a claim, the dispatch of the era before claims, or a
+// verification of any kind shows a slice was taken up, and a release does not
+// undo it. Approval, notes and the lines that only follow from a claim do not.
+func TestEverClaimed(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		lines []journal.Line
+		want  bool
+	}{
+		{"an empty journal", nil, false},
+		{"an approval and a note", []journal.Line{ln(journal.EventApproval), ln(journal.EventNote)}, false},
+		{"a question, an answer and a stall alone", []journal.Line{ln(journal.EventQuestion, onSlice("a")), ln(journal.EventAnswer, onSlice("a")), ln(journal.EventStall, onSlice("a"))}, false},
+		{"a claim", []journal.Line{ln(journal.EventClaim, onSlice("a"), by("s-1"))}, true},
+		{"a claim released again", []journal.Line{ln(journal.EventClaim, onSlice("a")), ln(journal.EventRelease, onSlice("a"))}, true},
+		{"a dispatch", []journal.Line{ln(journal.EventDispatch, onSlice("a"))}, true},
+		{"a verification pending", []journal.Line{ln(journal.EventVerifyPending, onSlice("a"))}, true},
+		{"an oracle run", []journal.Line{ln(journal.EventOracle, onSlice("a"))}, true},
+		{"a verified commit", []journal.Line{ln(journal.EventVerified, onSlice("a"))}, true},
+		{"a verification that errored", []journal.Line{ln(journal.EventVerifyError, onSlice("a"))}, true},
+	}
+	for _, tc := range tests {
+		if got := EverClaimed(tc.lines); got != tc.want {
+			t.Errorf("%s: EverClaimed = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
