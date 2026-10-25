@@ -69,8 +69,10 @@ In scope - what jig itself guarantees, and a report that breaks one of these:
 - A gate round's intent excerpt (`internal/intent`,
   `internal/verifydeliver/intent_infer.go`) leaking a local agent transcript's
   own text into the store or a pull request. A round with no brief and no
-  explicit intent reads the operator's local Claude Code transcripts for the repo
-  and writes an excerpt of the best match - the developer's and the assistant's
+  explicit intent reads the Claude Code transcripts of the sessions the machine
+  ledger names for the ticket (its driver and builders), or, when the ledger
+  yields none, the operator's local transcripts for the repo, and writes an
+  excerpt of the best match - the developer's and the assistant's
   own text; tool calls, tool results and thinking blocks are dropped, and so is a
   user record the transcript marks as the harness's own (`isMeta`, a compaction
   recap, a transcript-only notice) or as someone else's (any `origin` other than

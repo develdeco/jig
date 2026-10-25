@@ -1,5 +1,7 @@
 # Ticket dependencies live on the ticket, not the chart
 
+**Amended by the phases build** (the entries "A merged blocker is met when its work merged, not when it published" and "A stacked ticket is told where its branch starts and when it moved" in [DECISIONS.md](../../DECISIONS.md)): a `merged` blocker holds its dependents until its work has merged, judged per repo from its recorded pull request or the branch being in the target; a `stacked` child is told, as advice computed on read, to start from the parent's branch in each repo the two share, to restack when the parent's branch moves past it, and to retarget when the parent merges. The two kinds and the clean-gate rule below stand.
+
 A dependency between tickets is recorded once, in the blocked ticket's own
 `<ticket>/ticket.yaml`, never in the chart that happened to create it. The
 chart's `tickets.yaml` is where a dependency is first declared, but the

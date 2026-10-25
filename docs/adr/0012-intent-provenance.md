@@ -1,6 +1,6 @@
 # Intent has a provenance, and the gate no longer needs a brief
 
-**Amended by [ADR 0032](0032-jig-attaches-to-the-harness.md):** the summarizer launch is gone. With no brief and no explicit intent, the gate's request carries `intent_excerpt`, the path of an excerpt of the author's matching local session, and the reviewer reads it as a hint; the `intent.md` that only a model's summary could write is no longer made. The precedence and provenance below stand.
+**Amended by [ADR 0032](0032-jig-attaches-to-the-harness.md):** the summarizer launch is gone. With no brief and no explicit intent, the gate's request carries `intent_excerpt`, the path of an excerpt of the author's matching local session (found through the machine ledger's record of the sessions that worked the ticket and, failing that, matched by file overlap), and the reviewer reads it as a hint; the `intent.md` that only a model's summary could write is no longer made. The precedence and provenance below stand.
 
 The gate reviewer used to be pointed at `brief.md` unconditionally: `Gate`
 built `brief_path` from the ticket's own brief file, or, in `--branch`
