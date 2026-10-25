@@ -66,13 +66,13 @@ func (m *Model) publishPage(id string) page {
 		return clock(t.lines[i], m.zone)
 	}
 	if pub.BodyFor != "" {
-		check(true, "body written for "+m.repoHeads(t, pub, func(r publishRepo) string { return r.BodyFor }, pub.BodyFor), at(journal.EventPrBody))
+		check(true, "body written for "+repoHeads(pub, func(r publishRepo) string { return r.BodyFor }, commitWords(t, pub.BodyFor)), at(journal.EventPrBody))
 		record(body, bodyN)
 	} else {
 		check(false, "body: jig writes it from the brief, the slices and the review", "")
 	}
 	if pub.ApprovedFor != "" && allApproved(pub) {
-		check(true, "approved by "+firstOf(m.byWhom(t, pub.ApprovedBy, ""), "someone")+" for "+m.repoHeads(t, pub, func(r publishRepo) string { return r.ApprovedFor }, short(pub.ApprovedFor)), at(journal.EventPublishApproved))
+		check(true, "approved by "+firstOf(m.byWhom(t, pub.ApprovedBy, ""), "someone")+" for "+repoHeads(pub, func(r publishRepo) string { return r.ApprovedFor }, short(pub.ApprovedFor)), at(journal.EventPublishApproved))
 	} else {
 		check(false, "approval: yours, of the reviewed head (p)", "")
 	}
@@ -171,14 +171,12 @@ func allApproved(pub publishInfo) bool {
 }
 
 // repoHeads words the heads a check is about: the one head of a publish of one
-// repo (one), or each repo's head, of the repos that have one, for a publish of
-// several ("api ccccccc, web ddddddd"). The commit shows with its subject in a
-// body's check and as its short sha in an approval's, as each did before.
-func (m *Model) repoHeads(t *ticket, pub publishInfo, head func(publishRepo) string, one string) string {
+// repo, as the caller words it (one), or each repo's head, of the repos that
+// have one, for a publish of several ("api ccccccc, web ddddddd"). The commit
+// shows with its subject in a body's check and as its short sha in an
+// approval's, as each did before, so a publish of one repo is worded by its caller.
+func repoHeads(pub publishInfo, head func(publishRepo) string, one string) string {
 	if len(pub.Repos) == 0 {
-		if head(publishRepo{BodyFor: pub.BodyFor, ApprovedFor: pub.ApprovedFor}) == pub.BodyFor && one == pub.BodyFor {
-			return commitWords(t, one)
-		}
 		return one
 	}
 	var parts []string
