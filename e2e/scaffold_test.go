@@ -326,7 +326,7 @@ func TestHarnessCommitHasTrailer(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
 	h := newHarness(t, fx, env, "s-harness")
-	branch := "jig/" + fx.Ticket
+	branch := fx.Branch
 
 	h.Branch(branch)
 	if got := gitLog(t, fx.RepoDir, "rev-parse", "--abbrev-ref", "HEAD"); got != branch {

@@ -58,7 +58,7 @@ func buildTicketOn(t *testing.T, fx *fixture.Fixture, env jigEnv, whole bool) bu
 	defer func() { <-verifySlots }()
 	dropEnvFromSlices(t, fx)
 	h := newHarness(t, fx, env, "s-builder")
-	branch := "jig/" + fx.Ticket
+	branch := fx.Branch
 	h.Branch(branch)
 
 	type built struct{ slice, sha string }
