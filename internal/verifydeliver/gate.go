@@ -284,10 +284,16 @@ func checkFrontier(d Deps, ticket string, slices []store.Slice, early bool) erro
 			return fmt.Errorf("verifydeliver: gate: read slice %s state: %w", s.ID, err)
 		}
 		if st.State != "green" {
+			help := []string{fmt.Sprintf("Run `jig next %s` to see what is left to build, or `jig gate %s --early` to review anyway.", ticket, ticket)}
+			if d.Prompt != nil {
+				if p := d.Prompt(ticket); p != "" {
+					help = append(help, "ask: "+p)
+				}
+			}
 			return &axi.Error{
 				Msg:  fmt.Sprintf("slice %s is %s, not green; finish it first or pass --early", s.ID, st.State),
 				Code: "GATE_NOT_GREEN",
-				Help: []string{fmt.Sprintf("Run `jig next %s` to see what is left to build, or `jig gate %s --early` to review anyway.", ticket, ticket)},
+				Help: help,
 			}
 		}
 	}

@@ -394,22 +394,18 @@ func sliceByID(slices []store.Slice, id string) (store.Slice, bool) {
 }
 
 // nextStepHint computes the single contextual next-step hint for ticket:
-// an open question takes priority; next, a stalled slice points at the
-// command that can actually reset it; otherwise, once every slice is
-// green, the hint points at gate (no rounds yet, or a last round that was
-// not clean, whose fix slices are green by now) or publish (last round
-// clean); otherwise it points at next and claim to take a slice of the
-// frontier.
+// an open question takes priority; next, a stalled or env-blocked slice
+// points at the command that can actually reset it; otherwise the hint is
+// the advice of the phase the ticket is at (phaseAdvice, from
+// internal/phase): the command that moves it on, and the prompt that asks an
+// agent for it. `jig next`, `jig here` and the claim and gate refusals name
+// the same prompt.
 func nextStepHint(st *store.Store, ticket string) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		return "", err
 	}
 	questions, err := st.ReadQuestions(ticket)
-	if err != nil {
-		return "", err
-	}
-	rec, err := st.ReadTicket(ticket)
 	if err != nil {
 		return "", err
 	}
@@ -439,11 +435,6 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		return fmt.Sprintf("Run `%s` to answer and resume", cmd), nil
 	}
 
-	// A ticket that adopted a branch has no slices until a gate round queues
-	// its fixes: its next step is that round, not intake.
-	if len(slices) == 0 && !rec.Adopted() {
-		return intakeHint(ticket), nil
-	}
 	states := make(map[string]store.SliceState, len(slices))
 	for _, sl := range slices {
 		ss, err := st.ReadSliceState(ticket, sl.ID)
@@ -492,34 +483,11 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		), nil
 	}
 
-	allGreen := true
-	for _, sl := range slices {
-		if states[sl.ID].State != "green" {
-			allGreen = false
-		}
+	t, err := derivePhase(st, ticket)
+	if err != nil {
+		return "", err
 	}
-
-	if allGreen {
-		rounds, verdict, _, err := latestGateRound(st, ticket)
-		if err != nil {
-			return "", err
-		}
-		switch {
-		case rounds == 0:
-			return fmt.Sprintf("Run `jig gate %s` to open a gate round", ticket), nil
-		case verdict == "clean":
-			return fmt.Sprintf("Run `jig publish %s` to open or update the PR", ticket), nil
-		default:
-			// Every slice is green and the last round was not clean, so
-			// its fix slices are already built: what moves the ticket is
-			// the next round, not `jig next`, which would find nothing to
-			// do and reprint this same line. A verdict jig could not read
-			// lands here too, and the next round is the right step there
-			// as well.
-			return fmt.Sprintf("Run `jig gate %s` to open the next gate round", ticket), nil
-		}
-	}
-	return fmt.Sprintf("Run `jig next %s` to see what is ready, then `jig claim %s --slice <slice>` to take one", ticket, ticket), nil
+	return phaseAdvice(t, ticket), nil
 }
 
 var gateRoundDirRE = regexp.MustCompile(`^round-(\d+)$`)

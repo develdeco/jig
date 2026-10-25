@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -151,6 +152,11 @@ func TestGateReportHintNamesTheOrderWhenFixSlicesAreQueuedToo(t *testing.T) {
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
+	}
+	// The round is on record, so the ticket's work has begun and its phase is
+	// the build, not the brief the fixture never approves.
+	if err := journal.Append(st, fx.Ticket, journal.Line{Event: journal.EventGateRound, Attempt: 1}); err != nil {
+		t.Fatalf("journal.Append: %v", err)
 	}
 
 	report := verifydeliver.GateReport{

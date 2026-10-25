@@ -43,6 +43,7 @@ func TestToolsTurnArgumentsIntoTheCommandLine(t *testing.T) {
 		{"here", map[string]any{"ticket": "JIG-1", "slice": "b", "session": "s-1", "explain": true, "json": true}, "here JIG-1 --slice b --session s-1 --explain --json"},
 		{"here", map[string]any{"explain": false}, "here"},
 		{"next", map[string]any{"ticket": "JIG-1", "topology": true}, "next JIG-1 --topology"},
+		{"next", map[string]any{"ticket": "JIG-1", "for": "review"}, "next JIG-1 --for review"},
 		{"context", map[string]any{"slice": "b", "json": true}, "context --slice b --json"},
 		{"claim", map[string]any{"ticket": "JIG-2", "slice": "x", "session": "s-1", "unattended": true, "take": true, "release": true}, "claim JIG-2 --slice x --session s-1 --unattended --take --release"},
 		{"ask", map[string]any{"ticket": "JIG-1", "slice": "c", "session": "s-1", "question": "Which tone?"}, "ask JIG-1 --slice c --session s-1 -- Which tone?"},

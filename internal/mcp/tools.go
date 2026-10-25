@@ -371,10 +371,12 @@ func Tools(o Options) []Tool {
 		},
 		{
 			Name:        "next",
-			Description: "Name what is ready to build. With a ticket: its ready slices by repo and the branch to create. Without one: the tickets of the store in order, what blocks each and which are ready.",
+			Description: "Name what is ready to build. With a ticket: the phase it is at (brief, build, review or publish), whether that phase can start and the prompt that starts it, its ready slices by repo and the branch to create. Without one: the tickets of the store in order, what blocks each and which are ready.",
 			Verb:        "next", ReadOnly: true,
 			Params: []Param{ticketParam,
-				{Name: "topology", Type: typeBoolean, Desc: "with a ticket: also list every slice with its repo, wave and blockers"}, jsonParam},
+				{Name: "topology", Type: typeBoolean, Desc: "with a ticket: also list every slice with its repo, wave and blockers"},
+				{Name: "for", Type: typeString, Enum: []string{"brief", "build", "review", "publish"}, Desc: "with a ticket: the phase you are about to run; says whether it can run now, or what it waits for, or that it is done already"},
+				jsonParam},
 		},
 		{
 			Name:        "context",

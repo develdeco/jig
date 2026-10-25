@@ -121,19 +121,19 @@ func TestStatusOfAnAdoptedTicket(t *testing.T) {
 	if !strings.HasPrefix(got, "ticket: JIG-2\nbranch: add-retry\nstate: green\n") {
 		t.Errorf("status of an adopted ticket does not name its branch under the ticket, in a green state:\n%s", got)
 	}
-	if !strings.HasSuffix(got, "help[1]:\n  Run `jig gate JIG-2` to open a gate round\n") {
+	if !strings.HasSuffix(got, "help[1]:\n  Run `jig gate JIG-2` to open a gate round; ask: Review JIG-2\n") {
 		t.Errorf("status of an adopted ticket with no rounds does not point at the gate:\n%s", got)
 	}
 
 	writeRoundReport(t, fx.StoreDir, ticket, 1, "fix-slices")
-	if got := status(ticket); !strings.HasSuffix(got, "help[1]:\n  Run `jig gate JIG-2` to open the next gate round\n") {
+	if got := status(ticket); !strings.HasSuffix(got, "help[1]:\n  Run `jig gate JIG-2` to open the next gate round; ask: Review JIG-2\n") {
 		t.Errorf("status after an unclean round does not point at the next round:\n%s", got)
 	}
 
 	// After a clean round the ticket is published like any other: publish
 	// ships an adopted branch, so the hint names it.
 	writeRoundReport(t, fx.StoreDir, ticket, 2, "clean")
-	if got := status(ticket); !strings.HasSuffix(got, "help[1]:\n  Run `jig publish JIG-2` to open or update the PR\n") {
+	if got := status(ticket); !strings.HasSuffix(got, "help[1]:\n  Run `jig publish JIG-2` to open or update the PR; ask: Publish JIG-2\n") {
 		t.Errorf("status after a clean round does not point at `jig publish`:\n%s", got)
 	}
 
