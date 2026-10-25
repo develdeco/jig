@@ -50,6 +50,12 @@ type Ticket struct {
 	// stays in the one place that knows it. The default is never written
 	// here: a recorded branch is an adopted one (Adopted).
 	Branch string
+	// Rank is the ticket's place in the owner's priority order, written by
+	// jig rank: lower comes first. Nil means unranked, which `jig next`
+	// orders after every ranked ticket. Two tickets may hold the same rank;
+	// `jig next` orders them by id and says the rank is shared. Any integer
+	// is a rank to read; jig rank writes whole numbers from 1.
+	Rank *int
 	// BlockedBy is the ticket's own blockers, written by jig graduate.
 	BlockedBy []TicketBlockedBy
 	// Aliases is every earlier id this ticket has carried. Every rewrite of
@@ -75,6 +81,7 @@ type ticketFile struct {
 	Body          literalString     `yaml:"body,omitempty"`
 	Slug          string            `yaml:"slug,omitempty"`
 	Branch        string            `yaml:"branch,omitempty"`
+	Rank          *int              `yaml:"rank,omitempty"`
 	BlockedBy     []TicketBlockedBy `yaml:"blocked_by,omitempty"`
 	Aliases       []string          `yaml:"aliases,omitempty"`
 }
@@ -170,7 +177,7 @@ func ReadTicketFile(path string) (Ticket, error) {
 			Help: []string{"Upgrade jig to a version that understands this ticket.yaml schema"},
 		}
 	}
-	return Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, BlockedBy: f.BlockedBy, Aliases: f.Aliases}, nil
+	return Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, Rank: f.Rank, BlockedBy: f.BlockedBy, Aliases: f.Aliases}, nil
 }
 
 // ReadTicketDeps reads <ticket>/ticket.yaml's blockers. An absent file
@@ -250,6 +257,7 @@ func writeTicketFile(path string, t Ticket) error {
 		Body:          literalString(t.Body),
 		Slug:          t.Slug,
 		Branch:        t.Branch,
+		Rank:          t.Rank,
 		BlockedBy:     t.BlockedBy,
 		Aliases:       t.Aliases,
 	})
@@ -261,8 +269,8 @@ func writeTicketFile(path string, t Ticket) error {
 
 // WriteTicketBranch sets <ticket>/ticket.yaml's branch to branch, leaving
 // any recorded title and blockers untouched, and creating the record when
-// the ticket has none. It is the one update of a record that already exists:
-// a ticket's title and blockers are written once, whole, by
+// the ticket has none. With SetTicketRank it is an update of a record that
+// already exists: a ticket's title and blockers are written once, whole, by
 // CreateTicketRecord when the ticket is minted, and nothing changes them
 // afterwards. A ticket records a branch when it adopts one (`jig gate
 // --branch`) or when a session claims a slice on a branch no ticket's id
@@ -279,6 +287,26 @@ func (s *Store) WriteTicketBranch(ticket string, branch string) error {
 			t.Slug = Slug(t.Title)
 		}
 	})
+}
+
+// TicketFileRelPath returns <ticket>/ticket.yaml relative to the store root:
+// the path a Claim that edits the record stages and commits.
+func (s *Store) TicketFileRelPath(ticket string) string {
+	return filepath.Join(s.TicketRelDir(ticket), "ticket.yaml")
+}
+
+// SetTicketRank sets <ticket>/ticket.yaml's rank to *rank, or removes it when
+// rank is nil, leaving the rest of the record untouched. Setting a rank
+// creates the record when the ticket has none; removing one from a ticket
+// with no record writes nothing. It only writes the file: jig rank commits it
+// through Claim.
+func (s *Store) SetTicketRank(ticket string, rank *int) error {
+	if rank == nil {
+		if _, err := os.Stat(s.TicketFilePath(ticket)); os.IsNotExist(err) {
+			return nil
+		}
+	}
+	return s.mutateTicket(ticket, func(t *Ticket) { t.Rank = rank })
 }
 
 // SetMigratedTicket rewrites ticket's whole ticket.yaml as `jig store
