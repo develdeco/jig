@@ -45,10 +45,16 @@ func TestTicketStatus(t *testing.T) {
 		assertStatus(t, nil, "Briefed")
 	})
 
-	t.Run("In progress once a slice has left queued", func(t *testing.T) {
+	// A ticket whose slices nobody has started is `queued` to jig status; the
+	// board keeps it in the column it was in, never In progress.
+	t.Run("Briefed while its slices are all queued", func(t *testing.T) {
 		if err := st.AppendSlices(ticket, []store.Slice{{ID: "a", Goal: "do it"}}); err != nil {
 			t.Fatal(err)
 		}
+		assertStatus(t, nil, "Briefed")
+	})
+
+	t.Run("In progress once a slice has left queued", func(t *testing.T) {
 		if err := st.WriteSliceState(ticket, "a", store.SliceState{State: "building"}); err != nil {
 			t.Fatal(err)
 		}

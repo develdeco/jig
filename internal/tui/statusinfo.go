@@ -10,7 +10,7 @@ import (
 // statusInfo is `jig status <ticket>`, read: the store's word on the ticket's
 // slices, its questions and the asks a gate round left for a person.
 type statusInfo struct {
-	State     string // building, parked, stalled, env-blocked, green or closed
+	State     string // new, queued, building, parked, stalled, env-blocked, green or closed
 	Branch    string
 	Closed    string // how a closed ticket was closed, such as "covered by develdeco/jig#82"; "" when open
 	Slices    []statusSlice

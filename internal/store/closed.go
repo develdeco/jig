@@ -2,7 +2,6 @@ package store
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -123,13 +122,6 @@ func (c Closed) Phrase() string {
 		return "not planned"
 	}
 	return c.Reason
-}
-
-// TicketRecordRelPath is ticket's ticket.yaml relative to the store root: the
-// one path a closure or a reopening stages, so a claim commits that record
-// alone.
-func (s *Store) TicketRecordRelPath(ticket string) string {
-	return filepath.Join(s.TicketRelDir(ticket), "ticket.yaml")
 }
 
 // CloseTicket writes c as ticket's closure, leaving every other field of the

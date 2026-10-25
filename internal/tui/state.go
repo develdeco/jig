@@ -624,6 +624,10 @@ func (t *ticket) phase(zone *time.Location) (state, label string) {
 			return StateEnvBlocked, "env blocked"
 		case "green":
 			return StateGreen, "built"
+		case "new", "queued":
+			// Nothing was claimed: the word is the ticket's own, not the
+			// building the journal's lines might otherwise suggest.
+			return StateQueued, t.status.State
 		}
 		if len(t.verifying()) > 0 {
 			return StateVerifying, "verifying"

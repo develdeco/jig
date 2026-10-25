@@ -179,3 +179,26 @@ func TestRoundsWithNoFindingsFileKeepTheirDash(t *testing.T) {
 		t.Errorf("rounds = %+v", got)
 	}
 }
+
+// TestParseStatusReadsTheClosureOfAClosedTicket: a ticket closed without a pull
+// request says how in the closed block of its status, and an open one has none.
+func TestParseStatusReadsTheClosureOfAClosedTicket(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		kv   [][2]string
+		want string
+	}{
+		{"covered", [][2]string{{"reason", "covered"}, {"by", "develdeco/jig#82"}, {"at", "2026-10-25"}}, "covered by develdeco/jig#82"},
+		{"superseded", [][2]string{{"reason", "superseded"}, {"by", "JIG-4"}}, "superseded by JIG-4"},
+		{"not planned", [][2]string{{"reason", "not-planned"}, {"note", "Decided against it."}}, "not planned"},
+	} {
+		info := parseStatus(strings.Join([]string{"ticket: JIG-1", "state: closed", axi.KV("closed", tc.kv)}, "\n") + "\n")
+		if info.Err != nil || info.State != "closed" || info.Closed != tc.want {
+			t.Errorf("%s: info = %+v, want state closed, closed %q", tc.name, info, tc.want)
+		}
+	}
+	if open := parseStatus(statusJIG1()); open.Closed != "" {
+		t.Errorf("an open ticket reads as closed: %q", open.Closed)
+	}
+}

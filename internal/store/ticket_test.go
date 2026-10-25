@@ -652,3 +652,108 @@ func TestTicketAdoptedIsTheRecordedBranch(t *testing.T) {
 		}
 	}
 }
+
+// TestSetTicketRank covers the rank field of the record: it is written and
+// read back, a rewrite of the record for any other field keeps it, setting it
+// keeps the rest of the record, and clearing it leaves no key behind.
+func TestSetTicketRank(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	deps := []TicketBlockedBy{{Ticket: "T-4", Kind: "merged"}}
+	if err := st.CreateTicketRecord("T-1", Ticket{Title: "Fix the thing", BlockedBy: deps}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
+	}
+	if got, _ := st.ReadTicket("T-1"); got.Rank != nil {
+		t.Fatalf("rank of a ticket minted without one = %d, want none", *got.Rank)
+	}
+
+	three := 3
+	if err := st.SetTicketRank("T-1", &three); err != nil {
+		t.Fatalf("SetTicketRank: %v", err)
+	}
+	got, err := st.ReadTicket("T-1")
+	if err != nil {
+		t.Fatalf("ReadTicket: %v", err)
+	}
+	if got.Rank == nil || *got.Rank != 3 || got.Title != "Fix the thing" || !reflect.DeepEqual(got.BlockedBy, deps) {
+		t.Fatalf("ReadTicket after SetTicketRank = %+v, want rank 3 with the title and blockers kept", got)
+	}
+	data, err := os.ReadFile(st.TicketFilePath("T-1"))
+	if err != nil || !strings.Contains(string(data), "\nrank: 3\n") {
+		t.Fatalf("ticket.yaml = %q, %v, want a rank: 3 line", data, err)
+	}
+
+	// A rewrite for another field keeps the rank, and rank 0 is a rank.
+	if err := st.WriteTicketBranch("T-1", "fix/T-1"); err != nil {
+		t.Fatalf("WriteTicketBranch: %v", err)
+	}
+	if got, _ := st.ReadTicket("T-1"); got.Rank == nil || *got.Rank != 3 {
+		t.Fatalf("rank after WriteTicketBranch = %v, want 3", got.Rank)
+	}
+	zero := 0
+	if err := st.SetTicketRank("T-1", &zero); err != nil {
+		t.Fatalf("SetTicketRank 0: %v", err)
+	}
+	if got, _ := st.ReadTicket("T-1"); got.Rank == nil || *got.Rank != 0 {
+		t.Fatalf("rank after SetTicketRank 0 = %v, want 0", got.Rank)
+	}
+
+	if err := st.SetTicketRank("T-1", nil); err != nil {
+		t.Fatalf("SetTicketRank nil: %v", err)
+	}
+	got, err = st.ReadTicket("T-1")
+	if err != nil || got.Rank != nil || got.Title != "Fix the thing" || got.Branch != "fix/T-1" {
+		t.Fatalf("ReadTicket after clearing = %+v, %v, want no rank and the rest kept", got, err)
+	}
+	if data, _ := os.ReadFile(st.TicketFilePath("T-1")); strings.Contains(string(data), "rank") {
+		t.Fatalf("ticket.yaml after clearing = %q, want no rank key", data)
+	}
+}
+
+// TestSetTicketRankOnATicketWithNoRecord: setting a rank creates the record,
+// clearing one writes nothing.
+func TestSetTicketRankOnATicketWithNoRecord(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	if err := os.MkdirAll(st.TicketDir("T-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetTicketRank("T-1", nil); err != nil {
+		t.Fatalf("SetTicketRank nil: %v", err)
+	}
+	if _, err := os.Stat(st.TicketFilePath("T-1")); !os.IsNotExist(err) {
+		t.Fatalf("clearing the rank of a ticket with no record wrote ticket.yaml (stat err = %v)", err)
+	}
+
+	two := 2
+	if err := st.SetTicketRank("T-1", &two); err != nil {
+		t.Fatalf("SetTicketRank: %v", err)
+	}
+	if got, err := st.ReadTicket("T-1"); err != nil || got.Rank == nil || *got.Rank != 2 {
+		t.Fatalf("ReadTicket = %+v, %v, want rank 2", got, err)
+	}
+}
+
+// TestReadTicketRefusesARankThatIsNotAnInteger: the key is known, so only its
+// value can be wrong, and the refusal is the one every unreadable record gets.
+func TestReadTicketRefusesARankThatIsNotAnInteger(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	if err := os.MkdirAll(st.TicketDir("T-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(st.TicketFilePath("T-1"), []byte("schema_version: 1\nrank: soon\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := st.ReadTicket("T-1")
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "TICKET_RECORD_INVALID" {
+		t.Fatalf("ReadTicket of rank: soon = %v, want TICKET_RECORD_INVALID", err)
+	}
+}
+
+// TestTicketFileRelPath: the record's path under the store root, the one a
+// claim stages.
+func TestTicketFileRelPath(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	if got, want := st.TicketFileRelPath("T-1"), filepath.Join("tickets", "T-1", "ticket.yaml"); got != want {
+		t.Fatalf("TicketFileRelPath = %q, want %q", got, want)
+	}
+}

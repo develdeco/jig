@@ -97,7 +97,7 @@ func cmdClose(e env, args []string, stdout io.Writer) int {
 			if err := st.CloseTicket(ticket, closure); err != nil {
 				return "", nil, err
 			}
-			return ticket, []string{st.TicketRecordRelPath(ticket)}, nil
+			return ticket, []string{st.TicketFileRelPath(ticket)}, nil
 		},
 		func(id string) string { return fmt.Sprintf("%s: closed, %s", id, closure.Phrase()) },
 	); err != nil {
@@ -217,7 +217,7 @@ func cmdReopen(e env, args []string, stdout io.Writer) int {
 			if err := st.ReopenTicket(ticket); err != nil {
 				return "", nil, err
 			}
-			return ticket, []string{st.TicketRecordRelPath(ticket)}, nil
+			return ticket, []string{st.TicketFileRelPath(ticket)}, nil
 		},
 		func(id string) string { return fmt.Sprintf("%s: reopened", id) },
 	); err != nil {

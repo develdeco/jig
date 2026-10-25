@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -38,8 +40,10 @@ func init() {
 // cmdNext implements `jig next [<ticket>]`. With a ticket it prints the
 // slices that are ready to build, grouped by the repo they build in, the
 // branch to create and how the repos can be shared out; without one, every
-// ticket of the store in order with what blocks it and which are ready, and a
-// warning for local branches of different tickets that change the same files.
+// ticket of the store in order with what blocks it and which are ready, the
+// ready tickets in the owner's priority order (jig rank), and a warning for
+// ready tickets that build in the same workspace and for local branches of
+// different tickets that change the same files.
 // With a ticket it also says which phase the ticket is at, whether that phase
 // can start now, why not, and the prompt that starts it (internal/phase); --for
 // asks about one phase, whatever the ticket is at.
@@ -626,22 +630,47 @@ func (n nextTicket) switchAdvice() string {
 
 // nextStore is what `jig next` says without a ticket.
 type nextStore struct {
-	Tickets  []nextRow     `json:"tickets"`
-	Next     []string      `json:"next"`
-	Overlaps []nextOverlap `json:"overlaps,omitempty"`
+	// Tickets are every ticket of the store, in id order.
+	Tickets []nextRow `json:"tickets"`
+	// Next are the ids of the ready tickets in the order to start them: by
+	// rank, lowest first, then by id, the unranked last.
+	Next []string `json:"next"`
+	// SharedRanks are the ranks that more than one ready ticket holds.
+	SharedRanks []nextSharedRank `json:"shared_ranks,omitempty"`
+	// WorkspaceOverlaps are the workspaces that two ready tickets both build
+	// in, one entry for each pair and workspace.
+	WorkspaceOverlaps []nextWorkspaceOverlap `json:"workspace_overlaps,omitempty"`
+	Overlaps          []nextOverlap          `json:"overlaps,omitempty"`
 }
 
 // nextRow is one ticket of the listing; Closed is how a closed ticket was
 // closed ("covered by develdeco/jig#82").
 type nextRow struct {
-	ID        string        `json:"id"`
-	Title     string        `json:"title,omitempty"`
-	State     string        `json:"state"`
-	Closed    string        `json:"closed,omitempty"`
+	ID     string `json:"id"`
+	Title  string `json:"title,omitempty"`
+	State  string `json:"state"`
+	Closed string `json:"closed,omitempty"`
+	// Rank is the ticket's rank (ticket.yaml), absent when it has none.
+	Rank      *int          `json:"rank,omitempty"`
 	BlockedBy []nextBlocker `json:"blocked_by,omitempty"`
 	Ready     []string      `json:"ready"`
 	// Problem is why an invalid ticket could not be read.
 	Problem string `json:"problem,omitempty"`
+}
+
+// nextSharedRank is a rank that more than one ready ticket holds, so which
+// of them to start first is not the owner's word.
+type nextSharedRank struct {
+	Rank    int      `json:"rank"`
+	Tickets []string `json:"tickets"`
+}
+
+// nextWorkspaceOverlap is a workspace that two ready tickets both build in:
+// run together, their slices change the same files.
+type nextWorkspaceOverlap struct {
+	Repo      string   `json:"repo"`
+	Workspace string   `json:"workspace"`
+	Tickets   []string `json:"tickets"`
 }
 
 // nextOverlap is a file that local branches of different tickets both change.
@@ -667,8 +696,11 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 	}
 	readMerges(merges, inputs)
 	out := nextStore{Tickets: []nextRow{}, Next: []string{}}
+	// The ready tickets in id order, with their ranks and slices.
+	var ranked []ready.Ranked
+	slicesOf := map[string][]store.Slice{}
 	for i, s := range ready.Tickets(inputs) {
-		row := nextRow{ID: s.ID, Title: datas[i].title, State: s.State, Ready: s.Ready}
+		row := nextRow{ID: s.ID, Title: datas[i].title, State: s.State, Rank: datas[i].rec.Rank, Ready: s.Ready}
 		if c := datas[i].rec.Closed; c != nil {
 			row.Closed = c.Phrase()
 		}
@@ -685,11 +717,39 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		}
 		out.Tickets = append(out.Tickets, row)
 		if s.State == ready.StateReady {
-			out.Next = append(out.Next, s.ID)
+			ranked = append(ranked, ready.Ranked{ID: s.ID, Rank: datas[i].rec.Rank})
+			slicesOf[s.ID] = datas[i].in.Slices
 		}
 	}
+	out.Next = ready.ByPriority(ranked)
+	for _, s := range ready.SharedRanks(ranked) {
+		out.SharedRanks = append(out.SharedRanks, nextSharedRank{Rank: s.Rank, Tickets: s.Tickets})
+	}
+	out.WorkspaceOverlaps = workspaceOverlaps(cfg, mp, out.Next, slicesOf)
 	out.Overlaps = findOverlaps(st, cfg, mp)
 	return out, nil
+}
+
+// workspaceOverlaps names, for each pair of the ready tickets, the workspaces
+// both build in: the sites of all their slices, placed in the repos of the
+// project as `jig next <ticket>` places them. The tickets come in the order to
+// start them, so a pair names the one to start first before the other. A
+// ticket's workspace that no repo owns is no site (it is not known whose it
+// is), and it overlaps nothing.
+func workspaceOverlaps(cfg project.Config, mp project.MachineProject, order []string, slicesOf map[string][]store.Slice) []nextWorkspaceOverlap {
+	if len(order) < 2 {
+		return nil
+	}
+	repos := ready.ProjectRepos(cfg, mp.Clones)
+	footprints := make([]ready.Footprint, len(order))
+	for i, id := range order {
+		footprints[i] = ready.Footprint{Ticket: id, Sites: ready.Sites(slicesOf[id], ready.Place(repos, slicesOf[id]))}
+	}
+	var out []nextWorkspaceOverlap
+	for _, o := range ready.Overlaps(footprints) {
+		out = append(out, nextWorkspaceOverlap{Repo: o.Repo, Workspace: o.Workspace, Tickets: o.Tickets[:]})
+	}
+	return out
 }
 
 func (n nextStore) blocks() []string {
@@ -712,6 +772,33 @@ func (n nextStore) blocks() []string {
 		rows = append(rows, []string{t.ID, t.Title, t.State, blocked, readySlices})
 	}
 	blocks := []string{axi.Table("tickets", []string{"id", "title", "state", "blocked_by", "ready"}, rows)}
+	// The ready tickets in the order to start them, with the rank each holds.
+	if len(n.Next) > 0 {
+		byID := map[string]nextRow{}
+		for _, t := range n.Tickets {
+			byID[t.ID] = t
+		}
+		var order [][]string
+		for _, id := range n.Next {
+			rank := "-"
+			if r := byID[id].Rank; r != nil {
+				rank = strconv.Itoa(*r)
+			}
+			order = append(order, []string{id, rank, byID[id].Title})
+		}
+		blocks = append(blocks, axi.Table("next", []string{"ticket", "rank", "title"}, order))
+	}
+	for _, s := range n.SharedRanks {
+		blocks = append(blocks, fmt.Sprintf("warning: rank %d is shared by %s: they are ordered by id", s.Rank, andList(s.Tickets)))
+	}
+	if len(n.WorkspaceOverlaps) > 0 {
+		var wrows [][]string
+		for _, o := range n.WorkspaceOverlaps {
+			wrows = append(wrows, []string{o.Repo, o.Workspace, joinPlus(o.Tickets)})
+		}
+		blocks = append(blocks, "warning: ready tickets build in the same workspace",
+			axi.Table("workspace_overlap", []string{"repo", "workspace", "tickets"}, wrows))
+	}
 	// What each blocker that is not met is missing, so the table above (which
 	// names who waits for whom) need not.
 	var waiting [][]string
@@ -747,13 +834,41 @@ func (n nextStore) blocks() []string {
 	default:
 		help = append(help, "No ticket has a slice ready: run `jig next <ticket>` for one that is in flight, or `jig status <ticket>`")
 	}
+	if len(n.WorkspaceOverlaps) > 0 {
+		help = append(help, "Do not run tickets that share a workspace (`workspace_overlap`) at once: start the one that comes first in `next`, and the other after it")
+	}
 	if len(n.Overlaps) > 0 {
 		help = append(help, "Build overlapping tickets one after the other, or settle who changes those files first")
+	}
+	if n.unrankedAmongMany() {
+		help = append(help, "Order the ready tickets with `jig rank <ticket> <n>`: the lowest rank starts first")
 	}
 	if len(invalid) > 0 {
 		help = append(help, fmt.Sprintf("Fix what the problem of %s says (its slices.yaml or a slice's state), then check it with `jig validate %s --check`", invalid[0][0], invalid[0][0]))
 	}
 	return append(blocks, axi.Help(help...))
+}
+
+// unrankedAmongMany reports whether there are several ready tickets and one of
+// them has no rank: the order the person has not given.
+func (n nextStore) unrankedAmongMany() bool {
+	if len(n.Next) < 2 {
+		return false
+	}
+	for _, t := range n.Tickets {
+		if t.Rank == nil && slices.Contains(n.Next, t.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+// andList joins words as prose: "a", "a and b", "a, b and c".
+func andList(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }
 
 // findOverlaps looks in each repo's mapped clone for local branches that bind
