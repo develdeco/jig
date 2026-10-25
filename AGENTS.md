@@ -1,6 +1,6 @@
 # jig
 
-A CLI that runs a ticket from brief to merged PR as a dispatch loop over slices.
+A CLI that a coding agent's own session uses to take a ticket from brief to merged PR, phase by phase: jig verifies each commit, records the review and writes the publish.
 
 - **Vocabulary** → `CONTEXT.md`
 - **Structure and store schema** → `ARCHITECTURE.md`
