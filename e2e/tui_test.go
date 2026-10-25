@@ -124,7 +124,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	fx, env := newFixture(t, fixture.Opts{})
 	dropEnvFromSlices(t, fx)
 	h := newHarness(t, fx, env, "s-builder")
-	branch := "jig/" + fx.Ticket
+	branch := fx.Branch
 	h.Branch(branch)
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {

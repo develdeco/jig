@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,11 +29,22 @@ const (
 // stepNames are the steps as the screens title them.
 var stepNames = [stepCount]string{"Brief", "Build", "Review", "Publish"}
 
+// The lines the screens write themselves. The planner writes brief.md and
+// slices.yaml, which make no journal line, so a screen that waits on lines sees
+// nothing for the minutes that takes; a status shows the files, and what it
+// shows that it did not before is a line of the brief's activity. They come from
+// the status (srcStatus), never from the stream.
+const (
+	srcStatus       = "status"
+	eventBriefSeen  = "brief-seen"
+	eventSlicesSeen = "slices-seen"
+)
+
 // stepOfLine is the step a journal line belongs to, or -1 for a line about
 // the ticket as a whole (what it has cost).
 func stepOfLine(l events.Envelope) int {
 	switch l.Event {
-	case journal.EventApproval, journal.EventRevalidate:
+	case journal.EventApproval, journal.EventRevalidate, eventBriefSeen, eventSlicesSeen:
 		return stepBrief
 	case journal.EventGateOpen, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean, journal.EventTriage,
 		journal.EventFixSlice, journal.EventAdopt, journal.EventRoute:
@@ -46,7 +58,9 @@ func stepOfLine(l events.Envelope) int {
 	return stepBuild
 }
 
-// stepLines are the ticket's lines of step, oldest first.
+// stepLines are the ticket's lines of step, oldest first: the journal's, with
+// the ones the screens wrote from a status among them where their time puts
+// them.
 func (t *ticket) stepLines(step int) []events.Envelope {
 	var out []events.Envelope
 	for _, l := range t.lines {
@@ -54,7 +68,64 @@ func (t *ticket) stepLines(step int) []events.Envelope {
 			out = append(out, l)
 		}
 	}
+	for _, s := range t.seen {
+		if stepOfLine(s) != step {
+			continue
+		}
+		pos := len(out)
+		if at, ok := s.At(); ok {
+			for i, l := range out {
+				if lt, ok := l.At(); ok && lt.After(at) {
+					pos = i
+					break
+				}
+			}
+		}
+		out = slices.Insert(out, pos, s)
+	}
 	return out
+}
+
+// noteChanges writes, as lines of the brief's activity, what status after
+// shows of the brief and the slices that status before did not: sections
+// written, slices written. The first status read is the baseline, since what
+// was there when the screen opened is not news, and a change that a journal line
+// says (an approval, a fix slice sent back) has its own line.
+func (m *Model) noteChanges(t *ticket, before, after *statusInfo) {
+	if before == nil || after == nil {
+		return
+	}
+	note := func(event, text string) {
+		t.seen = append(t.seen, events.Envelope{Src: srcStatus, Line: journal.Line{
+			TS: m.now().UTC().Format(time.RFC3339Nano), Ticket: t.id, Event: event, Summary: text,
+		}})
+	}
+	if was, now := briefSections(before), briefSections(after); now > was {
+		note(eventBriefSeen, strconv.Itoa(now)+" "+plural(now, "section", "sections")+" written")
+	}
+	if was, now := plannedSlices(before), plannedSlices(after); now > was {
+		note(eventSlicesSeen, strconv.Itoa(now)+" "+plural(now, "slice", "slices")+" written")
+	}
+}
+
+// briefSections is how many sections the status shows in the brief.
+func briefSections(s *statusInfo) int {
+	if s.Brief == nil {
+		return 0
+	}
+	return len(s.Brief.Sections)
+}
+
+// plannedSlices is how many slices the status shows that the brief planned: the
+// ones a gate round sent back as fixes come with lines of their own.
+func plannedSlices(s *statusInfo) int {
+	n := 0
+	for _, sl := range s.Slices {
+		if sl.FromGate == 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // subjects maps each commit the ticket verified to its subject, which jig
@@ -116,7 +187,9 @@ func (t *ticket) subKey(l events.Envelope) string {
 	switch l.Event {
 	case journal.EventApproval:
 		return "approved"
-	case journal.EventRevalidate:
+	case eventBriefSeen:
+		return "drafted"
+	case journal.EventRevalidate, eventSlicesSeen:
 		return "slices"
 	case journal.EventGateOpen, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean:
 		return "round:" + strconv.Itoa(t.roundOf(l))
@@ -173,7 +246,7 @@ func (t *ticket) roundOf(l events.Envelope) int {
 // asks of a round that closed clean, a slice the status does not name): the
 // same words internal/phase gives it while it does.
 var fallbackLabels = map[string]string{
-	"approved": "brief approved", "slices": "slices written", "asks": "asks", "fixes": "fixes",
+	"drafted": "brief drafted", "approved": "brief approved", "slices": "slices written", "asks": "asks", "fixes": "fixes",
 	"body": "body", "approval": "approval", "pr": "pull request", "changelog": "changelog", "done": "published",
 }
 
@@ -275,16 +348,18 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return text
 	case journal.EventRevalidate:
 		return "the brief was checked again"
+	case eventBriefSeen, eventSlicesSeen:
+		return l.Summary
 	case journal.EventAdopt:
 		return strings.TrimSpace("the ticket took over " + firstOf(l.Branch, "a branch") + " " + short(l.Commit))
 	case journal.EventGateOpen:
 		return "opened"
 	case journal.EventGateReviewer:
-		return firstOf(m.whoWith(t, l.Session), "a reviewer") + " took it"
+		return firstOf(m.reviewerWho(t, l.Session, t.roundOf(l), l.Model, nil), "a reviewer") + " took it"
 	case journal.EventGateRound:
-		return firstOf(m.whoWith(t, l.Session), "the reviewer") + " finished with findings"
+		return firstOf(m.reviewerWho(t, l.Session, t.roundOf(l), l.Model, nil), "the reviewer") + " finished with findings"
 	case journal.EventGateClean:
-		return firstOf(m.whoWith(t, l.Session), "the reviewer") + " finished: clean"
+		return firstOf(m.reviewerWho(t, l.Session, t.roundOf(l), l.Model, nil), "the reviewer") + " finished: clean"
 	case journal.EventRoute:
 		return strings.TrimSpace("the round's findings were routed: " + firstOf(l.Summary, l.Outcome))
 	case journal.EventTriage:

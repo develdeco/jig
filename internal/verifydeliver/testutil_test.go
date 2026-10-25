@@ -36,16 +36,23 @@ var buildGitEnv = []string{
 
 // ticketBranch is the default branch name a ticket with no recorded branch
 // resolves to (store.Store.TicketBranch's own fallback). Tests use this
-// literal directly wherever they only need to name that conventional
+// helper directly wherever they only need to name that conventional
 // branch - to set up a lease, or to assert against it - without threading
 // a *store.Store through every call site for a value most of these tests
-// never record differently.
-func ticketBranch(ticket string) string { return "jig/" + ticket }
+// never record differently. The fixture ticket's brief has a heading, which
+// gives its branch a slug (fixture.Branch); any other ticket a test makes has
+// no title and no brief, and is named by its bare id.
+func ticketBranch(ticket string) string {
+	if ticket == fixture.Ticket {
+		return fixture.Branch
+	}
+	return ticket
+}
 
 // recordBranch records branch as ticket's working branch in st's
 // ticket.yaml and commits and pushes it, the way an adoption does (without the
 // review or the start sha), so the next Gate, Publish or buildLeaseDir
-// resolves it instead of the "jig/<ticket>" default.
+// resolves it instead of the default.
 func recordBranch(t *testing.T, st *store.Store, ticket, branch string) {
 	t.Helper()
 	if err := st.WriteTicketBranch(ticket, branch); err != nil {

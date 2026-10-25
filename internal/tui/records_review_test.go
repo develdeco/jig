@@ -64,19 +64,22 @@ func TestReviewScreenSaysWhoReviewedEachRoundAndHowFarTheyStood(t *testing.T) {
 	}
 }
 
-// TestReviewScreenUsesTheLedgersHarnessAndModelForTheReviewer: the session's
-// start line, which the status cannot see, wins over the words in the table.
-func TestReviewScreenUsesTheLedgersHarnessAndModelForTheReviewer(t *testing.T) {
+// TestReviewScreenNamesTheModelTheRoundRanOn: the harness is the one the
+// session's start line gave, which the status cannot see, and the model is the
+// one the round's row names, since a reviewer subagent runs on a model of its
+// own and the session started on its parent's.
+func TestReviewScreenNamesTheModelTheRoundRanOn(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", reviewStatus([][]string{
-		{"1", "findings", "s-reviewer", "codex", "gpt-5", "true", "0", "1", "0", "full", sha('0'), sha('c'), "4"},
+		{"1", "findings", "s-reviewer", "codex", "claude-opus-5", "true", "0", "1", "0", "full", sha('0'), sha('c'), "4"},
 	}, nil), 0)
 	g.feed(append([]events.Envelope{
-		ll(at(10, 59), "JIG-2", journal.EventSessionStart, func(l *journal.Line) { l.Session, l.Harness, l.Model = "s-reviewer", "claude", "claude-opus-5" }),
+		ll(at(10, 59), "JIG-2", journal.EventSessionStart, func(l *journal.Line) { l.Session, l.Harness, l.Model = "s-reviewer", "claude", "claude-sonnet-5" }),
 	}, jig2Mid()...)...).press("enter")
-	if text := pageText(g); !strings.Contains(text, "reviewer (Claude Code · Opus 5) · independent") || strings.Contains(text, "Codex") {
-		t.Errorf("the screen does not use the harness and model the ledger gave:\n%s", text)
+	text := pageText(g)
+	if !strings.Contains(text, "reviewer (Claude Code · Opus 5) · independent") || strings.Contains(text, "Codex") || strings.Contains(text, "Sonnet 5) · independent") {
+		t.Errorf("the screen does not use the harness the ledger gave and the model the round ran on:\n%s", text)
 	}
 }
 

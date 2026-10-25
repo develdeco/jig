@@ -1,6 +1,7 @@
 package phase
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -458,6 +459,55 @@ func TestReviewSubSteps(t *testing.T) {
 	}
 	if got.Text != "round 2 clean · by 01234567" || got.State != StateDone {
 		t.Errorf("review after the clean round = %+v", got)
+	}
+}
+
+// TestReviewerNameWordsTheReviewerOfARound: a caller with its own words for a
+// reviewer gets them wherever the answer names the session that took a round or
+// closed it, with the round's number, while a session that holds a slice keeps
+// SessionName's words: one session can build a slice and have a subagent review.
+func TestReviewerNameWordsTheReviewerOfARound(t *testing.T) {
+	t.Parallel()
+	name := func(id string) string { return "session " + id }
+	reviewer := func(id string, n int, detailed bool) string {
+		if detailed {
+			return fmt.Sprintf("reviewer subagent of %s (round %d, on a model)", id, n)
+		}
+		return fmt.Sprintf("reviewer subagent of %s (round %d)", id, n)
+	}
+
+	open := allGreen()
+	open.Open = &OpenRound{Round: 1, Reviewer: "s1"}
+	open.SessionName, open.ReviewerName = name, reviewer
+	got := Derive(open, built()).Of(Review)
+	if s := sub(t, got, "round:1"); s.Detail != "taken by reviewer subagent of s1 (round 1, on a model)" {
+		t.Errorf("round sub-step = %+v, want the reviewer's detailed words", s)
+	}
+	if got.Text != "round 1 open · reviewer subagent of s1 (round 1) is reading the change" {
+		t.Errorf("review text = %q, want the reviewer's short words", got.Text)
+	}
+
+	// The session that closed the last round, clean.
+	closed := allGreen()
+	closed.SessionName, closed.ReviewerName = name, reviewer
+	lines := append(built(), ln(journal.EventGateOpen, attempt(1)), ln(journal.EventGateClean, attempt(1), by("s1")))
+	if got := Derive(closed, lines).Of(Review); got.Text != "round 1 clean · by reviewer subagent of s1 (round 1)" {
+		t.Errorf("clean round text = %q, want the reviewer's words", got.Text)
+	}
+
+	// A holder of a slice is named with SessionName, and a caller with no words
+	// for a reviewer gets SessionName's.
+	claimed := approved()
+	claimed.Slices[0].State = "building"
+	claimed.SessionName, claimed.ReviewerName = name, reviewer
+	if got := sub(t, Derive(claimed, []journal.Line{ln(journal.EventClaim, onSlice("a"), by("s1"))}).Of(Build), "slice:a"); !strings.Contains(got.Detail, "claimed by session s1") {
+		t.Errorf("slice a = %+v, want it claimed by session s1", got)
+	}
+	plain := allGreen()
+	plain.Open = &OpenRound{Round: 1, Reviewer: "s1"}
+	plain.SessionName = name
+	if s := sub(t, Derive(plain, built()).Of(Review), "round:1"); s.Detail != "taken by session s1" {
+		t.Errorf("with no ReviewerName: %+v, want SessionName's words", s)
 	}
 }
 

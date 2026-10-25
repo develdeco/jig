@@ -184,7 +184,7 @@ func TestPublishBodyOffersTheRecordingsToPickFromThroughMain(t *testing.T) {
 	if body, err := os.ReadFile(filepath.Join(st.TicketDir(fx.Ticket), "pr", "fixture-repo.md")); err != nil || !strings.Contains(string(body), "### Greeting") {
 		t.Errorf("pr body = %q (err %v), want the demo section", body, err)
 	}
-	if got, err := gitx.Run(fx.RepoRemote, "for-each-ref", "--format=%(objectname)", "refs/heads/jig/"+fx.Ticket); err != nil || got != "" {
+	if got, err := gitx.Run(fx.RepoRemote, "for-each-ref", "--format=%(objectname)", "refs/heads/"+fx.Branch); err != nil || got != "" {
 		t.Errorf("origin has the ticket branch at %q (err %v) after --body, want nothing pushed", got, err)
 	}
 }

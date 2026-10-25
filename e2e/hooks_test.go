@@ -39,7 +39,7 @@ func TestHooksDriveVerify(t *testing.T) {
 	fx, env := newFixture(t, fixture.Opts{})
 	env = env.withGitGlobal(t)
 	h := newHarness(t, fx, env, "s-hooks")
-	branch := "jig/" + fx.Ticket
+	branch := fx.Branch
 	h.Branch(branch)
 
 	// Install both hooks into this test's own home and git config.

@@ -380,7 +380,7 @@ func TestPublishFullChain(t *testing.T) {
 	d := newDeps(t, fx)
 	gateToClean(t, fx, d)
 	buildHead := run(t, buildLeaseDir(t, fx), "rev-parse", "HEAD")
-	buildLog := run(t, buildLeaseDir(t, fx), "log", "--format=%H", "jig/"+fx.Ticket)
+	buildLog := run(t, buildLeaseDir(t, fx), "log", "--format=%H", fx.Branch)
 	advanceTarget(t, fx)
 
 	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
@@ -424,17 +424,17 @@ func TestPublishFullChain(t *testing.T) {
 			t.Fatalf("journal has %+v, but publish reconciles, revalidates, memorizes and squashes nothing", l)
 		}
 	}
-	if pr := seen["pr"]; pr.Outcome != "none:no-host" || pr.Commit != buildHead || pr.Branch != "jig/"+fx.Ticket {
-		t.Fatalf("pr line = %+v, want none:no-host for %s from jig/%s", pr, buildHead, fx.Ticket)
+	if pr := seen["pr"]; pr.Outcome != "none:no-host" || pr.Commit != buildHead || pr.Branch != fx.Branch {
+		t.Fatalf("pr line = %+v, want none:no-host for %s from %s", pr, buildHead, fx.Branch)
 	}
 
 	// The reviewed head went out as it is, on top of nothing: origin's history
 	// of the branch is the build lease's, with no memorize or squash commit.
-	if remoteHead := originRef(t, fx.RepoRemote, "refs/heads/jig/"+fx.Ticket); remoteHead != buildHead {
-		t.Fatalf("origin jig/%s = %s, want the reviewed head %s", fx.Ticket, remoteHead, buildHead)
+	if remoteHead := originRef(t, fx.RepoRemote, "refs/heads/"+fx.Branch); remoteHead != buildHead {
+		t.Fatalf("origin %s = %s, want the reviewed head %s", fx.Branch, remoteHead, buildHead)
 	}
-	if got := run(t, fx.RepoRemote, "log", "--format=%H", "jig/"+fx.Ticket); got != buildLog {
-		t.Fatalf("origin's history of jig/%s is\n%s\nwant the build lease's\n%s", fx.Ticket, got, buildLog)
+	if got := run(t, fx.RepoRemote, "log", "--format=%H", fx.Branch); got != buildLog {
+		t.Fatalf("origin's history of %s is\n%s\nwant the build lease's\n%s", fx.Branch, got, buildLog)
 	}
 	if _, err := gitx.Run(publishLeaseDir(t, fx), "cat-file", "-e", buildHead+":.claude/retrieval/"+fx.Ticket+".md"); err == nil {
 		t.Fatal("the reviewed head holds retrieval notes: publish committed on the branch")
@@ -586,7 +586,7 @@ func TestPublishNoDivergenceLeavesTheStoreUntouched(t *testing.T) {
 	gateToClean(t, fx, d)
 	// Fast-forward origin's target branch to exactly the build lease's
 	// ticket-branch tip: the branch then differs from the target by nothing.
-	run(t, buildLeaseDir(t, fx), "push", "origin", "jig/"+fx.Ticket+":main")
+	run(t, buildLeaseDir(t, fx), "push", "origin", fx.Branch+":main")
 	subjectBefore := run(t, d.Store.Root, "log", "-1", "--format=%s")
 
 	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})

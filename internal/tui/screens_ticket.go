@@ -9,12 +9,27 @@ import (
 	"github.com/develdeco/jig/internal/phase"
 )
 
-// activityLines is how many of a step's latest lines a screen shows.
-const activityLines = 8
+// activityLines is how many of a step's latest lines a screen shows, and
+// substepLines the most sub-steps the block lists, not counting its frame (past
+// that it lists the ones that matter and counts the rest), on the screen they
+// were set for: 80 by 24, whose body has bodyRef rows. A taller terminal has
+// room for more of both (activityCap, substepCap).
+const (
+	activityLines = 8
+	substepLines  = 6
+	bodyRef       = 19
+	// nextLines is how many lines the "next" line may take.
+	nextLines = 2
+)
 
-// substepLines is the most sub-steps the block lists, not counting its frame.
-// Past that it lists the ones that matter and counts the rest.
-const substepLines = 6
+// substepCap is the most sub-steps the block lists in a body of body rows:
+// substepLines on the 80x24 screen, and a third of each row a taller one adds.
+func substepCap(body int) int { return substepLines + max(0, body-bodyRef)/3 }
+
+// activityCap is the most lines of a step's activity a body of body rows shows:
+// activityLines on the 80x24 screen, and two thirds of each row a taller one
+// adds. Together with substepCap they take all the rows a tall terminal adds.
+func activityCap(body int) int { return activityLines + max(0, body-bodyRef)*2/3 }
 
 // ticketPage is one ticket: its four steps in order, then the sub-steps of the
 // step under the cursor, what waits for a person, what to do next, and the
@@ -57,7 +72,16 @@ func (m *Model) ticketPage(id string) page {
 		}
 	}
 	if t.status != nil && len(t.status.Help) > 0 {
-		next.add(m.st.dim("next  ") + t.status.Help[0])
+		// The line wraps to a second line and is cut, with an ellipsis, only
+		// after that: what to do next is the sentence a person reads.
+		for i, line := range wrap(t.status.Help[0], m.width-8, nextLines) {
+			if i == 0 {
+				line = m.st.dim("next  ") + line
+			} else {
+				line = "      " + line
+			}
+			next.add(line)
+		}
 	}
 
 	// The heights. The screen has a body of so many rows: the steps, the
@@ -82,7 +106,7 @@ func (m *Model) ticketPage(id string) page {
 
 	var block page
 	if subs := d.Phases[focus].Subs; len(subs) > 0 && spare >= 3 {
-		block = m.substepsPanel(focus, subs, min(substepLines+2, spare, len(subs)+2))
+		block = m.substepsPanel(focus, subs, min(substepCap(body)+2, spare, len(subs)+2))
 		spare -= len(block.lines)
 	}
 	blank := func() bool {
@@ -283,7 +307,7 @@ func subState(step int, s phase.Sub) string {
 // line names the sub-step it advances.
 func (m *Model) activityPanel(p *page, t *ticket, step int) {
 	lines := t.stepLines(step)
-	keep := min(activityLines, max(3, m.bodyRows()-len(p.lines)-2))
+	keep := min(activityCap(m.bodyRows()), max(3, m.bodyRows()-len(p.lines)-2))
 	right := ""
 	if n := len(lines); n > keep {
 		right = fmt.Sprintf("latest %d of %d", keep, n)

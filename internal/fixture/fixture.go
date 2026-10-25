@@ -47,6 +47,35 @@ import (
 // Ticket is the single ticket id every generated fixture store carries.
 const Ticket = "JIG-1"
 
+// Branch is the default branch of the fixture's ticket: its id and the slug of
+// its brief's heading ("# Fixture ticket brief"), since the ticket has no
+// record and so no title to name a branch after (store.Store.TicketBranch).
+// TestBranchIsTheDefaultOfTheTicket keeps it true.
+const Branch = Ticket + "-fixture-ticket-brief"
+
+// RemoveBrief deletes brief.md from ticket's folder in the store at storeDir,
+// leaving the ticket brief-less, and keeps its default branch as it was. A ticket
+// with no record takes the slug of its branch from its brief's heading, so
+// removing the brief would rename the branch a build was made on; the slug the
+// heading gave goes into a record first. A ticket that has a record already is
+// left to it.
+func RemoveBrief(storeDir, ticket string) error {
+	st := &store.Store{Root: storeDir}
+	path := filepath.Join(st.TicketDir(ticket), "brief.md")
+	brief, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(st.TicketFilePath(ticket)); os.IsNotExist(err) {
+		if slug := store.Slug(store.BriefTitle(brief)); slug != "" {
+			if err := st.CreateTicketRecord(ticket, store.Ticket{Slug: slug}); err != nil {
+				return err
+			}
+		}
+	}
+	return os.Remove(path)
+}
+
 // ErrUnknownScenarioBranch wraps the error Build returns when Opts.ScenarioBranch
 // names an overlay that does not exist under testdata/fixture/scenario-branches.
 // Callers that need to tell this apart from any other failure (a copyTree error
@@ -63,6 +92,7 @@ type Fixture struct {
 	StoreRemote string // bare remote for the store; "" when Opts.Standalone
 	ScenarioDir string // materialized scenario tree for the fake session backend
 	Ticket      string // "JIG-1"
+	Branch      string // the ticket's default branch, Branch
 	Home        string // jig home root the machine mapping was written under
 
 	// SecondRepoDir and SecondRepoRemote are the second repo's working clone
@@ -292,6 +322,7 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 		StoreRemote:      storeRemote,
 		ScenarioDir:      scenarioDir,
 		Ticket:           Ticket,
+		Branch:           Branch,
 		Home:             jigHome,
 		SecondRepoDir:    secondDir,
 		SecondRepoRemote: secondRemote,

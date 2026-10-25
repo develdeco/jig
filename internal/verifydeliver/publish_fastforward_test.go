@@ -69,7 +69,7 @@ func TestPublishRefusesAPushThatIsNotAFastForward(t *testing.T) {
 	gateToClean(t, fx, d)
 	branch := ticketBranch(fx.Ticket)
 
-	// Someone else's commit on origin's jig/<ticket>, cut from main.
+	// Someone else's commit on origin's copy of the ticket's branch, cut from main.
 	var theirs string
 	whenPublishFetchesOrigin(&d, func() {
 		foreign := t.TempDir()

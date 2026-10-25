@@ -53,7 +53,7 @@ func TestGateIntentFromTheTicketsSession(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "inferred-intent"})
 	ticket := fx.Ticket
-	if err := os.Remove(filepath.Join(fx.StoreDir, "tickets", ticket, "brief.md")); err != nil {
+	if err := fixture.RemoveBrief(fx.StoreDir, ticket); err != nil {
 		t.Fatalf("remove brief.md: %v", err)
 	}
 

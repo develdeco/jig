@@ -103,18 +103,18 @@ func TestNextReadySetsAndTickets(t *testing.T) {
 	// Nothing started: every slice with no blocker is ready, in the repo its
 	// workspace belongs to; b waits for a.
 	n := nextJSON[nextTicketOut](t, env, fx.RepoDir, "JIG-1")
-	if n.Ticket != "JIG-1" || n.State != "ready" || n.Branch != "jig/JIG-1" {
-		t.Errorf("ticket = %q, state = %q, branch = %q, want JIG-1, ready, jig/JIG-1", n.Ticket, n.State, n.Branch)
+	if n.Ticket != "JIG-1" || n.State != "ready" || n.Branch != fx.Branch {
+		t.Errorf("ticket = %q, state = %q, branch = %q, want JIG-1, ready, %s", n.Ticket, n.State, n.Branch, fx.Branch)
 	}
 	if want := []string{"fixture-repo: a+c+d", "second-repo: e"}; !reflect.DeepEqual(readyRepos(n), want) {
 		t.Errorf("ready = %v, want %v", readyRepos(n), want)
 	}
 	r := runJig(t, env, fx.RepoDir, "next", "JIG-1")
 	for _, want := range []string{
-		"next:\n  ticket: JIG-1\n  state: ready\n  branch: jig/JIG-1\n",
+		"next:\n  ticket: JIG-1\n  state: ready\n  branch: " + fx.Branch + "\n",
 		"ready[2]{repo,slices,start}:\n  fixture-repo,a+c+d,origin/main\n  second-repo,e,origin/main\n",
 		"2 repos have ready slices (fixture-repo, second-repo)",
-		"git switch -c jig/JIG-1",
+		"git switch -c " + fx.Branch,
 	} {
 		if !strings.Contains(r.Stdout, want) {
 			t.Errorf("jig next JIG-1 lacks %q:\n%s", want, r.Stdout)

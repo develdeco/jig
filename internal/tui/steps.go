@@ -240,24 +240,53 @@ func stepTitle(step int) string {
 }
 
 // stepLabel is where a ticket stands, for a header: the state of its current
-// step and the step's name with a word for that state.
+// step and the words that say it.
 func (m *Model) stepLabel(t *ticket) (state, label string) {
 	steps := m.steps(t)
 	cur := steps[currentStep(steps)]
 	if cur.Done {
 		return cur.State, "published"
 	}
-	word := map[string]string{
-		StateQueued: "waiting", StateReady: "ready", StateBuilding: "in progress", StateVerifying: "verifying",
-		StateNeedsInput: "needs you", StateStalled: "stalled", StateEnvBlocked: "env blocked",
-		StateReviewing: "round open", StateFindings: "findings", StatePublishing: "publishing",
-	}[cur.State]
-	if cur.Step == stepBrief {
-		// The brief's states are its own: drafted, or changed after it was
-		// approved.
-		if w := map[string]string{StateBuilding: "being drafted", StateFindings: "needs approving"}[cur.State]; w != "" {
-			word = w
-		}
+	return cur.State, stepWords(cur.Step, cur.State)
+}
+
+// stepState is a step in a state, the key of the header's words.
+type stepState struct {
+	step  int
+	state string
+}
+
+// headerWords are what the header says of a step in a state, whole, since a
+// step's name and its state's word do not always read as one phrase: the
+// publish that is under way is "publishing", not "publish publishing". Every
+// pair a step's row can be in is here; stepWords falls back to the step's name
+// and the state for one that is not.
+var headerWords = map[stepState]string{
+	{stepBrief, StateQueued}:       "brief being read",
+	{stepBrief, StateBuilding}:     "brief being drafted",
+	{stepBrief, StateFindings}:     "brief needs approving",
+	{stepBrief, StateStalled}:      "brief cannot be read",
+	{stepBuild, StateQueued}:       "waiting to build",
+	{stepBuild, StateReady}:        "ready to build",
+	{stepBuild, StateBuilding}:     "build in progress",
+	{stepBuild, StateVerifying}:    "build verifying",
+	{stepBuild, StateNeedsInput}:   "build needs you",
+	{stepBuild, StateStalled}:      "build stalled",
+	{stepBuild, StateEnvBlocked}:   "build blocked by its environment",
+	{stepReview, StateQueued}:      "waiting to review",
+	{stepReview, StateReady}:       "ready to review",
+	{stepReview, StateReviewing}:   "review round open",
+	{stepReview, StateFindings}:    "review findings",
+	{stepPublish, StateQueued}:     "waiting to publish",
+	{stepPublish, StateReady}:      "ready to publish",
+	{stepPublish, StatePublishing}: "publishing",
+	{stepPublish, StatePublished}:  "published",
+}
+
+// stepWords is what the header says of step in state.
+func stepWords(step int, state string) string {
+	if w, ok := headerWords[stepState{step, state}]; ok {
+		return w
 	}
-	return cur.State, strings.ToLower(stepNames[cur.Step]) + " " + firstOf(word, cur.State)
+	return strings.ToLower(stepNames[step]) + " " + state
 }

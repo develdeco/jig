@@ -113,7 +113,7 @@ type GateOpts struct {
 	// the ticket's record, with the branch's tip as the ticket's start sha; every
 	// later round works on the recorded branch, and naming another one is
 	// refused (BRANCH_MISMATCH). Empty: the ticket's own branch, the recorded
-	// one or jig/<ticket>.
+	// one or the default (<ticket>-<slug>).
 	Branch string
 	// Intent and IntentDoc are `jig gate --intent`/`--doc`: at most one is
 	// ever set - refused when both are, whether by the CLI or by a caller
@@ -175,7 +175,7 @@ type GateReport struct {
 	// list, the exit-2 signal. Empty when nothing is waiting on a person.
 	NeedsHuman []Finding
 	// Branch is the branch the ticket adopted, "" for a ticket working on
-	// its own jig/<ticket>.
+	// its own default branch.
 	Branch string
 	// Intent is this round's resolved intent binding (resolveIntent), read
 	// once before the round's source runs; a reviewer round reports the one

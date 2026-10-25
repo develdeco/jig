@@ -60,7 +60,7 @@ func TestEventsReadsHarnessRun(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
 	h := newHarness(t, fx, env, "s-events")
-	branch := "jig/" + fx.Ticket
+	branch := fx.Branch
 	h.Branch(branch)
 
 	if res := h.Jig("session", "start", "--harness", "claude"); res.Code != 0 {
@@ -155,7 +155,7 @@ func TestEventsFollowSeesHookVerification(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
 	h := newHarness(t, fx, env, "s-follow")
-	branch := "jig/" + fx.Ticket
+	branch := fx.Branch
 	h.Branch(branch)
 
 	follow := startJig(t, env, fx.RepoDir, "events", "--follow", fx.Ticket)

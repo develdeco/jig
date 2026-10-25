@@ -51,7 +51,7 @@ func TestHooksLive(t *testing.T) {
 	env := jigEnv{home: t.TempDir()}
 	fx := fixture.Generate(t, fixture.Opts{Home: env.home})
 	h := newHarness(t, fx, env, "live")
-	branch := "jig/" + fx.Ticket
+	branch := fx.Branch
 	h.Branch(branch)
 
 	mustExitZero(t, runJig(t, env, fx.RepoDir, "hooks", "--here", "--yes"), "jig hooks --here")

@@ -247,3 +247,69 @@ func TestAnUnreadTicketsBriefSaysWhatTheRosterKnows(t *testing.T) {
 		}
 	}
 }
+
+// TestTheHeaderSaysEveryStepInEveryStateInWordsThatRead: the header joins a
+// step and the state it is in, and not every pair reads as a phrase when it is
+// joined ("publish publishing"). The table is every pair a step's row can be in,
+// each in the words a person would say it.
+func TestTheHeaderSaysEveryStepInEveryStateInWordsThatRead(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		step  int
+		state string
+		want  string
+	}{
+		{stepBrief, StateQueued, "brief being read"},
+		{stepBrief, StateBuilding, "brief being drafted"},
+		{stepBrief, StateFindings, "brief needs approving"},
+		{stepBrief, StateStalled, "brief cannot be read"},
+		{stepBuild, StateQueued, "waiting to build"},
+		{stepBuild, StateReady, "ready to build"},
+		{stepBuild, StateBuilding, "build in progress"},
+		{stepBuild, StateVerifying, "build verifying"},
+		{stepBuild, StateNeedsInput, "build needs you"},
+		{stepBuild, StateStalled, "build stalled"},
+		{stepBuild, StateEnvBlocked, "build blocked by its environment"},
+		{stepReview, StateQueued, "waiting to review"},
+		{stepReview, StateReady, "ready to review"},
+		{stepReview, StateReviewing, "review round open"},
+		{stepReview, StateFindings, "review findings"},
+		{stepPublish, StateQueued, "waiting to publish"},
+		{stepPublish, StateReady, "ready to publish"},
+		{stepPublish, StatePublishing, "publishing"},
+		{stepPublish, StatePublished, "published"},
+	} {
+		got := stepWords(tc.step, tc.state)
+		if got != tc.want {
+			t.Errorf("%s in %s: the header says %q, want %q", stepNames[tc.step], tc.state, got, tc.want)
+		}
+		// No pair says a word twice in two forms: "publish publishing",
+		// "build building", "review reviewing".
+		words := strings.Fields(got)
+		for i, a := range words {
+			for _, b := range words[i+1:] {
+				if len(a) >= 4 && strings.HasPrefix(b, a) {
+					t.Errorf("%s in %s: %q says %q and then %q", stepNames[tc.step], tc.state, got, a, b)
+				}
+			}
+		}
+	}
+	// A pair the table lacks keeps both words, for a state no row has today.
+	if got := stepWords(stepBuild, "odd"); got != "build odd" {
+		t.Errorf("a state with no words reads %q, want the step and the state", got)
+	}
+}
+
+// TestTheHeaderOfAPublishUnderWayReadsPublishing: the case the table is for, on
+// the screen: a ticket whose body is written and whose approval waits is
+// "publishing", in the header of its screen.
+func TestTheHeaderOfAPublishUnderWayReadsPublishing(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
+	g.feed(jig2()[:9]...)
+	head := strings.Split(g.view(), "\n")[0]
+	if !strings.HasSuffix(head, "▲ publishing") || strings.Contains(head, "publish publishing") {
+		t.Errorf("header = %q, want it to end in the icon and \"publishing\"", head)
+	}
+}

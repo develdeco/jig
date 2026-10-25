@@ -55,6 +55,9 @@ type ticket struct {
 	ledger []events.Envelope
 	// status is the last `jig status` read, nil before the first.
 	status *statusInfo
+	// seen are the lines the screens wrote themselves, from a status that
+	// shows work no journal line says (noteChanges).
+	seen []events.Envelope
 	// loading is set while a status is being read; dirty, when the ticket
 	// changed since the one being read was asked for.
 	loading, dirty bool
@@ -617,6 +620,8 @@ func eventState(l events.Envelope) string {
 		return StateNeedsInput
 	case journal.EventAnswer, journal.EventApproval, journal.EventRevalidate:
 		return StateOK
+	case eventBriefSeen, eventSlicesSeen:
+		return StateBuilding
 	case journal.EventGateOpen, journal.EventGateReviewer:
 		return StateReviewing
 	case journal.EventGateRound:

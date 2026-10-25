@@ -101,10 +101,17 @@ func TestNoTrackerStoreIDBranch(t *testing.T) {
 		t.Errorf("after a retitle: branch = %q, want it unchanged, %q", n.Branch, want)
 	}
 
-	// The ticket the fixture holds has no title and no slug: it keeps the name
-	// every ticket had.
-	if n := nextJSON[nextTicketOut](t, env, fx.RepoDir, fx.Ticket); n.Branch != "jig/"+fx.Ticket {
-		t.Errorf("a ticket with nothing to name a branch after: branch = %q, want jig/%s", n.Branch, fx.Ticket)
+	// The ticket the fixture holds has no title and no slug: its brief's
+	// heading names the branch; with no brief either it is named by its id,
+	// and not by the jig/ prefix every ticket once had.
+	if n := nextJSON[nextTicketOut](t, env, fx.RepoDir, fx.Ticket); n.Branch != fx.Branch {
+		t.Errorf("a ticket with a brief and no title: branch = %q, want %s", n.Branch, fx.Branch)
+	}
+	if err := os.Remove(filepath.Join(fx.StoreDir, "tickets", fx.Ticket, "brief.md")); err != nil {
+		t.Fatalf("remove brief.md: %v", err)
+	}
+	if n := nextJSON[nextTicketOut](t, env, fx.RepoDir, fx.Ticket); n.Branch != fx.Ticket {
+		t.Errorf("a ticket with nothing to name a branch after: branch = %q, want %s", n.Branch, fx.Ticket)
 	}
 
 	// The branch binds to the ticket by its store id.

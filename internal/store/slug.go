@@ -12,8 +12,8 @@ const slugMax = 40
 // ASCII letter or digit ends a word; an apostrophe sits inside one ("don't"
 // is "dont"), so it ends nothing. A first word longer than slugMax is cut
 // where it stands, since a slug that is empty for a long word would name
-// nothing. A title with no ASCII word has no slug: "" (a branch then keeps the
-// name jig has always given a ticket; see defaultBranch).
+// nothing. A title with no ASCII word has no slug: "" (a branch then takes the
+// slug of the brief's heading, else is the bare id; see defaultBranch).
 //
 // The result is only ever [a-z0-9] and single dashes between words, so it can
 // follow an id in a branch name without git objecting to the whole.

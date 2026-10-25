@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -365,8 +366,8 @@ func (s *Store) SetMigratedTicket(ticket, oldID, title, body string, blockedBy [
 // name when none is recorded: <id>-<slug>, where id is the ticket's GitHub
 // issue number once the mirror has given it one (and the project's branches
 // are led by GitHub's ids, Store.BranchesFrom) and the ticket's own id
-// before that, and slug is Slug of its title; a ticket with no slug to give
-// keeps the name jig always gave it, "jig/<ticket>". Every caller that names
+// before that, and slug is Slug of its title, else of its brief's heading; a
+// ticket with no slug to give is named by the bare id. Every caller that names
 // a ticket's branch resolves it here instead of building the name itself, so
 // a branch the ticket adopted is picked up by every one of them - and every
 // one of them gets this same validation for free, rather than each having to
@@ -510,31 +511,55 @@ func (s *Store) branchNameFault(branch, target string) *branchFault {
 // before the field existed. The default is derived, never written to
 // ticket.yaml's branch: that key marks an adopted branch.
 //
-// A ticket with no slug to give (no title, or a title with no ASCII word) has
-// nothing to put after an id, and keeps "jig/<ticket>", the name every ticket
-// had before branches were named for their titles. Tickets minted through
-// jig have a title, so this is a hand-built store's ticket, or one titled in
-// a script with no Latin letter in it.
+// A ticket with no title to give a slug (none recorded, or one with no ASCII
+// word) takes it from the first "# " heading of its brief, without the
+// "<id>:" that heading may lead with (briefSlug). Tickets minted through jig
+// have a title, so this is a ticket whose folder was made by hand. A ticket
+// with no slug from either is named by the bare id: the "jig/<id>" prefix
+// went with the branches named for their titles (decision 31), and a
+// jig/<id> branch still binds to its ticket (TicketForBranch).
 func (s *Store) defaultBranch(ticket string, rec Ticket) (string, error) {
 	slug := rec.Slug
 	if slug == "" {
 		slug = Slug(rec.Title)
 	}
 	if slug == "" {
-		return branchPrefix + ticket, nil
+		slug = s.briefSlug(ticket, rec)
 	}
 	lead, err := s.branchID(ticket)
 	if err != nil {
 		return "", err
 	}
+	if slug == "" {
+		return lead, nil
+	}
 	return lead + "-" + slug, nil
 }
 
+// briefSlug is the slug of ticket's brief heading: the first "# " heading of
+// brief.md, with a leading "<id>:" taken off (the id the ticket has or had),
+// run through Slug. It is "" when the ticket has no brief, no heading, or a
+// heading that is nothing but its id.
+func (s *Store) briefSlug(ticket string, rec Ticket) string {
+	brief, err := os.ReadFile(filepath.Join(s.TicketDir(ticket), "brief.md"))
+	if err != nil {
+		return ""
+	}
+	title := BriefTitle(brief)
+	for _, id := range append([]string{ticket}, rec.Aliases...) {
+		if len(title) > len(id) && strings.EqualFold(title[:len(id)], id) && title[len(id)] == ':' {
+			title = title[len(id)+1:]
+			break
+		}
+	}
+	return Slug(title)
+}
+
 // defaultBranchOr is defaultBranch for a message that only wants to name the
-// default: when the name cannot be worked out, the one every ticket once had.
+// default: when the name cannot be worked out, the bare id.
 func (s *Store) defaultBranchOr(ticket string, rec Ticket) string {
 	if name, err := s.defaultBranch(ticket, rec); err == nil {
 		return name
 	}
-	return branchPrefix + ticket
+	return ticket
 }

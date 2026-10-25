@@ -298,9 +298,9 @@ func TestTicketMutateRefusesUnreadableRecord(t *testing.T) {
 }
 
 // TestTicketBranchDefault covers a ticket with no ticket.yaml at all, which
-// has no title to name a branch for and keeps the conventional "jig/<ticket>",
-// and one whose ticket.yaml exists but records no branch (title/blocked_by
-// only), which resolves to "<ticket>-<slug of its title>".
+// has no title to name a branch for and is named by its bare id, and one whose
+// ticket.yaml exists but records no branch (title/blocked_by only), which
+// resolves to "<ticket>-<slug of its title>".
 func TestTicketBranchDefault(t *testing.T) {
 	st := &Store{Root: t.TempDir()}
 
@@ -308,8 +308,8 @@ func TestTicketBranchDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TicketBranch on an absent ticket.yaml: %v", err)
 	}
-	if got != "jig/T-1" {
-		t.Fatalf("TicketBranch = %q, want %q", got, "jig/T-1")
+	if got != "T-1" {
+		t.Fatalf("TicketBranch = %q, want %q", got, "T-1")
 	}
 
 	if err := st.CreateTicketRecord("T-2", Ticket{Title: "Fix the thing"}); err != nil {
@@ -321,6 +321,79 @@ func TestTicketBranchDefault(t *testing.T) {
 	}
 	if got != "T-2-fix-the-thing" {
 		t.Fatalf("TicketBranch = %q, want %q", got, "T-2-fix-the-thing")
+	}
+}
+
+// writeBrief writes brief.md in ticket's folder of st, as a person or an
+// agent that made the folder by hand would: no ticket.yaml beside it.
+func writeBrief(t *testing.T, st *Store, ticket, text string) {
+	t.Helper()
+	dir := st.TicketDir(ticket)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "brief.md"), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestBranchFromBriefHeadingWhenNoTitle covers a ticket whose folder was made by
+// hand: with no title (no record, or a record that has none) its branch takes
+// its slug from the brief's first "# " heading, without the "<id>:" the heading
+// leads with. A recorded title still wins over the heading, and a "## "
+// heading is a section, never the title.
+func TestBranchFromBriefHeadingWhenNoTitle(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	for _, tc := range []struct {
+		name, ticket, brief string
+		rec                 *Ticket
+		want                string
+	}{
+		{"the id and a colon lead the heading", "SHOP-1", "# SHOP-1: Show the cart total\n\n## Goal\n\nx\n", nil, "SHOP-1-show-the-cart-total"},
+		{"a heading with no id", "SHOP-2", "# Cart discount\n\n## Goal\n\nx\n", nil, "SHOP-2-cart-discount"},
+		{"the id in another case", "SHOP-3", "# shop-3:   Empty cart message\n", nil, "SHOP-3-empty-cart-message"},
+		{"an id the ticket carried before", "SHOP-4", "# OLD-7: Wishlist\n", &Ticket{Aliases: []string{"OLD-7"}}, "SHOP-4-wishlist"},
+		{"a record with no title", "SHOP-5", "# SHOP-5: Gift wrap\n", &Ticket{Slug: ""}, "SHOP-5-gift-wrap"},
+		{"the title wins", "SHOP-6", "# SHOP-6: Gift wrap\n", &Ticket{Title: "Returns page"}, "SHOP-6-returns-page"},
+		{"the first heading wins", "SHOP-7", "intro\n\n# SHOP-7: First\n\n# Second\n", nil, "SHOP-7-first"},
+		{"a section is not the title", "SHOP-8", "## Goal\n\nx\n", nil, "SHOP-8"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeBrief(t, st, tc.ticket, tc.brief)
+			if tc.rec != nil {
+				if err := st.CreateTicketRecord(tc.ticket, *tc.rec); err != nil {
+					t.Fatalf("CreateTicketRecord: %v", err)
+				}
+			}
+			got, err := st.TicketBranch(tc.ticket, "main")
+			if err != nil || got != tc.want {
+				t.Fatalf("TicketBranch = %q, %v, want %q", got, err, tc.want)
+			}
+			// The branch is the default, never an adopted one, and binds back.
+			if rec, err := st.ReadTicket(tc.ticket); err != nil || rec.Adopted() {
+				t.Fatalf("ReadTicket = %+v, %v, want an unadopted ticket", rec, err)
+			}
+		})
+	}
+}
+
+// TestBranchIsTheBareIdWithNoTitleAtAll covers a ticket with no slug from its
+// record or its brief (no folder, no brief, a brief with no heading, a heading
+// that is only the id, or a title with no ASCII word): its branch is its bare
+// id, not the retired "jig/<id>"; a jig/<id> branch still binds to the ticket.
+func TestBranchIsTheBareIdWithNoTitleAtAll(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	writeBrief(t, st, "T-2", "## Goal\n\nx\n")
+	writeBrief(t, st, "T-3", "# T-3:\n\n## Goal\n\nx\n")
+	writeBrief(t, st, "T-4", "# 日本語\n")
+	for _, ticket := range []string{"T-1", "T-2", "T-3", "T-4"} {
+		got, err := st.TicketBranch(ticket, "main")
+		if err != nil || got != ticket {
+			t.Errorf("TicketBranch(%s) = %q, %v, want the bare id", ticket, got, err)
+		}
+		if got := BranchLeadID("jig/" + ticket); got != ticket {
+			t.Errorf("BranchLeadID(jig/%s) = %q, want %s: a jig/<id> branch still binds", ticket, got, ticket)
+		}
 	}
 }
 
@@ -357,8 +430,8 @@ func TestResolveTicketBranchWorksOnTheRecordItIsGiven(t *testing.T) {
 		t.Fatalf("ResolveTicketBranch(a record with a branch) = %q, %v, want %q", got, err, "given")
 	}
 	got, err = st.ResolveTicketBranch("T-1", Ticket{}, "main")
-	if err != nil || got != "jig/T-1" {
-		t.Fatalf("ResolveTicketBranch(a record with none) = %q, %v, want the default %q", got, err, "jig/T-1")
+	if err != nil || got != "T-1" {
+		t.Fatalf("ResolveTicketBranch(a record with none) = %q, %v, want the default %q", got, err, "T-1")
 	}
 	_, err = st.ResolveTicketBranch("T-1", Ticket{Branch: "main"}, "main")
 	var ae *axi.Error
