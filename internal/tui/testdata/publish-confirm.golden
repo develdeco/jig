@@ -6,19 +6,19 @@ jig  demo › JIG-2  Config loader                                     ✓ publi
   │  ✓ 3 Review   2m 30s  round 2 clean · by reviewer                          │
   │▸ ✓ 4 Publish  20s     pull request opened · https://example.test/acme/dem… │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
-  next  Run `jig status JIG-2` to confirm the ticket is fully green
-
-  ╭─ 4 Publish · activity ─────────────────────────────────────────────────────╮
-  │  09:14:00 ▲ the pull request body was written for ccccccc                  │
-  │  09:14:10 ▲ you approved publishing ccccccc                                │
-  │  09:14:20 ▲ pull request opened https://example.test/acme/demo/pull/7      │
-  │  09:14:21 ● published                                                      │
+  ╭─ 4 Publish · sub-steps ────────────────────────────────────── 4 of 5 done ─╮
+  │  ✓ body · ccccccc                                                          │
+  │  ✓ approval                                                                │
+  │  ✓ pull request · https://example.test/acme/demo/pull/7                    │
+  │  ○ changelog                                                               │
+  │  ✓ published                                                               │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
-
-
-
+  next  Run `jig status JIG-2` to confirm the ticket is fully green
+  ╭─ 4 Publish · activity ───────────────────────────────────── latest 3 of 4 ─╮
+  │  09:14:10 ▲ approval · you approved ccccccc                                │
+  │  09:14:20 ▲ pull request · opened https://example.test/acme/demo/pull/7    │
+  │  09:14:21 ● published · finished                                           │
+  ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   publish JIG-2: approve the reviewed head, push it and open the pull request?
   y yes · any other key no

@@ -8,10 +8,10 @@ jig  demo › JIG-2 › 4 publish                                        ✓ pub
   ✓ pull request opened  https://example.test/acme/demo/pull/7  09:14:20
 
   ╭─ 4 Publish · activity ─────────────────────────────────────────────────────╮
-  │  09:14:00 ▲ the pull request body was written for ccccccc                  │
-  │  09:14:10 ▲ you approved publishing ccccccc                                │
-  │  09:14:20 ▲ pull request opened https://example.test/acme/demo/pull/7      │
-  │  09:14:21 ● published                                                      │
+  │  09:14:00 ▲ body · written for ccccccc                                     │
+  │  09:14:10 ▲ approval · you approved ccccccc                                │
+  │  09:14:20 ▲ pull request · opened https://example.test/acme/demo/pull/7    │
+  │  09:14:21 ● published · finished                                           │
   ╰────────────────────────────────────────────────────────────────────────────╯
 
 

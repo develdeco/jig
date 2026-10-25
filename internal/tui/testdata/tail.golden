@@ -6,9 +6,9 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   │  ○ 3 Review           after the build                                      │
   │  ○ 4 Publish          after a clean review                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
   needs you
   ? builder asks about slice c: Formal or casual?  q-001
+  next  Answer q-001: `jig answer JIG-1 q-001 '<text>'`
   tail ─────────────────────────────────────────────────────────────────────────
   09:00:01 j claim           a   s-builder
   09:00:05 j verify-pending  a   aaaaaaa s-builder

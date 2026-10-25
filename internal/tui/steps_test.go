@@ -54,7 +54,7 @@ func TestFixesGreenAfterARoundAskForTheNextRound(t *testing.T) {
 		jl(at(32, 10), "JIG-6", "fix-1", journal.EventVerified, with("", sha('b'), "", "", "", "")),
 	)
 	r := steps[stepReview]
-	if r.Done || currentStep(steps) != stepReview || r.Text != "round 1's fixes are green · g runs round 2" {
+	if r.Done || currentStep(steps) != stepReview || r.Text != "round 1's fixes are green · round 2 is next" {
 		t.Errorf("review = %+v, want the current step asking for round 2", r)
 	}
 }
@@ -101,7 +101,7 @@ func TestTheLastRowShowsThePanelBelowIt(t *testing.T) {
 	g.send(tea.WindowSizeMsg{Width: 80, Height: 18})
 	g.feed(jig1()...).press("enter", "end") // the build's screen, its last slice
 	v := g.view()
-	if !strings.Contains(v, "▸ ○ d") || !strings.Contains(v, "╰") || !strings.Contains(v, "builder asks about slice c") {
+	if !strings.Contains(v, "▸ ○ d") || !strings.Contains(v, "╰") || !strings.Contains(v, "slice c · builder asks: Formal or casual?") {
 		t.Errorf("the last slice, the newest activity line and the panel's edge are not all in view:\n%s", v)
 	}
 }
@@ -124,7 +124,7 @@ func TestTheReviewScreenNamesWhatARoundSentBack(t *testing.T) {
 	)
 	g.press("down", "enter") // from the build, the current step, to the review
 	v := g.view()
-	for _, want := range []string{"sent back to the build", "fix-1  round 1  alpha/a.go:3 Unchecked error", "the review sent back fix-1: alpha/a.go:3 Unchecked error"} {
+	for _, want := range []string{"sent back to the build", "fix-1  round 1  alpha/a.go:3 Unchecked error", "fixes · sent back fix-1: alpha/a.go:3 Unchecked error"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the review screen lacks %q:\n%s", want, v)
 		}
@@ -181,11 +181,18 @@ func TestAReviewerTakingTheRoundShowsOnTheReviewStep(t *testing.T) {
 	if r := g.m.steps(tk)[stepReview]; r.State != StateReviewing || r.Text != "round 1 open · reviewer is reading the change" {
 		t.Errorf("review once taken = %+v, want the reviewer reading round 1", r)
 	}
-	if got := g.m.say(tk, open); got != "review round 1 opened" {
+	labels := g.m.subLabelsOf(tk)
+	if got := tk.labelOf(labels, open); got != "round 1" {
+		t.Errorf("gate-open names %q, want round 1", got)
+	}
+	if got := g.m.say(tk, open); got != "opened" {
 		t.Errorf("gate-open says %q", got)
 	}
-	if got := g.m.say(tk, took); got != "reviewer took round 1" {
+	if got := g.m.say(tk, took); got != "reviewer took it" {
 		t.Errorf("gate-reviewer says %q", got)
+	}
+	if got := g.m.activityLine(tk, labels, took); !strings.HasSuffix(got, "round 1 · reviewer took it") {
+		t.Errorf("gate-reviewer line = %q, want it to name the round and say who took it", got)
 	}
 	if stepOfLine(took) != stepReview {
 		t.Errorf("a gate-reviewer line is in step %d, want the review", stepOfLine(took))

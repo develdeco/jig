@@ -78,7 +78,7 @@ func TestTUIShowsTheStoreAndEndsOnQ(t *testing.T) {
 
 	keys, out, wait := startTUI(t, e)
 	out.until(t, T)
-	out.until(t, "on slice a")
+	out.until(t, "slice a is being built")
 	if got := out.String(); strings.Contains(got, "\x1b") {
 		t.Errorf("a pipe got an escape sequence:\n%q", got)
 	}
@@ -107,8 +107,10 @@ func TestTUIWithATicketOpensItsScreen(t *testing.T) {
 	}
 }
 
-// TestTUIRefusesWhatItCannotOpen: a ticket the store has not, two tickets, an
-// unknown flag and a directory with no store are refusals before any screen.
+// TestTUIRefusesWhatItCannotOpen: an id that is no ticket's, a key the project
+// does not declare, two tickets, an unknown flag and a directory with no store
+// are refusals before any screen. (A well-formed id under a declared key is
+// waited for: TestTUIWaitsForATicketToBeCreated.)
 func TestTUIRefusesWhatItCannotOpen(t *testing.T) {
 	t.Parallel()
 	fx, _, e := workFixture(t)
@@ -119,7 +121,8 @@ func TestTUIRefusesWhatItCannotOpen(t *testing.T) {
 		code int
 		want string
 	}{
-		{"unknown ticket", e, []string{"JIG-99"}, 2, "JIG-99"},
+		{"a malformed ticket", e, []string{"jig-99"}, 2, "jig-99"},
+		{"a ticket under a key the project does not declare", e, []string{"NOPE-1"}, 2, `does not declare key "NOPE"`},
 		{"two tickets", e, []string{fx.Ticket, "JIG-2"}, 2, "at most one ticket"},
 		{"unknown flag", e, []string{"--nope"}, 2, "--nope"},
 		{"unknown project", e, []string{"--project", "nope"}, 2, `no project "nope"`},
@@ -199,5 +202,30 @@ func TestTUIReadsAndActsOnTheStoreItWasOpenedOn(t *testing.T) {
 	answers := linesOf(t, st, fx.Ticket, journal.EventAnswer)
 	if len(answers) != 1 || answers[0].Provenance != "person" || answers[0].Summary != "Casual" || answers[0].Ref != "q-001" {
 		t.Errorf("answer lines = %+v, want the person's answer to q-001", answers)
+	}
+}
+
+// TestTUIWaitsForATicketToBeCreated: `jig tui JIG-2` before the session has
+// planned JIG-2 opens its screen saying it waits, with the store untouched, and
+// the screen fills in once the ticket is minted, with no key pressed.
+func TestTUIWaitsForATicketToBeCreated(t *testing.T) {
+	t.Parallel()
+	_, _, e := workFixture(t)
+	keys, out, wait := startTUI(t, e, "JIG-2")
+	out.until(t, "waiting for JIG-2 to be created")
+	if got := out.String(); strings.Contains(got, "╭─ Steps") {
+		t.Errorf("a ticket that does not exist has steps:\n%s", got)
+	}
+
+	// The session plans it: the ticket exists, with no line in its journal yet.
+	minted, code := runMain(t, e, "", "ticket", "new", "--title", "Second ticket")
+	if code != 0 || !strings.Contains(minted, "id: JIG-2") {
+		t.Fatalf("jig ticket new: exit %d, want JIG-2\n%s", code, minted)
+	}
+	out.until(t, "Second ticket")
+	out.until(t, "╭─ Steps")
+	keys.Write([]byte("q"))
+	if code := wait(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, out.String())
 	}
 }

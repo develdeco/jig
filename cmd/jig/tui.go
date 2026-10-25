@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/develdeco/jig/internal/events"
+	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/tui"
 )
 
@@ -37,6 +38,11 @@ func init() {
 // key does is a command, run in process as a person at a terminal would run
 // it.
 //
+// A ticket the store has no folder for yet is waited for when the store could
+// mint it (a well-formed id under a declared key): the ticket screen says so
+// and fills in once the ticket exists. A malformed id, or one under a key the
+// project does not declare, is refused as before.
+//
 // On a terminal the screens take over the screen. Where stdout is not one,
 // each screen is printed whole as it changes, and keys are read from stdin
 // as they arrive, so a script can drive it.
@@ -63,10 +69,19 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	awaiting := false
 	if ticket != "" {
 		id, err := st.ResolveTicket(ticket)
 		if err == nil {
-			err = requireTicket(st, id)
+			if err = requireTicket(st, id); err != nil {
+				if key, ok := mintableKey(id); ok {
+					if _, declared := cfg.Keys[key]; declared {
+						err, awaiting = nil, true
+					} else {
+						_, err = cfg.ResolveKey(key)
+					}
+				}
+			}
 		}
 		if err != nil {
 			return renderErr(stdout, err)
@@ -79,16 +94,29 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		Journals: func() ([]events.Journal, error) { return storeJournals(st, cfg.Name) },
 	}
 	err = tui.Run(e.ctx, tui.Config{
-		Source:  eventsSource{scope},
-		Run:     tuiRunner(e),
-		Ticket:  ticket,
-		Scope:   []string{"--store", st.Root},
-		Project: cfg.Name,
+		Source:   eventsSource{scope},
+		Run:      tuiRunner(e),
+		Ticket:   ticket,
+		Awaiting: awaiting,
+		Scope:    []string{"--store", st.Root},
+		Project:  cfg.Name,
 	}, stdin, stdout, e.stdoutIsTerminal(stdout))
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 	return 0
+}
+
+// mintableKey is the key of id when id is shaped like an id the store mints (a
+// key, a dash and a number) and safe to name a folder. Whether the project
+// declares the key decides whether a ticket by that id may be created at any
+// moment, by the session that plans it.
+func mintableKey(id string) (string, bool) {
+	if checkTicketID(id) != nil {
+		return "", false
+	}
+	key, _, ok := store.ParseTicketID(id)
+	return key, ok
 }
 
 // eventsSource is the screens' event stream: internal/events following a scope.

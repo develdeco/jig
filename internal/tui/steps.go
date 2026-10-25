@@ -1,12 +1,12 @@
 package tui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/phase"
 )
 
 // stepRow is one step of a ticket as its screen shows it: whether it is done,
@@ -21,15 +21,24 @@ type stepRow struct {
 	Done  bool
 }
 
-// steps are the ticket's four steps, in order. A step is done only when every
-// step before it is: a review that found fixes takes the build back, and the
-// build is not done again until they are green.
+// steps are the ticket's four steps, in order, as internal/phase derives them
+// (standing.go): a step is done only when every step before it is, so a review
+// that found fixes takes the build back, and the build is not done again until
+// they are green.
 func (m *Model) steps(t *ticket) []stepRow {
-	brief := m.briefStep(t)
-	build := m.buildStep(t, brief.Done)
-	review := m.reviewStep(t, build.Done)
-	publish := m.publishStep(t, review.Done)
-	return []stepRow{brief, build, review, publish}
+	return m.stepRows(t, m.phaseOf(t))
+}
+
+// stepRows are the four rows of a ticket that stands as d says. The phase gives
+// each row whether it is done and what it says; the screens add the state the
+// row is drawn in, and how long a done step took.
+func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
+	return []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d)}
+}
+
+// rowOf is the row the phase p makes: its text, and whether it is done.
+func rowOf(step int, kind string, p phase.Phase) stepRow {
+	return stepRow{Step: step, Kind: kind, Text: p.Text, Done: p.State == phase.StateDone}
 }
 
 // currentStep is the first step not done, the last when all are.
@@ -42,183 +51,99 @@ func currentStep(steps []stepRow) int {
 	return len(steps) - 1
 }
 
-// briefStep is the brief: drafted, waiting for its approval, approved, or
+// briefRow is the brief: drafted, waiting for its approval, approved, or
 // changed after it. A ticket whose work started with no brief on record (an
 // older ticket, an adopted branch) is past this step, and says so.
-func (m *Model) briefStep(t *ticket) stepRow {
-	s := stepRow{Step: stepBrief, Kind: rowBrief}
-	approval := t.latest("", journal.EventApproval)
-	started := false
-	for _, l := range t.lines {
-		if st := stepOfLine(l); st > stepBrief {
-			started = true
-			break
-		}
-	}
-	var b *statusBrief
-	if t.status != nil {
-		b = t.status.Brief
-	}
-	nSlices := 0
-	if t.status != nil {
-		nSlices = len(t.status.Slices)
-	}
-	counts := ""
-	if b != nil {
-		counts = fmt.Sprintf(" · %d %s, %d %s", len(b.Sections), plural(len(b.Sections), "section", "sections"), nSlices, plural(nSlices, "slice", "slices"))
-	}
+func (m *Model) briefRow(t *ticket, d phase.Ticket) stepRow {
+	p := d.Of(phase.Brief)
+	s := rowOf(stepBrief, rowBrief, p)
+	changed := t.status != nil && t.status.Brief != nil && t.status.Brief.Approval == phase.ApprovalChanged
 	switch {
-	case b != nil && b.Approval == "current":
-		s.Done, s.State = true, StateOK
-		s.Text = "approved by " + firstOf(b.ApprovedBy, "someone") + counts
-	case b != nil && b.Approval == "changed":
+	case s.Done && hasSub(p, phase.SubNeedsYou):
+		// The work started without an approval.
 		s.State = StateFindings
-		s.Text = "changed after " + firstOf(b.ApprovedBy, "someone") + " approved it: it needs approving again"
-	case b != nil && started:
-		s.Done, s.State = true, StateFindings
-		s.Text = "never approved: the work started without it" + counts
-	case b != nil && nSlices == 0:
-		s.State = StateBuilding
-		s.Text = "being drafted" + counts
-	case b != nil:
-		s.State = StateBuilding
-		s.Text = "drafted" + counts + " · waiting for your approval"
-	case t.status != nil && t.status.Branch != "":
-		s.Done, s.State = true, StateOK
-		s.Text = "none: the ticket took over branch " + t.status.Branch
-	case approval >= 0:
-		s.Done, s.State = true, StateOK
-		s.Text = "approved by " + firstOf(personName(t.lines[approval].Summary), "someone")
-	case started:
-		s.Done, s.State = true, StateOK
-		s.Text = "no brief on record"
-	case t.status == nil && t.rosterState == "new":
-		// Not read yet, but `jig next` says the ticket has no slices.
-		s.State, s.Text = StateBuilding, "being drafted"
-	case t.status == nil && (t.rosterState == "ready" || t.rosterState == "blocked"):
-		// It has slices that nobody has started, and the journal holds no
-		// approval (or has not been delivered yet, which the next line
-		// mends).
-		s.State, s.Text = StateBuilding, "drafted · waiting for your approval"
-	case t.status == nil && t.rosterState == "invalid":
-		s.State, s.Text = StateStalled, "its slices.yaml cannot be read"
+	case s.Done:
+		s.State = StateOK
+	case changed:
+		s.State = StateFindings
 	case t.status == nil:
-		// Started or done (its lines are on their way), or not listed yet.
-		s.State, s.Text = StateQueued, "reading"
+		s.State, s.Text = m.unreadBrief(t, s.Text)
 	default:
-		s.State, s.Text = StateBuilding, "being drafted"
+		s.State = StateBuilding
 	}
 	return s
 }
 
-// buildStep is the build: how many slices are green and what the rest are
-// doing.
-func (m *Model) buildStep(t *ticket, ready bool) stepRow {
-	s := stepRow{Step: stepBuild, Kind: rowBuild}
-	slices := t.slices(m.zone)
-	lines := t.stepLines(stepBuild)
-	if len(slices) == 0 {
-		switch {
-		case t.status != nil && t.status.Branch != "" && ready:
-			// An adopted branch is built: it has no slices until a review
-			// sends fixes back.
-			s.Done, s.State = true, StateOK
-			s.Text = "built on branch " + t.status.Branch + ", adopted"
-		case t.status == nil && ready && len(t.stepLines(stepReview)) > 0:
-			// The same, seen from the journal alone (the main screen reads
-			// no status): reviewed with no slice ever built.
-			s.Done, s.State = true, StateOK
-			s.Text = "built on an adopted branch"
-		case !ready:
-			s.State, s.Text = StateQueued, "after the brief"
-		default:
-			s.State, s.Text = StateQueued, "no slices yet"
-		}
-		return s
+// unreadBrief is the brief of a ticket whose status has not been read and
+// whose journal shows no approval or work: all the screens know of it is what
+// `jig next` listed it as.
+func (m *Model) unreadBrief(t *ticket, text string) (state, said string) {
+	switch t.rosterState {
+	case "new":
+		return StateBuilding, text
+	case "ready", "blocked":
+		// It has slices that nobody has started, and the journal holds no
+		// approval (or has not been delivered yet, which the next line
+		// mends).
+		return StateBuilding, "drafted · waiting for your approval"
+	case "invalid":
+		return StateStalled, "its slices.yaml cannot be read"
 	}
+	// Started or done (its lines are on their way), or not listed yet.
+	return StateQueued, "reading"
+}
+
+// hasSub is whether any sub-step of p is in state.
+func hasSub(p phase.Phase, state string) bool {
+	for _, sub := range p.Subs {
+		if sub.State == state {
+			return true
+		}
+	}
+	return false
+}
+
+// buildRow is the build: how many slices are green and what the rest are
+// doing.
+func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
+	p := d.Of(phase.Build)
+	s := rowOf(stepBuild, rowBuild, p)
+	slices := t.slices(m.zone)
 	counts := map[string]int{}
 	for _, sl := range slices {
 		counts[sl.State]++
 	}
 	n := len(slices)
-	if counts[StateGreen] == n && len(lines) > 0 {
-		s.Done, s.State = ready, StateOK
-		s.Text = fmt.Sprintf("%d %s green, each verified by jig", n, plural(n, "slice", "slices"))
-		s.Took = m.stepTook(t, lines, journal.EventVerified)
-		return s
-	}
-	if len(lines) == 0 {
-		if !ready {
-			s.State, s.Text = StateQueued, "after the brief"
-			return s
-		}
-		s.State = StateReady
-		s.Text = fmt.Sprintf("%d %s to build, starting with %s", n, plural(n, "slice", "slices"), strings.Join(readySlices(slices), " and "))
-		return s
-	}
-
-	s.State = StateBuilding
 	switch {
-	case counts[StateStalled] > 0:
-		s.State = StateStalled
-	case counts[StateEnvBlocked] > 0:
-		s.State = StateEnvBlocked
-	case counts[StateNeedsInput] > 0:
-		s.State = StateNeedsInput
-	case counts[StateVerifying] > 0:
-		s.State = StateVerifying
-	}
-	s.Text = fmt.Sprintf("%d of %d green", counts[StateGreen], n)
-	if focus := m.buildFocus(t, slices); focus != "" {
-		s.Text += " · " + focus
+	case s.Done:
+		s.State = StateOK
+		if n > 0 {
+			s.Took = m.stepTook(t, t.stepLines(stepBuild), journal.EventVerified)
+		}
+	case n == 0:
+		s.State = StateQueued
+	case counts[StateGreen] == n:
+		// Every slice is green, but an earlier step is not done.
+		s.State = StateOK
+	case len(t.stepLines(stepBuild)) == 0:
+		s.State = StateReady
+		if p.State == phase.StatePending {
+			s.State = StateQueued
+		}
+	default:
+		s.State = StateBuilding
+		switch {
+		case counts[StateStalled] > 0:
+			s.State = StateStalled
+		case counts[StateEnvBlocked] > 0:
+			s.State = StateEnvBlocked
+		case counts[StateNeedsInput] > 0:
+			s.State = StateNeedsInput
+		case counts[StateVerifying] > 0:
+			s.State = StateVerifying
+		}
 	}
 	return s
-}
-
-// readySlices are the slices nothing blocks, by id.
-func readySlices(slices []sliceRow) []string {
-	var out []string
-	for _, s := range slices {
-		if s.BlockedBy == "" && s.State != StateGreen {
-			out = append(out, "slice "+s.ID)
-		}
-	}
-	if len(out) == 0 {
-		out = []string{"slice " + slices[0].ID}
-	}
-	return out
-}
-
-// buildFocus is what matters most in a build under way: a question for the
-// person, a stall, a verification running, the slice a builder holds.
-func (m *Model) buildFocus(t *ticket, slices []sliceRow) string {
-	for _, want := range []string{StateNeedsInput, StateStalled, StateEnvBlocked, StateVerifying, StateBuilding} {
-		for _, sl := range slices {
-			if sl.State != want {
-				continue
-			}
-			switch want {
-			case StateNeedsInput:
-				return "slice " + sl.ID + " needs your answer"
-			case StateStalled:
-				return "slice " + sl.ID + " stalled"
-			case StateEnvBlocked:
-				return "slice " + sl.ID + " waits for its environment"
-			case StateVerifying:
-				p := t.latest(sl.ID, journal.EventVerifyPending)
-				if p >= 0 {
-					return "verifying slice " + sl.ID + " at " + commitWords(t, t.lines[p].Commit)
-				}
-				return "verifying slice " + sl.ID
-			case StateBuilding:
-				if holder, ok := claimHolder(t, sl.ID); ok && holder != "" {
-					return m.who(t, holder) + " is on slice " + sl.ID
-				}
-				return "slice " + sl.ID + " is being built"
-			}
-		}
-	}
-	return ""
 }
 
 // roundReviewer is the session that took round n to review it: the latest
@@ -237,89 +162,55 @@ func (t *ticket) roundReviewer(n int) string {
 	return ""
 }
 
-// reviewStep is the review: no round yet, a round open, findings to decide,
+// reviewRow is the review: no round yet, a round open, findings to decide,
 // or a clean round after the last of the build.
-func (m *Model) reviewStep(t *ticket, ready bool) stepRow {
-	s := stepRow{Step: stepReview, Kind: rowReview}
+func (m *Model) reviewRow(t *ticket, d phase.Ticket) stepRow {
+	p := d.Of(phase.Review)
+	s := rowOf(stepReview, rowReview, p)
 	rounds := t.rounds(m.zone)
-	if len(rounds) == 0 {
-		if !ready {
-			s.State, s.Text = StateQueued, "after the build"
-			return s
-		}
-		s.State, s.Text = StateReady, "ready for a fresh session to review the change (g opens a round)"
-		return s
-	}
-	r := rounds[len(rounds)-1]
-	last := t.latest("", journal.EventGateOpen, journal.EventGateRound, journal.EventGateClean)
-	builtSince := t.latest("", buildEventNames...) > last
-	switch r.State {
-	case StateReviewing:
-		s.State = StateReviewing
-		s.Text = fmt.Sprintf("round %d open · ", r.N)
-		if reader := t.roundReviewer(r.N); reader != "" {
-			s.Text += firstOf(m.whoWith(t, reader), "a reviewer") + " is reading the change"
-		} else {
-			s.Text += "waiting for a reviewer"
-		}
-	case StateReady:
-		if builtSince || !ready {
-			s.State, s.Text = StateQueued, fmt.Sprintf("round %d was clean, but an earlier step changed since", r.N)
-			return s
-		}
-		s.Done, s.State = true, StateOK
-		s.Text = fmt.Sprintf("round %d clean", r.N)
-		if last >= 0 && t.lines[last].Session != "" {
-			s.Text += " · by " + m.whoWith(t, t.lines[last].Session)
-		}
+	pending := p.State == phase.StatePending
+	switch {
+	case s.Done:
+		s.State = StateOK
 		s.Took = m.stepTook(t, t.stepLines(stepReview), journal.EventGateClean)
-	default:
-		s.State = StateFindings
-		asks := t.asks()
-		undecided := 0
-		for _, a := range asks {
-			if a.Decision == "" {
-				undecided++
-			}
+	case len(rounds) == 0:
+		s.State = StateReady
+		if pending {
+			s.State = StateQueued
 		}
-		switch {
-		case undecided > 0:
-			s.Text = fmt.Sprintf("round %d found %d to decide · %d %s your decision", r.N, len(asks), undecided, plural(undecided, "waits for", "wait for"))
-		case builtSince && !ready:
-			s.Text = fmt.Sprintf("round %d sent fixes back · the build is on them", r.N)
-		case builtSince:
-			s.Text = fmt.Sprintf("round %d's fixes are green · g runs round %d", r.N, r.N+1)
-		case len(asks) > 0:
-			s.Text = fmt.Sprintf("round %d's asks are decided · g runs round %d", r.N, r.N+1)
+	default:
+		switch last := rounds[len(rounds)-1]; {
+		case last.State == StateReviewing:
+			s.State = StateReviewing
+		case last.State == StateReady && pending:
+			// Clean, but a step before it is not done any more.
+			s.State = StateQueued
+			s.Text = "round " + strconv.Itoa(last.N) + " was clean, but an earlier step changed since"
+		case last.State == StateReady:
+			// Clean, but the build went on after it: the head is not reviewed.
+			s.State = StateReady
 		default:
-			s.Text = fmt.Sprintf("round %d found things to fix", r.N)
+			s.State = StateFindings
 		}
 	}
 	return s
 }
 
-// publishStep is the publish: the body, the person's approval, the pull
+// publishRow is the publish: the body, the person's approval, the pull
 // request.
-func (m *Model) publishStep(t *ticket, ready bool) stepRow {
-	s := stepRow{Step: stepPublish, Kind: rowPublish}
-	pub := t.publish()
-	lines := t.stepLines(stepPublish)
+func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
+	p := d.Of(phase.Publish)
+	s := rowOf(stepPublish, rowPublish, p)
 	switch {
-	case (pub.Done || pub.PR != "") && ready:
-		s.Done, s.State = true, StatePublished
-		s.Text = strings.TrimSpace("pull request " + firstOf(pub.PROutcome, "opened") + " · " + pub.PR)
-		s.Took = m.stepTook(t, lines, journal.EventPr)
-	case pub.Done || pub.PR != "":
+	case s.Done:
 		s.State = StatePublished
-		s.Text = strings.TrimSpace("published " + pub.PR + ", but an earlier step changed since")
-	case !ready:
-		s.State, s.Text = StateQueued, "after a clean review"
-	case pub.ApprovedFor != "":
-		s.State, s.Text = StatePublishing, "approved by "+firstOf(m.byWhom(t, pub.ApprovedBy, ""), "someone")+" · pushing and opening the pull request"
-	case pub.BodyFor != "":
-		s.State, s.Text = StatePublishing, "body written · waiting for your approval (p)"
+		s.Took = m.stepTook(t, t.stepLines(stepPublish), journal.EventPr)
+	case p.State == phase.StatePending:
+		s.State = StateQueued
+	case hasSub(p, phase.SubDone):
+		s.State = StatePublishing
 	default:
-		s.State, s.Text = StateReady, "ready: p approves it, pushes the branch and opens the pull request"
+		s.State = StateReady
 	}
 	return s
 }
