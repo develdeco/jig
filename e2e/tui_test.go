@@ -205,7 +205,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if res := reviewer.Jig("review", "done", fx.Ticket, "--result", reviewResult(t, st, fx.Ticket, 1, true)); !strings.Contains(res.Stdout, "round: 1") {
 		t.Fatalf("jig review done (round 1) exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	if screen := screens.until("round 1 found 1 to decide"); !strings.Contains(screen, "Which greeting does the product want?") {
+	if screen := screens.until("round 1 left 1 ask"); !strings.Contains(screen, "Which greeting does the product want?") {
 		t.Errorf("the screen with the round's findings does not show the ask:\n%s", screen)
 	}
 

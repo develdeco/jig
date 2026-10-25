@@ -217,6 +217,9 @@ func (m *Model) header(w int) []string {
 		}
 		if t != nil {
 			state, label := m.stepLabel(t)
+			if t.awaiting {
+				state, label = StateQueued, "waiting"
+			}
 			if e.screen == screenSlice {
 				for _, s := range t.slices(m.zone) {
 					if s.ID == e.slice {
@@ -299,6 +302,10 @@ func (m *Model) keyHints() []string {
 		keys = [][]string{move, open, gate, answer, tail, {"r", "refresh"}, quit}
 	case screenTicket:
 		keys = [][]string{move, open, back, answer, keep, dismiss, gate, publish, tail, quit}
+		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
+			// Nothing to move on or act on until the ticket exists.
+			keys = [][]string{back, tail, quit}
+		}
 	case screenBrief:
 		keys = [][]string{move, open, back, tail, quit}
 	case screenBuild:

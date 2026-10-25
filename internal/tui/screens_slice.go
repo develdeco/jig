@@ -95,7 +95,7 @@ func (m *Model) slicePage(id, slice string) page {
 		}
 		for _, i := range lines {
 			l := t.lines[i]
-			p.add(m.activityLine(t, l))
+			p.add(m.timelineLine(t, l))
 		}
 	}
 	return p
