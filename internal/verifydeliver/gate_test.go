@@ -225,6 +225,35 @@ func TestGateEarlyAndFrontierGuard(t *testing.T) {
 	}
 }
 
+// TestFrontierRefusalNamesThePromptItIsGiven: a refusal for a slice that is not
+// green says what to ask when the caller has a prompt for the ticket, and
+// nothing more when it has none.
+func TestFrontierRefusalNamesThePromptItIsGiven(t *testing.T) {
+	t.Parallel()
+	d := Deps{Store: &store.Store{Root: t.TempDir()}}
+	slices := []store.Slice{{ID: "a"}}
+	help := func() []string {
+		t.Helper()
+		var ae *axi.Error
+		if err := checkFrontier(d, "JIG-1", slices, false); !errors.As(err, &ae) || ae.Code != "GATE_NOT_GREEN" {
+			t.Fatalf("checkFrontier = %v, want GATE_NOT_GREEN", err)
+		}
+		return ae.Help
+	}
+
+	if got := help(); len(got) != 1 {
+		t.Errorf("with no prompt the help is %q, want the one line", got)
+	}
+	d.Prompt = func(string) string { return "" }
+	if got := help(); len(got) != 1 {
+		t.Errorf("with an empty prompt the help is %q, want the one line", got)
+	}
+	d.Prompt = func(ticket string) string { return "Build " + ticket }
+	if got := help(); len(got) != 2 || got[1] != "ask: Build JIG-1" {
+		t.Errorf("with a prompt the help is %q, want it to end with the ask", got)
+	}
+}
+
 // duplicateFixSliceSource is a GateSource stub whose round-1 fix slice
 // reuses an id that already exists in the ticket's slices.yaml.
 type duplicateFixSliceSource struct{}

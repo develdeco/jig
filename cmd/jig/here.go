@@ -202,6 +202,9 @@ type hereView struct {
 	verified  []hereVerified
 	questions []hereQuestion
 	pending   []herePending
+	// prompt is what to ask an agent to move the ticket on (internal/phase), "" when
+	// it is published or its phase could not be told.
+	prompt string
 }
 
 type hereSlice struct {
@@ -270,6 +273,11 @@ func buildHereView(hc hereCtx) (hereView, error) {
 		return v, err
 	}
 	v.verified, v.pending = verificationsIn(lines)
+	// The phase is best-effort here: `jig here` runs on every session start,
+	// and a ticket it cannot derive still has its state to show.
+	if t, err := derivePhase(st, ticket); err == nil {
+		v.prompt = t.Prompt
+	}
 	return v, nil
 }
 
@@ -401,7 +409,7 @@ func (v hereView) help(hc hereCtx) []string {
 	case w.StorePath == "":
 		return []string{"The store of this project is not on this machine; pass --store, or `jig map <repo>=<path>` once it is"}
 	case w.Ticket != "":
-		return []string{fmt.Sprintf("Run `jig next %s` to see what is ready, `jig status %s` for the full state", w.Ticket, w.Ticket)}
+		return []string{fmt.Sprintf("Run `jig next %s` to see what is ready, `jig status %s` for the full state%s", w.Ticket, w.Ticket, promptHint(v.prompt))}
 	case w.Branch != "":
 		return []string{fmt.Sprintf("Branch %s binds no ticket: run `jig next` to see which ticket to take, or name one: `jig here <ticket>`", w.Branch)}
 	default:
