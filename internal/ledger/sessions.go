@@ -28,13 +28,16 @@ import (
 //
 // Line shapes, all journal.Line values in the ledger (ledger.go):
 //
-//	session-start  session, agent?, harness?, cwd?, clone?, ticket?, slice?, model?, effort?, commit?
+//	session-start  session, agent?, harness?, cwd?, clone?, transcript?, ticket?, slice?, model?, effort?, commit?
 //	session-touch  the same keys; every one given replaces what the session had
 //	session-end    session
 //	tool           session, agent?, tool?, files? (the observe hook writes these)
 //
-// The one key journal.Line has no field for is clone, the repository clone the
-// session works in; session lines carry it beside the Line's own keys.
+// The two keys journal.Line has no field for are clone, the repository clone
+// the session works in, and transcript, the path of the harness's transcript
+// of the session; session lines carry them beside the Line's own keys. A
+// harness that reports no transcript path writes none: the session id is what
+// every harness gives, the path only some do.
 
 // Session is one harness session as the ledger's session lines fold it.
 type Session struct {
@@ -51,6 +54,11 @@ type Session struct {
 	Slice  string `json:"slice,omitempty"`
 	Model  string `json:"model,omitempty"`
 	Effort string `json:"effort,omitempty"`
+	// Transcript is the path of the harness's transcript of the session, as
+	// its hook reported it ("" for a harness or a session that gave none). It
+	// is where a reader goes to learn what the session was asked, and it can
+	// be read only on the machine that recorded it.
+	Transcript string `json:"transcript,omitempty"`
 	// Started is the stamp of the session's earliest line, LastSeen the
 	// latest of its lines, Ended the stamp of the session-end that closed it
 	// ("" for a session still open). All are RFC 3339 with nanoseconds, as
@@ -82,6 +90,9 @@ type Registration struct {
 	Slice   string
 	Model   string
 	Effort  string
+	// Transcript is the path of the harness's transcript of the session, for
+	// a harness that reports one.
+	Transcript string
 	// Commit is the HEAD of the clone when the line was written, for a
 	// reader that asks later whether HEAD has moved since (the observe hook
 	// does). The session fold ignores it.
@@ -115,10 +126,11 @@ func EndSession(root string, at time.Time, id string) error {
 }
 
 // sessionLine is a session line as the ledger stores it: the journal line and
-// the clone key (see the comment at the top of the file).
+// the clone and transcript keys (see the comment at the top of the file).
 type sessionLine struct {
 	journal.Line
-	Clone string `json:"clone,omitempty"`
+	Clone      string `json:"clone,omitempty"`
+	Transcript string `json:"transcript,omitempty"`
 }
 
 func appendSession(root, event string, at time.Time, r Registration) error {
@@ -142,7 +154,8 @@ func appendSession(root, event string, at time.Time, r Registration) error {
 			Effort:  r.Effort,
 			Commit:  r.Commit,
 		},
-		Clone: r.Clone,
+		Clone:      r.Clone,
+		Transcript: r.Transcript,
 	})
 }
 
@@ -166,8 +179,8 @@ func Graph(root string, l journal.Line) error {
 //
 //   - Started is the earliest stamp among a session's lines and LastSeen the
 //     latest, whatever order the file has them in;
-//   - a start or touch replaces Harness, Cwd, Clone, Model and Effort with
-//     whichever it names, and Ticket with Slice (a line that names a ticket
+//   - a start or touch replaces Harness, Cwd, Clone, Transcript, Model and
+//     Effort with whichever it names, and Ticket with Slice (a line that names a ticket
 //     replaces the slice with its own, empty or not; one that names only a
 //     slice replaces only that);
 //   - a start also clears Ended: the harness resumed the session;
@@ -228,6 +241,7 @@ func foldSession(sessions map[string]Session, l sessionLine) {
 		replaceIfSet(&s.Harness, l.Harness)
 		replaceIfSet(&s.Cwd, l.Cwd)
 		replaceIfSet(&s.Clone, l.Clone)
+		replaceIfSet(&s.Transcript, l.Transcript)
 		replaceIfSet(&s.Model, l.Model)
 		replaceIfSet(&s.Effort, l.Effort)
 		if l.Ticket != "" {
