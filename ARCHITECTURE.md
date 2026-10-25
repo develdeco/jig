@@ -457,7 +457,7 @@ working, and an id never changes.
 
 `ticket.yaml` may carry `aliases:`, a list of a ticket's earlier ids, kept
 unchanged by every rewrite of the record (no command renames a ticket; only
-a later migration writes real ones - until then only a test sets them).
+`jig store migrate` writes real ones).
 `Store.ResolveTicket(idOrAlias)` is the one resolver: it turns idOrAlias
 into the ticket's current id, unchanged when nothing claims it (so a
 caller's own "not found" check still fires), and refused
