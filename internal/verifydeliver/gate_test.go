@@ -63,7 +63,7 @@ func TestGateRound1FixSlice(t *testing.T) {
 	if report.Verdict != "fix-slices" {
 		t.Fatalf("Verdict = %q, want fix-slices", report.Verdict)
 	}
-	// A ticket on its own jig/<ticket> adopted nothing, so its report names no
+	// A ticket on its own default branch adopted nothing, so its report names no
 	// branch: only an adopted ticket's does.
 	if report.Branch != "" {
 		t.Fatalf("Branch = %q, want none for a ticket that adopted no branch", report.Branch)
@@ -225,6 +225,35 @@ func TestGateEarlyAndFrontierGuard(t *testing.T) {
 	}
 }
 
+// TestFrontierRefusalNamesThePromptItIsGiven: a refusal for a slice that is not
+// green says what to ask when the caller has a prompt for the ticket, and
+// nothing more when it has none.
+func TestFrontierRefusalNamesThePromptItIsGiven(t *testing.T) {
+	t.Parallel()
+	d := Deps{Store: &store.Store{Root: t.TempDir()}}
+	slices := []store.Slice{{ID: "a"}}
+	help := func() []string {
+		t.Helper()
+		var ae *axi.Error
+		if err := checkFrontier(d, "JIG-1", slices, false); !errors.As(err, &ae) || ae.Code != "GATE_NOT_GREEN" {
+			t.Fatalf("checkFrontier = %v, want GATE_NOT_GREEN", err)
+		}
+		return ae.Help
+	}
+
+	if got := help(); len(got) != 1 {
+		t.Errorf("with no prompt the help is %q, want the one line", got)
+	}
+	d.Prompt = func(string) string { return "" }
+	if got := help(); len(got) != 1 {
+		t.Errorf("with an empty prompt the help is %q, want the one line", got)
+	}
+	d.Prompt = func(ticket string) string { return "Build " + ticket }
+	if got := help(); len(got) != 2 || got[1] != "ask: Build JIG-1" {
+		t.Errorf("with a prompt the help is %q, want it to end with the ask", got)
+	}
+}
+
 // duplicateFixSliceSource is a GateSource stub whose round-1 fix slice
 // reuses an id that already exists in the ticket's slices.yaml.
 type duplicateFixSliceSource struct{}
@@ -308,10 +337,11 @@ func TestGateRefusesQueuedFixSlice(t *testing.T) {
 
 // removeBrief deletes fx's ticket's brief.md, simulating a brief-less
 // ticket: fixture.Generate always writes one, and intent precedence only
-// falls through to intent.md/none once it is gone.
+// falls through to intent.md/none once it is gone. The ticket keeps its
+// branch (fixture.RemoveBrief).
 func removeBrief(t *testing.T, d Deps, ticket string) {
 	t.Helper()
-	if err := os.Remove(filepath.Join(d.Store.TicketDir(ticket), "brief.md")); err != nil {
+	if err := fixture.RemoveBrief(d.Store.Root, ticket); err != nil {
 		t.Fatalf("remove brief.md: %v", err)
 	}
 }
@@ -1090,7 +1120,7 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 			t.Fatalf("commit: %v", err)
 		}
 	}
-	// Advance jig/<ticket> in the build lease with a commit touching the
+	// Advance the ticket's branch in the build lease with a commit touching the
 	// same file, as a later slice build (e.g. after an --early gate) would.
 	advance("next slice")
 
@@ -1150,12 +1180,12 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 
 // TestGateUsesRecordedBranch runs a gate round on a ticket whose ticket.yaml
 // records a branch, with the build lease on that branch instead of the
-// "jig/<ticket>" default. Gate resolves the branch once, through
+// default name. Gate resolves the branch once, through
 // Store.TicketBranch, and its gate lease and its fetch from the build lease
 // both name the result: the round succeeds only if the gate lease ends up on
 // the recorded branch, and no branch under the default name is ever made
 // there. Every other Gate test in this file records no branch, so a Gate that
-// hardcoded "jig/"+ticket would still pass them. A recorded branch is on
+// hardcoded the default's spelling would still pass them. A recorded branch is on
 // origin by definition, so the test puts it there, at the target's tip, before
 // the build.
 func TestGateUsesRecordedBranch(t *testing.T) {

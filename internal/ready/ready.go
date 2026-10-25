@@ -1,7 +1,6 @@
 package ready
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/develdeco/jig/internal/store"
@@ -71,82 +70,6 @@ func Batches(slices []store.Slice, wsRepo map[string]string) []Batch {
 	return out
 }
 
-// Unplaced is the repo name Place gives a workspace no repo declares, so a
-// batch of such slices still has a name to print.
-const Unplaced = "?"
-
-// Repo is one repo of a project and the workspace ids its manifest declares
-// (its .claude/jig.yaml, or the detected default "root").
-type Repo struct {
-	Name       string
-	Workspaces []string
-}
-
-// Placement is the workspace-to-repo map of one ticket's slices.
-type Placement struct {
-	// Repo maps a workspace id to the name of the repo that owns it. A
-	// workspace no repo declares maps to Unplaced.
-	Repo map[string]string
-	// Unplaced lists, sorted, the workspace ids of the slices that no repo
-	// declares.
-	Unplaced []string
-	// Ambiguous lists, sorted, the workspace ids that more than one repo
-	// declares; the first repo in project order owns it.
-	Ambiguous []string
-}
-
-// Place maps each workspace the slices name to the repo that owns it. A
-// project with one repo gives that repo every workspace, declared or not
-// (the frontier's own rule for a single-repo project); with several, a
-// workspace belongs to the first repo, in project order, whose manifest
-// declares it. A workspace that two repos declare is reported in Ambiguous
-// and one nobody declares in Unplaced.
-func Place(repos []Repo, slices []store.Slice) Placement {
-	p := Placement{Repo: map[string]string{}}
-	if len(repos) == 1 {
-		for _, s := range slices {
-			p.Repo[s.Workspace] = repos[0].Name
-		}
-		return p
-	}
-	owner := map[string]string{}
-	ambiguous := map[string]bool{}
-	for _, r := range repos {
-		for _, ws := range r.Workspaces {
-			if have, ok := owner[ws]; ok {
-				if have != r.Name {
-					ambiguous[ws] = true
-				}
-				continue
-			}
-			owner[ws] = r.Name
-		}
-	}
-	for _, s := range slices {
-		name, ok := owner[s.Workspace]
-		if !ok {
-			name = Unplaced
-			p.Unplaced = appendOnce(p.Unplaced, s.Workspace)
-		}
-		p.Repo[s.Workspace] = name
-		if ambiguous[s.Workspace] {
-			p.Ambiguous = appendOnce(p.Ambiguous, s.Workspace)
-		}
-	}
-	sort.Strings(p.Unplaced)
-	sort.Strings(p.Ambiguous)
-	return p
-}
-
-func appendOnce(list []string, v string) []string {
-	for _, have := range list {
-		if have == v {
-			return list
-		}
-	}
-	return append(list, v)
-}
-
 // Waves numbers each slice by the longest chain of slices it waits on: 0 for
 // a slice that waits on none, one more than its deepest blocker otherwise.
 // A blocker that is not one of the slices is ignored. A slice on a cycle, or
@@ -199,10 +122,15 @@ func Waves(slices []store.Slice) map[string]int {
 
 // The state a ticket is in for `jig next`.
 const (
+	// StateClosed: the ticket was closed without a pull request (`jig close`:
+	// covered, superseded or not planned). It wins over every other state, and
+	// nothing of it is ready to build.
+	StateClosed = "closed"
 	// StateDone: the ticket's pull requests were published (its journal has
 	// publish-done).
 	StateDone = "done"
-	// StateBlocked: a blocker in its ticket.yaml has not published yet.
+	// StateBlocked: a blocker in its ticket.yaml is not met: it has not
+	// published, or its work has not merged.
 	StateBlocked = "blocked"
 	// StateReady: not blocked, and at least one slice is ready to build.
 	StateReady = "ready"
@@ -232,46 +160,69 @@ type Ticket struct {
 	Blockers []Blocker
 	// Published is whether the ticket's journal has a publish-done line.
 	Published bool
-	Slices    []store.Slice
-	States    map[string]store.SliceState
+	// Closed is the ticket's closure, nil while it is open. A closed ticket is
+	// done without a merge: the tickets that wait for it are released when it
+	// is covered or superseded, and held when it is not planned.
+	Closed *store.Closed
+	// Merge is whether the ticket's work has merged, as its caller read it
+	// (the recorded pull request, the branch). A merged blocker is met by it;
+	// nil when the caller read none, and then having published is all that is
+	// known of the ticket. A stacked blocker is met by publishing either way.
+	Merge  *Merge
+	Slices []store.Slice
+	States map[string]store.SliceState
 }
 
 // Status is the readiness of one ticket.
 type Status struct {
 	ID    string
 	State string
-	// Blocked is the blockers that have not published, in ticket.yaml order.
+	// Blocked is the blockers that are not met, in ticket.yaml order, and Why
+	// says what each is missing, keyed by the blocking ticket.
 	Blocked []Blocker
+	Why     map[string]string
 	// Ready is the ids of the slices ready to build, in slices.yaml order;
 	// none for a ticket that is done or blocked.
 	Ready []string
 }
 
 // Tickets works out the readiness of each of tickets, in the order given. A
-// blocker is met when it is one of tickets and has published; one that is
-// not among them counts as unmet, so a ticket never reads as free because
-// its blocker went missing.
+// merged blocker is met when it is one of tickets and its work has merged
+// (Ticket.Merge), or, with no merge read for it, when it has published. A
+// stacked blocker is met by publishing. A blocker that is closed is met when
+// it was covered or superseded, whatever its kind, and unmet when it was not
+// planned. One that is not among tickets counts as unmet, so a ticket never
+// reads as free because its blocker went missing.
 func Tickets(tickets []Ticket) []Status {
-	published := make(map[string]bool, len(tickets))
+	byID := make(map[string]Ticket, len(tickets))
 	for _, t := range tickets {
-		published[t.ID] = t.Published
+		byID[t.ID] = t
 	}
 	out := make([]Status, 0, len(tickets))
 	for _, t := range tickets {
 		st := Status{ID: t.ID}
 		for _, b := range t.Blockers {
-			if !published[b.Ticket] {
+			if t.Closed != nil {
+				break // nothing of a closed ticket waits for anything
+			}
+			if why := unmet(b, byID); why != "" {
 				st.Blocked = append(st.Blocked, b)
+				if st.Why == nil {
+					st.Why = map[string]string{}
+				}
+				st.Why[b.Ticket] = why
 			}
 		}
-		// A published ticket has nothing left to build and a blocked one
-		// cannot start, so neither offers slices.
-		if !t.Published && len(st.Blocked) == 0 {
+		// A closed or published ticket has nothing left to build and a blocked
+		// one cannot start, so none of them offers slices.
+		if t.Closed == nil && !t.Published && len(st.Blocked) == 0 {
 			for _, s := range ComputeReady(t.Slices, t.States) {
 				st.Ready = append(st.Ready, s.ID)
 			}
 		}
 		switch {
+		case t.Closed != nil:
+			st.State = StateClosed
 		case t.Published:
 			st.State = StateDone
 		case len(st.Blocked) > 0:
@@ -288,6 +239,24 @@ func Tickets(tickets []Ticket) []Status {
 		out = append(out, st)
 	}
 	return out
+}
+
+// unmet is what blocker b is missing, "" when it is met.
+func unmet(b Blocker, byID map[string]Ticket) string {
+	t, ok := byID[b.Ticket]
+	switch {
+	case !ok:
+		return "it is not a ticket of the store"
+	case t.Closed != nil && store.Releases(t.Closed.Reason):
+		return ""
+	case t.Closed != nil:
+		return NotPlanned
+	case b.Kind != "stacked" && t.Merge != nil:
+		return t.Merge.Why()
+	case !t.Published:
+		return NotPublished
+	}
+	return ""
 }
 
 func allGreen(slices []store.Slice, states map[string]store.SliceState) bool {

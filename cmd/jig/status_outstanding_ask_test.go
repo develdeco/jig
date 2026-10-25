@@ -66,15 +66,15 @@ func TestRenderStatusOutstandingAskWithQueuedFrontier(t *testing.T) {
 		t.Fatalf("RenderStatus: %v", err)
 	}
 
-	wantTable := "outstanding_asks[1]{id,risk,file:line,title,why}:\n" +
-		"  r1-f1,medium,\"go.mod:1\",toolchain bumped,\n"
+	wantTable := "outstanding_asks[1]{id,risk,file:line,title,why,decision,decided_by}:\n" +
+		"  r1-f1,medium,\"go.mod:1\",toolchain bumped,,,\n"
 	if !strings.Contains(got, wantTable) {
 		t.Errorf("status is missing the outstanding_asks table %q:\n%s", wantTable, got)
 	}
 
 	wantHelp := "help[2]:\n" +
-		"  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one\n" +
-		"  Then run `jig triage JIG-1 <id> keep|dismiss` to decide the outstanding asks, then `jig gate JIG-1` to apply the decisions\n"
+		"  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one; ask: Build JIG-1\n" +
+		"  Then run `jig triage JIG-1 <id> keep|dismiss` to decide the 1 undecided ask, then `jig gate JIG-1` to apply the decisions\n"
 	if !strings.HasSuffix(got, wantHelp) {
 		t.Errorf("status help does not name the frontier-first ordering:\n--- got ---\n%s--- want suffix ---\n%s", got, wantHelp)
 	}
@@ -115,7 +115,7 @@ func TestRenderStatusOutstandingAskWithGreenFrontier(t *testing.T) {
 	}
 
 	wantHelp := "help[1]:\n" +
-		"  Run `jig triage JIG-1 <id> keep|dismiss` to decide the outstanding asks, then `jig gate JIG-1` to apply the decisions\n"
+		"  Run `jig triage JIG-1 <id> keep|dismiss` to decide the 1 undecided ask, then `jig gate JIG-1` to apply the decisions\n"
 	if !strings.HasSuffix(got, wantHelp) {
 		t.Errorf("status help does not name the deciding command:\n--- got ---\n%s--- want suffix ---\n%s", got, wantHelp)
 	}
@@ -239,7 +239,7 @@ func TestRenderStatusAfterAFixSliceRoundPointsAtTheNextRound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderStatus: %v", err)
 	}
-	wantHelp := "help[1]:\n  Run `jig gate JIG-1` to open the next gate round\n"
+	wantHelp := "help[1]:\n  Run `jig gate JIG-1` to open the next gate round; ask: Review JIG-1\n"
 	if !strings.HasSuffix(got, wantHelp) {
 		t.Errorf("status help does not point at the next round:\n--- got ---\n%s--- want suffix ---\n%s", got, wantHelp)
 	}

@@ -55,10 +55,14 @@ func herePublishBlocks(c hereCtx) ([]string, error) {
 	}
 	var blocks []string
 	if s.Open != nil {
-		kv := [][2]string{
-			{"round", strconv.Itoa(s.Open.Round)}, {"head", shortSHA(s.Open.Head)}, {"copy", s.Open.Copy},
-			{"drafts", strconv.Itoa(s.Open.Drafts)},
+		kv := [][2]string{{"round", strconv.Itoa(s.Open.Round)}}
+		if len(s.Open.Repos) == 0 {
+			kv = append(kv, [2]string{"head", shortSHA(s.Open.Head)}, [2]string{"copy", s.Open.Copy})
 		}
+		for _, r := range s.Open.Repos {
+			kv = append(kv, [2]string{"head_" + r.Repo, shortSHA(r.Head)}, [2]string{"copy_" + r.Repo, r.Copy})
+		}
+		kv = append(kv, [2]string{"drafts", strconv.Itoa(s.Open.Drafts)})
 		if s.Open.Reviewer.Known() {
 			kv = append(kv, [2]string{"reviewer", reviewerLabel(s.Open.Reviewer)})
 		}
@@ -90,7 +94,16 @@ func herePublishBlocks(c hereCtx) ([]string, error) {
 		if s.ApprovedFor != "" {
 			kv = append(kv, [2]string{"approved_for", shortSHA(s.ApprovedFor)})
 		}
-		if s.PR != "" {
+		if len(s.PRs) > 1 {
+			repos := make([]string, 0, len(s.PRs))
+			for repo := range s.PRs {
+				repos = append(repos, repo)
+			}
+			sort.Strings(repos)
+			for _, repo := range repos {
+				kv = append(kv, [2]string{"pr_" + repo, s.PRs[repo]})
+			}
+		} else if s.PR != "" {
 			kv = append(kv, [2]string{"pr", s.PR})
 		}
 		kv = append(kv, [2]string{"published", map[bool]string{true: "yes", false: "no"}[s.Published]})

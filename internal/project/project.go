@@ -302,7 +302,7 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 			return &axi.Error{
 				Msg:  "project.yaml's trackers: is not a list",
 				Code: "VALIDATION_ERROR",
-				Help: []string{"trackers: takes a list of mirrors, e.g. trackers: []; T-24 builds the tracker tree and T-22 the GitHub mirror"},
+				Help: []string{"trackers: takes a list of mirrors, e.g. trackers: [] or one github entry"},
 			}
 		}
 		var entries []yaml.Node

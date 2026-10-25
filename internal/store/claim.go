@@ -257,6 +257,9 @@ func foreignCommitError(foreign string) error {
 // the branch is already back at the pre-claim commit and a later, per-path
 // step failed instead (see undoFailedError).
 func (s *Store) undoClaim(sha string, paths []string) (resetRan bool, err error) {
+	// The paths may hold tracker records, which this takes off the disk behind
+	// the index's back.
+	defer s.invalidateTrackerIndex()
 	if _, err := gitx.Run(s.Root, "reset", "--soft", sha); err != nil {
 		return false, err
 	}

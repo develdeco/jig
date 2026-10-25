@@ -12,7 +12,9 @@ import (
 // sessionStart sets JIG_SESSION for the session's shell commands, records
 // the session and gives it the context of `jig here`. The variable is set
 // wherever the session starts, since it may work in a project later; where
-// the harness cannot set it, a session in a project is asked to.
+// the harness cannot set it, a session in a project is asked to. The line
+// that records the session carries the transcript path the harness reported,
+// so a later reader can find what the session was asked (ledger.Session).
 func (h *handler) sessionStart() Result {
 	set := h.handOverSession()
 	if !h.locate() {
@@ -20,15 +22,16 @@ func (h *handler) sessionStart() Result {
 	}
 	if h.ev.Session != "" {
 		h.fail(ledger.StartSession(h.d.JigHome, h.d.Now(), ledger.Registration{
-			ID:      h.ev.Session,
-			Harness: h.ev.Harness,
-			Agent:   h.ev.Agent,
-			Cwd:     h.w.Cwd,
-			Clone:   h.w.RepoDir,
-			Ticket:  h.w.Ticket,
-			Slice:   h.w.Slice,
-			Model:   h.ev.Model,
-			Commit:  h.head(),
+			ID:         h.ev.Session,
+			Harness:    h.ev.Harness,
+			Agent:      h.ev.Agent,
+			Cwd:        h.w.Cwd,
+			Clone:      h.w.RepoDir,
+			Ticket:     h.w.Ticket,
+			Slice:      h.w.Slice,
+			Model:      h.ev.Model,
+			Transcript: h.transcript(),
+			Commit:     h.head(),
 		}))
 	}
 	h.hook("")
@@ -79,15 +82,27 @@ func (h *handler) prompt() Result {
 // the first ticket of a session that started on none. The line carries the
 // harness and model the session started with, so a reader of the ticket's
 // stream, which leaves out lines about no ticket, still learns who the
-// session is.
+// session is, and the transcript path of this event: a session whose start
+// jig did not see (the hooks came after it, or it began outside a project)
+// has no other line that gives one.
 func (h *handler) noteMove(mem sessionMemory) {
 	if h.ev.Session == "" || h.w.Ticket == "" || (h.w.Ticket == mem.ticket && h.w.Slice == mem.slice) {
 		return
 	}
 	h.fail(ledger.TouchSession(h.d.JigHome, h.d.Now(), ledger.Registration{
 		ID: h.ev.Session, Harness: firstNonEmpty(h.ev.Harness, mem.harness), Agent: h.ev.Agent, Model: firstNonEmpty(h.ev.Model, mem.model),
-		Cwd: h.w.Cwd, Clone: h.w.RepoDir, Ticket: h.w.Ticket, Slice: h.w.Slice,
+		Cwd: h.w.Cwd, Clone: h.w.RepoDir, Ticket: h.w.Ticket, Slice: h.w.Slice, Transcript: h.transcript(),
 	}))
+}
+
+// transcript is the transcript path the event reports for the session itself:
+// none for an event from a subagent, whose hook may name a transcript of its
+// own, which says nothing of what the session was asked.
+func (h *handler) transcript() string {
+	if h.ev.Agent != "" {
+		return ""
+	}
+	return h.ev.Transcript
 }
 
 // firstNonEmpty is the first of ss that is not empty.

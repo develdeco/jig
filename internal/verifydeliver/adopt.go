@@ -18,7 +18,7 @@ type gateBranch struct {
 	Name string
 	// Adopted is true when the ticket works on a branch it recorded (built
 	// outside jig, adopted with `jig gate --branch`) or records this round:
-	// its ticket.yaml, not the "jig/<ticket>" default, names it.
+	// its ticket.yaml, not the "<ticket>-<slug>" default, names it.
 	Adopted bool
 	// Adopting is true when this round is the one that records the branch.
 	Adopting bool
@@ -35,7 +35,7 @@ type gateBranch struct {
 // (empty when not given):
 //
 //   - no flag, or the flag names the branch the ticket recorded: the
-//     recorded branch, or "jig/<ticket>" when none is recorded;
+//     recorded branch, or the ticket's default branch when none is recorded;
 //   - the flag names another branch than the one recorded: refused,
 //     BRANCH_MISMATCH, since a ticket's branch is recorded, not chosen per
 //     round;
@@ -149,7 +149,7 @@ func jigBuilt(st *store.Store, ticket string, slices []store.Slice, lines []jour
 // disagree about which head is the branch's.
 //
 // The rule is the branch's, not the kind of ticket's: the ticket's own
-// jig/<ticket> stands where an adopted branch does once a publish has pushed
+// default branch (<ticket>-<slug>) stands where an adopted branch does once a publish has pushed
 // it, and is judged the same way. jig's commits stay in the build lease until
 // someone pushes them - publish does - so which copy holds them all depends on
 // where they are now, and is judged the way the pool's sync rule judges a
@@ -157,7 +157,7 @@ func jigBuilt(st *store.Store, ticket string, slices []store.Slice, lines []jour
 // origin's:
 //
 //   - origin has no copy of the branch: the build lease's is the only one. That
-//     is the ticket's own jig/<ticket> until a publish pushes it (an adopted
+//     is the ticket's own default branch until a publish pushes it (an adopted
 //     branch is on origin by definition), and there is nothing to compare;
 //   - the build lease's copy is InStep with origin's, or Behind it: origin
 //     holds every commit the lease does, so it holds the ones jig built - an
@@ -304,7 +304,7 @@ func pointAtBuiltCopy(d Deps, leaseDir, buildDir, repoName, ticket, branch strin
 //   - an adopted branch jig has built nothing on is the author's: origin's
 //     copy, exactly (neither lease ever commits to it);
 //   - any other is whichever copy holds jig's commits (chooseBuiltCopy): the
-//     build lease's while origin has no copy, as the ticket's own jig/<ticket>
+//     build lease's while origin has no copy, as the ticket's own default branch
 //     does until a publish pushes it, and after that by comparing the two.
 //
 // The lease is left pristine at that copy: pool.Acquire never resets an
@@ -377,7 +377,7 @@ func branchTipIn(dir, branch string) (string, error) {
 // requireACopy refuses, BRANCH_NOT_FOUND, a branch that origin, the build
 // lease and the clone all lack. The clone was asked before this, so what is
 // left to look in is origin as the lease last fetched it and the build lease.
-// The build lease's copy counts for a ticket's own jig/<ticket>, which lives
+// The build lease's copy counts for a ticket's own default branch, which lives
 // there until a publish pushes it, and not for an adopted branch, which is on
 // origin by definition: one that is gone from origin is a branch nobody can
 // open a pull request from.

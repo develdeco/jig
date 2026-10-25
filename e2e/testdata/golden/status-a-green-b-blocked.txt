@@ -1,10 +1,10 @@
 ticket: JIG-1
 state: building
-slices[4]{id,state,attempts,blocked_by,question,goal}:
-  a,green,1,-,-,Fix Clamp so TestClamp passes.
-  b,queued,0,a,-,"Give Clamp a percentage-range caller, once it works."
-  c,queued,0,-,-,Decide and implement the greeting's tone.
-  d,queued,0,-,-,Smoke-test the rig environment class.
+slices[4]{id,state,attempts,blocked_by,question,goal,workspace,oracle,from_gate}:
+  a,green,1,-,-,Fix Clamp so TestClamp passes.,alpha,test,-
+  b,queued,0,a,-,"Give Clamp a percentage-range caller, once it works.",alpha,test,-
+  c,queued,0,-,-,Decide and implement the greeting's tone.,beta,test,-
+  d,queued,0,-,-,Smoke-test the rig environment class.,beta,test,-
 questions: none
 brief:
   approval: none
@@ -15,4 +15,4 @@ brief_sections[5]{heading,slices}:
   Slice C - greeting decision,c
   Slice D - rig smoke,d
 help[1]:
-  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one
+  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one; ask: Build JIG-1

@@ -5,11 +5,14 @@ import (
 
 	"github.com/develdeco/jig/internal/correct"
 	"github.com/develdeco/jig/internal/observe"
+	"github.com/develdeco/jig/internal/stack"
 )
 
 // The correction notes: a slice that fails its oracle the same way twice, a
 // brief that changed under verified work, a commit outside the workspaces the
-// slices build in. internal/correct decides them; this source hands them to the
+// slices build in, a commit that names no slice, a parent the ticket is
+// stacked on whose branch moved past it or that merged. internal/correct
+// decides them; this source hands them to the
 // observe core, which tells the session at its next tool call or prompt and,
 // when the session is unattended, refuses to let it stop once for each.
 func init() {
@@ -36,11 +39,15 @@ func correctionNotes(c observe.NoteCtx) ([]observe.Note, error) {
 		Harness:    c.Event.Harness,
 		Slice:      c.Where.Slice,
 		Cwd:        c.Where.Cwd,
+		Repo:       c.Where.Repo,
 		Now:        c.Now,
 		Since:      c.Since,
 		Commit:     c.Commit,
 		Unattended: c.Unattended,
 		Journal:    c.Journal,
+		// What the ticket is stacked on is read with no host to ask: a hook
+		// does not wait on the network.
+		Stack: func() (stack.Plan, error) { return locatedStack(c.Where, c.Store, c.JigHome) },
 	})
 	notes := make([]observe.Note, len(found))
 	for i, n := range found {

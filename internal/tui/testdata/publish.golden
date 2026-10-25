@@ -2,23 +2,23 @@ jig  demo › JIG-2 › 4 publish                                        ✓ pub
 ────────────────────────────────────────────────────────────────────────────────
   ✓ pull request opened · https://example.test/acme/demo/pull/7
 
-  ✓ body written from the brief, the slices and the review, for ccccccc  09:14:…
+  ✓ body written for ccccccc  09:14:00
+      ## Intent
+      Load the config from the file the person names.
+      ## What changed
+      - a: load the config (ccccccc) …
   ✓ approved by you for ccccccc  09:14:10
   ✓ branch jig/JIG-2 pushed
   ✓ pull request opened  https://example.test/acme/demo/pull/7  09:14:20
+  ✓ changelog written
+      ## Slices
+      - a: ccccccc …
+  ✓ published  09:14:21
 
-  ╭─ 4 Publish · activity ─────────────────────────────────────────────────────╮
-  │  09:14:00 ▲ the pull request body was written for ccccccc                  │
-  │  09:14:10 ▲ you approved publishing ccccccc                                │
-  │  09:14:20 ▲ pull request opened https://example.test/acme/demo/pull/7      │
-  │  09:14:21 ● published                                                      │
+  ╭─ 4 Publish · activity ───────────────────────────────────── latest 3 of 4 ─╮
+  │  09:14:10 ▲ approval · you approved ccccccc                                │
+  │  09:14:20 ▲ pull request · opened https://example.test/acme/demo/pull/7    │
+  │  09:14:21 ● published · finished                                           │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
-
-
-
-
-
-
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · p publish · t tail · q quit
+  ↑↓ scroll · esc back · p publish · t tail · q quit

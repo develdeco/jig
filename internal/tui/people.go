@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -106,8 +107,12 @@ func (m *Model) who(t *ticket, session string) string { return m.whoAs(t, sessio
 
 // whoWith is who, with the harness and model the session runs when the
 // ledger said: "reviewer (Claude Code · Opus 5.5)".
-func (m *Model) whoWith(t *ticket, session string) string {
-	name := m.who(t, session)
+func (m *Model) whoWith(t *ticket, session string) string { return m.whoWithAs(t, session, "") }
+
+// whoWithAs is whoWith for a session playing role in what is worded: a
+// session that planned and then claims a slice is named as its builder.
+func (m *Model) whoWithAs(t *ticket, session, role string) string {
+	name := m.whoAs(t, session, role)
 	if name == "" {
 		return ""
 	}
@@ -123,14 +128,91 @@ func (m *Model) sessionDesc(session string) string {
 	if !ok {
 		return ""
 	}
+	return harnessAndModel(info.Harness, info.Model)
+}
+
+// harnessAndModel is a harness and a model in words, "Claude Code · Opus 5.5".
+func harnessAndModel(harness, model string) string {
 	var parts []string
-	if h := harnessName(info.Harness); h != "" {
+	if h := harnessName(harness); h != "" {
 		parts = append(parts, h)
 	}
-	if mo := modelName(info.Model); mo != "" {
+	if mo := modelName(model); mo != "" {
 		parts = append(parts, mo)
 	}
 	return strings.Join(parts, " · ")
+}
+
+// played is whether session played role on the ticket.
+func (t *ticket) played(session, role string) bool {
+	return slices.Contains(t.roleSessions()[role], session)
+}
+
+// reviewerName is how a session that reviewed the ticket is named: a reviewer
+// subagent when it also played the planner or the builder, since a subagent
+// shares its parent's session id and the first role that id played is not the
+// one it reviews in; else the reviewer, numbered when several sessions
+// reviewed. "" for a session that played none of the roles.
+func (t *ticket) reviewerName(session string) string {
+	if t.played(session, rolePlanner) || t.played(session, roleBuilder) {
+		return "reviewer subagent"
+	}
+	return t.roleLabel(session, roleReviewer)
+}
+
+// roundModel is the model that reviewed round n, as the round's own lines say
+// it (the gate-reviewer line carries what the reviewer ran on, and so do the
+// lines that close the round): the latest of them that names one, else "".
+func (t *ticket) roundModel(n int) string {
+	model := ""
+	for _, l := range t.lines {
+		switch l.Event {
+		case journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean:
+			if l.Model != "" && t.roundOf(l) == n {
+				model = l.Model
+			}
+		}
+	}
+	return model
+}
+
+// reviewerDesc is the harness and model round n's reviewer ran on, in words.
+// The model is the one the line being worded names (own), else the round's in
+// its lines, else, when the caller has the status's row for the round (rec),
+// that one, since a reviewer subagent runs on a model of its own; the model the
+// session started with is the last resort. The harness is the session's, else
+// the row's.
+func (m *Model) reviewerDesc(t *ticket, session string, n int, own string, rec *statusRound) string {
+	info := m.w.sessionInfo[session]
+	harness, model := info.Harness, info.Model
+	if rec != nil {
+		harness, model = firstOf(harness, rec.Harness), firstOf(rec.Model, model)
+	}
+	return harnessAndModel(harness, firstOf(own, t.roundModel(n), model))
+}
+
+// reviewerRole names a session that reviewed by its role alone: "reviewer
+// subagent". "" for a line that names no session.
+func (m *Model) reviewerRole(t *ticket, session string) string {
+	if session == "" {
+		return ""
+	}
+	return firstOf(t.reviewerName(session), m.who(t, session))
+}
+
+// reviewerWho names the session that reviewed round n with its harness and the
+// model it ran on: "reviewer subagent (Claude Code · Opus 5)". own is the model
+// the line being worded names, "" for none, and rec the status's row for the
+// round, nil for none. "" for a line that names no session.
+func (m *Model) reviewerWho(t *ticket, session string, n int, own string, rec *statusRound) string {
+	name := m.reviewerRole(t, session)
+	if name == "" {
+		return ""
+	}
+	if d := m.reviewerDesc(t, session, n, own, rec); d != "" {
+		return name + " (" + d + ")"
+	}
+	return name
 }
 
 // byWhom is the person a line's provenance names: "you" for a person at a

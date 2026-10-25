@@ -17,9 +17,9 @@ import (
 // and mark the slice green - so a test starts from the state a built ticket
 // is in, with the work in the operator's clone and not pushed anywhere.
 
-// ticketBranchOf is the branch a fixture ticket (which has no title) is built
-// on.
-func ticketBranchOf(fx *fixture.Fixture) string { return "jig/" + fx.Ticket }
+// ticketBranchOf is the branch a fixture ticket (which has no title, so its
+// brief's heading gives the slug) is built on.
+func ticketBranchOf(fx *fixture.Fixture) string { return fx.Branch }
 
 // cloneEnv is the env of a command run from the operator's clone.
 func cloneEnv(fx *fixture.Fixture) env { return testEnv(fx.Home).inDir(fx.RepoDir) }

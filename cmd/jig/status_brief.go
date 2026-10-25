@@ -39,20 +39,12 @@ func briefBlocks(st *store.Store, ticket string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	approval, approved, err := st.ReadApproval(ticket)
+	state, approval, err := briefApprovalOf(st, ticket)
 	if err != nil {
 		return nil, err
 	}
-	pairs := [][2]string{{"approval", briefApprovalNone}}
-	if approved {
-		sum, err := st.BriefSHA256(ticket)
-		if err != nil {
-			return nil, err
-		}
-		pairs[0][1] = briefApprovalChanged
-		if strings.EqualFold(sum, approval.BriefSHA256) {
-			pairs[0][1] = briefApprovalCurrent
-		}
+	pairs := [][2]string{{"approval", state}}
+	if state != briefApprovalNone {
 		pairs = append(pairs, [2]string{"approved_by", approval.By}, [2]string{"approved_at", approval.At})
 		if approval.Provenance != "" {
 			pairs = append(pairs, [2]string{"provenance", approval.Provenance})

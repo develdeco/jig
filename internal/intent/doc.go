@@ -7,4 +7,9 @@
 // itself - and it stays advisory: it only ever picks which session a model
 // then summarizes (the caller's own dispatch, not this package), never
 // judges the change or the session's own prose.
+//
+// A session the machine ledger already names as one that worked the ticket
+// needs no search: Reader.Load reads it from the transcript path its hook
+// recorded, and Among orders the few such sessions by the same file overlap,
+// with no bar to clear.
 package intent

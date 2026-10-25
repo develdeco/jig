@@ -235,14 +235,22 @@ func ExpandStillPresent(result ReviewResult, known map[string]Finding) ReviewRes
 // never reaches the budget, since it was never going to become an open fix
 // on its own.
 func ApplyRound(round int, known map[string]Finding, result ReviewResult, existingSlices []store.Slice, sliceGreen func(sliceID string) (bool, error), man manifest.Manifest, fixRisks []string, budgetReached bool) (reported []Finding, err error) {
+	return applyRound(round, known, result, existingSlices, sliceGreen, oneRepoFiles(man), fixRisks, budgetReached)
+}
+
+// applyRound is ApplyRound over the files of a round, which say which repo's
+// manifest a finding's file and oracle are judged against: a round over several
+// repos names its files "<repo>/<path>" and its workspaces "<repo>/<id>"
+// (roundrepos.go).
+func applyRound(round int, known map[string]Finding, result ReviewResult, existingSlices []store.Slice, sliceGreen func(sliceID string) (bool, error), files roundFiles, fixRisks []string, budgetReached bool) (reported []Finding, err error) {
 	seq := 0
-	oracleNames := SortedOracleNames(man)
 
 	for _, rf := range result.Findings {
 		file, ferr := normalizeRepoRelPath(rf.File)
 		if ferr != nil {
 			return nil, fmt.Errorf("verifydeliver: findings: finding file %q: %w", rf.File, ferr)
 		}
+		oracleNames := files.oracles(file)
 
 		var id string
 		var prior Finding
@@ -264,7 +272,7 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 			f := prior
 			f.File, f.Line, f.Title, f.Detail = file, rf.Line, rf.Title, rf.Detail
 			f.Action, f.Risk, f.RiskRationale, f.Oracle = rf.Action, rf.Risk, rf.RiskRationale, rf.Oracle
-			f.Workspace = workspaceFor(file, man)
+			f.Workspace = files.workspace(file)
 			f.Triage, f.Decision, f.RoutedAs = "", "", ""
 			reported = append(reported, f)
 			continue
@@ -311,7 +319,7 @@ func ApplyRound(round int, known map[string]Finding, result ReviewResult, existi
 		// reason is worse than none.
 		f.Triage, f.RoutedAs, f.RoutedWhy = "", "", ""
 
-		newWorkspace := workspaceFor(file, man)
+		newWorkspace := files.workspace(file)
 		// The workspace is jig-derived, not the reviewer's word, so rule 1
 		// leaves it alone only when the file is unchanged and still maps to
 		// no workspace: then a human already chose one for this same file
@@ -605,14 +613,21 @@ func askedFindingsList(cum map[string]Finding) []Finding {
 // toOpenFindingList projects fs (cum's open/asked/noted findings, per
 // openAndNotedFindingsList) onto review.json's open shape. Building fs from
 // the cumulative fold, and calling this before every reviewer round, is
-// what keeps review.json's open list honest.
-func toOpenFindingList(fs []Finding) []OpenFinding {
+// what keeps review.json's open list honest. An asked finding with a pending
+// decision in decisions (ReadTriageDecisions; nil for none) carries it: the
+// row stays in the list, annotated, since only the round that applies the
+// decision moves the ask out of the open set.
+func toOpenFindingList(fs []Finding, decisions map[string]TriageDecision) []OpenFinding {
 	out := make([]OpenFinding, 0, len(fs))
 	for _, f := range fs {
-		out = append(out, OpenFinding{
+		row := OpenFinding{
 			ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail, Action: f.Action,
 			Risk: f.Risk, RiskRationale: f.RiskRationale, Oracle: f.Oracle, Recurrences: f.Recurrences,
-		})
+		}
+		if d, ok := decisions[f.ID]; ok && f.Status == StatusAsked && d.Decided() {
+			row.Decision, row.DecidedBy, row.DecisionReason = d.Label(f), d.Provenance, d.Reason
+		}
+		out = append(out, row)
 	}
 	return out
 }

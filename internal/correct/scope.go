@@ -24,22 +24,39 @@ type ScopeDrift struct {
 // Ref fingerprints the drift by its commit.
 func (d ScopeDrift) Ref() string { return "scope:" + short12(d.Commit) }
 
-// WorkspacePaths lists the paths, cleaned and with forward slashes, of the
-// workspaces the slices build in, as the repo manifest m places them. A slice
-// whose workspace m does not have builds in another repo of the project, so
-// it says nothing about this one and is passed over.
-func WorkspacePaths(m manifest.Manifest, all []store.Slice) []string {
-	var out []string
-	seen := map[string]bool{}
+// A SliceWorkspace is a slice and the path of the workspace it builds in.
+type SliceWorkspace struct {
+	Slice string
+	// Path is the workspace path, cleaned and with forward slashes.
+	Path string
+}
+
+// SliceWorkspaces lists, in the order of all, each slice with the path of the
+// workspace it builds in, as the manifest m of the repo called repo places it
+// (a slice of a project of several repos writes its workspace as
+// "<repo>/<id>"). A slice whose workspace m does not have builds in another
+// repo of the project, so it says nothing about this one and is passed over.
+func SliceWorkspaces(m manifest.Manifest, repo string, all []store.Slice) []SliceWorkspace {
+	var out []SliceWorkspace
 	for _, sl := range all {
-		ws, ok := m.Workspace(sl.Workspace)
+		ws, ok := m.WorkspaceIn(repo, sl.Workspace)
 		if !ok {
 			continue
 		}
-		p := path.Clean(strings.ReplaceAll(ws.Path, "\\", "/"))
-		if !seen[p] {
-			seen[p] = true
-			out = append(out, p)
+		out = append(out, SliceWorkspace{Slice: sl.ID, Path: path.Clean(strings.ReplaceAll(ws.Path, "\\", "/"))})
+	}
+	return out
+}
+
+// WorkspacePaths lists the paths, cleaned and with forward slashes, of the
+// workspaces the slices build in, once each, as SliceWorkspaces places them.
+func WorkspacePaths(m manifest.Manifest, repo string, all []store.Slice) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, sw := range SliceWorkspaces(m, repo, all) {
+		if !seen[sw.Path] {
+			seen[sw.Path] = true
+			out = append(out, sw.Path)
 		}
 	}
 	return out
@@ -72,12 +89,14 @@ func within(file string, paths []string) bool {
 	return false
 }
 
-// Scope looks at what commit sha changed in the repository around dir against
-// the workspaces the slices build in, as that repository's manifest places
-// them. It reports false when nothing is outside them, and when there is
-// nothing to judge by: the slices build in no workspace this manifest has, or
-// the commit has no parent to compare with.
-func Scope(dir, sha string, all []store.Slice) (ScopeDrift, bool, error) {
+// Scope looks at what commit sha changed in the repository around dir, the
+// repo called repo of the project, against the workspaces the slices build in,
+// as that repository's manifest places them. It reports false when nothing is
+// outside them, and when there is nothing to judge by: the slices build in no
+// workspace this manifest has, or the commit has no parent to compare with. A
+// merge is no drift either: what it brings in was made on the branch it merges
+// (the restack a stacked ticket is asked for is one).
+func Scope(dir, repo, sha string, all []store.Slice) (ScopeDrift, bool, error) {
 	top, err := gitx.TopLevel(dir)
 	if err != nil {
 		return ScopeDrift{}, false, err
@@ -86,11 +105,17 @@ func Scope(dir, sha string, all []store.Slice) (ScopeDrift, bool, error) {
 	if err != nil {
 		return ScopeDrift{}, false, err
 	}
-	paths := WorkspacePaths(m, all)
+	paths := WorkspacePaths(m, repo, all)
 	if len(paths) == 0 {
 		return ScopeDrift{}, false, nil
 	}
-	if _, err := gitx.RevParse(top, sha+"^"); err != nil {
+	// The line is the commit and then its parents: a commit with none has
+	// nothing to compare with, and a merge brings in work made elsewhere.
+	parents, err := gitx.Run(top, "rev-list", "--parents", "-n", "1", sha)
+	if err != nil {
+		return ScopeDrift{}, false, err
+	}
+	if len(strings.Fields(parents)) != 2 {
 		return ScopeDrift{}, false, nil
 	}
 	changed, err := gitx.DiffNameOnly(top, sha+"^", sha, "ADMT")

@@ -55,11 +55,11 @@ func TestRenderStatus(t *testing.T) {
 
 	want := "ticket: JIG-1\n" +
 		"state: building\n" +
-		"slices[4]{id,state,attempts,blocked_by,question,goal}:\n" +
-		"  a,green,1,-,-,Fix Clamp so TestClamp passes.\n" +
-		"  b,queued,0,a,-,\"Give Clamp a percentage-range caller, once it works.\"\n" +
-		"  c,queued,0,-,-,Decide and implement the greeting's tone.\n" +
-		"  d,queued,0,-,-,Smoke-test the rig environment class.\n" +
+		"slices[4]{id,state,attempts,blocked_by,question,goal,workspace,oracle,from_gate}:\n" +
+		"  a,green,1,-,-,Fix Clamp so TestClamp passes.,alpha,test,-\n" +
+		"  b,queued,0,a,-,\"Give Clamp a percentage-range caller, once it works.\",alpha,test,-\n" +
+		"  c,queued,0,-,-,Decide and implement the greeting's tone.,beta,test,-\n" +
+		"  d,queued,0,-,-,Smoke-test the rig environment class.,beta,test,-\n" +
 		"questions: none\n" +
 		"brief:\n" +
 		"  approval: none\n" +
@@ -70,7 +70,7 @@ func TestRenderStatus(t *testing.T) {
 		"  Slice C - greeting decision,c\n" +
 		"  Slice D - rig smoke,d\n" +
 		"help[1]:\n" +
-		"  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one\n"
+		"  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one; ask: Build JIG-1\n"
 
 	if got != want {
 		t.Fatalf("RenderStatus mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)

@@ -12,7 +12,6 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
-	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -62,6 +61,13 @@ func cmdClaim(e env, args []string, stdout io.Writer) int {
 	w, err := resolveWork(e, stdout, flags, ticketArg)
 	if err != nil {
 		return renderErr(stdout, err)
+	}
+	// A closed ticket cannot be built; a session may still let go of a slice
+	// it holds.
+	if !*release {
+		if err := requireOpen(w.St, w.Ticket); err != nil {
+			return renderErr(stdout, err)
+		}
 	}
 	sl, err := w.slice()
 	if err != nil {
@@ -117,10 +123,7 @@ func claimSlice(e env, stdout io.Writer, w work, sl store.Slice, unattended, tak
 		})
 	}
 
-	deps := claimDeps{merged: func(url string) (bool, bool) {
-		gh, _ := e.lookPath("gh")
-		return repohost.PRMerged(gh, nil, url)
-	}}
+	deps := claimDeps{merges: newMergeReader(e, w.St, w.Cfg, w.MP, w.JigHome, 0)}
 	problems, err := claimProblems(w.St, w.Ticket, deps)
 	if err != nil {
 		return renderErr(stdout, err)
@@ -210,7 +213,7 @@ func recordClaim(e env, w work, sl store.Slice, ss store.SliceState, unattended,
 			return "", "", err
 		}
 	}
-	if started, err = ensureStartSHA(w); err != nil {
+	if started, err = ensureStartSHA(w, sl); err != nil {
 		return "", "", err
 	}
 	if recorded, err = recordBranch(w); err != nil {
@@ -233,12 +236,13 @@ func stamp(e env) string {
 	return e.now().UTC().Format(time.RFC3339Nano)
 }
 
-// ensureStartSHA records where the ticket branch started in the repo the work
-// is in, unless the ticket has that already: the merge base of HEAD and the
-// target branch of the repo. It returns the sha it recorded, "" when it
-// recorded none (it was there, or the repo has no target to measure from).
-func ensureStartSHA(w work) (string, error) {
-	repo, dir := w.Where.Repo, w.buildDir()
+// ensureStartSHA records where the ticket branch started in the repo the slice
+// builds in (sliceHome), unless the ticket has that already: the merge base of
+// HEAD and the target branch of the repo. It returns the sha it recorded, ""
+// when it recorded none (it was there, or the repo has no target to measure
+// from).
+func ensureStartSHA(w work, sl store.Slice) (string, error) {
+	repo, dir := sliceHome(w, sl)
 	if repo == "" || dir == "" {
 		return "", nil
 	}
@@ -290,6 +294,13 @@ func printClaim(stdout io.Writer, w work, sl store.Slice, result, started, recor
 			pairs = append(pairs, [2]string{k, v})
 		}
 	}
+	// The repo the slice is bound to, and its clone, when the project has
+	// several: the work may be run from anywhere in the orchestrator.
+	repo, dir := sliceHome(w, sl)
+	if len(w.Cfg.Repos) > 1 {
+		add("repo", repo)
+		add("clone", dir)
+	}
 	add("session", w.Session)
 	add("branch", w.Where.Branch)
 	add("start", shortSHA(started))
@@ -302,7 +313,11 @@ func printClaim(stdout io.Writer, w work, sl store.Slice, result, started, recor
 		}
 		blocks = append(blocks, axi.Table("warnings", []string{"code", "message", "help"}, rows))
 	}
-	help := []string{fmt.Sprintf("Run `jig context %s --slice %s` for the brief, what is built and the oracle; commit with the trailer `Jig-Slice: %s`", w.Ticket, sl.ID, sl.ID)}
+	var help []string
+	if line := otherRepoHelp(w, sl, repo, dir); line != "" {
+		help = append(help, line)
+	}
+	help = append(help, fmt.Sprintf("Run `jig context %s --slice %s` for the brief, what is built and the oracle; commit with the trailer `Jig-Slice: %s`", w.Ticket, sl.ID, sl.ID))
 	if recorded != "" {
 		help = append(help, fmt.Sprintf("Branch %s names no ticket, so it is now %s's branch (ticket.yaml branch:); name later branches for the ticket and they need no claim to bind", recorded, w.Ticket))
 	}

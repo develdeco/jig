@@ -5,6 +5,8 @@ description: Publishes a ticket's reviewed branch - renders the pull request bod
 
 # publish
 
+Run `jig next <T>`. If the phase it names is not publish, tell the person what the ticket needs and the prompt that does it, and stop. Do not run an earlier phase on your own.
+
 jig publishes the head the last clean gate round reviewed, **unchanged**: it reconciles, squashes and commits nothing on the branch, so the person's branch never diverges from origin's. Publishing needs every slice green and a clean round whose reviewer did not build the change (`PUBLISH_NOT_CLEAN`, `PUBLISH_NOT_INDEPENDENT`). A branch that moved since the round (`PUBLISH_UNREVIEWED_HEAD`) needs `jig gate T-1` again.
 
 ## Two ways, one hand-off
@@ -14,11 +16,11 @@ You push and open the pull request yourself, and jig renders and records:
 ```
 jig publish T-1 --body                 # renders pr/<repo>.md and the review notes; touches no lease, branch or remote
 git push origin <branch>               # your own push of the reviewed head
-gh pr create --head <branch> --base main --title "<title>" --body-file <pr_body>
+gh pr create --head <branch> --base <base> --title "<title>" --body-file <pr_body>
 jig publish T-1 --pr <url>             # checks the PR is from the ticket's branch (and the reviewed head), then records it
 ```
 
-The `--body` output gives the branch, base, title and the absolute `pr_body` path to hand to `gh`. The branch is the one the ticket records, else `<id>-<slug>` (the GitHub issue number leads it once the ticket is mirrored); `jig next T-1` names it too. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so.
+The `--body` output gives the branch, base, title and the absolute `pr_body` path to hand to `gh`. The base is the repo's target, or, for a ticket stacked on another, the parent's branch until the parent merges. The branch is the one the ticket records, else `<id>-<slug>` (the GitHub issue number leads it once the ticket is mirrored); `jig next T-1` names it too. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so.
 
 Or jig pushes and opens it:
 
@@ -27,6 +29,10 @@ jig publish T-1            # asks before it pushes; --yes stands in for the answ
 ```
 
 It pushes the reviewed head as it is (never forced: `PUBLISH_NOT_FAST_FORWARD` when origin has moved past it), opens the pull request or updates the one the branch has open, and posts the review notes as its first comment.
+
+A ticket whose slices build in several repos publishes one pull request for each, all from the same branch name, and each body names the others under `## Part of T-1` (`pending` until that repo's pull request is recorded). `--body` renders them all, or one with `--repo <r>`; push and open each, then record each with `jig publish T-1 --pr <url> --repo <r>`. The ticket is published when the last is recorded; render the bodies again then, and update the pull requests with the urls. Bare `jig publish` does it all, and `--approve` approves every repo's head.
+
+An automatic run publishes the first way (`--body`, your push, `gh pr create`, `--pr`) when the person's prompt delegated the publish (it ends at the PR, or says "and publish it"). Otherwise the run stops after the review and relays the publish prompt.
 
 ## A person approves
 
@@ -45,6 +51,10 @@ When the build recorded end-to-end scenarios and nobody picked, `--body` and `ji
 ```
 
 then run `jig publish T-1 --body --picks answer.json` (or the bare publish with `--picks`). Pick at least one and a few at most; an id is a candidate and used once; flows keep their step order. A pick jig refuses publishes with no demo and says why; the next publish of the same head and recordings reuses a pick that stood.
+
+## Then
+
+Relay `jig next <T>`'s `prompt:` to the person (there is none once the pull request is recorded) and stop. Publish is the last phase: no skill (intake, build, review) follows it, even in an automatic run.
 
 ## Never
 

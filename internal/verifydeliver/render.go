@@ -13,6 +13,7 @@ import (
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -40,7 +41,13 @@ func writeChangelogs(st *store.Store, ticket string, slices []store.Slice, lines
 	sliceWS := sliceWorkspaceMap(slices)
 	for _, ws := range distinctWorkspaces(slices) {
 		content := journal.RenderChangelog(lines, ws, sliceWS)
-		if err := os.WriteFile(filepath.Join(dir, ws+".md"), []byte(content), 0o644); err != nil {
+		// A workspace of a project of several repos is named <repo>/<id>: its
+		// changelog is in a directory of the repo.
+		path := filepath.Join(dir, filepath.FromSlash(ws)+".md")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("verifydeliver: changelog: create dir for %s.md: %w", ws, err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			return fmt.Errorf("verifydeliver: changelog: write %s.md: %w", ws, err)
 		}
 	}
@@ -762,7 +769,7 @@ func escapeDemoHTML(text string) string {
 // value when there is no pick: a body has a ## Demo section only from a pick.
 func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 	rep reportYAML, tier string, commits map[string]string, authorCommits []authorCommit,
-	oracleNames []string, outcomes []findingOutcome, picked *DemoRenderResult) (string, bool, DemoRenderResult, error) {
+	oracleNames []string, outcomes []findingOutcome, picked *DemoRenderResult, links []prLink, stacked stack.Repo) (string, bool, DemoRenderResult, error) {
 	relPath := filepath.Join(st.TicketRelDir(ticket), "pr", repoName+".md")
 	fullPath := filepath.Join(st.Root, relPath)
 
@@ -774,6 +781,14 @@ func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 		return "", false, DemoRenderResult{}, err
 	}
 	b.WriteString(intent)
+
+	// Render the Stacked on section, which names the branch the pull request
+	// goes into while the parent the ticket is stacked on has not merged
+	b.WriteString(renderStackedSection(ticket, stacked))
+
+	// Render the Part of section, which names the pull requests of the ticket's
+	// other repos (none for a ticket that publishes one)
+	b.WriteString(renderPartOfSection(ticket, links))
 
 	// Render What changed section
 	b.WriteString(renderWhatChangedSection(slices, commits, authorCommits))
@@ -795,6 +810,49 @@ func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 		return "", false, DemoRenderResult{}, fmt.Errorf("verifydeliver: pr body: write: %w", err)
 	}
 	return filepath.ToSlash(relPath), omittedBriefIntent, demoResult, nil
+}
+
+// prLink is the pull request of another repo of the same ticket: the repo and
+// the url of its pull request, "" while it has none.
+type prLink struct {
+	Repo string
+	URL  string
+}
+
+// pendingPR is what a link says of a repo whose pull request is not opened yet.
+const pendingPR = "pending"
+
+// renderPartOfSection renders the ## Part of <ticket> section a pull request
+// has when the ticket publishes in several repos: one line for each of the
+// other repos, with the url of its pull request or "pending" while it has
+// none. A ticket that publishes in one repo has no other, and no section.
+func renderPartOfSection(ticket string, links []prLink) string {
+	if len(links) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Part of %s\n\n", ticket)
+	for _, l := range links {
+		url := l.URL
+		if url == "" {
+			url = pendingPR
+		}
+		fmt.Fprintf(&b, "- also %s: %s\n", l.Repo, url)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// renderStackedSection renders the ## Stacked on <parent> section a pull
+// request has while it goes into the branch of the parent its ticket is
+// stacked on: which branch that is, and that it goes into the target once the
+// parent merges. A pull request into its repo's target has none.
+func renderStackedSection(ticket string, r stack.Repo) string {
+	if !r.Shared() || r.PRTarget == "" {
+		return ""
+	}
+	return fmt.Sprintf("## Stacked on %s\n\n%s builds on %s: this pull request goes into `%s`, the branch of %s. Once %s merges, retarget it to `%s`.\n\n",
+		r.Parent, ticket, r.Parent, r.PRTarget, r.Parent, r.Parent, r.Target)
 }
 
 // findingOutcome pairs one finding with how it ended. status is the bucket
@@ -942,15 +1000,26 @@ func sortFindingOutcomes(outcomes []findingOutcome) {
 	})
 }
 
-// writeReviewNotes writes <ticket>/pr/review-notes.md, the pull request's
-// first comment: the last round's own summary, every finding across every
-// round ordered by risk with how it ended, and coverage - the files the
+// reviewNotesFile is the name, in the ticket's pr directory, of the review notes
+// that go with the pull request of repo: review-notes.md, or for a ticket that
+// publishes in several repos review-notes-<repo>.md, since each pull request
+// carries its own.
+func reviewNotesFile(repo string, several bool) string {
+	if several {
+		return "review-notes-" + repo + ".md"
+	}
+	return "review-notes.md"
+}
+
+// writeReviewNotes writes <ticket>/pr/<name> (see reviewNotesFile), the pull
+// request's first comment: the last round's own summary, every finding across
+// every round ordered by risk with how it ended, and coverage - the files the
 // change touched (touchedFiles, Publish's own diff of the ship range)
 // against the files the reviewer read (reviewedPaths). outcomes,
 // reviewedPaths and lastSummary all come from the one pass
 // collectFindingsWithOutcomes already makes over every round's
 // findings.yaml; this function reads nothing on its own.
-func writeReviewNotes(st *store.Store, ticket string, lastRound int, lastSummary string, outcomes []findingOutcome, reviewedPaths, touchedFiles []string) error {
+func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastSummary string, outcomes []findingOutcome, reviewedPaths, touchedFiles []string) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
@@ -1002,7 +1071,7 @@ func writeReviewNotes(st *store.Store, ticket string, lastRound int, lastSummary
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("verifydeliver: review notes: create pr dir: %w", err)
 	}
-	return os.WriteFile(filepath.Join(dir, "review-notes.md"), []byte(b.String()), 0o644)
+	return os.WriteFile(filepath.Join(dir, name), []byte(b.String()), 0o644)
 }
 
 // demoHeadingRe and demoNextHeadingRe tolerate a "\r\n" line ending, not

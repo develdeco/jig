@@ -33,6 +33,10 @@ type Config struct {
 	// Ticket, when set, opens that ticket's screen first, with the project's
 	// list one step back.
 	Ticket string
+	// Awaiting says Ticket has no folder in the store yet: its screen waits
+	// for it and fills in as soon as the ticket has a line in its journal or a
+	// row in the ticket list.
+	Awaiting bool
 	// Scope is the flags that keep every verb on the store the screens were
 	// opened on (`--store <path>`); they are added to each command.
 	Scope []string
@@ -45,6 +49,20 @@ type Config struct {
 	// RetryDelay is how long to wait before a read that failed is made again;
 	// zero is 300ms.
 	RetryDelay time.Duration
+	// AwaitEvery is how often the ticket list is read while the ticket is
+	// awaited; zero is 2s, and a negative value never reads it again (a test
+	// that drives the clock itself).
+	AwaitEvery time.Duration
+	// IdleAfter is how long a ticket's screen goes with no event before its
+	// status is read again, and the least time between two such reads: the
+	// brief is written to files that make no journal line, so the screen would
+	// otherwise not see it. Zero is 3s.
+	IdleAfter time.Duration
+	// IdleTick is how often the model looks at the clock for that; zero is 1s,
+	// and a negative value never looks (a test that drives the clock itself).
+	IdleTick time.Duration
+	// Now is the clock the idle read measures by. Nil is time.Now.
+	Now func() time.Time
 	// Width and Height are the screen's size until the terminal reports one;
 	// zero is 100 by 30.
 	Width, Height int
@@ -53,6 +71,10 @@ type Config struct {
 const (
 	defaultWidth  = 100
 	defaultHeight = 30
+	// defaultIdleAfter and defaultIdleTick are Config.IdleAfter and
+	// Config.IdleTick when they are zero.
+	defaultIdleAfter = 3 * time.Second
+	defaultIdleTick  = time.Second
 	// batchMax bounds how many lines of the stream one update takes.
 	batchMax = 512
 )
@@ -97,6 +119,9 @@ type navEntry struct {
 	ticket string
 	slice  string
 	sel    int
+	// scroll is how many lines a page with no row to stand on is moved up, so a
+	// screen longer than its window can be read to its end.
+	scroll int
 	// follow keeps a ticket screen's cursor on the current step until the
 	// person moves it; lastCur is the current step the screen last showed,
 	// so a cursor left on the current step moves on with it.
@@ -145,7 +170,14 @@ type Model struct {
 	rosterBusy  bool
 	rosterFails int
 	retryDelay  time.Duration
+	awaitEvery  time.Duration
 	quitting    bool
+
+	// The idle read: when the screen last took an event of the ticket it shows
+	// and when it last started to read that ticket's status, by now.
+	idleAfter, idleTick time.Duration
+	now                 func() time.Time
+	lastEvent, lastRead time.Time
 }
 
 // New builds the model for cfg.
@@ -161,6 +193,21 @@ func New(cfg Config) *Model {
 	if m.retryDelay <= 0 {
 		m.retryDelay = 300 * time.Millisecond
 	}
+	m.awaitEvery = cfg.AwaitEvery
+	if m.awaitEvery == 0 {
+		m.awaitEvery = 2 * time.Second
+	}
+	m.idleAfter, m.idleTick = cfg.IdleAfter, cfg.IdleTick
+	if m.idleAfter == 0 {
+		m.idleAfter = defaultIdleAfter
+	}
+	if m.idleTick == 0 {
+		m.idleTick = defaultIdleTick
+	}
+	m.now = cfg.Now
+	if m.now == nil {
+		m.now = time.Now
+	}
 	m.zone = cfg.Zone
 	if m.zone == nil {
 		m.zone = time.Local
@@ -175,7 +222,8 @@ func New(cfg Config) *Model {
 	}
 	m.nav = []navEntry{{screen: screenMain}}
 	if cfg.Ticket != "" {
-		m.w.ticketFor(cfg.Ticket)
+		t, _ := m.w.ticketFor(cfg.Ticket)
+		t.awaiting = cfg.Awaiting
 		m.nav = append(m.nav, navEntry{screen: screenTicket, ticket: cfg.Ticket, follow: true})
 	}
 	return m
@@ -193,6 +241,10 @@ func (m *Model) Init() tea.Cmd {
 	if id := m.watching(); id != "" {
 		cmds = append(cmds, m.refreshStatus(id))
 	}
+	if m.awaitingTicket() {
+		cmds = append(cmds, m.awaitAfter())
+	}
+	cmds = append(cmds, m.idleAfterTick())
 	return tea.Batch(cmds...)
 }
 
@@ -202,6 +254,54 @@ func (m *Model) Stop() {
 	if m.cancel != nil {
 		m.cancel()
 	}
+}
+
+// awaitingTicket is whether the ticket the screens were opened on is one that
+// does not exist yet.
+func (m *Model) awaitingTicket() bool {
+	t := m.w.tickets[m.cfg.Ticket]
+	return m.cfg.Ticket != "" && t != nil && t.awaiting
+}
+
+// awaitMsg asks for the ticket list to be read again while a ticket is awaited.
+type awaitMsg struct{}
+
+// awaitAfter asks, after a moment, to look for the awaited ticket in the
+// ticket list: a ticket that exists but has no line yet shows nowhere else.
+func (m *Model) awaitAfter() tea.Cmd {
+	if m.awaitEvery < 0 {
+		return nil
+	}
+	return tea.Tick(m.awaitEvery, func(time.Time) tea.Msg { return awaitMsg{} })
+}
+
+// idleMsg asks the model to look at whether the ticket on its screen has gone
+// quiet.
+type idleMsg struct{}
+
+// idleAfterTick asks, after a moment, for that look.
+func (m *Model) idleAfterTick() tea.Cmd {
+	if m.idleTick < 0 {
+		return nil
+	}
+	return tea.Tick(m.idleTick, func(time.Time) tea.Msg { return idleMsg{} })
+}
+
+// onIdle reads the status of the ticket on the screen when it has had no event
+// for idleAfter and its status was last read no less long ago. The brief and the
+// slices are written to files that make no journal line, and a status is the
+// only place the screens can see them; the read is made for the watched ticket
+// alone, so the cost of a quiet screen is one status every few seconds.
+func (m *Model) onIdle() tea.Cmd {
+	t := m.w.tickets[m.watching()]
+	if t == nil || t.awaiting || t.loading {
+		return nil
+	}
+	now := m.now()
+	if now.Sub(m.lastEvent) < m.idleAfter || now.Sub(m.lastRead) < m.idleAfter {
+		return nil
+	}
+	return m.refreshStatus(t.id)
 }
 
 // Screen reports which screen is showing, for tests and callers that care.
@@ -290,8 +390,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case rosterMsg:
 		return m, m.onRoster(msg)
+	case awaitMsg:
+		if m.awaitingTicket() {
+			return m, tea.Batch(m.loadRoster(), m.awaitAfter())
+		}
+	case idleMsg:
+		return m, tea.Batch(m.onIdle(), m.idleAfterTick())
 	case statusMsg:
 		return m, m.onStatus(msg)
+	case briefMsg:
+		return m, m.onBrief(msg)
 	case retryMsg:
 		if msg.ticket == "" {
 			return m, m.loadRoster()
@@ -310,12 +418,23 @@ func (m *Model) onEvents(envs []events.Envelope) tea.Cmd {
 	for id := range touched {
 		m.w.tickets[id].dirty = true
 	}
+	// A line about the brief (its approval, a check of the slices) says what
+	// the screens read of its text may have changed.
+	for _, e := range envs {
+		if t := m.w.tickets[e.Ticket]; t != nil && e.Src == events.SrcJournal && stepOfLine(e) == stepBrief {
+			t.briefStale = true
+		}
+	}
 	var cmds []tea.Cmd
 	if fresh {
 		cmds = append(cmds, m.loadRoster())
 	}
 	if id := m.watching(); id != "" && touched[id] {
+		m.lastEvent = m.now()
 		cmds = append(cmds, m.refreshStatus(id))
+		if m.top().screen == screenBrief {
+			cmds = append(cmds, m.loadBrief(id))
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -345,6 +464,7 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 		return nil
 	}
 	t.failures = 0
+	m.noteChanges(t, t.status, msg.info)
 	t.status = msg.info
 	if t.dirty && m.watching() == msg.ticket {
 		return m.refreshStatus(msg.ticket)
@@ -363,7 +483,12 @@ func (m *Model) onRoster(msg rosterMsg) tea.Cmd {
 		return nil
 	}
 	m.rosterFails = 0
+	was := m.awaitingTicket()
 	m.w.setRoster(msg.rows)
+	if was && !m.awaitingTicket() {
+		// The awaited ticket is listed: read it.
+		return m.refreshStatus(m.cfg.Ticket)
+	}
 	return nil
 }
 
@@ -458,8 +583,13 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 // that was following the current step stays where it moved.
 func (m *Model) move(delta int) {
 	m.followSel()
-	n := len(m.page().refs())
+	pg := m.page()
+	n := len(pg.refs())
 	e := m.top()
+	if n == 0 {
+		e.scroll = max(0, min(e.scroll+delta, len(pg.lines)-m.bodyRows()))
+		return
+	}
 	e.follow = false
 	e.sel += delta
 	if e.sel >= n {
@@ -530,10 +660,36 @@ func (m *Model) open() tea.Cmd {
 	}
 	m.nav = append(m.nav, next)
 	m.last = nil
-	if t := m.w.tickets[next.ticket]; t != nil && (t.status == nil || t.dirty) {
-		return m.refreshStatus(next.ticket)
+	if next.screen == screenReview {
+		// What the review screen is for, when something waits, is deciding it.
+		m.top().sel = m.askRow(ref)
 	}
-	return nil
+	var cmds []tea.Cmd
+	if t := m.w.tickets[next.ticket]; t != nil && (t.status == nil || t.dirty) {
+		cmds = append(cmds, m.refreshStatus(next.ticket))
+	}
+	if next.screen == screenBrief {
+		cmds = append(cmds, m.loadBrief(next.ticket))
+	}
+	return tea.Batch(cmds...)
+}
+
+// askRow is the position, among the rows of the review screen on top, of the
+// ask ref names, else of the first ask; 0 when it holds none.
+func (m *Model) askRow(ref *rowRef) int {
+	first := -1
+	for i, r := range m.page().refs() {
+		if r.kind != rowAsk {
+			continue
+		}
+		if ref.kind == rowAsk && r.id == ref.id {
+			return i
+		}
+		if first < 0 {
+			first = i
+		}
+	}
+	return max(0, first)
 }
 
 // back goes up one screen.
@@ -549,6 +705,12 @@ func (m *Model) refreshAll() tea.Cmd {
 	cmds := []tea.Cmd{m.loadRoster()}
 	if id := m.watching(); id != "" {
 		cmds = append(cmds, m.refreshStatus(id))
+		if t := m.w.tickets[id]; t != nil {
+			t.briefStale = true
+		}
+		if m.top().screen == screenBrief {
+			cmds = append(cmds, m.loadBrief(id))
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -692,6 +854,10 @@ func (m *Model) gate() tea.Cmd {
 		m.notice = "select a ticket first"
 		return nil
 	}
+	if m.w.tickets[id].awaiting {
+		m.notice = id + " does not exist yet"
+		return nil
+	}
 	return m.exec("gate", id, m.verbArgs("gate", id))
 }
 
@@ -701,6 +867,10 @@ func (m *Model) beginPublish() {
 	id := m.targetTicket()
 	if id == "" || m.w.tickets[id] == nil {
 		m.notice = "select a ticket first"
+		return
+	}
+	if m.w.tickets[id].awaiting {
+		m.notice = id + " does not exist yet"
 		return
 	}
 	m.ask = &confirmation{

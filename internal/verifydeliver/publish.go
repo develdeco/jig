@@ -30,14 +30,16 @@ import (
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 )
 
 // PublishOpts configures one publish, in any of its forms.
 type PublishOpts struct {
 	Ticket string
-	// Repo names the repo to publish, by its name in the project: `jig
-	// publish --repo`. "" means the project's first.
+	// Repo narrows the publish to one repo of the ticket, by its name in the
+	// project: `jig publish --repo`. "" means every repo the ticket's slices
+	// build in, which is the project's one repo when it has one.
 	Repo string
 	// Yes stands in for the confirmation bare publish asks for.
 	Yes bool
@@ -67,59 +69,162 @@ type PublishReport struct {
 	// Picks is what publish did with the build's recordings: the zero value
 	// when the build recorded nothing that could be offered.
 	Picks PicksReport
+	// Pending names the repos of the ticket that have no pull request
+	// recorded when the publish ended, in the project's order: the ones a
+	// publish narrowed with --repo left alone. The ticket is published when
+	// there are none.
+	Pending []string
 }
 
 // publishTarget is what every form of publish settles before it does
-// anything: the repo and branch, the ticket's slices, and the latest gate
-// round, which must be clean.
+// anything, for each repo it works in: the repo and branch, the ticket's
+// slices, and the latest gate round, which must be clean.
 type publishTarget struct {
-	ticket    string
-	repo      project.Repo
-	repoName  string
-	target    string
-	rec       store.Ticket
-	branch    string
-	slices    []store.Slice
-	gateRep   reportYAML
-	lastRound int
+	ticket   string
+	repo     project.Repo
+	repoName string
+	target   string
+	rec      store.Ticket
+	// branch is the ticket's branch, which has one name in every repo.
+	branch string
+	// slices are all the ticket's slices, repoSlices those that build in this
+	// repo.
+	slices     []store.Slice
+	repoSlices []store.Slice
+	gateRep    reportYAML
+	lastRound  int
+	// covered are the names of the repos the ticket's slices build in, in the
+	// project's order (this one among them): a pull request is opened in each.
+	covered []string
+	// qualified is whether the project has several repos. A journal line of
+	// its publish names the repo, and a round names a file <repo>/<path>.
+	qualified bool
+	// stack is where the ticket stands in this repo against a parent it is
+	// stacked on (Deps.Stack): the zero value when it is stacked on nothing
+	// here.
+	stack stack.Repo
+}
+
+// base is the branch the repo's pull request goes into: the branch of the
+// parent the ticket is stacked on while that has not merged in the repo, else
+// the repo's target.
+func (t *publishTarget) base() string {
+	if t.stack.Shared() && t.stack.PRTarget != "" {
+		return t.stack.PRTarget
+	}
+	return t.target
 }
 
 // reviewedHead is the head the last clean gate round reviewed for the repo:
 // "" for a scripted round, which recorded none.
 func (t *publishTarget) reviewedHead() string { return t.gateRep.ReviewedSHA[t.repoName] }
 
-// selectRepo returns the repo named by name in cfg, or the first when name is
-// empty.
-func selectRepo(cfg project.Config, name string) (project.Repo, string, string, error) {
-	if name == "" {
-		repo, n, target := primaryRepo(cfg)
-		return repo, n, target, nil
+// several is whether the ticket publishes in more than one repo.
+func (t *publishTarget) several() bool { return len(t.covered) > 1 }
+
+// lineRepo is the repo a journal line of this repo's publish names: the repo
+// in a project of several, nothing in a project of one.
+func (t *publishTarget) lineRepo() string {
+	if t.qualified {
+		return t.repoName
 	}
-	var names []string
-	for _, r := range cfg.Repos {
-		if r.Name() == name {
-			return r, r.Name(), r.TargetBranch(), nil
+	return ""
+}
+
+// bodySlices are the slices the repo's pull request tells: those that build in
+// the repo when the ticket publishes in several, else all of the ticket's.
+func (t *publishTarget) bodySlices() []store.Slice {
+	if t.several() {
+		return t.repoSlices
+	}
+	return t.slices
+}
+
+// notesName is the name of the repo's review notes in the ticket's pr
+// directory.
+func (t *publishTarget) notesName() string { return reviewNotesFile(t.repoName, t.several()) }
+
+// report is the gate round's report as the repo's pull request shows it: when
+// the ticket publishes in several repos, with the reviewed head of this repo
+// alone.
+func (t *publishTarget) report() reportYAML {
+	rep := t.gateRep
+	if t.several() {
+		rep.ReviewedSHA = map[string]string{}
+		if sha := t.gateRep.ReviewedSHA[t.repoName]; sha != "" {
+			rep.ReviewedSHA[t.repoName] = sha
 		}
-		names = append(names, r.Name())
 	}
-	return project.Repo{}, "", "", &axi.Error{
-		Msg:  fmt.Sprintf("the project has no repo %q (it has %s)", name, strings.Join(names, ", ")),
-		Code: "VALIDATION_ERROR",
+	return rep
+}
+
+// ownFindings are the findings, and the paths the reviewer read, that belong
+// to this repo's pull request. In a project of several repos a round names a
+// file <repo>/<path>: a finding is the repo's whose name begins its file, and a
+// path read is listed by its place in the repo, as the files the change
+// touched are. A finding that names no repo of the ticket (an older jig wrote a
+// bare path) goes to the first repo, so each is told once. A project of one
+// repo has them as they are.
+func (t *publishTarget) ownFindings(outcomes []findingOutcome, reviewed []string) ([]findingOutcome, []string) {
+	if !t.qualified {
+		return outcomes, reviewed
 	}
+	repoOf := func(file string) string {
+		name, _, _ := strings.Cut(file, "/")
+		for _, c := range t.covered {
+			if c == name {
+				return name
+			}
+		}
+		return ""
+	}
+	var mine []findingOutcome
+	for _, o := range outcomes {
+		if owner := repoOf(o.finding.File); owner == t.repoName || (owner == "" && t.covered[0] == t.repoName) {
+			mine = append(mine, o)
+		}
+	}
+	var paths []string
+	for _, p := range reviewed {
+		if repoOf(p) == t.repoName {
+			paths = append(paths, strings.TrimPrefix(p, t.repoName+"/"))
+		}
+	}
+	return mine, paths
+}
+
+// oracleNames are the manifest's oracle names the last clean round recorded
+// (report.yaml's oracle_names), or, for a round that recorded none, the
+// names man has. When the ticket publishes in several repos, the round's
+// names are the union of the repos', and the repo's pull request names those
+// its own manifest declares.
+func (t *publishTarget) oracleNames(man manifest.Manifest) []string {
+	if len(t.gateRep.OracleNames) == 0 {
+		return SortedOracleNames(man)
+	}
+	names := append([]string(nil), t.gateRep.OracleNames...)
+	if !t.several() || len(man.Oracles) == 0 {
+		return names
+	}
+	own := names[:0]
+	for _, n := range names {
+		if _, ok := man.Oracles[n]; ok {
+			own = append(own, n)
+		}
+	}
+	return own
 }
 
 // readyToPublish checks what every form of publish needs and reads what it
 // works from: every slice is green (the same frontier check gate applies
 // before it will even review), the latest gate round is clean and was not
 // reviewed by one of the builders, and the intent it pinned is the intent on
-// disk. A refusal here leaves nothing written.
-func readyToPublish(d Deps, ticket, repoFlag string) (*publishTarget, error) {
+// disk. It returns a target for each repo the publish works in, the ticket's
+// repos in the project's order or the one --repo names. A refusal here leaves
+// nothing written.
+func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
 	if err := d.Store.Sync(); err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: sync store: %w", err)
-	}
-	repo, repoName, target, err := selectRepo(d.Cfg, repoFlag)
-	if err != nil {
-		return nil, err
 	}
 	// The ticket's record is read once, here, before publish writes anything
 	// to the store, and both the branch and the PR title come from that one
@@ -130,13 +235,26 @@ func readyToPublish(d Deps, ticket, repoFlag string) (*publishTarget, error) {
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: read ticket record: %w", err)
 	}
-	branch, err := d.Store.ResolveTicketBranch(ticket, rec, target)
-	if err != nil {
-		return nil, fmt.Errorf("verifydeliver: publish: resolve ticket branch: %w", err)
-	}
 	slices, err := d.Store.ReadSlices(ticket)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: read slices: %w", err)
+	}
+	// The repos are the ones the gate reviewed. A ticket whose slices build in
+	// none of them is told so after the slices not being done, as the gate does.
+	covered, coverErr := gateRepos(d, ticket, slices)
+	if coverErr != nil {
+		if err := checkFrontier(d, ticket, slices, false); err != nil {
+			return nil, err
+		}
+		return nil, coverErr
+	}
+	repos, err := publishRepos(d.Cfg, ticket, covered, repoFlag)
+	if err != nil {
+		return nil, err
+	}
+	branch, err := publishBranch(d, ticket, rec, repos)
+	if err != nil {
+		return nil, err
 	}
 	if err := checkFrontier(d, ticket, slices, false); err != nil {
 		return nil, err
@@ -166,10 +284,49 @@ func readyToPublish(d Deps, ticket, repoFlag string) (*publishTarget, error) {
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: count gate rounds: %w", err)
 	}
-	return &publishTarget{
-		ticket: ticket, repo: repo, repoName: repoName, target: target, rec: rec, branch: branch,
-		slices: slices, gateRep: gateRep, lastRound: lastRound,
-	}, nil
+	names := make([]string, len(covered))
+	for i, gr := range covered {
+		names[i] = gr.name
+	}
+	// A ticket stacked on another goes into the parent's branch where they
+	// share a repo: read before anything is written, so a stack that cannot be
+	// read refuses the publish rather than opening a pull request into the
+	// wrong branch.
+	var plan stack.Plan
+	if d.Stack != nil {
+		if plan, err = d.Stack(ticket); err != nil {
+			return nil, fmt.Errorf("verifydeliver: publish: read what %s is stacked on: %w", ticket, err)
+		}
+	}
+	targets := make([]*publishTarget, len(repos))
+	for i, gr := range repos {
+		targets[i] = &publishTarget{
+			ticket: ticket, repo: gr.repo, repoName: gr.name, target: gr.target, rec: rec, branch: branch,
+			slices: slices, repoSlices: gr.slices, gateRep: gateRep, lastRound: lastRound,
+			covered: names, qualified: len(d.Cfg.Repos) > 1,
+		}
+		if r, ok := plan.In(gr.name); ok {
+			targets[i].stack = r
+		}
+	}
+	return targets, nil
+}
+
+// publishBranch is the ticket's branch, which has one name in every repo: it
+// is resolved against the target branch of each repo the publish works in.
+func publishBranch(d Deps, ticket string, rec store.Ticket, repos []*gateRepo) (string, error) {
+	branch := ""
+	for _, gr := range repos {
+		name, err := d.Store.ResolveTicketBranch(ticket, rec, gr.target)
+		if err != nil {
+			return "", inRepo(len(repos) > 1, gr.name, fmt.Errorf("verifydeliver: publish: resolve ticket branch: %w", err))
+		}
+		if branch != "" && name != branch {
+			return "", fmt.Errorf("verifydeliver: publish: the branch of %s is %s in one repo and %s in another", ticket, branch, name)
+		}
+		branch = name
+	}
+	return branch, nil
 }
 
 // publishFuncs are the seams a publish form takes from Deps, each with its
@@ -222,15 +379,146 @@ func (d Deps) publishFuncs() publishFuncs {
 	return f
 }
 
+// shipment is one repo's publish while it is under way: the lease that holds
+// the head to ship, what was learned of the repo before anything was written,
+// and the pull request body rendered for it.
+type shipment struct {
+	pt          *publishTarget
+	lease       pool.Lease
+	shipping    branchCopy
+	head        string
+	host        repohost.Host
+	openPR      string
+	touched     []string
+	oracleNames []string
+	pub         publication
+	// linked are the other repos' pull requests as the body on disk names them.
+	linked []prLink
+}
+
+// prepareShipment points a publish lease at the copy of the repo's branch
+// publish ships and checks everything that can refuse the publish, writing
+// nothing to the store: a refusal here leaves it as it was. built are the
+// commits jig built in the repo, which its copy of the branch must hold.
+func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string) (*shipment, error) {
+	ticket, branch, repoName, target := pt.ticket, pt.branch, pt.repoName, pt.target
+	// The publish lease is re-pointed at the copy publish ships right after
+	// the acquire below, so its own copy of the branch is disposable: one left
+	// by an earlier attempt must not refuse the acquire (BRANCH_DIVERGED) over
+	// commits nobody keeps, which it does once the branch has reached origin
+	// another way.
+	if err := restoreLeaseBeforeAcquire(d.Home, repoName, ticket, pool.Publish, branch); err != nil {
+		return nil, err
+	}
+	lease, err := pool.Acquire(d.Home, repoName, pt.repo.Remote, target, branch, ticket, pool.Publish)
+	if err != nil {
+		return nil, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
+	}
+	// The lease is pointed at the copy of the branch the gate reviewed, by the
+	// same function the gate uses: the clone's when it has the newer, origin's
+	// otherwise.
+	shipping, err := pointAtBranchCopy(d, lease.Dir, repoName, ticket, branch, pt.rec.Adopted(), built, "publish")
+	if err != nil {
+		return nil, err
+	}
+	if err := fn.fetchOrigin(lease.Dir); err != nil {
+		return nil, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
+	}
+	// A pull request into the branch of the parent the ticket is stacked on
+	// needs that branch on the origin: jig pushes no branch but the ticket's.
+	if base := pt.base(); base != target {
+		if _, err := gitx.RevParse(lease.Dir, "refs/remotes/origin/"+base); err != nil {
+			return nil, &axi.Error{
+				Msg:  fmt.Sprintf("%s is stacked on %s, whose branch %s is not on the origin of %s, so no pull request can go into it", ticket, pt.stack.Parent, base, repoName),
+				Code: "PUBLISH_PARENT_NOT_PUSHED",
+				Help: []string{fmt.Sprintf("Publish %s first (its branch goes to the origin), then publish %s again", pt.stack.Parent, ticket)},
+			}
+		}
+	}
+
+	// Publish ships what was reviewed: the head it would ship must be the head
+	// the last clean round reviewed (when that round recorded heads), because a
+	// commit that landed on the branch since would go out under a verdict that
+	// never saw it. Checked ahead of everything that writes, so a refusal
+	// leaves the store untouched.
+	shipHead, err := gitx.RevParse(lease.Dir, "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("verifydeliver: publish: resolve the head to ship: %w", err)
+	}
+	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket); err != nil {
+		return nil, err
+	}
+	// Publish never rewrites what is on origin and never forces: a branch that
+	// is already there must be a fast-forward from where it stands. Checked
+	// here for the same reason as above - git would refuse the push, but only
+	// after publish had written the store.
+	buildDir, err := pool.Dir(d.Home, repoName, ticket, pool.Build)
+	if err != nil {
+		return nil, fmt.Errorf("verifydeliver: publish: resolve build lease: %w", err)
+	}
+	if err := requireFastForward(lease.Dir, branch, buildDir, ticket, shipping); err != nil {
+		return nil, err
+	}
+	// Build the repo host from the repo's remote (or take the one d hands
+	// Publish). It may be nil if the remote is not a pull-request host
+	// (e.g., a local path).
+	host, err := d.publishHost(pt.repo.Remote)
+	if err != nil {
+		return nil, fmt.Errorf("verifydeliver: publish: build repo host: %w", err)
+	}
+
+	// If the host exists, look for an open pull request ahead of the first
+	// store write: a host that cannot be reached, or cannot say, refuses the
+	// publish before it has written or pushed anything, not after the branch
+	// is on origin.
+	openPR := ""
+	if host != nil {
+		if openPR, err = host.FindOpenPR(branch, pt.base()); err != nil {
+			return nil, fmt.Errorf("verifydeliver: publish: look for an open pull request from %s: %w", branch, err)
+		}
+	}
+
+	touchedFiles, err := diffFiles(lease.Dir, target, "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	if len(touchedFiles) == 0 {
+		return nil, &axi.Error{
+			Msg:  "the branch changes nothing against the target - stale-overwrite suspicion",
+			Code: "PUBLISH_NO_DIVERGENCE",
+		}
+	}
+	if err := checkNonEmptyRange(lease.Dir, target, "HEAD"); err != nil {
+		return nil, err
+	}
+
+	man, err := manifest.Resolve(lease.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("verifydeliver: publish: resolve manifest: %w", err)
+	}
+	return &shipment{
+		pt: pt, lease: lease, shipping: shipping, head: shipHead, host: host, openPR: openPR,
+		touched: touchedFiles, oracleNames: pt.oracleNames(man),
+	}, nil
+}
+
 // Publish pushes the reviewed head of the ticket's branch as it is and opens
-// or updates its pull request. It reconciles nothing, squashes nothing and
-// commits nothing on the branch: the head it pushes is the head the last
-// clean gate round reviewed, taken from the operator's clone (or origin's
-// copy, when that is the newer), so the person's branch never diverges from
-// origin's because of a publish. The pull request body is rendered from the
-// store's records (PublishBody renders the same), the recordings the demo
-// shows come from the picks file or an earlier pick (o.Picks), and the store
-// gets the ticket's changelogs, ledger entry and evidence.
+// or updates its pull request, in each repo the ticket's slices build in (or
+// the one o.Repo names). It reconciles nothing, squashes nothing and commits
+// nothing on the branch: the head it pushes is the head the last clean gate
+// round reviewed, taken from the operator's clone (or origin's copy, when that
+// is the newer), so the person's branch never diverges from origin's because
+// of a publish. The pull request body is rendered from the store's records
+// (PublishBody renders the same), the recordings the demo shows come from the
+// picks file or an earlier pick (o.Picks), and the store gets the ticket's
+// changelogs, ledger entry and evidence.
+//
+// A ticket that publishes in several repos gets one pull request for each,
+// every one from the branch of the same name. Each body names the others, with
+// the url of a pull request once it is opened; the bodies of the pull requests
+// opened first are updated when the last is, so all of them name all. Every
+// repo is checked before the first is pushed, and the ticket is published
+// (publish-done) once every repo has its pull request recorded.
 func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	ticket := o.Ticket
 	fn := d.publishFuncs()
@@ -255,128 +543,66 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		_ = d.Store.Push(fmt.Sprintf("%s: publish failed: %s", ticket, failureCode(err)))
 	}()
 
-	pt, err := readyToPublish(d, ticket, o.Repo)
+	targets, err := readyToPublish(d, ticket, o.Repo)
 	if err != nil {
 		return PublishReport{}, err
 	}
-	branch, repoName, target := pt.branch, pt.repoName, pt.target
 	picks, err := loadPicksFile(o.Picks)
 	if err != nil {
-		return PublishReport{}, err
-	}
-
-	// The publish lease is re-pointed at the copy publish ships right after
-	// the acquire below, so its own copy of the branch is disposable: one left
-	// by an earlier attempt must not refuse the acquire (BRANCH_DIVERGED) over
-	// commits nobody keeps, which it does once the branch has reached origin
-	// another way.
-	if err := restoreLeaseBeforeAcquire(d.Home, repoName, ticket, pool.Publish, branch); err != nil {
 		return PublishReport{}, err
 	}
 	jlines, err := journal.Read(d.Store, ticket)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
-	built := journal.BuiltCommits(jlines)
-	lease, err := pool.Acquire(d.Home, repoName, pt.repo.Remote, target, branch, ticket, pool.Publish)
-	if err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
-	}
-	// The lease is pointed at the copy of the branch the gate reviewed, by the
-	// same function the gate uses: the clone's when it has the newer, origin's
-	// otherwise.
-	shipping, err := pointAtBranchCopy(d, lease.Dir, repoName, ticket, branch, pt.rec.Adopted(), built, "publish")
-	if err != nil {
-		return PublishReport{}, err
-	}
-	if err := fn.fetchOrigin(lease.Dir); err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
-	}
 
-	// Publish ships what was reviewed: the head it would ship must be the head
-	// the last clean round reviewed (when that round recorded heads), because a
-	// commit that landed on the branch since would go out under a verdict that
-	// never saw it. Checked ahead of everything that writes, so a refusal
-	// leaves the store untouched.
-	shipHead, err := gitx.RevParse(lease.Dir, "HEAD")
-	if err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve the head to ship: %w", err)
-	}
-	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket); err != nil {
-		return PublishReport{}, err
-	}
-	// Publish never rewrites what is on origin and never forces: a branch that
-	// is already there must be a fast-forward from where it stands. Checked
-	// here for the same reason as above - git would refuse the push, but only
-	// after publish had written the store.
-	buildDir, err := pool.Dir(d.Home, repoName, ticket, pool.Build)
-	if err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve build lease: %w", err)
-	}
-	if err := requireFastForward(lease.Dir, branch, buildDir, ticket, shipping); err != nil {
-		return PublishReport{}, err
-	}
-	// Build the repo host from the repo's remote (or take the one d hands
-	// Publish). It may be nil if the remote is not a pull-request host
-	// (e.g., a local path).
-	host, err := d.publishHost(pt.repo.Remote)
-	if err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: build repo host: %w", err)
-	}
-
-	// If the host exists, look for an open pull request ahead of the first
-	// store write: a host that cannot be reached, or cannot say, refuses the
-	// publish before it has written or pushed anything, not after the branch
-	// is on origin.
-	openPR := ""
-	if host != nil {
-		if openPR, err = host.FindOpenPR(branch, target); err != nil {
-			return PublishReport{}, fmt.Errorf("verifydeliver: publish: look for an open pull request from %s: %w", branch, err)
+	// Every repo is checked before anything is written or pushed, so a repo
+	// that refuses leaves the others, and the store, as they were.
+	ships := make([]*shipment, 0, len(targets))
+	for _, pt := range targets {
+		built := journal.BuiltCommits(jlines)
+		if pt.qualified {
+			built = builtIn(jlines, pt.repoSlices)
 		}
-	}
-
-	touchedFiles, err := diffFiles(lease.Dir, target, "HEAD")
-	if err != nil {
-		return PublishReport{}, err
-	}
-	if len(touchedFiles) == 0 {
-		return PublishReport{}, &axi.Error{
-			Msg:  "the branch changes nothing against the target - stale-overwrite suspicion",
-			Code: "PUBLISH_NO_DIVERGENCE",
+		sh, err := prepareShipment(d, fn, pt, built)
+		if err != nil {
+			return PublishReport{}, inRepo(pt.qualified, pt.repoName, err)
 		}
-	}
-	if err := checkNonEmptyRange(lease.Dir, target, "HEAD"); err != nil {
-		return PublishReport{}, err
+		ships = append(ships, sh)
 	}
 
-	man, err := manifest.Resolve(lease.Dir)
-	if err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: resolve manifest: %w", err)
-	}
-	oracleNames := pt.oracleNames(man)
-
-	// Everything from here to the push writes the store's working copy.
+	// Everything from here to the push writes the store's working copy. The
+	// bodies name the pull requests the branch already has open, and the ones
+	// the journal recorded for repos this publish leaves alone.
 	journaled = true
-	pub, err := renderPublication(d, pt, renderInput{
-		dir: lease.Dir, head: shipHead, touched: touchedFiles, oracleNames: oracleNames,
-		picks: picks, warn: fn.warn,
-	})
-	if err != nil {
-		return PublishReport{}, err
+	known := recordedPRs(jlines)
+	for _, sh := range ships {
+		known[sh.pt.repoName] = sh.openPR
+	}
+	for _, sh := range ships {
+		sh.linked = linksFor(sh.pt, known)
+		sh.pub, err = renderPublication(d, sh.pt, renderInput{
+			dir: sh.lease.Dir, head: sh.head, touched: sh.touched, oracleNames: sh.oracleNames,
+			picks: picks, warn: fn.warn, links: sh.linked,
+		})
+		if err != nil {
+			return PublishReport{}, inRepo(sh.pt.qualified, sh.pt.repoName, err)
+		}
 	}
 
 	// confirmed tracks whether an actual publish confirmation ran: --yes
-	// stands in for it, a person's recorded approval of this head does too,
-	// or an interactive "y"/"yes" answer does. A decline stops cleanly here:
-	// the ticket branch itself is never pushed (the deferred push above still
-	// runs and pushes the store's own record of the attempt - only
+	// stands in for it, a person's recorded approval of every head to ship does
+	// too, or an interactive "y"/"yes" answer does. A decline stops cleanly
+	// here: the ticket branch itself is never pushed (the deferred push above
+	// still runs and pushes the store's own record of the attempt - only
 	// guardedPush's push of the ticket branch below is skipped). confirmed is
 	// the only value ever passed to guardedPush; it is never hardcoded to
 	// true, so a non-local remote with no confirmation is refused by the gitx
 	// guard downstream.
-	confirmed := o.Yes || approvedByPerson(jlines, shipHead)
+	confirmed := o.Yes || allApproved(jlines, ships)
 	if !confirmed {
-		if !fn.confirm(branch, ticket, openPR, host != nil) {
+		branch, openPR, hasHost := confirmation(ships)
+		if !fn.confirm(branch, ticket, openPR, hasHost) {
 			return PublishReport{}, &axi.Error{Msg: "publish declined at confirmation", Code: "PUBLISH_DECLINED"}
 		}
 		confirmed = true
@@ -390,67 +616,131 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// same) and stages the files afresh, with no gate round. What is left
 	// after this is the push and the host's own read of the files, which a
 	// check made by jig cannot close, since the host opens them by name.
-	picked := pub.picked
-	if picked != nil && host != nil {
-		if err := verifyStaged(absPath(filepath.Join(d.Home, "evidence")), picked.MediaDir, picked.MediaFiles); err != nil {
-			return PublishReport{}, &axi.Error{
-				Msg:  fmt.Sprintf("the recordings staged for %s changed before they were attached: %v", ticket, err),
-				Code: "PUBLISH_PICKS_CHANGED",
-				Help: []string{fmt.Sprintf("Nothing was pushed. Run `jig publish %s` again: it reuses the pick and stages the recordings afresh.", ticket)},
+	for _, sh := range ships {
+		picked := sh.pub.picked
+		if picked != nil && sh.host != nil {
+			if err := verifyStaged(absPath(filepath.Join(d.Home, "evidence")), picked.MediaDir, picked.MediaFiles); err != nil {
+				return PublishReport{}, &axi.Error{
+					Msg:  fmt.Sprintf("the recordings staged for %s changed before they were attached: %v", ticket, err),
+					Code: "PUBLISH_PICKS_CHANGED",
+					Help: []string{fmt.Sprintf("Nothing was pushed. Run `jig publish %s` again: it reuses the pick and stages the recordings afresh.", ticket)},
+				}
 			}
 		}
 	}
 
-	if err := fn.guardedPush(lease.Dir, "origin", branch, confirmed); err != nil {
-		return PublishReport{}, err
+	report = PublishReport{
+		Tier: "none", Head: map[string]string{}, PRBody: map[string]string{}, PRURL: map[string]string{},
+		PRUpdated: map[string]bool{}, PRNote: map[string]string{},
+	}
+	for _, sh := range ships {
+		pt := sh.pt
+		// The body names the pull requests opened since it was rendered: the
+		// repos before this one in the loop.
+		if links := linksFor(pt, known); !sameLinks(links, sh.linked) {
+			if err := sh.pub.rewrite(links); err != nil {
+				return PublishReport{}, inRepo(pt.qualified, pt.repoName, err)
+			}
+			sh.linked = links
+		}
+		if err := fn.guardedPush(sh.lease.Dir, "origin", pt.branch, confirmed); err != nil {
+			return PublishReport{}, inRepo(pt.qualified, pt.repoName, err)
+		}
+		prURL, prOutcome, err := openOrUpdatePR(d, sh.host, pt, sh.pub, sh.openPR, fn.warn)
+		if err != nil {
+			return PublishReport{}, inRepo(pt.qualified, pt.repoName, err)
+		}
+		line := journal.Line{Event: journal.EventPr, Outcome: prOutcome, Commit: sh.head, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo()}
+		if err := journal.Append(d.Store, ticket, line); err != nil {
+			return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
+		}
+		postPublishChecks(d, sh.host, ticket, prURL, sh.pub, fn.warn)
+
+		known[pt.repoName] = prURL
+		report.Head[pt.repoName] = sh.head
+		report.PRBody[pt.repoName] = sh.pub.prPath
+		report.PRURL[pt.repoName] = prURL
+		report.PRUpdated[pt.repoName] = prOutcome == "updated"
+		if sh.host == nil {
+			report.PRNote[pt.repoName] = "no pull-request host"
+		}
+		if report.Picks.Status == "" && len(report.Picks.Dropped) == 0 {
+			report.Picks = sh.pub.picks
+		}
 	}
 
-	prURL, prOutcome, err := openOrUpdatePR(d, host, pt, pub, openPR, fn.warn)
+	// The pull requests opened first were rendered before the others had urls:
+	// they are updated now that all are known.
+	for _, sh := range ships {
+		url := report.PRURL[sh.pt.repoName]
+		links := linksFor(sh.pt, known)
+		if url == "" || sameLinks(links, sh.linked) {
+			continue
+		}
+		if err := sh.pub.rewrite(links); err != nil {
+			return PublishReport{}, inRepo(sh.pt.qualified, sh.pt.repoName, err)
+		}
+		sh.linked = links
+		if _, _, err := openOrUpdatePR(d, sh.host, sh.pt, sh.pub, url, fn.warn); err != nil {
+			return PublishReport{}, inRepo(sh.pt.qualified, sh.pt.repoName, err)
+		}
+		checkMediaReferences(d, sh.host, ticket, url, sh.pub, fn.warn)
+	}
+
+	// The ticket is published once every repo has its pull request recorded.
+	// What a publish leaves in the store about the ticket is written then, once
+	// the branch is out: a publish that is declined or that fails before the
+	// push leaves no changelog or ledger entry behind to be written again by
+	// the one that follows.
+	lines, err := journal.Read(d.Store, ticket)
 	if err != nil {
-		return PublishReport{}, err
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: prOutcome, Commit: shipHead, URL: prURL, Branch: branch}); err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
-	}
-	postPublishChecks(d, host, ticket, prURL, pub, fn.warn)
-
-	// What a publish leaves in the store about the ticket is written once the
-	// branch is out: a publish that is declined or that fails before the push
-	// leaves no changelog or ledger entry behind to be written again by the
-	// one that follows.
-	if err := writeStoreDocs(d, pt, oracleNames); err != nil {
-		return PublishReport{}, err
-	}
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPublishDone}); err != nil {
-		return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
+	report.Pending = pendingRepos(lines, targets[0].covered)
+	if len(report.Pending) == 0 {
+		var names [][]string
+		for _, sh := range ships {
+			names = append(names, sh.oracleNames)
+		}
+		if err := writeStoreDocs(d, targets[0], unionNames(names...)); err != nil {
+			return PublishReport{}, err
+		}
+		if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPublishDone}); err != nil {
+			return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
+		}
 	}
 	if err := d.Store.Push(fmt.Sprintf("%s: publish", ticket)); err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
-
-	prNote := map[string]string{}
-	if host == nil {
-		prNote[repoName] = "no pull-request host"
-	}
-	return PublishReport{
-		Tier:      "none",
-		Head:      map[string]string{repoName: shipHead},
-		PRBody:    map[string]string{repoName: pub.prPath},
-		PRURL:     map[string]string{repoName: prURL},
-		PRUpdated: map[string]bool{repoName: prOutcome == "updated"},
-		PRNote:    prNote,
-		Picks:     pub.picks,
-	}, nil
+	return report, nil
 }
 
-// oracleNames are the manifest's oracle names the last clean round recorded
-// (report.yaml's oracle_names), or, for a round that recorded none, the
-// names man has.
-func (t *publishTarget) oracleNames(man manifest.Manifest) []string {
-	if len(t.gateRep.OracleNames) > 0 {
-		return append([]string(nil), t.gateRep.OracleNames...)
+// allApproved reports whether a person approved publishing the head of every
+// shipment (`jig publish --approve`), which stands in for the question a bare
+// publish asks.
+func allApproved(lines []journal.Line, ships []*shipment) bool {
+	for _, sh := range ships {
+		if !approvedByPerson(lines, sh.head) {
+			return false
+		}
 	}
-	return SortedOracleNames(man)
+	return true
+}
+
+// confirmation is what the question a bare publish asks names: the branch, the
+// pull request the branch already has open, and whether there is a
+// pull-request host. For a ticket that publishes in several repos the branch
+// is said with the repos, and there is no one pull request to name.
+func confirmation(ships []*shipment) (branch, openPR string, hasHost bool) {
+	if len(ships) == 1 {
+		return ships[0].pt.branch, ships[0].openPR, ships[0].host != nil
+	}
+	names := make([]string, len(ships))
+	for i, sh := range ships {
+		names[i] = sh.pt.repoName
+		hasHost = hasHost || sh.host != nil
+	}
+	return ships[0].pt.branch + " in " + joinNames(names), "", hasHost
 }
 
 // approvedByPerson reports whether a person approved publishing head
@@ -505,6 +795,9 @@ type renderInput struct {
 	oracleNames []string
 	picks       *PicksResult
 	warn        func(format string, args ...any)
+	// links are the ticket's other repos as the body names them, with the url
+	// of each one's pull request once it has one.
+	links []prLink
 }
 
 // publication is what renderPublication wrote and decided: the pull request
@@ -518,6 +811,12 @@ type publication struct {
 	demoResult DemoRenderResult
 	mediaDir   string
 	mediaFiles []string
+	// notesName is the name, in the ticket's pr directory, of the review notes
+	// the pull request's first comment carries.
+	notesName string
+	// rewrite writes the body again, naming links as the other repos' pull
+	// requests: the same body, with the pull requests opened since.
+	rewrite func(links []prLink) error
 }
 
 // renderPublication renders the pull request body and the review notes for
@@ -530,7 +829,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
-	title := consolidatedTitle(t.rec.Title, ticket, t.slices)
+	title := consolidatedTitle(t.rec.Title, ticket, t.bodySlices())
 	commits := lastGreenCommits(lines)
 	// An adopted ticket's own commits, from the merge base with target up to
 	// the start sha recorded at adoption: the author's work, listed ahead of
@@ -550,6 +849,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, err
 	}
+	outcomes, reviewedPaths = t.ownFindings(outcomes, reviewedPaths)
 	// The recordings the build made, picked for the pull request (ADR 0029).
 	// A pick that stands renders the ## Demo section; one that does not, or
 	// none to make, leaves the pull request without one. The pick is made for
@@ -561,7 +861,10 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, err
 	}
-	prPath, omittedBriefIntent, demoResult, err := writePRBody(d.Store, ticket, t.repoName, t.slices, t.gateRep, "none", commits, authorCommits, in.oracleNames, outcomes, picked)
+	write := func(links []prLink) (string, bool, DemoRenderResult, error) {
+		return writePRBody(d.Store, ticket, t.repoName, t.bodySlices(), t.report(), "none", commits, authorCommits, in.oracleNames, outcomes, picked, links, t.stack)
+	}
+	prPath, omittedBriefIntent, demoResult, err := write(in.links)
 	if err != nil {
 		return publication{}, err
 	}
@@ -618,17 +921,23 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 			ticket, demoResult.ScrubbedCaptions)
 	}
 
-	if err := writeReviewNotes(d.Store, ticket, t.lastRound, lastSummary, outcomes, reviewedPaths, in.touched); err != nil {
+	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, lastSummary, outcomes, reviewedPaths, in.touched); err != nil {
 		return publication{}, err
 	}
 	return publication{
 		prPath: prPath, title: title, picks: picksReport, picked: picked, demoResult: demoResult,
 		mediaDir: demoResult.MediaDir, mediaFiles: mediaFiles,
+		notesName: t.notesName(),
+		rewrite: func(links []prLink) error {
+			_, _, _, err := write(links)
+			return err
+		},
 	}, nil
 }
 
 // openOrUpdatePR opens the branch's pull request, or updates the one it
-// already has open into the target with this publish's body: none is opened
+// already has open into its base (the target, or the branch of the parent the
+// ticket is stacked on) with this publish's body: none is opened
 // beside an open one. A closed or merged pull request, or one into another
 // base, is not that one (FindOpenPR): the operator asked to publish, so one is
 // opened, and the others are left as they are. A repo with no pull-request
@@ -653,7 +962,7 @@ func openOrUpdatePR(d Deps, host repohost.Host, t *publishTarget, r publication,
 		return openPR, "updated", nil
 	}
 	if len(r.mediaFiles) > 0 {
-		url, attached, err := host.CreatePRWithMedia(t.branch, t.target, r.title, bodyFile, r.mediaDir, r.mediaFiles)
+		url, attached, err := host.CreatePRWithMedia(t.branch, t.base(), r.title, bodyFile, r.mediaDir, r.mediaFiles)
 		if err != nil {
 			return "", "", fmt.Errorf("verifydeliver: publish: create PR with media: %w", err)
 		}
@@ -662,7 +971,7 @@ func openOrUpdatePR(d Deps, host repohost.Host, t *publishTarget, r publication,
 		}
 		return url, "opened", nil
 	}
-	url, err = host.CreatePR(t.branch, t.target, r.title, bodyFile)
+	url, err = host.CreatePR(t.branch, t.base(), r.title, bodyFile)
 	if err != nil {
 		return "", "", fmt.Errorf("verifydeliver: publish: create PR: %w", err)
 	}
@@ -677,6 +986,21 @@ func postPublishChecks(d Deps, host repohost.Host, ticket, prURL string, r publi
 	if prURL == "" || host == nil {
 		return
 	}
+	checkMediaReferences(d, host, ticket, prURL, r, warn)
+
+	// Post the review notes as a comment on the pull request. A failed post is
+	// a soft failure, not a publish failure: the pull request stands, and the
+	// file is kept in the store for a manual post.
+	reviewNotesPath := filepath.Join(d.Store.TicketDir(ticket), "pr", r.notesName)
+	if err := host.CommentPR(prURL, reviewNotesPath); err != nil {
+		warn("jig: post %s as a comment on %s: %v\n", reviewNotesPath, prURL, err)
+	}
+}
+
+// checkMediaReferences reads the body of the pull request at prURL back and
+// checks the media references of the demo were rewritten, when media were
+// attached. A soft check: a failure is a warning, and the pull request stands.
+func checkMediaReferences(d Deps, host repohost.Host, ticket, prURL string, r publication, warn func(format string, args ...any)) {
 	// Check for unrewritten demo references if media was attached. A failed
 	// read-back is a warning, not silence: media were just uploaded, and the
 	// read-back is the one signal that says whether the references actually
@@ -707,42 +1031,49 @@ func postPublishChecks(d Deps, host repohost.Host, ticket, prURL string, r publi
 			}
 		}
 	}
-
-	// Post the review notes as a comment on the pull request. A failed post is
-	// a soft failure, not a publish failure: the pull request stands, and the
-	// file is kept in the store for a manual post.
-	reviewNotesPath := filepath.Join(d.Store.TicketDir(ticket), "pr", "review-notes.md")
-	if err := host.CommentPR(prURL, reviewNotesPath); err != nil {
-		warn("jig: post %s as a comment on %s: %v\n", reviewNotesPath, prURL, err)
-	}
 }
 
-// BodyReport is PublishBody's result.
-type BodyReport struct {
+// RepoBody is the pull request body PublishBody rendered for one repo.
+type RepoBody struct {
 	Repo string
-	// Branch is the ticket's branch and Target the branch its pull request
-	// goes into.
-	Branch, Target string
-	// Head is the reviewed head the body is for.
-	Head string
+	// Target is the branch the repo's pull request goes into and Head the
+	// reviewed head the body is for.
+	Target, Head string
 	// PRBody is the store-relative path of the body, and ReviewNotes of the
 	// notes the pull request's first comment carries.
 	PRBody      string
 	ReviewNotes string
 	Title       string
-	Picks       PicksReport
+}
+
+// BodyReport is PublishBody's result.
+type BodyReport struct {
+	// Branch is the ticket's branch, which has one name in every repo.
+	Branch string
+	// Covered are the repos the ticket publishes in, whichever of them this
+	// call rendered a body for.
+	Covered []string
+	// Repos are the bodies rendered, one for each repo the call covered, in
+	// the project's order.
+	Repos []RepoBody
+	// Picks is what the render did with the build's recordings, of the first
+	// repo that had any to offer.
+	Picks PicksReport
 }
 
 // PublishBody renders the pull request body (pr/<repo>.md) and the review
 // notes for the head the last clean gate round reviewed, and journals a
 // pr-body line: the first step of publishing when an agent does the pushing.
-// It changes no lease and no branch, runs nothing, and needs the reviewed head
-// to be the tip of the clone's branch or of origin's: a body for a head that
-// is neither describes a pull request nobody will open.
+// A ticket that publishes in several repos gets a body for each (or the one
+// o.Repo names), each naming the pull requests of the others the journal
+// records and "pending" for those it does not. It changes no lease and no
+// branch, runs nothing, and needs the reviewed head to be the tip of the
+// clone's branch or of origin's: a body for a head that is neither describes a
+// pull request nobody will open.
 func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 	ticket := o.Ticket
 	fn := d.publishFuncs()
-	pt, err := readyToPublish(d, ticket, o.Repo)
+	targets, err := readyToPublish(d, ticket, o.Repo)
 	if err != nil {
 		return BodyReport{}, err
 	}
@@ -750,43 +1081,77 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 	if err != nil {
 		return BodyReport{}, err
 	}
-	dir, err := readerDir(d, pt)
+	// Every repo's reviewed head is found before a body is written, so a repo
+	// that refuses leaves the others, and the store, as they were.
+	type reading struct {
+		pt      *publishTarget
+		dir     string
+		head    string
+		rev     string
+		touched []string
+		names   []string
+	}
+	reads := make([]reading, 0, len(targets))
+	for _, pt := range targets {
+		rd, err := func() (reading, error) {
+			dir, err := readerDir(d, pt)
+			if err != nil {
+				return reading{}, err
+			}
+			head := pt.reviewedHead()
+			if err := checkBodyHead(d, pt, dir); err != nil {
+				return reading{}, err
+			}
+			rev := head
+			if rev == "" {
+				rev = "HEAD"
+			}
+			touched, err := diffFiles(dir, pt.target, rev)
+			if err != nil {
+				return reading{}, err
+			}
+			man, err := manifest.Resolve(dir)
+			if err != nil {
+				return reading{}, fmt.Errorf("verifydeliver: publish: resolve manifest: %w", err)
+			}
+			return reading{pt: pt, dir: dir, head: head, rev: rev, touched: touched, names: pt.oracleNames(man)}, nil
+		}()
+		if err != nil {
+			return BodyReport{}, inRepo(pt.qualified, pt.repoName, err)
+		}
+		reads = append(reads, rd)
+	}
+	lines, err := journal.Read(d.Store, ticket)
 	if err != nil {
-		return BodyReport{}, err
+		return BodyReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
-	head := pt.reviewedHead()
-	if err := checkBodyHead(d, pt, dir); err != nil {
-		return BodyReport{}, err
-	}
-	rev := head
-	if rev == "" {
-		rev = "HEAD"
-	}
-	touched, err := diffFiles(dir, pt.target, rev)
-	if err != nil {
-		return BodyReport{}, err
-	}
-	man, err := manifest.Resolve(dir)
-	if err != nil {
-		return BodyReport{}, fmt.Errorf("verifydeliver: publish: resolve manifest: %w", err)
-	}
-	r, err := renderPublication(d, pt, renderInput{
-		dir: dir, head: rev, touched: touched, oracleNames: pt.oracleNames(man), picks: picks, warn: fn.warn,
-	})
-	if err != nil {
-		return BodyReport{}, err
-	}
-	line := journal.Line{Event: journal.EventPrBody, Commit: head, Branch: pt.branch, Ref: r.prPath}
-	if err := journal.Append(d.Store, ticket, line); err != nil {
-		return BodyReport{}, fmt.Errorf("verifydeliver: publish: journal pr-body: %w", err)
+	known := recordedPRs(lines)
+	report := BodyReport{Branch: targets[0].branch, Covered: targets[0].covered}
+	for _, rd := range reads {
+		pt := rd.pt
+		r, err := renderPublication(d, pt, renderInput{
+			dir: rd.dir, head: rd.rev, touched: rd.touched, oracleNames: rd.names, picks: picks, warn: fn.warn,
+			links: linksFor(pt, known),
+		})
+		if err != nil {
+			return BodyReport{}, inRepo(pt.qualified, pt.repoName, err)
+		}
+		line := journal.Line{Event: journal.EventPrBody, Commit: rd.head, Branch: pt.branch, Ref: r.prPath, Repo: pt.lineRepo()}
+		if err := journal.Append(d.Store, ticket, line); err != nil {
+			return BodyReport{}, fmt.Errorf("verifydeliver: publish: journal pr-body: %w", err)
+		}
+		report.Repos = append(report.Repos, RepoBody{
+			Repo: pt.repoName, Target: pt.base(), Head: rd.head, PRBody: r.prPath, Title: r.title,
+			ReviewNotes: filepath.ToSlash(filepath.Join(d.Store.TicketRelDir(ticket), "pr", r.notesName)),
+		})
+		if report.Picks.Status == "" && len(report.Picks.Dropped) == 0 {
+			report.Picks = r.picks
+		}
 	}
 	if err := d.Store.Push(fmt.Sprintf("%s: pr body", ticket)); err != nil {
 		return BodyReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
-	return BodyReport{
-		Repo: pt.repoName, Branch: pt.branch, Target: pt.target, Head: head, PRBody: r.prPath, Title: r.title, Picks: r.picks,
-		ReviewNotes: filepath.ToSlash(filepath.Join(d.Store.TicketRelDir(ticket), "pr", "review-notes.md")),
-	}, nil
+	return report, nil
 }
 
 // readerDir is a repository to read the reviewed head from without changing
@@ -863,15 +1228,22 @@ type RecordReport struct {
 	// ticket's branch; false when the repo has no pull-request host to ask,
 	// and the pull request was recorded as given.
 	Verified bool
+	// Pending names the repos of the ticket that still have no pull request
+	// recorded, in the project's order. The ticket is published once there
+	// are none.
+	Pending []string
 }
 
 // PublishRecordPR records the pull request at prURL, which somebody other than
 // jig opened, as the ticket's: after checking, when the repo has a
 // pull-request host, that it is from the ticket's branch and, when the host
-// says which commit, from the reviewed head. It journals a pr line and the
-// publish-done line, writes what a publish leaves in the store (changelogs,
-// ledger entry, evidence), and pushes the store. It changes no lease and no
-// branch and pushes nothing of the repo.
+// says which commit, from the reviewed head. It journals a pr line, naming the
+// repo in a project of several. A ticket that publishes in several repos
+// takes one pull request for each repo, and says which with o.Repo; the last
+// to be recorded finishes the publish, which writes what a publish leaves in
+// the store (changelogs, ledger entry, evidence) and journals publish-done.
+// It pushes the store, changes no lease and no branch and pushes nothing of the
+// repo.
 func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format string, args ...any)) (RecordReport, error) {
 	ticket := o.Ticket
 	if warn == nil {
@@ -881,10 +1253,18 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if err != nil {
 		return RecordReport{}, err
 	}
-	pt, err := readyToPublish(d, ticket, o.Repo)
+	targets, err := readyToPublish(d, ticket, o.Repo)
 	if err != nil {
 		return RecordReport{}, err
 	}
+	if len(targets) > 1 {
+		return RecordReport{}, &axi.Error{
+			Msg:  fmt.Sprintf("%s builds in %s: say which repo the pull request is for", ticket, joinNames(targets[0].covered)),
+			Code: "VALIDATION_ERROR",
+			Help: []string{fmt.Sprintf("Record each repo's pull request with --repo, as `jig publish %s --pr <url> --repo %s`", ticket, targets[0].covered[0])},
+		}
+	}
+	pt := targets[0]
 	host, err := d.publishHost(pt.repo.Remote)
 	if err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: build repo host: %w", err)
@@ -919,67 +1299,100 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 		verified = true
 	}
 
-	oracleNames := pt.gateRep.OracleNames
-	if len(oracleNames) == 0 {
-		if dir, err := readerDir(d, pt); err == nil {
-			if man, err := manifest.Resolve(dir); err == nil {
-				oracleNames = SortedOracleNames(man)
+	// The other repos still waiting for a pull request: the publish is done
+	// with this one when there are none.
+	lines, err := journal.Read(d.Store, ticket)
+	if err != nil {
+		return RecordReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
+	}
+	var pending []string
+	if pt.several() {
+		for _, name := range pendingRepos(lines, pt.covered) {
+			if name != pt.repoName {
+				pending = append(pending, name)
 			}
 		}
 	}
-	if err := writeStoreDocs(d, pt, oracleNames); err != nil {
-		return RecordReport{}, err
+
+	if len(pending) == 0 {
+		oracleNames := pt.gateRep.OracleNames
+		if len(oracleNames) == 0 {
+			if dir, err := readerDir(d, pt); err == nil {
+				if man, err := manifest.Resolve(dir); err == nil {
+					oracleNames = SortedOracleNames(man)
+				}
+			}
+		}
+		if err := writeStoreDocs(d, pt, oracleNames); err != nil {
+			return RecordReport{}, err
+		}
 	}
 	outcome := "recorded"
 	if !verified {
 		outcome = "recorded:unverified"
 	}
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch}); err != nil {
+	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo()}); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 	}
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPublishDone}); err != nil {
-		return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
+	if len(pending) == 0 {
+		if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPublishDone}); err != nil {
+			return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
+		}
 	}
 	if err := d.Store.Push(fmt.Sprintf("%s: publish", ticket)); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
-	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified}, nil
+	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified, Pending: pending}, nil
+}
+
+// RepoHead is the head a repo's pull request ships.
+type RepoHead struct {
+	Repo string
+	Head string
 }
 
 // ApproveReport is PublishApprove's result.
 type ApproveReport struct {
-	Repo   string
-	Head   string
 	Branch string
+	// Repos are the heads approved, one for each repo the call covered, in
+	// the project's order.
+	Repos []RepoHead
 	// Provenance is who the approval speaks for.
 	Provenance string
 }
 
-// PublishApprove records, as a publish-approved line, that provenance (a
-// person at a terminal, or an agent) approves publishing the head the last
-// clean gate round reviewed. Only a person's approval stands in for the
-// confirmation a bare publish asks for.
+// PublishApprove records, as a publish-approved line for each repo it covers,
+// that provenance (a person at a terminal, or an agent) approves publishing the
+// head the last clean gate round reviewed there. Only a person's approval
+// stands in for the confirmation a bare publish asks for, and a ticket that
+// publishes in several repos needs it for every one.
 func PublishApprove(d Deps, o PublishOpts, provenance string) (ApproveReport, error) {
-	pt, err := readyToPublish(d, o.Ticket, o.Repo)
+	targets, err := readyToPublish(d, o.Ticket, o.Repo)
 	if err != nil {
 		return ApproveReport{}, err
 	}
-	head := pt.reviewedHead()
-	if head == "" {
-		return ApproveReport{}, &axi.Error{
-			Msg:  fmt.Sprintf("the latest gate round for %s recorded no reviewed head to approve", o.Ticket),
-			Code: "PUBLISH_UNREVIEWED_HEAD",
-			Help: []string{fmt.Sprintf("Run `jig gate %s` and have it reviewed", o.Ticket)},
+	for _, pt := range targets {
+		if pt.reviewedHead() == "" {
+			return ApproveReport{}, inRepo(pt.qualified, pt.repoName, &axi.Error{
+				Msg:  fmt.Sprintf("the latest gate round for %s recorded no reviewed head to approve", o.Ticket),
+				Code: "PUBLISH_UNREVIEWED_HEAD",
+				Help: []string{fmt.Sprintf("Run `jig gate %s` and have it reviewed", o.Ticket)},
+			})
 		}
 	}
-	line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: pt.branch, Provenance: provenance}
-	if err := journal.Append(d.Store, o.Ticket, line); err != nil {
-		return ApproveReport{}, fmt.Errorf("verifydeliver: publish: journal publish-approved: %w", err)
+	report := ApproveReport{Branch: targets[0].branch, Provenance: provenance}
+	for _, pt := range targets {
+		head := pt.reviewedHead()
+		line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: pt.branch, Provenance: provenance, Repo: pt.lineRepo()}
+		if err := journal.Append(d.Store, o.Ticket, line); err != nil {
+			return ApproveReport{}, fmt.Errorf("verifydeliver: publish: journal publish-approved: %w", err)
+		}
+		report.Repos = append(report.Repos, RepoHead{Repo: pt.repoName, Head: head})
 	}
 	if err := d.Store.Push(fmt.Sprintf("%s: publish approved", o.Ticket)); err != nil {
 		return ApproveReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
-	return ApproveReport{Repo: pt.repoName, Head: head, Branch: pt.branch, Provenance: provenance}, nil
+	return report, nil
 }
 
 // loadPicksFile reads and strictly parses the picks file `jig publish --picks`

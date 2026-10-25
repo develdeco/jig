@@ -178,7 +178,9 @@ func TestRemoveSkillsTakesOnlyJigs(t *testing.T) {
 func TestStubBodyListsTheSkillsAndSendsToTheBinary(t *testing.T) {
 	t.Parallel()
 	body := string(StubBody([]StubEntry{{Name: "here", Summary: "Names where the work is."}, {Name: "x", Summary: "a | b"}}))
-	for _, want := range []string{"name: jig\n", "run `jig here`", "`jig skill <name>`", "| `here` | Names where the work is. |", "| `x` | a / b |"} {
+	for _, want := range []string{"name: jig\n", "run `jig here`", "`jig skill <name>`", "| `here` | Names where the work is. |", "| `x` | a / b |",
+		"`jig next <ticket>` names the phase it is at", "is an automatic run", "\"and publish it\"",
+		"subagent in the foreground (`run_in_background: false`)", "never end the turn while it runs"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("stub lacks %q:\n%s", want, body)
 		}

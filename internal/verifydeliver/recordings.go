@@ -61,8 +61,11 @@ type ReviewRecording struct {
 // the file; it is absent when there were none. A recording that no longer
 // matches its journal line is not evidence and is not counted.
 type ReviewRecordings struct {
-	Ticket     string            `json:"ticket"`
-	HeadSHA    string            `json:"head_sha"`
+	Ticket  string `json:"ticket"`
+	HeadSHA string `json:"head_sha,omitempty"`
+	// Heads are the commits a round over several repos read, by repo name,
+	// where HeadSHA is the one a round over one repo read.
+	Heads      map[string]string `json:"heads,omitempty"`
 	Recordings []ReviewRecording `json:"recordings"`
 	Omitted    int               `json:"omitted,omitempty"`
 }
@@ -86,7 +89,10 @@ type ReviewRecordings struct {
 //
 // Only the first maxReviewRecordings (latest first) are checked against their
 // files, so a round never hashes more than that many.
-func writeReviewRecordings(in RoundInput, head string) (string, error) {
+//
+// A round over several repos lists the recordings made at or before the head of
+// each repo (files holds the heads), in one list.
+func writeReviewRecordings(in RoundInput, files roundFiles) (string, error) {
 	if in.Home == "" {
 		return "", nil
 	}
@@ -96,9 +102,13 @@ func writeReviewRecordings(in RoundInput, head string) (string, error) {
 	}
 	// The selection reads a Deps' Home and Store and nothing else of it.
 	d := Deps{Store: in.Store, Home: in.Home}
-	all, err := recordedCandidates(d, lines, in.LeaseDir, head)
-	if err != nil {
-		return "", fmt.Errorf("verifydeliver: review: list the build's recordings: %w", err)
+	var all []pickCandidate
+	for _, r := range files.repos {
+		found, err := recordedCandidates(d, lines, r.Dir, r.Head)
+		if err != nil {
+			return "", fmt.Errorf("verifydeliver: review: list the build's recordings: %w", err)
+		}
+		all = append(all, found...)
 	}
 	if len(all) == 0 {
 		return "", nil
@@ -126,7 +136,15 @@ func writeReviewRecordings(in RoundInput, head string) (string, error) {
 		return at[origin{a.Commit, a.run, a.rec.File}] > at[origin{b.Commit, b.run, b.rec.File}]
 	})
 
-	list := ReviewRecordings{Ticket: in.Ticket, HeadSHA: head}
+	list := ReviewRecordings{Ticket: in.Ticket}
+	if files.qualified {
+		list.Heads = map[string]string{}
+		for _, r := range files.repos {
+			list.Heads[r.Name] = r.Head
+		}
+	} else {
+		list.HeadSHA = files.repos[0].Head
+	}
 	var readable []pickCandidate
 	for _, c := range all {
 		if file, err := c.path(d, storeID, in.Ticket); err == nil && in.Readable != nil && !in.Readable(file) {
@@ -187,7 +205,11 @@ func writeReviewRecordings(in RoundInput, head string) (string, error) {
 // words, which reach the store, must not name: the lease it works in, the jig
 // home (the recordings and everything else jig keeps there) and the store.
 func reviewerHostDirs(in RoundInput) []hostDir {
-	dirs := []hostDir{{in.LeaseDir, "<lease>"}, {in.Home, "<jig home>"}}
+	var dirs []hostDir
+	for _, r := range in.repoList() {
+		dirs = append(dirs, hostDir{r.LeaseDir, "<lease>"})
+	}
+	dirs = append(dirs, hostDir{in.Home, "<jig home>"})
 	if in.Store != nil {
 		dirs = append(dirs, hostDir{in.Store.Root, "<store>"})
 	}

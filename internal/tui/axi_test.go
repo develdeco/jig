@@ -77,8 +77,8 @@ func TestParseStatusReadsTheTablesJigStatusPrints(t *testing.T) {
 	if info.Err != nil || info.State != "green" {
 		t.Fatalf("info = %+v", info)
 	}
-	if len(info.Slices) != 1 || info.Slices[0] != (statusSlice{ID: "a", State: "green", Attempts: 1}) {
-		t.Errorf("slices = %+v, want slice a green after 1 try, with no blocker or question", info.Slices)
+	if want := (statusSlice{ID: "a", State: "green", Attempts: 1, Goal: "Load the config", Workspace: "alpha", Oracle: "unit"}); len(info.Slices) != 1 || info.Slices[0] != want {
+		t.Errorf("slices = %+v, want %+v: green after 1 try, with no blocker or question", info.Slices, want)
 	}
 	if len(info.Asks) != 2 || info.Asks[0] != (statusAsk{ID: "r1-f1", Risk: "high", Where: "alpha/a.go:3", Title: "Unchecked error", Why: "needs a human"}) {
 		t.Errorf("asks = %+v", info.Asks)
@@ -123,5 +123,82 @@ func TestParseRoster(t *testing.T) {
 	}
 	if _, err := parseRoster("{not json\n"); err == nil {
 		t.Errorf("broken JSON read without error")
+	}
+}
+
+// TestParseStatusReadsTheRecordsOfTheSections: the columns and blocks the
+// rounds, findings and publish sections of `jig status` print are read by name,
+// and a status that predates them reads as having none.
+func TestParseStatusReadsTheRecordsOfTheSections(t *testing.T) {
+	t.Parallel()
+	info := parseStatus(statusJIG2Done())
+	if info.FixBudget != "1 of 3 rounds used" {
+		t.Errorf("fix budget = %q", info.FixBudget)
+	}
+	if len(info.Rounds) != 2 {
+		t.Fatalf("rounds = %+v, want two", info.Rounds)
+	}
+	want := statusRound{
+		N: 1, Verdict: "findings", Reviewer: "s-reviewer", Harness: "claude", Model: "claude-opus-5", Independent: "true",
+		Fix: 1, Ask: 2, Note: 1, Scope: "full", Base: sha('0'), Head: sha('c'), Files: 4,
+	}
+	if info.Rounds[0] != want {
+		t.Errorf("round 1 = %+v, want %+v", info.Rounds[0], want)
+	}
+	if info.Publish == nil || info.Publish.PR != "https://example.test/acme/demo/pull/7" || info.Publish.Head != sha('d') || info.Publish.Branch != "jig/JIG-2" {
+		t.Fatalf("publish = %+v", info.Publish)
+	}
+	if got := info.Publish.Body; !strings.HasPrefix(got, "## Intent\nLoad the config") || strings.Count(got, "\n") != 6 {
+		t.Errorf("publish body = %q, want its seven lines with the newlines restored", got)
+	}
+	if got := info.Publish.Changelog; !strings.HasSuffix(got, "- round 1: fix-slice fix-1") {
+		t.Errorf("publish changelog = %q", got)
+	}
+
+	mid := parseStatus(statusJIG2())
+	if len(mid.Findings) != 4 || mid.Findings[2].Title != "Close the file" || mid.Findings[2].Status != "open" || mid.Findings[0].Where != "alpha/a.go:3" {
+		t.Errorf("findings = %+v", mid.Findings)
+	}
+
+	old := parseStatus(statusJIG1())
+	if old.Err != nil || old.Rounds != nil || old.Findings != nil || old.Publish != nil || old.FixBudget != "" || old.Slices[0].Workspace != "" {
+		t.Errorf("a status without the sections reads as %+v", old)
+	}
+}
+
+// TestRoundsWithNoFindingsFileKeepTheirDash: a round with no findings.yaml prints
+// "-" for its files, which is not a count of none.
+func TestRoundsWithNoFindingsFileKeepTheirDash(t *testing.T) {
+	t.Parallel()
+	out := "ticket: JIG-9\nstate: green\n" + axi.Table("rounds", roundColumns, [][]string{
+		{"1", "findings", "-", "-", "-", "-", "0", "0", "0", "-", "-", sha('5'), "-"},
+		{"2", "clean", "s-rev", "-", "-", "true", "0", "0", "0", "delta", sha('5'), sha('6'), "0"},
+	})
+	got := parseStatus(out).Rounds
+	if len(got) != 2 || got[0].Files != -1 || got[0].Reviewer != "" || got[0].Head != sha('5') || got[1].Files != 0 {
+		t.Errorf("rounds = %+v", got)
+	}
+}
+
+// TestParseStatusReadsTheClosureOfAClosedTicket: a ticket closed without a pull
+// request says how in the closed block of its status, and an open one has none.
+func TestParseStatusReadsTheClosureOfAClosedTicket(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		kv   [][2]string
+		want string
+	}{
+		{"covered", [][2]string{{"reason", "covered"}, {"by", "develdeco/jig#82"}, {"at", "2026-10-25"}}, "covered by develdeco/jig#82"},
+		{"superseded", [][2]string{{"reason", "superseded"}, {"by", "JIG-4"}}, "superseded by JIG-4"},
+		{"not planned", [][2]string{{"reason", "not-planned"}, {"note", "Decided against it."}}, "not planned"},
+	} {
+		info := parseStatus(strings.Join([]string{"ticket: JIG-1", "state: closed", axi.KV("closed", tc.kv)}, "\n") + "\n")
+		if info.Err != nil || info.State != "closed" || info.Closed != tc.want {
+			t.Errorf("%s: info = %+v, want state closed, closed %q", tc.name, info, tc.want)
+		}
+	}
+	if open := parseStatus(statusJIG1()); open.Closed != "" {
+		t.Errorf("an open ticket reads as closed: %q", open.Closed)
 	}
 }

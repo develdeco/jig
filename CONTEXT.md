@@ -17,7 +17,7 @@ A project whose root is a directory above its repos, which sit nested inside it 
 _Avoid_: monorepo, meta-repo
 
 **Truth repo (store)**:
-A dedicated git repo with a remote holding every ticket artifact; it is the source of truth: jig mints every ticket id and claims it here, trackers only mirror the store outward, and pull requests come from the repo host, not a tracker. Real tickets live under `tickets/<id>/`; `charts/`, `platform/`, `ledger.md` and the store config (`store.yaml` at schema 3, `project.yaml` at schema 2) stay at the store root. A store at schema 2 up to the current one is accepted on every command, and `jig store migrate` moves one up a step at a time. Every commit jig makes in the store is authored and committed by the person's own git identity, as git resolves it in the store clone (`user.name` and `user.email`, or the environment); a clone with none is refused with `IDENTITY_REQUIRED` and the two commands that set one, and jig never commits under a name of its own. A store is in single-main mode, or, once `jig store migrate --writers` has run, in writers mode (see **Writer branch**).
+A dedicated git repo with a remote holding every ticket artifact; it is the source of truth: jig mints every ticket id and claims it here, trackers only mirror the store outward, and pull requests come from the repo host, not a tracker. Real tickets live under `tickets/<id>/`; `charts/`, `platform/`, `trackers/`, `ledger.md` and the store config (`store.yaml` at schema 3, `project.yaml` at schema 2) stay at the store root. A store at schema 2 up to the current one is accepted on every command, and `jig store migrate` moves one up a step at a time. Every commit jig makes in the store is authored and committed by the person's own git identity, as git resolves it in the store clone (`user.name` and `user.email`, or the environment); a clone with none is refused with `IDENTITY_REQUIRED` and the two commands that set one, and jig never commits under a name of its own. A store is in single-main mode, or, once `jig store migrate --writers` has run, in writers mode (see **Writer branch**).
 _Avoid_: database, state dir
 
 **Ticket**:
@@ -25,6 +25,10 @@ jig's record of one unit of work, in the store, under an id jig mints: a
 key plus a number. May carry aliases, its earlier ids, kept forever; an id or
 alias resolves to the ticket's current id wherever jig takes one.
 _Avoid_: issue, which names a tracker's copy of a ticket
+
+**Closed ticket**:
+A ticket closed without a pull request for one of three reasons: covered (another change did the work), superseded (another ticket replaces it) or not planned (it will not be done). Its record carries a `closed:` entry, written by `jig close` and removed by `jig reopen`. It cannot be claimed, gated, published, requeued or reviewed, and the tickets that wait for it go on when it was covered or superseded and stay held when it was not planned.
+_Avoid_: cancelled, deleted
 
 **Key**:
 The area part of a ticket id (`STORE` in `STORE-3`), declared in the store
@@ -34,7 +38,7 @@ ticket mints under.
 _Avoid_: prefix, namespace
 
 **Slug**:
-The part of a ticket's default branch name after its id: the lowercase ASCII words of its title, at most 40 characters, fixed when the ticket is minted so that editing the title never renames the branch. A ticket's default branch is `<id>-<slug>`, where the id is the GitHub issue number once the ticket is mirrored and the project's branches are led by GitHub, else the store id; the default is derived and never recorded.
+The part of a ticket's default branch name after its id: the lowercase ASCII words of its title, at most 40 characters, fixed when the ticket is minted so that editing the title never renames the branch. A ticket's default branch is `<id>-<slug>`, where the id is the GitHub issue number once the ticket is mirrored and the project's branches are led by GitHub, else the store id; the default is derived and never recorded. A ticket with no recorded slug and no title takes it from the first heading of its brief, and with none of them the default branch is the bare id.
 _Avoid_: branch name (a recorded `branch:` can be any name)
 
 **Mirror**:
@@ -46,9 +50,21 @@ command. An edit made on the tracker side of a jig-owned field is drift,
 reported and overwritten with the store's value at the next sync.
 _Avoid_: tracker as the source of tickets
 
+**Tracker tree**:
+The folder `trackers/<provider>/<scope>/<remote id>` of a store: one record and one link for each remote item a tracker holds of the store's tickets and charts. GitHub's scope is the lower-case `<owner>/<repo>` and its remote id the bare issue number.
+_Avoid_: tracker folder, mirror folder
+
+**Record** (of the tracker tree):
+The file `<remote id>.yaml` in the tracker tree. The tree owns its `ticket:` or `chart:` key and the link beside it; every other key belongs to the provider and is kept as the provider wrote it. The link is a view of the record, made again from the records on every sync.
+_Avoid_: tracker file
+
 **Intake**:
 The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several. It starts from `jig recall`, which shows the open tickets and their edges, near-duplicates, the charts' fog, platform documents and past answers, and it ends when `jig validate` says `valid: yes` once the person has confirmed the brief, which is the brief's approval (`jig validate --check` checks the same without approving).
 _Avoid_: onboarding
+
+**Illustration**:
+An optional `illustration.html` beside a brief's `brief.md`, covered by the brief's approval: adding, editing or removing it withdraws the approval, and a brief with none is approved exactly as before. `jig brief show` is the one viewer jig ships; any other is the project's choice.
+_Avoid_: mockup, diagram
 
 **Shape**:
 A ticket's intent, one of feature, bug, or refactor.
@@ -67,7 +83,7 @@ The command that proves a slice done. Green is done - there is no separate test 
 _Avoid_: test suite, check
 
 **Workspace**:
-A slice's target: a repo, or a module inside one.
+A slice's target: a repo, or a module inside one. In a project of several repos a slice writes it as `<repo>/<workspace>`, or as the bare id of the one repo whose manifest declares it; a bare id that two repos declare, or that none does, belongs to no repo until the slice names one.
 _Avoid_: target dir, project root
 
 **Env class**:
@@ -77,6 +93,18 @@ _Avoid_: environment, test env
 **Frontier**:
 The set of slices whose blockers are all green, and so are ready to claim now (`jig next`). It is advice about what is ready, not a dispatcher: nothing hands a slice to anyone.
 _Avoid_: ready queue, backlog
+
+**Phase**:
+One of the four stages a ticket goes through: brief, build, review and publish (the TUI calls them steps). Each has a skill (`intake`, `build`, `review`, `publish`) and a prompt that asks for it: "Plan SHOP-1", "Build SHOP-1", "Review SHOP-1", "Publish SHOP-1". Where a ticket stands is derived from its journal lines and its status, never recorded (`internal/phase`, shown by `jig next <ticket>`, `jig status` and the TUI): a phase is done only when the ones before it are, a phase that cannot start says what it waits for, and asking again for a phase that is done is warned about, not refused.
+_Avoid_: stage, task
+
+**Sub-step**:
+A part of a phase with a state of its own: a slice in the build; a gate round, the asks and the fixes in the review; the body, the approval, a pull request and the changelog in the publish. `internal/phase` derives them with the phase, the TUI lists them under the step under the cursor, and each line of its activity names the sub-step it advances.
+_Avoid_: task, sub-task
+
+**Automatic run**:
+A prompt that names several phases ("Build and review SHOP-1", "Take SHOP-1 from brief to PR"), which the session runs in order, each with its skill. The span is the prompt and nothing records it; a refusal ends the run. The person's two moments, the brief's approval and the publish approval, stay theirs unless the prompt delegates them ("go with your recommendations", "... to PR", "and publish it"). A delegated brief approval is recorded with agent provenance; a delegated publish takes the hand-off way (the session's own push, then `jig publish --pr`), which asks for no approval. For an unattended session the Stop hook's next-phase note says when the run has more to do.
+_Avoid_: workflow, pipeline run
 
 **Scout**:
 A read-only session rooted in a repo, drafting brief sections for the parent intake.
@@ -90,8 +118,12 @@ _Avoid_: agent runtime, backend (a backend is what the reviewer evaluation launc
 One run of a harness, known to jig by the id the harness gives it (or one jig mints, `s-` and 12 hex digits), as the fold of its lines in the **Ledger**. Live until it has a `session-end` line. Its claims, verifications and tool calls are how jig knows who built what.
 _Avoid_: run, conversation
 
+**Fresh session**:
+A harness session that did none of a ticket's work: its id carries no journal line of the ticket except the gate's, triage and publish lines, and no ledger line of it changed a file or made a commit for the ticket. `jig gate` and `jig next <ticket>` say whether the calling session is fresh, not fresh or unknown. A fresh one reviews the ticket itself; one that is not has a subagent do it, in the foreground, and never reads the round itself (a subagent shares its session's id, so if both read it the ledger cannot say which closed it). Advice only: `jig review done` judges independence from who built, as before.
+_Avoid_: independent (that is the property of a recorded round)
+
 **Claim**:
-A session taking a slice to build it (`jig claim`): a journal line plus the slice's state, checked against the ticket's readiness (a merged blocker published, a stacked parent's gate clean, the brief's approval current), refused when unattended and warned otherwise. Not to be confused with claiming an id, which reserves it on the claims log (see **Claims branch**).
+A session taking a slice to build it (`jig claim`): a journal line plus the slice's state, checked against the ticket's readiness (a merged blocker's work merged, a stacked parent's gate clean, the brief's approval current, the ticket not closed), refused when unattended and warned otherwise (a closed ticket is refused outright). Not to be confused with claiming an id, which reserves it on the claims log (see **Claims branch**).
 _Avoid_: assign, lock
 
 **Verification**:
@@ -115,11 +147,11 @@ What a harness (or git) calls when something happens in a session: session start
 _Avoid_: trigger, listener
 
 **Note**:
-What a session has not yet heard: a verification outcome, an answer, a correction, a spend warning, a prompt to publish. Delivered once per session and fact at the session's next tool call or prompt; an enforced note also holds an **unattended** session back at Stop, once.
+What a session has not yet heard: a verification outcome, an answer, a correction, a spend warning, what comes next (to open the gate and review, to publish). Delivered once per session and fact at the session's next tool call or prompt; an enforced note also holds an **unattended** session back at Stop, once.
 _Avoid_: notification, alert
 
 **Correction**:
-A fact told to a session from what the journal already holds, with no second record: a **stall**, a brief that changed under verified work (*brief drift*), or a commit outside every slice workspace (*scope drift*). Advisory in an interactive session, enforced in an unattended one.
+A fact told to a session from what the journal already holds, with no second record: a **stall**, a brief that changed under verified work (*brief drift*), a commit outside every slice workspace (*scope drift*), a commit that names no slice (*slice missing*: the note guesses the slice from the files, and verifies nothing), or, for a stacked ticket, a parent that moved past it or merged (*restack*, *retarget*; see **Stacked start point**). Advisory in an interactive session, enforced in an unattended one.
 _Avoid_: warning, lint
 
 **Unattended**:
@@ -191,7 +223,7 @@ A gate round that is opened by `jig gate` and closed by a reviewer's `jig review
 _Avoid_: review job, launched review
 
 **Intent**:
-What a change is meant to accomplish, resolved once per gate round with a provenance: `brief` (the ticket's own brief.md) or `explicit` (`jig gate --intent`/`--doc`, recorded in `intent.md`) are binding, the human's own statement of what was asked for; `inferred` is an excerpt of the author's local agent session (`internal/intent`, matched to the scope diff by file overlap) that the reviewer reads, a hint, not binding, which never reaches a pull request; `none` means nothing states it.
+What a change is meant to accomplish, resolved once per gate round with a provenance: `brief` (the ticket's own brief.md) or `explicit` (`jig gate --intent`/`--doc`, recorded in `intent.md`) are binding, the human's own statement of what was asked for; `inferred` is an excerpt of the transcript of a session that worked the ticket (found through the machine ledger's record of its driver and builders, else matched to the scope diff by file overlap in `internal/intent`) that the reviewer reads, a hint, not binding, which never reaches a pull request; `none` means nothing states it.
 _Avoid_: spec, requirements, brief (a brief is one source of intent, not the concept itself)
 
 **Finding action**:
@@ -202,8 +234,12 @@ _Avoid_: class, severity, category
 The files a reviewer actually read in a round, reported as `reviewed_paths`. jig accepts a round only when coverage includes every changed file and every open finding's file, and clears an open finding from it (or, whatever coverage says, when the finding's file no longer exists at head at all).
 _Avoid_: reviewed scope, read set
 
+**Repo-qualified file**:
+In a project of several repos, how a gate round names a file: `<repo>/<path>`, the repo being one the ticket's slices build in. A finding's file, `reviewed_paths` and `must_review` are all named so; in a project of one repo a file is a path in the repo. A finding's workspace is named `<repo>/<id>` the same way, as a slice's is.
+_Avoid_: bare path (in a project of several repos)
+
 **Triage**:
-The human seam for a gate round's `ask` findings: `jig triage <ticket> <finding> keep|dismiss` records a decision, as `person` at a terminal and `agent` otherwise, and the next round applies what was decided. An ask nobody decided stays undecided - it is never defaulted - unless the round was opened with `--yes`, which keeps every fix and every ask with a full build target (a workspace and an oracle). Every decision is recorded and becomes eval gold.
+The human seam for a gate round's `ask` findings: `jig triage <ticket> <finding> keep|dismiss` records a decision, as `person` at a terminal and `agent` otherwise, and the next round applies what was decided. A decision is *pending* from its `triage` line until the next round closes, and *spent* after; `jig status` and `jig review context` show a pending decision on its ask beforehand, and the ask stays open until the round applies it. An ask nobody decided stays undecided - it is never defaulted - unless the round was opened with `--yes`, which keeps every fix and every ask with a full build target (a workspace and an oracle). Every decision is recorded and becomes eval gold.
 _Avoid_: review comment triage, auto-dismiss
 
 **Gold**:
@@ -227,5 +263,17 @@ The wayfinder layer for work spanning tickets: `charts/<name>/` holds `map.md` (
 _Avoid_: roadmap, epic
 
 **Dependency**:
-A ticket's own blocker, recorded in its `ticket.yaml` after graduation: another ticket id plus a kind, always spelled out. `merged` means the child starts from the target branch once all of the parent's PRs have merged; `stacked` means the child starts from the parent's branch in each repo the two share. Code overlap and priority are not dependencies.
+A ticket's own blocker, recorded in its `ticket.yaml` after graduation: another ticket id plus a kind, always spelled out. `merged` means the child starts from the target branch once all of the parent's PRs have merged (see **Merge fact**); `stacked` means the child starts from the parent's branch in each repo the two share (see **Stacked start point**). Code overlap and priority are not dependencies.
 _Avoid_: dep, edge
+
+**Rank**:
+The owner's place for a ticket in the order to start ready tickets: `rank:` in `ticket.yaml`, set by `jig rank`. Lower starts first, a rank two ready tickets hold is allowed and flagged, and the unranked come last, by id.
+_Avoid_: priority field, weight
+
+**Merge fact**:
+Whether a ticket's work has merged, for each repo it builds in. A `merged` blocker holds its dependents until it is met: the ticket published, and the host says its recorded pull request merged or, with none recorded or the host unable to say, its branch tip is an ancestor of `origin/<target>` in the mapped clone. Patch equivalence is never taken for a merge, so a squash stays unmet until its pull request is recorded, and what is missing is named (`no merge on record`, `its PR is open`).
+_Avoid_: merge status
+
+**Stacked start point**:
+Where a stacked ticket's branch starts, and where its pull request goes, in each repo it shares with its parent: the parent's branch while the parent has not merged there, `origin/<target>` and the target otherwise. It is advice computed on read (`jig next`, `jig here`, the publish), and jig never rebases or merges. When the parent's branch moves past the child's, the child's session is told to *restack*, which is to merge the parent's branch into the child's; when the parent merges, to *retarget*, which is to point the pull request at the target and merge it.
+_Avoid_: base branch

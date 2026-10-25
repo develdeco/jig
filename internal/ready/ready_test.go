@@ -74,38 +74,106 @@ func TestScheduleGroupsByRepoInOrder(t *testing.T) {
 	}
 }
 
-// TestPlace: a single-repo project owns every workspace; with several repos a
-// workspace belongs to the first repo that declares it, and the ones nobody
-// declares, or several do, are reported.
+// TestPlace: a single-repo project owns every workspace, written bare; with
+// several repos a slice names its repo as "<repo>/<id>", a bare id belongs to
+// the one repo that declares it, and the ones nobody declares, or several do,
+// are reported and owned by no repo.
 func TestPlace(t *testing.T) {
 	t.Parallel()
 	slices := []store.Slice{{ID: "a", Workspace: "alpha"}, {ID: "b", Workspace: "beta"}, {ID: "e", Workspace: "gamma"}, {ID: "x", Workspace: "stray"}, {ID: "y", Workspace: "stray"}}
 
 	one := Place([]Repo{{Name: "solo"}}, slices)
 	for ws, repo := range one.Repo {
-		if repo != "solo" {
-			t.Errorf("single repo: workspace %s -> %s, want solo", ws, repo)
+		if repo != "solo" || one.ID[ws] != ws {
+			t.Errorf("single repo: workspace %s -> %s as %s, want solo as itself", ws, repo, one.ID[ws])
 		}
 	}
 	if len(one.Unplaced) != 0 || len(one.Ambiguous) != 0 {
 		t.Errorf("single repo: unplaced %v, ambiguous %v, want none", one.Unplaced, one.Ambiguous)
+	}
+	if got := Place([]Repo{{Name: "solo"}}, []store.Slice{{ID: "q", Workspace: "solo/alpha"}}); got.Repo["solo/alpha"] != "solo" || got.ID["solo/alpha"] != "solo/alpha" {
+		t.Errorf("single repo: a workspace that begins with the repo's name is still the bare id: %+v", got)
 	}
 
 	got := Place([]Repo{
 		{Name: "first", Workspaces: []string{"alpha", "beta"}},
 		{Name: "second", Workspaces: []string{"gamma", "beta"}},
 	}, slices)
-	want := map[string]string{"alpha": "first", "beta": "first", "gamma": "second", "stray": Unplaced}
+	want := map[string]string{"alpha": "first", "beta": Unplaced, "gamma": "second", "stray": Unplaced}
 	if !reflect.DeepEqual(got.Repo, want) {
 		t.Errorf("Place.Repo = %v, want %v", got.Repo, want)
 	}
 	if !reflect.DeepEqual(got.Unplaced, []string{"stray"}) || !reflect.DeepEqual(got.Ambiguous, []string{"beta"}) {
 		t.Errorf("Place: unplaced %v, ambiguous %v, want [stray] and [beta]", got.Unplaced, got.Ambiguous)
 	}
+	if want := []string{"first", "second"}; !reflect.DeepEqual(got.Declared["beta"], want) {
+		t.Errorf("Place: beta is declared by %v, want %v", got.Declared["beta"], want)
+	}
+
+	// A slice that names its repo is never ambiguous, whatever the manifests
+	// say, and its id is the one after the repo's name.
+	named := Place([]Repo{
+		{Name: "first", Workspaces: []string{"alpha", "beta"}},
+		{Name: "second", Workspaces: []string{"gamma", "beta"}},
+	}, []store.Slice{{ID: "a", Workspace: "second/beta"}, {ID: "b", Workspace: "first/beta"}, {ID: "c", Workspace: "third/beta"}, {ID: "d", Workspace: "first/"}})
+	if wantRepo := map[string]string{"second/beta": "second", "first/beta": "first", "third/beta": Unplaced, "first/": Unplaced}; !reflect.DeepEqual(named.Repo, wantRepo) {
+		t.Errorf("Place.Repo with named repos = %v, want %v", named.Repo, wantRepo)
+	}
+	if named.ID["second/beta"] != "beta" || named.ID["first/beta"] != "beta" || len(named.Ambiguous) != 0 {
+		t.Errorf("Place.ID = %v, ambiguous %v, want beta for both named, none ambiguous", named.ID, named.Ambiguous)
+	}
 
 	none := Place(nil, slices)
 	if none.Repo["alpha"] != Unplaced || len(none.Unplaced) != 4 {
 		t.Errorf("no repos: %+v, want every workspace unplaced", none)
+	}
+}
+
+// TestBuiltIn: the repos a ticket's slices build in come in the project's
+// order; a project of one repo is that repo, and a ticket with no slice placed
+// in a repo is taken to build in all of them.
+func TestBuiltIn(t *testing.T) {
+	t.Parallel()
+	repos := []Repo{{Name: "api", Workspaces: []string{"server"}}, {Name: "web", Workspaces: []string{"ui"}}, {Name: "docs", Workspaces: []string{"site"}}}
+	for _, c := range []struct {
+		name   string
+		repos  []Repo
+		slices []store.Slice
+		want   []string
+	}{
+		{"several, in the project's order", repos, []store.Slice{{ID: "a", Workspace: "site"}, {ID: "b", Workspace: "server"}}, []string{"api", "docs"}},
+		{"named by its repo", repos, []store.Slice{{ID: "a", Workspace: "web/ui"}}, []string{"web"}},
+		{"none placed", repos, []store.Slice{{ID: "a", Workspace: "stray"}}, []string{"api", "web", "docs"}},
+		{"no slices", repos, nil, []string{"api", "web", "docs"}},
+		{"one repo", []Repo{{Name: "solo"}}, []store.Slice{{ID: "a", Workspace: "anything"}}, []string{"solo"}},
+		{"no repo", nil, []store.Slice{{ID: "a", Workspace: "alpha"}}, []string{}},
+	} {
+		if got := BuiltIn(c.repos, c.slices); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: BuiltIn = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestSplitWorkspace: only a repo's own name and a slash make a workspace
+// qualified.
+func TestSplitWorkspace(t *testing.T) {
+	t.Parallel()
+	repos := []string{"api", "web"}
+	for _, c := range []struct {
+		written, repo, id string
+		ok                bool
+	}{
+		{"api/server", "api", "server", true},
+		{"web/ui/admin", "web", "ui/admin", true},
+		{"server", "", "server", false},
+		{"apix/server", "", "apix/server", false},
+		{"api/", "", "api/", false},
+		{"api", "", "api", false},
+	} {
+		repo, id, ok := SplitWorkspace(c.written, repos)
+		if repo != c.repo || id != c.id || ok != c.ok {
+			t.Errorf("SplitWorkspace(%q) = %q, %q, %v, want %q, %q, %v", c.written, repo, id, ok, c.repo, c.id, c.ok)
+		}
 	}
 }
 
@@ -185,5 +253,56 @@ func TestJoinBlockers(t *testing.T) {
 	}
 	if got, want := JoinBlockers([]Blocker{{"T-1", "merged"}, {"T-2", "stacked"}, {"T-3", ""}}), "T-1(merged)+T-2(stacked)+T-3"; got != want {
 		t.Errorf("JoinBlockers = %q, want %q", got, want)
+	}
+}
+
+// TestTicketsClosed: a closed ticket is closed whatever else it is, and offers
+// no slices; a covered or superseded blocker releases the tickets that wait for
+// it, of either kind and whatever merge was read for it, and a blocker closed as
+// not planned holds them, saying they need planning again.
+func TestTicketsClosed(t *testing.T) {
+	t.Parallel()
+	open := []store.Slice{{ID: "a"}}
+	covered := &store.Closed{Reason: store.CloseCovered, By: "o/r#82"}
+	superseded := &store.Closed{Reason: store.CloseSuperseded, By: "T-9"}
+	notPlanned := &store.Closed{Reason: store.CloseNotPlanned}
+	queued := states("a", "queued")
+	out := map[string]Status{}
+	for _, s := range Tickets([]Ticket{
+		{ID: "C-1", Closed: covered, Published: true, Merge: &Merge{Published: true, Repos: []RepoMerge{{Why: "its PR is open"}}}, Slices: open, States: queued},
+		{ID: "C-2", Closed: superseded, Slices: open, States: queued},
+		{ID: "C-3", Closed: notPlanned, Slices: open, States: queued},
+		{ID: "C-4", Closed: covered, Published: true, Slices: open, States: states("a", "green")},
+		{ID: "C-5", Closed: covered, Blockers: []Blocker{{"C-3", "merged"}}, Slices: open, States: queued},
+		{ID: "D-1", Blockers: []Blocker{{"C-1", "merged"}}, Slices: open, States: queued},
+		{ID: "D-2", Blockers: []Blocker{{"C-2", "stacked"}}, Slices: open, States: queued},
+		{ID: "D-3", Blockers: []Blocker{{"C-3", "merged"}}, Slices: open, States: queued},
+		{ID: "D-4", Blockers: []Blocker{{"C-3", "stacked"}}, Slices: open, States: queued},
+	}) {
+		out[s.ID] = s
+	}
+	for id, want := range map[string]string{
+		"C-1": StateClosed, "C-2": StateClosed, "C-3": StateClosed, "C-4": StateClosed, "C-5": StateClosed,
+		"D-1": StateReady, "D-2": StateReady, "D-3": StateBlocked, "D-4": StateBlocked,
+	} {
+		if out[id].State != want {
+			t.Errorf("%s: state = %q, want %q", id, out[id].State, want)
+		}
+	}
+	for _, id := range []string{"C-1", "C-2", "C-3", "C-4", "C-5"} {
+		if len(out[id].Ready) != 0 {
+			t.Errorf("%s is closed and offers slices %v, want none", id, out[id].Ready)
+		}
+	}
+	if len(out["C-5"].Blocked) != 0 {
+		t.Errorf("C-5 is closed and still lists blockers %v, want none", out["C-5"].Blocked)
+	}
+	for _, id := range []string{"D-3", "D-4"} {
+		if why := out[id].Why["C-3"]; why != NotPlanned {
+			t.Errorf("%s waits for a ticket closed as not planned: why = %q, want %q", id, why, NotPlanned)
+		}
+	}
+	if !reflect.DeepEqual(out["D-1"].Ready, []string{"a"}) {
+		t.Errorf("D-1 is released by its covered blocker and offers %v, want [a]", out["D-1"].Ready)
 	}
 }

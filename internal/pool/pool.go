@@ -135,7 +135,7 @@ type acquireOpts struct {
 
 // MustExistOnOrigin makes Acquire refuse, with BRANCH_NOT_FOUND, when origin
 // has no such branch, instead of cutting the branch from the target. The
-// ordinary jig/<ticket> is such a branch until a publish pushes it, and is
+// ordinary default branch (<ticket>-<slug>) is such a branch until a publish pushes it, and is
 // cut from the target on purpose; a branch a ticket recorded is on origin by
 // definition, so one that is not there is gone, and cutting it from the
 // target would build on something else.

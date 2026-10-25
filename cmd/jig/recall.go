@@ -78,7 +78,7 @@ func cmdRecall(e env, args []string, stdout io.Writer) int {
 // recallTickets reads every ticket of the store as a planner sees it: its
 // record, its blockers and the state the readiness rules give it.
 func recallTickets(st *store.Store) ([]recall.Ticket, error) {
-	ids, err := st.TicketIDs()
+	ids, err := st.Tickets()
 	if err != nil {
 		return nil, err
 	}

@@ -87,9 +87,7 @@ func setUpDemo7(t *testing.T, st *store.Store) {
 	if err := st.CreateTicketRecord("DEMO-4", store.Ticket{Title: "stacked ticket"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeRecord(ticketRecordAbs(st, "DEMO-2"), githubRecord{Repo: "example/tracking", Issue: 12, NodeID: "NODE_12"}); err != nil {
-		t.Fatal(err)
-	}
+	writeAdoptedRecord(t, st, "DEMO-2", "example/tracking", 12, "NODE_12", "")
 
 	if err := st.AppendSlices("DEMO-7", []store.Slice{
 		{ID: "tracer", Goal: "Create the issue for one ticket at a checkpoint."},
@@ -111,11 +109,6 @@ func setUpDemo7(t *testing.T, st *store.Store) {
 	if err := os.WriteFile(filepath.Join(st.TicketDir("DEMO-7"), "brief.md"), []byte(briefMD), 0o644); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func ticketRecordAbs(st *store.Store, ticket string) string {
-	_, abs := ticketRecordPath(st, ticket)
-	return abs
 }
 
 // TestRenderTicketBodyMatchesTheGolden is the renderer seam

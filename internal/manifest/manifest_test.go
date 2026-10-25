@@ -159,6 +159,32 @@ func TestWorkspaceLookup(t *testing.T) {
 	}
 }
 
+// TestWorkspaceIn: a slice writes its workspace as "<repo>/<id>" in a project
+// of several repos; the repo's own manifest finds the id, another repo's does
+// not, and an id declared exactly as written (a bare one with a slash in it)
+// still wins.
+func TestWorkspaceIn(t *testing.T) {
+	m := Manifest{Workspaces: []Workspace{{ID: "server", Path: "srv"}, {ID: "api/legacy", Path: "legacy"}}}
+	for _, c := range []struct {
+		repo, written string
+		wantPath      string
+		ok            bool
+	}{
+		{"api", "server", "srv", true},
+		{"api", "api/server", "srv", true},
+		{"web", "api/server", "", false},
+		{"api", "api/missing", "", false},
+		{"api", "api/", "", false},
+		{"api", "api/legacy", "legacy", true},
+		{"", "api/server", "", false},
+	} {
+		ws, ok := m.WorkspaceIn(c.repo, c.written)
+		if ok != c.ok || ws.Path != c.wantPath {
+			t.Errorf("WorkspaceIn(%q, %q) = %+v, %v, want path %q, %v", c.repo, c.written, ws, ok, c.wantPath, c.ok)
+		}
+	}
+}
+
 func TestOracleCmd(t *testing.T) {
 	m := Manifest{Oracles: map[string]string{"test": "go test ./{path}/..."}}
 	ws := Workspace{ID: "alpha", Path: "alpha"}

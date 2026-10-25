@@ -14,6 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
@@ -70,7 +72,10 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 }
 
 // RenderStatus renders the exact `jig status` golden format for ticket:
-// ticket/state lines, a slices table, a questions table (or "questions:
+// ticket/state lines, a slices table (a slice's id, state, attempts,
+// blocked_by, question and goal, then the workspace and oracle it names as
+// slices.yaml has them and, for a fix slice, the round it came from), a
+// questions table (or "questions:
 // none"), a parked table (present only while a slice is needs-input) and a
 // stalled table (present only while a slice is stalled), the blocks of every
 // registered status section (registerStatusSection), and a contextual help
@@ -116,6 +121,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 	// its fixes, and nothing built is not something building: every slice
 	// it has is green, however few.
 	allGreen := len(slices) > 0 || adopted
+	attempted := false
 	for _, sl := range slices {
 		ss, err := st.ReadSliceState(ticket, sl.ID)
 		if err != nil {
@@ -124,6 +130,9 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		counts[ss.State]++
 		if ss.State != "green" {
 			allGreen = false
+		}
+		if ss.Attempts > 0 {
+			attempted = true
 		}
 		blocked := "-"
 		if len(sl.BlockedBy) > 0 {
@@ -137,7 +146,11 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		if goal == "" {
 			goal = "-"
 		}
-		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question, goal})
+		fromGate := "-"
+		if sl.FromGate > 0 {
+			fromGate = strconv.Itoa(sl.FromGate)
+		}
+		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question, goal, dashed(sl.Workspace), dashed(sl.Oracle), fromGate})
 
 		if ss.State == "needs-input" {
 			parkedRows = append(parkedRows, []string{sl.ID, ss.Question, resumeCell(ticket, sl, ss)})
@@ -151,19 +164,14 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		}
 	}
 
-	// Precedence: a stalled slice is worse than one merely parked awaiting a
-	// human, which is worse than one blocked on its env coming up, which
-	// beats "green" only once every slice is; "building" is the fallback.
-	overall := "building"
-	switch {
-	case counts["stalled"] > 0:
-		overall = "stalled"
-	case counts["needs-input"] > 0:
-		overall = "parked"
-	case counts["env-blocked"] > 0:
-		overall = "env-blocked"
-	case allGreen:
-		overall = "green"
+	// A closed ticket is closed, whatever its slices say, and wins over every
+	// state overallState gives.
+	overall := "closed"
+	if rec.Closed == nil {
+		var err error
+		if overall, err = overallState(st, ticket, len(slices), counts, allGreen, attempted); err != nil {
+			return "", err
+		}
 	}
 
 	blocks := []string{"ticket: " + ticket}
@@ -171,6 +179,19 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		blocks = append(blocks, "branch: "+rec.Branch)
 	}
 	blocks = append(blocks, "state: "+overall)
+	if c := rec.Closed; c != nil {
+		pairs := [][2]string{{"reason", c.Reason}}
+		if c.By != "" {
+			pairs = append(pairs, [2]string{"by", c.By})
+		}
+		if c.Note != "" {
+			pairs = append(pairs, [2]string{"note", c.Note})
+		}
+		if c.At != "" {
+			pairs = append(pairs, [2]string{"at", c.At})
+		}
+		blocks = append(blocks, axi.KV("closed", pairs))
+	}
 	// fix_budget: once the ticket has a gate round, how much of its fix
 	// budget (gate.fix_rounds) is used - the count of its earlier rounds
 	// that appended at least one fix slice - ending in ", reached" exactly
@@ -182,7 +203,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		}
 		blocks = append(blocks, budgetLine)
 	}
-	blocks = append(blocks, axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, rows))
+	blocks = append(blocks, axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal", "workspace", "oracle", "from_gate"}, rows))
 	if len(questions) == 0 {
 		blocks = append(blocks, "questions: none")
 	} else {
@@ -240,16 +261,25 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		blocks = append(blocks, "note: asks recorded by an unreadable round are not listed")
 		blocks = append(blocks, axi.Table("unreadable_gate_rounds", []string{"round"}, rows))
 	}
-	parkedOutstanding := 0
+	var asks askCounts
 	if len(outstanding) > 0 {
+		// A decision `jig triage` journaled is pending until the next round
+		// closes and applies it: the ask stays listed, with the decision.
+		decisions, err := verifydeliver.ReadTriageDecisions(st, ticket)
+		if err != nil {
+			return "", err
+		}
 		var askRows [][]string
 		for _, f := range outstanding {
-			askRows = append(askRows, []string{f.ID, f.Risk, fileLine(f), f.Title, f.RoutedWhy})
-			if f.RoutedWhy == verifydeliver.RoutedWhyBudget {
-				parkedOutstanding++
+			d := decisions[f.ID]
+			decision, decidedBy := d.Label(f), ""
+			if decision != "" {
+				decidedBy = d.Provenance
 			}
+			askRows = append(askRows, []string{f.ID, f.Risk, fileLine(f), f.Title, f.RoutedWhy, decision, decidedBy})
+			asks.add(f, d)
 		}
-		blocks = append(blocks, axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title", "why"}, askRows))
+		blocks = append(blocks, axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title", "why", "decision", "decided_by"}, askRows))
 	}
 
 	// The help names one way forward, in this order of precedence: a
@@ -264,7 +294,10 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 	// the gate is named as the step after it - the order `jig gate`'s own
 	// report hint prints.
 	var helpLines []string
-	if len(blockedRounds) > 0 {
+	if rec.Closed != nil {
+		// A closed ticket is not worked: the way forward is to take it back.
+		helpLines = []string{fmt.Sprintf("%s is closed (%s): run `jig reopen %s` to work it again", ticket, rec.Closed.Phrase(), ticket)}
+	} else if len(blockedRounds) > 0 {
 		// A gate round folds every earlier round's findings file, so it
 		// refuses outright while one cannot be read. Naming the next
 		// command here would name one that cannot run; the step is the
@@ -277,7 +310,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 			"Repair or remove %s/gate/{%s}/findings.yaml in the store: `jig gate` cannot open a round until it reads them",
 			ticket, strings.Join(rounds, ","))}
 	} else if len(outstanding) > 0 && frontierGreen(st, ticket) {
-		helpLines = []string{"Run " + outstandingAsksHelpLine(ticket, parkedOutstanding, budgetUsed, fixRounds)}
+		helpLines = []string{"Run " + outstandingAsksHelpLine(ticket, asks, budgetUsed, fixRounds)}
 	} else if len(slices) == 0 && !adopted {
 		// A ticket with nothing to work has the two ways to get work that
 		// `jig ticket new` and the refusal of `jig claim` give.
@@ -289,7 +322,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		}
 		helpLines = []string{hint}
 		if len(outstanding) > 0 {
-			helpLines = append(helpLines, "Then run "+outstandingAsksHelpLine(ticket, parkedOutstanding, budgetUsed, fixRounds))
+			helpLines = append(helpLines, "Then run "+outstandingAsksHelpLine(ticket, asks, budgetUsed, fixRounds))
 		}
 	}
 	for _, sec := range sections {
@@ -306,18 +339,120 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 	return buf.String(), nil
 }
 
+// overallState is the word of the state: line, from the slices' states
+// (counts, of n slices) and whether any of them has an attempt on record. A
+// stalled slice is worse than one merely parked awaiting a human, which is
+// worse than one blocked on its env coming up, which beats "green" only once
+// every slice is (allGreen). Below those a ticket nothing has started reads
+// as what it lacks: "new" with no slices and no adopted branch, "queued" with
+// slices that every one is queued, none has an attempt and none was ever
+// claimed or verified (phase.EverClaimed; a slice released after a claim is
+// queued again, and the ticket is still building). "building" is the fallback:
+// a slice was claimed, or has a verification.
+func overallState(st *store.Store, ticket string, n int, counts map[string]int, allGreen, attempted bool) (string, error) {
+	switch {
+	case counts["stalled"] > 0:
+		return "stalled", nil
+	case counts["needs-input"] > 0:
+		return "parked", nil
+	case counts["env-blocked"] > 0:
+		return "env-blocked", nil
+	case allGreen:
+		return "green", nil
+	case n == 0:
+		// A ticket that adopted a branch is allGreen with no slices, so this
+		// one adopted none.
+		return "new", nil
+	case counts["queued"] == n && !attempted:
+		lines, err := journal.Read(st, ticket)
+		if err != nil {
+			return "", err
+		}
+		if !phase.EverClaimed(lines) {
+			return "queued", nil
+		}
+	}
+	return "building", nil
+}
+
+// askCounts is how a ticket's outstanding asks stand against the decisions
+// `jig triage` has journaled for the next round to apply.
+type askCounts struct {
+	// decided are the asks with a pending decision the next round applies.
+	decided int
+	// undecided are the others: no pending decision, or a keep with no build
+	// target, which the round leaves asked.
+	undecided int
+	// noTarget are the undecided asks that have a keep with no build target.
+	noTarget int
+	// parked are the undecided asks the fix budget parked.
+	parked int
+}
+
+// add counts one outstanding ask f, and the decision d journaled for it (the
+// zero decision when none was).
+func (c *askCounts) add(f verifydeliver.Finding, d verifydeliver.TriageDecision) {
+	switch {
+	case !d.Decided():
+		c.undecided++
+	case d.KeepLacksTarget(f):
+		c.undecided++
+		c.noTarget++
+	default:
+		c.decided++
+		return
+	}
+	if f.RoutedWhy == verifydeliver.RoutedWhyBudget {
+		c.parked++
+	}
+}
+
+// asksOf counts n asks of one kind: "1 undecided ask", "3 decided asks".
+func asksOf(n int, kind string) string {
+	if n == 1 {
+		return "1 " + kind + " ask"
+	}
+	return fmt.Sprintf("%d %s asks", n, kind)
+}
+
+// decidedClause says when the decided asks take effect: a decision changes
+// nothing until a round closes.
+func decidedClause(n int) string {
+	verb := "are"
+	if n == 1 {
+		verb = "is"
+	}
+	return fmt.Sprintf("the %s %s applied when the next round closes", asksOf(n, "decided"), verb)
+}
+
 // outstandingAsksHelpLine phrases the command that decides a ticket's
 // outstanding asks, lead-verb-free ("run ...", for a caller to prepend
-// "Run " or "Then "): while any of them is budget-parked (parked > 0) it
-// says the fix budget is reached and names keeping or dismissing them,
-// rather than the generic "decide the outstanding asks" - the same `jig
-// triage` decides both kinds, and the next `jig gate <ticket>` round applies
-// the decisions, so this is one line, not two.
-func outstandingAsksHelpLine(ticket string, parked, budgetUsed, budgetLimit int) string {
-	if parked > 0 {
-		return fmt.Sprintf("`jig triage %s <id> keep|dismiss` to keep or dismiss the parked finding(s), then `jig gate %s` to apply the decisions: the fix budget is reached (%d of %d)", ticket, ticket, budgetUsed, budgetLimit)
+// "Run " or "Then "): it counts the asks nobody has decided, and says the
+// decided ones are applied when the next round closes, since a decision
+// changes nothing before then. While any undecided ask is budget-parked it
+// says the fix budget is reached and names keeping or dismissing them, rather
+// than the generic "decide the undecided asks" - the same `jig triage` decides
+// both kinds, and the next `jig gate <ticket>` round applies the decisions, so
+// this is one line, not two. With every ask decided, only the gate is left.
+func outstandingAsksHelpLine(ticket string, c askCounts, budgetUsed, budgetLimit int) string {
+	apply := fmt.Sprintf("`jig gate %s` to apply the decisions", ticket)
+	if c.undecided == 0 {
+		return apply + ": " + decidedClause(c.decided)
 	}
-	return fmt.Sprintf("`jig triage %s <id> keep|dismiss` to decide the outstanding asks, then `jig gate %s` to apply the decisions", ticket, ticket)
+	triage := fmt.Sprintf("`jig triage %s <id> keep|dismiss`", ticket)
+	var line string
+	if c.parked > 0 {
+		line = fmt.Sprintf("%s to keep or dismiss the parked finding(s), then %s: the fix budget is reached (%d of %d)", triage, apply, budgetUsed, budgetLimit)
+	} else {
+		line = fmt.Sprintf("%s to decide the %s, then %s", triage, asksOf(c.undecided, "undecided"), apply)
+	}
+	if c.noTarget > 0 {
+		line += "; a keep with no build target needs --workspace or --oracle, or the round leaves it asked"
+	}
+	if c.decided > 0 {
+		line += "; " + decidedClause(c.decided)
+	}
+	return line
 }
 
 // resumeCommand returns the exact command that clears a parked
@@ -394,22 +529,18 @@ func sliceByID(slices []store.Slice, id string) (store.Slice, bool) {
 }
 
 // nextStepHint computes the single contextual next-step hint for ticket:
-// an open question takes priority; next, a stalled slice points at the
-// command that can actually reset it; otherwise, once every slice is
-// green, the hint points at gate (no rounds yet, or a last round that was
-// not clean, whose fix slices are green by now) or publish (last round
-// clean); otherwise it points at next and claim to take a slice of the
-// frontier.
+// an open question takes priority; next, a stalled or env-blocked slice
+// points at the command that can actually reset it; otherwise the hint is
+// the advice of the phase the ticket is at (phaseAdvice, from
+// internal/phase): the command that moves it on, and the prompt that asks an
+// agent for it. `jig next`, `jig here` and the claim and gate refusals name
+// the same prompt.
 func nextStepHint(st *store.Store, ticket string) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		return "", err
 	}
 	questions, err := st.ReadQuestions(ticket)
-	if err != nil {
-		return "", err
-	}
-	rec, err := st.ReadTicket(ticket)
 	if err != nil {
 		return "", err
 	}
@@ -439,11 +570,6 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		return fmt.Sprintf("Run `%s` to answer and resume", cmd), nil
 	}
 
-	// A ticket that adopted a branch has no slices until a gate round queues
-	// its fixes: its next step is that round, not intake.
-	if len(slices) == 0 && !rec.Adopted() {
-		return intakeHint(ticket), nil
-	}
 	states := make(map[string]store.SliceState, len(slices))
 	for _, sl := range slices {
 		ss, err := st.ReadSliceState(ticket, sl.ID)
@@ -492,34 +618,11 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		), nil
 	}
 
-	allGreen := true
-	for _, sl := range slices {
-		if states[sl.ID].State != "green" {
-			allGreen = false
-		}
+	t, err := derivePhase(st, ticket)
+	if err != nil {
+		return "", err
 	}
-
-	if allGreen {
-		rounds, verdict, _, err := latestGateRound(st, ticket)
-		if err != nil {
-			return "", err
-		}
-		switch {
-		case rounds == 0:
-			return fmt.Sprintf("Run `jig gate %s` to open a gate round", ticket), nil
-		case verdict == "clean":
-			return fmt.Sprintf("Run `jig publish %s` to open or update the PR", ticket), nil
-		default:
-			// Every slice is green and the last round was not clean, so
-			// its fix slices are already built: what moves the ticket is
-			// the next round, not `jig next`, which would find nothing to
-			// do and reprint this same line. A verdict jig could not read
-			// lands here too, and the next round is the right step there
-			// as well.
-			return fmt.Sprintf("Run `jig gate %s` to open the next gate round", ticket), nil
-		}
-	}
-	return fmt.Sprintf("Run `jig next %s` to see what is ready, then `jig claim %s --slice <slice>` to take one", ticket, ticket), nil
+	return phaseAdvice(t, ticket), nil
 }
 
 var gateRoundDirRE = regexp.MustCompile(`^round-(\d+)$`)

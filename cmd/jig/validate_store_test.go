@@ -159,6 +159,46 @@ func TestValidateAdvisoriesNameShippedWorkTheGoalComesNear(t *testing.T) {
 	}
 }
 
+// TestValidateAdvisesATicketWithABriefAndNoRecord: a ticket folder made by hand
+// has a brief and no ticket.yaml, so it was never minted; validate advises
+// `jig ticket new` and still passes it. A minted ticket, and a ticket with no
+// brief yet, get no such advisory.
+func TestValidateAdvisesATicketWithABriefAndNoRecord(t *testing.T) {
+	t.Parallel()
+	st := planStore(t)
+	writeBrief := func(id string) {
+		t.Helper()
+		if err := os.MkdirAll(st.TicketDir(id), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(st.TicketDir(id), "brief.md"), []byte("# "+id+": By hand\n\n## Goal\n\nx\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeBrief("SHOP-1")
+	writeBrief("SHOP-2")
+	if err := st.CreateTicketRecord("SHOP-2", store.Ticket{Title: "Minted"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := validateAdvisories(st, "SHOP-1", nil)
+	if len(got) != 1 || got[0].Code != advisoryNotMinted {
+		t.Fatalf("advisories of a ticket with a brief and no record = %+v, want %s alone", got, advisoryNotMinted)
+	}
+	if m := got[0].Message; !strings.Contains(m, "not minted") || !strings.Contains(m, "SHOP-1") {
+		t.Errorf("message = %q, want it to say SHOP-1 was not minted", m)
+	}
+	if h := got[0].Help; !strings.Contains(h, "jig ticket new") {
+		t.Errorf("help = %q, want it to name jig ticket new", h)
+	}
+	if got := validateAdvisories(st, "SHOP-2", nil); len(got) != 0 {
+		t.Errorf("advisories of a minted ticket = %+v, want none", got)
+	}
+	if got := validateAdvisories(st, "SHOP-3", nil); len(got) != 0 {
+		t.Errorf("advisories of a ticket with no brief = %+v, want none", got)
+	}
+}
+
 // TestValidateAdvisoriesLeaveFixSlicesOutOfTheGroups: the slices a gate
 // round appended (from_gate) have no blocked_by edge to the planned work, and
 // say nothing about whether the plan is one concern.

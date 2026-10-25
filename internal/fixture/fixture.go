@@ -47,6 +47,35 @@ import (
 // Ticket is the single ticket id every generated fixture store carries.
 const Ticket = "JIG-1"
 
+// Branch is the default branch of the fixture's ticket: its id and the slug of
+// its brief's heading ("# Fixture ticket brief"), since the ticket has no
+// record and so no title to name a branch after (store.Store.TicketBranch).
+// TestBranchIsTheDefaultOfTheTicket keeps it true.
+const Branch = Ticket + "-fixture-ticket-brief"
+
+// RemoveBrief deletes brief.md from ticket's folder in the store at storeDir,
+// leaving the ticket brief-less, and keeps its default branch as it was. A ticket
+// with no record takes the slug of its branch from its brief's heading, so
+// removing the brief would rename the branch a build was made on; the slug the
+// heading gave goes into a record first. A ticket that has a record already is
+// left to it.
+func RemoveBrief(storeDir, ticket string) error {
+	st := &store.Store{Root: storeDir}
+	path := filepath.Join(st.TicketDir(ticket), "brief.md")
+	brief, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(st.TicketFilePath(ticket)); os.IsNotExist(err) {
+		if slug := store.Slug(store.BriefTitle(brief)); slug != "" {
+			if err := st.CreateTicketRecord(ticket, store.Ticket{Slug: slug}); err != nil {
+				return err
+			}
+		}
+	}
+	return os.Remove(path)
+}
+
 // ErrUnknownScenarioBranch wraps the error Build returns when Opts.ScenarioBranch
 // names an overlay that does not exist under testdata/fixture/scenario-branches.
 // Callers that need to tell this apart from any other failure (a copyTree error
@@ -63,12 +92,21 @@ type Fixture struct {
 	StoreRemote string // bare remote for the store; "" when Opts.Standalone
 	ScenarioDir string // materialized scenario tree for the fake session backend
 	Ticket      string // "JIG-1"
+	Branch      string // the ticket's default branch, Branch
 	Home        string // jig home root the machine mapping was written under
 
 	// SecondRepoDir and SecondRepoRemote are the second repo's working clone
 	// and bare remote; both are "" unless Opts.SecondRepo.
 	SecondRepoDir    string
 	SecondRepoRemote string
+
+	// OrchestratorDir is the orchestrator's folder, and NestedDirs and
+	// NestedRemotes the clones and bare remotes of the repos nested in it, by
+	// repo name; all are empty unless Opts.Orchestrator, which leaves RepoDir,
+	// RepoRemote, StoreRemote and ScenarioDir empty.
+	OrchestratorDir string
+	NestedDirs      map[string]string
+	NestedRemotes   map[string]string
 }
 
 // Opts configures a Build or Generate call.
@@ -92,6 +130,15 @@ type Opts struct {
 	// JIG-1 gains a fifth slice, e, that builds in gamma and waits on no
 	// other, and the machine mapping clones both repos.
 	SecondRepo bool
+	// Orchestrator makes the project the shape `jig init --orchestrator`
+	// leaves: an orchestrator folder (Fixture.OrchestratorDir) holding two
+	// nested repos, api and web (Fixture.NestedDirs), each with its own remote
+	// and a manifest, over a v3 store that has no remote. Ticket JIG-1 has a
+	// slice in each repo, naming it as "<repo>/<workspace>": server in
+	// api/server and ui in web/ui. Both manifests also declare a workspace
+	// "lib", for a test of a bare workspace two repos declare. It excludes
+	// SecondRepo, ScenarioBranch and EnvFail (orchestrator.go).
+	Orchestrator bool
 }
 
 // identityEnv pins the git author/committer identity and date used for every
@@ -159,6 +206,10 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 		if _, statErr := os.Stat(branchDir); statErr != nil {
 			return nil, fmt.Errorf("%w %q: %w", ErrUnknownScenarioBranch, opts.ScenarioBranch, statErr)
 		}
+	}
+
+	if opts.Orchestrator {
+		return buildOrchestrator(dir, opts, testdataDir)
 	}
 
 	cachedEnvtool, err := buildEnvtool(testdataDir)
@@ -271,6 +322,7 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 		StoreRemote:      storeRemote,
 		ScenarioDir:      scenarioDir,
 		Ticket:           Ticket,
+		Branch:           Branch,
 		Home:             jigHome,
 		SecondRepoDir:    secondDir,
 		SecondRepoRemote: secondRemote,

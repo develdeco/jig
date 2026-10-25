@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -12,7 +13,9 @@ import (
 // A ticket goes through four steps, in order: its brief is agreed, its slices
 // are built and verified, the change is reviewed, and it is published. Every
 // journal line belongs to one of them, and a screen says a line in words: who
-// did it by role, the slice by its goal, the commit by its subject.
+// did it by role, the slice by its goal, the commit by its subject. A line also
+// advances a sub-step of its step (a slice, a round, the body of the pull
+// request), and its activity line names it in the words of the sub-steps block.
 
 // The steps, in the order a ticket goes through them.
 const (
@@ -26,11 +29,22 @@ const (
 // stepNames are the steps as the screens title them.
 var stepNames = [stepCount]string{"Brief", "Build", "Review", "Publish"}
 
+// The lines the screens write themselves. The planner writes brief.md and
+// slices.yaml, which make no journal line, so a screen that waits on lines sees
+// nothing for the minutes that takes; a status shows the files, and what it
+// shows that it did not before is a line of the brief's activity. They come from
+// the status (srcStatus), never from the stream.
+const (
+	srcStatus       = "status"
+	eventBriefSeen  = "brief-seen"
+	eventSlicesSeen = "slices-seen"
+)
+
 // stepOfLine is the step a journal line belongs to, or -1 for a line about
 // the ticket as a whole (what it has cost).
 func stepOfLine(l events.Envelope) int {
 	switch l.Event {
-	case journal.EventApproval, journal.EventRevalidate:
+	case journal.EventApproval, journal.EventRevalidate, eventBriefSeen, eventSlicesSeen:
 		return stepBrief
 	case journal.EventGateOpen, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean, journal.EventTriage,
 		journal.EventFixSlice, journal.EventAdopt, journal.EventRoute:
@@ -44,7 +58,9 @@ func stepOfLine(l events.Envelope) int {
 	return stepBuild
 }
 
-// stepLines are the ticket's lines of step, oldest first.
+// stepLines are the ticket's lines of step, oldest first: the journal's, with
+// the ones the screens wrote from a status among them where their time puts
+// them.
 func (t *ticket) stepLines(step int) []events.Envelope {
 	var out []events.Envelope
 	for _, l := range t.lines {
@@ -52,7 +68,64 @@ func (t *ticket) stepLines(step int) []events.Envelope {
 			out = append(out, l)
 		}
 	}
+	for _, s := range t.seen {
+		if stepOfLine(s) != step {
+			continue
+		}
+		pos := len(out)
+		if at, ok := s.At(); ok {
+			for i, l := range out {
+				if lt, ok := l.At(); ok && lt.After(at) {
+					pos = i
+					break
+				}
+			}
+		}
+		out = slices.Insert(out, pos, s)
+	}
 	return out
+}
+
+// noteChanges writes, as lines of the brief's activity, what status after
+// shows of the brief and the slices that status before did not: sections
+// written, slices written. The first status read is the baseline, since what
+// was there when the screen opened is not news, and a change that a journal line
+// says (an approval, a fix slice sent back) has its own line.
+func (m *Model) noteChanges(t *ticket, before, after *statusInfo) {
+	if before == nil || after == nil {
+		return
+	}
+	note := func(event, text string) {
+		t.seen = append(t.seen, events.Envelope{Src: srcStatus, Line: journal.Line{
+			TS: m.now().UTC().Format(time.RFC3339Nano), Ticket: t.id, Event: event, Summary: text,
+		}})
+	}
+	if was, now := briefSections(before), briefSections(after); now > was {
+		note(eventBriefSeen, strconv.Itoa(now)+" "+plural(now, "section", "sections")+" written")
+	}
+	if was, now := plannedSlices(before), plannedSlices(after); now > was {
+		note(eventSlicesSeen, strconv.Itoa(now)+" "+plural(now, "slice", "slices")+" written")
+	}
+}
+
+// briefSections is how many sections the status shows in the brief.
+func briefSections(s *statusInfo) int {
+	if s.Brief == nil {
+		return 0
+	}
+	return len(s.Brief.Sections)
+}
+
+// plannedSlices is how many slices the status shows that the brief planned: the
+// ones a gate round sent back as fixes come with lines of their own.
+func plannedSlices(s *statusInfo) int {
+	n := 0
+	for _, sl := range s.Slices {
+		if sl.FromGate == 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // subjects maps each commit the ticket verified to its subject, which jig
@@ -91,73 +164,204 @@ func commitWords(t *ticket, sha string) string {
 	return short(sha)
 }
 
+// subLabels are the labels of a ticket's sub-steps by key, as internal/phase
+// words them for the sub-steps block. An activity line names the sub-step it
+// advances with the same label.
+type subLabels map[string]string
+
+// subLabelsOf are the labels of the sub-steps the ticket has now.
+func (m *Model) subLabelsOf(t *ticket) subLabels {
+	out := subLabels{}
+	d := m.phaseOf(t)
+	for _, p := range d.Phases {
+		for _, s := range p.Subs {
+			out[s.Key] = s.Label
+		}
+	}
+	return out
+}
+
+// subKey is the key of the sub-step a journal line advances (the keys of
+// internal/phase's sub-steps), "" for a line that advances none.
+func (t *ticket) subKey(l events.Envelope) string {
+	switch l.Event {
+	case journal.EventApproval:
+		return "approved"
+	case eventBriefSeen:
+		return "drafted"
+	case journal.EventRevalidate, eventSlicesSeen:
+		return "slices"
+	case journal.EventGateOpen, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean:
+		return "round:" + strconv.Itoa(t.roundOf(l))
+	case journal.EventTriage:
+		return "asks"
+	case journal.EventFixSlice:
+		return "fixes"
+	case journal.EventPrBody, journal.EventPublishPicks:
+		return "body"
+	case journal.EventPublishApproved:
+		return "approval"
+	case journal.EventPr:
+		// A publish of several repos has a pull request sub-step for each.
+		if l.Repo != "" && len(t.publish().Repos) > 0 {
+			return "pr:" + l.Repo
+		}
+		return "pr"
+	case journal.EventSquash:
+		return "pr"
+	case journal.EventChangelog, journal.EventMemorize:
+		return "changelog"
+	case journal.EventPublishDone:
+		return "done"
+	}
+	if l.Slice != "" && stepOfLine(l) == stepBuild {
+		return "slice:" + l.Slice
+	}
+	return ""
+}
+
+// roundOf is the round a gate line is about: its attempt, else the round after
+// the ones that had closed before it.
+func (t *ticket) roundOf(l events.Envelope) int {
+	if l.Attempt > 0 {
+		return l.Attempt
+	}
+	closed := 0
+	for _, x := range t.lines {
+		if x.TS == l.TS && x.Event == l.Event && x.Session == l.Session {
+			break
+		}
+		if x.Event == journal.EventGateRound || x.Event == journal.EventGateClean {
+			if x.Attempt > 0 {
+				closed = x.Attempt
+			} else {
+				closed++
+			}
+		}
+	}
+	return closed + 1
+}
+
+// fallbackLabels are the words of a sub-step the ticket does not list now (the
+// asks of a round that closed clean, a slice the status does not name): the
+// same words internal/phase gives it while it does.
+var fallbackLabels = map[string]string{
+	"drafted": "brief drafted", "approved": "brief approved", "slices": "slices written", "asks": "asks", "fixes": "fixes",
+	"body": "body", "approval": "approval", "pr": "pull request", "changelog": "changelog", "done": "published",
+}
+
+// labelOf is the sub-step a line advances, in the words of the sub-steps
+// block; a line that advances none names its step.
+func (t *ticket) labelOf(ls subLabels, l events.Envelope) string {
+	key := t.subKey(l)
+	if key == "" {
+		if step := stepOfLine(l); step >= 0 {
+			return strings.ToLower(stepNames[step])
+		}
+		return "ticket"
+	}
+	if label, ok := ls[key]; ok {
+		return label
+	}
+	if label, ok := fallbackLabels[key]; ok {
+		return label
+	}
+	kind, id, _ := strings.Cut(key, ":")
+	if kind == "pr" {
+		return "pull request " + id
+	}
+	return kind + " " + id
+}
+
 // activityLine is one line of a step's activity: its time, the state it is
-// drawn in, and what happened.
-func (m *Model) activityLine(t *ticket, l events.Envelope) string {
+// drawn in, the sub-step it advances and what happened.
+func (m *Model) activityLine(t *ticket, ls subLabels, l events.Envelope) string {
+	return m.st.dim(clock(l, m.zone)) + " " + m.st.icon(eventState(l)) + " " + t.labelOf(ls, l) + m.st.dim(" · ") + m.say(t, l)
+}
+
+// timelineLine is activityLine without the sub-step, for a screen that is
+// about one of them.
+func (m *Model) timelineLine(t *ticket, l events.Envelope) string {
 	return m.st.dim(clock(l, m.zone)) + " " + m.st.icon(eventState(l)) + " " + m.say(t, l)
 }
 
-// say is what a journal line records, in words.
+// say is what a journal line records, in words that follow the sub-step it
+// names: "builder took it", "verified aaaaaaa", "reviewer took it".
 func (m *Model) say(t *ticket, l events.Envelope) string {
-	slice := "slice " + l.Slice
 	who := m.whoAs(t, l.Session, roleOf(l.Event))
 	if who == "" {
 		who = "a session"
 	}
 	switch l.Event {
 	case journal.EventClaim:
-		return who + " took " + slice + goalTail(t, l.Slice, m)
+		return who + " took it" + goalTail(t, l.Slice, m)
 	case journal.EventRelease:
-		return who + " let go of " + slice
+		return who + " let go of it"
 	case journal.EventDispatch:
-		return "jig started a builder on " + slice
+		return "jig started a builder"
 	case journal.EventVerifyPending:
-		return "verifying " + slice + " at " + commitWords(t, l.Commit)
+		return "verifying " + commitWords(t, l.Commit)
 	case journal.EventOracle:
 		cmd := "its oracle"
 		if l.Command != "" {
 			cmd = "`" + l.Command + "`"
 		}
 		if l.Outcome == "pass" {
-			return slice + ": " + cmd + " passed" + took(l.Seconds)
+			return cmd + " passed" + took(l.Seconds)
 		}
-		return strings.TrimSpace(slice + ": " + cmd + " failed" + took(l.Seconds) + ": " + firstOf(l.Summary, l.Signature))
+		return strings.TrimSpace(cmd + " failed" + took(l.Seconds) + ": " + firstOf(l.Summary, l.Signature))
 	case journal.EventVerified:
-		return slice + " is green: jig verified " + short(l.Commit)
+		return "verified " + short(l.Commit)
 	case journal.EventVerifyError:
-		return strings.TrimSpace(slice + " could not be verified: " + l.Summary)
+		return strings.TrimSpace("could not be verified: " + l.Summary)
 	case journal.EventQuestion:
-		return strings.TrimSpace(who + " asks about " + slice + ": " + firstLine(l.Summary))
+		return strings.TrimSpace(who + " asks: " + firstLine(l.Summary))
 	case journal.EventAnswer:
-		return strings.TrimSpace(firstOf(m.byWhom(t, l.Provenance, l.Session), "someone") + " answered the question on " + slice + ": " + firstLine(l.Summary))
+		return strings.TrimSpace(firstOf(m.byWhom(t, l.Provenance, l.Session), "someone") + " answered the question: " + firstLine(l.Summary))
 	case journal.EventStall:
-		return strings.TrimSpace(slice + " stalled: " + firstOf(l.Summary, l.Outcome))
+		return strings.TrimSpace("stalled: " + firstOf(l.Summary, l.Outcome))
 	case journal.EventRequeue:
-		return slice + " is back in the queue"
+		return "back in the queue"
+	case journal.EventResult:
+		return strings.TrimSpace(who + "'s attempt ended " + firstOf(l.Outcome, "without an outcome") + attemptWords(l))
+	case journal.EventRecorded:
+		return "recorded " + strconv.Itoa(len(l.Recordings)) + " " + plural(len(l.Recordings), "file", "files") + " of the build's scenarios at " + short(l.Commit)
+	case journal.EventEnvUp:
+		return "its environment came up"
+	case journal.EventEnvDown:
+		return "its environment went down"
+	case journal.EventEnvUnavailable:
+		return strings.TrimSpace("its environment is unavailable: " + l.Summary)
+	case journal.EventDriver:
+		return strings.TrimSpace("jig's driver: " + firstOf(l.Summary, l.Outcome))
+	case journal.EventReconcile:
+		return strings.TrimSpace("reconciled with the store: " + firstOf(l.Summary, l.Outcome))
+	case journal.EventLeaseRecovered:
+		return "the lease was recovered"
 	case journal.EventNote, journal.EventCorrection:
-		if l.Slice != "" {
-			return "note on " + slice + ": " + l.Summary
-		}
 		return "note: " + l.Summary
 	case journal.EventApproval:
-		text := firstOf(personName(l.Summary), "someone") + " approved the brief"
+		text := "by " + firstOf(personName(l.Summary), "someone")
 		if l.Provenance == "agent" && l.Session != "" {
-			text += ", as recorded by " + who
+			text += ", recorded by " + who
 		}
 		return text
 	case journal.EventRevalidate:
 		return "the brief was checked again"
+	case eventBriefSeen, eventSlicesSeen:
+		return l.Summary
+	case journal.EventAdopt:
+		return strings.TrimSpace("the ticket took over " + firstOf(l.Branch, "a branch") + " " + short(l.Commit))
 	case journal.EventGateOpen:
-		if l.Attempt > 0 {
-			return "review " + roundName(l) + " opened"
-		}
-		return "a review round opened"
+		return "opened"
 	case journal.EventGateReviewer:
-		return firstOf(m.whoWith(t, l.Session), "a reviewer") + " took " + roundName(l)
+		return firstOf(m.reviewerWho(t, l.Session, t.roundOf(l), l.Model, nil), "a reviewer") + " took it"
 	case journal.EventGateRound:
-		return firstOf(m.whoWith(t, l.Session), "the reviewer") + " finished " + roundName(l) + " with findings"
+		return firstOf(m.reviewerWho(t, l.Session, t.roundOf(l), l.Model, nil), "the reviewer") + " finished with findings"
 	case journal.EventGateClean:
-		return firstOf(m.whoWith(t, l.Session), "the reviewer") + " finished " + roundName(l) + ": clean"
+		return firstOf(m.reviewerWho(t, l.Session, t.roundOf(l), l.Model, nil), "the reviewer") + " finished: clean"
+	case journal.EventRoute:
+		return strings.TrimSpace("the round's findings were routed: " + firstOf(l.Summary, l.Outcome))
 	case journal.EventTriage:
 		verb := "kept"
 		if l.Outcome == "dismiss" {
@@ -169,21 +373,54 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		}
 		return text
 	case journal.EventFixSlice:
-		text := "the review sent back " + l.Slice
+		text := "sent back " + l.Slice
 		if f := t.goals()[l.Slice]; f != "" {
 			text += ": " + f
 		}
 		return text
 	case journal.EventPrBody:
-		return "the pull request body was written for " + commitWords(t, l.Commit)
+		return "written for " + repoWords(l) + commitWords(t, l.Commit)
+	case journal.EventPublishPicks:
+		return strings.TrimSpace("demo " + firstOf(l.Outcome, "picked") + ": " + firstOf(pickSummary(l), l.Summary))
 	case journal.EventPublishApproved:
-		return firstOf(m.byWhom(t, l.Provenance, l.Session), "someone") + " approved publishing " + short(l.Commit)
+		return firstOf(m.byWhom(t, l.Provenance, l.Session), "someone") + " approved " + repoWords(l) + short(l.Commit)
 	case journal.EventPr:
-		return strings.TrimSpace("pull request " + firstOf(l.Outcome, "recorded") + " " + l.URL)
+		return strings.TrimSpace(firstOf(l.Outcome, "recorded") + " " + l.URL)
+	case journal.EventSquash:
+		return strings.TrimSpace("the branch was squashed " + short(l.Commit))
+	case journal.EventChangelog:
+		return "written"
+	case journal.EventMemorize:
+		return strings.TrimSpace("what the ticket taught was memorized: " + firstOf(l.Summary, l.Outcome))
 	case journal.EventPublishDone:
-		return "published"
+		return "finished"
 	}
 	return strings.TrimSpace(l.Event + " " + firstOf(l.Summary, l.Outcome))
+}
+
+// repoWords is the repo a publish line names with a space after it, none for a
+// line that names no repo.
+func repoWords(l events.Envelope) string {
+	if l.Repo == "" {
+		return ""
+	}
+	return l.Repo + " "
+}
+
+// attemptWords is " (attempt n)" for a line of a numbered attempt.
+func attemptWords(l events.Envelope) string {
+	if l.Attempt > 0 {
+		return " (attempt " + strconv.Itoa(l.Attempt) + ")"
+	}
+	return ""
+}
+
+// pickSummary is a publish-picks line's summary of the demo it picked.
+func pickSummary(l events.Envelope) string {
+	if l.Pick == nil {
+		return ""
+	}
+	return firstLine(l.Pick.Summary)
 }
 
 // goalLine is a goal in one line, as a row shows it. A fix slice's goal runs
@@ -221,14 +458,6 @@ func took(seconds int) string {
 		return ""
 	}
 	return " in " + span(time.Duration(seconds)*time.Second)
-}
-
-// roundName is "round N" for a line of a numbered round.
-func roundName(l events.Envelope) string {
-	if l.Attempt > 0 {
-		return "round " + strconv.Itoa(l.Attempt)
-	}
-	return "the round"
 }
 
 // askName is an ask by its title when the status lists it, else its id.

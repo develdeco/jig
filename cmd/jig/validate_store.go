@@ -17,9 +17,10 @@ import (
 // The checks `jig validate` runs beyond the ticket's own files look at the
 // store around it: the tickets it waits on (a refusal when one of the edges
 // on the way is cut), the work that already shipped (an advisory when a
-// slice goal reads like it) and the shape of the ticket's own slice graph
-// (an advisory when it holds independent concerns). The last step is the
-// approval a valid brief earns.
+// slice goal reads like it), the shape of the ticket's own slice graph
+// (an advisory when it holds independent concerns) and the tracker tree (an
+// advisory for each thing wrong in it). The last step is the approval a
+// valid brief earns.
 
 // Advisory codes: what a valid ticket is told without being refused.
 const (
@@ -28,6 +29,9 @@ const (
 	advisorySlicesUnconnected = "SLICES_UNCONNECTED"
 	// advisoryWorkCovered: a slice goal comes near work that shipped.
 	advisoryWorkCovered = "WORK_COVERED"
+	// advisoryNotMinted: the ticket has a brief but no ticket.yaml, so it was
+	// made by hand and never minted.
+	advisoryNotMinted = "TICKET_NOT_MINTED"
 )
 
 // advisory is something worth a planner a second look in a ticket that is
@@ -64,7 +68,7 @@ func validateUpstreamEdges(st *store.Store, ticket string) []string {
 			if resolved, err := st.ResolveTicket(d.Ticket); err == nil {
 				next = resolved
 			}
-			if requireTicket(st, next) != nil {
+			if requireTicketID(st, next) != nil {
 				if cur != ticket {
 					problems = append(problems, fmt.Sprintf("upstream ticket %s, which %s waits on: blocked_by %q is not a ticket in the store", cur, ticket, d.Ticket))
 				}
@@ -83,11 +87,29 @@ func validateUpstreamEdges(st *store.Store, ticket string) []string {
 	return problems
 }
 
-// validateAdvisories gathers the advisories for the slices of ticket:
-// independent groups of slices first, then every slice goal that reads like
-// shipped work.
+// unmintedAdvisories is the advisory for a ticket that has a brief but no
+// ticket.yaml: its folder was made by hand, so it has no title, no slug and no
+// minted id, and its branch is named from its brief's heading or its bare id.
+// A ticket with no brief is not planned yet, and has nothing to say.
+func unmintedAdvisories(st *store.Store, ticket string) []advisory {
+	if _, err := os.Stat(filepath.Join(st.TicketDir(ticket), "brief.md")); err != nil {
+		return nil
+	}
+	if _, err := os.Stat(st.TicketFilePath(ticket)); !os.IsNotExist(err) {
+		return nil
+	}
+	return []advisory{{
+		Code:    advisoryNotMinted,
+		Message: fmt.Sprintf("not minted: %s has a brief but no ticket.yaml, so it has no title, slug or minted id", ticket),
+		Help:    "Run `jig ticket new --title \"<title>\"`, which mints the id, and plan under the id it prints; never make a ticket's folder by hand",
+	}}
+}
+
+// validateAdvisories gathers the advisories for the slices of ticket: a ticket
+// that was never minted first, then independent groups of slices, then every
+// slice goal that reads like shipped work.
 func validateAdvisories(st *store.Store, ticket string, slices []store.Slice) []advisory {
-	var out []advisory
+	out := unmintedAdvisories(st, ticket)
 	// Whether the plan is one concern is a question about the slices the
 	// brief planned: a fix slice is a gate round's (from_gate), joined to the
 	// work it fixes by the round, not by a blocked_by edge.
@@ -108,7 +130,56 @@ func validateAdvisories(st *store.Store, ticket string, slices []store.Slice) []
 			Help:    "If they are, give each group a ticket of its own; if one builds on another, add the blocked_by edge",
 		})
 	}
-	return append(out, coveredAdvisories(st, ticket, slices)...)
+	out = append(out, coveredAdvisories(st, ticket, slices)...)
+	return append(out, trackerTreeAdvisories(st)...)
+}
+
+// advisoryTreeUnreadable: the tracker tree could not be listed, so it could
+// not be checked.
+const advisoryTreeUnreadable = "TRACKER_TREE_UNREADABLE"
+
+// trackerTreeAdvisoryMax is how many things of one kind the tracker tree's
+// advisories name before they say how many more there are: a store whose
+// records have not moved yet would otherwise print a row for each.
+const trackerTreeAdvisoryMax = 3
+
+// trackerTreeAdvisories checks the store's tracker tree, with or without a
+// provider configured, and turns what is wrong in it into advisories under
+// the store's own codes (store.CheckTrackerTree): the tree is a view of the
+// store around the ticket, not part of the brief, so it never refuses a
+// brief or keeps it from being approved.
+func trackerTreeAdvisories(st *store.Store) []advisory {
+	problems, err := st.CheckTrackerTree()
+	if err != nil {
+		return []advisory{{
+			Code:    advisoryTreeUnreadable,
+			Message: fmt.Sprintf("the tracker tree could not be checked: %v", err),
+			Help:    "Check that trackers/ in the store can be listed",
+		}}
+	}
+	var out []advisory
+	shown := map[string]int{}
+	more := map[string]int{}
+	help := map[string]string{}
+	var order []string
+	for _, p := range problems {
+		if shown[p.Code] == 0 && more[p.Code] == 0 {
+			order = append(order, p.Code)
+			help[p.Code] = p.Help
+		}
+		if shown[p.Code] >= trackerTreeAdvisoryMax {
+			more[p.Code]++
+			continue
+		}
+		shown[p.Code]++
+		out = append(out, advisory{Code: p.Code, Message: p.Msg, Help: p.Help})
+	}
+	for _, code := range order {
+		if n := more[code]; n > 0 {
+			out = append(out, advisory{Code: code, Message: fmt.Sprintf("and %d more of the same kind", n), Help: help[code]})
+		}
+	}
+	return out
 }
 
 // sliceGroups splits slices into the groups blocked_by connects, an edge
@@ -181,7 +252,7 @@ func coveredAdvisories(st *store.Store, ticket string, slices []store.Slice) []a
 // title comes near one of goals. A journal is read whole, so only the tickets
 // whose title could matter have theirs read.
 func shippedTicketsNear(st *store.Store, goals []string) []recall.Ticket {
-	ids, err := st.TicketIDs()
+	ids, err := st.Tickets()
 	if err != nil {
 		return nil
 	}

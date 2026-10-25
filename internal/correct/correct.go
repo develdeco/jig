@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -19,6 +20,11 @@ const (
 	KindStall = "stall"
 	KindBrief = "brief-drift"
 	KindScope = "scope-drift"
+	KindSlice = "slice-missing"
+	// KindRestack: the branch of the parent the ticket is stacked on moved
+	// past the ticket's; KindRetarget: the parent merged (restack.go).
+	KindRestack  = "restack"
+	KindRetarget = "retarget"
 )
 
 // Input is what Check is given: the session and where it works, the ticket
@@ -32,8 +38,10 @@ type Input struct {
 	// Slice is the slice the session works on, "" for none.
 	Slice string
 	// Cwd is the directory of the event, in the repository the session
-	// commits to.
-	Cwd string
+	// commits to, and Repo that repository's name in the project ("" when it
+	// is none of its repos).
+	Cwd  string
+	Repo string
 
 	// Now is the clock; Since is when the session began (zero when unknown:
 	// nothing is then known to be the session own).
@@ -45,6 +53,10 @@ type Input struct {
 	Unattended bool
 	// Journal reads the ticket journal.
 	Journal func() ([]journal.Line, error)
+	// Stack reads where the ticket's branch stands against the parents it is
+	// stacked on (internal/stack); nil reads nothing, and no restack or
+	// retarget is found.
+	Stack func() (stack.Plan, error)
 }
 
 // A Note is one thing the session has to hear. Each is the kind of note an
@@ -89,6 +101,15 @@ var errNone = errors.New("nothing found")
 //   - A scope drift (scope.go) is found for the commit the event made, and
 //     the correction line it leaves is what offers it again at the events that
 //     follow, so a Stop can still hold the session back for it.
+//   - A missing slice (slice.go) is found for the same commit when it names no
+//     slice, and the slices its files point to are offered as the likely one.
+//     It is offered again like a scope drift, until the commit is amended away
+//     or verified for a slice.
+//   - A restack (restack.go) is found from the ticket's stack each time, while
+//     the branch of the parent it is stacked on holds a head the ticket's does
+//     not: one fact for each head the parent's branch moves to. A retarget,
+//     the parent having merged, is said once: to the session it was first
+//     found in, and to no session after it.
 //
 // A detector that fails costs only its own note; the notes of the others are
 // returned with the error that joins what failed. When writing the record of
@@ -98,10 +119,12 @@ func Check(in Input) ([]Note, error) {
 	if err != nil {
 		return nil, err
 	}
-	fired := map[string]bool{}
+	fired := map[string]journal.Line{}
 	for _, l := range lines {
 		if l.Event == journal.EventCorrection && l.Ref != "" {
-			fired[l.Ref] = true
+			if _, ok := fired[l.Ref]; !ok {
+				fired[l.Ref] = l
+			}
 		}
 	}
 
@@ -139,18 +162,37 @@ func Check(in Input) ([]Note, error) {
 		add(briefFact(in, all, lines))
 		if in.Commit != "" {
 			add(scopeFact(in, all))
+			add(sliceFact(in, all))
 		}
 	}
-	// What this session was told of earlier scope drifts is in the journal.
+	restacks, err := restackFacts(in)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	for _, f := range restacks {
+		if l, ok := fired[f.note.Ref]; ok && f.note.Kind == KindRetarget && !ownLine(in, l) {
+			continue
+		}
+		add(f, nil)
+	}
+	// What this session was told of earlier commits is in the journal.
 	for _, l := range lines {
-		if l.Event == journal.EventCorrection && l.Outcome == KindScope && in.Session != "" && l.Session == in.Session && after(l.TS, in.Since) {
+		if l.Event != journal.EventCorrection || !ownLine(in, l) {
+			continue
+		}
+		switch l.Outcome {
+		case KindScope:
 			add(fact{note: Note{Ref: l.Ref, Kind: KindScope, Text: l.Summary}}, nil)
+		case KindSlice:
+			if stillUnsliced(in, l.Commit, lines) {
+				add(fact{note: Note{Ref: l.Ref, Kind: KindSlice, Text: l.Summary}}, nil)
+			}
 		}
 	}
 
 	var notes []Note
 	for _, f := range facts {
-		if !fired[f.note.Ref] {
+		if _, done := fired[f.note.Ref]; !done {
 			if err := fire(in, f); err != nil {
 				errs = append(errs, err)
 				continue
@@ -187,7 +229,7 @@ func scopeFact(in Input, all []store.Slice) (fact, error) {
 	if in.Cwd == "" {
 		return fact{}, errNone
 	}
-	d, drifted, err := Scope(in.Cwd, in.Commit, all)
+	d, drifted, err := Scope(in.Cwd, in.Repo, in.Commit, all)
 	if err != nil {
 		return fact{}, err
 	}
@@ -254,6 +296,11 @@ func markStalled(in Input, s Stall) error {
 		return fmt.Errorf("correct: mark slice %s stalled: %w", s.Slice, err)
 	}
 	return nil
+}
+
+// ownLine reports whether the correction line l was written in this session.
+func ownLine(in Input, l journal.Line) bool {
+	return in.Session != "" && l.Session == in.Session && after(l.TS, in.Since)
 }
 
 // after reports whether the stamp ts is at or after t. A zero t admits

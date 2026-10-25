@@ -27,6 +27,11 @@ type TriageInput struct {
 	Asks     []Finding
 	Notes    []Finding
 	Manifest manifest.Manifest
+	// Repos are the manifests of a round in a project of several repos, by repo
+	// name: a finding's file begins with its repo's name, and its workspace and
+	// oracle are those of that repo's manifest. Manifest is empty then, and
+	// Repos is nil for a round over one repo.
+	Repos map[string]manifest.Manifest
 	// BudgetUsed and BudgetLimit are this ticket's fix budget state (the
 	// gate's earlier fix-appending rounds, and gate.fix_rounds), carried so
 	// a hook can phrase the header it shows Asks' own budget-parked
@@ -87,12 +92,37 @@ func DefaultTriage(in TriageInput) TriageResult {
 		if f.RoutedWhy == RoutedWhyBudget {
 			continue // undecided: only a person at a terminal can keep a parked finding
 		}
-		if noWorkspace, noOracle := BuildTargetGaps(f, in.Manifest); noWorkspace || noOracle {
+		if noWorkspace, noOracle := BuildTargetGaps(f, in.manifestOf(f)); noWorkspace || noOracle {
 			continue // undecided: keeping it needs a human's workspace/oracle choice
 		}
 		asks[f.ID] = AskOutcome{Keep: true}
 	}
 	return TriageResult{Asks: asks}
+}
+
+// noOracleError is GATE_NO_ORACLE for a finding whose repo's manifest declares
+// no oracle: a fix slice for it could never be proven. "The manifest has no
+// oracles" is reserved for exactly this case.
+func noOracleError(files roundFiles, file string) error {
+	where := "the manifest"
+	if repo, _, ok := files.of(file); ok && files.qualified {
+		where = "the manifest of repo " + repo.Name
+	}
+	return &axi.Error{
+		Msg:  fmt.Sprintf("cannot build a fix slice, %s has no oracles", where),
+		Code: "GATE_NO_ORACLE",
+		Help: []string{"Add an oracle to the manifest, then rerun `jig gate` for this ticket."},
+	}
+}
+
+// manifestOf is the manifest f is judged against: the one manifest of a round
+// over one repo, else that of the repo f's file begins with.
+func (in TriageInput) manifestOf(f Finding) manifest.Manifest {
+	if in.Repos == nil {
+		return in.Manifest
+	}
+	repo, _, _ := strings.Cut(f.File, "/")
+	return in.Repos[repo]
 }
 
 // BuildTargetGaps reports which part of f's build target jig cannot derive
@@ -139,13 +169,18 @@ func sortByRiskThenID(fs []Finding) {
 // and triage finish entirely inside this call, before Gate appends any
 // slice or pushes the store.
 //
+// files is the files of the round, which say which repo's manifest a finding
+// is routed against: a round over several repos routes a finding in
+// web/ui/page.go into a fix slice that builds in the workspace web/ui, with an
+// oracle of web's manifest (roundrepos.go).
+//
 // budgetUsed and budgetLimit are this ticket's own fix budget state
 // (Gate's own UsedFixBudget and gate.fix_rounds), passed through to the
 // triage hook's TriageInput unchanged so it can phrase its own
 // budget-parked header without recomputing either number. fixSliceFindings
 // is gate.fix_slice_findings, the most findings one fix slice may carry
 // (buildFixSlices' own splitFixGroupIntoSlices enforces it).
-func routeRound(round int, st *store.Store, ticket string, existingSlices []store.Slice, reported []Finding, outstanding []Finding, triage Triage, man manifest.Manifest, budgetUsed, budgetLimit, fixSliceFindings int) ([]Finding, []store.Slice, error) {
+func routeRound(round int, st *store.Store, ticket string, existingSlices []store.Slice, reported []Finding, outstanding []Finding, triage Triage, files roundFiles, budgetUsed, budgetLimit, fixSliceFindings int) ([]Finding, []store.Slice, error) {
 	if triage == nil {
 		triage = DefaultTriage
 	}
@@ -180,16 +215,22 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 	// a resolvable oracle in a manifest that does have some is routed to
 	// the human as an ask instead (findings.go's ApplyRound), the same
 	// mechanism a no-workspace fix uses.
-	oracleNames := SortedOracleNames(man)
-	if len(oracleNames) == 0 && (len(fixes) > 0 || len(asks) > 0) {
-		return nil, nil, &axi.Error{
-			Msg:  "cannot build a fix slice, the manifest has no oracles",
-			Code: "GATE_NO_ORACLE",
-			Help: []string{"Add an oracle to the manifest, then rerun `jig gate` for this ticket."},
+	for _, f := range append(append([]Finding(nil), fixes...), asks...) {
+		if len(files.oracles(f.File)) == 0 {
+			return nil, nil, noOracleError(files, f.File)
 		}
 	}
 
-	result := triage(TriageInput{Fixes: fixes, Asks: asks, Notes: notes, Manifest: man, BudgetUsed: budgetUsed, BudgetLimit: budgetLimit})
+	in := TriageInput{Fixes: fixes, Asks: asks, Notes: notes, BudgetUsed: budgetUsed, BudgetLimit: budgetLimit}
+	if files.qualified {
+		in.Repos = make(map[string]manifest.Manifest, len(files.repos))
+		for _, r := range files.repos {
+			in.Repos[r.Name] = r.Man
+		}
+	} else {
+		in.Manifest = files.repos[0].Man
+	}
+	result := triage(in)
 
 	fixTriage := TriageAuto
 	if result.FixHuman {
@@ -230,7 +271,8 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 		if !decision.Keep {
 			wf.Status = StatusDismissed
 		} else {
-			noWorkspace, noOracle := BuildTargetGaps(wf, man)
+			noWorkspace, noOracle := BuildTargetGaps(wf, files.manifestOf(wf.File))
+			oracleNames := files.oracles(wf.File)
 			ws := wf.Workspace
 			if noWorkspace {
 				ws = decision.Workspace
@@ -261,7 +303,7 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 	}
 	reported = append(reported, decidedOutstanding...)
 
-	slices, err := buildFixSlices(round, st, ticket, existingSlices, keptFixes, keptAsks, oracleNames, fixSliceFindings)
+	slices, err := buildFixSlices(round, st, ticket, existingSlices, keptFixes, keptAsks, files, fixSliceFindings)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -489,15 +531,15 @@ func splitFixGroupIntoSlices(group []Finding, fixSliceFindings int) [][]Finding 
 // or more slices bounded by fixSliceFindings (splitFixGroupIntoSlices);
 // keptAsks each become their own slice, carrying the human's decision.
 // existingSlices is the ticket's slices.yaml as of before this round, used
-// only to look up a recurrence's previous fix slice. oracleNames is the
-// manifest's sorted oracle names, computed once by the caller (the
-// zero-oracle check already ran on it before triage).
-func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []store.Slice, keptFixes, keptAsks []Finding, oracleNames []string, fixSliceFindings int) ([]store.Slice, error) {
+// only to look up a recurrence's previous fix slice. files gives each
+// finding's oracle names, those of its repo's manifest (the zero-oracle check
+// already ran on them before triage).
+func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []store.Slice, keptFixes, keptAsks []Finding, files roundFiles, fixSliceFindings int) ([]store.Slice, error) {
 	type groupKey struct{ workspace, oracle string }
 	groups := map[groupKey][]Finding{}
 	var order []groupKey
 	for _, f := range keptFixes {
-		oracle, err := oracleForFinding(f, oracleNames)
+		oracle, err := oracleForFinding(f, files.oracles(f.File))
 		if err != nil {
 			return nil, err
 		}
@@ -545,7 +587,7 @@ func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []
 
 	sort.Slice(keptAsks, func(i, j int) bool { return keptAsks[i].ID < keptAsks[j].ID })
 	for _, f := range keptAsks {
-		oracle, err := oracleForFinding(f, oracleNames)
+		oracle, err := oracleForFinding(f, files.oracles(f.File))
 		if err != nil {
 			return nil, err
 		}

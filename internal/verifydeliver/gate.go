@@ -16,6 +16,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -112,7 +113,7 @@ type GateOpts struct {
 	// the ticket's record, with the branch's tip as the ticket's start sha; every
 	// later round works on the recorded branch, and naming another one is
 	// refused (BRANCH_MISMATCH). Empty: the ticket's own branch, the recorded
-	// one or jig/<ticket>.
+	// one or the default (<ticket>-<slug>).
 	Branch string
 	// Intent and IntentDoc are `jig gate --intent`/`--doc`: at most one is
 	// ever set - refused when both are, whether by the CLI or by a caller
@@ -174,7 +175,7 @@ type GateReport struct {
 	// list, the exit-2 signal. Empty when nothing is waiting on a person.
 	NeedsHuman []Finding
 	// Branch is the branch the ticket adopted, "" for a ticket working on
-	// its own jig/<ticket>.
+	// its own default branch.
 	Branch string
 	// Intent is this round's resolved intent binding (resolveIntent), read
 	// once before the round's source runs; a reviewer round reports the one
@@ -272,8 +273,10 @@ func UsedFixBudget(st *store.Store, ticket string, round int) (used int, unreada
 // earlier gate round - is not yet green and early is false: a slice left
 // queued, stalled, needs-input, env-blocked or otherwise unfinished means
 // the delivery is incomplete, so gating (or publishing) now would review or
-// ship less than the whole ticket. --early skips the check entirely, for a
-// deliberate mid-ticket milestone batch.
+// ship less than the whole ticket. The slices of every repo count, and in a
+// project of several repos the refusal names the repo of the slice it stops
+// at. --early skips the check entirely, for a deliberate mid-ticket milestone
+// batch.
 func checkFrontier(d Deps, ticket string, slices []store.Slice, early bool) error {
 	if early {
 		return nil
@@ -284,10 +287,22 @@ func checkFrontier(d Deps, ticket string, slices []store.Slice, early bool) erro
 			return fmt.Errorf("verifydeliver: gate: read slice %s state: %w", s.ID, err)
 		}
 		if st.State != "green" {
+			where := ""
+			if len(d.Cfg.Repos) > 1 {
+				if repo := ready.Place(ready.ProjectRepos(d.Cfg, d.Machine.Clones), slices).Repo[s.Workspace]; repo != "" && repo != ready.Unplaced {
+					where = " of repo " + repo
+				}
+			}
+			help := []string{fmt.Sprintf("Run `jig next %s` to see what is left to build, or `jig gate %s --early` to review anyway.", ticket, ticket)}
+			if d.Prompt != nil {
+				if p := d.Prompt(ticket); p != "" {
+					help = append(help, "ask: "+p)
+				}
+			}
 			return &axi.Error{
-				Msg:  fmt.Sprintf("slice %s is %s, not green; finish it first or pass --early", s.ID, st.State),
+				Msg:  fmt.Sprintf("slice %s%s is %s, not green; finish it first or pass --early", s.ID, where, st.State),
 				Code: "GATE_NOT_GREEN",
-				Help: []string{fmt.Sprintf("Run `jig next %s` to see what is left to build, or `jig gate %s --early` to review anyway.", ticket, ticket)},
+				Help: help,
 			}
 		}
 	}

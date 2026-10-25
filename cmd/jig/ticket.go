@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -130,9 +131,10 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 	return 0
 }
 
-// intakeHint is the next step for a ticket that has no slices yet.
+// intakeHint is the next step for a ticket that has no slices yet, with the
+// prompt that asks an agent for it.
 func intakeHint(ticket string) string {
-	return fmt.Sprintf("Write its brief.md and slices.yaml (the intake skill drafts both) and check them with `jig validate %s --check`; run `jig validate %s` once the person has confirmed the brief", ticket, ticket)
+	return fmt.Sprintf("Write its brief.md and slices.yaml (the intake skill drafts both) and check them with `jig validate %s --check`; run `jig validate %s` once the person has confirmed the brief%s", ticket, ticket, promptHint(phase.Prompt(phase.Brief, ticket)))
 }
 
 // checkTicketID fails when ticket cannot name a ticket's pool leases (see
@@ -145,15 +147,36 @@ func checkTicketID(ticket string) error {
 	return nil
 }
 
-// requireTicket fails when ticket is not a usable id or the store has no
-// folder for it.
+// requireTicket fails when ticket is not a usable id or the store holds no
+// ticket by it to work: no folder, or one with nothing but jig's lock and
+// temporary files (store.TicketExists), which a store reset or checkout
+// leaves of a ticket it removed.
 func requireTicket(st *store.Store, ticket string) error {
+	if err := checkTicketID(ticket); err != nil {
+		return err
+	}
+	if st.TicketExists(ticket) {
+		return nil
+	}
+	return ticketNotFound(st, ticket)
+}
+
+// requireTicketID fails when ticket is not a usable id or the store has no
+// folder by it: the check for an id another record names (a blocker, the
+// ticket a closure names, a chart entry's), where any folder, even one a
+// checkout emptied, means the id is a ticket's.
+func requireTicketID(st *store.Store, ticket string) error {
 	if err := checkTicketID(ticket); err != nil {
 		return err
 	}
 	if fi, err := os.Stat(st.TicketDir(ticket)); err == nil && fi.IsDir() {
 		return nil
 	}
+	return ticketNotFound(st, ticket)
+}
+
+// ticketNotFound is the refusal for a ticket the store does not have.
+func ticketNotFound(st *store.Store, ticket string) error {
 	return &axi.Error{
 		Msg:  fmt.Sprintf("ticket %s not found in the store at %s", ticket, st.Root),
 		Code: "VALIDATION_ERROR",

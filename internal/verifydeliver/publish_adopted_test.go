@@ -253,7 +253,7 @@ func TestPointAtTicketBranchSaysWhoseCopyItChose(t *testing.T) {
 		return d, fx
 	}
 
-	// own is a ticket's own jig/<ticket> after the build and a clean round: the
+	// own is a ticket's own default branch after the build and a clean round: the
 	// state each of its subtests continues from.
 	own := func(t *testing.T) (Deps, *fixture.Fixture, string, string) {
 		t.Helper()
@@ -274,7 +274,7 @@ func TestPointAtTicketBranchSaysWhoseCopyItChose(t *testing.T) {
 		t.Parallel()
 		d, fx, br, _ := own(t)
 		if got := point(t, d, fx, fx.Ticket, br, false); got != buildLeasesCopy {
-			t.Errorf("copy = %v, want the build lease's: jig/<ticket> lives there until a publish pushes it", got)
+			t.Errorf("copy = %v, want the build lease's: the ticket's own branch lives there until a publish pushes it", got)
 		}
 	})
 	t.Run("a ticket's own branch pushed as it is", func(t *testing.T) {

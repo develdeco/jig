@@ -67,7 +67,7 @@ func TestVerifyHandCommitReusedByGate(t *testing.T) {
 	fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "clean-round"})
 	dropEnvFromSlices(t, fx)
 	h := newHarness(t, fx, env, "s-hand")
-	branch := "jig/" + fx.Ticket
+	branch := fx.Branch
 	h.Branch(branch)
 	sha := h.CommitScenario("a", 1)
 	h.Push(branch)
@@ -151,7 +151,7 @@ func TestVerifyIdempotent(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
 	h := newHarness(t, fx, env, "s-idem")
-	branch := "jig/" + fx.Ticket
+	branch := fx.Branch
 	h.Branch(branch)
 	sha := h.CommitScenario("a", 1)
 
@@ -223,7 +223,7 @@ func TestVerifyFailPersistsSignature(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
 	h := newHarness(t, fx, env, "s-fail")
-	branch := "jig/" + fx.Ticket
+	branch := fx.Branch
 	h.Branch(branch)
 	sha := h.CommitScenario("b", 1)
 

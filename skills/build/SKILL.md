@@ -5,6 +5,8 @@ description: Builds a ticket's slices in the repo clone you work in - claim a sl
 
 # build
 
+Run `jig next <T>`. If the phase it names is not build, tell the person what the ticket needs and the prompt that does it, and stop. Do not run an earlier phase on your own.
+
 You build in the person's own clone with your own tools. jig does not start you or wait on you: it keeps each slice's state in the store, verifies every commit, and carries questions and answers between you and the person.
 
 ## Start
@@ -16,11 +18,11 @@ jig claim <ticket> --slice <slice>
 jig context <ticket> --slice <slice>
 ```
 
-`jig claim` makes the slice building and records you as its holder; set `JIG_SESSION` or pass `--session`, so `jig here` can tell which slice is yours. A condition the claim does not meet (a blocker not published or merged, a stacked parent with no clean gate round, a brief nobody approved) prints as a warning and the claim goes through, because a person is watching. Pass `--unattended` when nobody is: the claim is then refused with `CLAIM_BLOCKED_MERGED`, `CLAIM_STACKED_PARENT_NOT_CLEAN` or `CLAIM_NOT_APPROVED`. A slice another session holds needs `--take`.
+`jig claim` makes the slice building and records you as its holder; set `JIG_SESSION` or pass `--session`, so `jig here` can tell which slice is yours. A condition the claim does not meet (a blocker not published or merged, a stacked parent with no clean gate round, a brief nobody approved) prints as a warning and the claim goes through, because a person is watching. **Stop on any claim warning**: tell the person what it says and give the prompt that clears it (`ask:` in the warning, such as `Plan <T> (approve its brief)`), and release the slice unless they say to go on. Pass `--unattended` when nobody is watching: the claim is then refused with `CLAIM_BLOCKED_MERGED`, `CLAIM_STACKED_PARENT_NOT_CLEAN` or `CLAIM_NOT_APPROVED`. A slice another session holds needs `--take`.
 
 ## Read the context
 
-`jig context` is everything the slice needs, in one call: its goal and oracle command, the brief sections it builds from and the Seams, the commits and files of the slices already verified, the failed attempts so far with why they failed, the code a graph links to the goal, its questions with their answers, and notes. Read it before you search the repo. `--json` gives the same as one object. Run it again after an answer, or when something looks out of date.
+`jig context` is everything the slice needs in one call (`--json` for one object): its goal and oracle command, the brief sections and Seams it builds from, what the verified slices built, the failed attempts and why, the code a graph links to the goal, its questions with answers, and notes. Read it before you search the repo, and again after an answer.
 
 ## Build
 
@@ -62,7 +64,7 @@ jig claim <ticket> --slice <slice> --release   # queued again, unless it is gree
 
 ## Handing a slice to another agent
 
-When you start a subagent or another session to build a slice, give it these rules in its prompt (they are the ones jig used to put in the prompt of the sessions it dispatched; the verbs are how it now does each):
+To have a subagent or another session build a slice, give it these rules in its prompt:
 
 ```
 You are building slice <slice> of ticket <ticket>. Work only in this clone, on this branch. Goal: <the slice's goal>.
@@ -75,7 +77,11 @@ Stuck: `jig ask --slice <slice> "<question>"`, saying what you would do by defau
 Leave pushing to publish, and never answer your own question.
 ```
 
-Pass `--unattended` to the claim when nobody is watching: jig then holds the session back from stopping while a verification runs, a question is open, or a ticket a person approved is not yet published.
+With `--unattended`, jig holds the session back from stopping while a verification runs, tracked changes are uncommitted, every slice is green and no review round is open (open the gate and review it), or a ticket a person approved is not yet published.
+
+## Then
+
+When every slice is green, relay `jig next <T>`'s `prompt:` to the person and stop, unless the person's prompt named later phases (an automatic run): then go on to the next phase's skill (review, then publish).
 
 ## Never
 

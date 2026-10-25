@@ -9,5 +9,13 @@
 // states, tickets' blockers and journals) and return an answer, so the
 // callers decide how to read it and a test needs no store. The two that move
 // a slice back to queued by a person's word, Requeue and RequeueSlice
-// (requeue.go), are the exception: they write the slice's state and journal.
+// (requeue.go), are an exception: they write the slice's state and journal.
+// ProjectRepos (repos.go) is the other: it reads the manifest of each repo's
+// clone, for Place to say which repo a slice's workspace belongs to.
+//
+// Whether a blocker has merged is a fact the caller reads and this package
+// judges: JudgeRepo says, from the pull request recorded for a repo, what the
+// host said of it and whether the ticket's branch is in the target, whether
+// the work merged there, and Tickets holds a ticket back until every merged
+// blocker's Merge is met (internal/mergefacts reads the evidence).
 package ready

@@ -34,7 +34,7 @@ A branch that leads with no ticket (`main`, a feature branch) binds no ticket: n
 ## What to build next
 
 ```
-jig next              # tickets in store order: ready, blocked (and by whom), new, done
+jig next              # tickets in store order: ready, blocked (and by whom), new, done; the ready ones again in priority order
 jig next JIG-4        # its ready slices by repo, and the branch to work on
 jig next JIG-4 --topology   # every slice with its repo, wave and blockers
 ```
@@ -42,6 +42,14 @@ jig next JIG-4 --topology   # every slice with its repo, wave and blockers
 A ticket is `ready` when it has a slice that is queued with every blocker green and nothing blocks the ticket; a blocked ticket names the ticket it waits for. Slices of one repo build one after the other; repos are independent, so a ready set that spans repos can go to one session each. Create the branch `jig next` names in each repo; `jig here` then binds it to the ticket.
 
 When `jig next` ends with an `overlap` table, two tickets' local branches change the same file: build them one after the other.
+
+The `next` table lists the ready tickets by the owner's rank (`jig rank <T> <n>`, lowest first; unranked last, by id). `warning: rank N is shared` means the owner has not said which of those comes first. A `workspace_overlap` table names two ready tickets that build in the same workspace: start the first and the other after it.
+
+## Phases and prompts
+
+A ticket moves through four phases, each with a skill: brief (`intake`), build (`build`), review (`review`) and publish (`publish`). `jig next <T>` names the one it is at (`phase:`), whether it can start (`ready:`) and the prompt that asks for it (`prompt:`, such as "Build SHOP-1"). Each phase's skill starts with `jig next <T>` and stops if the phase is not its own; it ends by relaying the `prompt:` to the person, who decides when the next phase runs. When you only oriented, relay that `prompt:` and stop.
+
+**An automatic run** is a prompt that names several phases ("Take SHOP-1 from brief to PR"): run them in order, each with its skill, and end the run at a refusal or a stop the skill gives. Run the review's subagent in the foreground (`run_in_background: false`) and wait for its verdict in the same turn: never end the turn while it runs. The person's moments stay theirs unless the prompt delegates them: "go with your recommendations" delegates the brief's approval, and a prompt that ends at the PR ("... to PR") or says "and publish it" delegates the publish. A delegated brief approval is recorded with agent provenance; a delegated publish goes the publish skill's first way, which asks for no approval.
 
 ## When here says nothing
 

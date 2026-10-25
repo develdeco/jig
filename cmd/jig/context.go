@@ -32,7 +32,9 @@ func init() {
 // slice.json carried when jig dispatched a builder, pulled by the builder
 // instead. It reads the store and the clone; when the project opted into a
 // code graph it brings the graph up to date and asks it, which takes as long
-// as graphify does, and records a graph line in the machine ledger.
+// as graphify does, and records a graph line in the machine ledger. In a
+// project of several repos it also names the repo the slice builds in and that
+// repo's clone, wherever the command is run from.
 func cmdContext(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "context")
 	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
@@ -56,12 +58,13 @@ func cmdContext(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
+	repo, dir := sliceHome(w, sl)
 	c, err := slicectx.Build(slicectx.Input{
 		Store:   w.St,
 		Ticket:  w.Ticket,
 		Slice:   sl.ID,
-		Repo:    w.Where.Repo,
-		RepoDir: w.buildDir(),
+		Repo:    repo,
+		RepoDir: dir,
 		Graph:   graphify.DetectWith(w.Cfg, e.lookPath),
 		RecordGraph: func(l journal.Line) error {
 			return ledger.Graph(w.JigHome, l)
@@ -70,6 +73,11 @@ func cmdContext(e env, args []string, stdout io.Writer) int {
 	})
 	if err != nil {
 		return renderErr(stdout, err)
+	}
+	if len(w.Cfg.Repos) > 1 {
+		// Which repo of the project the slice builds in, and where, is what a
+		// session in the orchestrator or in the other repo needs to be told.
+		c.Repo, c.Clone = repo, dir
 	}
 	if *jsonOut {
 		data, err := json.Marshal(c)
@@ -80,7 +88,11 @@ func cmdContext(e env, args []string, stdout io.Writer) int {
 		return 0
 	}
 	blocks := c.Blocks()
-	blocks = append(blocks, axi.Help(contextHelp(c)...))
+	help := contextHelp(c)
+	if line := otherRepoHelp(w, sl, repo, dir); line != "" {
+		help = append([]string{line}, help...)
+	}
+	blocks = append(blocks, axi.Help(help...))
 	axi.Render(stdout, blocks...)
 	return 0
 }

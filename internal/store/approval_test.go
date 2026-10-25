@@ -73,3 +73,119 @@ func TestBriefSHA256NeedsABrief(t *testing.T) {
 		t.Fatalf("BriefSHA256 of a ticket with no brief = %q, nil; want an error", sum)
 	}
 }
+
+// briefHashRig is a store with one ticket whose brief.md holds brief, and the
+// hash of whatever the ticket folder holds now.
+func briefHashRig(t *testing.T, brief string) (hash func() string, writeIllustration func(string), removeIllustration func()) {
+	t.Helper()
+	st := &Store{Root: t.TempDir()}
+	const id = "JIG-1"
+	if err := st.CreateTicketRecord(id, Ticket{Title: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	dir := st.TicketDir(id)
+	if err := os.WriteFile(filepath.Join(dir, "brief.md"), []byte(brief), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hash = func() string {
+		t.Helper()
+		sum, err := st.BriefSHA256(id)
+		if err != nil {
+			t.Fatalf("BriefSHA256: %v", err)
+		}
+		return sum
+	}
+	writeIllustration = func(html string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, IllustrationFile), []byte(html), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removeIllustration = func() {
+		t.Helper()
+		if err := os.Remove(filepath.Join(dir, IllustrationFile)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return hash, writeIllustration, removeIllustration
+}
+
+// TestBriefSHA256WithoutAnIllustrationIsTheFilesHash: a brief with no
+// illustration hashes to the sha256 of brief.md and nothing else, as it did
+// before briefs had illustrations, so an approval recorded then stays valid.
+// The digest below is that of these exact bytes, pinned as a literal so a
+// change to the rule fails here whatever the code computes.
+func TestBriefSHA256WithoutAnIllustrationIsTheFilesHash(t *testing.T) {
+	hash, _, _ := briefHashRig(t, "hello\n")
+	const sha256OfHelloNewline = "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
+	if got := hash(); got != sha256OfHelloNewline {
+		t.Fatalf("BriefSHA256 of a brief with no illustration = %s, want the sha256 of brief.md, %s", got, sha256OfHelloNewline)
+	}
+}
+
+// TestBriefSHA256CoversTheIllustration: adding an illustration, editing it and
+// removing it each change the hash, and removing it gives the brief's own hash
+// back.
+func TestBriefSHA256CoversTheIllustration(t *testing.T) {
+	hash, write, remove := briefHashRig(t, "# JIG-1\n\n## Goal\n\nShow it.\n")
+	plain := hash()
+
+	write("<p>one</p>")
+	withOne := hash()
+	if withOne == plain {
+		t.Fatal("adding an illustration left the hash as it was")
+	}
+	if again := hash(); again != withOne {
+		t.Fatalf("the same files hashed twice give %s and %s", withOne, again)
+	}
+
+	write("<p>two</p>")
+	withTwo := hash()
+	if withTwo == withOne || withTwo == plain {
+		t.Fatalf("editing the illustration gave %s, which is the hash from before the edit (%s) or without it (%s)", withTwo, withOne, plain)
+	}
+
+	write("")
+	if empty := hash(); empty == plain {
+		t.Fatal("an empty illustration.html hashes as no illustration: the file's presence is part of the brief")
+	}
+
+	remove()
+	if back := hash(); back != plain {
+		t.Fatalf("removing the illustration gave %s, want the brief's own hash %s", back, plain)
+	}
+}
+
+// TestBriefSHA256KeepsTheTwoFilesApart: the same bytes split differently
+// between brief.md and illustration.html hash differently.
+func TestBriefSHA256KeepsTheTwoFilesApart(t *testing.T) {
+	first, write, _ := briefHashRig(t, "abcd")
+	write("efgh")
+	a := first()
+
+	second, write2, _ := briefHashRig(t, "abcdef")
+	write2("gh")
+	if b := second(); a == b {
+		t.Fatalf("moving bytes from the illustration to the brief left the hash as %s", a)
+	}
+}
+
+// TestBriefSHA256RefusesAnIllustrationItCannotRead: an illustration.html that
+// is not a readable file is an error, not a brief with none.
+func TestBriefSHA256RefusesAnIllustrationItCannotRead(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	const id = "JIG-1"
+	if err := st.CreateTicketRecord(id, Ticket{Title: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	dir := st.TicketDir(id)
+	if err := os.WriteFile(filepath.Join(dir, "brief.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, IllustrationFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if sum, err := st.BriefSHA256(id); err == nil {
+		t.Fatalf("BriefSHA256 with a directory for an illustration = %q, nil; want an error", sum)
+	}
+}

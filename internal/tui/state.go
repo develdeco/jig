@@ -55,11 +55,24 @@ type ticket struct {
 	ledger []events.Envelope
 	// status is the last `jig status` read, nil before the first.
 	status *statusInfo
+	// seen are the lines the screens wrote themselves, from a status that
+	// shows work no journal line says (noteChanges).
+	seen []events.Envelope
 	// loading is set while a status is being read; dirty, when the ticket
 	// changed since the one being read was asked for.
 	loading, dirty bool
 	// failures counts the reads of the status that failed in a row.
 	failures int
+	// awaiting is set for a ticket the person asked to watch before the store
+	// had a folder for it: it clears when the ticket has a line or a row in the
+	// ticket list.
+	awaiting bool
+	// brief is the brief's text as `jig brief show --text` printed it, nil
+	// until the brief screen has read it. briefStale is set when a line about
+	// the brief arrived since (it is read again when the screen needs it), and
+	// briefLoading while a read is out.
+	brief                    *briefText
+	briefStale, briefLoading bool
 }
 
 // ticketFor returns the ticket id, making it known when it is not.
@@ -99,6 +112,7 @@ func (w *world) apply(envs []events.Envelope) (touched map[string]bool, fresh bo
 		}
 		t, isNew := w.ticketFor(id)
 		fresh = fresh || isNew
+		t.awaiting = false
 		touched[id] = true
 		if e.Src == events.SrcJournal {
 			t.lines = insertSorted(t.lines, e)
@@ -120,6 +134,7 @@ func (w *world) setRoster(rows []rosterRow) {
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
 		t.title, t.rosterState = r.Title, r.State
+		t.awaiting = false
 		listed[r.ID] = true
 		order = append(order, r.ID)
 	}
@@ -338,15 +353,20 @@ type askRow struct {
 	Decision, DecidedBy         string // "", keep or dismiss; person or agent
 }
 
-// asks are the asks status lists, each with the latest triage line for it.
-// They are known only once a status has been read.
+// asks are the asks status lists, each with the latest triage line for it
+// that a round has not closed since: a round applies the decisions made before
+// it closed, and an ask it left again is undecided (the rule internal/phase
+// reads). They are known only once a status has been read.
 func (t *ticket) asks() []askRow {
 	if t.status == nil {
 		return nil
 	}
 	decisions := map[string]events.Envelope{}
 	for _, l := range t.lines {
-		if l.Event == journal.EventTriage && l.Ref != "" {
+		switch {
+		case l.Event == journal.EventGateRound || l.Event == journal.EventGateClean:
+			decisions = map[string]events.Envelope{}
+		case l.Event == journal.EventTriage && l.Ref != "":
 			decisions[l.Ref] = l
 		}
 	}
@@ -367,23 +387,66 @@ type publishInfo struct {
 	ApprovedFor, ApprovedBy string // the head a person approved, and who
 	PR, PROutcome           string
 	Done                    bool
+	// Repos are the repos the publish lines name, in the order each first
+	// appears, when there are several: a ticket that publishes in several
+	// repos has a pull request for each. A publish of one repo has none.
+	Repos []publishRepo
+}
+
+// publishRepo is what the journal says of one repo of a publish: the same
+// facts as publishInfo, and the position of the line each came from, -1 for
+// none.
+type publishRepo struct {
+	Name                     string
+	BodyFor                  string
+	ApprovedFor, ApprovedBy  string
+	PR, PROutcome            string
+	BodyAt, ApprovedAt, PRAt int
 }
 
 func (t *ticket) publish() publishInfo {
 	var p publishInfo
-	for _, l := range t.lines {
+	by := map[string]*publishRepo{}
+	var order []string
+	repoOf := func(name string) *publishRepo {
+		if name == "" {
+			return nil
+		}
+		r := by[name]
+		if r == nil {
+			r = &publishRepo{Name: name, BodyAt: -1, ApprovedAt: -1, PRAt: -1}
+			by[name] = r
+			order = append(order, name)
+		}
+		return r
+	}
+	for i, l := range t.lines {
 		switch l.Event {
 		case journal.EventPrBody:
 			p.BodyFor, p.Branch = l.Commit, firstOf(l.Branch, p.Branch)
+			if r := repoOf(l.Repo); r != nil {
+				r.BodyFor, r.BodyAt = l.Commit, i
+			}
 		case journal.EventPublishApproved:
 			p.ApprovedFor, p.ApprovedBy, p.Branch = l.Commit, l.Provenance, firstOf(l.Branch, p.Branch)
+			if r := repoOf(l.Repo); r != nil {
+				r.ApprovedFor, r.ApprovedBy, r.ApprovedAt = l.Commit, l.Provenance, i
+			}
 		case journal.EventPr:
 			if l.URL != "" {
 				p.PR, p.PROutcome = l.URL, l.Outcome
 			}
 			p.Branch = firstOf(l.Branch, p.Branch)
+			if r := repoOf(l.Repo); r != nil && l.URL != "" {
+				r.PR, r.PROutcome, r.PRAt = l.URL, l.Outcome, i
+			}
 		case journal.EventPublishDone:
 			p.Done = true
+		}
+	}
+	if len(order) > 1 {
+		for _, name := range order {
+			p.Repos = append(p.Repos, *by[name])
 		}
 	}
 	return p
@@ -401,10 +464,15 @@ func firstOf(ss ...string) string {
 // sliceRow is a slice as the build screen lists it.
 type sliceRow struct {
 	ID, State, BlockedBy, Question string
-	Attempts                       int
-	Last                           string // what the latest line about it says
-	LastAt                         string
-	LastState                      string // the state that line is drawn in
+	// Workspace and Oracle are what slices.yaml names for the slice, FromGate the
+	// round a fix slice came from; all three are empty once only the journal is
+	// known.
+	Workspace, Oracle string
+	FromGate          int
+	Attempts          int
+	Last              string // what the latest line about it says
+	LastAt            string
+	LastState         string // the state that line is drawn in
 }
 
 // relevantSliceEvents are the lines worth showing as a slice's latest.
@@ -422,7 +490,10 @@ func (t *ticket) slices(zone *time.Location) []sliceRow {
 	var out []sliceRow
 	if t.status != nil && len(t.status.Slices) > 0 {
 		for _, s := range t.status.Slices {
-			out = append(out, sliceRow{ID: s.ID, State: s.State, BlockedBy: s.BlockedBy, Question: s.Question, Attempts: s.Attempts})
+			out = append(out, sliceRow{
+				ID: s.ID, State: s.State, BlockedBy: s.BlockedBy, Question: s.Question, Attempts: s.Attempts,
+				Workspace: s.Workspace, Oracle: s.Oracle, FromGate: s.FromGate,
+			})
 		}
 	} else {
 		for _, id := range t.sliceIDsFromLines() {
@@ -504,11 +575,11 @@ func describe(l events.Envelope) string {
 	case journal.EventTriage:
 		return strings.TrimSpace(l.Ref + " " + l.Outcome + who + " " + l.Summary)
 	case journal.EventPrBody:
-		return "pr body rendered " + short(l.Commit)
+		return "pr body rendered " + repoWords(l) + short(l.Commit)
 	case journal.EventPublishApproved:
-		return "publish approved " + short(l.Commit) + who
+		return "publish approved " + repoWords(l) + short(l.Commit) + who
 	case journal.EventPr:
-		return strings.TrimSpace("pr " + l.Outcome + " " + l.URL)
+		return strings.TrimSpace("pr " + repoWords(l) + l.Outcome + " " + l.URL)
 	case journal.EventPublishDone:
 		return "published"
 	}
@@ -549,6 +620,8 @@ func eventState(l events.Envelope) string {
 		return StateNeedsInput
 	case journal.EventAnswer, journal.EventApproval, journal.EventRevalidate:
 		return StateOK
+	case eventBriefSeen, eventSlicesSeen:
+		return StateBuilding
 	case journal.EventGateOpen, journal.EventGateReviewer:
 		return StateReviewing
 	case journal.EventGateRound:
@@ -599,6 +672,10 @@ func (t *ticket) phase(zone *time.Location) (state, label string) {
 			return StateEnvBlocked, "env blocked"
 		case "green":
 			return StateGreen, "built"
+		case "new", "queued":
+			// Nothing was claimed: the word is the ticket's own, not the
+			// building the journal's lines might otherwise suggest.
+			return StateQueued, t.status.State
 		}
 		if len(t.verifying()) > 0 {
 			return StateVerifying, "verifying"

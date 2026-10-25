@@ -111,17 +111,17 @@ func statusJIG1() string {
 	}, "\n") + "\n"
 }
 
-// statusJIG1Brief is statusJIG1 with the slices' goals and the brief block a
-// status of this version prints.
+// statusJIG1Brief is statusJIG1 with the slices' goals, workspaces and oracles
+// and the brief block a status of this version prints.
 func statusJIG1Brief() string {
 	return strings.Join([]string{
 		"ticket: JIG-1",
 		"state: parked",
-		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
-			{"a", "green", "1", "-", "-", "Greet by name"},
-			{"b", "building", "2", "-", "-", "Say goodbye, politely"},
-			{"c", "needs-input", "1", "-", "q-001", "Pick the tone"},
-			{"d", "queued", "0", "b+c", "-", "Ship the copy"},
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal", "workspace", "oracle", "from_gate"}, [][]string{
+			{"a", "green", "1", "-", "-", "Greet by name", "app", "unit", "-"},
+			{"b", "building", "2", "-", "-", "Say goodbye, politely", "app", "unit", "-"},
+			{"c", "needs-input", "1", "-", "q-001", "Pick the tone", "copy", "go test ./...", "-"},
+			{"d", "queued", "0", "b+c", "-", "Ship the copy", "copy", "go test ./...", "-"},
 		}),
 		axi.Table("questions", []string{"id", "slice", "status"}, [][]string{{"q-001", "c", "open"}}),
 		axi.KV("brief", [][2]string{{"approval", "current"}, {"approved_by", "Ada Lovelace"}, {"approved_at", "2026-10-23T09:00:00Z"}, {"provenance", "agent"}}),
@@ -130,6 +130,51 @@ func statusJIG1Brief() string {
 		}),
 		axi.Help("Answer q-001: `jig answer JIG-1 q-001 '<text>'`"),
 	}, "\n") + "\n"
+}
+
+// briefTextJIG1 is `jig brief show JIG-1 --text`: the brief's title and its four
+// sections, each with the first lines of its body, then the bodies the screens
+// do not read.
+func briefTextJIG1() string {
+	return strings.Join([]string{
+		axi.KV("brief", [][2]string{{"ticket", "JIG-1"}, {"title", "Greeting copy"}, {"illustration", "no"}}),
+		axi.Table("sections", []string{"heading", "summary"}, [][]string{
+			{"Goal", "Say hello and goodbye to a person by name, in the tone the product has."},
+			{"Greeting", "Use the first name. Fall back to \"friend\" when there is none."},
+			{"Farewell", "Say goodbye politely, and never twice."},
+			{"Tone", "Casual or formal: the owner decides. Until then neither is shipped, so the copy waits for the answer."},
+		}),
+		"section: Goal\n  Say hello and goodbye to a person by name, in the tone the product has.",
+		"section: Greeting\n  Use the first name. Fall back to \"friend\" when there is none.\n\n  A name is trimmed.",
+		"section: Farewell\n  Say goodbye politely, and never twice.",
+		"section: Tone\n  Casual or formal: the owner decides.",
+		axi.Help("`jig brief show JIG-1` serves the brief and its illustration on 127.0.0.1 for a browser"),
+	}, "\n") + "\n"
+}
+
+// jig1Records is jig1 as the build screen shows its records: the commits carry
+// their subjects, the oracle lines their command, time and who ran them, slice
+// b is checked twice and fails both times, and slice a once had a question that
+// was answered.
+func jig1Records() []events.Envelope {
+	oracle := func(command string, seconds int, source string) func(*journal.Line) {
+		return func(l *journal.Line) { l.Command, l.Seconds, l.Source = command, seconds, source }
+	}
+	return []events.Envelope{
+		jl(at(0, 1), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
+		jl(at(0, 2), "JIG-1", "a", journal.EventQuestion, with("s-builder", "", "", "Trim the name?", "q-000", "agent")),
+		jl(at(0, 3), "JIG-1", "a", journal.EventAnswer, with("s-person", "", "", "Yes, trim it.", "q-000", "person")),
+		jl(at(0, 5), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "Greet the person by name", "", "")),
+		jl(at(0, 20), "JIG-1", "a", journal.EventOracle, with("", sha('a'), "pass", "", "", ""), oracle("go test ./...", 15, "jig")),
+		jl(at(0, 21), "JIG-1", "a", journal.EventVerified, with("", sha('a'), "", "", "", "")),
+		jl(at(1, 0), "JIG-1", "b", journal.EventClaim, with("s-builder", "", "", "", "", "")),
+		jl(at(1, 10), "JIG-1", "b", journal.EventVerifyPending, with("s-builder", sha('b'), "", "Say goodbye", "", "")),
+		jl(at(1, 40), "JIG-1", "b", journal.EventOracle, with("", sha('b'), "fail", "TestB: want 2, got 3", "", ""), oracle("go test ./...", 30, "jig")),
+		jl(at(1, 50), "JIG-1", "b", journal.EventVerifyPending, with("s-builder", sha('e'), "", "Say goodbye, politely", "", "")),
+		jl(at(2, 15), "JIG-1", "b", journal.EventOracle, with("", sha('e'), "fail", "--- FAIL: TestB (0.00s) b_test.go:12: want 2, got 3 FAIL exit status 1", "", ""), oracle("go test ./...", 25, "jig")),
+		jl(at(2, 30), "JIG-1", "c", journal.EventQuestion, with("s-builder", "", "", "Formal or casual?", "q-001", "agent")),
+		ll(at(2, 31), "JIG-1", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-builder", "Bash" }),
+	}
 }
 
 // jig2 is a ticket reviewed and published: a first round that found two asks,
@@ -162,24 +207,64 @@ func statusJIG2() string {
 	return strings.Join([]string{
 		"ticket: JIG-2",
 		"state: green",
-		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question"}, [][]string{{"a", "green", "1", "-", "-"}}),
+		"fix_budget: 1 of 3 rounds used",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal", "workspace", "oracle", "from_gate"}, [][]string{
+			{"a", "green", "1", "-", "-", "Load the config", "alpha", "unit", "-"},
+		}),
 		"questions: none",
 		axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title", "why"}, [][]string{
 			{"r1-f1", "high", "alpha/a.go:3", "Unchecked error", "needs a human"},
 			{"r1-f2", "low", "beta/b.go:9", "Name shadows import", "-"},
 		}),
+		axi.Table("rounds", roundColumns, [][]string{
+			{"1", "findings", "s-reviewer", "claude", "claude-opus-5", "true", "1", "2", "1", "full", sha('0'), sha('c'), "4"},
+		}),
+		axi.Table("findings", findingColumns, [][]string{
+			{"r1-f1", "1", "ask", "high", "alpha/a.go:3", "Unchecked error", "asked", "a failed write would pass silently", "", ""},
+			{"r1-f2", "1", "ask", "low", "beta/b.go:9", "Name shadows import", "asked", "the import is hidden in this scope", "", ""},
+			{"r1-f3", "1", "fix", "medium", "alpha/a.go:12", "Close the file", "open", "a leaked handle fails the next open", "", ""},
+			{"r1-f4", "1", "note", "low", "beta/b.go:2", "Rename the helper", "noted", "a clearer name, whenever the file is next touched", "", ""},
+		}),
 		axi.Help("Run `jig triage JIG-2 <id> keep|dismiss` to decide the outstanding asks, then `jig gate JIG-2` to apply the decisions"),
 	}, "\n") + "\n"
 }
 
+// roundColumns and findingColumns are the columns of `jig status`'s rounds and
+// findings tables.
+var (
+	roundColumns   = []string{"round", "verdict", "reviewer", "harness", "model", "independent", "fix", "ask", "note", "scope", "base", "head", "files"}
+	findingColumns = []string{"id", "round", "action", "risk", "file:line", "title", "status", "rationale", "decision", "decided_by"}
+)
+
 // statusJIG2Done is `jig status JIG-2` once the clean round has folded the
-// asks away.
+// asks away and the ticket is published.
 func statusJIG2Done() string {
+	return statusJIG2DoneWith(
+		"## Intent\nLoad the config from the file the person names.\n## What changed\n- a: load the config (ccccccc)\n- fix-1: check the error\n## Verification\n- unit passed",
+		"## Slices\n- a: ccccccc\n- fix-1: ddddddd\n## Fix rounds\n- round 1: fix-slice fix-1",
+	)
+}
+
+// statusJIG2DoneWith is statusJIG2Done with the first lines of the pull request
+// body and of the changelog the status carries.
+func statusJIG2DoneWith(body, changelog string) string {
 	return strings.Join([]string{
 		"ticket: JIG-2",
 		"state: green",
-		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question"}, [][]string{{"a", "green", "1", "-", "-"}}),
+		"fix_budget: 1 of 3 rounds used",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal", "workspace", "oracle", "from_gate"}, [][]string{
+			{"a", "green", "1", "-", "-", "Load the config", "alpha", "unit", "-"},
+		}),
 		"questions: none",
+		axi.Table("rounds", roundColumns, [][]string{
+			{"1", "findings", "s-reviewer", "claude", "claude-opus-5", "true", "1", "2", "1", "full", sha('0'), sha('c'), "4"},
+			{"2", "clean", "s-reviewer", "claude", "claude-opus-5", "true", "0", "0", "0", "delta", sha('c'), sha('d'), "2"},
+		}),
+		axi.KV("publish", [][2]string{
+			{"ticket", "JIG-2"}, {"pr", "https://example.test/acme/demo/pull/7"}, {"pr_state", "opened"}, {"head", sha('d')}, {"branch", "jig/JIG-2"},
+			{"body_file", "tickets/JIG-2/pr/demo.md"}, {"body", body},
+			{"changelog_file", "tickets/JIG-2/changelog/consolidated.md"}, {"changelog", changelog},
+		}),
 		axi.Help("Run `jig status JIG-2` to confirm the ticket is fully green"),
 	}, "\n") + "\n"
 }
@@ -261,7 +346,7 @@ type rig struct {
 func newRig(t *testing.T, ticket string) *rig {
 	t.Helper()
 	r := newRunner()
-	m := New(Config{RetryDelay: time.Millisecond, Run: r.run, Ticket: ticket, Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24})
+	m := New(Config{RetryDelay: time.Millisecond, IdleTick: -1, Run: r.run, Ticket: ticket, Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24})
 	return &rig{t: t, m: m, r: r}
 }
 
@@ -352,4 +437,59 @@ func contextWithTimeout(t *testing.T, d time.Duration) context.Context {
 	ctx, cancel := context.WithTimeout(context.Background(), d)
 	t.Cleanup(cancel)
 	return ctx
+}
+
+// jig2Repos is JIG-2 published in two repos: its lines to the clean round, then
+// a body and an approval for each repo, a pull request for each, and the end.
+func jig2Repos() []events.Envelope {
+	in := func(repo string, mod func(*journal.Line)) func(*journal.Line) {
+		return func(l *journal.Line) {
+			l.Repo, l.Branch = repo, "jig/JIG-2"
+			mod(l)
+		}
+	}
+	commit := func(sha string) func(*journal.Line) { return func(l *journal.Line) { l.Commit = sha } }
+	approved := func(sha string) func(*journal.Line) {
+		return func(l *journal.Line) { l.Commit, l.Provenance = sha, "person" }
+	}
+	opened := func(sha, url string) func(*journal.Line) {
+		return func(l *journal.Line) { l.Commit, l.Outcome, l.URL = sha, "opened", url }
+	}
+	return append(jig2()[:8],
+		jl(at(14, 0), "JIG-2", "", journal.EventPrBody, in("api", commit(sha('c')))),
+		jl(at(14, 1), "JIG-2", "", journal.EventPrBody, in("web", commit(sha('d')))),
+		jl(at(14, 10), "JIG-2", "", journal.EventPublishApproved, in("api", approved(sha('c')))),
+		jl(at(14, 11), "JIG-2", "", journal.EventPublishApproved, in("web", approved(sha('d')))),
+		jl(at(14, 20), "JIG-2", "", journal.EventPr, in("api", opened(sha('c'), "https://example.test/acme/api/pull/7"))),
+		jl(at(14, 21), "JIG-2", "", journal.EventPr, in("web", opened(sha('d'), "https://example.test/acme/web/pull/3"))),
+		jl(at(14, 22), "JIG-2", "", journal.EventPublishDone),
+	)
+}
+
+// statusJIG2Repos is `jig status JIG-2` once it is published in two repos: the
+// publish block has the branch and the changelog, and a table the pull request
+// of each repo.
+func statusJIG2Repos() string {
+	return strings.Join([]string{
+		"ticket: JIG-2",
+		"state: green",
+		"fix_budget: 1 of 3 rounds used",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal", "workspace", "oracle", "from_gate"}, [][]string{
+			{"a", "green", "1", "-", "-", "Load the config", "api/alpha", "unit", "-"},
+			{"b", "green", "1", "-", "-", "Show the config", "web/beta", "unit", "-"},
+		}),
+		"questions: none",
+		axi.Table("rounds", roundColumns, [][]string{
+			{"1", "clean", "s-reviewer", "claude", "claude-opus-5", "true", "0", "0", "0", "full", "api:" + sha('0') + "+web:" + sha('0'), "api:" + sha('c') + "+web:" + sha('d'), "4"},
+		}),
+		axi.KV("publish", [][2]string{
+			{"ticket", "JIG-2"}, {"branch", "jig/JIG-2"},
+			{"changelog_file", "tickets/JIG-2/changelog/consolidated.md"}, {"changelog", "## Slices\n- a: ccccccc\n- b: ddddddd"},
+		}),
+		axi.Table("publish_prs", []string{"repo", "pr", "state", "head", "body_file"}, [][]string{
+			{"api", "https://example.test/acme/api/pull/7", "opened", sha('c'), "tickets/JIG-2/pr/api.md"},
+			{"web", "https://example.test/acme/web/pull/3", "opened", sha('d'), "tickets/JIG-2/pr/web.md"},
+		}),
+		axi.Help("JIG-2 is published: run `jig next` to see the tickets that are left"),
+	}, "\n") + "\n"
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/mirror"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -301,6 +302,24 @@ func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.Ma
 	}
 	if w := e.stderr; w != nil {
 		d.Warn = func(format string, args ...any) { fmt.Fprintf(w, format, args...) }
+	}
+	if st != nil {
+		// A refusal that sends a person back to an earlier phase names the
+		// prompt `jig next`, `jig status` and `jig here` name: all of them read
+		// the phase the same way (derivePhase).
+		d.Prompt = func(ticket string) string {
+			t, err := derivePhase(st, ticket)
+			if err != nil {
+				return ""
+			}
+			return t.Prompt
+		}
+		// A stacked ticket's pull request goes into its parent's branch until
+		// the parent merges, which the host is asked about now: a pull request
+		// opened into a branch that merged already goes nowhere useful.
+		d.Stack = func(ticket string) (stack.Plan, error) {
+			return stack.Read(stackInput(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, 0)), ticket)
+		}
 	}
 	return d
 }
