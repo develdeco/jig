@@ -539,6 +539,94 @@ func TestPublishSubStepsFollowTheFlow(t *testing.T) {
 	}
 }
 
+// TestPublishSubStepsOfATicketInSeveralRepos: a publish whose lines name two
+// repos has a pull request sub-step for each, in place of the one, and is done
+// with the body and the approval when both repos are. A publish whose lines name
+// one repo (a ticket in one repo of a project of several) looks as it always did.
+func TestPublishSubStepsOfATicketInSeveralRepos(t *testing.T) {
+	t.Parallel()
+	clean := append(built(), ln(journal.EventGateOpen, attempt(1)), ln(journal.EventGateClean, attempt(1)))
+	repo := func(name string) func(*journal.Line) { return func(l *journal.Line) { l.Repo = name } }
+	url := func(u string) func(*journal.Line) { return func(l *journal.Line) { l.URL = u } }
+	step := func(f Facts, extra ...journal.Line) Phase {
+		return Derive(f, append(append([]journal.Line{}, clean...), extra...)).Of(Publish)
+	}
+	states := func(p Phase) string {
+		var out []string
+		for _, s := range p.Subs {
+			out = append(out, s.Key+"="+s.State)
+		}
+		return strings.Join(out, " ")
+	}
+	bodies := []journal.Line{
+		ln(journal.EventPrBody, commit("aaaaaaa1"), repo("api")),
+		ln(journal.EventPrBody, commit("bbbbbbb2"), repo("web")),
+	}
+	approvals := []journal.Line{
+		ln(journal.EventPublishApproved, provenance("person"), repo("api")),
+		ln(journal.EventPublishApproved, provenance("person"), repo("web")),
+	}
+	apiPR := ln(journal.EventPr, outcome("opened"), repo("api"), url("https://example.invalid/o/api/pull/7"))
+	webPR := ln(journal.EventPr, outcome("opened"), repo("web"), url("https://example.invalid/o/web/pull/8"))
+	with := func(groups ...[]journal.Line) []journal.Line {
+		var all []journal.Line
+		for _, g := range groups {
+			all = append(all, g...)
+		}
+		return all
+	}
+
+	// The body of one repo is not the body of the ticket.
+	p := step(allGreen(), with(bodies[:1], approvals[:1])...)
+	if want := "body=done approval=done pr=active changelog=pending done=pending"; states(p) != want {
+		t.Errorf("one repo named: %s, want %s", states(p), want)
+	}
+	p = step(allGreen(), with(bodies[:1], bodies[1:], approvals[:1])...)
+	if want := "body=done approval=needs-you pr:api=pending pr:web=pending changelog=pending done=pending"; states(p) != want {
+		t.Errorf("both bodies, one approval: %s, want %s", states(p), want)
+	}
+	if s := sub(t, p, "approval"); s.State != SubNeedsYou {
+		t.Errorf("approval = %+v, want the person's still owed for the second repo", s)
+	}
+
+	p = step(allGreen(), with(bodies, approvals)...)
+	if want := "body=done approval=done pr:api=active pr:web=pending changelog=pending done=pending"; states(p) != want {
+		t.Errorf("approved: %s, want %s", states(p), want)
+	}
+
+	p = step(allGreen(), with(bodies, approvals, []journal.Line{apiPR})...)
+	if want := "body=done approval=done pr:api=done pr:web=active changelog=pending done=pending"; states(p) != want {
+		t.Errorf("the api's pull request opened: %s, want %s", states(p), want)
+	}
+	if s := sub(t, p, "pr:api"); s.Label != "pull request api" || s.Detail != "https://example.invalid/o/api/pull/7" {
+		t.Errorf("pr:api = %+v, want the label and the url", s)
+	}
+	if s := sub(t, p, "pr:web"); s.Label != "pull request web" || s.Detail != "" {
+		t.Errorf("pr:web = %+v, want a label and no url", s)
+	}
+
+	f := allGreen()
+	f.Published = true
+	p = step(f, with(bodies, approvals, []journal.Line{apiPR, webPR, ln(journal.EventChangelog), ln(journal.EventPublishDone)})...)
+	if want := "body=done approval=done pr:api=done pr:web=done changelog=done done=done"; states(p) != want {
+		t.Errorf("published: %s, want %s", states(p), want)
+	}
+	if p.State != StateDone || p.Text != "2 pull requests · api, web" {
+		t.Errorf("published phase = %q (%s)", p.Text, p.State)
+	}
+
+	// A ticket in one repo of a project of several names its repo on its lines,
+	// and has the one pull request step.
+	one := ln(journal.EventPr, outcome("opened"), repo("web"), url("https://example.invalid/o/web/pull/8"))
+	p = step(f, one, ln(journal.EventChangelog), ln(journal.EventPublishDone))
+	if want := "body=pending approval=pending pr=done changelog=done done=done"; states(p) != want {
+		t.Errorf("one repo named, published: %s, want %s", states(p), want)
+	}
+	if p.Text != "pull request opened · https://example.invalid/o/web/pull/8" {
+		t.Errorf("text = %q", p.Text)
+	}
+}
+
 // TestAnEarlierPhaseChangedTakesTheLaterOnesBack: a phase is done only while
 // every phase before it is.
 func TestAnEarlierPhaseChangedTakesTheLaterOnesBack(t *testing.T) {

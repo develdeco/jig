@@ -45,12 +45,26 @@ const (
 // the changelog once the publish finished. head is the head of the latest pr,
 // publish-approved or pr-body line. A ticket whose publish has not begun has no
 // block.
+//
+// A ticket that publishes in several repos has one pull request for each, and
+// its lines name their repo. The block then carries the ticket, the branch
+// (one name in every repo) and the changelog, and a table beside it has a row
+// for each repo:
+//
+//	publish_prs[2]{repo,pr,state,head,body_file}:
+//	  api,https://example.test/acme/api/pull/7,opened,<sha>,tickets/JIG-2/pr/api.md
+//	  web,-,-,<sha>,tickets/JIG-2/pr/web.md
+//
+// A row's pr and state are "-" until the repo's pull request is opened or
+// recorded.
 func publishBlocks(st *store.Store, ticket string) ([]string, error) {
 	lines, err := journal.Read(st, ticket)
 	if err != nil {
 		return nil, err
 	}
 	var body, approved, pr journal.Line
+	var repos []string
+	byRepo := map[string]*repoPublish{}
 	for _, l := range lines {
 		switch l.Event {
 		case journal.EventPrBody:
@@ -60,6 +74,27 @@ func publishBlocks(st *store.Store, ticket string) ([]string, error) {
 		case journal.EventPr:
 			if l.URL != "" {
 				pr = l
+			}
+		default:
+			continue
+		}
+		if l.Repo == "" {
+			continue
+		}
+		rp := byRepo[l.Repo]
+		if rp == nil {
+			rp = &repoPublish{name: l.Repo}
+			byRepo[l.Repo] = rp
+			repos = append(repos, l.Repo)
+		}
+		switch l.Event {
+		case journal.EventPrBody:
+			rp.body = l
+		case journal.EventPublishApproved:
+			rp.approved = l
+		case journal.EventPr:
+			if l.URL != "" {
+				rp.pr = l
 			}
 		}
 	}
@@ -72,11 +107,14 @@ func publishBlocks(st *store.Store, ticket string) ([]string, error) {
 			pairs = append(pairs, [2]string{key, value})
 		}
 	}
-	add("pr", pr.URL)
-	add("pr_state", pr.Outcome)
-	add("head", firstNonEmptyString(pr.Commit, approved.Commit, body.Commit))
+	several := len(repos) > 1
+	if !several {
+		add("pr", pr.URL)
+		add("pr_state", pr.Outcome)
+		add("head", firstNonEmptyString(pr.Commit, approved.Commit, body.Commit))
+	}
 	add("branch", firstNonEmptyString(pr.Branch, approved.Branch, body.Branch))
-	if path, ok := inStore(st.Root, body.Ref); ok {
+	if path, ok := inStore(st.Root, body.Ref); ok && !several {
 		add("body_file", body.Ref)
 		text, err := firstLinesOf(path, false)
 		if err != nil {
@@ -93,7 +131,30 @@ func publishBlocks(st *store.Store, ticket string) ([]string, error) {
 		add("changelog_file", rel)
 		add("changelog", changelog)
 	}
-	return []string{axi.KV("publish", pairs)}, nil
+	blocks := []string{axi.KV("publish", pairs)}
+	if several {
+		rows := make([][]string, 0, len(repos))
+		for _, name := range repos {
+			rp := byRepo[name]
+			bodyFile := "-"
+			if _, ok := inStore(st.Root, rp.body.Ref); ok {
+				bodyFile = rp.body.Ref
+			}
+			rows = append(rows, []string{
+				name, dashed(rp.pr.URL), dashed(rp.pr.Outcome),
+				dashed(firstNonEmptyString(rp.pr.Commit, rp.approved.Commit, rp.body.Commit)), bodyFile,
+			})
+		}
+		blocks = append(blocks, axi.Table("publish_prs", []string{"repo", "pr", "state", "head", "body_file"}, rows))
+	}
+	return blocks, nil
+}
+
+// repoPublish is the publish lines of one repo of a ticket that publishes in
+// several: the latest of its body, its approval and its pull request.
+type repoPublish struct {
+	name               string
+	body, approved, pr journal.Line
 }
 
 // inStore is the path of the store-relative file rel names, and whether it lies

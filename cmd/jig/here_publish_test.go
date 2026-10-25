@@ -96,3 +96,36 @@ func TestHerePublishSectionShowsWhereThePublishStands(t *testing.T) {
 		t.Errorf("jig here lacks the pull request:\n%s", whole)
 	}
 }
+
+// TestHerePublishSectionNamesThePullRequestOfEachRepo: a publish whose lines name
+// two repos shows a pull request for each, by the repo, in place of the one.
+func TestHerePublishSectionNamesThePullRequestOfEachRepo(t *testing.T) {
+	t.Parallel()
+	section := publishSection(t)
+	r := newVerifyRig(t)
+	head := strings.Repeat("c", 40)
+	for _, l := range []journal.Line{
+		{Event: journal.EventPr, Outcome: "opened", Commit: head, Repo: "web", URL: "https://github.com/owner/web/pull/3"},
+		{Event: journal.EventPr, Outcome: "opened", Commit: head, Repo: "api", URL: "https://github.com/owner/api/pull/9"},
+	} {
+		if err := journal.Append(r.st, r.fx.Ticket, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	blocks, err := section.Blocks(hereVerifyCtx(r, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := strings.Join(blocks, "\n")
+	for _, want := range []string{"pr_api: ", "https://github.com/owner/api/pull/9", "pr_web: ", "https://github.com/owner/web/pull/3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the section lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "\n  pr: ") {
+		t.Errorf("the section has the one pull request beside the two:\n%s", out)
+	}
+	if strings.Index(out, "pr_api") > strings.Index(out, "pr_web") {
+		t.Errorf("the pull requests are not in the order of the repos' names:\n%s", out)
+	}
+}

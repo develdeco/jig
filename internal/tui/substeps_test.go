@@ -226,3 +226,25 @@ func TestPickingSubstepsKeepsWhatNeedsAPersonAndWhatIsUnderWay(t *testing.T) {
 		t.Errorf("picked %v of five done, want the latest two (3 and 4) and a line for the count", got)
 	}
 }
+
+// TestSubstepsOfAPublishInTwoReposListAPullRequestForEach: the sub-steps of the
+// publish step have a pull request for each repo, each with its own url, and the
+// activity names the repo a line is about.
+func TestSubstepsOfAPublishInTwoReposListAPullRequestForEach(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.r.answer("status JIG-2 --store /s", statusJIG2Repos(), 0)
+	g.feed(jig2Repos()...)
+	v := g.view()
+	for _, want := range []string{
+		"4 Publish · sub-steps", "✓ pull request api · https://example.test/acme/api/pull/7",
+		"✓ pull request web · https://example.test/acme/web/pull/3", "✓ published",
+	} {
+		if !strings.Contains(v, want) {
+			t.Errorf("the ticket screen lacks %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "○ pull request ·") {
+		t.Errorf("the ticket screen lists the one pull request step beside the two:\n%s", v)
+	}
+}

@@ -270,11 +270,12 @@ func TestAmbiguousWorkspaceIsAValidationProblem(t *testing.T) {
 	projRefusal(t, "validate with a workspace its repo lacks", validate(), 2, `slice helper: workspace "server" not in the manifest of repo web`)
 }
 
-// TestGateRefusesAMultiRepoTicketUntilItCoversThem: the gate covers every repo a
-// ticket builds in, so it does not turn away a ticket whose slices build in two;
-// jig publish ships one repo, so it refuses such a ticket in every form,
-// whatever state its slices are in. A ticket that builds in one repo of the same
-// project is judged as ever by both.
+// TestGateRefusesAMultiRepoTicketUntilItCoversThem: the gate and publish both
+// cover every repo a ticket builds in, so neither turns away a ticket whose
+// slices build in two for that. Each is turned away for what the ticket lacks:
+// a slice that is not built, and with every slice green the branch (the gate) or
+// the round (publish). A ticket that builds in one repo of the same project is
+// judged as ever by both.
 func TestGateRefusesAMultiRepoTicketUntilItCoversThem(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{Orchestrator: true})
@@ -287,29 +288,28 @@ func TestGateRefusesAMultiRepoTicketUntilItCoversThem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = "this ticket's slices span repos api and web; publish ships one repo until multi-repo publishing lands"
 
-	// Publish is refused before it asks anything of the slices. The gate asks for
-	// them: it is turned away for the slice that is not built, and not for where
-	// the slices build.
+	// Both ask for the slices first, from the orchestrator and from each repo.
 	for _, cwd := range []string{fx.OrchestratorDir, fx.NestedDirs["api"], fx.NestedDirs["web"]} {
-		for _, args := range [][]string{{"publish", ticket}, {"publish", ticket, "--body"}} {
+		for _, args := range [][]string{{"gate", ticket}, {"publish", ticket}, {"publish", ticket, "--body"}} {
 			r := runJig(t, env, cwd, args...)
-			projRefusal(t, "jig "+strings.Join(args, " ")+" in "+filepath.Base(cwd), r, 1, "error: "+want, "code: MULTI_REPO_NOT_YET")
-		}
-		r := runJig(t, env, cwd, "gate", ticket)
-		projRefusal(t, "jig gate in "+filepath.Base(cwd), r, 1, "code: GATE_NOT_GREEN")
-		if strings.Contains(r.Stdout, "MULTI_REPO_NOT_YET") {
-			t.Errorf("jig gate in %s is refused for the repos the ticket builds in:\n%s", filepath.Base(cwd), r.Stdout)
+			projRefusal(t, "jig "+strings.Join(args, " ")+" in "+filepath.Base(cwd), r, 1, "code: GATE_NOT_GREEN")
+			if strings.Contains(r.Stdout, "MULTI_REPO_NOT_YET") {
+				t.Errorf("jig %s in %s is refused for the repos the ticket builds in:\n%s", strings.Join(args, " "), filepath.Base(cwd), r.Stdout)
+			}
 		}
 	}
 
-	// The same once every slice is green: publish is refused for where the slices
-	// build, not for whether they are done, and the gate goes on to the branch,
-	// which nothing has built yet in the first repo it reads.
+	// The same once every slice is green: the gate goes on to the branch, which
+	// nothing has built yet in the first repo it reads, and publish to the round
+	// nobody has opened.
 	setStates(t, st, ticket, map[string]string{"server": "green", "ui": "green"})
-	projRefusal(t, "jig publish with every slice green", runJig(t, env, fx.OrchestratorDir, "publish", ticket), 1, "code: MULTI_REPO_NOT_YET")
 	projRefusal(t, "jig gate with every slice green and no branch", runJig(t, env, fx.OrchestratorDir, "gate", ticket), 1, "code: BRANCH_NOT_FOUND", "error: repo api: ")
+	r := runJig(t, env, fx.OrchestratorDir, "publish", ticket)
+	projRefusal(t, "jig publish with every slice green and no round", r, 1, "no gate rounds recorded for "+ticket)
+	if strings.Contains(r.Stdout, "MULTI_REPO_NOT_YET") {
+		t.Errorf("jig publish with every slice green is refused for the repos the ticket builds in:\n%s", r.Stdout)
+	}
 
 	// A ticket of the same project that builds in one repo is judged as ever:
 	// not green, it is turned away for that.

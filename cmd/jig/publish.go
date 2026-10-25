@@ -16,10 +16,10 @@ import (
 // the same text, which the help parity test compares.
 const (
 	publishYesUsage     = "skip the interactive confirm"
-	publishBodyUsage    = "render the pull request body and review notes for the reviewed head and stop: nothing is pushed, no lease or branch changes"
-	publishPRUsage      = "record the pull request at this URL, which you opened from the ticket's branch, as the ticket's and finish the publish"
-	publishApproveUsage = "record that you approve publishing the reviewed head, so `jig publish` pushes it without asking"
-	publishRepoUsage    = "the repo to publish, by its name in the project (default: the project's first)"
+	publishBodyUsage    = "render the pull request body and review notes for the reviewed head of each repo and stop: nothing is pushed, no lease or branch changes"
+	publishPRUsage      = "record the pull request at this URL, which you opened from the ticket's branch, as the ticket's (with --repo, for a ticket that builds in several repos) and finish the publish once every repo has one"
+	publishApproveUsage = "record that you approve publishing the reviewed head of each repo, so `jig publish` pushes it without asking"
+	publishRepoUsage    = "publish only this repo, by its name in the project (default: every repo the ticket builds in; --pr needs it when there are several)"
 	publishPicksUsage   = "a picks file: the recordings to show in the pull request's demo, in the pick result's JSON shape"
 	publishStoreUsage   = "explicit store path"
 	publishProjectUsage = "project name, resolved via the machine mapping"
@@ -53,7 +53,9 @@ func init() {
 // git and gh work: --body renders the pull request body and stops, --pr
 // records the pull request the agent opened, --approve records a person's
 // approval of the head. Publish reconciles nothing, squashes nothing and
-// commits nothing on the branch.
+// commits nothing on the branch. A ticket that builds in several repos has a
+// pull request for each: every form covers them all, or the one --repo names,
+// and --pr takes the repo of the pull request it records.
 func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
@@ -114,19 +116,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		bodyFile := filepath.Join(st.Root, filepath.FromSlash(report.PRBody))
-		kv := [][2]string{
-			{"ticket", ticket}, {"repo", report.Repo}, {"branch", report.Branch}, {"base", report.Target},
-			{"head", report.Head}, {"title", report.Title}, {"pr_body", bodyFile}, {"review_notes", filepath.Join(st.Root, filepath.FromSlash(report.ReviewNotes))},
-		}
-		kv = append(kv, picksRows(report.Picks)...)
-		axi.Render(stdout,
-			axi.KV("publish_body", kv),
-			axi.Help(
-				fmt.Sprintf("Push %s to origin, open the pull request with the title and body above (gh pr create --head %s --base %s --title <title> --body-file <pr_body>), then record it: `jig publish %s --pr <url>`", report.Branch, report.Branch, report.Target, ticket),
-				fmt.Sprintf("Or have jig push and open it: `jig publish %s`", ticket),
-			),
-		)
+		renderBodies(stdout, st.Root, ticket, report)
 		return 0
 	case *prURL != "":
 		report, err := verifydeliver.PublishRecordPR(deps, opts, *prURL, nil)
@@ -137,12 +127,16 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		if !report.Verified {
 			verified = "no (the repo has no pull-request host to ask)"
 		}
+		help := "Run `jig status " + ticket + "` to confirm the ticket is fully green"
+		if len(report.Pending) > 0 {
+			help = fmt.Sprintf("%s still needs its pull request: `jig publish %s --pr <url> --repo %s`", joinWords(report.Pending), ticket, report.Pending[0])
+		}
 		axi.Render(stdout,
 			axi.KV("publish_pr", [][2]string{
 				{"ticket", ticket}, {"repo", report.Repo}, {"url", report.URL}, {"branch", report.Branch},
 				{"commit", report.Commit}, {"verified", verified},
 			}),
-			axi.Help("Run `jig status "+ticket+"` to confirm the ticket is fully green"),
+			axi.Help(help),
 		)
 		return 0
 	case *approve:
@@ -154,16 +148,23 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		hint := fmt.Sprintf("`jig publish %s` now pushes %s without asking", ticket, shortSHA(report.Head))
+		heads := make([]string, len(report.Repos))
+		for i, r := range report.Repos {
+			heads[i] = shortSHA(r.Head)
+		}
+		hint := fmt.Sprintf("`jig publish %s` now pushes %s without asking", ticket, strings.Join(heads, ", "))
 		if provenance != "person" {
 			hint = "Only a person at a terminal stands in for the confirmation: this approval was recorded as an agent's, and `jig publish` still asks (or takes --yes)"
 		}
-		axi.Render(stdout,
-			axi.KV("publish_approved", [][2]string{
-				{"ticket", ticket}, {"repo", report.Repo}, {"branch", report.Branch}, {"head", report.Head}, {"provenance", report.Provenance},
-			}),
-			axi.Help(hint),
-		)
+		blocks := []string{axi.KV("publish_approved", approvedRows(ticket, report))}
+		if len(report.Repos) > 1 {
+			rows := make([][]string, len(report.Repos))
+			for i, r := range report.Repos {
+				rows[i] = []string{r.Repo, r.Head}
+			}
+			blocks = append(blocks, axi.Table("approved", []string{"repo", "head"}, rows))
+		}
+		axi.Render(stdout, append(blocks, axi.Help(hint))...)
 		return 0
 	}
 
@@ -175,14 +176,77 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	for repo, path := range report.PRBody {
 		prRows = append(prRows, []string{repo, path})
 	}
+	head := [][2]string{{"ticket", ticket}, {"tier", report.Tier}}
+	help := "Run `jig status " + ticket + "` to confirm the ticket is fully green"
+	if len(report.Pending) > 0 {
+		head = append(head, [2]string{"pending", strings.Join(report.Pending, ", ")})
+		help = fmt.Sprintf("%s still needs its pull request: `jig publish %s --repo %s`", joinWords(report.Pending), ticket, report.Pending[0])
+	}
 	axi.Render(stdout,
-		axi.KV("publish", append([][2]string{{"ticket", ticket}, {"tier", report.Tier}}, picksRows(report.Picks)...)),
+		axi.KV("publish", append(head, picksRows(report.Picks)...)),
 		pushedTable(report),
 		axi.Table("pr_body", []string{"repo", "path"}, prRows),
 		prURLTable(report),
-		axi.Help("Run `jig status "+ticket+"` to confirm the ticket is fully green"),
+		axi.Help(help),
 	)
 	return 0
+}
+
+// renderBodies prints what `jig publish --body` rendered. A body for one repo
+// is a block of its facts; bodies for several are a table with a row for each
+// repo, since the branch is the same in all.
+func renderBodies(stdout io.Writer, root, ticket string, report verifydeliver.BodyReport) {
+	path := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
+	if len(report.Repos) == 1 {
+		r := report.Repos[0]
+		kv := [][2]string{
+			{"ticket", ticket}, {"repo", r.Repo}, {"branch", report.Branch}, {"base", r.Target},
+			{"head", r.Head}, {"title", r.Title}, {"pr_body", path(r.PRBody)}, {"review_notes", path(r.ReviewNotes)},
+		}
+		kv = append(kv, picksRows(report.Picks)...)
+		record, bare := "", fmt.Sprintf("`jig publish %s`", ticket)
+		if len(report.Covered) > 1 {
+			record, bare = " --repo "+r.Repo, fmt.Sprintf("`jig publish %s --repo %s`", ticket, r.Repo)
+		}
+		axi.Render(stdout,
+			axi.KV("publish_body", kv),
+			axi.Help(
+				fmt.Sprintf("Push %s to origin, open the pull request with the title and body above (gh pr create --head %s --base %s --title <title> --body-file <pr_body>), then record it: `jig publish %s --pr <url>%s`", report.Branch, report.Branch, r.Target, ticket, record),
+				"Or have jig push and open it: "+bare,
+			),
+		)
+		return
+	}
+	rows := make([][]string, len(report.Repos))
+	for i, r := range report.Repos {
+		rows[i] = []string{r.Repo, r.Target, r.Head, r.Title, path(r.PRBody), path(r.ReviewNotes)}
+	}
+	axi.Render(stdout,
+		axi.KV("publish_body", append([][2]string{{"ticket", ticket}, {"branch", report.Branch}}, picksRows(report.Picks)...)),
+		axi.Table("bodies", []string{"repo", "base", "head", "title", "pr_body", "review_notes"}, rows),
+		axi.Help(
+			fmt.Sprintf("Push %s to origin in each repo, open a pull request in each with its title and body above (gh pr create --head %s --base <base> --title <title> --body-file <pr_body>), then record each: `jig publish %s --pr <url> --repo <repo>`", report.Branch, report.Branch, ticket),
+			fmt.Sprintf("Each body names the others' pull requests, \"pending\" until they are recorded: once all are, render the bodies again and update the pull requests with them. Or have jig push and open them all: `jig publish %s`", ticket),
+		),
+	)
+}
+
+// approvedRows are the facts of an approval: the one repo's head, or for
+// several repos the branch alone, the heads being a table.
+func approvedRows(ticket string, report verifydeliver.ApproveReport) [][2]string {
+	if len(report.Repos) == 1 {
+		r := report.Repos[0]
+		return [][2]string{{"ticket", ticket}, {"repo", r.Repo}, {"branch", report.Branch}, {"head", r.Head}, {"provenance", report.Provenance}}
+	}
+	return [][2]string{{"ticket", ticket}, {"branch", report.Branch}, {"provenance", report.Provenance}}
+}
+
+// joinWords lists words in prose: "a", "a and b", "a, b and c".
+func joinWords(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }
 
 // picksRows are the publish report's rows for the recordings it picked: none

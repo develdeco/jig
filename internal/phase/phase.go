@@ -19,6 +19,7 @@ package phase
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -376,7 +377,26 @@ type publishView struct {
 	approvedAgent  bool
 	pr, prOutcome  string
 	changelog      bool
+
+	// repos are the repos the publish lines name, in the order each first
+	// appears, and by what each of them says. A publish names its repos in a
+	// project of several: a ticket that publishes in two of them has a pull
+	// request for each, and the sub-steps say so.
+	repos []string
+	by    map[string]*repoView
 }
+
+// repoView is what the publish lines of one repo say.
+type repoView struct {
+	body           bool
+	bodyFor        string
+	approvedPerson bool
+	approvedAgent  bool
+	pr, prOutcome  string
+}
+
+// several is whether the publish lines name more than one repo.
+func (p publishView) several() bool { return len(p.repos) > 1 }
 
 // digest is the journal read once, with the facts laid over it.
 type digest struct {
@@ -627,23 +647,70 @@ func (d *digest) readPublish() {
 	}
 	p := &d.pub
 	for _, l := range d.lines[from:] {
+		var r *repoView
+		switch l.Event {
+		case journal.EventPrBody, journal.EventPublishApproved, journal.EventPr:
+			r = p.repoOf(l.Repo)
+		}
 		switch l.Event {
 		case journal.EventPrBody:
 			p.body, p.bodyFor = true, l.Commit
+			if r != nil {
+				r.body, r.bodyFor = true, l.Commit
+			}
 		case journal.EventPublishApproved:
 			if l.Provenance == "person" {
 				p.approvedPerson = true
+				if r != nil {
+					r.approvedPerson = true
+				}
 			} else {
 				p.approvedAgent = true
+				if r != nil {
+					r.approvedAgent = true
+				}
 			}
 		case journal.EventPr:
 			if l.URL != "" {
 				p.pr, p.prOutcome = l.URL, l.Outcome
+				if r != nil {
+					r.pr, r.prOutcome = l.URL, l.Outcome
+				}
 			}
 		case journal.EventChangelog:
 			p.changelog = true
 		}
 	}
+	// A publish of several repos is done with a step when every repo is:
+	// the body is written for each, and a person approved each head. A repo
+	// whose lines name no repo (a project of one writes none) has no view.
+	if p.several() {
+		p.body, p.approvedPerson, p.approvedAgent = true, true, false
+		for _, name := range p.repos {
+			r := p.by[name]
+			p.body = p.body && r.body
+			p.approvedPerson = p.approvedPerson && r.approvedPerson
+			p.approvedAgent = p.approvedAgent || r.approvedAgent
+		}
+	}
+}
+
+// repoOf is the view of the repo name, made when it is first named. A line
+// that names no repo has none.
+func (p *publishView) repoOf(name string) *repoView {
+	if name == "" {
+		return nil
+	}
+	if p.by == nil {
+		p.by = map[string]*repoView{}
+	}
+	r := p.by[name]
+	if r == nil {
+		r = &repoView{}
+		p.by[name] = r
+		p.repos = append(p.repos, name)
+	}
+	return r
 }
 
 // planned is how many slices the brief planned, as against the fix slices a
@@ -1053,19 +1120,38 @@ func roundOfFinding(id string) int {
 	return n
 }
 
+// publishStep is a sub-step of the publish before it is given its state.
+type publishStep struct {
+	key, label, detail string
+	done               bool
+}
+
+// prSteps are the pull request sub-steps of a publish that names several
+// repos: one for each, keyed pr:<repo>, done once the repo's pull request is
+// opened or recorded and carrying its url.
+func (p publishView) prSteps() []publishStep {
+	steps := make([]publishStep, 0, len(p.repos))
+	for _, name := range p.repos {
+		r := p.by[name]
+		steps = append(steps, publishStep{"pr:" + name, "pull request " + name, r.pr, r.pr != ""})
+	}
+	return steps
+}
+
 // publish is the publish phase and whether the ticket is published.
 func (d *digest) publish(prevDone bool) (Phase, bool) {
 	p := Phase{Name: Publish}
 	pub := d.pub
-	steps := []struct {
-		key, label, detail string
-		done               bool
-	}{
+	steps := []publishStep{
 		{"body", "body", short(pub.bodyFor), pub.body},
 		{"approval", "approval", "", pub.approvedPerson},
 		{"pr", "pull request", pub.pr, pub.pr != ""},
 		{"changelog", "changelog", "", pub.changelog},
 		{"done", "published", "", d.f.Published},
+	}
+	if pub.several() {
+		// A pull request for each repo, in place of the one.
+		steps = slices.Concat(steps[:2], pub.prSteps(), steps[3:])
 	}
 	first := true
 	for _, s := range steps {
@@ -1093,7 +1179,10 @@ func (d *digest) publish(prevDone bool) (Phase, bool) {
 		return p, true
 	case d.f.Published:
 		p.Text = "published"
-		if pub.pr != "" {
+		switch {
+		case pub.several():
+			p.Text = fmt.Sprintf("%d pull requests · %s", len(pub.repos), strings.Join(pub.repos, ", "))
+		case pub.pr != "":
 			p.Text = strings.TrimSpace("pull request " + firstOf(pub.prOutcome, "opened") + " · " + pub.pr)
 		}
 		return p, true

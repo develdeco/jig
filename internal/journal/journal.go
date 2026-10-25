@@ -81,6 +81,11 @@ type Line struct {
 	// Branch and URL name a branch or a link the line is about.
 	Branch string `json:"branch,omitempty"`
 	URL    string `json:"url,omitempty"`
+	// Repo names the repo a pr-body, publish-approved or pr line is about, by
+	// its name in the project. A project of several repos sets it, since a
+	// publish there opens one pull request for each repo; a project of one
+	// repo leaves it out.
+	Repo string `json:"repo,omitempty"`
 	// Ref is the id of the subject the line is about: a question (q-001),
 	// a review finding (r1-f2) or a note's fingerprint.
 	Ref string `json:"ref,omitempty"`

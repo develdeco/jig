@@ -243,3 +243,17 @@ func stripANSI(s string) string {
 	}
 	return b.String()
 }
+
+// TestPublishScreenOfATicketInTwoRepos: a ticket published in two repos has a
+// check for the pull request of each, and the body and approval name the head of
+// each repo; the screen is as tall as the window.
+func TestPublishScreenOfATicketInTwoRepos(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.r.answer("status JIG-2 --store /s", statusJIG2Repos(), 0)
+	g.feed(jig2Repos()...).press("enter")
+	if g.m.Screen() != "publish" {
+		t.Fatalf("on %s, want publish", g.m.Screen())
+	}
+	golden(t, "publish-repos", g.view())
+}

@@ -94,7 +94,16 @@ func herePublishBlocks(c hereCtx) ([]string, error) {
 		if s.ApprovedFor != "" {
 			kv = append(kv, [2]string{"approved_for", shortSHA(s.ApprovedFor)})
 		}
-		if s.PR != "" {
+		if len(s.PRs) > 1 {
+			repos := make([]string, 0, len(s.PRs))
+			for repo := range s.PRs {
+				repos = append(repos, repo)
+			}
+			sort.Strings(repos)
+			for _, repo := range repos {
+				kv = append(kv, [2]string{"pr_" + repo, s.PRs[repo]})
+			}
+		} else if s.PR != "" {
 			kv = append(kv, [2]string{"pr", s.PR})
 		}
 		kv = append(kv, [2]string{"published", map[bool]string{true: "yes", false: "no"}[s.Published]})

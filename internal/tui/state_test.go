@@ -185,7 +185,7 @@ func TestPublishCollectsTheJournalsAccount(t *testing.T) {
 		BodyFor: sha('c'), Branch: "jig/JIG-2", ApprovedFor: sha('c'), ApprovedBy: "person",
 		PR: "https://example.test/acme/demo/pull/7", PROutcome: "opened", Done: true,
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("publish = %+v, want %+v", got, want)
 	}
 }
@@ -273,5 +273,38 @@ func TestDescribeAndEventStateCoverEveryJournalEvent(t *testing.T) {
 	}
 	if got := describe(jl(at(0, 1), "T", "", "something-new", with("", "", "odd", "", "", ""))); got != "something-new odd" {
 		t.Errorf("an event the screens do not know = %q, want its name and outcome", got)
+	}
+}
+
+// TestPublishCollectsEachRepoOfAPublish: the lines of a publish that name two
+// repos give each repo its body, approval and pull request, in the order the
+// repos first appear, with the position of the line each came from; the
+// ticket-wide facts are the latest, as they were. A publish that names one repo
+// has no repos of its own.
+func TestPublishCollectsEachRepoOfAPublish(t *testing.T) {
+	t.Parallel()
+	tk := ticketOf("JIG-2", jig2Repos()...)
+	got := tk.publish()
+	if got.PR != "https://example.test/acme/web/pull/3" || got.Branch != "jig/JIG-2" || !got.Done {
+		t.Errorf("publish = %+v, want the latest pull request, the branch and done", got)
+	}
+	if len(got.Repos) != 2 {
+		t.Fatalf("repos = %+v, want api and web", got.Repos)
+	}
+	api, web := got.Repos[0], got.Repos[1]
+	if api.Name != "api" || api.BodyFor != sha('c') || api.ApprovedFor != sha('c') || api.ApprovedBy != "person" ||
+		api.PR != "https://example.test/acme/api/pull/7" || api.PROutcome != "opened" {
+		t.Errorf("api = %+v", api)
+	}
+	if web.Name != "web" || web.BodyFor != sha('d') || web.ApprovedFor != sha('d') || web.PR != "https://example.test/acme/web/pull/3" {
+		t.Errorf("web = %+v", web)
+	}
+	if !(api.BodyAt < api.ApprovedAt && api.ApprovedAt < api.PRAt && api.PRAt < web.PRAt) || tk.lines[web.PRAt].Repo != "web" {
+		t.Errorf("positions: api %d %d %d, web pr %d, want the order the lines were written in", api.BodyAt, api.ApprovedAt, api.PRAt, web.PRAt)
+	}
+	if one := ticketOf("JIG-2", append(jig2()[:8], jl(at(14, 20), "JIG-2", "", journal.EventPr, func(l *journal.Line) {
+		l.Repo, l.URL, l.Outcome = "web", "https://example.test/acme/web/pull/3", "opened"
+	}))...).publish(); len(one.Repos) != 0 || one.PR == "" {
+		t.Errorf("a publish naming one repo = %+v, want the pull request and no repos", one)
 	}
 }

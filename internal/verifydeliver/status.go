@@ -34,6 +34,9 @@ type Status struct {
 	ApprovedFor string `json:"approved_for,omitempty"`
 	PR          string `json:"pr,omitempty"`
 	Published   bool   `json:"published,omitempty"`
+	// PRs is repo -> the pull request recorded or opened there, for a ticket
+	// whose publish names its repos (a project of several): PR is the latest.
+	PRs map[string]string `json:"prs,omitempty"`
 }
 
 // OpenStatus is a round that is open: opened by `jig gate` or `jig review
@@ -100,6 +103,12 @@ func ReadStatus(st *store.Store, ticket string) (Status, error) {
 		case journal.EventPr:
 			if l.URL != "" {
 				s.PR = l.URL
+				if l.Repo != "" {
+					if s.PRs == nil {
+						s.PRs = map[string]string{}
+					}
+					s.PRs[l.Repo] = l.URL
+				}
 			}
 		case journal.EventPublishDone:
 			s.Published = true
