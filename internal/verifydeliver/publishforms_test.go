@@ -56,10 +56,14 @@ func TestPublishBodyRendersAndChangesNothingElse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PublishBody: %v", err)
 	}
-	if report.Head != head || report.Branch != ticketBranch(fx.Ticket) || report.Target != "main" || report.Repo != "fixture-repo" {
+	if len(report.Repos) != 1 {
+		t.Fatalf("report = %+v, want a body for the one repo", report)
+	}
+	repo := report.Repos[0]
+	if repo.Head != head || report.Branch != ticketBranch(fx.Ticket) || repo.Target != "main" || repo.Repo != "fixture-repo" {
 		t.Fatalf("report = %+v, want the reviewed head %s of %s into main", report, head, ticketBranch(fx.Ticket))
 	}
-	body, err := os.ReadFile(filepath.Join(d.Store.Root, filepath.FromSlash(report.PRBody)))
+	body, err := os.ReadFile(filepath.Join(d.Store.Root, filepath.FromSlash(repo.PRBody)))
 	if err != nil {
 		t.Fatalf("read the body: %v", err)
 	}
@@ -68,7 +72,7 @@ func TestPublishBodyRendersAndChangesNothingElse(t *testing.T) {
 			t.Errorf("pr body lacks %q:\n%s", want, body)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(d.Store.Root, filepath.FromSlash(report.ReviewNotes))); err != nil {
+	if _, err := os.Stat(filepath.Join(d.Store.Root, filepath.FromSlash(repo.ReviewNotes))); err != nil {
 		t.Errorf("no review notes: %v", err)
 	}
 	if _, err := os.Stat(publishLeaseDir(t, fx)); err == nil {
@@ -96,7 +100,7 @@ func TestPublishBodyRendersAndChangesNothingElse(t *testing.T) {
 			t.Errorf("--body journaled %+v", l)
 		}
 	}
-	if bodyLine.Commit != head || bodyLine.Branch != report.Branch || bodyLine.Ref != report.PRBody {
+	if bodyLine.Commit != head || bodyLine.Branch != report.Branch || bodyLine.Ref != repo.PRBody {
 		t.Errorf("pr-body line = %+v, want the head, the branch and the body's path", bodyLine)
 	}
 }
@@ -225,7 +229,7 @@ func TestPublishApproveAndTheConfirmation(t *testing.T) {
 	d.Confirm = func(string, string, string, bool) bool { asked++; return false }
 	d.GuardedPush = func(string, string, string, bool) error { return nil }
 
-	if report, err := PublishApprove(d, PublishOpts{Ticket: fx.Ticket}, "agent"); err != nil || report.Head != head || report.Provenance != "agent" {
+	if report, err := PublishApprove(d, PublishOpts{Ticket: fx.Ticket}, "agent"); err != nil || len(report.Repos) != 1 || report.Repos[0].Head != head || report.Provenance != "agent" {
 		t.Fatalf("PublishApprove(agent) = %+v (%v)", report, err)
 	}
 	_, err := Publish(d, PublishOpts{Ticket: fx.Ticket})

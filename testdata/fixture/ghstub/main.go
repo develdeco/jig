@@ -19,7 +19,9 @@
 // most 100) of page (the first when not given). A row is the endpoint's own:
 // html_url, state ("open" when it says none), head.ref, head.user.login and
 // base.ref; one that lacks head or base matches any. A list that is not a JSON
-// array is printed as it is. "pr create" prints a pull request URL, and "pr
+// array is printed as it is. "pr create" prints a pull request URL on the
+// repository its --repo flag names (owner/repo when it has none), so a test
+// that opens a pull request in each of two repositories gets two URLs, and "pr
 // edit" prints the URL it was given. "pr comment" succeeds silently. Set
 // $GH_STUB_FAIL to a subcommand pair, such as "pr create", to make that call
 // fail the way gh does: a message on stderr and exit status 1.
@@ -109,7 +111,7 @@ func main() {
 		printAttachHelp("pr edit")
 	case len(args) >= 2 && args[0] == "pr" && args[1] == "create":
 		processAttachments(args)
-		fmt.Println("https://github.example/owner/repo/pull/1")
+		fmt.Println("https://github.example/" + repoFlag(args) + "/pull/1")
 	case len(args) >= 3 && args[0] == "pr" && args[1] == "edit":
 		processAttachments(args)
 		fmt.Println(args[2])
@@ -514,4 +516,15 @@ func nextCounter(path string) int {
 // GraphQL resolve call after a mint reports the just-minted number.
 func currentCounter(path string) int {
 	return readCounter(path)
+}
+
+// repoFlag is the repository the --repo flag in args names ("owner/repo"), or
+// owner/repo when it has none.
+func repoFlag(args []string) string {
+	for i, a := range args {
+		if a == "--repo" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return "owner/repo"
 }
