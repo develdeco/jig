@@ -12,40 +12,49 @@ records the review and the publish.
 
 ## What working with jig looks like
 
-![Claude Code planning, building and reviewing a ticket on the left, jig tui following its four steps on the right](docs/media/jig-in-a-session.gif)
+![One Claude Code session taking a ticket from its brief to its pull request on the left, jig tui following its four steps on the right](docs/media/jig-in-a-session.gif)
 
-On the left, Claude Code works on a small shop project; on the right, `jig tui`
-follows the ticket, SHOP-1, from its brief to its pull request. The recording
-runs at twice its speed, with the waits cut. The person started a Claude Code
-session for each part (a fresh one for each review), typed six requests,
-allowed three shell commands Claude Code asked about, and pressed five keys in
-the TUI to act (`g` twice, `d`, `p`, `y`), besides refreshing it once and moving
-between its screens. Everything else happened between the sessions and jig, and
-the TUI shows the four steps in order, each with where it stands:
+On the left, one Claude Code session (Sonnet 5) works on a small shop project;
+on the right, `jig tui SHOP-1` stays on the ticket's screen while the session
+takes it from its brief to its pull request. The recording runs at twice its
+speed, with the waits and two permission prompts cut. The person typed one
+prompt and allowed the four shell commands Claude Code asked about, and the
+session took 9m 46s:
 
-1. **Brief.** "Plan a ticket for this bug: cart.Total takes the discount off
-   each line and truncates…". A Sonnet session drafts `brief.md` with the
-   intake skill and shows it; on "Go with your recommendations" it writes
-   `slices.yaml`, checks both with `jig validate --check`, and runs
-   `jig validate`, which records the approval. The step goes from "being
-   drafted" to "approved by … · 5 sections, 2 slices".
-2. **Build.** "Build SHOP-1, and stop once its slices are green." The same
-   session claims each slice and commits with a `Jig-Slice:` trailer. jig runs
-   the slice's oracle on a detached copy of each commit and counts the slices
-   green: green is what jig ran, never what the model said.
-3. **Review.** The person presses `g` to open a round (a session can open one
-   itself), and a fresh Opus session reviews the branch ("Review SHOP-1").
-   Round 1 sends back a fix, a test that pins rounding half up, and asks one
-   question; the person dismisses the question in the TUI with `d`. A new
-   builder session makes the fix green, and round 2 comes back clean. jig
-   checks each reviewer built none of what it reviewed.
-4. **Publish.** `p`, then `y`: jig pushes the reviewed head and opens the pull
-   request ([develdeco/jig-demo-shop#2](https://github.com/develdeco/jig-demo-shop/pull/2))
-   with a body it writes from the brief, the slices and the review.
+> Take SHOP-1 from brief to PR. The bug: cart.Total takes the discount off each
+> line and truncates, so three items at 3.33 with 10% off cost 8.97 instead of
+> 8.99. [...] Go with your recommendations, then build it, review it and
+> publish it.
 
-Enter opens a step's screen, and the recording visits each: the brief's sections
-and the slices that cite them, the build's slices and sessions, each review round
-with what it sent back and the ask it left, the pull request and how it got there.
+A prompt that names several phases is an automatic run: the session runs the
+phases in order, each with its skill, and each skill starts and ends with
+`jig next`, which says where the ticket stands and what comes next. The TUI
+shows the four steps, the sub-steps of the current one, and the activity, each
+line labeled with the sub-step it belongs to:
+
+1. **Brief.** SHOP-1 does not exist yet, so the session mints it with
+   `jig ticket new`, drafts `brief.md` and `slices.yaml` with the intake skill,
+   and checks them with `jig validate --check`. "Go with your recommendations"
+   delegates the brief's approval, so `jig validate` records it as the agent's.
+2. **Build.** The session claims each slice and commits with a `Jig-Slice:`
+   trailer. jig runs the slice's oracle on a detached copy of each commit and
+   counts the slice green: green is what jig ran, never what the model said.
+3. **Review.** The session built the change, so `jig gate` advises a reviewer
+   in a fresh context, and the session runs one as a subagent (Opus 5) for each
+   round. Round 1 finds the new test blind to rounding (truncation and rounding
+   both give 899) and sends back a fix; the session adds a fix slice with cases
+   they disagree on, and round 2 comes back clean. jig checks that each round's
+   reviewer built none of what it reviewed.
+4. **Publish.** The prompt delegated the publish, so the session renders the
+   body with `jig publish --body`, pushes the reviewed head, opens the pull
+   request with `gh`, and records it with `jig publish --pr`
+   ([develdeco/jig-demo-shop#5](https://github.com/develdeco/jig-demo-shop/pull/5)).
+
+By default each phase waits for its own prompt ("Plan SHOP-1", "Build SHOP-1",
+"Review SHOP-1", "Publish SHOP-1"), in one session or in several, so a person
+can look at each outcome before the next; a phase asked for before it is ready
+is refused with what the ticket needs. Enter opens a step's screen with its
+records.
 
 ## Getting started
 
@@ -90,9 +99,10 @@ and stops with the prompt that asks for the next one.
 Four moments need you: agreeing on the brief, answering a question a session
 asked, deciding what a review asks, and approving the pull request. A prompt can
 hand over the first and the last ("go with your recommendations" approves the
-brief, "... to PR" or "and publish it" publishes), and what the session approves
-for you is recorded as its own. Everything else is the session's work, proven by
-jig.
+brief, "... to PR" or "and publish it" publishes): a brief the session approves
+for you is recorded as its approval, not yours, and a publish handed over is the
+session's own push, recorded with `jig publish --pr`. Everything else is the
+session's work, proven by jig.
 
 **You need** `git` with an identity (jig authors every store commit as you) and a
 harness. Claude Code is proven end to end; hook files for Codex, Gemini CLI,
@@ -101,27 +111,27 @@ Cursor, GitHub Copilot and OpenCode are written from their documentation.
 
 ## The TUI
 
-`jig tui` is a view of everything in flight, built on the same stream
-`jig events --follow` prints. A ticket is four steps taken in order (brief,
-build, review, publish), each with its state in a few words: "approved by
-<name> (person) · 5 sections, 3 slices", "1 of 3 green · verifying slice clamp
-at bbbbbbb", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading the
-change", "pull request opened · <url>". The steps are the same answer
-`jig next` gives, so the screen and the command never disagree about where a
-ticket stands. Under them is a list of the sub-steps of the one under the
-cursor (each slice of the build, each review round with its asks and fixes, the
-publish's body, approval, pull request and changelog, each with its state), and
-under that its activity, told in words: a session by the role it plays (planner,
-builder, reviewer, or reviewer subagent when the session that built the change
-also reviewed it; a reviewer with its harness and model too), a slice by its
-goal, a commit by its subject. Each activity line names the sub-step it
-advances ("slice clamp", "round 1", "body"). Enter opens a step's screen, which
-shows the records behind it: the brief's sections and the slices that cite them,
-the build's slices with their workspace and oracle, their commits and every
-oracle run (with the end of a failed one), each review round with its reviewer,
-what it sent back and the asks it left, and the pull request's body and
-changelog. `jig tui SHOP-1` can be open before SHOP-1 exists; it waits for the
-ticket and fills in when it does.
+`jig tui` is a view of everything in flight, built on the same stream `jig
+events --follow` prints. A ticket is four steps taken in order (brief, build,
+review, publish), each with its state in a few words: "approved by <name>
+(person) · 5 sections, 3 slices", "1 of 3 green · verifying slice clamp at
+bbbbbbb", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading the
+change", "pull request opened · <url>". The steps are the same answer `jig next`
+gives, so the screen and the command never disagree about where a ticket stands.
+Under them is a list of the sub-steps of the one under the cursor (each slice of
+the build, each review round with its asks and fixes, the publish's body, pull
+request and changelog, with your approval first when jig pushes for you, each
+with its state), and under that its activity, told in words: a session by the
+role it plays (planner, builder, reviewer, or reviewer subagent when the session
+that built the change also reviewed it; a reviewer with its harness and model
+too), a slice by its goal, a commit by its subject. Each activity line names the
+sub-step it advances ("slice clamp", "round 1", "body"). Enter opens a step's
+screen, which shows the records behind it: the brief's sections and the slices
+that cite them, the build's slices with their workspace and oracle, their
+commits and every oracle run (with the end of a failed one), each review round
+with its reviewer, what it sent back and the asks it left, and the pull
+request's body and changelog. `jig tui SHOP-1` can be open before SHOP-1 exists;
+it waits for the ticket and fills in when it does.
 
 From it you answer a session's question (`a`), keep or dismiss a review's ask
 (`k`, `d`), open a review round (`g`), and approve and publish (`p`: after your
