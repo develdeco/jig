@@ -171,6 +171,18 @@ func Judge(f Facts) Repo {
 	return r
 }
 
+// StackedOnAny reports whether rec names a blocker of kind stacked: a ticket
+// whose record names none has an empty plan, so a caller that would load the
+// project only for Read can skip it.
+func StackedOnAny(rec store.Ticket) bool {
+	for _, b := range rec.BlockedBy {
+		if b.Kind == KindStacked {
+			return true
+		}
+	}
+	return false
+}
+
 // Read is the plan of ticket. A ticket with no stacked blocker has an empty
 // plan, read from its record alone. A parent that is closed is not built on:
 // its closure says whether the ticket still waits for it. In a repo of the

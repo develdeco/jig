@@ -124,8 +124,16 @@ func cachedMergeReader(st *store.Store, cfg project.Config, mp project.MachinePr
 // locatedStack reads the stack plan of the ticket where names, in the store st
 // it resolved: the project's repos from the store and the marker, its clones
 // from the machine mapping, and whether a parent merged from what this
-// machine knows (cachedMergeReader).
+// machine knows (cachedMergeReader). A ticket stacked on nothing is told from
+// its record alone: the hook asks at every event.
 func locatedStack(where locate.Where, st *store.Store, jigHome string) (stack.Plan, error) {
+	rec, err := st.ReadTicket(where.Ticket)
+	if err != nil {
+		return stack.Plan{}, err
+	}
+	if !stack.StackedOnAny(rec) {
+		return stack.Plan{Ticket: where.Ticket}, nil
+	}
 	cfg, err := project.LoadConfig(where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
 	if err != nil {
 		return stack.Plan{}, err
