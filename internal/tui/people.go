@@ -107,8 +107,12 @@ func (m *Model) who(t *ticket, session string) string { return m.whoAs(t, sessio
 
 // whoWith is who, with the harness and model the session runs when the
 // ledger said: "reviewer (Claude Code · Opus 5.5)".
-func (m *Model) whoWith(t *ticket, session string) string {
-	name := m.who(t, session)
+func (m *Model) whoWith(t *ticket, session string) string { return m.whoWithAs(t, session, "") }
+
+// whoWithAs is whoWith for a session playing role in what is worded: a
+// session that planned and then claims a slice is named as its builder.
+func (m *Model) whoWithAs(t *ticket, session, role string) string {
+	name := m.whoAs(t, session, role)
 	if name == "" {
 		return ""
 	}

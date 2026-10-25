@@ -103,7 +103,7 @@ A part of a phase with a state of its own: a slice in the build; a gate round, t
 _Avoid_: task, sub-task
 
 **Automatic run**:
-A prompt that names several phases ("Build and review SHOP-1", "Take SHOP-1 from brief to PR"), which the session runs in order, each with its skill. The span is the prompt and nothing records it; a refusal ends the run. The person's two moments, the brief's approval and the publish approval, stay theirs unless the prompt delegates them ("go with your recommendations", "... to PR", "and publish it"), and a delegated approval is recorded with agent provenance. For an unattended session the Stop hook's next-phase note says when the run has more to do.
+A prompt that names several phases ("Build and review SHOP-1", "Take SHOP-1 from brief to PR"), which the session runs in order, each with its skill. The span is the prompt and nothing records it; a refusal ends the run. The person's two moments, the brief's approval and the publish approval, stay theirs unless the prompt delegates them ("go with your recommendations", "... to PR", "and publish it"). A delegated brief approval is recorded with agent provenance; a delegated publish takes the hand-off way (the session's own push, then `jig publish --pr`), which asks for no approval. For an unattended session the Stop hook's next-phase note says when the run has more to do.
 _Avoid_: workflow, pipeline run
 
 **Scout**:

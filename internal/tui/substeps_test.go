@@ -72,7 +72,7 @@ func TestTicketScreenShowsTheSubstepsOfTheStepUnderTheCursor(t *testing.T) {
 	}{
 		{[]string{"up"}, "1 Brief · sub-steps", []string{"✓ brief drafted", "✓ slices written · 3 slices", "✓ brief approved · Dana (person)"}},
 		{[]string{"down", "down"}, "3 Review · sub-steps", []string{"○ round 1"}},
-		{[]string{"down"}, "4 Publish · sub-steps", []string{"○ body", "○ approval", "○ pull request", "○ changelog", "○ published"}},
+		{[]string{"down"}, "4 Publish · sub-steps", []string{"○ body", "○ pull request", "○ changelog", "○ published"}},
 		{[]string{"up", "up"}, "2 Build · sub-steps", []string{"✓ slice round · verified aaaaaaa", "◐ slice clamp · verifying bbbbbbb", "○ slice cart · waits for clamp"}},
 	} {
 		g.press(tc.keys...)

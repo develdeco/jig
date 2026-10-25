@@ -19,7 +19,6 @@ package phase
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -260,16 +259,20 @@ type Facts struct {
 	Closed string
 
 	// SessionName words a session id wherever the answer names a session (who
-	// took a round, who holds a slice). Nil is the first eight characters of the
-	// id; a caller that knows its sessions by role (the TUI) passes its own words.
-	SessionName func(id string) string
+	// took a round, who holds a slice). role is the part the session plays in
+	// what is worded ("builder" for a slice's holder), since one session can
+	// plan, build and have a subagent review. Nil is "session" and the first
+	// eight characters of the id; a caller that knows its sessions by role (the
+	// TUI) passes its own words.
+	SessionName func(id, role string) string
 	// ReviewerName words the session that reviewed round n, where the answer
 	// names one (who took the round, who closed the last). A session can play
 	// several roles on a ticket and a subagent shares its parent's id, so the
 	// words for a reviewer may not be the words for the same id as a builder.
 	// detailed says there is room for the harness and model the reviewer ran on
 	// (a sub-step's detail), as against a line that names the role alone (a
-	// step's summary). Nil is SessionName.
+	// step's summary). Nil words a session that also built or planned the
+	// ticket as its reviewer subagent, and any other as SessionName does.
 	ReviewerName func(id string, round int, detailed bool) string
 }
 
@@ -383,8 +386,11 @@ type publishView struct {
 	bodyFor        string
 	approvedPerson bool
 	approvedAgent  bool
-	pr, prOutcome  string
-	changelog      bool
+	// approvals is whether any approval line names the publish: only jig's
+	// own push (`jig publish --approve`, then the push) writes one.
+	approvals     bool
+	pr, prOutcome string
+	changelog     bool
 
 	// repos are the repos the publish lines name, in the order each first
 	// appears, and by what each of them says. A publish names its repos in a
@@ -405,6 +411,17 @@ type repoView struct {
 
 // several is whether the publish lines name more than one repo.
 func (p publishView) several() bool { return len(p.repos) > 1 }
+
+// recorded is how many of the repos have their pull request.
+func (p publishView) recorded() int {
+	n := 0
+	for _, name := range p.repos {
+		if p.by[name].pr != "" {
+			n++
+		}
+	}
+	return n
+}
 
 // digest is the journal read once, with the facts laid over it.
 type digest struct {
@@ -667,6 +684,7 @@ func (d *digest) readPublish() {
 				r.body, r.bodyFor = true, l.Commit
 			}
 		case journal.EventPublishApproved:
+			p.approvals = true
 			if l.Provenance == "person" {
 				p.approvedPerson = true
 				if r != nil {
@@ -866,16 +884,23 @@ func (d *digest) build(prevDone bool) (Phase, bool) {
 		}
 		return p, false
 	}
-	green := 0
+	green, fixes := 0, 0
 	for _, s := range d.slices {
 		state, detail := d.sliceState(s)
 		p.Subs = append(p.Subs, Sub{Key: "slice:" + s.ID, Label: sliceLabel(s.Slice), State: state, Detail: detail})
 		if s.State == sliceGreen && !s.verifying {
 			green++
 		}
+		if s.FromGate > 0 {
+			fixes++
+		}
 	}
 	n := len(d.slices)
 	switch {
+	case green == n && fixes > 0:
+		// The brief's count is the planned slices: say which of these the
+		// review sent back, so the two counts agree.
+		p.Text = fmt.Sprintf("%s green (%s), each verified by jig", count(n, "slice"), count(fixes, "fix"))
 	case green == n:
 		p.Text = fmt.Sprintf("%s green, each verified by jig", count(n, "slice"))
 	case !prevDone && d.untouched():
@@ -924,7 +949,7 @@ func (d *digest) sliceState(s sliceView) (state, detail string) {
 		return SubWaiting, "waits for its environment"
 	case s.State == sliceBuilding:
 		if s.claimed && s.claimedBy != "" {
-			return SubActive, "claimed by " + d.session(s.claimedBy)
+			return SubActive, "claimed by " + d.session(s.claimedBy, "builder")
 		}
 		return SubActive, "claimed"
 	case s.State == sliceQueued:
@@ -1146,21 +1171,32 @@ func (p publishView) prSteps() []publishStep {
 	return steps
 }
 
-// publish is the publish phase and whether the ticket is published.
+// publish is the publish phase and whether the ticket is published. Its
+// sub-steps are what the publish does: the body, the pull request (one for
+// each repo of a publish of several), the changelog and the end. The approval
+// is one of them only once an approval line names it, since only jig's own
+// push asks for one: a bare `jig publish` asks at the terminal and writes
+// none, and a publish by hand (`--body`, the session's own push, `--pr`)
+// needs none, so on those ways nothing waits for an approval.
 func (d *digest) publish(prevDone bool) (Phase, bool) {
 	p := Phase{Name: Publish}
 	pub := d.pub
-	steps := []publishStep{
-		{"body", "body", short(pub.bodyFor), pub.body},
-		{"approval", "approval", "", pub.approvedPerson},
-		{"pr", "pull request", pub.pr, pub.pr != ""},
-		{"changelog", "changelog", "", pub.changelog},
-		{"done", "published", "", d.f.Published},
+	// A pull request carries its body: a bare publish renders it and writes
+	// no body line.
+	opened := pub.pr != "" || d.f.Published
+	steps := []publishStep{{"body", "body", short(pub.bodyFor), pub.body || opened}}
+	if pub.approvals {
+		steps = append(steps, publishStep{"approval", "approval", "", pub.approvedPerson})
 	}
 	if pub.several() {
-		// A pull request for each repo, in place of the one.
-		steps = slices.Concat(steps[:2], pub.prSteps(), steps[3:])
+		steps = append(steps, pub.prSteps()...)
+	} else {
+		steps = append(steps, publishStep{"pr", "pull request", pub.pr, pub.pr != ""})
 	}
+	steps = append(steps,
+		publishStep{"changelog", "changelog", "", pub.changelog},
+		publishStep{"done", "published", "", d.f.Published},
+	)
 	first := true
 	for _, s := range steps {
 		sub := Sub{Key: s.key, Label: s.label, State: SubPending, Detail: s.detail}
@@ -1198,8 +1234,12 @@ func (d *digest) publish(prevDone bool) (Phase, bool) {
 		p.Text = "after a clean review"
 	case pub.approvedPerson:
 		p.Text = "approved · pushing and opening the pull request"
+	case pub.approvals:
+		p.Text = "waiting for your approval"
+	case pub.several() && pub.pr != "":
+		p.Text = fmt.Sprintf("%d of %d pull requests recorded", pub.recorded(), len(pub.repos))
 	case pub.body:
-		p.Text = "body written · waiting for your approval"
+		p.Text = "body written · the push and the pull request are next"
 	default:
 		p.Text = "ready: approve it, push the branch and open the pull request"
 	}
@@ -1324,7 +1364,11 @@ func (d *digest) notReviewedReason() string {
 
 // count words n of a noun: "1 slice", "3 slices".
 func count(n int, noun string) string {
-	return fmt.Sprintf("%d %s", n, plural(n, noun, noun+"s"))
+	many := noun + "s"
+	if strings.HasSuffix(noun, "x") {
+		many = noun + "es"
+	}
+	return fmt.Sprintf("%d %s", n, plural(n, noun, many))
 }
 
 func plural(n int, one, many string) string {
@@ -1344,24 +1388,47 @@ func short(sha string) string {
 
 // session words a session id: the caller's words when it gave a way to say
 // them, else the first eight characters.
-func (d *digest) session(id string) string {
+func (d *digest) session(id, role string) string {
 	if d.f.SessionName != nil {
-		if s := d.f.SessionName(id); s != "" {
+		if s := d.f.SessionName(id, role); s != "" {
 			return s
 		}
 	}
-	return shortSession(id)
+	if id == "" {
+		return ""
+	}
+	return "session " + shortSession(id)
 }
 
 // reviewer words the session that reviewed round n: the caller's words for a
-// reviewer when it gave a way to say them, else session's.
+// reviewer when it gave a way to say them. Else a session that also planned or
+// built the ticket reviews through a subagent, which shares its id, and is
+// worded so; any other is worded as session words it.
 func (d *digest) reviewer(id string, n int, detailed bool) string {
 	if d.f.ReviewerName != nil {
 		if s := d.f.ReviewerName(id, n, detailed); s != "" {
 			return s
 		}
 	}
-	return d.session(id)
+	if d.f.SessionName == nil && id != "" && d.workedOn(id) {
+		return "a reviewer subagent of session " + shortSession(id)
+	}
+	return d.session(id, "reviewer")
+}
+
+// workedOn is whether session approved the brief or built a slice of the
+// ticket, as the journal says.
+func (d *digest) workedOn(session string) bool {
+	for _, l := range d.lines {
+		if l.Session != session {
+			continue
+		}
+		switch l.Event {
+		case journal.EventApproval, journal.EventClaim, journal.EventVerifyPending, journal.EventVerified:
+			return true
+		}
+	}
+	return false
 }
 
 // shortSession is the first eight characters of a session id.

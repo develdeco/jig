@@ -39,7 +39,7 @@ func (m *Model) factsOf(t *ticket) (phase.Facts, []journal.Line) {
 		Ticket:      t.id,
 		Open:        phase.OpenRoundIn(lines),
 		Published:   t.publish().Done,
-		SessionName: func(session string) string { return m.whoWith(t, session) },
+		SessionName: func(session, role string) string { return m.whoWithAs(t, session, role) },
 		ReviewerName: func(session string, round int, detailed bool) string {
 			if detailed {
 				return m.reviewerWho(t, session, round, "", nil)

@@ -221,7 +221,7 @@ func TestForNamesWhatAPhaseWaitsFor(t *testing.T) {
 		{"publish before the build is done", withState(approved(), "a", "green"), built()[:3], Publish, false, CodeNotBuilt, "1 of 3 slices are green; b, c are not"},
 		{"review while a verification runs", allGreen(), append(built(), ln(journal.EventVerifyPending, onSlice("a"), commit("0badf00d11"))), Review, false, CodeNotBuilt, "slice a is being verified at 0badf00"},
 		{"publish with no round", allGreen(), built(), Publish, false, CodeNotReviewed, "no gate round has reviewed SHOP-1 yet"},
-		{"publish while a round is open", open, built(), Publish, false, CodeRoundOpen, "round 2 of SHOP-1 is open: s-review is reading the change"},
+		{"publish while a round is open", open, built(), Publish, false, CodeRoundOpen, "round 2 of SHOP-1 is open: session s-review is reading the change"},
 		{"publish after a round of findings", allGreen(), findings, Publish, false, CodeNotReviewed, "round 1 of SHOP-1 found things to fix"},
 		{"publish on a head that moved", allGreen(), moved, Publish, false, CodeNotReviewed, "the build of SHOP-1 changed after clean round 1"},
 		{"review in a fix round", fixed, append(findings, ln(journal.EventFixSlice, onSlice("r1-fix-1"), attempt(1))), Review, false, CodeNotBuilt, "r1-fix-1"},
@@ -368,12 +368,24 @@ func TestBuildSubStepsFollowTheSlices(t *testing.T) {
 	f = approved()
 	f.Slices = []Slice{{ID: "a", State: "building"}}
 	held := []journal.Line{ln(journal.EventClaim, onSlice("a"), by("0123456789abcdef"))}
-	if s := sub(t, Derive(f, held).Of(Build), "slice:a"); s.Detail != "claimed by 01234567" {
+	if s := sub(t, Derive(f, held).Of(Build), "slice:a"); s.Detail != "claimed by session 01234567" {
 		t.Errorf("a held slice: %+v", s)
 	}
 	freed := append(held, ln(journal.EventRelease, onSlice("a")))
 	if s := sub(t, Derive(f, freed).Of(Build), "slice:a"); s.Detail != "claimed" {
 		t.Errorf("a released slice: %+v", s)
+	}
+
+	// A build whose review sent fixes back counts them apart, so it agrees
+	// with the brief's count of planned slices.
+	f = allGreen()
+	f.Slices = append(f.Slices, Slice{ID: "r1-fix-1", State: "green", FromGate: 1}, Slice{ID: "r2-fix-1", State: "green", FromGate: 2})
+	if got, want := Derive(f, built()).Of(Build).Text, "5 slices green (2 fixes), each verified by jig"; got != want {
+		t.Errorf("a build with fixes: text = %q, want %q", got, want)
+	}
+	f.Slices = f.Slices[:len(f.Slices)-1]
+	if got, want := Derive(f, built()).Of(Build).Text, "4 slices green (1 fix), each verified by jig"; got != want {
+		t.Errorf("a build with a fix: text = %q, want %q", got, want)
 	}
 }
 
@@ -406,7 +418,7 @@ func TestReviewSubSteps(t *testing.T) {
 	}
 	open.Open = &OpenRound{Round: 1, Reviewer: "reviewer-session-1"}
 	got = pending(open, built())
-	if s := sub(t, got, "round:1"); s.Detail != "taken by reviewer" || got.Text != "round 1 open · reviewer is reading the change" {
+	if s := sub(t, got, "round:1"); s.Detail != "taken by session reviewer" || got.Text != "round 1 open · session reviewer is reading the change" {
 		t.Errorf("a round a reviewer took: %+v / %q", s, got.Text)
 	}
 
@@ -457,7 +469,7 @@ func TestReviewSubSteps(t *testing.T) {
 			t.Errorf("a clean round still lists round 3: %v", subKeys(got))
 		}
 	}
-	if got.Text != "round 2 clean · by 01234567" || got.State != StateDone {
+	if got.Text != "round 2 clean · by session 01234567" || got.State != StateDone {
 		t.Errorf("review after the clean round = %+v", got)
 	}
 }
@@ -465,10 +477,11 @@ func TestReviewSubSteps(t *testing.T) {
 // TestReviewerNameWordsTheReviewerOfARound: a caller with its own words for a
 // reviewer gets them wherever the answer names the session that took a round or
 // closed it, with the round's number, while a session that holds a slice keeps
-// SessionName's words: one session can build a slice and have a subagent review.
+// SessionName's words for a builder: one session can build a slice and have a
+// subagent review.
 func TestReviewerNameWordsTheReviewerOfARound(t *testing.T) {
 	t.Parallel()
-	name := func(id string) string { return "session " + id }
+	name := func(id, role string) string { return role + " " + id }
 	reviewer := func(id string, n int, detailed bool) string {
 		if detailed {
 			return fmt.Sprintf("reviewer subagent of %s (round %d, on a model)", id, n)
@@ -495,25 +508,39 @@ func TestReviewerNameWordsTheReviewerOfARound(t *testing.T) {
 		t.Errorf("clean round text = %q, want the reviewer's words", got.Text)
 	}
 
-	// A holder of a slice is named with SessionName, and a caller with no words
-	// for a reviewer gets SessionName's.
+	// A holder of a slice is named with SessionName as a builder, and a caller
+	// with no words for a reviewer gets SessionName's for a reviewer.
 	claimed := approved()
 	claimed.Slices[0].State = "building"
 	claimed.SessionName, claimed.ReviewerName = name, reviewer
-	if got := sub(t, Derive(claimed, []journal.Line{ln(journal.EventClaim, onSlice("a"), by("s1"))}).Of(Build), "slice:a"); !strings.Contains(got.Detail, "claimed by session s1") {
-		t.Errorf("slice a = %+v, want it claimed by session s1", got)
+	if got := sub(t, Derive(claimed, []journal.Line{ln(journal.EventClaim, onSlice("a"), by("s1"))}).Of(Build), "slice:a"); !strings.Contains(got.Detail, "claimed by builder s1") {
+		t.Errorf("slice a = %+v, want it claimed by builder s1", got)
 	}
 	plain := allGreen()
 	plain.Open = &OpenRound{Round: 1, Reviewer: "s1"}
 	plain.SessionName = name
-	if s := sub(t, Derive(plain, built()).Of(Review), "round:1"); s.Detail != "taken by session s1" {
+	if s := sub(t, Derive(plain, built()).Of(Review), "round:1"); s.Detail != "taken by reviewer s1" {
 		t.Errorf("with no ReviewerName: %+v, want SessionName's words", s)
+	}
+
+	// With no words at all (jig next, jig status), a reviewer that also built
+	// the ticket is its reviewer subagent, and any other a session.
+	bare := allGreen()
+	bare.Open = &OpenRound{Round: 1, Reviewer: "0123456789abcdef"}
+	builtBy := append(built(), ln(journal.EventClaim, onSlice("a"), by("0123456789abcdef")))
+	if got := Derive(bare, builtBy).Of(Review).Text; got != "round 1 open · a reviewer subagent of session 01234567 is reading the change" {
+		t.Errorf("a builder's reviewer: %q", got)
+	}
+	if got := Derive(bare, built()).Of(Review).Text; got != "round 1 open · session 01234567 is reading the change" {
+		t.Errorf("a fresh reviewer: %q", got)
 	}
 }
 
 // TestPublishSubStepsFollowTheFlow: body, approval, pull request, changelog,
-// published, in the order publish writes them; the approval is the person's, and
-// an agent's alone does not stand for it.
+// published, in the order publish writes them; the approval is a sub-step only
+// once an approval line names it (jig's own push), it is the person's, and an
+// agent's alone does not stand for it. A publish by hand or a bare publish has
+// none, and nothing on those ways waits for one.
 func TestPublishSubStepsFollowTheFlow(t *testing.T) {
 	t.Parallel()
 	clean := append(built(), ln(journal.EventGateOpen, attempt(1)), ln(journal.EventGateClean, attempt(1)))
@@ -529,7 +556,7 @@ func TestPublishSubStepsFollowTheFlow(t *testing.T) {
 	}
 
 	p := step()
-	if want := "body=active approval=pending pr=pending changelog=pending done=pending"; states(p) != want {
+	if want := "body=active pr=pending changelog=pending done=pending"; states(p) != want {
 		t.Errorf("a clean round: %s, want %s", states(p), want)
 	}
 	if p.Text != "ready: approve it, push the branch and open the pull request" || p.State != StateCurrent {
@@ -537,19 +564,22 @@ func TestPublishSubStepsFollowTheFlow(t *testing.T) {
 	}
 
 	p = step(ln(journal.EventPrBody, commit("abcdef0123")))
-	if want := "body=done approval=needs-you pr=pending changelog=pending done=pending"; states(p) != want {
+	if want := "body=done pr=active changelog=pending done=pending"; states(p) != want {
 		t.Errorf("body written: %s, want %s", states(p), want)
 	}
 	if s := sub(t, p, "body"); s.Detail != "abcdef0" {
 		t.Errorf("body detail = %q", s.Detail)
 	}
-	if p.Text != "body written · waiting for your approval" {
+	if p.Text != "body written · the push and the pull request are next" {
 		t.Errorf("text = %q", p.Text)
 	}
 
 	p = step(ln(journal.EventPrBody, commit("abcdef0123")), ln(journal.EventPublishApproved, provenance("agent")))
 	if s := sub(t, p, "approval"); s.State != SubNeedsYou || !strings.Contains(s.Detail, "an agent approved it") {
 		t.Errorf("an agent's approval = %+v, want the person's still owed", s)
+	}
+	if p.Text != "waiting for your approval" {
+		t.Errorf("an agent's approval: text = %q", p.Text)
 	}
 
 	p = step(ln(journal.EventPrBody, commit("abcdef0123")), ln(journal.EventPublishApproved, provenance("person")))
@@ -567,14 +597,28 @@ func TestPublishSubStepsFollowTheFlow(t *testing.T) {
 		t.Errorf("pr detail = %q", s.Detail)
 	}
 
+	// A bare publish asks at the terminal and writes neither a body nor an
+	// approval line: its pull request carries the body.
 	f := allGreen()
 	f.Published = true
 	p = Derive(f, append(append(append([]journal.Line{}, clean...), pr, ln(journal.EventChangelog)), ln(journal.EventPublishDone))).Of(Publish)
-	if want := "body=pending approval=pending pr=done changelog=done done=done"; states(p) != want {
+	if want := "body=done pr=done changelog=done done=done"; states(p) != want {
 		t.Errorf("published: %s, want %s", states(p), want)
 	}
 	if p.State != StateDone || p.Text != "pull request opened · "+pr.URL {
 		t.Errorf("published phase = %+v", p)
+	}
+
+	// A publish by hand: the body, the session's own push, and the pull
+	// request recorded with --pr. No approval was asked, and none is owed.
+	recorded := ln(journal.EventPr, outcome("recorded"))
+	recorded.URL = "https://example.invalid/o/r/pull/4"
+	p = Derive(f, append(append([]journal.Line{}, clean...), ln(journal.EventPrBody, commit("abcdef0123")), ln(journal.EventChangelog), recorded, ln(journal.EventPublishDone))).Of(Publish)
+	if want := "body=done pr=done changelog=done done=done"; states(p) != want {
+		t.Errorf("published by hand: %s, want %s", states(p), want)
+	}
+	if p.Text != "pull request recorded · "+recorded.URL {
+		t.Errorf("published by hand: text = %q", p.Text)
 	}
 
 	// A body written for an earlier head does not count after a new round.
@@ -584,7 +628,7 @@ func TestPublishSubStepsFollowTheFlow(t *testing.T) {
 	}
 
 	// Before the review is done, nothing in the publish is under way.
-	if p := Derive(allGreen(), built()).Of(Publish); states(p) != "body=pending approval=pending pr=pending changelog=pending done=pending" || p.Text != "after a clean review" {
+	if p := Derive(allGreen(), built()).Of(Publish); states(p) != "body=pending pr=pending changelog=pending done=pending" || p.Text != "after a clean review" {
 		t.Errorf("publish before the review: %s / %q", states(p), p.Text)
 	}
 }
@@ -655,6 +699,17 @@ func TestPublishSubStepsOfATicketInSeveralRepos(t *testing.T) {
 		t.Errorf("pr:web = %+v, want a label and no url", s)
 	}
 
+	// By hand, with no approval: the bodies, then each repo's pull request
+	// recorded in turn.
+	apiRec := ln(journal.EventPr, outcome("recorded"), repo("api"), url("https://example.invalid/o/api/pull/7"))
+	p = step(allGreen(), with(bodies, []journal.Line{apiRec})...)
+	if want := "body=done pr:api=done pr:web=active changelog=pending done=pending"; states(p) != want {
+		t.Errorf("by hand, one recorded: %s, want %s", states(p), want)
+	}
+	if p.Text != "1 of 2 pull requests recorded" {
+		t.Errorf("by hand, one recorded: text = %q", p.Text)
+	}
+
 	f := allGreen()
 	f.Published = true
 	p = step(f, with(bodies, approvals, []journal.Line{apiPR, webPR, ln(journal.EventChangelog), ln(journal.EventPublishDone)})...)
@@ -669,7 +724,7 @@ func TestPublishSubStepsOfATicketInSeveralRepos(t *testing.T) {
 	// and has the one pull request step.
 	one := ln(journal.EventPr, outcome("opened"), repo("web"), url("https://example.invalid/o/web/pull/8"))
 	p = step(f, one, ln(journal.EventChangelog), ln(journal.EventPublishDone))
-	if want := "body=pending approval=pending pr=done changelog=done done=done"; states(p) != want {
+	if want := "body=done pr=done changelog=done done=done"; states(p) != want {
 		t.Errorf("one repo named, published: %s, want %s", states(p), want)
 	}
 	if p.Text != "pull request opened · https://example.invalid/o/web/pull/8" {
@@ -845,7 +900,7 @@ func TestTheStoresRoundsAreTheWordOnAVerdict(t *testing.T) {
 	if got.Current != Publish || got.Prompt != "Publish SHOP-1" {
 		t.Errorf("a clean round in the store: %+v", got)
 	}
-	if want := "round 2 clean · by reviewer"; got.Of(Review).Text != want {
+	if want := "round 2 clean · by session reviewer"; got.Of(Review).Text != want {
 		t.Errorf("review text = %q, want %q", got.Of(Review).Text, want)
 	}
 

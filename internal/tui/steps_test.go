@@ -313,3 +313,45 @@ func TestTheHeaderOfAPublishUnderWayReadsPublishing(t *testing.T) {
 		t.Errorf("header = %q, want it to end in the icon and \"publishing\"", head)
 	}
 }
+
+// TestStepTimesCountOnlyTheirOwnGaps: a step's time is the gaps between its own
+// consecutive lines. A build that the review sent a fix back to counts the fix
+// and not the review between; the hand-offs from one step to the next (here a
+// minute each, a person reading before the next prompt) count for neither, and
+// a spend line is no step's.
+func TestStepTimesCountOnlyTheirOwnGaps(t *testing.T) {
+	t.Parallel()
+	status := strings.Join([]string{"ticket: JIG-9", "state: green",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
+			{"a", "green", "1", "-", "-", "Do a"},
+			{"r1-fix-1", "green", "1", "-", "-", "Fix r1-f1"},
+		}), "questions: none"}, "\n") + "\n"
+	g := newRig(t, "JIG-9")
+	g.r.answer("status JIG-9 --store /s", status, 0)
+	round := func(n int, session string) func(*journal.Line) {
+		return func(l *journal.Line) { l.Attempt, l.Session = n, session }
+	}
+	g.feed(
+		jl(at(30, 0), "JIG-9", "a", journal.EventClaim, with("s-b", "", "", "", "", "")),
+		jl(at(30, 40), "JIG-9", "a", journal.EventVerified, with("s-b", sha('a'), "", "", "", "")),
+		jl(at(31, 40), "JIG-9", "", journal.EventGateOpen, round(1, "")),
+		jl(at(33, 40), "JIG-9", "", journal.EventGateRound, round(1, "s-rev")),
+		jl(at(33, 40), "JIG-9", "r1-fix-1", journal.EventFixSlice, round(1, "")),
+		jl(at(34, 40), "JIG-9", "r1-fix-1", journal.EventClaim, with("s-b", "", "", "", "", "")),
+		jl(at(35, 0), "JIG-9", "r1-fix-1", journal.EventVerified, with("s-b", sha('b'), "", "", "", "")),
+		jl(at(36, 0), "JIG-9", "", journal.EventGateOpen, round(2, "")),
+		jl(at(37, 30), "JIG-9", "", journal.EventGateClean, round(2, "s-rev")),
+		jl(at(37, 40), "JIG-9", "r1-fix-1", journal.EventSpend, with("s-b", "", "", "", "", "")),
+		jl(at(38, 40), "JIG-9", "", journal.EventPrBody, func(l *journal.Line) { l.Commit = sha('b') }),
+		jl(at(39, 10), "JIG-9", "", journal.EventPr, func(l *journal.Line) {
+			l.Commit, l.Outcome, l.URL = sha('b'), "recorded", "https://example.test/acme/demo/pull/9"
+		}),
+		jl(at(39, 10), "JIG-9", "", journal.EventPublishDone),
+	)
+	steps := g.m.steps(g.m.w.tickets["JIG-9"])
+	for step, want := range map[int]string{stepBrief: "", stepBuild: "1m 00s", stepReview: "3m 30s", stepPublish: "30s"} {
+		if got := steps[step].Took; got != want {
+			t.Errorf("%s took %q, want %q", stepNames[step], got, want)
+		}
+	}
+}

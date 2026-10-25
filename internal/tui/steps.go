@@ -3,8 +3,8 @@ package tui
 import (
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
 )
@@ -118,7 +118,7 @@ func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 	case s.Done:
 		s.State = StateOK
 		if n > 0 {
-			s.Took = m.stepTook(t, t.stepLines(stepBuild), journal.EventVerified)
+			s.Took = t.stepTook(stepBuild)
 		}
 	case n == 0:
 		s.State = StateQueued
@@ -172,7 +172,7 @@ func (m *Model) reviewRow(t *ticket, d phase.Ticket) stepRow {
 	switch {
 	case s.Done:
 		s.State = StateOK
-		s.Took = m.stepTook(t, t.stepLines(stepReview), journal.EventGateClean)
+		s.Took = t.stepTook(stepReview)
 	case len(rounds) == 0:
 		s.State = StateReady
 		if pending {
@@ -196,15 +196,15 @@ func (m *Model) reviewRow(t *ticket, d phase.Ticket) stepRow {
 	return s
 }
 
-// publishRow is the publish: the body, the person's approval, the pull
-// request.
+// publishRow is the publish: the body, the pull request (with the person's
+// approval first when jig pushes), the changelog.
 func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	p := d.Of(phase.Publish)
 	s := rowOf(stepPublish, rowPublish, p)
 	switch {
 	case s.Done:
 		s.State = StatePublished
-		s.Took = m.stepTook(t, t.stepLines(stepPublish), journal.EventPr)
+		s.Took = t.stepTook(stepPublish)
 	case p.State == phase.StatePending:
 		s.State = StateQueued
 	case hasSub(p, phase.SubDone):
@@ -215,23 +215,32 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	return s
 }
 
-// stepTook is how long a done step took: from its first line to the last
-// line of event.
-func (m *Model) stepTook(t *ticket, lines []events.Envelope, event string) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	end := -1
-	for i := len(lines) - 1; i >= 0; i-- {
-		if lines[i].Event == event {
-			end = i
-			break
+// stepTook is how long a done step took: the gaps between consecutive lines of
+// the journal that are both the step's. A build that a review sent fixes back to
+// counts the fixes and not the review between, and a hand-off from one step to
+// the next (a person reading the outcome before prompting the next phase) counts
+// for neither. A line of no step (a spend) neither starts nor ends a gap. ""
+// when the step had no time: the brief, whose drafting writes no line before its
+// approval.
+func (t *ticket) stepTook(step int) string {
+	var took time.Duration
+	var prev time.Time
+	prevStep := -1
+	for _, l := range t.lines {
+		s := stepOfLine(l)
+		at, ok := l.At()
+		if s < 0 || !ok {
+			continue
 		}
+		if s == step && prevStep == step && at.After(prev) {
+			took += at.Sub(prev)
+		}
+		prev, prevStep = at, s
 	}
-	if end < 0 {
+	if took <= 0 {
 		return ""
 	}
-	return between(lines[0], lines[end])
+	return span(took)
 }
 
 // stepTitle is a step as its panel titles it: "2 Build".

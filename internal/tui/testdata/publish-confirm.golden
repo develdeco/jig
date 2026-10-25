@@ -4,7 +4,7 @@ jig  demo › JIG-2  Config loader                                     ✓ publi
   │  ✓ 1 Brief            no brief on record                                   │
   │  ✓ 2 Build    30s     1 slice green, each verified by jig                  │
   │  ✓ 3 Review   2m 30s  round 2 clean · by reviewer                          │
-  │▸ ✓ 4 Publish  20s     pull request opened · https://example.test/acme/dem… │
+  │▸ ✓ 4 Publish  21s     pull request opened · https://example.test/acme/dem… │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ 4 Publish · sub-steps ────────────────────────────────────── 4 of 5 done ─╮
   │  ✓ body · ccccccc                                                          │
