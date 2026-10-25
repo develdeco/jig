@@ -21,7 +21,15 @@ import (
 // asks it, so `jig next`, `jig status`, `jig here` and the refusals name the
 // same phase and the same prompt.
 func derivePhase(st *store.Store, ticket string) (phase.Ticket, error) {
-	f, lines, err := phaseFacts(st, ticket)
+	return derivePhaseWith(st, ticket, nil)
+}
+
+// derivePhaseWith is derivePhase with the merge facts of the blockers read from
+// merges (nil: a blocker is met once it published). `jig next` reads them, so
+// the phase it names and the state it prints agree on a blocker whose pull
+// request is not merged.
+func derivePhaseWith(st *store.Store, ticket string, merges mergeSource) (phase.Ticket, error) {
+	f, lines, err := phaseFactsWith(st, ticket, merges)
 	if err != nil {
 		return phase.Ticket{}, err
 	}
@@ -31,16 +39,23 @@ func derivePhase(st *store.Store, ticket string) (phase.Ticket, error) {
 // phaseFacts gathers what internal/phase derives a ticket's phase from, and
 // the journal lines it reads beside them. It reads the store and writes
 // nothing. Blockers are the ones a claim would be warned of or refused for
-// with no pull-request host to ask (claimProblems asks the host as well), each
-// with the prompt of the blocker's own phase.
+// before any merge is read (claimProblems and `jig next` read them: see
+// phaseFactsWith), each with the prompt of the blocker's own phase.
 func phaseFacts(st *store.Store, ticket string) (phase.Facts, []journal.Line, error) {
-	return phaseFactsOf(st, ticket, map[string]bool{})
+	return phaseFactsWith(st, ticket, nil)
+}
+
+// phaseFactsWith is phaseFacts with the blockers judged by merges, as a claim
+// judges them: a blocker is held until its work has merged. nil judges by the
+// journal alone, where a blocker is met once it published.
+func phaseFactsWith(st *store.Store, ticket string, merges mergeSource) (phase.Facts, []journal.Line, error) {
+	return phaseFactsOf(st, ticket, map[string]bool{}, merges)
 }
 
 // phaseFactsOf is phaseFacts for a ticket reached through blockers: seen holds
 // the tickets already being gathered, so blockers that wait for one another
 // stop at the first repeat instead of recursing for good.
-func phaseFactsOf(st *store.Store, ticket string, seen map[string]bool) (phase.Facts, []journal.Line, error) {
+func phaseFactsOf(st *store.Store, ticket string, seen map[string]bool, merges mergeSource) (phase.Facts, []journal.Line, error) {
 	seen[ticket] = true
 	f := phase.Facts{Ticket: ticket}
 	rec, err := st.ReadTicket(ticket)
@@ -90,12 +105,12 @@ func phaseFactsOf(st *store.Store, ticket string, seen map[string]bool) (phase.F
 		if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
 			blocker = resolved
 		}
-		p, err := blockerProblem(st, ticket, blocker, b.Kind, claimDeps{})
+		p, err := blockerProblem(st, ticket, blocker, b.Kind, claimDeps{merges: merges})
 		if err != nil {
 			return f, nil, err
 		}
 		if p != nil {
-			f.Blockers = append(f.Blockers, phase.Blocker{Ticket: blocker, Kind: b.Kind, Reason: p.Message, Prompt: blockerPrompt(st, blocker, seen)})
+			f.Blockers = append(f.Blockers, phase.Blocker{Ticket: blocker, Kind: b.Kind, Reason: p.Message, Prompt: blockerPrompt(st, blocker, seen, merges)})
 		}
 	}
 
@@ -167,11 +182,11 @@ func briefApprovalOf(st *store.Store, ticket string) (string, store.Approval, er
 // blockerPrompt is the prompt of the phase a blocker is at: what to ask to
 // move it toward publishing. "" when it cannot be told (the blocker is already
 // being gathered, or cannot be read).
-func blockerPrompt(st *store.Store, blocker string, seen map[string]bool) string {
+func blockerPrompt(st *store.Store, blocker string, seen map[string]bool, merges mergeSource) string {
 	if seen[blocker] {
 		return ""
 	}
-	f, lines, err := phaseFactsOf(st, blocker, seen)
+	f, lines, err := phaseFactsOf(st, blocker, seen, merges)
 	if err != nil {
 		return ""
 	}

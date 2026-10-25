@@ -65,6 +65,13 @@
 // `pr view ... --json headRefName,...` (the adapter's PRHead) answers the head
 // of the pull request: $GH_STUB_HEAD_REF as headRefName, $GH_STUB_HEAD_OID as
 // headRefOid, and $GH_STUB_PR_STATE as state (OPEN when not set).
+//
+// `pr view <url> --json state` (the state of a pull request somebody recorded:
+// what a blocker's merge is read from) answers for the pull request of
+// $GH_STUB_PULLS whose html_url is the url (a row with none, whose number ends
+// it): MERGED for a row with a merge time, else CLOSED for a closed one, else
+// OPEN. A url the list does not hold fails as gh does for a pull request that
+// is not there.
 package main
 
 import (
@@ -110,6 +117,8 @@ func main() {
 		// pr comment succeeds silently
 	case len(args) >= 2 && args[0] == "pr" && args[1] == "view" && jsonFields(args) == "headRefName,headRefOid,state":
 		printPRHead()
+	case len(args) >= 3 && args[0] == "pr" && args[1] == "view" && jsonFields(args) == "state":
+		printPRState(args[2], os.Getenv("GH_STUB_PULLS"))
 	case len(args) >= 3 && args[0] == "repo" && args[1] == "create":
 		createRepo(args[2], args[3:])
 	case len(args) >= 2 && args[0] == "pr" && args[1] == "view":
@@ -225,6 +234,42 @@ func printPRHead() {
 		os.Exit(1)
 	}
 	fmt.Println(string(data))
+}
+
+// printPRState answers `gh pr view <url> --json state` from the pull request of
+// list (the JSON array of $GH_STUB_PULLS) whose html_url is url, or, for a row
+// with none, whose number ends url: MERGED for a row with a merge time, else
+// CLOSED for a closed one, else OPEN. A url the list does not hold fails the way
+// gh does for a pull request that is not there.
+func printPRState(url, list string) {
+	url = strings.TrimRight(url, "/")
+	number := url[strings.LastIndex(url, "/")+1:]
+	var rows []map[string]json.RawMessage
+	if list != "" {
+		_ = json.Unmarshal([]byte(list), &rows)
+	}
+	for _, row := range rows {
+		if link := rowString(row, "html_url", ""); link != "" {
+			if link != url {
+				continue
+			}
+		} else {
+			var num int
+			if err := json.Unmarshal(row["number"], &num); err != nil || strconv.Itoa(num) != number {
+				continue
+			}
+		}
+		state := "OPEN"
+		if _, merged := row["merged_at"]; merged {
+			state = "MERGED"
+		} else if strings.EqualFold(rowString(row, "state", "open"), "closed") {
+			state = "CLOSED"
+		}
+		fmt.Printf("{\"state\":%q}\n", state)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "GraphQL: Could not resolve to a PullRequest with the number of %s. (repository.pullRequest)\n", number)
+	os.Exit(1)
 }
 
 // imageRefRE matches a markdown image reference to file, "./<file>" exactly,

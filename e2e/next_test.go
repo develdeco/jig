@@ -205,22 +205,56 @@ func TestNextReadySetsAndTickets(t *testing.T) {
 		t.Errorf("jig next JIG-2: state = %q, ready = %v, blocked_by = %+v, want blocked with nothing ready", blocked.State, readyRepos(blocked), blocked.BlockedBy)
 	}
 
-	// JIG-1 publishes: it is done, and JIG-2's blocker is met.
+	// JIG-1 publishes: it is done, but JIG-2 waits for its work to merge, and
+	// nothing says it has.
 	if err := journal.Append(st, "JIG-1", journal.Line{Event: journal.EventPublishDone}); err != nil {
 		t.Fatalf("journal.Append publish-done: %v", err)
 	}
 	all = nextJSON[nextStoreOut](t, env, fx.RepoDir)
 	states = []string{all.Tickets[0].State, all.Tickets[1].State, all.Tickets[2].State}
-	if want := []string{"done", "ready", "new"}; !reflect.DeepEqual(states, want) {
+	if want := []string{"done", "blocked", "new"}; !reflect.DeepEqual(states, want) {
 		t.Errorf("after JIG-1 published: ticket states = %v, want %v", states, want)
 	}
-	if !reflect.DeepEqual(all.Next, []string{"JIG-2"}) {
-		t.Errorf("after JIG-1 published: next = %v, want JIG-2", all.Next)
+	if len(all.Next) != 0 {
+		t.Errorf("after JIG-1 published: next = %v, want none (JIG-2 waits for the merge)", all.Next)
 	}
+
+	// JIG-1 built in two repos and recorded a pull request in each. One is
+	// merged and the other open: JIG-2 waits for the repo that is missing.
+	env, _ = ghOnPath(t, env)
+	env = withPulls(t, env,
+		fixture.GhPull{Number: 3, Repo: "fixture-repo", State: "closed", Merged: true},
+		fixture.GhPull{Number: 4, Repo: "second-repo"})
+	for _, url := range []string{pullURLIn("fixture-repo", 3), pullURLIn("second-repo", 4)} {
+		if err := journal.Append(st, "JIG-1", journal.Line{Event: journal.EventPr, Outcome: "recorded", URL: url}); err != nil {
+			t.Fatalf("journal.Append pr: %v", err)
+		}
+	}
+	half := nextJSON[struct {
+		State     string          `json:"state"`
+		BlockedBy []nextBlockedBy `json:"blocked_by"`
+	}](t, env, fx.RepoDir, "JIG-2")
+	if want := "second-repo: its PR is open (" + pullURLIn("second-repo", 4) + ")"; half.State != "blocked" || len(half.BlockedBy) != 1 || half.BlockedBy[0].Fact != want {
+		t.Errorf("one repo merged, one open: %+v, want JIG-2 blocked by JIG-1, %q", half, want)
+	}
+
+	// Both are merged: JIG-2's blocker is met.
+	env = withPulls(t, env,
+		fixture.GhPull{Number: 3, Repo: "fixture-repo", State: "closed", Merged: true},
+		fixture.GhPull{Number: 4, Repo: "second-repo", State: "closed", Merged: true})
 	unblocked := nextJSON[nextTicketOut](t, env, fx.RepoDir, "JIG-2")
 	// JIG-2 has a title ("second"), so its branch is its id and the slug of it.
 	if want := []string{"fixture-repo: x"}; unblocked.State != "ready" || !reflect.DeepEqual(readyRepos(unblocked), want) || unblocked.Branch != "JIG-2-second" {
 		t.Errorf("jig next JIG-2: state = %q, ready = %v, branch = %q, want ready, %v, JIG-2-second", unblocked.State, readyRepos(unblocked), unblocked.Branch, want)
+	}
+	// The listing of the store takes what that read just learned.
+	all = nextJSON[nextStoreOut](t, env, fx.RepoDir)
+	states = []string{all.Tickets[0].State, all.Tickets[1].State, all.Tickets[2].State}
+	if want := []string{"done", "ready", "new"}; !reflect.DeepEqual(states, want) {
+		t.Errorf("after JIG-1 merged: ticket states = %v, want %v", states, want)
+	}
+	if !reflect.DeepEqual(all.Next, []string{"JIG-2"}) {
+		t.Errorf("after JIG-1 merged: next = %v, want JIG-2", all.Next)
 	}
 
 	if r := runJig(t, env, fx.RepoDir, "next", "JIG-99"); r.Code == 0 || !strings.Contains(r.Stdout, "JIG-99") {
