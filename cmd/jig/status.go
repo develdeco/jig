@@ -14,6 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
@@ -119,6 +121,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 	// its fixes, and nothing built is not something building: every slice
 	// it has is green, however few.
 	allGreen := len(slices) > 0 || adopted
+	attempted := false
 	for _, sl := range slices {
 		ss, err := st.ReadSliceState(ticket, sl.ID)
 		if err != nil {
@@ -127,6 +130,9 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		counts[ss.State]++
 		if ss.State != "green" {
 			allGreen = false
+		}
+		if ss.Attempts > 0 {
+			attempted = true
 		}
 		blocked := "-"
 		if len(sl.BlockedBy) > 0 {
@@ -158,19 +164,9 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		}
 	}
 
-	// Precedence: a stalled slice is worse than one merely parked awaiting a
-	// human, which is worse than one blocked on its env coming up, which
-	// beats "green" only once every slice is; "building" is the fallback.
-	overall := "building"
-	switch {
-	case counts["stalled"] > 0:
-		overall = "stalled"
-	case counts["needs-input"] > 0:
-		overall = "parked"
-	case counts["env-blocked"] > 0:
-		overall = "env-blocked"
-	case allGreen:
-		overall = "green"
+	overall, err := overallState(st, ticket, len(slices), counts, allGreen, attempted)
+	if err != nil {
+		return "", err
 	}
 
 	blocks := []string{"ticket: " + ticket}
@@ -320,6 +316,42 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 	var buf bytes.Buffer
 	axi.Render(&buf, blocks...)
 	return buf.String(), nil
+}
+
+// overallState is the word of the state: line, from the slices' states
+// (counts, of n slices) and whether any of them has an attempt on record. A
+// stalled slice is worse than one merely parked awaiting a human, which is
+// worse than one blocked on its env coming up, which beats "green" only once
+// every slice is (allGreen). Below those a ticket nothing has started reads
+// as what it lacks: "new" with no slices and no adopted branch, "queued" with
+// slices that every one is queued, none has an attempt and none was ever
+// claimed or verified (phase.EverClaimed; a slice released after a claim is
+// queued again, and the ticket is still building). "building" is the fallback:
+// a slice was claimed, or has a verification.
+func overallState(st *store.Store, ticket string, n int, counts map[string]int, allGreen, attempted bool) (string, error) {
+	switch {
+	case counts["stalled"] > 0:
+		return "stalled", nil
+	case counts["needs-input"] > 0:
+		return "parked", nil
+	case counts["env-blocked"] > 0:
+		return "env-blocked", nil
+	case allGreen:
+		return "green", nil
+	case n == 0:
+		// A ticket that adopted a branch is allGreen with no slices, so this
+		// one adopted none.
+		return "new", nil
+	case counts["queued"] == n && !attempted:
+		lines, err := journal.Read(st, ticket)
+		if err != nil {
+			return "", err
+		}
+		if !phase.EverClaimed(lines) {
+			return "queued", nil
+		}
+	}
+	return "building", nil
 }
 
 // askCounts is how a ticket's outstanding asks stand against the decisions

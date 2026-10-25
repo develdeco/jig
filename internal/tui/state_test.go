@@ -79,6 +79,19 @@ func TestPhaseTakesTheStoresWordOnTheSlices(t *testing.T) {
 	}
 }
 
+// TestPhaseDoesNotCallATicketNothingStartedBuilding: a status that says new or
+// queued is taken at its word, in the words it used, however the journal reads.
+func TestPhaseDoesNotCallATicketNothingStartedBuilding(t *testing.T) {
+	t.Parallel()
+	tk := ticketOf("T", jl(at(0, 1), "T", "", journal.EventApproval))
+	for _, word := range []string{"new", "queued"} {
+		tk.status = &statusInfo{State: word}
+		if got, label := tk.phase(time.UTC); got != StateQueued || label != word {
+			t.Errorf("status %s: phase = %s %q, want %s %q", word, got, label, StateQueued, word)
+		}
+	}
+}
+
 func TestLinesStayInTheOrderTheyWereWritten(t *testing.T) {
 	t.Parallel()
 	// A line from another machine arrives late, by a merge, with an earlier stamp.
