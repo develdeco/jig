@@ -246,6 +246,7 @@ func (r *gateRun) roundInput() RoundInput {
 		LeaseDir:      r.lease.Dir,
 		RepoName:      r.repoName,
 		Target:        r.target,
+		Branch:        r.branch,
 		Effort:        r.d.Cfg.ReviewEffortFor,
 		Intent:        r.intent,
 		IntentText:    r.intentText,
