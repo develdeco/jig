@@ -1,7 +1,6 @@
 package ready
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/develdeco/jig/internal/store"
@@ -69,82 +68,6 @@ func Batches(slices []store.Slice, wsRepo map[string]string) []Batch {
 		out = append(out, Batch{Repo: repo, Slices: groups[repo]})
 	}
 	return out
-}
-
-// Unplaced is the repo name Place gives a workspace no repo declares, so a
-// batch of such slices still has a name to print.
-const Unplaced = "?"
-
-// Repo is one repo of a project and the workspace ids its manifest declares
-// (its .claude/jig.yaml, or the detected default "root").
-type Repo struct {
-	Name       string
-	Workspaces []string
-}
-
-// Placement is the workspace-to-repo map of one ticket's slices.
-type Placement struct {
-	// Repo maps a workspace id to the name of the repo that owns it. A
-	// workspace no repo declares maps to Unplaced.
-	Repo map[string]string
-	// Unplaced lists, sorted, the workspace ids of the slices that no repo
-	// declares.
-	Unplaced []string
-	// Ambiguous lists, sorted, the workspace ids that more than one repo
-	// declares; the first repo in project order owns it.
-	Ambiguous []string
-}
-
-// Place maps each workspace the slices name to the repo that owns it. A
-// project with one repo gives that repo every workspace, declared or not
-// (the frontier's own rule for a single-repo project); with several, a
-// workspace belongs to the first repo, in project order, whose manifest
-// declares it. A workspace that two repos declare is reported in Ambiguous
-// and one nobody declares in Unplaced.
-func Place(repos []Repo, slices []store.Slice) Placement {
-	p := Placement{Repo: map[string]string{}}
-	if len(repos) == 1 {
-		for _, s := range slices {
-			p.Repo[s.Workspace] = repos[0].Name
-		}
-		return p
-	}
-	owner := map[string]string{}
-	ambiguous := map[string]bool{}
-	for _, r := range repos {
-		for _, ws := range r.Workspaces {
-			if have, ok := owner[ws]; ok {
-				if have != r.Name {
-					ambiguous[ws] = true
-				}
-				continue
-			}
-			owner[ws] = r.Name
-		}
-	}
-	for _, s := range slices {
-		name, ok := owner[s.Workspace]
-		if !ok {
-			name = Unplaced
-			p.Unplaced = appendOnce(p.Unplaced, s.Workspace)
-		}
-		p.Repo[s.Workspace] = name
-		if ambiguous[s.Workspace] {
-			p.Ambiguous = appendOnce(p.Ambiguous, s.Workspace)
-		}
-	}
-	sort.Strings(p.Unplaced)
-	sort.Strings(p.Ambiguous)
-	return p
-}
-
-func appendOnce(list []string, v string) []string {
-	for _, have := range list {
-		if have == v {
-			return list
-		}
-	}
-	return append(list, v)
 }
 
 // Waves numbers each slice by the longest chain of slices it waits on: 0 for

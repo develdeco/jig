@@ -74,38 +74,81 @@ func TestScheduleGroupsByRepoInOrder(t *testing.T) {
 	}
 }
 
-// TestPlace: a single-repo project owns every workspace; with several repos a
-// workspace belongs to the first repo that declares it, and the ones nobody
-// declares, or several do, are reported.
+// TestPlace: a single-repo project owns every workspace, written bare; with
+// several repos a slice names its repo as "<repo>/<id>", a bare id belongs to
+// the one repo that declares it, and the ones nobody declares, or several do,
+// are reported and owned by no repo.
 func TestPlace(t *testing.T) {
 	t.Parallel()
 	slices := []store.Slice{{ID: "a", Workspace: "alpha"}, {ID: "b", Workspace: "beta"}, {ID: "e", Workspace: "gamma"}, {ID: "x", Workspace: "stray"}, {ID: "y", Workspace: "stray"}}
 
 	one := Place([]Repo{{Name: "solo"}}, slices)
 	for ws, repo := range one.Repo {
-		if repo != "solo" {
-			t.Errorf("single repo: workspace %s -> %s, want solo", ws, repo)
+		if repo != "solo" || one.ID[ws] != ws {
+			t.Errorf("single repo: workspace %s -> %s as %s, want solo as itself", ws, repo, one.ID[ws])
 		}
 	}
 	if len(one.Unplaced) != 0 || len(one.Ambiguous) != 0 {
 		t.Errorf("single repo: unplaced %v, ambiguous %v, want none", one.Unplaced, one.Ambiguous)
+	}
+	if got := Place([]Repo{{Name: "solo"}}, []store.Slice{{ID: "q", Workspace: "solo/alpha"}}); got.Repo["solo/alpha"] != "solo" || got.ID["solo/alpha"] != "solo/alpha" {
+		t.Errorf("single repo: a workspace that begins with the repo's name is still the bare id: %+v", got)
 	}
 
 	got := Place([]Repo{
 		{Name: "first", Workspaces: []string{"alpha", "beta"}},
 		{Name: "second", Workspaces: []string{"gamma", "beta"}},
 	}, slices)
-	want := map[string]string{"alpha": "first", "beta": "first", "gamma": "second", "stray": Unplaced}
+	want := map[string]string{"alpha": "first", "beta": Unplaced, "gamma": "second", "stray": Unplaced}
 	if !reflect.DeepEqual(got.Repo, want) {
 		t.Errorf("Place.Repo = %v, want %v", got.Repo, want)
 	}
 	if !reflect.DeepEqual(got.Unplaced, []string{"stray"}) || !reflect.DeepEqual(got.Ambiguous, []string{"beta"}) {
 		t.Errorf("Place: unplaced %v, ambiguous %v, want [stray] and [beta]", got.Unplaced, got.Ambiguous)
 	}
+	if want := []string{"first", "second"}; !reflect.DeepEqual(got.Declared["beta"], want) {
+		t.Errorf("Place: beta is declared by %v, want %v", got.Declared["beta"], want)
+	}
+
+	// A slice that names its repo is never ambiguous, whatever the manifests
+	// say, and its id is the one after the repo's name.
+	named := Place([]Repo{
+		{Name: "first", Workspaces: []string{"alpha", "beta"}},
+		{Name: "second", Workspaces: []string{"gamma", "beta"}},
+	}, []store.Slice{{ID: "a", Workspace: "second/beta"}, {ID: "b", Workspace: "first/beta"}, {ID: "c", Workspace: "third/beta"}, {ID: "d", Workspace: "first/"}})
+	if wantRepo := map[string]string{"second/beta": "second", "first/beta": "first", "third/beta": Unplaced, "first/": Unplaced}; !reflect.DeepEqual(named.Repo, wantRepo) {
+		t.Errorf("Place.Repo with named repos = %v, want %v", named.Repo, wantRepo)
+	}
+	if named.ID["second/beta"] != "beta" || named.ID["first/beta"] != "beta" || len(named.Ambiguous) != 0 {
+		t.Errorf("Place.ID = %v, ambiguous %v, want beta for both named, none ambiguous", named.ID, named.Ambiguous)
+	}
 
 	none := Place(nil, slices)
 	if none.Repo["alpha"] != Unplaced || len(none.Unplaced) != 4 {
 		t.Errorf("no repos: %+v, want every workspace unplaced", none)
+	}
+}
+
+// TestSplitWorkspace: only a repo's own name and a slash make a workspace
+// qualified.
+func TestSplitWorkspace(t *testing.T) {
+	t.Parallel()
+	repos := []string{"api", "web"}
+	for _, c := range []struct {
+		written, repo, id string
+		ok                bool
+	}{
+		{"api/server", "api", "server", true},
+		{"web/ui/admin", "web", "ui/admin", true},
+		{"server", "", "server", false},
+		{"apix/server", "", "apix/server", false},
+		{"api/", "", "api/", false},
+		{"api", "", "api", false},
+	} {
+		repo, id, ok := SplitWorkspace(c.written, repos)
+		if repo != c.repo || id != c.id || ok != c.ok {
+			t.Errorf("SplitWorkspace(%q) = %q, %q, %v, want %q, %q, %v", c.written, repo, id, ok, c.repo, c.id, c.ok)
+		}
 	}
 }
 

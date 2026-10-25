@@ -137,6 +137,22 @@ func (m Manifest) Workspace(id string) (Workspace, bool) {
 	return Workspace{}, false
 }
 
+// WorkspaceIn looks up the workspace a slice names, in the form the slice
+// writes it: "<repo>/<id>" in a project of several repos, the bare id in a
+// project of one. repo is the name of the repo m belongs to. An id m declares
+// exactly as written wins, so a bare id that holds a slash still finds its
+// workspace; else the "<repo>/" in front of the written id is taken off. A
+// workspace written for another repo is not found.
+func (m Manifest) WorkspaceIn(repo, written string) (Workspace, bool) {
+	if w, ok := m.Workspace(written); ok {
+		return w, true
+	}
+	if rest, ok := strings.CutPrefix(written, repo+"/"); ok && repo != "" && rest != "" {
+		return m.Workspace(rest)
+	}
+	return Workspace{}, false
+}
+
 // OracleCmd resolves a slice's oracle field to a runnable command: when it
 // names a manifest oracle, that oracle's template with {path} substituted
 // for ws.Path; otherwise oracleField is used verbatim as a literal command.
