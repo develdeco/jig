@@ -207,3 +207,60 @@ func TestScanFilePathsInTextIsStructuralOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestAmongOrdersTheSessionsItIsGivenWithNoBarToClear(t *testing.T) {
+	head := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	say := func(id string, at time.Time, text string) *Session {
+		s := sessionAt(at, Message{Role: RoleUser, Text: text})
+		s.ID = id
+		return s
+	}
+	diff := []string{"alpha/alpha.go", "alpha/percent.go"}
+	none := say("none", head, "nothing about the files")
+	one := say("one", head, "I edited alpha/alpha.go")
+	both := say("both", head.Add(-time.Hour), "I edited alpha/alpha.go and alpha/percent.go")
+
+	// Best would refuse the first two (a multi-file diff needs two files);
+	// Among only orders them, because the ledger already vouched for them.
+	if m := Among([]*Session{none, one}, diff); m == nil || m.Session.ID != "one" {
+		t.Errorf("Among(none, one) = %+v, want the session that mentions a file", m)
+	}
+	if m := Among([]*Session{none}, diff); m == nil || m.Session.ID != "none" || m.Score != 0 {
+		t.Errorf("Among(none) = %+v, want the one session given, at score 0", m)
+	}
+	if m := Among([]*Session{none, one, both}, diff); m == nil || m.Session.ID != "both" || m.Score != 1 {
+		t.Errorf("Among(none, one, both) = %+v, want the session that mentions both files", m)
+	}
+}
+
+func TestAmongBreaksTiesTowardTheMoreRecentThenTheEarlier(t *testing.T) {
+	head := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	say := func(id string, at time.Time) *Session {
+		s := sessionAt(at, Message{Role: RoleUser, Text: "edited alpha/alpha.go"})
+		s.ID = id
+		return s
+	}
+	older, newer, same := say("older", head.Add(-time.Hour)), say("newer", head), say("same", head)
+	if m := Among([]*Session{older, newer}, []string{"alpha/alpha.go"}); m == nil || m.Session.ID != "newer" {
+		t.Errorf("Among(older, newer) = %+v, want the more recently active", m)
+	}
+	if m := Among([]*Session{newer, same}, []string{"alpha/alpha.go"}); m == nil || m.Session.ID != "newer" {
+		t.Errorf("Among(newer, same) = %+v, want the earlier given when activity ties", m)
+	}
+}
+
+func TestAmongPassesOverASessionWithNothingToExcerpt(t *testing.T) {
+	head := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	empty := sessionAt(head)
+	if m := Among([]*Session{nil, empty}, []string{"alpha/alpha.go"}); m != nil {
+		t.Errorf("Among(nil, a session with no messages) = %+v, want none", m)
+	}
+	if m := Among(nil, []string{"alpha/alpha.go"}); m != nil {
+		t.Errorf("Among(no sessions) = %+v, want none", m)
+	}
+	// With no diff files nothing orders the sessions, but one is still the ticket's.
+	talk := sessionAt(head, Message{Role: RoleUser, Text: "do it"})
+	if m := Among([]*Session{empty, talk}, nil); m == nil || m.Session != talk {
+		t.Errorf("Among with no diff files = %+v, want the session that has messages", m)
+	}
+}

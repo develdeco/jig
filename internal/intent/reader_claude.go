@@ -18,6 +18,10 @@ import (
 // ClaudeAgentName is Reader.Name for the Claude Code reader.
 const ClaudeAgentName = "claude-code"
 
+// claudeHarness is the name Claude Code's hook adapter gives the sessions it
+// records in the machine ledger (ledger.Session.Harness).
+const claudeHarness = "claude"
+
 // claudeReader reads Claude Code transcripts from
 // <home>/.claude/projects/*/*.jsonl.
 type claudeReader struct{}
@@ -32,6 +36,31 @@ type claudeReader struct{}
 func NewClaudeReader() Reader { return claudeReader{} }
 
 func (claudeReader) Name() string { return ClaudeAgentName }
+
+// Load reads the Claude Code transcript at path: the session file itself and,
+// beside it, the subagent transcripts folded in as Discover folds them. It
+// takes no repository or window, since the caller names the file it wants; a
+// file with no cwd anywhere in it is no transcript of Claude Code's, and
+// comes back as nil, nil. The session's ID is the file's name without its
+// extension, which Claude Code makes the session id, and which is safe to
+// use as a file name.
+func (claudeReader) Load(path string) (*Session, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := loadClaudeTranscript(path, nil)
+	if err != nil || sess == nil {
+		return nil, err
+	}
+	sessionID := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	sess.Agent = ClaudeAgentName
+	sess.ID = sessionID
+	sess.LastActivity = info.ModTime()
+	sess.CWDTopLevel = resolveTopLevel(sess.CWD, map[string]string{})
+	foldSubagents(sess, filepath.Dir(path), sessionID)
+	return sess, nil
+}
 
 func (claudeReader) Discover(opts DiscoverOpts) ([]*Session, error) {
 	// Nothing to identify a session's cwd against: match nothing rather
@@ -94,53 +123,54 @@ func (claudeReader) Discover(opts DiscoverOpts) ([]*Session, error) {
 			sess.ID = sessionID
 			sess.LastActivity = mtime
 			sess.CWDTopLevel = resolveTopLevel(sess.CWD, topLevelCache)
-
-			// Subagent transcripts live under <session-id>/subagents/,
-			// not only directly in it: a workflow's own subagents nest
-			// one level deeper, at subagents/workflows/<wf-id>/agent-*
-			// .jsonl. Every *.jsonl at any depth under subagents/ is
-			// counted under the parent session, since an implementer
-			// subagent does the actual editing the matcher needs to see.
-			// Their own mtimes are not separately filtered against the
-			// window: they happened during their parent session, whose
-			// own mtime already passed above, but the most recent of them
-			// still updates LastActivity so a session whose subagent
-			// activity ran later is not judged stale by its parent file's
-			// own, earlier mtime alone.
-			subDir := filepath.Join(projDir, sessionID, "subagents")
-			_ = filepath.WalkDir(subDir, func(p string, de fs.DirEntry, werr error) error {
-				if werr != nil {
-					// subDir not existing at all, or one entry under it
-					// failing to stat, must not drop the rest of the
-					// subagent tree.
-					return nil
-				}
-				if de.IsDir() || !strings.HasSuffix(de.Name(), ".jsonl") {
-					return nil
-				}
-				subSess, lerr := loadClaudeTranscript(p, nil)
-				if lerr != nil || subSess == nil {
-					return nil
-				}
-				// Marked FromSubagent before folding in: a RoleUser message
-				// here is the parent agent's own prompt to this subagent,
-				// not the developer's own words, even though the
-				// transcript format gives both the same "user" role - the
-				// excerpt renderer needs to tell them apart.
-				for i := range subSess.Messages {
-					subSess.Messages[i].FromSubagent = true
-				}
-				sess.Messages = append(sess.Messages, subSess.Messages...)
-				if subInfo, ierr := de.Info(); ierr == nil && subInfo.ModTime().After(sess.LastActivity) {
-					sess.LastActivity = subInfo.ModTime()
-				}
-				return nil
-			})
-
+			foldSubagents(sess, projDir, sessionID)
 			out = append(out, sess)
 		}
 	}
 	return out, nil
+}
+
+// foldSubagents folds the messages of the session's subagents into sess.
+// Subagent transcripts live under <session-id>/subagents/ in projDir, the
+// directory of the session's own file, not only directly in it: a workflow's
+// own subagents nest one level deeper, at subagents/workflows/<wf-id>/agent-*
+// .jsonl. Every *.jsonl at any depth under subagents/ is counted under the
+// parent session, since an implementer subagent does the actual editing the
+// matcher needs to see. Their own mtimes are not separately filtered against
+// the window: they happened during their parent session, whose own mtime
+// already passed, but the most recent of them still updates LastActivity so a
+// session whose subagent activity ran later is not judged stale by its parent
+// file's own, earlier mtime alone.
+func foldSubagents(sess *Session, projDir, sessionID string) {
+	subDir := filepath.Join(projDir, sessionID, "subagents")
+	_ = filepath.WalkDir(subDir, func(p string, de fs.DirEntry, werr error) error {
+		if werr != nil {
+			// subDir not existing at all, or one entry under it
+			// failing to stat, must not drop the rest of the
+			// subagent tree.
+			return nil
+		}
+		if de.IsDir() || !strings.HasSuffix(de.Name(), ".jsonl") {
+			return nil
+		}
+		subSess, lerr := loadClaudeTranscript(p, nil)
+		if lerr != nil || subSess == nil {
+			return nil
+		}
+		// Marked FromSubagent before folding in: a RoleUser message
+		// here is the parent agent's own prompt to this subagent,
+		// not the developer's own words, even though the
+		// transcript format gives both the same "user" role - the
+		// excerpt renderer needs to tell them apart.
+		for i := range subSess.Messages {
+			subSess.Messages[i].FromSubagent = true
+		}
+		sess.Messages = append(sess.Messages, subSess.Messages...)
+		if subInfo, ierr := de.Info(); ierr == nil && subInfo.ModTime().After(sess.LastActivity) {
+			sess.LastActivity = subInfo.ModTime()
+		}
+		return nil
+	})
 }
 
 // repoMatches reports whether cwd names the same repository as
