@@ -63,6 +63,10 @@ type Deps struct {
 	// with its process tree killed past it; a test that is not about the
 	// gate's oracle run hands one that passes.
 	Oracle func(cmd, dir string) (string, error)
+	// Prompt is what to ask an agent to move ticket on, in the words of the
+	// phase the ticket is at ("Build SHOP-1"): a refusal that sends a person
+	// back to an earlier phase names it. nil, or "", names none.
+	Prompt func(ticket string) string
 }
 
 // oracle is d.Oracle, or the real run when it is nil.

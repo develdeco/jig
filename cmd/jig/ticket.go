@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -130,9 +131,10 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 	return 0
 }
 
-// intakeHint is the next step for a ticket that has no slices yet.
+// intakeHint is the next step for a ticket that has no slices yet, with the
+// prompt that asks an agent for it.
 func intakeHint(ticket string) string {
-	return fmt.Sprintf("Write its brief.md and slices.yaml (the intake skill drafts both) and check them with `jig validate %s --check`; run `jig validate %s` once the person has confirmed the brief", ticket, ticket)
+	return fmt.Sprintf("Write its brief.md and slices.yaml (the intake skill drafts both) and check them with `jig validate %s --check`; run `jig validate %s` once the person has confirmed the brief%s", ticket, ticket, promptHint(phase.Prompt(phase.Brief, ticket)))
 }
 
 // checkTicketID fails when ticket cannot name a ticket's pool leases (see

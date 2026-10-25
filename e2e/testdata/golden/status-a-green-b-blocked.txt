@@ -15,4 +15,4 @@ brief_sections[5]{heading,slices}:
   Slice C - greeting decision,c
   Slice D - rig smoke,d
 help[1]:
-  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one
+  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one; ask: Build JIG-1

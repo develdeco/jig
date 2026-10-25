@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -57,6 +58,9 @@ func claimProblems(st *store.Store, ticket string, d claimDeps) ([]claimProblem,
 			return nil, err
 		}
 		if p != nil {
+			// What makes the ticket ready is the blocker getting on: the prompt
+			// of the phase the blocker is at.
+			p.Help += promptHint(blockerPrompt(st, blocker, map[string]bool{ticket: true}))
 			out = append(out, *p)
 		}
 	}
@@ -143,13 +147,13 @@ func approvalProblem(st *store.Store, ticket string) (*claimProblem, error) {
 		return &claimProblem{
 			Code:    claimNotApproved,
 			Message: fmt.Sprintf("the brief of %s is not approved", ticket),
-			Help:    fmt.Sprintf("Run `jig validate %s`: a valid brief is approved there", ticket),
+			Help:    fmt.Sprintf("Run `jig validate %s`: a valid brief is approved there", ticket) + promptHint(phase.Prompt(phase.Brief, ticket)) + " (approve its brief)",
 		}, nil
 	case !strings.EqualFold(approval.BriefSHA256, sum):
 		return &claimProblem{
 			Code:    claimNotApproved,
 			Message: fmt.Sprintf("the brief of %s changed after it was approved", ticket),
-			Help:    fmt.Sprintf("Run `jig validate %s` to approve it as it is now", ticket),
+			Help:    fmt.Sprintf("Run `jig validate %s` to approve it as it is now", ticket) + promptHint(phase.Prompt(phase.Brief, ticket)) + " (approve its brief)",
 		}, nil
 	}
 	return nil, nil

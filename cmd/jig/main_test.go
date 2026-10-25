@@ -70,7 +70,7 @@ func TestRenderStatus(t *testing.T) {
 		"  Slice C - greeting decision,c\n" +
 		"  Slice D - rig smoke,d\n" +
 		"help[1]:\n" +
-		"  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one\n"
+		"  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one; ask: Build JIG-1\n"
 
 	if got != want {
 		t.Fatalf("RenderStatus mismatch:\n--- got ---\n%q\n--- want ---\n%q", got, want)

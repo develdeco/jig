@@ -12,6 +12,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
@@ -24,6 +25,7 @@ func init() {
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 			{"topology", "also print every slice of the ticket with its repo, wave and blockers", false},
+			{"for", "the phase you are about to run (brief, build, review or publish): says whether it can run now, what it waits for, or that it is done already", false},
 			{"json", "print one JSON object instead of blocks", false},
 		}, false},
 		Order: 301,
@@ -38,12 +40,16 @@ func init() {
 // branch to create and how the repos can be shared out; without one, every
 // ticket of the store in order with what blocks it and which are ready, and a
 // warning for local branches of different tickets that change the same files.
+// With a ticket it also says which phase the ticket is at, whether that phase
+// can start now, why not, and the prompt that starts it (internal/phase); --for
+// asks about one phase, whatever the ticket is at.
 // It reads the store and the clones and writes nothing.
 func cmdNext(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "next")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	topology := fs.Bool("topology", false, "also print every slice of the ticket with its repo, wave and blockers")
+	forFlag := fs.String("for", "", "the phase you are about to run (brief, build, review or publish): says whether it can run now, what it waits for, or that it is done already")
 	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
 	positionals, handled, err := parseWithPositionals(stdout, fs, args)
 	if handled {
@@ -52,6 +58,10 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 	ticket, err := atMostOne(positionals, "jig next", "ticket")
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	asked, err := parseAskedPhase(*forFlag, ticket)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -77,7 +87,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		n, err := nextForTicket(st, cfg, mp, id, distribution, *topology)
+		n, err := nextForTicket(st, cfg, mp, id, distribution, *topology, asked)
 		if err != nil {
 			return renderErr(stdout, err)
 		}
@@ -114,6 +124,82 @@ type nextTicket struct {
 	Ambiguous    []string      `json:"ambiguous_workspaces,omitempty"`
 	Topology     []nextSlice   `json:"topology,omitempty"`
 	Advice       []string      `json:"advice,omitempty"`
+	// Phase is where the ticket stands (internal/phase), nil when it could
+	// not be told (PhaseProblem says why). It is a block of its own in the
+	// JSON because `ready` above is already the slices ready to build.
+	Phase        *nextPhase `json:"phase,omitempty"`
+	PhaseProblem string     `json:"phase_problem,omitempty"`
+
+	// derived is the same derivation, for the help.
+	derived *phase.Ticket
+}
+
+// nextPhase is the phase block of `jig next <ticket>`: the phase the ticket is
+// at, whether it can start now (Code and Reason say why not), the prompt that
+// starts it, each phase's state, and what --for asked.
+type nextPhase struct {
+	Name   string          `json:"name"`
+	Ready  bool            `json:"ready"`
+	Code   string          `json:"code,omitempty"`
+	Reason string          `json:"reason,omitempty"`
+	Prompt string          `json:"prompt,omitempty"`
+	Phases []nextPhaseRow  `json:"phases"`
+	For    *nextPhaseAsked `json:"for,omitempty"`
+}
+
+// nextPhaseRow is one phase's state and where it stands, in words.
+type nextPhaseRow struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+	Text  string `json:"text"`
+}
+
+// nextPhaseAsked is the answer to --for: whether that phase can run now, what
+// it waits for if not, and the warning when it is done already.
+type nextPhaseAsked struct {
+	Phase   string `json:"phase"`
+	Ready   bool   `json:"ready"`
+	Code    string `json:"code,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Warning string `json:"warning,omitempty"`
+}
+
+// parseAskedPhase is the phase --for names: "" for none, a VALIDATION_ERROR for
+// a word that is no phase or for a flag with no ticket to ask about.
+func parseAskedPhase(word, ticket string) (phase.Name, error) {
+	if word == "" {
+		return "", nil
+	}
+	p, ok := phase.Parse(word)
+	switch {
+	case !ok:
+		return "", &axi.Error{Msg: fmt.Sprintf("--for %q is none of the phases", word), Code: "VALIDATION_ERROR", Help: []string{"The phases are brief, build, review and publish"}}
+	case ticket == "":
+		return "", &axi.Error{Msg: "--for asks about a ticket: name one", Code: "VALIDATION_ERROR"}
+	}
+	return p, nil
+}
+
+// setPhase reads where the ticket stands and lays it on n, with the answer to
+// asked when --for named a phase. It is best-effort: a ticket whose phase
+// cannot be derived (a gate round it cannot read, say) still gets the rest of
+// `jig next`, and says why the phase is missing.
+func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name) {
+	t, err := derivePhase(st, id)
+	if err != nil {
+		n.PhaseProblem = err.Error()
+		return
+	}
+	n.derived = &t
+	p := &nextPhase{Name: string(t.Current), Ready: t.Ready, Code: t.Code, Reason: t.Reason, Prompt: t.Prompt}
+	for _, ph := range t.Phases {
+		p.Phases = append(p.Phases, nextPhaseRow{Name: string(ph.Name), State: ph.State, Text: ph.Text})
+	}
+	if asked != "" {
+		a := t.For(asked)
+		p.For = &nextPhaseAsked{Phase: string(asked), Ready: a.Ready, Code: a.Code, Reason: a.Reason, Warning: a.Warning}
+	}
+	n.Phase = p
 }
 
 type nextBlocker struct {
@@ -241,8 +327,9 @@ func projectRepos(cfg project.Config, mp project.MachineProject) []ready.Repo {
 	return repos
 }
 
-// nextForTicket works out what is ready to build on ticket id.
-func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProject, id, distribution string, topology bool) (nextTicket, error) {
+// nextForTicket works out what is ready to build on ticket id, and which phase
+// it is at; asked is the phase --for named, "" for none.
+func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProject, id, distribution string, topology bool, asked phase.Name) (nextTicket, error) {
 	data, err := readTicketData(st, id)
 	if err != nil {
 		return nextTicket{}, err
@@ -289,6 +376,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices})
 	}
 	n.Advice = distributionAdvice(n.Ready)
+	n.setPhase(st, id, asked)
 	if topology {
 		waves := ready.Waves(data.in.Slices)
 		for _, s := range data.in.Slices {
@@ -334,6 +422,7 @@ func (n nextTicket) blocks(topology bool) []string {
 	if n.Distribution != "" {
 		pairs = append(pairs, [2]string{"distribution", n.Distribution})
 	}
+	pairs = append(pairs, n.phasePairs()...)
 	blocks := []string{axi.KV("next", pairs)}
 	if len(n.BlockedBy) > 0 {
 		var rows [][]string
@@ -357,6 +446,9 @@ func (n nextTicket) blocks(topology bool) []string {
 	if len(n.Ambiguous) > 0 {
 		blocks = append(blocks, "note: more than one repo declares workspace(s) "+strings.Join(n.Ambiguous, ", ")+": the first repo of the project owns them")
 	}
+	if n.PhaseProblem != "" {
+		blocks = append(blocks, "note: the phase of "+n.Ticket+" could not be told: "+n.PhaseProblem)
+	}
 	if topology {
 		var rows [][]string
 		for _, s := range n.Topology {
@@ -371,22 +463,77 @@ func (n nextTicket) blocks(topology bool) []string {
 	return append(blocks, axi.Help(n.help()...))
 }
 
+// phasePairs are the lines `jig next <ticket>` adds to its next block: the
+// phase the ticket is at, whether it can start now, the prompt that starts it,
+// why not when it cannot, and the answer to --for.
+func (n nextTicket) phasePairs() [][2]string {
+	p := n.Phase
+	if p == nil {
+		return nil
+	}
+	pairs := [][2]string{{"phase", p.Name}, {"ready", yesNo(p.Ready)}}
+	add := func(k, v string) {
+		if v != "" {
+			pairs = append(pairs, [2]string{k, v})
+		}
+	}
+	add("prompt", p.Prompt)
+	if !p.Ready {
+		add("code", p.Code)
+		add("reason", p.Reason)
+	}
+	if f := p.For; f != nil {
+		pairs = append(pairs, [2]string{"for", f.Phase}, [2]string{"for_ready", yesNo(f.Ready)})
+		add("for_code", f.Code)
+		add("for_reason", f.Reason)
+		add("warning", f.Warning)
+	}
+	return pairs
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
 // help is the next step for the ticket, after the advice on sharing it out.
+// The phase the ticket is at decides what a ready or green ticket is told;
+// every line that sends a person to a phase names its prompt.
 func (n nextTicket) help() []string {
+	t := n.derived
+	prompt := ""
+	if t != nil {
+		prompt = promptHint(t.Prompt)
+	}
 	switch n.State {
 	case ready.StateDone:
 		return []string{n.Ticket + " is published: run `jig next` to see the tickets that are left"}
 	case ready.StateBlocked:
-		return []string{fmt.Sprintf("%s waits for %s to publish: run `jig next` to see a ticket that is ready", n.Ticket, n.BlockedBy[0].Ticket)}
+		if t != nil && t.Code != phase.CodeBlocked {
+			prompt = ""
+		}
+		return []string{fmt.Sprintf("%s waits for %s to publish: run `jig next` to see a ticket that is ready%s", n.Ticket, n.BlockedBy[0].Ticket, prompt)}
 	case ready.StateNew:
-		return []string{fmt.Sprintf("%s has no slices yet: draft its brief and slices with the intake skill, checking them with `jig validate %s --check`, and run `jig validate %s` once the person has confirmed the brief", n.Ticket, n.Ticket, n.Ticket)}
+		return []string{fmt.Sprintf("%s has no slices yet: draft its brief and slices with the intake skill, checking them with `jig validate %s --check`, and run `jig validate %s` once the person has confirmed the brief%s",
+			n.Ticket, n.Ticket, n.Ticket, promptHint(phase.Prompt(phase.Brief, n.Ticket)))}
 	case ready.StateGreen:
+		if t != nil {
+			return []string{"Every slice of " + n.Ticket + " is green. " + phaseAdvice(*t, n.Ticket)}
+		}
 		return []string{fmt.Sprintf("Every slice of %s is green: run `jig gate %s`, then `jig publish %s`", n.Ticket, n.Ticket, n.Ticket)}
 	case ready.StateActive:
-		return []string{fmt.Sprintf("Nothing is ready: work is in flight or parked; run `jig status %s` for the state", n.Ticket)}
+		return []string{fmt.Sprintf("Nothing is ready: work is in flight or parked; run `jig status %s` for the state%s", n.Ticket, prompt)}
 	}
-	help := append([]string(nil), n.Advice...)
-	return append(help, fmt.Sprintf("Work on branch %s in each repo (`git switch -c %s` where it does not exist), then run `jig here` to confirm", n.Branch, n.Branch))
+	var help []string
+	if t != nil && (t.Current == phase.Brief || t.Code == phase.CodeBlocked) {
+		// The slices are ready, but the phase says what comes first.
+		help = append(help, phaseAdvice(*t, n.Ticket))
+		prompt = ""
+	}
+	help = append(help, n.Advice...)
+	return append(help, fmt.Sprintf("Work on branch %s in each repo (`git switch -c %s` where it does not exist), then run `jig here` to confirm%s", n.Branch, n.Branch, prompt))
 }
 
 // nextStore is what `jig next` says without a ticket.

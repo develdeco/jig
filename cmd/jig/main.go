@@ -302,6 +302,18 @@ func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.Ma
 	if w := e.stderr; w != nil {
 		d.Warn = func(format string, args ...any) { fmt.Fprintf(w, format, args...) }
 	}
+	if st != nil {
+		// A refusal that sends a person back to an earlier phase names the
+		// prompt `jig next`, `jig status` and `jig here` name: all of them read
+		// the phase the same way (derivePhase).
+		d.Prompt = func(ticket string) string {
+			t, err := derivePhase(st, ticket)
+			if err != nil {
+				return ""
+			}
+			return t.Prompt
+		}
+	}
 	return d
 }
 
