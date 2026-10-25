@@ -40,6 +40,12 @@ func (m *Model) factsOf(t *ticket) (phase.Facts, []journal.Line) {
 		Open:        phase.OpenRoundIn(lines),
 		Published:   t.publish().Done,
 		SessionName: func(session string) string { return m.whoWith(t, session) },
+		ReviewerName: func(session string, round int, detailed bool) string {
+			if detailed {
+				return m.reviewerWho(t, session, round, "", nil)
+			}
+			return m.reviewerRole(t, session)
+		},
 	}
 	fixes := t.fixRounds()
 	if st := t.status; st != nil {

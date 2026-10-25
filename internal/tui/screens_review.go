@@ -157,9 +157,9 @@ func (m *Model) roundRecord(p *page, t *ticket, r roundRow) {
 	var who []string
 	switch {
 	case reviewer != "" && r.State == StateReviewing:
-		who = append(who, m.reviewerWords(t, reviewer, rec)+" took it")
+		who = append(who, m.reviewerWho(t, reviewer, r.N, "", rec)+" took it")
 	case reviewer != "":
-		who = append(who, m.reviewerWords(t, reviewer, rec))
+		who = append(who, m.reviewerWho(t, reviewer, r.N, "", rec))
 	case r.State == StateReviewing:
 		who = append(who, "waiting for a reviewer to take it")
 	}
@@ -221,28 +221,6 @@ func (t *ticket) reviewerOf(n int) string {
 		}
 	}
 	return ""
-}
-
-// reviewerWords names a round's reviewer the way the activity does, with the
-// harness and model the ledger gave the session, else the ones the status
-// printed for the round.
-func (m *Model) reviewerWords(t *ticket, session string, rec *statusRound) string {
-	name := firstOf(m.who(t, session), "a reviewer")
-	desc := m.sessionDesc(session)
-	if desc == "" && rec != nil {
-		var parts []string
-		if h := harnessName(rec.Harness); h != "" {
-			parts = append(parts, h)
-		}
-		if mo := modelName(rec.Model); mo != "" {
-			parts = append(parts, mo)
-		}
-		desc = strings.Join(parts, " · ")
-	}
-	if desc != "" {
-		return name + " (" + desc + ")"
-	}
-	return name
 }
 
 // findingRows adds what the latest recorded round found that is not an ask

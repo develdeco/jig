@@ -102,6 +102,7 @@ func (m *Model) refreshStatus(id string) tea.Cmd {
 		return nil
 	}
 	t.loading, t.dirty = true, false
+	m.lastRead = m.now()
 	args := m.verbArgs("status", id)
 	run := m.run
 	return func() tea.Msg {

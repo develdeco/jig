@@ -14,7 +14,7 @@ func awaitRig(t *testing.T) *rig {
 	r := newRunner()
 	r.answer("status SHOP-1 --store /s", "error: ticket SHOP-1 not found in the store at /s\ncode: VALIDATION_ERROR\n", 2)
 	m := New(Config{
-		RetryDelay: time.Millisecond, AwaitEvery: -1, Run: r.run, Ticket: "SHOP-1", Awaiting: true,
+		RetryDelay: time.Millisecond, AwaitEvery: -1, IdleTick: -1, Run: r.run, Ticket: "SHOP-1", Awaiting: true,
 		Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24,
 	})
 	return &rig{t: t, m: m, r: r}

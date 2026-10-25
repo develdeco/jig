@@ -87,7 +87,9 @@ func TestTicketScreenShowsTheSubstepsOfTheStepUnderTheCursor(t *testing.T) {
 
 // TestSubstepsListAtMostSixAndTheActivityKeepsThree: a build with more
 // slices than the block has room for shows the ones that matter and counts
-// the rest, and the screen keeps its height with the activity's three lines.
+// the rest, and the screen keeps its height with the activity's three lines. On
+// the 80x24 screen the room is six sub-steps; a taller terminal has room for
+// more (substepCap), and counts only what it cannot list.
 func TestSubstepsListAtMostSixAndTheActivityKeepsThree(t *testing.T) {
 	t.Parallel()
 	var rows [][]string
@@ -125,15 +127,19 @@ func TestSubstepsListAtMostSixAndTheActivityKeepsThree(t *testing.T) {
 			t.Errorf("height %d: the screen has %d lines, want its height:\n%s", height, len(rowsOf), v)
 		}
 		block, act := panelLines(rowsOf, "2 Build · sub-steps"), panelLines(rowsOf, "2 Build · activity")
-		if len(block) < 3 || len(block) > 6+2 {
-			t.Errorf("height %d: the sub-steps block takes %d lines, want its frame and 1 to 6 sub-steps:\n%s", height, len(block), v)
+		room := substepCap(g.m.bodyRows())
+		if height == 24 && room != 6 {
+			t.Errorf("height 24: the block has room for %d sub-steps, want 6", room)
+		}
+		if len(block) < 3 || len(block) > min(9, room)+2 {
+			t.Errorf("height %d: the sub-steps block takes %d lines, want its frame and 1 to %d sub-steps:\n%s", height, len(block), room, v)
 		}
 		if len(act) < 5 {
 			t.Errorf("height %d: the activity panel takes %d lines, want its three and the frame:\n%s", height, len(act), v)
 		}
 		joined := strings.Join(block, "\n")
-		if !strings.Contains(joined, "slice s6 · verifying") || !strings.Contains(joined, "more") {
-			t.Errorf("height %d: the block does not show the slice under way and count the rest:\n%s", height, v)
+		if !strings.Contains(joined, "slice s6 · verifying") || strings.Contains(joined, "more") != (room < 9) {
+			t.Errorf("height %d: the block does not show the slice under way and count the rest (room for %d of 9):\n%s", height, room, v)
 		}
 		if !strings.Contains(joined, "6 of 9 done") && !strings.Contains(joined, "5 of 9 done") {
 			t.Errorf("height %d: the block does not count what is done:\n%s", height, v)
