@@ -59,7 +59,7 @@ func adviceFor(f verifydeliver.Fresh, ticket, clone string) reviewAdvice {
 	}
 	return reviewAdvice{State: state, Lines: []string{
 		first,
-		"In Claude Code, call the Agent tool (Task in older versions) with `subagent_type: general-purpose`, `model: opus` unless the person named another model, `run_in_background: false` and no worktree isolation (the round has its own); another harness starts a fresh session instead. Run it in the foreground: wait for its verdict in this same turn, and never end the turn while it runs. Pass it this prompt",
+		"In Claude Code, call the Agent tool (Task in older versions) with `subagent_type: general-purpose`, `model: opus` unless the person named another model, and no worktree isolation (the round has its own); another harness starts a fresh session instead. Claude Code may run it in the background whatever you ask: wait for its verdict with TaskOutput (`block: true`, the agent id the call returned), or, in an attended session only, end the turn and go on when the harness says it finished; an unattended session ends with its turn, so it must wait in it. Never call another tool to stall. Pass it this prompt",
 		reviewerPrompt(ticket, clone),
 		"The main session must not run `jig review context` itself: jig sees a session and its subagents as one session, so if both read the round it cannot tell which of them closed it, and the round is not independent",
 	}}
