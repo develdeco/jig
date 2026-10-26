@@ -110,7 +110,7 @@ func (m *Model) ticketPage(id string) page {
 		// line and as many more as it has to show.
 		extra := 0
 		if f := focusIndex(subs); f >= 0 {
-			extra = m.cardWant(t, focus, subs[f]) - 1
+			extra = max(0, m.cardWant(t, focus, subs[f])-1)
 		}
 		block = m.substepsPanel(t, focus, subs, min(substepCap(body)+2+extra, spare, len(subs)+2+extra))
 		spare -= len(block.lines)
@@ -199,12 +199,14 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	p.boxTop(stepTitle(step)+" · sub-steps", fmt.Sprintf("%d of %d done", done, len(subs)))
 	room := height - 2
 	focus, cardRows := focusIndex(subs), 0
-	if focus >= 0 {
+	if want := 0; focus >= 0 {
 		// The card takes what the folded lines leave; with too many of them,
 		// two stay, the rest are counted, and the card takes the remainder.
+		// A card with nothing to show does not open.
 		others := len(subs) - 1
-		want := m.cardWant(t, step, subs[focus])
+		want = m.cardWant(t, step, subs[focus])
 		switch {
+		case want == 0:
 		case room-others >= cardMin:
 			cardRows = min(want, room-others)
 		case room-min(others, 2) >= cardMin:

@@ -20,6 +20,7 @@ func TestShownCommandDropsTheCdBeforeIt(t *testing.T) {
 		{`cd "D:\work\shop" && go test ./cart/...`, "go test ./cart/..."},
 		{`cd /w && cd sub && git   commit -m x`, "git commit -m x"},
 		{"go vet ./...", "go vet ./..."},
+		{`cd /w && jig claim SHOP-1 --slice round 2>&1`, "jig claim SHOP-1 --slice round"},
 		{"cd /w", "cd /w"},
 	} {
 		if got := shownCommand(tc.in); got != tc.want {
@@ -167,13 +168,16 @@ func TestAReviewRoundOpensWithItsReviewersCommands(t *testing.T) {
 	v := g.view()
 	block := strings.Join(panelLines(strings.Split(v, "\n"), "3 Review · sub-steps"), "\n")
 	for _, want := range []string{
-		"╭ ◎ round 1", "│ who   reviewer subagent (Claude Code · Opus 5)",
+		"╭ ◎ round 1 · taken by reviewer subagent (Claude Code · Opus 5)",
 		"09:03:10", "ran `jig review context SHOP-1 --model claude-opus-5`",
 		"ran `go test ./cart/...` · exit 1",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("the review block lacks %q:\n%s", want, v)
 		}
+	}
+	if strings.Contains(block, "│ who") {
+		t.Errorf("the card names its reviewer twice, in its head and in a who row:\n%s", block)
 	}
 	if strings.Contains(block, "git commit -m round") {
 		t.Errorf("the round's card shows a command of the build:\n%s", block)
@@ -209,5 +213,62 @@ func TestADoneStepFoldsEverySubstep(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("the folded block lacks %q:\n%s", want, text)
 		}
+	}
+}
+
+// prOpeningRig is SHOP-1 built and reviewed clean, its body written by session
+// s-b, which then pushes and opens the pull request: commands that come before
+// any line of the pull request sub-step.
+func prOpeningRig(t *testing.T, extra ...events.Envelope) *rig {
+	t.Helper()
+	status := strings.Join([]string{"ticket: SHOP-1", "state: green",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
+			{"round", "green", "1", "-", "-", "Round to the cent"},
+		}), "questions: none"}, "\n") + "\n"
+	g := newRig(t, "SHOP-1")
+	g.r.answer("status SHOP-1 --store /s", status, 0)
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 40})
+	g.feed(append([]events.Envelope{
+		jl(at(1, 0), "SHOP-1", "round", journal.EventClaim, with("s-b", "", "", "", "", "")),
+		jl(at(1, 30), "SHOP-1", "round", journal.EventVerified, with("", sha('a'), "", "", "", "")),
+		jl(at(3, 0), "SHOP-1", "", journal.EventGateOpen, func(l *journal.Line) { l.Attempt = 1 }),
+		jl(at(4, 0), "SHOP-1", "", journal.EventGateClean, func(l *journal.Line) { l.Attempt, l.Session = 1, "s-b" }),
+		jl(at(5, 0), "SHOP-1", "", journal.EventPrBody, func(l *journal.Line) { l.Commit = sha('a') }),
+	}, extra...)...)
+	return g
+}
+
+// TestAPullRequestBeingOpenedShowsTheSessionsCommands: the pull request
+// sub-step writes no line until the pull request is recorded, so its card holds
+// the commands the session that wrote the ticket's latest line ran since that
+// line: the push and the `gh pr create` that open it.
+func TestAPullRequestBeingOpenedShowsTheSessionsCommands(t *testing.T) {
+	t.Parallel()
+	g := prOpeningRig(t,
+		tool(at(4, 30), "s-b", "jig publish SHOP-1 --body"),
+		tool(at(5, 10), "s-b", "git push origin SHOP-1-round"),
+		tool(at(5, 20), "s-b", `cd /w && gh pr create --head SHOP-1-round 2>&1`),
+	)
+	v := g.view()
+	block := strings.Join(panelLines(strings.Split(v, "\n"), "4 Publish · sub-steps"), "\n")
+	for _, want := range []string{"pull request", "ran `git push origin SHOP-1-round`", "ran `gh pr create --head SHOP-1-round`"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("the publish block lacks %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(block, "jig publish SHOP-1 --body") {
+		t.Errorf("the card shows a command from before the body was written:\n%s", block)
+	}
+}
+
+// TestACardWithNothingToShowDoesNotOpen: the pull request sub-step under way
+// with no command run since the body has no moves and no facts, so the block
+// lists it as a line.
+func TestACardWithNothingToShowDoesNotOpen(t *testing.T) {
+	t.Parallel()
+	v := prOpeningRig(t).view()
+	block := strings.Join(panelLines(strings.Split(v, "\n"), "4 Publish · sub-steps"), "\n")
+	if strings.Contains(block, "│ moves") || strings.Contains(block, "nothing yet") {
+		t.Errorf("an empty card opened:\n%s", block)
 	}
 }

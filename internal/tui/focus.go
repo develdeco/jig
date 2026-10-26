@@ -44,6 +44,10 @@ type subTrack struct {
 	own        []events.Envelope
 	holder     string
 	start, end time.Time
+	// borrowed is set when the holder is the ticket's latest session, not one
+	// the sub-step's own lines name (openTrack): it finds the moves, and is
+	// not named as the sub-step's holder.
+	borrowed bool
 }
 
 // trackOf reads the sub-step key of step from the ticket's lines.
@@ -62,6 +66,28 @@ func (t *ticket) trackOf(step int, key string) subTrack {
 				tr.start = at
 			}
 			tr.end = at
+		}
+	}
+	return tr
+}
+
+// openTrack is trackOf for a sub-step under way. One that has written no line
+// of its own yet (a pull request being opened once its body is written) is held
+// by the session that wrote the ticket's latest line naming one, since the
+// ticket's latest line: what that session has run since are its moves.
+func (t *ticket) openTrack(step int, key string) subTrack {
+	tr := t.trackOf(step, key)
+	if len(tr.own) > 0 {
+		return tr
+	}
+	for i := len(t.lines) - 1; i >= 0; i-- {
+		l := t.lines[i]
+		if at, ok := l.At(); ok && tr.start.IsZero() {
+			tr.start = at
+		}
+		if l.Session != "" {
+			tr.holder, tr.borrowed = l.Session, true
+			break
 		}
 	}
 	return tr
@@ -92,7 +118,8 @@ func (t *ticket) moves(tr subTrack, open bool, now time.Time) []events.Envelope 
 }
 
 // shownCommand is a command as a move shows it: without the `cd <dir> &&` a
-// harness puts before it to run it in a folder, which says nothing of what ran.
+// harness puts before it to run it in a folder, nor the `2>&1` that sends its
+// errors where its output goes, which say nothing of what ran.
 func shownCommand(cmd string) string {
 	cmd = strings.TrimSpace(cmd)
 	for strings.HasPrefix(cmd, "cd ") {
@@ -102,7 +129,13 @@ func shownCommand(cmd string) string {
 		}
 		cmd = strings.TrimSpace(rest)
 	}
-	return strings.Join(strings.Fields(cmd), " ")
+	var words []string
+	for _, w := range strings.Fields(cmd) {
+		if w != "2>&1" {
+			words = append(words, w)
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 // moveLine is one move of a card: its time, then what the journal line says,
@@ -138,7 +171,8 @@ func subRole(key string) string {
 }
 
 // cardFacts are the rows of a card above its moves: the goal of a slice and
-// who holds the sub-step, each when known.
+// who holds the sub-step, each when known and not already said by the
+// sub-step's detail, which heads the card ("claimed by builder (...)").
 func (m *Model) cardFacts(t *ticket, s phase.Sub, tr subTrack) [][2]string {
 	var facts [][2]string
 	kind, id, _ := strings.Cut(s.Key, ":")
@@ -147,35 +181,42 @@ func (m *Model) cardFacts(t *ticket, s phase.Sub, tr subTrack) [][2]string {
 			facts = append(facts, [2]string{"goal", goal})
 		}
 	}
-	if tr.holder != "" {
+	if tr.holder != "" && !tr.borrowed {
 		who := m.whoWithAs(t, tr.holder, subRole(s.Key))
 		if kind == "round" {
 			n, _ := strconv.Atoi(id)
 			who = firstOf(m.reviewerWho(t, tr.holder, n, "", nil), who)
 		}
-		if who != "" {
+		if who != "" && !strings.Contains(s.Detail, who) {
 			facts = append(facts, [2]string{"who", who})
 		}
 	}
 	return facts
 }
 
+// cardParts are what the card of s shows: its track, its moves and its facts.
+func (m *Model) cardParts(t *ticket, step int, s phase.Sub) (subTrack, []events.Envelope, [][2]string) {
+	tr := t.openTrack(step, s.Key)
+	return tr, t.moves(tr, true, m.now()), m.cardFacts(t, s, tr)
+}
+
 // cardWant is how many rows the card of s would take with room for all its
-// moves (up to cardMoves): its edges, its facts and its moves.
+// moves (up to cardMoves): its edges, its facts and its moves. 0 for a card
+// with nothing to show, which does not open.
 func (m *Model) cardWant(t *ticket, step int, s phase.Sub) int {
-	tr := t.trackOf(step, s.Key)
-	moves := len(t.moves(tr, true, m.now()))
-	return 2 + len(m.cardFacts(t, s, tr)) + max(1, min(moves, cardMoves))
+	_, moves, facts := m.cardParts(t, step, s)
+	if len(moves)+len(facts) == 0 {
+		return 0
+	}
+	return 2 + len(facts) + max(1, min(len(moves), cardMoves))
 }
 
 // card is s opened up in rows lines, the most it may take: a frame in its
 // state's color headed by its label, its detail and how long it has run, then
 // its facts and its latest moves. Facts give way to moves when rows are few.
 func (m *Model) card(t *ticket, step int, s phase.Sub, rows int) []string {
-	tr := t.trackOf(step, s.Key)
+	tr, moves, facts := m.cardParts(t, step, s)
 	now := m.now()
-	moves := t.moves(tr, true, now)
-	facts := m.cardFacts(t, s, tr)
 	room := max(1, rows-2)
 	for len(facts) > 0 && len(facts)+min(max(1, len(moves)), 2) > room {
 		facts = facts[:len(facts)-1]
