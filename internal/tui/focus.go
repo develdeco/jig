@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -138,6 +139,31 @@ func shownCommand(cmd string) string {
 	return strings.Join(words, " ")
 }
 
+// homePattern matches home in the spellings a command may give it: as the
+// system writes it, with forward slashes, and as Git Bash names a drive
+// (/c/Users/...), in any case, and only as a whole folder name (followed by a
+// separator, a quote, a space or the end). Nil for no home.
+func homePattern(home string) *regexp.Regexp {
+	home = strings.TrimRight(home, `\/`)
+	if home == "" {
+		return nil
+	}
+	slash := strings.ReplaceAll(home, `\`, "/")
+	forms := []string{regexp.QuoteMeta(home), regexp.QuoteMeta(slash)}
+	if len(slash) > 2 && slash[1] == ':' {
+		forms = append(forms, regexp.QuoteMeta("/"+slash[:1]+slash[2:]))
+	}
+	return regexp.MustCompile(`(?i)(` + strings.Join(forms, "|") + `)([\\/"'\s]|$)`)
+}
+
+// tildeHome is cmd with the home folder named ~.
+func (m *Model) tildeHome(cmd string) string {
+	if m.home == nil {
+		return cmd
+	}
+	return m.home.ReplaceAllString(cmd, "~${2}")
+}
+
 // moveLine is one move of a card: its time, then what the journal line says,
 // or the command the holder ran with its exit status when it failed.
 func (m *Model) moveLine(t *ticket, l events.Envelope) string {
@@ -150,9 +176,10 @@ func (m *Model) moveLine(t *ticket, l events.Envelope) string {
 		}
 		return at + m.st.icon(eventState(l)) + " " + text
 	}
-	text := m.st.dim("$") + " ran `" + shownCommand(l.Command) + "`"
+	cmd := m.tildeHome(shownCommand(l.Command))
+	text := m.st.dim("$") + " ran `" + cmd + "`"
 	if l.Exit != nil && *l.Exit != 0 {
-		text = m.st.state(StateStalled, "$") + " ran `" + shownCommand(l.Command) + "`" + m.st.state(StateStalled, " · exit "+strconv.Itoa(*l.Exit))
+		text = m.st.state(StateStalled, "$") + " ran `" + cmd + "`" + m.st.state(StateStalled, " · exit "+strconv.Itoa(*l.Exit))
 	}
 	return at + text
 }

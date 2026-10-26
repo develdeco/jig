@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"io"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -63,6 +65,10 @@ type Config struct {
 	IdleTick time.Duration
 	// Now is the clock the idle read measures by. Nil is time.Now.
 	Now func() time.Time
+	// Home is the folder a command the screens show names as ~: a session's
+	// scratchpad under it says nothing to a reader and names the person on a
+	// shared screen. Empty is the user's home folder.
+	Home string
 	// Width and Height are the screen's size until the terminal reports one;
 	// zero is 100 by 30.
 	Width, Height int
@@ -177,6 +183,8 @@ type Model struct {
 	// and when it last started to read that ticket's status, by now.
 	idleAfter, idleTick time.Duration
 	now                 func() time.Time
+	// home matches the home folder in any of its spellings (homePattern).
+	home                *regexp.Regexp
 	lastEvent, lastRead time.Time
 }
 
@@ -208,6 +216,11 @@ func New(cfg Config) *Model {
 	if m.now == nil {
 		m.now = time.Now
 	}
+	home := cfg.Home
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	m.home = homePattern(home)
 	m.zone = cfg.Zone
 	if m.zone == nil {
 		m.zone = time.Local

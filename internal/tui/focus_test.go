@@ -272,3 +272,26 @@ func TestACardWithNothingToShowDoesNotOpen(t *testing.T) {
 		t.Errorf("an empty card opened:\n%s", block)
 	}
 }
+
+// TestAHomeFolderIsShownAsATilde: a command that names the home folder, in
+// any spelling a harness gives it (as Windows writes it, with forward slashes,
+// as Git Bash names the drive, in any case), shows it as ~ in a card; a folder
+// that only starts like it keeps its name.
+func TestAHomeFolderIsShownAsATilde(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "SHOP-1")
+	for _, tc := range []struct{ in, want string }{
+		{`cp a "C:/Users/Ada/AppData/x"`, `cp a "~/AppData/x"`},
+		{`cp a /c/Users/Ada/AppData/y`, `cp a ~/AppData/y`},
+		{`type C:\Users\Ada\z.txt`, `type ~\z.txt`},
+		{`ls c:/users/ada`, `ls ~`},
+		{`ls C:/Users/Adam/x`, `ls C:/Users/Adam/x`},
+	} {
+		if got := g.m.tildeHome(tc.in); got != tc.want {
+			t.Errorf("tildeHome(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	if homePattern("") != nil {
+		t.Error("no home has a pattern")
+	}
+}
