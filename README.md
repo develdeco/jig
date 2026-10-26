@@ -239,10 +239,11 @@ explains each step.
 
 jig starts no coding session. On your machine it runs `git`, `gh`, your repo's
 own oracle commands (in a detached worktree of the commit, bounded by the
-manifest's `timeout:`, 30 minutes by default), `graphify` when the store's
-`store.yaml` names it under `context:` and it is on your PATH, and itself. It edits your settings
-and memory files only after a yes, keeps everything in them that is not its
-own, and its uninstall takes out only what it wrote. The machine ledger, under
+manifest's `timeout:`, 30 minutes by default), and itself. It runs no context
+tool for a session: finding the code is the session's job, with its own
+tools. It edits your settings and memory files only after a yes, keeps
+everything in them that is not its own, and its uninstall takes out only what
+it wrote. The machine ledger, under
 the jig home, records for sessions in jig projects the first 400 bytes of each
 command and the files touched. With git's global hook installed (`--githook`,
 part of `--artifacts`) it also records every commit made on the machine, in any

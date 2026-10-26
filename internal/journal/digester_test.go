@@ -175,7 +175,7 @@ func TestEventConstants(t *testing.T) {
 	}
 	for _, value := range []string{
 		"adopt", "answer", "changelog", "dispatch", "env-down", "env-unavailable", "env-up", "fix-slice",
-		"gate-clean", "gate-open", "gate-round", "graph", "lease-recovered", "memorize", "oracle", "pr",
+		"gate-clean", "gate-open", "gate-round", "lease-recovered", "memorize", "oracle", "pr",
 		"publish-done", "publish-picks", "question", "reconcile", "recorded", "requeue", "result",
 		"revalidate", "route", "squash", "stall", "verified",
 		"verify-pending", "verify-error", "claim", "release", "driver", "note", "correction", "spend",

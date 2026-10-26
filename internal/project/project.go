@@ -177,7 +177,6 @@ type Config struct {
 	Projects  []string
 	Platform  string
 	Staircase []string
-	Context   map[string]any
 	// Gate is the optional gate: block configuring the gate's fix loop and
 	// risk floor. An absent block is nil; a block with absent keys gains
 	// defaults.
@@ -214,22 +213,23 @@ type GitHubTracker struct {
 
 // configRaw mirrors Config's YAML shape, with Tracker, Trackers and Routes
 // left as raw nodes so UnmarshalYAML can tell an absent key apart from one
-// that is present but empty, and refuse the shapes it no longer accepts.
+// that is present but empty, and refuse the shapes it no longer accepts. A key
+// it does not name is ignored, so a store whose config still has the context:
+// that once opted into a code graph loads unchanged (ADR 0034).
 type configRaw struct {
-	SchemaVersion int            `yaml:"schema_version"`
-	Name          string         `yaml:"name"`
-	Projects      []string       `yaml:"projects"`
-	TicketFormat  yaml.Node      `yaml:"ticket_format"`
-	Keys          yaml.Node      `yaml:"keys"`
-	Tracker       yaml.Node      `yaml:"tracker"`
-	Trackers      yaml.Node      `yaml:"trackers"`
-	Repos         []Repo         `yaml:"repos"`
-	Platform      string         `yaml:"platform"`
-	Staircase     []string       `yaml:"staircase,omitempty"`
-	Context       map[string]any `yaml:"context,omitempty"`
-	Routes        yaml.Node      `yaml:"routes"`
-	Gate          *GateConfig    `yaml:"gate,omitempty"`
-	BuilderEffort BuilderEffort  `yaml:"builder_effort,omitempty"`
+	SchemaVersion int           `yaml:"schema_version"`
+	Name          string        `yaml:"name"`
+	Projects      []string      `yaml:"projects"`
+	TicketFormat  yaml.Node     `yaml:"ticket_format"`
+	Keys          yaml.Node     `yaml:"keys"`
+	Tracker       yaml.Node     `yaml:"tracker"`
+	Trackers      yaml.Node     `yaml:"trackers"`
+	Repos         []Repo        `yaml:"repos"`
+	Platform      string        `yaml:"platform"`
+	Staircase     []string      `yaml:"staircase,omitempty"`
+	Routes        yaml.Node     `yaml:"routes"`
+	Gate          *GateConfig   `yaml:"gate,omitempty"`
+	BuilderEffort BuilderEffort `yaml:"builder_effort,omitempty"`
 }
 
 // UnmarshalYAML decodes project.yaml: trackers: is a list of mirrors (absent
@@ -258,7 +258,6 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	c.Repos = raw.Repos
 	c.Platform = raw.Platform
 	c.Staircase = raw.Staircase
-	c.Context = raw.Context
 	c.Gate = raw.Gate
 	c.BuilderEffort = raw.BuilderEffort
 

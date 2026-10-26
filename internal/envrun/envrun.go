@@ -109,8 +109,8 @@ func Shell(cmd, dir string) error {
 // this package (an oracle run, an env class's up, check and down) or to a
 // headless session (internal/session), both through ChildEnv. jig can itself
 // run inside a recording oracle run (it tests itself), and these must not
-// record into that run's directory. git, gh and graphify run no scenarios and
-// may inherit it.
+// record into that run's directory. git and gh run no scenarios and may
+// inherit it.
 const RecordDirEnv = "JIG_RECORD_DIR"
 
 // ChildEnv is the environment cmd's process will get, for a caller that
