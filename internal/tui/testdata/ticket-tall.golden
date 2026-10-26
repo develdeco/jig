@@ -7,15 +7,20 @@ jig  demo › BIG-1                                                             
   │  ○ 4 Publish          after a clean review                                                     │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ 2 Build · sub-steps ─────────────────────────────────────────────────────────── 8 of 12 done ─╮
-  │  ✓ slice s1 · verified 1111111                                                                 │
-  │  ✓ slice s2 · verified 2222222                                                                 │
-  │  ✓ slice s3 · verified 3333333                                                                 │
-  │  ✓ slice s4 · verified 4444444                                                                 │
-  │  ✓ slice s5 · verified 5555555                                                                 │
-  │  ✓ slice s6 · verified 6666666                                                                 │
-  │  ✓ slice s7 · verified 7777777                                                                 │
-  │  ✓ slice s8 · verified 8888888                                                                 │
-  │  ◐ slice s9 · verifying 9999999                                                                │
+  │  ✓ slice s1 · verified 1111111 · 40s                                                           │
+  │  ✓ slice s2 · verified 2222222 · 40s                                                           │
+  │  ✓ slice s3 · verified 3333333 · 40s                                                           │
+  │  ✓ slice s4 · verified 4444444 · 40s                                                           │
+  │  ✓ slice s5 · verified 5555555 · 40s                                                           │
+  │  ✓ slice s6 · verified 6666666 · 40s                                                           │
+  │  ✓ slice s7 · verified 7777777 · 40s                                                           │
+  │  ✓ slice s8 · verified 8888888 · 40s                                                           │
+  │  ╭ ◐ slice s9 · verifying 9999999 ────────────────────────────────────────────────── 50m 30s ╮ │
+  │  │ goal  Slice s9                                                                              │
+  │  │ who   builder                                                                               │
+  │  │ moves 09:09:00 ◐ builder took it                                                            │
+  │  │       09:09:20 ◑ verifying 9999999 “Slice s9”                                               │
+  │  ╰───────────────────────────────────────────────────────────────────────────────────────────╯ │
   │  ○ slice s10 · ready to build                                                                  │
   │  ○ slice s11 · ready to build                                                                  │
   │  ○ slice s12 · ready to build                                                                  │
@@ -24,12 +29,7 @@ jig  demo › BIG-1                                                             
   next  Run `jig next BIG-1` to see what is ready, then `jig claim BIG-1 --slice <slice>` to take
         one; ask: Build BIG-1
 
-  ╭─ 2 Build · activity ───────────────────────────────────────────────────────── latest 19 of 34 ─╮
-  │  09:04:40 ● slice s4 · verified 4444444                                                        │
-  │  09:05:00 ◐ slice s5 · builder took it · Slice s5                                              │
-  │  09:05:20 ◑ slice s5 · verifying 5555555 “Slice s5”                                            │
-  │  09:05:30 ● slice s5 · its oracle passed                                                       │
-  │  09:05:40 ● slice s5 · verified 5555555                                                        │
+  ╭─ 2 Build · activity ───────────────────────────────────────────────────────── latest 14 of 34 ─╮
   │  09:06:00 ◐ slice s6 · builder took it · Slice s6                                              │
   │  09:06:20 ◑ slice s6 · verifying 6666666 “Slice s6”                                            │
   │  09:06:30 ● slice s6 · its oracle passed                                                       │

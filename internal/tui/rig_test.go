@@ -342,11 +342,17 @@ type rig struct {
 	started bool
 }
 
-// newRig builds an 80 by 24 model on UTC, without color, in project demo.
+// rigNow is the rigs' clock: after every line the fixtures write (at), so a
+// sub-step under way has run a known time on a golden.
+var rigNow, _ = time.Parse(time.RFC3339, at(59, 30))
+
+// newRig builds an 80 by 24 model on UTC, without color, in project demo, on a
+// clock that stands at rigNow.
 func newRig(t *testing.T, ticket string) *rig {
 	t.Helper()
 	r := newRunner()
-	m := New(Config{RetryDelay: time.Millisecond, IdleTick: -1, Run: r.run, Ticket: ticket, Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24})
+	m := New(Config{RetryDelay: time.Millisecond, IdleTick: -1, Run: r.run, Ticket: ticket, Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24,
+		Now: func() time.Time { return rigNow }})
 	return &rig{t: t, m: m, r: r}
 }
 

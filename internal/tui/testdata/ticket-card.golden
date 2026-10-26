@@ -1,0 +1,40 @@
+jig  demo › SHOP-1                                                                 ◑ build verifying
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ╭─ Steps ────────────────────────────────────────────────────────────────────────── step 2 of 4 ─╮
+  │  ✓ 1 Brief            no brief on record                                                       │
+  │▸ ◑ 2 Build            1 of 3 green · verifying slice clamp at bbbbbbb                          │
+  │  ○ 3 Review           after the build                                                          │
+  │  ○ 4 Publish          after a clean review                                                     │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ╭─ 2 Build · sub-steps ──────────────────────────────────────────────────────────── 1 of 3 done ─╮
+  │  ✓ slice round · verified aaaaaaa · 37s                                                        │
+  │  ╭ ◐ slice clamp · verifying bbbbbbb ─────────────────────────────────────────────── 57m 30s ╮ │
+  │  │ goal  Clamp negative quantities                                                             │
+  │  │ who   builder (Claude Code · Sonnet 5)                                                      │
+  │  │ moves 09:02:00 ◐ builder took it                                                            │
+  │  │       09:02:05 $ ran `go test ./cart/...` · exit 1                                          │
+  │  │       09:02:08 $ ran `go test ./cart/...`                                                   │
+  │  │       09:02:10 ◑ verifying bbbbbbb “Clamp negative quantities”                              │
+  │  ╰───────────────────────────────────────────────────────────────────────────────────────────╯ │
+  │  ○ slice cart · waits for clamp                                                                │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+  ╭─ 2 Build · activity ───────────────────────────────────────────────────────────────────────────╮
+  │  09:01:00 ◐ slice round · builder took it · Round to the cent                                  │
+  │  09:01:30 ◑ slice round · verifying aaaaaaa “Round to the cent”                                │
+  │  09:01:37 ● slice round · verified aaaaaaa                                                     │
+  │  09:02:00 ◐ slice clamp · builder took it · Clamp negative quantities                          │
+  │  09:02:10 ◑ slice clamp · verifying bbbbbbb “Clamp negative quantities”                        │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate · p publish · t tail
+  q quit

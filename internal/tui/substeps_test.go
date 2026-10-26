@@ -89,7 +89,8 @@ func TestTicketScreenShowsTheSubstepsOfTheStepUnderTheCursor(t *testing.T) {
 // slices than the block has room for shows the ones that matter and counts
 // the rest, and the screen keeps its height with the activity's three lines. On
 // the 80x24 screen the room is six sub-steps; a taller terminal has room for
-// more (substepCap), and counts only what it cannot list.
+// more (substepCap), and counts only what it cannot list. The slice under way
+// opens into a card, which may take its extra rows beyond that room.
 func TestSubstepsListAtMostSixAndTheActivityKeepsThree(t *testing.T) {
 	t.Parallel()
 	var rows [][]string
@@ -131,8 +132,11 @@ func TestSubstepsListAtMostSixAndTheActivityKeepsThree(t *testing.T) {
 		if height == 24 && room != 6 {
 			t.Errorf("height 24: the block has room for %d sub-steps, want 6", room)
 		}
-		if len(block) < 3 || len(block) > min(9, room)+2 {
-			t.Errorf("height %d: the sub-steps block takes %d lines, want its frame and 1 to %d sub-steps:\n%s", height, len(block), room, v)
+		tk := g.m.w.tickets["BIG-1"]
+		subs := g.m.phaseOf(tk).Of(phase.Build).Subs
+		extra := g.m.cardWant(tk, stepBuild, subs[focusIndex(subs)]) - 1
+		if len(block) < 3 || len(block) > min(9, room)+2+extra {
+			t.Errorf("height %d: the sub-steps block takes %d lines, want its frame, 1 to %d sub-steps and the card's %d more:\n%s", height, len(block), room, extra, v)
 		}
 		if len(act) < 5 {
 			t.Errorf("height %d: the activity panel takes %d lines, want its three and the frame:\n%s", height, len(act), v)
@@ -154,8 +158,10 @@ func panelLines(rows []string, title string) []string {
 		if !strings.Contains(r, "╭─ "+title) {
 			continue
 		}
+		// The panel's bottom edge is at its own indent: a card inside it has
+		// an edge of its own one level in.
 		for j := i; j < len(rows); j++ {
-			if strings.Contains(rows[j], "╰") {
+			if strings.HasPrefix(rows[j], "  ╰") {
 				return rows[i : j+1]
 			}
 		}

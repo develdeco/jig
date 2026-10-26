@@ -106,7 +106,13 @@ func (m *Model) ticketPage(id string) page {
 
 	var block page
 	if subs := d.Phases[focus].Subs; len(subs) > 0 && spare >= 3 {
-		block = m.substepsPanel(focus, subs, min(substepCap(body)+2, spare, len(subs)+2))
+		// The card of the sub-step that matters now takes the rows of its
+		// line and as many more as it has to show.
+		extra := 0
+		if f := focusIndex(subs); f >= 0 {
+			extra = m.cardWant(t, focus, subs[f]) - 1
+		}
+		block = m.substepsPanel(t, focus, subs, min(substepCap(body)+2+extra, spare, len(subs)+2+extra))
 		spare -= len(block.lines)
 	}
 	blank := func() bool {
@@ -177,11 +183,12 @@ func (m *Model) ticketFocus(steps []stepRow, questions int) int {
 }
 
 // substepsPanel is a panel of the sub-steps of step, height lines tall with its
-// frame: a checklist with a state, a label and a few words of detail each. When
-// they do not all fit it shows the ones that matter most (a person's turn, a
-// failure, the work under way), in their order, and says how many more there
-// are.
-func (m *Model) substepsPanel(step int, subs []phase.Sub, height int) page {
+// frame: a checklist with a state, a label and a few words of detail each, and
+// the one that matters now (focusIndex) opened into a card (focus.go) when the
+// panel has room for it beside the rest. When they do not all fit it shows the
+// ones that matter most (a person's turn, a failure, the work under way), in
+// their order, and says how many more there are.
+func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int) page {
 	var p page
 	done := 0
 	for _, s := range subs {
@@ -191,15 +198,68 @@ func (m *Model) substepsPanel(step int, subs []phase.Sub, height int) page {
 	}
 	p.boxTop(stepTitle(step)+" · sub-steps", fmt.Sprintf("%d of %d done", done, len(subs)))
 	room := height - 2
-	shown := pickSubs(subs, room)
-	for _, i := range shown {
-		p.boxAdd(m.subLine(step, subs[i]))
+	focus, cardRows := focusIndex(subs), 0
+	if focus >= 0 {
+		// The card takes what the folded lines leave; with too many of them,
+		// two stay, the rest are counted, and the card takes the remainder.
+		others := len(subs) - 1
+		want := m.cardWant(t, step, subs[focus])
+		switch {
+		case room-others >= cardMin:
+			cardRows = min(want, room-others)
+		case room-min(others, 2) >= cardMin:
+			cardRows = min(want, room-min(others, 2))
+		}
 	}
-	if more := len(subs) - len(shown); more > 0 && room >= 2 {
+	if cardRows == 0 {
+		shown := pickSubs(subs, room)
+		for _, i := range shown {
+			p.boxAdd(m.foldedLine(t, step, subs[i]))
+		}
+		if more := len(subs) - len(shown); more > 0 && room >= 2 {
+			p.boxAdd(m.st.dim("+" + strconv.Itoa(more) + " more"))
+		}
+		p.boxEnd()
+		return p
+	}
+
+	others := make([]phase.Sub, 0, len(subs)-1)
+	at := make([]int, 0, len(subs)-1)
+	for i, s := range subs {
+		if i != focus {
+			others, at = append(others, s), append(at, i)
+		}
+	}
+	shownAt := map[int]bool{}
+	picked := pickSubs(others, room-cardRows)
+	for _, j := range picked {
+		shownAt[at[j]] = true
+	}
+	for i, s := range subs {
+		switch {
+		case i == focus:
+			for _, line := range m.card(t, step, s, cardRows) {
+				p.boxAdd(line)
+			}
+		case shownAt[i]:
+			p.boxAdd(m.foldedLine(t, step, s))
+		}
+	}
+	if more := len(others) - len(picked); more > 0 {
 		p.boxAdd(m.st.dim("+" + strconv.Itoa(more) + " more"))
 	}
 	p.boxEnd()
 	return p
+}
+
+// foldedLine is a sub-step folded to a line: subLine, and how long it took once
+// it is done.
+func (m *Model) foldedLine(t *ticket, step int, s phase.Sub) string {
+	line := m.subLine(step, s)
+	if sum := t.subSummary(step, s); sum != "" {
+		line += m.st.dim(" · " + sum)
+	}
+	return line
 }
 
 // pickSubs are the positions of the sub-steps to show in room lines, in their

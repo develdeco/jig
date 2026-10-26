@@ -121,17 +121,21 @@ gives, so the screen and the command never disagree about where a ticket stands.
 Under them is a list of the sub-steps of the one under the cursor (each slice of
 the build, each review round with its asks and fixes, the publish's body, pull
 request and changelog, with your approval first when jig pushes for you, each
-with its state), and under that its activity, told in words: a session by the
-role it plays (planner, builder, reviewer, or reviewer subagent when the session
-that built the change also reviewed it; a reviewer with its harness and model
-too), a slice by its goal, a commit by its subject. Each activity line names the
-sub-step it advances ("slice clamp", "round 1", "body"). Enter opens a step's
-screen, which shows the records behind it: the brief's sections and the slices
-that cite them, the build's slices with their workspace and oracle, their
-commits and every oracle run (with the end of a failed one), each review round
-with its reviewer, what it sent back and the asks it left, and the pull
-request's body and changelog. `jig tui SHOP-1` can be open before SHOP-1 exists;
-it waits for the ticket and fills in when it does.
+with its state). The sub-step that matters now (your turn, a failure, else the
+work under way) opens into a card: what it is for, who holds it and for how
+long, and its latest moves, its own lines and the commands its session ran
+meanwhile, a failing one with its exit status; the others fold to a line, with
+the time each took once done. Under that is the step's activity, told in words:
+a session by the role it plays (planner, builder, reviewer, or reviewer subagent
+when the session that built the change also reviewed it; a reviewer with its
+harness and model too), a slice by its goal, a commit by its subject. Each
+activity line names the sub-step it advances ("slice clamp", "round 1", "body").
+Enter opens a step's screen, which shows the records behind it: the brief's
+sections and the slices that cite them, the build's slices with their workspace
+and oracle, their commits and every oracle run (with the end of a failed one),
+each review round with its reviewer, what it sent back and the asks it left, and
+the pull request's body and changelog. `jig tui SHOP-1` can be open before
+SHOP-1 exists; it waits for the ticket and fills in when it does.
 
 From it you answer a session's question (`a`), keep or dismiss a review's ask
 (`k`, `d`), open a review round (`g`), and approve and publish (`p`: after your

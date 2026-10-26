@@ -7,7 +7,7 @@ jig  demo › SHOP-1                                             ◑ build verif
   │  ○ 4 Publish          after a clean review                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ 2 Build · sub-steps ──────────────────────────────────────── 1 of 3 done ─╮
-  │  ✓ slice round · verified aaaaaaa                                          │
+  │  ✓ slice round · verified aaaaaaa · 7s                                     │
   │  ◐ slice clamp · verifying bbbbbbb                                         │
   │  ○ slice cart · waits for clamp                                            │
   ╰────────────────────────────────────────────────────────────────────────────╯
