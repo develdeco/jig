@@ -21,6 +21,7 @@ failed_attempts[1]{attempt,commit,summary}:
   1,<sha>,"alpha/caller_test.go:9: Percent(5, 0, 10) = 0, want 50"
 questions[1]{id,status,question,answer,provenance}:
   q-001,answered,Should Percent clamp its input?,"Yes, through Clamp.",person
-help[2]:
+help[3]:
   Claim it first: `jig claim JIG-1 --slice b`
+  Find the code the goal touches with your own tools (search, a code graph, your editor's symbols), starting from the files the earlier slices changed
   Test at the seams and commit with the trailer `Jig-Slice: b`; jig runs the oracle on each commit. `jig ask` takes a question to the person

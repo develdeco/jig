@@ -59,7 +59,6 @@ const (
 )
 
 // Events the machine ledger records and a ticket's journal does not.
-// EventGraph is also what the frontier's graph oracle writes to a journal.
 const (
 	EventSessionStart  = "session-start"
 	EventSessionTouch  = "session-touch"
@@ -69,5 +68,4 @@ const (
 	EventVerifySpawned = "verify-spawned"
 	EventNoteDelivered = "note-delivered"
 	EventHook          = "hook"
-	EventGraph         = "graph"
 )

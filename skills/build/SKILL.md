@@ -22,7 +22,7 @@ jig context <ticket> --slice <slice>
 
 ## Read the context
 
-`jig context` is everything the slice needs in one call (`--json` for one object): its goal and oracle command, the brief sections and Seams it builds from, what the verified slices built, the failed attempts and why, the code a graph links to the goal, its questions with answers, and notes. Read it before you search the repo, and again after an answer.
+`jig context` is what jig holds for the slice in one call (`--json` for one object): its goal and oracle command, the brief sections and Seams it builds from, what the verified slices built, the failed attempts and why, its questions with answers, and notes. Read it first, and again after an answer. The code is yours to find with your own tools, starting from the files the verified slices changed.
 
 ## Build
 
