@@ -473,9 +473,16 @@ func goalLine(goal string) string {
 }
 
 // goalText is a goal as one paragraph, from its first line that is not a
-// heading on: what a card has the rows to show of it.
+// heading on: what a card has the rows to show of it. A line that ends with
+// no stop (a finding's title) ends with one, so it does not run into the next.
 func goalText(goal string) string {
-	return strings.Join(goalLines(goal), " ")
+	lines := goalLines(goal)
+	for i, line := range lines[:max(0, len(lines)-1)] {
+		if !strings.ContainsAny(line[len(line)-1:], ".:;!?") {
+			lines[i] = line + "."
+		}
+	}
+	return strings.Join(lines, " ")
 }
 
 // goalLines are a goal's lines that say something, from the first that is

@@ -18,7 +18,8 @@ import (
 // A block too short for the card keeps the one-line form.
 
 const (
-	// cardMoves is the most moves a card lists.
+	// cardMoves is the most moves a card lists on the 80 by 24 screen; a
+	// taller one lists a third of each body row it adds more (cardMovesIn).
 	cardMoves = 8
 	// cardMin is the fewest rows a card takes: its two edges, one fact and one
 	// move.
@@ -328,15 +329,20 @@ func (m *Model) cardParts(t *ticket, step int, s phase.Sub) (subTrack, []events.
 	return tr, t.moves(tr, true, m.now()), m.cardFacts(t, s, tr)
 }
 
+// cardMovesIn is the most moves a card lists in a body of body rows: cardMoves
+// on the 80 by 24 screen, and a third of each row a taller one adds, which the
+// sub-steps block and the activity share with it.
+func cardMovesIn(body int) int { return cardMoves + max(0, body-bodyRef)/3 }
+
 // cardWant is how many rows the card of s would take with room for all its
-// moves (up to cardMoves): its edges, its facts and its moves. 0 for a card
+// moves (up to cardMovesIn): its edges, its facts and its moves. 0 for a card
 // with nothing to show, which does not open.
 func (m *Model) cardWant(t *ticket, step int, s phase.Sub) int {
 	_, moves, facts := m.cardParts(t, step, s)
 	if len(moves)+len(facts) == 0 {
 		return 0
 	}
-	return 2 + factRows(facts) + max(1, min(len(moves), cardMoves))
+	return 2 + factRows(facts) + max(1, min(len(moves), cardMovesIn(m.bodyRows())))
 }
 
 // card is s opened up in rows lines, the most it may take: a frame in its
@@ -347,7 +353,7 @@ func (m *Model) card(t *ticket, step int, s phase.Sub, rows int) []string {
 	now := m.now()
 	room := max(1, rows-2)
 	facts = trimFacts(facts, room-min(max(1, len(moves)), 2))
-	keep := min(cardMoves, room-factRows(facts))
+	keep := min(cardMovesIn(m.bodyRows()), room-factRows(facts))
 	if len(moves) > keep {
 		moves = moves[len(moves)-keep:]
 	}
