@@ -62,6 +62,34 @@ func release(t *testing.T, dir string) {
 	}
 }
 
+// awaitExit has the test, when it ends, release the child it started in dir
+// and wait for it to exit before t.TempDir removes dir: Windows does not
+// remove a directory a running process works in or holds its log open in,
+// and the child is still exiting when the test sees done.
+func awaitExit(t *testing.T, dir string, pid int) {
+	t.Helper()
+	if pid <= 0 {
+		return
+	}
+	t.Cleanup(func() {
+		os.WriteFile(filepath.Join(dir, "release"), []byte("release"), 0o644)
+		p, err := os.FindProcess(pid)
+		if err != nil {
+			return // the child has exited and is gone
+		}
+		exited := make(chan struct{})
+		go func() {
+			p.Wait()
+			close(exited)
+		}()
+		select {
+		case <-exited:
+		case <-time.After(childWait):
+			t.Errorf("child %d still running %s after it was released", pid, childWait)
+		}
+	})
+}
+
 func mustGetwd() string {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -88,7 +116,9 @@ func waitForFile(t *testing.T, path string) {
 // running, and the child goes on to finish its work. The child finishes only
 // once the test releases it, after Detached has returned, so a Detached that
 // waited for the child would return only after the child gave up and wrote
-// abandoned. The order proves it, with no clock for a loaded machine to miss.
+// abandoned. The order proves it, with no clock for a loaded machine to miss;
+// a Detached that is slow without waiting for the child passes, since how fast
+// a process starts is the machine's.
 func TestDetachedOutlivesParent(t *testing.T) {
 	dir := t.TempDir()
 	self, err := os.Executable()
@@ -106,6 +136,7 @@ func TestDetachedOutlivesParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Detached: %v", err)
 	}
+	awaitExit(t, dir, pid)
 	if pid <= 0 {
 		t.Errorf("pid = %d, want a process id", pid)
 	}
@@ -147,9 +178,11 @@ func TestDetachedAppendsToTheLog(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte("earlier run\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Detached(Spec{Path: self, Dir: dir, Env: append(os.Environ(), "JIG_SPAWN_CHILD="+dir), LogPath: logPath}); err != nil {
+	pid, err := Detached(Spec{Path: self, Dir: dir, Env: append(os.Environ(), "JIG_SPAWN_CHILD="+dir), LogPath: logPath})
+	if err != nil {
 		t.Fatalf("Detached: %v", err)
 	}
+	awaitExit(t, dir, pid)
 	release(t, dir)
 	waitForFile(t, filepath.Join(dir, "done"))
 
