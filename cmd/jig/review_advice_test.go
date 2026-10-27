@@ -9,14 +9,14 @@ import (
 
 // TestAdviceToSpawnSaysHowToWait: the advice that tells a session to spawn a
 // reviewer says how to wait for it as Claude Code runs it, in the background
-// whatever the session asks: with TaskOutput, or by ending an attended turn,
-// never by stalling with another tool. It says so for a session that built the
+// whatever the session asks: in the same turn with TaskOutput, neither ending
+// the turn nor scheduling a wakeup, and never stalling with another tool. It says so for a session that built the
 // ticket and for one jig cannot tell, and never asks for a foreground run the
 // harness does not give. A fresh session is told to review itself, with no
 // subagent to wait for.
 func TestAdviceToSpawnSaysHowToWait(t *testing.T) {
 	t.Parallel()
-	rule := []string{"TaskOutput (`block: true`", "in an attended session only, end the turn", "an unattended session ends with its turn", "Never call another tool to stall"}
+	rule := []string{"TaskOutput (`block: true`", "load the tool with ToolSearch", "Do not end the turn or schedule a wakeup while it runs", "never call another tool to stall"}
 	cases := []struct {
 		name  string
 		fresh verifydeliver.Fresh
