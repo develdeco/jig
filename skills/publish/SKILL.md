@@ -54,7 +54,7 @@ then run `jig publish T-1 --body --picks answer.json` (or the bare publish with 
 
 ## Then
 
-Relay `jig next <T>`'s `prompt:` to the person (there is none once the pull request is recorded) and stop. Publish is the last phase: no skill (intake, build, review) follows it, even in an automatic run.
+Relay `jig next <T>`'s `prompt:` to the person (there is none once the pull request is recorded) and stop. Publish is the last phase: no skill (intake, build, review) follows it, even in a start-to-finish run.
 
 ## Never
 

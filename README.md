@@ -98,15 +98,16 @@ and stops with the prompt that asks for the next one.
 | (the session is unsure) | asks with `jig ask` | parks the question; you answer from the TUI (`a`) or `jig answer` |
 | "Review SHOP-1" | in a session that did none of the ticket's work, reads `jig review context`, records findings and closes the round; in the session that built it, spawns a subagent to do that, since a reviewer must not have built what it reviews | routes findings into fix slices, and checks the reviewer built none of the change |
 | "Publish SHOP-1" | renders the body with `jig publish --body`, pushes and opens the PR, records it with `--pr` | or pushes and opens it itself with `jig publish` after your yes (the TUI's `p`) |
-| "Take SHOP-1 from brief to PR" (or "Build and review SHOP-1") | an automatic run: does the phases in order, each with its skill, and stops at a refusal | answers each phase as above; `jig next SHOP-1` names the phase a ticket is at and the prompt that asks for the next |
+| "Take SHOP-1 from brief to PR" (or "Build and review SHOP-1") | a start-to-finish run: does the phases in order, each with its skill, without waiting for a prompt per phase, still asking you its questions and approvals, and stops at a refusal | answers each phase as above; `jig next SHOP-1` names the phase a ticket is at and the prompt that asks for the next |
+| "... and go with your recommendations" | answers its own questions and approvals with what it recommends, in one phase or a whole run | records them as the session's, never as yours |
 
 Four moments need you: agreeing on the brief, answering a question a session
-asked, deciding what a review asks, and approving the pull request. A prompt can
-hand over the first and the last ("go with your recommendations" approves the
-brief, "... to PR" or "and publish it" publishes): a brief the session approves
-for you is recorded as its approval, not yours, and a publish handed over is the
-session's own push, recorded with `jig publish --pr`. Everything else is the
-session's work, proven by jig.
+asked, deciding what a review asks, and approving the pull request. A run from
+start to finish still asks you each of them; only a prompt that says "go with
+your recommendations" hands them over: a brief the session approves for you is
+recorded as its approval, not yours, and a publish handed over is the session's
+own push, recorded with `jig publish --pr`. Ask for both, and the run needs no
+one. Everything else is the session's work, proven by jig.
 
 **You need** `git` with an identity (jig authors every store commit as you) and a
 harness. Claude Code is proven end to end; hook files for Codex, Gemini CLI,

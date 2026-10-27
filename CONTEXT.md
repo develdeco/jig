@@ -102,9 +102,13 @@ _Avoid_: stage, task
 A part of a phase with a state of its own: a slice in the build; a gate round, the asks and the fixes in the review; the body, the approval, a pull request and the changelog in the publish. `internal/phase` derives them with the phase, the TUI lists them under the step under the cursor, and each line of its activity names the sub-step it advances.
 _Avoid_: task, sub-task
 
-**Automatic run**:
-A prompt that names several phases ("Build and review SHOP-1", "Take SHOP-1 from brief to PR"), which the session runs in order, each with its skill. The span is the prompt and nothing records it; a refusal ends the run. The person's two moments, the brief's approval and the publish approval, stay theirs unless the prompt delegates them ("go with your recommendations", "... to PR", "and publish it"). A delegated brief approval is recorded with agent provenance; a delegated publish takes the hand-off way (the session's own push, then `jig publish --pr`), which asks for no approval. For an unattended session the Stop hook's next-phase note says when the run has more to do.
-_Avoid_: workflow, pipeline run
+**Start-to-finish run**:
+A prompt that names several phases ("Build and review SHOP-1", "Take SHOP-1 from brief to PR"), which the session runs in order, each with its skill, without waiting for a prompt to start the next. The span is the prompt and nothing records it; a refusal ends the run. It hands over no decision: the brief's questions and approval, a review's asks and the publish approval are asked of the person. For an unattended session the Stop hook's next-phase note says when the run has more to do ([ADR 0035](docs/adr/0035-start-to-finish-and-recommendations-are-separate.md)).
+_Avoid_: automatic run, workflow, pipeline run
+
+**Recommendations**:
+A hand-over the prompt says ("go with your recommendations"), in one phase or a start-to-finish run: the session answers the person's decisions itself with its recommended answers, recorded as its own (grilling answers tagged `defaulted`, the brief's approval with agent provenance, asks decided with `jig triage`, the publish the hand-off way, which asks for no approval). A start-to-finish run with recommendations has nobody to ask.
+_Avoid_: delegation, auto mode
 
 **Scout**:
 A read-only session rooted in a repo, drafting brief sections for the parent intake.
