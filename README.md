@@ -122,14 +122,18 @@ review, publish), each with its state in a few words: "approved by <name>
 bbbbbbb", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading the
 change", "pull request opened · <url>". The steps are the same answer `jig next`
 gives, so the screen and the command never disagree about where a ticket stands.
-Under them is a list of the sub-steps of the one under the cursor (each slice of
-the build, each review round with its asks and fixes, the publish's body, pull
-request and changelog, with your approval first when jig pushes for you, each
-with its state). The sub-step that matters now (your turn, a failure, else the
-work under way) opens into a card: what it is for, who holds it and for how
-long, and its latest moves, its own lines and the commands its session ran
-meanwhile, a failing one with its exit status; the others fold to a line, with
-the time each took once done. Under that is the step's activity, told in words:
+Under them a block named after the step under the cursor lists what the step is
+made of (the brief drafted, its slices written and its approval; each slice of
+the build; each review round with its asks and fixes; the publish's body, pull
+request and changelog, with your approval first when jig pushes for you), each
+with its state. The part that matters now (your turn, a failure, else the work
+under way) opens into a card: what it is for (a slice's goal in up to three
+lines, the brief's sections, its slices), who holds it and for how long, and its
+latest moves: its own lines and what its session did meanwhile, in the words the
+session gave each call ("Run the cart tests", "Mutation check: drop the rounding
+term"), a failing one with its exit status. The others fold to a line, a done
+one with what it produced and how long it took. Under that is the step's
+activity, told in words:
 a session by the role it plays (planner, builder, reviewer, or reviewer subagent
 when the session that built the change also reviewed it; a reviewer with its
 harness and model too), a slice by its goal, a commit by its subject. Each
@@ -138,8 +142,9 @@ Enter opens a step's screen, which shows the records behind it: the brief's
 sections and the slices that cite them, the build's slices with their workspace
 and oracle, their commits and every oracle run (with the end of a failed one),
 each review round with its reviewer, what it sent back and the asks it left, and
-the pull request's body and changelog. `jig tui SHOP-1` can be open before
-SHOP-1 exists; it waits for the ticket and fills in when it does.
+the pull request's body and changelog. `jig tui` opened on no ticket opens the
+first ticket a session creates after it started, until you press a key; `jig tui
+SHOP-1` can be open before SHOP-1 exists, and fills in when it does.
 
 From it you answer a session's question (`a`), keep or dismiss a review's ask
 (`k`, `d`), open a review round (`g`), and approve and publish (`p`: after your
@@ -153,7 +158,9 @@ moments, and a directory in no project gets nothing:
 
 - **Session start**: what `jig here` prints - the project, the ticket the branch
   names, its slices and their states, open questions, verifications still running,
-  and the prompt that asks for the ticket's next phase.
+  and the prompt that asks for the ticket's next phase; on a branch with no ticket,
+  that work asked for without one is planned first with the intake skill, which
+  mints its ticket.
   The harness's session id is set as `JIG_SESSION` for the session's shell
   commands where the harness allows it (Claude Code does), and asked of the
   agent where it does not.
