@@ -201,3 +201,20 @@ func TestNoStoreErrorNamesTheCloneCommand(t *testing.T) {
 		t.Errorf("none: %+v", err)
 	}
 }
+
+// TestHereSendsWorkWithNoTicketToIntake: in a project whose branch binds no
+// ticket, the help says what work asked for with no ticket is (fresh work,
+// planned first with the intake skill, which mints its ticket) before how to
+// take a ticket that exists. A session hears it at its start, so a request in
+// plain words reaches jig without naming an id.
+func TestHereSendsWorkWithNoTicketToIntake(t *testing.T) {
+	t.Parallel()
+	for _, w := range []locate.Where{{StorePath: "/s", Branch: "main"}, {StorePath: "/s"}} {
+		help := strings.Join(hereView{}.help(hereCtx{Where: w}), "\n")
+		for _, want := range []string{"is fresh work, planned first with the intake skill (`jig skill intake`), which mints its ticket", "run `jig next`"} {
+			if !strings.Contains(help, want) {
+				t.Errorf("branch %q: help %q lacks %q", w.Branch, help, want)
+			}
+		}
+	}
+}

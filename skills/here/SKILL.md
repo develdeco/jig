@@ -29,7 +29,7 @@ Run it from the repo, a directory in it, or a linked worktree of it: all read as
 | `slices` | every slice of the ticket with its state; `blocked_by` shows what each waits for |
 | `questions`, `pending_verifications` | open questions to answer; commits whose oracle is still running |
 
-A branch that leads with no ticket (`main`, a feature branch) binds no ticket: name one, or run `jig next`. `jig claim` on such a branch records it as that ticket's branch.
+A branch that leads with no ticket (`main`, a feature branch) binds no ticket: name one, or run `jig next`. Work the person asks for with no ticket is fresh work: plan it with the intake skill, which mints its ticket. `jig claim` on such a branch records it as that ticket's branch.
 
 ## What to build next
 

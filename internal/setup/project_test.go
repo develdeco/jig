@@ -180,7 +180,9 @@ func TestStubBodyListsTheSkillsAndSendsToTheBinary(t *testing.T) {
 	body := string(StubBody([]StubEntry{{Name: "here", Summary: "Names where the work is."}, {Name: "x", Summary: "a | b"}}))
 	for _, want := range []string{"name: jig\n", "run `jig here`", "`jig skill <name>`", "| `here` | Names where the work is. |", "| `x` | a / b |",
 		"`jig next <ticket>` names the phase it is at", "is an automatic run", "\"and publish it\"",
-		"subagent in the same turn with TaskOutput (`block: true`)", "never call another tool to stall"} {
+		"subagent in the same turn with TaskOutput (`block: true`)", "never call another tool to stall",
+		"A request that names none", "is fresh work: its brief comes first, with the `intake` skill", "asks for two of them",
+		"\"then build it, review it and publish it\""} {
 		if !strings.Contains(body, want) {
 			t.Errorf("stub lacks %q:\n%s", want, body)
 		}
