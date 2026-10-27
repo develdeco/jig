@@ -89,16 +89,19 @@ func cmdContext(e env, args []string, stdout io.Writer) int {
 }
 
 // contextHelp is the next step for the slice a context describes, and where
-// the code it touches comes from: the session's own tools, starting from what
-// the earlier slices changed when there are some.
+// the code it touches comes from: the session's own tools, starting from the
+// files the earlier slices changed when the clone holds some.
 func contextHelp(c slicectx.Context) []string {
 	var help []string
 	if c.Slice.State == "queued" {
 		help = append(help, fmt.Sprintf("Claim it first: `jig claim %s --slice %s`", c.Ticket, c.Slice.ID))
 	}
 	find := "Find the code the goal touches with your own tools (search, a code graph, your editor's symbols)"
-	if len(c.EarlierSlices) > 0 {
-		find += ", starting from the files the earlier slices changed"
+	for _, e := range c.EarlierSlices {
+		if len(e.Files) > 0 {
+			find += ", starting from the files the earlier slices changed"
+			break
+		}
 	}
 	help = append(help, find)
 	return append(help, fmt.Sprintf(

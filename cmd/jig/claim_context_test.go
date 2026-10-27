@@ -127,7 +127,8 @@ func TestContextSliceSources(t *testing.T) {
 // store whose config still names a code graph under context: (ADR 0034). It
 // prints no related block and its --json has no related key; its help says
 // the code is the session's to find with its own tools, and points at the
-// files the earlier slices changed once a slice has verified.
+// files the earlier slices changed only once the clone holds a verified
+// slice's commit: a verified slice with no files there points at nothing.
 func TestContextRunsNoContextTool(t *testing.T) {
 	t.Parallel()
 	fx, st, e := workFixture(t)
@@ -157,8 +158,18 @@ func TestContextRunsNoContextTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, code = runMain(t, e, "", "context", T, "--slice", "b")
-	if code != 0 || !strings.Contains(out, own+" (search, a code graph, your editor's symbols), "+fromEarlier) {
-		t.Errorf("context after slice a verified: exit %d, want the advice pointing at the earlier slices' files\n%s", code, out)
+	if code != 0 || !strings.Contains(out, own) || strings.Contains(out, fromEarlier) {
+		t.Errorf("context after slice a verified with no commit in the clone: exit %d, want the advice with no earlier files to point at\n%s", code, out)
+	}
+
+	if err := os.WriteFile(filepath.Join(fx.RepoDir, "alpha", "ctx.txt"), []byte("ctx\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitMust(t, fx.RepoDir, "add", "--", "alpha/ctx.txt")
+	gitMust(t, fx.RepoDir, "commit", "-q", "-m", T+" a: ctx", "-m", "Jig-Slice: a")
+	out, code = runMain(t, e, "", "context", T, "--slice", "b")
+	if code != 0 || !strings.Contains(out, "alpha/ctx.txt") || !strings.Contains(out, own+" (search, a code graph, your editor's symbols), "+fromEarlier) {
+		t.Errorf("context after slice a's commit is in the clone: exit %d, want its file listed and the advice pointing at it\n%s", code, out)
 	}
 	out, code = runMain(t, e, "", "context", T, "--slice", "b", "--json")
 	var c map[string]any
