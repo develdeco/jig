@@ -254,9 +254,15 @@ func (m *Model) heldBy(t *ticket, s phase.Sub, tr subTrack) string {
 	if tr.holder == "" {
 		return ""
 	}
-	if kind, id, _ := strings.Cut(s.Key, ":"); kind == "round" {
+	kind, id, _ := strings.Cut(s.Key, ":")
+	switch kind {
+	case "round":
 		n, _ := strconv.Atoi(id)
 		return firstOf(m.reviewerWho(t, tr.holder, n, "", nil), m.holderWho(t, tr.holder, roleReviewer))
+	case "body", "approval", "pr", "changelog", "done":
+		// The session that publishes is the one that built the change, as
+		// the builder it was, whatever it played first.
+		return m.whoWithAs(t, tr.holder, roleBuilder)
 	}
 	return m.holderWho(t, tr.holder, subRole(s.Key))
 }
@@ -557,10 +563,19 @@ func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, la
 	live := m.st.dim("nothing yet")
 	if last != nil {
 		if at, ok := last.At(); ok {
-			live = m.st.state(state, pad(span(max(0, now.Sub(at))), 7)) + " " + m.moveText(t, *last)
+			live = m.st.state(state, pad(ago(now.Sub(at)), 7)) + " " + m.moveText(t, *last)
 		}
 	}
 	return append(out, row("now", live))
+}
+
+// ago is how long ago a move was made, in the few cells of the live line:
+// span's words, and "0s" for under a second.
+func ago(d time.Duration) string {
+	if d < time.Second {
+		return "0s"
+	}
+	return span(d)
 }
 
 // subSummary is what a folded sub-step that is done adds to its line: how long
