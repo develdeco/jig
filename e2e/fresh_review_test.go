@@ -65,7 +65,7 @@ func TestReviewFromBuildSessionIsAdvisedToSpawn(t *testing.T) {
 	spawn := []string{
 		"spawn a subagent to review", "claimed slice a", "approved the brief",
 		"Agent tool", "subagent_type: general-purpose", "model: opus", "no worktree isolation",
-		"TaskOutput (`block: true`", "an unattended session ends with its turn", "Never call another tool to stall",
+		"TaskOutput (`block: true`", "Do not end the turn or schedule a wakeup while it runs", "never call another tool to stall",
 		"You did not build " + T, "jig skill review", "jig review context " + T, "Reply with the verdict line only",
 		"must not run `jig review context` itself",
 	}
