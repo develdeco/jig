@@ -59,6 +59,19 @@ func TestTheLogTagsEachCallWithWhatItWasFor(t *testing.T) {
 	if !strings.Contains(block, "by       builder · Claude Code · Sonnet 5") {
 		t.Errorf("the pull request's holder is not named as the builder:\n%s", block)
 	}
+
+	// The pull request is recorded: one call writes its line, the
+	// changelog's and the publish's end at once. The push stays the pull
+	// request's.
+	g.feed(
+		jl(at(6, 0), "SHOP-1", "", journal.EventChangelog),
+		jl(at(6, 0), "SHOP-1", "", journal.EventPr, func(l *journal.Line) { l.URL = "https://example.test/acme/shop/pull/1" }),
+		jl(at(6, 0), "SHOP-1", "", journal.EventPublishDone),
+	)
+	act = strings.Join(panelLines(strings.Split(g.view(), "\n"), "Activity"), "\n")
+	if line := lineWith(act, "09:05:40"); !strings.Contains(line, "publish·pr ") || !strings.Contains(line, "Push the branch") {
+		t.Errorf("once the pull request is recorded the push is not the pull request's:\n%s", act)
+	}
 }
 
 // TestALiveLineSaysHowLongAgo: the live line gives how long ago its move was
@@ -73,4 +86,14 @@ func TestALiveLineSaysHowLongAgo(t *testing.T) {
 			t.Errorf("ago(%v) = %q, want %q", tc.d, got, tc.want)
 		}
 	}
+}
+
+// lineWith is the first line of text that holds part, "" when none does.
+func lineWith(text, part string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, part) {
+			return line
+		}
+	}
+	return ""
 }

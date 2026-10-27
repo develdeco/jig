@@ -77,7 +77,9 @@ func (m *Model) moveWindows(t *ticket) []moveWindow {
 // doneTrack is trackOf for a sub-step that is done. One whose lines name no
 // session (a brief drafted, a body written: lines the screens or jig wrote) is
 // held by the session of the latest line before it that names one, else by the
-// session the machine ledger ties to the ticket, from the line before it.
+// session the machine ledger ties to the ticket, from the line before it. A
+// line written within a second of its own is not before it: one call writes
+// them together (the pull request, the changelog and the publish's end).
 func (t *ticket) doneTrack(step int, key string) subTrack {
 	tr := t.trackOf(step, key)
 	if tr.holder != "" || tr.start.IsZero() {
@@ -86,7 +88,7 @@ func (t *ticket) doneTrack(step int, key string) subTrack {
 	var prev time.Time
 	for _, l := range append(append([]events.Envelope(nil), t.lines...), t.seen...) {
 		at, ok := l.At()
-		if !ok || !at.Before(tr.start) {
+		if !ok || !at.Before(tr.start.Add(-time.Second)) {
 			continue
 		}
 		if at.After(prev) {
