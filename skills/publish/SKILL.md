@@ -32,7 +32,7 @@ It pushes the reviewed head as it is (never forced: `PUBLISH_NOT_FAST_FORWARD` w
 
 A ticket whose slices build in several repos publishes one pull request for each, all from the same branch name, and each body names the others under `## Part of T-1` (`pending` until that repo's pull request is recorded). `--body` renders them all, or one with `--repo <r>`; push and open each, then record each with `jig publish T-1 --pr <url> --repo <r>`. The ticket is published when the last is recorded; render the bodies again then, and update the pull requests with the urls. Bare `jig publish` does it all, and `--approve` approves every repo's head.
 
-An automatic run publishes the first way (`--body`, your push, `gh pr create`, `--pr`) when the person's prompt delegated the publish (it ends at the PR, or says "and publish it"). Otherwise the run stops after the review and relays the publish prompt.
+A start-to-finish run that names the publish asks the person to approve it (the reviewed head and the body's first lines) and, on their yes, publishes the first way (`--body`, your push, `gh pr create`, `--pr`); a prompt that told you to go with your recommendations needs no yes. A run that names no publish stops after the review and relays the publish prompt.
 
 ## A person approves
 
