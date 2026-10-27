@@ -103,6 +103,7 @@ func TestToolRecordsTheCallWithoutVerifyingWhenHeadStays(t *testing.T) {
 	r.handle(r.ev(KindSessionStart))
 	res := r.handle(r.ev(KindTool, func(e *Event) {
 		e.Tool, e.Command, e.Exit, e.Files = "Bash", "jig  review\tcontext JIG-1", intp(0), []string{"a.go"}
+		e.Description = "Open the review\nround"
 	}))
 	if !res.Empty() {
 		t.Errorf("Result = %+v, want nothing to say", res)
@@ -114,7 +115,7 @@ func TestToolRecordsTheCallWithoutVerifyingWhenHeadStays(t *testing.T) {
 	l := tools[0]
 	head, _ := gitx.RevParse(r.fx.RepoDir, "HEAD")
 	if l.Session != "s1" || l.Harness != "claude" || l.Tool != "Bash" || l.Command != "jig review context JIG-1" ||
-		l.Exit == nil || *l.Exit != 0 || len(l.Files) != 1 || l.Commit != head || l.Ticket != r.fx.Ticket || l.Branch != "jig/"+r.fx.Ticket {
+		l.Description != "Open the review round" || l.Exit == nil || *l.Exit != 0 || len(l.Files) != 1 || l.Commit != head || l.Ticket != r.fx.Ticket || l.Branch != "jig/"+r.fx.Ticket {
 		t.Errorf("tool line = %+v", l)
 	}
 	if len(r.started()) != 0 {

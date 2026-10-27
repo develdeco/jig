@@ -141,6 +141,7 @@ func (h *handler) tool() Result {
 	l := h.base(journal.EventTool)
 	l.Tool = h.ev.Tool
 	l.Command = oneLine(h.ev.Command, 400)
+	l.Description = oneLine(h.ev.Description, 200)
 	l.Exit = h.ev.Exit
 	l.Files = h.ev.Files
 	l.Commit = head

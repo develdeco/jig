@@ -5,7 +5,7 @@ description: Runs the grilling round that turns fresh work or a rushed backlog t
 
 # intake
 
-With a ticket, run `jig next <T>` first. If the phase it names is not brief, tell the person what the ticket needs and the prompt that does it, and stop. If the ticket the person names does not exist, mint it with `jig ticket new --title "<title>"` and use the id it prints; never make a ticket's folder yourself.
+With a ticket, run `jig next <T>` first. If the phase it names is not brief, tell the person what the ticket needs and the prompt that does it, and stop. For fresh work, or a ticket the person names that does not exist, mint it with `jig ticket new --title "<title>"` and use the id and folder it prints; never make a ticket's folder yourself.
 
 One skill, two destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). Which one is intake's verdict, not a caller's guess; it can surface mid-grilling.
 

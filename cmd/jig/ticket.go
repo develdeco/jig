@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
@@ -124,11 +125,32 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 	// ticket's own sync, run explicitly once its claim has landed.
 	st.RunCheckpointHook()
 
+	help := getWorkHints(id)
+	if err := touchMinter(e, id); err != nil {
+		help = append(help, "The ledger could not record that this session works on "+id+": "+err.Error())
+	}
 	axi.Render(stdout,
-		axi.KV("ticket", [][2]string{{"id", id}, {"title", *title}}),
-		axi.Help(getWorkHints(id)...),
+		axi.KV("ticket", [][2]string{{"id", id}, {"title", *title}, {"folder", st.TicketDir(id)}}),
+		axi.Help(help...),
 	)
 	return 0
+}
+
+// touchMinter records, in the machine ledger, that the session that minted
+// ticket works on it now: its brief is drafted before any journal line names
+// the session, and a screen that follows the ticket learns from this line
+// whose moves are the drafting. Nothing is written for a ticket minted
+// outside a session.
+func touchMinter(e env, ticket string) error {
+	session := envSession(e)
+	if session == "" {
+		return nil
+	}
+	root, err := e.jigHome()
+	if err != nil {
+		return err
+	}
+	return ledger.TouchSession(root, e.now(), ledger.Registration{ID: session, Ticket: ticket})
 }
 
 // intakeHint is the next step for a ticket that has no slices yet, with the

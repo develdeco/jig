@@ -54,11 +54,13 @@ type Event struct {
 	// Cwd is the directory the event happened in.
 	Cwd string
 	// Tool is the name of the tool a tool event is about, Command the shell
-	// command it ran when it ran one, and Exit that command's exit status
-	// when the harness reports it.
-	Tool    string
-	Command string
-	Exit    *int
+	// command it ran when it ran one, Description what the session said the
+	// call is for, and Exit that command's exit status when the harness
+	// reports it.
+	Tool        string
+	Command     string
+	Description string
+	Exit        *int
 	// Files are the files an editing tool touched.
 	Files []string
 	// Model is the model the session runs, Transcript the path of the

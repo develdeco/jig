@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -89,6 +92,52 @@ func TestTicketNewClaimsOnOrigin(t *testing.T) {
 	}
 	if got.Title != "Fix the thing" {
 		t.Fatalf("ticket.yaml title = %q, want %q", got.Title, "Fix the thing")
+	}
+}
+
+// TestTicketNewTiesTheMintingSessionToTheTicket: the session that mints a
+// ticket works on it from then on, before any journal line names it, so jig
+// ticket new records a session-touch line naming the ticket for it in the
+// machine ledger, and names the ticket's folder, where the brief goes. A
+// ticket minted outside a session writes no line.
+func TestTicketNewTiesTheMintingSessionToTheTicket(t *testing.T) {
+	t.Parallel()
+	for _, session := range []string{"s-plan", ""} {
+		home := t.TempDir()
+		vars := map[string]string{"JIG_HOME": home, "HOME": home, "USERPROFILE": home}
+		if session != "" {
+			vars[locate.SessionEnv] = session
+		}
+		clone := filepath.Join(t.TempDir(), "clone")
+		newTestOriginClone(t, clone)
+
+		var buf bytes.Buffer
+		if code := run(envFrom(vars), []string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader("")); code != 0 {
+			t.Fatalf("jig ticket new: exit %d\n%s", code, buf.String())
+		}
+		st, err := store.Open(clone)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(buf.String(), st.TicketDir("DEMO-1")) {
+			t.Errorf("the output does not name the ticket's folder %s:\n%s", st.TicketDir("DEMO-1"), buf.String())
+		}
+		lines, err := ledger.Read(home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var touches []journal.Line
+		for _, l := range lines {
+			if l.Event == journal.EventSessionTouch {
+				touches = append(touches, l)
+			}
+		}
+		switch {
+		case session == "" && len(touches) != 0:
+			t.Errorf("a ticket minted outside a session wrote %+v", touches)
+		case session != "" && (len(touches) != 1 || touches[0].Session != session || touches[0].Ticket != "DEMO-1"):
+			t.Errorf("session-touch lines = %+v, want one naming DEMO-1 for %s", touches, session)
+		}
 	}
 }
 
