@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -381,6 +382,8 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return "the lease was recovered"
 	case journal.EventNote, journal.EventCorrection:
 		return "note: " + l.Summary
+	case journal.EventSpend:
+		return spendText(l)
 	case journal.EventApproval:
 		text := "by " + firstOf(personName(l.Summary), "someone")
 		if l.Provenance == "agent" && l.Session != "" {
@@ -529,6 +532,52 @@ func askName(t *ticket, id string) string {
 		}
 	}
 	return id
+}
+
+// spendText is a spend line as the activity says it: what the session has
+// spent so far (the line is its running total), in tokens and, when a price
+// is known, dollars, and the models it went to.
+func spendText(l events.Envelope) string {
+	if l.Spend == nil {
+		return "spend recorded"
+	}
+	sp := l.Spend
+	text := "the session has spent " + tokens(sp.Input+sp.Output+sp.CacheRead+sp.CacheWrite) + " tokens"
+	if sp.USD > 0 {
+		text += fmt.Sprintf(" ($%.2f)", sp.USD)
+	}
+	var names []string
+	for _, id := range strings.Split(l.Model, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			names = append(names, modelName(id))
+		}
+	}
+	if len(names) > 0 {
+		text += " on " + strings.Join(names, " and ")
+	}
+	if rest, ok := strings.CutPrefix(l.Summary, "unpriced: "); ok {
+		if sp.USD == 0 {
+			text += ", no price known"
+		} else {
+			var unpriced []string
+			for _, id := range strings.Split(rest, ",") {
+				unpriced = append(unpriced, modelName(strings.TrimSpace(id)))
+			}
+			text += ", no price known for " + strings.Join(unpriced, " and ")
+		}
+	}
+	return text
+}
+
+// tokens is a count of tokens in a few cells: 980, 25k, 3.5M.
+func tokens(n int64) string {
+	switch {
+	case n < 1000:
+		return strconv.FormatInt(n, 10)
+	case n < 999_500:
+		return strconv.FormatInt((n+500)/1000, 10) + "k"
+	}
+	return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
 }
 
 // span is a duration as people read it: 45s, 3m 05s, 2h 10m.

@@ -13,9 +13,10 @@ import (
 // the brief, and the calls its sessions made (the machine ledger's tool lines,
 // in the words each session gave them), newest first. Each line is tagged with
 // the step and sub-step it belongs to ("build·clamp", "review·r2"): a journal
-// line by what it records, a call by the sub-step its session held when it made
-// it, else by the step it led to (the step of the next line, or the ticket's
-// current step for a call after the latest).
+// line by what it records; a call of a subagent by the sub-step its lines name;
+// any other call by the sub-step its session held when it made it, else by the
+// line it wrote, else by the step it led to (the step of the next line, or the
+// ticket's current step for a call after the latest).
 
 // logLines are the ticket's lines and moves, oldest first.
 func (t *ticket) logLines() []events.Envelope {
@@ -34,9 +35,14 @@ func (t *ticket) logLines() []events.Envelope {
 // moveWindow is the time a sub-step was held, and by which session: a call
 // that session made in it belongs to the sub-step.
 type moveWindow struct {
-	step       int
-	key        string
-	holder     string
+	step   int
+	key    string
+	holder string
+	// agent is the subagent the sub-step's own lines name (the reviewer that
+	// closed a round), "" for none: a subagent is started for one sub-step,
+	// so every call it makes is that sub-step's, however long after the
+	// sub-step's last line the harness records it.
+	agent      string
 	start, end time.Time
 	// borrowed is set for a window whose holder its sub-step's lines do not
 	// name (subTrack.borrowed): a window whose lines name its holder wins.
@@ -67,11 +73,22 @@ func (m *Model) moveWindows(t *ticket, d phase.Ticket) []moveWindow {
 				continue
 			}
 			if tr.holder != "" && !tr.start.IsZero() {
-				ws = append(ws, moveWindow{step, s.Key, tr.holder, tr.start, end, tr.borrowed})
+				ws = append(ws, moveWindow{step, s.Key, tr.holder, agentOf(tr.own), tr.start, end, tr.borrowed})
 			}
 		}
 	}
 	return ws
+}
+
+// agentOf is the subagent the latest of lines that names one names, "" for
+// none.
+func agentOf(lines []events.Envelope) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if lines[i].Agent != "" {
+			return lines[i].Agent
+		}
+	}
+	return ""
 }
 
 // doneTrack is trackOf for a sub-step that is done. One whose lines name no
@@ -117,14 +134,25 @@ func (t *ticket) doneTrack(step int, key string) subTrack {
 
 // placeOf is the step and sub-step key line l belongs to (key "" for the step
 // alone; step -1 for the ticket as a whole). all are the log's lines, oldest
-// first, for a call made between sub-steps: it belongs to the step of the next
-// line, or to current (the ticket's current step) when none came after it.
+// first, for a call made outside every sub-step's window: it belongs to the
+// line it wrote (wroteLine), else to the step of the next line, or to current
+// (the ticket's current step) when none came after it.
 func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelope, current int) (int, string) {
 	if !isMove(l) {
 		return stepOfLine(l), t.subKey(l)
 	}
 	at, _ := l.At()
 	best := -1
+	if l.Agent != "" {
+		for i, w := range ws {
+			if w.agent == l.Agent && at.After(w.start) && (best < 0 || w.start.After(ws[best].start)) {
+				best = i
+			}
+		}
+		if best >= 0 {
+			return ws[best].step, ws[best].key
+		}
+	}
 	for i, w := range ws {
 		if w.holder != l.Session || !at.After(w.start) || at.After(w.end) {
 			continue
@@ -135,6 +163,9 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 	}
 	if best >= 0 {
 		return ws[best].step, ws[best].key
+	}
+	if x, ok := wroteLine(l, at, all); ok {
+		return stepOfLine(x), t.subKey(x)
 	}
 	for _, x := range all {
 		if isMove(x) {
@@ -181,6 +212,43 @@ func currentOf(d phase.Ticket) int {
 	return len(d.Phases) - 1
 }
 
+// wroteLine is the line call l wrote, when it wrote one: the harness records a
+// call when it ends, so the first journal line written since the call its
+// session (and subagent) made before it, that names that session or none, was
+// written while it ran (a command that records a line, then pushes the store
+// and syncs its mirror, ends seconds after it). A line the person wrote at a
+// terminal is never a session's, and a session's first call has no call
+// before it to bound the lines it could have written.
+func wroteLine(l events.Envelope, at time.Time, all []events.Envelope) (events.Envelope, bool) {
+	var since time.Time
+	for _, x := range all {
+		xt, ok := x.At()
+		if !ok || !xt.Before(at) {
+			break
+		}
+		if isMove(x) && x.Session == l.Session && x.Agent == l.Agent {
+			since = xt
+		}
+	}
+	if since.IsZero() {
+		return events.Envelope{}, false
+	}
+	for _, x := range all {
+		xt, ok := x.At()
+		switch {
+		case !ok || !xt.After(since):
+			continue
+		case xt.After(at):
+			return events.Envelope{}, false
+		case isMove(x) || x.Src == srcStatus || x.Provenance == "person" || stepOfLine(x) < 0:
+			continue
+		case x.Session == "" || (x.Session == l.Session && (x.Agent == "" || x.Agent == l.Agent)):
+			return x, true
+		}
+	}
+	return events.Envelope{}, false
+}
+
 // tagOf is a place as a log line's tag: the step's name, and the sub-step's
 // short name after a dot.
 func tagOf(step int, key string) string {
@@ -210,11 +278,11 @@ var stepTagState = [stepCount]string{StateNeedsInput, StateBuilding, StateReview
 const tagMaxW = 18
 
 // activityPanel adds the ticket's activity log to p, newest first: as many
-// lines as the rows left below what p holds allow, activityCap at most and
-// three at least, so the panel's edge stays on the screen.
+// lines as the rows left below what p holds allow, three at least, so the
+// panel's edge stays on the screen and a tall one is filled to its foot.
 func (m *Model) activityPanel(p *page, t *ticket) {
 	all := m.placed(t, m.phaseOf(t))
-	keep := min(activityCap(m.bodyRows()), max(3, m.bodyRows()-len(p.lines)-2))
+	keep := max(3, m.bodyRows()-len(p.lines)-2)
 	right := ""
 	if n := len(all); n > keep {
 		right = fmt.Sprintf("latest %d of %d", keep, n)
