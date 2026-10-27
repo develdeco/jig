@@ -15,44 +15,46 @@ records the review and the publish.
 ![One Claude Code session taking a ticket from its brief to its pull request on the left, jig tui following its four steps on the right](docs/media/jig-in-a-session.gif)
 
 On the left, one Claude Code session (Sonnet 5) works on a small shop project;
-on the right, `jig tui SHOP-1` stays on the ticket's screen while the session
-takes it from its brief to its pull request. The recording runs at twice its
-speed, with the waits and five permission prompts cut. The person typed one
-prompt and allowed the seven shell commands Claude Code asked about, and the
-session took 6m 54s:
+on the right, `jig tui` opens the ticket as soon as the session creates it and
+follows it from its brief to its pull request. The recording runs at twice its
+speed, with the waits cut. The person typed one prompt that names no ticket,
+answered the session's three questions with the answers it recommended, and
+allowed the four shell commands Claude Code asked about (the frames of two,
+which showed a home folder, are cut); the session took 9m 58s:
 
-> Take SHOP-1 from brief to PR. The bug: cart.Total takes the discount off each
-> line and truncates, so three items at 3.33 with 10% off cost 8.97 instead of
-> 8.99. [...] Go with your recommendations, then build it, review it and
-> publish it.
+> Fix a bug: cart.Total takes the discount off each line and truncates, so three
+> items at 3.33 with 10% off cost 8.97 instead of 8.99. [...] Take it from brief
+> to PR.
 
-A prompt that names several phases is an automatic run: the session runs the
-phases in order, each with its skill, and each skill starts and ends with
-`jig next`, which says where the ticket stands and what comes next. The TUI
-shows the four steps; under them the sub-steps of the current one, the one
-under way opened into a card with its goal, who holds it and its latest moves,
-the commands its session runs among them; then the activity, each line
-labeled with the sub-step it belongs to:
+A prompt that names several phases is a start-to-finish run: the session runs
+the phases one after another, each with its skill, without waiting for a prompt
+per phase, and still asks the person every decision; each skill starts and ends
+with `jig next`, which says where the ticket stands and what comes next. The TUI
+shows the four steps; under them the step under way, its part under way opened
+with how far it has come, what it is and its latest move; then one activity log,
+newest first, each line tagged with its step and sub-step:
 
-1. **Brief.** SHOP-1 does not exist yet, so the session mints it with
-   `jig ticket new`, drafts `brief.md` and `slices.yaml` with the intake skill,
-   and checks them with `jig validate --check`. "Go with your recommendations"
-   delegates the brief's approval, so `jig validate` records it as the agent's.
-2. **Build.** The session claims each slice and commits with a `Jig-Slice:`
-   trailer. jig runs the slice's oracle on a detached copy of each commit and
+1. **Brief.** The prompt names no ticket, so the session mints SHOP-1 with
+   `jig ticket new` and the TUI opens it. It drafts `brief.md` and
+   `slices.yaml` with the intake skill, asks how a half cent should round,
+   shows the brief, and records the approval once the person confirms it.
+2. **Build.** The session claims the slice and commits with a `Jig-Slice:`
+   trailer. jig runs the slice's oracle on a detached copy of the commit and
    counts the slice green: green is what jig ran, never what the model said.
 3. **Review.** The session built the change, so `jig gate` advises a reviewer
    in a fresh context, and the session runs one as a subagent (Opus 5) for each
-   round, waiting for its verdict in the same turn. Round 1 finds the
-   regression test blind to rounding (999 cents at 10% off is 899 truncated and
-   rounded alike) and sends back a fix; the session adds a fix slice with a case
-   they disagree on (111 cents at 10% off: 100 rounded, 99 truncated), and
-   round 2 comes back clean. jig checks that each round's reviewer built none
-   of what it reviewed.
-4. **Publish.** The prompt delegated the publish, so the session renders the
-   body with `jig publish --body`, pushes the reviewed head, opens the pull
-   request with `gh`, and records it with `jig publish --pr`
-   ([develdeco/jig-demo-shop#10](https://github.com/develdeco/jig-demo-shop/pull/10)).
+   round, waiting for its verdict in the same turn. Round 1 finds every test
+   buying one of each item, so a change that dropped the quantity from the
+   subtotal would pass; it sends back a fix, the session adds a test with a
+   quantity above one, and round 2 comes back clean. jig checks that each
+   round's reviewer built none of what it reviewed.
+4. **Publish.** The session asks before it publishes; on the person's yes it
+   renders the body with `jig publish --body`, pushes the reviewed head, opens
+   the pull request with `gh`, and records it with `jig publish --pr`
+   ([develdeco/jig-demo-shop#15](https://github.com/develdeco/jig-demo-shop/pull/15)).
+
+Adding "go with your recommendations" to the prompt would hand those decisions
+to the session, and the run would need no one.
 
 By default each phase waits for its own prompt ("Plan SHOP-1", "Build SHOP-1",
 "Review SHOP-1", "Publish SHOP-1"), in one session or in several, so a person
