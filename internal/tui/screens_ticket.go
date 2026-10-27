@@ -52,7 +52,7 @@ func (m *Model) ticketPage(id string) page {
 		right = "done"
 	}
 	if total := totalTook(steps); total > 0 {
-		right += " · total " + span(total)
+		right += " · total " + ago(total)
 	}
 	p.boxTop("Steps", right)
 	for i, s := range steps {

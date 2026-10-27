@@ -537,7 +537,7 @@ func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, la
 
 	right := ""
 	if !tr.start.IsZero() && now.After(tr.start) {
-		right = m.st.state(state, span(now.Sub(tr.start)))
+		right = m.st.state(state, ago(now.Sub(tr.start)))
 	}
 	head := m.st.icon(state) + " " + m.st.bold(pad(s.Label, labelW)) + "  "
 	stages, reached := t.stagesOf(step, s, subs)
@@ -569,8 +569,9 @@ func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, la
 	return append(out, row("now", live))
 }
 
-// ago is how long ago a move was made, in the few cells of the live line:
-// span's words, and "0s" for under a second.
+// ago is a time in a few cells (how long ago the live line's move was made, how
+// long a step or the sub-step under way has run): span's words, and "0s" for
+// under a second, which span spells out.
 func ago(d time.Duration) string {
 	if d < time.Second {
 		return "0s"

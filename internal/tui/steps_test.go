@@ -392,3 +392,30 @@ func TestEachStepCountsItsTimeAndTheStepsTheirTotal(t *testing.T) {
 		t.Errorf("the Steps panel's title does not give the total:\n%s", top)
 	}
 }
+
+// TestAStepJustStartedSaysZeroSeconds: in a step's first second its time, the
+// total and the sub-step under way read "0s", not span's spelled-out words,
+// which do not fit their cells.
+func TestAStepJustStartedSaysZeroSeconds(t *testing.T) {
+	t.Parallel()
+	status := strings.Join([]string{"ticket: SHOP-1", "state: building",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
+			{"round", "building", "1", "-", "-", "Round to the cent"},
+		}), "questions: none"}, "\n") + "\n"
+	g := newRig(t, "SHOP-1")
+	g.m.now = func() time.Time { return time.Date(2026, 10, 23, 9, 5, 10, 400_000_000, time.UTC) }
+	g.r.answer("status SHOP-1 --store /s", status, 0)
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 40})
+	g.feed(
+		ll(at(0, 0), "", journal.EventSessionStart, func(l *journal.Line) { l.Session, l.Harness, l.Model = "s-b", "claude", "claude-sonnet-5" }),
+		ll(at(1, 0), "SHOP-1", journal.EventSessionTouch, func(l *journal.Line) { l.Session = "s-b" }),
+		jl(at(4, 0), "SHOP-1", "", journal.EventApproval, with("s-b", "", "", "Dana <dana@example.invalid>", "0123456789ab", "person")),
+		jl(at(5, 10), "SHOP-1", "round", journal.EventClaim, with("s-b", "", "", "", "", "")),
+	)
+	if got := g.m.steps(g.m.w.tickets["SHOP-1"])[stepBuild].Took; got != "0s" {
+		t.Errorf("the build's time = %q, want 0s", got)
+	}
+	if view := g.view(); strings.Contains(view, "under") {
+		t.Errorf("a time under a second is spelled out:\n%s", view)
+	}
+}

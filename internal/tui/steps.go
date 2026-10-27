@@ -37,7 +37,7 @@ func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
 	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d)}
 	for i, took := range m.stepTimes(t, d) {
 		if took > 0 {
-			rows[i].Took, rows[i].took = span(took), took
+			rows[i].Took, rows[i].took = ago(took), took
 		}
 	}
 	return rows
