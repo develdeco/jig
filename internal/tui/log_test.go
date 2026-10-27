@@ -67,13 +67,13 @@ func TestTheLogTagsEachCallWithWhatItWasFor(t *testing.T) {
 		t.Errorf("the pull request's holder is not named as the builder:\n%s", block)
 	}
 
-	// The pull request is recorded: one call writes its line, the
-	// changelog's and the publish's end at once, and is recorded 12s later,
-	// once the store is pushed: it is the pull request's. The push stays the
-	// pull request's.
+	// The pull request is recorded: one call writes the changelog's line, its
+	// own and the publish's end at once, in that order, and is recorded 12s
+	// later, once the store is pushed: it is the pull request's, the first of
+	// the three in the publish's order. The push stays the pull request's.
 	g.feed(
-		jl(at(6, 0), "SHOP-1", "", journal.EventPr, func(l *journal.Line) { l.URL = "https://example.test/acme/shop/pull/1" }),
 		jl(at(6, 0), "SHOP-1", "", journal.EventChangelog),
+		jl(at(6, 0), "SHOP-1", "", journal.EventPr, func(l *journal.Line) { l.URL = "https://example.test/acme/shop/pull/1" }),
 		jl(at(6, 0), "SHOP-1", "", journal.EventPublishDone),
 		tool(at(6, 12), "s-b", "jig publish SHOP-1 --pr https://example.test/acme/shop/pull/1", said("Record the pull request")),
 	)

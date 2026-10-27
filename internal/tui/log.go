@@ -135,9 +135,9 @@ func (t *ticket) doneTrack(step int, key string) subTrack {
 // placeOf is the step and sub-step key line l belongs to (key "" for the step
 // alone; step -1 for the ticket as a whole). all are the log's lines, oldest
 // first, for a call made outside every sub-step's window: it belongs to the
-// line it wrote (wroteLine), else to the step of the next line, or to current
-// (the ticket's current step) when none came after it.
-func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelope, current int) (int, string) {
+// line it wrote (wroteLine), else to the step of the next line, or to the step
+// under way in d when none came after it.
+func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelope, d phase.Ticket) (int, string) {
 	if !isMove(l) {
 		return stepOfLine(l), t.subKey(l)
 	}
@@ -164,8 +164,8 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 	if best >= 0 {
 		return ws[best].step, ws[best].key
 	}
-	if x, ok := wroteLine(l, at, all); ok {
-		return stepOfLine(x), t.subKey(x)
+	if step, key, ok := t.wroteLine(l, at, all, d); ok {
+		return step, key
 	}
 	for _, x := range all {
 		if isMove(x) {
@@ -177,7 +177,7 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 			}
 		}
 	}
-	return current, ""
+	return currentOf(d), ""
 }
 
 // placedLine is a line of the log and the place it belongs to (placeOf).
@@ -192,10 +192,9 @@ type placedLine struct {
 func (m *Model) placed(t *ticket, d phase.Ticket) []placedLine {
 	all := t.logLines()
 	ws := m.moveWindows(t, d)
-	current := currentOf(d)
 	out := make([]placedLine, len(all))
 	for i, l := range all {
-		step, key := t.placeOf(l, ws, all, current)
+		step, key := t.placeOf(l, ws, all, d)
 		out[i] = placedLine{l, step, key}
 	}
 	return out
@@ -212,14 +211,17 @@ func currentOf(d phase.Ticket) int {
 	return len(d.Phases) - 1
 }
 
-// wroteLine is the line call l wrote, when it wrote one: the harness records a
-// call when it ends, so the first journal line written since the call its
-// session (and subagent) made before it, that names that session or none, was
-// written while it ran (a command that records a line, then pushes the store
-// and syncs its mirror, ends seconds after it). A line the person wrote at a
-// terminal is never a session's, and a session's first call has no call
-// before it to bound the lines it could have written.
-func wroteLine(l events.Envelope, at time.Time, all []events.Envelope) (events.Envelope, bool) {
+// wroteLine is the place of the line call l wrote, when it wrote one: the
+// harness records a call when it ends, so the first journal line written since
+// the call its session (and subagent) made before it, that names that session
+// or none, was written while it ran (a command that records a line, then
+// pushes the store and syncs its mirror, ends seconds after it). Lines it wrote
+// within a second of that one are one write, in no order that means anything
+// (the pull request's, the changelog's and the publish's end), and the call
+// takes the place of the one that comes first in its step (subOrder). A line
+// the person wrote at a terminal is never a session's, and a session's first
+// call has no call before it to bound the lines it could have written.
+func (t *ticket) wroteLine(l events.Envelope, at time.Time, all []events.Envelope, d phase.Ticket) (int, string, bool) {
 	var since time.Time
 	for _, x := range all {
 		xt, ok := x.At()
@@ -231,22 +233,43 @@ func wroteLine(l events.Envelope, at time.Time, all []events.Envelope) (events.E
 		}
 	}
 	if since.IsZero() {
-		return events.Envelope{}, false
+		return 0, "", false
 	}
+	var first time.Time
+	step, key, rank := 0, "", -1
 	for _, x := range all {
 		xt, ok := x.At()
 		switch {
 		case !ok || !xt.After(since):
 			continue
-		case xt.After(at):
-			return events.Envelope{}, false
+		case xt.After(at) || (!first.IsZero() && xt.Sub(first) > time.Second):
+			return step, key, rank >= 0
 		case isMove(x) || x.Src == srcStatus || x.Provenance == "person" || stepOfLine(x) < 0:
 			continue
-		case x.Session == "" || (x.Session == l.Session && (x.Agent == "" || x.Agent == l.Agent)):
-			return x, true
+		case x.Session != "" && (x.Session != l.Session || (x.Agent != "" && x.Agent != l.Agent)):
+			continue
+		}
+		if first.IsZero() {
+			first = xt
+		}
+		s, k := stepOfLine(x), t.subKey(x)
+		if r := s*1000 + subOrder(d, s, k); rank < 0 || r < rank {
+			step, key, rank = s, k, r
 		}
 	}
-	return events.Envelope{}, false
+	return step, key, rank >= 0
+}
+
+// subOrder is where sub-step key comes in step's sub-steps in d, after all of
+// them when it is not one.
+func subOrder(d phase.Ticket, step int, key string) int {
+	subs := d.Phases[step].Subs
+	for i, s := range subs {
+		if s.Key == key {
+			return i
+		}
+	}
+	return len(subs)
 }
 
 // tagOf is a place as a log line's tag: the step's name, and the sub-step's
