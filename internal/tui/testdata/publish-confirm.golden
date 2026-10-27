@@ -7,17 +7,17 @@ jig  demo › JIG-2  Config loader                                     ✓ publi
   │▸ ✓ 4 Publish  21s     pull request opened · https://example.test/acme/dem… │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Publish ──────────────────────────────────────────────────── 4 of 5 done ─╮
-  │  ✓ body · ccccccc                                                          │
+  │  ✓ body          ccccccc                                                   │
   │  ✓ approval                                                                │
-  │  ✓ pull request · https://example.test/acme/demo/pull/7                    │
+  │  ✓ pull request  https://example.test/acme/demo/pull/7                     │
   │  ○ changelog                                                               │
   │  ✓ published                                                               │
   ╰────────────────────────────────────────────────────────────────────────────╯
   next  Run `jig status JIG-2` to confirm the ticket is fully green
-  ╭─ Publish activity ───────────────────────────────────────── latest 3 of 4 ─╮
-  │  09:14:10 ▲ approval · you approved ccccccc                                │
-  │  09:14:20 ▲ pull request · opened https://example.test/acme/demo/pull/7    │
-  │  09:14:21 ● published · finished                                           │
+  ╭─ Activity ──────────────────────────────────────────────── latest 3 of 12 ─╮
+  │  09:14:21 publish·done     ● finished                                      │
+  │  09:14:20 publish·pr       ▲ opened https://example.test/acme/demo/pull/7  │
+  │  09:14:10 publish·approval ▲ you approved ccccccc                          │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   publish JIG-2: approve the reviewed head, push it and open the pull request?

@@ -96,71 +96,81 @@ func cardRig(t *testing.T, width, height int) *rig {
 	return g
 }
 
-// TestTheSliceUnderWayOpensIntoACard: on a screen with room, the slice being
-// built opens into a card headed by how long it has run, with its goal, its
-// builder by role, harness and model, and its moves: its own lines and the
-// commands its builder ran since the claim, a failing one with its exit
-// status. A command before the claim or from another session is not its move.
-// The slice that is done folds to a line with the time it took.
-func TestTheSliceUnderWayOpensIntoACard(t *testing.T) {
+// TestTheSliceUnderWayOpensWithItsFields: on a screen with room, the slice
+// being built opens: its line has the track of its stages and how long it has
+// run, and under it are its goal, its builder by role, harness and model, its
+// commit, and one live line, its latest move with how long ago it was made.
+// The slice that is done stays one line with the time it took. Every move is
+// in the activity, newest first, tagged with its sub-step: the builder's
+// commands in the slice's time are the slice's, one between two slices is the
+// step's, and a session the ticket never named is not there.
+func TestTheSliceUnderWayOpensWithItsFields(t *testing.T) {
 	t.Parallel()
 	g := cardRig(t, 100, 40)
 	v := g.view()
 	golden(t, "ticket-card", v)
-	block := strings.Join(panelLines(strings.Split(v, "\n"), "Build ─"), "\n")
+	rows := strings.Split(v, "\n")
+	block := strings.Join(panelLines(rows, "Build ─"), "\n")
 	for _, want := range []string{
-		"✓ slice round · verified aaaaaaa · 37s",
-		"╭ ◐ slice clamp · verifying bbbbbbb", "57m 30s ╮",
-		"│ goal   Clamp negative quantities",
-		"│ who    builder (Claude Code · Sonnet 5)",
-		"│        a returned item never charges less than nothing; a quantity above the stock is     │",
-		"│        left to the checkout, which knows the stock and says so to the person at the till… │",
-		"│ moves  09:02:05 ✗ Run the cart tests · exit 1",
-		"09:02:08 · $ `go test ./cart/...`",
-		"09:02:10 ◑ verifying bbbbbbb",
-		"○ slice cart · waits for clamp",
+		"✓ slice round  verified aaaaaaa · took 37s",
+		"◐ slice clamp  claimed ━━ committed ━━ verifying ── verified", "57m 30s",
+		"goal     Clamp negative quantities",
+		"held by  builder · Claude Code · Sonnet 5",
+		"commit   bbbbbbb “Clamp negative quantities”",
+		"now      57m 20s ◑ verifying bbbbbbb",
+		"○ slice cart   waits for clamp",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("the block lacks %q:\n%s", want, block)
 		}
 	}
-	for _, not := range []string{"`ls`", "09:01:50", "cd \"D:"} {
-		if strings.Contains(block, not) {
-			t.Errorf("the card shows %q, which is not a move of slice clamp:\n%s", not, block)
+	if strings.Contains(block, "took it") || strings.Contains(block, "$ `") {
+		t.Errorf("the block lists moves; only its live line names one:\n%s", block)
+	}
+	act := panelLines(rows, "Activity")
+	text := strings.Join(act, "\n")
+	for _, want := range []string{
+		"09:02:10 build·clamp ◑ verifying bbbbbbb",
+		"09:02:08 build·clamp · $ `go test ./cart/...`",
+		"09:02:05 build·clamp ✗ Run the cart tests · exit 1",
+		"09:01:50 build       · $ `go test ./...`",
+		"09:01:00 build·round ◐ builder took it",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the activity lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(block, "took it") {
-		t.Errorf("the card's moves repeat the claim its head already tells:\n%s", block)
+	if strings.Contains(text, "`ls`") {
+		t.Errorf("the activity shows a session the ticket never named:\n%s", text)
 	}
-	for _, line := range strings.Split(block, "\n") {
-		if strings.HasPrefix(line, "  │  │") && !strings.HasSuffix(strings.TrimRight(line, " "), "│ │") {
-			t.Errorf("a row of the card is open on the right: %q", line)
-		}
+	if strings.Index(text, "09:02:10") > strings.Index(text, "09:01:00") {
+		t.Errorf("the activity is not newest first:\n%s", text)
 	}
 }
 
-// TestTheCardGivesWayOnASmallScreen: at 80 by 24 the card keeps its moves and
-// its facts give way; a screen too short for even that lists the sub-steps one
-// line each, as before.
-func TestTheCardGivesWayOnASmallScreen(t *testing.T) {
+// TestTheOpenSubstepGivesWayOnASmallScreen: at 80 by 24 the open slice keeps
+// its line and its live line and its fields give way; a screen too short for
+// even that lists the sub-steps one line each.
+func TestTheOpenSubstepGivesWayOnASmallScreen(t *testing.T) {
 	t.Parallel()
 	v := cardRig(t, 80, 24).view()
 	block := strings.Join(panelLines(strings.Split(v, "\n"), "Build ─"), "\n")
-	if !strings.Contains(block, "│ moves") || strings.Contains(block, "│ goal") {
-		t.Errorf("the 80x24 card does not keep its moves over its facts:\n%s", v)
+	if !strings.Contains(block, "now ") || strings.Contains(block, "   a quantity above") {
+		t.Errorf("the 80x24 block does not keep the live line over the fields:\n%s", v)
 	}
-	v = cardRig(t, 80, 22).view()
+	v = cardRig(t, 80, 20).view()
 	block = strings.Join(panelLines(strings.Split(v, "\n"), "Build ─"), "\n")
-	if strings.Contains(block, "│ moves") || !strings.Contains(block, "◐ slice clamp · verifying bbbbbbb") {
-		t.Errorf("the 80x22 block is not one line per sub-step:\n%s", v)
+	if strings.Contains(block, "now ") || !strings.Contains(block, "◐ slice clamp  verifying bbbbbbb") {
+		t.Errorf("the 80x20 block is not one line per sub-step:\n%s", v)
 	}
 }
 
-// TestAReviewRoundOpensWithItsReviewersCommands: an open round taken by a
-// subagent of the session that built the ticket opens into a card that names
-// it reviewer subagent, with the model the round's lines name, and lists the
-// commands it ran in the round, not the build's.
-func TestAReviewRoundOpensWithItsReviewersCommands(t *testing.T) {
+// TestAReviewRoundOpensWithItsReviewer: an open round taken by a subagent of
+// the session that built the ticket opens with its stages, names its reviewer
+// as a reviewer subagent with the model the round's lines name, and its live
+// line is the reviewer's latest command; the activity tags the round's
+// commands with the round and the build's with the build.
+func TestAReviewRoundOpensWithItsReviewer(t *testing.T) {
 	t.Parallel()
 	status := strings.Join([]string{"ticket: SHOP-1", "state: green",
 		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
@@ -179,27 +189,30 @@ func TestAReviewRoundOpensWithItsReviewersCommands(t *testing.T) {
 		tool(at(3, 20), "s-b", "jig review context SHOP-1 --model claude-opus-5"),
 		tool(at(4, 0), "s-b", `cd /w/pool/SHOP-1-gate && go test ./cart/...`, exit(1)),
 	)
-	v := g.view()
-	block := strings.Join(panelLines(strings.Split(v, "\n"), "Review ─"), "\n")
+	rows := strings.Split(g.view(), "\n")
+	block := strings.Join(panelLines(rows, "Review ─"), "\n")
 	for _, want := range []string{
-		"╭ ◎ round 1 · taken by reviewer subagent (Claude Code · Opus 5)",
-		"09:03:20 · $ `jig review context SHOP-1 --model claude-opus-5`",
-		"$ `go test ./cart/...` · exit 1",
+		"◎ round 1  opened ━━ taken ━━ reviewing ── closed",
+		"reviewer reviewer subagent · Claude Code · Opus 5",
+		"now      55m 30s ✗ $ `go test ./cart/...` · exit 1",
 	} {
 		if !strings.Contains(block, want) {
-			t.Errorf("the review block lacks %q:\n%s", want, v)
+			t.Errorf("the review block lacks %q:\n%s", want, block)
 		}
 	}
-	if strings.Contains(block, "│ who") || strings.Contains(block, "took it") {
-		t.Errorf("the card names its reviewer twice, in its head and in a who row or a move:\n%s", block)
-	}
-	if strings.Contains(block, "git commit -m round") {
-		t.Errorf("the round's card shows a command of the build:\n%s", block)
+	act := strings.Join(panelLines(rows, "Activity"), "\n")
+	for _, want := range []string{
+		"09:03:20 review·r1   · $ `jig review context SHOP-1 --model claude-opus-5`",
+		"09:01:20 build·round · $ `git commit -m round`",
+	} {
+		if !strings.Contains(act, want) {
+			t.Errorf("the activity lacks %q:\n%s", want, act)
+		}
 	}
 }
 
-// TestADoneStepFoldsEverySubstep: the sub-steps of a step that is done all fold
-// to a line, each with the time it took; no card opens.
+// TestADoneStepFoldsEverySubstep: the sub-steps of a step that is done all stay
+// one line, each with the time it took; none opens.
 func TestADoneStepFoldsEverySubstep(t *testing.T) {
 	t.Parallel()
 	g := cardRig(t, 100, 40)
@@ -220,12 +233,12 @@ func TestADoneStepFoldsEverySubstep(t *testing.T) {
 		lines = append(lines, l.text)
 	}
 	text := strings.Join(lines, "\n")
-	if strings.Contains(text, "│ moves") {
-		t.Errorf("a done step opened a card:\n%s", text)
+	if strings.Contains(text, "now ") {
+		t.Errorf("a done step opened a sub-step:\n%s", text)
 	}
-	for _, want := range []string{"slice round · verified aaaaaaa · 37s", "slice clamp · verified bbbbbbb · 30s"} {
+	for _, want := range []string{"slice round  verified aaaaaaa · took 37s", "slice clamp  verified bbbbbbb · took 30s"} {
 		if !strings.Contains(text, want) {
-			t.Errorf("the folded block lacks %q:\n%s", want, text)
+			t.Errorf("the block lacks %q:\n%s", want, text)
 		}
 	}
 }
@@ -252,38 +265,39 @@ func prOpeningRig(t *testing.T, extra ...events.Envelope) *rig {
 	return g
 }
 
-// TestAPullRequestBeingOpenedShowsTheSessionsCommands: the pull request
-// sub-step writes no line until the pull request is recorded, so its card holds
-// the commands the session that wrote the ticket's latest line ran since that
-// line: the push and the `gh pr create` that open it.
-func TestAPullRequestBeingOpenedShowsTheSessionsCommands(t *testing.T) {
+// TestAPullRequestBeingOpenedShowsTheSessionsLatestMove: the pull request
+// sub-step writes no line until the pull request is recorded, so the session
+// that wrote the ticket's latest line holds it: its line opens with the
+// publish's stages, names that session, and its live line is the session's
+// latest command since that line.
+func TestAPullRequestBeingOpenedShowsTheSessionsLatestMove(t *testing.T) {
 	t.Parallel()
 	g := prOpeningRig(t,
-		tool(at(4, 30), "s-b", "jig publish SHOP-1 --body"),
 		tool(at(5, 10), "s-b", "git push origin SHOP-1-round"),
 		tool(at(5, 20), "s-b", `cd /w && gh pr create --head SHOP-1-round 2>&1`),
 	)
-	v := g.view()
-	block := strings.Join(panelLines(strings.Split(v, "\n"), "Publish ─"), "\n")
-	for _, want := range []string{"pull request", "$ `git push origin SHOP-1-round`", "$ `gh pr create --head SHOP-1-round`"} {
+	rows := strings.Split(g.view(), "\n")
+	block := strings.Join(panelLines(rows, "Publish ─"), "\n")
+	for _, want := range []string{"pull request  body ━━ PR ── changelog ── published", "by       builder", "now      54m 10s · $ `gh pr create --head SHOP-1-round`"} {
 		if !strings.Contains(block, want) {
-			t.Errorf("the publish block lacks %q:\n%s", want, v)
+			t.Errorf("the publish block lacks %q:\n%s", want, block)
 		}
 	}
-	if strings.Contains(block, "jig publish SHOP-1 --body") {
-		t.Errorf("the card shows a command from before the body was written:\n%s", block)
+	act := strings.Join(panelLines(rows, "Activity"), "\n")
+	if !strings.Contains(act, "09:05:10 publish·pr   · $ `git push origin SHOP-1-round`") {
+		t.Errorf("the activity does not tag the push with the pull request:\n%s", act)
 	}
 }
 
-// TestACardWithNothingToShowDoesNotOpen: the pull request sub-step under way
-// with no command run since the body has no moves and no facts, so the block
-// lists it as a line.
-func TestACardWithNothingToShowDoesNotOpen(t *testing.T) {
+// TestAnOpenSubstepWithNoMoveSaysSo: the pull request sub-step under way with
+// no command run since the body opens all the same, with its stages and its
+// holder, and its live line says nothing has happened yet.
+func TestAnOpenSubstepWithNoMoveSaysSo(t *testing.T) {
 	t.Parallel()
 	v := prOpeningRig(t).view()
 	block := strings.Join(panelLines(strings.Split(v, "\n"), "Publish ─"), "\n")
-	if strings.Contains(block, "│ moves") || strings.Contains(block, "nothing yet") {
-		t.Errorf("an empty card opened:\n%s", block)
+	if !strings.Contains(block, "now      nothing yet") {
+		t.Errorf("the open sub-step's live line does not say nothing happened:\n%s", block)
 	}
 }
 

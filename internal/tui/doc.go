@@ -1,7 +1,8 @@
 // Package tui is jig's terminal screens: the project, a ticket (its four steps,
-// the sub-steps of one, the one that matters now opened into a card that tells
-// its moves in the session's own words, and its activity), the ticket's brief,
-// build, review and publish, and a slice. They are built only on the event stream and on running
+// the sub-steps of one, the one that matters now opened into its stages, its
+// fields and its latest move, and one activity log of every line and call
+// tagged with its sub-step), the ticket's brief, build, review and publish, and
+// a slice. They are built only on the event stream and on running
 // verbs: a ticket's lines arrive as events.Envelopes from a Source, what the
 // store holds of its slices and asks arrives as the output of `jig status`,
 // and every action a key makes is a verb run through a Runner (answer, triage,

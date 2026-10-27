@@ -7,17 +7,17 @@ jig  demo › SHOP-1                                             ◑ build verif
   │  ○ 4 Publish          after a clean review                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 3 done ─╮
-  │  ✓ slice round · verified aaaaaaa · 7s                                     │
-  │  ◐ slice clamp · verifying bbbbbbb                                         │
-  │  ○ slice cart · waits for clamp                                            │
+  │  ✓ slice round  verified aaaaaaa · took 7s                                 │
+  │  ◐ slice clamp  verifying bbbbbbb                                          │
+  │  ○ slice cart   waits for clamp                                            │
   ╰────────────────────────────────────────────────────────────────────────────╯
 
   next  Run `jig next SHOP-1` to see what is ready, then `jig claim SHOP-1
         --slice <slice>` to take one; ask: Build SHOP-1
-  ╭─ Build activity ─────────────────────────────────────────── latest 3 of 6 ─╮
-  │  09:01:07 ● slice round · verified aaaaaaa                                 │
-  │  09:02:00 ◐ slice clamp · builder took it · Clamp negative quantities      │
-  │  09:02:10 ◑ slice clamp · verifying bbbbbbb “Clamp negative quantities”    │
+  ╭─ Activity ───────────────────────────────────────────────── latest 3 of 7 ─╮
+  │  09:02:10 build·clamp ◑ verifying bbbbbbb “Clamp negative quantities”      │
+  │  09:02:00 build·clamp ◐ builder took it · Clamp negative quantities        │
+  │  09:01:07 build·round ● verified aaaaaaa                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate

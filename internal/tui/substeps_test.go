@@ -70,10 +70,10 @@ func TestTicketScreenShowsTheSubstepsOfTheStepUnderTheCursor(t *testing.T) {
 		title string
 		wants []string
 	}{
-		{[]string{"up"}, "Brief ─", []string{"✓ brief drafted", "✓ slices written · 3 slices", "✓ brief approved · Dana (person)"}},
+		{[]string{"up"}, "Brief ─", []string{"✓ brief drafted", "✓ slices written  3 slices", "✓ brief approved  Dana (person)"}},
 		{[]string{"down", "down"}, "Review ─", []string{"○ round 1"}},
 		{[]string{"down"}, "Publish ─", []string{"○ body", "○ pull request", "○ changelog", "○ published"}},
-		{[]string{"up", "up"}, "Build ─", []string{"✓ slice round · verified aaaaaaa", "◐ slice clamp · verifying bbbbbbb", "○ slice cart · waits for clamp"}},
+		{[]string{"up", "up"}, "Build ─", []string{"✓ slice round  verified aaaaaaa", "◐ slice clamp", "○ slice cart   waits for clamp"}},
 	} {
 		g.press(tc.keys...)
 		v := g.view()
@@ -127,14 +127,14 @@ func TestSubstepsListAtMostSixAndTheActivityKeepsThree(t *testing.T) {
 		if len(rowsOf) != height {
 			t.Errorf("height %d: the screen has %d lines, want its height:\n%s", height, len(rowsOf), v)
 		}
-		block, act := panelLines(rowsOf, "Build ─"), panelLines(rowsOf, "Build activity")
+		block, act := panelLines(rowsOf, "Build ─"), panelLines(rowsOf, "Activity")
 		room := substepCap(g.m.bodyRows())
 		if height == 24 && room != 6 {
 			t.Errorf("height 24: the block has room for %d sub-steps, want 6", room)
 		}
 		tk := g.m.w.tickets["BIG-1"]
 		subs := g.m.phaseOf(tk).Of(phase.Build).Subs
-		extra := g.m.cardWant(tk, stepBuild, subs[focusIndex(subs)]) - 1
+		extra := g.m.openWant(tk, stepBuild, subs[focusIndex(subs)]) - 1
 		if len(block) < 3 || len(block) > min(9, room)+2+extra {
 			t.Errorf("height %d: the sub-steps block takes %d lines, want its frame, 1 to %d sub-steps and the card's %d more:\n%s", height, len(block), room, extra, v)
 		}
@@ -142,7 +142,7 @@ func TestSubstepsListAtMostSixAndTheActivityKeepsThree(t *testing.T) {
 			t.Errorf("height %d: the activity panel takes %d lines, want its three and the frame:\n%s", height, len(act), v)
 		}
 		joined := strings.Join(block, "\n")
-		if !strings.Contains(joined, "slice s6 · verifying") || strings.Contains(joined, "more") != (room < 9) {
+		if !strings.Contains(joined, "slice s6") || strings.Contains(joined, "more") != (room < 9) {
 			t.Errorf("height %d: the block does not show the slice under way and count the rest (room for %d of 9):\n%s", height, room, v)
 		}
 		if !strings.Contains(joined, "6 of 9 done") && !strings.Contains(joined, "5 of 9 done") {
@@ -183,7 +183,7 @@ func TestTheTicketScreenFitsWhateverTheStepsAreDoing(t *testing.T) {
 		if n := strings.Count(v, "\n") + 1; n != 24 {
 			t.Errorf("%s: the screen has %d lines, want 24:\n%s", name, n, v)
 		}
-		if !strings.Contains(v, " activity ─") || strings.Count(v, "╰") < 3 {
+		if !strings.Contains(v, "╭─ Activity") || strings.Count(v, "╰") < 3 {
 			t.Errorf("%s: the Steps, sub-steps and activity panels are not all drawn to their edges:\n%s", name, v)
 		}
 	}
@@ -249,8 +249,8 @@ func TestSubstepsOfAPublishInTwoReposListAPullRequestForEach(t *testing.T) {
 	g.feed(jig2Repos()...)
 	v := g.view()
 	for _, want := range []string{
-		"Publish ─", "✓ pull request api · https://example.test/acme/api/pull/7",
-		"✓ pull request web · https://example.test/acme/web/pull/3", "✓ published",
+		"Publish ─", "✓ pull request api  https://example.test/acme/api/pull/7",
+		"✓ pull request web  https://example.test/acme/web/pull/3", "✓ published",
 	} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the ticket screen lacks %q:\n%s", want, v)

@@ -7,43 +7,43 @@ jig  demo › BIG-1                                                             
   │  ○ 4 Publish          after a clean review                                                     │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ───────────────────────────────────────────────────────────────────────── 8 of 12 done ─╮
-  │  ✓ slice s1 · verified 1111111 · 40s                                                           │
-  │  ✓ slice s2 · verified 2222222 · 40s                                                           │
-  │  ✓ slice s3 · verified 3333333 · 40s                                                           │
-  │  ✓ slice s4 · verified 4444444 · 40s                                                           │
-  │  ✓ slice s5 · verified 5555555 · 40s                                                           │
-  │  ✓ slice s6 · verified 6666666 · 40s                                                           │
-  │  ✓ slice s7 · verified 7777777 · 40s                                                           │
-  │  ✓ slice s8 · verified 8888888 · 40s                                                           │
-  │  ╭ ◐ slice s9 · verifying 9999999 ────────────────────────────────────────────────── 50m 30s ╮ │
-  │  │ goal   Slice s9                                                                           │ │
-  │  │ who    builder                                                                            │ │
-  │  │ moves  09:09:20 ◑ verifying 9999999 “Slice s9”                                            │ │
-  │  ╰───────────────────────────────────────────────────────────────────────────────────────────╯ │
-  │  ○ slice s10 · ready to build                                                                  │
-  │  ○ slice s11 · ready to build                                                                  │
-  │  ○ slice s12 · ready to build                                                                  │
+  │  ✓ slice s1   verified 1111111 · took 40s                                                      │
+  │  ✓ slice s2   verified 2222222 · took 40s                                                      │
+  │  ✓ slice s3   verified 3333333 · took 40s                                                      │
+  │  ✓ slice s4   verified 4444444 · took 40s                                                      │
+  │  ✓ slice s5   verified 5555555 · took 40s                                                      │
+  │  ✓ slice s6   verified 6666666 · took 40s                                                      │
+  │  ✓ slice s7   verified 7777777 · took 40s                                                      │
+  │  ✓ slice s8   verified 8888888 · took 40s                                                      │
+  │  ◐ slice s9   claimed ━━ committed ━━ verifying ── verified                            50m 30s │
+  │      goal     Slice s9                                                                         │
+  │      held by  builder                                                                          │
+  │      commit   9999999 “Slice s9”                                                               │
+  │      now      50m 10s ◑ verifying 9999999 “Slice s9”                                           │
+  │  ○ slice s10  ready to build                                                                   │
+  │  ○ slice s11  ready to build                                                                   │
+  │  ○ slice s12  ready to build                                                                   │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 
   next  Run `jig next BIG-1` to see what is ready, then `jig claim BIG-1 --slice <slice>` to take
         one; ask: Build BIG-1
 
-  ╭─ Build activity ───────────────────────────────────────────────────────────── latest 15 of 34 ─╮
-  │  09:05:40 ● slice s5 · verified 5555555                                                        │
-  │  09:06:00 ◐ slice s6 · builder took it · Slice s6                                              │
-  │  09:06:20 ◑ slice s6 · verifying 6666666 “Slice s6”                                            │
-  │  09:06:30 ● slice s6 · its oracle passed                                                       │
-  │  09:06:40 ● slice s6 · verified 6666666                                                        │
-  │  09:07:00 ◐ slice s7 · builder took it · Slice s7                                              │
-  │  09:07:20 ◑ slice s7 · verifying 7777777 “Slice s7”                                            │
-  │  09:07:30 ● slice s7 · its oracle passed                                                       │
-  │  09:07:40 ● slice s7 · verified 7777777                                                        │
-  │  09:08:00 ◐ slice s8 · builder took it · Slice s8                                              │
-  │  09:08:20 ◑ slice s8 · verifying 8888888 “Slice s8”                                            │
-  │  09:08:30 ● slice s8 · its oracle passed                                                       │
-  │  09:08:40 ● slice s8 · verified 8888888                                                        │
-  │  09:09:00 ◐ slice s9 · builder took it · Slice s9                                              │
-  │  09:09:20 ◑ slice s9 · verifying 9999999 “Slice s9”                                            │
+  ╭─ Activity ─────────────────────────────────────────────────────────────────── latest 15 of 34 ─╮
+  │  09:09:20 build·s9 ◑ verifying 9999999 “Slice s9”                                              │
+  │  09:09:00 build·s9 ◐ builder took it · Slice s9                                                │
+  │  09:08:40 build·s8 ● verified 8888888                                                          │
+  │  09:08:30 build·s8 ● its oracle passed                                                         │
+  │  09:08:20 build·s8 ◑ verifying 8888888 “Slice s8”                                              │
+  │  09:08:00 build·s8 ◐ builder took it · Slice s8                                                │
+  │  09:07:40 build·s7 ● verified 7777777                                                          │
+  │  09:07:30 build·s7 ● its oracle passed                                                         │
+  │  09:07:20 build·s7 ◑ verifying 7777777 “Slice s7”                                              │
+  │  09:07:00 build·s7 ◐ builder took it · Slice s7                                                │
+  │  09:06:40 build·s6 ● verified 6666666                                                          │
+  │  09:06:30 build·s6 ● its oracle passed                                                         │
+  │  09:06:20 build·s6 ◑ verifying 6666666 “Slice s6”                                              │
+  │  09:06:00 build·s6 ◐ builder took it · Slice s6                                                │
+  │  09:05:40 build·s5 ● verified 5555555                                                          │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate · p publish · t tail

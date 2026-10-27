@@ -7,27 +7,27 @@ jig  demo › SHOP-1                                                            
   │  ○ 4 Publish          after a clean review                                                     │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────────────────────────── 1 of 3 done ─╮
-  │  ✓ slice round · verified aaaaaaa · 37s                                                        │
-  │  ╭ ◐ slice clamp · verifying bbbbbbb ─────────────────────────────────────────────── 57m 30s ╮ │
-  │  │ goal   Clamp negative quantities to zero before the total is taken, so a cart that holds  │ │
-  │  │        a returned item never charges less than nothing; a quantity above the stock is     │ │
-  │  │        left to the checkout, which knows the stock and says so to the person at the till… │ │
-  │  │ who    builder (Claude Code · Sonnet 5)                                                   │ │
-  │  │ moves  09:02:05 ✗ Run the cart tests · exit 1                                             │ │
-  │  │        09:02:08 · $ `go test ./cart/...`                                                  │ │
-  │  │        09:02:10 ◑ verifying bbbbbbb “Clamp negative quantities”                           │ │
-  │  ╰───────────────────────────────────────────────────────────────────────────────────────────╯ │
-  │  ○ slice cart · waits for clamp                                                                │
+  │  ✓ slice round  verified aaaaaaa · took 37s                                                    │
+  │  ◐ slice clamp  claimed ━━ committed ━━ verifying ── verified                          57m 30s │
+  │      goal     Clamp negative quantities to zero before the total is taken, so a cart that      │
+  │               holds a returned item never charges less than nothing; a quantity above the      │
+  │               stock is left to the checkout, which knows the stock and says so to the person…  │
+  │      held by  builder · Claude Code · Sonnet 5                                                 │
+  │      commit   bbbbbbb “Clamp negative quantities”                                              │
+  │      now      57m 20s ◑ verifying bbbbbbb “Clamp negative quantities”                          │
+  │  ○ slice cart   waits for clamp                                                                │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 
-  ╭─ Build activity ───────────────────────────────────────────────────────────────────────────────╮
-  │  09:01:00 ◐ slice round · builder took it · Round to the cent                                  │
-  │  09:01:30 ◑ slice round · verifying aaaaaaa “Round to the cent”                                │
-  │  09:01:37 ● slice round · verified aaaaaaa                                                     │
-  │  09:02:00 ◐ slice clamp · builder took it · Clamp negative quantities to zero before the tota… │
-  │  09:02:10 ◑ slice clamp · verifying bbbbbbb “Clamp negative quantities”                        │
+  ╭─ Activity ─────────────────────────────────────────────────────────────────────────────────────╮
+  │  09:02:10 build·clamp ◑ verifying bbbbbbb “Clamp negative quantities”                          │
+  │  09:02:08 build·clamp · $ `go test ./cart/...`                                                 │
+  │  09:02:05 build·clamp ✗ Run the cart tests · exit 1                                            │
+  │  09:02:00 build·clamp ◐ builder took it · Clamp negative quantities to zero before the total … │
+  │  09:01:50 build       · $ `go test ./...`                                                      │
+  │  09:01:37 build·round ● verified aaaaaaa                                                       │
+  │  09:01:30 build·round ◑ verifying aaaaaaa “Round to the cent”                                  │
+  │  09:01:00 build·round ◐ builder took it · Round to the cent                                    │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
-
 
 
 

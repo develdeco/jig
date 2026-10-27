@@ -101,16 +101,16 @@ func (m *Model) ticketPage(id string) page {
 	for _, g := range groups {
 		taken += len(g.lines)
 	}
-	floor := 2 + min(3, max(1, len(t.stepLines(focus))))
+	floor := 2 + min(3, max(1, len(t.logLines())))
 	spare := body - taken - floor
 
 	var block page
 	if subs := d.Phases[focus].Subs; len(subs) > 0 && spare >= 3 {
-		// The card of the sub-step that matters now takes the rows of its
-		// line and as many more as it has to show.
+		// The sub-step that matters now takes the rows of its line and as
+		// many more as its fields and live line need.
 		extra := 0
 		if f := focusIndex(subs); f >= 0 {
-			extra = max(0, m.cardWant(t, focus, subs[f])-1)
+			extra = max(0, m.openWant(t, focus, subs[f])-1)
 		}
 		block = m.substepsPanel(t, focus, subs, min(substepCap(body)+2+extra, spare, len(subs)+2+extra))
 		spare -= len(block.lines)
@@ -136,7 +136,7 @@ func (m *Model) ticketPage(id string) page {
 	if gapActivity {
 		p.add("")
 	}
-	m.activityPanel(&p, t, focus)
+	m.activityPanel(&p, t)
 	return p
 }
 
@@ -183,40 +183,41 @@ func (m *Model) ticketFocus(steps []stepRow, questions int) int {
 }
 
 // substepsPanel is a panel of the sub-steps of step, height lines tall with its
-// frame, titled by the step's name alone (the steps above number it): a checklist with a state, a label and a few words of detail each, and
-// the one that matters now (focusIndex) opened into a card (focus.go) when the
-// panel has room for it beside the rest. When they do not all fit it shows the
-// ones that matter most (a person's turn, a failure, the work under way), in
-// their order, and says how many more there are.
+// frame, titled by the step's name alone (the steps above number it): a list
+// with a state, a label and a few words each, the labels in a column, and the
+// one that matters now (focusIndex) opened (focus.go) when the panel has room
+// for it beside the rest. When they do not all fit it shows the ones that
+// matter most (a person's turn, a failure, the work under way), in their
+// order, and says how many more there are.
 func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int) page {
 	var p page
 	done := 0
+	labelW := 0
 	for _, s := range subs {
 		if s.State == phase.SubDone {
 			done++
 		}
+		labelW = max(labelW, min(labelMaxW, width(s.Label)))
 	}
 	p.boxTop(stepNames[step], fmt.Sprintf("%d of %d done", done, len(subs)))
 	room := height - 2
-	focus, cardRows := focusIndex(subs), 0
-	if want := 0; focus >= 0 {
-		// The card takes what the folded lines leave; with too many of them,
-		// two stay, the rest are counted, and the card takes the remainder.
-		// A card with nothing to show does not open.
+	focus, openRows := focusIndex(subs), 0
+	if focus >= 0 {
+		// The open sub-step takes what the other lines leave; with too many
+		// of them, two stay, the rest are counted, and it takes the remainder.
 		others := len(subs) - 1
-		want = m.cardWant(t, step, subs[focus])
+		want := m.openWant(t, step, subs[focus])
 		switch {
-		case want == 0:
-		case room-others >= cardMin:
-			cardRows = min(want, room-others)
-		case room-min(others, 2) >= cardMin:
-			cardRows = min(want, room-min(others, 2))
+		case room-others >= openMin:
+			openRows = min(want, room-others)
+		case room-min(others, 2) >= openMin:
+			openRows = min(want, room-min(others, 2))
 		}
 	}
-	if cardRows == 0 {
+	if openRows == 0 {
 		shown := pickSubs(subs, room)
 		for _, i := range shown {
-			p.boxAdd(m.foldedLine(t, step, subs[i]))
+			p.boxAdd(m.foldedLine(t, step, subs[i], labelW))
 		}
 		if more := len(subs) - len(shown); more > 0 && room >= 2 {
 			p.boxAdd(m.st.dim("+" + strconv.Itoa(more) + " more"))
@@ -233,18 +234,18 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 		}
 	}
 	shownAt := map[int]bool{}
-	picked := pickSubs(others, room-cardRows)
+	picked := pickSubs(others, room-openRows)
 	for _, j := range picked {
 		shownAt[at[j]] = true
 	}
 	for i, s := range subs {
 		switch {
 		case i == focus:
-			for _, line := range m.card(t, step, s, cardRows) {
+			for _, line := range m.openLines(t, step, s, subs, labelW, openRows) {
 				p.boxAdd(line)
 			}
 		case shownAt[i]:
-			p.boxAdd(m.foldedLine(t, step, s))
+			p.boxAdd(m.foldedLine(t, step, s, labelW))
 		}
 	}
 	if more := len(others) - len(picked); more > 0 {
@@ -254,15 +255,14 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	return p
 }
 
-// foldedLine is a sub-step folded to a line: subLine with what the status adds
-// to its detail (subDetail), and how long it took once it is done.
-func (m *Model) foldedLine(t *ticket, step int, s phase.Sub) string {
-	s.Detail = m.subDetail(t, s)
-	line := m.subLine(step, s)
-	if sum := t.subSummary(step, s); sum != "" {
-		line += m.st.dim(" · " + sum)
-	}
-	return line
+// labelMaxW is the widest a sub-step's label column gets.
+const labelMaxW = 16
+
+// foldedLine is a sub-step on one line: subLine with what the status adds to
+// its detail (subDetail), and how long it took once it is done.
+func (m *Model) foldedLine(t *ticket, step int, s phase.Sub, labelW int) string {
+	s.Detail = strings.Join(nonEmpty(m.subDetail(t, s), t.subSummary(step, s)), " · ")
+	return m.subLine(step, s, labelW)
 }
 
 // subDetail is a sub-step's detail with what the status adds to it once it is
@@ -341,27 +341,22 @@ func subWeight(s phase.Sub) int {
 	return subWeightDone
 }
 
-// subLine is a sub-step as a line of the block: its state's icon, its label and
-// a few words of detail. The ones that are done, waiting or still to come are
-// drawn back.
-func (m *Model) subLine(step int, s phase.Sub) string {
-	text := s.Label
+// subLine is a sub-step as a line of the block: its state's icon, its label in
+// a column labelW wide, and a few words of detail. The ones that are waiting or
+// still to come are drawn back.
+func (m *Model) subLine(step int, s phase.Sub, labelW int) string {
+	label := pad(s.Label, labelW)
+	detail := ""
 	if s.Detail != "" {
-		text += m.st.dim(" · " + s.Detail)
+		detail = m.st.dim("  " + s.Detail)
 	}
 	switch s.State {
 	case phase.SubActive, phase.SubNeedsYou, phase.SubFailed:
-		text = m.st.bold(s.Label)
-		if s.Detail != "" {
-			text += m.st.dim(" · " + s.Detail)
-		}
+		label = m.st.bold(label)
 	case phase.SubWaiting, phase.SubPending:
-		text = m.st.dim(s.Label)
-		if s.Detail != "" {
-			text += m.st.dim(" · " + s.Detail)
-		}
+		label = m.st.dim(label)
 	}
-	return m.st.icon(subState(step, s)) + " " + text
+	return m.st.icon(subState(step, s)) + " " + label + detail
 }
 
 // subState is the state a sub-step is drawn in.
@@ -388,11 +383,12 @@ func subState(step int, s phase.Sub) string {
 	return StateQueued
 }
 
-// activityPanel adds a panel of the latest lines of step to p: as many as
+// stepActivityPanel adds a panel of the latest lines of step to p, for the
+// step's own screen: as many as
 // the rows left below what p holds allow, activityLines at most and three at
 // least, so the newest line and the panel's edge stay on the screen. Each
 // line names the sub-step it advances.
-func (m *Model) activityPanel(p *page, t *ticket, step int) {
+func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
 	lines := t.stepLines(step)
 	keep := min(activityCap(m.bodyRows()), max(3, m.bodyRows()-len(p.lines)-2))
 	right := ""

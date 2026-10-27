@@ -127,14 +127,17 @@ Under them a block named after the step under the cursor lists what the step is
 made of (the brief drafted, its slices written and its approval; each slice of
 the build; each review round with its asks and fixes; the publish's body, pull
 request and changelog, with your approval first when jig pushes for you), each
-with its state. The part that matters now (your turn, a failure, else the work
-under way) opens into a card: what it is for (a slice's goal in up to three
-lines, the brief's sections, its slices), who holds it and for how long, and its
-latest moves: its own lines and what its session did meanwhile, in the words the
-session gave each call ("Run the cart tests", "Mutation check: drop the rounding
-term"), a failing one with its exit status. The others fold to a line, a done
-one with what it produced and how long it took. Under that is the step's
-activity, told in words:
+with its state. The part that matters now (your turn, a failure, else the work under way)
+opens: its line shows how far it has come (`claimed ━━ committed ━━ verifying ──
+verified` for a slice) and how long it has run, and under it are fields that
+say what it is (a slice's goal, who holds it, what checks it and its commit; a
+round's reviewer; the brief's sections and slices; the pull request's branch)
+and one live line, the latest move and how long ago it was made. The others stay
+one line, a done one with what it produced and how long it took. Under that is
+the ticket's activity, newest first: every line jig recorded and every call its
+sessions made, in the words each session gave the call ("Run the cart tests",
+"Mutation check: drop the rounding term"), each tagged with its step and
+sub-step (`build·clamp`, `review·r2`), and told in words:
 a session by the role it plays (planner, builder, reviewer, or reviewer subagent
 when the session that built the change also reviewed it; a reviewer with its
 harness and model too), a slice by its goal, a commit by its subject. Each

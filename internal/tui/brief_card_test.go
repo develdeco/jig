@@ -28,21 +28,27 @@ func TestABriefBeingDraftedOpensIntoThePlannersCard(t *testing.T) {
 		tool(at(21, 1), "s-p", `jig ticket new --title "Cart totals"`, said("Mint a ticket for the bug")),
 		tool(at(22, 0), "s-p", "jig skill intake", said("Read the intake skill")),
 	)
-	block := strings.Join(panelLines(strings.Split(g.view(), "\n"), "Brief ─"), "\n")
+	rows := strings.Split(g.view(), "\n")
+	block := strings.Join(panelLines(rows, "Brief ─"), "\n")
 	for _, want := range []string{
-		"╭ ◐ brief drafted", "9m 00s ╮",
-		"│ who    planner (Claude Code · Sonnet 5)",
-		"│ moves  09:21:01 · Mint a ticket for the bug",
-		"09:22:00 · Read the intake skill",
-		"○ slices written · after the brief",
-		"○ brief approved · after the slices",
+		"◐ brief drafted   drafted ── slices ── approved", "9m 00s",
+		"planner  Claude Code · Sonnet 5",
+		"now      8m 00s  · Read the intake skill",
+		"○ slices written  after the brief",
+		"○ brief approved  after the slices",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("while the brief is drafted the block lacks %q:\n%s", want, block)
 		}
 	}
-	if strings.Contains(block, "Run the tests to see the bug") {
-		t.Errorf("the card shows a call the session made before it minted the ticket:\n%s", block)
+	act := strings.Join(panelLines(rows, "Activity"), "\n")
+	for _, want := range []string{"09:22:00 brief·drafted · Read the intake skill", "09:21:01 brief·drafted · Mint a ticket for the bug"} {
+		if !strings.Contains(act, want) {
+			t.Errorf("the activity lacks %q:\n%s", want, act)
+		}
+	}
+	if strings.Contains(act, "Run the tests to see the bug") {
+		t.Errorf("the activity shows a call the session made before it minted the ticket:\n%s", act)
 	}
 
 	// brief.md is written: three sections.
@@ -53,17 +59,17 @@ func TestABriefBeingDraftedOpensIntoThePlannersCard(t *testing.T) {
 	advance(20 * time.Second)
 	block = strings.Join(panelLines(strings.Split(g.view(), "\n"), "Brief ─"), "\n")
 	for _, want := range []string{
-		"✓ brief drafted · 3 sections: Section 1, Section 2, Section 3",
-		"╭ ◐ slices written",
-		"│ brief  Section 1 · Section 2 · Section 3",
-		"│ moves  09:30:10 · Check the brief",
+		"✓ brief drafted   3 sections: Section 1, Section 2, Section 3",
+		"◐ slices written  drafted ━━ slices ── approved",
+		"sections Section 1 · Section 2 · Section 3",
+		"now      14s     · Check the brief",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("once the brief is written the block lacks %q:\n%s", want, block)
 		}
 	}
 	if strings.Contains(block, "Read the intake skill") {
-		t.Errorf("the slices' card shows a call made before the brief was written:\n%s", block)
+		t.Errorf("the slices' live line is a call made before the brief was written:\n%s", block)
 	}
 
 	// slices.yaml is written: the approval is the person's.
@@ -72,10 +78,9 @@ func TestABriefBeingDraftedOpensIntoThePlannersCard(t *testing.T) {
 	g.send(idleMsg{})
 	block = strings.Join(panelLines(strings.Split(g.view(), "\n"), "Brief ─"), "\n")
 	for _, want := range []string{
-		"✓ slices written · 2 slices: round, clamp",
-		"brief approved · waits for your approval",
-		"│ slices round · Goal of round",
-		"│        clamp · Goal of clamp",
+		"✓ slices written  2 slices: round, clamp",
+		"? brief approved  drafted ━━ slices ━━ approved",
+		"slices   round, clamp",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("once the slices are written the block lacks %q:\n%s", want, block)
