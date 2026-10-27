@@ -1,0 +1,402 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "jig system context",
+    "output": "diagrams/system-context.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/develdeco/jig.git",
+      "provider": "github",
+      "revision": "cc02c783e95a1ecdce014f7d7cc3abc6aac62a6e"
+    }
+  },
+  "components": [
+    {
+      "id": "person",
+      "type": "external",
+      "label": "Person",
+      "sublabel": "prompts, approves",
+      "icon": "person",
+      "pos": [
+        40,
+        220
+      ],
+      "size": [
+        120,
+        60
+      ],
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 3,
+          "label": "attached to a person's session"
+        }
+      ]
+    },
+    {
+      "id": "harness",
+      "type": "backend",
+      "label": "Harness session",
+      "sublabel": "own model, tools, subagents",
+      "pos": [
+        240,
+        220
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 113,
+          "end_line": 119,
+          "label": "Harness, Session"
+        }
+      ]
+    },
+    {
+      "id": "doors",
+      "type": "messagebus",
+      "label": "Doors",
+      "sublabel": "hooks, skills, MCP, CLI",
+      "pos": [
+        520,
+        220
+      ],
+      "size": [
+        150,
+        60
+      ],
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 73,
+          "end_line": 94,
+          "label": "The doors"
+        }
+      ]
+    },
+    {
+      "id": "jig",
+      "type": "backend",
+      "label": "jig verbs",
+      "sublabel": "claim, validate, gate, publish",
+      "pos": [
+        790,
+        220
+      ],
+      "size": [
+        150,
+        60
+      ],
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 5,
+          "end_line": 56,
+          "label": "Pipeline"
+        },
+        {
+          "path": "internal/observe/commit.go",
+          "line": 16,
+          "end_line": 65,
+          "label": "observe starts verify"
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "Store repo",
+      "sublabel": "tickets, charts, journals",
+      "tag": "source of truth",
+      "pos": [
+        1060,
+        220
+      ],
+      "size": [
+        140,
+        60
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 19,
+          "end_line": 21,
+          "label": "Truth repo"
+        },
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 225,
+          "end_line": 245,
+          "label": "Store schema"
+        }
+      ]
+    },
+    {
+      "id": "home",
+      "type": "database",
+      "label": "jig home",
+      "sublabel": "ledger, logs, evidence",
+      "pos": [
+        790,
+        60
+      ],
+      "size": [
+        150,
+        60
+      ],
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 143,
+          "label": "machine ledger"
+        },
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 176,
+          "label": "machine-only facts"
+        }
+      ]
+    },
+    {
+      "id": "github",
+      "type": "cloud",
+      "label": "GitHub",
+      "sublabel": "issues, board, PRs",
+      "pos": [
+        1060,
+        60
+      ],
+      "size": [
+        140,
+        60
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 44,
+          "end_line": 51,
+          "label": "Mirror"
+        },
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 554,
+          "end_line": 568,
+          "label": "mirror on checkpoint"
+        }
+      ]
+    },
+    {
+      "id": "clone",
+      "type": "database",
+      "label": "Person's clone",
+      "sublabel": "the product repo",
+      "tag": "branch <id>-<slug>",
+      "pos": [
+        240,
+        380
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 23,
+          "end_line": 25,
+          "label": "build in own clone"
+        },
+        {
+          "path": "CONTEXT.md",
+          "line": 41,
+          "label": "default branch"
+        }
+      ]
+    },
+    {
+      "id": "githook",
+      "type": "messagebus",
+      "label": "post-commit hook",
+      "sublabel": "global core.hooksPath",
+      "pos": [
+        520,
+        380
+      ],
+      "size": [
+        150,
+        60
+      ],
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 105,
+          "label": "global git hook"
+        },
+        {
+          "path": "cmd/jig/githook.go",
+          "line": 204,
+          "label": "jig githook post-commit"
+        }
+      ]
+    },
+    {
+      "id": "verify",
+      "type": "backend",
+      "label": "jig verify",
+      "sublabel": "detached oracle run",
+      "pos": [
+        790,
+        380
+      ],
+      "size": [
+        150,
+        60
+      ],
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 127,
+          "end_line": 137,
+          "label": "Verification"
+        },
+        {
+          "path": "internal/verify/spawn.go",
+          "line": 67,
+          "label": "Spawn"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "jig never starts it",
+      "wraps": [
+        "harness"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "jig: one binary and its detached worker",
+      "wraps": [
+        "doors",
+        "jig",
+        "githook",
+        "verify"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "person-harness",
+      "from": "person",
+      "to": "harness",
+      "label": "prompts",
+      "variant": "emphasis"
+    },
+    {
+      "id": "harness-doors",
+      "from": "harness",
+      "to": "doors",
+      "label": "events, calls"
+    },
+    {
+      "id": "doors-harness",
+      "from": "doors",
+      "to": "harness",
+      "label": "context, notes"
+    },
+    {
+      "id": "doors-jig",
+      "from": "doors",
+      "to": "jig",
+      "label": "observe, verbs",
+      "variant": "emphasis"
+    },
+    {
+      "id": "jig-store",
+      "from": "jig",
+      "to": "store",
+      "label": "checkpoints",
+      "variant": "emphasis"
+    },
+    {
+      "id": "jig-home",
+      "from": "jig",
+      "to": "home",
+      "label": "ledger lines"
+    },
+    {
+      "id": "store-github",
+      "from": "store",
+      "to": "github",
+      "label": "mirror",
+      "variant": "dashed"
+    },
+    {
+      "id": "harness-clone",
+      "from": "harness",
+      "to": "clone",
+      "label": "edits, commits",
+      "variant": "emphasis"
+    },
+    {
+      "id": "clone-githook",
+      "from": "clone",
+      "to": "githook",
+      "label": "commit"
+    },
+    {
+      "id": "githook-verify",
+      "from": "githook",
+      "to": "verify",
+      "label": "spawns"
+    },
+    {
+      "id": "jig-verify",
+      "from": "jig",
+      "to": "verify",
+      "label": "HEAD moved",
+      "variant": "dashed"
+    },
+    {
+      "id": "verify-store",
+      "from": "verify",
+      "to": "store",
+      "label": "oracle, verified"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Who owns what",
+      "items": [
+        "The harness owns the session, its model and its tools; jig starts no session and picks no model.",
+        "The binary owns the machinery: state, verification, git and the hooks that observe.",
+        "Skills own judgment: reading a brief, writing code, reviewing a diff."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Two paths start a verification",
+      "items": [
+        "Git's post-commit hook, through jig githook post-commit.",
+        "The harness's tool hook, when a command moved HEAD; a verify-spawned ledger line keeps it to one run."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Left out of this view",
+      "items": [
+        "jig tui, which runs verbs as the person and reads jig events.",
+        "The pooled worktrees (leases) a gate round and a publish check out.",
+        "Publish pushes the reviewed head and opens the PR with gh, or the session pushes and records it."
+      ]
+    }
+  ]
+}

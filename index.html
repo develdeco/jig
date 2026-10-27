@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jig diagrams</title>
+<meta name="description" content="Interactive diagrams of jig: system context, domain model, a ticket's flow, a commit's verification and a slice's states.">
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --surface: #ffffff;
+    --text: #1c1c1a;
+    --muted: #5f5f5a;
+    --border: #e2e2dc;
+    --accent: #2f5fd0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514;
+      --surface: #1f1f1d;
+      --text: #ececea;
+      --muted: #a3a39d;
+      --border: #33332f;
+      --accent: #8aa9f5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 1.75rem; margin: 0 0 8px; letter-spacing: -0.01em; }
+  p { margin: 0 0 16px; color: var(--muted); }
+  a { color: var(--accent); }
+  ul { list-style: none; padding: 0; margin: 32px 0; display: grid; gap: 12px; }
+  li a {
+    display: block;
+    padding: 16px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--text);
+  }
+  li a:hover, li a:focus-visible { border-color: var(--accent); }
+  li strong { display: block; font-size: 1.05rem; }
+  li span { color: var(--muted); font-size: 0.95rem; }
+  footer { font-size: 0.9rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>jig diagrams</h1>
+  <p>Interactive pictures of <a href="https://github.com/develdeco/jig">jig</a>, for people who want the shape before the prose. Every element links to the code or docs it was drawn from.</p>
+  <ul>
+    <li><a href="diagrams/system-context.html"><strong>System context</strong><span>What jig attaches to and where its state lives</span></a></li>
+    <li><a href="diagrams/domain-model.html"><strong>Domain model</strong><span>How charts, tickets, briefs, slices and rounds relate</span></a></li>
+    <li><a href="diagrams/ticket-flow.html"><strong>A ticket from brief to PR</strong><span>The four phases and who acts in each</span></a></li>
+    <li><a href="diagrams/commit-verification.html"><strong>A commit's verification</strong><span>From git commit to the note the session hears</span></a></li>
+    <li><a href="diagrams/slice-states.html"><strong>A slice's states</strong><span>What moves a slice between queued and green</span></a></li>
+  </ul>
+  <footer>
+    <p>Drawn from the code at <a href="https://github.com/develdeco/jig/tree/cc02c783e95a1ecdce014f7d7cc3abc6aac62a6e"><code>cc02c78</code></a>. The Mermaid versions live in <a href="https://github.com/develdeco/jig/blob/main/docs/diagrams.md">docs/diagrams.md</a>; <a href="https://github.com/develdeco/jig/blob/main/CONTEXT.md">CONTEXT.md</a> and <a href="https://github.com/develdeco/jig/blob/main/ARCHITECTURE.md">ARCHITECTURE.md</a> stay the authority.</p>
+  </footer>
+</main>
+</body>
+</html>

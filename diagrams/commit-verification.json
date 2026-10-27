@@ -1,0 +1,307 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "A commit's verification",
+    "output": "diagrams/commit-verification.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/develdeco/jig.git",
+      "provider": "github",
+      "revision": "cc02c783e95a1ecdce014f7d7cc3abc6aac62a6e"
+    }
+  },
+  "participants": [
+    {
+      "id": "session",
+      "type": "external",
+      "label": "Session",
+      "sublabel": "harness agent",
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 117,
+          "end_line": 119,
+          "label": "Session"
+        }
+      ]
+    },
+    {
+      "id": "git",
+      "type": "messagebus",
+      "label": "git",
+      "sublabel": "post-commit hook",
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 105,
+          "label": "global git hook"
+        },
+        {
+          "path": "cmd/jig/githook.go",
+          "line": 204,
+          "label": "jig githook post-commit"
+        }
+      ]
+    },
+    {
+      "id": "observe",
+      "type": "backend",
+      "label": "jig observe",
+      "sublabel": "hook core",
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 81,
+          "end_line": 88,
+          "label": "hook events"
+        },
+        {
+          "path": "internal/observe/commit.go",
+          "line": 16,
+          "end_line": 65,
+          "label": "postCommit"
+        }
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "verify worker",
+      "sublabel": "detached process",
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 129,
+          "end_line": 135,
+          "label": "the worker's steps"
+        },
+        {
+          "path": "internal/verify/run.go",
+          "line": 298,
+          "label": "Run"
+        }
+      ]
+    },
+    {
+      "id": "worktree",
+      "type": "cloud",
+      "label": "Worktree",
+      "sublabel": "detached at the sha",
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 132,
+          "end_line": 133,
+          "label": "worktree, oracle"
+        },
+        {
+          "path": "internal/verify/run.go",
+          "line": 561,
+          "label": "runOracle"
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "Store",
+      "sublabel": "ticket journal",
+      "sources": [
+        {
+          "path": "internal/journal/journal.go",
+          "line": 18,
+          "end_line": 26,
+          "label": "journal line"
+        },
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 153,
+          "label": "verification note"
+        }
+      ]
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 345,
+      "label": "Commit"
+    },
+    {
+      "from": 355,
+      "to": 640,
+      "label": "In the background"
+    },
+    {
+      "from": 650,
+      "to": 800,
+      "label": "Next turn"
+    }
+  ],
+  "messages": [
+    {
+      "id": "commit",
+      "from": "session",
+      "to": "git",
+      "y": 170,
+      "label": "git commit, Jig-Slice: s",
+      "variant": "emphasis"
+    },
+    {
+      "id": "hook",
+      "from": "git",
+      "to": "observe",
+      "y": 205,
+      "label": "jig githook post-commit"
+    },
+    {
+      "id": "spawn",
+      "from": "observe",
+      "to": "worker",
+      "y": 240,
+      "label": "spawn detached",
+      "variant": "dashed",
+      "note": "Once per commit and slice: a verify-spawned ledger line also covers the tool hook"
+    },
+    {
+      "id": "hook-exit",
+      "from": "observe",
+      "to": "git",
+      "y": 300,
+      "label": "exit 0, prints nothing",
+      "variant": "return"
+    },
+    {
+      "id": "commit-done",
+      "from": "git",
+      "to": "session",
+      "y": 330,
+      "label": "commit done",
+      "variant": "return"
+    },
+    {
+      "id": "pending",
+      "from": "worker",
+      "to": "store",
+      "y": 375,
+      "label": "verify-pending",
+      "note": "Pushed first, so the work shows"
+    },
+    {
+      "id": "checkout",
+      "from": "worker",
+      "to": "worktree",
+      "y": 440,
+      "label": "worktree add --detach"
+    },
+    {
+      "id": "oracle",
+      "from": "worker",
+      "to": "worktree",
+      "y": 470,
+      "label": "env up, run oracle",
+      "variant": "emphasis",
+      "note": "Command from the manifest at that commit"
+    },
+    {
+      "id": "result",
+      "from": "worktree",
+      "to": "worker",
+      "y": 545,
+      "label": "pass or fail",
+      "variant": "return"
+    },
+    {
+      "id": "verified",
+      "from": "worker",
+      "to": "store",
+      "y": 575,
+      "label": "oracle, verified",
+      "variant": "emphasis",
+      "note": "A pass marks the slice green; a fail sends it back to building"
+    },
+    {
+      "id": "next-tool",
+      "from": "session",
+      "to": "observe",
+      "y": 670,
+      "label": "next tool call (hook)"
+    },
+    {
+      "id": "read",
+      "from": "observe",
+      "to": "store",
+      "y": 700,
+      "label": "read journal"
+    },
+    {
+      "id": "lines",
+      "from": "store",
+      "to": "observe",
+      "y": 730,
+      "label": "verified since start",
+      "variant": "return"
+    },
+    {
+      "id": "note",
+      "from": "observe",
+      "to": "session",
+      "y": 760,
+      "label": "note, told once",
+      "variant": "return",
+      "note": "Enforced at Stop when the claim is unattended"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "git",
+      "from": 170,
+      "to": 330,
+      "type": "messagebus"
+    },
+    {
+      "participant": "observe",
+      "from": 205,
+      "to": 300,
+      "type": "backend"
+    },
+    {
+      "participant": "worker",
+      "from": 240,
+      "to": 575,
+      "type": "backend"
+    },
+    {
+      "participant": "worktree",
+      "from": 440,
+      "to": 545,
+      "type": "cloud"
+    },
+    {
+      "participant": "observe",
+      "from": 670,
+      "to": 760,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Green is a record",
+      "items": [
+        "Green is what a verification proved on a commit, never what a session claimed.",
+        "Lines are keyed by commit and slice, so a second run of the same pair changes nothing."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Nothing is shared in memory",
+      "items": [
+        "The worker is its own process; the store and the machine ledger are the whole interface.",
+        "The hook core keeps no state: it reads the ledger back to know what a session was told."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,383 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "A ticket from brief to PR",
+    "output": "diagrams/ticket-flow.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/develdeco/jig.git",
+      "provider": "github",
+      "revision": "cc02c783e95a1ecdce014f7d7cc3abc6aac62a6e"
+    }
+  },
+  "lanes": [
+    {
+      "id": "person",
+      "label": "Person"
+    },
+    {
+      "id": "session",
+      "label": "Session"
+    },
+    {
+      "id": "jig",
+      "label": "jig"
+    },
+    {
+      "id": "reviewer",
+      "label": "Fresh reviewer"
+    }
+  ],
+  "phases": [
+    {
+      "id": "p_brief",
+      "label": "Brief",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "p_build",
+      "label": "Build",
+      "fromCol": 2,
+      "toCol": 2
+    },
+    {
+      "id": "p_review",
+      "label": "Review",
+      "fromCol": 3,
+      "toCol": 4
+    },
+    {
+      "id": "p_publish",
+      "label": "Publish",
+      "fromCol": 5,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "ask",
+    "intake",
+    "approve",
+    "validate",
+    "claim",
+    "verify",
+    "gate",
+    "review",
+    "route",
+    "approve_publish",
+    "publish"
+  ],
+  "nodes": [
+    {
+      "id": "ask",
+      "lane": "person",
+      "col": 0,
+      "type": "external",
+      "label": "Plan T",
+      "sublabel": "or Take T to PR",
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 97,
+          "end_line": 107,
+          "label": "Phase, Automatic run"
+        }
+      ]
+    },
+    {
+      "id": "intake",
+      "lane": "session",
+      "col": 0,
+      "type": "backend",
+      "label": "Intake",
+      "sublabel": "recall, draft brief",
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 61,
+          "end_line": 63,
+          "label": "Intake"
+        }
+      ]
+    },
+    {
+      "id": "approve",
+      "lane": "person",
+      "col": 1,
+      "type": "security",
+      "label": "Confirm brief",
+      "sublabel": "the person's word",
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 106,
+          "label": "the person's two moments"
+        }
+      ]
+    },
+    {
+      "id": "validate",
+      "lane": "jig",
+      "col": 1,
+      "type": "backend",
+      "label": "jig validate",
+      "sublabel": "records approval",
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 10,
+          "end_line": 15,
+          "label": "brief stage"
+        }
+      ]
+    },
+    {
+      "id": "claim",
+      "lane": "session",
+      "col": 2,
+      "type": "backend",
+      "label": "Claim, build",
+      "sublabel": "commit Jig-Slice",
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 17,
+          "end_line": 25,
+          "label": "claim and build"
+        }
+      ]
+    },
+    {
+      "id": "verify",
+      "lane": "jig",
+      "col": 2,
+      "type": "backend",
+      "label": "jig verify",
+      "sublabel": "oracle per commit",
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 127,
+          "end_line": 137,
+          "label": "Verification"
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "lane": "jig",
+      "col": 3,
+      "type": "security",
+      "label": "jig gate",
+      "sublabel": "opens a round",
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 722,
+          "end_line": 724,
+          "label": "Gate reviewer contract"
+        }
+      ]
+    },
+    {
+      "id": "review",
+      "lane": "reviewer",
+      "col": 3,
+      "type": "backend",
+      "label": "Review round",
+      "sublabel": "findings, done",
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 728,
+          "end_line": 732,
+          "label": "review context, finding, done"
+        }
+      ]
+    },
+    {
+      "id": "route",
+      "lane": "jig",
+      "col": 4,
+      "type": "backend",
+      "label": "Route findings",
+      "sublabel": "fix, ask, note",
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 197,
+          "end_line": 199,
+          "label": "Fix slice"
+        },
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 746,
+          "label": "routing and triage"
+        }
+      ]
+    },
+    {
+      "id": "triage",
+      "lane": "person",
+      "col": 4,
+      "type": "security",
+      "label": "Triage asks",
+      "sublabel": "next round applies it",
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 241,
+          "end_line": 243,
+          "label": "Triage"
+        }
+      ]
+    },
+    {
+      "id": "approve_publish",
+      "lane": "person",
+      "col": 5,
+      "type": "security",
+      "label": "Approve publish",
+      "sublabel": "the reviewed head",
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 776,
+          "label": "--approve"
+        }
+      ]
+    },
+    {
+      "id": "publish",
+      "lane": "jig",
+      "col": 5,
+      "type": "cloud",
+      "label": "jig publish",
+      "sublabel": "push head, open PR",
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 772,
+          "end_line": 788,
+          "label": "Publish"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "ask-intake",
+      "from": "ask",
+      "to": "intake",
+      "label": "skill intake"
+    },
+    {
+      "id": "intake-approve",
+      "from": "intake",
+      "to": "approve",
+      "label": "brief, slices"
+    },
+    {
+      "id": "approve-validate",
+      "from": "approve",
+      "to": "validate",
+      "label": "valid: yes"
+    },
+    {
+      "id": "validate-claim",
+      "from": "validate",
+      "to": "claim",
+      "label": "Build T",
+      "variant": "emphasis"
+    },
+    {
+      "id": "claim-verify",
+      "from": "claim",
+      "to": "verify",
+      "label": "commit"
+    },
+    {
+      "id": "verify-claim",
+      "from": "verify",
+      "to": "claim",
+      "label": "red: note",
+      "role": "error",
+      "variant": "dashed"
+    },
+    {
+      "id": "verify-gate",
+      "from": "verify",
+      "to": "gate",
+      "label": "all green",
+      "variant": "emphasis"
+    },
+    {
+      "id": "gate-review",
+      "from": "gate",
+      "to": "review",
+      "label": "Review T"
+    },
+    {
+      "id": "review-route",
+      "from": "review",
+      "to": "route",
+      "label": "jig review done"
+    },
+    {
+      "id": "route-claim",
+      "from": "route",
+      "to": "claim",
+      "label": "fix slices",
+      "role": "return"
+    },
+    {
+      "id": "route-triage",
+      "from": "route",
+      "to": "triage",
+      "label": "asks",
+      "role": "branch"
+    },
+    {
+      "id": "route-approve",
+      "from": "route",
+      "to": "approve_publish",
+      "label": "clean round",
+      "variant": "emphasis"
+    },
+    {
+      "id": "approve-publish",
+      "from": "approve_publish",
+      "to": "publish",
+      "label": "Publish T"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Phases are asked for by prompt",
+      "items": [
+        "Plan T, Build T, Review T, Publish T each start one phase with its skill.",
+        "A prompt naming several phases runs them in order; a refusal ends the run.",
+        "Where a ticket stands is derived from its journal, never recorded."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "The person's two moments",
+      "items": [
+        "Confirming the brief and approving the publish stay the person's.",
+        "A prompt can delegate them; the approval is then recorded with agent provenance."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Review has no back-edges",
+      "items": [
+        "A fix finding becomes a new slice queued from the round, not an edit of the old one.",
+        "The fix budget caps unattended fix rounds; past it, fixes park for a person."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,215 @@
+{
+  "schema_version": 3,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "A slice's states",
+    "output": "diagrams/slice-states.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/develdeco/jig.git",
+      "provider": "github",
+      "revision": "cc02c783e95a1ecdce014f7d7cc3abc6aac62a6e"
+    }
+  },
+  "mainPath": [
+    "queued",
+    "building",
+    "green"
+  ],
+  "states": [
+    {
+      "id": "queued",
+      "type": "start",
+      "label": "queued",
+      "sublabel": "ready once blockers are green",
+      "sources": [
+        {
+          "path": "internal/store/slice_state.go",
+          "line": 56,
+          "label": "no state file reads queued"
+        },
+        {
+          "path": "cmd/jig/slice_moves.go",
+          "line": 47,
+          "end_line": 54,
+          "label": "release"
+        }
+      ]
+    },
+    {
+      "id": "building",
+      "type": "active",
+      "label": "building",
+      "sublabel": "claimed by a session",
+      "sources": [
+        {
+          "path": "cmd/jig/slice_moves.go",
+          "line": 38,
+          "end_line": 45,
+          "label": "claim"
+        },
+        {
+          "path": "internal/verify/run.go",
+          "line": 604,
+          "end_line": 616,
+          "label": "a failed oracle"
+        }
+      ]
+    },
+    {
+      "id": "green",
+      "type": "success",
+      "label": "green",
+      "sublabel": "proven on a commit",
+      "sources": [
+        {
+          "path": "internal/verify/run.go",
+          "line": 631,
+          "end_line": 638,
+          "label": "a passing oracle"
+        }
+      ]
+    },
+    {
+      "id": "env_blocked",
+      "type": "external",
+      "label": "env-blocked",
+      "sublabel": "env class would not come up",
+      "sources": [
+        {
+          "path": "internal/verify/run.go",
+          "line": 530,
+          "end_line": 545,
+          "label": "env up failed"
+        }
+      ]
+    },
+    {
+      "id": "stalled",
+      "type": "failure",
+      "label": "stalled",
+      "sublabel": "same failure twice, unattended",
+      "sources": [
+        {
+          "path": "internal/correct/stall.go",
+          "line": 91,
+          "end_line": 108,
+          "label": "Stalled"
+        },
+        {
+          "path": "CONTEXT.md",
+          "line": 257,
+          "end_line": 259,
+          "label": "Stall"
+        }
+      ]
+    },
+    {
+      "id": "needs_input",
+      "type": "waiting",
+      "label": "needs-input",
+      "sublabel": "a question is open",
+      "sources": [
+        {
+          "path": "cmd/jig/slice_moves.go",
+          "line": 56,
+          "end_line": 87,
+          "label": "ask, answer"
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "id": "claim",
+      "from": "queued",
+      "to": "building",
+      "label": "jig claim"
+    },
+    {
+      "id": "pass",
+      "from": "building",
+      "to": "green",
+      "label": "oracle passes",
+      "variant": "emphasis"
+    },
+    {
+      "id": "release",
+      "from": "building",
+      "to": "queued",
+      "label": "jig release"
+    },
+    {
+      "id": "later-fail",
+      "from": "green",
+      "to": "building",
+      "label": "later commit fails"
+    },
+    {
+      "id": "brief-drift",
+      "from": "green",
+      "to": "queued",
+      "label": "cited section changed",
+      "variant": "dashed",
+      "note": "jig requeue --from-brief-diff"
+    },
+    {
+      "id": "env-down",
+      "from": "building",
+      "to": "env_blocked",
+      "label": "env down",
+      "variant": "security"
+    },
+    {
+      "id": "requeue-env",
+      "from": "env_blocked",
+      "to": "queued",
+      "label": "jig requeue"
+    },
+    {
+      "id": "stall",
+      "from": "building",
+      "to": "stalled",
+      "label": "stall",
+      "variant": "security"
+    },
+    {
+      "id": "requeue-stalled",
+      "from": "stalled",
+      "to": "queued",
+      "label": "jig requeue"
+    },
+    {
+      "id": "ask",
+      "from": "building",
+      "to": "needs_input",
+      "label": "jig ask"
+    },
+    {
+      "id": "answer-claimed",
+      "from": "needs_input",
+      "to": "building",
+      "label": "answered",
+      "note": "queued instead when no session holds it"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Only a verification makes green",
+      "items": [
+        "A passing oracle on a commit naming the slice marks it green from any state.",
+        "A failing one sends it back to building, unless a question is open."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Ready is computed, not stored",
+      "items": [
+        "The frontier is every queued slice whose blockers are all green: jig next.",
+        "A claim of a stalled or env-blocked slice also moves it to building."
+      ]
+    }
+  ]
+}

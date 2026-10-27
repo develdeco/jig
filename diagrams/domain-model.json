@@ -1,0 +1,782 @@
+{
+  "schema_version": 1,
+  "diagram_type": "class",
+  "meta": {
+    "title": "jig domain model",
+    "output": "diagrams/domain-model.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/develdeco/jig.git",
+      "provider": "github",
+      "revision": "cc02c783e95a1ecdce014f7d7cc3abc6aac62a6e"
+    }
+  },
+  "layout": {
+    "mode": "grid"
+  },
+  "types": [
+    {
+      "id": "phase",
+      "label": "Phase",
+      "kind": "enum",
+      "sublabel": "Derived from the journal, never recorded",
+      "row": 0,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "brief"
+        },
+        {
+          "name": "build"
+        },
+        {
+          "name": "review"
+        },
+        {
+          "name": "publish"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 97,
+          "end_line": 99,
+          "label": "Phase"
+        },
+        {
+          "path": "internal/phase/phase.go",
+          "line": 29,
+          "end_line": 36,
+          "label": "phase names"
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "label": "Store",
+      "kind": "class",
+      "sublabel": "Truth repo: every ticket artifact",
+      "row": 0,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "charts",
+          "type": "charts/<name>/"
+        },
+        {
+          "name": "tickets",
+          "type": "tickets/<id>/"
+        },
+        {
+          "name": "claims",
+          "type": "minted ids, drivers"
+        },
+        {
+          "name": "trackers",
+          "type": "mirror records"
+        }
+      ],
+      "methods": [
+        {
+          "name": "mint",
+          "parameters": "key",
+          "returns": "TicketId"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 19,
+          "end_line": 21,
+          "label": "Truth repo"
+        },
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 245,
+          "end_line": 294,
+          "label": "store tree"
+        }
+      ]
+    },
+    {
+      "id": "chart",
+      "label": "Chart",
+      "kind": "class",
+      "sublabel": "Wayfinder for work spanning tickets",
+      "row": 0,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "map",
+          "type": "map.md, for people"
+        },
+        {
+          "name": "entries",
+          "type": "tickets.yaml"
+        },
+        {
+          "name": "entry.blocked_by",
+          "type": "ChartRef[]"
+        }
+      ],
+      "methods": [
+        {
+          "name": "graduate",
+          "returns": "Ticket[]"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 261,
+          "end_line": 263,
+          "label": "Chart"
+        },
+        {
+          "path": "internal/store/charts.go",
+          "line": 13,
+          "end_line": 53,
+          "label": "tickets.yaml shape"
+        },
+        {
+          "path": "cmd/jig/graduate.go",
+          "line": 303,
+          "end_line": 304,
+          "label": "graduate mints"
+        }
+      ]
+    },
+    {
+      "id": "journal",
+      "label": "Journal",
+      "kind": "class",
+      "sublabel": "Append-only facts of one ticket",
+      "row": 1,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "build",
+          "type": "claim, oracle, verified"
+        },
+        {
+          "name": "review",
+          "type": "gate round lines"
+        },
+        {
+          "name": "publish",
+          "type": "pr, publish-done"
+        }
+      ],
+      "methods": [
+        {
+          "name": "derive",
+          "returns": "Phase"
+        },
+        {
+          "name": "changelog",
+          "returns": "markdown"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 133,
+          "end_line": 135,
+          "label": "Journal"
+        },
+        {
+          "path": "internal/journal/journal.go",
+          "line": 18,
+          "end_line": 26,
+          "label": "journal line"
+        },
+        {
+          "path": "internal/phase/phase.go",
+          "line": 499,
+          "label": "Derive"
+        }
+      ]
+    },
+    {
+      "id": "ticket",
+      "label": "Ticket",
+      "kind": "class",
+      "sublabel": "One unit of work, id jig mints",
+      "row": 1,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "KEY-N, aliases"
+        },
+        {
+          "name": "title",
+          "type": "and slug"
+        },
+        {
+          "name": "branch",
+          "type": "<id>-<slug>"
+        },
+        {
+          "name": "rank",
+          "type": "int"
+        },
+        {
+          "name": "closed",
+          "type": "reason, by, at"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 23,
+          "end_line": 31,
+          "label": "Ticket, closed"
+        },
+        {
+          "path": "internal/store/ticket.go",
+          "line": 26,
+          "end_line": 74,
+          "label": "ticket.yaml"
+        }
+      ]
+    },
+    {
+      "id": "dependency",
+      "label": "Dependency",
+      "kind": "record",
+      "sublabel": "A ticket's own blocker",
+      "row": 1,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "ticket",
+          "type": "the blocking Ticket"
+        },
+        {
+          "name": "kind",
+          "type": "merged | stacked"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 265,
+          "end_line": 267,
+          "label": "Dependency"
+        },
+        {
+          "path": "internal/store/ticket.go",
+          "line": 19,
+          "end_line": 24,
+          "label": "TicketBlockedBy"
+        }
+      ]
+    },
+    {
+      "id": "session",
+      "label": "Session",
+      "kind": "class",
+      "sublabel": "A harness run jig observes",
+      "row": 2,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "harness session id"
+        },
+        {
+          "name": "harness",
+          "type": "and model"
+        },
+        {
+          "name": "ticket",
+          "type": "and slice"
+        }
+      ],
+      "methods": [
+        {
+          "name": "claim",
+          "parameters": "slice"
+        },
+        {
+          "name": "commit",
+          "parameters": "Jig-Slice trailer"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 117,
+          "end_line": 127,
+          "label": "Session, Claim"
+        },
+        {
+          "path": "internal/ledger/sessions.go",
+          "line": 42,
+          "end_line": 61,
+          "label": "Session fold"
+        }
+      ]
+    },
+    {
+      "id": "slice",
+      "label": "Slice",
+      "kind": "class",
+      "sublabel": "Unit of claim, verification, commit",
+      "row": 2,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "goal",
+          "type": "string"
+        },
+        {
+          "name": "workspace",
+          "type": "<repo>/<ws>"
+        },
+        {
+          "name": "oracle",
+          "type": "proves it done"
+        },
+        {
+          "name": "blocked_by",
+          "type": "Slice[]"
+        },
+        {
+          "name": "from_brief",
+          "type": "section hashes"
+        },
+        {
+          "name": "from_gate",
+          "type": "round (fix slice)"
+        },
+        {
+          "name": "state",
+          "type": "queued ... green"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 77,
+          "end_line": 83,
+          "label": "Slice, Oracle"
+        },
+        {
+          "path": "internal/store/slices.go",
+          "line": 14,
+          "end_line": 26,
+          "label": "slices.yaml"
+        },
+        {
+          "path": "internal/store/slice_state.go",
+          "line": 12,
+          "end_line": 14,
+          "label": "slice state"
+        }
+      ]
+    },
+    {
+      "id": "brief",
+      "label": "Brief",
+      "kind": "class",
+      "sublabel": "brief.md: what the work must do",
+      "row": 2,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "sections",
+          "type": "## heading + sha256"
+        },
+        {
+          "name": "illustration",
+          "type": "optional html"
+        },
+        {
+          "name": "approval",
+          "type": "pinned to sha256"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 61,
+          "end_line": 67,
+          "label": "Intake, Illustration"
+        },
+        {
+          "path": "internal/store/brief.go",
+          "line": 9,
+          "end_line": 20,
+          "label": "BriefSection"
+        },
+        {
+          "path": "internal/store/approval.go",
+          "line": 15,
+          "end_line": 34,
+          "label": "Approval"
+        }
+      ]
+    },
+    {
+      "id": "workspace",
+      "label": "Workspace",
+      "kind": "record",
+      "sublabel": "Build target in a repo manifest",
+      "row": 3,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "and path"
+        },
+        {
+          "name": "oracles",
+          "type": "name to command"
+        },
+        {
+          "name": "envs",
+          "type": "up, check, down"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 85,
+          "end_line": 91,
+          "label": "Workspace, Env class"
+        },
+        {
+          "path": "internal/manifest/manifest.go",
+          "line": 19,
+          "end_line": 46,
+          "label": "Manifest"
+        }
+      ]
+    },
+    {
+      "id": "verification",
+      "label": "Verification",
+      "kind": "class",
+      "sublabel": "Oracle run on one commit, detached",
+      "row": 3,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "key",
+          "type": "(commit, slice)"
+        },
+        {
+          "name": "outcome",
+          "type": "pass | fail | error"
+        },
+        {
+          "name": "recordings",
+          "type": "demo source"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 129,
+          "end_line": 131,
+          "label": "Verification"
+        },
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 127,
+          "end_line": 137,
+          "label": "jig verify"
+        }
+      ]
+    },
+    {
+      "id": "finding",
+      "label": "Finding",
+      "kind": "class",
+      "sublabel": "What the reviewer reported",
+      "row": 3,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "at",
+          "type": "file:line"
+        },
+        {
+          "name": "action",
+          "type": "fix | ask | note"
+        },
+        {
+          "name": "risk",
+          "type": "low | medium | high"
+        },
+        {
+          "name": "triage",
+          "type": "keep | dismiss (asks)"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 197,
+          "end_line": 199,
+          "label": "Fix slice"
+        },
+        {
+          "path": "CONTEXT.md",
+          "line": 229,
+          "end_line": 243,
+          "label": "Finding action, Triage"
+        },
+        {
+          "path": "internal/verifydeliver/findings.go",
+          "line": 51,
+          "end_line": 77,
+          "label": "Finding"
+        }
+      ]
+    },
+    {
+      "id": "pull_request",
+      "label": "PullRequest",
+      "kind": "record",
+      "sublabel": "One per repo the ticket builds in",
+      "row": 4,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "head",
+          "type": "reviewed, pushed as is"
+        },
+        {
+          "name": "body",
+          "type": "with ## Demo picks"
+        },
+        {
+          "name": "changelog",
+          "type": "from the journal"
+        }
+      ],
+      "sources": [
+        {
+          "path": "ARCHITECTURE.md",
+          "line": 45,
+          "end_line": 55,
+          "label": "publish stage"
+        },
+        {
+          "path": "CONTEXT.md",
+          "line": 185,
+          "end_line": 195,
+          "label": "Demo, Pick"
+        }
+      ]
+    },
+    {
+      "id": "gate_round",
+      "label": "GateRound",
+      "kind": "class",
+      "sublabel": "Recorded review of the branch",
+      "row": 4,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "round",
+          "type": "N"
+        },
+        {
+          "name": "range",
+          "type": "base..head"
+        },
+        {
+          "name": "reviewer",
+          "type": "fresh session"
+        },
+        {
+          "name": "intent",
+          "type": "brief | explicit | inferred"
+        },
+        {
+          "name": "verdict",
+          "type": "clean | findings"
+        }
+      ],
+      "sources": [
+        {
+          "path": "CONTEXT.md",
+          "line": 217,
+          "end_line": 227,
+          "label": "Gate, round, Intent"
+        },
+        {
+          "path": "internal/verifydeliver/rounds.go",
+          "line": 33,
+          "end_line": 57,
+          "label": "RoundRecord"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "id": "store_charts",
+      "from": "store",
+      "to": "chart",
+      "kind": "composition",
+      "label": "holds"
+    },
+    {
+      "id": "store_tickets",
+      "from": "store",
+      "to": "ticket",
+      "kind": "composition",
+      "label": "holds, mints id"
+    },
+    {
+      "id": "chart_graduates",
+      "from": "chart",
+      "to": "ticket",
+      "kind": "dependency",
+      "label": "graduate mints",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "chart_blockers",
+      "from": "chart",
+      "to": "dependency",
+      "kind": "dependency",
+      "label": "blocked_by becomes"
+    },
+    {
+      "id": "ticket_journal",
+      "from": "ticket",
+      "to": "journal",
+      "kind": "composition",
+      "label": "records in"
+    },
+    {
+      "id": "journal_phase",
+      "from": "journal",
+      "to": "phase",
+      "kind": "dependency",
+      "label": "derives"
+    },
+    {
+      "id": "ticket_blockers",
+      "from": "ticket",
+      "to": "dependency",
+      "kind": "composition",
+      "label": "blocked_by"
+    },
+    {
+      "id": "ticket_brief",
+      "from": "ticket",
+      "to": "brief",
+      "kind": "composition",
+      "label": "brief.md",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "ticket_slices",
+      "from": "ticket",
+      "to": "slice",
+      "kind": "composition",
+      "label": "slices.yaml"
+    },
+    {
+      "id": "slice_cites",
+      "from": "slice",
+      "to": "brief",
+      "kind": "dependency",
+      "label": "cites sections"
+    },
+    {
+      "id": "session_claims",
+      "from": "session",
+      "to": "slice",
+      "kind": "association",
+      "label": "claims, commits"
+    },
+    {
+      "id": "verification_proves",
+      "from": "verification",
+      "to": "slice",
+      "kind": "dependency",
+      "label": "proves green"
+    },
+    {
+      "id": "slice_builds_in",
+      "from": "slice",
+      "to": "workspace",
+      "kind": "association",
+      "label": "builds in",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "verification_runs",
+      "from": "verification",
+      "to": "workspace",
+      "kind": "dependency",
+      "label": "runs oracle of"
+    },
+    {
+      "id": "finding_fix",
+      "from": "finding",
+      "to": "slice",
+      "kind": "dependency",
+      "label": "fix queues",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "round_findings",
+      "from": "gate_round",
+      "to": "finding",
+      "kind": "composition",
+      "label": "raises"
+    },
+    {
+      "id": "pr_ships",
+      "from": "pull_request",
+      "to": "gate_round",
+      "kind": "dependency",
+      "label": "ships clean head"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "How a ticket moves",
+      "items": [
+        "Brief: intake writes brief.md and slices.yaml; jig validate approves the brief, pinned to its sha256.",
+        "Build: a session claims a slice and commits with a Jig-Slice trailer; jig verifies the commit in the background.",
+        "Review: jig gate opens a round, a fresh reviewer closes it; a fix finding becomes a new slice, never a back-edge.",
+        "Publish: the reviewed head is pushed unchanged and the PR body and changelog render from the journal."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Rules the links carry",
+      "items": [
+        "Green is what a verification proved, never what a session claimed.",
+        "Editing a section a verified slice cites is brief drift; editing the brief withdraws its approval.",
+        "A merged blocker holds a ticket until its PR merges; a stacked one starts it from the parent's branch.",
+        "A phase is done only when every phase before it is."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Left out of this view",
+      "items": [
+        "Mirror: GitHub issues and the board copy tickets and charts outward and are never read back.",
+        "Questions, notes and corrections a session hears, and the machine-local ledger of sessions.",
+        "The project marker jig.yaml that names the repos and finds the store."
+      ]
+    }
+  ]
+}
