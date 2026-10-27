@@ -7,14 +7,16 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
-// TestAdviceToSpawnNamesTheForegroundRule: the advice that tells a session to
-// spawn a reviewer says to run it in the foreground, wait for its verdict in the
-// same turn and not to end the turn while it runs, for a session that built the
-// ticket and for one jig cannot tell. A fresh session is told to review itself,
-// with no subagent to wait for.
-func TestAdviceToSpawnNamesTheForegroundRule(t *testing.T) {
+// TestAdviceToSpawnSaysHowToWait: the advice that tells a session to spawn a
+// reviewer says how to wait for it as Claude Code runs it, in the background
+// whatever the session asks: with TaskOutput, or by ending an attended turn,
+// never by stalling with another tool. It says so for a session that built the
+// ticket and for one jig cannot tell, and never asks for a foreground run the
+// harness does not give. A fresh session is told to review itself, with no
+// subagent to wait for.
+func TestAdviceToSpawnSaysHowToWait(t *testing.T) {
 	t.Parallel()
-	rule := []string{"run_in_background: false", "wait for its verdict in this same turn", "never end the turn while it runs"}
+	rule := []string{"TaskOutput (`block: true`", "in an attended session only, end the turn", "an unattended session ends with its turn", "Never call another tool to stall"}
 	cases := []struct {
 		name  string
 		fresh verifydeliver.Fresh
@@ -37,6 +39,9 @@ func TestAdviceToSpawnNamesTheForegroundRule(t *testing.T) {
 				if got := strings.Contains(text, want); got != tc.spawn {
 					t.Errorf("advice has %q = %v, want %v:\n%s", want, got, tc.spawn, text)
 				}
+			}
+			if strings.Contains(text, "run_in_background") {
+				t.Errorf("advice asks for a foreground run, which Claude Code does not give:\n%s", text)
 			}
 		})
 	}
