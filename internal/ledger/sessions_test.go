@@ -290,33 +290,6 @@ func TestRecentOrdersByInstant(t *testing.T) {
 	}
 }
 
-// TestGraphLine: Graph writes one graph event for a ticket and refuses a line
-// that names none.
-func TestGraphLine(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-
-	if err := Graph(root, journal.Line{Slice: "a", Session: "s1"}); err == nil {
-		t.Fatal("Graph with no ticket succeeded, want a refusal")
-	}
-	if err := Graph(root, journal.Line{
-		TS: Stamp(at(0)), Event: "ignored", Ticket: "JIG-1", Slice: "a", Session: "s1", Cwd: "/work/app", Files: []string{"x.go"}, Summary: "starting points",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	lines, err := Read(root)
-	if err != nil || len(lines) != 1 {
-		t.Fatalf("Read = %+v, %v, want the one graph line", lines, err)
-	}
-	l := lines[0]
-	if l.Event != journal.EventGraph || l.Ticket != "JIG-1" || l.Slice != "a" || l.Session != "s1" || l.Cwd != "/work/app" || !reflect.DeepEqual(l.Files, []string{"x.go"}) || l.Summary != "starting points" || l.TS != Stamp(at(0)) {
-		t.Fatalf("graph line = %+v", l)
-	}
-	if got := mustSessions(t, root); len(got) != 0 {
-		t.Fatalf("a graph line made sessions: %v", got)
-	}
-}
-
 func TestSessionLinesCarryTheCommitAndTheFoldIgnoresIt(t *testing.T) {
 	root := t.TempDir()
 	if err := StartSession(root, time.Time{}, Registration{ID: "s1", Ticket: "JIG-1", Commit: "abc123"}); err != nil {

@@ -159,18 +159,6 @@ func appendSession(root, event string, at time.Time, r Registration) error {
 	})
 }
 
-// Graph appends a graph line: the code-graph starting points a session was
-// given for a slice. l names the ticket (required), the slice, the session and
-// agent, the clone directory in Cwd, the starting points in Files and anything
-// worth keeping in Summary; Event is set here and TS, when empty, is now.
-func Graph(root string, l journal.Line) error {
-	if l.Ticket == "" {
-		return errors.New("ledger: a graph line needs a ticket")
-	}
-	l.Event = journal.EventGraph
-	return Append(root, l)
-}
-
 // Sessions folds the ledger under the jig home root into the sessions it
 // records, by id. Four events make a session: session-start, session-touch,
 // session-end and tool; any other line, and any line without a session id, is

@@ -119,7 +119,7 @@ One run of a harness, known to jig by the id the harness gives it (or one jig mi
 _Avoid_: run, conversation
 
 **Fresh session**:
-A harness session that did none of a ticket's work: its id carries no journal line of the ticket except the gate's, triage and publish lines, and no ledger line of it changed a file or made a commit for the ticket. `jig gate` and `jig next <ticket>` say whether the calling session is fresh, not fresh or unknown. A fresh one reviews the ticket itself; one that is not has a subagent do it, in the foreground, and never reads the round itself (a subagent shares its session's id, so if both read it the ledger cannot say which closed it). Advice only: `jig review done` judges independence from who built, as before.
+A harness session that did none of a ticket's work: its id carries no journal line of the ticket except the gate's, triage and publish lines, and no ledger line of it changed a file or made a commit for the ticket. `jig gate` and `jig next <ticket>` say whether the calling session is fresh, not fresh or unknown. A fresh one reviews the ticket itself; one that is not has a subagent do it, waits for its verdict, and never reads the round itself (a subagent shares its session's id, so if both read it the ledger cannot say which closed it). Advice only: `jig review done` judges independence from who built, as before.
 _Avoid_: independent (that is the property of a recorded round)
 
 **Claim**:

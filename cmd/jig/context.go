@@ -6,9 +6,6 @@ import (
 	"io"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/graphify"
-	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/slicectx"
 )
 
@@ -30,11 +27,10 @@ func init() {
 
 // cmdContext implements `jig context [<ticket>] [--slice s] [--json]`: what
 // slice.json carried when jig dispatched a builder, pulled by the builder
-// instead. It reads the store and the clone; when the project opted into a
-// code graph it brings the graph up to date and asks it, which takes as long
-// as graphify does, and records a graph line in the machine ledger. In a
-// project of several repos it also names the repo the slice builds in and that
-// repo's clone, wherever the command is run from.
+// instead. It reads the store and the clone and runs no context tool: the
+// code is the session's to find with its own tools, and the help says so
+// (ADR 0034). In a project of several repos it also names the repo the slice
+// builds in and that repo's clone, wherever the command is run from.
 func cmdContext(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "context")
 	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
@@ -65,11 +61,6 @@ func cmdContext(e env, args []string, stdout io.Writer) int {
 		Slice:   sl.ID,
 		Repo:    repo,
 		RepoDir: dir,
-		Graph:   graphify.DetectWith(w.Cfg, e.lookPath),
-		RecordGraph: func(l journal.Line) error {
-			return ledger.Graph(w.JigHome, l)
-		},
-		Session: w.Session,
 	})
 	if err != nil {
 		return renderErr(stdout, err)
@@ -97,12 +88,22 @@ func cmdContext(e env, args []string, stdout io.Writer) int {
 	return 0
 }
 
-// contextHelp is the next step for the slice a context describes.
+// contextHelp is the next step for the slice a context describes, and where
+// the code it touches comes from: the session's own tools, starting from the
+// files the earlier slices changed when the clone holds some.
 func contextHelp(c slicectx.Context) []string {
 	var help []string
 	if c.Slice.State == "queued" {
 		help = append(help, fmt.Sprintf("Claim it first: `jig claim %s --slice %s`", c.Ticket, c.Slice.ID))
 	}
+	find := "Find the code the goal touches with your own tools (search, a code graph, your editor's symbols)"
+	for _, e := range c.EarlierSlices {
+		if len(e.Files) > 0 {
+			find += ", starting from the files the earlier slices changed"
+			break
+		}
+	}
+	help = append(help, find)
 	return append(help, fmt.Sprintf(
 		"Test at the seams and commit with the trailer `Jig-Slice: %s`; jig runs the oracle on each commit. `jig ask` takes a question to the person",
 		c.Slice.ID))
