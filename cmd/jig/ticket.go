@@ -139,8 +139,10 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 // touchMinter records, in the machine ledger, that the session that minted
 // ticket works on it now: its brief is drafted before any journal line names
 // the session, and a screen that follows the ticket learns from this line
-// whose moves are the drafting. Nothing is written for a ticket minted
-// outside a session.
+// whose moves are the drafting. The line repeats the harness and model the
+// ledger knows the session by, since a reader of the ticket's stream sees
+// none of the session's lines from before it named the ticket. Nothing is
+// written for a ticket minted outside a session.
 func touchMinter(e env, ticket string) error {
 	session := envSession(e)
 	if session == "" {
@@ -150,7 +152,12 @@ func touchMinter(e env, ticket string) error {
 	if err != nil {
 		return err
 	}
-	return ledger.TouchSession(root, e.now(), ledger.Registration{ID: session, Ticket: ticket})
+	known, err := ledger.Sessions(root)
+	if err != nil {
+		return err
+	}
+	s := known[session]
+	return ledger.TouchSession(root, e.now(), ledger.Registration{ID: session, Ticket: ticket, Harness: s.Harness, Model: s.Model, Effort: s.Effort})
 }
 
 // intakeHint is the next step for a ticket that has no slices yet, with the

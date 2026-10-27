@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
@@ -107,6 +108,9 @@ func TestTicketNewTiesTheMintingSessionToTheTicket(t *testing.T) {
 		vars := map[string]string{"JIG_HOME": home, "HOME": home, "USERPROFILE": home}
 		if session != "" {
 			vars[locate.SessionEnv] = session
+			if err := ledger.StartSession(home, time.Time{}, ledger.Registration{ID: session, Harness: "claude", Model: "claude-sonnet-5"}); err != nil {
+				t.Fatal(err)
+			}
 		}
 		clone := filepath.Join(t.TempDir(), "clone")
 		newTestOriginClone(t, clone)
@@ -135,8 +139,9 @@ func TestTicketNewTiesTheMintingSessionToTheTicket(t *testing.T) {
 		switch {
 		case session == "" && len(touches) != 0:
 			t.Errorf("a ticket minted outside a session wrote %+v", touches)
-		case session != "" && (len(touches) != 1 || touches[0].Session != session || touches[0].Ticket != "DEMO-1"):
-			t.Errorf("session-touch lines = %+v, want one naming DEMO-1 for %s", touches, session)
+		case session != "" && (len(touches) != 1 || touches[0].Session != session || touches[0].Ticket != "DEMO-1" ||
+			touches[0].Harness != "claude" || touches[0].Model != "claude-sonnet-5"):
+			t.Errorf("session-touch lines = %+v, want one naming DEMO-1 for %s, with the harness and model it started with", touches, session)
 		}
 	}
 }
