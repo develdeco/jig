@@ -1,6 +1,6 @@
 jig  demo › JIG-2  Config loader                                     ✓ published
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ───────────────────────────────────────────────────────────── done ─╮
+  ╭─ Steps ────────────────────────────────────────────── done · total 3m 21s ─╮
   │  ✓ 1 Brief            no brief on record                                   │
   │  ✓ 2 Build    30s     1 slice green, each verified by jig                  │
   │  ✓ 3 Review   2m 30s  round 2 clean · by reviewer                          │

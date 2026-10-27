@@ -1,8 +1,8 @@
 jig  demo › SHOP-1                                             ◑ build verifying
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ────────────────────────────────────────────────────── step 2 of 4 ─╮
+  ╭─ Steps ────────────────────────────────────── step 2 of 4 · total 58m 30s ─╮
   │  ✓ 1 Brief            approved by Dana (person) · 3 sections, 3 slices     │
-  │▸ ◑ 2 Build            1 of 3 green · verifying slice clamp at bbbbbbb      │
+  │▸ ◑ 2 Build    58m 30s 1 of 3 green · verifying slice clamp at bbbbbbb      │
   │  ○ 3 Review           after the build                                      │
   │  ○ 4 Publish          after a clean review                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯

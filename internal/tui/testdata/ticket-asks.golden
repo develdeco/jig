@@ -1,9 +1,9 @@
 jig  demo › JIG-2  Config loader                               ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ────────────────────────────────────────────────────── step 3 of 4 ─╮
+  ╭─ Steps ────────────────────────────────────── step 3 of 4 · total 49m 00s ─╮
   │  ✓ 1 Brief            no brief on record                                   │
   │  ✓ 2 Build    30s     1 slice green, each verified by jig                  │
-  │▸ ! 3 Review           round 1 left 2 asks · 2 wait for your decision       │
+  │▸ ! 3 Review   48m 30s round 1 left 2 asks · 2 wait for your decision       │
   │  ○ 4 Publish          after a clean review                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Review ───────────────────────────────────────────────────── 1 of 3 done ─╮

@@ -1,8 +1,8 @@
 jig  demo › JIG-1  Greeting copy                               ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ────────────────────────────────────────────────────── step 2 of 4 ─╮
+  ╭─ Steps ────────────────────────────────────── step 2 of 4 · total 59m 29s ─╮
   │  ✓ 1 Brief            no brief on record                                   │
-  │▸ ? 2 Build            1 of 4 green · slice c needs your answer             │
+  │▸ ? 2 Build    59m 29s 1 of 4 green · slice c needs your answer             │
   │  ○ 3 Review           after the build                                      │
   │  ○ 4 Publish          after a clean review                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯

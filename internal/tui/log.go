@@ -48,12 +48,12 @@ type moveWindow struct {
 // the call wrote ("Close the review round" after the round's verdict).
 const callAfter = 2 * time.Second
 
-// moveWindows are the windows of the ticket's sub-steps that are done or under
-// way and have a holder.
-func (m *Model) moveWindows(t *ticket) []moveWindow {
+// moveWindows are the windows of the sub-steps of a ticket that stands as d
+// says that are done or under way and have a holder.
+func (m *Model) moveWindows(t *ticket, d phase.Ticket) []moveWindow {
 	now := m.now()
 	var ws []moveWindow
-	for step, p := range m.phaseOf(t).Phases {
+	for step, p := range d.Phases {
 		for _, s := range p.Subs {
 			var tr subTrack
 			end := now
@@ -149,6 +149,38 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 	return current, ""
 }
 
+// placedLine is a line of the log and the place it belongs to (placeOf).
+type placedLine struct {
+	l    events.Envelope
+	step int
+	key  string
+}
+
+// placed are the log's lines of a ticket that stands as d says, oldest first,
+// each with its place.
+func (m *Model) placed(t *ticket, d phase.Ticket) []placedLine {
+	all := t.logLines()
+	ws := m.moveWindows(t, d)
+	current := currentOf(d)
+	out := make([]placedLine, len(all))
+	for i, l := range all {
+		step, key := t.placeOf(l, ws, all, current)
+		out[i] = placedLine{l, step, key}
+	}
+	return out
+}
+
+// currentOf is the step under way in d: the first not done, the last when all
+// are.
+func currentOf(d phase.Ticket) int {
+	for i, p := range d.Phases {
+		if p.State != phase.StateDone {
+			return i
+		}
+	}
+	return len(d.Phases) - 1
+}
+
 // tagOf is a place as a log line's tag: the step's name, and the sub-step's
 // short name after a dot.
 func tagOf(step int, key string) string {
@@ -181,7 +213,7 @@ const tagMaxW = 18
 // lines as the rows left below what p holds allow, activityCap at most and
 // three at least, so the panel's edge stays on the screen.
 func (m *Model) activityPanel(p *page, t *ticket) {
-	all := t.logLines()
+	all := m.placed(t, m.phaseOf(t))
 	keep := min(activityCap(m.bodyRows()), max(3, m.bodyRows()-len(p.lines)-2))
 	right := ""
 	if n := len(all); n > keep {
@@ -191,23 +223,14 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 	if len(all) == 0 {
 		p.boxAdd(m.st.dim("nothing yet"))
 	}
-	ws := m.moveWindows(t)
-	current := currentStep(m.steps(t))
-	type entry struct {
-		l    events.Envelope
-		step int
-		tag  string
-	}
-	var shown []entry
+	var shown []placedLine
 	tagW := 0
 	for i := len(all) - 1; i >= 0 && len(shown) < keep; i-- {
-		step, key := t.placeOf(all[i], ws, all, current)
-		tag := tagOf(step, key)
-		tagW = max(tagW, min(tagMaxW, width(tag)))
-		shown = append(shown, entry{all[i], step, tag})
+		tagW = max(tagW, min(tagMaxW, width(tagOf(all[i].step, all[i].key))))
+		shown = append(shown, all[i])
 	}
 	for _, e := range shown {
-		tag := pad(e.tag, tagW)
+		tag := pad(tagOf(e.step, e.key), tagW)
 		if e.step >= 0 {
 			tag = m.st.state(stepTagState[e.step], tag)
 		} else {

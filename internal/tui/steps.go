@@ -10,8 +10,8 @@ import (
 )
 
 // stepRow is one step of a ticket as its screen shows it: whether it is done,
-// the state it is in, a few words on where it stands now, and for a done step
-// how long it took.
+// the state it is in, a few words on where it stands now, and how long it has
+// taken so far.
 type stepRow struct {
 	Step  int
 	Kind  string // the row kind that opens the step's screen
@@ -19,6 +19,7 @@ type stepRow struct {
 	Text  string
 	Took  string
 	Done  bool
+	took  time.Duration
 }
 
 // steps are the ticket's four steps, in order, as internal/phase derives them
@@ -31,9 +32,25 @@ func (m *Model) steps(t *ticket) []stepRow {
 
 // stepRows are the four rows of a ticket that stands as d says. The phase gives
 // each row whether it is done and what it says; the screens add the state the
-// row is drawn in, and how long a done step took.
+// row is drawn in, and how long the step has taken (stepTimes).
 func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
-	return []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d)}
+	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d)}
+	for i, took := range m.stepTimes(t, d) {
+		if took > 0 {
+			rows[i].Took, rows[i].took = span(took), took
+		}
+	}
+	return rows
+}
+
+// totalTook is how long the steps have taken in all: their times added up, so
+// the time between them (a person reading before the next prompt) is not in it.
+func totalTook(steps []stepRow) time.Duration {
+	var d time.Duration
+	for _, s := range steps {
+		d += s.took
+	}
+	return d
 }
 
 // rowOf is the row the phase p makes: its text, and whether it is done.
@@ -117,9 +134,6 @@ func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 	switch {
 	case s.Done:
 		s.State = StateOK
-		if n > 0 {
-			s.Took = t.stepTook(stepBuild)
-		}
 	case n == 0:
 		s.State = StateQueued
 	case counts[StateGreen] == n:
@@ -172,7 +186,6 @@ func (m *Model) reviewRow(t *ticket, d phase.Ticket) stepRow {
 	switch {
 	case s.Done:
 		s.State = StateOK
-		s.Took = t.stepTook(stepReview)
 	case len(rounds) == 0:
 		s.State = StateReady
 		if pending {
@@ -204,7 +217,6 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	switch {
 	case s.Done:
 		s.State = StatePublished
-		s.Took = t.stepTook(stepPublish)
 	case p.State == phase.StatePending:
 		s.State = StateQueued
 	case hasSub(p, phase.SubDone):
@@ -215,32 +227,32 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	return s
 }
 
-// stepTook is how long a done step took: the gaps between consecutive lines of
-// the journal that are both the step's. A build that a review sent fixes back to
-// counts the fixes and not the review between, and a hand-off from one step to
-// the next (a person reading the outcome before prompting the next phase) counts
-// for neither. A line of no step (a spend) neither starts nor ends a gap. ""
-// when the step had no time: the brief, whose drafting writes no line before its
-// approval.
-func (t *ticket) stepTook(step int) string {
-	var took time.Duration
+// stepTimes are how long each step has taken: the gaps between consecutive
+// lines of the log that both belong to the step (placed), so a build that a
+// review sent a fix back to counts the fix and not the review between, and the
+// time from one step to the next (a person reading the outcome before prompting
+// the next phase) counts for neither. A line of no step (a spend) neither
+// starts nor ends a gap. The step under way also counts the time since its
+// latest line, while that line is the latest of the log: the brief waiting on
+// the person's answer, a slice being built.
+func (m *Model) stepTimes(t *ticket, d phase.Ticket) [stepCount]time.Duration {
+	var took [stepCount]time.Duration
 	var prev time.Time
 	prevStep := -1
-	for _, l := range t.lines {
-		s := stepOfLine(l)
-		at, ok := l.At()
-		if s < 0 || !ok {
+	for _, p := range m.placed(t, d) {
+		at, ok := p.l.At()
+		if p.step < 0 || !ok {
 			continue
 		}
-		if s == step && prevStep == step && at.After(prev) {
-			took += at.Sub(prev)
+		if p.step == prevStep && at.After(prev) {
+			took[p.step] += at.Sub(prev)
 		}
-		prev, prevStep = at, s
+		prev, prevStep = at, p.step
 	}
-	if took <= 0 {
-		return ""
+	if cur := currentOf(d); prevStep == cur && d.Phases[cur].State != phase.StateDone && m.now().After(prev) {
+		took[cur] += m.now().Sub(prev)
 	}
-	return span(took)
+	return took
 }
 
 // stepLabel is where a ticket stands, for a header: the state of its current

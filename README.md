@@ -120,9 +120,10 @@ Cursor, GitHub Copilot and OpenCode are written from their documentation.
 
 `jig tui` is a view of everything in flight, built on the same stream `jig
 events --follow` prints. A ticket is four steps taken in order (brief, build,
-review, publish), each with its state in a few words: "approved by <name>
-(person) · 5 sections, 3 slices", "1 of 3 green · verifying slice clamp at
-bbbbbbb", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading the
+review, publish), each with how long it has taken (the step under way counting
+on, the steps' total in the panel's title) and its state in a few words:
+"approved by <name> (person) · 5 sections, 3 slices", "1 of 3 green ·
+verifying slice clamp at bbbbbbb", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading the
 change", "pull request opened · <url>". The steps are the same answer `jig next`
 gives, so the screen and the command never disagree about where a ticket stands.
 Under them a block named after the step under the cursor lists what the step is

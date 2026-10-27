@@ -51,6 +51,9 @@ func (m *Model) ticketPage(id string) page {
 	if steps[len(steps)-1].Done {
 		right = "done"
 	}
+	if total := totalTook(steps); total > 0 {
+		right += " · total " + span(total)
+	}
 	p.boxTop("Steps", right)
 	for i, s := range steps {
 		p.boxRow(rowRef{kind: s.Kind, ticket: id}, m.stepLine(s, i == cur))
@@ -149,19 +152,23 @@ func (m *Model) waitingPage(id string) page {
 	return p
 }
 
-// stepLine is a step's row: its icon, number and name, where it stands, and
-// how long it took once done. A step not reached yet is drawn back.
+// stepLine is a step's row: its icon, number and name, how long it has taken,
+// and where it stands. A step not reached yet is drawn back, and the time of
+// the step under way, which counts on, is not.
 func (m *Model) stepLine(s stepRow, current bool) string {
 	name := pad(stepNames[s.Step], 8)
 	num := strconv.Itoa(s.Step+1) + " "
 	text := s.Text
+	took := m.st.dim(pad(s.Took, 7))
 	switch {
+	case current && !s.Done:
+		name, text, took = m.st.bold(name), m.st.state(s.State, text), pad(s.Took, 7)
 	case current:
 		name, text = m.st.bold(name), m.st.state(s.State, text)
 	case !s.Done:
 		num, name, text = m.st.dim(num), m.st.dim(name), m.st.dim(text)
 	}
-	return m.st.icon(s.State) + " " + num + name + " " + m.st.dim(pad(s.Took, 7)) + " " + text
+	return m.st.icon(s.State) + " " + num + name + " " + took + " " + text
 }
 
 // ticketFocus is the step whose sub-steps and activity the ticket screen
