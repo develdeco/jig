@@ -62,6 +62,11 @@ func tool(ts, session, command string, mod ...func(*journal.Line)) events.Envelo
 	}}, mod...)...)
 }
 
+// said gives a tool line the words the session gave its call.
+func said(description string) func(*journal.Line) {
+	return func(l *journal.Line) { l.Description = description }
+}
+
 // cardRig is SHOP-1 at width by height: slice round green, slice clamp claimed
 // by s-b (Claude Code, Sonnet 5) and being verified, slice cart waiting, with
 // the commands s-b and another session ran around it.
@@ -70,7 +75,7 @@ func cardRig(t *testing.T, width, height int) *rig {
 	status := strings.Join([]string{"ticket: SHOP-1", "state: building",
 		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
 			{"round", "green", "1", "-", "-", "Round to the cent"},
-			{"clamp", "building", "1", "round", "-", "Clamp negative quantities"},
+			{"clamp", "building", "1", "round", "-", "Clamp negative quantities to zero before the total is taken, so a cart that holds a returned item never charges less than nothing; a quantity above the stock is left to the checkout, which knows the stock and says so to the person at the till before they pay for the order"},
 			{"cart", "queued", "0", "clamp", "-", "Show the cart"},
 		}), "questions: none"}, "\n") + "\n"
 	g := newRig(t, "SHOP-1")
@@ -83,7 +88,7 @@ func cardRig(t *testing.T, width, height int) *rig {
 		jl(at(1, 37), "SHOP-1", "round", journal.EventVerified, with("", sha('a'), "", "", "", "")),
 		tool(at(1, 50), "s-b", "go test ./...", exit(0)),
 		jl(at(2, 0), "SHOP-1", "clamp", journal.EventClaim, with("s-b", "", "", "", "", "")),
-		tool(at(2, 5), "s-b", `cd "D:\work\shop" && go test ./cart/...`, exit(1)),
+		tool(at(2, 5), "s-b", `cd "D:\work\shop" && go test ./cart/...`, exit(1), said("Run the cart tests")),
 		tool(at(2, 8), "s-b", `cd "D:\work\shop" && go test ./cart/...`, exit(0)),
 		tool(at(2, 9), "s-other", "ls"),
 		jl(at(2, 10), "SHOP-1", "clamp", journal.EventVerifyPending, with("s-b", sha('b'), "", "Clamp negative quantities", "", "")),
@@ -102,15 +107,16 @@ func TestTheSliceUnderWayOpensIntoACard(t *testing.T) {
 	g := cardRig(t, 100, 40)
 	v := g.view()
 	golden(t, "ticket-card", v)
-	block := strings.Join(panelLines(strings.Split(v, "\n"), "2 Build · sub-steps"), "\n")
+	block := strings.Join(panelLines(strings.Split(v, "\n"), "Build ─"), "\n")
 	for _, want := range []string{
 		"✓ slice round · verified aaaaaaa · 37s",
 		"╭ ◐ slice clamp · verifying bbbbbbb", "57m 30s ╮",
-		"│ goal  Clamp negative quantities",
-		"│ who   builder (Claude Code · Sonnet 5)",
-		"│ moves 09:02:00 ◐ builder took it",
-		"09:02:05 $ ran `go test ./cart/...` · exit 1",
-		"09:02:08 $ ran `go test ./cart/...`",
+		"│ goal   Clamp negative quantities",
+		"│ who    builder (Claude Code · Sonnet 5)",
+		"│        a returned item never charges less than nothing; a quantity above the stock is     │",
+		"│        left to the checkout, which knows the stock and says so to the person at the till… │",
+		"│ moves  09:02:05 ✗ Run the cart tests · exit 1",
+		"09:02:08 · $ `go test ./cart/...`",
 		"09:02:10 ◑ verifying bbbbbbb",
 		"○ slice cart · waits for clamp",
 	} {
@@ -118,9 +124,17 @@ func TestTheSliceUnderWayOpensIntoACard(t *testing.T) {
 			t.Errorf("the block lacks %q:\n%s", want, block)
 		}
 	}
-	for _, not := range []string{"ran `ls`", "09:01:50", "cd \"D:"} {
+	for _, not := range []string{"`ls`", "09:01:50", "cd \"D:"} {
 		if strings.Contains(block, not) {
 			t.Errorf("the card shows %q, which is not a move of slice clamp:\n%s", not, block)
+		}
+	}
+	if strings.Contains(block, "took it") {
+		t.Errorf("the card's moves repeat the claim its head already tells:\n%s", block)
+	}
+	for _, line := range strings.Split(block, "\n") {
+		if strings.HasPrefix(line, "  │  │") && !strings.HasSuffix(strings.TrimRight(line, " "), "│ │") {
+			t.Errorf("a row of the card is open on the right: %q", line)
 		}
 	}
 }
@@ -131,12 +145,12 @@ func TestTheSliceUnderWayOpensIntoACard(t *testing.T) {
 func TestTheCardGivesWayOnASmallScreen(t *testing.T) {
 	t.Parallel()
 	v := cardRig(t, 80, 24).view()
-	block := strings.Join(panelLines(strings.Split(v, "\n"), "2 Build · sub-steps"), "\n")
+	block := strings.Join(panelLines(strings.Split(v, "\n"), "Build ─"), "\n")
 	if !strings.Contains(block, "│ moves") || strings.Contains(block, "│ goal") {
 		t.Errorf("the 80x24 card does not keep its moves over its facts:\n%s", v)
 	}
 	v = cardRig(t, 80, 22).view()
-	block = strings.Join(panelLines(strings.Split(v, "\n"), "2 Build · sub-steps"), "\n")
+	block = strings.Join(panelLines(strings.Split(v, "\n"), "Build ─"), "\n")
 	if strings.Contains(block, "│ moves") || !strings.Contains(block, "◐ slice clamp · verifying bbbbbbb") {
 		t.Errorf("the 80x22 block is not one line per sub-step:\n%s", v)
 	}
@@ -166,18 +180,18 @@ func TestAReviewRoundOpensWithItsReviewersCommands(t *testing.T) {
 		tool(at(4, 0), "s-b", `cd /w/pool/SHOP-1-gate && go test ./cart/...`, exit(1)),
 	)
 	v := g.view()
-	block := strings.Join(panelLines(strings.Split(v, "\n"), "3 Review · sub-steps"), "\n")
+	block := strings.Join(panelLines(strings.Split(v, "\n"), "Review ─"), "\n")
 	for _, want := range []string{
 		"╭ ◎ round 1 · taken by reviewer subagent (Claude Code · Opus 5)",
-		"09:03:10", "ran `jig review context SHOP-1 --model claude-opus-5`",
-		"ran `go test ./cart/...` · exit 1",
+		"09:03:20 · $ `jig review context SHOP-1 --model claude-opus-5`",
+		"$ `go test ./cart/...` · exit 1",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("the review block lacks %q:\n%s", want, v)
 		}
 	}
-	if strings.Contains(block, "│ who") {
-		t.Errorf("the card names its reviewer twice, in its head and in a who row:\n%s", block)
+	if strings.Contains(block, "│ who") || strings.Contains(block, "took it") {
+		t.Errorf("the card names its reviewer twice, in its head and in a who row or a move:\n%s", block)
 	}
 	if strings.Contains(block, "git commit -m round") {
 		t.Errorf("the round's card shows a command of the build:\n%s", block)
@@ -250,8 +264,8 @@ func TestAPullRequestBeingOpenedShowsTheSessionsCommands(t *testing.T) {
 		tool(at(5, 20), "s-b", `cd /w && gh pr create --head SHOP-1-round 2>&1`),
 	)
 	v := g.view()
-	block := strings.Join(panelLines(strings.Split(v, "\n"), "4 Publish · sub-steps"), "\n")
-	for _, want := range []string{"pull request", "ran `git push origin SHOP-1-round`", "ran `gh pr create --head SHOP-1-round`"} {
+	block := strings.Join(panelLines(strings.Split(v, "\n"), "Publish ─"), "\n")
+	for _, want := range []string{"pull request", "$ `git push origin SHOP-1-round`", "$ `gh pr create --head SHOP-1-round`"} {
 		if !strings.Contains(block, want) {
 			t.Errorf("the publish block lacks %q:\n%s", want, v)
 		}
@@ -267,7 +281,7 @@ func TestAPullRequestBeingOpenedShowsTheSessionsCommands(t *testing.T) {
 func TestACardWithNothingToShowDoesNotOpen(t *testing.T) {
 	t.Parallel()
 	v := prOpeningRig(t).view()
-	block := strings.Join(panelLines(strings.Split(v, "\n"), "4 Publish · sub-steps"), "\n")
+	block := strings.Join(panelLines(strings.Split(v, "\n"), "Publish ─"), "\n")
 	if strings.Contains(block, "│ moves") || strings.Contains(block, "nothing yet") {
 		t.Errorf("an empty card opened:\n%s", block)
 	}

@@ -243,11 +243,6 @@ func (t *ticket) stepTook(step int) string {
 	return span(took)
 }
 
-// stepTitle is a step as its panel titles it: "2 Build".
-func stepTitle(step int) string {
-	return strconv.Itoa(step+1) + " " + stepNames[step]
-}
-
 // stepLabel is where a ticket stands, for a header: the state of its current
 // step and the words that say it.
 func (m *Model) stepLabel(t *ticket) (state, label string) {

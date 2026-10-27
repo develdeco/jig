@@ -828,18 +828,18 @@ func (d *digest) brief() (Phase, bool) {
 }
 
 // briefSubs are the sub-steps of a brief that exists or is being drafted:
-// drafted, slices written, approved. odd says what is wrong with the approval:
-// "changed" or "never".
+// drafted, slices written, approved, each still to come saying what it comes
+// after. odd says what is wrong with the approval: "changed" or "never".
 func (d *digest) briefSubs(planned int, odd string) []Sub {
 	f := d.f
 	subs := []Sub{
 		{Key: "drafted", Label: "brief drafted", State: SubDone},
 		{Key: "slices", Label: "slices written", State: SubDone, Detail: count(planned, "slice")},
-		{Key: "approved", Label: "brief approved", State: SubPending},
+		{Key: "approved", Label: "brief approved", State: SubPending, Detail: "after the slices"},
 	}
 	if !f.BriefExists {
 		subs[0].State = SubActive
-		subs[1].State, subs[1].Detail = SubPending, ""
+		subs[1].State, subs[1].Detail = SubPending, "after the brief"
 		return subs
 	}
 	if f.Sections > 0 {

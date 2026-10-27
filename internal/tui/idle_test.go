@@ -90,7 +90,7 @@ func TestAQuietTicketScreenReadsItsStatusAgainAndSaysWhatAppeared(t *testing.T) 
 			t.Errorf("after the brief was written the screen lacks %q:\n%s", want, v)
 		}
 	}
-	if strings.Contains(v, "nothing yet") {
+	if act := strings.Join(panelLines(strings.Split(v, "\n"), "Brief activity"), "\n"); strings.Contains(act, "nothing yet") {
 		t.Errorf("the activity says \"nothing yet\" while work happened:\n%s", v)
 	}
 

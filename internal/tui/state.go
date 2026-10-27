@@ -63,6 +63,9 @@ type ticket struct {
 	loading, dirty bool
 	// failures counts the reads of the status that failed in a row.
 	failures int
+	// firstAt is when the first line the screens saw of the ticket was
+	// written; zero for a ticket the list named first.
+	firstAt time.Time
 	// awaiting is set for a ticket the person asked to watch before the store
 	// had a folder for it: it clears when the ticket has a line or a row in the
 	// ticket list.
@@ -111,6 +114,9 @@ func (w *world) apply(envs []events.Envelope) (touched map[string]bool, fresh bo
 			continue
 		}
 		t, isNew := w.ticketFor(id)
+		if isNew {
+			t.firstAt, _ = e.At()
+		}
 		fresh = fresh || isNew
 		t.awaiting = false
 		touched[id] = true

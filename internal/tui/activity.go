@@ -128,6 +128,47 @@ func plannedSlices(s *statusInfo) int {
 	return n
 }
 
+// planned are the slices of the ticket's status that the brief planned, in
+// its order: not the fix slices a gate round sent back.
+func (t *ticket) planned() []statusSlice {
+	if t.status == nil {
+		return nil
+	}
+	var out []statusSlice
+	for _, s := range t.status.Slices {
+		if s.FromGate == 0 {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// headings are the headings of the brief's sections, as the status lists
+// them.
+func (t *ticket) headings() []string {
+	if t.status == nil || t.status.Brief == nil {
+		return nil
+	}
+	var out []string
+	for _, s := range t.status.Brief.Sections {
+		out = append(out, s.Heading)
+	}
+	return out
+}
+
+// goal is the whole goal of slice id as the status gives it, "" before the
+// first status or for a slice it does not list.
+func (t *ticket) goal(id string) string {
+	if t.status != nil {
+		for _, s := range t.status.Slices {
+			if s.ID == id {
+				return s.Goal
+			}
+		}
+	}
+	return ""
+}
+
 // subjects maps each commit the ticket verified to its subject, which jig
 // verify writes on its verify-pending line.
 func (t *ticket) subjects() map[string]string {
@@ -428,20 +469,31 @@ func pickSummary(l events.Envelope) string {
 // findings:", "Gate finding r1-f1, kept by the human:"): its line is the
 // first finding after the heading. Any other goal's is its first line.
 func goalLine(goal string) string {
-	first := ""
+	return firstOf(goalLines(goal)...)
+}
+
+// goalText is a goal as one paragraph, from its first line that is not a
+// heading on: what a card has the rows to show of it.
+func goalText(goal string) string {
+	return strings.Join(goalLines(goal), " ")
+}
+
+// goalLines are a goal's lines that say something, from the first that is
+// not a heading ending in a colon ("Fix these gate findings:"); all of them
+// when every line is one.
+func goalLines(goal string) []string {
+	var lines []string
 	for _, line := range strings.Split(goal, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if first == "" {
-			first = line
-		}
-		if !strings.HasSuffix(line, ":") {
-			return line
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
 		}
 	}
-	return first
+	for i, line := range lines {
+		if !strings.HasSuffix(line, ":") {
+			return lines[i:]
+		}
+	}
+	return lines
 }
 
 // goalTail is " · <goal>" for a slice whose goal is known.

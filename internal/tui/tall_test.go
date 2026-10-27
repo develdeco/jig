@@ -71,7 +71,7 @@ func TestATallTerminalShowsMoreActivityAndSubstepsAndLeavesNoEmptyArea(t *testin
 	if len(rows) != 50 {
 		t.Fatalf("the screen has %d lines, want its height of 50:\n%s", len(rows), v)
 	}
-	block, act := panelLines(rows, "2 Build · sub-steps"), panelLines(rows, "2 Build · activity")
+	block, act := panelLines(rows, "Build ─"), panelLines(rows, "Build activity")
 	if shown := len(block) - 2; shown <= substepLines {
 		t.Errorf("the sub-steps block lists %d, want more than the %d of the 80x24 screen:\n%s", shown, substepLines, v)
 	}

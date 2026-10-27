@@ -13,7 +13,7 @@ jig  demo › JIG-2 › 4 publish                                        ✓ pub
       - b: ddddddd
   ✓ published  09:14:22
 
-  ╭─ 4 Publish · activity ───────────────────────────────────── latest 5 of 7 ─╮
+  ╭─ Publish activity ───────────────────────────────────────── latest 5 of 7 ─╮
   │  09:14:10 ▲ approval · you approved api ccccccc                            │
   │  09:14:11 ▲ approval · you approved web ddddddd                            │
   │  09:14:20 ▲ pull request api · opened https://example.test/acme/api/pull/7 │

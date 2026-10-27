@@ -13,9 +13,9 @@ import (
 
 // The sub-steps block folds every sub-step to a line and opens the one that
 // matters now into a card: what it is for, who holds it, and its latest moves,
-// which are its own journal lines and the commands the session that holds it
-// ran meanwhile (the machine ledger's tool lines). A block too short for the
-// card keeps the one-line form.
+// which are its own journal lines and what the session that holds it did
+// meanwhile, in the words it gave each call (the machine ledger's tool lines).
+// A block too short for the card keeps the one-line form.
 
 const (
 	// cardMoves is the most moves a card lists.
@@ -23,6 +23,10 @@ const (
 	// cardMin is the fewest rows a card takes: its two edges, one fact and one
 	// move.
 	cardMin = 4
+	// goalRows is the most rows a slice's goal takes in its card, and
+	// briefRows the most a brief's sections or slices take.
+	goalRows  = 3
+	briefRows = 3
 )
 
 // focusIndex is the sub-step the block opens into a card: a person's turn or a
@@ -47,7 +51,7 @@ type subTrack struct {
 	start, end time.Time
 	// borrowed is set when the holder is the ticket's latest session, not one
 	// the sub-step's own lines name (openTrack): it finds the moves, and is
-	// not named as the sub-step's holder.
+	// named only for a sub-step whose role says what it does there.
 	borrowed bool
 }
 
@@ -73,31 +77,55 @@ func (t *ticket) trackOf(step int, key string) subTrack {
 }
 
 // openTrack is trackOf for a sub-step under way. One that has written no line
-// of its own yet (a pull request being opened once its body is written) is held
-// by the session that wrote the ticket's latest line naming one, since the
-// ticket's latest line: what that session has run since are its moves.
+// of its own yet (a pull request being opened once its body is written, a
+// brief being drafted) is held by the session that wrote the ticket's latest
+// line naming one, since the ticket's latest line: what that session has done
+// since are its moves. A ticket whose journal names no session yet is held by
+// the session the machine ledger ties to it (the one that minted it, for a
+// brief), since its first line there.
 func (t *ticket) openTrack(step int, key string) subTrack {
 	tr := t.trackOf(step, key)
 	if len(tr.own) > 0 {
 		return tr
 	}
+	for _, l := range t.seen {
+		if at, ok := l.At(); ok && at.After(tr.start) {
+			tr.start = at
+		}
+	}
 	for i := len(t.lines) - 1; i >= 0; i-- {
 		l := t.lines[i]
-		if at, ok := l.At(); ok && tr.start.IsZero() {
+		if at, ok := l.At(); ok && at.After(tr.start) {
 			tr.start = at
 		}
 		if l.Session != "" {
 			tr.holder, tr.borrowed = l.Session, true
-			break
+			return tr
+		}
+	}
+	for _, l := range t.ledger {
+		if l.Session == "" {
+			continue
+		}
+		tr.holder, tr.borrowed = l.Session, true
+		if at, ok := l.At(); ok && tr.start.IsZero() {
+			tr.start = at
 		}
 	}
 	return tr
 }
 
 // moves are the track's lines and, between its first line and its end (now,
-// while the sub-step is open), the commands its holder ran, oldest first.
+// while the sub-step is open), the calls its holder made, oldest first. A
+// line that took the sub-step is left out: the card's header says who holds
+// it and since when.
 func (t *ticket) moves(tr subTrack, open bool, now time.Time) []events.Envelope {
-	out := append([]events.Envelope(nil), tr.own...)
+	var out []events.Envelope
+	for _, l := range tr.own {
+		if l.Event != journal.EventClaim && l.Event != journal.EventGateReviewer {
+			out = append(out, l)
+		}
+	}
 	if tr.holder == "" || tr.start.IsZero() {
 		return out
 	}
@@ -165,23 +193,21 @@ func (m *Model) tildeHome(cmd string) string {
 }
 
 // moveLine is one move of a card: its time, then what the journal line says,
-// or the command the holder ran with its exit status when it failed.
+// or what the holder did in the words it gave the call (the command itself
+// when it gave none), with the exit status of a command that failed.
 func (m *Model) moveLine(t *ticket, l events.Envelope) string {
 	at := m.st.dim(clock(l, m.zone)) + " "
 	if l.Src != events.SrcLedger {
-		text := m.say(t, l)
-		if l.Event == journal.EventClaim {
-			// The card's goal row says what a claim's line adds after it.
-			text = firstOf(m.whoAs(t, l.Session, roleOf(l.Event)), "a session") + " took it"
-		}
-		return at + m.st.icon(eventState(l)) + " " + text
+		return at + m.st.icon(eventState(l)) + " " + m.say(t, l)
 	}
-	cmd := m.tildeHome(shownCommand(l.Command))
-	text := m.st.dim("$") + " ran `" + cmd + "`"
+	text := "$ `" + m.tildeHome(shownCommand(l.Command)) + "`"
+	if d := strings.TrimSpace(l.Description); d != "" {
+		text = m.tildeHome(d)
+	}
 	if l.Exit != nil && *l.Exit != 0 {
-		text = m.st.state(StateStalled, "$") + " ran `" + cmd + "`" + m.st.state(StateStalled, " · exit "+strconv.Itoa(*l.Exit))
+		return at + m.st.state(StateStalled, "✗ "+text+" · exit "+strconv.Itoa(*l.Exit))
 	}
-	return at + text
+	return at + m.st.dim("·") + " " + text
 }
 
 // subRole is the role a sub-step's holder plays in it, for naming the session.
@@ -197,32 +223,107 @@ func subRole(key string) string {
 	return ""
 }
 
-// cardFacts are the rows of a card above its moves: the goal of a slice and
-// who holds the sub-step, each when known and not already said by the
-// sub-step's detail, which heads the card ("claimed by builder (...)").
-func (m *Model) cardFacts(t *ticket, s phase.Sub, tr subTrack) [][2]string {
-	var facts [][2]string
+// cardFact is one fact of a card, above its moves: a label and the rows that
+// say it, wrapped to the card.
+type cardFact struct {
+	label string
+	rows  []string
+}
+
+// cardText is how many cells a card leaves the text of a row: the card is the
+// panel's inside, and a row is its edges, a space on each side and a label.
+func (m *Model) cardText() int { return max(10, m.width-7-11) }
+
+// cardFacts are the rows of a card above its moves, each when known and not
+// already said by the sub-step's detail, which heads the card ("claimed by
+// builder (...)"): the goal of a slice; the sections of a brief whose slices
+// are being written, or its slices once they are; and who holds the sub-step.
+func (m *Model) cardFacts(t *ticket, s phase.Sub, tr subTrack) []cardFact {
+	var facts []cardFact
+	tw := m.cardText()
 	kind, id, _ := strings.Cut(s.Key, ":")
-	if kind == "slice" {
-		if goal := t.goals()[id]; goal != "" {
-			facts = append(facts, [2]string{"goal", goal})
+	switch kind {
+	case "slice":
+		if goal := goalText(t.goal(id)); goal != "" {
+			facts = append(facts, cardFact{"goal", wrap(goal, tw, goalRows)})
+		}
+	case "slices":
+		if hs := t.headings(); len(hs) > 0 {
+			facts = append(facts, cardFact{"brief", wrap(strings.Join(hs, " · "), tw, briefRows)})
+		}
+	case "approved":
+		if rows := m.sliceRows(t, tw); len(rows) > 0 {
+			facts = append(facts, cardFact{"slices", rows})
 		}
 	}
-	if tr.holder != "" && !tr.borrowed {
-		who := m.whoWithAs(t, tr.holder, subRole(s.Key))
+	if tr.holder != "" && (!tr.borrowed || subRole(s.Key) != "") {
+		who := m.holderWho(t, tr.holder, subRole(s.Key))
 		if kind == "round" {
 			n, _ := strconv.Atoi(id)
 			who = firstOf(m.reviewerWho(t, tr.holder, n, "", nil), who)
 		}
 		if who != "" && !strings.Contains(s.Detail, who) {
-			facts = append(facts, [2]string{"who", who})
+			facts = append(facts, cardFact{"who", []string{who}})
 		}
 	}
 	return facts
 }
 
+// holderWho names the session that holds a sub-step of role: as whoWithAs
+// does, and by the role itself when the session has played none on the ticket
+// yet (the planner of a brief nobody has approved).
+func (m *Model) holderWho(t *ticket, session, role string) string {
+	if role != "" && t.firstRole(session) == "" {
+		if d := m.sessionDesc(session); d != "" {
+			return role + " (" + d + ")"
+		}
+		return role
+	}
+	return m.whoWithAs(t, session, role)
+}
+
+// sliceRows are the brief's planned slices as rows of a card, each its id and
+// goal, briefRows at most, the last one counting the rest when they do not
+// all fit.
+func (m *Model) sliceRows(t *ticket, tw int) []string {
+	var rows []string
+	planned := t.planned()
+	for i, s := range planned {
+		if len(rows) == briefRows-1 && len(planned) > briefRows {
+			rows = append(rows, m.st.dim("+"+strconv.Itoa(len(planned)-i)+" more"))
+			break
+		}
+		rows = append(rows, fit(s.ID+m.st.dim(" · ")+goalText(s.Goal), tw))
+	}
+	return rows
+}
+
+// factRows is how many rows facts take.
+func factRows(facts []cardFact) int {
+	n := 0
+	for _, f := range facts {
+		n += len(f.rows)
+	}
+	return n
+}
+
+// trimFacts is facts in at most n rows: the last fact gives up rows first, its
+// last kept row ending in an ellipsis, and goes when it has one row left.
+func trimFacts(facts []cardFact, n int) []cardFact {
+	for len(facts) > 0 && factRows(facts) > n {
+		last := &facts[len(facts)-1]
+		if len(last.rows) <= 1 {
+			facts = facts[:len(facts)-1]
+			continue
+		}
+		last.rows = last.rows[:len(last.rows)-1]
+		last.rows[len(last.rows)-1] = strings.TrimRight(last.rows[len(last.rows)-1], " …") + " …"
+	}
+	return facts
+}
+
 // cardParts are what the card of s shows: its track, its moves and its facts.
-func (m *Model) cardParts(t *ticket, step int, s phase.Sub) (subTrack, []events.Envelope, [][2]string) {
+func (m *Model) cardParts(t *ticket, step int, s phase.Sub) (subTrack, []events.Envelope, []cardFact) {
 	tr := t.openTrack(step, s.Key)
 	return tr, t.moves(tr, true, m.now()), m.cardFacts(t, s, tr)
 }
@@ -235,7 +336,7 @@ func (m *Model) cardWant(t *ticket, step int, s phase.Sub) int {
 	if len(moves)+len(facts) == 0 {
 		return 0
 	}
-	return 2 + len(facts) + max(1, min(len(moves), cardMoves))
+	return 2 + factRows(facts) + max(1, min(len(moves), cardMoves))
 }
 
 // card is s opened up in rows lines, the most it may take: a frame in its
@@ -245,10 +346,8 @@ func (m *Model) card(t *ticket, step int, s phase.Sub, rows int) []string {
 	tr, moves, facts := m.cardParts(t, step, s)
 	now := m.now()
 	room := max(1, rows-2)
-	for len(facts) > 0 && len(facts)+min(max(1, len(moves)), 2) > room {
-		facts = facts[:len(facts)-1]
-	}
-	keep := min(cardMoves, room-len(facts))
+	facts = trimFacts(facts, room-min(max(1, len(moves)), 2))
+	keep := min(cardMoves, room-factRows(facts))
 	if len(moves) > keep {
 		moves = moves[len(moves)-keep:]
 	}
@@ -264,14 +363,22 @@ func (m *Model) card(t *ticket, step int, s phase.Sub, rows int) []string {
 	if !tr.start.IsZero() && now.After(tr.start) {
 		right = " " + m.st.state(state, span(now.Sub(tr.start))) + " "
 	}
-	fill := w - 4 - width(title) - width(right)
-	if fill < 1 {
-		right, fill = "", max(1, w-4-width(title))
+	if w-4-width(title)-width(right) < 1 {
+		title = fit(title, max(1, w-5-width(right)))
 	}
+	fill := max(1, w-4-width(title)-width(right))
 	out := []string{edge("╭ ") + title + " " + edge(strings.Repeat("─", fill)) + right + edge("╮")}
-	row := func(label, text string) string { return edge("│") + " " + m.st.dim(pad(label, 6)) + text }
+	row := func(label, text string) string {
+		return edge("│") + " " + pad(m.st.dim(pad(label, 7))+text, w-4) + " " + edge("│")
+	}
 	for _, f := range facts {
-		out = append(out, row(f[0], f[1]))
+		for i, r := range f.rows {
+			label := ""
+			if i == 0 {
+				label = f.label
+			}
+			out = append(out, row(label, r))
+		}
 	}
 	if len(moves) == 0 {
 		out = append(out, row("moves", m.st.dim("nothing yet")))

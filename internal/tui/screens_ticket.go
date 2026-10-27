@@ -183,7 +183,7 @@ func (m *Model) ticketFocus(steps []stepRow, questions int) int {
 }
 
 // substepsPanel is a panel of the sub-steps of step, height lines tall with its
-// frame: a checklist with a state, a label and a few words of detail each, and
+// frame, titled by the step's name alone (the steps above number it): a checklist with a state, a label and a few words of detail each, and
 // the one that matters now (focusIndex) opened into a card (focus.go) when the
 // panel has room for it beside the rest. When they do not all fit it shows the
 // ones that matter most (a person's turn, a failure, the work under way), in
@@ -196,7 +196,7 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 			done++
 		}
 	}
-	p.boxTop(stepTitle(step)+" · sub-steps", fmt.Sprintf("%d of %d done", done, len(subs)))
+	p.boxTop(stepNames[step], fmt.Sprintf("%d of %d done", done, len(subs)))
 	room := height - 2
 	focus, cardRows := focusIndex(subs), 0
 	if want := 0; focus >= 0 {
@@ -254,14 +254,39 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	return p
 }
 
-// foldedLine is a sub-step folded to a line: subLine, and how long it took once
-// it is done.
+// foldedLine is a sub-step folded to a line: subLine with what the status adds
+// to its detail (subDetail), and how long it took once it is done.
 func (m *Model) foldedLine(t *ticket, step int, s phase.Sub) string {
+	s.Detail = m.subDetail(t, s)
 	line := m.subLine(step, s)
 	if sum := t.subSummary(step, s); sum != "" {
 		line += m.st.dim(" · " + sum)
 	}
 	return line
+}
+
+// subDetail is a sub-step's detail with what the status adds to it once it is
+// done: the headings of the brief's sections, the ids of its slices.
+func (m *Model) subDetail(t *ticket, s phase.Sub) string {
+	if s.State != phase.SubDone {
+		return s.Detail
+	}
+	var names []string
+	switch s.Key {
+	case "drafted":
+		names = t.headings()
+	case "slices":
+		for _, sl := range t.planned() {
+			names = append(names, sl.ID)
+		}
+	}
+	switch {
+	case len(names) == 0:
+		return s.Detail
+	case s.Detail == "":
+		return strings.Join(names, ", ")
+	}
+	return s.Detail + ": " + strings.Join(names, ", ")
 }
 
 // pickSubs are the positions of the sub-steps to show in room lines, in their
@@ -375,7 +400,7 @@ func (m *Model) activityPanel(p *page, t *ticket, step int) {
 		right = fmt.Sprintf("latest %d of %d", keep, n)
 		lines = lines[n-keep:]
 	}
-	p.boxTop(stepTitle(step)+" · activity", right)
+	p.boxTop(stepNames[step]+" activity", right)
 	if len(lines) == 0 {
 		p.boxAdd(m.st.dim("nothing yet"))
 	}
