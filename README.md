@@ -17,10 +17,11 @@ records the review and the publish.
 On the left, one Claude Code session (Sonnet 5) works on a small shop project;
 on the right, `jig tui` opens the ticket as soon as the session creates it and
 follows it from its brief to its pull request. The recording runs at twice its
-speed, with the waits cut. The person typed one prompt that names no ticket,
-answered the session's three questions with the answers it recommended, and
-allowed the four shell commands Claude Code asked about (the frames of two,
-which showed a home folder, are cut); the session took 9m 58s:
+speed with the waits cut, and stops on each of the session's questions and on
+each sub-step as it starts and ends. The person typed one prompt that names no
+ticket, answered the session's three questions with the answers it
+recommended, and allowed the one shell command Claude Code asked about (its
+frames, which showed a home folder, are cut); the session took 7m 45s:
 
 > Fix a bug: cart.Total takes the discount off each line and truncates, so three
 > items at 3.33 with 10% off cost 8.97 instead of 8.99. [...] Take it from brief
@@ -30,28 +31,45 @@ A prompt that names several phases is a start-to-finish run: the session runs
 the phases one after another, each with its skill, without waiting for a prompt
 per phase, and still asks the person every decision; each skill starts and ends
 with `jig next`, which says where the ticket stands and what comes next. The TUI
-shows the four steps; under them the step under way, its part under way opened
-with how far it has come, what it is and its latest move; then one activity log,
-newest first, each line tagged with its step and sub-step:
+shows the four steps with how long each has taken and their total; under them
+the step under way, its part under way opened with how far it has come, what it
+is and its latest move; then one activity log, newest first, each line tagged
+with its step and sub-step:
 
 1. **Brief.** The prompt names no ticket, so the session mints SHOP-1 with
-   `jig ticket new` and the TUI opens it. It drafts `brief.md` and
+   `jig ticket new`, and the TUI opens it. It drafts `brief.md` and
    `slices.yaml` with the intake skill, asks how a half cent should round,
-   shows the brief, and records the approval once the person confirms it.
+   asks the person to approve the brief, and records the approval.
 2. **Build.** The session claims the slice and commits with a `Jig-Slice:`
    trailer. jig runs the slice's oracle on a detached copy of the commit and
    counts the slice green: green is what jig ran, never what the model said.
 3. **Review.** The session built the change, so `jig gate` advises a reviewer
-   in a fresh context, and the session runs one as a subagent (Opus 5) for each
-   round, waiting for its verdict in the same turn. Round 1 finds every test
-   buying one of each item, so a change that dropped the quantity from the
-   subtotal would pass; it sends back a fix, the session adds a test with a
-   quantity above one, and round 2 comes back clean. jig checks that each
+   in a fresh context, and the session runs one as a subagent (Opus 5),
+   waiting for its verdict in the same turn. The round comes back clean, with
+   two notes that need no change: a negative total would round toward zero,
+   and the order-wide product overflows on a 32-bit build. jig checks that the
    round's reviewer built none of what it reviewed.
 4. **Publish.** The session asks before it publishes; on the person's yes it
    renders the body with `jig publish --body`, pushes the reviewed head, opens
    the pull request with `gh`, and records it with `jig publish --pr`
-   ([develdeco/jig-demo-shop#15](https://github.com/develdeco/jig-demo-shop/pull/15)).
+   ([develdeco/jig-demo-shop#17](https://github.com/develdeco/jig-demo-shop/pull/17)).
+
+The shop's store is shared, and jig mirrors it onto GitHub at every checkpoint:
+
+- **The store.** [develdeco/jig-demo-shop-tickets](https://github.com/develdeco/jig-demo-shop-tickets)
+  holds SHOP-1 under [`tickets/SHOP-1`](https://github.com/develdeco/jig-demo-shop-tickets/tree/main/tickets/SHOP-1):
+  its brief, its slices, the review round, the pull request's body and the
+  journal the TUI reads. Each change is a commit of its own.
+- **The mirror.** SHOP-1 is issue
+  [develdeco/jig-demo-shop#16](https://github.com/develdeco/jig-demo-shop/issues/16),
+  whose body jig renders from the store (the slices, the pull request and the
+  brief). It sits with its pull request on the
+  [jig demo shop board](https://github.com/users/develdeco/projects/3), in the
+  column the ticket has reached. Its record is
+  [`trackers/github/develdeco/jig-demo-shop/16.yaml`](https://github.com/develdeco/jig-demo-shop-tickets/blob/main/trackers/github/develdeco/jig-demo-shop/16.yaml)
+  in the store.
+- **The branch.** A mirrored ticket's branch is named by its issue, so the
+  pull request's branch is `16-cart-round-discount-once-on-the-order`.
 
 Adding "go with your recommendations" to the prompt would hand those decisions
 to the session, and the run would need no one.
