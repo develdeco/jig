@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/graphify"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/store"
@@ -30,32 +29,24 @@ const (
 const seamsHeading = "Seams"
 
 // Input is what Build reads. Everything but Store, Ticket and Slice is
-// optional: a context built without a clone has no oracle command, no
-// earlier commits and no graph, and says so by leaving them out.
+// optional: a context built without a clone has no oracle command and no
+// earlier commits, and says so by leaving them out.
 type Input struct {
 	Store  *store.Store
 	Ticket string
 	Slice  string
 	// Repo is the name of the repo the slice builds in, and RepoDir its clone
-	// on this machine: where the manifest is read, the commits of the earlier
-	// slices are found by their Jig-Slice trailer, and the code graph runs.
+	// on this machine: where the manifest is read and the commits of the
+	// earlier slices are found by their Jig-Slice trailer.
 	Repo    string
 	RepoDir string
-	// Graph is the code-graph plane. nil, or a plane that is not enabled,
-	// leaves Related empty and records nothing.
-	Graph graphify.Plane
-	// RecordGraph receives the graph line (Event graph) after each run of the
-	// plane, for the machine ledger. nil records none.
-	RecordGraph func(journal.Line) error
-	// Session is the harness session the line is recorded for.
-	Session string
 }
 
 // Context is what a builder needs to start on one slice: the slice itself, the
 // brief sections it builds from, what the ticket verified slices already
-// did, the failed attempts so far, the code a graph links to its goal, and
-// the questions and notes about it. It is the pulled form of what
-// slice.json carried.
+// did, the failed attempts so far, and the questions and notes about it. It
+// is the pulled form of what slice.json carried, and holds only jig's own
+// records: the code is the builder's to find with its own tools (ADR 0034).
 type Context struct {
 	Ticket string `json:"ticket"`
 	Title  string `json:"title,omitempty"`
@@ -86,8 +77,6 @@ type Context struct {
 	// FailedAttempts are the latest failed verifications of the slice, oldest
 	// first, each with the summary of why.
 	FailedAttempts []FailedAttempt `json:"failed_attempts"`
-	// Related is the code a graph links to the slice goal, by file.
-	Related []RelatedFile `json:"related"`
 	// Questions are the questions about the slice, open and answered, in id
 	// order.
 	Questions []Question `json:"questions"`
@@ -144,13 +133,6 @@ type FailedAttempt struct {
 	Seconds int    `json:"seconds,omitempty"`
 }
 
-// RelatedFile is a file the code graph links to the goal of the slice, with
-// the symbols in it that matched, as "<label> L<line>".
-type RelatedFile struct {
-	File    string   `json:"file"`
-	Symbols []string `json:"symbols"`
-}
-
 // Question is a question about the slice and, once answered, its answer and
 // who the answer speaks for.
 type Question struct {
@@ -171,7 +153,7 @@ type Note struct {
 }
 
 // Build reads everything a context holds. A part that cannot be had for lack
-// of a clone, a manifest or a graph is left empty; a part that is there and
+// of a clone or a manifest is left empty; a part that is there and
 // cannot be read is an error.
 func Build(in Input) (Context, error) {
 	st := in.Store
@@ -211,7 +193,6 @@ func Build(in Input) (Context, error) {
 		BriefSections:  []BriefSection{},
 		EarlierSlices:  []EarlierSlice{},
 		FailedAttempts: []FailedAttempt{},
-		Related:        []RelatedFile{},
 		Questions:      []Question{},
 		Notes:          []Note{},
 	}
@@ -234,7 +215,6 @@ func Build(in Input) (Context, error) {
 	c.Notes = notes(lines, sl.ID)
 
 	c.EarlierSlices = earlierSlices(in, lines)
-	c.Related = related(in, *sl, c.EarlierSlices)
 
 	questions, err := st.ReadQuestions(in.Ticket)
 	if err != nil {
@@ -368,13 +348,6 @@ func (c Context) Blocks() []string {
 			rows = append(rows, []string{fmt.Sprint(a.Attempt), short(a.Commit), dash(a.Summary)})
 		}
 		blocks = append(blocks, axi.Table("failed_attempts", []string{"attempt", "commit", "summary"}, rows))
-	}
-	if len(c.Related) > 0 {
-		rows := make([][]string, 0, len(c.Related))
-		for _, r := range c.Related {
-			rows = append(rows, []string{r.File, strings.Join(r.Symbols, "+")})
-		}
-		blocks = append(blocks, axi.Table("related", []string{"file", "symbols"}, rows))
 	}
 	if len(c.Questions) > 0 {
 		rows := make([][]string, 0, len(c.Questions))

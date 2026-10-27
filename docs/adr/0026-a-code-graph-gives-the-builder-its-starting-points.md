@@ -1,5 +1,7 @@
 # A code graph gives the builder its starting points
 
+**Superseded by [ADR 0034](0034-jig-advises-context-and-runs-no-context-tool.md):** jig runs no code graph or other context tool for a session. `jig context` returns jig's own records and says the code is the session's to find with its own tools, starting from the files the earlier slices changed; `internal/graphify`, the `related` block, the ledger's `graph` line and the `context:` key's reader are gone.
+
 **Inverted by [ADR 0032](0032-jig-attaches-to-the-harness.md):** the graph runs on demand in `jig context` (the same opt-in, bounds and `/graphify-out/` exclude), and the `graph` line goes to the machine ledger instead of the ticket journal; `related` is a block of that command's output, not a `slice.json` field.
 
 A build session starts by learning the code it is about to change: BS-3's builder spent its first ten minutes on 36 file reads, 18 greps and dozens of shell reads before its first edit. ADR 0025 hands a later slice what earlier slices of the ticket built; the first slice, and every slice's untouched code, still start cold. jig shipped a graphify plane in v0.1 (an interface, a `graphify affected` shell-out and a no-op fallback) with no caller.
