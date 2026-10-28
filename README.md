@@ -12,16 +12,17 @@ records the review and the publish.
 
 ## What working with jig looks like
 
-![One Claude Code session taking a ticket from its brief to its pull request on the left, jig tui following its four steps on the right](docs/media/jig-in-a-session.gif)
+https://github.com/user-attachments/assets/729724dc-ca6f-4706-b371-a375e531fe54
 
 On the left, one Claude Code session (Sonnet 5) works on a small shop project;
 on the right, `jig tui` opens the ticket as soon as the session creates it and
-follows it from its brief to its pull request. The recording runs at twice its
-speed with the waits cut, and stops on each of the session's questions and on
-each sub-step as it starts and ends. The person typed one prompt that names no
-ticket, answered the session's two questions with the answers it recommended,
-and allowed the shell commands Claude Code asked about (the frames of one,
-which showed a home folder, are cut); the session took 15m 32s:
+follows it from its brief to its pull request. The video runs at three times
+its speed with the waits cut, and stops briefly on each of the session's
+questions and on each sub-step as it starts and ends. The person typed one
+prompt that names no ticket, answered the session's two questions with the
+answers it recommended, and allowed the shell commands Claude Code asked about
+(the frames of one, which showed a home folder, are cut); the session took
+15m 32s:
 
 > Fix a bug: cart.Total takes the discount off each line and truncates, so three
 > items at 3.33 with 10% off cost 8.97 instead of 8.99. [...] Take it from brief
