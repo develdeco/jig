@@ -366,11 +366,10 @@ func TestLandTrackerWritesPushesWhatSyncCommittedAndNothingWroteSince(t *testing
 	}
 }
 
-// TestLandTrackerWritesPutsItsPathsBackWhenThePushFails: a landing whose push
-// the origin refuses outright returns the cause, keeps its commit for the
-// next checkpoint's push, and notes the paths again so a later landing in the
-// same process tries them.
-func TestLandTrackerWritesPutsItsPathsBackWhenThePushFails(t *testing.T) {
+// TestLandTrackerWritesKeepsItsCommitWhenThePushFails: a landing whose push
+// the origin refuses outright returns the cause and keeps its commit, which
+// the next checkpoint's push carries.
+func TestLandTrackerWritesKeepsItsCommitWhenThePushFails(t *testing.T) {
 	st, work, remote, _ := newLandStore(t)
 	putRecord(t, st, TrackerOwner{Ticket: "JIG-1"}, "acme/tracking", 7)
 	runGit(t, work, "remote", "set-url", "origin", filepath.Join(filepath.Dir(remote), "gone.git"))
@@ -383,8 +382,88 @@ func TestLandTrackerWritesPutsItsPathsBackWhenThePushFails(t *testing.T) {
 	}
 
 	runGit(t, work, "remote", "set-url", "origin", remote)
-	if err := st.LandTrackerWrites(); err != nil {
-		t.Fatalf("LandTrackerWrites once origin is back: %v", err)
+	if err := st.Push("JIG-1: next checkpoint"); err != nil {
+		t.Fatalf("Push once origin is back: %v", err)
+	}
+	if local, origin := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD")), strings.TrimSpace(runGit(t, remote, "rev-parse", "main")); local != origin {
+		t.Fatalf("origin is at %s, want it level with the store at %s", origin, local)
+	}
+}
+
+// TestCheckpointHookPushesWritesAnotherProcessesSyncCommitted: another
+// process's Sync commits the working tree, the hook's record writes with it,
+// and never pushes. The landing then finds nothing of its own to commit, and
+// pushes because the branch is ahead of origin.
+func TestCheckpointHookPushesWritesAnotherProcessesSyncCommitted(t *testing.T) {
+	st, work, remote, warnings := newLandStore(t)
+	st.AfterCheckpoint = func(s *Store) error {
+		putRecord(t, s, TrackerOwner{Ticket: "JIG-1"}, "acme/tracking", 7)
+		runGit(t, work, "add", "-A")
+		runGit(t, work, "commit", "-m", leftoversMessage)
+		return nil
+	}
+
+	st.RunCheckpointHook()
+
+	if len(*warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", *warnings)
+	}
+	if got := runGit(t, remote, "show", "main:trackers/github/acme/tracking/7/record.yaml"); !strings.Contains(got, "issue: 7") {
+		t.Errorf("origin's record = %q, want the one the other process's commit holds", got)
+	}
+	if local, origin := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD")), strings.TrimSpace(runGit(t, remote, "rev-parse", "main")); local != origin {
+		t.Errorf("origin is at %s, want it level with the store at %s", origin, local)
+	}
+}
+
+// TestCheckpointHookLandingTakesWhatMovedWithAChangeUncommitted: origin moved
+// while the sync ran and another process has a tracked file modified in the
+// working tree, which the landing leaves where it is. A rebase refuses a dirty
+// tree, so a rejected push records that change first, as Sync does, and then
+// takes what moved: the store still ends level with origin.
+func TestCheckpointHookLandingTakesWhatMovedWithAChangeUncommitted(t *testing.T) {
+	st, work, remote, warnings := newLandStore(t)
+	base := filepath.Join(work, "base.txt")
+	if err := os.WriteFile(base, []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Push("JIG-1: base"); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(t.TempDir(), "other")
+	runGit(t, "", "clone", remote, other)
+	runGit(t, other, "config", "user.name", "other")
+	runGit(t, other, "config", "user.email", "other@example.invalid")
+
+	st.AfterCheckpoint = func(s *Store) error {
+		putRecord(t, s, TrackerOwner{Ticket: "JIG-1"}, "acme/tracking", 7)
+		if err := os.WriteFile(base, []byte("one\ntwo\n"), 0o644); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(other, "note.txt"), []byte("theirs\n"), 0o644); err != nil {
+			return err
+		}
+		runGit(t, other, "add", "-A")
+		runGit(t, other, "commit", "-m", "theirs")
+		runGit(t, other, "push", "origin", "main")
+		return nil
+	}
+	st.RunCheckpointHook()
+
+	if len(*warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", *warnings)
+	}
+	if got := porcelain(t, work); got != "" {
+		t.Fatalf("working tree still dirty after the landing:\n%s", got)
+	}
+	files := runGit(t, remote, "ls-tree", "-r", "--name-only", "main")
+	for _, want := range []string{"note.txt", "trackers/github/acme/tracking/7/record.yaml"} {
+		if !strings.Contains(files, want+"\n") {
+			t.Errorf("origin lacks %s:\n%s", want, files)
+		}
+	}
+	if got := runGit(t, remote, "show", "main:base.txt"); got != "one\ntwo\n" {
+		t.Errorf("origin's base.txt = %q, want the change recorded before the rebase", got)
 	}
 	if local, origin := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD")), strings.TrimSpace(runGit(t, remote, "rev-parse", "main")); local != origin {
 		t.Fatalf("origin is at %s, want it level with the store at %s", origin, local)

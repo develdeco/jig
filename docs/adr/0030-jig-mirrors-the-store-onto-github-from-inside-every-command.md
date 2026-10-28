@@ -125,12 +125,18 @@ pushes, so a teammate's clone and the store on GitHub never saw it.
   `RebuildTrackerLinks`, `DropLegacyTrackerRecord`) note the paths they change
   in the working tree, and `Store.RunCheckpointHook` ends by committing exactly
   those paths and pushing (`landTrackerWrites`). The commit is the person's,
-  `jig: record the tracker mirror's sync`, scoped by pathspec the way `Claim`'s
-  is, so any other dirty state in the store (a journal line another process
-  just wrote) stays where it is. A sync that failed part-way lands the records
-  it did write, which are true. A landing that fails (the origin cannot be
-  reached, a rebase conflicts) is one warning, and the records stay for the
-  next checkpoint's commit, as before.
+  `jig: record the tracker mirror's sync`, limited to those paths the way
+  `Claim`'s is, so any other dirty state in the store (a journal line another
+  process just wrote) stays where it is. A sync that failed part-way lands the
+  records it did write, which are true. The push is made when the landing
+  committed, and also when the branch is ahead of origin anyway (another
+  process's `Store.Sync` swept the writes into a commit of its own and never
+  pushes). When origin moved on and the push is rejected, the landing records
+  the other uncommitted changes the way `Sync` does before it rebases onto what
+  moved, since a rebase refuses a dirty tree. A landing that fails (the origin
+  cannot be reached, a rebase conflicts) is one warning: the commit is already
+  in the clone and waits for the next checkpoint's push, or the files for its
+  commit, as before.
 - **An up-to-date store costs nothing.** `WriteTrackerRecord` leaves a record
   that already holds the bytes alone and notes nothing, so a sync that finds
   nothing to change makes no commit, no push and no git process: only a
@@ -142,9 +148,11 @@ pushes, so a teammate's clone and the store on GitHub never saw it.
   mirror's sync, a run that is not a dry run calls `Store.LandTrackerWrites`,
   which commits the noted paths and pushes the branch whether or not there was
   anything new to commit, so the commit `Sync` made of the leftovers reaches
-  origin too. It leaves nothing uncommitted or unpushed; `--dry-run` still
-  writes to neither GitHub nor the store, and lands nothing. A landing that
-  fails is the command's error.
+  origin too. On a store with an origin it leaves nothing it wrote, or `Sync`
+  committed, unpushed (a standalone store has no origin, and `Sync` leaves its
+  leftovers alone). `--dry-run` still writes to neither GitHub nor the store,
+  and lands nothing. A landing that fails is the command's error, or, when the
+  sync failed as well, a warning beside the sync's error.
 
 The observe hooks' own journal lines (a session's `spend` line, the note of a
 question left open) are not mirror writes and are not landed this way: they

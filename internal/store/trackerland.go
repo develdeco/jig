@@ -50,8 +50,8 @@ func (s *Store) takeTrackerWrites() []string {
 // LandTrackerWrites commits what the tracker tree's writers changed in the
 // working tree since the last landing and pushes the store to its origin,
 // whether or not there was anything to commit: it is how `jig trackers sync`
-// leaves nothing uncommitted or unpushed, the commit Sync made of the
-// leftovers before the sync included.
+// on a store with an origin ends with the mirror's records, and the commit
+// Sync made of the leftovers before the sync, on origin.
 func (s *Store) LandTrackerWrites() error {
 	return s.landTrackerWrites(true)
 }
@@ -61,26 +61,22 @@ func (s *Store) LandTrackerWrites() error {
 // link) land in the working tree only, as every record write but a
 // creation's claim does (ADR 0030), and this commits exactly those paths, as
 // the person, so the next checkpoint's commit is not the only thing that
-// carries them. It pushes when it committed, or when always is set. The
-// commit is scoped to the noted paths the way Claim's is: any other dirty
-// state in the store, a journal line another process just wrote, stays
-// where it is. It holds the checkpoint lock (LockCheckpoint) from the
-// commit through the push, and takes nothing when nothing was noted.
+// carries them. It pushes when it committed, when always is set, or when the
+// branch is ahead of origin anyway (another process's Sync swept the sync's
+// writes into a commit of its own, which never pushes). The commit is scoped
+// to the noted paths the way Claim's is: any other dirty state in the store,
+// a journal line another process just wrote, stays where it is. It holds the
+// checkpoint lock (LockCheckpoint) from the commit through the push, and does
+// nothing, not even run git, when nothing was noted.
 //
-// A landing that fails puts its paths back, so a later one in this process
-// tries them again, and returns the cause: a store with no origin never
-// fails on a push, and one whose origin cannot be reached leaves the commit
-// to the next checkpoint's push.
-func (s *Store) landTrackerWrites(always bool) (err error) {
+// It returns the cause of a failure: a store with no origin never fails on a
+// push, and one whose origin cannot be reached leaves the commit for the next
+// checkpoint's push.
+func (s *Store) landTrackerWrites(always bool) error {
 	paths := s.takeTrackerWrites()
 	if len(paths) == 0 && !always {
 		return nil
 	}
-	defer func() {
-		if err != nil {
-			s.noteTrackerWrite(paths...)
-		}
-	}()
 	release, err := s.LockCheckpoint()
 	if err != nil {
 		return err
@@ -103,8 +99,33 @@ func (s *Store) landTrackerWrites(always bool) (err error) {
 			}
 		}
 	}
-	if !cp.hasRemote() || !(committed || always) {
+	if !cp.hasRemote() {
 		return nil
+	}
+	if !committed && !always && !s.aheadOfOrigin(cp.branch) {
+		return nil
+	}
+	return cp.pushLanding()
+}
+
+// aheadOfOrigin reports whether the branch holds a commit origin does not, as
+// far as the clone knows. A branch origin has never had counts as ahead.
+func (s *Store) aheadOfOrigin(branch string) bool {
+	out, err := gitx.Run(s.Root, "rev-list", "--count", "refs/remotes/origin/"+branch+"..HEAD")
+	return err != nil || strings.TrimSpace(out) != "0"
+}
+
+// pushLanding pushes the branch once and, when origin has moved on, records
+// whatever else is uncommitted the way Sync does before taking what moved:
+// the landing leaves other changes in the working tree on purpose, and a
+// rebase refuses a dirty one.
+func (cp *checkpoint) pushLanding() error {
+	rejected, err := cp.pushOnce()
+	if err == nil || !rejected {
+		return err
+	}
+	if err := cp.commit(leftoversMessage); err != nil {
+		return err
 	}
 	return cp.push()
 }
@@ -116,7 +137,8 @@ func (s *Store) landTrackerWrites(always bool) (err error) {
 // entry's folder takes its place ("does not have a commit checked out"), and
 // the move out of the flat layout is exactly that. Something staged already is
 // not this landing's to commit, so it takes the pathspec commit, which leaves
-// it where it is.
+// it where it is and, for that move, fails: the landing is then a warning, and
+// the next checkpoint's commit takes the paths.
 func (s *Store) commitTrackerPaths(paths []string) (bool, error) {
 	foreign, err := s.hasStagedChanges()
 	if err != nil {

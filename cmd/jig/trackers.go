@@ -71,8 +71,8 @@ func cmdTrackers(e env, args []string, stdout io.Writer) int {
 	report, err := mirror.Sync(mirror.Deps{Store: st, Cfg: cfg, Home: jigHome, Client: e.mirrorClient}, mirror.SyncOpts{DryRun: *dryRun, Unbounded: true})
 	// What the sync wrote goes out even when it failed part-way: the records
 	// it did write are true. Together with the commit Sync made of the
-	// leftovers, a run that is not a dry run leaves nothing uncommitted or
-	// unpushed.
+	// leftovers, a run that is not a dry run, on a store with an origin, leaves
+	// none of what it wrote or committed unpushed.
 	var landErr error
 	if !*dryRun {
 		landErr = st.LandTrackerWrites()

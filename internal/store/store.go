@@ -212,6 +212,11 @@ func (s *Store) HasRemote() bool {
 	return err == nil
 }
 
+// leftoversMessage is the commit message of the uncommitted store state Sync
+// (and a landing whose push origin rejected) records before taking what moved
+// on origin.
+const leftoversMessage = "jig: record uncommitted store state"
+
 // Sync stages and commits any uncommitted store state left behind by an
 // earlier command that failed after writing to the store - for example a
 // gate that appended its gate-open journal line and then failed at an
@@ -241,7 +246,7 @@ func (s *Store) Sync() error {
 	if !cp.hasRemote() {
 		return nil
 	}
-	if err := cp.commit("jig: record uncommitted store state"); err != nil {
+	if err := cp.commit(leftoversMessage); err != nil {
 		return err
 	}
 	return cp.pull()

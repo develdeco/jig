@@ -130,6 +130,16 @@ func TestTrackersSyncDryRunCommitsAndPushesNothing(t *testing.T) {
 		t.Fatalf("jig ticket new: exit %d\n%s", code, buf.String())
 	}
 	leaveASpendLine(t, clone, "DEMO-1")
+	// A commit origin does not have yet: a dry run that landed would push it.
+	if err := os.WriteFile(filepath.Join(clone, "local-note.txt"), []byte("not pushed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(clone, "add", "local-note.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(clone, "-c", "user.name=tester", "-c", "user.email=tester@example.invalid", "commit", "-m", "a local commit"); err != nil {
+		t.Fatal(err)
+	}
 	headBefore, err := gitx.Run(clone, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatal(err)
