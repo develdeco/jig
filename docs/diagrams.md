@@ -31,7 +31,7 @@ flowchart TB
   subgraph jigBox ["jig binary"]
     doors{{"Doors<br/>hooks, skills, MCP, CLI"}}
     verbs["jig verbs<br/>claim, validate, gate, publish"]
-    hook["post-commit hook<br/>global core.hooksPath"]
+    hook["post-commit hook<br/>global, or a block in the clone's"]
     verify["jig verify<br/>detached oracle run"]
   end
   store[("Store repo<br/>tickets, charts, journals")]
@@ -44,7 +44,8 @@ flowchart TB
   doors -->|observe, verbs| verbs
   verbs -->|checkpoints| store
   verbs -->|ledger lines| home
-  store -.->|mirror| github
+  store -.->|"mirror: issues, board"| github
+  verbs -->|"publish: push head, open PR"| github
   harness -->|edits, commits| clone
   clone -->|commit| hook
   hook -->|spawns| verify
@@ -95,16 +96,22 @@ classDiagram
     goal
     workspace: repo/ws
     oracle: proves it done
+    env: an env class, optional
     blocked_by: Slice[]
     from_brief: section hashes
     from_gate: round of a fix slice
     state
   }
+  class Manifest {
+    <<record>>
+    the repo's, read at the commit
+    oracles: name to command
+    envs: up, check, down
+    timeout
+  }
   class Workspace {
     <<record>>
     id, path
-    oracles: name to command
-    envs: up, check, down
   }
   class Session {
     id, harness, model
@@ -135,8 +142,8 @@ classDiagram
     round N
     range: base..head
     reviewer: a fresh session
-    intent: brief, explicit or inferred
-    verdict: clean or findings
+    intent: brief, explicit, inferred or none
+    verdict: clean, findings or not-independent
   }
   class Finding {
     file:line
@@ -147,7 +154,7 @@ classDiagram
   class PullRequest {
     <<record>>
     head: reviewed, pushed as is
-    body with a Demo section
+    body: Demo if recordings were picked
     changelog from the journal
   }
 
@@ -165,7 +172,8 @@ classDiagram
   Session --> Slice : claims, commits
   Verification ..> Slice : proves green
   Slice --> Workspace : builds in
-  Verification ..> Workspace : runs oracle of
+  Manifest *-- Workspace : declares
+  Verification ..> Manifest : runs oracle of
   GateRound *-- Finding : raises
   Finding ..> Slice : fix queues
   PullRequest ..> GateRound : ships clean head
@@ -191,18 +199,19 @@ flowchart TB
     verify -.->|"red: note"| claim
   end
   subgraph review ["Review"]
-    gate["jig gate<br/>opens a round"] -->|"Review T"| round["Fresh reviewer<br/>findings, review done"]
+    gate["Round opens<br/>jig gate or review context"] --> round["Fresh reviewer<br/>findings, review done"]
     round --> route{"Route findings"}
     route -->|ask| triage{{"Person triages<br/>keep or dismiss"}}
     triage -.->|"next round applies it"| gate
   end
   subgraph publish ["Publish"]
-    approve{{"Person approves the publish"}} -->|"Publish T"| pub["jig publish<br/>push head, open PR"]
+    pbody["jig publish --body<br/>renders the PR body"] --> approve{{"Person approves<br/>the reviewed head"}}
+    approve --> pub["jig publish<br/>push head, open PR"]
   end
   validate -->|"Build T"| claim
-  verify -->|"all green"| gate
+  verify -->|"all green: Review T"| gate
   route -->|"fix: new slices"| claim
-  route -->|"clean round"| approve
+  route -->|"clean: Publish T"| pbody
 ```
 
 ## A commit's verification
@@ -226,21 +235,21 @@ sequenceDiagram
   G->>O: jig githook post-commit
   O-)W: spawn detached
   Note over O,W: one run per commit and slice
-  O-->>G: exit 0, prints nothing
+  O-->>G: exit 0, one line only if something failed
   G-->>S: commit done
 
   W->>J: verify-pending, pushed first
   W->>T: git worktree add --detach
   W->>T: env up, run the manifest's oracle
   T-->>W: pass or fail
-  W->>J: oracle, verified
-  Note over W,J: a pass marks the slice green, a fail sends it back to building
+  W->>J: oracle, and verified on a pass
+  Note over W,J: pass: the slice is green<br/>fail: building, unless it needs input<br/>cannot run: verify-error
 
   S->>O: next tool call (hook)
   O->>J: read journal
-  J-->>O: verified since the session began
+  J-->>O: outcomes since the session began
   O-->>S: note, told once
-  Note over S,O: enforced at Stop when the claim is unattended
+  Note over S,O: a pass is only told<br/>a fail or verify-error also holds Stop<br/>when the claim is unattended
 ```
 
 ## A slice's states
@@ -254,12 +263,13 @@ stateDiagram-v2
   [*] --> queued
   queued --> building : jig claim
   building --> green : oracle passes
+  queued --> needs_input : jig ask
   building --> needs_input : jig ask
   building --> stalled : same failure twice, unattended
   building --> env_blocked : env class will not come up
   building --> queued : jig release
   green --> building : a later commit fails
-  green --> queued : a cited brief section changed
+  green --> queued : jig requeue --from-brief-diff
   needs_input --> building : answered, still claimed
   needs_input --> queued : answered, unclaimed
   stalled --> queued : jig requeue
@@ -269,4 +279,15 @@ stateDiagram-v2
   state "env-blocked" as env_blocked
 ```
 
-A claim of a stalled or env-blocked slice also moves it to building.
+The diagram draws each move from the state it usually leaves. The code is
+wider:
+
+- A verification moves a slice from any state. A pass makes it green and
+  clears its question; a fail makes it building, unless it needs input. An
+  outcome for an older commit that lands after a newer one's leaves the
+  state alone.
+- An env class that will not come up blocks a slice from any state.
+- `jig claim` also moves a stalled or env-blocked slice to building, and
+  `jig release` also queues one.
+- `jig requeue --from-brief-diff` queues every slice that cites a changed
+  brief section, whatever its state, and supersedes its open question.
