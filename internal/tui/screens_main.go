@@ -13,6 +13,9 @@ func (m *Model) mainPage() page {
 	if len(ids) == 0 {
 		p.add(m.st.dim("no tickets yet"))
 		p.add(m.st.dim("ask your agent to plan one, or make one with `jig ticket new --title \"...\"`"))
+		if m.followNew {
+			p.add(m.st.dim("the first ticket a session creates opens here"))
+		}
 		return p
 	}
 

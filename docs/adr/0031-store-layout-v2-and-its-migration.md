@@ -124,3 +124,7 @@ The last paragraph above said jig's own store would be migrated after this ticke
 ## Amendment: the tracker tree (L4)
 
 The mirror's records move out of the ticket and chart folders into `trackers/<provider>/<scope>/<remote id>.yaml`, each with a relative symlink at `<remote id>` to its ticket or chart. The record names its owner (`ticket:` or `chart:`) and the provider keeps every other key; the link is rebuilt from the records on every sync, with no provider and no network, and `jig validate` checks the tree and reports what is wrong as advisories. A record still in an old place is read as a fallback and moved into the tree by the next sync. The schema stays at 3 (2 for a v2 store): the tree is part of the layout both read.
+
+## Amendment: a tracker entry is a folder
+
+Each remote item of the tracker tree became a folder, `trackers/<provider>/<scope>/<remote id>/`, holding `record.yaml` and a link named by the store id (`101/STORE-6`), where the tree had `<remote id>.yaml` and a link at `<remote id>`. A tree in the old layout is read as a fallback and moved by the next sync; the schema stays at 3 (2 for a v2 store). DECISIONS.md has the account.

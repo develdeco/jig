@@ -28,7 +28,8 @@ type Store struct {
 	// mirror depends on the store and never the reverse. A failure never
 	// fails or stops the command whose Push found it: Push reports it
 	// through Warn instead and returns nil, the same as every other
-	// checkpoint. nil runs no hook.
+	// checkpoint. What the hook wrote to the tracker tree is committed and
+	// pushed once it returns (RunCheckpointHook). nil runs no hook.
 	AfterCheckpoint func(s *Store) error
 
 	// Warn reports AfterCheckpoint's failure, naming its cause. nil writes
@@ -68,6 +69,10 @@ type Store struct {
 	// tracker is the tracker tree's memoized index and this clone's answer
 	// about symlinks (trackertree.go).
 	tracker trackerState
+
+	// landing is the set of tracker tree paths written since the last
+	// landing (trackerland.go).
+	landing trackerWrites
 }
 
 // invalidateAliasClaims drops the memoized aliasClaims result, so the next
@@ -98,16 +103,23 @@ func (s *Store) invalidateAliasClaims() {
 // through Claim too, and hooking Claim would re-enter the mirror. A command
 // whose only checkpoint is a Claim, such as `jig ticket new`, calls this
 // explicitly once the claim lands.
+//
+// What the hook wrote to the tracker tree goes out with it: the sync's
+// record writes land in the working tree, and this commits and pushes them
+// once the hook is done (landTrackerWrites), a sync that failed part-way
+// included, since the records it did write are true. A ticket's last
+// checkpoint is a checkpoint like any other, with no next one to carry them.
 func (s *Store) RunCheckpointHook() {
 	if s.AfterCheckpoint == nil {
 		return
 	}
-	if err := s.AfterCheckpoint(s); err != nil {
-		warn := s.Warn
-		if warn == nil {
-			warn = func(format string, args ...any) { fmt.Fprintf(os.Stderr, "warning: "+format+"\n", args...) }
-		}
-		warn("the tracker sync after this checkpoint failed: %v", err)
+	hookErr := s.AfterCheckpoint(s)
+	landErr := s.landTrackerWrites(false)
+	if hookErr != nil {
+		s.warn("the tracker sync after this checkpoint failed: %v", hookErr)
+	}
+	if landErr != nil {
+		s.warn("the tracker records this checkpoint's sync wrote were not landed on the store's origin: %v", landErr)
 	}
 }
 
@@ -145,27 +157,40 @@ func (s *Store) TicketRelDir(id string) string {
 	return filepath.Join(ticketsDirName, id)
 }
 
-// trackersDirName is the store-root folder of the tracker tree: one record and
-// one link per remote item, trackers/<provider>/<scope>/<remote id>
-// (trackertree.go).
+// trackersDirName is the store-root folder of the tracker tree: one folder per
+// remote item, trackers/<provider>/<scope>/<remote id>, holding its record and
+// its link (trackertree.go).
 const trackersDirName = "trackers"
 
-// TrackerRelPath returns a tracker tree entry's path relative to the store
-// root, trackers/<provider>/<scope>/<remote id>: where the link to the
-// entry's ticket or chart sits. Like TicketRelDir, it is the one place the
-// tree's paths are named; TrackerRecordRelPath, TrackerPath and
-// TrackerRecordPath are its other forms.
+// TrackerRelPath returns a tracker tree entry's folder relative to the store
+// root, trackers/<provider>/<scope>/<remote id>: the folder that holds the
+// entry's record (record.yaml) and the link to its ticket or chart, named by
+// the store id. Like TicketRelDir, it is the one place the tree's paths are
+// named; TrackerRecordRelPath, TrackerLinkRelPath, TrackerPath,
+// TrackerRecordPath and TrackerLinkPath are its other forms.
 func (s *Store) TrackerRelPath(e TrackerEntry) string {
 	return filepath.Join(trackersDirName, e.Provider, filepath.FromSlash(e.Scope), e.ID)
 }
 
 // TrackerRecordRelPath returns the path, relative to the store root, of the
-// record beside an entry's link: <remote id>.yaml.
+// entry's record: <entry>/record.yaml.
 func (s *Store) TrackerRecordRelPath(e TrackerEntry) string {
-	return s.TrackerRelPath(e) + trackerRecordSuffix
+	return filepath.Join(s.TrackerRelPath(e), trackerRecordFile)
 }
 
-// TrackerPath returns an entry's absolute path (TrackerRelPath, rooted at
+// TrackerLinkRelPath returns the path, relative to the store root, of the
+// link in e's folder to o's ticket or chart: <entry>/<ticket id or chart name>.
+func (s *Store) TrackerLinkRelPath(e TrackerEntry, o TrackerOwner) string {
+	return filepath.Join(s.TrackerRelPath(e), o.linkName())
+}
+
+// flatRecordRelPath returns where the flat layout kept e's record, beside its
+// link: <entry>.yaml.
+func (s *Store) flatRecordRelPath(e TrackerEntry) string {
+	return s.TrackerRelPath(e) + flatRecordSuffix
+}
+
+// TrackerPath returns an entry's absolute folder (TrackerRelPath, rooted at
 // Root).
 func (s *Store) TrackerPath(e TrackerEntry) string {
 	return filepath.Join(s.Root, s.TrackerRelPath(e))
@@ -176,11 +201,21 @@ func (s *Store) TrackerRecordPath(e TrackerEntry) string {
 	return filepath.Join(s.Root, s.TrackerRecordRelPath(e))
 }
 
+// TrackerLinkPath returns the absolute path of the link in e's folder to o.
+func (s *Store) TrackerLinkPath(e TrackerEntry, o TrackerOwner) string {
+	return filepath.Join(s.Root, s.TrackerLinkRelPath(e, o))
+}
+
 // HasRemote reports whether the store has a git remote named "origin".
 func (s *Store) HasRemote() bool {
 	_, err := gitx.Run(s.Root, "remote", "get-url", "origin")
 	return err == nil
 }
+
+// leftoversMessage is the commit message of the uncommitted store state Sync
+// (and a landing whose push origin rejected) records before taking what moved
+// on origin.
+const leftoversMessage = "jig: record uncommitted store state"
 
 // Sync stages and commits any uncommitted store state left behind by an
 // earlier command that failed after writing to the store - for example a
@@ -211,7 +246,7 @@ func (s *Store) Sync() error {
 	if !cp.hasRemote() {
 		return nil
 	}
-	if err := cp.commit("jig: record uncommitted store state"); err != nil {
+	if err := cp.commit(leftoversMessage); err != nil {
 		return err
 	}
 	return cp.pull()

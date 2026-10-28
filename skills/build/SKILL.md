@@ -81,7 +81,7 @@ With `--unattended`, jig holds the session back from stopping while a verificati
 
 ## Then
 
-When every slice is green, relay `jig next <T>`'s `prompt:` to the person and stop, unless the person's prompt named later phases (an automatic run): then go on to the next phase's skill (review, then publish).
+When every slice is green, relay `jig next <T>`'s `prompt:` to the person and stop, unless the person's prompt named later phases (a start-to-finish run): then go on to the next phase's skill (review, then publish).
 
 ## Never
 

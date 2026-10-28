@@ -14,6 +14,10 @@ func TestClaudeAdapterParsesEveryEvent(t *testing.T) {
 			with(func(e *Event) { e.Kind = KindPrompt })},
 		{"bash tool", `{` + common + `,"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m x"},"tool_response":{"stdout":"ok","stderr":"","interrupted":false}}`,
 			with(func(e *Event) { e.Kind, e.Tool, e.Command = KindTool, "Bash", "git commit -m x" })},
+		{"bash tool with a description", `{` + common + `,"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"go test ./...","description":"Run the tests"}}`,
+			with(func(e *Event) {
+				e.Kind, e.Tool, e.Command, e.Description = KindTool, "Bash", "go test ./...", "Run the tests"
+			})},
 		{"bash tool with an exit code", `{` + common + `,"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"false"},"tool_response":{"exit_code":1}}`,
 			with(func(e *Event) { e.Kind, e.Tool, e.Command, e.Exit = KindTool, "Bash", "false", intp(1) })},
 		{"failed bash tool", `{` + common + `,"hook_event_name":"PostToolUseFailure","tool_name":"Bash","tool_input":{"command":"git commit -m x && false"},"error":"exit 1"}`,

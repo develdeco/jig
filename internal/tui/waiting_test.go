@@ -92,7 +92,7 @@ func TestAWaitedTicketFillsInWhenTheTicketListNamesIt(t *testing.T) {
 		t.Fatalf("the ticket is still awaited after the ticket list named it")
 	}
 	v := g.view()
-	for _, want := range []string{"› SHOP-1  Cart totals", "╭─ Steps", "2 Build · sub-steps"} {
+	for _, want := range []string{"› SHOP-1  Cart totals", "╭─ Steps", "Build ─"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the screen lacks %q once the ticket exists:\n%s", want, v)
 		}

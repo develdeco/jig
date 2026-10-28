@@ -25,8 +25,9 @@ func addDemoChart(t *testing.T, st *store.Store, ticketsYAML string) {
 	runGit(t, st.Root, "commit", "-m", "add chart")
 }
 
-// treeLinks reads every symlink under trackers/ as entry path to the folder it
-// leads to, both relative to the store root, in slash form.
+// treeLinks reads every symlink under trackers/ as link path (inside an
+// entry's folder, named by the store id) to the folder it leads to, both
+// relative to the store root, in slash form.
 func treeLinks(t *testing.T, st *store.Store) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -94,9 +95,9 @@ func TestSyncMovesRecordsFromTicketAndChartFoldersIntoTheTree(t *testing.T) {
 		moved = append(moved, m.What+" "+m.From+" -> "+m.To)
 	}
 	wantMoved := []string{
-		"DEMO-1 tickets/DEMO-1/tracker/github.yaml -> trackers/github/example/tracking/11.yaml",
-		"DEMO-2 tickets/DEMO-2/tracker/github.yaml -> trackers/github/example/tracking/12.yaml",
-		"charts/demo charts/demo/github.yaml -> trackers/github/example/tracking/13.yaml",
+		"DEMO-1 tickets/DEMO-1/tracker/github.yaml -> trackers/github/example/tracking/11/record.yaml",
+		"DEMO-2 tickets/DEMO-2/tracker/github.yaml -> trackers/github/example/tracking/12/record.yaml",
+		"charts/demo charts/demo/github.yaml -> trackers/github/example/tracking/13/record.yaml",
 	}
 	if !reflect.DeepEqual(moved, wantMoved) {
 		t.Fatalf("MovedRecords = %v, want %v", moved, wantMoved)
@@ -124,9 +125,9 @@ func TestSyncMovesRecordsFromTicketAndChartFoldersIntoTheTree(t *testing.T) {
 	}
 	if linksOn {
 		want := map[string]string{
-			"trackers/github/example/tracking/11": "tickets/DEMO-1",
-			"trackers/github/example/tracking/12": "tickets/DEMO-2",
-			"trackers/github/example/tracking/13": "charts/demo",
+			"trackers/github/example/tracking/11/DEMO-1": "tickets/DEMO-1",
+			"trackers/github/example/tracking/12/DEMO-2": "tickets/DEMO-2",
+			"trackers/github/example/tracking/13/demo":   "charts/demo",
 		}
 		if got := treeLinks(t, st); !reflect.DeepEqual(got, want) {
 			t.Errorf("links = %v, want %v", got, want)
@@ -222,7 +223,7 @@ func TestSyncWithNoTrackerStillMakesTheLinks(t *testing.T) {
 	if err != nil || !report.NoTracker {
 		t.Fatalf("Sync = %+v, %v; want NoTracker", report, err)
 	}
-	want := map[string]string{"trackers/github/example/tracking/11": "tickets/DEMO-1"}
+	want := map[string]string{"trackers/github/example/tracking/11/DEMO-1": "tickets/DEMO-1"}
 	if got := treeLinks(t, st); !reflect.DeepEqual(got, want) {
 		t.Errorf("links = %v, want %v", got, want)
 	}
@@ -243,12 +244,12 @@ func TestSyncCommitsARecordAndItsLinkTogether(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 	files := runGit(t, "", "--git-dir", remote, "log", "--name-only", "--format=%s", "-1", "main")
-	for _, want := range []string{"DEMO-1: github issue example/tracking#1", "trackers/github/example/tracking/1.yaml", "trackers/github/example/tracking/1\n"} {
+	for _, want := range []string{"DEMO-1: github issue example/tracking#1", "trackers/github/example/tracking/1/record.yaml", "trackers/github/example/tracking/1/DEMO-1\n"} {
 		if !strings.Contains(files+"\n", want) {
 			t.Errorf("the claim commit =\n%s\nwant it to hold %q", files, want)
 		}
 	}
-	entry := runGit(t, "", "--git-dir", remote, "ls-tree", "main", "trackers/github/example/tracking/1")
+	entry := runGit(t, "", "--git-dir", remote, "ls-tree", "main", "trackers/github/example/tracking/1/DEMO-1")
 	if !strings.HasPrefix(entry, "120000 blob") {
 		t.Errorf("the pushed entry = %q, want a symlink (mode 120000)", entry)
 	}
@@ -303,8 +304,9 @@ func TestSyncWithoutSymlinksSyncsWithOneWarningAndKeepsEveryRecord(t *testing.T)
 }
 
 // TestSyncMovesARecordWhenItsIssueIsRecreated: an issue gone from GitHub is
-// opened again under a new number, and the record moves with it: the old file
-// and its link are gone, so the tree holds one record of the ticket.
+// opened again under a new number, and the record moves with it: the old entry
+// folder, with its record and its link, is gone, so the tree holds one record
+// of the ticket.
 func TestSyncMovesARecordWhenItsIssueIsRecreated(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
 	mintTestTicket(t, st, "DEMO-1", "First ticket")
@@ -333,10 +335,10 @@ func TestSyncMovesARecordWhenItsIssueIsRecreated(t *testing.T) {
 		t.Errorf("the old record is still there (stat err %v)", err)
 	}
 	if _, err := os.Lstat(st.TrackerPath(githubEntry(old.Repo, old.Issue))); !os.IsNotExist(err) {
-		t.Errorf("the old link is still there (lstat err %v)", err)
+		t.Errorf("the old entry folder, with its link, is still there (lstat err %v)", err)
 	}
 	if st.SymlinksOn() {
-		want := map[string]string{"trackers/github/example/tracking/" + itoa(fresh.Issue): "tickets/DEMO-1"}
+		want := map[string]string{"trackers/github/example/tracking/" + itoa(fresh.Issue) + "/DEMO-1": "tickets/DEMO-1"}
 		if got := treeLinks(t, st); !reflect.DeepEqual(got, want) {
 			t.Errorf("links = %v, want %v", got, want)
 		}
@@ -360,7 +362,7 @@ func TestSyncRefusesWhileARecordCannotBeRead(t *testing.T) {
 
 	client := &fakeClient{}
 	_, err := Sync(Deps{Store: st, Cfg: loadCfg(t, st), Client: client}, SyncOpts{})
-	if err == nil || !strings.Contains(err.Error(), "trackers/github/example/tracking/5.yaml could not be read") {
+	if err == nil || !strings.Contains(err.Error(), "trackers/github/example/tracking/5/record.yaml could not be read") {
 		t.Fatalf("Sync = %v, want a refusal naming the record", err)
 	}
 	if len(client.calls) != 0 {
@@ -388,9 +390,9 @@ func TestTrackerTreeRebuiltFromRecords(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 	want := map[string]string{
-		"trackers/github/example/tracking/1": "tickets/DEMO-1",
-		"trackers/github/example/tracking/2": "tickets/DEMO-2",
-		"trackers/github/example/tracking/3": "charts/demo",
+		"trackers/github/example/tracking/1/DEMO-1": "tickets/DEMO-1",
+		"trackers/github/example/tracking/2/DEMO-2": "tickets/DEMO-2",
+		"trackers/github/example/tracking/3/demo":   "charts/demo",
 	}
 	if got := treeLinks(t, st); !reflect.DeepEqual(got, want) {
 		t.Fatalf("links after a sync = %v, want %v", got, want)

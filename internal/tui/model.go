@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"io"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -63,6 +65,10 @@ type Config struct {
 	IdleTick time.Duration
 	// Now is the clock the idle read measures by. Nil is time.Now.
 	Now func() time.Time
+	// Home is the folder a command the screens show names as ~: a session's
+	// scratchpad under it says nothing to a reader and names the person on a
+	// shared screen. Empty is the user's home folder.
+	Home string
 	// Width and Height are the screen's size until the terminal reports one;
 	// zero is 100 by 30.
 	Width, Height int
@@ -177,7 +183,14 @@ type Model struct {
 	// and when it last started to read that ticket's status, by now.
 	idleAfter, idleTick time.Duration
 	now                 func() time.Time
+	// home matches the home folder in any of its spellings (homePattern).
+	home                *regexp.Regexp
 	lastEvent, lastRead time.Time
+	// followNew is set while screens opened on no ticket wait to open the
+	// first ticket that appears after started, when the stream first names
+	// it: a key pressed before that clears it.
+	followNew bool
+	started   time.Time
 }
 
 // New builds the model for cfg.
@@ -208,6 +221,11 @@ func New(cfg Config) *Model {
 	if m.now == nil {
 		m.now = time.Now
 	}
+	home := cfg.Home
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	m.home = homePattern(home)
 	m.zone = cfg.Zone
 	if m.zone == nil {
 		m.zone = time.Local
@@ -221,6 +239,7 @@ func New(cfg Config) *Model {
 		m.run = serial(cfg.Run)
 	}
 	m.nav = []navEntry{{screen: screenMain}}
+	m.followNew, m.started = cfg.Ticket == "", m.now()
 	if cfg.Ticket != "" {
 		t, _ := m.w.ticketFor(cfg.Ticket)
 		t.awaiting = cfg.Awaiting
@@ -429,6 +448,7 @@ func (m *Model) onEvents(envs []events.Envelope) tea.Cmd {
 	if fresh {
 		cmds = append(cmds, m.loadRoster())
 	}
+	m.openNewTicket(touched)
 	if id := m.watching(); id != "" && touched[id] {
 		m.lastEvent = m.now()
 		cmds = append(cmds, m.refreshStatus(id))
@@ -437,6 +457,31 @@ func (m *Model) onEvents(envs []events.Envelope) tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// openNewTicket opens, on screens opened on no ticket that still wait for one,
+// the earliest of touched that the stream first named after the screens
+// started: a session minted it, and it is what the person is here to watch.
+// The list stays one step back.
+func (m *Model) openNewTicket(touched map[string]bool) {
+	if !m.followNew || m.top().screen != screenMain {
+		return
+	}
+	pick := ""
+	for id := range touched {
+		t := m.w.tickets[id]
+		if !t.firstAt.After(m.started) {
+			continue
+		}
+		if p := m.w.tickets[pick]; p == nil || t.firstAt.Before(p.firstAt) || (t.firstAt.Equal(p.firstAt) && id < pick) {
+			pick = id
+		}
+	}
+	if pick == "" {
+		return
+	}
+	m.followNew = false
+	m.nav = append(m.nav, navEntry{screen: screenTicket, ticket: pick, follow: true})
 }
 
 // retryMsg asks for a read that failed to be made again: the ticket's status,
@@ -535,6 +580,8 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 	if k.Type == tea.KeyCtrlC {
 		return m.quit()
 	}
+	// A person at the keys chooses what to look at.
+	m.followNew = false
 	if m.input != nil {
 		return m.inputKey(k)
 	}

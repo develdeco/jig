@@ -15,7 +15,7 @@ import (
 const recordHeader = "# This file is written by jig's GitHub mirror; edits here are overwritten.\n"
 
 // githubRecord is the GitHub mirror's part of a record of the tracker tree,
-// trackers/github/<owner>/<repo>/<number>.yaml, in the bridge's own shape so
+// trackers/github/<owner>/<repo>/<number>/record.yaml, in the bridge's own shape so
 // its records are adopted as they are. The tree owns the ticket: or chart: key
 // beside these keys (internal/store); every key below is the mirror's. The
 // rest of synced (title, body_sha256, state, status, store_id) is the drift
@@ -95,7 +95,7 @@ type recordRef struct {
 // so an item with one is left alone and one with none gets a new issue.
 func (r *recordRef) has() bool { return r.inTree || r.legacy != nil }
 
-// githubEntry returns the tree entry of an issue:
+// githubEntry returns the tree entry of an issue, the folder
 // trackers/github/<owner>/<repo>/<number>. GitHub's owner and repository
 // names are case-insensitive, so the folder is their lower-case spelling, the
 // same on a file system that folds case and one that does not.
@@ -215,9 +215,10 @@ func writeRecord(st *store.Store, it item, rec githubRecord) error {
 // writeRecordLinks updates item it's record's synced.links to links, leaving its
 // repo, issue and node id untouched, and writes it back (brief.md#Links: "the
 // record keeps the node ids of the links it last wrote"). The write lands in
-// the working tree only; it goes in with the next checkpoint's commit, as
-// every record change but a creation does (brief.md#Syncing at every
-// checkpoint).
+// the working tree only; the checkpoint that ran the sync commits and pushes
+// it once the sync is done (Store.RunCheckpointHook), as it does every record
+// change but a creation, which claimIssue lands itself (brief.md#Syncing at
+// every checkpoint).
 func writeRecordLinks(st *store.Store, it item, links syncedLinks) error {
 	rec, err := readRecord(st, it)
 	if err != nil {

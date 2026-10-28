@@ -63,7 +63,7 @@ func (m *Model) buildPage(id string) page {
 	}
 
 	p.add("")
-	m.activityPanel(&p, t, stepBuild)
+	m.stepActivityPanel(&p, t, stepBuild)
 	return p
 }
 

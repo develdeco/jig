@@ -29,8 +29,6 @@ type statusInfo struct {
 	Rounds   []statusRound
 	Findings []statusFinding
 	Publish  *statusPublish
-	// Help is the status's own account of the next step.
-	Help []string
 	// Err is set when the status itself was refused.
 	Err *axiErr
 }
@@ -99,7 +97,6 @@ func parseStatus(out string) *statusInfo {
 	info := &statusInfo{
 		State:  doc.Scalars["state"],
 		Branch: doc.Scalars["branch"],
-		Help:   doc.Help,
 		Err:    doc.Err,
 	}
 	if doc.Err == nil && doc.Scalars["ticket"] == "" {

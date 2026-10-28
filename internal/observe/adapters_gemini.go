@@ -45,6 +45,7 @@ func (a geminiShape) Parse(data []byte) (Event, error) {
 		ev.Kind = KindTool
 		ev.Tool = p.str("tool_name")
 		ev.Command = p.str("tool_input.command")
+		ev.Description = p.str("tool_input.description")
 		ev.Files = p.editedFiles("tool_input")
 		ev.Exit = p.exitStatus("tool_response")
 	case "AfterAgent":

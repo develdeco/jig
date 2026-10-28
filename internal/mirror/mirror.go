@@ -146,12 +146,14 @@ type SyncReport struct {
 	// really is gone.
 	GoneRecordedPRs []GoneRecordedPR
 	// MovedRecords is every record this sync moved from a ticket's or chart's
-	// own folder into the tracker tree. Empty in a dry run, which moves
+	// own folder into the tracker tree, and every record it moved from beside
+	// its link into its entry's folder. Empty in a dry run, which moves
 	// nothing.
 	MovedRecords []MovedRecord
 }
 
-// MovedRecord is one record Sync moved into the tracker tree.
+// MovedRecord is one record Sync moved into the tracker tree, or into its
+// entry's folder in the tree.
 type MovedRecord struct {
 	// What is the ticket id, or "charts/<name>" for a chart.
 	What string
@@ -214,6 +216,9 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 	d.Store.ReloadTrackerTree()
 	if d.Cfg.GitHub == nil {
 		if !opts.DryRun {
+			if _, err := moveFlatRecords(d.Store); err != nil {
+				return SyncReport{NoTracker: true}, nil, err
+			}
 			if _, err := d.Store.RebuildTrackerLinks(); err != nil {
 				return SyncReport{NoTracker: true}, nil, fmt.Errorf("mirror: rebuild the tracker tree's links: %w", err)
 			}
@@ -239,6 +244,11 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 	var report SyncReport
 	if !opts.DryRun {
 		report.MovedRecords, err = moveLegacyRecords(d.Store, items, d.Cfg.GitHub.Repo)
+		if err != nil {
+			return report, items, err
+		}
+		flat, err := moveFlatRecords(d.Store)
+		report.MovedRecords = append(report.MovedRecords, flat...)
 		if err != nil {
 			return report, items, err
 		}
@@ -653,7 +663,7 @@ func refuseUnreadableRecords(st *store.Store) error {
 		if rec.Err == nil {
 			continue
 		}
-		rel := filepath.ToSlash(st.TrackerRecordRelPath(rec.Entry))
+		rel := rec.Rel
 		return &axi.Error{
 			Msg:  fmt.Sprintf("%s could not be read: %v", rel, rec.Err),
 			Code: "MIRROR_RECORD_INVALID",
@@ -677,8 +687,8 @@ func repoChangedError(it item, recorded, configured string) error {
 // folder into the tracker tree, adding the key that names its owner, and
 // returns what it moved. It is the first thing a sync does, before any record
 // is read for its issue, so the issue is found by its record and updated in
-// place, never created again. The moves are working-tree changes, committed
-// with the next checkpoint like every record change but a creation. A record
+// place, never created again. The moves are working-tree changes, landed by
+// the checkpoint that ran the sync like every record change but a creation. A record
 // for another repository than repo is refused before anything moves, as the
 // sync would refuse it later.
 func moveLegacyRecords(st *store.Store, items []item, repo string) ([]MovedRecord, error) {
@@ -714,6 +724,26 @@ func moveLegacyRecords(st *store.Store, items []item, repo string) ([]MovedRecor
 		}
 		moved = append(moved, MovedRecord{What: m.it.what(), From: filepath.ToSlash(m.it.ref.legacy.Rel), To: filepath.ToSlash(st.TrackerRecordRelPath(m.entry))})
 		m.it.ref.entry, m.it.ref.inTree, m.it.ref.legacy = m.entry, true, nil
+	}
+	return moved, nil
+}
+
+// moveFlatRecords moves every record still in the flat layout, <remote id>.yaml
+// beside its link, into its entry's folder as record.yaml, and returns what it
+// moved. The records are read from where they are until then, so a dry run,
+// which moves nothing, syncs a flat tree as it syncs one already moved.
+func moveFlatRecords(st *store.Store) ([]MovedRecord, error) {
+	moves, err := st.MoveFlatTrackerRecords()
+	var moved []MovedRecord
+	for _, m := range moves {
+		what := m.Owner.Ticket
+		if m.Owner.Chart != "" {
+			what = "charts/" + m.Owner.Chart
+		}
+		moved = append(moved, MovedRecord{What: what, From: m.From, To: m.To})
+	}
+	if err != nil {
+		return moved, fmt.Errorf("mirror: move the tracker tree's records into their folders: %w", err)
 	}
 	return moved, nil
 }

@@ -42,8 +42,8 @@ The part of a ticket's default branch name after its id: the lowercase ASCII wor
 _Avoid_: branch name (a recorded `branch:` can be any name)
 
 **Mirror**:
-A tracker's copy of the store, written by jig at every checkpoint and never
-read back. Today's one mirror projects every ticket and chart onto a GitHub
+A tracker's copy of the store, written by jig at every checkpoint (its records
+committed and pushed with it) and never read back. Today's one mirror projects every ticket and chart onto a GitHub
 issue and a GitHub Project board, from inside the command that made the
 checkpoint, best-effort: a GitHub failure warns rather than failing the
 command. An edit made on the tracker side of a jig-owned field is drift,
@@ -51,11 +51,11 @@ reported and overwritten with the store's value at the next sync.
 _Avoid_: tracker as the source of tickets
 
 **Tracker tree**:
-The folder `trackers/<provider>/<scope>/<remote id>` of a store: one record and one link for each remote item a tracker holds of the store's tickets and charts. GitHub's scope is the lower-case `<owner>/<repo>` and its remote id the bare issue number.
+The folder `trackers/<provider>/<scope>/<remote id>/` of a store, its entry: one folder for each remote item a tracker holds of the store's tickets and charts, holding the item's record and a link to its ticket or chart named by the store id. GitHub's scope is the lower-case `<owner>/<repo>` and its remote id the bare issue number.
 _Avoid_: tracker folder, mirror folder
 
 **Record** (of the tracker tree):
-The file `<remote id>.yaml` in the tracker tree. The tree owns its `ticket:` or `chart:` key and the link beside it; every other key belongs to the provider and is kept as the provider wrote it. The link is a view of the record, made again from the records on every sync.
+The file `record.yaml` in a remote item's folder in the tracker tree. The tree owns its `ticket:` or `chart:` key and the link beside it; every other key belongs to the provider and is kept as the provider wrote it. The link is a view of the record, made again from the records on every sync, and renamed when the ticket's id is. It is not `ticket.yaml`, which through the link is the ticket's own record.
 _Avoid_: tracker file
 
 **Intake**:
@@ -102,9 +102,13 @@ _Avoid_: stage, task
 A part of a phase with a state of its own: a slice in the build; a gate round, the asks and the fixes in the review; the body, the approval, a pull request and the changelog in the publish. `internal/phase` derives them with the phase, the TUI lists them under the step under the cursor, and each line of its activity names the sub-step it advances.
 _Avoid_: task, sub-task
 
-**Automatic run**:
-A prompt that names several phases ("Build and review SHOP-1", "Take SHOP-1 from brief to PR"), which the session runs in order, each with its skill. The span is the prompt and nothing records it; a refusal ends the run. The person's two moments, the brief's approval and the publish approval, stay theirs unless the prompt delegates them ("go with your recommendations", "... to PR", "and publish it"). A delegated brief approval is recorded with agent provenance; a delegated publish takes the hand-off way (the session's own push, then `jig publish --pr`), which asks for no approval. For an unattended session the Stop hook's next-phase note says when the run has more to do.
-_Avoid_: workflow, pipeline run
+**Start-to-finish run**:
+A prompt that names several phases ("Build and review SHOP-1", "Take SHOP-1 from brief to PR"), which the session runs in order, each with its skill, without waiting for a prompt to start the next. The span is the prompt and nothing records it; a refusal ends the run. It hands over no decision: the brief's questions and approval, a review's asks and the publish approval are asked of the person. For an unattended session the Stop hook's next-phase note says when the run has more to do ([ADR 0035](docs/adr/0035-start-to-finish-and-recommendations-are-separate.md)).
+_Avoid_: automatic run, workflow, pipeline run
+
+**Recommendations**:
+A hand-over the prompt says ("go with your recommendations"), in one phase or a start-to-finish run: the session answers the person's decisions itself with its recommended answers, recorded as its own (grilling answers tagged `defaulted`, the brief's approval with agent provenance, asks decided with `jig triage`, the publish the hand-off way, which asks for no approval). A start-to-finish run with recommendations has nobody to ask.
+_Avoid_: delegation, auto mode
 
 **Scout**:
 A read-only session rooted in a repo, drafting brief sections for the parent intake.
