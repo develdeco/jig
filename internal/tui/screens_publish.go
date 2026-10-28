@@ -109,7 +109,7 @@ func (m *Model) publishPage(id string) page {
 	}
 
 	p.add("")
-	m.activityPanel(&p, t, stepPublish)
+	m.stepActivityPanel(&p, t, stepPublish)
 	return p
 }
 

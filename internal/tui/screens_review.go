@@ -107,7 +107,7 @@ func (m *Model) reviewPage(id string) page {
 	}
 
 	p.add("")
-	m.activityPanel(&p, t, stepReview)
+	m.stepActivityPanel(&p, t, stepReview)
 	return p
 }
 

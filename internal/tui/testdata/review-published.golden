@@ -14,7 +14,7 @@ jig  demo › JIG-2 › 3 review                                         ✓ pub
   asks
   nothing: no finding waits for a person
 
-  ╭─ 3 Review · activity ────────────────────────────────────── latest 4 of 6 ─╮
+  ╭─ Review activity ────────────────────────────────────────── latest 4 of 6 ─╮
   │  09:12:00 - asks · you dismissed r1-f1: not a bug                          │
   │  09:12:05 + asks · you kept r1-f2                                          │
   │  09:13:00 ◎ round 2 · opened                                               │
