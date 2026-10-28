@@ -5249,7 +5249,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </g>
         <g data-graph-role="automatic-crossover" style="--step:4">
           <path data-graph-role="automatic-crossover-underlay" d="M 797.7 94 L 797.7 52 Q 797.7 40 785.7 40 L 204.2 40 Q 192.2 40 192.2 52 L 192.2 94" fill="none" stroke="var(--mask)" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="green" data-edge-to="queued" data-edge-label="cited section changed" data-edge-key="4" data-edge-id="brief-drift" data-composition-points="797.7,94;797.7,40;192.2,40;192.2,94" data-composition-crossover="halo" data-composition-independent="true" d="M 797.7 94 L 797.7 52 Q 797.7 40 785.7 40 L 204.2 40 Q 192.2 40 192.2 52 L 192.2 94" class="a-dashed" data-animate="edge" style="--step:4" stroke-width="1.2" marker-end="url(#arrowhead-dashed)"/>
+          <path data-edge-from="green" data-edge-to="queued" data-edge-label="requeue --from-brief-diff" data-edge-key="4" data-edge-id="brief-drift" data-composition-points="797.7,94;797.7,40;192.2,40;192.2,94" data-composition-crossover="halo" data-composition-independent="true" d="M 797.7 94 L 797.7 52 Q 797.7 40 785.7 40 L 204.2 40 Q 192.2 40 192.2 52 L 192.2 94" class="a-dashed" data-animate="edge" style="--step:4" stroke-width="1.2" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:5">
           <path data-graph-role="automatic-crossover-underlay" d="M 455.7 158 L 455.7 210 Q 455.7 222 443.7 222 L 236 222 Q 224 222 224 234 L 224 308" fill="none" stroke="var(--mask)" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
@@ -5361,10 +5361,10 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <rect x="587.2" y="56" width="120" height="16" rx="4" class="c-mask"/>
           <text x="647.2" y="67.5" class="t-muted" font-size="10" text-anchor="middle">later commit fails</text>
         </g>
-        <g data-detail="context" data-edge-from="green" data-edge-to="queued" data-edge-label="cited section changed" data-edge-key="4" data-edge-id="brief-drift">
+        <g data-detail="context" data-edge-from="green" data-edge-to="queued" data-edge-label="requeue --from-brief-diff" data-edge-key="4" data-edge-id="brief-drift">
           <rect x="410.45000000000005" y="26" width="169" height="28" rx="4" class="c-mask"/>
-          <text x="494.95000000000005" y="37.5" class="t-edge-dashed" font-size="10" text-anchor="middle">cited section changed</text>
-          <text data-detail="fine" x="494.95000000000005" y="49.5" class="t-muted" font-size="9" text-anchor="middle">jig requeue --from-brief-diff</text>
+          <text x="494.95000000000005" y="37.5" class="t-edge-dashed" font-size="10" text-anchor="middle">requeue --from-brief-diff</text>
+          <text data-detail="fine" x="494.95000000000005" y="49.5" class="t-muted" font-size="9" text-anchor="middle">a cited brief section changed</text>
         </g>
         <g data-detail="context" data-edge-from="building" data-edge-to="env_blocked" data-edge-label="env down" data-edge-key="5" data-edge-id="env-down">
           <rect x="230" y="257" width="60" height="16" rx="4" class="c-mask"/>
@@ -5615,7 +5615,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </div>
         <ul>
           <li>The frontier is every queued slice whose blockers are all green: jig next.</li>
-          <li>A claim of a stalled or env-blocked slice also moves it to building.</li>
+          <li>jig claim also moves a stalled or env-blocked slice to building; jig release also queues one; jig ask parks a queued one too.</li>
+          <li>An env class that will not come up blocks a slice from any state, and requeue --from-brief-diff queues one from any state.</li>
         </ul>
       </div>
     </div>

@@ -66,6 +66,7 @@
     "gate",
     "review",
     "route",
+    "pub_body",
     "approve_publish",
     "publish"
   ],
@@ -170,14 +171,20 @@
       "lane": "jig",
       "col": 3,
       "type": "security",
-      "label": "jig gate",
-      "sublabel": "opens a round",
+      "label": "Round opens",
+      "sublabel": "gate or review context",
       "sources": [
         {
           "path": "ARCHITECTURE.md",
           "line": 722,
           "end_line": 724,
           "label": "Gate reviewer contract"
+        },
+        {
+          "path": "skills/review/SKILL.md",
+          "line": 15,
+          "end_line": 20,
+          "label": "review context opens the round"
         }
       ]
     },
@@ -231,6 +238,27 @@
           "line": 241,
           "end_line": 243,
           "label": "Triage"
+        }
+      ]
+    },
+    {
+      "id": "pub_body",
+      "lane": "session",
+      "col": 5,
+      "type": "backend",
+      "label": "Render body",
+      "sublabel": "jig publish --body",
+      "sources": [
+        {
+          "path": "skills/publish/SKILL.md",
+          "line": 13,
+          "end_line": 24,
+          "label": "--body"
+        },
+        {
+          "path": "CONTEXT.md",
+          "line": 102,
+          "label": "publish sub-steps"
         }
       ]
     },
@@ -310,14 +338,14 @@
       "id": "verify-gate",
       "from": "verify",
       "to": "gate",
-      "label": "all green",
+      "label": "green: Review T",
       "variant": "emphasis"
     },
     {
       "id": "gate-review",
       "from": "gate",
       "to": "review",
-      "label": "Review T"
+      "label": "review context"
     },
     {
       "id": "review-route",
@@ -340,17 +368,23 @@
       "role": "branch"
     },
     {
-      "id": "route-approve",
+      "id": "route-body",
       "from": "route",
-      "to": "approve_publish",
-      "label": "clean round",
+      "to": "pub_body",
+      "label": "clean: Publish T",
       "variant": "emphasis"
+    },
+    {
+      "id": "body-approve",
+      "from": "pub_body",
+      "to": "approve_publish",
+      "label": "PR body"
     },
     {
       "id": "approve-publish",
       "from": "approve_publish",
       "to": "publish",
-      "label": "Publish T"
+      "label": "approved"
     }
   ],
   "cards": [

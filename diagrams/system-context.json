@@ -222,7 +222,7 @@
       "id": "githook",
       "type": "messagebus",
       "label": "post-commit hook",
-      "sublabel": "global core.hooksPath",
+      "sublabel": "global, or in the clone",
       "pos": [
         520,
         380
@@ -335,8 +335,14 @@
       "id": "store-github",
       "from": "store",
       "to": "github",
-      "label": "mirror",
+      "label": "mirror: issues, board",
       "variant": "dashed"
+    },
+    {
+      "id": "jig-github",
+      "from": "jig",
+      "to": "github",
+      "label": "push head, open PR"
     },
     {
       "id": "harness-clone",
@@ -395,7 +401,7 @@
       "items": [
         "jig tui, which runs verbs as the person and reads jig events.",
         "The pooled worktrees (leases) a gate round and a publish check out.",
-        "Publish pushes the reviewed head and opens the PR with gh, or the session pushes and records it."
+        "The session can push and open the PR itself; jig publish --pr then records it."
       ]
     }
   ]

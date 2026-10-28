@@ -150,9 +150,9 @@
       "id": "brief-drift",
       "from": "green",
       "to": "queued",
-      "label": "cited section changed",
+      "label": "requeue --from-brief-diff",
       "variant": "dashed",
-      "note": "jig requeue --from-brief-diff"
+      "note": "a cited brief section changed"
     },
     {
       "id": "env-down",
@@ -208,7 +208,8 @@
       "title": "Ready is computed, not stored",
       "items": [
         "The frontier is every queued slice whose blockers are all green: jig next.",
-        "A claim of a stalled or env-blocked slice also moves it to building."
+        "jig claim also moves a stalled or env-blocked slice to building; jig release also queues one; jig ask parks a queued one too.",
+        "An env class that will not come up blocks a slice from any state, and requeue --from-brief-diff queues one from any state."
       ]
     }
   ]

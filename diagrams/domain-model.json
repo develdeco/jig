@@ -341,6 +341,10 @@
           "type": "proves it done"
         },
         {
+          "name": "env",
+          "type": "env class, optional"
+        },
+        {
           "name": "blocked_by",
           "type": "Slice[]"
         },
@@ -431,28 +435,20 @@
         {
           "name": "id",
           "type": "and path"
-        },
-        {
-          "name": "oracles",
-          "type": "name to command"
-        },
-        {
-          "name": "envs",
-          "type": "up, check, down"
         }
       ],
       "sources": [
+        {
+          "path": "internal/manifest/manifest.go",
+          "line": 18,
+          "end_line": 22,
+          "label": "Workspace"
+        },
         {
           "path": "CONTEXT.md",
           "line": 85,
           "end_line": 91,
           "label": "Workspace, Env class"
-        },
-        {
-          "path": "internal/manifest/manifest.go",
-          "line": 19,
-          "end_line": 46,
-          "label": "Manifest"
         }
       ]
     },
@@ -552,7 +548,7 @@
         },
         {
           "name": "body",
-          "type": "with ## Demo picks"
+          "type": "## Demo if recordings picked"
         },
         {
           "name": "changelog",
@@ -596,11 +592,11 @@
         },
         {
           "name": "intent",
-          "type": "brief | explicit | inferred"
+          "type": "brief | explicit | inferred | none"
         },
         {
           "name": "verdict",
-          "type": "clean | findings"
+          "type": "clean | findings | not-independent"
         }
       ],
       "sources": [
@@ -615,6 +611,42 @@
           "line": 33,
           "end_line": 57,
           "label": "RoundRecord"
+        }
+      ]
+    },
+    {
+      "id": "manifest",
+      "label": "Manifest",
+      "kind": "record",
+      "sublabel": "A repo's build surface, read at the commit",
+      "row": 4,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "oracles",
+          "type": "name to command"
+        },
+        {
+          "name": "envs",
+          "type": "up, check, down"
+        },
+        {
+          "name": "timeout",
+          "type": "per oracle run"
+        }
+      ],
+      "sources": [
+        {
+          "path": "internal/manifest/manifest.go",
+          "line": 35,
+          "end_line": 46,
+          "label": "Manifest"
+        },
+        {
+          "path": "internal/manifest/manifest.go",
+          "line": 156,
+          "end_line": 164,
+          "label": "OracleCmd"
         }
       ]
     }
@@ -720,7 +752,7 @@
     {
       "id": "verification_runs",
       "from": "verification",
-      "to": "workspace",
+      "to": "manifest",
       "kind": "dependency",
       "label": "runs oracle of"
     },
@@ -746,6 +778,13 @@
       "to": "gate_round",
       "kind": "dependency",
       "label": "ships clean head"
+    },
+    {
+      "id": "manifest_declares",
+      "from": "manifest",
+      "to": "workspace",
+      "kind": "composition",
+      "label": "declares"
     }
   ],
   "cards": [

@@ -126,11 +126,11 @@
   "segments": [
     {
       "from": 150,
-      "to": 345,
+      "to": 352,
       "label": "Commit"
     },
     {
-      "from": 355,
+      "from": 360,
       "to": 640,
       "label": "In the background"
     },
@@ -169,15 +169,15 @@
       "id": "hook-exit",
       "from": "observe",
       "to": "git",
-      "y": 300,
-      "label": "exit 0, prints nothing",
+      "y": 318,
+      "label": "exit 0, quiet unless it failed",
       "variant": "return"
     },
     {
       "id": "commit-done",
       "from": "git",
       "to": "session",
-      "y": 330,
+      "y": 342,
       "label": "commit done",
       "variant": "return"
     },
@@ -218,9 +218,9 @@
       "from": "worker",
       "to": "store",
       "y": 575,
-      "label": "oracle, verified",
+      "label": "oracle, verified on a pass",
       "variant": "emphasis",
-      "note": "A pass marks the slice green; a fail sends it back to building"
+      "note": "Pass: green. Fail: building, unless it needs input. Cannot run: verify-error"
     },
     {
       "id": "next-tool",
@@ -241,7 +241,7 @@
       "from": "store",
       "to": "observe",
       "y": 730,
-      "label": "verified since start",
+      "label": "outcomes since start",
       "variant": "return"
     },
     {
@@ -251,20 +251,20 @@
       "y": 760,
       "label": "note, told once",
       "variant": "return",
-      "note": "Enforced at Stop when the claim is unattended"
+      "note": "A pass is only told; a fail or verify-error also holds Stop when unattended"
     }
   ],
   "activations": [
     {
       "participant": "git",
       "from": 170,
-      "to": 330,
+      "to": 342,
       "type": "messagebus"
     },
     {
       "participant": "observe",
       "from": 205,
-      "to": 300,
+      "to": 318,
       "type": "backend"
     },
     {
