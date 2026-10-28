@@ -151,7 +151,7 @@ func (s *Store) CheckTrackerTree() ([]TrackerProblem, error) {
 		problems = append(problems, TrackerProblem{
 			Code: TrackerRecordUnmoved, Path: rel,
 			Msg:  fmt.Sprintf("%s is still beside its link: a record is %s", rel, filepath.ToSlash(s.TrackerRecordRelPath(e))),
-			Help: "Run `jig trackers sync`: it moves the record into its entry's folder and links it there",
+			Help: "Run `jig trackers sync`: it moves the record into its entry's folder and links it there (a record that cannot be read or names nothing is reported above and stays until it is mended)",
 		})
 	}
 	legacy, err := s.LegacyTrackerRecords()

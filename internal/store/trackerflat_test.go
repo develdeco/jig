@@ -298,3 +298,59 @@ func TestRemoveTrackerRecordTakesTheFlatLayoutToo(t *testing.T) {
 		t.Errorf("records = %+v, want none", recs)
 	}
 }
+
+// TestAFlatEntryNeverReadsOrRemovesAFileOfTheFolderItLinksTo: in the flat layout
+// the entry's path is a link to the ticket's or chart's own folder, so
+// <entry>/record.yaml reached through it is a file of the chart's. Moving the
+// entry, and removing it, treat the path as no folder of the tree's until it is
+// one, and leave that file as it is.
+func TestAFlatEntryNeverReadsOrRemovesAFileOfTheFolderItLinksTo(t *testing.T) {
+	st, _ := newTreeStore(t)
+	skipWithoutSymlinks(t, st)
+	own := filepath.Join(st.Root, "charts", "demo", "record.yaml")
+	const ownText = "chart: demo\nsomething: the chart's own file\n"
+	if err := os.WriteFile(own, []byte(ownText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	moves := TrackerEntry{Provider: ProviderGitHub, Scope: "acme/tracking", ID: "7"}
+	removes := TrackerEntry{Provider: ProviderGitHub, Scope: "acme/tracking", ID: "8"}
+	text := treeHeader + "chart: demo\nrepo: acme/tracking\nissue: 7\nnode_id: I_7\n"
+	writeFlat(t, st, moves, TrackerOwner{Chart: "demo"}, text)
+	writeFlat(t, st, removes, TrackerOwner{Chart: "demo"}, treeHeader+"chart: demo\nrepo: acme/tracking\nissue: 8\nnode_id: I_8\n")
+
+	if err := st.RemoveTrackerRecord(removes); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(own); err != nil || string(got) != ownText {
+		t.Fatalf("the chart's own record.yaml after removing a flat entry = %q, %v; want it untouched", got, err)
+	}
+	if _, err := os.Lstat(st.TrackerPath(removes)); !os.IsNotExist(err) {
+		t.Errorf("the removed entry's old link is still there (lstat err %v)", err)
+	}
+
+	moved, err := st.MoveFlatTrackerRecords()
+	if err != nil || len(moved) != 1 {
+		t.Fatalf("MoveFlatTrackerRecords = %+v, %v; want the one record moved, not refused over the chart's file", moved, err)
+	}
+	if got, err := os.ReadFile(own); err != nil || string(got) != ownText {
+		t.Errorf("the chart's own record.yaml after the move = %q, %v; want it untouched", got, err)
+	}
+	if got, err := os.ReadFile(st.TrackerRecordPath(moves)); err != nil || string(got) != text {
+		t.Errorf("the moved record = %q, %v; want the flat record's bytes", got, err)
+	}
+}
+
+// TestLinkNameOKRefusesAnythingThatIsTheRecordOrLeavesTheFolder: the record's
+// name is matched the way Windows and macOS match it, without regard to case
+// and trailing dots and spaces, so a chart cannot name a link over the record.
+func TestLinkNameOKRefusesAnythingThatIsTheRecordOrLeavesTheFolder(t *testing.T) {
+	for name, want := range map[string]bool{
+		"JIG-1": true, "demo": true, "record.yaml.bak": true, "my.record.yaml": true,
+		"record.yaml": false, "RECORD.YAML": false, "Record.Yaml": false, "record.yaml.": false,
+		"record.yaml ": false, "": false, ".": false, "..": false, "a/b": false, `a\b`: false,
+	} {
+		if got := (TrackerOwner{Chart: name}).linkNameOK(); got != want {
+			t.Errorf("linkNameOK(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

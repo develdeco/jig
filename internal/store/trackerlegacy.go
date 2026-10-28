@@ -104,7 +104,11 @@ func (s *Store) MoveLegacyTrackerRecord(l LegacyTrackerRecord, e TrackerEntry, h
 	if err != nil {
 		return err
 	}
-	for _, rel := range []string{s.TrackerRecordRelPath(e), s.flatRecordRelPath(e)} {
+	rels := []string{s.flatRecordRelPath(e)}
+	if s.entryIsFolder(e) {
+		rels = []string{s.TrackerRecordRelPath(e), s.flatRecordRelPath(e)}
+	}
+	for _, rel := range rels {
 		if _, err := os.Stat(filepath.Join(s.Root, rel)); err != nil {
 			continue
 		}

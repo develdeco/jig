@@ -112,7 +112,15 @@ func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error)
 		return LinkBlocked, nil
 	case err == nil:
 		// A plain file: the stand-in git left while this clone, or the one that
-		// made the checkout, had no symlinks.
+		// made the checkout, had no symlinks. Never the record itself, which a
+		// file system that folds case or trailing dots can name the link as.
+		if rfi, rerr := os.Stat(s.TrackerRecordPath(e)); rerr == nil && os.SameFile(fi, rfi) {
+			return "", &axi.Error{
+				Msg:  fmt.Sprintf("%q cannot be the name of a link in the tracker tree: it is the entry's record", o.linkName()),
+				Code: "TRACKER_ENTRY_INVALID",
+				Help: []string{"A link is named by its ticket's id or its chart's name, one plain name that is not record.yaml"},
+			}
+		}
 		if err := os.Remove(link); err != nil {
 			return "", err
 		}

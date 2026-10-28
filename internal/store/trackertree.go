@@ -138,10 +138,15 @@ func (o TrackerOwner) linkName() string {
 // linkNameOK reports whether the owner's store id can be the name of a link:
 // one plain component that is not the record's own name. A record's ticket: or
 // chart: key is read out of a file, so it can never lead a write out of the
-// entry's folder or over the record.
+// entry's folder or over the record. The record's name is compared without
+// regard to case and trailing dots and spaces, which the file systems of
+// Windows and macOS do not tell apart.
 func (o TrackerOwner) linkNameOK() bool {
 	name := o.linkName()
-	return name != "" && name != "." && name != ".." && name != trackerRecordFile && !strings.ContainsAny(name, `/\`)
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return false
+	}
+	return !strings.EqualFold(strings.TrimRight(name, ". "), trackerRecordFile)
 }
 
 // ownerRelDir is the owner's folder, relative to the store root: where its
@@ -602,6 +607,24 @@ func (s *Store) checkEntryFree(e TrackerEntry, o TrackerOwner) error {
 	return nil
 }
 
+// entryIsFolder reports whether e's path is a folder of its own. In the flat
+// layout it is a link to the ticket's or chart's folder, which is not the
+// entry's: a stat of <entry>/record.yaml would follow the link and read, or a
+// remove would delete, a file of the ticket's or chart's own.
+func (s *Store) entryIsFolder(e TrackerEntry) bool {
+	fi, err := os.Lstat(s.TrackerPath(e))
+	return err == nil && fi.IsDir()
+}
+
+// hasFolderRecord reports whether e's folder holds a record.yaml.
+func (s *Store) hasFolderRecord(e TrackerEntry) bool {
+	if !s.entryIsFolder(e) {
+		return false
+	}
+	_, err := os.Stat(s.TrackerRecordPath(e))
+	return err == nil
+}
+
 // makeEntryFolder makes e's folder, first taking out what the flat layout
 // left at its path: the link named <remote id> (or the plain file git leaves
 // where a clone cannot make one), which a write would otherwise follow into the
@@ -639,7 +662,11 @@ func (s *Store) RemoveTrackerRecord(e TrackerEntry) error {
 		s.invalidateTrackerIndex()
 		return err
 	}
-	for _, rel := range []string{s.TrackerRecordRelPath(e), s.flatRecordRelPath(e)} {
+	rels := []string{s.flatRecordRelPath(e)}
+	if s.entryIsFolder(e) {
+		rels = append(rels, s.TrackerRecordRelPath(e))
+	}
+	for _, rel := range rels {
 		if err := os.Remove(filepath.Join(s.Root, rel)); err != nil && !os.IsNotExist(err) {
 			return fail(err)
 		}

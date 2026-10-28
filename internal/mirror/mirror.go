@@ -663,7 +663,7 @@ func refuseUnreadableRecords(st *store.Store) error {
 		if rec.Err == nil {
 			continue
 		}
-		rel := filepath.ToSlash(st.TrackerRecordRelPath(rec.Entry))
+		rel := rec.Rel
 		return &axi.Error{
 			Msg:  fmt.Sprintf("%s could not be read: %v", rel, rec.Err),
 			Code: "MIRROR_RECORD_INVALID",

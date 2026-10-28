@@ -197,6 +197,31 @@ func TestSyncDryRunReadsAFlatTreeAndMovesNone(t *testing.T) {
 	}
 }
 
+// TestSyncRefusalNamesTheFlatRecordItCannotRead: a record beside its link that
+// cannot be decoded stops the sync, and the refusal names that file, not the
+// folder path it would move to, which does not exist.
+func TestSyncRefusalNamesTheFlatRecordItCannotRead(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+	mintTestTicket(t, st, "DEMO-1", "First ticket")
+	runGit(t, work, "push", "origin", "main")
+	broken := st.TrackerPath(githubEntry("example/tracking", 5)) + ".yaml"
+	if err := os.MkdirAll(filepath.Dir(broken), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(broken, []byte("ticket: [unclosed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &fakeClient{}
+	_, err := Sync(Deps{Store: st, Cfg: loadCfg(t, st), Client: client}, SyncOpts{})
+	if err == nil || !strings.Contains(err.Error(), "trackers/github/example/tracking/5.yaml could not be read") {
+		t.Fatalf("Sync = %v, want a refusal naming the flat file", err)
+	}
+	if len(client.calls) != 0 {
+		t.Errorf("CreateIssue calls = %+v, want none: no second issue", client.calls)
+	}
+}
+
 // TestSyncRenamesTheLinkWhenATicketIsRenamed: a ticket renamed through an alias
 // keeps its issue, found by the record that still names the old id, and the
 // next sync names the link by the id the ticket has now.

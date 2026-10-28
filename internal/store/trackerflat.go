@@ -44,7 +44,7 @@ func (s *Store) MoveFlatTrackerRecords() ([]TrackerMove, error) {
 			continue
 		}
 		to := filepath.ToSlash(s.TrackerRecordRelPath(e))
-		if _, err := os.Stat(s.TrackerRecordPath(e)); err == nil {
+		if s.hasFolderRecord(e) {
 			have := s.readTrackerRecord(to)
 			if have.Err != nil || have.Owner() != flat.Owner() {
 				s.invalidateTrackerIndex()
