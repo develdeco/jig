@@ -69,8 +69,8 @@ const (
 // LinkTrackerEntry makes the link of entry e to o's folder, replacing one that
 // points elsewhere, and reports which it did (the Link constants). A clone
 // without symlinks gets LinkOff, and a warning once. The write goes in the
-// working tree; Claim's paths and the next checkpoint's commit take it from
-// there.
+// working tree; Claim's paths and the landing of the checkpoint's sync
+// (landTrackerWrites) take it from there.
 func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error) {
 	if err := e.check(); err != nil {
 		return "", err
@@ -112,6 +112,7 @@ func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error)
 		s.warnNoLinks(fmt.Sprintf("the file system refused one: %v", err))
 		return LinkOff, nil
 	}
+	s.noteTrackerWrite(s.TrackerRelPath(e))
 	return result, nil
 }
 
@@ -204,6 +205,7 @@ func (s *Store) RebuildTrackerLinks() (TrackerLinks, error) {
 		if err := os.Remove(abs); err != nil {
 			return out, err
 		}
+		s.noteTrackerWrite(rel)
 		out.Removed = append(out.Removed, rel)
 	}
 	return out, nil

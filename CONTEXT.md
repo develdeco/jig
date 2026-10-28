@@ -42,8 +42,8 @@ The part of a ticket's default branch name after its id: the lowercase ASCII wor
 _Avoid_: branch name (a recorded `branch:` can be any name)
 
 **Mirror**:
-A tracker's copy of the store, written by jig at every checkpoint and never
-read back. Today's one mirror projects every ticket and chart onto a GitHub
+A tracker's copy of the store, written by jig at every checkpoint (its records
+committed and pushed with it) and never read back. Today's one mirror projects every ticket and chart onto a GitHub
 issue and a GitHub Project board, from inside the command that made the
 checkpoint, best-effort: a GitHub failure warns rather than failing the
 command. An edit made on the tracker side of a jig-owned field is drift,

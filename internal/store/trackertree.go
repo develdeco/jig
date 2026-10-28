@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -459,9 +460,15 @@ func (s *Store) WriteTrackerRecord(e TrackerEntry, o TrackerOwner, fields *yaml.
 	if err != nil {
 		return fmt.Errorf("store: encode %s: %w", e, err)
 	}
-	if err := AtomicWrite(s.TrackerRecordPath(e), data); err != nil {
-		s.invalidateTrackerIndex()
-		return err
+	// A record already holding these bytes is not written again: a sync
+	// that finds the store up to date changes nothing in the working tree,
+	// and so has nothing to land.
+	if have, rerr := os.ReadFile(s.TrackerRecordPath(e)); rerr != nil || !bytes.Equal(have, data) {
+		if err := AtomicWrite(s.TrackerRecordPath(e), data); err != nil {
+			s.invalidateTrackerIndex()
+			return err
+		}
+		s.noteTrackerWrite(s.TrackerRecordRelPath(e))
 	}
 	rec := TrackerRecord{Entry: e, Ticket: o.Ticket, Named: o.Ticket, Chart: o.Chart}
 	if fields != nil && fields.Kind == yaml.MappingNode {
@@ -506,11 +513,13 @@ func (s *Store) RemoveTrackerRecord(e TrackerEntry) error {
 		s.invalidateTrackerIndex()
 		return err
 	}
+	s.noteTrackerWrite(s.TrackerRecordRelPath(e))
 	s.dropTrackerRecord(e)
 	if fi, err := os.Lstat(s.TrackerPath(e)); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		if err := os.Remove(s.TrackerPath(e)); err != nil {
 			return err
 		}
+		s.noteTrackerWrite(s.TrackerRelPath(e))
 	}
 	// A folder with anything left in it refuses to go: that is the check.
 	for dir := filepath.Dir(s.TrackerPath(e)); dir != filepath.Join(s.Root, trackersDirName); dir = filepath.Dir(dir) {

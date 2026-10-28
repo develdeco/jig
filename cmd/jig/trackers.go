@@ -69,15 +69,33 @@ func cmdTrackers(e env, args []string, stdout io.Writer) int {
 	// 2-minute bound a first sync of a sizeable store cannot finish inside
 	// (gate finding r2-f5): it runs until it is done.
 	report, err := mirror.Sync(mirror.Deps{Store: st, Cfg: cfg, Home: jigHome, Client: e.mirrorClient}, mirror.SyncOpts{DryRun: *dryRun, Unbounded: true})
+	// What the sync wrote goes out even when it failed part-way: the records
+	// it did write are true. Together with the commit Sync made of the
+	// leftovers, a run that is not a dry run leaves nothing uncommitted or
+	// unpushed.
+	var landErr error
+	if !*dryRun {
+		landErr = st.LandTrackerWrites()
+	}
 	if err != nil {
+		if landErr != nil {
+			st.Warn("the tracker records this sync wrote were not landed on the store's origin: %v", landErr)
+		}
 		return renderErr(stdout, err)
 	}
 	if report.NoTracker {
 		axi.Render(stdout, axi.KV("trackers", [][2]string{{"status", "no github entry configured"}}))
+		if landErr != nil {
+			return renderErr(stdout, landErr)
+		}
 		return 0
 	}
 
-	if renderSyncReport(stdout, report, *dryRun) {
+	skipped := renderSyncReport(stdout, report, *dryRun)
+	if landErr != nil {
+		return renderErr(stdout, landErr)
+	}
+	if skipped {
 		return 1
 	}
 	return 0

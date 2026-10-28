@@ -59,6 +59,11 @@ func Notes(c observe.NoteCtx) ([]observe.Note, error) {
 
 // record appends the spend line of the event session when its total changed,
 // and returns lines with it added (the journal as read before it is stale).
+// The line is written to the clone and not committed: a Stop runs in every
+// turn, the line is cumulative and written again whenever the total moved, so
+// a commit and a push here would be a store commit and a round trip per turn.
+// The next checkpoint's commit, or `jig trackers sync`, carries it to origin
+// (ADR 0030, "Amendment: a checkpoint lands what its sync wrote").
 func record(c observe.NoteCtx, lines []journal.Line) ([]journal.Line, error) {
 	transcript := c.Event.Transcript
 	session := c.Event.Session

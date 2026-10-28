@@ -1,5 +1,7 @@
 # jig mirrors the store onto GitHub from inside every command
 
+**Amended** (see "Amendment: a checkpoint lands what its sync wrote" below): the records a sync writes after a ticket's creation are committed and pushed by the checkpoint that ran the sync, instead of waiting for the next checkpoint's commit, and `jig trackers sync` pushes what it writes. The mirror's shape, ownership and drift rules below stand.
+
 A bridge program outside jig used to project the store onto a GitHub
 Project and its issues: one ticket or chart, one issue; the project's
 Status and Store ID fields; sub-issue and blocked-by links; pull requests.
@@ -59,9 +61,9 @@ rejected, its pull brings in the winner's record, and the losing clone
 closes its own issue as not planned (`Duplicate of #<number>`), drops its
 own record, and adopts the winner's - rather than retrying into the same
 race again. Every other record write (an update, a link, a board
-placement) lands in the working tree and goes in with the next
-checkpoint's own commit, since only a brand-new id needs the claim's race
-protection.
+placement) lands in the working tree with no race protection of its own,
+since only a brand-new id needs the claim's, and goes out when the
+checkpoint's sync is done (the amendment below).
 
 ## Ownership is split field by field, and an edit on the other side is drift
 
@@ -108,3 +110,52 @@ its repo gone) is simply opened again, rather than failing the sync.
 See [DECISIONS.md](../../DECISIONS.md) for the records' exact keys, the
 renderer's golden format, the publish-safety scan, and the drift slice's
 own mechanics.
+
+## Amendment: a checkpoint lands what its sync wrote
+
+Recording the README demo against a store with an origin and a mirror found
+the gap in "goes in with the next checkpoint's commit": `jig publish --pr` is
+a ticket's last checkpoint, so no next one comes. The pull request's record
+(its `prs:` entry, `synced.status`, `body_sha256`) stayed uncommitted until a
+later `jig trackers sync` ran `Store.Sync`, which commits leftovers but never
+pushes, so a teammate's clone and the store on GitHub never saw it.
+
+- **The checkpoint that ran the sync lands its writes.** The tracker tree's
+  writers (`WriteTrackerRecord`, `RemoveTrackerRecord`, `LinkTrackerEntry`,
+  `RebuildTrackerLinks`, `DropLegacyTrackerRecord`) note the paths they change
+  in the working tree, and `Store.RunCheckpointHook` ends by committing exactly
+  those paths and pushing (`landTrackerWrites`). The commit is the person's,
+  `jig: record the tracker mirror's sync`, scoped by pathspec the way `Claim`'s
+  is, so any other dirty state in the store (a journal line another process
+  just wrote) stays where it is. A sync that failed part-way lands the records
+  it did write, which are true. A landing that fails (the origin cannot be
+  reached, a rebase conflicts) is one warning, and the records stay for the
+  next checkpoint's commit, as before.
+- **An up-to-date store costs nothing.** `WriteTrackerRecord` leaves a record
+  that already holds the bytes alone and notes nothing, so a sync that finds
+  nothing to change makes no commit, no push and no git process: only a
+  checkpoint whose sync changed the tree pays for a landing.
+- **Issue creation keeps its claim.** A new issue's record is still committed
+  alone and pushed at once (`Store.Claim`), with the same race protection; the
+  landing only carries what the sync writes after it.
+- **`jig trackers sync` pushes what it writes.** After `Store.Sync` and the
+  mirror's sync, a run that is not a dry run calls `Store.LandTrackerWrites`,
+  which commits the noted paths and pushes the branch whether or not there was
+  anything new to commit, so the commit `Sync` made of the leftovers reaches
+  origin too. It leaves nothing uncommitted or unpushed; `--dry-run` still
+  writes to neither GitHub nor the store, and lands nothing. A landing that
+  fails is the command's error.
+
+The observe hooks' own journal lines (a session's `spend` line, the note of a
+question left open) are not mirror writes and are not landed this way: they
+stay in the clone until the next checkpoint's commit or `jig trackers sync`.
+That is on purpose. They are written inside the harness's Stop and SessionEnd
+hooks, in the agent's way and under the harness's own bound on how long a hook
+may run; a commit and a network push there would put a round trip into every
+turn's Stop (the spend line is cumulative and written again whenever the total
+moved, so a push per Stop is a store commit per turn) or be cut off at session
+end. Nothing is lost by waiting: the line is cumulative, there is nothing to
+reconcile, and the next checkpoint's commit sweeps it up. A session that ends
+and leaves its clone idle leaves its last spend line local until a checkpoint
+or `jig trackers sync` runs there. A detached flush at session end, as
+verification runs detached workers, would remove that wait; it is not built.

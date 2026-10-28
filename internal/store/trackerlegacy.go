@@ -128,6 +128,7 @@ func (s *Store) DropLegacyTrackerRecord(l LegacyTrackerRecord) error {
 	if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	s.noteTrackerWrite(l.Rel)
 	if l.Owner.Chart == "" {
 		_ = os.Remove(filepath.Dir(abs))
 	}
