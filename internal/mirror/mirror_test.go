@@ -500,7 +500,7 @@ func TestSyncCreatesAnIssuePerTicketAndChart(t *testing.T) {
 		if !strings.HasPrefix(string(data), "#") {
 			t.Fatalf("%s's record does not start with a comment line: %s", what, data)
 		}
-		out := runGit(t, "", "--git-dir", remote, "log", "--oneline", "--all", "--", filepath.ToSlash(filepath.Join("trackers", "github", "example", "tracking", string(rune('1'+i))+".yaml")))
+		out := runGit(t, "", "--git-dir", remote, "log", "--oneline", "--all", "--", filepath.ToSlash(filepath.Join("trackers", "github", "example", "tracking", string(rune('1'+i)), "record.yaml")))
 		if !strings.Contains(out, what+": github issue example/tracking#"+string(rune('1'+i))) {
 			t.Fatalf("remote history for %s = %q, want a commit naming the issue", what, out)
 		}
@@ -693,6 +693,22 @@ func TestSyncUnboundedRunsPastTheBound(t *testing.T) {
 // its own issue as not planned (naming the other in a comment), drop its own
 // record and adopt the other's - ending with one open issue and one record.
 func TestSyncAdoptsAnotherClonesIssueOnARejectedPush(t *testing.T) {
+	adoptsAnotherClonesIssue(t, false)
+}
+
+// TestSyncAdoptsAFlatRecordAnotherCloneRejectedWith is the same race against a
+// clone still on a build that keeps its records in the flat layout, beside the
+// link as <remote id>.yaml: the record is adopted as it is and moves into its
+// entry's folder with the board step's write.
+func TestSyncAdoptsAFlatRecordAnotherCloneRejectedWith(t *testing.T) {
+	adoptsAnotherClonesIssue(t, true)
+}
+
+// adoptsAnotherClonesIssue runs the race of
+// TestSyncAdoptsAnotherClonesIssueOnARejectedPush with the other clone's
+// record in the entry's folder, or beside its link when flat is set.
+func adoptsAnotherClonesIssue(t *testing.T, flat bool) {
+	t.Helper()
 	st, work, remote := newTestRemoteStore(t)
 	mintTestTicket(t, st, "DEMO-1", "First ticket")
 	runGit(t, work, "push", "origin", "main")
@@ -703,10 +719,14 @@ func TestSyncAdoptsAnotherClonesIssueOnARejectedPush(t *testing.T) {
 	runGit(t, other, "config", "user.email", "other@example.invalid")
 	otherRecord := recordHeader + "ticket: DEMO-1\nrepo: example/tracking\nissue: 99\nnode_id: NODE_OTHER\n"
 	otherDir := filepath.Join(other, "trackers", "github", "example", "tracking")
-	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+	otherFile := filepath.Join(otherDir, "99", "record.yaml")
+	if flat {
+		otherFile = filepath.Join(otherDir, "99.yaml")
+	}
+	if err := os.MkdirAll(filepath.Dir(otherFile), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(otherDir, "99.yaml"), []byte(otherRecord), 0o644); err != nil {
+	if err := os.WriteFile(otherFile, []byte(otherRecord), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, other, "add", "-A")
@@ -749,7 +769,11 @@ func TestSyncAdoptsAnotherClonesIssueOnARejectedPush(t *testing.T) {
 		t.Fatalf("DEMO-1's record = %+v, want it placed on the board too (item: set)", rec)
 	}
 
-	remoteLog := runGit(t, "", "--git-dir", remote, "log", "--oneline", "--all", "--", "trackers/github/example/tracking/99.yaml")
+	otherPath := "trackers/github/example/tracking/99/record.yaml"
+	if flat {
+		otherPath = "trackers/github/example/tracking/99.yaml"
+	}
+	remoteLog := runGit(t, "", "--git-dir", remote, "log", "--oneline", "--all", "--", otherPath)
 	if n := strings.Count(remoteLog, "DEMO-1: github issue"); n != 1 {
 		t.Fatalf("remote history for DEMO-1's record has %d claiming commits, want exactly 1 (the rejected attempt left nothing behind)", n)
 	}
@@ -759,10 +783,14 @@ func TestSyncAdoptsAnotherClonesIssueOnARejectedPush(t *testing.T) {
 	// Claim), going in with the next checkpoint's commit
 	// (brief.md#Syncing at every checkpoint), so the only dirty file is
 	// DEMO-1's own record, carrying the item: the board step just set, and
-	// its link, which the other clone's record came without.
-	want := "M trackers/github/example/tracking/99.yaml"
+	// its link, which the other clone's record came without. A flat record
+	// moves into the entry's folder with that write.
+	want := "M trackers/github/example/tracking/99/record.yaml"
 	if st.SymlinksOn() {
-		want += "\n?? trackers/github/example/tracking/99"
+		want += "\n?? trackers/github/example/tracking/99/DEMO-1"
+	}
+	if flat {
+		want = "D trackers/github/example/tracking/99.yaml\n?? trackers/github/example/tracking/99/"
 	}
 	status := runGit(t, work, "status", "--porcelain")
 	if strings.TrimSpace(status) != want {

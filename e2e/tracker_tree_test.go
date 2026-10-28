@@ -1,9 +1,9 @@
 package e2e
 
 // End-to-end tests of the tracker tree (store layout L4): the records a sync
-// writes under trackers/<provider>/<scope>/<remote id>.yaml, the links the
-// store rebuilds from them, what jig validate says about the tree, and the
-// branch binding that reads it.
+// writes under trackers/<provider>/<scope>/<remote id>/record.yaml, the links
+// the store rebuilds from them in the same folder, named by the ticket's id,
+// what jig validate says about the tree, and the branch binding that reads it.
 
 import (
 	"os"
@@ -22,17 +22,17 @@ const treeRecordHeader = "# This file is written by jig's GitHub mirror; edits h
 
 // writeTreeRecord writes, as the GitHub mirror does, the record of GitHub issue
 // number issue of acme/tracking in the tracker tree, naming ticket (or the
-// chart, when chart is set).
+// chart, when chart is set), and returns the entry's folder.
 func writeTreeRecord(t *testing.T, fx *fixture.Fixture, owner string, issue int) string {
 	t.Helper()
-	dir := filepath.Join(fx.StoreDir, "trackers", "github", "acme", "tracking")
+	n := strconv.Itoa(issue)
+	dir := filepath.Join(fx.StoreDir, "trackers", "github", "acme", "tracking", n)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	n := strconv.Itoa(issue)
 	record := treeRecordHeader + owner + "\nrepo: acme/tracking\nissue: " + n + "\nnode_id: I_" + n + "\n"
-	writeFileOrFatal(t, filepath.Join(dir, n+".yaml"), []byte(record))
-	return filepath.Join(dir, n)
+	writeFileOrFatal(t, filepath.Join(dir, "record.yaml"), []byte(record))
+	return dir
 }
 
 // storeSymlinks turns git's symlinks on in the fixture store when the machine
@@ -77,7 +77,8 @@ func treeLinks(t *testing.T, fx *fixture.Fixture) map[string]string {
 
 // TestTrackerTreeRebuiltFromRecords: the links of the tree are a view of its
 // records. A sync writes the records and the store makes every link from them,
-// each a relative symlink that leads to its ticket; jig validate says so when a
+// each a relative symlink, named by the ticket's id in its entry's folder, that
+// leads to its ticket; jig validate says so when a
 // link is missing and points at the sync; and taking every link away and
 // syncing again gives the same tree, with no provider anywhere.
 func TestTrackerTreeRebuiltFromRecords(t *testing.T) {
@@ -95,8 +96,8 @@ func TestTrackerTreeRebuiltFromRecords(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"trackers/github/acme/tracking/102": "../../../../tickets/" + fx.Ticket,
-		"trackers/github/acme/tracking/103": "../../../../tickets/" + other,
+		"trackers/github/acme/tracking/102/" + fx.Ticket: "../../../../../tickets/" + fx.Ticket,
+		"trackers/github/acme/tracking/103/" + other:     "../../../../../tickets/" + other,
 	}
 	sync := func() {
 		t.Helper()
@@ -109,7 +110,7 @@ func TestTrackerTreeRebuiltFromRecords(t *testing.T) {
 		t.Fatalf("links after a sync = %v, want %v", got, want)
 	}
 	for link, ticket := range map[string]string{"102": fx.Ticket, "103": other} {
-		through, err := os.Stat(filepath.Join(fx.StoreDir, "trackers", "github", "acme", "tracking", link))
+		through, err := os.Stat(filepath.Join(fx.StoreDir, "trackers", "github", "acme", "tracking", link, ticket))
 		direct, derr := os.Stat(filepath.Join(fx.StoreDir, "tickets", ticket))
 		if err != nil || derr != nil || !os.SameFile(through, direct) {
 			t.Errorf("link %s does not lead to %s's folder (%v, %v)", link, ticket, err, derr)

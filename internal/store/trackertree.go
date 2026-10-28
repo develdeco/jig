@@ -19,18 +19,29 @@ import (
 )
 
 // The tracker tree is where the store keeps what a remote tracker holds of its
-// tickets and charts: one entry per remote item, at
+// tickets and charts: one folder per remote item, the entry, at
 // trackers/<provider>/<scope>/<remote id>. GitHub's scope is <owner>/<repo>, the
 // place its issue numbers are unique, and its remote id is the bare number, so
-// issue 65 of develdeco/jig is trackers/github/develdeco/jig/65.
+// issue 65 of develdeco/jig is trackers/github/develdeco/jig/65/.
 //
-// Beside each entry, <remote id>.yaml is the record: it names its ticket
+// An entry holds two things. record.yaml is the record: it names its ticket
 // (ticket: <id>) or chart (chart: <name>), and every other key is the
 // provider's, kept exactly as the provider wrote it. The tree code owns the id
-// and the link and nothing else. The entry itself is a relative symlink to
-// tickets/<id> or charts/<name>, committed as git stores symlinks. The record
-// is the mapping and the link a view of it: RebuildTrackerLinks makes every
-// link from the records alone, with no provider and no network.
+// and the link and nothing else. The link is named by the store id, the
+// ticket's id or the chart's name, and is a relative symlink to tickets/<id>
+// or charts/<name>, committed as git stores symlinks; the store id is readable
+// in the tree without opening the link. The record is the mapping and the link
+// a view of it: RebuildTrackerLinks makes every link from the records alone,
+// with no provider and no network, and a ticket renamed through an alias gets
+// its link renamed with it.
+//
+// The record is not called ticket.yaml: through the link,
+// <entry>/<id>/ticket.yaml is the ticket's own record.
+//
+// A tree in the flat layout, which kept the link at <remote id> and the record
+// beside it as <remote id>.yaml, is still read: a record there is found where
+// a folder has none (flatRecordSuffix), and MoveFlatTrackerRecords moves it
+// into its entry's folder at the next sync.
 //
 // A ticket's or chart's own folder holds no tracker data. The first GitHub
 // mirror kept its records there, in <ticket>/tracker/github.yaml and
@@ -42,8 +53,12 @@ import (
 // trackers/github/<owner>/<repo>/<number>.
 const ProviderGitHub = "github"
 
-// trackerRecordSuffix ends the file name of a record: <remote id>.yaml.
-const trackerRecordSuffix = ".yaml"
+// trackerRecordFile is the fixed name of a record inside its entry's folder.
+const trackerRecordFile = "record.yaml"
+
+// flatRecordSuffix ends the file name of a record in the flat layout:
+// <remote id>.yaml, beside the link named <remote id>.
+const flatRecordSuffix = ".yaml"
 
 // legacyRecordFile is the name of the record A6's mirror first kept in a
 // ticket's tracker/ folder and in a chart's folder, before the tree.
@@ -78,7 +93,7 @@ func trackerNameOK(name string) bool {
 // component is a plain name, so an id read out of a file can never lead a
 // write out of trackers/.
 func (e TrackerEntry) check() error {
-	ok := trackerNameOK(e.Provider) && trackerNameOK(e.ID) && !strings.HasSuffix(e.ID, trackerRecordSuffix) && e.Scope != ""
+	ok := trackerNameOK(e.Provider) && trackerNameOK(e.ID) && !strings.HasSuffix(e.ID, flatRecordSuffix) && e.Scope != ""
 	for _, c := range strings.Split(e.Scope, "/") {
 		ok = ok && trackerNameOK(c)
 	}
@@ -88,7 +103,7 @@ func (e TrackerEntry) check() error {
 	return &axi.Error{
 		Msg:  fmt.Sprintf("%q is not a place in the tracker tree", e.String()),
 		Code: "TRACKER_ENTRY_INVALID",
-		Help: []string{"An entry is trackers/<provider>/<scope>/<remote id>, each part made of letters, digits, dots, dashes and underscores"},
+		Help: []string{"An entry is the folder trackers/<provider>/<scope>/<remote id>, each part made of letters, digits, dots, dashes and underscores"},
 	}
 }
 
@@ -112,6 +127,29 @@ func (o TrackerOwner) String() string {
 	return "ticket " + o.Ticket
 }
 
+// linkName is the name of the owner's link in an entry's folder: the store id,
+// the ticket's id or the chart's name.
+func (o TrackerOwner) linkName() string {
+	if o.Chart != "" {
+		return o.Chart
+	}
+	return o.Ticket
+}
+
+// linkNameOK reports whether the owner's store id can be the name of a link:
+// one plain component that is not the record's own name. A record's ticket: or
+// chart: key is read out of a file, so it can never lead a write out of the
+// entry's folder or over the record. The record's name is compared without
+// regard to case and trailing dots and spaces, which the file systems of
+// Windows and macOS do not tell apart.
+func (o TrackerOwner) linkNameOK() bool {
+	name := o.linkName()
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return false
+	}
+	return !strings.EqualFold(strings.TrimRight(name, ". "), trackerRecordFile)
+}
+
 // ownerRelDir is the owner's folder, relative to the store root: where its
 // link points.
 func (s *Store) ownerRelDir(o TrackerOwner) string {
@@ -131,6 +169,13 @@ func (s *Store) ownerExists(o TrackerOwner) bool {
 type TrackerRecord struct {
 	// Entry is where the record sits, read from its path.
 	Entry TrackerEntry
+	// Rel is the path of the file the record was read from, relative to the
+	// store root, in slash form: <entry>/record.yaml, or <entry>.yaml for a
+	// record still in the flat layout (Flat).
+	Rel string
+	// Flat is set for a record read from the flat layout, <entry>.yaml beside
+	// its link, which the next sync moves into the entry's folder.
+	Flat bool
 	// Ticket is the ticket the record names, as ResolveTicket gives it (an
 	// alias in the file is followed to the ticket's current id), or "".
 	Ticket string
@@ -149,6 +194,15 @@ type TrackerRecord struct {
 // Owner returns the ticket or chart the record names: valid only when the
 // record names exactly one.
 func (r TrackerRecord) Owner() TrackerOwner { return TrackerOwner{Ticket: r.Ticket, Chart: r.Chart} }
+
+// dir is the entry's folder as a slash path relative to the store root: where
+// the record's link goes, and where a link of the flat layout sits.
+func (r TrackerRecord) dir() string {
+	if r.Flat {
+		return strings.TrimSuffix(r.Rel, flatRecordSuffix)
+	}
+	return path.Dir(r.Rel)
+}
 
 // trackerState is what a Store remembers of the tree between calls.
 type trackerState struct {
@@ -207,12 +261,6 @@ func newTrackerIndex(records []TrackerRecord) *trackerIndex {
 	return idx
 }
 
-// recordSlashPath is the path of e's record relative to the store root, in
-// the slash form scanTracker sorts by.
-func recordSlashPath(e TrackerEntry) string {
-	return path.Join(trackersDirName, e.Provider, e.Scope, e.ID) + trackerRecordSuffix
-}
-
 // changeTrackerIndex replaces the memoized index, when there is one, with what
 // change makes of a copy of its records (which it keeps in path order). The
 // index a reader holds is never edited under it.
@@ -223,9 +271,7 @@ func (s *Store) changeTrackerIndex(change func([]TrackerRecord) []TrackerRecord)
 		return
 	}
 	records := change(append([]TrackerRecord(nil), s.tracker.idx.records...))
-	sort.SliceStable(records, func(i, j int) bool {
-		return recordSlashPath(records[i].Entry) < recordSlashPath(records[j].Entry)
-	})
+	sort.SliceStable(records, func(i, j int) bool { return records[i].Rel < records[j].Rel })
 	s.tracker.idx = newTrackerIndex(records)
 }
 
@@ -272,14 +318,29 @@ func (s *Store) trackerRecordIndex() (*trackerIndex, error) {
 	return idx, nil
 }
 
-// buildTrackerIndex reads every record under trackers/.
+// buildTrackerIndex reads every record under trackers/: the record of each
+// entry's folder, and a record of the flat layout where its entry's folder has
+// none. A flat file beside a folder's own record is a leftover, not a second
+// record (CheckTrackerTree reports it; MoveFlatTrackerRecords drops it).
 func (s *Store) buildTrackerIndex() (*trackerIndex, error) {
-	files, _, err := s.scanTracker()
+	scan, err := s.scanTracker()
 	if err != nil {
 		return nil, err
 	}
-	records := make([]TrackerRecord, len(files))
-	for i, rel := range files {
+	rels := append([]string(nil), scan.records...)
+	have := make(map[TrackerEntry]bool, len(scan.records))
+	for _, rel := range scan.records {
+		e, _ := entryOfRecordPath(rel)
+		have[e] = true
+	}
+	for _, rel := range scan.flat {
+		if e, _ := entryOfRecordPath(rel); !have[e] {
+			rels = append(rels, rel)
+		}
+	}
+	sort.Strings(rels)
+	records := make([]TrackerRecord, len(rels))
+	for i, rel := range rels {
 		records[i] = s.readTrackerRecord(rel)
 	}
 	return newTrackerIndex(records), nil
@@ -311,11 +372,25 @@ func (s *Store) TrackerRecordsFor(o TrackerOwner) ([]TrackerRecord, error) {
 	return out, nil
 }
 
-// scanTracker lists the tree without reading a file: the record files
-// (<remote id>.yaml) and the entries beside them (the links, or the plain
-// files git leaves where a clone cannot make one), as slash paths relative to
-// the store root. Links are not followed. An absent trackers/ lists nothing.
-func (s *Store) scanTracker() (records, entries []string, err error) {
+// trackerScan is the tree listed without reading a file, as slash paths
+// relative to the store root.
+type trackerScan struct {
+	// records are the record.yaml files of the entries' folders.
+	records []string
+	// flat are the records of the flat layout, <remote id>.yaml beside the link.
+	flat []string
+	// entries are the links in the entries' folders (or the plain files git
+	// leaves where a clone cannot make one), and the links of the flat layout.
+	entries []string
+}
+
+// scanTracker lists the tree without reading a file. An entry's folder is the
+// one that holds a record.yaml, and everything else in it but a temporary file
+// is an entry: the link, or a file a later version keeps there. Elsewhere a
+// regular .yaml file is a record of the flat layout. Links are not followed.
+// An absent trackers/ lists nothing.
+func (s *Store) scanTracker() (trackerScan, error) {
+	var out trackerScan
 	var walk func(dir, rel string) error
 	walk = func(dir, rel string) error {
 		ents, err := os.ReadDir(dir)
@@ -325,6 +400,12 @@ func (s *Store) scanTracker() (records, entries []string, err error) {
 			}
 			return fmt.Errorf("store: list %s: %w", rel, err)
 		}
+		isEntry := false
+		for _, e := range ents {
+			if e.Name() == trackerRecordFile && !e.IsDir() {
+				isEntry = true
+			}
+		}
 		for _, e := range ents {
 			name := e.Name()
 			child := path.Join(rel, name)
@@ -333,40 +414,60 @@ func (s *Store) scanTracker() (records, entries []string, err error) {
 				if err := walk(filepath.Join(dir, name), child); err != nil {
 					return err
 				}
-			case strings.HasSuffix(name, trackerRecordSuffix):
-				records = append(records, child)
 			case strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".tmp"):
 				// AtomicWrite's temporary file, mid-write or left by a crash.
+			case isEntry && name == trackerRecordFile:
+				out.records = append(out.records, child)
+			case isEntry:
+				out.entries = append(out.entries, child)
+			case strings.HasSuffix(name, flatRecordSuffix) && e.Type()&os.ModeSymlink == 0:
+				out.flat = append(out.flat, child)
 			default:
-				entries = append(entries, child)
+				out.entries = append(out.entries, child)
 			}
 		}
 		return nil
 	}
 	if err := walk(filepath.Join(s.Root, trackersDirName), trackersDirName); err != nil {
-		return nil, nil, err
+		return trackerScan{}, err
 	}
-	sort.Strings(records)
-	sort.Strings(entries)
-	return records, entries, nil
+	sort.Strings(out.records)
+	sort.Strings(out.flat)
+	sort.Strings(out.entries)
+	return out, nil
 }
 
 // entryOfRecordPath reads the entry a record's slash path (relative to the
-// store root) sits at. A path with no scope folder (trackers/github/5.yaml)
-// has an empty Scope.
-func entryOfRecordPath(rel string) TrackerEntry {
+// store root) sits at, and whether the path is of the flat layout. A path with
+// no scope folder (trackers/github/5/record.yaml) has an empty Scope, and one
+// with no provider folder an empty Provider.
+func entryOfRecordPath(rel string) (e TrackerEntry, flat bool) {
 	parts := strings.Split(strings.TrimPrefix(rel, trackersDirName+"/"), "/")
-	e := TrackerEntry{Provider: parts[0], ID: strings.TrimSuffix(parts[len(parts)-1], trackerRecordSuffix)}
+	last := parts[len(parts)-1]
+	if last == trackerRecordFile {
+		parts = parts[:len(parts)-1]
+	} else {
+		flat = true
+		parts[len(parts)-1] = strings.TrimSuffix(last, flatRecordSuffix)
+	}
+	switch {
+	case len(parts) == 0:
+		return TrackerEntry{}, flat
+	case len(parts) == 1:
+		return TrackerEntry{ID: parts[0]}, flat
+	}
+	e = TrackerEntry{Provider: parts[0], ID: parts[len(parts)-1]}
 	if len(parts) > 2 {
 		e.Scope = strings.Join(parts[1:len(parts)-1], "/")
 	}
-	return e
+	return e, flat
 }
 
 // readTrackerRecord reads the record at rel, a slash path relative to the
 // store root.
 func (s *Store) readTrackerRecord(rel string) TrackerRecord {
-	rec := TrackerRecord{Entry: entryOfRecordPath(rel)}
+	entry, flat := entryOfRecordPath(rel)
+	rec := TrackerRecord{Entry: entry, Rel: rel, Flat: flat}
 	data, err := readFile(filepath.Join(s.Root, filepath.FromSlash(rel)))
 	if err != nil {
 		rec.Err = err
@@ -445,7 +546,9 @@ func encodeTrackerRecord(header string, o TrackerOwner, fields *yaml.Node) ([]by
 // WriteTrackerRecord writes the record of entry e: header (the provider's
 // comment lines), the key that names o, then fields, the provider's mapping,
 // untouched. It writes the record only; the link is LinkTrackerEntry's or
-// RebuildTrackerLinks'.
+// RebuildTrackerLinks'. A record of the flat layout for the same entry, and
+// the link of that layout where the entry's folder goes, are replaced by the
+// write.
 func (s *Store) WriteTrackerRecord(e TrackerEntry, o TrackerOwner, fields *yaml.Node, header string) error {
 	if err := e.check(); err != nil {
 		return err
@@ -462,15 +565,33 @@ func (s *Store) WriteTrackerRecord(e TrackerEntry, o TrackerOwner, fields *yaml.
 	}
 	// A record already holding these bytes is not written again: a sync
 	// that finds the store up to date changes nothing in the working tree,
-	// and so has nothing to land.
-	if have, rerr := os.ReadFile(s.TrackerRecordPath(e)); rerr != nil || !bytes.Equal(have, data) {
+	// and so has nothing to land. The entry's path is read only when it is a
+	// folder: the link of the flat layout there would lead into the ticket's
+	// own folder.
+	same := false
+	if s.entryIsFolder(e) {
+		have, rerr := os.ReadFile(s.TrackerRecordPath(e))
+		same = rerr == nil && bytes.Equal(have, data)
+	}
+	if !same {
+		if err := s.makeEntryFolder(e); err != nil {
+			s.invalidateTrackerIndex()
+			return err
+		}
 		if err := AtomicWrite(s.TrackerRecordPath(e), data); err != nil {
 			s.invalidateTrackerIndex()
 			return err
 		}
 		s.noteTrackerWrite(s.TrackerRecordRelPath(e))
 	}
-	rec := TrackerRecord{Entry: e, Ticket: o.Ticket, Named: o.Ticket, Chart: o.Chart}
+	flat := s.flatRecordRelPath(e)
+	if err := os.Remove(filepath.Join(s.Root, flat)); err == nil {
+		s.noteTrackerWrite(flat)
+	} else if !os.IsNotExist(err) {
+		s.invalidateTrackerIndex()
+		return err
+	}
+	rec := TrackerRecord{Entry: e, Rel: filepath.ToSlash(s.TrackerRecordRelPath(e)), Ticket: o.Ticket, Named: o.Ticket, Chart: o.Chart}
 	if fields != nil && fields.Kind == yaml.MappingNode {
 		rec.Fields = *fields
 	} else {
@@ -495,7 +616,7 @@ func (s *Store) checkEntryFree(e TrackerEntry, o TrackerOwner) error {
 	}
 	if have := idx.records[i]; have.Err == nil && have.Owner().valid() && have.Owner() != o {
 		return &axi.Error{
-			Msg:  fmt.Sprintf("%s is the record of %s, not of %s", filepath.ToSlash(s.TrackerRecordRelPath(e)), have.Owner(), o),
+			Msg:  fmt.Sprintf("%s is the record of %s, not of %s", have.Rel, have.Owner(), o),
 			Code: "TRACKER_ENTRY_TAKEN",
 			Help: []string{"Two items cannot be one remote item: fix the ticket: or chart: key of the record that is wrong, or remove it"},
 		}
@@ -503,29 +624,101 @@ func (s *Store) checkEntryFree(e TrackerEntry, o TrackerOwner) error {
 	return nil
 }
 
-// RemoveTrackerRecord removes the record of entry e and its link, when it has
-// them, and the folders that held only those.
-func (s *Store) RemoveTrackerRecord(e TrackerEntry) error {
-	if err := e.check(); err != nil {
-		return err
+// entryIsFolder reports whether e's path is a folder of its own. In the flat
+// layout it is a link to the ticket's or chart's folder, which is not the
+// entry's: a stat of <entry>/record.yaml would follow the link and read, or a
+// remove would delete, a file of the ticket's or chart's own.
+func (s *Store) entryIsFolder(e TrackerEntry) bool {
+	fi, err := os.Lstat(s.TrackerPath(e))
+	return err == nil && fi.IsDir()
+}
+
+// hasFolderRecord reports whether e's folder holds a record.yaml.
+func (s *Store) hasFolderRecord(e TrackerEntry) bool {
+	if !s.entryIsFolder(e) {
+		return false
 	}
-	if err := os.Remove(s.TrackerRecordPath(e)); err != nil && !os.IsNotExist(err) {
-		s.invalidateTrackerIndex()
-		return err
-	}
-	s.noteTrackerWrite(s.TrackerRecordRelPath(e))
-	s.dropTrackerRecord(e)
-	if fi, err := os.Lstat(s.TrackerPath(e)); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		if err := os.Remove(s.TrackerPath(e)); err != nil {
+	_, err := os.Stat(s.TrackerRecordPath(e))
+	return err == nil
+}
+
+// makeEntryFolder makes e's folder, first taking out what the flat layout
+// left at its path: the link named <remote id> (or the plain file git leaves
+// where a clone cannot make one), which a write would otherwise follow into the
+// ticket's or chart's own folder.
+func (s *Store) makeEntryFolder(e TrackerEntry) error {
+	dir := s.TrackerPath(e)
+	if fi, err := os.Lstat(dir); err == nil && !fi.IsDir() {
+		if err := os.Remove(dir); err != nil {
 			return err
 		}
 		s.noteTrackerWrite(s.TrackerRelPath(e))
 	}
-	// A folder with anything left in it refuses to go: that is the check.
-	for dir := filepath.Dir(s.TrackerPath(e)); dir != filepath.Join(s.Root, trackersDirName); dir = filepath.Dir(dir) {
+	return os.MkdirAll(dir, 0o755)
+}
+
+// pruneTrackerDirs removes dir and then each folder above it that the removal
+// left empty, up to trackers/. A folder with anything left in it refuses to go:
+// that is the check.
+func (s *Store) pruneTrackerDirs(dir string) {
+	root := filepath.Join(s.Root, trackersDirName)
+	for ; dir != root && strings.HasPrefix(dir, root); dir = filepath.Dir(dir) {
 		if os.Remove(dir) != nil {
-			break
+			return
 		}
 	}
+}
+
+// RemoveTrackerRecord removes the record of entry e and its link, when it has
+// them, and the folders that held only those. A record or link of the flat
+// layout for the entry goes too.
+func (s *Store) RemoveTrackerRecord(e TrackerEntry) error {
+	if err := e.check(); err != nil {
+		return err
+	}
+	fail := func(err error) error {
+		s.invalidateTrackerIndex()
+		return err
+	}
+	rels := []string{s.flatRecordRelPath(e)}
+	if s.entryIsFolder(e) {
+		rels = append(rels, s.TrackerRecordRelPath(e))
+	}
+	for _, rel := range rels {
+		if err := os.Remove(filepath.Join(s.Root, rel)); err == nil {
+			s.noteTrackerWrite(rel)
+		} else if !os.IsNotExist(err) {
+			return fail(err)
+		}
+	}
+	s.dropTrackerRecord(e)
+	dir := s.TrackerPath(e)
+	fi, err := os.Lstat(dir)
+	switch {
+	case err != nil:
+		return nil
+	case fi.Mode()&os.ModeSymlink != 0:
+		// The link of the flat layout.
+		if err := os.Remove(dir); err != nil {
+			return err
+		}
+		s.noteTrackerWrite(s.TrackerRelPath(e))
+		dir = filepath.Dir(dir)
+	case fi.IsDir():
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			return err
+		}
+		for _, ent := range ents {
+			if ent.Type()&os.ModeSymlink == 0 {
+				continue
+			}
+			if err := os.Remove(filepath.Join(dir, ent.Name())); err != nil {
+				return err
+			}
+			s.noteTrackerWrite(filepath.Join(s.TrackerRelPath(e), ent.Name()))
+		}
+	}
+	s.pruneTrackerDirs(dir)
 	return nil
 }

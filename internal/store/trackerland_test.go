@@ -91,7 +91,7 @@ func TestCheckpointHookLandsWhatAFailedHookWrote(t *testing.T) {
 	if len(*warnings) != 1 || !strings.Contains((*warnings)[0], "github is down") {
 		t.Fatalf("warnings = %v, want the one naming the hook's cause", *warnings)
 	}
-	if got := runGit(t, remote, "show", "main:trackers/github/acme/tracking/7.yaml"); !strings.Contains(got, "issue: 7") {
+	if got := runGit(t, remote, "show", "main:trackers/github/acme/tracking/7/record.yaml"); !strings.Contains(got, "issue: 7") {
 		t.Fatalf("origin lacks the record the failed hook wrote: %q", got)
 	}
 }
@@ -148,11 +148,81 @@ func TestCheckpointHookLandsARecordItRemovesAndOneItAdds(t *testing.T) {
 		t.Fatalf("working tree still dirty after the landing:\n%s", got)
 	}
 	tree := runGit(t, remote, "ls-tree", "-r", "--name-only", "main", "trackers")
-	if !strings.Contains(tree, "trackers/github/acme/tracking/8.yaml\n") {
+	if !strings.Contains(tree, "trackers/github/acme/tracking/8/record.yaml\n") {
 		t.Errorf("origin's trackers/ lacks the added record:\n%s", tree)
 	}
-	if strings.Contains(tree, "trackers/github/acme/tracking/7.yaml") {
+	if strings.Contains(tree, "trackers/github/acme/tracking/7/record.yaml") {
 		t.Errorf("origin's trackers/ still holds the removed record:\n%s", tree)
+	}
+}
+
+// TestCheckpointHookLandingLeavesAForeignStagedFileStaged: a file another
+// process staged is not the landing's to commit, so the landing's commit holds
+// only the tracker path and the file stays staged.
+func TestCheckpointHookLandingLeavesAForeignStagedFileStaged(t *testing.T) {
+	st, work, remote, warnings := newLandStore(t)
+	if err := os.WriteFile(filepath.Join(work, "foreign.txt"), []byte("staged elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "foreign.txt")
+	st.AfterCheckpoint = func(s *Store) error {
+		putRecord(t, s, TrackerOwner{Ticket: "JIG-1"}, "acme/tracking", 7)
+		return nil
+	}
+
+	st.RunCheckpointHook()
+
+	if len(*warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", *warnings)
+	}
+	if got := porcelain(t, work); got != "A  foreign.txt" {
+		t.Errorf("status = %q, want only foreign.txt still staged", got)
+	}
+	tree := runGit(t, remote, "ls-tree", "-r", "--name-only", "main")
+	if !strings.Contains(tree, "trackers/github/acme/tracking/7/record.yaml\n") || strings.Contains(tree, "foreign.txt") {
+		t.Errorf("origin's tree = %q, want the record and not foreign.txt", tree)
+	}
+}
+
+// TestCheckpointHookLandsAFlatRecordMovedIntoItsFolder: the sync that moves a
+// record out of the flat layout takes away the link that sat where the entry's
+// folder goes (a plain file where the clone has no symlinks), and a file and a
+// folder cannot share a path, so the landing commits the removal and the
+// folder's record together and origin ends with the folder alone.
+func TestCheckpointHookLandsAFlatRecordMovedIntoItsFolder(t *testing.T) {
+	st, work, remote, warnings := newLandStore(t)
+	e := TrackerEntry{Provider: ProviderGitHub, Scope: "acme/tracking", ID: "7"}
+	writeFlat(t, st, e, TrackerOwner{Ticket: "JIG-1"}, flatText("JIG-1", "7"))
+	if err := st.Push("JIG-1: flat layout"); err != nil {
+		t.Fatal(err)
+	}
+	st.takeTrackerWrites()
+
+	st.AfterCheckpoint = func(s *Store) error {
+		moved, err := s.MoveFlatTrackerRecords()
+		if err == nil && len(moved) != 1 {
+			err = fmt.Errorf("moved %v, want the one flat record", moved)
+		}
+		return err
+	}
+	st.RunCheckpointHook()
+
+	for _, w := range *warnings {
+		if strings.Contains(w, "failed") || strings.Contains(w, "not landed") {
+			t.Fatalf("warning %q, want the move landed", w)
+		}
+	}
+	if got := porcelain(t, work); got != "" {
+		t.Fatalf("working tree still dirty after the landing:\n%s", got)
+	}
+	tree := runGit(t, remote, "ls-tree", "-r", "--name-only", "main", "trackers")
+	if !strings.Contains(tree, "trackers/github/acme/tracking/7/record.yaml\n") {
+		t.Errorf("origin's trackers/ lacks the record in its folder:\n%s", tree)
+	}
+	for _, flat := range []string{"trackers/github/acme/tracking/7.yaml\n", "trackers/github/acme/tracking/7\n"} {
+		if strings.Contains(tree, flat) {
+			t.Errorf("origin's trackers/ still holds the flat layout's %q:\n%s", strings.TrimSpace(flat), tree)
+		}
 	}
 }
 
@@ -189,10 +259,10 @@ func TestCheckpointHookLandsLinks(t *testing.T) {
 		t.Fatalf("working tree still dirty after the landing:\n%s", got)
 	}
 	tree := runGit(t, remote, "ls-tree", "-r", "--name-only", "main", "trackers")
-	if !strings.Contains(tree, "trackers/github/acme/tracking/8\n") {
+	if !strings.Contains(tree, "trackers/github/acme/tracking/8/JIG-1\n") {
 		t.Errorf("origin's trackers/ lacks the made link:\n%s", tree)
 	}
-	if strings.Contains(tree, "trackers/github/acme/tracking/7\n") {
+	if strings.Contains(tree, "trackers/github/acme/tracking/7/JIG-1\n") {
 		t.Errorf("origin's trackers/ still holds the removed link:\n%s", tree)
 	}
 }
@@ -254,7 +324,7 @@ func TestCheckpointHookLandingRebasesOntoAMovedOrigin(t *testing.T) {
 		t.Fatalf("warnings = %v, want none", *warnings)
 	}
 	files := runGit(t, remote, "ls-tree", "-r", "--name-only", "main")
-	for _, want := range []string{"note.txt", "trackers/github/acme/tracking/7.yaml"} {
+	for _, want := range []string{"note.txt", "trackers/github/acme/tracking/7/record.yaml"} {
 		if !strings.Contains(files, want+"\n") {
 			t.Errorf("origin lacks %s:\n%s", want, files)
 		}

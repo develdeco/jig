@@ -97,17 +97,50 @@ func (s *Store) landTrackerWrites(always bool) (err error) {
 			return err
 		}
 		if len(changed) > 0 {
-			sha, err := s.stageAndCommitPaths(changed, trackerLandMessage)
+			committed, err = s.commitTrackerPaths(changed)
 			if err != nil {
 				return err
 			}
-			committed = sha != ""
 		}
 	}
 	if !cp.hasRemote() || !(committed || always) {
 		return nil
 	}
 	return cp.push()
+}
+
+// commitTrackerPaths stages paths and commits them as the person, and reports
+// whether it committed. When nothing else is staged, the commit is the index as
+// it is: a pathspec commit (stageAndCommitPaths) cannot take a path that was a
+// file in HEAD and is a folder now, as the flat layout's link is once its
+// entry's folder takes its place ("does not have a commit checked out"), and
+// the move out of the flat layout is exactly that. Something staged already is
+// not this landing's to commit, so it takes the pathspec commit, which leaves
+// it where it is.
+func (s *Store) commitTrackerPaths(paths []string) (bool, error) {
+	foreign, err := s.hasStagedChanges()
+	if err != nil {
+		return false, err
+	}
+	if foreign {
+		sha, err := s.stageAndCommitPaths(paths, trackerLandMessage)
+		return sha != "", err
+	}
+	if _, err := gitx.Run(s.Root, append([]string{"add", "--"}, paths...)...); err != nil {
+		return false, err
+	}
+	staged, err := s.hasStagedChanges()
+	if err != nil || !staged {
+		return false, err
+	}
+	id, err := s.identity()
+	if err != nil {
+		return false, err
+	}
+	if _, err := gitx.Run(s.Root, commitConfig(id, "commit", "-m", trackerLandMessage)...); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // changedPaths returns those of paths that differ from the index: modified,

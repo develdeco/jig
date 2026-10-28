@@ -47,7 +47,7 @@ func TestTheLastCheckpointOfATicketLeavesOriginWithItsPullRequestsRecord(t *test
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %v, want none", warnings)
 	}
-	rel := filepath.ToSlash(filepath.Join("trackers", "github", "example", "tracking", "1.yaml"))
+	rel := filepath.ToSlash(filepath.Join("trackers", "github", "example", "tracking", "1", "record.yaml"))
 	shown := runGit(t, remote, "show", "main:"+rel)
 	for _, want := range []string{"prs:", "number: 5", "node_id: PR_5", "status: In review"} {
 		if !strings.Contains(shown, want) {

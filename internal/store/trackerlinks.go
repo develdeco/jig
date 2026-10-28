@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 )
 
@@ -32,9 +33,9 @@ func (s *Store) warnNoLinks(why string) {
 	})
 }
 
-// linkTarget is where e's link points, relative to the folder the link is in.
+// linkTarget is where o's link in e's folder points, relative to that folder.
 func (s *Store) linkTarget(e TrackerEntry, o TrackerOwner) (string, error) {
-	return filepath.Rel(filepath.Dir(s.TrackerPath(e)), filepath.Join(s.Root, s.ownerRelDir(o)))
+	return filepath.Rel(s.TrackerPath(e), filepath.Join(s.Root, s.ownerRelDir(o)))
 }
 
 // sameTarget reports whether a link at link that reads got points where want
@@ -66,22 +67,35 @@ const (
 	LinkOff = "off"
 )
 
-// LinkTrackerEntry makes the link of entry e to o's folder, replacing one that
-// points elsewhere, and reports which it did (the Link constants). A clone
-// without symlinks gets LinkOff, and a warning once. The write goes in the
-// working tree; Claim's paths and the landing of the checkpoint's sync
-// (landTrackerWrites) take it from there.
+// LinkTrackerEntry makes the link in entry e's folder to o's folder, named by
+// the store id, replacing one that points elsewhere, and reports which it did
+// (the Link constants). The link of the flat layout, where the folder goes, is
+// replaced by the folder. A link under another store id (the ticket was
+// renamed) is RebuildTrackerLinks' to take out. A clone without symlinks gets
+// LinkOff, and a warning once. The write goes in the working tree; Claim's
+// paths and the landing of the checkpoint's sync (landTrackerWrites) take it
+// from there.
 func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error) {
 	if err := e.check(); err != nil {
 		return "", err
+	}
+	if !o.linkNameOK() {
+		return "", &axi.Error{
+			Msg:  fmt.Sprintf("%q cannot be the name of a link in the tracker tree", o.linkName()),
+			Code: "TRACKER_ENTRY_INVALID",
+			Help: []string{"A link is named by its ticket's id or its chart's name, one plain name that is not record.yaml"},
+		}
 	}
 	if !s.SymlinksOn() {
 		s.warnNoLinks("git's core.symlinks is off")
 		return LinkOff, nil
 	}
-	link := s.TrackerPath(e)
+	link := s.TrackerLinkPath(e, o)
 	want, err := s.linkTarget(e, o)
 	if err != nil {
+		return "", err
+	}
+	if err := s.makeEntryFolder(e); err != nil {
 		return "", err
 	}
 	result := LinkMade
@@ -99,7 +113,15 @@ func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error)
 		return LinkBlocked, nil
 	case err == nil:
 		// A plain file: the stand-in git left while this clone, or the one that
-		// made the checkout, had no symlinks.
+		// made the checkout, had no symlinks. Never the record itself, which a
+		// file system that folds case or trailing dots can name the link as.
+		if rfi, rerr := os.Stat(s.TrackerRecordPath(e)); rerr == nil && os.SameFile(fi, rfi) {
+			return "", &axi.Error{
+				Msg:  fmt.Sprintf("%q cannot be the name of a link in the tracker tree: it is the entry's record", o.linkName()),
+				Code: "TRACKER_ENTRY_INVALID",
+				Help: []string{"A link is named by its ticket's id or its chart's name, one plain name that is not record.yaml"},
+			}
+		}
 		if err := os.Remove(link); err != nil {
 			return "", err
 		}
@@ -107,12 +129,12 @@ func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error)
 	case !errors.Is(err, fs.ErrNotExist):
 		return "", err
 	}
+	s.noteTrackerWrite(s.TrackerLinkRelPath(e, o))
 	if err := os.Symlink(want, link); err != nil {
 		s.tracker.symFailed.Store(true)
 		s.warnNoLinks(fmt.Sprintf("the file system refused one: %v", err))
 		return LinkOff, nil
 	}
-	s.noteTrackerWrite(s.TrackerRelPath(e))
 	return result, nil
 }
 
@@ -122,7 +144,8 @@ type TrackerLinks struct {
 	Made []string
 	// Replaced are the links (or plain files) it replaced with a right one.
 	Replaced []string
-	// Removed are the links it took out because no record is beside them.
+	// Removed are the links it took out because no record names them: one in a
+	// folder with no record, or under a store id the record no longer names.
 	Removed []string
 	// Blocked are the entries a folder sits at, left alone.
 	Blocked []string
@@ -136,29 +159,32 @@ func (l TrackerLinks) Changed() bool {
 }
 
 // linkable reports whether rec is a record that gets a link: it names a ticket
-// or chart the store has, and sits in a scope folder.
+// or chart the store has, by an id that can name a link, and sits in a scope
+// folder.
 func (s *Store) linkable(rec TrackerRecord) bool {
-	return rec.Err == nil && rec.Owner().valid() && rec.Entry.Scope != "" && rec.Entry.check() == nil && s.ownerExists(rec.Owner())
+	return rec.Err == nil && rec.Owner().valid() && rec.Owner().linkNameOK() && rec.Entry.Scope != "" && rec.Entry.check() == nil && s.ownerExists(rec.Owner())
 }
 
 // RebuildTrackerLinks makes every link of the tree from the records alone, with
 // no provider and no network: each record that names a ticket or chart in the
-// store gets a relative symlink to its folder, a link that points elsewhere is
-// replaced, and a link with no record beside it is removed. A second run finds
-// nothing to do. Where the clone has no symlinks it touches nothing and warns
-// once; every record is still there. It reads the records as the Store
-// remembers them; ReloadTrackerTree first for the tree as it is on disk now.
+// store gets a relative symlink to its folder, named by the store id, in its
+// entry's folder. A link that points elsewhere is replaced, and a link under
+// any other name (a ticket renamed through an alias leaves its old id's) or in
+// a folder with no record is removed. A second run finds nothing to do. Where
+// the clone has no symlinks it touches nothing and warns once; every record is
+// still there. It reads the records as the Store remembers them;
+// ReloadTrackerTree first for the tree as it is on disk now.
 func (s *Store) RebuildTrackerLinks() (TrackerLinks, error) {
 	var out TrackerLinks
 	idx, err := s.trackerRecordIndex()
 	if err != nil {
 		return out, err
 	}
-	_, entries, err := s.scanTracker()
+	scan, err := s.scanTracker()
 	if err != nil {
 		return out, err
 	}
-	if len(idx.records) == 0 && len(entries) == 0 {
+	if len(idx.records) == 0 && len(scan.entries) == 0 {
 		return out, nil
 	}
 	if !s.SymlinksOn() {
@@ -171,13 +197,20 @@ func (s *Store) RebuildTrackerLinks() (TrackerLinks, error) {
 		}
 		return out, nil
 	}
-	have := map[string]bool{}
+	wanted := map[string]bool{}
+	folders := map[string]bool{}
+	left := map[string]bool{}
 	for _, rec := range idx.records {
-		rel := path.Join(trackersDirName, rec.Entry.String())
-		have[rel] = true
+		dir := rec.dir()
+		folders[dir] = true
 		if !s.linkable(rec) {
+			// A record that names nothing, or something the store lacks: its
+			// folder and whatever links are in it are left as they are.
+			left[dir] = true
 			continue
 		}
+		rel := path.Join(dir, rec.Owner().linkName())
+		wanted[rel] = true
 		res, err := s.LinkTrackerEntry(rec.Entry, rec.Owner())
 		if err != nil {
 			return out, err
@@ -194,8 +227,8 @@ func (s *Store) RebuildTrackerLinks() (TrackerLinks, error) {
 			return out, nil
 		}
 	}
-	for _, rel := range entries {
-		if have[rel] {
+	for _, rel := range scan.entries {
+		if wanted[rel] || folders[rel] || left[path.Dir(rel)] {
 			continue
 		}
 		abs := filepath.Join(s.Root, filepath.FromSlash(rel))
@@ -206,6 +239,7 @@ func (s *Store) RebuildTrackerLinks() (TrackerLinks, error) {
 			return out, err
 		}
 		s.noteTrackerWrite(rel)
+		s.pruneTrackerDirs(filepath.Dir(abs))
 		out.Removed = append(out.Removed, rel)
 	}
 	return out, nil

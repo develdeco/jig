@@ -13,11 +13,11 @@ import (
 )
 
 // treeRecordOf returns the text of the record the tracker tree under root holds
-// for ticket (trackers/github/<owner>/<repo>/<number>.yaml naming it), and
-// whether there is one.
+// for ticket (trackers/github/<owner>/<repo>/<number>/record.yaml naming it),
+// and whether there is one.
 func treeRecordOf(t *testing.T, root, ticket string) (string, bool) {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join(root, "trackers", "github", "*", "*", "*.yaml"))
+	paths, err := filepath.Glob(filepath.Join(root, "trackers", "github", "*", "*", "*", "record.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

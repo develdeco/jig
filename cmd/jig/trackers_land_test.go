@@ -46,7 +46,7 @@ func TestTicketNewLeavesTheStoreLevelWithItsOriginAfterTheSync(t *testing.T) {
 		t.Errorf("origin is at %s, want it level with the store at %s", origin, local)
 	}
 	// What origin holds is what the sync left: the record carries synced:.
-	shown, err := gitx.Run(remote, "show", "main:trackers/github/example/tracking/1.yaml")
+	shown, err := gitx.Run(remote, "show", "main:trackers/github/example/tracking/1/record.yaml")
 	if err != nil {
 		t.Fatalf("origin has no record for issue 1: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestTrackersSyncLeavesNothingUncommittedOrUnpushed(t *testing.T) {
 	if journal, err := gitx.Run(remote, "show", "main:tickets/DEMO-1/journal.ndjson"); err != nil || !strings.Contains(journal, `"event":"spend"`) {
 		t.Errorf("origin's journal = %q (%v), want the spend line the sync committed", journal, err)
 	}
-	if record, err := gitx.Run(remote, "show", "main:trackers/github/example/tracking/1.yaml"); err != nil || !strings.Contains(record, "synced:") {
+	if record, err := gitx.Run(remote, "show", "main:trackers/github/example/tracking/1/record.yaml"); err != nil || !strings.Contains(record, "synced:") {
 		t.Errorf("origin's record = %q (%v), want it as the sync left it, with synced:", record, err)
 	}
 }
