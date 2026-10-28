@@ -13,7 +13,7 @@ jig  demo › JIG-2  Config loader                                     ✓ publi
   │  ○ changelog                                                               │
   │  ✓ published                                                               │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  next  Run `jig status JIG-2` to confirm the ticket is fully green
+
   ╭─ Activity ──────────────────────────────────────────────── latest 3 of 12 ─╮
   │  09:14:21 publish·done     ● finished                                      │
   │  09:14:20 publish·pr       ▲ opened https://example.test/acme/demo/pull/7  │

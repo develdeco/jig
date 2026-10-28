@@ -18,8 +18,6 @@ const (
 	activityLines = 8
 	substepLines  = 6
 	bodyRef       = 19
-	// nextLines is how many lines the "next" line may take.
-	nextLines = 2
 )
 
 // substepCap is the most sub-steps the block lists in a body of body rows:
@@ -61,8 +59,10 @@ func (m *Model) ticketPage(id string) page {
 	p.boxEnd()
 
 	// What follows the sub-steps: the rows that wait for a person, whose
-	// cursor places come after the steps', and the next line.
-	var needs, next page
+	// cursor places come after the steps'. There is no line of what to run
+	// next: the status's help is written for the session, which reads it
+	// itself, and the session tells the person the prompt a phase waits for.
+	var needs page
 	qs := t.openQuestions(m.zone, "")
 	asks := t.asks()
 	if len(qs)+len(asks) > 0 {
@@ -74,18 +74,6 @@ func (m *Model) ticketPage(id string) page {
 			needs.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
 		}
 	}
-	if t.status != nil && len(t.status.Help) > 0 {
-		// The line wraps to a second line and is cut, with an ellipsis, only
-		// after that: what to do next is the sentence a person reads.
-		for i, line := range wrap(t.status.Help[0], m.width-8, nextLines) {
-			if i == 0 {
-				line = m.st.dim("next  ") + line
-			} else {
-				line = "      " + line
-			}
-			next.add(line)
-		}
-	}
 
 	// The heights. The screen has a body of so many rows: the steps, the
 	// groups below, and the activity panel at its floor of three lines come
@@ -95,7 +83,7 @@ func (m *Model) ticketPage(id string) page {
 	focus := m.ticketFocus(steps, len(qs))
 	body := m.bodyRows()
 	var groups []page
-	for _, g := range []page{needs, next} {
+	for _, g := range []page{needs} {
 		if len(g.lines) > 0 {
 			groups = append(groups, g)
 		}

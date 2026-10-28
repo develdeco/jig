@@ -8,7 +8,7 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you
   ? builder asks about slice c: Formal or casual?  q-001
-  next  Answer q-001: `jig answer JIG-1 q-001 '<text>'`
+  ╭─ Activity ───────────────────────────────────────────────── latest 3 of 8 ─╮
   tail ─────────────────────────────────────────────────────────────────────────
   09:00:01 j claim           a   s-builder
   09:00:05 j verify-pending  a   aaaaaaa s-builder

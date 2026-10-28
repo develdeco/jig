@@ -83,8 +83,8 @@ func TestParseStatusReadsTheTablesJigStatusPrints(t *testing.T) {
 	if len(info.Asks) != 2 || info.Asks[0] != (statusAsk{ID: "r1-f1", Risk: "high", Where: "alpha/a.go:3", Title: "Unchecked error", Why: "needs a human"}) {
 		t.Errorf("asks = %+v", info.Asks)
 	}
-	if len(info.Questions) != 0 || len(info.Help) != 1 {
-		t.Errorf("questions = %+v, help = %q", info.Questions, info.Help)
+	if len(info.Questions) != 0 {
+		t.Errorf("questions = %+v", info.Questions)
 	}
 
 	one := parseStatus(statusJIG1())

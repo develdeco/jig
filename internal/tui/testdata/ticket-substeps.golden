@@ -8,12 +8,12 @@ jig  demo › SHOP-1                                             ◑ build verif
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 3 done ─╮
   │  ✓ slice round  verified aaaaaaa · took 7s                                 │
-  │  ◐ slice clamp  verifying bbbbbbb                                          │
+  │  ◐ slice clamp  claimed ━━ committed ━━ verifying ── verified      57m 30s │
+  │      goal     Clamp negative quantities                                    │
+  │      held by  builder                                                      │
+  │      now      57m 20s ◑ verifying bbbbbbb “Clamp negative quantities”      │
   │  ○ slice cart   waits for clamp                                            │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
-  next  Run `jig next SHOP-1` to see what is ready, then `jig claim SHOP-1
-        --slice <slice>` to take one; ask: Build SHOP-1
   ╭─ Activity ───────────────────────────────────────────────── latest 3 of 7 ─╮
   │  09:02:10 build·clamp ◑ verifying bbbbbbb “Clamp negative quantities”      │
   │  09:02:00 build·clamp ◐ builder took it · Clamp negative quantities        │

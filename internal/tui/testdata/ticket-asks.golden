@@ -7,13 +7,13 @@ jig  demo › JIG-2  Config loader                               ! review findin
   │  ○ 4 Publish          after a clean review                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Review ───────────────────────────────────────────────────── 1 of 3 done ─╮
+  │  ✓ round 1  2 asks · took 30s                                              │
   │  ! asks     2 to decide                                                    │
+  │  ○ round 2  ready to open                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you
   ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
   ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
-  next  Run `jig triage JIG-2 <id> keep|dismiss` to decide the outstanding asks,
-        then `jig gate JIG-2` to apply the decisions
   ╭─ Activity ───────────────────────────────────────────────── latest 3 of 4 ─╮
   │  09:11:30 review·r1 ! reviewer finished with findings                      │
   │  09:11:00 review·r1 ◎ opened                                               │

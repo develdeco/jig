@@ -7,13 +7,13 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   │  ○ 4 Publish          after a clean review                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 4 done ─╮
+  │  ✓ slice a  verified aaaaaaa · took 20s                                    │
   │  ◐ slice b  claimed by builder                                             │
   │  ? slice c  waits for your answer                                          │
-  │  +2 more                                                                   │
+  │  ○ slice d  waits for b, c                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you
   ? builder asks about slice c: Formal or casual?  q-001
-  next  Answer q-001: `jig answer JIG-1 q-001 '<text>'`
   ╭─ Activity ───────────────────────────────────────────────── latest 3 of 8 ─╮
   │  09:02:00 build·c ? builder asks: Formal or casual?                        │
   │  09:01:40 build·b ✖ its oracle failed: TestB: want 2, got 3                │
