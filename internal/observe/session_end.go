@@ -27,7 +27,9 @@ func (h *handler) sessionEnd() Result {
 // noteOpenQuestions writes a note line in the ticket journal for each question
 // still open when the session ends, once per session and question, so
 // whoever picks the ticket up next knows the session left without an answer.
-// The line stays in the store clone until the next checkpoint pushes it.
+// The line stays in the store clone until the next checkpoint pushes it, or
+// `jig trackers sync` does: a commit and a push inside a hook would cost the
+// session end a round trip the harness bounds (ADR 0030).
 func (h *handler) noteOpenQuestions() {
 	questions, err := h.st.ReadQuestions(h.w.Ticket)
 	if err != nil {

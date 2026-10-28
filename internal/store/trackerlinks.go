@@ -73,7 +73,8 @@ const (
 // replaced by the folder. A link under another store id (the ticket was
 // renamed) is RebuildTrackerLinks' to take out. A clone without symlinks gets
 // LinkOff, and a warning once. The write goes in the working tree; Claim's
-// paths and the next checkpoint's commit take it from there.
+// paths and the landing of the checkpoint's sync (landTrackerWrites) take it
+// from there.
 func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error) {
 	if err := e.check(); err != nil {
 		return "", err
@@ -128,6 +129,7 @@ func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error)
 	case !errors.Is(err, fs.ErrNotExist):
 		return "", err
 	}
+	s.noteTrackerWrite(s.TrackerLinkRelPath(e, o))
 	if err := os.Symlink(want, link); err != nil {
 		s.tracker.symFailed.Store(true)
 		s.warnNoLinks(fmt.Sprintf("the file system refused one: %v", err))
@@ -236,6 +238,7 @@ func (s *Store) RebuildTrackerLinks() (TrackerLinks, error) {
 		if err := os.Remove(abs); err != nil {
 			return out, err
 		}
+		s.noteTrackerWrite(rel)
 		s.pruneTrackerDirs(filepath.Dir(abs))
 		out.Removed = append(out.Removed, rel)
 	}

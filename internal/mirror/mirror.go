@@ -687,8 +687,8 @@ func repoChangedError(it item, recorded, configured string) error {
 // folder into the tracker tree, adding the key that names its owner, and
 // returns what it moved. It is the first thing a sync does, before any record
 // is read for its issue, so the issue is found by its record and updated in
-// place, never created again. The moves are working-tree changes, committed
-// with the next checkpoint like every record change but a creation. A record
+// place, never created again. The moves are working-tree changes, landed by
+// the checkpoint that ran the sync like every record change but a creation. A record
 // for another repository than repo is refused before anything moves, as the
 // sync would refuse it later.
 func moveLegacyRecords(st *store.Store, items []item, repo string) ([]MovedRecord, error) {

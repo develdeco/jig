@@ -570,7 +570,23 @@ claims (`claimIssue`, landing a new issue's record) reach the store through
 `Claim` too, and hooking `Claim` itself would re-enter the mirror. Either
 way it runs `mirror.Sync` in the same process, best-effort - a failure
 prints one warning naming the cause and never fails the command, and the
-next checkpoint retries. The
+next checkpoint retries - and then lands what the sync wrote: the tracker
+tree's writers note the paths they change in the working tree, and
+`RunCheckpointHook` ends (`internal/store/trackerland.go`, `landTrackerWrites`)
+by committing exactly those paths as the person and pushing, so a ticket's
+last checkpoint (`jig publish`) leaves its pull request's record on origin
+without a next checkpoint to carry it. A sync that finds the store up to date
+rewrites no record, notes nothing and so costs no commit and no push; the
+landing also pushes a branch that is ahead of origin when another process's
+`Sync` already committed the writes, and a push origin rejected first records
+the other uncommitted changes (as `Sync` does) so the rebase onto what moved
+has a clean tree. A landing that fails is one warning: its commit waits for
+the next checkpoint's push. The observe hooks' own journal lines (a session's `spend`
+line, the note of a question left open) are not mirror writes and stay in the
+clone until the next checkpoint's commit or `jig trackers sync`, since a
+commit and a push inside the harness's Stop and SessionEnd hooks would
+cost every turn a round trip (ADR 0030, "Amendment: a checkpoint lands what
+its sync wrote"). The
 `SyncReport` that sync returns is rendered through the resolving command's
 own writer (`cmd/jig/mirror_report.go`'s `renderSyncReport`, which
 `resolveStore` hands `stdout`), so a drift line, a skipped item or an
@@ -579,8 +595,13 @@ rode in on; `Store.Warn` is wired the same way, so a failed sync's warning
 is a labelled block in that output rather than bare stderr. `jig trackers
 sync [--dry-run] [--store] [--project]` (`cmd/jig/trackers.go`) runs the
 same `Sync` on demand and renders the same report through the same
-function - the second of the two places brief.md names. `--dry-run` reads
-the store and GitHub and writes to neither (a store whose items all still
+function - the second of the two places brief.md names. A run that is not a
+dry run calls `Store.LandTrackerWrites` once the sync is done (a failed sync
+too), which commits the sync's writes and pushes the branch whether or not
+there was anything new to commit, so the commit `Store.Sync` made of the
+leftovers at the start of the command reaches origin as well: on a store with
+an origin, nothing the command wrote or committed stays unpushed. `--dry-run` reads
+the store and GitHub and writes to neither, lands nothing (a store whose items all still
 need creating reaches no client at all, having nothing to read). The mirror
 depends on the store, never the reverse: `internal/mirror` holds what any
 tracker provider would share, and `internal/mirror/github` is the one
@@ -623,7 +644,8 @@ completing the Status field's options, when missing, and linking the issue
 repo when it is not linked) and place every issue and every open or merged
 pull request on it, with its Status and Store ID - skipping the placement
 entirely when the item already carries both, so an up-to-date store sends
-no board mutation; write every record. A record naming an issue repo other
+no board mutation; write every record (into the working tree: the landing
+above takes it from there). A record naming an issue repo other
 than the `trackers:` entry's own `repo:` refuses the sync as
 `MIRROR_REPO_CHANGED` (moving issues to a new repo is T-30) rather than
 opening a second issue elsewhere. The renderer (`internal/mirror/render.go`) and the

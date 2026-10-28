@@ -27,7 +27,8 @@ type TrackerMove struct {
 // dropped; one whose entry has the record of another owner is refused,
 // TRACKER_ENTRY_TAKEN, with both left as they are. A flat record that cannot be
 // read stays where it is: it is the tree check's to report. The moves are
-// working-tree changes, committed with the next checkpoint.
+// working-tree changes, committed and pushed by the landing of the
+// checkpoint's sync (landTrackerWrites).
 func (s *Store) MoveFlatTrackerRecords() ([]TrackerMove, error) {
 	scan, err := s.scanTracker()
 	if err != nil {
@@ -58,6 +59,7 @@ func (s *Store) MoveFlatTrackerRecords() ([]TrackerMove, error) {
 				s.invalidateTrackerIndex()
 				return moved, err
 			}
+			s.noteTrackerWrite(from)
 			continue
 		}
 		if err := s.makeEntryFolder(e); err != nil {
@@ -68,6 +70,7 @@ func (s *Store) MoveFlatTrackerRecords() ([]TrackerMove, error) {
 			s.invalidateTrackerIndex()
 			return moved, err
 		}
+		s.noteTrackerWrite(from, to)
 		moved = append(moved, TrackerMove{Owner: flat.Owner(), From: from, To: to})
 		s.invalidateTrackerIndex()
 		if rec := s.readTrackerRecord(to); s.linkable(rec) {

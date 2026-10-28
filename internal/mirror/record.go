@@ -215,9 +215,10 @@ func writeRecord(st *store.Store, it item, rec githubRecord) error {
 // writeRecordLinks updates item it's record's synced.links to links, leaving its
 // repo, issue and node id untouched, and writes it back (brief.md#Links: "the
 // record keeps the node ids of the links it last wrote"). The write lands in
-// the working tree only; it goes in with the next checkpoint's commit, as
-// every record change but a creation does (brief.md#Syncing at every
-// checkpoint).
+// the working tree only; the checkpoint that ran the sync commits and pushes
+// it once the sync is done (Store.RunCheckpointHook), as it does every record
+// change but a creation, which claimIssue lands itself (brief.md#Syncing at
+// every checkpoint).
 func writeRecordLinks(st *store.Store, it item, links syncedLinks) error {
 	rec, err := readRecord(st, it)
 	if err != nil {

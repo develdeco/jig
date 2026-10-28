@@ -28,7 +28,8 @@ type Store struct {
 	// mirror depends on the store and never the reverse. A failure never
 	// fails or stops the command whose Push found it: Push reports it
 	// through Warn instead and returns nil, the same as every other
-	// checkpoint. nil runs no hook.
+	// checkpoint. What the hook wrote to the tracker tree is committed and
+	// pushed once it returns (RunCheckpointHook). nil runs no hook.
 	AfterCheckpoint func(s *Store) error
 
 	// Warn reports AfterCheckpoint's failure, naming its cause. nil writes
@@ -68,6 +69,10 @@ type Store struct {
 	// tracker is the tracker tree's memoized index and this clone's answer
 	// about symlinks (trackertree.go).
 	tracker trackerState
+
+	// landing is the set of tracker tree paths written since the last
+	// landing (trackerland.go).
+	landing trackerWrites
 }
 
 // invalidateAliasClaims drops the memoized aliasClaims result, so the next
@@ -98,16 +103,23 @@ func (s *Store) invalidateAliasClaims() {
 // through Claim too, and hooking Claim would re-enter the mirror. A command
 // whose only checkpoint is a Claim, such as `jig ticket new`, calls this
 // explicitly once the claim lands.
+//
+// What the hook wrote to the tracker tree goes out with it: the sync's
+// record writes land in the working tree, and this commits and pushes them
+// once the hook is done (landTrackerWrites), a sync that failed part-way
+// included, since the records it did write are true. A ticket's last
+// checkpoint is a checkpoint like any other, with no next one to carry them.
 func (s *Store) RunCheckpointHook() {
 	if s.AfterCheckpoint == nil {
 		return
 	}
-	if err := s.AfterCheckpoint(s); err != nil {
-		warn := s.Warn
-		if warn == nil {
-			warn = func(format string, args ...any) { fmt.Fprintf(os.Stderr, "warning: "+format+"\n", args...) }
-		}
-		warn("the tracker sync after this checkpoint failed: %v", err)
+	hookErr := s.AfterCheckpoint(s)
+	landErr := s.landTrackerWrites(false)
+	if hookErr != nil {
+		s.warn("the tracker sync after this checkpoint failed: %v", hookErr)
+	}
+	if landErr != nil {
+		s.warn("the tracker records this checkpoint's sync wrote were not landed on the store's origin: %v", landErr)
 	}
 }
 
@@ -200,6 +212,11 @@ func (s *Store) HasRemote() bool {
 	return err == nil
 }
 
+// leftoversMessage is the commit message of the uncommitted store state Sync
+// (and a landing whose push origin rejected) records before taking what moved
+// on origin.
+const leftoversMessage = "jig: record uncommitted store state"
+
 // Sync stages and commits any uncommitted store state left behind by an
 // earlier command that failed after writing to the store - for example a
 // gate that appended its gate-open journal line and then failed at an
@@ -229,7 +246,7 @@ func (s *Store) Sync() error {
 	if !cp.hasRemote() {
 		return nil
 	}
-	if err := cp.commit("jig: record uncommitted store state"); err != nil {
+	if err := cp.commit(leftoversMessage); err != nil {
 		return err
 	}
 	return cp.pull()

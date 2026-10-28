@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -562,15 +563,31 @@ func (s *Store) WriteTrackerRecord(e TrackerEntry, o TrackerOwner, fields *yaml.
 	if err != nil {
 		return fmt.Errorf("store: encode %s: %w", e, err)
 	}
-	if err := s.makeEntryFolder(e); err != nil {
-		s.invalidateTrackerIndex()
-		return err
+	// A record already holding these bytes is not written again: a sync
+	// that finds the store up to date changes nothing in the working tree,
+	// and so has nothing to land. The entry's path is read only when it is a
+	// folder: the link of the flat layout there would lead into the ticket's
+	// own folder.
+	same := false
+	if s.entryIsFolder(e) {
+		have, rerr := os.ReadFile(s.TrackerRecordPath(e))
+		same = rerr == nil && bytes.Equal(have, data)
 	}
-	if err := AtomicWrite(s.TrackerRecordPath(e), data); err != nil {
-		s.invalidateTrackerIndex()
-		return err
+	if !same {
+		if err := s.makeEntryFolder(e); err != nil {
+			s.invalidateTrackerIndex()
+			return err
+		}
+		if err := AtomicWrite(s.TrackerRecordPath(e), data); err != nil {
+			s.invalidateTrackerIndex()
+			return err
+		}
+		s.noteTrackerWrite(s.TrackerRecordRelPath(e))
 	}
-	if err := os.Remove(filepath.Join(s.Root, s.flatRecordRelPath(e))); err != nil && !os.IsNotExist(err) {
+	flat := s.flatRecordRelPath(e)
+	if err := os.Remove(filepath.Join(s.Root, flat)); err == nil {
+		s.noteTrackerWrite(flat)
+	} else if !os.IsNotExist(err) {
 		s.invalidateTrackerIndex()
 		return err
 	}
@@ -635,6 +652,7 @@ func (s *Store) makeEntryFolder(e TrackerEntry) error {
 		if err := os.Remove(dir); err != nil {
 			return err
 		}
+		s.noteTrackerWrite(s.TrackerRelPath(e))
 	}
 	return os.MkdirAll(dir, 0o755)
 }
@@ -667,7 +685,9 @@ func (s *Store) RemoveTrackerRecord(e TrackerEntry) error {
 		rels = append(rels, s.TrackerRecordRelPath(e))
 	}
 	for _, rel := range rels {
-		if err := os.Remove(filepath.Join(s.Root, rel)); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(filepath.Join(s.Root, rel)); err == nil {
+			s.noteTrackerWrite(rel)
+		} else if !os.IsNotExist(err) {
 			return fail(err)
 		}
 	}
@@ -682,6 +702,7 @@ func (s *Store) RemoveTrackerRecord(e TrackerEntry) error {
 		if err := os.Remove(dir); err != nil {
 			return err
 		}
+		s.noteTrackerWrite(s.TrackerRelPath(e))
 		dir = filepath.Dir(dir)
 	case fi.IsDir():
 		ents, err := os.ReadDir(dir)
@@ -695,6 +716,7 @@ func (s *Store) RemoveTrackerRecord(e TrackerEntry) error {
 			if err := os.Remove(filepath.Join(dir, ent.Name())); err != nil {
 				return err
 			}
+			s.noteTrackerWrite(filepath.Join(s.TrackerRelPath(e), ent.Name()))
 		}
 	}
 	s.pruneTrackerDirs(dir)
