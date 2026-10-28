@@ -5,8 +5,9 @@ package observe
 // plugin that builds the event itself, and what jig answers in the same
 // words:
 //
-//	in   {"event"|"kind", "session", "agent", "cwd", "tool", "command", "exit",
-//	      "files", "model", "transcript", "stop_active", "harness"}
+//	in   {"event"|"kind", "session", "agent", "cwd", "tool", "command",
+//	      "description", "exit", "files", "model", "transcript", "stop_active",
+//	      "harness"}
 //	out  {"context", "message", "block"}   each only when it has something to say
 //
 // event takes jig's kinds (session-start, prompt, tool, stop, session-end,
@@ -40,8 +41,10 @@ func (a neutralShape) Parse(data []byte) (Event, error) {
 		Cwd:     p.str("cwd", "directory", "worktree", "properties.directory"),
 		Tool:    p.str("tool", "tool_name", "input.tool"),
 		Command: p.str("command", "args.command", "input.args.command", "output.args.command", "tool_input.command"),
-		Files:   p.strs("files"),
-		Model:   p.str("model", "properties.model"),
+		Description: p.str("description", "args.description", "input.args.description", "output.args.description",
+			"tool_input.description"),
+		Files: p.strs("files"),
+		Model: p.str("model", "properties.model"),
 
 		Transcript: p.str("transcript", "transcript_path"),
 		StopActive: p.flag("stop_active", "stop_hook_active"),

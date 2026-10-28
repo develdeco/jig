@@ -62,7 +62,7 @@ func TestAReviewerSubagentIsNamedAsOneAndByTheModelItRanOn(t *testing.T) {
 	// The review sub-steps, with the cursor on the review.
 	g.press("down")
 	v := g.view()
-	for _, want := range []string{"3 Review · sub-steps", "round 1 · taken by reviewer subagent (Claude Code · Opus 5)", "round 1 · reviewer subagent (Claude Code · Opus 5) took it"} {
+	for _, want := range []string{"Review ─", "reviewer reviewer subagent · Claude Code · Opus 5", "review·r1   ◎ reviewer subagent (Claude Code · Opus 5) took it"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the review screen lacks %q:\n%s", want, v)
 		}

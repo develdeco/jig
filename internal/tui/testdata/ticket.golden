@@ -1,23 +1,23 @@
 jig  demo › JIG-1  Greeting copy                               ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ────────────────────────────────────────────────────── step 2 of 4 ─╮
+  ╭─ Steps ────────────────────────────────────── step 2 of 4 · total 59m 29s ─╮
   │  ✓ 1 Brief            no brief on record                                   │
-  │▸ ? 2 Build            1 of 4 green · slice c needs your answer             │
+  │▸ ? 2 Build    59m 29s 1 of 4 green · slice c needs your answer             │
   │  ○ 3 Review           after the build                                      │
   │  ○ 4 Publish          after a clean review                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ 2 Build · sub-steps ──────────────────────────────────────── 1 of 4 done ─╮
-  │  ◐ slice b · claimed by builder                                            │
-  │  ? slice c · waits for your answer                                         │
-  │  +2 more                                                                   │
+  ╭─ Build ────────────────────────────────────────────────────── 1 of 4 done ─╮
+  │  ✓ slice a  verified aaaaaaa · took 20s                                    │
+  │  ◐ slice b  claimed by builder                                             │
+  │  ? slice c  waits for your answer                                          │
+  │  ○ slice d  waits for b, c                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you
   ? builder asks about slice c: Formal or casual?  q-001
-  next  Answer q-001: `jig answer JIG-1 q-001 '<text>'`
-  ╭─ 2 Build · activity ─────────────────────────────────────── latest 3 of 8 ─╮
-  │  09:01:10 ◑ slice b · verifying bbbbbbb                                    │
-  │  09:01:40 ✖ slice b · its oracle failed: TestB: want 2, got 3              │
-  │  09:02:00 ? slice c · builder asks: Formal or casual?                      │
+  ╭─ Activity ───────────────────────────────────────────────── latest 3 of 8 ─╮
+  │  09:02:00 build·c ? builder asks: Formal or casual?                        │
+  │  09:01:40 build·b ✖ its oracle failed: TestB: want 2, got 3                │
+  │  09:01:10 build·b ◑ verifying bbbbbbb                                      │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate

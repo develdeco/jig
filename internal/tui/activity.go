@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -126,6 +127,47 @@ func plannedSlices(s *statusInfo) int {
 		}
 	}
 	return n
+}
+
+// planned are the slices of the ticket's status that the brief planned, in
+// its order: not the fix slices a gate round sent back.
+func (t *ticket) planned() []statusSlice {
+	if t.status == nil {
+		return nil
+	}
+	var out []statusSlice
+	for _, s := range t.status.Slices {
+		if s.FromGate == 0 {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// headings are the headings of the brief's sections, as the status lists
+// them.
+func (t *ticket) headings() []string {
+	if t.status == nil || t.status.Brief == nil {
+		return nil
+	}
+	var out []string
+	for _, s := range t.status.Brief.Sections {
+		out = append(out, s.Heading)
+	}
+	return out
+}
+
+// goal is the whole goal of slice id as the status gives it, "" before the
+// first status or for a slice it does not list.
+func (t *ticket) goal(id string) string {
+	if t.status != nil {
+		for _, s := range t.status.Slices {
+			if s.ID == id {
+				return s.Goal
+			}
+		}
+	}
+	return ""
 }
 
 // subjects maps each commit the ticket verified to its subject, which jig
@@ -340,6 +382,8 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return "the lease was recovered"
 	case journal.EventNote, journal.EventCorrection:
 		return "note: " + l.Summary
+	case journal.EventSpend:
+		return spendText(l)
 	case journal.EventApproval:
 		text := "by " + firstOf(personName(l.Summary), "someone")
 		if l.Provenance == "agent" && l.Session != "" {
@@ -428,20 +472,38 @@ func pickSummary(l events.Envelope) string {
 // findings:", "Gate finding r1-f1, kept by the human:"): its line is the
 // first finding after the heading. Any other goal's is its first line.
 func goalLine(goal string) string {
-	first := ""
-	for _, line := range strings.Split(goal, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if first == "" {
-			first = line
-		}
-		if !strings.HasSuffix(line, ":") {
-			return line
+	return firstOf(goalLines(goal)...)
+}
+
+// goalText is a goal as one paragraph, from its first line that is not a
+// heading on: what a card has the rows to show of it. A line that ends with
+// no stop (a finding's title) ends with one, so it does not run into the next.
+func goalText(goal string) string {
+	lines := goalLines(goal)
+	for i, line := range lines[:max(0, len(lines)-1)] {
+		if !strings.ContainsAny(line[len(line)-1:], ".:;!?") {
+			lines[i] = line + "."
 		}
 	}
-	return first
+	return strings.Join(lines, " ")
+}
+
+// goalLines are a goal's lines that say something, from the first that is
+// not a heading ending in a colon ("Fix these gate findings:"); all of them
+// when every line is one.
+func goalLines(goal string) []string {
+	var lines []string
+	for _, line := range strings.Split(goal, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	for i, line := range lines {
+		if !strings.HasSuffix(line, ":") {
+			return lines[i:]
+		}
+	}
+	return lines
 }
 
 // goalTail is " · <goal>" for a slice whose goal is known.
@@ -470,6 +532,52 @@ func askName(t *ticket, id string) string {
 		}
 	}
 	return id
+}
+
+// spendText is a spend line as the activity says it: what the session has
+// spent so far (the line is its running total), in tokens and, when a price
+// is known, dollars, and the models it went to.
+func spendText(l events.Envelope) string {
+	if l.Spend == nil {
+		return "spend recorded"
+	}
+	sp := l.Spend
+	text := "the session has spent " + tokens(sp.Input+sp.Output+sp.CacheRead+sp.CacheWrite) + " tokens"
+	if sp.USD > 0 {
+		text += fmt.Sprintf(" ($%.2f)", sp.USD)
+	}
+	var names []string
+	for _, id := range strings.Split(l.Model, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			names = append(names, modelName(id))
+		}
+	}
+	if len(names) > 0 {
+		text += " on " + strings.Join(names, " and ")
+	}
+	if rest, ok := strings.CutPrefix(l.Summary, "unpriced: "); ok {
+		if sp.USD == 0 {
+			text += ", no price known"
+		} else {
+			var unpriced []string
+			for _, id := range strings.Split(rest, ",") {
+				unpriced = append(unpriced, modelName(strings.TrimSpace(id)))
+			}
+			text += ", no price known for " + strings.Join(unpriced, " and ")
+		}
+	}
+	return text
+}
+
+// tokens is a count of tokens in a few cells: 980, 25k, 3.5M.
+func tokens(n int64) string {
+	switch {
+	case n < 1000:
+		return strconv.FormatInt(n, 10)
+	case n < 999_500:
+		return strconv.FormatInt((n+500)/1000, 10) + "k"
+	}
+	return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
 }
 
 // span is a duration as people read it: 45s, 3m 05s, 2h 10m.

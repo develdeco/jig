@@ -76,7 +76,7 @@ func (m *Model) briefPage(id string) page {
 	}
 
 	p.add("")
-	m.activityPanel(&p, t, stepBrief)
+	m.stepActivityPanel(&p, t, stepBrief)
 	return p
 }
 

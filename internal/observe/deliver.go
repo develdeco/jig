@@ -27,9 +27,16 @@ func (h *handler) noteCtx(mem sessionMemory, commit string) NoteCtx {
 // collect asks every note source for its notes. A source that fails costs its
 // own notes, never the others'. The notes come in source order, each Ref
 // once. Without a ticket in a store that is here there is nothing for a
-// source to look at.
+// source to look at; a prompt then hears how work comes to have one
+// (freshWorkNote).
 func (h *handler) collect(mem sessionMemory, commit string) []Note {
-	if h.st == nil || h.w.Ticket == "" {
+	if h.st == nil {
+		return nil
+	}
+	if h.w.Ticket == "" {
+		if h.ev.Kind == KindPrompt {
+			return []Note{freshWorkNote}
+		}
 		return nil
 	}
 	c := h.noteCtx(mem, commit)
@@ -51,6 +58,19 @@ func (h *handler) collect(mem sessionMemory, commit string) []Note {
 		}
 	}
 	return out
+}
+
+// freshWorkNote is what a session in a project, working on no ticket, hears
+// with its first prompt: that work goes through a ticket, and how a request
+// that names none comes to have one. The session start's own text says the
+// same among much else; a session that reads a request in plain words ("Fix
+// a bug: ...") can go straight to the code, and this note comes with the
+// request.
+var freshWorkNote = Note{
+	Ref: "fresh-work",
+	Text: "This session works on no ticket, and in this project work goes through one: a change the person asks for without naming a ticket is fresh work, " +
+		"planned first with the intake skill (`jig skill intake`), which mints its ticket and drafts its brief; change no code before the brief is approved, " +
+		"then build, review and publish with their skills as far as the prompt asks. A question that asks for no change needs no ticket.",
 }
 
 // callSource calls a source, turning its panic into its error.

@@ -1,23 +1,23 @@
 jig  demo › JIG-2  Config loader                               ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ────────────────────────────────────────────────────── step 3 of 4 ─╮
+  ╭─ Steps ────────────────────────────────────── step 3 of 4 · total 49m 00s ─╮
   │  ✓ 1 Brief            no brief on record                                   │
   │  ✓ 2 Build    30s     1 slice green, each verified by jig                  │
-  │▸ ! 3 Review           round 1 left 2 asks · 2 wait for your decision       │
+  │▸ ! 3 Review   48m 30s round 1 left 2 asks · 2 wait for your decision       │
   │  ○ 4 Publish          after a clean review                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ 3 Review · sub-steps ─────────────────────────────────────── 1 of 3 done ─╮
-  │  ! asks · 2 to decide                                                      │
-  │  +2 more                                                                   │
+  ╭─ Review ───────────────────────────────────────────────────── 1 of 3 done ─╮
+  │  ✓ round 1  2 asks · took 30s                                              │
+  │  ! asks     2 to decide                                                    │
+  │  ○ round 2  ready to open                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you
   ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
   ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
-  next  Run `jig triage JIG-2 <id> keep|dismiss` to decide the outstanding asks,
-        then `jig gate JIG-2` to apply the decisions
-  ╭─ 3 Review · activity ──────────────────────────────────────────────────────╮
-  │  09:11:00 ◎ round 1 · opened                                               │
-  │  09:11:30 ! round 1 · reviewer finished with findings                      │
+  ╭─ Activity ───────────────────────────────────────────────── latest 3 of 4 ─╮
+  │  09:11:30 review·r1 ! reviewer finished with findings                      │
+  │  09:11:00 review·r1 ◎ opened                                               │
+  │  09:10:30 build·a   ● verified ccccccc                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate

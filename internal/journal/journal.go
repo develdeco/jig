@@ -89,13 +89,16 @@ type Line struct {
 	// Ref is the id of the subject the line is about: a question (q-001),
 	// a review finding (r1-f2) or a note's fingerprint.
 	Ref string `json:"ref,omitempty"`
-	// Tool is the harness tool a ledger tool line records; Cwd the
+	// Tool is the harness tool a ledger tool line records; Description
+	// what the session said the call is for, in its own words, when the
+	// harness asks for that (Claude Code's "Run the cart tests"); Cwd the
 	// directory it ran in; Exit its exit status when it had one; Files the
 	// files it touched.
-	Tool  string   `json:"tool,omitempty"`
-	Cwd   string   `json:"cwd,omitempty"`
-	Exit  *int     `json:"exit,omitempty"`
-	Files []string `json:"files,omitempty"`
+	Tool        string   `json:"tool,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Cwd         string   `json:"cwd,omitempty"`
+	Exit        *int     `json:"exit,omitempty"`
+	Files       []string `json:"files,omitempty"`
 	// PID is the process id a ledger line records (a spawned verify
 	// worker's, say).
 	PID int `json:"pid,omitempty"`
