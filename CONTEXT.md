@@ -51,11 +51,11 @@ reported and overwritten with the store's value at the next sync.
 _Avoid_: tracker as the source of tickets
 
 **Tracker tree**:
-The folder `trackers/<provider>/<scope>/<remote id>` of a store: one record and one link for each remote item a tracker holds of the store's tickets and charts. GitHub's scope is the lower-case `<owner>/<repo>` and its remote id the bare issue number.
+The folder `trackers/<provider>/<scope>/<remote id>/` of a store, its entry: one folder for each remote item a tracker holds of the store's tickets and charts, holding the item's record and a link to its ticket or chart named by the store id. GitHub's scope is the lower-case `<owner>/<repo>` and its remote id the bare issue number.
 _Avoid_: tracker folder, mirror folder
 
 **Record** (of the tracker tree):
-The file `<remote id>.yaml` in the tracker tree. The tree owns its `ticket:` or `chart:` key and the link beside it; every other key belongs to the provider and is kept as the provider wrote it. The link is a view of the record, made again from the records on every sync.
+The file `record.yaml` in a remote item's folder in the tracker tree. The tree owns its `ticket:` or `chart:` key and the link beside it; every other key belongs to the provider and is kept as the provider wrote it. The link is a view of the record, made again from the records on every sync, and renamed when the ticket's id is. It is not `ticket.yaml`, which through the link is the ticket's own record.
 _Avoid_: tracker file
 
 **Intake**:

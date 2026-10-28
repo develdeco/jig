@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// writeRawRecord writes the record at e with exactly text, for a record the
-// tree code would never write.
+// writeRawRecord writes the record of entry e with exactly text, for a record
+// the tree code would never write.
 func writeRawRecord(t *testing.T, st *Store, e TrackerEntry, text string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(st.TrackerRecordPath(e)), 0o755); err != nil {
@@ -58,10 +58,10 @@ func TestCheckTrackerTreeReportsARecordNamingNoTicketOrChart(t *testing.T) {
 		got = append(got, p.Code+" "+p.Path)
 	}
 	want := []string{
-		"TRACKER_RECORD_ORPHAN trackers/github/acme/tracking/51.yaml",
-		"TRACKER_RECORD_ORPHAN trackers/github/acme/tracking/52.yaml",
-		"TRACKER_RECORD_ORPHAN trackers/github/acme/tracking/53.yaml",
-		"TRACKER_RECORD_ORPHAN trackers/github/acme/tracking/54.yaml",
+		"TRACKER_RECORD_ORPHAN trackers/github/acme/tracking/51/record.yaml",
+		"TRACKER_RECORD_ORPHAN trackers/github/acme/tracking/52/record.yaml",
+		"TRACKER_RECORD_ORPHAN trackers/github/acme/tracking/53/record.yaml",
+		"TRACKER_RECORD_ORPHAN trackers/github/acme/tracking/54/record.yaml",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("problems = %v, want %v", got, want)
@@ -89,13 +89,14 @@ func TestCheckTrackerTreeReportsTwoRecordsOfOneTicketInOneScope(t *testing.T) {
 	if codes := problemCodes(problems); !reflect.DeepEqual(codes, []string{TrackerRecordDuplicate}) {
 		t.Fatalf("problems = %+v, want exactly one duplicate", problems)
 	}
-	if p := problems[0]; p.Path != "trackers/github/acme/tracking/62.yaml" {
+	if p := problems[0]; p.Path != "trackers/github/acme/tracking/62/record.yaml" {
 		t.Errorf("the duplicate is reported at %s, want the second record", p.Path)
 	}
 }
 
 // TestCheckTrackerTreeReportsARecordWhoseNameIsNotItsRemoteID: a GitHub record
-// is named for the issue number it holds, in the folder of its repository.
+// sits in a folder named for the issue number it holds, in the folder of its
+// repository.
 func TestCheckTrackerTreeReportsARecordWhoseNameIsNotItsRemoteID(t *testing.T) {
 	st, _ := newTreeStore(t)
 	e := func(scope, id string) TrackerEntry { return TrackerEntry{ProviderGitHub, scope, id} }
@@ -116,28 +117,27 @@ func TestCheckTrackerTreeReportsARecordWhoseNameIsNotItsRemoteID(t *testing.T) {
 		got = append(got, p.Code+" "+p.Path)
 	}
 	want := []string{
-		"TRACKER_RECORD_MISPLACED trackers/github/acme/other/11.yaml",
-		"TRACKER_RECORD_MISPLACED trackers/github/acme/tracking/7.yaml",
-		"TRACKER_RECORD_MISPLACED trackers/github/acme/tracking/github.yaml",
+		"TRACKER_RECORD_MISPLACED trackers/github/acme/other/11/record.yaml",
+		"TRACKER_RECORD_MISPLACED trackers/github/acme/tracking/7/record.yaml",
+		"TRACKER_RECORD_MISPLACED trackers/github/acme/tracking/github/record.yaml",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("problems = %v, want %v (the record of issue 12, whose repo differs by case only, is fine)", got, want)
 	}
 }
 
-// TestCheckTrackerTreeReportsALinkThatDisagreesWithItsRecord: missing, or
-// pointing at another ticket, or a plain file; and a record that cannot be
-// decoded.
+// TestCheckTrackerTreeReportsALinkThatDisagreesWithItsRecord: missing from its
+// entry's folder, or pointing at another ticket, or a plain file.
 func TestCheckTrackerTreeReportsALinkThatDisagreesWithItsRecord(t *testing.T) {
 	st, _ := newTreeStore(t)
 	skipWithoutSymlinks(t, st)
 	putRecord(t, st, TrackerOwner{Ticket: "JIG-1"}, "acme/tracking", 71)
 	e2 := putRecord(t, st, TrackerOwner{Ticket: "JIG-2"}, "acme/tracking", 72)
 	e3 := putRecord(t, st, TrackerOwner{Chart: "demo"}, "acme/tracking", 73)
-	if err := os.Symlink("../../../../tickets/JIG-1", st.TrackerPath(e2)); err != nil {
+	if err := os.Symlink("../../../../../tickets/JIG-1", st.TrackerLinkPath(e2, TrackerOwner{Ticket: "JIG-2"})); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(st.TrackerPath(e3), []byte("../../../../charts/demo"), 0o644); err != nil {
+	if err := os.WriteFile(st.TrackerLinkPath(e3, TrackerOwner{Chart: "demo"}), []byte("../../../../../charts/demo"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	problems, err := st.CheckTrackerTree()
@@ -155,8 +155,8 @@ func TestCheckTrackerTreeReportsALinkThatDisagreesWithItsRecord(t *testing.T) {
 		}
 	}
 	want := []string{
-		"trackers/github/acme/tracking/71", "trackers/github/acme/tracking/72",
-		"trackers/github/acme/tracking/73",
+		"trackers/github/acme/tracking/71/JIG-1", "trackers/github/acme/tracking/72/JIG-2",
+		"trackers/github/acme/tracking/73/demo",
 	}
 	if !reflect.DeepEqual(paths, want) {
 		t.Errorf("wrong links = %v, want %v", paths, want)
@@ -177,7 +177,7 @@ func TestCheckTrackerTreeReportsARecordThatCannotBeDecoded(t *testing.T) {
 	if got := problemCodes(problems); !reflect.DeepEqual(got, want) {
 		t.Fatalf("problem codes = %v, want %v", got, want)
 	}
-	if problems[0].Path != "trackers/github/acme/tracking/81.yaml" {
+	if problems[0].Path != "trackers/github/acme/tracking/81/record.yaml" {
 		t.Errorf("the invalid record is reported at %s", problems[0].Path)
 	}
 }
