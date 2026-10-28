@@ -3,7 +3,8 @@
 Five pictures of jig, for people who want the shape before the prose.
 [CONTEXT.md](../CONTEXT.md) and [ARCHITECTURE.md](../ARCHITECTURE.md) stay
 the authority: when a diagram and the prose disagree, the prose is right and
-the diagram is stale. Each diagram was drawn from the code at `cc02c78`.
+the diagram is stale. Each diagram was drawn from the code at `cc02c78` and
+checked again at `2691036`.
 
 Each also has an [interactive version](https://develdeco.github.io/jig/)
 where every element links to the code it was drawn from. The Mermaid here is
@@ -182,9 +183,11 @@ classDiagram
 ## A ticket from brief to PR
 
 Each phase starts from a prompt ("Plan T", "Build T", "Review T",
-"Publish T"); a prompt that names several runs them in order. Confirming the
-brief and approving the publish stay the person's unless the prompt
-delegates them. Review has no back-edges: a fix finding becomes new work.
+"Publish T"); a prompt that names several, a start-to-finish run, runs them
+in order. The person's decisions - confirming the brief, the review's asks,
+approving the publish - stay theirs even then, unless the prompt says to go
+with the session's recommendations. Review has no back-edges: a fix finding
+becomes new work.
 [Interactive version](https://develdeco.github.io/jig/diagrams/ticket-flow.html).
 
 ```mermaid
