@@ -93,9 +93,9 @@ func (s *Store) ReadLegacyTrackerRecord(l LegacyTrackerRecord) (yaml.Node, error
 // MoveLegacyTrackerRecord moves a record from its old place to entry e: the
 // tree record names the owner and keeps every key of the old one, then the
 // old file goes (and its tracker/ folder, once empty). An entry the tree
-// already has for the same owner is the same record, and the old file is
-// simply dropped; one it has for another owner is refused, TRACKER_ENTRY_TAKEN,
-// with both left as they are.
+// already has for the same owner (in its folder, or still in the flat layout) is
+// the same record, and the old file is simply dropped; one it has for another
+// owner is refused, TRACKER_ENTRY_TAKEN, with both left as they are.
 func (s *Store) MoveLegacyTrackerRecord(l LegacyTrackerRecord, e TrackerEntry, header string) error {
 	if err := e.check(); err != nil {
 		return err
@@ -104,13 +104,16 @@ func (s *Store) MoveLegacyTrackerRecord(l LegacyTrackerRecord, e TrackerEntry, h
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(s.TrackerRecordPath(e)); err == nil {
-		have := s.readTrackerRecord(filepath.ToSlash(s.TrackerRecordRelPath(e)))
+	for _, rel := range []string{s.TrackerRecordRelPath(e), s.flatRecordRelPath(e)} {
+		if _, err := os.Stat(filepath.Join(s.Root, rel)); err != nil {
+			continue
+		}
+		have := s.readTrackerRecord(filepath.ToSlash(rel))
 		if have.Err == nil && have.Owner() == l.Owner {
 			return s.DropLegacyTrackerRecord(l)
 		}
 		return &axi.Error{
-			Msg:  fmt.Sprintf("%s says its issue is %s, but %s holds the record of another ticket or chart", filepath.ToSlash(l.Rel), e, filepath.ToSlash(s.TrackerRecordRelPath(e))),
+			Msg:  fmt.Sprintf("%s says its issue is %s, but %s holds the record of another ticket or chart", filepath.ToSlash(l.Rel), e, filepath.ToSlash(rel)),
 			Code: "TRACKER_ENTRY_TAKEN",
 			Help: []string{"Two items cannot be one remote item: remove the record that is wrong, then run `jig trackers sync` again"},
 		}

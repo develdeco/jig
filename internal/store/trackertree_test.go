@@ -85,16 +85,16 @@ func putRecord(t *testing.T, st *Store, o TrackerOwner, repo string, issue int) 
 	return e
 }
 
-// linkMap reads every symlink under trackers/ as entry path to target, in
+// linkMap reads every symlink under trackers/ as link path to target, in
 // slash form.
 func linkMap(t *testing.T, st *Store) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	_, entries, err := st.scanTracker()
+	scan, err := st.scanTracker()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, rel := range entries {
+	for _, rel := range scan.entries {
 		abs := filepath.Join(st.Root, filepath.FromSlash(rel))
 		if fi, err := os.Lstat(abs); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 			got, err := os.Readlink(abs)
@@ -254,7 +254,8 @@ func TestTrackerRecordIsNeverWrittenOverAnotherOwnersRecord(t *testing.T) {
 }
 
 // TestRemoveTrackerRecordTakesTheLinkAndTheEmptyFoldersToo: the record, its
-// link and the scope folders that held only those; a record beside it stays.
+// link, its folder and the scope folders that held only those; the record of
+// another entry stays.
 func TestRemoveTrackerRecordTakesTheLinkAndTheEmptyFoldersToo(t *testing.T) {
 	st, _ := newTreeStore(t)
 	a := putRecord(t, st, TrackerOwner{Ticket: "JIG-1"}, "acme/tracking", 1)
@@ -264,6 +265,9 @@ func TestRemoveTrackerRecordTakesTheLinkAndTheEmptyFoldersToo(t *testing.T) {
 	}
 	if err := st.RemoveTrackerRecord(b); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Lstat(st.TrackerPath(b)); !os.IsNotExist(err) {
+		t.Errorf("the emptied entry folder is still there (lstat err %v)", err)
 	}
 	if _, err := os.Lstat(filepath.Dir(st.TrackerPath(b))); !os.IsNotExist(err) {
 		t.Errorf("the emptied scope folder is still there (lstat err %v)", err)
@@ -276,5 +280,34 @@ func TestRemoveTrackerRecordTakesTheLinkAndTheEmptyFoldersToo(t *testing.T) {
 	}
 	if err := st.RemoveTrackerRecord(b); err != nil {
 		t.Errorf("removing a record that is already gone: %v", err)
+	}
+}
+
+// TestAStrayRecordFileInAScopeFolderHidesNoEntry: the tree is listed by walking
+// every folder, so a record.yaml dropped into a scope folder is one more record
+// (reported as misplaced) and does not make the entries below it vanish, which
+// would let a sync open a second issue for each of their tickets.
+func TestAStrayRecordFileInAScopeFolderHidesNoEntry(t *testing.T) {
+	st, _ := newTreeStore(t)
+	e := putRecord(t, st, TrackerOwner{Ticket: "JIG-1"}, "acme/tracking", 5)
+	stray := filepath.Join(filepath.Dir(st.TrackerPath(e)), trackerRecordFile)
+	if err := os.WriteFile(stray, []byte("ticket: JIG-2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st.ReloadTrackerTree()
+	recs, err := st.TrackerRecordsFor(TrackerOwner{Ticket: "JIG-1"})
+	if err != nil || len(recs) != 1 || recs[0].Entry != e {
+		t.Fatalf("TrackerRecordsFor(JIG-1) = %+v, %v; want the entry below the stray file", recs, err)
+	}
+	problems, err := st.CheckTrackerTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var misplaced bool
+	for _, p := range problems {
+		misplaced = misplaced || (p.Code == TrackerRecordMisplaced && strings.HasSuffix(p.Path, "tracking/record.yaml"))
+	}
+	if !misplaced {
+		t.Errorf("problems = %+v, want the stray file reported as misplaced", problems)
 	}
 }

@@ -3,7 +3,6 @@ package store
 import (
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -20,11 +19,12 @@ const (
 	TrackerRecordOrphan = "TRACKER_RECORD_ORPHAN"
 	// TrackerRecordDuplicate: two records in one scope for one ticket or chart.
 	TrackerRecordDuplicate = "TRACKER_RECORD_DUPLICATE"
-	// TrackerRecordMisplaced: a record whose file name is not its remote id.
+	// TrackerRecordMisplaced: a record whose folder is not its remote id.
 	TrackerRecordMisplaced = "TRACKER_RECORD_MISPLACED"
 	// TrackerLinkWrong: a link that is missing or points elsewhere.
 	TrackerLinkWrong = "TRACKER_LINK_WRONG"
-	// TrackerRecordUnmoved: a record still in a ticket or chart folder.
+	// TrackerRecordUnmoved: a record still in a ticket or chart folder, or still
+	// beside its link as <remote id>.yaml instead of in its entry's folder.
 	TrackerRecordUnmoved = "TRACKER_RECORD_UNMOVED"
 )
 
@@ -56,11 +56,11 @@ func githubIdentity(fields yaml.Node) (repo string, issue int) {
 //   - a record that cannot be read, or that names no ticket or chart in the
 //     store (none, both, or one the store does not have);
 //   - two records in one scope for the same ticket or chart;
-//   - a record whose file name is not the remote id it holds, or whose folder
-//     is not the repository it holds;
-//   - where the clone has symlinks, a link that is missing or points
-//     somewhere other than its record's ticket or chart;
-//   - a record still in a ticket or chart folder.
+//   - a record whose folder name is not the remote id it holds, or whose
+//     scope folder is not the repository it holds;
+//   - where the clone has symlinks, a link that is missing from its entry's
+//     folder, or points somewhere other than its record's ticket or chart;
+//   - a record still in a ticket or chart folder, or still in the flat layout.
 func (s *Store) CheckTrackerTree() ([]TrackerProblem, error) {
 	s.invalidateTrackerIndex()
 	idx, err := s.trackerRecordIndex()
@@ -77,7 +77,7 @@ func (s *Store) CheckTrackerTree() ([]TrackerProblem, error) {
 	linksOn := s.SymlinksOn()
 
 	for _, rec := range idx.records {
-		rel := path.Join(trackersDirName, rec.Entry.String()) + trackerRecordSuffix
+		rel := rec.Rel
 		if rec.Err != nil {
 			problems = append(problems, TrackerProblem{
 				Code: TrackerRecordInvalid, Path: rel,
@@ -89,7 +89,7 @@ func (s *Store) CheckTrackerTree() ([]TrackerProblem, error) {
 		if rec.Entry.Scope == "" {
 			problems = append(problems, TrackerProblem{
 				Code: TrackerRecordMisplaced, Path: rel,
-				Msg:  fmt.Sprintf("%s is in no scope folder: a record is trackers/<provider>/<scope>/<remote id>.yaml", rel),
+				Msg:  fmt.Sprintf("%s is in no scope folder: a record is trackers/<provider>/<scope>/<remote id>/record.yaml", rel),
 				Help: "Move it to the folder of the repository it is for",
 			})
 		}
@@ -116,14 +116,16 @@ func (s *Store) CheckTrackerTree() ([]TrackerProblem, error) {
 				problems = append(problems, TrackerProblem{
 					Code: TrackerRecordMisplaced, Path: rel,
 					Msg:  fmt.Sprintf("%s %s, not %s#%s", rel, is, rec.Entry.Scope, rec.Entry.ID),
-					Help: "A GitHub record is trackers/github/<owner>/<repo>/<number>.yaml: move it to the issue's own name",
+					Help: "A GitHub record is trackers/github/<owner>/<repo>/<number>/record.yaml: move it to the folder of the issue's own number",
 				})
 			}
 		}
-		if linksOn && s.linkable(rec) {
+		// A record of the flat layout has its link where its folder goes: the
+		// unmoved record is the one thing to report.
+		if linksOn && !rec.Flat && s.linkable(rec) {
 			if msg := s.linkFault(rec.Entry, o); msg != "" {
 				problems = append(problems, TrackerProblem{
-					Code: TrackerLinkWrong, Path: path.Join(trackersDirName, rec.Entry.String()),
+					Code: TrackerLinkWrong, Path: filepath.ToSlash(s.TrackerLinkRelPath(rec.Entry, o)),
 					Msg:  msg,
 					Help: "Run `jig trackers sync`: it makes every link again from the records",
 				})
@@ -140,6 +142,18 @@ func (s *Store) CheckTrackerTree() ([]TrackerProblem, error) {
 		}
 	}
 
+	scan, err := s.scanTracker()
+	if err != nil {
+		return nil, err
+	}
+	for _, rel := range scan.flat {
+		e, _ := entryOfRecordPath(rel)
+		problems = append(problems, TrackerProblem{
+			Code: TrackerRecordUnmoved, Path: rel,
+			Msg:  fmt.Sprintf("%s is still beside its link: a record is %s", rel, filepath.ToSlash(s.TrackerRecordRelPath(e))),
+			Help: "Run `jig trackers sync`: it moves the record into its entry's folder and links it there",
+		})
+	}
 	legacy, err := s.LegacyTrackerRecords()
 	if err != nil {
 		return nil, err
@@ -165,6 +179,8 @@ func (s *Store) orphanReason(rec TrackerRecord) string {
 		return "it has neither a ticket: nor a chart: key"
 	case !o.valid():
 		return "it has both a ticket: and a chart: key"
+	case !o.linkNameOK():
+		return fmt.Sprintf("%q is not a ticket id or a chart name", o.linkName())
 	case s.ownerExists(o):
 		return ""
 	case o.Chart != "":
@@ -175,10 +191,11 @@ func (s *Store) orphanReason(rec TrackerRecord) string {
 	return fmt.Sprintf("ticket %q is not in the store", rec.Ticket)
 }
 
-// linkFault says what is wrong with e's link, or "" when it is right.
+// linkFault says what is wrong with o's link in e's folder, or "" when it is
+// right.
 func (s *Store) linkFault(e TrackerEntry, o TrackerOwner) string {
-	link := s.TrackerPath(e)
-	rel := path.Join(trackersDirName, e.String())
+	link := s.TrackerLinkPath(e, o)
+	rel := filepath.ToSlash(s.TrackerLinkRelPath(e, o))
 	want := filepath.ToSlash(s.ownerRelDir(o))
 	fi, err := os.Lstat(link)
 	switch {
