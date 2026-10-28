@@ -9,7 +9,7 @@
     "repository": {
       "url": "https://github.com/develdeco/jig.git",
       "provider": "github",
-      "revision": "cc02c783e95a1ecdce014f7d7cc3abc6aac62a6e"
+      "revision": "2691036e5b99b026aec757bf1384a72f4f4fa295"
     }
   },
   "lanes": [
@@ -83,7 +83,7 @@
           "path": "CONTEXT.md",
           "line": 97,
           "end_line": 107,
-          "label": "Phase, Automatic run"
+          "label": "Phase, Start-to-finish run"
         }
       ]
     },
@@ -113,8 +113,9 @@
       "sources": [
         {
           "path": "CONTEXT.md",
-          "line": 106,
-          "label": "the person's two moments"
+          "line": 105,
+          "label": "Start-to-finish run, Recommendations",
+          "end_line": 111
         }
       ]
     },
@@ -176,8 +177,8 @@
       "sources": [
         {
           "path": "ARCHITECTURE.md",
-          "line": 722,
-          "end_line": 724,
+          "line": 748,
+          "end_line": 750,
           "label": "Gate reviewer contract"
         },
         {
@@ -198,8 +199,8 @@
       "sources": [
         {
           "path": "ARCHITECTURE.md",
-          "line": 728,
-          "end_line": 732,
+          "line": 754,
+          "end_line": 758,
           "label": "review context, finding, done"
         }
       ]
@@ -214,13 +215,13 @@
       "sources": [
         {
           "path": "CONTEXT.md",
-          "line": 197,
-          "end_line": 199,
+          "line": 201,
+          "end_line": 203,
           "label": "Fix slice"
         },
         {
           "path": "ARCHITECTURE.md",
-          "line": 746,
+          "line": 772,
           "label": "routing and triage"
         }
       ]
@@ -235,8 +236,8 @@
       "sources": [
         {
           "path": "CONTEXT.md",
-          "line": 241,
-          "end_line": 243,
+          "line": 245,
+          "end_line": 247,
           "label": "Triage"
         }
       ]
@@ -272,7 +273,7 @@
       "sources": [
         {
           "path": "ARCHITECTURE.md",
-          "line": 776,
+          "line": 802,
           "label": "--approve"
         }
       ]
@@ -287,8 +288,8 @@
       "sources": [
         {
           "path": "ARCHITECTURE.md",
-          "line": 772,
-          "end_line": 788,
+          "line": 798,
+          "end_line": 814,
           "label": "Publish"
         }
       ]
@@ -393,16 +394,16 @@
       "title": "Phases are asked for by prompt",
       "items": [
         "Plan T, Build T, Review T, Publish T each start one phase with its skill.",
-        "A prompt naming several phases runs them in order; a refusal ends the run.",
+        "A prompt naming several phases, a start-to-finish run, runs them in order; a refusal ends the run.",
         "Where a ticket stands is derived from its journal, never recorded."
       ]
     },
     {
       "dot": "amber",
-      "title": "The person's two moments",
+      "title": "The person's decisions",
       "items": [
-        "Confirming the brief and approving the publish stay the person's.",
-        "A prompt can delegate them; the approval is then recorded with agent provenance."
+        "Confirming the brief, the review's asks and approving the publish stay the person's, even in a start-to-finish run.",
+        "A prompt that says to go with the recommendations hands them over; the answers are then recorded as the session's own."
       ]
     },
     {
