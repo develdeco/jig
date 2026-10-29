@@ -3,11 +3,10 @@ package store
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
-)
 
-const lockRetryInterval = 50 * time.Millisecond
+	"github.com/develdeco/jig/internal/filelock"
+)
 
 // Lock acquires an advisory, exclusive lock on path's sidecar file
 // ("<path>.lock", created if absent and never removed). Only writers lock;
@@ -26,39 +25,9 @@ func Lock(path string, timeout time.Duration) (release func(), held bool, err er
 // TryLock is Lock without the warning: on timeout it returns held=false and
 // says nothing, for a caller that does not proceed unlocked and so has its
 // own word for it (the machine ledger refuses, the checkpoint lock warns in
-// terms of what it guards).
+// terms of what it guards). It is filelock.TryLock, which gitx shares.
 func TryLock(path string, timeout time.Duration) (release func(), held bool, err error) {
-	release = func() {}
-	lockPath := path + ".lock"
-	if dir := filepath.Dir(lockPath); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return release, false, err
-		}
-	}
-	f, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o644)
-	if err != nil {
-		return release, false, err
-	}
-
-	deadline := time.Now().Add(timeout)
-	for {
-		ok, lerr := tryLockFile(f)
-		if lerr != nil {
-			f.Close()
-			return release, false, lerr
-		}
-		if ok {
-			return func() {
-				_ = unlockFile(f)
-				_ = f.Close()
-			}, true, nil
-		}
-		if time.Now().After(deadline) {
-			_ = f.Close()
-			return release, false, nil
-		}
-		time.Sleep(lockRetryInterval)
-	}
+	return filelock.TryLock(path, timeout)
 }
 
 // warnLockTimeout tells the operator, out loud, that a write is proceeding

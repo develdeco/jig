@@ -1,43 +1,115 @@
 package gitx
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/develdeco/jig/internal/filelock"
 )
+
+// worktreesLockName is the file in a repository's git common directory that
+// jig's adds and removals of the repository's worktrees lock (filelock adds
+// ".lock"): beside git's own records of the worktrees, and shared by every
+// linked worktree of the clone and every process that works in it.
+const worktreesLockName = "jig-worktrees"
+
+// worktreesLockWait is how long an add or a removal waits for another
+// process's to finish. Adds wait for whole checkouts, one after another, so
+// it is long; the lock is let go when its holder exits, so only a holder that
+// is stuck makes the wait run out.
+const worktreesLockWait = 10 * time.Minute
+
+// errWorktreesBusy is a lock that another process held for the whole wait.
+var errWorktreesBusy = errors.New("another process is adding or removing a worktree")
+
+// lockWorktrees takes repoDir's repository's worktrees lock, waiting up to
+// wait for it. git's worktree add, remove and prune read every worktree's
+// records under the common directory's worktrees/ and add or delete records
+// of their own without any lock, so two of them at once in one repository
+// fail at random: an add dies reading the half-written records of another
+// ("failed to read .../commondir"), and a prune deletes the records of an add
+// that has not locked them yet. Holding this lock around each keeps jig's own
+// processes from running into each other: the verify workers of one clone
+// start together whenever several commits are verified at once.
+func lockWorktrees(repoDir string, wait time.Duration) (release func(), err error) {
+	common := filepath.Join(repoDir, ".git")
+	if info, err := os.Stat(common); err != nil || !info.IsDir() {
+		// A linked worktree's .git is a file, and a bare repository has none.
+		if common, err = CommonDir(repoDir); err != nil {
+			return nil, err
+		}
+	}
+	release, held, err := filelock.TryLock(filepath.Join(common, worktreesLockName), wait)
+	if err != nil {
+		return nil, fmt.Errorf("gitx: lock the worktrees of %s: %w", repoDir, err)
+	}
+	if !held {
+		return nil, fmt.Errorf("gitx: lock the worktrees of %s: %w (waited %s)", repoDir, errWorktreesBusy, wait)
+	}
+	return release, nil
+}
 
 // WorktreeAddDetached checks rev out, detached, into a new linked worktree of
 // repoDir's repository at dir. The new worktree shares repoDir's object
 // store and refs, so it costs a checkout and no fetch, and any commit repoDir
-// has is there. dir must not exist, or be empty; git creates it.
+// has is there. dir must not exist, or be empty; git creates it. It holds
+// the repository's worktrees lock while git adds it (lockWorktrees).
 func WorktreeAddDetached(repoDir, dir, rev string) error {
+	return worktreeAddDetached(repoDir, dir, rev, worktreesLockWait)
+}
+
+// worktreeAddDetached is WorktreeAddDetached with the lock's wait given, so a
+// test can see the wait run out without waiting ten minutes.
+func worktreeAddDetached(repoDir, dir, rev string, wait time.Duration) error {
 	if strings.HasPrefix(rev, "-") {
 		return fmt.Errorf("gitx: worktree add: %q is not a revision", rev)
 	}
-	_, err := Run(repoDir, "worktree", "add", "--detach", dir, rev)
+	release, err := lockWorktrees(repoDir, wait)
+	if err != nil {
+		return err
+	}
+	defer release()
+	_, err = Run(repoDir, "worktree", "add", "--detach", dir, rev)
 	return err
 }
 
 // WorktreeRemove takes the linked worktree at dir away from repoDir's
-// repository, and the directory with it: it removes the worktree with git
-// (forced, so a tree the oracle left dirty goes too), deletes whatever is
-// left of the directory, and prunes the repository's record of worktrees
-// whose directory is gone. A dir that is not a worktree (the leftover of a
-// run that died before git registered it) is deleted all the same, and a
-// dir that is already gone is not an error: the call is safe to repeat, and
-// to make before an add that may find the last run's remains. The error it
-// returns is the directory still being there, or git's prune failing.
+// repository, and the directory with it: it deletes the directory, then,
+// holding the repository's worktrees lock (lockWorktrees), removes the
+// worktree's record with git (forced twice, so a record git left locked goes
+// too) and prunes the records of worktrees whose directory is gone. A dir
+// that is not a worktree (the leftover of a run that died before git
+// registered it) is deleted all the same, and a dir that is already gone is
+// not an error: the call is safe to repeat, and to make before an add that
+// may find the last run's remains. The error it returns is the directory
+// still being there, the lock's wait running out, or git's prune failing.
 func WorktreeRemove(repoDir, dir string) error {
-	// Forced twice: the second force also removes a worktree that is locked.
-	// A failure is no news: the directory is dealt with below, whatever git
-	// said, and an unregistered one is what git calls "not a working tree".
-	_, _ = Run(repoDir, "worktree", "remove", "--force", "--force", dir)
+	return worktreeRemove(repoDir, dir, worktreesLockWait)
+}
+
+// worktreeRemove is WorktreeRemove with the lock's wait given.
+func worktreeRemove(repoDir, dir string, wait time.Duration) error {
+	// The directory is the caller's alone, so it goes outside the lock, which
+	// then covers only git's records; a removal of a large tree keeps no add
+	// waiting.
 	if err := removeAllWithRetry(dir); err != nil {
 		return fmt.Errorf("gitx: remove worktree %s: %w", dir, err)
 	}
+	release, err := lockWorktrees(repoDir, wait)
+	if err != nil {
+		return err
+	}
+	defer release()
+	// A failure is no news: the prune below clears the record of a worktree
+	// whose directory is gone, and a dir git never registered is what git
+	// calls "not a working tree".
+	_, _ = Run(repoDir, "worktree", "remove", "--force", "--force", dir)
 	if _, err := Run(repoDir, "worktree", "prune"); err != nil {
 		return err
 	}
