@@ -74,6 +74,11 @@ func TestWorktreeAddDetachedChecksTheCommitOutWithoutMovingTheRepo(t *testing.T)
 	if !worktreeListed(t, repo, dir) {
 		t.Errorf("git does not list %s as a worktree of the repo", dir)
 	}
+	// The checkout is the whole commit, staged as it is: nothing modified,
+	// deleted or untracked, which is what verify's clean-tree check holds it to.
+	if status, err := Run(dir, "status", "--porcelain"); err != nil || status != "" {
+		t.Errorf("git status in the new worktree = %q, %v, want a clean tree", status, err)
+	}
 }
 
 // TestWorktreeAddDetachedRefusesWhatItCannotCheckOut keeps a failure an error:

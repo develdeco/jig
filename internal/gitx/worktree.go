@@ -20,10 +20,11 @@ import (
 const worktreesLockName = "jig-worktrees"
 
 // worktreesLockWait is how long an add or a removal waits for another
-// process's to finish. Adds wait for whole checkouts, one after another, so
-// it is long; the lock is let go when its holder exits, so only a holder that
-// is stuck makes the wait run out.
-const worktreesLockWait = 10 * time.Minute
+// process's to finish. A holder holds the lock only while git writes or
+// deletes records, never for a checkout or a tree's deletion, and the lock is
+// let go when its holder exits, so only a holder that is stuck makes the wait
+// run out, even behind many others.
+const worktreesLockWait = 2 * time.Minute
 
 // errWorktreesBusy is a lock that another process held for the whole wait.
 var errWorktreesBusy = errors.New("another process is adding or removing a worktree")
@@ -58,24 +59,42 @@ func lockWorktrees(repoDir string, wait time.Duration) (release func(), err erro
 // WorktreeAddDetached checks rev out, detached, into a new linked worktree of
 // repoDir's repository at dir. The new worktree shares repoDir's object
 // store and refs, so it costs a checkout and no fetch, and any commit repoDir
-// has is there. dir must not exist, or be empty; git creates it. It holds
-// the repository's worktrees lock while git adds it (lockWorktrees).
+// has is there. dir must not exist, or be empty; git creates it.
+//
+// It holds the repository's worktrees lock (lockWorktrees) while git writes
+// the worktree's records, and checks the commit out after letting go, as git
+// itself does (a hard reset of the new worktree), so the checkouts of several
+// adds run side by side. git's add with no checkout runs no post-checkout
+// hook, so none of the repository's hooks runs in the checkout.
 func WorktreeAddDetached(repoDir, dir, rev string) error {
 	return worktreeAddDetached(repoDir, dir, rev, worktreesLockWait)
 }
 
 // worktreeAddDetached is WorktreeAddDetached with the lock's wait given, so a
-// test can see the wait run out without waiting ten minutes.
+// test can see the wait run out without waiting two minutes.
 func worktreeAddDetached(repoDir, dir, rev string, wait time.Duration) error {
 	if strings.HasPrefix(rev, "-") {
 		return fmt.Errorf("gitx: worktree add: %q is not a revision", rev)
 	}
+	if err := addWorktreeRecords(repoDir, dir, rev, wait); err != nil {
+		return err
+	}
+	// Once git's add returns, the records are whole, unlocked and name a dir
+	// whose .git exists, so no other add or prune can trip on them.
+	_, err := Run(dir, "reset", "--hard", "--no-recurse-submodules", "--quiet")
+	return err
+}
+
+// addWorktreeRecords is the part of an add that holds the worktrees lock:
+// git's add with no checkout, which writes the worktree's records, its .git
+// file and its detached HEAD.
+func addWorktreeRecords(repoDir, dir, rev string, wait time.Duration) error {
 	release, err := lockWorktrees(repoDir, wait)
 	if err != nil {
 		return err
 	}
 	defer release()
-	_, err = Run(repoDir, "worktree", "add", "--detach", dir, rev)
+	_, err = Run(repoDir, "worktree", "add", "--no-checkout", "--detach", dir, rev)
 	return err
 }
 
