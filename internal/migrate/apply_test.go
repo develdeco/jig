@@ -92,7 +92,7 @@ func TestApplyMigratesAStoreEndToEnd(t *testing.T) {
 		Keys:    map[string]string{"STORE": "the store", "GRAPH": "the graph"},
 		Tickets: map[string]string{"T-1": "STORE", "T-2": "GRAPH"},
 	}
-	plan, err := BuildPlan(st, m)
+	plan, err := BuildPlan(st, m, "")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestApplyRefusesWithoutAnIdentityBeforeMovingAnything(t *testing.T) {
 		Keys:    map[string]string{"STORE": "the store", "GRAPH": "the graph"},
 		Tickets: map[string]string{"T-1": "STORE", "T-2": "GRAPH"},
 	}
-	plan, err := BuildPlan(st, m)
+	plan, err := BuildPlan(st, m, "")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestApplyWrapsAPartwayFailureWithRecoveryHelp(t *testing.T) {
 		Keys:    map[string]string{"STORE": "the store", "GRAPH": "the graph"},
 		Tickets: map[string]string{"T-1": "STORE", "T-2": "GRAPH"},
 	}
-	plan, err := BuildPlan(st, m)
+	plan, err := BuildPlan(st, m, "")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}

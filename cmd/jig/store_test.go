@@ -138,6 +138,59 @@ func TestStoreMigrateDryRunChangesNothing(t *testing.T) {
 	}
 }
 
+// TestStoreMigrateRenamesAndCollapsesTheLedgerAndContractIndex: the dry run
+// lists the ledger and the contract index as rewrites and says how many
+// duplicate entries it drops from each, and the apply leaves each with one
+// entry of a ticket, under the id the ticket has now.
+func TestStoreMigrateRenamesAndCollapsesTheLedgerAndContractIndex(t *testing.T) {
+	t.Parallel()
+	fx := newMigrateFixture(t)
+	write := func(rel, text string) {
+		t.Helper()
+		path := filepath.Join(fx.work, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("ledger.md", "# Ledger\n\n## T-1 - First\n\n**Answers:**\nnone\n\n## T-2 - Second\n\n**Answers:**\nnone\n\n## T-1 - First again\n\n**Answers:**\nnone\n")
+	write("platform/contract-index.md", "- T-1: workspaces a, oracles test\n- T-2: workspaces a, oracles test\n- T-1: workspaces a,b, oracles test\n")
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-m", "publish twice"}, {"push", "origin", "main"}} {
+		if _, err := gitx.Run(fx.work, args...); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	mapPath := writeMigrateMap(t, migrateMapYAML)
+	env := testEnv(t.TempDir())
+
+	out, code := runMain(t, env, "", "store", "migrate", "--map", mapPath, "--dry-run", "--store", fx.work)
+	if code != 0 {
+		t.Fatalf("dry run: exit %d\n%s", code, out)
+	}
+	for _, want := range []string{"rewrite,ledger.md", "rewrite,platform/contract-index.md", "collapsed[2]{path,entries}:", "ledger.md,1", "platform/contract-index.md,1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry run output lacks %q:\n%s", want, out)
+		}
+	}
+	if data, _ := os.ReadFile(filepath.Join(fx.work, "ledger.md")); !strings.Contains(string(data), "## T-1 - First again") {
+		t.Errorf("the dry run rewrote ledger.md:\n%s", data)
+	}
+
+	if out, code := runMain(t, env, "", "store", "migrate", "--map", mapPath, "--store", fx.work); code != 0 {
+		t.Fatalf("apply: exit %d\n%s", code, out)
+	}
+	wantLedger := "# Ledger\n\n## GRAPH-1 - First again\n\n**Answers:**\nnone\n\n## STORE-1 - Second\n\n**Answers:**\nnone\n"
+	if got, _ := os.ReadFile(filepath.Join(fx.work, "ledger.md")); string(got) != wantLedger {
+		t.Errorf("ledger.md =\n%s\nwant\n%s", got, wantLedger)
+	}
+	wantIndex := "- GRAPH-1: workspaces a,b, oracles test\n- STORE-1: workspaces a, oracles test\n"
+	if got, _ := os.ReadFile(filepath.Join(fx.work, "platform", "contract-index.md")); string(got) != wantIndex {
+		t.Errorf("platform/contract-index.md =\n%s\nwant\n%s", got, wantIndex)
+	}
+}
+
 func TestStoreMigrateApplyEndToEnd(t *testing.T) {
 	t.Parallel()
 	fx := newMigrateFixture(t)

@@ -22,10 +22,10 @@ func TestLedgerEntryReadsBackThroughRecall(t *testing.T) {
 		{ID: "q-002", Status: "open", Body: "Never answered?"},
 		{ID: "q-003", Status: "answered", Body: "Which locale?", Answer: "English first, then Spanish."},
 	}
-	if err := appendLedgerEntry(st, "JIG-1", "Greeting tone", slices, questions); err != nil {
+	if err := writeLedgerEntry(st, "JIG-1", "Greeting tone", slices, questions); err != nil {
 		t.Fatal(err)
 	}
-	if err := appendLedgerEntry(st, "JIG-2", "Rename the flags - all of them", slices[:1], nil); err != nil {
+	if err := writeLedgerEntry(st, "JIG-2", "Rename the flags - all of them", slices[:1], nil); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(st.Root, "ledger.md"))
