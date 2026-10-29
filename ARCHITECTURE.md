@@ -2,6 +2,8 @@
 
 jig is one binary plus a set of session skills, attached to the harness session a person already runs (Claude Code today; Codex, Gemini CLI, Cursor, GitHub Copilot and OpenCode by the same floor): the binary owns machinery (state, verification, git, the hooks that observe), skills own judgment (reading a brief, writing code, reviewing a diff), and the harness owns the session, its tools and its model. jig starts no coding session and chooses no model ([ADR 0032](docs/adr/0032-jig-attaches-to-the-harness.md)). The two only agree through the store on disk - the schema below *is* the API between them, and between jig and any future tooling that reads a ticket's history.
 
+[docs/diagrams.md](docs/diagrams.md) draws the shape of what follows: the system context, the domain model, a ticket's flow, a commit's verification and a slice's states.
+
 ## Pipeline
 
 A ticket goes from a brief to a pull request in five stages. Each is a verb the session runs, or a record a hook writes on its behalf; none starts a session.
