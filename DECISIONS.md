@@ -2527,7 +2527,10 @@ build left open beyond those.
   8). In nine paired Windows runs the whole suite averaged 351 s on main and 331 s with
   it, a mean paired difference of 21 s against a standard error of 19 s, and macOS and
   Linux, two runs each, did not change measurably. That was not worth 320 lines of gitx
-  code and 280 of tests.
+  code and 280 of tests. Superseded: a fixture is now a copy of a template built once
+  per shape, which starts none of the fixture's git processes after the first (see
+  "Fixtures are copies of a template built once per shape", at the end of this file),
+  so what this paragraph chose between, eight processes or sixteen, no longer arises.
 - The Windows test leg puts `git --exec-path` first on PATH. The runner's first git is
   Git for Windows' `bin\git.exe`, a launcher that starts git's own `git.exe` as a second
   process on every call, the calls git makes itself during a local push included. On
