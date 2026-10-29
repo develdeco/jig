@@ -4,7 +4,9 @@
 // like are dropped, so git finds its repository from that directory), and
 // runs with git's automatic background maintenance off for that one
 // process; nothing is persisted, so a user's own git commands still
-// maintain their repos.
+// maintain their repos. The read-only questions about a plain repository's
+// refs, HEAD, objects and work tree top are answered in process, exactly as
+// git would (read.go), and left to the git program when gitx cannot.
 package gitx
 
 import (
@@ -231,11 +233,6 @@ func MaintenanceAuto(dir string) error {
 	return err
 }
 
-// RevParse resolves ref to a full commit sha in dir.
-func RevParse(dir, ref string) (string, error) {
-	return Run(dir, "rev-parse", ref)
-}
-
 // MergeBase returns the merge base of a and b in dir.
 func MergeBase(dir, a, b string) (string, error) {
 	return Run(dir, "merge-base", a, b)
@@ -278,8 +275,10 @@ func IsAncestor(dir, ancestor, descendant string) (bool, error) {
 // where it went.
 func Missing(dir, ref string, commits []string) ([]string, error) {
 	var missing []string
+	r := newReader(dir, os.LookupEnv)
+	defer r.close()
 	for _, commit := range commits {
-		if _, err := Run(dir, "rev-parse", "--verify", "--quiet", commit+"^{commit}"); err != nil {
+		if _, ok, err := resolveWith(dir, commit+"^{commit}", r, false); err != nil || !ok {
 			missing = append(missing, commit)
 			continue
 		}
@@ -352,6 +351,9 @@ func PathExistsAtRev(dir, rev, path string) (bool, error) {
 // "tree") of the tree entry at path there, and whether path matched one at
 // all.
 func treeEntryAtRev(dir, rev, path string) (entryType string, found bool, err error) {
+	if et, found, ok := treeEntryInProcess(dir, rev, path, os.LookupEnv); ok {
+		return et, found, nil
+	}
 	if _, err := Run(dir, "rev-parse", "--verify", "--quiet", rev+"^{commit}"); err != nil {
 		return "", false, fmt.Errorf("gitx: tree entry at rev: rev %q does not resolve to a commit: %w", rev, err)
 	}
@@ -408,13 +410,21 @@ func lsTreeEntry(entry string) (entryType, path string, err error) {
 // resolve a Windows junction, a subst drive or an 8.3 short name, so a
 // caller comparing two common dirs asks SameDir, which compares the
 // directories themselves rather than their spellings.
+//
+// A plain repository (see discover) is answered from its files with no
+// process; any other, and any error, is "git rev-parse --git-common-dir".
 func CommonDir(dir string) (string, error) {
-	out, err := Run(dir, "rev-parse", "--git-common-dir")
-	if err != nil {
-		return "", err
-	}
-	if !filepath.IsAbs(out) {
-		out = filepath.Join(dir, out)
+	var out string
+	if loc, ok := discover(dir, os.LookupEnv); ok {
+		out = loc.commonDir
+	} else {
+		var err error
+		if out, err = Run(dir, "rev-parse", "--git-common-dir"); err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(out) {
+			out = filepath.Join(dir, out)
+		}
 	}
 	out = filepath.Clean(out)
 	if resolved, err := filepath.EvalSymlinks(out); err == nil {
@@ -451,10 +461,18 @@ func SameDir(a, b string) bool {
 // relativized against it stays repo-relative for whichever worktree dir was
 // actually given. dir that is not inside any git repository, or that does
 // not exist, is returned as an error.
+//
+// A plain repository (see discover) is answered from its files with no
+// process; any other, and any error, is "git rev-parse --show-toplevel".
 func TopLevel(dir string) (string, error) {
-	out, err := Run(dir, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return "", err
+	var out string
+	if loc, ok := discover(dir, os.LookupEnv); ok {
+		out = loc.workTree
+	} else {
+		var err error
+		if out, err = Run(dir, "rev-parse", "--show-toplevel"); err != nil {
+			return "", err
+		}
 	}
 	out = filepath.Clean(out)
 	if resolved, err := filepath.EvalSymlinks(out); err == nil {
