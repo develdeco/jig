@@ -107,8 +107,10 @@ moved record.
 ## What stays out of scope
 
 Rewriting any other history file (journals, gate rounds, changelogs, PR
-notes, `ledger.md`, `platform/`, a chart's `map.md`) is unnecessary: every
-one of them is read by id, and an old id resolves through its alias.
+notes, the rest of `platform/`, a chart's `map.md`) is unnecessary: every
+one of them is read by id, and an old id resolves through its alias. The
+ledger and the contract index are the two that are not: see the last
+amendment.
 Branches in the product repos, and the machine's evidence tree (keyed by
 old ids, which belong to tickets in flight the migration's own branch
 warning already tells the operator to finish first), are the operator's to
@@ -128,3 +130,7 @@ The mirror's records move out of the ticket and chart folders into `trackers/<pr
 ## Amendment: a tracker entry is a folder
 
 Each remote item of the tracker tree became a folder, `trackers/<provider>/<scope>/<remote id>/`, holding `record.yaml` and a link named by the store id (`101/STORE-6`), where the tree had `<remote id>.yaml` and a link at `<remote id>`. A tree in the old layout is read as a fallback and moved by the next sync; the schema stays at 3 (2 for a v2 store). DECISIONS.md has the account.
+
+## Amendment: the ledger and the contract index are rewritten
+
+"Out of scope" above said every other history file is read by id and an old id resolves through its alias. That holds for the files a command opens by ticket, and not for two the store keeps by text: `ledger.md` and `platform/contract-index.md`. A publish writes one entry into each under the ticket's id, and `jig recall` reads the ledger's entries by the id in their headings, so after jig's own store migrated they named ids that no longer existed (`T-22` for what is now `TRACK-1`). The migration now renames the ticket id in each ledger entry heading and each contract index line through the same rename map, and the dry run lists either file when it would rewrite it. A ticket the file holds more than once, from a publish that appended on every run, is left with its newest entry in the place of its first, and the dry run counts what it drops. Otherwise only the id changes: a title or an answer that mentions one is the person's words. Every new id differs from every old one (the map's keys must not clash with the old ids' own), so a file already renamed is not renamed again. See DECISIONS.md.

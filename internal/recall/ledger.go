@@ -24,12 +24,13 @@ type LedgerEntry struct {
 // answersMarker is the line that opens an entry's Answers section.
 const answersMarker = "**Answers:**"
 
-// ParseLedger reads ledger.md into its entries, oldest first (the file is only
-// appended to). Text before the first "## " heading is skipped. In an entry,
-// the lines after the Answers marker are read as bullets: "- q-001: ..." opens
-// an answer, and a line that is neither a bullet nor blank continues the one
-// before it. The section is "none" for an entry with no answers, which gives
-// the entry no Answers.
+// ParseLedger reads ledger.md into its entries, in the order the tickets were
+// first published (a publish writes a ticket's entry at the end, and a later
+// one replaces it where it stands). Text before the first "## " heading is
+// skipped. In an entry, the lines after the Answers marker are read as
+// bullets: "- q-001: ..." opens an answer, and a line that is neither a bullet
+// nor blank continues the one before it. The section is "none" for an entry
+// with no answers, which gives the entry no Answers.
 func ParseLedger(text string) []LedgerEntry {
 	var entries []LedgerEntry
 	var cur *LedgerEntry
