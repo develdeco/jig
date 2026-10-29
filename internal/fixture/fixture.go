@@ -14,6 +14,16 @@
 // import path, so testdataFixtureDir then finds go.mod only when the binary
 // runs from the module root.
 //
+// A fixture is a copy: the first Build of each shape in a process (an Opts
+// less its Home) builds that shape once with the git program, into a temp
+// directory of its own, and every Build copies it into its directory and
+// rewrites the copy for that directory, starting no git process at all
+// (template.go has the how, and gitx.RewriteHeadCommit the commit rewrite).
+// What a caller gets is the fixture a direct build into the same directory
+// makes, commit ids included; template_test.go checks that for each shape.
+// The template directory is removed through gittest.AtExit, so a package
+// that builds fixtures wires gittest into its TestMain, as it does for git.
+//
 // Build and Generate write the per-machine project mapping under Opts.Home,
 // the jig home root the caller hands the code under test (a test passes its
 // own t.TempDir()). Left empty, Home is home.Root(): JIG_HOME, else the real
@@ -160,13 +170,33 @@ var identityEnv = []string{
 // error rather than failing a test, so Build never calls into testing and
 // can run from any binary.
 //
+// A fixture is a copy of a template (template.go). The first Build of each
+// shape in a process, a shape being the Opts less its Home, builds that
+// shape once in a temp directory of its own, with the git program; every
+// Build, that first one included, copies the template into dir and points the
+// copy at dir, which starts no git process at all. A build the template cannot
+// serve (a dir whose spelling would change how the files in it quote its
+// path) is made directly, which is the template's own build.
+//
 // Everything checkable is validated before writing the fixture, and the
 // per-machine mapping under the jig home (project.InitProject) is written
-// last, after everything else under dir already exists. On any error once the
-// non-empty check has passed, Build removes what it wrote: dir's new
-// contents, and dir itself when Build created it, so a retry into the same
-// dir is not refused unless the cleanup itself fails, which Build reports.
-func Build(dir string, opts Opts) (fx *Fixture, err error) {
+// last, after everything else under dir already exists, on every Build, for
+// the copy. On any error once the non-empty check has passed, Build removes
+// what it wrote: dir's new contents, and dir itself when Build created it, so
+// a retry into the same dir is not refused unless the cleanup itself fails,
+// which Build reports.
+func Build(dir string, opts Opts) (*Fixture, error) {
+	return build(dir, opts, true)
+}
+
+// buildDirect is Build without the template: the fixture is built into dir
+// by the git program, as a template is. The test that proves a copy is the
+// same fixture builds one with it.
+func buildDirect(dir string, opts Opts) (*Fixture, error) {
+	return build(dir, opts, false)
+}
+
+func build(dir string, opts Opts, fromTemplate bool) (fx *Fixture, err error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, fmt.Errorf("fixture: resolve %s: %w", dir, err)
@@ -199,13 +229,47 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := scenarioBranchDir(testdataDir, opts); err != nil {
+		return nil, err
+	}
 
-	var branchDir string
-	if opts.ScenarioBranch != "" {
-		branchDir = filepath.Join(testdataDir, "scenario-branches", opts.ScenarioBranch)
-		if _, statErr := os.Stat(branchDir); statErr != nil {
-			return nil, fmt.Errorf("%w %q: %w", ErrUnknownScenarioBranch, opts.ScenarioBranch, statErr)
-		}
+	if fromTemplate {
+		fx, err = buildFromTemplate(dir, opts, testdataDir)
+	} else {
+		fx, err = buildTree(dir, opts, testdataDir)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := mapMachine(fx, opts); err != nil {
+		return nil, err
+	}
+	return fx, nil
+}
+
+// scenarioBranchDir is the directory of the scenario overlay opts names, ""
+// when it names none. An overlay that does not exist is an
+// ErrUnknownScenarioBranch.
+func scenarioBranchDir(testdataDir string, opts Opts) (string, error) {
+	if opts.ScenarioBranch == "" {
+		return "", nil
+	}
+	branchDir := filepath.Join(testdataDir, "scenario-branches", opts.ScenarioBranch)
+	if _, statErr := os.Stat(branchDir); statErr != nil {
+		return "", fmt.Errorf("%w %q: %w", ErrUnknownScenarioBranch, opts.ScenarioBranch, statErr)
+	}
+	return branchDir, nil
+}
+
+// buildTree writes the fixture opts describes into the empty directory dir
+// with the git program: every repository, remote, the store and the
+// scenario, everything but the per-machine mapping (mapMachine). It is what
+// a template is built by and what a build the template cannot serve falls
+// back to. The fixture it returns has no Home.
+func buildTree(dir string, opts Opts, testdataDir string) (*Fixture, error) {
+	branchDir, err := scenarioBranchDir(testdataDir, opts)
+	if err != nil {
+		return nil, err
 	}
 
 	if opts.Orchestrator {
@@ -300,20 +364,6 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 		}
 	}
 
-	jigHome := opts.Home
-	if jigHome == "" {
-		if jigHome, err = home.Root(); err != nil {
-			return nil, fmt.Errorf("fixture: resolve jig home: %w", err)
-		}
-	}
-	clones := map[string]string{"fixture-repo": repoDir}
-	if secondDir != "" {
-		clones["second-repo"] = secondDir
-	}
-	if _, err := project.InitProject(jigHome, storeDir, clones); err != nil {
-		return nil, fmt.Errorf("fixture: init project machine mapping: %w", err)
-	}
-
 	return &Fixture{
 		Dir:              dir,
 		RepoDir:          repoDir,
@@ -323,10 +373,42 @@ func Build(dir string, opts Opts) (fx *Fixture, err error) {
 		ScenarioDir:      scenarioDir,
 		Ticket:           Ticket,
 		Branch:           Branch,
-		Home:             jigHome,
 		SecondRepoDir:    secondDir,
 		SecondRepoRemote: secondRemote,
 	}, nil
+}
+
+// mapMachine writes the per-machine project mapping for fx under the jig
+// home opts names (home.Root() when it names none), which is what makes the
+// fixture's project known to the code under test, and sets fx.Home. It runs
+// for every fixture, copy or not, after everything else under fx.Dir exists.
+func mapMachine(fx *Fixture, opts Opts) error {
+	jigHome := opts.Home
+	if jigHome == "" {
+		var err error
+		if jigHome, err = home.Root(); err != nil {
+			return fmt.Errorf("fixture: resolve jig home: %w", err)
+		}
+	}
+	if opts.Orchestrator {
+		err := project.UpdateMachine(jigHome, func(m map[string]project.MachineProject) error {
+			m[OrchestratorName] = project.MachineProject{Store: fx.StoreDir, Clones: fx.NestedDirs, Root: fx.OrchestratorDir}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("fixture: map the orchestrator: %w", err)
+		}
+	} else {
+		clones := map[string]string{"fixture-repo": fx.RepoDir}
+		if fx.SecondRepoDir != "" {
+			clones["second-repo"] = fx.SecondRepoDir
+		}
+		if _, err := project.InitProject(jigHome, fx.StoreDir, clones); err != nil {
+			return fmt.Errorf("fixture: init project machine mapping: %w", err)
+		}
+	}
+	fx.Home = jigHome
+	return nil
 }
 
 // Generate materializes a fresh fixture into a new t.TempDir() and returns
@@ -558,11 +640,12 @@ func rewriteJigYAML(repoDir, envtoolBin, stateFile string, envFail bool) error {
 	return writeFile(path, out)
 }
 
-// The envtool helper is built once per process into a shared cache dir; each
-// Build call copies that cached binary into its own dir/bin (see Build), so
-// a fixture no longer references that shared, longer-lived cache. The
-// oracle command Build writes into jig.yaml still runs the Go toolchain at
-// runtime.GOROOT() (see goBinaryPath), a path outside dir.
+// The envtool helper is built once per process into a shared cache dir; the
+// direct build copies that cached binary into its own dir/bin (see
+// buildTree), and a copy of a template gets the template's, so a fixture
+// never references that shared, longer-lived cache. The oracle command a
+// fixture's jig.yaml holds still runs the Go toolchain at runtime.GOROOT()
+// (see goBinaryPath), a path outside dir.
 var (
 	envtoolOnce     sync.Once
 	envtoolBin      string
@@ -575,8 +658,8 @@ var (
 // build failure fails every caller with the original error. Inside a test
 // binary the cache dir is removed through gittest.AtExit when the binary
 // finishes; outside one (gittest.Run never runs), it is a one-per-process
-// leak of a build artifact, not of any fixture's own output, since Build
-// copies the binary out before returning. The OS does not reclaim it on
+// leak of a build artifact, not of any fixture's own output, since a
+// fixture is given a copy of the binary. The OS does not reclaim it on
 // Windows, so a long-lived non-test process calling Build many times should
 // expect one leaked temp dir for its own lifetime, not one per call.
 func buildEnvtool(testdataDir string) (string, error) {

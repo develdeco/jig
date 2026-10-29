@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -61,8 +60,13 @@ const orchestratorSlices = `slices:
     from_brief: [%q]
 `
 
-// buildOrchestrator is Build for Opts.Orchestrator (see there): the shape
-// `jig init --orchestrator` leaves around two repos.
+// buildOrchestrator is buildTree for Opts.Orchestrator (see there): the shape
+// `jig init --orchestrator` leaves around two repos. The orchestrator's entry
+// in the machine mapping is mapMachine's, as every fixture's is.
+//
+// No tracked file of this shape names the directory it is in, so its template
+// is copied with only the remote URLs of the repositories' configs pointed at
+// the copy, and no commit is rewritten.
 //
 //	<dir>/shop/               the orchestrator: a git repository on main with
 //	                          a jig.yaml marker of kind orchestrator, committed
@@ -126,26 +130,10 @@ func buildOrchestrator(dir string, opts Opts, testdataDir string) (*Fixture, err
 	if err := project.WriteMarker(orchDir, project.Marker{Project: OrchestratorName, Kind: project.KindOrchestrator, Repos: repos}); err != nil {
 		return nil, err
 	}
-	jigHome := opts.Home
-	if jigHome == "" {
-		var err error
-		if jigHome, err = home.Root(); err != nil {
-			return nil, fmt.Errorf("fixture: resolve jig home: %w", err)
-		}
-	}
-	err := project.UpdateMachine(jigHome, func(m map[string]project.MachineProject) error {
-		m[OrchestratorName] = project.MachineProject{Store: storeDir, Clones: nested, Root: orchDir}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("fixture: map the orchestrator: %w", err)
-	}
-
 	return &Fixture{
 		Dir:             dir,
 		StoreDir:        storeDir,
 		Ticket:          Ticket,
-		Home:            jigHome,
 		OrchestratorDir: orchDir,
 		NestedDirs:      nested,
 		NestedRemotes:   remotes,
