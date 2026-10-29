@@ -695,7 +695,7 @@ func writeFindingsYAMLAt(t *testing.T, ticketDir string, round int, fy findingsY
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data, err := marshalFindingsYAML(fy.Scope, fy.ReviewedPaths, fy.Findings, fy.Cleared, fy.Summary)
+	data, err := marshalFindingsYAML(fy.Scope, fy.ReviewedPaths, fy.Findings, fy.Cleared, fy.Summary, fy.Probes, fy.Skipped)
 	if err != nil {
 		t.Fatalf("marshalFindingsYAML: %v", err)
 	}

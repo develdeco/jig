@@ -203,8 +203,10 @@ func writersBlock(writer, branch, claims string, ids, carried int) string {
 	return axi.KV("writers", pairs)
 }
 
-// renderMigratePlan prints plan's rename map (when it renames anything) and
-// file operations, the same table shapes for both the dry run and the apply.
+// renderMigratePlan prints plan's rename map (when it renames anything), file
+// operations and the duplicate ledger and contract index entries it drops
+// (when it drops any), the same table shapes for both the dry run and the
+// apply.
 func renderMigratePlan(stdout io.Writer, plan migrate.Plan) {
 	if len(plan.Renames) > 0 {
 		renameRows := make([][]string, len(plan.Renames))
@@ -219,4 +221,12 @@ func renderMigratePlan(stdout io.Writer, plan migrate.Plan) {
 		fileRows[i] = []string{f.Action, f.Path}
 	}
 	axi.Render(stdout, axi.Table("files", []string{"action", "path"}, fileRows))
+
+	if len(plan.Collapsed) > 0 {
+		collapsedRows := make([][]string, len(plan.Collapsed))
+		for i, c := range plan.Collapsed {
+			collapsedRows[i] = []string{c.Path, fmt.Sprint(c.Entries)}
+		}
+		axi.Render(stdout, axi.Table("collapsed", []string{"path", "entries"}, collapsedRows))
+	}
 }

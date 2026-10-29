@@ -773,10 +773,10 @@ func writeStoreDocs(d Deps, t *publishTarget, oracleNames []string) error {
 		return err
 	}
 	title := consolidatedTitle(t.rec.Title, ticket, t.slices)
-	if err := appendLedgerEntry(d.Store, ticket, title, t.slices, questions); err != nil {
+	if err := writeLedgerEntry(d.Store, ticket, title, t.slices, questions); err != nil {
 		return err
 	}
-	if err := appendContractIndexEntry(d.Store, d.Cfg.Platform, ticket, t.slices, oracleNames); err != nil {
+	if err := writeContractIndexEntry(d.Store, d.Cfg.Platform, ticket, t.slices, oracleNames); err != nil {
 		return err
 	}
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventChangelog}); err != nil {
@@ -921,7 +921,17 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 			ticket, demoResult.ScrubbedCaptions)
 	}
 
-	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, lastSummary, outcomes, reviewedPaths, in.touched); err != nil {
+	// The behavior a reviewer's rounds tested, at the head they reviewed: a
+	// scripted round recorded no reviewed head, and no probe.
+	var behavior *behaviorCoverage
+	if t.reviewedHead() != "" {
+		cov, err := publishCoverage(d.Store, t, in.dir, in.head)
+		if err != nil {
+			return publication{}, err
+		}
+		behavior = &cov
+	}
+	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, lastSummary, outcomes, reviewedPaths, in.touched, behavior); err != nil {
 		return publication{}, err
 	}
 	return publication{
