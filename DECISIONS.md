@@ -2555,8 +2555,9 @@ build left open beyond those.
   off after 60 days without repository activity. It is a job of its own rather
   than steps of the test job, so the hermetic suite still runs with no `claude` on PATH
   and the Windows leg's wall time does not grow.
-- Main's ruleset requires `ci ok` beside the test job's three legs, switched once this
-  landed. `ci ok` is ci.yml's gate job: it needs every job that runs on pull requests
+- Main's ruleset requires `ci ok` beside the test job's legs, switched once this
+  landed; since 2026-10-28 those are the Linux and macOS legs ("Pull requests test on
+  Linux and macOS", below). `ci ok` is ci.yml's gate job: it needs every job that runs on pull requests
   and fails unless each of them succeeded. Before it, only the test legs were required,
   so a pull request that broke the CLI contract showed a red `claude-cli` and could
   still merge; a release could not, since release.yml waits on all of ci.yml. Requiring
@@ -3556,3 +3557,12 @@ Three consequences follow from naming the link by the store id. A renamed ticket
 
 The move needs no schema bump, for the reason the first tree needed none: both layouts are read. A record is read from its folder, and from `<remote id>.yaml` where its folder has none (a flat file beside a folder's record is a leftover, reported and dropped); the mirror then moves each flat record into its folder as a rename, bytes untouched, replaces the old link with the folder and the new link, and lists the move in the sync's `moved` table, after the records in ticket folders and before any issue is touched; a sync with no tracker configured moves them too, without printing. A flat record of one owner beside the folder record of another is refused as `TRACKER_ENTRY_TAKEN` with both left in place, and one that cannot be read stays for the tree check. The move is a working-tree change that goes in with the next checkpoint's commit, like the first one. `TRACKER_RECORD_UNMOVED` now also reports a flat record. The cost of no version marker is that nothing refuses a clone on a build from before this change, which does not understand the folders, so every clone of a store should take the new build before it syncs; the owner's own store, `develdeco/jig-tickets`, is moved by its next sync after this lands and is not touched by hand.
 
+## Pull requests test on Linux and macOS
+
+Every pull request waited on the test job's Windows leg: 1,055 s on 2026-10-28, beside 129 s on Linux and 211 s on macOS for the same suite, and `windows-verifydeliver` (819 s) beside it. The wait per landing had grown from 8 minutes (2026-09-29) to 17.5 as the suite went from 737 tests to 2,522, and no change to the tests themselves had held it down: making packages run their tests in parallel and splitting verifydeliver onto a runner of its own moved the overlap, not the work, and each gain was gone within days of new features.
+
+So ci.yml's `plan` job names the test legs a run needs, from what the run changes. A pull request runs the test job on Linux and macOS. It runs the Windows leg and `windows-verifydeliver` too only when it changes what Windows builds or runs differently: a `_windows` Go file or any Go file with a build constraint, `go.mod` or `go.sum`, `.gitattributes`, or a workflow. Every push to main, the daily run, a dispatch and every release run all three, so a Windows-only failure shows on main within the half hour after its merge, and is fixed forward or reverted. The owner develops on Windows and tests the touched packages there before a pull request, which is where Windows-only breaks have been found in practice. `claude-cli`, a minute and a half on Windows, still runs on all three for every pull request: the hook JSON it checks is the one place the real CLI meets jig, and the most user-visible Windows break.
+
+A pull request that changes only docs (markdown at the root or in `.github`, `docs/`, `LICENSE`) tests `./lint` alone and skips `claude-cli`. No test outside `./lint` reads those files: the skills, which `go:embed` builds into the binary, and markdown under `testdata` are not docs to the plan. A test that starts reading a doc belongs in `./lint`; one that does not is caught by main's full run.
+
+Main's ruleset now requires test (ubuntu-latest), test (macos-latest) and `ci ok`, which every pull request reports; test (windows-latest) is no longer required by name. `ci ok` still needs the Windows jobs, and counts one as succeeded when it is skipped only where the plan's output says it was left out, never where the plan failed. The lint test runs the plan's step with synthetic changes, and holds its reading of a file to Go's: every Go file built on Windows but not on both Linux and macOS must plan the Windows leg. This reverses the 2026-09-28 preference for the same checks on every OS for the pull request gate only; main keeps them.
