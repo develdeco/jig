@@ -247,6 +247,21 @@ Reviewed paths:
 - beta/version.go
 - go.mod
 
+Probes current at the reviewed head:
+
+- alpha/percent.go:5 caught: upper bound 100 to 101 (ClampPercent bounds a percentage; round 3)
+
+Set aside as on no critical path:
+
+- alpha/percent_test.go: tests
+
+Hunks no probe or skip covers:
+
+- alpha/alpha.go:5-7
+- alpha/alpha.go:17-19
+- beta/beta.go:4-6
+- beta/version.go:1-5
+
 `
 	if notes != wantNotes {
 		t.Fatalf("pr/review-notes.md =\n%s\nwant\n%s", notes, wantNotes)

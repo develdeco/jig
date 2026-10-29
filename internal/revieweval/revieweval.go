@@ -119,11 +119,13 @@ type Decision struct {
 // store, so this package and Gate always agree on what a round starts
 // from.
 type recordedRoundYAML struct {
-	Scope         string                  `yaml:"scope"`
-	ReviewedPaths []string                `yaml:"reviewed_paths"`
-	Findings      []verifydeliver.Finding `yaml:"findings"`
-	Cleared       []string                `yaml:"cleared,omitempty"`
-	Summary       string                  `yaml:"summary,omitempty"`
+	Scope         string                      `yaml:"scope"`
+	ReviewedPaths []string                    `yaml:"reviewed_paths"`
+	Findings      []verifydeliver.Finding     `yaml:"findings"`
+	Cleared       []string                    `yaml:"cleared,omitempty"`
+	Summary       string                      `yaml:"summary,omitempty"`
+	Probes        []verifydeliver.ProbeRecord `yaml:"probes,omitempty"`
+	Skipped       []verifydeliver.SkipRecord  `yaml:"skipped,omitempty"`
 }
 
 // Round is one case round: the patch applied on top of the previous

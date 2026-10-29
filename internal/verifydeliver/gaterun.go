@@ -248,7 +248,7 @@ func gatePrepare(d Deps, o GateOpts) (*gateRun, error) {
 		if err != nil {
 			return r, inRepo(r.qualified, gr.name, fmt.Errorf("verifydeliver: gate: resolve manifest: %w", err))
 		}
-		gr.oracleRuns, err = runGateOracles(d, ticket, gr.lease.Dir, gr.man, gr.slices)
+		gr.oracleRuns, err = runGateOracles(d, ticket, gr.name, gr.lease.Dir, gr.man, gr.slices)
 		if err != nil {
 			return r, inRepo(r.qualified, gr.name, err)
 		}
@@ -286,6 +286,8 @@ func (r *gateRun) roundInput() RoundInput {
 		UserHome:   r.d.UserHome,
 		Open:       r.fold.Open,
 		Dismissed:  r.fold.Dismissed,
+		Probes:     r.fold.Probes,
+		Skips:      r.fold.Skips,
 	}
 	if !r.qualified {
 		gr := r.repos[0]
@@ -537,7 +539,17 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		for _, fs := range fixSlices {
 			report.FixSlices = append(report.FixSlices, fs.ID)
 		}
-		if err := writeReviewerRound(d, ticket, n, report, report.Scope, round.Review.Result.ReviewedPaths, routed, cleared, round.Review.Result.Summary); err != nil {
+		// The round's probes and skips join the ledger with their files'
+		// blobs at the head it reviewed (ADR 0036), and the hunks they and the
+		// earlier rounds' current ones leave uncovered are counted.
+		result := round.Review.Result
+		probes, skips, err := recordLedger(files, result.Probes, result.Skipped)
+		if err != nil {
+			return GateReport{}, err
+		}
+		report.Probes = len(probes)
+		report.Unprobed = len(unprobedHunks(coverHunks(round.Review.Hunks, result.Probes, result.Skipped)))
+		if err := writeReviewerRound(d, ticket, n, report, report.Scope, result.ReviewedPaths, routed, cleared, result.Summary, probes, skips); err != nil {
 			return GateReport{}, err
 		}
 		event := journal.EventGateRound
