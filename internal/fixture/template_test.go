@@ -632,44 +632,94 @@ func TestBuildsInParallelMakeSeparateFixtures(t *testing.T) {
 	}
 }
 
-// TestADirTheTemplateCannotServeIsBuiltDirectly: the files of a fixture quote
-// the directory they are in by what it holds, so a directory that needs other
-// quoting than the template's root is built by the git program, and the
-// fixture is whole all the same.
-func TestADirTheTemplateCannotServeIsBuiltDirectly(t *testing.T) {
+// TestADirTheTemplateServesOrNot: the files of a fixture quote the directory
+// they are in by what it holds. A directory made of what a test's temp
+// directory can be made of (a comma, a plus, parentheses, a percent sign) is
+// quoted as the template's root is, so the template serves it and the copy is
+// the fixture a direct build makes there; a directory that is quoted otherwise
+// (a hash or a semicolon, which a git config value quotes, a quote, a space
+// the root has none of) is built directly, and the fixture is whole all the
+// same.
+func TestADirTheTemplateServesOrNot(t *testing.T) {
 	tpl := templateOf(t, Opts{})
 	spaced := strings.Contains(tpl.root, " ")
 	base := os.TempDir()
+	const specials = "a,b+c=d@e(f)!$%&^{}~g"
 	for _, c := range []struct {
 		dir  string
 		want bool
 	}{
 		{filepath.Join(base, "plain-dir_1.x"), !spaced},
 		{filepath.Join(base, "RUNNER~1", "Temp"), !spaced},
+		{filepath.Join(base, specials), !spaced},
 		{filepath.Join(base, "plain dir"), spaced},
 		{filepath.Join(base, "odd#dir"), false},
+		{filepath.Join(base, "odd;dir"), false},
 		{filepath.Join(base, "odd'dir"), false},
 		{filepath.Join(base, `odd"dir`), false},
-		{filepath.Join(base, "odd,dir"), false},
+		{filepath.Join(base, "odd[dir]"), false},
 	} {
 		if got := tpl.servable(c.dir); got != c.want {
 			t.Errorf("servable(%q) = %v, want %v", c.dir, got, c.want)
 		}
 	}
 
-	dir := filepath.Join(t.TempDir(), "odd#dir")
-	fx, err := Build(dir, Opts{Home: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status := git(t, fx.RepoDir, "status", "--porcelain"); status != "" {
-		t.Errorf("git status = %q", status)
-	}
-	data, err := os.ReadFile(filepath.Join(fx.RepoDir, ".claude", "jig.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), filepath.ToSlash(dir)) || strings.Contains(string(data), filepath.ToSlash(tpl.root)) {
-		t.Errorf("jig.yaml names %s or the template:\n%s", dir, data)
-	}
+	t.Run("served", func(t *testing.T) {
+		if spaced {
+			t.Skip("the temp directory has a space, which the characters below are checked without")
+		}
+		opts := Opts{Home: t.TempDir()}
+		dir := filepath.Join(t.TempDir(), specials)
+		if !tpl.servable(dir) {
+			t.Fatalf("servable(%q) = false", dir)
+		}
+		if _, err := Build(dir, opts); err != nil {
+			t.Fatal(err)
+		}
+		got := readTree(t, dir)
+		if err := os.RemoveAll(dir); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := buildDirect(dir, opts); err != nil {
+			t.Fatal(err)
+		}
+		want := readTree(t, dir)
+		sameNames(t, "files", want.files, got.files)
+		sameNames(t, "refs and reflogs", want.refs, got.refs)
+		for _, name := range sortedKeys(want.files) {
+			if g, ok := got.files[name]; ok && !bytes.Equal(want.files[name], g) {
+				t.Errorf("%s differs:\ndirect build:\n%s\ncopy:\n%s", name, show(want.files[name]), show(g))
+			}
+		}
+		for _, name := range sortedKeys(want.refs) {
+			if g, ok := got.refs[name]; ok && !bytes.Equal(want.refs[name], g) {
+				t.Errorf("%s differs:\ndirect build:\n%s\ncopy:\n%s", name, want.refs[name], g)
+			}
+		}
+	})
+
+	t.Run("not served", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "odd#dir")
+		fx, err := Build(dir, Opts{Home: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status := git(t, fx.RepoDir, "status", "--porcelain"); status != "" {
+			t.Errorf("git status = %q", status)
+		}
+		data, err := os.ReadFile(filepath.Join(fx.RepoDir, ".claude", "jig.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), filepath.ToSlash(dir)) || strings.Contains(string(data), filepath.ToSlash(tpl.root)) {
+			t.Errorf("jig.yaml names %s or the template:\n%s", dir, data)
+		}
+		config, err := os.ReadFile(filepath.Join(fx.RepoDir, ".git", "config"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(config), "odd#dir") && !strings.Contains(string(config), `"`) {
+			t.Errorf("a git config value with a # in it is not quoted, so git reads it as a comment:\n%s", config)
+		}
+	})
 }

@@ -319,11 +319,15 @@ func (t *template) repositories() []tplRepo {
 // something else. A copy only replaces text, so it is the same file only
 // when dir needs the quoting the root did, and none the root did not. Dir is
 // served when it has a space exactly when the root has one and every other
-// character in it is one that needs no quoting anywhere: a letter, a digit,
-// a separator, a drive's colon, and the dot, hyphen, underscore and tilde
-// that temp directory names and test names are made of ("~" is the tail of a
-// Windows short name, RUNNER~1). Any other dir is built directly, which is
-// correct and as slow as a Build always was.
+// character in it is one that needs no quoting in a plain YAML scalar in the
+// middle of a line (the manifest's commands and the store's remotes are
+// block-style scalars that start with the path's first character, which a dir
+// shares with the root), in a git config value (which quotes one holding a
+// "#" or ";", and writes a backslash doubled, which the copy does) or in a
+// command: a letter, a digit, a separator, a drive's colon, and the
+// characters temp directory names are made of when a test's name has them
+// ("~" is also the tail of a Windows short name, RUNNER~1). Any other dir is
+// built directly, which is correct and as slow as a Build always was.
 func (t *template) servable(dir string) bool {
 	if strings.Contains(t.root, " ") != strings.Contains(dir, " ") {
 		return false
@@ -331,7 +335,7 @@ func (t *template) servable(dir string) bool {
 	for _, r := range dir {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case strings.ContainsRune("._-~/\\: ", r):
+		case strings.ContainsRune("._-~/\\: ,+=@()!$%&^{}", r):
 		default:
 			return false
 		}
