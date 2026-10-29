@@ -42,7 +42,7 @@ func TestBuildPlanRefusesTicketLeftOut(t *testing.T) {
 	st := newV1Store(t, "T-1", "T-2")
 	m := Map{Keys: map[string]string{"STORE": "the store"}, Tickets: map[string]string{"T-1": "STORE"}}
 
-	_, err := BuildPlan(st, m)
+	_, err := BuildPlan(st, m, "")
 	wantValidationError(t, err)
 	if !strings.Contains(err.Error(), "T-2") {
 		t.Fatalf("err = %v, want it to name T-2", err)
@@ -54,7 +54,7 @@ func TestBuildPlanRefusesTicketTheStoreLacks(t *testing.T) {
 	st := newV1Store(t, "T-1")
 	m := Map{Keys: map[string]string{"STORE": "the store"}, Tickets: map[string]string{"T-1": "STORE", "T-9": "STORE"}}
 
-	_, err := BuildPlan(st, m)
+	_, err := BuildPlan(st, m, "")
 	wantValidationError(t, err)
 	if !strings.Contains(err.Error(), "T-9") {
 		t.Fatalf("err = %v, want it to name T-9", err)
@@ -66,7 +66,7 @@ func TestBuildPlanRefusesUndeclaredKey(t *testing.T) {
 	st := newV1Store(t, "T-1", "T-2")
 	m := Map{Keys: map[string]string{"STORE": "the store"}, Tickets: map[string]string{"T-1": "STORE", "T-2": "GRAPH"}}
 
-	_, err := BuildPlan(st, m)
+	_, err := BuildPlan(st, m, "")
 	wantValidationError(t, err)
 	if !strings.Contains(err.Error(), "T-2") || !strings.Contains(err.Error(), "GRAPH") {
 		t.Fatalf("err = %v, want it to name T-2 and GRAPH", err)
@@ -78,7 +78,7 @@ func TestBuildPlanRefusesAMapThatDeclaresTheOldIDsKey(t *testing.T) {
 	st := newV1Store(t, "T-1", "T-2")
 	m := Map{Keys: map[string]string{"T": "clashes with the old ids"}, Tickets: map[string]string{"T-1": "T", "T-2": "T"}}
 
-	_, err := BuildPlan(st, m)
+	_, err := BuildPlan(st, m, "")
 	wantValidationError(t, err)
 	if !strings.Contains(err.Error(), "T") {
 		t.Fatalf("err = %v, want it to name the clashing key", err)
@@ -100,7 +100,7 @@ func TestBuildPlanNumbersInOldIDOrderPerKey(t *testing.T) {
 		},
 	}
 
-	plan, err := BuildPlan(st, m)
+	plan, err := BuildPlan(st, m, "")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestBuildPlanFilesMovesDeletesAndRewrites(t *testing.T) {
 	write("tracker/comments/c1.md", "a comment\n")
 
 	m := Map{Keys: map[string]string{"STORE": "the store"}, Tickets: map[string]string{"T-1": "STORE"}}
-	plan, err := BuildPlan(st, m)
+	plan, err := BuildPlan(st, m, "")
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}

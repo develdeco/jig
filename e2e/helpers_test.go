@@ -544,7 +544,8 @@ func waitFor(t *testing.T, d time.Duration, what string, cond func() bool) {
 // waitJournal waits up to d for a line of ticket's journal in fx's store that
 // satisfies pred, and returns the first such line. A read that fails (a line
 // being written as it is read) is retried; the failure message shows the
-// last error and every line the journal had.
+// last error and every line the journal had, each with its summary, which
+// on a verify-error line is why the worker could not reach the oracle.
 func waitJournal(t *testing.T, fx *fixture.Fixture, ticket string, d time.Duration, pred func(journal.Line) bool) journal.Line {
 	t.Helper()
 	st, err := store.Open(fx.StoreDir)
@@ -573,7 +574,11 @@ func waitJournal(t *testing.T, fx *fixture.Fixture, ticket string, d time.Durati
 	}
 	var have []string
 	for _, l := range lines {
-		have = append(have, fmt.Sprintf("  %s %s slice=%s outcome=%s", l.TS, l.Event, l.Slice, l.Outcome))
+		line := fmt.Sprintf("  %s %s slice=%s outcome=%s", l.TS, l.Event, l.Slice, l.Outcome)
+		if l.Summary != "" {
+			line += " summary=" + l.Summary
+		}
+		have = append(have, line)
 	}
 	t.Fatalf("timed out after %s waiting for a matching journal line of %s (last read error: %v); the journal has %d lines:\n%s",
 		d, ticket, readErr, len(lines), strings.Join(have, "\n"))

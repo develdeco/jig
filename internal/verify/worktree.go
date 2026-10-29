@@ -45,8 +45,8 @@ func (x *run) addWorktree() error {
 	return nil
 }
 
-// removeWorktree takes the worktree away: git's removal, then the directory,
-// then a prune of the clone's record of worktrees, in that order
+// removeWorktree takes the worktree away: the directory, then git's record
+// of it and a prune of the clone's records of worktrees, in that order
 // (gitx.WorktreeRemove). A failure is reported to the log, never to the
 // verification: the outcome is already recorded, and the next run of the
 // same (commit, slice) clears what is left.
