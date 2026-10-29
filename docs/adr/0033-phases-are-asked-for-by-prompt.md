@@ -19,7 +19,7 @@ The owner asked for four things: phases that run when the person asks for them, 
 ## Consequences
 
 - The skills carry the hand-off text, and each stays within the 6000 bytes and 100 lines the lint allows. The intake skill had to be trimmed to make room.
-- A hint, a refusal and the TUI's Steps panel can no longer disagree about the phase, because there is one function. `TestTUIAndNextAgree` walks a ticket from a drafted brief to a published pull request and compares the screens' standing with `jig next --json` at each state.
+- A hint, a refusal and the TUI's Steps panel can no longer disagree about the phase, because there is one function. `cmd/jig`'s `TestTheScreensStandWhereJigNextDoes` walks a ticket from a drafted brief to a published pull request and compares the screens' standing with `jig next --json` at each state.
 - A subagent shares its parent's session id, since the commands it runs carry no agent id, so freshness is a fact about the whole session. If the main session and a subagent both read a round, the ledger cannot say which of them closed it; the rule that the main session never reads the round is what keeps the round independent.
 - A reviewer subagent that runs `jig next` before any round is open is shown the advice to spawn a subagent, because jig sees it as its parent. Its prompt and the review skill say to ignore the advice. A way for the harness to tell jig the caller is a subagent would remove the case.
 - `jig status`, `jig here` and the Stop hook derive the phase without asking a repo host about a blocker's pull request, so they can say "Build T" for a ticket that `jig next T` holds for an unmerged blocker. `jig next <T>` is the exact answer, and every skill starts with it.
