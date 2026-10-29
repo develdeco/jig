@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -204,6 +205,20 @@ func (t *template) scan() error {
 		}
 		perm := info.Mode().Perm()
 		if under(slash, objectsDirs) {
+			if runtime.GOOS == "windows" && perm&0o200 == 0 {
+				// Git writes its objects read-only, and a read-only attribute
+				// belongs to the file, not to a name of it: every copy's link
+				// shares it. Go removes a read-only file by clearing the
+				// attribute and deleting, and when two copies are removed
+				// at once the second finds it already cleared, does not retry
+				// its failed delete and reports "Access is denied" (a test's
+				// temp directory cleanup fails with it). A writable object
+				// has no attribute to race over.
+				if err := os.Chmod(p, 0o666); err != nil {
+					return err
+				}
+				perm = 0o666
+			}
 			t.plan = append(t.plan, planEntry{rel: slash, kind: planLink, perm: perm})
 			return nil
 		}

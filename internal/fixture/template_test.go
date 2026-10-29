@@ -489,6 +489,10 @@ func TestLooseObjectsOfACopyAreLinksToTheTemplates(t *testing.T) {
 				return err
 			case os.SameFile(a, b):
 				linked++
+				if runtime.GOOS == "windows" && a.Mode().Perm()&0o200 == 0 {
+					// See TestBuildsInParallelMakeSeparateFixtures.
+					t.Errorf("%s is read-only, an attribute every link of it shares", rel)
+				}
 			default:
 				t.Errorf("%s is a copy of the template's file, not a link", rel)
 			}
@@ -571,34 +575,59 @@ func TestACopyCanBeChangedWithoutChangingTheOthers(t *testing.T) {
 }
 
 // TestBuildsInParallelMakeSeparateFixtures: Builds of one shape racing to be
-// the first, and every one after, each make a fixture of their own.
+// the first, and then racing to copy it, each make a fixture of their own, and
+// the copies can then be removed all at once.
+//
+// Copies share their loose objects, which are one file; a Build prunes the
+// objects it replaced and a test's cleanup removes the rest, so many names of
+// one file are removed at the same moment. On Windows a read-only attribute
+// is the file's, not a name's, and removing a read-only file races with
+// another removal of it (Go clears the attribute, deletes, and does not
+// retry when another remover cleared it first), which fails the Build or the
+// cleanup with "Access is denied"; the template's objects are made writable
+// so that it cannot.
 func TestBuildsInParallelMakeSeparateFixtures(t *testing.T) {
 	opts := Opts{EnvFail: true, SecondRepo: true, Standalone: true, Home: t.TempDir()}
-	const n = 6
-	fixtures := make([]*Fixture, n)
-	errs := make([]error, n)
-	dirs := make([]string, n)
-	for i := range dirs {
-		dirs[i] = filepath.Join(t.TempDir(), "fx")
-	}
-	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			fixtures[i], errs[i] = Build(dirs[i], opts)
-		}()
-	}
-	wg.Wait()
-	for i, fx := range fixtures {
-		if errs[i] != nil {
-			t.Fatalf("build %d: %v", i, errs[i])
+	const n = 16
+	for round := 0; round < 2; round++ {
+		fixtures := make([]*Fixture, n)
+		errs := make([]error, n)
+		dirs := make([]string, n)
+		for i := range dirs {
+			dirs[i] = filepath.Join(t.TempDir(), "fx")
 		}
-		if fx.Dir != dirs[i] || !strings.HasPrefix(fx.RepoDir, dirs[i]) || !strings.HasPrefix(fx.SecondRepoRemote, dirs[i]) {
-			t.Errorf("build %d is in %s, not %s", i, fx.RepoDir, dirs[i])
+		var wg sync.WaitGroup
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				fixtures[i], errs[i] = Build(dirs[i], opts)
+			}()
 		}
-		if status := git(t, fx.RepoDir, "status", "--porcelain"); status != "" {
-			t.Errorf("build %d: git status = %q", i, status)
+		wg.Wait()
+		for i, fx := range fixtures {
+			if errs[i] != nil {
+				t.Fatalf("round %d, build %d: %v", round, i, errs[i])
+			}
+			if fx.Dir != dirs[i] || !strings.HasPrefix(fx.RepoDir, dirs[i]) || !strings.HasPrefix(fx.SecondRepoRemote, dirs[i]) {
+				t.Errorf("round %d, build %d is in %s, not %s", round, i, fx.RepoDir, dirs[i])
+			}
+		}
+		if status := git(t, fixtures[0].RepoDir, "status", "--porcelain"); status != "" {
+			t.Errorf("round %d: git status = %q", round, status)
+		}
+		for i := range dirs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errs[i] = os.RemoveAll(dirs[i])
+			}()
+		}
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Errorf("round %d: removing copy %d: %v", round, i, err)
+			}
 		}
 	}
 }
