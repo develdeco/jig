@@ -7,29 +7,31 @@
 # A package that starts no git process has no entry.
 margin: 1
 packages:
-  cmd/jig: 7260
-  e2e: 13704
-  internal/correct: 314
-  internal/fixture: 370
+  cmd/jig: 3274
+  e2e: 5959
+  internal/correct: 271
+  internal/fileshare: 8
+  internal/fixture: 708
   internal/gitbudget: 7
   internal/gittest: 6
-  internal/gitx: 1395
-  internal/intent: 72
-  internal/locate: 180
-  internal/mergefacts: 191
-  internal/migrate: 194
-  internal/mirror: 1595
-  internal/observe: 1186
-  internal/pool: 2263
-  internal/project: 419
-  internal/ready: 148
+  internal/gitx: 1841
+  internal/intent: 51
+  internal/locate: 95
+  internal/mergefacts: 169
+  internal/migrate: 295
+  internal/mirror: 1491
+  internal/observe: 150
+  internal/pool: 1862
+  internal/project: 382
+  internal/ready: 22
   internal/repohost: 2
-  internal/revieweval: 1692
-  internal/session: 137
-  internal/setup: 187
-  internal/slicectx: 62
-  internal/stack: 192
-  internal/store: 4399
-  internal/verify: 1484
-  internal/verifydeliver: 23923
+  internal/revieweval: 1449
+  internal/session: 135
+  internal/setup: 132
+  internal/slicectx: 61
+  internal/stack: 139
+  internal/store: 3971
+  internal/verify: 562
+  internal/verifydeliver: 14261
   lint: 21
+##[error]Process completed with exit code 1.
