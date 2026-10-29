@@ -74,53 +74,49 @@ func answersBlock(questions []store.Question) string {
 	return strings.Join(lines, "\n")
 }
 
-// appendLedgerEntry appends this ticket's ledger entry to the store's
-// ledger.md, under a lock.
-func appendLedgerEntry(st *store.Store, ticket, title string, slices []store.Slice, questions []store.Question) error {
-	path := filepath.Join(st.Root, "ledger.md")
+// editStoreDoc rewrites the store file at path under its lock: edit gets the
+// file's text, "" when there is no file yet, and returns the text to write.
+// what names the file in an error.
+func editStoreDoc(path, what string, edit func(text string) string) error {
 	release, _, err := store.Lock(path, 30*time.Second)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: ledger: lock: %w", err)
+		return fmt.Errorf("verifydeliver: %s: lock: %w", what, err)
 	}
 	defer release()
 
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("verifydeliver: ledger: read: %w", err)
+		return fmt.Errorf("verifydeliver: %s: read: %w", what, err)
 	}
-	entry := fmt.Sprintf(
-		"\n## %s - %s\n\nDelivered %d slice(s).\n\n**Answers:**\n%s\n",
-		ticket, title, len(slices), answersBlock(questions),
-	)
-	out := append(append([]byte{}, existing...), []byte(entry)...)
-	return store.AtomicWrite(path, out)
+	return store.AtomicWrite(path, []byte(edit(string(existing))))
 }
 
-// appendContractIndexEntry appends this ticket's contract-index entry
-// under the store's platform directory, under a lock.
-func appendContractIndexEntry(st *store.Store, cfgPlatform, ticket string, slices []store.Slice, oracleNames []string) error {
-	platform := cfgPlatform
-	if platform == "" {
-		platform = "platform/"
-	}
-	path := filepath.Join(st.Root, filepath.FromSlash(platform), "contract-index.md")
-	release, _, err := store.Lock(path, 30*time.Second)
-	if err != nil {
-		return fmt.Errorf("verifydeliver: contract-index: lock: %w", err)
-	}
-	defer release()
+// writeLedgerEntry puts this ticket's entry in the store's ledger.md, under a
+// lock: in the place the ticket's earlier entry held when a publish already
+// wrote one, so a republish replaces it and the file keeps one entry per
+// ticket, and at the end otherwise.
+func writeLedgerEntry(st *store.Store, ticket, title string, slices []store.Slice, questions []store.Question) error {
+	entry := fmt.Sprintf(
+		"## %s - %s\n\nDelivered %d slice(s).\n\n**Answers:**\n%s\n",
+		ticket, title, len(slices), answersBlock(questions),
+	)
+	return editStoreDoc(st.LedgerPath(), "ledger", func(text string) string {
+		return store.ReplaceLedgerEntry(text, ticket, entry)
+	})
+}
 
-	existing, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("verifydeliver: contract-index: read: %w", err)
-	}
+// writeContractIndexEntry puts this ticket's contract-index entry in the
+// store's platform directory, under a lock, replacing the line a publish
+// already wrote for it (writeLedgerEntry).
+func writeContractIndexEntry(st *store.Store, cfgPlatform, ticket string, slices []store.Slice, oracleNames []string) error {
 	ws := distinctWorkspaces(slices)
 	sort.Strings(ws)
 	names := append([]string{}, oracleNames...)
 	sort.Strings(names)
 	entry := fmt.Sprintf("- %s: workspaces %s, oracles %s\n", ticket, strings.Join(ws, ","), strings.Join(names, ","))
-	out := append(append([]byte{}, existing...), []byte(entry)...)
-	return store.AtomicWrite(path, out)
+	return editStoreDoc(st.ContractIndexPath(cfgPlatform), "contract-index", func(text string) string {
+		return store.ReplaceContractIndexEntry(text, ticket, entry)
+	})
 }
 
 // writeEvidence writes <ticket>/pr/evidence.md: a per-round list linking

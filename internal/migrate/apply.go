@@ -12,8 +12,8 @@ import (
 
 // Apply carries out plan against st, as the dry run only described: moves
 // every ticket folder, writes its migrated ticket.yaml, deletes its local
-// tracker files, rewrites project.yaml and every affected chart, and
-// commits everything once on the current branch. It does not push or sync;
+// tracker files, rewrites project.yaml, every affected chart, and the ledger
+// and contract index, and commits everything once on the current branch. It does not push or sync;
 // the caller's own refusals (CheckSchemaVersion, CheckClean,
 // CheckLevelWithOrigin, CheckNoLeases) must already have passed.
 //
@@ -59,6 +59,9 @@ func applyUncommitted(st *store.Store, plan Plan, id gitx.Identity) error {
 		}
 	}
 	if err := rewriteCharts(st, plan.RenameOf); err != nil {
+		return err
+	}
+	if err := rewriteStoreDocs(st, plan); err != nil {
 		return err
 	}
 	if err := rewriteProjectYAMLFile(st, plan); err != nil {
@@ -145,6 +148,26 @@ func rewriteCharts(st *store.Store, renameOf map[string]string) error {
 			}
 		}
 		if err := st.WriteChart(name, entries); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rewriteStoreDocs renames the ticket ids in the ledger and the contract
+// index through plan.RenameOf, leaving every other byte of both as it is. A
+// file that is not there, or names no renamed ticket, is not written; one
+// already renamed is not either, since a new id is never an old one.
+func rewriteStoreDocs(st *store.Store, plan Plan) error {
+	for _, d := range storeDocs(plan.Platform) {
+		text, changed, err := d.renamed(st, plan.RenameOf)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			continue
+		}
+		if err := store.AtomicWrite(filepath.Join(st.Root, filepath.FromSlash(d.rel)), []byte(text)); err != nil {
 			return err
 		}
 	}

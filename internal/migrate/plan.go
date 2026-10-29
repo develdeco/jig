@@ -42,6 +42,10 @@ type Plan struct {
 	// Keys is the new area keys the migrated project.yaml declares (the
 	// map's own keys:).
 	Keys map[string]string
+	// Platform is the store's platform directory (project.yaml's platform:),
+	// "" for the default: the contract index whose ids the migration renames
+	// lives in it.
+	Platform string
 
 	// v3 is the v2 to v3 step's own work (v2tov3.go); the v1 to v2 step
 	// leaves it nil.
@@ -57,7 +61,8 @@ var chartIndexRefRE = regexp.MustCompile(`^([^#]*)#(\d+)$`)
 // BuildPlan validates m against st's current tickets and builds the Plan:
 // every ticket present and declared exactly once, every number assigned in
 // old-id order per key, and the title each renamed ticket will carry.
-func BuildPlan(st *store.Store, m Map) (Plan, error) {
+// platform is the store's platform directory, "" for the default.
+func BuildPlan(st *store.Store, m Map, platform string) (Plan, error) {
 	oldIDs, err := OldTicketIDs(st.Root)
 	if err != nil {
 		return Plan{}, err
@@ -147,12 +152,12 @@ func BuildPlan(st *store.Store, m Map) (Plan, error) {
 		renameOf[renames[i].OldID] = renames[i].NewID
 	}
 
-	files, err := planFiles(st, renames)
+	files, err := planFiles(st, renames, platform)
 	if err != nil {
 		return Plan{}, err
 	}
 
-	return Plan{Renames: renames, Files: files, RenameOf: renameOf, Keys: m.Keys}, nil
+	return Plan{Renames: renames, Files: files, RenameOf: renameOf, Keys: m.Keys, Platform: platform}, nil
 }
 
 // assignNewIDs numbers every ticket of each key in old-id order, by the old
@@ -192,9 +197,10 @@ func trackerDeletedPrefixes(relSlash string) bool {
 }
 
 // planFiles walks each renamed ticket's folder on disk and reports what the
-// migration would do to every file in it, plus project.yaml and every
-// chart's tickets.yaml the renames touch.
-func planFiles(st *store.Store, renames []Rename) ([]FileOp, error) {
+// migration would do to every file in it, plus project.yaml, every chart's
+// tickets.yaml the renames touch, and the ledger and contract index when they
+// name a renamed ticket.
+func planFiles(st *store.Store, renames []Rename, platform string) ([]FileOp, error) {
 	var ops []FileOp
 	for _, r := range renames {
 		ticketOps, err := planTicketFiles(st, r.OldID, r.NewID)
@@ -222,7 +228,50 @@ func planFiles(st *store.Store, renames []Rename) ([]FileOp, error) {
 			ops = append(ops, FileOp{Action: "rewrite", Path: filepath.ToSlash(filepath.Join("charts", name, "tickets.yaml"))})
 		}
 	}
+
+	for _, d := range storeDocs(platform) {
+		_, changed, err := d.renamed(st, renameOf)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			ops = append(ops, FileOp{Action: "rewrite", Path: d.rel})
+		}
+	}
 	return ops, nil
+}
+
+// storeDoc is one of the store's own files that names tickets by id outside
+// any ticket's folder, and how to rename those ids in its text.
+type storeDoc struct {
+	rel     string // store-relative, slash-separated
+	rewrite func(text string, renameOf map[string]string) string
+}
+
+// storeDocs are the ledger and the contract index (in the platform directory
+// platform names, "" for the default): a publish writes one entry for each
+// ticket into each, under the id the ticket had then, and jig recall reads
+// them by that text.
+func storeDocs(platform string) []storeDoc {
+	return []storeDoc{
+		{store.LedgerFile, store.RenameLedgerTickets},
+		{store.ContractIndexRelPath(platform), store.RenameContractIndexTickets},
+	}
+}
+
+// renamed reads d from st and returns its text with the ids renameOf names
+// replaced, and whether that changed anything. A store without the file has
+// nothing to rename.
+func (d storeDoc) renamed(st *store.Store, renameOf map[string]string) (text string, changed bool, err error) {
+	data, err := os.ReadFile(filepath.Join(st.Root, filepath.FromSlash(d.rel)))
+	if os.IsNotExist(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	text = d.rewrite(string(data), renameOf)
+	return text, text != string(data), nil
 }
 
 // chartAffected reports whether any entry id or blocked_by ref in entries
