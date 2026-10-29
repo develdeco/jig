@@ -1,0 +1,67 @@
+diff --git a/cart/cart.go b/cart/cart.go
+new file mode 100644
+index 0000000..b1c2caf
+--- /dev/null
++++ b/cart/cart.go
+@@ -0,0 +1,27 @@
++// Package cart prices an order.
++package cart
++
++// Item is one line of an order: a unit price in cents and a quantity.
++type Item struct {
++	PriceCents int
++	Qty        int
++}
++
++// Total is what the order costs, in cents, after a percentage discount.
++// The discount is taken once on the order's subtotal and rounded to the
++// nearest cent. discountPct is clamped to [0, 100].
++func Total(items []Item, discountPct int) int {
++	switch {
++	case discountPct < 0:
++		discountPct = 0
++	case discountPct > 100:
++		discountPct = 100
++	}
++
++	subtotal := 0
++	for _, it := range items {
++		subtotal += it.PriceCents * it.Qty
++	}
++
++	return (subtotal*(100-discountPct) + 50) / 100
++}
+diff --git a/cart/cart_test.go b/cart/cart_test.go
+new file mode 100644
+index 0000000..c98ebe8
+--- /dev/null
++++ b/cart/cart_test.go
+@@ -0,0 +1,28 @@
++package cart
++
++import "testing"
++
++// Three items at 3.33 with 10% off cost 8.991, so 8.99: the discount is
++// taken once, on the order, and rounded to the nearest cent.
++func TestTotalRoundsOnceOnTheOrder(t *testing.T) {
++	items := []Item{{PriceCents: 333, Qty: 1}, {PriceCents: 333, Qty: 1}, {PriceCents: 333, Qty: 1}}
++	if got := Total(items, 10); got != 899 {
++		t.Fatalf("Total = %d cents, want 899", got)
++	}
++}
++
++// A discount below 0% behaves as no discount.
++func TestTotalClampsNegativeDiscountToZero(t *testing.T) {
++	items := []Item{{PriceCents: 1000, Qty: 1}}
++	if got := Total(items, -10); got != 1000 {
++		t.Fatalf("Total = %d cents, want 1000", got)
++	}
++}
++
++// A discount above 100% behaves as free.
++func TestTotalClampsDiscountAboveHundredToHundred(t *testing.T) {
++	items := []Item{{PriceCents: 1000, Qty: 1}}
++	if got := Total(items, 150); got != 0 {
++		t.Fatalf("Total = %d cents, want 0", got)
++	}
++}

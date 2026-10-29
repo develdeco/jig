@@ -84,6 +84,11 @@ type findingsYAML struct {
 	Findings      []Finding `yaml:"findings"`
 	Cleared       []string  `yaml:"cleared,omitempty"`
 	Summary       string    `yaml:"summary,omitempty"`
+	// Probes and Skipped are the round's own probes and skips, each with its
+	// file's blob at the round's head (ADR 0036): the behavior the round
+	// tested, beside the files it read.
+	Probes  []ProbeRecord `yaml:"probes,omitempty"`
+	Skipped []SkipRecord  `yaml:"skipped,omitempty"`
 }
 
 // statusForAction maps a reviewer's action label to jig's own status: fix
@@ -692,12 +697,19 @@ type Fold struct {
 	Known     map[string]Finding // every earlier round's findings: latest occurrence wins, cleared ids removed
 	Open      []Finding          // open, asked and noted, sorted by id: RoundInput.Open
 	Dismissed []DismissedFinding // dismissed, sorted by id: RoundInput.Dismissed
+	Probes    []ProbeRecord      // every earlier round's probes, oldest first: RoundInput.Probes
+	Skips     []SkipRecord       // every earlier round's skips, oldest first: RoundInput.Skips
 }
 
 // FoldBefore folds every gate/round-<n>/findings.yaml for ticket with
-// n < round (cumulativeFindings) and projects it into a Fold.
+// n < round (cumulativeFindings) and projects it into a Fold, with the probe
+// ledger of those rounds (ledgerBefore).
 func FoldBefore(st *store.Store, ticket string, round int) (Fold, error) {
 	known, err := cumulativeFindings(st, ticket, round)
+	if err != nil {
+		return Fold{}, fmt.Errorf("verifydeliver: findings: fold before round %d: %w", round, err)
+	}
+	probes, skips, err := ledgerBefore(st, ticket, round)
 	if err != nil {
 		return Fold{}, fmt.Errorf("verifydeliver: findings: fold before round %d: %w", round, err)
 	}
@@ -705,6 +717,8 @@ func FoldBefore(st *store.Store, ticket string, round int) (Fold, error) {
 		Known:     known,
 		Open:      openAndNotedFindingsList(known),
 		Dismissed: toDismissedFindingList(dismissedFindingsList(known)),
+		Probes:    probes,
+		Skips:     skips,
 	}, nil
 }
 
@@ -744,8 +758,9 @@ func OutstandingAsks(st *store.Store, ticket string) (asks []Finding, unreadable
 }
 
 // marshalFindingsYAML renders one round's findings.yaml, marshaling nil
-// reviewedPaths/findings as [] rather than null.
-func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string) ([]byte, error) {
+// reviewedPaths/findings as [] rather than null; a round with no probes or
+// skips writes neither key.
+func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string, probes []ProbeRecord, skips []SkipRecord) ([]byte, error) {
 	if reviewedPaths == nil {
 		reviewedPaths = []string{}
 	}
@@ -758,6 +773,8 @@ func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Findin
 		Findings:      findings,
 		Cleared:       cleared,
 		Summary:       summary,
+		Probes:        probes,
+		Skipped:       skips,
 	})
 }
 

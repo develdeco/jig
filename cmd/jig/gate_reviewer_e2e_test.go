@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -456,5 +457,112 @@ func TestFindingsDraftedWithJigFindingBecomeTheRound(t *testing.T) {
 	md, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-1", "findings.md"))
 	if err != nil || !strings.Contains(string(md), "Add never says how it overflows") {
 		t.Fatalf("findings.md = %q (err %v), want the drafted note", md, err)
+	}
+}
+
+// TestProbesDraftedWithJigProbeJoinTheRound (ADR 0036): a reviewer records a
+// probe and a skip as it goes; each is checked as it is taken and says how many
+// hunks are left unprobed, the round counts them in its output, and
+// findings.yaml keeps them with the probed file's blob. A probe of a file not
+// at head is refused when the round is done.
+func TestProbesDraftedWithJigProbeJoinTheRound(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
+	e := testEnv(fx.Home)
+	ticket := fx.Ticket
+	buildFixtureTicket(t, fx)
+	flags := []string{"--store", fx.StoreDir}
+	withFlags := func(args ...string) []string { return append(args, flags...) }
+
+	if out, code := runMain(t, e, "", withFlags("gate", ticket)...); code != 0 {
+		t.Fatalf("jig gate: exit = %d\n%s", code, out)
+	}
+	ctx, code := runMain(t, e, "", withFlags("review", "context", ticket, "--json")...)
+	if code != 0 {
+		t.Fatalf("review context: exit = %d\n%s", code, ctx)
+	}
+	var req verifydeliver.ReviewRequest
+	if err := json.Unmarshal([]byte(ctx), &req); err != nil {
+		t.Fatalf("review context --json: %v\n%s", err, ctx)
+	}
+	if len(req.Hunks) < 2 {
+		t.Fatalf("hunks = %+v, want at least two", req.Hunks)
+	}
+	probed, skipped := req.Hunks[0], ""
+	for _, h := range req.Hunks {
+		if h.File != probed.File {
+			skipped = h.File
+			break
+		}
+	}
+	left := 0
+	for _, h := range req.Hunks {
+		if h != probed && h.File != skipped {
+			left++
+		}
+	}
+
+	// A probe of a file that is not at head is refused when the round is done.
+	resultPath := filepath.Join(t.TempDir(), "r.json")
+	writeReviewResultAt(t, resultPath, verifydeliver.ReviewResult{ReviewedPaths: req.MustReview, Probes: []verifydeliver.ResultProbe{{
+		Seam: "s", File: "alpha/missing.go", Line: 1, Mutation: "m", Command: "go test ./alpha", Outcome: verifydeliver.ProbeCaught,
+	}}})
+	out, code := runMain(t, e, "", withFlags("review", "done", ticket, "--result", resultPath)...)
+	if code != 1 || !strings.Contains(out, "is not present at head") {
+		t.Fatalf("jig review done with a probe of a missing file: exit = %d, want 1 naming it\n%s", code, out)
+	}
+
+	probe := func(outcome string) []string {
+		return withFlags("probe", ticket, "--seam", "the bound of a percentage", "--file", probed.File, "--line", strconv.Itoa(probed.From),
+			"--mutation", "raise the bound", "--command", "go test ./alpha", "--outcome", outcome)
+	}
+	out, code = runMain(t, e, "", probe("killed")...)
+	if code != 1 || !strings.Contains(out, "REVIEW_INVALID") || !strings.Contains(out, "outcome") {
+		t.Fatalf("jig probe with an unknown outcome: exit = %d, want 1 and REVIEW_INVALID naming it\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", withFlags("probe", ticket, "--skip", skipped, "--seam", "s")...)
+	if code != 2 || !strings.Contains(out, "VALIDATION_ERROR") {
+		t.Fatalf("jig probe --skip with a probe's flags: exit = %d, want 2\n%s", code, out)
+	}
+	// A draft cannot be taken back, so a probe of a file not at head is
+	// refused as it is drafted, not first when the round is done.
+	out, code = runMain(t, e, "", withFlags("probe", ticket, "--seam", "s", "--file", "alpha/missing.go", "--line", "1",
+		"--mutation", "m", "--command", "go test ./alpha", "--outcome", verifydeliver.ProbeCaught)...)
+	if code != 1 || !strings.Contains(out, "is not present at head") {
+		t.Fatalf("jig probe of a file not at head: exit = %d, want 1 naming it\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", probe(verifydeliver.ProbeCaught)...)
+	if code != 0 || !strings.Contains(out, "kind: probe") || !strings.Contains(out, "drafts: 1") {
+		t.Fatalf("jig probe: exit = %d, want 0 and one draft\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", withFlags("probe", ticket, "--skip", skipped, "--why", "tests")...)
+	if code != 0 || !strings.Contains(out, "kind: skip") || !strings.Contains(out, "unprobed: "+strconv.Itoa(left)) {
+		t.Fatalf("jig probe --skip: exit = %d, want 0 and %d hunks left\n%s", code, left, out)
+	}
+	// Reading the round again says the same of what is left.
+	out, code = runMain(t, e, "", withFlags("review", "context", ticket)...)
+	if code != 0 || !strings.Contains(out, "unprobed: "+strconv.Itoa(left)) {
+		t.Fatalf("jig review context after the drafts: exit = %d, want %d hunks left\n%s", code, left, out)
+	}
+	out, code = runMain(t, e, "", withFlags("review", "done", ticket, "--reviewed", strings.Join(req.MustReview, ","), "--summary", "probed")...)
+	if code != 0 || !strings.Contains(out, "probes: 1") || !strings.Contains(out, "unprobed: "+strconv.Itoa(left)) {
+		t.Fatalf("jig review done: exit = %d, want 0 counting one probe and %d unprobed\n%s", code, left, out)
+	}
+	var ff struct {
+		Probes []struct {
+			File string `yaml:"file"`
+			Blob string `yaml:"blob"`
+		} `yaml:"probes"`
+		Skipped []struct {
+			File string `yaml:"file"`
+			Why  string `yaml:"why"`
+		} `yaml:"skipped"`
+	}
+	data, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-1", "findings.yaml"))
+	if err != nil || yaml.Unmarshal(data, &ff) != nil {
+		t.Fatalf("read findings.yaml: %v\n%s", err, data)
+	}
+	if len(ff.Probes) != 1 || ff.Probes[0].File != probed.File || ff.Probes[0].Blob == "" || len(ff.Skipped) != 1 || ff.Skipped[0].Why != "tests" {
+		t.Fatalf("findings.yaml probes %+v and skipped %+v, want the probe with its blob and the skip", ff.Probes, ff.Skipped)
 	}
 }

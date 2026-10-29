@@ -18,8 +18,14 @@ While working, run `go build ./...`, `go vet ./...` and `gofmt -l .`, and test
 what your change can break: the packages you touched (`go test
 ./internal/store`, say), the packages that import them when behavior changes,
 and `./lint`, whose checks cover files across the repo (skills, workflows,
-tests). The full suite takes minutes; CI runs it on all three platforms on
-every pull request, and jig's gate runs it as this repo's `test` oracle
+tests). The full suite takes minutes. CI runs it on Linux and macOS on every
+pull request, and on Windows too when the pull request changes what Windows
+builds differently (a `_windows` file or one with a build constraint,
+`go.mod`, `go.sum`, `.gitattributes`, a workflow); every push to main, the
+daily run and every release run it on all three, so a Windows-only failure
+shows on main and is fixed forward. A pull request that changes only docs
+runs `./lint`, whose tests are the only ones that read them. jig's gate runs
+it as this repo's `test` oracle
 (`.claude/jig.yaml`). A jig build slice's own oracle runs when its builder
 reports green.
 
@@ -131,8 +137,8 @@ what Claude Code reads: the session start context reaches the model, a
 commit the session makes is verified, and an unattended session is held back
 from stopping with the reason jig gives. Set `JIG_E2E_BINARY` to an installed
 jig to run the e2e suite against it instead of a binary built from the tree.
-CI's `claude-cli` job runs it on all three platforms, on every pull request,
-every push to main and once a day, with the latest CLI release installed,
+CI's `claude-cli` job runs it on all three platforms, on every pull request
+but a docs-only one, every push to main and once a day, with the latest CLI release installed,
 and every release runs it with its own binaries, as they are installed,
 before and after it is published. The headless backend of `internal/session`
 has its own opt-in live test (`TestHeadlessLiveCLI`, run with `-run Live

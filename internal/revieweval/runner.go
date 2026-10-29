@@ -405,6 +405,7 @@ func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string,
 	rnd, ok, rerr := reviewerSource(backend).Round(verifydeliver.RoundInput{
 		Store: st, Ticket: ticket, Round: n, LeaseDir: repoDir, RepoName: evalRepoName, Target: evalTarget,
 		Model: model, Effort: project.Config{}.ReviewEffortFor, Intent: intent, Manifest: man, OracleRuns: oracleRuns, Open: fold.Open, Dismissed: fold.Dismissed,
+		Probes: fold.Probes, Skips: fold.Skips,
 	})
 	if rerr != nil {
 		rs, handled := reviewerRoundFailure(n, r.Gold, r.Decisions, rerr)
