@@ -346,14 +346,14 @@ func fetchTicketBranchFromBuildLease(jigHome, leaseDir, repoName, ticket, branch
 // brings up none when no run is left. An unavailable env with a defer-ci
 // policy journals and skips; one with no policy pauses the gate with a
 // NEEDS_INPUT error.
-func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []store.Slice) ([]OracleRun, error) {
+func runGateOracles(d Deps, ticket, repo, dir string, man manifest.Manifest, slices []store.Slice) ([]OracleRun, error) {
 	reused, err := reusablePasses(d, ticket, dir, man, slices)
 	if err != nil {
 		return nil, err
 	}
 	if coversSuite(man, reused) {
 		runs, err := oracleSuiteRuns(dir, man, reused, d.oracle())
-		return withSlices(runs, slices), err
+		return withSlices(runs, repo, man, slices), err
 	}
 
 	var handles []*envrun.Handle
@@ -394,21 +394,18 @@ func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []
 	}
 
 	runs, err := oracleSuiteRuns(dir, man, reused, d.oracle())
-	return withSlices(runs, slices), err
+	return withSlices(runs, repo, man, slices), err
 }
 
 // withSlices names, on each run, the slices whose oracle it is in its
 // workspace (ADR 0036): which code the oracle was run for. slices are the
-// slices that build in this repo, and in a project of several repos a slice
-// names its workspace <repo>/<id> where the run names the id.
-func withSlices(runs []OracleRun, slices []store.Slice) []OracleRun {
+// slices that build in repo, each workspace read as a slice writes it
+// (manifest.WorkspaceIn): <repo>/<id> in a project of several repos, the bare
+// id, which may hold a slash, in a project of one.
+func withSlices(runs []OracleRun, repo string, man manifest.Manifest, slices []store.Slice) []OracleRun {
 	for i, run := range runs {
 		for _, s := range slices {
-			ws := s.Workspace
-			if _, id, qualified := strings.Cut(ws, "/"); qualified {
-				ws = id
-			}
-			if s.Oracle == run.Oracle && ws == run.Workspace {
+			if ws, ok := man.WorkspaceIn(repo, s.Workspace); ok && s.Oracle == run.Oracle && ws.ID == run.Workspace {
 				runs[i].Slices = append(runs[i].Slices, s.ID)
 			}
 		}

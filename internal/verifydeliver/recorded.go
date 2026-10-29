@@ -585,14 +585,14 @@ func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
 		if err := checkResultProbe(len(existing), *dr.Probe); err != nil {
 			return 0, err
 		}
-		if err := p.Request.files().placeLedgerFile(dr.Probe.File); err != nil {
+		if err := p.roundInput(d).requestFiles(p.Request).placeLedgerFile(dr.Probe.File); err != nil {
 			return 0, err
 		}
 	case dr.Skip != nil:
 		if err := checkResultSkip(len(existing), *dr.Skip); err != nil {
 			return 0, err
 		}
-		if err := p.Request.files().placeLedgerFile(dr.Skip.File); err != nil {
+		if err := p.roundInput(d).requestFiles(p.Request).placeLedgerFile(dr.Skip.File); err != nil {
 			return 0, err
 		}
 	default:

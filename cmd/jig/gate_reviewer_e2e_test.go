@@ -524,6 +524,13 @@ func TestProbesDraftedWithJigProbeJoinTheRound(t *testing.T) {
 	if code != 2 || !strings.Contains(out, "VALIDATION_ERROR") {
 		t.Fatalf("jig probe --skip with a probe's flags: exit = %d, want 2\n%s", code, out)
 	}
+	// A draft cannot be taken back, so a probe of a file not at head is
+	// refused as it is drafted, not first when the round is done.
+	out, code = runMain(t, e, "", withFlags("probe", ticket, "--seam", "s", "--file", "alpha/missing.go", "--line", "1",
+		"--mutation", "m", "--command", "go test ./alpha", "--outcome", verifydeliver.ProbeCaught)...)
+	if code != 1 || !strings.Contains(out, "is not present at head") {
+		t.Fatalf("jig probe of a file not at head: exit = %d, want 1 naming it\n%s", code, out)
+	}
 	out, code = runMain(t, e, "", probe(verifydeliver.ProbeCaught)...)
 	if code != 0 || !strings.Contains(out, "kind: probe") || !strings.Contains(out, "drafts: 1") {
 		t.Fatalf("jig probe: exit = %d, want 0 and one draft\n%s", code, out)
@@ -531,6 +538,11 @@ func TestProbesDraftedWithJigProbeJoinTheRound(t *testing.T) {
 	out, code = runMain(t, e, "", withFlags("probe", ticket, "--skip", skipped, "--why", "tests")...)
 	if code != 0 || !strings.Contains(out, "kind: skip") || !strings.Contains(out, "unprobed: "+strconv.Itoa(left)) {
 		t.Fatalf("jig probe --skip: exit = %d, want 0 and %d hunks left\n%s", code, left, out)
+	}
+	// Reading the round again says the same of what is left.
+	out, code = runMain(t, e, "", withFlags("review", "context", ticket)...)
+	if code != 0 || !strings.Contains(out, "unprobed: "+strconv.Itoa(left)) {
+		t.Fatalf("jig review context after the drafts: exit = %d, want %d hunks left\n%s", code, left, out)
 	}
 	out, code = runMain(t, e, "", withFlags("review", "done", ticket, "--reviewed", strings.Join(req.MustReview, ","), "--summary", "probed")...)
 	if code != 0 || !strings.Contains(out, "probes: 1") || !strings.Contains(out, "unprobed: "+strconv.Itoa(left)) {

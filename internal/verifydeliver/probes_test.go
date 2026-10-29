@@ -9,7 +9,9 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/session"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // TestParseReviewResultProbeRules: probes and skipped are optional, parse as
@@ -287,5 +289,70 @@ func TestCoverHunksCountsProbesInsideAndTakesACoveringSkip(t *testing.T) {
 	}
 	if left := unprobedHunks(got); len(left) != 2 || left[0] != want[1] || left[1] != want[3] {
 		t.Errorf("unprobed = %+v, want the second a.go hunk and c.go's", left)
+	}
+}
+
+// TestWithSlicesReadsAWorkspaceAsASliceWritesIt: a run names the slices of its
+// workspace whether the slice writes it bare, as a bare id holding a slash, or
+// as <repo>/<id>, and a slice of one workspace is never put on another's run.
+func TestWithSlicesReadsAWorkspaceAsASliceWritesIt(t *testing.T) {
+	t.Parallel()
+
+	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "cmd/jig"}, {ID: "x"}, {ID: "a/x"}}}
+	runs := []OracleRun{{Oracle: "test", Workspace: "cmd/jig"}, {Oracle: "test", Workspace: "x"}, {Oracle: "test", Workspace: "a/x"}}
+	got := withSlices(runs, "proj", man, []store.Slice{
+		{ID: "s1", Workspace: "cmd/jig", Oracle: "test"},
+		{ID: "s2", Workspace: "a/x", Oracle: "test"},
+		{ID: "s3", Workspace: "proj/x", Oracle: "test"},
+		{ID: "s4", Workspace: "x", Oracle: "lint"},
+		{ID: "s5", Workspace: "other/x", Oracle: "test"},
+	})
+	want := map[string]string{"cmd/jig": "s1", "x": "s3", "a/x": "s2"}
+	for _, run := range got {
+		if strings.Join(run.Slices, ",") != want[run.Workspace] {
+			t.Errorf("run of %s names slices %v, want %s", run.Workspace, run.Slices, want[run.Workspace])
+		}
+	}
+}
+
+// TestALaterProbeOfALineSupersedesTheEarlierOne: with the file unchanged, a
+// survivor that a later round probed again at the same line is stale, and the
+// later probe is the current one; a probe of another line stays current.
+func TestALaterProbeOfALineSupersedesTheEarlierOne(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for _, args := range [][]string{{"init", "-b", "main"}, {"config", "user.name", "f"}, {"config", "user.email", "f@example.invalid"}} {
+		if _, err := gitx.Run(dir, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-m", "c1"}} {
+		if _, err := gitx.Run(dir, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	blob, err := gitx.RevParse(dir, "HEAD:a.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rf := roundFiles{repos: []roundRepo{{Dir: dir, Head: "HEAD"}}}
+	probed, current, _, err := currentLedger(rf, []ProbeRecord{
+		{Round: 1, File: "a.go", Line: 5, Outcome: ProbeSurvived, Blob: blob},
+		{Round: 1, File: "a.go", Line: 9, Outcome: ProbeCaught, Blob: blob},
+		{Round: 2, File: "a.go", Line: 5, Outcome: ProbeCaught, Blob: blob},
+	}, nil)
+	if err != nil {
+		t.Fatalf("currentLedger: %v", err)
+	}
+	states := []string{probed[0].State, probed[1].State, probed[2].State}
+	if want := []string{ProbeStale, ProbeCurrent, ProbeCurrent}; strings.Join(states, ",") != strings.Join(want, ",") {
+		t.Errorf("states = %v, want %v: round 2's probe of line 5 supersedes round 1's", states, want)
+	}
+	if len(current) != 2 || current[0].Line != 9 || current[1].Outcome != ProbeCaught {
+		t.Errorf("current = %+v, want line 9 and round 2's caught probe of line 5", current)
 	}
 }

@@ -302,10 +302,17 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "%s\n", data)
 		return 0
 	}
+	// The round's view counts what this round has drafted so far, as `jig
+	// probe` does: a reviewer reading the round again sees what is left.
+	drafts, err := verifydeliver.ReadDrafts(p)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	p.Request.Hunks = verifydeliver.HunksWithDrafts(p, drafts)
 	blocks := roundBlocks(p, moved, true)
 	help := []string{
 		"Read the code in the worktree at the head, never in the clone, and never edit the clone; run no oracle and no suite (the oracles above passed), and run a test only to probe, in the worktree, putting the file back",
-		fmt.Sprintf("Probe each term of every function the change alters on a critical path the intent names, unless probed lists a current probe of it, with the narrowest command (seconds above): `jig probe %s --seam S --file F --line N --mutation M --command C --outcome caught|survived`; set aside an unprobed hunk with no critical-path code with `jig probe %s --skip F[:A-B] --why W`", ticket, ticket),
+		fmt.Sprintf("Probe each term of every function the change alters on a critical path the intent names, unless probed lists a current, caught probe of it, with the narrowest command (seconds above): `jig probe %s --seam S --file F --line N --mutation M --command C --outcome caught|survived`; set aside an unprobed hunk with no critical-path code with `jig probe %s --skip F[:A-B] --why W`", ticket, ticket),
 		fmt.Sprintf("Report each problem: `jig finding %s --file F --line N --title T --action fix|ask|note --risk low|medium|high --risk-rationale R --oracle O`; confirm an earlier one with `jig finding %s --still-present ID --line N`", ticket, ticket),
 		fmt.Sprintf("Then close the round: `jig review done %s --reviewed <every file you read> --summary <text>`", ticket),
 	}

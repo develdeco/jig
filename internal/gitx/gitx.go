@@ -324,11 +324,11 @@ type Hunk struct {
 // DiffHunks returns every hunk base..head adds or changes lines in, in dir,
 // in diff order, with renames off as in DiffNameOnly, so a renamed file is
 // all new lines at its new path. A hunk that only deletes lines leaves no line
-// at head and is left out, and a binary file has no hunks. Paths come back
-// repo-relative with forward slashes, unquoted.
+// at head and is left out, and a binary file and a submodule have no hunks.
+// Paths come back repo-relative with forward slashes, unquoted.
 func DiffHunks(dir, base, head string) ([]Hunk, error) {
 	args := []string{"-c", "core.quotepath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
-		"--no-renames", "--src-prefix=a/", "--dst-prefix=b/", base, head}
+		"--no-renames", "--ignore-submodules=all", "--src-prefix=a/", "--dst-prefix=b/", base, head}
 	var stdout, stderr bytes.Buffer
 	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
 		return nil, callError(args, stderr.String(), err)

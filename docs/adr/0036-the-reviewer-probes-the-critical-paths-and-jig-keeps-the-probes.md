@@ -10,11 +10,11 @@ The miss was in what a reviewer probed, not in what it read or in the round's sc
 
 ## Decision
 
-**Every round, the reviewer probes each term of the critical paths' changed code, unless an earlier round's probe of it is current.** A term is the smallest piece of code whose change changes behavior: an operand, an operator, a condition, a constant, a call or a returned value. The terms in scope are those of each function the change adds or alters on a critical path the intent names (ADR 0016's seams). An intent that names none puts in scope the functions that carry the behavior it asks for. A probe mutates one term in the round's `worktree`, runs the narrowest test command that covers it (one test or one package, never a whole suite) and puts the file back. The command failing or timing out is `caught`; passing is `survived`.
+**Every round, the reviewer probes each term of the critical paths' changed code, unless an earlier round's probe of it is current and caught.** A term is the smallest piece of code whose change changes behavior: an operand, an operator, a condition, a constant, a call or a returned value. The terms in scope are those of each function the change adds or alters on a critical path the intent names (ADR 0016's seams). An intent that names none puts in scope the functions that carry the behavior it asks for. A probe mutates one term in the round's `worktree`, runs the narrowest test command that covers it (one test or one package, never a whole suite) and puts the file back. The command failing or timing out is `caught`; passing is `survived`.
 
 - A survivor at a seam is a finding by the rules that already hold: a missing test at a seam (ADR 0016), routed by the risk floor and the fix budget (ADR 0015). A survivor elsewhere is at most a note. A mutant that cannot change behavior is no finding.
 - Round 1 has no earlier probes, so it sweeps every term in scope. It has just read the whole change, and its fix slice then collects every gap at once instead of one gap per round.
-- A later round probes only the terms with no current probe: those in files its delta changed, and any an earlier round left unprobed. It probes a survivor again to check the fix of the finding the survivor backs.
+- A later round probes only the terms with no current, caught probe: those in files its delta changed, any an earlier round left unprobed, and every survivor, whose probe it makes again to check the fix of the finding the survivor backs. Its probe of that line supersedes the earlier one.
 - Which terms matter, and whether a survivor is a problem, stay the reviewer's judgment (ADR 0007).
 
 **jig records each probe and says which are still current.**
@@ -22,7 +22,7 @@ The miss was in what a reviewer probed, not in what it read or in the round's sc
 - `jig probe [T] --seam S --file F --line N --mutation M --command C --outcome caught|survived` drafts a probe into the round's drafts (`work/gate.round-N.findings.ndjson`), as `jig finding` drafts a finding. `--seam` names the critical path in the intent's words, `--mutation` the edit in words, `--command` what ran. In a project of several repos `--file` is `<repo>/<path>`.
 - `result.json` gains an optional `probes` list of the same six fields. A result without it reports no probes, so result files written before this ADR still parse.
 - `jig review done` writes the round's probes into `gate/round-N/findings.yaml` beside `reviewed_paths`, each with the git blob of its file at the round's head, and its output counts them (`probes: N`).
-- `review.json` gains `probed`: every earlier round's probes, oldest first, each with its round and a `state`. A probe is `current` while its file's blob at this round's head is the one it recorded, and `stale` once the file changed or is gone. jig compares blobs, not commits, so a rebase or a new full round that leaves the file alone keeps its probes current.
+- `review.json` gains `probed`: every earlier round's probes, oldest first, each with its round and a `state`. A probe is `current` while its file's blob at this round's head is the one it recorded and no later round probed the same line, and `stale` once the file changed or is gone, or a later round probed that line again: the latest round to probe a line says what it is now. jig compares blobs, not commits, so a rebase or a new full round that leaves the file alone keeps its probes current.
 - `jig review context` prints `probed` as a table (round, file:line, outcome, state, seam, mutation), and one help line says how to probe.
 - The review notes (`pr/review-notes.md`) list, beside the file coverage, the probes current at the reviewed head, the hunks with none and the reviewer's skips with their reasons (both below), so a person sees what behavior the clean verdict rests on and what it left untested.
 
@@ -44,7 +44,7 @@ jig checks shape only: every field non-empty, the outcome one of the two, the fi
 - `jig review context`'s help line on tests and mutation checks becomes the probe rule, with the `jig probe` command.
 - `reviewPromptTemplate`, which the review eval's launched reviewer reads in place of the skill, says the same. "Do not edit files, commit, or push." becomes "Do not commit or push, and edit a file only to probe it and put it back."; "Review by reading: run no tests." becomes "Review by reading, and run a test only to probe."; and two lines follow the seams line:
 
-  > Probe each term of every function the change adds or alters on a critical path the intent names, unless review.json's probed lists a current probe of it: mutate it, run the narrowest test command that covers it (oracles_passed gives each oracle's seconds), put the file back, and record it in probes. A mutant that survives at a seam is a finding.
+  > Probe each term of every function the change adds or alters on a critical path the intent names, unless review.json's probed lists a current, caught probe of it: mutate it, run the narrowest test command that covers it (oracles_passed gives each oracle's seconds), put the file back, and record it in probes. A mutant that survives at a seam is a finding.
   > review.json's hunks lists every hunk of the change: record in skipped each one with no code on a critical path, and why.
 
   The result schema line shows `probes` and `skipped`.

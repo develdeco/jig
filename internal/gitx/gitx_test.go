@@ -508,7 +508,7 @@ func TestDiffNameOnly(t *testing.T) {
 // TestDiffHunks checks the new side of each hunk: a changed line, a content
 // line that reads "+++" inside a hunk, a deletion-only hunk left out, a
 // renamed file as all new lines at its new path, a deleted file with no hunk,
-// and a name with a space.
+// a submodule pointer that moved with none either, and a name with a space.
 func TestDiffHunks(t *testing.T) {
 	dir := t.TempDir()
 	run := func(args ...string) {
@@ -532,6 +532,7 @@ func TestDiffHunks(t *testing.T) {
 	write("old.txt", "o\n")
 	write("with space.txt", "1\n")
 	run("add", "-A")
+	run("update-index", "--add", "--cacheinfo", "160000,1111111111111111111111111111111111111111,sub")
 	run("commit", "-m", "c1")
 	base, err := RevParse(dir, "HEAD")
 	if err != nil {
@@ -547,6 +548,7 @@ func TestDiffHunks(t *testing.T) {
 	}
 	write("with space.txt", "1\n2\n")
 	run("add", "-A")
+	run("update-index", "--add", "--cacheinfo", "160000,2222222222222222222222222222222222222222,sub")
 	run("commit", "-m", "c2")
 
 	got, err := DiffHunks(dir, base, "HEAD")

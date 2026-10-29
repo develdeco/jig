@@ -29,12 +29,12 @@ It names the branch, whose copy (`copy`), the `head`, its `base` and `scope` (fu
 
 ## Probe
 
-Every round, probe each term (operand, operator, condition, constant, call, return) of each function the change adds or alters on a critical path the intent names (none named: that carries what it asks for), unless `probed` lists it `current`:
+Every round, probe each term (operand, operator, condition, constant, call, return) of each function the change adds or alters on a critical path the intent names (none named: that carries what it asks for), unless `probed` lists it `current` and `caught`:
 
 - Mutate it in `worktree`, run the narrowest test that covers it (by `seconds`), put the file back. Failing or timing out is `caught`, passing `survived`.
 - `jig probe T-1 --seam S --file F --line N --mutation M --command C --outcome caught|survived`
 - `unprobed` is the work list: set aside a hunk with no critical-path code, `jig probe T-1 --skip F[:A-B] --why W`.
-- A survivor at a seam is a finding, elsewhere at most a note; an equivalent mutant none. Probe a survivor again to check its fix.
+- A survivor at a seam is a finding, elsewhere at most a note; an equivalent mutant none.
 
 ## Report
 

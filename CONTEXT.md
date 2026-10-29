@@ -239,7 +239,7 @@ The files a reviewer actually read in a round, reported as `reviewed_paths`. jig
 _Avoid_: reviewed scope, read set
 
 **Probe**:
-One term of a critical path's changed code that a gate reviewer mutated in the round's worktree, with the narrowest test command that covers it run against the mutant and the file put back: `caught` when the command failed or timed out, `survived` when it passed. Every round probes the terms no earlier probe still covers, so round 1 sweeps them all. A probe is kept in the round's `findings.yaml` with its file's blob at the round's head, and stays *current* while a later head has the same blob, *stale* once the file changed (ADR 0036).
+One term of a critical path's changed code that a gate reviewer mutated in the round's worktree, with the narrowest test command that covers it run against the mutant and the file put back: `caught` when the command failed or timed out, `survived` when it passed. Every round probes the terms no earlier probe still covers, so round 1 sweeps them all. A probe is kept in the round's `findings.yaml` with its file's blob at the round's head, and stays *current* while a later head has the same blob and no later round probed the same line, *stale* once the file changed or the line was probed again; a survivor is probed again every round, since only a caught probe covers its term (ADR 0036).
 _Avoid_: mutation check, mutant test
 
 **Skip**:

@@ -77,8 +77,10 @@ func normalizeLedger(probes []ResultProbe, skips []ResultSkip) ([]ResultProbe, [
 }
 
 // placeLedgerFile refuses the file of a drafted probe or skip when it names
-// no repo of the round; whether it is present at head is checked when the
-// round is done, as a finding's file is.
+// no repo of the round or is not present at head there. It is checked as the
+// draft is taken, not only when the round is done: a probe is always of code
+// at head, and a draft cannot be taken back, so one mistyped file would
+// otherwise leave the round unable to close.
 func (rf roundFiles) placeLedgerFile(file string) error {
 	norm, err := normalizeRepoRelPath(file)
 	if err != nil {
@@ -87,16 +89,29 @@ func (rf roundFiles) placeLedgerFile(file string) error {
 	if _, _, ok := rf.of(norm); !ok {
 		return reviewInvalid(rf.unknownRepoFile(file))
 	}
+	present, err := rf.atHead(norm)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: probes: check %q at head: %w", norm, err)
+	}
+	if !present {
+		return reviewInvalid(fmt.Sprintf("file %q is not present at head", file))
+	}
 	return nil
 }
 
-// UnprobedAfter is the hunks of the open round p that are still unprobed once
-// its drafted probes and skips are counted with the earlier rounds' current
-// ones: what is left of the sweep.
-func UnprobedAfter(p Prepared, drafts []Draft) []HunkEntry {
+// HunksWithDrafts is the hunks of the open round p with its drafted probes and
+// skips counted beside the earlier rounds' current ones: where the sweep
+// stands.
+func HunksWithDrafts(p Prepared, drafts []Draft) []HunkEntry {
 	res := DraftResult(drafts, nil, "")
 	probes, skips := normalizeLedger(res.Probes, res.Skipped)
-	return unprobedHunks(coverHunks(p.Request.Hunks, probes, skips))
+	return coverHunks(p.Request.Hunks, probes, skips)
+}
+
+// UnprobedAfter is the hunks of HunksWithDrafts that are still unprobed: what
+// is left of the sweep.
+func UnprobedAfter(p Prepared, drafts []Draft) []HunkEntry {
+	return unprobedHunks(HunksWithDrafts(p, drafts))
 }
 
 // headBlobs is the blob of each of files at the commit under review in its
@@ -193,11 +208,18 @@ func ledgerBefore(st *store.Store, ticket string, round int) ([]ProbeRecord, []S
 
 // currentLedger splits the ledger by its files' blobs at the head under
 // review: probed is every probe, current or stale, and current and skips are
-// the probes and skips that are current.
+// the probes and skips that are current. A probe is current while its file's
+// blob is the one it recorded and no later round probed the same line: the
+// latest round to probe a line says what it is now, so a survivor that a
+// later round probed again after its fix does not still read as current.
 func currentLedger(rf roundFiles, probes []ProbeRecord, skips []SkipRecord) (probed []ProbedEntry, current []ResultProbe, currentSkips []ResultSkip, err error) {
 	var files []string
+	latest := map[string]int{}
 	for _, p := range probes {
 		files = append(files, p.File)
+		if at := fmt.Sprintf("%s:%d", p.File, p.Line); p.Round > latest[at] {
+			latest[at] = p.Round
+		}
 	}
 	for _, s := range skips {
 		files = append(files, s.File)
@@ -208,7 +230,7 @@ func currentLedger(rf roundFiles, probes []ProbeRecord, skips []SkipRecord) (pro
 	}
 	for _, p := range probes {
 		state := ProbeStale
-		if b, ok := blobs[p.File]; ok && b == p.Blob {
+		if b, ok := blobs[p.File]; ok && b == p.Blob && p.Round == latest[fmt.Sprintf("%s:%d", p.File, p.Line)] {
 			state = ProbeCurrent
 			current = append(current, p.result())
 		}

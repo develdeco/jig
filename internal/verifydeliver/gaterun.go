@@ -248,7 +248,7 @@ func gatePrepare(d Deps, o GateOpts) (*gateRun, error) {
 		if err != nil {
 			return r, inRepo(r.qualified, gr.name, fmt.Errorf("verifydeliver: gate: resolve manifest: %w", err))
 		}
-		gr.oracleRuns, err = runGateOracles(d, ticket, gr.lease.Dir, gr.man, gr.slices)
+		gr.oracleRuns, err = runGateOracles(d, ticket, gr.name, gr.lease.Dir, gr.man, gr.slices)
 		if err != nil {
 			return r, inRepo(r.qualified, gr.name, err)
 		}
