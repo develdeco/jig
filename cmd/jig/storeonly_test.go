@@ -16,11 +16,12 @@ var hashMarker = regexp.MustCompile(`@HASH:([^"]+)`)
 // newStoreOnlyFixture is the store of the fixture ticket made of files alone:
 // the ticket JIG-1 with the fixture's brief and four slices, in a project of no
 // repos. It carries the fields of a fixture.Fixture that a test of what the
-// store says reads (Ticket, StoreDir, Home), and starts no git, which
-// fixture.Generate does about twenty times: a test that renders `jig status` or
-// walks the journal of a ticket needs the store and nothing around it. A test
-// that runs a verb that commits the store, or reads a clone, takes
-// newFixture.
+// store says reads (Ticket, StoreDir, Home), and starts no git and copies no
+// repository, where fixture.Generate copies about 150 files and makes about 110
+// directories (it starts no git either, once its template exists): a test that
+// renders `jig status` or walks the journal of a ticket needs the store and
+// nothing around it. A test that runs a verb that commits the store, or reads
+// a clone, takes newFixture.
 func newStoreOnlyFixture(t *testing.T) *fixture.Fixture {
 	t.Helper()
 	root := t.TempDir()
