@@ -12,5 +12,23 @@
     "go.mod",
     ".claude/jig.yaml"
   ],
-  "summary": "round 3: nothing new; the shared-helper note from round 1 remains on record"
+  "summary": "round 3: nothing new; the shared-helper note from round 1 remains on record",
+  "probes": [
+    {
+      "seam": "ClampPercent bounds a percentage",
+      "file": "alpha/percent.go",
+      "line": 5,
+      "mutation": "upper bound 100 to 101",
+      "command": "go test ./alpha -run TestClampPercent",
+      "outcome": "caught"
+    }
+  ],
+  "skipped": [
+    {
+      "file": "alpha/percent_test.go",
+      "from": 0,
+      "to": 0,
+      "why": "tests"
+    }
+  ]
 }

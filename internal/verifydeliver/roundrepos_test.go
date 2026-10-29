@@ -256,9 +256,13 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
 		SlicesPath:    "/store/JIG-1/slices.yaml",
 		JournalPath:   "/store/JIG-1/journal.ndjson",
 		Oracles:       []string{"lint", "test"},
-		OraclesPassed: []OracleRun{{Oracle: "test", Workspace: "alpha", Command: "go test ./alpha/...", ReusedFrom: "cccc"}},
+		OraclesPassed: []OracleRun{{Oracle: "test", Workspace: "alpha", Command: "go test ./alpha/...", ReusedFrom: "cccc", Seconds: 4, Slices: []string{"a"}}},
 		Open:          []OpenFinding{{ID: "r1-f1", File: "alpha/a.go", Line: 3, Title: "t", Detail: "d", Action: "fix", Risk: "high", RiskRationale: "r", Oracle: "test", Recurrences: 1}},
 		MustReview:    []string{"alpha/a.go", "beta/b.go"},
+		Probed: []ProbedEntry{{Round: 1, ResultProbe: ResultProbe{
+			Seam: "a total", File: "alpha/a.go", Line: 3, Mutation: "drop the factor", Command: "go test ./alpha -run TestA", Outcome: ProbeCaught,
+		}, State: ProbeCurrent}},
+		Hunks: []HunkEntry{{File: "alpha/a.go", From: 2, To: 4, Probes: 1}, {File: "alpha/a_test.go", From: 1, To: 9, Skip: "tests"}},
 	}
 	data, err := MarshalReviewRequest(req)
 	if err != nil {
@@ -288,7 +292,11 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
       "oracle": "test",
       "workspace": "alpha",
       "command": "go test ./alpha/...",
-      "reused_from": "cccc"
+      "reused_from": "cccc",
+      "seconds": 4,
+      "slices": [
+        "a"
+      ]
     }
   ],
   "open": [
@@ -309,6 +317,33 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
   "must_review": [
     "alpha/a.go",
     "beta/b.go"
+  ],
+  "probed": [
+    {
+      "round": 1,
+      "seam": "a total",
+      "file": "alpha/a.go",
+      "line": 3,
+      "mutation": "drop the factor",
+      "command": "go test ./alpha -run TestA",
+      "outcome": "caught",
+      "state": "current"
+    }
+  ],
+  "hunks": [
+    {
+      "file": "alpha/a.go",
+      "from": 2,
+      "to": 4,
+      "probes": 1
+    },
+    {
+      "file": "alpha/a_test.go",
+      "from": 1,
+      "to": 9,
+      "probes": 0,
+      "skip": "tests"
+    }
   ]
 }`
 	if string(data) != golden {

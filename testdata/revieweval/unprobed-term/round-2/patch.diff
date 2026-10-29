@@ -1,0 +1,26 @@
+diff --git a/cart/cart_test.go b/cart/cart_test.go
+index c98ebe8..ba2cf80 100644
+--- a/cart/cart_test.go
++++ b/cart/cart_test.go
+@@ -26,3 +26,21 @@ func TestTotalClampsDiscountAboveHundredToHundred(t *testing.T) {
+ 		t.Fatalf("Total = %d cents, want 0", got)
+ 	}
+ }
++
++// 1.01 with 1% off is 0.9999, which rounds up to 1.00: truncation would
++// give 0.99.
++func TestTotalRoundsUpToTheNearestCent(t *testing.T) {
++	items := []Item{{PriceCents: 101, Qty: 1}}
++	if got := Total(items, 1); got != 100 {
++		t.Fatalf("Total = %d cents, want 100", got)
++	}
++}
++
++// 0.50 with 3% off is exactly 0.485, which ties at the half cent: round-half-up
++// gives 0.49, where round-half-even would give 0.48.
++func TestTotalBreaksExactHalfCentTiesUp(t *testing.T) {
++	items := []Item{{PriceCents: 50, Qty: 1}}
++	if got := Total(items, 3); got != 49 {
++		t.Fatalf("Total = %d cents, want 49", got)
++	}
++}

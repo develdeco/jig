@@ -33,7 +33,7 @@ func resultsDir(set string) string {
 	return filepath.Join("testdata", "results", set)
 }
 
-// evalCorpusRoot is the real ten-case corpus's root, at the repo's own
+// evalCorpusRoot is the real eleven-case corpus's root, at the repo's own
 // testdata/revieweval (not under this package), the same root live_test.go
 // uses.
 func evalCorpusRoot(t *testing.T) string {
@@ -205,12 +205,12 @@ func (j fixtureJudge) Confirm(q JudgeQuery) ([]Verdict, error) {
 	return out, nil
 }
 
-// TestFixtureLoadCorpusLoadsAllTenCases pins the real corpus's shape: ten
-// cases in name order, fourteen rounds total (five one-round cases, five
+// TestFixtureLoadCorpusLoadsEveryCase pins the real corpus's shape: eleven
+// cases in name order, sixteen rounds total (five one-round cases, six
 // two-round cases). Every other fixture test below depends on this corpus
 // loading at all, so a broken corpus file would otherwise surface as a
 // confusing failure somewhere else instead of here.
-func TestFixtureLoadCorpusLoadsAllTenCases(t *testing.T) {
+func TestFixtureLoadCorpusLoadsEveryCase(t *testing.T) {
 	t.Parallel()
 	cases, err := LoadCorpus(evalCorpusRoot(t))
 	if err != nil {
@@ -218,7 +218,7 @@ func TestFixtureLoadCorpusLoadsAllTenCases(t *testing.T) {
 	}
 	wantNames := []string{
 		"clean", "forgotten-finding", "judgment-call", "loopvar-trap", "mechanical-batch",
-		"nil-deref", "nit-disguise", "reworded-dismissed", "tenant-leak", "title-collision",
+		"nil-deref", "nit-disguise", "reworded-dismissed", "tenant-leak", "title-collision", "unprobed-term",
 	}
 	if len(cases) != len(wantNames) {
 		var got []string
@@ -234,8 +234,8 @@ func TestFixtureLoadCorpusLoadsAllTenCases(t *testing.T) {
 		}
 		totalRounds += len(c.Rounds)
 	}
-	if totalRounds != 14 {
-		t.Errorf("total rounds = %d, want 14 (5 one-round cases + 5 two-round cases)", totalRounds)
+	if totalRounds != 16 {
+		t.Errorf("total rounds = %d, want 16 (5 one-round cases + 6 two-round cases)", totalRounds)
 	}
 }
 
@@ -273,8 +273,8 @@ func TestFixturePerfectPassesEveryCaseEveryRound(t *testing.T) {
 			}
 		}
 	}
-	if roundCount != 14 {
-		t.Errorf("scored %d rounds, want 14", roundCount)
+	if roundCount != 16 {
+		t.Errorf("scored %d rounds, want 16", roundCount)
 	}
 }
 
@@ -338,9 +338,11 @@ func TestFixtureRegressedFailsExactlyAsDesigned(t *testing.T) {
 		{Case: "nit-disguise", Round: 1}, // copies perfect: passes
 		{Case: "nit-disguise", Round: 2, Lost: []string{"upper-bound-exclusive"}},
 		{Case: "judgment-call", Round: 1, DroppedQuestions: []string{"retry-non-idempotent"}},
+		{Case: "unprobed-term", Round: 1}, // copies perfect: passes
+		{Case: "unprobed-term", Round: 2, Missed: []string{"quantity-unpinned"}},
 	}
-	if len(wants) != 14 {
-		t.Fatalf("test bug: %d want entries, want 14 (one per corpus round)", len(wants))
+	if len(wants) != 16 {
+		t.Fatalf("test bug: %d want entries, want 16 (one per corpus round)", len(wants))
 	}
 
 	for _, w := range wants {
@@ -506,7 +508,7 @@ func TestFixtureReportRendersTotals(t *testing.T) {
 	scores := perfectCorpusScores(t)
 
 	report := RenderReport(scores)
-	if !strings.Contains(report, "cases passed 10/10, rounds passed 14/14, recall 1.00") {
+	if !strings.Contains(report, "cases passed 11/11, rounds passed 16/16, recall 1.00") {
 		t.Errorf("report totals line missing or wrong; got:\n%s", report)
 	}
 	if !strings.Contains(report, "lost 0, forgotten 0, dropped questions 0, misattributed 0, false alarms 0, re-litigated 0, wrong priors 0, refused 0, failed 0") {

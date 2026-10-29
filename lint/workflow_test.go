@@ -8,6 +8,8 @@
 package lint
 
 import (
+	"encoding/json"
+	"go/build/constraint"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -150,11 +152,12 @@ func TestCIWorkflowTriggers(t *testing.T) {
 	}
 }
 
-// TestCIWorkflowTestJob asserts the "test" job's matrix covers all three
-// supported platforms (a macOS-only regression has shipped before, commit
-// d920a72), that its legs report the check names main's ruleset requires,
-// and that it actually enforces formatting, vet, and tests rather than just
-// building.
+// TestCIWorkflowTestJob asserts the "test" job's legs are the ones the plan
+// job names (TestCIWorkflowPlan: all three platforms on every push to main,
+// Linux and macOS on every pull request; a macOS-only regression has
+// shipped before, commit d920a72), that its legs report the check names
+// main's ruleset requires, and that it actually enforces formatting, vet,
+// and tests rather than just building.
 func TestCIWorkflowTestJob(t *testing.T) {
 	root := repoRoot(t)
 	doc := loadWorkflow(t, root, "ci.yml")
@@ -167,23 +170,21 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	if !ok {
 		t.Fatalf("ci.yml: no \"test\" job, so there is nothing to run the cross-platform and gate checks below")
 	}
-	requireAllPlatforms(t, "ci.yml", "test", job)
-
-	// Main's ruleset requires test (windows-latest), test (ubuntu-latest) and
-	// test (macos-latest) by name, so the labels and the name are pinned, not
-	// just the platforms: another label would never report a required check.
+	// The matrix is the plan's os output and nothing else, so no include or
+	// exclude can add or drop a leg the plan did not name.
+	if !slices.Contains(needsList(job["needs"]), planJob) {
+		t.Errorf("ci.yml: the test job does not need the %s job, so its matrix cannot read the legs that job plans", planJob)
+	}
 	strategy, _ := yamlMap(job["strategy"])
 	matrix, _ := yamlMap(strategy["matrix"])
-	osList, _ := yamlSlice(matrix["os"])
-	var labels []string
-	for _, v := range osList {
-		label, _ := yamlString(v)
-		labels = append(labels, label)
+	if got, _ := yamlString(matrix["os"]); got != planMatrixOS || len(matrix) != 1 {
+		t.Errorf("ci.yml: the test job's matrix is %v, want only os: %s, the legs the plan job names", matrix, planMatrixOS)
 	}
-	sort.Strings(labels)
-	if !slices.Equal(labels, []string{"macos-latest", "ubuntu-latest", "windows-latest"}) {
-		t.Errorf("ci.yml: the test job's matrix.os is %v, want exactly windows-latest, ubuntu-latest and macos-latest, the labels of the checks main's ruleset requires, so a pull request would wait on a check that is never reported", labels)
-	}
+
+	// Main's ruleset requires test (ubuntu-latest) and test (macos-latest) by
+	// name, and every pull request reports both (TestCIWorkflowPlan), so the
+	// name is pinned, not just the platforms: another name would never
+	// report a required check.
 	if name, _ := yamlString(job["name"]); name != "test (${{ matrix.os }})" {
 		t.Errorf("ci.yml: the test job is named %q, want \"test (${{ matrix.os }})\", which reports the checks main's ruleset requires, so a pull request would wait on a check that is never reported", name)
 	}
@@ -203,6 +204,261 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	requireUnconditionalStep(t, steps, "go vet", "go vet ./...")
 	requireUnconditionalStep(t, steps, "go test", "go test ")
 	requireStepOnExactly(t, steps, "gofmt", "gofmt -l", "runner.os == 'Linux'")
+}
+
+// planJob is the ci.yml job that names a run's test legs, planMatrixOS the
+// test job's matrix that reads them, and windowsPlanned the job-level if of
+// a job that runs when, and only when, the plan includes the Windows leg.
+const (
+	planJob        = "plan"
+	planMatrixOS   = "${{ fromJSON(needs.plan.outputs.os) }}"
+	windowsPlanned = "needs.plan.outputs.windows == 'true'"
+	codePlanned    = "needs.plan.outputs.docs == 'false'"
+)
+
+// planOutcome is what the plan job's step wrote to GITHUB_OUTPUT.
+type planOutcome struct {
+	legs    []string
+	windows string
+	docs    string
+}
+
+// runPlan runs the plan job's step with bash, as the runner would on event
+// for a change touching changed (paths relative to the checkout, which is
+// a temporary directory holding files, path to content), and returns what
+// it wrote to GITHUB_OUTPUT. The test skips without bash.
+func runPlan(t *testing.T, jobs map[string]interface{}, event string, changed []string, files map[string]string) planOutcome {
+	t.Helper()
+	job, ok := yamlMap(jobs[planJob])
+	if !ok {
+		t.Fatalf("ci.yml: no %s job, so nothing names a run's test legs", planJob)
+	}
+	var script string
+	steps, _ := yamlSlice(job["steps"])
+	for _, sv := range steps {
+		step, _ := yamlMap(sv)
+		if id, _ := yamlString(step["id"]); id == "plan" {
+			script, _ = yamlString(step["run"])
+		}
+	}
+	if script == "" {
+		t.Fatalf("ci.yml: the %s job has no step with id plan, whose outputs the job passes on", planJob)
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skipf("no bash to run the %s job's step: %v", planJob, err)
+	}
+	dir := t.TempDir()
+	for name, content := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	output := filepath.Join(dir, "github-output")
+	cmd := exec.Command(bash, "-e", "-o", "pipefail", "-c", script)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "EVENT="+event, "CHANGED_FILES="+strings.Join(changed, "\n"), "GITHUB_OUTPUT="+filepath.ToSlash(output))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("ci.yml: the %s job's step on %s for %v failed: %v: %s", planJob, event, changed, err, out)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("ci.yml: the %s job's step wrote no GITHUB_OUTPUT: %v", planJob, err)
+	}
+	var got planOutcome
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		key, value, _ := strings.Cut(line, "=")
+		switch key {
+		case "os":
+			if err := json.Unmarshal([]byte(value), &got.legs); err != nil {
+				t.Fatalf("ci.yml: the %s job's os output %q is not a JSON list: %v", planJob, value, err)
+			}
+		case "windows":
+			got.windows = value
+		case "docs":
+			got.docs = value
+		}
+	}
+	return got
+}
+
+// allLegs and pullRequestLegs are the test job's legs on every run of
+// ci.yml but a pull request's, and on a pull request that changes nothing
+// Windows builds or runs differently: test (ubuntu-latest) and
+// test (macos-latest) are the checks main's ruleset requires.
+var (
+	allLegs         = []string{"macos-latest", "ubuntu-latest", "windows-latest"}
+	pullRequestLegs = []string{"macos-latest", "ubuntu-latest"}
+)
+
+// TestCIWorkflowPlan runs the plan job's step, with synthetic changes, and
+// asserts the legs it names: all three platforms for every event but a pull
+// request, and for a pull request that changes a file Windows builds
+// differently (a _windows file, a Go file with a build constraint), go.mod
+// or go.sum, .gitattributes or a workflow; Linux and macOS for any other
+// pull request. The plan's windows output says whether the Windows leg is
+// in, for the jobs that run beside it. A pull request that changes only
+// docs - markdown at the root or in .github, docs/, LICENSE, which no test
+// but lint's reads - plans docs=true, and the Windows leg out; markdown
+// anywhere else (a skill go:embed builds into jig, testdata) is not docs.
+func TestCIWorkflowPlan(t *testing.T) {
+	jobs := workflowJobs(t, repoRoot(t), "ci.yml")
+	for _, c := range []struct {
+		event   string
+		changed []string
+		files   map[string]string
+		windows bool
+		docs    bool
+	}{
+		{"push", nil, nil, true, false},
+		{"push", []string{"README.md"}, nil, true, false},
+		{"schedule", nil, nil, true, false},
+		{"workflow_dispatch", nil, nil, true, false},
+		{"pull_request", []string{"internal/store/store.go", "README.md"}, nil, false, false},
+		{"pull_request", nil, nil, false, false},
+		{"pull_request", []string{"internal/gitx/stat_windows.go"}, nil, true, false},
+		{"pull_request", []string{"e2e/proc_alive_windows_test.go"}, nil, true, false},
+		{"pull_request", []string{"internal/envrun/kill_windows_group.go"}, nil, true, false},
+		{"pull_request", []string{"go.mod"}, nil, true, false},
+		{"pull_request", []string{"go.sum"}, nil, true, false},
+		{"pull_request", []string{".gitattributes"}, nil, true, false},
+		{"pull_request", []string{".github/workflows/smoke.yml"}, nil, true, false},
+		{"pull_request", []string{"internal/x/a.go"}, map[string]string{"internal/x/a.go": "//go:build windows\n\npackage x\n"}, true, false},
+		{"pull_request", []string{"internal/x/b.go"}, map[string]string{"internal/x/b.go": "//go:build !linux && !darwin\n\npackage x\n"}, true, false},
+		{"pull_request", []string{"internal/x/c.go"}, map[string]string{"internal/x/c.go": "package x\n\n// //go:build windows is not a constraint here.\n"}, false, false},
+		{"pull_request", []string{"internal/x/gone.go"}, nil, false, false},
+		{"pull_request", []string{"README.md", "DECISIONS.md", "docs/adr/0001-x.md", ".github/CONTRIBUTING.md", "LICENSE"}, nil, false, true},
+		{"pull_request", []string{"docs/adr/0001-x.md"}, nil, false, true},
+		{"pull_request", []string{"skills/intake/SKILL.md"}, nil, false, false},
+		{"pull_request", []string{"internal/x/testdata/a.md"}, nil, false, false},
+		{"pull_request", []string{"README.md", "go.mod"}, nil, true, false},
+		{"pull_request", []string{"README.md", ".github/workflows/ci.yml"}, nil, true, false},
+	} {
+		got := runPlan(t, jobs, c.event, c.changed, c.files)
+		want, wantWindows, wantDocs := pullRequestLegs, "false", "false"
+		if c.windows {
+			want, wantWindows = allLegs, "true"
+		}
+		if c.docs {
+			wantDocs = "true"
+		}
+		legs := slices.Clone(got.legs)
+		sort.Strings(legs)
+		if !slices.Equal(legs, want) || got.windows != wantWindows || got.docs != wantDocs {
+			t.Errorf("ci.yml: the %s job plans legs %v, windows=%q and docs=%q on %s for %v, want %v, windows=%s and docs=%s", planJob, got.legs, got.windows, got.docs, c.event, c.changed, want, wantWindows, wantDocs)
+		}
+	}
+}
+
+// TestCIWorkflowPlansWindowsForWindowsOnlyFiles asserts, for every Go file
+// in the repository that Go builds on Windows but not on both Linux and
+// macOS (by its file name or its build constraint), that a pull request
+// changing it alone runs the Windows leg: no other leg compiles that file
+// as Windows does. The plan's own reading of a file is a shell pattern,
+// and this holds it to Go's.
+func TestCIWorkflowPlansWindowsForWindowsOnlyFiles(t *testing.T) {
+	root := repoRoot(t)
+	jobs := workflowJobs(t, root, "ci.yml")
+	var specific []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if path != root && (d.Name() == "testdata" || strings.HasPrefix(d.Name(), ".") || strings.HasPrefix(d.Name(), "_")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if builtFor(d.Name(), data, "windows") && !(builtFor(d.Name(), data, "linux") && builtFor(d.Name(), data, "darwin")) {
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			specific = append(specific, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specific) == 0 {
+		t.Fatal("found no Go file built on Windows but not on Linux and macOS, so this test checks nothing; the repository has had several")
+	}
+	for _, rel := range specific {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := runPlan(t, jobs, "pull_request", []string{rel}, map[string]string{rel: string(data)}); got.windows != "true" {
+			t.Errorf("ci.yml: a pull request changing %s, which Go builds on Windows but not on both Linux and macOS, plans windows=%q, want true", rel, got.windows)
+		}
+	}
+}
+
+// knownOS and knownArch are the GOOS and GOARCH values a Go file name can
+// end in (go/build's goodOSArchFile).
+var (
+	knownOS   = []string{"aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios", "js", "linux", "nacl", "netbsd", "openbsd", "plan9", "solaris", "wasip1", "windows", "zos"}
+	knownArch = []string{"386", "amd64", "amd64p32", "arm", "armbe", "arm64", "arm64be", "loong64", "mips", "mipsle", "mips64", "mips64le", "ppc", "ppc64", "ppc64le", "riscv", "riscv64", "s390", "s390x", "sparc", "sparc64", "wasm"}
+	unixOS    = []string{"aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios", "linux", "netbsd", "openbsd", "solaris"}
+)
+
+// builtFor reports whether go build includes the Go file named name, holding
+// data, for goos: its name's _GOOS or _GOOS_GOARCH suffix and its //go:build
+// line, read the way go/build reads them, for the GOARCH CI's runner of that
+// OS has.
+func builtFor(name string, data []byte, goos string) bool {
+	arch := "amd64"
+	if goos == "darwin" {
+		arch = "arm64"
+	}
+	parts := strings.Split(strings.TrimSuffix(strings.TrimSuffix(name, ".go"), "_test"), "_")
+	if n := len(parts); n >= 2 {
+		last, prev := parts[n-1], parts[n-2]
+		switch {
+		case n >= 3 && slices.Contains(knownOS, prev) && slices.Contains(knownArch, last):
+			if prev != goos || last != arch {
+				return false
+			}
+		case slices.Contains(knownOS, last):
+			if last != goos {
+				return false
+			}
+		case slices.Contains(knownArch, last):
+			if last != arch {
+				return false
+			}
+		}
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "package ") {
+			break
+		}
+		if !constraint.IsGoBuild(line) {
+			continue
+		}
+		expr, err := constraint.Parse(line)
+		if err != nil {
+			return true
+		}
+		return expr.Eval(func(tag string) bool {
+			return tag == goos || tag == arch || tag == "gc" || (tag == "unix" && slices.Contains(unixOS, goos)) || strings.HasPrefix(tag, "go1.")
+		})
+	}
+	return true
 }
 
 // requireAllPlatforms asserts job name in workflow file runs a
@@ -311,29 +567,108 @@ func TestCIWorkflowGateJob(t *testing.T) {
 		}
 	}
 	requireGateStepFailsClosed(t, gate, job)
+	requireGateResultPerJob(t, gate, job, jobs)
 }
 
-// requireGateStepFailsClosed runs the gate job's step that reads
-// needs.*.result, with that expression's variable set to synthetic
-// results, and asserts it succeeds only when every result is success -
-// failing on a failed, cancelled or skipped job and on no results at all,
-// as it would if its wiring to the variable broke.
-func requireGateStepFailsClosed(t *testing.T, gate string, job map[string]interface{}) {
-	t.Helper()
-	var script, variable string
+// gateResultsEnv returns the name and value of the gate job's step env
+// entry that reads the needed jobs' results, or "" for both.
+func gateResultsEnv(job map[string]interface{}) (step map[string]interface{}, name, value string) {
 	steps, _ := yamlSlice(job["steps"])
 	for _, sv := range steps {
-		step, _ := yamlMap(sv)
-		env, _ := yamlMap(step["env"])
+		s, _ := yamlMap(sv)
+		env, _ := yamlMap(s["env"])
 		for _, k := range sortedKeys(env) {
-			if v, _ := yamlString(env[k]); strings.Contains(v, "needs.*.result") {
-				script, _ = yamlString(step["run"])
-				variable = k
+			if v, _ := yamlString(env[k]); strings.Contains(v, "needs.") && strings.Contains(v, ".result") {
+				return s, k, v
 			}
 		}
 	}
+	return nil, "", ""
+}
+
+// gateTerm matches one ${{ }} expression of the gate's results, plainResult
+// a needed job's own result, and plannedSkip a job the plan can leave out:
+// success in place of skipped when the plan's output says so.
+var (
+	gateTerm    = regexp.MustCompile(`\$\{\{\s*(.*?)\s*\}\}`)
+	plainResult = regexp.MustCompile(`^needs\.([A-Za-z0-9_-]+)\.result$`)
+	plannedSkip = regexp.MustCompile(`^needs\.([A-Za-z0-9_-]+)\.result == 'skipped' && needs\.` + planJob + `\.outputs\.([A-Za-z0-9_-]+) == '(true|false)' && 'success' \|\| needs\.([A-Za-z0-9_-]+)\.result$`)
+)
+
+// requireGateResultPerJob asserts the gate's results hold one result for
+// each job it needs, and nothing else: the job's own, or, for a job whose
+// job-level if is that one plan output is true, success in place of
+// skipped only when the same output is false. A skip the plan did not
+// call for, or a skip after the plan itself failed (its outputs empty),
+// fails the gate.
+func requireGateResultPerJob(t *testing.T, gate string, job map[string]interface{}, jobs map[string]interface{}) {
+	t.Helper()
+	_, name, value := gateResultsEnv(job)
+	if strings.TrimSpace(gateTerm.ReplaceAllString(value, "")) != "" {
+		t.Errorf("ci.yml: the %s job's %s = %q holds more than ${{ }} results, so a word that is not a job's result could pass or fail the gate", gate, name, value)
+	}
+	seen := map[string]int{}
+	for _, m := range gateTerm.FindAllStringSubmatch(value, -1) {
+		expr := m[1]
+		if r := plainResult.FindStringSubmatch(expr); r != nil {
+			seen[r[1]]++
+			// A job with a job-level if is skipped on some runs, and its
+			// plain result would fail the gate on every one of them.
+			if other, _ := yamlMap(jobs[r[1]]); other["if"] != nil {
+				t.Errorf("ci.yml: the %s job's results read %s's result as is, but %s runs on if = %v, so every run that skips it fails the gate", gate, r[1], r[1], other["if"])
+			}
+			continue
+		}
+		r := plannedSkip.FindStringSubmatch(expr)
+		if r == nil || r[1] != r[4] {
+			t.Errorf("ci.yml: the %s job's results hold %q, which is neither a needed job's result nor that result with a skip the plan calls for", gate, expr)
+			continue
+		}
+		seen[r[1]]++
+		other, _ := yamlMap(jobs[r[1]])
+		ifExpr, _ := yamlString(other["if"])
+		left := "false"
+		if r[3] == "false" {
+			left = "true"
+		}
+		if ifExpr != "needs."+planJob+".outputs."+r[2]+" == '"+left+"'" {
+			t.Errorf("ci.yml: the %s job counts %s skipped as succeeded when %s is %s, but %s runs on if = %q, so a skip the plan did not call for would pass the gate", gate, r[1], r[2], r[3], r[1], ifExpr)
+		}
+	}
+	needs := needsList(job["needs"])
+	for _, n := range needs {
+		if seen[n] != 1 {
+			t.Errorf("ci.yml: the %s job's results hold %d results of %s, want exactly one", gate, seen[n], n)
+		}
+	}
+	for _, n := range sortedKeysInt(seen) {
+		if !slices.Contains(needs, n) {
+			t.Errorf("ci.yml: the %s job's results read %s, which it does not need, so that result is empty", gate, n)
+		}
+	}
+}
+
+// sortedKeysInt returns m's keys sorted.
+func sortedKeysInt(m map[string]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// requireGateStepFailsClosed runs the gate job's step that reads the
+// needed jobs' results, with that variable set to synthetic results, and
+// asserts it succeeds only when every result is success - failing on a
+// failed, cancelled or skipped job and on no results at all, as it would
+// if its wiring to the variable broke.
+func requireGateStepFailsClosed(t *testing.T, gate string, job map[string]interface{}) {
+	t.Helper()
+	step, variable, _ := gateResultsEnv(job)
+	script, _ := yamlString(step["run"])
 	if script == "" {
-		t.Fatalf("ci.yml: the %s job has no step with needs.*.result in its env, so it cannot fail on a needed job's result", gate)
+		t.Fatalf("ci.yml: the %s job has no step reading needs.<job>.result in its env, so it cannot fail on a needed job's result", gate)
 	}
 	bash, err := exec.LookPath("bash")
 	if err != nil {
@@ -360,8 +695,9 @@ func requireGateStepFailsClosed(t *testing.T, gate string, job map[string]interf
 
 // TestCIWorkflowClaudeCLIJob asserts ci.yml runs jig's hooks against the
 // real Claude Code CLI on all three platforms, on every run of the
-// workflow, and fails the run when they fail: a job with no job-level "if"
-// runs them (requireLiveJob). It has bitten: v0.1.1 shipped an argv the CLI
+// workflow but a docs-only pull request's, and fails the run when they
+// fail: a job with no job-level "if" but codePlanned runs them
+// (requireLiveJob). It has bitten: v0.1.1 shipped an argv the CLI
 // refuses, since the test job's stub `claude` accepted any argv and nothing
 // ran the real one; the hook JSON jig prints is likewise what only the real
 // CLI can say it reads (TestHooksLive).
@@ -373,7 +709,8 @@ func TestCIWorkflowClaudeCLIJob(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if _, conditional := job["if"]; conditional {
+		// It may skip a docs-only pull request, which changes nothing it runs.
+		if ifExpr, conditional := job["if"]; conditional && ifExpr != codePlanned {
 			continue
 		}
 		if len(findLiveSteps(job, false)) > 0 {
@@ -381,7 +718,7 @@ func TestCIWorkflowClaudeCLIJob(t *testing.T) {
 			return
 		}
 	}
-	t.Errorf("ci.yml: no job without a job-level if runs go test with JIG_LIVE_CLAUDE set, so nothing runs against the real Claude Code CLI on every change, or before a release")
+	t.Errorf("ci.yml: no job without a job-level if (but %s) runs go test with JIG_LIVE_CLAUDE set, so nothing runs against the real Claude Code CLI on every change, or before a release", codePlanned)
 }
 
 // TestReleaseRunsTheHooksTestOnInstalledBinaries asserts a release's own
@@ -655,13 +992,22 @@ func TestCIWorkflowTestsEveryPackageOnEveryOS(t *testing.T) {
 	}
 	listRun, _ := yamlString(list["run"])
 	env, _ := yamlMap(list["env"])
-	if !strings.Contains(listRun, "$(go list ./...)") || !strings.Contains(listRun, "list=") || env["SKIP_PACKAGE"] != "${{ matrix.skip-package }}" {
-		t.Errorf("ci.yml: step %q does not print go list ./... as an output named list, less the SKIP_PACKAGE its env takes from matrix.skip-package, so a leg would test the wrong packages", id)
+	skipExpr, _ := yamlString(env["SKIP_PACKAGE"])
+	skip := skipPackageExpr.FindStringSubmatch(skipExpr)
+	if !strings.Contains(listRun, "$(go list ./...)") || !strings.Contains(listRun, "list=") || skip == nil {
+		t.Errorf("ci.yml: step %q does not print go list ./... as an output named list, less the SKIP_PACKAGE its env names for one runner OS (${{ runner.os == '<OS>' && '<package>' || '' }}), so a leg would test the wrong packages", id)
 	}
 	for _, line := range strings.Split(listRun, "\n") {
 		if listFilter.MatchString(line) && !strings.Contains(line, `ENVIRON["SKIP_PACKAGE"]`) {
 			t.Errorf("ci.yml: step %q filters its list with %q, which is not by SKIP_PACKAGE, so a leg could drop a package no job tests", id, strings.TrimSpace(line))
 		}
+	}
+	// A docs-only pull request tests lint alone: the list is replaced only
+	// under DOCS_ONLY, the plan's docs output, and only by ./lint.
+	docsOnly, _ := yamlString(env["DOCS_ONLY"])
+	replaced := strings.Count(listRun, "packages=$(go list")
+	if docsOnly != "${{ needs."+planJob+".outputs.docs }}" || replaced != 2 || !strings.Contains(listRun, "if [ \"$DOCS_ONLY\" = true ]; then\n  packages=$(go list ./lint)\nfi") {
+		t.Errorf("ci.yml: step %q does not replace its list with go list ./lint exactly when DOCS_ONLY, the plan's docs output, is true, and nowhere else, so a leg could test fewer packages than its change needs", id)
 	}
 
 	gomod, err := os.ReadFile(filepath.Join(root, "go.mod"))
@@ -669,33 +1015,39 @@ func TestCIWorkflowTestsEveryPackageOnEveryOS(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := regexp.MustCompile(`(?m)^module\s+(\S+)`).FindStringSubmatch(string(gomod))[1]
-	strategy, _ := yamlMap(test["strategy"])
-	matrix, _ := yamlMap(strategy["matrix"])
-	includes, _ := yamlSlice(matrix["include"])
-	for _, iv := range includes {
-		entry, _ := yamlMap(iv)
-		skip, _ := yamlString(entry["skip-package"])
-		leg, _ := yamlString(entry["os"])
-		switch {
-		case skip == "":
-		case !strings.HasPrefix(skip, module+"/"):
-			t.Errorf("ci.yml: the test job's %s leg skips %q, which is not an import path under %s, so go list never names it and the list step fails", leg, skip, module)
-		case !testedByAnotherJob(jobs, leg, skip, "./"+strings.TrimPrefix(skip, module+"/")):
-			t.Errorf("ci.yml: the test job's %s leg skips %s, but no job that runs on every change tests it on a %s runner (an unconditional go test step naming it, with no -run or -skip), so it would merge untested there", leg, skip, strings.SplitN(leg, "-", 2)[0])
-		}
+	if skip == nil {
+		return
+	}
+	leg, pkg := runnerLeg[skip[1]], skip[2]
+	switch {
+	case !strings.HasPrefix(pkg, module+"/"):
+		t.Errorf("ci.yml: the test job's %s leg skips %q, which is not an import path under %s, so go list never names it and the list step fails", leg, pkg, module)
+	case !testedByAnotherJob(jobs, leg, pkg, "./"+strings.TrimPrefix(pkg, module+"/")):
+		t.Errorf("ci.yml: the test job's %s leg skips %s, but no job that runs whenever that leg does tests it on a %s runner (an unconditional go test step naming it, with no -run or -skip), so it would merge untested there", leg, pkg, strings.SplitN(leg, "-", 2)[0])
 	}
 }
 
+// skipPackageExpr matches the test job's SKIP_PACKAGE: the package one
+// runner OS leaves to a job of its own, or none. runnerLeg maps runner.os
+// to that leg's label.
+var (
+	skipPackageExpr = regexp.MustCompile(`^\$\{\{ runner\.os == '(Windows|Linux|macOS)' && '([^']+)' \|\| '' \}\}$`)
+	runnerLeg       = map[string]string{"Windows": "windows-latest", "Linux": "ubuntu-latest", "macOS": "macos-latest"}
+)
+
 // testedByAnotherJob reports whether a job other than test - with no
-// job-level "if" or continue-on-error, on a runner of the leg's OS - has an
-// unconditional step whose go test line names pkg (as an import path or as
-// rel) without -run or -skip.
+// continue-on-error, on a runner of the leg's OS, and with no job-level
+// "if" but, for the Windows leg, windowsPlanned, under which it runs
+// whenever that leg does - has an unconditional step whose go test line
+// names pkg (as an import path or as rel) without -run or -skip.
 func testedByAnotherJob(jobs map[string]interface{}, leg, pkg, rel string) bool {
 	narrows := func(w string) bool { return strings.HasPrefix(w, "-run") || strings.HasPrefix(w, "-skip") }
 	for name, jv := range jobs {
 		job, _ := yamlMap(jv)
 		runsOn, _ := yamlString(job["runs-on"])
-		if _, conditional := job["if"]; name == "test" || conditional || hasContinueOnError(job) || !strings.HasPrefix(runsOn, strings.SplitN(leg, "-", 2)[0]+"-") {
+		ifExpr, conditional := job["if"]
+		withLeg := !conditional || (strings.HasPrefix(leg, "windows-") && ifExpr == windowsPlanned)
+		if name == "test" || !withLeg || hasContinueOnError(job) || !strings.HasPrefix(runsOn, strings.SplitN(leg, "-", 2)[0]+"-") {
 			continue
 		}
 		steps, _ := yamlSlice(job["steps"])

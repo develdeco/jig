@@ -1,0 +1,40 @@
+{
+  "findings": [
+    {
+      "file": "cart/cart.go",
+      "line": 26,
+      "title": "No test pins the nearest-cent rounding",
+      "detail": "Dropping the + 50 term, so the total truncates instead of rounding, leaves go test ./cart/... green: every case is rounding-indifferent.",
+      "action": "fix",
+      "risk": "medium",
+      "risk_rationale": "Every discounted order can be off by a cent with the suite still green.",
+      "oracle": "test"
+    },
+    {
+      "file": "cart/cart.go",
+      "line": 23,
+      "title": "No test pins the line total's quantity factor",
+      "detail": "Dropping * it.Qty leaves go test ./cart/... green: every item in the tests has a quantity of one.",
+      "action": "fix",
+      "risk": "high",
+      "risk_rationale": "An order of several units of one item would be priced as one unit with the suite still green.",
+      "oracle": "test"
+    }
+  ],
+  "still_present": [],
+  "reviewed_paths": [
+    "cart/cart.go",
+    "cart/cart_test.go"
+  ],
+  "summary": "The fix is right; two terms of the pricing path survive their mutants: the rounding and the quantity factor.",
+  "probes": [
+    {"seam": "Pricing a multi-item order with a discount returns the once-applied, rounded total", "file": "cart/cart.go", "line": 23, "mutation": "drop the * it.Qty factor", "command": "go test ./cart/...", "outcome": "survived"},
+    {"seam": "Pricing a multi-item order with a discount returns the once-applied, rounded total", "file": "cart/cart.go", "line": 26, "mutation": "drop the + 50 rounding term", "command": "go test ./cart/...", "outcome": "survived"},
+    {"seam": "Pricing a multi-item order with a discount returns the once-applied, rounded total", "file": "cart/cart.go", "line": 26, "mutation": "take the discount as 100 + discountPct", "command": "go test ./cart/...", "outcome": "caught"},
+    {"seam": "Pricing with a discount outside [0, 100] behaves as the nearest boundary", "file": "cart/cart.go", "line": 15, "mutation": "clamp only below -1", "command": "go test ./cart/...", "outcome": "caught"},
+    {"seam": "Pricing with a discount outside [0, 100] behaves as the nearest boundary", "file": "cart/cart.go", "line": 17, "mutation": "clamp above 101", "command": "go test ./cart/...", "outcome": "caught"}
+  ],
+  "skipped": [
+    {"file": "cart/cart_test.go", "from": 0, "to": 0, "why": "tests"}
+  ]
+}

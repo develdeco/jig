@@ -1,0 +1,26 @@
+{
+  "findings": [
+    {
+      "file": "cart/cart.go",
+      "line": 23,
+      "title": "No test pins the line total's quantity factor",
+      "detail": "The new tests pin the rounding, but dropping * it.Qty still leaves go test ./cart/... green: every item in the tests has a quantity of one.",
+      "action": "fix",
+      "risk": "high",
+      "risk_rationale": "An order of several units of one item would be priced as one unit with the suite still green.",
+      "oracle": "test"
+    }
+  ],
+  "still_present": [],
+  "reviewed_paths": [
+    "cart/cart.go",
+    "cart/cart_test.go"
+  ],
+  "summary": "The rounding is pinned now; the quantity factor still survives its mutant.",
+  "probes": [
+    {"seam": "Pricing a multi-item order with a discount returns the once-applied, rounded total", "file": "cart/cart.go", "line": 23, "mutation": "drop the * it.Qty factor", "command": "go test ./cart/...", "outcome": "survived"}
+  ],
+  "skipped": [
+    {"file": "cart/cart_test.go", "from": 0, "to": 0, "why": "tests"}
+  ]
+}
