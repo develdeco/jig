@@ -6,4 +6,30 @@
 # cuts git work lowers it. The failing step prints the numbers to put here.
 # A package that starts no git process has no entry.
 margin: 10
-packages: {}
+packages:
+  cmd/jig: 7260
+  e2e: 13704
+  internal/correct: 314
+  internal/fixture: 370
+  internal/gitbudget: 7
+  internal/gittest: 6
+  internal/gitx: 1395
+  internal/intent: 72
+  internal/locate: 180
+  internal/mergefacts: 191
+  internal/migrate: 194
+  internal/mirror: 1595
+  internal/observe: 1186
+  internal/pool: 2263
+  internal/project: 419
+  internal/ready: 148
+  internal/repohost: 2
+  internal/revieweval: 1692
+  internal/session: 137
+  internal/setup: 187
+  internal/slicectx: 62
+  internal/stack: 192
+  internal/store: 4399
+  internal/verify: 1484
+  internal/verifydeliver: 23923
+  lint: 21
