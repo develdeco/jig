@@ -76,6 +76,9 @@ func TestHooksDriveVerify(t *testing.T) {
 	}
 
 	// A commit made by git: its global post-commit hook starts the worker.
+	// Every verification waits for the release below, so the hooks in between
+	// see it running however long they take.
+	release := h.HoldVerifications("alpha", "beta")
 	sha := h.CommitScenario("a", 1)
 	waitFor(t, 10*time.Second, "the worker git's hook started", func() bool { return spawnedFor(readLedger(t, env), sha) == 1 })
 
@@ -106,6 +109,7 @@ func TestHooksDriveVerify(t *testing.T) {
 	}
 
 	// Both verify, and the journal says so.
+	release()
 	for _, c := range []struct{ sha, slice string }{{sha, "a"}, {sha2, "c"}} {
 		waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
 			return l.Event == journal.EventVerified && l.Commit == c.sha && l.Slice == c.slice
