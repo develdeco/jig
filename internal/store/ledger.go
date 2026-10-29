@@ -92,7 +92,9 @@ func CollapseContractIndexEntries(index string) (string, int) {
 // entryShape says how one file lays out its entries.
 type entryShape struct {
 	// head reads a line that opens an entry: the ticket id it names, and where
-	// that id starts and ends in the line.
+	// that id starts and ends in the line. Only a ticket id opens one
+	// (ParseTicketID), so a line of a question or an answer that happens to
+	// read "## Options" is text inside the entry it sits in.
 	head func(line string) (id string, start, end int, ok bool)
 	// end returns the first line past the entry that opens at lines[i], not
 	// counting the blank lines that set the next entry off.
@@ -105,7 +107,10 @@ var ledgerEntries = entryShape{
 	head: ledgerHead,
 	end: func(lines []string, i int) int {
 		j := i + 1
-		for j < len(lines) && !strings.HasPrefix(lines[j], "## ") {
+		for j < len(lines) {
+			if _, _, _, ok := ledgerHead(lines[j]); ok {
+				break
+			}
 			j++
 		}
 		for j > i+1 && strings.TrimSpace(lines[j-1]) == "" {
@@ -123,7 +128,8 @@ var contractIndexEntries = entryShape{
 
 // ledgerHead reads a "## <id> - <title>" heading the way recall.ParseLedger
 // does: the id is what precedes the first " - ", or the whole heading when it
-// has no title.
+// has no title. A heading whose id is not shaped like a ticket id (a section
+// the person wrote, a "## Options" in a multi-line answer) opens no entry.
 func ledgerHead(line string) (id string, start, end int, ok bool) {
 	rest, found := strings.CutPrefix(line, "## ")
 	if !found {
@@ -133,7 +139,7 @@ func ledgerHead(line string) (id string, start, end int, ok bool) {
 	lead := len(text) - len(strings.TrimLeft(text, " \t"))
 	id, _, _ = strings.Cut(text[lead:], " - ")
 	id = strings.TrimRight(id, " \t")
-	if id == "" {
+	if _, _, isID := ParseTicketID(id); !isID {
 		return "", 0, 0, false
 	}
 	start = len("## ") + lead
@@ -141,16 +147,18 @@ func ledgerHead(line string) (id string, start, end int, ok bool) {
 }
 
 // contractIndexHead reads a "- <id>: ..." line: the id is what stands between
-// the bullet and the first colon, and holds no space, so a line of prose that
-// happens to open "- note: ..." is not mistaken for a ticket's unless the
-// ticket is named "note".
+// the bullet and the first colon, and is shaped like a ticket id, so a line of
+// the person's own that opens "- note: ..." is not mistaken for a ticket's.
 func contractIndexHead(line string) (id string, start, end int, ok bool) {
 	rest, found := strings.CutPrefix(line, "- ")
 	if !found {
 		return "", 0, 0, false
 	}
 	colon := strings.IndexByte(rest, ':')
-	if colon <= 0 || strings.ContainsAny(rest[:colon], " \t") {
+	if colon <= 0 {
+		return "", 0, 0, false
+	}
+	if _, _, isID := ParseTicketID(rest[:colon]); !isID {
 		return "", 0, 0, false
 	}
 	return rest[:colon], len("- "), len("- ") + colon, true

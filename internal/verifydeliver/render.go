@@ -59,14 +59,17 @@ func writeChangelogs(st *store.Store, ticket string, slices []store.Slice, lines
 }
 
 // answersBlock renders the ledger's "**Answers:**" section: one bullet per
-// answered question, or "none".
+// answered question, or "none". A question or an answer that runs over
+// several lines is folded onto one (oneLine): a line of its own in the entry
+// that starts "- " would read as another answer's bullet, and one that starts
+// "## " as the next entry's heading.
 func answersBlock(questions []store.Question) string {
 	var lines []string
 	for _, q := range questions {
 		if q.Status != "answered" || q.Answer == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- %s: %s -> %s", q.ID, q.Body, q.Answer))
+		lines = append(lines, fmt.Sprintf("- %s: %s -> %s", q.ID, oneLine(q.Body), oneLine(q.Answer)))
 	}
 	if len(lines) == 0 {
 		return "none"
@@ -98,7 +101,7 @@ func editStoreDoc(path, what string, edit func(text string) string) error {
 func writeLedgerEntry(st *store.Store, ticket, title string, slices []store.Slice, questions []store.Question) error {
 	entry := fmt.Sprintf(
 		"## %s - %s\n\nDelivered %d slice(s).\n\n**Answers:**\n%s\n",
-		ticket, title, len(slices), answersBlock(questions),
+		ticket, oneLine(title), len(slices), answersBlock(questions),
 	)
 	return editStoreDoc(st.LedgerPath(), "ledger", func(text string) string {
 		return store.ReplaceLedgerEntry(text, ticket, entry)

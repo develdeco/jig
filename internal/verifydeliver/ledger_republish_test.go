@@ -209,11 +209,76 @@ func TestRepublishCollapsesTheDuplicatesAnEarlierPublishLeft(t *testing.T) {
 	}
 }
 
+// TestLedgerEntryFoldsAMultiLineAnswerOntoOneLine: a question or an answer
+// that runs over several lines, with a "## " line and a "- " line in it, is
+// written as one bullet, so recall reads one answer and a republish with the
+// same inputs changes nothing.
+func TestLedgerEntryFoldsAMultiLineAnswerOntoOneLine(t *testing.T) {
+	t.Parallel()
+	st := &store.Store{Root: t.TempDir()}
+	slices := []store.Slice{{ID: "a"}}
+	questions := []store.Question{answered("q-001", "Which approach?\n\n## Options\n- A\n- B", "A,\nnot B\n\n## Because\n- it is simpler")}
+	for _, ticket := range []string{"JIG-1", "JIG-2"} {
+		if err := writeLedgerEntry(st, ticket, "Title of "+ticket, slices, questions); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := readStoreDoc(t, st.LedgerPath())
+
+	want := []recall.LedgerEntry{
+		{Ticket: "JIG-1", Title: "Title of JIG-1", Answers: []recall.Answer{{ID: "q-001", Text: "Which approach? ## Options - A - B -> A, not B ## Because - it is simpler"}}},
+		{Ticket: "JIG-2", Title: "Title of JIG-2", Answers: []recall.Answer{{ID: "q-001", Text: "Which approach? ## Options - A - B -> A, not B ## Because - it is simpler"}}},
+	}
+	if got := recall.ParseLedger(first); !reflect.DeepEqual(got, want) {
+		t.Errorf("recall.ParseLedger(ledger.md) = %+v, want %+v\nledger.md:\n%s", got, want, first)
+	}
+	if err := writeLedgerEntry(st, "JIG-1", "Title of JIG-1", slices, questions); err != nil {
+		t.Fatal(err)
+	}
+	if got := readStoreDoc(t, st.LedgerPath()); got != first {
+		t.Errorf("ledger.md after publishing JIG-1 again =\n%s\nwant it unchanged:\n%s", got, first)
+	}
+}
+
+// TestRepublishReplacesAnEntryAnOlderBuildWroteOverSeveralLines: an older build
+// wrote a multi-line answer as it was, so an entry can hold a "## Options"
+// line of its own. That line is part of the entry, not the heading of another
+// one: a republish replaces the whole entry, and does not touch the next
+// ticket's, which holds the same line.
+func TestRepublishReplacesAnEntryAnOlderBuildWroteOverSeveralLines(t *testing.T) {
+	t.Parallel()
+	st := &store.Store{Root: t.TempDir()}
+	entry := func(ticket, title string) string {
+		return strings.Join([]string{
+			"## " + ticket + " - " + title,
+			"",
+			"Delivered 1 slice(s).",
+			"",
+			"**Answers:**",
+			"- q-001: Which approach?",
+			"",
+			"## Options",
+			"- A -> A",
+			"",
+		}, "\n")
+	}
+	writeStoreDoc(t, st.LedgerPath(), "# Ledger\n\n"+entry("JIG-1", "First")+"\n"+entry("JIG-2", "Second"))
+
+	if err := writeLedgerEntry(st, "JIG-1", "First", []store.Slice{{ID: "a"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "# Ledger\n\n## JIG-1 - First\n\nDelivered 1 slice(s).\n\n**Answers:**\nnone\n\n" + entry("JIG-2", "Second")
+	if got := readStoreDoc(t, st.LedgerPath()); got != want {
+		t.Errorf("ledger.md =\n%s\nwant\n%s", got, want)
+	}
+}
+
 // TestLedgerEntryLeavesTheRestOfTheFileAlone: what is in ledger.md besides the
 // ticket's entry survives a publish - the heading, text between entries, a file
-// with no trailing newline. An entry runs to the next "## " heading, as
-// recall.ParseLedger reads it, so a deeper heading under it is part of it and
-// goes with it when the entry is replaced.
+// with no trailing newline. An entry runs to the next ticket's heading, so a
+// deeper heading under it is part of it and goes with it when the entry is
+// replaced.
 func TestLedgerEntryLeavesTheRestOfTheFileAlone(t *testing.T) {
 	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
@@ -231,7 +296,7 @@ func TestLedgerEntryLeavesTheRestOfTheFileAlone(t *testing.T) {
 		"",
 		"Its text.",
 		"",
-		"## JIG-1B - Another ticket",
+		"## JIG-3 - Another ticket",
 		"",
 		"**Answers:**",
 		"none",
@@ -256,7 +321,7 @@ func TestLedgerEntryLeavesTheRestOfTheFileAlone(t *testing.T) {
 		"**Answers:**",
 		"none",
 		"",
-		"## JIG-1B - Another ticket",
+		"## JIG-3 - Another ticket",
 		"",
 		"**Answers:**",
 		"none",

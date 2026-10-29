@@ -304,6 +304,46 @@ func TestApplyCollapsesDuplicatesInAFileThatRenamesNothing(t *testing.T) {
 	}
 }
 
+// TestApplyKeepsTwoTicketsApartWhoseEntriesHoldTheSameLine: an older build
+// wrote a multi-line answer as it was, so two tickets' entries can each hold a
+// "## Options" line. That line is text of its entry, not a ticket: the
+// migration renames the two headings, collapses nothing, and neither ticket's
+// answer ends up in the other's entry.
+func TestApplyKeepsTwoTicketsApartWhoseEntriesHoldTheSameLine(t *testing.T) {
+	t.Parallel()
+	entry := func(heading, title, answeredFor string) string {
+		return strings.Join([]string{
+			"## " + heading + " - " + title,
+			"",
+			"**Answers:**",
+			"- q-001: Which approach?",
+			"",
+			"## Options",
+			"- A -> A for " + answeredFor,
+			"",
+		}, "\n")
+	}
+	st := newV1GitStore(t)
+	putStoreFile(t, st, "ledger.md", "# Ledger\n\n"+entry("T-1", "First", "T-1")+"\n"+entry("T-2", "Second", "T-2"))
+
+	plan, err := BuildPlan(st, renameMapTwoTickets(), "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if len(plan.Collapsed) != 0 {
+		t.Errorf("plan collapses %v, want nothing: no ticket has two entries", plan.Collapsed)
+	}
+	if err := Apply(st, plan); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	// The headings are renamed; the old ids in the answers are prose and stay.
+	want := "# Ledger\n\n" + entry("STORE-1", "First", "T-1") + "\n" + entry("GRAPH-1", "Second", "T-2")
+	if got := readStoreFile(t, st, "ledger.md"); got != want {
+		t.Errorf("ledger.md =\n%s\nwant\n%s", got, want)
+	}
+}
+
 // TestStepOneRenamesTheContractIndexInTheConfiguredPlatformDirectory: the
 // migration step reads the project's platform directory from its config, so
 // the contract index in notes/platform/ is renamed and the default
