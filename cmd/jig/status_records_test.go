@@ -121,7 +121,7 @@ func twoRounds(t *testing.T, fx *fixture.Fixture, st *store.Store) {
 // names and, for a fix slice, the round it came from.
 func TestStatusSlicesNameTheirWorkspaceOracleAndRound(t *testing.T) {
 	t.Parallel()
-	fx := newFixture(t, fixture.Opts{})
+	fx := newStoreOnlyFixture(t)
 	st := openStore(t, fx)
 	fix := store.Slice{ID: "fix-1", Workspace: "alpha", Goal: "Fix the finding", Oracle: "go test ./...", BlockedBy: []string{"a"}, FromGate: 2}
 	if err := st.AppendSlices(fx.Ticket, []store.Slice{fix}); err != nil {
@@ -146,7 +146,7 @@ func TestStatusSlicesNameTheirWorkspaceOracleAndRound(t *testing.T) {
 // and the range and the paths it reviewed.
 func TestStatusRoundsListsEachRecordedRound(t *testing.T) {
 	t.Parallel()
-	fx := newFixture(t, fixture.Opts{})
+	fx := newStoreOnlyFixture(t)
 	st := openStore(t, fx)
 	if got := statusOf(t, fx, st); strings.Contains(got, "rounds[") || strings.Contains(got, "findings[") || strings.Contains(got, "publish:") {
 		t.Errorf("a ticket with no round or publish has their blocks:\n%s", got)
@@ -173,7 +173,7 @@ func TestStatusRoundsListsEachRecordedRound(t *testing.T) {
 // scope or paths, and a clean round and one the reviewer built are told apart.
 func TestStatusRoundsNamesARoundNoReviewerRan(t *testing.T) {
 	t.Parallel()
-	fx := newFixture(t, fixture.Opts{})
+	fx := newStoreOnlyFixture(t)
 	st := openStore(t, fx)
 	writeRound(t, fx.StoreDir, fx.Ticket, 1, roundFiles{report: "round: 1\nverdict: fix-slices\ntarget_sha:\n  fixture-repo: " + sha40("5") + "\n"})
 	writeRound(t, fx.StoreDir, fx.Ticket, 2, roundFiles{
@@ -259,7 +259,7 @@ func TestStatusFindingsDropsADecisionARoundHasTaken(t *testing.T) {
 // no body.
 func TestStatusPublishReadsNoFileOutsideTheStore(t *testing.T) {
 	t.Parallel()
-	fx := newFixture(t, fixture.Opts{})
+	fx := newStoreOnlyFixture(t)
 	st := openStore(t, fx)
 	outside := filepath.Join(filepath.Dir(fx.StoreDir), "outside.md")
 	if err := os.WriteFile(outside, []byte("not the store's\n"), 0o644); err != nil {
@@ -281,7 +281,7 @@ func TestStatusPublishReadsNoFileOutsideTheStore(t *testing.T) {
 // grows as the publish does, from the body to the pull request to the changelog.
 func TestStatusPublishNamesThePullRequestAndTheFirstLinesOfItsBody(t *testing.T) {
 	t.Parallel()
-	fx := newFixture(t, fixture.Opts{})
+	fx := newStoreOnlyFixture(t)
 	st := openStore(t, fx)
 	head := sha40("c")
 	bodyRel := "tickets/" + fx.Ticket + "/pr/fixture-repo.md"
@@ -348,7 +348,7 @@ func TestStatusPublishNamesThePullRequestAndTheFirstLinesOfItsBody(t *testing.T)
 // not done yet; a ticket whose lines name one repo reads as it always did.
 func TestStatusPublishListsThePullRequestOfEachRepo(t *testing.T) {
 	t.Parallel()
-	fx := newFixture(t, fixture.Opts{})
+	fx := newStoreOnlyFixture(t)
 	st := openStore(t, fx)
 	branch := "jig/" + fx.Ticket
 	api, web := sha40("a"), sha40("b")

@@ -119,6 +119,18 @@ func reviewResult(t *testing.T, st *store.Store, ticket string, n int, ask bool)
 // is clean, and one key approves and publishes (publish-approved, pr,
 // publish-done). Everything the keys did is a verb: the journal holds what
 // the same commands would have written.
+//
+// This is the one chain of the screens. The first round's reviewer is a
+// subagent of the builder's session (the hook payloads carry its id, the
+// ledger names it, and the round is independent). With the round's ask
+// waiting, `jig status` lists it with no decision and the phase waits on it,
+// and the detail screens (the round, the build, the brief) show what the verbs
+// print for them; once the person dismisses it, status lists the decision and
+// who made it, and the next round's request carries it. The rules behind those
+// lines are the seams': internal/tui's screens and records tests, cmd/jig's
+// status and triage tests, internal/verifydeliver's TestOpenRowsCarryAPendingDecision
+// and TestGateFinishFindsTheReviewerWhenNobodyNamedIt; that the screens and
+// `jig next` stand at the same place is cmd/jig's TestTheScreensStandWhereJigNextDoes.
 func TestTUIHandBuiltToPublish(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
@@ -193,21 +205,69 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	h.WaitVerifiers()
 	screens.until("4 slices green, each verified by jig")
 
-	// The gate opens from the screens. A reviewer in a session of its own
-	// reads the round and reports one ask.
+	// The gate opens from the screens. A subagent of the builder's session
+	// reads the round and reports one ask: the harness's hook payloads carry the
+	// subagent's id, the ledger's tool lines name it, and the round is
+	// independent of the builders although the session is the builder's.
 	screens.press("g")
 	screens.until("round 1 open", "✓ jig gate "+fx.Ticket)
-	reviewer := newHarness(t, fx, env, "s-reviewer")
-	if res := reviewer.Jig("review", "context", fx.Ticket); res.Code != 0 {
+	b := builtTicket{whole: true, fx: fx, env: env, builder: h, branch: branch, st: st}
+	sub := newHarness(t, fx, env, "s-builder")
+	sub.Agent = "agent-reviewer"
+	if res := jigHooked(sub, "review", "context", fx.Ticket); res.Code != 0 {
 		t.Fatalf("jig review context exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	reviewer.Bash("git log --oneline -3")
-	if res := reviewer.Jig("review", "done", fx.Ticket, "--result", reviewResult(t, st, fx.Ticket, 1, true)); !strings.Contains(res.Stdout, "round: 1") {
-		t.Fatalf("jig review done (round 1) exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	done := jigHooked(sub, "review", "done", fx.Ticket, "--result", reviewResult(t, st, fx.Ticket, 1, true))
+	if !strings.Contains(done.Stdout, "round: 1") || !strings.Contains(done.Stdout, "independent: true") {
+		t.Fatalf("jig review done (round 1) exit = %d, want round 1 recorded as independent\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
+	}
+	if rep := b.report(t, "1"); rep["independent"] != true {
+		t.Errorf("report.yaml of round 1 = %v, want independent: true", rep)
+	}
+	if reviewer, _ := b.report(t, "1")["reviewer"].(map[string]any); reviewer["session"] != "s-builder" || reviewer["agent"] != "agent-reviewer" {
+		t.Errorf("report.yaml reviewer = %v, want the subagent agent-reviewer of session s-builder", reviewer)
 	}
 	if screen := screens.until("round 1 left 1 ask"); !strings.Contains(screen, "Which greeting does the product want?") {
 		t.Errorf("the screen with the round's findings does not show the ask:\n%s", screen)
 	}
+
+	// The ask waits for a decision: `jig status` lists it with none, the help
+	// counts it, and the ticket's phase waits on it.
+	out := runJig(t, env, h.Clone, "status", fx.Ticket).Stdout
+	if !strings.Contains(out, "outstanding_asks[1]{id,risk,file:line,title,why,decision,decided_by}:") {
+		t.Fatalf("status lacks the asks table with its decision columns:\n%s", out)
+	}
+	if row := lineStarting(out, "  r1-f1,"); !strings.HasSuffix(row, ",,,") {
+		t.Errorf("the undecided ask's row = %q, want no why, no decision and no decider", row)
+	}
+	if !strings.Contains(out, "to decide the 1 undecided ask, then `jig gate "+fx.Ticket+"` to apply the decisions") {
+		t.Errorf("status help does not count the undecided ask:\n%s", out)
+	}
+	if p := nextJSON[phaseOut](t, env, h.Clone, fx.Ticket).Phase; p.Ready || p.Code != "PHASE_ASKS_UNDECIDED" {
+		t.Errorf("before the decision: phase ready=%v code=%q, want PHASE_ASKS_UNDECIDED", p.Ready, p.Code)
+	}
+
+	// The detail screens read what the verbs print. From the review step, which
+	// is the current one, up through the build to the brief, each screen shows
+	// what `jig status` and `jig brief show --text` printed for it.
+	// The round: who reviewed it, whether they stood apart from the builders,
+	// what they read, what they raised, and the ask with the reviewer's reason.
+	screens.press("\r")
+	screens.until("round 1  findings", "raised 1 ask", "independent", "files read", "fix budget 0 of 3 rounds used",
+		"Which greeting does the product want?", "undecided", "a user-visible string")
+	// The build: each slice's workspace and oracle from slices.yaml, and the
+	// commit that was verified, with its subject.
+	screens.press("\x7f")
+	screens.press("\x1b[A")
+	screens.press("\r")
+	screens.until("workspace alpha · oracle test", "workspace beta · oracle test", "“JIG-1 a: ", "fix budget 0 of 3 rounds used")
+	// The brief: its sections with their first lines, read by the screen from
+	// the verb, and the slices that cite them.
+	screens.press("\x7f")
+	screens.press("\x1b[A")
+	screens.press("\r")
+	screens.until("Slice A - failing clamp", "`alpha.Clamp` is committed broken", "workspace alpha · oracle test · after a")
+	screens.press("\x7f")
 
 	// The person dismisses the ask from the screens, and opens the next round.
 	screens.press("d")
@@ -216,15 +276,69 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if triage.Ref != "r1-f1" || triage.Outcome != "dismiss" || triage.Provenance != "person" {
 		t.Errorf("triage line = %+v, want r1-f1 dismissed by a person", triage)
 	}
+	// The decision is pending: the ask stays listed with it, by whom, and the
+	// ticket's phase no longer waits.
+	out = runJig(t, env, h.Clone, "status", fx.Ticket).Stdout
+	if row := lineStarting(out, "  r1-f1,"); !strings.HasSuffix(row, ",,dismiss,person") {
+		t.Errorf("the decided ask's row = %q, want it to end in the dismissal and its decider\n%s", row, out)
+	}
+	if want := "Run `jig gate " + fx.Ticket + "` to apply the decisions: the 1 decided ask is applied when the next round closes"; !strings.Contains(out, want) {
+		t.Errorf("status help does not count the ask as decided (want %q):\n%s", want, out)
+	}
+	if p := nextJSON[phaseOut](t, env, h.Clone, fx.Ticket).Phase; !p.Ready || p.Code != "" {
+		t.Errorf("after the decision: phase ready=%v code=%q, want ready", p.Ready, p.Code)
+	}
 	screens.press("g")
 	screens.until("round 2 open", "✓ jig gate "+fx.Ticket)
-	if res := reviewer.Jig("review", "context", fx.Ticket); res.Code != 0 {
-		t.Fatalf("jig review context (round 2) exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	if row := lineStarting(runJig(t, env, h.Clone, "status", fx.Ticket).Stdout, "  r1-f1,"); !strings.HasSuffix(row, ",,dismiss,person") {
+		t.Errorf("with round 2 open, the ask's row = %q, want the decision still shown", row)
+	}
+
+	// A reviewer in a session of its own reads round 2. Its request holds the
+	// ask still, with the decision, so it does not raise it again; the dismissed
+	// list stays empty, since only the round that closes moves the ask.
+	reviewer := newHarness(t, fx, env, "s-reviewer")
+	ctx := reviewer.Jig("review", "context", fx.Ticket)
+	if ctx.Code != 0 {
+		t.Fatalf("jig review context (round 2) exit = %d\nstdout:\n%s\nstderr:\n%s", ctx.Code, ctx.Stdout, ctx.Stderr)
+	}
+	if !strings.Contains(ctx.Stdout, "open[1]{id,file:line,action,risk,title,decision}:") {
+		t.Fatalf("the round's open list lacks the ask:\n%s", ctx.Stdout)
+	}
+	if row := lineStarting(ctx.Stdout, "  r1-f1,"); !strings.HasSuffix(row, `,"decided: dismiss, by a person"`) {
+		t.Errorf("the ask's open row = %q, want it to end in the decision and who made it", row)
+	}
+	if !strings.Contains(ctx.Stdout, "dismissed[0]") {
+		t.Errorf("the decided ask was moved to the dismissed list before the round closed:\n%s", ctx.Stdout)
+	}
+	var req struct {
+		Open []struct {
+			ID        string `json:"id"`
+			Decision  string `json:"decision"`
+			DecidedBy string `json:"decided_by"`
+		} `json:"open"`
+		Dismissed []struct {
+			ID string `json:"id"`
+		} `json:"dismissed"`
+	}
+	asJSON := reviewer.Jig("review", "context", fx.Ticket, "--json")
+	if err := json.Unmarshal([]byte(asJSON.Stdout), &req); err != nil {
+		t.Fatalf("parse review context --json: %v\n%s", err, asJSON.Stdout)
+	}
+	if len(req.Open) != 1 || req.Open[0].ID != "r1-f1" || req.Open[0].Decision != "dismiss" || req.Open[0].DecidedBy != "person" || len(req.Dismissed) != 0 {
+		t.Errorf("request open = %+v, dismissed = %+v, want r1-f1 dismissed by a person, and none dismissed yet", req.Open, req.Dismissed)
+	}
+	if stored := string(readFileOrFatal(t, b.workFile("gate.round-2.review.json"))); !strings.Contains(stored, `"decision": "dismiss"`) {
+		t.Errorf("the stored review.json does not carry the decision:\n%s", stored)
 	}
 	if res := reviewer.Jig("review", "done", fx.Ticket, "--result", reviewResult(t, st, fx.Ticket, 2, false)); res.Code != 0 || !strings.Contains(res.Stdout, "verdict: clean") {
 		t.Fatalf("jig review done (round 2) exit = %d, want 0 and a clean verdict\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	screens.until("round 2 clean")
+	// The round that closed applied the dismissal: the ask is gone.
+	if out = runJig(t, env, h.Clone, "status", fx.Ticket).Stdout; strings.Contains(out, "outstanding_asks") || strings.Contains(out, "r1-f1") {
+		t.Errorf("status still lists the ask after the round applied the decision:\n%s", out)
+	}
 
 	// One key, and a yes to the question, approves and publishes.
 	screens.press("p")

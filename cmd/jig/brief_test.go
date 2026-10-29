@@ -24,21 +24,49 @@ const (
 	showHTML   = "<h1>The picture</h1><script>1</script>"
 )
 
-// briefRig is a fixture store with a second ticket, JIG-2, whose brief is
-// showBrief and, when illustration is true, whose illustration is showHTML.
+// briefFx is where a briefRig keeps its jig home and its store, and the repo of
+// the one rig that has a clone.
+type briefFx struct {
+	Home, StoreDir, RepoDir string
+}
+
+// briefRig is a store with a ticket, JIG-2, whose brief is showBrief and, when
+// illustration is true, whose illustration is showHTML. The store is made of
+// files alone, so no test starts git but the one that needs the repo of a
+// branch (newBriefRigInRepo).
 type briefRig struct {
 	t  *testing.T
-	fx *fixture.Fixture
+	fx briefFx
 	st *store.Store
 }
 
 func newBriefRig(t *testing.T, illustration bool) briefRig {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "project.yaml"), []byte("schema_version: 2\nname: demo\nkeys:\n  JIG: everything in demo\ntrackers: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return briefRigOf(t, briefFx{Home: t.TempDir(), StoreDir: root}, st, illustration)
+}
+
+// newBriefRigInRepo is newBriefRig on the fixture: the store has a clone, for
+// the verb that names the ticket after the working branch.
+func newBriefRigInRepo(t *testing.T, illustration bool) briefRig {
 	t.Helper()
 	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return briefRigOf(t, briefFx{Home: fx.Home, StoreDir: fx.StoreDir, RepoDir: fx.RepoDir}, st, illustration)
+}
+
+func briefRigOf(t *testing.T, fx briefFx, st *store.Store, illustration bool) briefRig {
+	t.Helper()
 	if err := st.CreateTicketRecord(showTicket, store.Ticket{Title: "Show the thing", Slug: "show-the-thing"}); err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +378,7 @@ func TestBriefShowRefusals(t *testing.T) {
 // asks for one.
 func TestBriefShowTakesTheTicketTheBranchNames(t *testing.T) {
 	t.Parallel()
-	r := newBriefRig(t, false)
+	r := newBriefRigInRepo(t, false)
 	e := testEnv(r.fx.Home).inDir(r.fx.RepoDir)
 
 	out, code := r.show(t, e, "--path")

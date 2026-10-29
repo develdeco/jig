@@ -183,7 +183,7 @@ func TestPhaseFactsReadTheStore(t *testing.T) {
 // TestNextAsksOnlyAboutATicketAndAPhase: --for names a phase and needs a ticket.
 func TestNextAsksOnlyAboutATicketAndAPhase(t *testing.T) {
 	t.Parallel()
-	_, _, e := workFixture(t)
+	e := testEnv(t.TempDir()) // both refusals come before any store is read
 	for _, tc := range []struct {
 		args []string
 		want string
