@@ -773,10 +773,10 @@ func writeStoreDocs(d Deps, t *publishTarget, oracleNames []string) error {
 		return err
 	}
 	title := consolidatedTitle(t.rec.Title, ticket, t.slices)
-	if err := appendLedgerEntry(d.Store, ticket, title, t.slices, questions); err != nil {
+	if err := writeLedgerEntry(d.Store, ticket, title, t.slices, questions); err != nil {
 		return err
 	}
-	if err := appendContractIndexEntry(d.Store, d.Cfg.Platform, ticket, t.slices, oracleNames); err != nil {
+	if err := writeContractIndexEntry(d.Store, d.Cfg.Platform, ticket, t.slices, oracleNames); err != nil {
 		return err
 	}
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventChangelog}); err != nil {
