@@ -354,8 +354,8 @@ func tip(dir, branch string) (ref, head string) {
 
 // commit is the commit ref names in dir, "" when it names none.
 func commit(dir, ref string) string {
-	out, err := gitx.Run(dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
-	if err != nil {
+	out, found, _ := gitx.ResolveCommit(dir, ref)
+	if !found {
 		return ""
 	}
 	return out

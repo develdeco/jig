@@ -163,8 +163,8 @@ func (s *Store) Claim(write func() (id string, paths []string, err error), msg f
 // yet), which Claim can only see on a store with no origin, where nothing
 // past this point ever needs to undo a commit.
 func (s *Store) headSHA() (string, bool) {
-	sha, err := gitx.Run(s.Root, "rev-parse", "--quiet", "--verify", "HEAD")
-	if err != nil {
+	sha, found, err := gitx.Resolve(s.Root, "HEAD")
+	if err != nil || !found {
 		return "", false
 	}
 	return sha, true
@@ -190,7 +190,7 @@ func (s *Store) foreignCommitAhead(pre, claimSHA string) (string, error) {
 		return "", nil
 	}
 	if claimSHA != "" && tip == claimSHA {
-		parent, err := gitx.Run(s.Root, "rev-parse", "--quiet", "--verify", claimSHA+"^")
+		parent, err := gitx.Verify(s.Root, claimSHA+"^")
 		if err != nil {
 			return "", err
 		}

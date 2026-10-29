@@ -218,7 +218,7 @@ func chooseBuiltCopy(d Deps, leaseDir, repoName, ticket, branch string, built []
 // originsTip is the sha branch has on origin as dir last fetched it, or "" when
 // origin has no such branch.
 func originsTip(dir, branch string) (string, error) {
-	tip, err := gitx.Run(dir, "for-each-ref", "--format=%(objectname)", "refs/remotes/origin/"+branch)
+	tip, err := gitx.RefTip(dir, "refs/remotes/origin/"+branch)
 	if err != nil {
 		return "", fmt.Errorf("look up origin/%s: %w", branch, err)
 	}
@@ -264,7 +264,7 @@ func pointAtBuiltCopy(d Deps, leaseDir, buildDir, repoName, ticket, branch strin
 	if !pool.Usable(buildDir) {
 		return origin()
 	}
-	if _, err := gitx.RevParse(buildDir, "refs/heads/"+branch); err != nil {
+	if _, found, _ := gitx.Resolve(buildDir, "refs/heads/"+branch); !found {
 		return origin()
 	}
 	if err := fetchTicketBranchFromBuildLease(d.Home, leaseDir, repoName, ticket, branch); err != nil {
@@ -367,7 +367,7 @@ func pointAtBranchCopy(d Deps, leaseDir, repoName, ticket, branch string, adopte
 // branchTipIn is the sha of refs/heads/<branch> in the repository at dir, or
 // "" when it has no such branch.
 func branchTipIn(dir, branch string) (string, error) {
-	tip, err := gitx.Run(dir, "for-each-ref", "--format=%(objectname)", "refs/heads/"+branch)
+	tip, err := gitx.RefTip(dir, "refs/heads/"+branch)
 	if err != nil {
 		return "", fmt.Errorf("look up %s in %s: %w", branch, dir, err)
 	}
@@ -390,7 +390,7 @@ func requireACopy(d Deps, leaseDir, repoName, ticket, branch string, adopted boo
 		return nil
 	}
 	if buildDir, err := pool.Dir(d.Home, repoName, ticket, pool.Build); err == nil && !adopted && pool.Usable(buildDir) {
-		if _, err := gitx.RevParse(buildDir, "refs/heads/"+branch); err == nil {
+		if _, found, _ := gitx.Resolve(buildDir, "refs/heads/"+branch); found {
 			return nil
 		}
 	}

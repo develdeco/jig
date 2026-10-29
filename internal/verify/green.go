@@ -25,7 +25,7 @@ func verifyGreen(leaseDir, startSHA string, res outcome.Result) (reason string, 
 	if res.Commit == startSHA {
 		return "commit is the run's start sha: no new work", false
 	}
-	if _, err := gitx.Run(leaseDir, "cat-file", "-e", res.Commit+"^{commit}"); err != nil {
+	if !gitx.HasCommit(leaseDir, res.Commit) {
 		return fmt.Sprintf("commit %s not found in lease", res.Commit), false
 	}
 	if _, err := gitx.Run(leaseDir, "merge-base", "--is-ancestor", startSHA, res.Commit); err != nil {
@@ -36,7 +36,7 @@ func verifyGreen(leaseDir, startSHA string, res outcome.Result) (reason string, 
 	}
 	for _, a := range res.Artifacts {
 		path := filepath.ToSlash(a)
-		if _, err := gitx.Run(leaseDir, "cat-file", "-e", res.Commit+":"+path); err != nil {
+		if !gitx.HasPathAt(leaseDir, res.Commit, path) {
 			return fmt.Sprintf("artifact %s missing at commit %s", a, res.Commit), false
 		}
 	}

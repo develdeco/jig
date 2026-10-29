@@ -414,8 +414,8 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 	}
 	envs := gateEnvs(man, slices)
 	sameTree := func(commit string) bool {
-		tree, err := gitx.RevParse(dir, commit+"^{tree}")
-		return err == nil && tree == headTree
+		tree, found, _ := gitx.Resolve(dir, commit+"^{tree}")
+		return found && tree == headTree
 	}
 	passed, failed := map[string]string{}, map[string]bool{}
 	for _, l := range lines {
@@ -767,7 +767,7 @@ func dropLeaseBranch(leaseDir, branch string) error {
 	if _, err := gitx.Run(leaseDir, "checkout", "--detach", "HEAD"); err != nil {
 		return fmt.Errorf("detach HEAD: %w", err)
 	}
-	if _, err := gitx.Run(leaseDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+	if _, found, _ := gitx.Resolve(leaseDir, "refs/heads/"+branch); !found {
 		return nil // no local copy
 	}
 	if _, err := gitx.Run(leaseDir, "branch", "-D", branch); err != nil {
