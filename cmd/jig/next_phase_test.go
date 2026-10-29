@@ -203,14 +203,21 @@ type nextPhaseOut struct {
 	} `json:"phase"`
 }
 
-// next runs `jig next <ticket> args...` as e, in JSON and in text.
-func (r phaseRig) next(t *testing.T, e env, args ...string) (nextPhaseOut, string) {
+// nextJSON runs `jig next --json <ticket> args...` as e.
+func (r phaseRig) nextJSON(t *testing.T, e env, args ...string) nextPhaseOut {
 	t.Helper()
 	asJSON, code := runMain(t, e, "", append([]string{"next", "--store", r.root, "--json", r.ticket}, args...)...)
 	var out nextPhaseOut
 	if err := json.Unmarshal([]byte(asJSON), &out); code != 0 || err != nil {
 		t.Fatalf("jig next --json %s %v: exit %d, %v\n%s", r.ticket, args, code, err, asJSON)
 	}
+	return out
+}
+
+// next runs `jig next <ticket> args...` as e, in JSON and in text.
+func (r phaseRig) next(t *testing.T, e env, args ...string) (nextPhaseOut, string) {
+	t.Helper()
+	out := r.nextJSON(t, e, args...)
 	text, code := runMain(t, e, "", append([]string{"next", "--store", r.root, r.ticket}, args...)...)
 	if code != 0 {
 		t.Fatalf("jig next %s %v: exit %d\n%s", r.ticket, args, code, text)
@@ -315,8 +322,7 @@ func TestTheScreensStandWhereJigNextDoes(t *testing.T) {
 			envs = append(envs, events.Envelope{Src: events.SrcJournal, Store: "demo", Line: l})
 		}
 		got := tui.StandingOf(T, status, envs)
-		next, _ := r.next(t, e)
-		p := next.Phase
+		p := r.nextJSON(t, e).Phase
 		if got.Current != s.phase || got.Ready != s.ready {
 			t.Errorf("%s: the screens stand at %s (ready %v), want %s (ready %v)", s.name, got.Current, got.Ready, s.phase, s.ready)
 		}
