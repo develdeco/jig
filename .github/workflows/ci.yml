@@ -23,21 +23,99 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Which jobs and test legs this run needs. A pull request runs the test
+  # job on Linux and macOS, and on Windows too only when it changes what
+  # Windows builds or runs differently: a _windows Go file or one with a
+  # build constraint, go.mod or go.sum, .gitattributes, or a workflow. A
+  # pull request that changes only docs (markdown at the root or in .github,
+  # docs/, LICENSE), which no test reads but lint's, tests ./lint alone and
+  # skips claude-cli. Every other event - a push to main, the daily
+  # schedule, a dispatch, a release's call - runs everything on all three.
+  # The Windows legs take 15 to 18 minutes, Linux and macOS 2 to 4, so a
+  # Windows-only failure is found on main within the half hour after its
+  # merge and fixed forward (DECISIONS.md, "Pull requests test on Linux and
+  # macOS"). lint/workflow_test.go runs this job's step with synthetic
+  # changes.
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      os: ${{ steps.plan.outputs.os }}
+      windows: ${{ steps.plan.outputs.windows }}
+      docs: ${{ steps.plan.outputs.docs }}
+    steps:
+      # A pull request's run checks out its merge commit, whose first parent
+      # is the base branch's tip: the two name the files it changes.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: plan the run
+        id: plan
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          windows=true
+          docs=false
+          if [ "$EVENT" = pull_request ]; then
+            windows=false
+            # CHANGED_FILES, one path a line, stands in for the diff in the
+            # lint test of this step.
+            if [ -n "${CHANGED_FILES+set}" ]; then
+              changed=$CHANGED_FILES
+            else
+              changed=$(git diff --no-renames --name-only HEAD^1 HEAD)
+            fi
+            docs=true
+            any=false
+            while IFS= read -r f; do
+              case "$f" in
+                "") continue ;;
+                docs/* | .github/*.md | LICENSE) ;;
+                */*) docs=false ;;
+                *.md) ;;
+                *) docs=false ;;
+              esac
+              any=true
+              case "$f" in
+                *_windows.go | *_windows_*.go | go.mod | go.sum | .gitattributes | .github/workflows/*)
+                  windows=true ;;
+                *.go)
+                  if [ -f "$f" ] && grep -q '^//go:build ' "$f"; then
+                    windows=true
+                  fi ;;
+              esac
+            done <<< "$changed"
+            if [ "$any" = false ]; then
+              docs=false
+            fi
+            if [ "$docs" = true ]; then
+              windows=false
+            fi
+          fi
+          if [ "$windows" = true ]; then
+            os='["windows-latest", "ubuntu-latest", "macos-latest"]'
+          else
+            os='["ubuntu-latest", "macos-latest"]'
+          fi
+          {
+            echo "windows=$windows"
+            echo "os=$os"
+            echo "docs=$docs"
+          } >> "$GITHUB_OUTPUT"
+          echo "test legs: $os; docs only: $docs"
+
   # Named in full so no matrix key beyond os can reach the check names main's
-  # ruleset requires: test (windows-latest), test (ubuntu-latest) and
-  # test (macos-latest). lint/workflow_test.go checks them.
+  # ruleset requires: test (ubuntu-latest) and test (macos-latest), which
+  # every pull request reports. lint/workflow_test.go checks them.
   test:
     name: test (${{ matrix.os }})
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        include:
-          # A package a leg leaves to a job of its own: windows-verifydeliver,
-          # below. Every other leg tests every package. lint/workflow_test.go
-          # checks that a job tests each skipped package on the same OS.
-          - os: windows-latest
-            skip-package: github.com/develdeco/jig/internal/verifydeliver
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -72,7 +150,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: (git --exec-path) -replace '/', '\' | Add-Content -Path $env:GITHUB_PATH
-      # The packages to test: go list ./... less the matrix's skip-package.
+      # The packages to test: go list ./... less SKIP_PACKAGE, the package
+      # the Windows leg leaves to a job of its own (windows-verifydeliver,
+      # below); every other leg tests every package. lint/workflow_test.go
+      # checks that a job tests each skipped package on the same OS.
       # go test starts packages in the order it is given them, a few at a
       # time, and go list orders them by import path. Putting the
       # longest-running package first once saved the Windows step 10%, but
@@ -80,14 +161,19 @@ jobs:
       # other legs end in about 200 s and 400 s, far under Windows. The step
       # fails when go list does (bash runs it with -e), when the skipped
       # package is not named exactly once (a renamed package would be tested
-      # by no job), and when no package is left.
+      # by no job), and when no package is left. A docs-only pull request
+      # tests ./lint alone, the one package whose tests read the docs.
       - name: list the packages to test
         id: packages
         shell: bash
         env:
-          SKIP_PACKAGE: ${{ matrix.skip-package }}
+          SKIP_PACKAGE: ${{ runner.os == 'Windows' && 'github.com/develdeco/jig/internal/verifydeliver' || '' }}
+          DOCS_ONLY: ${{ needs.plan.outputs.docs }}
         run: |
           packages=$(go list ./...)
+          if [ "$DOCS_ONLY" = true ]; then
+            packages=$(go list ./lint)
+          fi
           if [ -n "$SKIP_PACKAGE" ]; then
             found=$(printf '%s\n' "$packages" | awk '$0 == ENVIRON["SKIP_PACKAGE"] { n++ } END { print n + 0 }')
             if [ "$found" -ne 1 ]; then
@@ -111,9 +197,12 @@ jobs:
   # cmd/jig, e2e and revieweval land; until then cmd/jig bounds the
   # step and the saving does not show. A package alone on the runner runs
   # faster than inside a shared step (gitx: 61 s alone, 149 s in the full
-  # step). Main's ruleset does not require this check by name: ci ok needs
-  # it, as it needs every job that runs on pull requests.
+  # step). It runs when the test job's Windows leg does. Main's ruleset does
+  # not require this check by name: ci ok needs it, as it needs every job
+  # that runs on pull requests.
   windows-verifydeliver:
+    needs: plan
+    if: needs.plan.outputs.windows == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -133,6 +222,8 @@ jobs:
   # change it with no change to jig, so nothing but the real CLI proves the
   # two still agree (TestHooksLive).
   claude-cli:
+    needs: plan
+    if: needs.plan.outputs.docs == 'false'
     strategy:
       fail-fast: false
       matrix:
@@ -165,22 +256,29 @@ jobs:
           JIG_LIVE_CLAUDE: "1"
         run: go test -count=1 -timeout 20m -run TestHooksLive -v ./e2e
 
-  # Main's ruleset requires this check beside the test job's legs, which
-  # run the lint test that keeps this job's shape. It passes only when every
-  # job it needs succeeded, so a job added to its needs - another agent
-  # CLI's contract check, say - gates merges with no ruleset edit. always():
-  # a skipped required check counts as passing, so this job must run, and
-  # fail, when a job it needs failed or was cancelled.
+  # Main's ruleset requires this check beside the test job's Linux and
+  # macOS legs, which run the lint test that keeps this job's shape. It
+  # passes only when every job it needs succeeded, so a job added to its
+  # needs - another agent CLI's contract check, say - gates merges with no
+  # ruleset edit. always(): a skipped required check counts as passing, so
+  # this job must run, and fail, when a job it needs failed or was
+  # cancelled. RESULTS holds one result per needed job. A job the plan
+  # leaves out of a run is skipped, and counts as succeeded only when the
+  # plan's output says it was left out, never when the plan failed.
   ci-ok:
     name: ci ok
     if: always()
-    needs: [test, windows-verifydeliver, claude-cli]
+    needs: [plan, test, windows-verifydeliver, claude-cli]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: every needed job succeeded
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          RESULTS: >-
+            ${{ needs.plan.result }}
+            ${{ needs.test.result }}
+            ${{ needs.windows-verifydeliver.result == 'skipped' && needs.plan.outputs.windows == 'false' && 'success' || needs.windows-verifydeliver.result }}
+            ${{ needs.claude-cli.result == 'skipped' && needs.plan.outputs.docs == 'true' && 'success' || needs.claude-cli.result }}
         run: |
           echo "needed jobs: $RESULTS"
           if [ -z "$RESULTS" ]; then
