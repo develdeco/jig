@@ -210,8 +210,8 @@ func (r *Reader) inTarget(ticket string, rec store.Ticket, repo repoRef) bool {
 		return false
 	}
 	for _, ref := range []string{"refs/remotes/origin/" + branch, "refs/heads/" + branch} {
-		tip, err := gitx.Run(repo.dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
-		if err != nil || tip == "" {
+		tip, found, _ := gitx.ResolveCommit(repo.dir, ref)
+		if !found || tip == "" {
 			continue
 		}
 		if ok, err := gitx.IsAncestor(repo.dir, tip, target); err == nil && ok {
@@ -223,6 +223,6 @@ func (r *Reader) inTarget(ticket string, rec store.Ticket, repo repoRef) bool {
 
 // hasCommit reports whether ref names a commit in dir.
 func hasCommit(dir, ref string) bool {
-	out, err := gitx.Run(dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
-	return err == nil && out != ""
+	out, found, _ := gitx.ResolveCommit(dir, ref)
+	return found && out != ""
 }

@@ -286,25 +286,17 @@ var unfinishedOps = []struct{ marker, name string }{
 // detached HEAD, never on the branch, so the checkout after this returns the
 // branch exactly as the rebase found it.
 func recoverUnfinished(dir string) (string, error) {
-	args := []string{"rev-parse"}
-	for _, op := range unfinishedOps {
-		args = append(args, "--git-path", op.marker)
+	markers := make([]string, len(unfinishedOps))
+	for i, op := range unfinishedOps {
+		markers[i] = op.marker
 	}
-	out, err := gitx.Run(dir, args...)
+	paths, err := gitx.GitPaths(dir, markers...)
 	if err != nil {
 		return "", fmt.Errorf("pool: look for unfinished operations in %s: %w", dir, err)
 	}
-	paths := strings.Split(strings.TrimSpace(strings.ReplaceAll(out, "\r\n", "\n")), "\n")
-	if len(paths) != len(unfinishedOps) {
-		return "", fmt.Errorf("pool: look for unfinished operations in %s: git printed %d paths for %d markers", dir, len(paths), len(unfinishedOps))
-	}
 	recovered := ""
 	for i, op := range unfinishedOps {
-		path := strings.TrimSpace(paths[i])
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(dir, path)
-		}
-		if _, err := os.Stat(path); err != nil {
+		if _, err := os.Stat(paths[i]); err != nil {
 			continue
 		}
 		if _, err := gitx.Run(dir, op.name, "--quit"); err != nil {
@@ -313,11 +305,11 @@ func recoverUnfinished(dir string) (string, error) {
 		recovered = op.name
 		break
 	}
-	unmerged, err := gitx.Run(dir, "ls-files", "--unmerged")
+	unmerged, err := gitx.HasUnmerged(dir)
 	if err != nil {
 		return "", fmt.Errorf("pool: look for an unmerged index in %s: %w", dir, err)
 	}
-	if strings.TrimSpace(unmerged) != "" {
+	if unmerged {
 		if _, err := gitx.Run(dir, "reset", "--merge"); err != nil {
 			return "", unfinishedError(dir, "unmerged index", err)
 		}
@@ -478,7 +470,8 @@ func DivergedError(countDir string, role Role, leaseDir, branch string) error {
 // Usable reports whether dir is a lease the gate may reset in place: git
 // opens it as its own repository (see ownRepo) and HEAD resolves to a
 // commit. A reset anywhere else would act on an enclosing repository or
-// fail on an unborn HEAD. probe trusts dir's owner, so a lease git refuses
+// fail on an unborn HEAD. The probes here trust dir's owner (the reads are
+// made in process, or by git with safe.directory=*), so a lease git refuses
 // as another user's still passes; the gate's own reset then fails with
 // that same ownership error instead of Acquire's fetch.
 func Usable(dir string) bool {
@@ -486,8 +479,8 @@ func Usable(dir string) bool {
 	if err != nil || !own {
 		return false
 	}
-	_, err = probe(dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
-	return err == nil
+	_, found, _ := gitx.ResolveCommitTrusted(dir, "HEAD")
+	return found
 }
 
 // ownRepo reports whether git opens dir's own .git directory as the
@@ -514,7 +507,7 @@ func ownRepo(dir string) (bool, error) {
 	// dir's own .git to answer for an enclosing repository, which must still
 	// fall to the shape check below rather than being read as "not a
 	// repository of its own".
-	out, err := probe(dir, "rev-parse", "--is-inside-work-tree", "--show-prefix")
+	out, err := gitx.WorkTreeProbe(dir)
 	if err == nil && out == "true" {
 		return true, nil
 	}
@@ -528,16 +521,6 @@ func ownRepo(dir string) (bool, error) {
 		}
 	}
 	return false, fmt.Errorf("pool: git cannot open lease %s, whose .git looks like a repository; repair or remove it by hand: %w", dir, err)
-}
-
-// probe runs a read-only git query in dir that trusts dir's owner.
-// Ownership is git's own check on every real command in the lease, so a
-// lease git refuses as another user's (a JIG_HOME on exFAT or a network
-// share, or one left behind by sudo) counts as a repository here and the
-// fetch that follows fails with git's own explanation, instead of the lease
-// being moved aside as broken.
-func probe(dir string, args ...string) (string, error) {
-	return gitx.Run(dir, append([]string{"-c", "safe.directory=*"}, args...)...)
 }
 
 // prepare readies dir for Acquire, reporting whether it holds a lease to
@@ -592,6 +575,6 @@ var now = time.Now
 
 // refExists reports whether ref resolves to a commit in dir.
 func refExists(dir, ref string) bool {
-	_, err := gitx.Run(dir, "rev-parse", "--verify", "--quiet", ref)
-	return err == nil
+	_, found, _ := gitx.Resolve(dir, ref)
+	return found
 }

@@ -52,8 +52,8 @@ func CheckLevelWithOrigin(st *store.Store) error {
 	if !st.HasRemote() {
 		return nil
 	}
-	branch, err := gitx.Run(st.Root, "symbolic-ref", "-q", "--short", "HEAD")
-	if err != nil {
+	branch, ok := gitx.HeadBranch(st.Root)
+	if !ok {
 		return &axi.Error{
 			Msg:  fmt.Sprintf("the store at %s has a detached HEAD, not a branch", st.Root),
 			Code: "STORE_CONFLICT",

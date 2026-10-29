@@ -1190,7 +1190,7 @@ func branchTips(d Deps, t *publishTarget, dir string) []string {
 		if repo == "" {
 			return
 		}
-		if sha, err := gitx.RevParse(repo, ref); err == nil {
+		if sha, found, _ := gitx.Resolve(repo, ref); found {
 			tips = append(tips, sha)
 		}
 	}
