@@ -143,11 +143,11 @@ The jig home's append-only record of what happened on this machine: sessions, to
 _Avoid_: history, audit log
 
 **Ledger entry**:
-One store entry per ticket in `ledger.md`, headed `## <id> - <title>` and ending in an Answers recall tail. A publish of a ticket that has an entry replaces it where it stands, and `jig store migrate` renames the id in its heading when the ticket gets a new one.
+One store entry per ticket in `ledger.md`, headed `## <id> - <title>` and ending in an Answers recall tail. A publish of a ticket that has an entry replaces it where it stands, and `jig store migrate` renames the id in its heading when the ticket gets a new one and keeps only the newest of a ticket's entries.
 _Avoid_: index, registry
 
 **Contract index entry**:
-One line per ticket in `platform/contract-index.md`, `- <id>: workspaces ..., oracles ...`, kept the way a **Ledger entry** is: one per ticket, replaced by the next publish, renamed by the migration.
+One line per ticket in `platform/contract-index.md`, `- <id>: workspaces ..., oracles ...`, kept the way a **Ledger entry** is: one per ticket, replaced by the next publish, renamed and reduced to the newest by the migration.
 _Avoid_: ledger entry
 
 **Hook**:

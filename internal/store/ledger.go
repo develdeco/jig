@@ -73,6 +73,22 @@ func RenameContractIndexTickets(index string, renameOf map[string]string) string
 	return renameEntries(index, renameOf, contractIndexEntries)
 }
 
+// CollapseLedgerEntries returns ledger with each ticket's entries reduced to
+// one, and how many it dropped: the newest entry's text, in the place the
+// ticket's first one held, which is what ReplaceLedgerEntry leaves when the
+// ticket is published again. A publish regenerates an entry whole, so the
+// newest is the most complete. A ledger with one entry per ticket comes back
+// unchanged.
+func CollapseLedgerEntries(ledger string) (string, int) {
+	return collapseEntries(ledger, ledgerEntries)
+}
+
+// CollapseContractIndexEntries is CollapseLedgerEntries for the contract
+// index's "- <id>: ..." lines.
+func CollapseContractIndexEntries(index string) (string, int) {
+	return collapseEntries(index, contractIndexEntries)
+}
+
 // entryShape says how one file lays out its entries.
 type entryShape struct {
 	// head reads a line that opens an entry: the ticket id it names, and where
@@ -180,6 +196,39 @@ func replaceEntry(doc, ticket, entry string, shape entryShape) string {
 		out = append(out, entry)
 	}
 	return strings.Join(out, "")
+}
+
+func collapseEntries(doc string, shape entryShape) (string, int) {
+	lines := splitLines(doc)
+	newest := map[string]string{}
+	count := map[string]int{}
+	var order []string
+	for i := 0; i < len(lines); {
+		id, _, _, ok := shape.head(lines[i])
+		if !ok {
+			i++
+			continue
+		}
+		end := shape.end(lines, i)
+		if count[id] == 0 {
+			order = append(order, id)
+		}
+		count[id]++
+		text := strings.Join(lines[i:end], "")
+		if !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		newest[id] = text
+		i = end
+	}
+	dropped := 0
+	for _, id := range order {
+		if count[id] > 1 {
+			doc = replaceEntry(doc, id, newest[id], shape)
+			dropped += count[id] - 1
+		}
+	}
+	return doc, dropped
 }
 
 func renameEntries(doc string, renameOf map[string]string, shape entryShape) string {

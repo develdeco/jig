@@ -76,7 +76,7 @@ const v1ContractIndex = `# Contract index
 - T-2: workspaces beta, oracles lint,test
 - T-9: workspaces gamma, oracles test
 - see T-1: a line of the person's own
-- T-2: workspaces beta, oracles lint,test
+- T-2: workspaces beta,gamma, oracles lint,test
 `
 
 func renameMapTwoTickets() Map {
@@ -86,10 +86,45 @@ func renameMapTwoTickets() Map {
 	}
 }
 
+// The same two files after the migration: the ids the tickets have now, and
+// the newest of T-2's two entries in T-2's first place.
+const v2Ledger = `# Ledger
+
+## STORE-1 - Mint ids - not T-2
+
+Delivered 2 slice(s).
+
+**Answers:**
+- q-001: Keep T-1 around? -> Yes, as an alias of T-1.
+
+## GRAPH-1 - Graph again
+
+Delivered 3 slice(s).
+
+**Answers:**
+none
+
+## T-9 - A ticket the store no longer has
+
+Delivered 1 slice(s).
+
+**Answers:**
+none
+`
+
+const v2ContractIndex = `# Contract index
+
+- STORE-1: workspaces alpha, oracles test
+- GRAPH-1: workspaces beta,gamma, oracles lint,test
+- T-9: workspaces gamma, oracles test
+- see T-1: a line of the person's own
+`
+
 // TestApplyRenamesTheTicketsInTheLedgerAndTheContractIndex: after the
 // migration the ledger's entry headings and the contract index's lines name
-// the ids the tickets have now, in the one commit, and nothing else in either
-// file moved.
+// the ids the tickets have now, each ticket has one entry (the newest, where
+// its first one stood), all in the one commit, and nothing else in either file
+// moved.
 func TestApplyRenamesTheTicketsInTheLedgerAndTheContractIndex(t *testing.T) {
 	t.Parallel()
 	st := newV1GitStore(t)
@@ -104,26 +139,18 @@ func TestApplyRenamesTheTicketsInTheLedgerAndTheContractIndex(t *testing.T) {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	wantLedger := strings.NewReplacer(
-		"## T-1 - Mint ids", "## STORE-1 - Mint ids",
-		"## T-2 - Graph", "## GRAPH-1 - Graph",
-	).Replace(v1Ledger)
-	if got := readStoreFile(t, st, "ledger.md"); got != wantLedger {
-		t.Errorf("ledger.md =\n%s\nwant\n%s", got, wantLedger)
+	if got := readStoreFile(t, st, "ledger.md"); got != v2Ledger {
+		t.Errorf("ledger.md =\n%s\nwant\n%s", got, v2Ledger)
 	}
-	wantIndex := strings.NewReplacer(
-		"- T-1: workspaces", "- STORE-1: workspaces",
-		"- T-2: workspaces", "- GRAPH-1: workspaces",
-	).Replace(v1ContractIndex)
-	if got := readStoreFile(t, st, "platform/contract-index.md"); got != wantIndex {
-		t.Errorf("platform/contract-index.md =\n%s\nwant\n%s", got, wantIndex)
+	if got := readStoreFile(t, st, "platform/contract-index.md"); got != v2ContractIndex {
+		t.Errorf("platform/contract-index.md =\n%s\nwant\n%s", got, v2ContractIndex)
 	}
 
 	var tickets []string
 	for _, e := range recall.ParseLedger(readStoreFile(t, st, "ledger.md")) {
 		tickets = append(tickets, e.Ticket)
 	}
-	if want := []string{"STORE-1", "GRAPH-1", "T-9", "GRAPH-1"}; !reflect.DeepEqual(tickets, want) {
+	if want := []string{"STORE-1", "GRAPH-1", "T-9"}; !reflect.DeepEqual(tickets, want) {
 		t.Errorf("jig recall's reading of the ledger names %v, want %v", tickets, want)
 	}
 
@@ -139,8 +166,8 @@ func TestApplyRenamesTheTicketsInTheLedgerAndTheContractIndex(t *testing.T) {
 }
 
 // TestRewritingTheLedgerAndContractIndexTwiceChangesNothingTheSecondTime: a
-// store whose ids were already renamed through the same map is not renamed
-// again, and not rewritten.
+// store whose ids were already renamed through the same map, and its duplicate
+// entries collapsed, is not touched again.
 func TestRewritingTheLedgerAndContractIndexTwiceChangesNothingTheSecondTime(t *testing.T) {
 	t.Parallel()
 	st := newV1GitStore(t)
@@ -194,8 +221,9 @@ func TestRewriteKeepsTheLineEndingsAndTheMissingFinalNewline(t *testing.T) {
 }
 
 // TestBuildPlanListsTheLedgerAndContractIndexItWouldRewrite: the dry run says
-// which of the two files the renames reach, and writes neither. A file that
-// is not there, or names no renamed ticket, is left out.
+// which of the two files the migration would change and how many duplicate
+// entries it would drop from each, and writes neither. A file that is not
+// there, or names no renamed ticket and holds one entry of each, is left out.
 func TestBuildPlanListsTheLedgerAndContractIndexItWouldRewrite(t *testing.T) {
 	t.Parallel()
 	rewrites := func(plan Plan) []string {
@@ -213,8 +241,8 @@ func TestBuildPlanListsTheLedgerAndContractIndexItWouldRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
-	if got := rewrites(plan); len(got) != 0 {
-		t.Errorf("a store with neither file plans %v, want nothing", got)
+	if got := rewrites(plan); len(got) != 0 || len(plan.Collapsed) != 0 {
+		t.Errorf("a store with neither file plans %v and collapses %v, want nothing", got, plan.Collapsed)
 	}
 
 	putStoreFile(t, st, "ledger.md", "# Ledger\n\n## T-9 - Not renamed\n")
@@ -226,6 +254,9 @@ func TestBuildPlanListsTheLedgerAndContractIndexItWouldRewrite(t *testing.T) {
 	if got, want := rewrites(plan), []string{"rewrite platform/contract-index.md"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("plan lists %v, want %v: the ledger names no renamed ticket", got, want)
 	}
+	if want := []Collapsed{{Path: "platform/contract-index.md", Entries: 1}}; !reflect.DeepEqual(plan.Collapsed, want) {
+		t.Errorf("plan collapses %v, want %v", plan.Collapsed, want)
+	}
 
 	putStoreFile(t, st, "ledger.md", v1Ledger)
 	plan, err = BuildPlan(st, renameMapTwoTickets(), "")
@@ -235,8 +266,41 @@ func TestBuildPlanListsTheLedgerAndContractIndexItWouldRewrite(t *testing.T) {
 	if got, want := rewrites(plan), []string{"rewrite ledger.md", "rewrite platform/contract-index.md"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("plan lists %v, want %v", got, want)
 	}
+	if want := []Collapsed{{Path: "ledger.md", Entries: 1}, {Path: "platform/contract-index.md", Entries: 1}}; !reflect.DeepEqual(plan.Collapsed, want) {
+		t.Errorf("plan collapses %v, want %v", plan.Collapsed, want)
+	}
 	if got := readStoreFile(t, st, "ledger.md"); got != v1Ledger {
 		t.Errorf("the dry run wrote ledger.md:\n%s", got)
+	}
+}
+
+// TestApplyCollapsesDuplicatesInAFileThatRenamesNothing: the duplicates a file
+// holds are dropped whether or not any of its tickets is renamed, the newest
+// entry in the first one's place, and a second pass drops nothing.
+func TestApplyCollapsesDuplicatesInAFileThatRenamesNothing(t *testing.T) {
+	t.Parallel()
+	st := newV1GitStore(t)
+	putStoreFile(t, st, "ledger.md", "# Ledger\n\n## T-9 - Old\n\nDelivered 1 slice(s).\n\n**Answers:**\nnone\n\n## T-8 - Other\n\nDelivered 1 slice(s).\n\n**Answers:**\nnone\n\n## T-9 - New\n\nDelivered 2 slice(s).\n\n**Answers:**\nnone\n")
+	plan, err := BuildPlan(st, renameMapTwoTickets(), "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if want := []Collapsed{{Path: "ledger.md", Entries: 1}}; !reflect.DeepEqual(plan.Collapsed, want) {
+		t.Fatalf("plan collapses %v, want %v", plan.Collapsed, want)
+	}
+	if err := Apply(st, plan); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	want := "# Ledger\n\n## T-9 - New\n\nDelivered 2 slice(s).\n\n**Answers:**\nnone\n\n## T-8 - Other\n\nDelivered 1 slice(s).\n\n**Answers:**\nnone\n"
+	if got := readStoreFile(t, st, "ledger.md"); got != want {
+		t.Errorf("ledger.md =\n%s\nwant\n%s", got, want)
+	}
+	if err := rewriteStoreDocs(st, plan); err != nil {
+		t.Fatalf("rewriteStoreDocs again: %v", err)
+	}
+	if got := readStoreFile(t, st, "ledger.md"); got != want {
+		t.Errorf("ledger.md changed on the second pass:\n%s", got)
 	}
 }
 
