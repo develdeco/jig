@@ -42,9 +42,21 @@ func readFile(path string) ([]byte, error) {
 
 // transientRead reports whether err, from reading path, can be AtomicWrite
 // replacing it: a failure replacing names, or path not there while an
-// AtomicWrite of it is under way. A file that is simply missing fails at once.
+// AtomicWrite of it is under way, or there again already (the write landed
+// between the read and the look for its temp file). A file that is simply
+// missing fails at once.
 func transientRead(path string, err error) bool {
-	return replacing(err) || (errors.Is(err, fs.ErrNotExist) && replacementPending(path))
+	if replacing(err) {
+		return true
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	if replacementPending(path) {
+		return true
+	}
+	_, statErr := os.Stat(path)
+	return statErr == nil
 }
 
 // replacementPending reports whether an AtomicWrite of path is under way:
