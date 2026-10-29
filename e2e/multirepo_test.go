@@ -71,6 +71,16 @@ func commitSlice(t *testing.T, h *fakeHarness, slice, file, body string) string 
 // in each; context and claim name the repo and clone of a slice wherever they
 // are run from; a commit in each clone with its slice's trailer is verified in
 // that clone, with the oracle of its own workspace; status shows both green.
+// Before the build, the gate and publish turn the ticket away for what it
+// lacks and not for being in two repos; during it, a commit made for a slice of
+// the other repo is not verified, and jig verify from the orchestrator has to be
+// told the clone.
+//
+// This is the one chain of a ticket in two repos. Which repos a slice names or
+// is placed in, and the refusal of a workspace two repos declare, of one none
+// declares, of one the repo lacks and of an oracle only the other repo has,
+// are cmd/jig's TestValidateWorkspacesOfAProjectOfSeveralRepos and
+// internal/ready's TestPlace and TestProjectRepos.
 func TestTwoRepoTicketBuildsInEachRepo(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{Orchestrator: true})
@@ -90,6 +100,35 @@ func TestTwoRepoTicketBuildsInEachRepo(t *testing.T) {
 	}
 	if r := runJig(t, env, fx.OrchestratorDir, "validate", ticket); r.Code != 0 || !strings.Contains(r.Stdout, "valid: yes") {
 		t.Fatalf("jig validate: exit %d, want valid\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
+	}
+
+	// The gate and publish both cover every repo a ticket builds in, so neither
+	// turns away a ticket whose slices build in two for that. Each is turned away
+	// for what the ticket lacks: a slice that is not built, and with every slice
+	// green the branch (the gate) or the round (publish). A ticket that builds in
+	// one repo of the same project is judged as ever by both. The repos a round
+	// covers are internal/verifydeliver's (TestGateRepos, TestPublishRepos).
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cwd := range []string{fx.OrchestratorDir, apiDir, webDir} {
+		for _, args := range [][]string{{"gate", ticket}, {"publish", ticket}, {"publish", ticket, "--body"}} {
+			projRefusal(t, "jig "+strings.Join(args, " ")+" in "+filepath.Base(cwd), runJig(t, env, cwd, args...), 1, "code: GATE_NOT_GREEN")
+		}
+	}
+	setStates(t, st, ticket, map[string]string{"server": "green", "ui": "green"})
+	projRefusal(t, "jig gate with every slice green and no branch", runJig(t, env, fx.OrchestratorDir, "gate", ticket), 1, "code: BRANCH_NOT_FOUND", "error: repo api: ")
+	projRefusal(t, "jig publish with every slice green and no round", runJig(t, env, fx.OrchestratorDir, "publish", ticket), 1, "no gate rounds recorded for "+ticket)
+	setStates(t, st, ticket, map[string]string{"server": "queued", "ui": "queued"})
+	if err := st.CreateTicketRecord("JIG-2", store.Ticket{Title: "Api only"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendSlices("JIG-2", []store.Slice{{ID: "total", Workspace: "api/server", Goal: "Add up.", Oracle: "test", BlockedBy: []string{}, FromBrief: slices[0].FromBrief}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"gate", "JIG-2"}, {"publish", "JIG-2"}} {
+		projRefusal(t, "jig "+strings.Join(args, " ")+" for a ticket in one repo", runJig(t, env, fx.OrchestratorDir, args...), 1, "code: GATE_NOT_GREEN")
 	}
 
 	// next lists both repos' slices, and where the branch starts in each.
@@ -190,6 +229,43 @@ func TestTwoRepoTicketBuildsInEachRepo(t *testing.T) {
 	api.WaitVerifiers()
 	web.WaitVerifiers()
 
+	// A commit is verified in the repo it was made in, for a slice of that repo.
+	// One whose trailer names a slice of the other repo is not verified: the hook
+	// that sees it starts nothing, and jig verify says why. The sessions that
+	// commit here claimed nothing: a session that claimed a slice has a slice to
+	// verify a commit for.
+	api2, web2 := newHarness(t, fx, env, "s-api-2"), newHarness(t, fx, env, "s-web-2")
+	api2.Clone, web2.Clone = apiDir, webDir
+	api2.Bash("git status --short")
+	web2.Bash("git status --short")
+	wrong := commitSlice(t, web2, "server", "ui/wrong.go", "package ui\n\n// Wrong is a change in the web repo made for the api's slice.\nfunc Wrong() {}\n")
+	if got := spawnedFor(readLedger(t, env), wrong); got != 0 {
+		t.Errorf("%d verifications were started for a commit in web made for the api's slice, want none", got)
+	}
+	projRefusal(t, "jig verify of a commit for another repo's slice", web2.Jig("verify"), 2,
+		"slice server of "+ticket+" builds in repo api, but this commit is in repo web", "Commit it in the clone of api")
+
+	// The same, for the web's slice, is verified: here by the command, which waits
+	// for the oracle. The api's session does the same in its own clone.
+	right := commitSlice(t, web2, "ui", "ui/right.go", "package ui\n\n// Right is a change in the web repo made for its own slice.\nfunc Right() {}\n")
+	if r := web2.Jig("verify", "--wait"); r.Code != 0 || !strings.Contains(r.Stdout, "slice: ui") || !strings.Contains(r.Stdout, "commit: "+right) || !strings.Contains(r.Stdout, "state: pass") {
+		t.Errorf("jig verify --wait in web: exit %d, want the ui slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, right[:12], r.Stdout, r.Stderr)
+	}
+	apiSha := commitSlice(t, api2, "server", "server/more.go", "package server\n\n// More names a second thing the api serves.\nfunc More() string { return \"more\" }\n")
+	if r := api2.Jig("verify", "--wait"); r.Code != 0 || !strings.Contains(r.Stdout, "slice: server") || !strings.Contains(r.Stdout, "commit: "+apiSha) || !strings.Contains(r.Stdout, "state: pass") {
+		t.Errorf("jig verify --wait in api: exit %d, want the server slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, apiSha[:12], r.Stdout, r.Stderr)
+	}
+
+	// From the orchestrator, in none of the repos, the commit has no repo to be
+	// in until the clone is named.
+	projRefusal(t, "jig verify from the orchestrator", runJig(t, env.with("JIG_SESSION=s-root"), fx.OrchestratorDir, "verify", ticket, right, "--slice", "ui"), 2,
+		"cannot tell which repo of the project the commit is in", "--repo-dir")
+	if r := runJig(t, env.with("JIG_SESSION=s-root"), fx.OrchestratorDir, "verify", ticket, right, "--slice", "ui", "--repo-dir", webDir, "--wait", "--rerun"); r.Code != 0 || !strings.Contains(r.Stdout, "state: pass") {
+		t.Errorf("jig verify --repo-dir from the orchestrator: exit %d, want a pass\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
+	}
+	api2.WaitVerifiers()
+	web2.WaitVerifiers()
+
 	// status shows both slices green.
 	status := runJig(t, env, fx.OrchestratorDir, "status", ticket)
 	if status.Code != 0 || !strings.Contains(status.Stdout, "server,green") || !strings.Contains(status.Stdout, "ui,green") {
@@ -198,214 +274,4 @@ func TestTwoRepoTicketBuildsInEachRepo(t *testing.T) {
 	if after := nextJSON[nextRepos](t, env, fx.OrchestratorDir, ticket); after.State != "green" || len(after.Ready) != 0 {
 		t.Errorf("jig next after both are built: state %q, ready %+v, want green and nothing ready", after.State, after.Ready)
 	}
-}
-
-// TestAmbiguousWorkspaceIsAValidationProblem: a bare workspace that two repos
-// declare is not owned by the first repo: validate refuses the slice, naming
-// the repos and the way to say which is meant, and next puts it under no repo.
-// Naming the repo settles it. A bare workspace no repo declares, and a repo's
-// workspace that its manifest lacks, are refused as well.
-func TestAmbiguousWorkspaceIsAValidationProblem(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{Orchestrator: true})
-	ticket := fx.Ticket
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	slices, err := st.ReadSlices(ticket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	slicesFile := filepath.Join(st.TicketDir(ticket), "slices.yaml")
-	pristine := readFileOrFatal(t, slicesFile)
-	addSlice := func(id, workspace string) {
-		t.Helper()
-		writeFileOrFatal(t, slicesFile, pristine)
-		err := st.AppendSlices(ticket, []store.Slice{{ID: id, Workspace: workspace, Goal: "Share a helper.", Oracle: "test", BlockedBy: []string{}, FromBrief: slices[0].FromBrief}})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	validate := func() jigResult {
-		t.Helper()
-		return runJig(t, env, fx.OrchestratorDir, "validate", ticket, "--check")
-	}
-
-	// Both repos declare lib: a slice that writes it bare belongs to neither.
-	addSlice("helper", "lib")
-	r := validate()
-	projRefusal(t, "validate with an ambiguous workspace", r, 2,
-		"ticket JIG-1 failed validation", `slice helper: ambiguous workspace "lib"`, "repos api and web declare it", "name its repo, as api/lib or web/lib")
-	if strings.Contains(r.Stdout, "slice server") || strings.Contains(r.Stdout, "slice ui") {
-		t.Errorf("validate blames a slice that names its repo:\n%s", r.Stdout)
-	}
-	n := nextJSON[nextRepos](t, env, fx.OrchestratorDir, ticket)
-	var ready []string
-	for _, b := range n.Ready {
-		ready = append(ready, b.Repo+": "+strings.Join(b.Slices, "+"))
-	}
-	if want := []string{"api: server", "web: ui", "?: helper"}; !reflect.DeepEqual(ready, want) || !reflect.DeepEqual(n.Ambiguous, []string{"lib"}) {
-		t.Errorf("next: ready %v, ambiguous %v, want %v and [lib]: the first repo does not own lib", ready, n.Ambiguous, want)
-	}
-	r = runJig(t, env, fx.OrchestratorDir, "next", ticket)
-	for _, want := range []string{"name the repo in the slice, as <repo>/<workspace>", "2 repos have ready slices (api, web)"} {
-		if !strings.Contains(r.Stdout, want) {
-			t.Errorf("jig next lacks %q:\n%s", want, r.Stdout)
-		}
-	}
-
-	// Naming the repo settles it, in either.
-	for _, workspace := range []string{"api/lib", "web/lib"} {
-		addSlice("helper", workspace)
-		if r := validate(); r.Code != 0 || !strings.Contains(r.Stdout, "valid: yes") {
-			t.Errorf("validate with the workspace %s: exit %d, want valid\n%s", workspace, r.Code, r.Stdout)
-		}
-	}
-
-	// A bare workspace no repo declares, and one a repo lacks.
-	addSlice("helper", "stray")
-	projRefusal(t, "validate with a workspace no repo declares", validate(), 2, `workspace "stray" is declared by none of the repos (api, web)`, "name its repo, as <repo>/stray")
-	addSlice("helper", "web/server")
-	projRefusal(t, "validate with a workspace its repo lacks", validate(), 2, `slice helper: workspace "server" not in the manifest of repo web`)
-}
-
-// TestGateRefusesAMultiRepoTicketUntilItCoversThem: the gate and publish both
-// cover every repo a ticket builds in, so neither turns away a ticket whose
-// slices build in two for that. Each is turned away for what the ticket lacks:
-// a slice that is not built, and with every slice green the branch (the gate) or
-// the round (publish). A ticket that builds in one repo of the same project is
-// judged as ever by both.
-func TestGateRefusesAMultiRepoTicketUntilItCoversThem(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{Orchestrator: true})
-	ticket := fx.Ticket
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	slices, err := st.ReadSlices(ticket)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Both ask for the slices first, from the orchestrator and from each repo.
-	for _, cwd := range []string{fx.OrchestratorDir, fx.NestedDirs["api"], fx.NestedDirs["web"]} {
-		for _, args := range [][]string{{"gate", ticket}, {"publish", ticket}, {"publish", ticket, "--body"}} {
-			r := runJig(t, env, cwd, args...)
-			projRefusal(t, "jig "+strings.Join(args, " ")+" in "+filepath.Base(cwd), r, 1, "code: GATE_NOT_GREEN")
-			if strings.Contains(r.Stdout, "MULTI_REPO_NOT_YET") {
-				t.Errorf("jig %s in %s is refused for the repos the ticket builds in:\n%s", strings.Join(args, " "), filepath.Base(cwd), r.Stdout)
-			}
-		}
-	}
-
-	// The same once every slice is green: the gate goes on to the branch, which
-	// nothing has built yet in the first repo it reads, and publish to the round
-	// nobody has opened.
-	setStates(t, st, ticket, map[string]string{"server": "green", "ui": "green"})
-	projRefusal(t, "jig gate with every slice green and no branch", runJig(t, env, fx.OrchestratorDir, "gate", ticket), 1, "code: BRANCH_NOT_FOUND", "error: repo api: ")
-	r := runJig(t, env, fx.OrchestratorDir, "publish", ticket)
-	projRefusal(t, "jig publish with every slice green and no round", r, 1, "no gate rounds recorded for "+ticket)
-	if strings.Contains(r.Stdout, "MULTI_REPO_NOT_YET") {
-		t.Errorf("jig publish with every slice green is refused for the repos the ticket builds in:\n%s", r.Stdout)
-	}
-
-	// A ticket of the same project that builds in one repo is judged as ever:
-	// not green, it is turned away for that.
-	if err := st.CreateTicketRecord("JIG-2", store.Ticket{Title: "Api only"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.AppendSlices("JIG-2", []store.Slice{{ID: "total", Workspace: "api/server", Goal: "Add up.", Oracle: "test", BlockedBy: []string{}, FromBrief: slices[0].FromBrief}}); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"gate", "JIG-2"}, {"publish", "JIG-2"}} {
-		r := runJig(t, env, fx.OrchestratorDir, args...)
-		if strings.Contains(r.Stdout, "MULTI_REPO_NOT_YET") || !strings.Contains(r.Stdout, "code: GATE_NOT_GREEN") {
-			t.Errorf("jig %s for a ticket in one repo: exit %d, want GATE_NOT_GREEN and no multi-repo refusal\n%s", strings.Join(args, " "), r.Code, r.Stdout)
-		}
-	}
-}
-
-// TestVerifyHoldsACommitToItsRepo: a commit is verified in the repo it was made
-// in, for a slice of that repo. A commit whose trailer names a slice of the
-// other repo is not verified: the hook that sees it starts nothing, and jig
-// verify says why. jig verify run from the orchestrator, in no repo, has to be
-// told the clone, and then verifies there.
-func TestVerifyHoldsACommitToItsRepo(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{Orchestrator: true})
-	ticket := fx.Ticket
-	webDir := fx.NestedDirs["web"]
-	api, web := orchestratorSessions(t, fx, env)
-	web.Branch("jig/" + ticket)
-	api.Branch("jig/" + ticket)
-
-	// The web session commits a change under the trailer of the api's slice.
-	web.Bash("git status --short")
-	wrong := commitSlice(t, web, "server", "ui/wrong.go", "package ui\n\n// Wrong is a change in the web repo made for the api's slice.\nfunc Wrong() {}\n")
-	if got := spawnedFor(readLedger(t, env), wrong); got != 0 {
-		t.Errorf("%d verifications were started for a commit in web made for the api's slice, want none", got)
-	}
-	r := web.Jig("verify")
-	projRefusal(t, "jig verify of a commit for another repo's slice", r, 2,
-		"slice server of "+ticket+" builds in repo api, but this commit is in repo web", "Commit it in the clone of api")
-
-	// The same commit, for the web's slice, is verified: here by the command, which
-	// waits for the oracle. The api's session does the same in its own clone.
-	right := commitSlice(t, web, "ui", "ui/right.go", "package ui\n\n// Right is a change in the web repo made for its own slice.\nfunc Right() {}\n")
-	verifySlots <- struct{}{}
-	defer func() { <-verifySlots }()
-	r = web.Jig("verify", "--wait")
-	if r.Code != 0 || !strings.Contains(r.Stdout, "slice: ui") || !strings.Contains(r.Stdout, "commit: "+right) || !strings.Contains(r.Stdout, "state: pass") {
-		t.Errorf("jig verify --wait in web: exit %d, want the ui slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, right[:12], r.Stdout, r.Stderr)
-	}
-	apiSha := api.Commit("server", "server: handler", map[string]string{"server/handler.go": "package server\n\n// Handler names what the api serves.\nfunc Handler() string { return \"total\" }\n"})
-	r = api.Jig("verify", "--wait")
-	if r.Code != 0 || !strings.Contains(r.Stdout, "slice: server") || !strings.Contains(r.Stdout, "commit: "+apiSha) || !strings.Contains(r.Stdout, "state: pass") {
-		t.Errorf("jig verify --wait in api: exit %d, want the server slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, apiSha[:12], r.Stdout, r.Stderr)
-	}
-
-	// From the orchestrator, in none of the repos, the commit has no repo to be
-	// in until the clone is named.
-	r = runJig(t, env.with("JIG_SESSION=s-root"), fx.OrchestratorDir, "verify", ticket, right, "--slice", "ui")
-	projRefusal(t, "jig verify from the orchestrator", r, 2, "cannot tell which repo of the project the commit is in", "--repo-dir")
-	r = runJig(t, env.with("JIG_SESSION=s-root"), fx.OrchestratorDir, "verify", ticket, right, "--slice", "ui", "--repo-dir", webDir, "--wait", "--rerun")
-	if r.Code != 0 || !strings.Contains(r.Stdout, "state: pass") {
-		t.Errorf("jig verify --repo-dir from the orchestrator: exit %d, want a pass\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
-	}
-}
-
-// TestValidateReadsASliceOracleFromItsOwnRepo: a slice is run with the oracles of
-// the repo it builds in, so an oracle name that only the other repo's manifest
-// has is a slice written for the wrong repo.
-func TestValidateReadsASliceOracleFromItsOwnRepo(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{Orchestrator: true})
-	ticket := fx.Ticket
-	// The web's manifest gains an oracle the api's does not have.
-	writeFileOrFatal(t, filepath.Join(fx.NestedDirs["web"], ".claude", "jig.yaml"), []byte(
-		"workspaces:\n  - id: ui\n    path: ui\n  - id: lib\n    path: lib\noracles:\n  test: go test ./{path}/...\n  lint: go vet ./{path}/...\n"))
-
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	slicesFile := filepath.Join(st.TicketDir(ticket), "slices.yaml")
-	body := string(readFileOrFatal(t, slicesFile))
-
-	// The web's lint, asked of the web's slice, is its own; asked of the api's
-	// slice, it is the web's.
-	web := strings.Replace(body, "workspace: web/ui\n    goal: Show the total as dollars in the web page.\n    oracle: test", "workspace: web/ui\n    goal: Show the total as dollars in the web page.\n    oracle: lint", 1)
-	api := strings.Replace(body, "workspace: api/server\n    goal: Add up the prices of an order in the api.\n    oracle: test", "workspace: api/server\n    goal: Add up the prices of an order in the api.\n    oracle: lint", 1)
-	if web == body || api == body {
-		t.Fatalf("test setup: the slices of the fixture changed:\n%s", body)
-	}
-	writeFileOrFatal(t, slicesFile, []byte(web))
-	if r := runJig(t, env, fx.OrchestratorDir, "validate", ticket, "--check"); r.Code != 0 || !strings.Contains(r.Stdout, "valid: yes") {
-		t.Errorf("validate with the web's slice on the web's lint: exit %d, want valid\n%s", r.Code, r.Stdout)
-	}
-	writeFileOrFatal(t, slicesFile, []byte(api))
-	projRefusal(t, "validate with the api's slice on the web's lint", runJig(t, env, fx.OrchestratorDir, "validate", ticket, "--check"), 2,
-		`slice server: oracle "lint" is not in the manifest of repo api (repo web declares it)`)
 }

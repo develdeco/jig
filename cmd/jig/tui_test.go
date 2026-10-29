@@ -122,6 +122,7 @@ func TestTUIRefusesWhatItCannotOpen(t *testing.T) {
 		want string
 	}{
 		{"a malformed ticket", e, []string{"jig-99"}, 2, "jig-99"},
+		{"a ticket no store would mint", e, []string{"JIG-0"}, 2, "JIG-0"},
 		{"a ticket under a key the project does not declare", e, []string{"NOPE-1"}, 2, `does not declare key "NOPE"`},
 		{"two tickets", e, []string{fx.Ticket, "JIG-2"}, 2, "at most one ticket"},
 		{"unknown flag", e, []string{"--nope"}, 2, "--nope"},
@@ -224,6 +225,7 @@ func TestTUIWaitsForATicketToBeCreated(t *testing.T) {
 	}
 	out.until(t, "Second ticket")
 	out.until(t, "╭─ Steps")
+	out.until(t, "being drafted")
 	keys.Write([]byte("q"))
 	if code := wait(); code != 0 {
 		t.Fatalf("exit %d\n%s", code, out.String())

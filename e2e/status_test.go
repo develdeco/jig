@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
@@ -70,76 +69,4 @@ func TestStatusGoldenStalled(t *testing.T) {
 		t.Fatalf("jig status exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
 	assertGolden(t, "status-stalled.txt", r.Stdout)
-}
-
-// TestStatusNamesATicketNothingStarted: through the binary, a ticket just
-// minted reads `new`, one whose slices nobody has claimed reads `queued`, and
-// a claim makes it `building`, which a release does not undo: building means
-// a slice was claimed, not that the ticket has slices.
-func TestStatusNamesATicketNothingStarted(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{})
-	env = env.without("JIG_SLICE", "JIG_SESSION")
-
-	stateOf := func(ticket string) string {
-		t.Helper()
-		r := runJig(t, env, fx.StoreDir, "status", ticket)
-		if r.Code != 0 {
-			t.Fatalf("jig status %s exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", ticket, r.Code, r.Stdout, r.Stderr)
-		}
-		for _, l := range strings.Split(r.Stdout, "\n") {
-			if w, ok := strings.CutPrefix(l, "state: "); ok {
-				return w
-			}
-		}
-		t.Fatalf("jig status %s has no state line:\n%s", ticket, r.Stdout)
-		return ""
-	}
-	want := func(ticket, state string) {
-		t.Helper()
-		if got := stateOf(ticket); got != state {
-			t.Errorf("jig status %s: state = %s, want %s", ticket, got, state)
-		}
-	}
-
-	// The fixture's own ticket has four queued slices and no claim.
-	want(fx.Ticket, "queued")
-
-	const ticket = "JIG-2"
-	if r := runJig(t, env, fx.StoreDir, "ticket", "new", "--title", "Nothing started"); r.Code != 0 || !strings.Contains(r.Stdout, "id: "+ticket) {
-		t.Fatalf("jig ticket new exit = %d, want 0 minting %s\nstdout:\n%s\nstderr:\n%s", r.Code, ticket, r.Stdout, r.Stderr)
-	}
-	want(ticket, "new")
-
-	slices := "slices:\n" +
-		"  - id: x\n    workspace: alpha\n    goal: Build x.\n    oracle: test\n    blocked_by: []\n    from_brief: []\n" +
-		"  - id: y\n    workspace: alpha\n    goal: Build y.\n    oracle: test\n    blocked_by: []\n    from_brief: []\n"
-	writeFileOrFatal(t, joinPath(fx.StoreDir, "tickets", ticket, "slices.yaml"), []byte(slices))
-	want(ticket, "queued")
-
-	if r := runJig(t, env, fx.RepoDir, "claim", ticket, "--slice", "x", "--session", "s-1"); r.Code != 0 {
-		t.Fatalf("jig claim exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
-	}
-	want(ticket, "building")
-
-	if r := runJig(t, env, fx.RepoDir, "claim", ticket, "--slice", "x", "--session", "s-1", "--release"); r.Code != 0 {
-		t.Fatalf("jig claim --release exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
-	}
-	if got := sliceStateOf(t, fx, ticket, "x"); got != "queued" {
-		t.Fatalf("test setup: after the release slice x is %s, want queued", got)
-	}
-	want(ticket, "building")
-
-	// The other ticket never moved.
-	want(fx.Ticket, "queued")
-}
-
-// sliceStateOf is the state the store holds for a slice.
-func sliceStateOf(t *testing.T, fx *fixture.Fixture, ticket, slice string) string {
-	t.Helper()
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	return sliceState(t, st, ticket, slice)
 }

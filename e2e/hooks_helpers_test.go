@@ -80,3 +80,30 @@ func decodeHook(t *testing.T, res jigResult) hookOutput {
 func claudeSettings(env jigEnv) string {
 	return filepath.Join(env.userHome, ".claude", "settings.json")
 }
+
+// jigHooked runs jig as the agent h speaks for and fires the PostToolUse hook
+// for the command, as Claude Code does after its Bash tool ran it: the ledger
+// then has the tool line, with the agent's id when h is a subagent.
+func jigHooked(h *fakeHarness, args ...string) jigResult {
+	h.t.Helper()
+	res := h.Jig(args...)
+	h.Hook("PostToolUse", map[string]any{
+		"tool_name": "Bash",
+		"command":   "jig " + strings.Join(args, " "),
+		"tool_response": map[string]any{
+			"stdout": res.Stdout, "stderr": res.Stderr, "interrupted": false,
+		},
+	})
+	return res
+}
+
+// lineStarting is the first line of out that starts with prefix, "" when none
+// does.
+func lineStarting(out, prefix string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return line
+		}
+	}
+	return ""
+}

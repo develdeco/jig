@@ -70,7 +70,7 @@ func TestGateIntentFromTheTicketsSession(t *testing.T) {
 
 	// The builder builds the ticket on its branch, and its session starts there
 	// with a transcript outside every .claude/projects directory.
-	built := buildTicketOn(t, fx, env, true)
+	built := buildTicketOn(t, fx, env, false)
 	builder := built.builder
 	writeTicketTranscript(t, builder.Transcript, fx.RepoDir, "Please clamp percentages and make the greeting casual. "+ticketSessionWords, mentioned...)
 	builder.Hook("SessionStart", map[string]any{"source": "startup", "model": "claude-test"})
@@ -88,7 +88,7 @@ func TestGateIntentFromTheTicketsSession(t *testing.T) {
 		t.Fatalf("the unrelated session = %+v, want its transcript %s and not %s", s, unrelatedTranscript, ticket)
 	}
 
-	gate := runJig(t, env, fx.StoreDir, "gate", ticket)
+	gate := runJig(t, env, fx.StoreDir, "gate", ticket, "--early")
 	if gate.Code != 0 {
 		t.Fatalf("gate exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
 	}

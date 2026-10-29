@@ -148,6 +148,17 @@ type flowEvent struct {
 //  14. jig events tells it all in order.
 //  15. The bookkeeping a publish leaves is there, and nothing of the old
 //     dispatch: no slice.json anywhere, no jig run.
+//
+// This is the one chain of the ticket's phases. At each point the ticket
+// passes through (a drafted brief, an approved one, a build under way, a build
+// done, a round open, a clean round, a published ticket) jig next names the
+// phase it is at, whether that phase can start, the prompt that starts it and
+// the state of each phase, in text and in JSON, and --for refuses or warns of
+// a phase asked out of its turn; the session that built the ticket is told to
+// have a subagent review it, by jig next and by jig gate. The rule behind each
+// answer is pinned where it is decided: internal/phase (Derive, For),
+// internal/verifydeliver (Freshness, the reviewer's independence), cmd/jig
+// (the next renderer, the review advice, the Stop note).
 func TestDigesterFlow(t *testing.T) {
 	t.Parallel()
 	f := flow{t}
@@ -176,10 +187,23 @@ func TestDigesterFlow(t *testing.T) {
 	}
 
 	f.step("2. the brief is validated, and approved with it")
+	// Nobody approved the brief: planning is where the ticket stands, and the
+	// build waits for the approval.
+	expectPhase(t, env, fx.RepoDir, ticket, "a drafted brief", "brief", true, "", "Plan "+ticket, "cppp")
+	if ask := phaseAsked(t, env, fx.RepoDir, ticket, "build").Phase.For; ask == nil || ask.Ready || ask.Code != "PHASE_BRIEF_NOT_APPROVED" || !strings.Contains(ask.Reason, "is not approved") {
+		t.Errorf("--for build on a drafted brief: %+v, want PHASE_BRIEF_NOT_APPROVED", ask)
+	}
+	if r := runJig(t, env, fx.RepoDir, "next", ticket, "--for", "build"); !strings.Contains(r.Stdout, "for_code: PHASE_BRIEF_NOT_APPROVED\n") || !strings.Contains(r.Stdout, "for_ready: no\n") {
+		t.Errorf("--for build in text:\n%s", r.Stdout)
+	}
 	f.mustRun(h, "validate", ticket)
 	approval, ok, err := st.ReadApproval(ticket)
 	if err != nil || !ok || approval.BriefSHA256 == "" {
 		t.Fatalf("approval = %+v, %v, %v, want the brief's hash recorded", approval, ok, err)
+	}
+	expectPhase(t, env, fx.RepoDir, ticket, "an approved brief", "build", true, "", "Build "+ticket, "dcpp")
+	if ask := phaseAsked(t, env, fx.RepoDir, ticket, "brief").Phase.For; ask == nil || !ask.Ready || !strings.HasPrefix(ask.Warning, "brief is done (approved by ") || !strings.HasSuffix(ask.Warning, "; prompt: Build "+ticket) {
+		t.Errorf("--for brief once approved: %+v, want a warning with the prompt that moves on", ask)
 	}
 
 	f.step("3. the branch to work on is the one jig next names")
@@ -207,6 +231,11 @@ func TestDigesterFlow(t *testing.T) {
 	claim := f.mustRun(h, "claim", ticket, "--slice", "a", "--unattended")
 	if !strings.Contains(claim.Stdout, "result: claimed") {
 		t.Fatalf("jig claim output lacks the claim:\n%s", claim.Stdout)
+	}
+	// A slice is claimed: still the build, and review waits for the slices.
+	expectPhase(t, env, fx.RepoDir, ticket, "a build under way", "build", true, "", "Build "+ticket, "dcpp")
+	if ask := phaseAsked(t, env, fx.RepoDir, ticket, "review").Phase.For; ask == nil || ask.Ready || ask.Code != "PHASE_NOT_BUILT" {
+		t.Errorf("--for review while slices are short of green: %+v, want PHASE_NOT_BUILT", ask)
 	}
 
 	f.step("6. the session commits slice a; git's global hook starts a detached verification of the commit")
@@ -310,14 +339,41 @@ func TestDigesterFlow(t *testing.T) {
 	review := h.Hook("Stop", map[string]any{"stop_hook_active": false})
 	f.hook(h.Session, "Stop", review)
 	if held := decodeHook(t, review); held.Decision != "block" || !strings.Contains(held.Reason, "open the gate and review") ||
-		!strings.Contains(held.Reason, "jig gate "+ticket) || !strings.Contains(held.Reason, "subagent") {
-		t.Errorf("Stop with every slice verified and heard = %+v, want a block that tells the unattended session to open the gate and have a subagent review", held)
+		!strings.Contains(held.Reason, "jig gate "+ticket) || !strings.Contains(held.Reason, "subagent") ||
+		!strings.Contains(held.Reason, "claimed slice a") || !strings.Contains(held.Reason, "not this session") {
+		t.Errorf("Stop with every slice verified and heard = %+v, want a block that tells the unattended session to open the gate and have a subagent review, and why", held)
+	}
+	// An attended session on the same ticket is never held, and is told nothing.
+	attended := newHarness(t, fx, env, "s-attended")
+	if res := attended.Hook("Stop", map[string]any{"stop_hook_active": false}); res.Code != 0 || res.Stdout != "" {
+		t.Errorf("attended Stop with every slice green and no round = exit %d, %q, want silence: nobody is held back", res.Code, res.Stdout)
 	}
 
 	f.step("11. every slice is green: jig next names the gate, and the session opens a round")
 	nextText := f.mustRun(h, "next", ticket)
 	if !strings.Contains(nextText.Stdout, "jig gate "+ticket) {
 		t.Fatalf("jig next with every slice green does not name the gate:\n%s", nextText.Stdout)
+	}
+	// The session built the ticket, so `jig next` tells it to have a subagent
+	// review, and `jig gate` says the same as it opens the round.
+	spawn := []string{
+		"spawn a subagent to review", "claimed slice a", "approved the brief",
+		"Agent tool", "subagent_type: general-purpose", "model: opus", "no worktree isolation",
+		"TaskOutput (`block: true`", "Do not end the turn or schedule a wakeup while it runs", "never call another tool to stall",
+		"You did not build " + ticket, "jig skill review", "jig review context " + ticket, "Reply with the verdict line only",
+		"must not run `jig review context` itself",
+	}
+	for _, want := range append([]string{"phase: review", "ready: yes", "fresh: no\n"}, spawn...) {
+		if !strings.Contains(nextText.Stdout, want) {
+			t.Errorf("the builder's jig next lacks %q:\n%s", want, nextText.Stdout)
+		}
+	}
+	expectPhase(t, env, fx.RepoDir, ticket, "a build done", "review", true, "", "Review "+ticket, "ddcp")
+	if ask := phaseAsked(t, env, fx.RepoDir, ticket, "build").Phase.For; ask == nil || !ask.Ready || ask.Code != "" || !strings.HasPrefix(ask.Warning, "build is done (") || !strings.HasSuffix(ask.Warning, "; prompt: Review "+ticket) {
+		t.Errorf("--for build once built: %+v, want a warning, not a refusal", ask)
+	}
+	if ask := phaseAsked(t, env, fx.RepoDir, ticket, "publish").Phase.For; ask == nil || ask.Ready || ask.Code != "PHASE_NOT_REVIEWED" {
+		t.Errorf("--for publish before a review: %+v, want PHASE_NOT_REVIEWED", ask)
 	}
 	gate := f.mustRun(h, "gate", ticket)
 	if !strings.Contains(gate.Stdout, "round: 1") || !strings.Contains(gate.Stdout, "head: "+shaC) && !strings.Contains(gate.Stdout, "head: "+shaD) {
@@ -327,6 +383,23 @@ func TestDigesterFlow(t *testing.T) {
 	head := h.git("rev-parse", "HEAD")
 	if !strings.Contains(gate.Stdout, "head: "+head) {
 		t.Fatalf("jig gate does not name the branch's head %s:\n%s", head, gate.Stdout)
+	}
+	for _, want := range spawn {
+		if !strings.Contains(gate.Stdout, want) {
+			t.Errorf("the builder's jig gate lacks %q:\n%s", want, gate.Stdout)
+		}
+	}
+	// The round is open: the phase waits for its reviewer, whose work `jig next`
+	// has no advice for, and an unattended session has no review left to open.
+	open := expectPhase(t, env, fx.RepoDir, ticket, "a round open", "review", false, "PHASE_ROUND_OPEN", "Review "+ticket, "ddcp")
+	if !strings.Contains(open.Phase.Reason, "round 1") {
+		t.Errorf("the open round's reason = %q, want it to name round 1", open.Phase.Reason)
+	}
+	if got := f.mustRun(h, "next", ticket); strings.Contains(got.Stdout, "fresh:") || strings.Contains(got.Stdout, "spawn a subagent") {
+		t.Errorf("jig next with the round open still advises who reviews:\n%s", got.Stdout)
+	}
+	if res := h.Hook("Stop", map[string]any{"stop_hook_active": false}); res.Code != 0 || strings.Contains(res.Stdout, "open the gate") {
+		t.Errorf("Stop with a round open = exit %d, %q, want no note to open the gate", res.Code, res.Stdout)
 	}
 
 	f.step("12. a reviewer in a session of its own reads the round and reports it clean")
@@ -342,6 +415,7 @@ func TestDigesterFlow(t *testing.T) {
 	if res := h.Hook("Stop", map[string]any{"stop_hook_active": false}); res.Code != 0 || res.Stdout != "" {
 		t.Errorf("Stop with a clean round no person approved = exit %d, %q, want silence: publishing waits for the person", res.Code, res.Stdout)
 	}
+	expectPhase(t, env, fx.RepoDir, ticket, "a clean round", "publish", true, "", "Publish "+ticket, "dddc")
 
 	f.step("13. the pull request: its body is rendered, a person approves, the harness pushes and opens it, jig records it")
 	env, ghLog := githubRemote(t, fx, env)
@@ -379,6 +453,7 @@ func TestDigesterFlow(t *testing.T) {
 	if res := h.Hook("Stop", map[string]any{"stop_hook_active": false}); res.Code != 0 || res.Stdout != "" {
 		t.Errorf("Stop once the ticket is published = exit %d, %q, want silence", res.Code, res.Stdout)
 	}
+	expectPhase(t, env, fx.RepoDir, ticket, "a published ticket", "publish", false, "PHASE_DONE", "", "dddd")
 	if got := originRefOrEmpty(t, fx.RepoRemote, "refs/heads/"+branch); got != head {
 		t.Errorf("origin's %s = %s, want the reviewed head %s", branch, got, head)
 	}
