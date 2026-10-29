@@ -13,7 +13,7 @@ import (
 // budgetHeader opens every budget file write produces.
 const budgetHeader = `# The git processes each package's tests may start, counted on CI's Linux
 # leg by internal/gitbudget (go test -exec), one per process git traces.
-# A count more than margin percent (and at least minSlack processes) away
+# A count more than margin percent (and at least 3 processes) away
 # from its budget, either way, fails the leg: a change that adds git work to
 # the suite raises its package's number here, in its own diff, and one that
 # cuts git work lowers it. The failing step prints the numbers to put here.
@@ -21,8 +21,10 @@ const budgetHeader = `# The git processes each package's tests may start, counte
 `
 
 // minSlack is the least a count may move from its budget whatever the
-// margin, so a package with a handful of processes is not failed by one.
-const minSlack = 2
+// margin, so a package with a handful of processes is not failed by the
+// one or two a run can vary by (DECISIONS.md, "Each package's tests have a
+// budget of git processes").
+const minSlack = 3
 
 // budget is a parsed budget file.
 type budget struct {
@@ -56,8 +58,12 @@ func readBudget(path string) (*budget, error) {
 	return &b, nil
 }
 
-// slack is how far a count may move from limit and still pass.
+// slack is how far a count may move from limit and still pass. A package
+// with no entry has none: its first git process is new git work.
 func (b *budget) slack(limit int) int {
+	if limit == 0 {
+		return 0
+	}
 	return max(minSlack, (limit*b.Margin+99)/100)
 }
 
