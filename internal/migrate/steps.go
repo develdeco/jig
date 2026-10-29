@@ -119,7 +119,7 @@ func planV1toV2(in Input) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	return BuildPlan(in.Store, m)
+	return BuildPlan(in.Store, m, in.Cfg.Platform)
 }
 
 // checkV1toV2 refuses a held lease and warns of each branch the rename leaves
