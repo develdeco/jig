@@ -3609,18 +3609,18 @@ The suite starts about 50,000 git processes through gitx, and on the Windows run
 
 **What a next pass would take.** In `internal/verifydeliver`, after this change, the largest read left is `rev-parse origin/<target>` (the gate's target tip: 395 of 17,718), a short name, which the brief sends to git. Resolving a short name exactly is the same lookup in git's order (the name, `refs/<name>`, `refs/tags/<name>`, `refs/heads/<name>`, `refs/remotes/<name>`, `refs/remotes/<name>/HEAD`, first one that exists), with the cases that need care (a name that is also hex, `@`, a reflog suffix) declined; it was not done because the brief names the accepted forms. The second is `git var GIT_AUTHOR_IDENT` (386), left alone as above.
 
-**Measured.** Git processes per test package, counted with git's own trace (`GIT_TRACE2_EVENT=<dir>`, one file per process), on this machine, `origin/main` against this branch:
+**Measured.** Git processes per test package, counted with git's own trace (`GIT_TRACE2_EVENT=<dir>`, one file per process), on this machine, `origin/main` at 4b8f2d4 (the commit this branch merged in) against this branch, one package at a time:
 
 | package | `origin/main` | this branch | change |
 | --- | ---: | ---: | ---: |
-| `e2e` | 13,889 | 9,366 | -4,523 |
-| `internal/verifydeliver` | 23,911 | 17,718 | -6,193 |
-| `cmd/jig` | 7,385 | 5,893 | -1,492 |
-| `internal/store` | 4,428 | 4,075 | -353 |
+| `e2e` | 13,836 | 9,399 | -4,437 |
+| `internal/verifydeliver` | 24,613 | 18,265 | -6,348 |
+| `cmd/jig` | 7,648 | 6,074 | -1,574 |
+| `internal/store` | 4,428 | 4,010 | -418 |
 | `internal/pool` | 2,274 | 1,873 | -401 |
-| `internal/verify` | 1,484 | 1,276 | -208 |
+| `internal/verify` | 1,484 | 1,264 | -220 |
 | `internal/locate` | 180 | 95 | -85 |
-| the seven | 53,551 | 40,296 | -13,255 (25%) |
-| `internal/gitx` | 1,392 | 1,591 | +199 |
+| the seven | 54,463 | 40,980 | -13,483 (25%) |
+| `internal/gitx` | 1,447 | 1,706 | +259 |
 
-`internal/gitx` grows because the differential tests build their repositories with the git program (about forty processes) and ask it each question they compare. What remains in the other packages is writes and test setup (`init`, `clone`, `commit`, `add`, `worktree`, `config`, `remote`, `upload-pack`), history walks (`merge-base`, `status`, `reset`) and `git var`; the pool's, locate's and verify's read-only calls are gone, and what `rev-parse` is left is the tests' own. Counts move by a handful between runs of the same code (verifydeliver ran 17,718 and 17,722). Wall time was not conclusive: other agents were running suites on this machine throughout, `internal/locate` took 23 s and 20 s on `origin/main` and 18 s and 7 s here, `internal/verify` 66 s and 27 s against 70 s and 31 s. One call in process took 2.6 ms (`RevParse` of HEAD), 6.7 ms (a commit in a pack) and 5.9 ms (`TopLevel`), against 47 ms, 69 ms and 50 ms for the same question to the git program, on a loaded machine.
+`internal/gitx` grows because the differential tests build their repositories with the git program (about forty processes) and ask it each question they compare. What remains in the other packages is writes and test setup (`init`, `clone`, `commit`, `add`, `worktree`, `config`, `remote`, `upload-pack`), history walks (`merge-base`, `status`, `reset`) and `git var`; the pool's, locate's and verify's read-only calls are gone, and what `rev-parse` is left is the tests' own. Counts move by a handful between runs of the same code (verifydeliver ran 18,265 here, and 17,718 and 17,722 before main moved). Wall time was not conclusive: other agents were running suites on this machine throughout, and a package ran slower on one side or the other by the load alone (`e2e` 174 s on `origin/main` and 283 s here, `internal/store` 360 s and 158 s, `internal/verifydeliver` 349 s and 313 s, `internal/pool` 62 s and 42 s). The process counts are the measure. One call in process took 2.6 ms (`RevParse` of HEAD), 6.7 ms (a commit in a pack) and 5.9 ms (`TopLevel`), against 47 ms, 69 ms and 50 ms for the same question to the git program, on a loaded machine.
