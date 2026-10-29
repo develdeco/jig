@@ -1,5 +1,24 @@
 # The store runs git in process; users' repositories run the git program
 
+**Amended by in-process reads (`internal/gitx/read*.go`):** the read-only
+questions jig asks of any repository - what HEAD and its branch are, whether a
+ref or a commit exists, what a path holds in a commit, where a work tree's top
+and common directory are - run no hook and no filter, so a user's repository
+no longer pays a git process for them. gitx answers them in process, from the
+refs, HEAD and config files and the objects through go-git, exactly as the git
+program prints them, when the repository is the plain case (a `.git`
+directory or a one-line `gitdir:` file; no `core.bare` or `core.worktree`, no
+extension, no include, no alternates, grafts, shallow file or replace ref, pack
+indexes of at most 16 MB; none of the environment variables that move git's
+search) and the revision one of a few forms (`HEAD`, a fully spelled ref, a
+full object name, with at most one of `^{commit}`, `^{tree}`, `^` or `:path`).
+Everything else runs the git program as before: writes, history walks,
+remote URLs and identity, and each repository or revision gitx declines. A
+"not there" about an object is confirmed by the git program before it is
+returned, since a repack running at the time can hide an object from a
+one-shot read that git retries. Hooks, filters and credential helpers still
+apply wherever the git program runs; they never applied to these reads.
+
 **Amended by [ADR 0032](0032-jig-attaches-to-the-harness.md):** the in-process commit cannot read git config, so it takes its author from one `git var` call, made on a process's first commit that has something to commit (every store commit is authored by the person, never by a name of jig's own). In a writers store the in-process path still commits, while a fetch or push of a history that has merges goes to the git program (`ErrUseCLI`).
 
 jig's store is a git repository jig writes at every checkpoint: a slice

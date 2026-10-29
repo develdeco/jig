@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/develdeco/jig/internal/fileshare"
 )
 
 // replaceWindow is how long a read, and AtomicWrite's rename, ride out
@@ -32,7 +34,7 @@ const replaceBackoff = 20 * time.Millisecond
 func readFile(path string) ([]byte, error) {
 	deadline := time.Now().Add(replaceWindow)
 	for {
-		data, err := readFileOnce(path)
+		data, err := fileshare.ReadFile(path)
 		if err == nil || !transientRead(path, err) || time.Now().After(deadline) {
 			return data, err
 		}

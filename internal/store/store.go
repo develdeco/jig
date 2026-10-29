@@ -526,40 +526,29 @@ var rebaseOrMergeMarkers = []struct {
 // - dir is in, as a short description naming the one that matched, or ""
 // when none is present. The git-path markers (rebaseOrMergeMarkers) are
 // read with one `rev-parse` call rather than one per marker, since this
-// runs on every Sync and every Push. The unmerged-index check uses
-// `git ls-files -u`, which only reads the index, rather than
+// runs on every Sync and every Push (gitx.GitPaths, which locates them in
+// process for an ordinary repository). The unmerged-index check
+// (gitx.HasUnmerged) reads only the index, like `git ls-files -u`, rather than
 // `git diff --diff-filter=U`, which opportunistically rewrites .git/index
 // as a side effect - a write this read-only guard, called on every Sync
 // and Push, must not make.
 func inProgressRebaseOrMerge(dir string) (string, error) {
-	args := make([]string, 0, 1+2*len(rebaseOrMergeMarkers))
-	args = append(args, "rev-parse")
-	for _, m := range rebaseOrMergeMarkers {
-		args = append(args, "--git-path", m.gitPath)
+	names := make([]string, len(rebaseOrMergeMarkers))
+	for i, m := range rebaseOrMergeMarkers {
+		names[i] = m.gitPath
 	}
-	out, err := gitx.Run(dir, args...)
+	markers, err := gitx.GitPaths(dir, names...)
 	if err != nil {
 		return "", err
-	}
-	markers := make([]string, len(rebaseOrMergeMarkers))
-	for i, line := range strings.Split(out, "\n") {
-		if i >= len(markers) {
-			break
-		}
-		p := strings.TrimSpace(line)
-		if p != "" && !filepath.IsAbs(p) {
-			p = filepath.Join(dir, p)
-		}
-		markers[i] = p
 	}
 	if what, err := markerPresent(markers); err != nil || what != "" {
 		return what, err
 	}
-	unmerged, err := gitx.Run(dir, "ls-files", "-u")
+	unmerged, err := gitx.HasUnmerged(dir)
 	if err != nil {
 		return "", err
 	}
-	if unmerged != "" {
+	if unmerged {
 		return unmergedDescription, nil
 	}
 	return "", nil
@@ -678,7 +667,7 @@ func (s *Store) abortFailedPull(pullErr error, branch string) error {
 	_, abortErr := gitx.Run(s.Root, "rebase", "--abort")
 	var sha string
 	if abortErr == nil {
-		sha, _ = gitx.Run(s.Root, "rev-parse", "HEAD")
+		sha, _ = gitx.RevParse(s.Root, "HEAD")
 	}
 	return s.wrapAbortedPullConflict(abortErr, stateErr, paths, sha, branch)
 }
@@ -761,8 +750,8 @@ func (s *Store) wrapAbortedPullConflict(abortErr, stateErr error, paths []string
 // at a branch, unlike `rev-parse --abbrev-ref HEAD`, which happily prints
 // the literal "HEAD" and lets Sync or Push run `pull`/`push` against it.
 func (s *Store) currentBranch() (string, error) {
-	branch, err := gitx.Run(s.Root, "symbolic-ref", "-q", "--short", "HEAD")
-	if err != nil {
+	branch, ok := gitx.HeadBranch(s.Root)
+	if !ok {
 		return "", s.detachedHEADError()
 	}
 	return branch, nil

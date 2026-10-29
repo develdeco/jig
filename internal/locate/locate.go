@@ -344,11 +344,8 @@ func claimedSlice(st *store.Store, ticket, session string) string {
 // currentBranch is the branch checked out in dir, "" when there is none
 // (detached HEAD, an unreadable repo).
 func currentBranch(dir string) string {
-	out, err := gitx.Run(dir, "symbolic-ref", "--short", "-q", "HEAD")
-	if err != nil {
-		return ""
-	}
-	return out
+	branch, _ := gitx.HeadBranch(dir)
+	return branch
 }
 
 // isStoreDir reports whether dir holds a store's config file: project.yaml of

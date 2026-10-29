@@ -928,7 +928,7 @@ func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 		}
 		base := ""
 		for _, ref := range []string{target, "origin/" + target} {
-			if _, err := gitx.Run(dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
+			if _, found, _ := gitx.ResolveCommit(dir, ref); found {
 				base = ref
 				break
 			}

@@ -219,7 +219,7 @@ func (x *run) existing(lines []journal.Line) bool {
 // being verified without a repository at hand. A commit git cannot show
 // leaves it empty.
 func (x *run) subject() string {
-	out, err := gitx.Run(x.d.Clone, "log", "-1", "--format=%s", x.sha)
+	out, err := gitx.Subject(x.d.Clone, x.sha)
 	if err != nil {
 		return ""
 	}
@@ -498,7 +498,7 @@ func (x *run) checkCheckout() string {
 	if start == "" {
 		return ""
 	}
-	if _, err := gitx.Run(d.Clone, "cat-file", "-e", start+"^{commit}"); err != nil {
+	if !gitx.HasCommit(d.Clone, start) {
 		return fmt.Sprintf("the start sha %s is not in this clone (fetch it, then run again)", short(start))
 	}
 	if reason, ok := verifyGreen(x.dir, start, outcome.Result{Outcome: outcome.Green, Commit: x.sha}); !ok {

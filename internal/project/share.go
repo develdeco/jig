@@ -108,7 +108,7 @@ func PlanShare(o ShareOpts) (SharePlan, error) {
 	// by default) does not, and is checked when it turns out to be pushed.
 	target := func(label, dir, given string) (ShareTarget, error) {
 		t := ShareTarget{Name: label, Dir: dir, Origin: OriginOf(dir), Push: true}
-		t.Branch, _ = gitx.Run(dir, "symbolic-ref", "--short", "-q", "HEAD")
+		t.Branch, _ = gitx.HeadBranch(dir)
 		switch {
 		case t.Origin != "" && given != "" && !sameRemote(t.Origin, given):
 			return t, &axi.Error{
