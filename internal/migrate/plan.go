@@ -30,6 +30,13 @@ type FileOp struct {
 	From   string // for "move": the path before the op; "" otherwise
 }
 
+// Collapsed is the number of entries the migration drops from one file of the
+// store, the extra entries of tickets that have more than one.
+type Collapsed struct {
+	Path    string // the file's path, store-relative and slash-separated
+	Entries int
+}
+
 // Plan is what `jig store migrate --map <file> --dry-run` reports and
 // `jig store migrate --map <file>` carries out: every ticket's rename, in
 // new-id order, and every file the migration touches.
@@ -42,6 +49,13 @@ type Plan struct {
 	// Keys is the new area keys the migrated project.yaml declares (the
 	// map's own keys:).
 	Keys map[string]string
+	// Platform is the store's platform directory (project.yaml's platform:),
+	// "" for the default: the contract index whose ids the migration renames
+	// lives in it.
+	Platform string
+	// Collapsed is, for the ledger and the contract index, how many duplicate
+	// entries of a ticket the migration drops, each file with any listed.
+	Collapsed []Collapsed
 
 	// v3 is the v2 to v3 step's own work (v2tov3.go); the v1 to v2 step
 	// leaves it nil.
@@ -57,7 +71,8 @@ var chartIndexRefRE = regexp.MustCompile(`^([^#]*)#(\d+)$`)
 // BuildPlan validates m against st's current tickets and builds the Plan:
 // every ticket present and declared exactly once, every number assigned in
 // old-id order per key, and the title each renamed ticket will carry.
-func BuildPlan(st *store.Store, m Map) (Plan, error) {
+// platform is the store's platform directory, "" for the default.
+func BuildPlan(st *store.Store, m Map, platform string) (Plan, error) {
 	oldIDs, err := OldTicketIDs(st.Root)
 	if err != nil {
 		return Plan{}, err
@@ -147,12 +162,12 @@ func BuildPlan(st *store.Store, m Map) (Plan, error) {
 		renameOf[renames[i].OldID] = renames[i].NewID
 	}
 
-	files, err := planFiles(st, renames)
+	files, collapsed, err := planFiles(st, renames, platform)
 	if err != nil {
 		return Plan{}, err
 	}
 
-	return Plan{Renames: renames, Files: files, RenameOf: renameOf, Keys: m.Keys}, nil
+	return Plan{Renames: renames, Files: files, RenameOf: renameOf, Keys: m.Keys, Platform: platform, Collapsed: collapsed}, nil
 }
 
 // assignNewIDs numbers every ticket of each key in old-id order, by the old
@@ -192,14 +207,16 @@ func trackerDeletedPrefixes(relSlash string) bool {
 }
 
 // planFiles walks each renamed ticket's folder on disk and reports what the
-// migration would do to every file in it, plus project.yaml and every
-// chart's tickets.yaml the renames touch.
-func planFiles(st *store.Store, renames []Rename) ([]FileOp, error) {
+// migration would do to every file in it, plus project.yaml, every chart's
+// tickets.yaml the renames touch, and the ledger and contract index when they
+// name a renamed ticket or hold more than one entry of a ticket (those
+// duplicates are also returned, counted).
+func planFiles(st *store.Store, renames []Rename, platform string) ([]FileOp, []Collapsed, error) {
 	var ops []FileOp
 	for _, r := range renames {
 		ticketOps, err := planTicketFiles(st, r.OldID, r.NewID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		ops = append(ops, ticketOps...)
 	}
@@ -207,7 +224,7 @@ func planFiles(st *store.Store, renames []Rename) ([]FileOp, error) {
 
 	names, err := st.ChartNames()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	renameOf := make(map[string]string, len(renames))
 	for _, r := range renames {
@@ -216,13 +233,63 @@ func planFiles(st *store.Store, renames []Rename) ([]FileOp, error) {
 	for _, name := range names {
 		entries, err := st.ReadChart(name)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if chartAffected(entries, renameOf) {
 			ops = append(ops, FileOp{Action: "rewrite", Path: filepath.ToSlash(filepath.Join("charts", name, "tickets.yaml"))})
 		}
 	}
-	return ops, nil
+
+	var collapsed []Collapsed
+	for _, d := range storeDocs(platform) {
+		_, dropped, changed, err := d.migrated(st, renameOf)
+		if err != nil {
+			return nil, nil, err
+		}
+		if changed {
+			ops = append(ops, FileOp{Action: "rewrite", Path: d.rel})
+		}
+		if dropped > 0 {
+			collapsed = append(collapsed, Collapsed{Path: d.rel, Entries: dropped})
+		}
+	}
+	return ops, collapsed, nil
+}
+
+// storeDoc is one of the store's own files that names tickets by id outside
+// any ticket's folder, and how to rename those ids in its text and to reduce
+// each ticket's entries to one.
+type storeDoc struct {
+	rel      string // store-relative, slash-separated
+	rename   func(text string, renameOf map[string]string) string
+	collapse func(text string) (string, int)
+}
+
+// storeDocs are the ledger and the contract index (in the platform directory
+// platform names, "" for the default): a publish writes one entry for each
+// ticket into each, under the id the ticket had then, and jig recall reads
+// them by that text.
+func storeDocs(platform string) []storeDoc {
+	return []storeDoc{
+		{store.LedgerFile, store.RenameLedgerTickets, store.CollapseLedgerEntries},
+		{store.ContractIndexRelPath(platform), store.RenameContractIndexTickets, store.CollapseContractIndexEntries},
+	}
+}
+
+// migrated reads d from st and returns its text with the ids renameOf names
+// replaced and each ticket's entries reduced to the newest, how many entries
+// that dropped, and whether the text differs at all. A store without the file
+// has nothing to migrate.
+func (d storeDoc) migrated(st *store.Store, renameOf map[string]string) (text string, dropped int, changed bool, err error) {
+	data, err := os.ReadFile(filepath.Join(st.Root, filepath.FromSlash(d.rel)))
+	if os.IsNotExist(err) {
+		return "", 0, false, nil
+	}
+	if err != nil {
+		return "", 0, false, err
+	}
+	text, dropped = d.collapse(d.rename(string(data), renameOf))
+	return text, dropped, text != string(data), nil
 }
 
 // chartAffected reports whether any entry id or blocked_by ref in entries

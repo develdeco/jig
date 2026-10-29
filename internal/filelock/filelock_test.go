@@ -1,4 +1,4 @@
-package store
+package filelock
 
 import (
 	"path/filepath"
@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// TestTryLockReportsContentionWithoutProceeding: TryLock is Lock's wait
-// without Lock's "proceed anyway" word: a held lock times out as held=false
-// and a nil error, and the lock is takable again once the holder lets go.
+// TestTryLockReportsContentionWithoutProceeding: a held lock times out as
+// held=false and a nil error, leaving what that means to the caller, and the
+// lock is takable again once the holder lets go.
 func TestTryLockReportsContentionWithoutProceeding(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "thing.ndjson")
 

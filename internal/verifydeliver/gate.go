@@ -199,6 +199,10 @@ type GateReport struct {
 	// meaningful only alongside BudgetParked > 0.
 	BudgetParked            int
 	BudgetUsed, BudgetLimit int
+	// Probes is how many probes a reviewer round recorded, and Unprobed how
+	// many hunks of the whole change it left with no current probe inside and
+	// no current skip over them (ADR 0036): 0 for a scripted round.
+	Probes, Unprobed int
 }
 
 // reportYAML is gate/round-<n>/report.yaml's exact on-disk shape.
@@ -342,13 +346,14 @@ func fetchTicketBranchFromBuildLease(jigHome, leaseDir, repoName, ticket, branch
 // brings up none when no run is left. An unavailable env with a defer-ci
 // policy journals and skips; one with no policy pauses the gate with a
 // NEEDS_INPUT error.
-func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []store.Slice) ([]OracleRun, error) {
+func runGateOracles(d Deps, ticket, repo, dir string, man manifest.Manifest, slices []store.Slice) ([]OracleRun, error) {
 	reused, err := reusablePasses(d, ticket, dir, man, slices)
 	if err != nil {
 		return nil, err
 	}
 	if coversSuite(man, reused) {
-		return oracleSuiteRuns(dir, man, reused, d.oracle())
+		runs, err := oracleSuiteRuns(dir, man, reused, d.oracle())
+		return withSlices(runs, repo, man, slices), err
 	}
 
 	var handles []*envrun.Handle
@@ -388,12 +393,36 @@ func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []
 		handles = append(handles, h)
 	}
 
-	return oracleSuiteRuns(dir, man, reused, d.oracle())
+	runs, err := oracleSuiteRuns(dir, man, reused, d.oracle())
+	return withSlices(runs, repo, man, slices), err
 }
 
-// reusablePasses returns, by exact command, the commit of an oracle pass
-// jig recorded at a slice's green (ADR 0020) that stands for the gate's own
-// run of that command on dir's HEAD (ADR 0021). A pass stands only when:
+// withSlices names, on each run, the slices whose oracle it is in its
+// workspace (ADR 0036): which code the oracle was run for. slices are the
+// slices that build in repo, each workspace read as a slice writes it
+// (manifest.WorkspaceIn): <repo>/<id> in a project of several repos, the bare
+// id, which may hold a slash, in a project of one.
+func withSlices(runs []OracleRun, repo string, man manifest.Manifest, slices []store.Slice) []OracleRun {
+	for i, run := range runs {
+		for _, s := range slices {
+			if ws, ok := man.WorkspaceIn(repo, s.Workspace); ok && s.Oracle == run.Oracle && ws.ID == run.Workspace {
+				runs[i].Slices = append(runs[i].Slices, s.ID)
+			}
+		}
+	}
+	return runs
+}
+
+// reusedPass is a pass jig recorded at a slice's green that stands for the
+// gate's own run: the commit it ran at and its wall time in seconds.
+type reusedPass struct {
+	Commit  string
+	Seconds int
+}
+
+// reusablePasses returns, by exact command, the oracle pass jig recorded at
+// a slice's green (ADR 0020) that stands for the gate's own run of that
+// command on dir's HEAD (ADR 0021). A pass stands only when:
 //   - it carries a commit, which frontier records only when the lease's
 //     tracked and untracked files were exactly that commit;
 //   - that commit's tree is HEAD's tree;
@@ -403,7 +432,7 @@ func runGateOracles(d Deps, ticket, dir string, man manifest.Manifest, slices []
 //     flaky oracle is sampled again.
 //
 // Every oracle runs from the repo root, so the command alone names the run.
-func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []store.Slice) (map[string]string, error) {
+func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []store.Slice) (map[string]reusedPass, error) {
 	lines, err := journal.Read(d.Store, ticket)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: gate: read journal for oracle passes: %w", err)
@@ -417,7 +446,7 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 		tree, found, _ := gitx.Resolve(dir, commit+"^{tree}")
 		return found && tree == headTree
 	}
-	passed, failed := map[string]string{}, map[string]bool{}
+	passed, failed := map[string]reusedPass{}, map[string]bool{}
 	for _, l := range lines {
 		if l.Event != "oracle" || l.Commit == "" || l.Command == "" || !sameTree(l.Commit) {
 			continue
@@ -427,7 +456,7 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 			failed[l.Command] = true
 		case "pass":
 			if sameEnvs(l.Env, envs) {
-				passed[l.Command] = l.Commit
+				passed[l.Command] = reusedPass{Commit: l.Commit, Seconds: l.Seconds}
 			}
 		}
 	}
@@ -459,7 +488,7 @@ func sameEnvs(env string, envs map[string]bool) bool {
 }
 
 // coversSuite reports whether reused holds every run of man's suite.
-func coversSuite(man manifest.Manifest, reused map[string]string) bool {
+func coversSuite(man manifest.Manifest, reused map[string]reusedPass) bool {
 	for _, ws := range man.Workspaces {
 		for name := range man.Oracles {
 			if _, ok := reused[man.OracleCmd(name, ws)]; !ok {
@@ -471,26 +500,38 @@ func coversSuite(man manifest.Manifest, reused map[string]string) bool {
 }
 
 // oracleSuiteRuns is RunOracleSuite with the runs in reused (by command)
-// taken from there instead of run again, and each other run made by run.
-func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]string, run oracleFunc) ([]OracleRun, error) {
+// taken from there instead of run again, and each other run made by run and
+// timed.
+func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reusedPass, run oracleFunc) ([]OracleRun, error) {
 	var runs []OracleRun
 	for _, ws := range man.Workspaces {
 		for _, name := range SortedOracleNames(man) {
 			cmd := man.OracleCmd(name, ws)
-			if commit, ok := reused[cmd]; ok {
-				runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, ReusedFrom: commit})
+			if pass, ok := reused[cmd]; ok {
+				runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, ReusedFrom: pass.Commit, Seconds: pass.Seconds})
 				continue
 			}
+			start := time.Now()
 			if err := runOracle(run, cmd, dir); err != nil {
 				return nil, &axi.Error{
 					Msg:  fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err),
 					Code: "GATE_ORACLE_FAILED",
 				}
 			}
-			runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd})
+			runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: wholeSeconds(time.Since(start))})
 		}
 	}
 	return runs, nil
+}
+
+// wholeSeconds is d rounded up to whole seconds, so any run takes at least 1:
+// the rule `jig verify` times an oracle by (ADR 0024).
+func wholeSeconds(d time.Duration) int {
+	s := int((d + time.Second - 1) / time.Second)
+	if s < 1 {
+		return 1
+	}
+	return s
 }
 
 // oracleLimit bounds one oracle run of the gate or of publish's
@@ -643,15 +684,15 @@ func appendFixSlices(d Deps, ticket string, n int, slices []store.Slice) error {
 	return nil
 }
 
-// writeReviewerRound writes a reviewer round's files: findings.yaml,
-// findings.md rendered from it, report.yaml (with
+// writeReviewerRound writes a reviewer round's files: findings.yaml (with the
+// round's probes and skips), findings.md rendered from it, report.yaml (with
 // ReviewedSHA), and diff-changelog.md.
-func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string) error {
+func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string, probes []ProbeRecord, skips []SkipRecord) error {
 	dir := gateRoundDir(d.Store, ticket, n)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("verifydeliver: gate: create round dir: %w", err)
 	}
-	yamlData, err := marshalFindingsYAML(scope, reviewedPaths, findings, cleared, summary)
+	yamlData, err := marshalFindingsYAML(scope, reviewedPaths, findings, cleared, summary, probes, skips)
 	if err != nil {
 		return fmt.Errorf("verifydeliver: gate: marshal findings.yaml: %w", err)
 	}

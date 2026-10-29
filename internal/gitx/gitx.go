@@ -312,6 +312,113 @@ func DiffNameOnly(dir, base, head, diffFilter string) ([]string, error) {
 	return strings.Split(raw, "\x00"), nil
 }
 
+// Hunk is one hunk of a diff as its new side reads: Path is the file's path
+// at head, From and To the hunk's first and last line there (1-based,
+// inclusive).
+type Hunk struct {
+	Path     string
+	From, To int
+}
+
+// DiffHunks returns every hunk base..head adds or changes lines in, in dir,
+// in diff order, with renames off as in DiffNameOnly, so a renamed file is
+// all new lines at its new path. A hunk that only deletes lines leaves no line
+// at head and is left out, and a binary file and a submodule have no hunks.
+// Paths come back repo-relative with forward slashes, unquoted.
+func DiffHunks(dir, base, head string) ([]Hunk, error) {
+	args := []string{"-c", "core.quotepath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
+		"--no-renames", "--ignore-submodules=all", "--src-prefix=a/", "--dst-prefix=b/", base, head}
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
+		return nil, callError(args, stderr.String(), err)
+	}
+	return parseHunks(stdout.String())
+}
+
+// hunkHeaderRe is a hunk header's new side: "+start" or "+start,count".
+var hunkHeaderRe = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
+
+// parseHunks reads DiffHunks's patch. A file's header runs from its "diff
+// --git" line to its first hunk; only there is a "+++ " line its new path,
+// since a content line of a hunk can begin with "+++" too.
+func parseHunks(patch string) ([]Hunk, error) {
+	var hunks []Hunk
+	path, inHeader := "", false
+	for _, line := range strings.Split(patch, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			path, inHeader = "", true
+		case inHeader && strings.HasPrefix(line, "+++ "):
+			// git ends the line with a tab when the name holds a space.
+			name := strings.TrimSuffix(strings.TrimPrefix(line, "+++ "), "\t")
+			if strings.HasPrefix(name, `"`) {
+				unq, err := strconv.Unquote(name)
+				if err != nil {
+					return nil, fmt.Errorf("gitx: diff hunks: unquote %s: %w", name, err)
+				}
+				name = unq
+			}
+			if name != "/dev/null" {
+				path = strings.TrimPrefix(name, "b/")
+			}
+		case strings.HasPrefix(line, "@@ "):
+			inHeader = false
+			m := hunkHeaderRe.FindStringSubmatch(line)
+			if m == nil {
+				return nil, fmt.Errorf("gitx: diff hunks: unreadable hunk header %q", line)
+			}
+			from, _ := strconv.Atoi(m[1])
+			count := 1
+			if m[2] != "" {
+				count, _ = strconv.Atoi(m[2])
+			}
+			if path == "" || count == 0 {
+				continue
+			}
+			hunks = append(hunks, Hunk{Path: path, From: from, To: from + count - 1})
+		}
+	}
+	return hunks, nil
+}
+
+// BlobsAtRev returns the object id of each of paths that is a blob in dir's
+// tree at rev, by path: one ls-tree for them all. A path that is absent at
+// rev, or names a directory or a submodule there, is not in the map. rev is
+// resolved first, as FileExistsAtRev resolves it.
+func BlobsAtRev(dir, rev string, paths []string) (map[string]string, error) {
+	blobs := map[string]string{}
+	if len(paths) == 0 {
+		return blobs, nil
+	}
+	if _, err := Run(dir, "rev-parse", "--verify", "--quiet", rev+"^{commit}"); err != nil {
+		return nil, fmt.Errorf("gitx: blobs at rev: rev %q does not resolve to a commit: %w", rev, err)
+	}
+	args := append([]string{"--literal-pathspecs", "ls-tree", "-r", "-z", "--full-tree", rev, "--"}, paths...)
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
+		return nil, callError(args, stderr.String(), err)
+	}
+	want := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		want[p] = true
+	}
+	for _, entry := range strings.Split(stdout.String(), "\x00") {
+		if entry == "" {
+			continue
+		}
+		meta, path, found := strings.Cut(entry, "\t")
+		fields := strings.Fields(meta)
+		if !found || len(fields) != 3 {
+			return nil, fmt.Errorf("gitx: blobs at rev: unexpected ls-tree entry %q", entry)
+		}
+		if fields[1] == "blob" && want[path] {
+			blobs[path] = fields[2]
+		}
+	}
+	return blobs, nil
+}
+
 // FileExistsAtRev reports whether path exists as a blob (not a tree) in
 // dir's tree at rev. rev is resolved first: a rev that does not name a
 // commit (a bad sha, an unknown ref) is returned as an error. Once rev is

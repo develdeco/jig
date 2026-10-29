@@ -1,10 +1,14 @@
 package gitx
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/develdeco/jig/internal/filelock"
 )
 
 // worktreeListed reports whether repo's worktree list names dir, by file
@@ -69,6 +73,11 @@ func TestWorktreeAddDetachedChecksTheCommitOutWithoutMovingTheRepo(t *testing.T)
 	}
 	if !worktreeListed(t, repo, dir) {
 		t.Errorf("git does not list %s as a worktree of the repo", dir)
+	}
+	// The checkout is the whole commit, staged as it is: nothing modified,
+	// deleted or untracked, which is what verify's clean-tree check holds it to.
+	if status, err := Run(dir, "status", "--porcelain"); err != nil || status != "" {
+		t.Errorf("git status in the new worktree = %q, %v, want a clean tree", status, err)
 	}
 }
 
@@ -176,6 +185,139 @@ func TestWorktreeRemove(t *testing.T) {
 			t.Errorf("adding at the pruned directory again: %v", err)
 		}
 	})
+	t.Run("a worktree git left locked is removed with its record", func(t *testing.T) {
+		t.Parallel()
+		repo := newRepo(t)
+		dir := filepath.Join(t.TempDir(), "wt")
+		if err := WorktreeAddDetached(repo, dir, "HEAD"); err != nil {
+			t.Fatal(err)
+		}
+		// An add that was killed half-way leaves its worktree locked.
+		if _, err := Run(repo, "worktree", "lock", "--reason", "initializing", dir); err != nil {
+			t.Fatal(err)
+		}
+		if err := WorktreeRemove(repo, dir); err != nil {
+			t.Fatalf("WorktreeRemove: %v", err)
+		}
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("the directory is still there: %v", err)
+		}
+		if worktreeListed(t, repo, dir) {
+			t.Error("git still lists the locked worktree")
+		}
+	})
+}
+
+// holdWorktreesLock takes repo's worktrees lock as another process would, and
+// lets go of it when the test ends unless the test let go of it first.
+func holdWorktreesLock(t *testing.T, repo string) (release func()) {
+	t.Helper()
+	unlock, held, err := filelock.TryLock(filepath.Join(repo, ".git", worktreesLockName), 0)
+	if err != nil || !held {
+		t.Fatalf("taking the worktrees lock: held %v, err %v", held, err)
+	}
+	var once sync.Once
+	t.Cleanup(func() { once.Do(unlock) })
+	return func() { once.Do(unlock) }
+}
+
+// halfAdded writes into repo the records git's worktree add has written of
+// a worktree named id when it is part-way through: its directory under
+// worktrees/, and, when files is set, a gitdir and a commondir that is still
+// empty. Another add that reads them then dies ("failed to read
+// .../commondir"); a prune deletes a directory with no gitdir in it.
+func halfAdded(t *testing.T, repo, id string, files bool) string {
+	t.Helper()
+	records := filepath.Join(repo, ".git", "worktrees", id)
+	if err := os.MkdirAll(records, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if files {
+		gitdir := filepath.ToSlash(filepath.Join(t.TempDir(), id, ".git"))
+		if err := os.WriteFile(filepath.Join(records, "gitdir"), []byte(gitdir+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(records, "commondir"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return records
+}
+
+// TestWorktreeAddDetachedWaitsForTheWorktreesLock: an add runs no git while
+// another process holds the repository's worktrees lock, whose own add may
+// have its records half written, as the verify workers of one clone do when
+// they start together. It waits, and when the wait runs out it says the lock
+// was busy and has made nothing. It is the same lock from a linked worktree
+// of the clone, and once the holder lets go the add goes through.
+func TestWorktreeAddDetachedWaitsForTheWorktreesLock(t *testing.T) {
+	t.Parallel()
+	repo := initRepo(t, filepath.Join(t.TempDir(), "origin.git"))
+	linked := filepath.Join(t.TempDir(), "linked")
+	if err := WorktreeAddDetached(repo, linked, "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	release := holdWorktreesLock(t, repo)
+	records := halfAdded(t, repo, "other", true)
+
+	for _, from := range []string{repo, linked} {
+		dir := filepath.Join(t.TempDir(), "wt")
+		err := worktreeAddDetached(from, dir, "HEAD", 0)
+		if !errors.Is(err, errWorktreesBusy) {
+			t.Fatalf("an add from %s while another process holds the lock = %v, want it to wait for the lock (%v)", from, err, errWorktreesBusy)
+		}
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("the add that waited made %s: %v", dir, err)
+		}
+	}
+
+	// The other add finishes (here, its records go) and lets go of the lock.
+	if err := os.RemoveAll(records); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	dir := filepath.Join(t.TempDir(), "wt")
+	if err := worktreeAddDetached(repo, dir, "HEAD", 0); err != nil {
+		t.Fatalf("the add once the lock is free: %v", err)
+	}
+	if !worktreeListed(t, repo, dir) {
+		t.Errorf("git does not list %s as a worktree of the repo", dir)
+	}
+}
+
+// TestWorktreeRemoveWaitsForTheWorktreesLock: a removal deletes its own
+// directory but prunes nothing while another process holds the repository's
+// worktrees lock, so the records of the holder's add, which a prune would
+// take for a stale worktree's, stay. Once the holder lets go the removal goes
+// through.
+func TestWorktreeRemoveWaitsForTheWorktreesLock(t *testing.T) {
+	t.Parallel()
+	repo := initRepo(t, filepath.Join(t.TempDir(), "origin.git"))
+	dir := filepath.Join(t.TempDir(), "wt")
+	if err := WorktreeAddDetached(repo, dir, "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	release := holdWorktreesLock(t, repo)
+	records := halfAdded(t, repo, "other", false)
+
+	err := worktreeRemove(repo, dir, 0)
+	if !errors.Is(err, errWorktreesBusy) {
+		t.Fatalf("a removal while another process holds the lock = %v, want it to wait for the lock (%v)", err, errWorktreesBusy)
+	}
+	if _, err := os.Stat(records); err != nil {
+		t.Errorf("the records of the other process's add were pruned: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("the removal that waited left its directory: %v", err)
+	}
+
+	release()
+	if err := worktreeRemove(repo, dir, 0); err != nil {
+		t.Fatalf("the removal once the lock is free: %v", err)
+	}
+	if worktreeListed(t, repo, dir) {
+		t.Error("git still lists the removed worktree")
+	}
 }
 
 // TestTrailer reads a commit trailer the way git interprets them: from the

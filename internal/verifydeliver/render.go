@@ -59,14 +59,17 @@ func writeChangelogs(st *store.Store, ticket string, slices []store.Slice, lines
 }
 
 // answersBlock renders the ledger's "**Answers:**" section: one bullet per
-// answered question, or "none".
+// answered question, or "none". A question or an answer that runs over
+// several lines is folded onto one (oneLine): a line of its own in the entry
+// that starts "- " would read as another answer's bullet, and one that starts
+// "## " as the next entry's heading.
 func answersBlock(questions []store.Question) string {
 	var lines []string
 	for _, q := range questions {
 		if q.Status != "answered" || q.Answer == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- %s: %s -> %s", q.ID, q.Body, q.Answer))
+		lines = append(lines, fmt.Sprintf("- %s: %s -> %s", q.ID, oneLine(q.Body), oneLine(q.Answer)))
 	}
 	if len(lines) == 0 {
 		return "none"
@@ -74,53 +77,49 @@ func answersBlock(questions []store.Question) string {
 	return strings.Join(lines, "\n")
 }
 
-// appendLedgerEntry appends this ticket's ledger entry to the store's
-// ledger.md, under a lock.
-func appendLedgerEntry(st *store.Store, ticket, title string, slices []store.Slice, questions []store.Question) error {
-	path := filepath.Join(st.Root, "ledger.md")
+// editStoreDoc rewrites the store file at path under its lock: edit gets the
+// file's text, "" when there is no file yet, and returns the text to write.
+// what names the file in an error.
+func editStoreDoc(path, what string, edit func(text string) string) error {
 	release, _, err := store.Lock(path, 30*time.Second)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: ledger: lock: %w", err)
+		return fmt.Errorf("verifydeliver: %s: lock: %w", what, err)
 	}
 	defer release()
 
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("verifydeliver: ledger: read: %w", err)
+		return fmt.Errorf("verifydeliver: %s: read: %w", what, err)
 	}
-	entry := fmt.Sprintf(
-		"\n## %s - %s\n\nDelivered %d slice(s).\n\n**Answers:**\n%s\n",
-		ticket, title, len(slices), answersBlock(questions),
-	)
-	out := append(append([]byte{}, existing...), []byte(entry)...)
-	return store.AtomicWrite(path, out)
+	return store.AtomicWrite(path, []byte(edit(string(existing))))
 }
 
-// appendContractIndexEntry appends this ticket's contract-index entry
-// under the store's platform directory, under a lock.
-func appendContractIndexEntry(st *store.Store, cfgPlatform, ticket string, slices []store.Slice, oracleNames []string) error {
-	platform := cfgPlatform
-	if platform == "" {
-		platform = "platform/"
-	}
-	path := filepath.Join(st.Root, filepath.FromSlash(platform), "contract-index.md")
-	release, _, err := store.Lock(path, 30*time.Second)
-	if err != nil {
-		return fmt.Errorf("verifydeliver: contract-index: lock: %w", err)
-	}
-	defer release()
+// writeLedgerEntry puts this ticket's entry in the store's ledger.md, under a
+// lock: in the place the ticket's earlier entry held when a publish already
+// wrote one, so a republish replaces it and the file keeps one entry per
+// ticket, and at the end otherwise.
+func writeLedgerEntry(st *store.Store, ticket, title string, slices []store.Slice, questions []store.Question) error {
+	entry := fmt.Sprintf(
+		"## %s - %s\n\nDelivered %d slice(s).\n\n**Answers:**\n%s\n",
+		ticket, oneLine(title), len(slices), answersBlock(questions),
+	)
+	return editStoreDoc(st.LedgerPath(), "ledger", func(text string) string {
+		return store.ReplaceLedgerEntry(text, ticket, entry)
+	})
+}
 
-	existing, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("verifydeliver: contract-index: read: %w", err)
-	}
+// writeContractIndexEntry puts this ticket's contract-index entry in the
+// store's platform directory, under a lock, replacing the line a publish
+// already wrote for it (writeLedgerEntry).
+func writeContractIndexEntry(st *store.Store, cfgPlatform, ticket string, slices []store.Slice, oracleNames []string) error {
 	ws := distinctWorkspaces(slices)
 	sort.Strings(ws)
 	names := append([]string{}, oracleNames...)
 	sort.Strings(names)
 	entry := fmt.Sprintf("- %s: workspaces %s, oracles %s\n", ticket, strings.Join(ws, ","), strings.Join(names, ","))
-	out := append(append([]byte{}, existing...), []byte(entry)...)
-	return store.AtomicWrite(path, out)
+	return editStoreDoc(st.ContractIndexPath(cfgPlatform), "contract-index", func(text string) string {
+		return store.ReplaceContractIndexEntry(text, ticket, entry)
+	})
 }
 
 // writeEvidence writes <ticket>/pr/evidence.md: a per-round list linking
@@ -1015,11 +1014,12 @@ func reviewNotesFile(repo string, several bool) string {
 // request's first comment: the last round's own summary, every finding across
 // every round ordered by risk with how it ended, and coverage - the files the
 // change touched (touchedFiles, Publish's own diff of the ship range)
-// against the files the reviewer read (reviewedPaths). outcomes,
-// reviewedPaths and lastSummary all come from the one pass
+// against the files the reviewer read (reviewedPaths), and, for a reviewer's
+// rounds, the behavior they tested (behavior, ADR 0036; nil for scripted
+// rounds). outcomes, reviewedPaths and lastSummary all come from the one pass
 // collectFindingsWithOutcomes already makes over every round's
 // findings.yaml; this function reads nothing on its own.
-func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastSummary string, outcomes []findingOutcome, reviewedPaths, touchedFiles []string) error {
+func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastSummary string, outcomes []findingOutcome, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
@@ -1065,6 +1065,38 @@ func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastS
 			fmt.Fprintf(&b, "- %s\n", p)
 		}
 		b.WriteString("\n")
+	}
+
+	// The behavior the review tested: a clean verdict rests on these probes,
+	// and says nothing of the hunks no probe or skip covers.
+	if behavior != nil {
+		if len(behavior.Probes) == 0 {
+			b.WriteString("Probes current at the reviewed head: none\n\n")
+		} else {
+			b.WriteString("Probes current at the reviewed head:\n\n")
+			for _, p := range behavior.Probes {
+				fmt.Fprintf(&b, "- %s:%d %s: %s (%s; round %d)\n", p.File, p.Line, p.Outcome, p.Mutation, p.Seam, p.Round)
+			}
+			b.WriteString("\n")
+		}
+		if len(behavior.Skips) > 0 {
+			b.WriteString("Set aside as on no critical path:\n\n")
+			for _, s := range behavior.Skips {
+				where := s.File
+				if s.From != 0 {
+					where = fmt.Sprintf("%s:%d-%d", s.File, s.From, s.To)
+				}
+				fmt.Fprintf(&b, "- %s: %s\n", where, s.Why)
+			}
+			b.WriteString("\n")
+		}
+		if len(behavior.Unprobed) > 0 {
+			b.WriteString("Hunks no probe or skip covers:\n\n")
+			for _, h := range behavior.Unprobed {
+				fmt.Fprintf(&b, "- %s:%d-%d\n", h.File, h.From, h.To)
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	dir := filepath.Join(ticketDir, "pr")
