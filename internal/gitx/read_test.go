@@ -9,14 +9,24 @@ import (
 	"testing"
 )
 
-// canonPath is a path in the form TopLevel and CommonDir return: cleaned and
-// free of symbolic links.
+// canonPath is p as git spells a path it makes absolute: cleaned, with the
+// longest part of it that exists resolved of symbolic links (on Windows that
+// also expands an 8.3 short name to its long one), and the rest kept as it
+// is, since a path git names need not exist.
 func canonPath(p string) string {
 	p = filepath.Clean(p)
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		p = r
+	rest := ""
+	for {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(r, rest)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return filepath.Join(p, rest)
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
 	}
-	return p
 }
 
 // TestInProcessReadsMatchGit puts every in-process read next to the git
