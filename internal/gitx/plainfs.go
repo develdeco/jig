@@ -4,15 +4,18 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/go-git/go-billy/v5"
 )
 
 // plainFS is the file system gitx gives go-git for a git directory: plain
-// OS calls on paths joined under root. go-billy's own OS file systems
+// OS calls on paths joined under root, with read-only opens through
+// fileshare so git can still replace or remove what go-git holds open. go-billy's own OS file systems
 // resolve every path component for symbolic links on every call, a stat
 // per component, which on Windows costs more than the object read itself;
-// gitx opens only a store's .git directory and its local bare remote this
-// way, whose paths come from git, not from the files it tracks.
+// gitx opens a store's .git directory and its local bare remote this way,
+// and the object store of a repository it reads in process, whose paths
+// come from git, not from the files it tracks.
 type plainFS struct {
 	root string
 }
@@ -43,7 +46,15 @@ func (fs plainFS) OpenFile(name string, flag int, perm os.FileMode) (billy.File,
 			return nil, err
 		}
 	}
-	f, err := os.OpenFile(p, flag, perm)
+	var f *os.File
+	var err error
+	if flag == os.O_RDONLY {
+		// git renames over and removes the files go-git reads (packs,
+		// their indexes, loose objects) while they are open.
+		f, err = fileshare.Open(p)
+	} else {
+		f, err = os.OpenFile(p, flag, perm)
+	}
 	if err != nil {
 		return nil, err
 	}

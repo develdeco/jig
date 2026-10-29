@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/develdeco/jig/internal/fileshare"
 )
 
 // maxPackedRefs is the size of packed-refs above which the in-process reads
@@ -76,7 +78,7 @@ func (l *repoLoc) readLoose(name string) (rawRef, refState) {
 	if !fi.Mode().IsRegular() || fi.Size() > 4096 {
 		return rawRef{}, refUnsure
 	}
-	data, err := os.ReadFile(path)
+	data, err := fileshare.ReadFile(path)
 	if err != nil {
 		if isAbsent(err) || errors.Is(err, syscall.EISDIR) {
 			return rawRef{}, refMissing
@@ -114,7 +116,7 @@ func isSpace(c byte) bool {
 // Peeled lines (^<oid>) and the header are skipped. Only the common
 // directory has packed-refs.
 func (l *repoLoc) packedScan(visit func(name, oid string) (stop bool)) refState {
-	f, err := os.Open(filepath.Join(l.commonDir, "packed-refs"))
+	f, err := fileshare.Open(filepath.Join(l.commonDir, "packed-refs"))
 	if err != nil {
 		if isAbsent(err) {
 			return refMissing

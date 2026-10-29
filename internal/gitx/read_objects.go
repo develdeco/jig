@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/format/index"
@@ -413,7 +414,7 @@ func (l *repoLoc) hasUnmerged() (unmerged, ok bool) {
 	if matches, _ := filepath.Glob(filepath.Join(l.gitDir, "sharedindex.*")); len(matches) > 0 {
 		return false, false
 	}
-	f, err := os.Open(filepath.Join(l.gitDir, "index"))
+	f, err := fileshare.Open(filepath.Join(l.gitDir, "index"))
 	if err != nil {
 		return false, isAbsent(err)
 	}

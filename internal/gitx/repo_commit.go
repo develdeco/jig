@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -196,7 +197,7 @@ func readIndex(gitDir string) (*index.Index, time.Time, error) {
 	if err != nil {
 		return nil, time.Time{}, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := fileshare.ReadFile(path)
 	if err != nil {
 		return nil, time.Time{}, err
 	}

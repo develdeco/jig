@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	format "github.com/go-git/go-git/v5/plumbing/format/config"
 )
 
@@ -160,7 +161,7 @@ func locateAt(workTree, dotGit string, fi fs.FileInfo, start string) (*repoLoc, 
 	case fi.IsDir():
 		gitDir = dotGit
 	case fi.Mode().IsRegular() && fi.Size() < 4096:
-		data, err := os.ReadFile(dotGit)
+		data, err := fileshare.ReadFile(dotGit)
 		if err != nil {
 			return nil, false
 		}
@@ -179,7 +180,7 @@ func locateAt(workTree, dotGit string, fi fs.FileInfo, start string) (*repoLoc, 
 		return nil, false
 	}
 	loc := &repoLoc{workTree: workTree, gitDir: gitDir, commonDir: gitDir}
-	if data, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+	if data, err := fileshare.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
 		common := strings.TrimRight(string(data), " \t\r\n")
 		if common == "" || strings.ContainsRune(common, 0) {
 			return nil, false
@@ -196,7 +197,7 @@ func locateAt(workTree, dotGit string, fi fs.FileInfo, start string) (*repoLoc, 
 	if fi, err := os.Lstat(filepath.Join(gitDir, "HEAD")); err != nil || !fi.Mode().IsRegular() {
 		return nil, false // a symbolic link as HEAD is an old git's symbolic ref
 	}
-	head, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
+	head, err := fileshare.ReadFile(filepath.Join(gitDir, "HEAD"))
 	if err != nil || len(head) > 1024 {
 		return nil, false
 	}
@@ -233,7 +234,7 @@ func validHead(head string) bool {
 // in-process reads do not honor, or cannot be read: see discover. A missing
 // config is an empty one.
 func configDeclines(commonDir string) bool {
-	f, err := os.Open(filepath.Join(commonDir, "config"))
+	f, err := fileshare.Open(filepath.Join(commonDir, "config"))
 	if err != nil {
 		return !isAbsent(err)
 	}

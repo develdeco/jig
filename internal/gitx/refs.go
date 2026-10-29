@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/develdeco/jig/internal/fileshare"
 )
 
 // RefExists reports whether the fully spelled ref (refs/heads/claims,
@@ -34,7 +36,7 @@ func RefExists(dir, ref string) (bool, error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-	f, err := os.Open(filepath.Join(gitDir, "packed-refs"))
+	f, err := fileshare.Open(filepath.Join(gitDir, "packed-refs"))
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
