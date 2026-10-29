@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/locate"
@@ -22,7 +21,8 @@ const publishHead = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
 // given verdict, and whose journal holds lines.
 func publishCtx(t *testing.T, verdict string, lines ...journal.Line) observe.NoteCtx {
 	t.Helper()
-	fx := newFixture(t, fixture.Opts{})
+	fx := newStoreOnlyFixture(t)
+	clone := t.TempDir() // the notes read the store and the ledger, never the clone
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func publishCtx(t *testing.T, verdict string, lines ...journal.Line) observe.Not
 	}
 	return observe.NoteCtx{
 		Event:   observe.Event{Kind: observe.KindStop, Session: "s1", Harness: "claude"},
-		Where:   locate.Where{Ticket: fx.Ticket, Cwd: fx.RepoDir, RepoDir: fx.RepoDir},
+		Where:   locate.Where{Ticket: fx.Ticket, Cwd: clone, RepoDir: clone},
 		Store:   st,
 		JigHome: fx.Home,
 		Now:     time.Now(),

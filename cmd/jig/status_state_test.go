@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/store"
@@ -36,7 +35,7 @@ func stateLine(t *testing.T, st *store.Store, ticket string) string {
 // queued has the build ahead, building is in it.
 func TestStatusStateOfATicketNothingHasStarted(t *testing.T) {
 	t.Parallel()
-	fx := newFixture(t, fixture.Opts{})
+	fx := newStoreOnlyFixture(t)
 	st := openStore(t, fx)
 
 	two := []store.Slice{{ID: "x", Workspace: "alpha", Goal: "Build x.", Oracle: "test"}, {ID: "y", Workspace: "alpha", Goal: "Build y.", Oracle: "test"}}
