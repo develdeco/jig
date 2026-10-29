@@ -75,6 +75,13 @@ func TestReadBudgetRefusesWhatItCannotJudge(t *testing.T) {
 	}
 }
 
+func TestSetEnvReplacesEveryEarlierEntry(t *testing.T) {
+	got := setEnv([]string{"A=1", "GIT_TRACE2_EVENT=/outer", "B=2", "git_trace2_event=/other"}, "GIT_TRACE2_EVENT", "/mine")
+	if strings.Join(got, " ") != "A=1 B=2 GIT_TRACE2_EVENT=/mine" {
+		t.Errorf("setEnv = %v", got)
+	}
+}
+
 func TestCountDirNameAndModule(t *testing.T) {
 	if got := countDirName("internal/gitx"); got != "internal%2Fgitx" {
 		t.Errorf("countDirName = %q", got)
@@ -112,7 +119,9 @@ func TestCountsTheGitProcessesOfTheBinaryItRuns(t *testing.T) {
 	}
 	counts := filepath.Join(tmp, "counts")
 	wrapped := exec.Command(bin, git, "version")
-	wrapped.Env = append(os.Environ(), "GITBUDGET_DIR="+counts)
+	// An outer trace directory, as this test has when CI counts its own
+	// package, must not take the wrapped binary's traces.
+	wrapped.Env = append(os.Environ(), "GIT_TRACE2_EVENT="+filepath.Join(tmp, "outer"), "GITBUDGET_DIR="+counts)
 	out, err := wrapped.CombinedOutput()
 	if err != nil || !strings.HasPrefix(string(out), "git version ") {
 		t.Fatalf("gitbudget git version: %v\n%s", err, out)

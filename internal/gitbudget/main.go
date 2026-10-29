@@ -67,9 +67,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "gitbudget: %v\n", err)
 			return 1
 		}
-		env = append(env, "GIT_TRACE2_EVENT="+traces)
+		env = setEnv(env, "GIT_TRACE2_EVENT", traces)
 	}
 	return execTest(args[0], args, env, stderr)
+}
+
+// setEnv returns env with name set to value, every earlier entry of name
+// dropped: exec passes the list as it is, and git reads the first of two.
+func setEnv(env []string, name, value string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if k, _, _ := strings.Cut(kv, "="); !strings.EqualFold(k, name) {
+			out = append(out, kv)
+		}
+	}
+	return append(out, name+"="+value)
 }
 
 // checkOrWrite is the check and write commands.
