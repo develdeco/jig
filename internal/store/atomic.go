@@ -11,8 +11,11 @@ import (
 
 // AtomicWrite writes data to path by writing a temp file in the same
 // directory (so the final rename is atomic even across the same volume) and
-// renaming it into place. On Windows, a sharing violation from the rename
-// (another process has path open) is retried 10 times with a 50ms backoff.
+// renaming it into place (replaceFile: on Windows with POSIX semantics, so
+// the name moves in one step even while a reader holds the old file). A
+// rename that still fails because another process has path open
+// (replacing) is retried until replaceWindow has passed; readFile rides out
+// the same moment from the reading side.
 func AtomicWrite(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if dir != "" {
@@ -25,19 +28,18 @@ func AtomicWrite(path string, data []byte) error {
 		return err
 	}
 
-	var err error
-	for attempt := 0; attempt < 10; attempt++ {
-		err = os.Rename(tmp, path)
+	deadline := time.Now().Add(replaceWindow)
+	for {
+		err := replaceFile(tmp, path)
 		if err == nil {
 			return nil
 		}
-		if attempt == 9 {
-			break
+		if !replacing(err) || time.Now().After(deadline) {
+			_ = os.Remove(tmp)
+			return err
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(replaceBackoff)
 	}
-	_ = os.Remove(tmp)
-	return err
 }
 
 func tempName(name string) string {

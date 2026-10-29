@@ -89,87 +89,64 @@ func commitOnParent(t *testing.T, h *fakeHarness, file string) string {
 // TestStackedChildStartsFromParentBranch: a child stacked on a parent that has
 // a branch starts from that branch, and its pull request goes into it, in the
 // repo they share; in a repo only the child builds in, both are the target.
-// `jig next` and `jig here` say so, and the child's pull request body, and the
-// base `jig publish --body` names, are the parent's branch.
+// `jig next` and `jig here` say so. The pull request is the publish's: the
+// base `jig publish --body` names, the Stacked on section of the body and the
+// refusal while the parent's branch is not pushed are internal/verifydeliver's
+// (TestPublishOfAStackedTicketGoesIntoTheParentsBranch and
+// TestRenderStackedSection).
 func TestStackedChildStartsFromParentBranch(t *testing.T) {
 	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{SecondRepo: true})
+	h := newHarness(t, fx, env, "s-parent")
+	st, head := stackOnAParent(t, fx, h)
+	h.Push(parentBranch)
+	if err := journal.Append(st, "JIG-2", journal.Line{Event: journal.EventPublishDone}); err != nil {
+		t.Fatal(err)
+	}
 
-	t.Run("next and here, in a shared repo and the child's own", func(t *testing.T) {
-		t.Parallel()
-		fx, env := newFixture(t, fixture.Opts{SecondRepo: true})
-		h := newHarness(t, fx, env, "s-parent")
-		st, head := stackOnAParent(t, fx, h)
-		h.Push(parentBranch)
-		if err := journal.Append(st, "JIG-2", journal.Line{Event: journal.EventPublishDone}); err != nil {
-			t.Fatal(err)
+	n := nextJSON[stackedNextOut](t, env, fx.RepoDir, "JIG-1")
+	if n.State != "ready" || len(n.Stack) != 2 {
+		t.Fatalf("jig next JIG-1: state %q, stack %+v, want ready with a row for each repo", n.State, n.Stack)
+	}
+	shared, own := n.Stack[0], n.Stack[1]
+	if shared.Repo != "fixture-repo" || shared.Parent != "JIG-2" || shared.ParentBranch != parentBranch || shared.ParentHead != head ||
+		shared.StartFrom != parentBranch || shared.PRTarget != parentBranch || shared.Merged || shared.Restack {
+		t.Errorf("fixture-repo = %+v, want it to start from and go into %s at %s", shared, parentBranch, head)
+	}
+	if own.Repo != "second-repo" || own.Parent != "" || own.StartFrom != "origin/main" || own.PRTarget != "main" {
+		t.Errorf("second-repo = %+v, want origin/main and main", own)
+	}
+	starts := map[string]string{}
+	for _, b := range n.Ready {
+		starts[b.Repo] = b.Start
+	}
+	if want := map[string]string{"fixture-repo": parentBranch, "second-repo": "origin/main"}; !reflect.DeepEqual(starts, want) {
+		t.Errorf("ready starts = %v, want %v", starts, want)
+	}
+	r := runJig(t, env, fx.RepoDir, "next", "JIG-1")
+	for _, want := range []string{
+		"stack[2]{repo,parent,start_from,pr_target}:\n  fixture-repo,JIG-2," + parentBranch + "," + parentBranch + "\n  second-repo,-,origin/main,main\n",
+		"ready[2]{repo,slices,start}:\n  fixture-repo,a+c+d," + parentBranch + "\n  second-repo,e,origin/main\n",
+	} {
+		if !strings.Contains(r.Stdout, want) {
+			t.Errorf("jig next JIG-1 lacks %q:\n%s", want, r.Stdout)
 		}
+	}
+	if strings.Contains(r.Stdout, "note:") {
+		t.Errorf("jig next JIG-1 has a note for a child that has not started:\n%s", r.Stdout)
+	}
 
-		n := nextJSON[stackedNextOut](t, env, fx.RepoDir, "JIG-1")
-		if n.State != "ready" || len(n.Stack) != 2 {
-			t.Fatalf("jig next JIG-1: state %q, stack %+v, want ready with a row for each repo", n.State, n.Stack)
-		}
-		shared, own := n.Stack[0], n.Stack[1]
-		if shared.Repo != "fixture-repo" || shared.Parent != "JIG-2" || shared.ParentBranch != parentBranch || shared.ParentHead != head ||
-			shared.StartFrom != parentBranch || shared.PRTarget != parentBranch || shared.Merged || shared.Restack {
-			t.Errorf("fixture-repo = %+v, want it to start from and go into %s at %s", shared, parentBranch, head)
-		}
-		if own.Repo != "second-repo" || own.Parent != "" || own.StartFrom != "origin/main" || own.PRTarget != "main" {
-			t.Errorf("second-repo = %+v, want origin/main and main", own)
-		}
-		starts := map[string]string{}
-		for _, b := range n.Ready {
-			starts[b.Repo] = b.Start
-		}
-		if want := map[string]string{"fixture-repo": parentBranch, "second-repo": "origin/main"}; !reflect.DeepEqual(starts, want) {
-			t.Errorf("ready starts = %v, want %v", starts, want)
-		}
-		r := runJig(t, env, fx.RepoDir, "next", "JIG-1")
-		for _, want := range []string{
-			"stack[2]{repo,parent,start_from,pr_target}:\n  fixture-repo,JIG-2," + parentBranch + "," + parentBranch + "\n  second-repo,-,origin/main,main\n",
-			"ready[2]{repo,slices,start}:\n  fixture-repo,a+c+d," + parentBranch + "\n  second-repo,e,origin/main\n",
-		} {
-			if !strings.Contains(r.Stdout, want) {
-				t.Errorf("jig next JIG-1 lacks %q:\n%s", want, r.Stdout)
-			}
-		}
-		if strings.Contains(r.Stdout, "note:") {
-			t.Errorf("jig next JIG-1 has a note for a child that has not started:\n%s", r.Stdout)
-		}
+	// `jig here` on the child's branch, cut from the parent's, says the same.
+	h.Branch(fx.Branch)
+	here := runJig(t, env, fx.RepoDir, "here")
+	if want := "stack[2]{repo,parent,start_from,pr_target}:\n  fixture-repo,JIG-2," + parentBranch + "," + parentBranch + "\n"; here.Code != 0 || !strings.Contains(here.Stdout, want) {
+		t.Errorf("jig here lacks %q:\nexit %d\n%s%s", want, here.Code, here.Stdout, here.Stderr)
+	}
 
-		// `jig here` on the child's branch, cut from the parent's, says the same.
-		h.Branch(fx.Branch)
-		here := runJig(t, env, fx.RepoDir, "here")
-		if want := "stack[2]{repo,parent,start_from,pr_target}:\n  fixture-repo,JIG-2," + parentBranch + "," + parentBranch + "\n"; here.Code != 0 || !strings.Contains(here.Stdout, want) {
-			t.Errorf("jig here lacks %q:\nexit %d\n%s%s", want, here.Code, here.Stdout, here.Stderr)
-		}
-
-		// A ticket stacked on nothing has no stack.
-		if r := runJig(t, env, fx.RepoDir, "next", "JIG-2"); strings.Contains(r.Stdout, "stack[") {
-			t.Errorf("jig next JIG-2 names a stack:\n%s", r.Stdout)
-		}
-	})
-
-	t.Run("the pull request body", func(t *testing.T) {
-		t.Parallel()
-		fx, env := newFixture(t, fixture.Opts{})
-		st, _ := stackOnAParent(t, fx, newHarness(t, fx, env, "s-parent"))
-		if err := journal.Append(st, "JIG-2", journal.Line{Event: journal.EventPublishDone}); err != nil {
-			t.Fatal(err)
-		}
-		// The child is built on the parent's branch, where the clone is.
-		b := buildTicketOn(t, fx, env, true)
-		b.openRound(t)
-		b.reviewedClean(t)
-
-		body := runJig(t, env, b.builder.Clone, "publish", fx.Ticket, "--body")
-		if body.Code != 0 || !strings.Contains(body.Stdout, "base: "+parentBranch+"\n") || !strings.Contains(body.Stdout, "--base "+parentBranch) {
-			t.Fatalf("jig publish --body exit = %d, want 0 and the base %s\nstdout:\n%s\nstderr:\n%s", body.Code, parentBranch, body.Stdout, body.Stderr)
-		}
-		text := string(readFileOrFatal(t, filepath.Join(st.TicketDir(fx.Ticket), "pr", "fixture-repo.md")))
-		if want := "## Stacked on JIG-2\n\nJIG-1 builds on JIG-2: this pull request goes into `" + parentBranch + "`, the branch of JIG-2. Once JIG-2 merges, retarget it to `main`."; !strings.Contains(text, want) {
-			t.Errorf("pr/fixture-repo.md lacks %q:\n%s", want, text)
-		}
-	})
+	// A ticket stacked on nothing has no stack.
+	if r := runJig(t, env, fx.RepoDir, "next", "JIG-2"); strings.Contains(r.Stdout, "stack[") {
+		t.Errorf("jig next JIG-2 names a stack:\n%s", r.Stdout)
+	}
 }
 
 // TestMovedParentGetsARestackNote: a child level with its parent's branch hears
