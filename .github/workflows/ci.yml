@@ -188,8 +188,24 @@ jobs:
           fi
           printf '%s\n' "$packages"
           echo "list=$(printf '%s\n' "$packages" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+      # The Linux leg runs every test binary through internal/gitbudget,
+      # which counts the git processes each package's tests start, with no
+      # test result reused from the cache, and holds the counts to
+      # .github/git-budget.yaml: a change that adds git work to the suite
+      # raises its package's number there in its own diff, and a cut lowers
+      # it. Counted on Linux only, where a trace file costs nothing; the
+      # count is the same work on every OS.
+      - name: build the git process counter
+        if: runner.os == 'Linux'
+        run: go build -o "$RUNNER_TEMP/gitbudget" ./internal/gitbudget
       - name: go test
-        run: go test -timeout 30m ${{ steps.packages.outputs.list }}
+        env:
+          GITBUDGET_DIR: ${{ runner.os == 'Linux' && format('{0}/gitcount', runner.temp) || '' }}
+        run: go test -timeout 30m ${{ runner.os == 'Linux' && format('-count=1 -exec={0}/gitbudget', runner.temp) || '' }} ${{ steps.packages.outputs.list }}
+      - name: git processes against the budget
+        if: runner.os == 'Linux'
+        run: |
+          "$RUNNER_TEMP/gitbudget" check .github/git-budget.yaml "$RUNNER_TEMP/gitcount" ${{ steps.packages.outputs.list }}
 
   # The package the test job's Windows leg skips, on a Windows runner of its
   # own. It is one of the leg's two longest (843 s, beside cmd/jig's 852 s,

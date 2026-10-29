@@ -939,7 +939,7 @@ func requireStepOnExactly(t *testing.T, steps []interface{}, label, substr, want
 	t.Helper()
 	step, ok := findStepByRun(steps, substr)
 	if !ok {
-		t.Errorf("ci.yml: test job has no step running %s, so unformatted code would merge", substr)
+		t.Errorf("ci.yml: test job has no step running %s, so the %s never runs", substr, label)
 		return
 	}
 	if hasContinueOnError(step) {
@@ -952,10 +952,12 @@ func requireStepOnExactly(t *testing.T, steps []interface{}, label, substr, want
 }
 
 // goTestListRun matches the test job's go test step: its one package
-// argument is the list another step prints. listFilter matches a command
-// that could drop packages from that list.
+// argument is the list another step prints, and on the Linux leg it runs
+// each test binary through the git process counter, uncached
+// (TestCIWorkflowCountsGitProcesses). listFilter matches a command that
+// could drop packages from that list.
 var (
-	goTestListRun = regexp.MustCompile(`^go test -timeout \S+ \$\{\{ steps\.([A-Za-z0-9_-]+)\.outputs\.list \}\}$`)
+	goTestListRun = regexp.MustCompile(`^go test -timeout \S+ \$\{\{ runner\.os == 'Linux' && format\('-count=1 -exec=\{0\}/gitbudget', runner\.temp\) \|\| '' \}\} \$\{\{ steps\.([A-Za-z0-9_-]+)\.outputs\.list \}\}$`)
 	listFilter    = regexp.MustCompile(`\b(awk|grep|sed|head|tail|sort|uniq|cut)\b`)
 )
 
