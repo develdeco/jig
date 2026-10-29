@@ -1,0 +1,37 @@
+# The git processes each package's tests may start, counted on CI's Linux
+# leg by internal/gitbudget (go test -exec), one per process git traces.
+# A count more than margin percent (and at least 3 processes) away
+# from its budget, either way, fails the leg: a change that adds git work to
+# the suite raises its package's number here, in its own diff, and one that
+# cuts git work lowers it. The failing step prints the numbers to put here.
+# A package that starts no git process has no entry.
+margin: 1
+packages:
+  cmd/jig: 3274
+  e2e: 5959
+  internal/correct: 271
+  internal/fileshare: 8
+  internal/fixture: 708
+  internal/gitbudget: 7
+  internal/gittest: 6
+  internal/gitx: 1841
+  internal/intent: 51
+  internal/locate: 95
+  internal/mergefacts: 169
+  internal/migrate: 295
+  internal/mirror: 1491
+  internal/observe: 150
+  internal/pool: 1862
+  internal/project: 382
+  internal/ready: 22
+  internal/repohost: 2
+  internal/revieweval: 1449
+  internal/session: 135
+  internal/setup: 132
+  internal/slicectx: 61
+  internal/stack: 139
+  internal/store: 3971
+  internal/verify: 562
+  internal/verifydeliver: 14261
+  lint: 21
+##[error]Process completed with exit code 1.

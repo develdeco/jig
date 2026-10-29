@@ -3711,3 +3711,27 @@ The suite starts about 50,000 git processes through gitx, and on the Windows run
 | `internal/gitx` | 1,447 | 1,706 | +259 |
 
 `internal/gitx` grows because the differential tests build their repositories with the git program (about forty processes) and ask it each question they compare. What remains in the other packages is writes and test setup (`init`, `clone`, `commit`, `add`, `worktree`, `config`, `remote`, `upload-pack`), history walks (`merge-base`, `status`, `reset`) and `git var`; the pool's, locate's and verify's read-only calls are gone, and what `rev-parse` is left is the tests' own. Counts move by a handful between runs of the same code (verifydeliver ran 18,265 here, and 17,718 and 17,722 before main moved). Wall time was not conclusive: other agents were running suites on this machine throughout, and a package ran slower on one side or the other by the load alone (`e2e` 174 s on `origin/main` and 283 s here, `internal/store` 360 s and 158 s, `internal/verifydeliver` 349 s and 313 s, `internal/pool` 62 s and 42 s). The process counts are the measure. One call in process took 2.6 ms (`RevParse` of HEAD), 6.7 ms (a commit in a pack) and 5.9 ms (`TopLevel`), against 47 ms, 69 ms and 50 ms for the same question to the git program, on a loaded machine.
+
+## Each package's tests have a budget of git processes
+
+Every cut to the suite's cost since 2026-09-28 held for days at most: the tests that features brought did more git work than the cuts took away, and nothing in a pull request showed it. The suite started 11,298 git processes on 2026-09-29 and about 62,000 on 2026-10-28, for 737 and 2,522 tests. On Windows each process is the cost.
+
+`.github/git-budget.yaml` now holds the git processes each package's tests may start, and CI's Linux leg holds them to it. Its go test runs every test binary through `internal/gitbudget` (`go test -exec`), which points git's own trace, `GIT_TRACE2_EVENT`, at a directory of the package's own: git writes one file there per git process, in the test binary and in whatever it runs, the jig binary e2e builds included. A step after go test compares the counts with the budget and fails on a count outside the margin either way, printing the numbers to put in the file: a change that adds git work raises its package's number in its own diff, and a cut lowers it. A package with no entry gets no slack, so its first git process is new work too. On the Linux leg the count needs every package to run, so that leg no longer reuses a cached test result (`-count=1`); its go test step took 151 s with the counter against 94 to 129 s before, still under the macOS leg.
+
+The count, not a time, is the measure: it is the work Windows pays for, it is the same on a loaded and an idle runner, and it is exact. Two runs of one commit differed by 38 of 13,709 processes in e2e and by 2 in store, and matched in every other package, so the margin is 1% and at least 3 processes. The count is taken on Linux, where a trace file costs nothing, and differs from a Windows count by the tests that run on one OS only; a local count on Windows is a guide, the CI log the number. One counted git process can start others (a fetch starts upload-pack), and each is counted, since each is a process to start. Git run with an environment of its own making (`RunReplaceEnv`) drops the trace setting and goes uncounted, the same on every run.
+
+The budget was recorded after this run's cuts landed (#159's diet, #160's fixture template copy, #161's in-process reads), from CI's Linux count of the merge of main at a6330af. The suite starts 37,324 git processes across 27 packages, where it started 61,403 when the budget was first counted on 2026-10-28:
+
+| package | first counted | recorded |
+| --- | ---: | ---: |
+| `internal/verifydeliver` | 23,923 | 14,261 |
+| `e2e` | 13,704 | 5,959 |
+| `cmd/jig` | 7,260 | 3,274 |
+| `internal/store` | 4,399 | 3,971 |
+| `internal/pool` | 2,263 | 1,862 |
+| `internal/gitx` | 1,395 | 1,841 |
+| `internal/observe` | 1,186 | 150 |
+| `internal/verify` | 1,484 | 562 |
+| all packages | 61,403 | 37,324 |
+
+`internal/gitx` and `internal/fixture` went up on purpose: their new tests hold the in-process reads and the fixture copies to the git program's answers.

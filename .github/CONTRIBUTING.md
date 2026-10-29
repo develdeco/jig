@@ -117,6 +117,14 @@ matching the directory name and a `description:` of at most 50 words.
   serial: the one that checks `Main` reads the process's `JIG_HOME`, and the
   one that sets git's commit dates in the environment, which the `git
   commit` child reads from it.
+- Each package's tests have a budget of git processes,
+  `.github/git-budget.yaml`, which CI's Linux leg holds them to: it runs
+  every test binary through `internal/gitbudget`, which counts the processes
+  git's own trace sees. A change that adds git work to the suite raises its
+  package's number there, in its own diff, and one that cuts it lowers the
+  number; a count outside the margin either way fails the leg, and the
+  failing step prints the numbers to put in the file. Counts differ by OS,
+  so take them from CI's Linux log, not a local run.
 - `e2e` records each jig run it makes, as an SVG with a tag beside it, into
   the directory named by `JIG_RECORD_DIR` when the build sets it (jig does,
   for the oracle run at a builder's green; ADR 0029). Unset, it records
