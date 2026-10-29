@@ -511,23 +511,38 @@ func originTip(dir, branch string) (string, error) {
 }
 
 // Draft is one entry of a round's findings drafts: a finding the reviewer
-// reports, or an earlier finding it confirms is still present. A round's
-// drafts are its ReviewResult, said a piece at a time.
+// reports, an earlier finding it confirms is still present, or a probe or a
+// skip (ADR 0036). A round's drafts are its ReviewResult, said a piece at a
+// time.
 type Draft struct {
 	Finding      *ResultFinding     `json:"finding,omitempty"`
 	StillPresent *StillPresentEntry `json:"still_present,omitempty"`
+	Probe        *ResultProbe       `json:"probe,omitempty"`
+	Skip         *ResultSkip        `json:"skip,omitempty"`
+}
+
+// kinds counts the parts of the draft that are set: exactly one is.
+func (dr Draft) kinds() int {
+	n := 0
+	for _, set := range []bool{dr.Finding != nil, dr.StillPresent != nil, dr.Probe != nil, dr.Skip != nil} {
+		if set {
+			n++
+		}
+	}
+	return n
 }
 
 // AppendDraft checks d against the open round and appends it to the round's
 // findings drafts. What it checks is what needs no other draft: the fields
-// ParseReviewResult checks of a finding, an oracle that is one of the
-// manifest's, a prior that names a finding under open or dismissed. That the
+// ParseReviewResult checks of a finding, a probe or a skip, an oracle that is
+// one of the manifest's, a prior that names a finding under open or
+// dismissed, and a file of a probe or a skip in a repo of the round. That the
 // file exists at the head, that no two drafts share a prior and that the
 // reviewed paths cover must_review are checked when the round is done. It
 // returns how many drafts the round has now.
 func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
-	if (dr.Finding == nil) == (dr.StillPresent == nil) {
-		return 0, &axi.Error{Msg: "a draft is a finding or a still_present entry, not both and not neither", Code: "VALIDATION_ERROR"}
+	if dr.kinds() != 1 {
+		return 0, &axi.Error{Msg: "a draft is one of a finding, a still_present entry, a probe or a skip", Code: "VALIDATION_ERROR"}
 	}
 	existing, err := ReadDrafts(p)
 	if err != nil {
@@ -565,6 +580,20 @@ func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
 		}
 		if f.Prior != "" && !known[f.Prior] {
 			return 0, reviewInvalid(fmt.Sprintf("prior %q does not name a finding under open or dismissed", f.Prior))
+		}
+	case dr.Probe != nil:
+		if err := checkResultProbe(len(existing), *dr.Probe); err != nil {
+			return 0, err
+		}
+		if err := p.Request.files().placeLedgerFile(dr.Probe.File); err != nil {
+			return 0, err
+		}
+	case dr.Skip != nil:
+		if err := checkResultSkip(len(existing), *dr.Skip); err != nil {
+			return 0, err
+		}
+		if err := p.Request.files().placeLedgerFile(dr.Skip.File); err != nil {
+			return 0, err
 		}
 	default:
 		sp := *dr.StillPresent
@@ -632,6 +661,12 @@ func DraftResult(drafts []Draft, reviewed []string, summary string) ReviewResult
 		}
 		if dr.StillPresent != nil {
 			res.StillPresent = append(res.StillPresent, *dr.StillPresent)
+		}
+		if dr.Probe != nil {
+			res.Probes = append(res.Probes, *dr.Probe)
+		}
+		if dr.Skip != nil {
+			res.Skipped = append(res.Skipped, *dr.Skip)
 		}
 	}
 	res.ReviewedPaths = append(res.ReviewedPaths, reviewed...)
@@ -822,7 +857,7 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 	review := &Review{
 		Changed: diff.Changed, Deleted: diff.Deleted, MustReview: p.Request.MustReview,
 		Result: rr, Intent: p.Intent, IntentSHA256: p.IntentSHA256, IntentNote: p.IntentNote,
-		Effort: prov.Effort,
+		Effort: prov.Effort, Hunks: p.Request.Hunks,
 	}
 	if qualified {
 		for _, r := range covered {

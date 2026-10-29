@@ -921,7 +921,17 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 			ticket, demoResult.ScrubbedCaptions)
 	}
 
-	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, lastSummary, outcomes, reviewedPaths, in.touched); err != nil {
+	// The behavior a reviewer's rounds tested, at the head they reviewed: a
+	// scripted round recorded no reviewed head, and no probe.
+	var behavior *behaviorCoverage
+	if t.reviewedHead() != "" {
+		cov, err := publishCoverage(d.Store, t, in.dir, in.head)
+		if err != nil {
+			return publication{}, err
+		}
+		behavior = &cov
+	}
+	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, lastSummary, outcomes, reviewedPaths, in.touched, behavior); err != nil {
 		return publication{}, err
 	}
 	return publication{

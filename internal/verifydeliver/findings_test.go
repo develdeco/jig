@@ -810,7 +810,7 @@ func TestCumulativeFindingsFoldsAcrossRoundsAndSkipsMissingOnes(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir round %d: %v", round, err)
 		}
-		data, err := marshalFindingsYAML(ff.Scope, ff.ReviewedPaths, ff.Findings, ff.Cleared, ff.Summary)
+		data, err := marshalFindingsYAML(ff.Scope, ff.ReviewedPaths, ff.Findings, ff.Cleared, ff.Summary, ff.Probes, ff.Skipped)
 		if err != nil {
 			t.Fatalf("marshal round %d: %v", round, err)
 		}
@@ -871,7 +871,7 @@ func TestFoldBeforeProjectsOpenNotedAndDismissed(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir round %d: %v", round, err)
 		}
-		data, err := marshalFindingsYAML(ff.Scope, ff.ReviewedPaths, ff.Findings, ff.Cleared, ff.Summary)
+		data, err := marshalFindingsYAML(ff.Scope, ff.ReviewedPaths, ff.Findings, ff.Cleared, ff.Summary, ff.Probes, ff.Skipped)
 		if err != nil {
 			t.Fatalf("marshal round %d: %v", round, err)
 		}
@@ -1009,7 +1009,7 @@ func indexOf(s, sub string) int {
 func TestMarshalFindingsYAMLEmptyListsAsBrackets(t *testing.T) {
 	t.Parallel()
 
-	data, err := marshalFindingsYAML("full", nil, nil, nil, "")
+	data, err := marshalFindingsYAML("full", nil, nil, nil, "", nil, nil)
 	if err != nil {
 		t.Fatalf("marshalFindingsYAML: %v", err)
 	}
@@ -1031,7 +1031,7 @@ func TestMarshalFindingsYAMLRoundTripsTriageFields(t *testing.T) {
 	findings := []Finding{
 		{ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Triage: TriageHuman, Decision: "do it", RoutedAs: ActionAsk},
 	}
-	data, err := marshalFindingsYAML("full", []string{"a.go"}, findings, []string{"r0-f1"}, "round summary")
+	data, err := marshalFindingsYAML("full", []string{"a.go"}, findings, []string{"r0-f1"}, "round summary", nil, nil)
 	if err != nil {
 		t.Fatalf("marshalFindingsYAML: %v", err)
 	}

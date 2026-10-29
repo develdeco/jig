@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -501,6 +502,101 @@ func TestDiffNameOnly(t *testing.T) {
 	}
 	if len(same) != 0 {
 		t.Fatalf("DiffNameOnly on an empty range = %v, want none", same)
+	}
+}
+
+// TestDiffHunks checks the new side of each hunk: a changed line, a content
+// line that reads "+++" inside a hunk, a deletion-only hunk left out, a
+// renamed file as all new lines at its new path, a deleted file with no hunk,
+// and a name with a space.
+func TestDiffHunks(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if _, err := Run(dir, args...); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	write := func(rel, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	run("init", "-b", "main")
+	run("config", "user.name", "jig-fixture")
+	run("config", "user.email", "fixture@example.invalid")
+	write("keep.txt", "a\nb\nc\nd\n")
+	write("del.txt", "1\n2\n3\n")
+	write("gone.txt", "x\n")
+	write("old.txt", "o\n")
+	write("with space.txt", "1\n")
+	run("add", "-A")
+	run("commit", "-m", "c1")
+	base, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("keep.txt", "a\nB\nc\n++ plus\n")
+	write("del.txt", "1\n3\n")
+	if err := os.Remove(filepath.Join(dir, "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "old.txt"), filepath.Join(dir, "new.txt")); err != nil {
+		t.Fatal(err)
+	}
+	write("with space.txt", "1\n2\n")
+	run("add", "-A")
+	run("commit", "-m", "c2")
+
+	got, err := DiffHunks(dir, base, "HEAD")
+	if err != nil {
+		t.Fatalf("DiffHunks: %v", err)
+	}
+	want := []Hunk{
+		{Path: "keep.txt", From: 2, To: 2},
+		{Path: "keep.txt", From: 4, To: 4},
+		{Path: "new.txt", From: 1, To: 1},
+		{Path: "with space.txt", From: 2, To: 2},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DiffHunks = %+v, want %+v", got, want)
+	}
+}
+
+// TestBlobsAtRev checks that a file at rev maps to its blob, that a
+// directory and an absent path are left out, and that a rev that is no
+// commit is an error.
+func TestBlobsAtRev(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Run(dir, "init", "-b", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for rel, content := range map[string]string{"a.txt": "a\n", "sub/b.txt": "b\n"} {
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Run(dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RunEnv(dir, []string{"GIT_AUTHOR_NAME=f", "GIT_AUTHOR_EMAIL=f@example.invalid", "GIT_COMMITTER_NAME=f", "GIT_COMMITTER_EMAIL=f@example.invalid"}, "commit", "-m", "c1"); err != nil {
+		t.Fatal(err)
+	}
+	blobs, err := BlobsAtRev(dir, "HEAD", []string{"a.txt", "sub", "missing.txt", "sub/b.txt"})
+	if err != nil {
+		t.Fatalf("BlobsAtRev: %v", err)
+	}
+	wantA, _ := RevParse(dir, "HEAD:a.txt")
+	wantB, _ := RevParse(dir, "HEAD:sub/b.txt")
+	if want := map[string]string{"a.txt": wantA, "sub/b.txt": wantB}; !reflect.DeepEqual(blobs, want) {
+		t.Fatalf("BlobsAtRev = %v, want %v", blobs, want)
+	}
+	if _, err := BlobsAtRev(dir, "no-such-rev", []string{"a.txt"}); err == nil {
+		t.Fatal("BlobsAtRev at a rev that is no commit: want an error")
 	}
 }
 

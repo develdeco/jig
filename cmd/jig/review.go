@@ -21,7 +21,7 @@ const (
 	reviewModelUsage    = "the model the reviewer runs on, as it reports it; jig chooses none"
 	reviewEffortUsage   = "the reasoning effort the reviewer runs at, as it reports it"
 	reviewJSONUsage     = "print the review request as JSON (the review.json the round wrote)"
-	reviewResultUsage   = "the reviewer's whole report as a result.json (findings, still_present, reviewed_paths, summary), instead of findings reported with `jig finding`"
+	reviewResultUsage   = "the reviewer's whole report as a result.json (findings, still_present, reviewed_paths, summary, and optionally probes and skipped), instead of findings reported with `jig finding` and `jig probe`"
 	reviewReviewedUsage = "a repo-relative path the reviewer read, as <repo>/<path> in a project of several repos (repeat the flag, or separate with commas); every must_review path must be covered"
 	reviewSummaryUsage  = "the reviewer's summary of the round, in a sentence or two"
 	reviewStoreUsage    = "explicit store path"
@@ -102,6 +102,18 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 		kv = append(kv, [2]string{"recordings", req.Recordings})
 	}
 	kv = append(kv, [2]string{"must_review", strconv.Itoa(len(req.MustReview))})
+	unprobed := 0
+	for _, h := range req.Hunks {
+		if h.Unprobed() {
+			unprobed++
+		}
+	}
+	if full {
+		kv = append(kv,
+			[2]string{"hunks", strconv.Itoa(len(req.Hunks))},
+			[2]string{"unprobed", strconv.Itoa(unprobed)},
+		)
+	}
 	if p.Reviewer.Known() {
 		kv = append(kv, [2]string{"reviewer", reviewerLabel(p.Reviewer)})
 	}
@@ -147,9 +159,24 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 	blocks = append(blocks, axi.Table("dismissed", []string{"id", "file:line", "title"}, dismissedRows))
 	var oracleRows [][]string
 	for _, o := range req.OraclesPassed {
-		oracleRows = append(oracleRows, []string{o.Oracle, o.Workspace, o.ReusedFrom})
+		oracleRows = append(oracleRows, []string{o.Oracle, o.Workspace, strconv.Itoa(o.Seconds), strings.Join(o.Slices, ","), o.ReusedFrom})
 	}
-	blocks = append(blocks, axi.Table("oracles_passed", []string{"oracle", "workspace", "reused_from"}, oracleRows))
+	blocks = append(blocks, axi.Table("oracles_passed", []string{"oracle", "workspace", "seconds", "slices", "reused_from"}, oracleRows))
+	// The probe ledger (ADR 0036): what earlier rounds probed, current or
+	// stale at this head, and the hunks of the change nothing covers yet - the
+	// sweep's work list.
+	var probedRows [][]string
+	for _, pr := range req.Probed {
+		probedRows = append(probedRows, []string{strconv.Itoa(pr.Round), fmt.Sprintf("%s:%d", pr.File, pr.Line), pr.Outcome, pr.State, pr.Seam, pr.Mutation})
+	}
+	blocks = append(blocks, axi.Table("probed", []string{"round", "file:line", "outcome", "state", "seam", "mutation"}, probedRows))
+	var unprobedRows [][]string
+	for _, h := range req.Hunks {
+		if h.Unprobed() {
+			unprobedRows = append(unprobedRows, []string{fmt.Sprintf("%s:%d-%d", h.File, h.From, h.To)})
+		}
+	}
+	blocks = append(blocks, axi.Table("unprobed", []string{"hunk"}, unprobedRows))
 	return blocks
 }
 
@@ -277,7 +304,8 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 	}
 	blocks := roundBlocks(p, moved, true)
 	help := []string{
-		"Read the code in the worktree at the head, never in the clone, and never edit the clone; run no tests (the oracles above passed), and make a mutation check only in the worktree, putting it back",
+		"Read the code in the worktree at the head, never in the clone, and never edit the clone; run no oracle and no suite (the oracles above passed), and run a test only to probe, in the worktree, putting the file back",
+		fmt.Sprintf("Probe each term of every function the change alters on a critical path the intent names, unless probed lists a current probe of it, with the narrowest command (seconds above): `jig probe %s --seam S --file F --line N --mutation M --command C --outcome caught|survived`; set aside an unprobed hunk with no critical-path code with `jig probe %s --skip F[:A-B] --why W`", ticket, ticket),
 		fmt.Sprintf("Report each problem: `jig finding %s --file F --line N --title T --action fix|ask|note --risk low|medium|high --risk-rationale R --oracle O`; confirm an earlier one with `jig finding %s --still-present ID --line N`", ticket, ticket),
 		fmt.Sprintf("Then close the round: `jig review done %s --reviewed <every file you read> --summary <text>`", ticket),
 	}

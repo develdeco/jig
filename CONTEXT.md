@@ -238,6 +238,18 @@ _Avoid_: class, severity, category
 The files a reviewer actually read in a round, reported as `reviewed_paths`. jig accepts a round only when coverage includes every changed file and every open finding's file, and clears an open finding from it (or, whatever coverage says, when the finding's file no longer exists at head at all).
 _Avoid_: reviewed scope, read set
 
+**Probe**:
+One term of a critical path's changed code that a gate reviewer mutated in the round's worktree, with the narrowest test command that covers it run against the mutant and the file put back: `caught` when the command failed or timed out, `survived` when it passed. Every round probes the terms no earlier probe still covers, so round 1 sweeps them all. A probe is kept in the round's `findings.yaml` with its file's blob at the round's head, and stays *current* while a later head has the same blob, *stale* once the file changed (ADR 0036).
+_Avoid_: mutation check, mutant test
+
+**Skip**:
+A file, or lines of it, a gate reviewer sets aside as holding no term on a critical path (a test, a doc, wiring), with its reason; current or stale like a probe.
+_Avoid_: waiver, exclusion
+
+**Unprobed hunk**:
+A hunk of the whole change at a round's head that no current probe falls inside and no current skip covers: the sweep's work list, counted in the gate report and listed in the review notes. A count, not a verdict: one probe makes a hunk probed.
+_Avoid_: uncovered line, coverage gap
+
 **Repo-qualified file**:
 In a project of several repos, how a gate round names a file: `<repo>/<path>`, the repo being one the ticket's slices build in. A finding's file, `reviewed_paths` and `must_review` are all named so; in a project of one repo a file is a path in the repo. A finding's workspace is named `<repo>/<id>` the same way, as a slice's is.
 _Avoid_: bare path (in a project of several repos)
