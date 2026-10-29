@@ -1,0 +1,27 @@
+scope: full
+reviewed_paths:
+  - cart/cart.go
+  - cart/cart_test.go
+findings:
+  - id: r1-f1
+    file: cart/cart_test.go
+    line: 9
+    title: 'No test pins nearest-cent rounding: dropping the +50 term passes the whole suite'
+    detail: 'All three cases are rounding-indifferent: 999*90=89910 truncates to 899 either way, a percentage clamped to 0 is exact, one clamped to 100 is 0. Replacing cart.go:26 with return subtotal * (100 - discountPct) / 100 leaves go test ./cart/... green. Total([]Item{{PriceCents: 101, Qty: 1}}, 1) wants 100 where truncation gives 99, and Total([]Item{{PriceCents: 50, Qty: 1}}, 3) wants 49 under round-half-up.'
+    action: fix
+    risk: medium
+    risk_rationale: Order totals are money and the rounding term is a single unguarded + 50; with no test pinning it, a later rewrite silently shifts every discounted order by up to a cent.
+    oracle: test
+    workspace: root
+    status: open
+    recurrences: 0
+    triage: auto
+summary: The fix takes the discount once on the subtotal and rounds it half up; no test pins the rounding.
+probes:
+  - seam: Pricing a multi-item order with a discount percentage returns the once-applied, nearest-cent-rounded total
+    file: cart/cart.go
+    line: 26
+    mutation: drop the + 50 rounding term, truncating instead of rounding
+    command: go test ./cart/...
+    outcome: survived
+    blob: b1c2caf969684104b25ea2fea19c0c58b6d0a8e0

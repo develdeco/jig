@@ -1014,11 +1014,12 @@ func reviewNotesFile(repo string, several bool) string {
 // request's first comment: the last round's own summary, every finding across
 // every round ordered by risk with how it ended, and coverage - the files the
 // change touched (touchedFiles, Publish's own diff of the ship range)
-// against the files the reviewer read (reviewedPaths). outcomes,
-// reviewedPaths and lastSummary all come from the one pass
+// against the files the reviewer read (reviewedPaths), and, for a reviewer's
+// rounds, the behavior they tested (behavior, ADR 0036; nil for scripted
+// rounds). outcomes, reviewedPaths and lastSummary all come from the one pass
 // collectFindingsWithOutcomes already makes over every round's
 // findings.yaml; this function reads nothing on its own.
-func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastSummary string, outcomes []findingOutcome, reviewedPaths, touchedFiles []string) error {
+func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastSummary string, outcomes []findingOutcome, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
@@ -1064,6 +1065,38 @@ func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastS
 			fmt.Fprintf(&b, "- %s\n", p)
 		}
 		b.WriteString("\n")
+	}
+
+	// The behavior the review tested: a clean verdict rests on these probes,
+	// and says nothing of the hunks no probe or skip covers.
+	if behavior != nil {
+		if len(behavior.Probes) == 0 {
+			b.WriteString("Probes current at the reviewed head: none\n\n")
+		} else {
+			b.WriteString("Probes current at the reviewed head:\n\n")
+			for _, p := range behavior.Probes {
+				fmt.Fprintf(&b, "- %s:%d %s: %s (%s; round %d)\n", p.File, p.Line, p.Outcome, p.Mutation, p.Seam, p.Round)
+			}
+			b.WriteString("\n")
+		}
+		if len(behavior.Skips) > 0 {
+			b.WriteString("Set aside as on no critical path:\n\n")
+			for _, s := range behavior.Skips {
+				where := s.File
+				if s.From != 0 {
+					where = fmt.Sprintf("%s:%d-%d", s.File, s.From, s.To)
+				}
+				fmt.Fprintf(&b, "- %s: %s\n", where, s.Why)
+			}
+			b.WriteString("\n")
+		}
+		if len(behavior.Unprobed) > 0 {
+			b.WriteString("Hunks no probe or skip covers:\n\n")
+			for _, h := range behavior.Unprobed {
+				fmt.Fprintf(&b, "- %s:%d-%d\n", h.File, h.From, h.To)
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	dir := filepath.Join(ticketDir, "pr")

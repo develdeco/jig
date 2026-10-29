@@ -1,0 +1,12 @@
+exhaustive: false
+findings:
+  - id: quantity-unpinned
+    file: cart/cart.go
+    lines: [22, 24]
+    action: fix
+    description: Still no test pins the line total's quantity factor. Round 2's tests pin the rounding, but every item in cart_test.go still has a quantity of one, so dropping the * it.Qty factor leaves the whole suite passing.
+traps:
+  - id: rounding-now-pinned
+    file: cart/cart.go
+    lines: [26, 26]
+    description: The rounding term is pinned now; round 2's tests fail when the + 50 is dropped.
