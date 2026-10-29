@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -154,6 +155,55 @@ func (h *fakeHarness) Commit(slice, msg string, files map[string]string) string 
 	}
 	h.git(args...)
 	return h.git("rev-parse", "HEAD")
+}
+
+// holdSource is the test HoldVerifications writes into a workspace: it
+// passes once the release file exists, and fails after holdLimit without it.
+const holdSource = `package %s
+
+import (
+	"os"
+	"testing"
+	"time"
+)
+
+// TestHeldByTheE2ETest waits for the e2e test that wrote it to let the
+// verification go.
+func TestHeldByTheE2ETest(t *testing.T) {
+	for deadline := time.Now().Add(%d * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(%q); err == nil {
+			return
+		}
+	}
+	t.Fatal("the e2e test never released this verification")
+}
+`
+
+// holdLimit is how long a held oracle waits for its release.
+const holdLimit = 2 * time.Minute
+
+// HoldVerifications makes the oracle of every verification started from the
+// next commit on wait until release is called, so a test can look at a
+// verification that is still running however loaded the machine is. It
+// writes a test into each of workspaces (clone-relative directories whose
+// package is named after the directory, as the fixture's are), left for the
+// next commit to take in; the oracle's go test then runs it, and it passes
+// once released. The test's cleanup releases it too, so a test that fails
+// first leaves no worker waiting.
+func (h *fakeHarness) HoldVerifications(workspaces ...string) (release func()) {
+	h.t.Helper()
+	gate := filepath.Join(h.t.TempDir(), "released")
+	for _, ws := range workspaces {
+		src := fmt.Sprintf(holdSource, filepath.Base(ws), int(holdLimit/time.Second), gate)
+		writeFileOrFatal(h.t, filepath.Join(h.Clone, filepath.FromSlash(ws), "held_by_e2e_test.go"), []byte(src))
+	}
+	release = sync.OnceFunc(func() {
+		if err := os.WriteFile(gate, nil, 0o644); err != nil {
+			h.t.Errorf("HoldVerifications: release: %v", err)
+		}
+	})
+	h.t.Cleanup(release)
+	return release
 }
 
 // Payload builds the JSON a Claude Code hook sends on stdin for event: the

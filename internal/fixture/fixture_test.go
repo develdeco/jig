@@ -350,7 +350,9 @@ func TestBuildEnvtoolStaysUnderDir(t *testing.T) {
 // the host's system or global git config: forced commit signing with no
 // usable signer would otherwise fail every commit Build makes, and a config
 // file git cannot parse would fail every git call (init, config, clone,
-// remote add and commit).
+// remote add and commit). Those calls are the direct build's, which a
+// template runs once; Build itself starts no git once a shape's template
+// exists, so it is the direct build this test builds with.
 func TestBuildIgnoresHostGitConfig(t *testing.T) {
 	t.Run("global signing config", func(t *testing.T) {
 		t.Setenv("JIG_HOME", t.TempDir())
@@ -362,8 +364,8 @@ func TestBuildIgnoresHostGitConfig(t *testing.T) {
 		t.Setenv("GIT_CONFIG_GLOBAL", cfg)
 
 		dir := filepath.Join(t.TempDir(), "built")
-		if _, err := Build(dir, Opts{}); err != nil {
-			t.Fatalf("Build: %v", err)
+		if _, err := buildDirect(dir, Opts{}); err != nil {
+			t.Fatalf("buildDirect: %v", err)
 		}
 	})
 
@@ -379,8 +381,8 @@ func TestBuildIgnoresHostGitConfig(t *testing.T) {
 		t.Setenv("GIT_CONFIG_GLOBAL", cfg)
 
 		dir := filepath.Join(t.TempDir(), "built")
-		if _, err := Build(dir, Opts{}); err != nil {
-			t.Fatalf("Build: %v", err)
+		if _, err := buildDirect(dir, Opts{}); err != nil {
+			t.Fatalf("buildDirect: %v", err)
 		}
 	})
 
@@ -403,8 +405,8 @@ func TestBuildIgnoresHostGitConfig(t *testing.T) {
 		t.Setenv("GIT_CONFIG_SYSTEM", cfg)
 
 		dir := filepath.Join(t.TempDir(), "built")
-		if _, err := Build(dir, Opts{}); err != nil {
-			t.Fatalf("Build: %v", err)
+		if _, err := buildDirect(dir, Opts{}); err != nil {
+			t.Fatalf("buildDirect: %v", err)
 		}
 	})
 }
