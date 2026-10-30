@@ -268,6 +268,11 @@ func TestApplyRoundStaleOracleAfterManifestChangeForcesAsk(t *testing.T) {
 	if f.Status != StatusAsked || f.RoutedAs != ActionAsk {
 		t.Errorf("finding = %+v, want asked/routed_as ask (the recorded oracle is no longer a manifest oracle)", f)
 	}
+	// The stale oracle is carried forward as it was recorded, never swapped for
+	// another: a person is asked, with it still on the finding.
+	if f.Oracle != "old" || f.Triage != "" {
+		t.Errorf("finding = %+v, want the stale oracle %q still recorded and no triage decided", f, "old")
+	}
 }
 
 // TestApplyRoundRejectsAnUnnormalizableFindingFile: a finding file that

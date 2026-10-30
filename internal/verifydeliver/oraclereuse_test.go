@@ -1,6 +1,7 @@
 package verifydeliver
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,24 +83,32 @@ func reusedByWorkspace(runs []OracleRun) map[string]string {
 // says so; every other run still runs. The fixture repo's suite is
 // test@alpha and test@beta, and its slice d names the env class rig, so the
 // gate brings rig up and a pass stands for its run only with rig up too.
+//
+// The steps run in order on one build, each making its own head (a commit with
+// a tree of its own, so what an earlier step recorded stands for no later one)
+// and recording the passes that step is about. The first commits tests that
+// fail, so a gate that ran the oracles for real would stop with
+// GATE_ORACLE_FAILED: the recorded passes are what lets it through, and the
+// gate runs nothing. The last runs the real oracles over the same red tests.
 func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 	t.Parallel()
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
 	failing := map[string]string{
 		"alpha/zz_red_test.go": "package alpha\n\nimport \"testing\"\n\nfunc TestRed(t *testing.T) { t.Fatal(\"red on purpose\") }\n",
 		"beta/zz_red_test.go":  "package beta\n\nimport \"testing\"\n\nfunc TestRed(t *testing.T) { t.Fatal(\"red on purpose\") }\n",
 	}
-	note := func(s string) map[string]string { return map[string]string{"alpha/note.txt": s} }
+	heads := 0
+	// note commits a file no other head has, so its tree is its own.
+	note := func() map[string]string {
+		heads++
+		return map[string]string{"alpha/note.txt": fmt.Sprintf("head %d\n", heads)}
+	}
 
-	t.Run("every run reused", func(t *testing.T) {
-		t.Parallel()
-		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-		driveBuild(t, fx, "rung-a")
-		d := newDeps(t, fx)
+	step(t, "every run reused", func(t *testing.T) {
 		rec := &oracleRecorder{}
 		d.Oracle = rec.run
-		// Tests that fail are committed at the head, so a gate that ran the
-		// oracles for real would stop with GATE_ORACLE_FAILED: the recorded
-		// passes are what lets it through, and the gate runs nothing.
 		head := commitInBuildLease(t, fx, failing)
 		recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "alpha"), "rig")
 		recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "beta"), "rig")
@@ -113,14 +122,10 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 		}
 	})
 
-	t.Run("a partial pass runs the rest", func(t *testing.T) {
-		t.Parallel()
-		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-		driveBuild(t, fx, "rung-a")
-		d := newDeps(t, fx)
+	step(t, "a partial pass runs the rest", func(t *testing.T) {
 		rec := &oracleRecorder{}
 		d.Oracle = rec.run
-		head := commitInBuildLease(t, fx, note("one\n"))
+		head := commitInBuildLease(t, fx, note())
 		recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "alpha"), "rig")
 
 		got := reusedByWorkspace(gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed)
@@ -133,15 +138,15 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 	})
 
 	// Each case below records a pass that must not stand for the gate's run
-	// of test@alpha; the head's tests pass, so the gate runs it and the round
-	// goes on.
+	// of test@alpha; the recorder's runs all pass, so the gate runs it and the
+	// round goes on.
 	for _, tc := range []struct {
 		name   string
 		record func(t *testing.T, fx *fixture.Fixture, d Deps, head string)
 	}{
 		{"a pass on another tree", func(t *testing.T, fx *fixture.Fixture, d Deps, _ string) {
 			t.Helper()
-			// commitInBuildLease below this record makes a new head.
+			// The head before this one has a tree of its own.
 			earlier, err := gitx.RevParse(buildLeaseDir(t, fx), "HEAD~1")
 			if err != nil {
 				t.Fatal(err)
@@ -162,15 +167,10 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 			recordOracle(t, d, fx.Ticket, "pass", head, testCmd(t, fx, "alpha"), "rig")
 		}},
 	} {
-		t.Run(tc.name+" is not reused", func(t *testing.T) {
-			t.Parallel()
-			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-			driveBuild(t, fx, "rung-a")
-			d := newDeps(t, fx)
+		step(t, tc.name+" is not reused", func(t *testing.T) {
 			rec := &oracleRecorder{}
 			d.Oracle = rec.run
-			commitInBuildLease(t, fx, note("one\n"))
-			head := commitInBuildLease(t, fx, note("two\n"))
+			head := commitInBuildLease(t, fx, note())
 			tc.record(t, fx, d, head)
 
 			if got := reusedByWorkspace(gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed); got["alpha"] != "" {
@@ -187,13 +187,9 @@ func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 		})
 	}
 
-	t.Run("a failed gate run says why", func(t *testing.T) {
-		t.Parallel()
-		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-		driveBuild(t, fx, "rung-a")
-		d := newDeps(t, fx)
+	step(t, "a failed gate run says why", func(t *testing.T) {
 		d.Oracle = nil // reuse is judged against real oracle runs
-		commitInBuildLease(t, fx, failing)
+		commitInBuildLease(t, fx, note())
 
 		backend := stubBackend{run: func(session.Dispatch) error {
 			t.Fatal("a round whose oracles fail dispatched a reviewer")

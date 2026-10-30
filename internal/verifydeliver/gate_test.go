@@ -45,81 +45,24 @@ type alwaysCleanSource struct{}
 
 func (alwaysCleanSource) Round(RoundInput) (Round, bool, error) { return Round{}, false, nil }
 
-func TestGateRound1FixSlice(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-
-	d := newDeps(t, fx)
-	src := NewFakeGateSource(fx.ScenarioDir)
-	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if report.Round != 1 {
-		t.Fatalf("Round = %d, want 1", report.Round)
-	}
-	if report.Verdict != "fix-slices" {
-		t.Fatalf("Verdict = %q, want fix-slices", report.Verdict)
-	}
-	// A ticket on its own default branch adopted nothing, so its report names no
-	// branch: only an adopted ticket's does.
-	if report.Branch != "" {
-		t.Fatalf("Branch = %q, want none for a ticket that adopted no branch", report.Branch)
-	}
-
-	roundDir := filepath.Join(d.Store.TicketDir(fx.Ticket), "gate", "round-1")
-	for _, name := range []string{"findings.md", "report.yaml", "diff-changelog.md"} {
-		if _, err := os.Stat(filepath.Join(roundDir, name)); err != nil {
-			t.Fatalf("missing %s: %v", name, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(d.Store.TicketDir(fx.Ticket), "evidence", "round-1", "oracle-output.txt")); err != nil {
-		t.Fatalf("missing receipt: %v", err)
-	}
-
-	slices, err := d.Store.ReadSlices(fx.Ticket)
-	if err != nil {
-		t.Fatalf("ReadSlices: %v", err)
-	}
-	var fix1 *store.Slice
-	for i := range slices {
-		if slices[i].ID == "fix-1" {
-			fix1 = &slices[i]
-		}
-	}
-	if fix1 == nil {
-		t.Fatal("fix-1 was not appended to slices.yaml")
-	}
-	if fix1.FromGate != 1 {
-		t.Fatalf("fix-1.FromGate = %d, want 1", fix1.FromGate)
-	}
-	st, err := d.Store.ReadSliceState(fx.Ticket, "fix-1")
-	if err != nil {
-		t.Fatalf("ReadSliceState fix-1: %v", err)
-	}
-	if st.State != "queued" {
-		t.Fatalf("fix-1 state = %q, want queued", st.State)
-	}
-
-	lines, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-	want := map[string]bool{"gate-open": false, "gate-round": false, "fix-slice": false}
-	for _, l := range lines {
-		if _, ok := want[l.Event]; ok {
-			want[l.Event] = true
-		}
-	}
-	for event, seen := range want {
-		if !seen {
-			t.Fatalf("journal missing event %q", event)
-		}
-	}
-}
-
+// TestGateCleanRound2 is the gate's one scripted chain, on a build with its
+// real oracles: round 1 finds the scenario's fix slice, the fix is built, and
+// round 2 is clean. Every rule of a scripted round that needs a whole ticket
+// is a step of it, so the ticket is built once:
+//
+//   - round 1 writes its files and its receipt, appends the fix slice queued
+//     with the round it came from, and journals the round (and names no branch,
+//     since a ticket on its own default branch adopted nothing);
+//   - the scripted source's fix slice counts toward the fix budget, since
+//     report.yaml lists it as a reviewer round's own routing does;
+//   - the brief is the intent, ahead of a stale intent.md: resolveIntent must
+//     check brief.md first, never the other way around. writeExplicitIntent
+//     itself refuses to create this state (INTENT_CONFLICT), so intent.md is
+//     written directly through the store before the round, simulating a
+//     brief.md added after an earlier explicit intent was recorded - which the
+//     CLI hints (`jig ticket`) point a user toward doing, and nothing ever
+//     removes the stale intent.md that leaves behind;
+//   - round 2 is clean and leaves round 1's files as they were.
 func TestGateCleanRound2(t *testing.T) {
 	t.Parallel()
 
@@ -129,49 +72,159 @@ func TestGateCleanRound2(t *testing.T) {
 	d := newDeps(t, fx)
 	d.Oracle = nil // the real oracle run is what this test is about
 	src := NewFakeGateSource(fx.ScenarioDir)
-	if _, err := Gate(d, src, GateOpts{Ticket: fx.Ticket}); err != nil {
-		t.Fatalf("Gate round 1: %v", err)
+	if err := d.Store.WriteIntent(fx.Ticket, store.Intent{Source: IntentSourceExplicit, Text: "stale explicit intent"}); err != nil {
+		t.Fatalf("WriteIntent: %v", err)
 	}
 
-	round1Dir := filepath.Join(d.Store.TicketDir(fx.Ticket), "gate", "round-1")
-	before := readDirBytes(t, round1Dir)
-
-	driveFix1(t, fx, "rung-a")
-
-	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate round 2: %v", err)
-	}
-	if report.Round != 2 {
-		t.Fatalf("Round = %d, want 2", report.Round)
-	}
-	if report.Verdict != "clean" {
-		t.Fatalf("Verdict = %q, want clean", report.Verdict)
-	}
-
-	after := readDirBytes(t, round1Dir)
-	if len(before) != len(after) {
-		t.Fatalf("round-1 file count changed: %d -> %d", len(before), len(after))
-	}
-	for name, data := range before {
-		if string(after[name]) != string(data) {
-			t.Fatalf("round-1/%s bytes changed after round 2", name)
+	var report1 GateReport
+	step(t, "round 1 finds the fix slice and records it", func(t *testing.T) {
+		var err error
+		report1, err = Gate(d, src, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("Gate: %v", err)
 		}
-	}
-
-	lines, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-	sawClean := false
-	for _, l := range lines {
-		if l.Event == "gate-clean" && l.Attempt == 2 {
-			sawClean = true
+		if report1.Round != 1 {
+			t.Fatalf("Round = %d, want 1", report1.Round)
 		}
-	}
-	if !sawClean {
-		t.Fatal("journal missing gate-clean for round 2")
-	}
+		if report1.Verdict != "fix-slices" {
+			t.Fatalf("Verdict = %q, want fix-slices", report1.Verdict)
+		}
+		// A ticket on its own default branch adopted nothing, so its report names no
+		// branch: only an adopted ticket's does.
+		if report1.Branch != "" {
+			t.Fatalf("Branch = %q, want none for a ticket that adopted no branch", report1.Branch)
+		}
+
+		roundDir := filepath.Join(d.Store.TicketDir(fx.Ticket), "gate", "round-1")
+		for _, name := range []string{"findings.md", "report.yaml", "diff-changelog.md"} {
+			if _, err := os.Stat(filepath.Join(roundDir, name)); err != nil {
+				t.Fatalf("missing %s: %v", name, err)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(d.Store.TicketDir(fx.Ticket), "evidence", "round-1", "oracle-output.txt")); err != nil {
+			t.Fatalf("missing receipt: %v", err)
+		}
+
+		slices, err := d.Store.ReadSlices(fx.Ticket)
+		if err != nil {
+			t.Fatalf("ReadSlices: %v", err)
+		}
+		var fix1 *store.Slice
+		for i := range slices {
+			if slices[i].ID == "fix-1" {
+				fix1 = &slices[i]
+			}
+		}
+		if fix1 == nil {
+			t.Fatal("fix-1 was not appended to slices.yaml")
+		}
+		if fix1.FromGate != 1 {
+			t.Fatalf("fix-1.FromGate = %d, want 1", fix1.FromGate)
+		}
+		st, err := d.Store.ReadSliceState(fx.Ticket, "fix-1")
+		if err != nil {
+			t.Fatalf("ReadSliceState fix-1: %v", err)
+		}
+		if st.State != "queued" {
+			t.Fatalf("fix-1 state = %q, want queued", st.State)
+		}
+
+		lines, err := journal.Read(d.Store, fx.Ticket)
+		if err != nil {
+			t.Fatalf("journal.Read: %v", err)
+		}
+		want := map[string]bool{"gate-open": false, "gate-round": false, "fix-slice": false}
+		for _, l := range lines {
+			if _, ok := want[l.Event]; ok {
+				want[l.Event] = true
+			}
+		}
+		for event, seen := range want {
+			if !seen {
+				t.Fatalf("journal missing event %q", event)
+			}
+		}
+	})
+
+	// The scripted source never writes a round's own findings.yaml, so this
+	// checks what Gate itself puts in report.yaml for a later round's
+	// UsedFixBudget to read.
+	step(t, "the scripted round's fix slices count toward the fix budget", func(t *testing.T) {
+		if len(report1.FixSlices) == 0 {
+			t.Fatalf("report.FixSlices = %v, want at least the scenario's own round-1 fix slice", report1.FixSlices)
+		}
+		used, unreadable := UsedFixBudget(d.Store, fx.Ticket, 2)
+		if used != 1 || len(unreadable) != 0 {
+			t.Fatalf("UsedFixBudget = %d (unreadable %v), want 1 (the scripted round counts toward the budget)", used, unreadable)
+		}
+	})
+
+	// The top of the precedence order: a ticket with a brief.md (fixture.Generate
+	// always writes one) resolves to source "brief", pointing at that file, with a
+	// non-empty report.yaml sha256.
+	step(t, "the brief is the intent, ahead of an intent.md", func(t *testing.T) {
+		if report1.Intent.Source != IntentSourceBrief {
+			t.Fatalf("Intent.Source = %q, want %q (brief.md must win even with intent.md present)", report1.Intent.Source, IntentSourceBrief)
+		}
+		wantPath, err := filepath.Abs(filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report1.Intent.Path != wantPath {
+			t.Fatalf("Intent.Path = %q, want %q", report1.Intent.Path, wantPath)
+		}
+		wantSHA256 := sha256HexFile(t, wantPath)
+		if report1.IntentSHA256 != wantSHA256 {
+			t.Fatalf("IntentSHA256 = %q, want %q (sha256 of brief.md's own bytes)", report1.IntentSHA256, wantSHA256)
+		}
+
+		rep := reportYAMLAt(t, d, fx.Ticket, report1.Round)
+		if rep.Intent.Source != IntentSourceBrief || rep.Intent.SHA256 != wantSHA256 {
+			t.Fatalf("report.yaml intent = %+v, want source %q with sha256 %q", rep.Intent, IntentSourceBrief, wantSHA256)
+		}
+	})
+
+	step(t, "round 2 is clean and leaves round 1 as it was", func(t *testing.T) {
+		round1Dir := filepath.Join(d.Store.TicketDir(fx.Ticket), "gate", "round-1")
+		before := readDirBytes(t, round1Dir)
+
+		driveFix1(t, fx, "rung-a")
+
+		report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("Gate round 2: %v", err)
+		}
+		if report.Round != 2 {
+			t.Fatalf("Round = %d, want 2", report.Round)
+		}
+		if report.Verdict != "clean" {
+			t.Fatalf("Verdict = %q, want clean", report.Verdict)
+		}
+
+		after := readDirBytes(t, round1Dir)
+		if len(before) != len(after) {
+			t.Fatalf("round-1 file count changed: %d -> %d", len(before), len(after))
+		}
+		for name, data := range before {
+			if string(after[name]) != string(data) {
+				t.Fatalf("round-1/%s bytes changed after round 2", name)
+			}
+		}
+
+		lines, err := journal.Read(d.Store, fx.Ticket)
+		if err != nil {
+			t.Fatalf("journal.Read: %v", err)
+		}
+		sawClean := false
+		for _, l := range lines {
+			if l.Event == "gate-clean" && l.Attempt == 2 {
+				sawClean = true
+			}
+		}
+		if !sawClean {
+			t.Fatal("journal missing gate-clean for round 2")
+		}
+	})
 }
 
 // readDirBytes reads every regular file directly under dir into a map
@@ -194,35 +247,6 @@ func readDirBytes(t *testing.T, dir string) map[string][]byte {
 		out[e.Name()] = data
 	}
 	return out
-}
-
-func TestGateEarlyAndFrontierGuard(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	dir := buildLeaseDir(t, fx)
-	driveAttempt(t, st, fx, dir, "rung-a", "a", 1)
-	// b, c, d are left queued: the frontier is not empty.
-
-	d2 := newDeps(t, fx)
-	_, err = Gate(d2, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "GATE_NOT_GREEN" {
-		t.Fatalf("Gate without --early: err = %v, want *axi.Error GATE_NOT_GREEN", err)
-	}
-
-	report, err := Gate(d2, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Early: true})
-	if err != nil {
-		t.Fatalf("Gate --early: %v", err)
-	}
-	if report.Verdict != "clean" {
-		t.Fatalf("Verdict = %q, want clean", report.Verdict)
-	}
 }
 
 // TestFrontierRefusalNamesThePromptItIsGiven: a refusal for a slice that is not
@@ -282,56 +306,6 @@ func TestGateSurfacesDuplicateFixSliceID(t *testing.T) {
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "SLICE_ID_DUPLICATE" {
 		t.Fatalf("err = %v, want *axi.Error SLICE_ID_DUPLICATE", err)
-	}
-}
-
-// TestGateRefusesStalledSlice checks that a slice left "stalled" (not
-// merely "queued") also blocks gate without --early: any non-green state is
-// an incomplete delivery.
-func TestGateRefusesStalledSlice(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-
-	d := newDeps(t, fx)
-	if err := d.Store.WriteSliceState(fx.Ticket, "d", store.SliceState{State: "stalled", Reason: "stall"}); err != nil {
-		t.Fatalf("write slice state d: %v", err)
-	}
-	if err := d.Store.Push(fx.Ticket + ": slice d stalled"); err != nil {
-		t.Fatalf("push after stalling d: %v", err)
-	}
-
-	_, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "GATE_NOT_GREEN" {
-		t.Fatalf("Gate with a stalled slice: err = %v, want *axi.Error GATE_NOT_GREEN", err)
-	}
-}
-
-// TestGateRefusesQueuedFixSlice checks that a queued fix slice (FromGate !=
-// 0, appended by an earlier round) also blocks a later gate round: it used
-// to be exempted from the frontier check entirely.
-func TestGateRefusesQueuedFixSlice(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-
-	d := newDeps(t, fx)
-	if err := d.Store.AppendSlices(fx.Ticket, []store.Slice{{ID: "fix-x", Workspace: "root", Goal: "fix", Oracle: "test", FromGate: 1}}); err != nil {
-		t.Fatalf("AppendSlices: %v", err)
-	}
-	// fix-x defaults to the zero-value "queued" state (no state file
-	// written yet), same as a fix slice fresh off a gate round.
-	if err := d.Store.Push(fx.Ticket + ": append fix-x"); err != nil {
-		t.Fatalf("push after appending fix-x: %v", err)
-	}
-
-	_, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "GATE_NOT_GREEN" {
-		t.Fatalf("Gate with a queued fix slice: err = %v, want *axi.Error GATE_NOT_GREEN", err)
 	}
 }
 
@@ -415,299 +389,134 @@ func reportYAMLAt(t *testing.T, d Deps, ticket string, round int) reportYAML {
 	return rep
 }
 
-// TestGateIntentBriefWins checks the top of the precedence order: a ticket
-// with a brief.md (fixture.Generate always writes one) resolves to source
-// "brief", pointing at that file, with a non-empty report.yaml sha256.
-func TestGateIntentBriefWins(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
-
-	report, err := Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if report.Intent.Source != IntentSourceBrief {
-		t.Fatalf("Intent.Source = %q, want %q", report.Intent.Source, IntentSourceBrief)
-	}
-	wantPath, err := filepath.Abs(filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if report.Intent.Path != wantPath {
-		t.Fatalf("Intent.Path = %q, want %q", report.Intent.Path, wantPath)
-	}
-	wantSHA256 := sha256HexFile(t, wantPath)
-	if report.IntentSHA256 != wantSHA256 {
-		t.Fatalf("IntentSHA256 = %q, want %q (sha256 of brief.md's own bytes)", report.IntentSHA256, wantSHA256)
-	}
-
-	rep := reportYAMLAt(t, d, fx.Ticket, report.Round)
-	if rep.Intent.Source != IntentSourceBrief || rep.Intent.SHA256 != wantSHA256 {
-		t.Fatalf("report.yaml intent = %+v, want source %q with sha256 %q", rep.Intent, IntentSourceBrief, wantSHA256)
-	}
-}
-
-// TestGateIntentNoneWithNoBriefOrIntent checks the bottom of the precedence
-// order: a ticket with neither a brief.md nor an intent.md resolves to
-// source "none", with no path and no sha256.
-func TestGateIntentNoneWithNoBriefOrIntent(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
-	removeBrief(t, d, fx.Ticket)
-
-	report, err := Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if report.Intent.Source != IntentSourceNone {
-		t.Fatalf("Intent.Source = %q, want %q", report.Intent.Source, IntentSourceNone)
-	}
-	if report.Intent.Path != "" {
-		t.Fatalf("Intent.Path = %q, want empty", report.Intent.Path)
-	}
-	if report.IntentSHA256 != "" {
-		t.Fatalf("IntentSHA256 = %q, want empty", report.IntentSHA256)
-	}
-
-	rep := reportYAMLAt(t, d, fx.Ticket, report.Round)
-	if rep.Intent.Source != IntentSourceNone || rep.Intent.SHA256 != "" {
-		t.Fatalf("report.yaml intent = %+v, want source %q with an empty sha256", rep.Intent, IntentSourceNone)
-	}
-}
-
-// TestGateIntentFlagOutsideBranch checks that --intent works in normal
-// (non-branch) mode, not only --branch: on a brief-less ticket it writes
-// intent.md and this round resolves to source "explicit". The text is
-// recorded byte for byte (surrounding spaces, CRLF and an inner blank line
-// kept, one newline appended to end the file), which ReadIntent's own
-// normalization cannot show, so the file is compared directly.
-func TestGateIntentFlagOutsideBranch(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
-	removeBrief(t, d, fx.Ticket)
-
-	const intentText = "  fix the thing that broke,\r\n\r\nnot the one next to it  "
-	src := NewFakeGateSource(fx.ScenarioDir)
-	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Intent: intentText})
-	if err != nil {
-		t.Fatalf("Gate --intent: %v", err)
-	}
-	if report.Intent.Source != IntentSourceExplicit {
-		t.Fatalf("Intent.Source = %q, want %q", report.Intent.Source, IntentSourceExplicit)
-	}
-	in, ok, err := d.Store.ReadIntent(fx.Ticket)
-	if err != nil || !ok {
-		t.Fatalf("ReadIntent: ok=%v err=%v", ok, err)
-	}
-	if in.Source != IntentSourceExplicit {
-		t.Fatalf("intent.md source = %q, want %q", in.Source, IntentSourceExplicit)
-	}
-	raw, err := os.ReadFile(d.Store.IntentPath(fx.Ticket))
-	if err != nil {
-		t.Fatalf("read intent.md: %v", err)
-	}
-	if want := "---\nsource: explicit\n---\n" + intentText + "\n"; string(raw) != want {
-		t.Fatalf("intent.md = %q, want the given text's own bytes after the front matter: %q", raw, want)
-	}
-
-	wantSHA256 := sha256HexFile(t, d.Store.IntentPath(fx.Ticket))
-	rep := reportYAMLAt(t, d, fx.Ticket, report.Round)
-	if rep.Intent.Source != IntentSourceExplicit || rep.Intent.SHA256 != wantSHA256 {
-		t.Fatalf("report.yaml intent = %+v, want source %q with sha256 %q (intent.md's own bytes)", rep.Intent, IntentSourceExplicit, wantSHA256)
-	}
-}
-
-// TestGateDocFlagWritesIntentFromFile checks --doc: its file's content, not
-// its path, becomes intent.md's text, byte for byte. The doc is shaped so
-// that trimming it, normalizing its CRLF line endings, or collapsing its
-// trailing blank lines (CRLF ones, then bare LF ones, so a trim of LF alone
-// and a trim of CR and LF each leave a different file) each change the
-// file: ReadIntent and ParseIntent normalize CRLF and trim newlines
-// themselves, so only the file's own bytes can tell a recorded text from a
-// rewritten one.
-func TestGateDocFlagWritesIntentFromFile(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
-	removeBrief(t, d, fx.Ticket)
-
-	const docText = "\r\n  line one\r\n\r\nline two  \r\n\r\n\n\n"
-	doc := filepath.Join(t.TempDir(), "doc.md")
-	if err := os.WriteFile(doc, []byte(docText), 0o644); err != nil {
-		t.Fatalf("write doc: %v", err)
-	}
-
-	report, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, IntentDoc: doc})
-	if err != nil {
-		t.Fatalf("Gate --doc: %v", err)
-	}
-	if report.Intent.Source != IntentSourceExplicit {
-		t.Fatalf("Intent.Source = %q, want %q", report.Intent.Source, IntentSourceExplicit)
-	}
-	raw, err := os.ReadFile(d.Store.IntentPath(fx.Ticket))
-	if err != nil {
-		t.Fatalf("read intent.md: %v", err)
-	}
-	if want := "---\nsource: explicit\n---\n" + docText; string(raw) != want {
-		t.Fatalf("intent.md = %q, want the doc's own bytes after the front matter: %q", raw, want)
-	}
-
-	wantSHA256 := sha256HexFile(t, d.Store.IntentPath(fx.Ticket))
-	rep := reportYAMLAt(t, d, fx.Ticket, report.Round)
-	if rep.Intent.Source != IntentSourceExplicit || rep.Intent.SHA256 != wantSHA256 {
-		t.Fatalf("report.yaml intent = %+v, want source %q with sha256 %q (intent.md's own bytes)", rep.Intent, IntentSourceExplicit, wantSHA256)
-	}
-}
-
-// TestGateIntentFlagConflictsWithBrief checks that --intent is refused with
-// INTENT_CONFLICT on a ticket that already has a brief.md.
-func TestGateIntentFlagConflictsWithBrief(t *testing.T) {
+// TestGateRefusalsLeaveNoTrace is the chain of the refusals that are documented
+// as leaving no trace: no journal line (gateRefused), no recorded intent.md, no
+// adopted branch and no start sha, so a plain rerun is the whole recovery. They
+// are decided before the round writes anything, so one ticket and one pushed
+// branch serve them all, each step standing on a ticket the ones before it left
+// as it was. The steps run with the ticket's brief, then (as an intent flag
+// needs no brief to conflict with) without it:
+//
+//   - a branch missing on origin fails loudly with BRANCH_NOT_FOUND, instead of
+//     pool.Acquire's own fallback (origin/<target> as the start point for a
+//     brand-new local branch) silently validating a branch that was never
+//     pushed;
+//   - --intent and --doc are refused with INTENT_CONFLICT on a ticket that
+//     already has a brief.md;
+//   - a --branch gate refused with BRANCH_NOT_FOUND leaves the same no trace:
+//     --intent must not write intent.md when the branch check refuses the round
+//     after the frontier precondition already passed;
+//   - a --doc path that cannot be read is refused with INTENT_DOC_MISSING
+//     rather than silently ignored;
+//   - writeExplicitIntent refuses Intent and IntentDoc both being set, not only
+//     the CLI (cmd/jig/gate.go's own "not both" check): GateOpts is a library
+//     entry point, so a caller that reaches Gate directly, bypassing the CLI,
+//     must be refused the same way rather than silently letting the doc win;
+//   - a --doc file that reads but holds no text a reviewer could judge a fix
+//     against - truly empty, or whitespace-only - is refused with INTENT_EMPTY
+//     rather than recording a binding explicit intent with nothing in it;
+//   - an adoption is recorded after --intent/--doc has been written and the
+//     intent resolved, so a refusal by either leaves no adopted branch behind.
+//     Recorded first, the refused round would leave the ticket on the branch, and
+//     a later --branch naming another one would be refused over an adoption that
+//     never happened: the last step is a later round that adopts another branch.
+func TestGateRefusalsLeaveNoTrace(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()}) // brief.md present by default
 	d := newDeps(t, fx)
-
-	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: pushedBranch(t, fx), Early: true, Intent: "explicit text"})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "INTENT_CONFLICT" {
-		t.Fatalf("err = %v, want *axi.Error INTENT_CONFLICT", err)
+	branch := pushedBranch(t, fx)
+	wantRefused := func(t *testing.T, o GateOpts, code string) {
+		t.Helper()
+		o.Ticket, o.Early = fx.Ticket, true
+		var ae *axi.Error
+		if err := gateRefused(t, d, alwaysCleanSource{}, o); !errors.As(err, &ae) || ae.Code != code {
+			t.Fatalf("err = %v, want *axi.Error %s", err, code)
+		}
+		if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
+			t.Fatalf("ReadIntent after %s: ok=%v err=%v, want ok=false (refused before writing intent.md)", code, ok, rerr)
+		}
+		wantNoAdoption(t, d, fx.Ticket)
 	}
-	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
-		t.Fatalf("ReadIntent after INTENT_CONFLICT: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
-	}
-	wantNoAdoption(t, d, fx.Ticket)
-}
-
-// TestGateDocFlagConflictsWithBrief is TestGateIntentFlagConflictsWithBrief
-// for --doc.
-func TestGateDocFlagConflictsWithBrief(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()}) // brief.md present by default
-	d := newDeps(t, fx)
-	doc := filepath.Join(t.TempDir(), "doc.md")
-	if err := os.WriteFile(doc, []byte("text"), 0o644); err != nil {
-		t.Fatalf("write doc: %v", err)
+	writeDoc := func(t *testing.T, body []byte) string {
+		t.Helper()
+		doc := filepath.Join(t.TempDir(), "doc.md")
+		if err := os.WriteFile(doc, body, 0o644); err != nil {
+			t.Fatalf("write doc: %v", err)
+		}
+		return doc
 	}
 
-	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: pushedBranch(t, fx), Early: true, IntentDoc: doc})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "INTENT_CONFLICT" {
-		t.Fatalf("err = %v, want *axi.Error INTENT_CONFLICT", err)
-	}
-	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
-		t.Fatalf("ReadIntent after INTENT_CONFLICT: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
-	}
-	wantNoAdoption(t, d, fx.Ticket)
-}
+	step(t, "a branch missing on origin is refused BRANCH_NOT_FOUND", func(t *testing.T) {
+		wantRefused(t, GateOpts{Branch: "no-such-branch"}, "BRANCH_NOT_FOUND")
+	})
+	step(t, "--intent over a brief is refused INTENT_CONFLICT", func(t *testing.T) {
+		wantRefused(t, GateOpts{Branch: branch, Intent: "explicit text"}, "INTENT_CONFLICT")
+	})
+	step(t, "--doc over a brief is refused INTENT_CONFLICT", func(t *testing.T) {
+		wantRefused(t, GateOpts{Branch: branch, IntentDoc: writeDoc(t, []byte("text"))}, "INTENT_CONFLICT")
+	})
 
-// TestGateIntentDocMissingErrors checks that a --doc path that cannot be
-// read is refused with INTENT_DOC_MISSING rather than silently ignored.
-func TestGateIntentDocMissingErrors(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
 	removeBrief(t, d, fx.Ticket)
 
-	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{
-		Ticket: fx.Ticket, Branch: pushedBranch(t, fx), Early: true,
-		IntentDoc: filepath.Join(t.TempDir(), "missing.md"),
+	step(t, "a branch missing on origin is refused before --intent is recorded", func(t *testing.T) {
+		wantRefused(t, GateOpts{Branch: "no-such-branch", Intent: "should not be recorded"}, "BRANCH_NOT_FOUND")
 	})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "INTENT_DOC_MISSING" {
-		t.Fatalf("err = %v, want *axi.Error INTENT_DOC_MISSING", err)
-	}
-	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
-		t.Fatalf("ReadIntent after INTENT_DOC_MISSING: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
-	}
-	wantNoAdoption(t, d, fx.Ticket)
-}
-
-// TestGateIntentAndDocBothSetRefused checks that writeExplicitIntent
-// refuses Intent and IntentDoc both being set, not only the CLI
-// (cmd/jig/gate.go's own "not both" check): GateOpts is a library entry
-// point, so a caller that reaches Gate directly, bypassing the CLI, must
-// be refused the same way rather than silently letting the doc win.
-func TestGateIntentAndDocBothSetRefused(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	removeBrief(t, d, fx.Ticket)
-	doc := filepath.Join(t.TempDir(), "doc.md")
-	if err := os.WriteFile(doc, []byte("doc text"), 0o644); err != nil {
-		t.Fatalf("write doc: %v", err)
-	}
-
-	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{
-		Ticket: fx.Ticket, Branch: pushedBranch(t, fx), Early: true,
-		Intent: "explicit text", IntentDoc: doc,
+	step(t, "a --doc path that cannot be read is refused INTENT_DOC_MISSING", func(t *testing.T) {
+		wantRefused(t, GateOpts{Branch: branch, IntentDoc: filepath.Join(t.TempDir(), "missing.md")}, "INTENT_DOC_MISSING")
 	})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "VALIDATION_ERROR" {
-		t.Fatalf("err = %v, want *axi.Error VALIDATION_ERROR", err)
-	}
-	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
-		t.Fatalf("ReadIntent after both Intent and IntentDoc set: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
-	}
-	wantNoAdoption(t, d, fx.Ticket)
-}
-
-// TestGateEmptyDocFileRefused checks that a --doc file that reads but holds
-// no text a reviewer could judge a fix against - truly empty, or
-// whitespace-only - is refused with INTENT_EMPTY rather than recording a
-// binding explicit intent with nothing in it.
-func TestGateEmptyDocFileRefused(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name string
-		body []byte
-	}{
-		{"empty", nil},
-		{"whitespace-only", []byte("\n")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-			d := newDeps(t, fx)
-			removeBrief(t, d, fx.Ticket)
-			doc := filepath.Join(t.TempDir(), "empty.md")
-			if err := os.WriteFile(doc, tc.body, 0o644); err != nil {
-				t.Fatalf("write doc: %v", err)
-			}
-
-			err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{
-				Ticket: fx.Ticket, Branch: pushedBranch(t, fx), Early: true,
-				IntentDoc: doc,
+	step(t, "--intent and --doc together are refused VALIDATION_ERROR", func(t *testing.T) {
+		wantRefused(t, GateOpts{Branch: branch, Intent: "explicit text", IntentDoc: writeDoc(t, []byte("doc text"))}, "VALIDATION_ERROR")
+	})
+	step(t, "a --doc file with no text is refused INTENT_EMPTY", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			body []byte
+		}{
+			{"empty", nil},
+			{"whitespace-only", []byte("\n")},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				wantRefused(t, GateOpts{Branch: branch, IntentDoc: writeDoc(t, tc.body)}, "INTENT_EMPTY")
 			})
-			var ae *axi.Error
-			if !errors.As(err, &ae) || ae.Code != "INTENT_EMPTY" {
-				t.Fatalf("err = %v, want *axi.Error INTENT_EMPTY", err)
-			}
-			if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
-				t.Fatalf("ReadIntent after INTENT_EMPTY: ok=%v err=%v, want ok=false (refused before writing intent.md)", ok, rerr)
-			}
-			wantNoAdoption(t, d, fx.Ticket)
-		})
-	}
+		}
+	})
+	step(t, "a later round may adopt any other branch", func(t *testing.T) {
+		other := authorBranch(t, fx, "add-retry")
+		if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: "add-retry", Early: true}); err != nil {
+			t.Fatalf("Gate --branch add-retry after the refusals (tip %s): %v", other, err)
+		}
+	})
 }
 
-// TestGateIntentFlagReplacesExistingIntentMD checks that a second --intent
-// replaces intent.md's text rather than appending to it.
+// TestGateIntentFlagReplacesExistingIntentMD is the one chain of a brief-less
+// ticket's intent, on a ticket built once with its brief removed
+// (fixture.Generate always writes one, and intent precedence only falls through
+// to intent.md and then none once it is gone). The steps run in order, each on
+// what the one before wrote:
+//
+//   - the reviewer is handed source "none" and no path, and the round resolves to
+//     none with no path and no sha256, in the report and in report.yaml: the
+//     bottom of the precedence order, a ticket with neither a brief.md nor an
+//     intent.md (this runs before any intent.md is written);
+//   - --intent works in normal (non-branch) mode, not only --branch: it writes
+//     intent.md and the round resolves to source "explicit". The text is
+//     recorded byte for byte (surrounding spaces, CRLF and an inner blank line
+//     kept, one newline appended to end the file), which ReadIntent's own
+//     normalization cannot show, so the file is compared directly;
+//   - a second --intent replaces intent.md's text rather than appending to it;
+//   - --doc: its file's content, not its path, becomes intent.md's text, byte
+//     for byte. The doc is shaped so that trimming it, normalizing its CRLF line
+//     endings, or collapsing its trailing blank lines (CRLF ones, then bare LF
+//     ones, so a trim of LF alone and a trim of CR and LF each leave a different
+//     file) each change the file: ReadIntent and ParseIntent normalize CRLF and
+//     trim newlines themselves, so only the file's own bytes can tell a recorded
+//     text from a rewritten one;
+//   - the intent Gate resolves and hands RoundInput for a binding explicit
+//     intent is the same one a real reviewer source writes into review.json.
+//
+// alwaysCleanSource never appends a fix slice, so the frontier stays green
+// across every round; none needs --early.
 func TestGateIntentFlagReplacesExistingIntentMD(t *testing.T) {
 	t.Parallel()
 
@@ -715,23 +524,111 @@ func TestGateIntentFlagReplacesExistingIntentMD(t *testing.T) {
 	driveBuild(t, fx, "rung-a")
 	d := newDeps(t, fx)
 	removeBrief(t, d, fx.Ticket)
+	wantExplicit := func(t *testing.T, report GateReport) string {
+		t.Helper()
+		if report.Intent.Source != IntentSourceExplicit {
+			t.Fatalf("Intent.Source = %q, want %q", report.Intent.Source, IntentSourceExplicit)
+		}
+		wantSHA256 := sha256HexFile(t, d.Store.IntentPath(fx.Ticket))
+		rep := reportYAMLAt(t, d, fx.Ticket, report.Round)
+		if rep.Intent.Source != IntentSourceExplicit || rep.Intent.SHA256 != wantSHA256 {
+			t.Fatalf("report.yaml intent = %+v, want source %q with sha256 %q (intent.md's own bytes)", rep.Intent, IntentSourceExplicit, wantSHA256)
+		}
+		raw, err := os.ReadFile(d.Store.IntentPath(fx.Ticket))
+		if err != nil {
+			t.Fatalf("read intent.md: %v", err)
+		}
+		return string(raw)
+	}
 
-	// alwaysCleanSource never appends a fix slice, so the frontier stays
-	// green across both calls; neither needs --early.
-	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Intent: "first take"}); err != nil {
-		t.Fatalf("Gate --intent (1st): %v", err)
-	}
-	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Intent: "second take"}); err != nil {
-		t.Fatalf("Gate --intent (2nd): %v", err)
-	}
+	step(t, "the reviewer is handed source none and no path", func(t *testing.T) {
+		got := reviewJSONIntent(t, d, fx.Ticket, GateOpts{})
+		if got.Source != IntentSourceNone || got.Path != "" {
+			t.Fatalf("review.json intent = %+v, want {%q \"\"}", got, IntentSourceNone)
+		}
+	})
 
-	in, ok, err := d.Store.ReadIntent(fx.Ticket)
-	if err != nil || !ok {
-		t.Fatalf("ReadIntent: ok=%v err=%v", ok, err)
-	}
-	if in.Text != "second take" {
-		t.Fatalf("intent.md text = %q, want it replaced with %q, not appended", in.Text, "second take")
-	}
+	step(t, "no brief and no intent.md resolve to none", func(t *testing.T) {
+		report, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("Gate: %v", err)
+		}
+		if report.Intent.Source != IntentSourceNone {
+			t.Fatalf("Intent.Source = %q, want %q", report.Intent.Source, IntentSourceNone)
+		}
+		if report.Intent.Path != "" {
+			t.Fatalf("Intent.Path = %q, want empty", report.Intent.Path)
+		}
+		if report.IntentSHA256 != "" {
+			t.Fatalf("IntentSHA256 = %q, want empty", report.IntentSHA256)
+		}
+
+		rep := reportYAMLAt(t, d, fx.Ticket, report.Round)
+		if rep.Intent.Source != IntentSourceNone || rep.Intent.SHA256 != "" {
+			t.Fatalf("report.yaml intent = %+v, want source %q with an empty sha256", rep.Intent, IntentSourceNone)
+		}
+	})
+
+	step(t, "--intent outside a branch records its text byte for byte", func(t *testing.T) {
+		const intentText = "  fix the thing that broke,\r\n\r\nnot the one next to it  "
+		report, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Intent: intentText})
+		if err != nil {
+			t.Fatalf("Gate --intent: %v", err)
+		}
+		in, ok, err := d.Store.ReadIntent(fx.Ticket)
+		if err != nil || !ok {
+			t.Fatalf("ReadIntent: ok=%v err=%v", ok, err)
+		}
+		if in.Source != IntentSourceExplicit {
+			t.Fatalf("intent.md source = %q, want %q", in.Source, IntentSourceExplicit)
+		}
+		if raw, want := wantExplicit(t, report), "---\nsource: explicit\n---\n"+intentText+"\n"; raw != want {
+			t.Fatalf("intent.md = %q, want the given text's own bytes after the front matter: %q", raw, want)
+		}
+	})
+
+	step(t, "a second --intent replaces intent.md's text", func(t *testing.T) {
+		if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Intent: "second take"}); err != nil {
+			t.Fatalf("Gate --intent (2nd): %v", err)
+		}
+		in, ok, err := d.Store.ReadIntent(fx.Ticket)
+		if err != nil || !ok {
+			t.Fatalf("ReadIntent: ok=%v err=%v", ok, err)
+		}
+		if in.Text != "second take" {
+			t.Fatalf("intent.md text = %q, want it replaced with %q, not appended", in.Text, "second take")
+		}
+	})
+
+	step(t, "--doc records its file's content, not its path, byte for byte", func(t *testing.T) {
+		const docText = "\r\n  line one\r\n\r\nline two  \r\n\r\n\n\n"
+		doc := filepath.Join(t.TempDir(), "doc.md")
+		if err := os.WriteFile(doc, []byte(docText), 0o644); err != nil {
+			t.Fatalf("write doc: %v", err)
+		}
+
+		report, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, IntentDoc: doc})
+		if err != nil {
+			t.Fatalf("Gate --doc: %v", err)
+		}
+		if raw, want := wantExplicit(t, report), "---\nsource: explicit\n---\n"+docText; raw != want {
+			t.Fatalf("intent.md = %q, want the doc's own bytes after the front matter: %q", raw, want)
+		}
+	})
+
+	step(t, "the reviewer is handed the explicit intent and the path of its intent.md", func(t *testing.T) {
+		// The reviewer is dispatched only when the round changes something to
+		// review.
+		commitInBuildLease(t, fx, map[string]string{"alpha/note.txt": "a change for the reviewer\n"})
+		got := reviewJSONIntent(t, d, fx.Ticket, GateOpts{Intent: "make the greeting warmer"})
+		wantPath, err := filepath.Abs(d.Store.IntentPath(fx.Ticket))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Source != IntentSourceExplicit || got.Path != wantPath {
+			t.Fatalf("review.json intent = %+v, want {%q %q}", got, IntentSourceExplicit, wantPath)
+		}
+	})
 }
 
 // gateReviewRequest dispatches a minimal clean round through a real
@@ -815,73 +712,6 @@ func TestGateHandsTheReviewerTheOraclesItRan(t *testing.T) {
 	}
 }
 
-// TestGateResolvedIntentReachesReviewJSONExplicit checks that the intent
-// Gate resolves and hands RoundInput for a binding explicit intent is the
-// same one a real reviewer source writes into review.json.
-func TestGateResolvedIntentReachesReviewJSONExplicit(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
-	removeBrief(t, d, fx.Ticket)
-
-	got := reviewJSONIntent(t, d, fx.Ticket, GateOpts{Intent: "make the greeting warmer"})
-	wantPath, err := filepath.Abs(d.Store.IntentPath(fx.Ticket))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Source != IntentSourceExplicit || got.Path != wantPath {
-		t.Fatalf("review.json intent = %+v, want {%q %q}", got, IntentSourceExplicit, wantPath)
-	}
-}
-
-// TestGateResolvedIntentReachesReviewJSONNone is
-// TestGateResolvedIntentReachesReviewJSONExplicit for a brief-less ticket
-// with no explicit intent either: review.json's intent must still name
-// source "none" with an empty path, exactly what Gate itself resolved.
-func TestGateResolvedIntentReachesReviewJSONNone(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
-	removeBrief(t, d, fx.Ticket)
-
-	got := reviewJSONIntent(t, d, fx.Ticket, GateOpts{})
-	if got.Source != IntentSourceNone || got.Path != "" {
-		t.Fatalf("review.json intent = %+v, want {%q \"\"}", got, IntentSourceNone)
-	}
-}
-
-// TestGateIntentBriefWinsOverExistingIntentMD checks that brief.md wins
-// precedence even when intent.md is also present: resolveIntent must
-// check brief.md first, never the other way around. writeExplicitIntent
-// itself refuses to create this state (INTENT_CONFLICT), so intent.md is
-// written directly through the store here, simulating a brief.md added
-// after an earlier explicit intent was recorded - which the CLI hints
-// (`jig ticket`) point a user toward doing, and nothing ever removes the
-// stale intent.md that leaves behind.
-func TestGateIntentBriefWinsOverExistingIntentMD(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()}) // brief.md present by default
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
-
-	if err := d.Store.WriteIntent(fx.Ticket, store.Intent{Source: IntentSourceExplicit, Text: "stale explicit intent"}); err != nil {
-		t.Fatalf("WriteIntent: %v", err)
-	}
-
-	report, err := Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if report.Intent.Source != IntentSourceBrief {
-		t.Fatalf("Intent.Source = %q, want %q (brief.md must win even with intent.md present)", report.Intent.Source, IntentSourceBrief)
-	}
-}
-
 // TestGateRefusesAnIntentMDItCannotBind checks that resolveIntent refuses
 // a ticket's intent.md when it binds nothing jig could stand behind, each
 // with its own code and before the round's gate-open journal line, and that
@@ -900,6 +730,13 @@ func TestGateIntentBriefWinsOverExistingIntentMD(t *testing.T) {
 func TestGateRefusesAnIntentMDItCannotBind(t *testing.T) {
 	t.Parallel()
 
+	// One build serves the three files, each tried in turn: the way out of each
+	// refusal leaves a good intent.md, which the next bad file replaces.
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	driveBuild(t, fx, "rung-a")
+	d := newDeps(t, fx)
+	removeBrief(t, d, fx.Ticket)
+
 	for _, tc := range []struct {
 		name string
 		file string
@@ -909,13 +746,7 @@ func TestGateRefusesAnIntentMDItCannotBind(t *testing.T) {
 		{"whitespace-only body", "---\nsource: explicit\n---\n   \n\n", "INTENT_EMPTY"},
 		{"no front matter", "just some words\n", "INTENT_INVALID"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-			driveBuild(t, fx, "rung-a")
-			d := newDeps(t, fx)
-			removeBrief(t, d, fx.Ticket)
+		step(t, tc.name, func(t *testing.T) {
 			if err := os.WriteFile(d.Store.IntentPath(fx.Ticket), []byte(tc.file), 0o644); err != nil {
 				t.Fatalf("write intent.md: %v", err)
 			}
@@ -946,132 +777,104 @@ func TestGateRefusesAnIntentMDItCannotBind(t *testing.T) {
 // GATE_NOT_GREEN leaves no trace: --intent must not write (or push)
 // intent.md, nor append a journal line, before the frontier precondition
 // is checked, so a plain rerun after finishing the frontier is the whole
-// recovery.
+// recovery. The frontier is the slices' states and nothing else
+// (TestFrontierRefusalNamesThePromptItIsGiven reads the refusal's help), so
+// the states that refuse a round are steps of one ticket whose slices are
+// written directly, with no build:
+//
+//   - a slice left queued, with --intent;
+//   - a slice left "stalled" (not merely "queued") also blocks gate without
+//     --early: any non-green state is an incomplete delivery;
+//   - a queued fix slice (FromGate != 0, appended by an earlier round) also
+//     blocks a later gate round: it used to be exempted from the frontier
+//     check entirely.
+//
+// Gate over slices that are all queued, with --early, is the round of
+// TestGateRefusalsLeaveNoTrace's last step and of every adoption test, which is
+// what --early is for.
 func TestGateIntentNotRecordedWhenNotGreen(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	dir := buildLeaseDir(t, fx)
-	driveAttempt(t, st, fx, dir, "rung-a", "a", 1)
-	// b, c, d are left queued: the frontier is not empty.
-
 	d := newDeps(t, fx)
 	removeBrief(t, d, fx.Ticket)
-
-	err = gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Intent: "should not be recorded"})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "GATE_NOT_GREEN" {
-		t.Fatalf("Gate with a queued slice and --intent: err = %v, want *axi.Error GATE_NOT_GREEN", err)
+	mark := func(t *testing.T, state string, ids ...string) {
+		t.Helper()
+		for _, id := range ids {
+			st := store.SliceState{State: state, Attempts: 1}
+			if state == "stalled" {
+				st = store.SliceState{State: state, Reason: "stall"}
+			}
+			if err := d.Store.WriteSliceState(fx.Ticket, id, st); err != nil {
+				t.Fatalf("write slice state %s: %v", id, err)
+			}
+		}
+		if err := d.Store.Push(fx.Ticket + ": slices " + state); err != nil {
+			t.Fatalf("push the slice states: %v", err)
+		}
 	}
-	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
-		t.Fatalf("ReadIntent after a refused gate: ok=%v err=%v, want ok=false (intent.md must not be written before preconditions pass)", ok, rerr)
+	wantNotGreen := func(t *testing.T, err error) {
+		t.Helper()
+		var ae *axi.Error
+		if !errors.As(err, &ae) || ae.Code != "GATE_NOT_GREEN" {
+			t.Fatalf("err = %v, want *axi.Error GATE_NOT_GREEN", err)
+		}
 	}
-}
 
-// TestGateIntentNotRecordedWhenBranchNotFound checks that a --branch gate
-// refused with BRANCH_NOT_FOUND leaves the same no trace: --intent must not
-// write intent.md, nor append a journal line, when the branch check refuses
-// the round after the frontier precondition already passed, so a plain
-// rerun (after the branch actually exists on origin) is still the whole
-// recovery.
-func TestGateIntentNotRecordedWhenBranchNotFound(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	removeBrief(t, d, fx.Ticket)
-
-	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{
-		Ticket: fx.Ticket, Branch: "no-such-branch", Early: true,
-		Intent: "should not be recorded",
+	step(t, "a queued slice refuses the round and --intent is not recorded", func(t *testing.T) {
+		mark(t, "green", "a") // b, c, d are left queued: the frontier is not empty
+		err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Intent: "should not be recorded"})
+		wantNotGreen(t, err)
+		if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
+			t.Fatalf("ReadIntent after a refused gate: ok=%v err=%v, want ok=false (intent.md must not be written before preconditions pass)", ok, rerr)
+		}
 	})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "BRANCH_NOT_FOUND" {
-		t.Fatalf("Gate --branch missing on origin, with --intent: err = %v, want *axi.Error BRANCH_NOT_FOUND", err)
-	}
-	if _, ok, rerr := d.Store.ReadIntent(fx.Ticket); rerr != nil || ok {
-		t.Fatalf("ReadIntent after BRANCH_NOT_FOUND: ok=%v err=%v, want ok=false (intent.md must not be written before every precondition passes)", ok, rerr)
-	}
+	step(t, "a stalled slice refuses the round", func(t *testing.T) {
+		mark(t, "green", "b", "c")
+		mark(t, "stalled", "d")
+		wantNotGreen(t, gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}))
+	})
+	step(t, "a queued fix slice refuses the round", func(t *testing.T) {
+		mark(t, "green", "d")
+		if err := d.Store.AppendSlices(fx.Ticket, []store.Slice{{ID: "fix-x", Workspace: "root", Goal: "fix", Oracle: "test", FromGate: 1}}); err != nil {
+			t.Fatalf("AppendSlices: %v", err)
+		}
+		// fix-x defaults to the zero-value "queued" state (no state file
+		// written yet), same as a fix slice fresh off a gate round.
+		if err := d.Store.Push(fx.Ticket + ": append fix-x"); err != nil {
+			t.Fatalf("push after appending fix-x: %v", err)
+		}
+		wantNotGreen(t, gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}))
+	})
 }
 
-// TestGateWipesLeftoverLeaseDirtBeforeOracles reproduces NM2 scenario A: a
-// reviewer that outlived a killed jig (no signal handler reaches a future
-// reviewer source's own defer restore) can leave an untracked failing test
-// file and a tracked edit sitting in the gate lease. The next `jig gate`
-// must not have its oracles fail or get skewed by that leftover dirt - Gate
-// itself restores the lease to a pristine head before any oracle runs.
-func TestGateWipesLeftoverLeaseDirtBeforeOracles(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-
-	d := newDeps(t, fx)
-	d.Oracle = nil // the real oracle run is what this test is about
-	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}); err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
-
-	gateLease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Gate)
-	if err != nil {
-		t.Fatalf("reacquire gate lease: %v", err)
-	}
-	// An untracked failing test file, as a reviewer's own repro would leave
-	// behind: the fixture's "test" oracle runs `go test ./alpha/...`.
-	reproPath := filepath.Join(gateLease.Dir, "alpha", "zz_repro_test.go")
-	repro := "package alpha\n\nimport \"testing\"\n\nfunc TestZZRepro(t *testing.T) { t.Fatal(\"boom\") }\n"
-	if err := os.WriteFile(reproPath, []byte(repro), 0o644); err != nil {
-		t.Fatalf("write leftover repro test: %v", err)
-	}
-	// A tracked edit left uncommitted, as an oracle rewrite or a killed
-	// reviewer's own edit would leave behind.
-	trackedPath := filepath.Join(gateLease.Dir, "alpha", "alpha.go")
-	orig, err := os.ReadFile(trackedPath)
-	if err != nil {
-		t.Fatalf("read tracked file: %v", err)
-	}
-	if err := os.WriteFile(trackedPath, append(orig, []byte("\n// leftover dirt\n")...), 0o644); err != nil {
-		t.Fatalf("dirty tracked file: %v", err)
-	}
-
-	report2, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate round 2 should succeed despite leftover lease dirt: %v", err)
-	}
-	if report2.Round != 2 || report2.Verdict != "clean" {
-		t.Fatalf("report2 = %+v, want round 2 clean", report2)
-	}
-
-	if _, err := os.Stat(reproPath); !os.IsNotExist(err) {
-		t.Fatalf("leftover untracked repro file still present after Gate: err = %v", err)
-	}
-	status, err := gitx.Run(gateLease.Dir, "status", "--porcelain")
-	if err != nil {
-		t.Fatalf("git status: %v", err)
-	}
-	if status != "" {
-		t.Fatalf("gate lease left dirty after Gate: %q", status)
-	}
-}
-
-// TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances reproduces NM5, a
-// residual of NM2: leftover tracked dirt in the gate lease (a reviewer that
-// outlived a killed jig, or an oracle rewrite from an earlier attempt) does
-// not get in the way of an oracle run by itself, but once the ticket branch
-// later advances past the same file, the checkout that runs before Gate's
-// post-acquire restore (fetchTicketBranchFromBuildLease's own final `git
-// checkout <branch>`) refuses with "local changes ... would be
-// overwritten", and Gate would return before that restore ever runs -
-// leaving the lease detached and still dirty, so pool.Acquire's own
-// checkout would fail the exact same way on every later attempt. Gate
-// restores an existing lease pristine before Acquire ever touches it, so
-// the very next gate succeeds, and a lease already left wedged by an
-// earlier failed attempt (detached, still dirty, its local branch ref
-// already fast-forwarded past the dirty file) recovers too.
+// TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances is the chain of what a
+// killed reviewer or oracle leaves in the gate lease, on one build whose gate
+// rounds run the real oracles: what the second round must not trip over.
+//
+// NM2 scenario A: a reviewer that outlived a killed jig (no signal handler
+// reaches a future reviewer source's own defer restore) can leave an untracked
+// failing test file and a tracked edit sitting in the gate lease. The next `jig
+// gate` must not have its oracles fail or get skewed by that leftover dirt -
+// Gate itself restores the lease to a pristine head before any oracle runs. The
+// untracked file here is a failing test of alpha, which the fixture's "test"
+// oracle (`go test ./alpha/...`) runs for real: it is only absent from the
+// oracle's run if the restore came first.
+//
+// NM5, a residual of NM2: leftover tracked dirt (a reviewer that outlived a
+// killed jig, or an oracle rewrite from an earlier attempt) does not get in the
+// way of an oracle run by itself, but once the ticket branch later advances past
+// the same file, the checkout that runs before Gate's post-acquire restore
+// (fetchTicketBranchFromBuildLease's own final `git checkout <branch>`) refuses
+// with "local changes ... would be overwritten", and Gate would return before
+// that restore ever runs - leaving the lease detached and still dirty, so
+// pool.Acquire's own checkout would fail the exact same way on every later
+// attempt. Gate restores an existing lease pristine before Acquire ever touches
+// it, so the very next gate succeeds (the second round here, whose lease holds
+// the dirt of both scenarios and whose branch advanced), and a lease already
+// left wedged by an earlier failed attempt (detached, still dirty, its local
+// branch ref already fast-forwarded past the dirty file) recovers too (the
+// third).
 func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 	t.Parallel()
 
@@ -1080,32 +883,20 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 
 	d := newDeps(t, fx)
 	d.Oracle = nil // the real oracle run is what this test is about
-	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}); err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
-
-	gateLease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Gate)
-	if err != nil {
-		t.Fatalf("reacquire gate lease: %v", err)
-	}
-	trackedPath := filepath.Join(gateLease.Dir, "alpha", "alpha.go")
-	orig, err := os.ReadFile(trackedPath)
-	if err != nil {
-		t.Fatalf("read tracked file: %v", err)
-	}
-	dirty := func(note string) {
+	var gateDir string
+	trackedPath := func() string { return filepath.Join(gateDir, "alpha", "alpha.go") }
+	var orig []byte
+	dirty := func(t *testing.T, note string) {
 		t.Helper()
 		edited := append(append([]byte{}, orig...), []byte("\n// "+note+"\n")...)
-		if err := os.WriteFile(trackedPath, edited, 0o644); err != nil {
+		if err := os.WriteFile(trackedPath(), edited, 0o644); err != nil {
 			t.Fatalf("dirty tracked file: %v", err)
 		}
 	}
-	dirty("leftover reviewer edit")
-
-	buildDir := buildLeaseDir(t, fx)
-	bp := filepath.Join(buildDir, "alpha", "alpha.go")
-	advance := func(note string) {
+	advance := func(t *testing.T, note string) {
 		t.Helper()
+		buildDir := buildLeaseDir(t, fx)
+		bp := filepath.Join(buildDir, "alpha", "alpha.go")
 		bdata, err := os.ReadFile(bp)
 		if err != nil {
 			t.Fatalf("read build alpha.go: %v", err)
@@ -1120,62 +911,92 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 			t.Fatalf("commit: %v", err)
 		}
 	}
-	// Advance the ticket's branch in the build lease with a commit touching the
-	// same file, as a later slice build (e.g. after an --early gate) would.
-	advance("next slice")
-
-	report2, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate round 2 should succeed on the first attempt despite the leftover tracked dirt and the advanced branch: %v", err)
-	}
-	if report2.Round != 2 || report2.Verdict != "clean" {
-		t.Fatalf("report2 = %+v, want round 2 clean", report2)
-	}
-	status, err := gitx.Run(gateLease.Dir, "status", "--porcelain")
-	if err != nil {
-		t.Fatalf("git status: %v", err)
-	}
-	if status != "" {
-		t.Fatalf("gate lease left dirty after round 2: %q", status)
+	wantPristine := func(t *testing.T, what string) {
+		t.Helper()
+		status, err := gitx.Run(gateDir, "status", "--porcelain")
+		if err != nil {
+			t.Fatalf("git status: %v", err)
+		}
+		if status != "" {
+			t.Fatalf("gate lease left dirty after %s: %q", what, status)
+		}
 	}
 
-	// Now forge exactly the state a pre-fix failed attempt would have left
-	// behind: advance the branch again, dirty the lease again, then call
-	// the real fetchTicketBranchFromBuildLease directly - its fetch force-
-	// updates the local branch ref to the new tip and succeeds, but its own
-	// final checkout back onto that branch fails on the dirty file, so it
-	// returns with the lease detached at the old commit and still dirty.
-	advance("third slice")
-	dirty("leftover from a killed attempt")
-	if err := fetchTicketBranchFromBuildLease(fx.Home, gateLease.Dir, "fixture-repo", fx.Ticket, ticketBranch(fx.Ticket)); err == nil {
-		t.Fatal("test setup: fetchTicketBranchFromBuildLease should still fail on the dirty file before the pre-Acquire restore runs")
-	}
+	step(t, "round 1 leaves the gate lease its own", func(t *testing.T) {
+		if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}); err != nil {
+			t.Fatalf("Gate round 1: %v", err)
+		}
+		gateLease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Gate)
+		if err != nil {
+			t.Fatalf("reacquire gate lease: %v", err)
+		}
+		gateDir = gateLease.Dir
+		if orig, err = os.ReadFile(trackedPath()); err != nil {
+			t.Fatalf("read tracked file: %v", err)
+		}
+	})
 
-	report3, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate round 3 should recover a lease left detached and dirty by an earlier failed attempt: %v", err)
-	}
-	if report3.Round != 3 || report3.Verdict != "clean" {
-		t.Fatalf("report3 = %+v, want round 3 clean", report3)
-	}
-	head, err := gitx.RevParse(gateLease.Dir, "HEAD")
-	if err != nil {
-		t.Fatalf("resolve HEAD: %v", err)
-	}
-	branchHead, err := gitx.RevParse(gateLease.Dir, ticketBranch(fx.Ticket))
-	if err != nil {
-		t.Fatalf("resolve branch HEAD: %v", err)
-	}
-	if head != branchHead {
-		t.Fatalf("gate lease HEAD %s is not the ticket branch's HEAD %s: still detached", head, branchHead)
-	}
-	status3, err := gitx.Run(gateLease.Dir, "status", "--porcelain")
-	if err != nil {
-		t.Fatalf("git status: %v", err)
-	}
-	if status3 != "" {
-		t.Fatalf("gate lease left dirty after round 3: %q", status3)
-	}
+	step(t, "round 2 wipes a failing repro and a tracked edit before its oracles, though the branch advanced", func(t *testing.T) {
+		// An untracked failing test file, as a reviewer's own repro would leave
+		// behind: the fixture's "test" oracle runs `go test ./alpha/...`.
+		reproPath := filepath.Join(gateDir, "alpha", "zz_repro_test.go")
+		repro := "package alpha\n\nimport \"testing\"\n\nfunc TestZZRepro(t *testing.T) { t.Fatal(\"boom\") }\n"
+		if err := os.WriteFile(reproPath, []byte(repro), 0o644); err != nil {
+			t.Fatalf("write leftover repro test: %v", err)
+		}
+		// A tracked edit left uncommitted, as an oracle rewrite or a killed
+		// reviewer's own edit would leave behind.
+		dirty(t, "leftover reviewer edit")
+		// Advance the ticket's branch in the build lease with a commit touching the
+		// same file, as a later slice build (e.g. after an --early gate) would.
+		advance(t, "next slice")
+
+		report2, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("Gate round 2 should succeed on the first attempt despite the leftover dirt and the advanced branch: %v", err)
+		}
+		if report2.Round != 2 || report2.Verdict != "clean" {
+			t.Fatalf("report2 = %+v, want round 2 clean", report2)
+		}
+		if _, err := os.Stat(reproPath); !os.IsNotExist(err) {
+			t.Fatalf("leftover untracked repro file still present after Gate: err = %v", err)
+		}
+		wantPristine(t, "round 2")
+	})
+
+	step(t, "round 3 recovers a lease an earlier failed attempt left detached and dirty", func(t *testing.T) {
+		// Forge exactly the state a pre-fix failed attempt would have left
+		// behind: advance the branch again, dirty the lease again, then call
+		// the real fetchTicketBranchFromBuildLease directly - its fetch force-
+		// updates the local branch ref to the new tip and succeeds, but its own
+		// final checkout back onto that branch fails on the dirty file, so it
+		// returns with the lease detached at the old commit and still dirty.
+		advance(t, "third slice")
+		dirty(t, "leftover from a killed attempt")
+		if err := fetchTicketBranchFromBuildLease(fx.Home, gateDir, "fixture-repo", fx.Ticket, ticketBranch(fx.Ticket)); err == nil {
+			t.Fatal("test setup: fetchTicketBranchFromBuildLease should still fail on the dirty file before the pre-Acquire restore runs")
+		}
+
+		report3, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("Gate round 3 should recover a lease left detached and dirty by an earlier failed attempt: %v", err)
+		}
+		if report3.Round != 3 || report3.Verdict != "clean" {
+			t.Fatalf("report3 = %+v, want round 3 clean", report3)
+		}
+		head, err := gitx.RevParse(gateDir, "HEAD")
+		if err != nil {
+			t.Fatalf("resolve HEAD: %v", err)
+		}
+		branchHead, err := gitx.RevParse(gateDir, ticketBranch(fx.Ticket))
+		if err != nil {
+			t.Fatalf("resolve branch HEAD: %v", err)
+		}
+		if head != branchHead {
+			t.Fatalf("gate lease HEAD %s is not the ticket branch's HEAD %s: still detached", head, branchHead)
+		}
+		wantPristine(t, "round 3")
+	})
 }
 
 // TestGateUsesRecordedBranch runs a gate round on a ticket whose ticket.yaml
@@ -1227,9 +1048,14 @@ func TestGateUsesRecordedBranch(t *testing.T) {
 // silent fallback the refusals exist to prevent; a fallback that tells the two
 // apart and keeps only one refusal is still one. The build runs before the
 // record is written: the test's own build-lease helper resolves the branch
-// too, and would refuse it.
+// too, and would refuse it. The refusals are steps of that one build, the
+// record put back between them.
 func TestGateFailsWithTheRefusalOfTicketBranch(t *testing.T) {
 	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	driveBuild(t, fx, "rung-a")
 
 	for _, tc := range []struct {
 		name     string
@@ -1258,10 +1084,8 @@ func TestGateFailsWithTheRefusalOfTicketBranch(t *testing.T) {
 			wantCode: "TICKET_SCHEMA_UNSUPPORTED",
 		},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-			d := newDeps(t, fx)
-			driveBuild(t, fx, "rung-a")
+		step(t, tc.name, func(t *testing.T) {
+			restore := saveTicketRecord(t, d, fx.Ticket)
 			tc.record(t, d.Store, fx.Ticket)
 			// Test setup: the record must earn this refusal from
 			// TicketBranch itself, or the Gate below proves nothing.
@@ -1278,128 +1102,8 @@ func TestGateFailsWithTheRefusalOfTicketBranch(t *testing.T) {
 			if _, err := os.Stat(gateLease); !os.IsNotExist(err) {
 				t.Fatalf("the refused Gate left a gate lease at %s (stat err %v), want none", gateLease, err)
 			}
+			restore(t)
 		})
-	}
-}
-
-// TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin reproduces
-// NM2 scenario B: the gate lease of a branch jig has built nothing on never
-// commits, so a local commit left behind by a killed reviewer must be
-// discarded - not reviewed and passed clean - and origin advancing between
-// two rounds must make the second gate review the new head, not a stale
-// local copy that pool.Acquire would otherwise reuse as-is (it never resets
-// an existing local branch), or refuse over as diverged: the leftover and
-// the author's new commit are each ahead of the other.
-func TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	branch := "feature-x"
-	origin1 := authorBranch(t, fx, branch)
-
-	d := newDeps(t, fx)
-	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: branch, Early: true}); err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
-
-	// Simulate a killed reviewer's leftover commit in the gate lease: a
-	// local commit ahead of origin, never pushed.
-	gateLease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Gate)
-	if err != nil {
-		t.Fatalf("reacquire gate lease: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(gateLease.Dir, "leftover.txt"), []byte("leftover reviewer commit\n"), 0o644); err != nil {
-		t.Fatalf("write leftover file: %v", err)
-	}
-	if _, err := gitx.Run(gateLease.Dir, "add", "-A"); err != nil {
-		t.Fatalf("git add leftover: %v", err)
-	}
-	if _, err := gitx.RunEnv(gateLease.Dir, buildGitEnv, "commit", "-m", "leftover reviewer commit"); err != nil {
-		t.Fatalf("commit leftover: %v", err)
-	}
-	leftoverHead, err := gitx.RevParse(gateLease.Dir, "HEAD")
-	if err != nil {
-		t.Fatalf("resolve leftover HEAD: %v", err)
-	}
-	if leftoverHead == origin1 {
-		t.Fatal("test setup: leftover commit did not move HEAD")
-	}
-
-	// The author pushes again.
-	origin2 := authorPush(t, fx, branch, "advance.txt")
-	if origin2 == origin1 {
-		t.Fatal("test setup: origin did not advance")
-	}
-
-	// Round 2 names no branch: the ticket recorded it in round 1.
-	report2, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Early: true})
-	if err != nil {
-		t.Fatalf("Gate round 2: %v", err)
-	}
-	if report2.Round != 2 || report2.Branch != branch {
-		t.Fatalf("report2 = round %d on %q, want round 2 on the adopted %q", report2.Round, report2.Branch, branch)
-	}
-	head2, err := gitx.RevParse(gateLease.Dir, "HEAD")
-	if err != nil {
-		t.Fatalf("resolve gate lease HEAD after round 2: %v", err)
-	}
-	if head2 != origin2 {
-		t.Fatalf("gate lease HEAD after round 2 = %s, want the advanced origin/%s = %s (a stale local copy, or the leftover commit, must not survive)", head2, branch, origin2)
-	}
-}
-
-// TestGateBranchNotFoundOnOrigin checks that gating a branch missing on
-// origin fails loudly with BRANCH_NOT_FOUND, instead of pool.Acquire's own
-// fallback (origin/<target> as the start point for a brand-new local
-// branch) silently validating a branch that was never pushed. The refusal
-// leaves nothing behind: the branch is not adopted, and no start sha is
-// recorded.
-func TestGateBranchNotFoundOnOrigin(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-
-	d := newDeps(t, fx)
-	_, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: "no-such-branch", Early: true})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "BRANCH_NOT_FOUND" {
-		t.Fatalf("Gate --branch missing on origin: err = %v, want *axi.Error BRANCH_NOT_FOUND", err)
-	}
-	if rec, rerr := d.Store.ReadTicket(fx.Ticket); rerr != nil || rec.Branch != "" {
-		t.Fatalf("record after BRANCH_NOT_FOUND = %+v (err %v), want no adopted branch", rec, rerr)
-	}
-	if _, serr := os.Stat(d.Store.StartSHAPath(fx.Ticket, "fixture-repo")); !os.IsNotExist(serr) {
-		t.Fatalf("a start sha was recorded for a refused adoption (stat err %v)", serr)
-	}
-}
-
-// TestGateBranchDeletedOnOriginAfterEarlierGate checks that a branch which
-// existed and gated cleanly, then got deleted on origin before the next
-// gate, fails BRANCH_NOT_FOUND rather than reviewing the stale tip that
-// pool.Acquire's own fetch (no --prune) leaves behind in
-// refs/remotes/origin/<branch>.
-func TestGateBranchDeletedOnOriginAfterEarlierGate(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	branch := "feature-x"
-	authorBranch(t, fx, branch)
-
-	d := newDeps(t, fx)
-	opts := GateOpts{Ticket: fx.Ticket, Branch: branch, Early: true}
-	if _, err := Gate(d, alwaysCleanSource{}, opts); err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
-
-	run(t, fx.RepoRemote, "branch", "-D", branch)
-
-	_, err := Gate(d, alwaysCleanSource{}, opts)
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "BRANCH_NOT_FOUND" {
-		t.Fatalf("Gate --branch after origin deleted it: err = %v, want *axi.Error BRANCH_NOT_FOUND", err)
-	}
-	if len(ae.Help) == 0 {
-		t.Fatal("BRANCH_NOT_FOUND has no Help line")
 	}
 }
 
@@ -1409,6 +1113,13 @@ func TestGateBranchDeletedOnOriginAfterEarlierGate(t *testing.T) {
 // wiring findings.go adds - review.json's open list built from the fold,
 // the verdict derived from applying the round, findings.yaml/md written to
 // disk, and reviewed_sha recorded - all agree with each other.
+//
+// Round 2 is answered the way a headless backend's file-read tool does, with
+// every reviewed path in its lease-absolute form: the finding must still clear
+// once its file is covered, and findings.yaml must record the coverage as
+// repo-relative paths only, never a host path. (A reviewer that echoes the
+// relative must_review list clears it the same way, in every other reviewer
+// round of this package.)
 func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 	t.Parallel()
 
@@ -1447,8 +1158,13 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 			if len(req.Open) != 1 || req.Open[0].Title != "needs a fix" || req.Open[0].File != "alpha/alpha.go" {
 				t.Fatalf("round 2 review.json Open = %+v, want the round 1 finding fed back", req.Open)
 			}
-			// Nothing new reported: the round 1 finding clears (rule 3).
-			result = ReviewResult{ReviewedPaths: req.MustReview, Summary: "round 2 summary"}
+			// Nothing new reported: the round 1 finding clears (rule 3), its
+			// file covered by every entry in the lease-absolute form.
+			abs := make([]string, len(req.MustReview))
+			for i, p := range req.MustReview {
+				abs[i] = filepath.Join(sd.Worktree, filepath.FromSlash(p))
+			}
+			result = ReviewResult{ReviewedPaths: abs, Summary: "round 2 summary"}
 		default:
 			t.Fatalf("unexpected round %d", round)
 		}
@@ -1457,102 +1173,112 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 	}}
 
 	src := newReviewerGateSource(backend)
+	var f1 Finding
 
-	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
-	if report1.Round != 1 {
-		t.Fatalf("round = %d, want 1", report1.Round)
-	}
-	if report1.Verdict != "fix-slices" {
-		t.Fatalf("round 1 Verdict = %q, want fix-slices", report1.Verdict)
-	}
-	if report1.ReviewedSHA == nil || report1.ReviewedSHA["fixture-repo"] == "" {
-		t.Fatalf("round 1 ReviewedSHA = %+v, want a non-empty fixture-repo entry", report1.ReviewedSHA)
-	}
-
-	ff1, ok, err := readFindingsYAML(d.Store, fx.Ticket, 1)
-	if err != nil {
-		t.Fatalf("read round 1 findings.yaml: %v", err)
-	}
-	if !ok {
-		t.Fatal("round 1 findings.yaml missing")
-	}
-	if len(ff1.Findings) != 1 {
-		t.Fatalf("round 1 findings = %+v, want 1", ff1.Findings)
-	}
-	f1 := ff1.Findings[0]
-	if f1.Status != StatusOpen {
-		t.Errorf("round 1 finding status = %q, want open", f1.Status)
-	}
-	if f1.Workspace != "alpha" {
-		t.Errorf("round 1 finding workspace = %q, want alpha", f1.Workspace)
-	}
-	if f1.ID == "" {
-		t.Error("round 1 finding has no id")
-	}
-	if len(report1.FixSlices) != 1 {
-		t.Fatalf("round 1 FixSlices = %v, want 1 (routing kept the fix)", report1.FixSlices)
-	}
-	sliceID := report1.FixSlices[0]
-	fixSlices, err := d.Store.ReadSlices(fx.Ticket)
-	if err != nil {
-		t.Fatalf("read slices: %v", err)
-	}
-	var fs *store.Slice
-	for i := range fixSlices {
-		if fixSlices[i].ID == sliceID {
-			fs = &fixSlices[i]
+	step(t, "round 1 records the finding, routes its fix and the head it reviewed", func(t *testing.T) {
+		report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("Gate round 1: %v", err)
 		}
-	}
-	if fs == nil {
-		t.Fatalf("appended fix slice %q not found in slices.yaml", sliceID)
-	}
-	if !equalStrings(fs.Findings, []string{f1.ID}) {
-		t.Errorf("fix slice %s Findings = %v, want [%s]", sliceID, fs.Findings, f1.ID)
-	}
-	if fs.Workspace != "alpha" || fs.Oracle != "test" {
-		t.Errorf("fix slice %s = %+v, want workspace alpha, oracle test", sliceID, fs)
-	}
+		if report1.Round != 1 {
+			t.Fatalf("round = %d, want 1", report1.Round)
+		}
+		if report1.Verdict != "fix-slices" {
+			t.Fatalf("round 1 Verdict = %q, want fix-slices", report1.Verdict)
+		}
+		if report1.ReviewedSHA == nil || report1.ReviewedSHA["fixture-repo"] == "" {
+			t.Fatalf("round 1 ReviewedSHA = %+v, want a non-empty fixture-repo entry", report1.ReviewedSHA)
+		}
 
-	mdPath := filepath.Join(gateRoundDir(d.Store, fx.Ticket, 1), "findings.md")
-	if md, err := os.ReadFile(mdPath); err != nil || len(md) == 0 {
-		t.Fatalf("round 1 findings.md: data=%q err=%v", md, err)
-	}
+		ff1, ok, err := readFindingsYAML(d.Store, fx.Ticket, 1)
+		if err != nil {
+			t.Fatalf("read round 1 findings.yaml: %v", err)
+		}
+		if !ok {
+			t.Fatal("round 1 findings.yaml missing")
+		}
+		if len(ff1.Findings) != 1 {
+			t.Fatalf("round 1 findings = %+v, want 1", ff1.Findings)
+		}
+		f1 = ff1.Findings[0]
+		if f1.Status != StatusOpen {
+			t.Errorf("round 1 finding status = %q, want open", f1.Status)
+		}
+		if f1.Workspace != "alpha" {
+			t.Errorf("round 1 finding workspace = %q, want alpha", f1.Workspace)
+		}
+		if f1.ID == "" {
+			t.Error("round 1 finding has no id")
+		}
+		if len(report1.FixSlices) != 1 {
+			t.Fatalf("round 1 FixSlices = %v, want 1 (routing kept the fix)", report1.FixSlices)
+		}
+		sliceID := report1.FixSlices[0]
+		fixSlices, err := d.Store.ReadSlices(fx.Ticket)
+		if err != nil {
+			t.Fatalf("read slices: %v", err)
+		}
+		var fs *store.Slice
+		for i := range fixSlices {
+			if fixSlices[i].ID == sliceID {
+				fs = &fixSlices[i]
+			}
+		}
+		if fs == nil {
+			t.Fatalf("appended fix slice %q not found in slices.yaml", sliceID)
+		}
+		if !equalStrings(fs.Findings, []string{f1.ID}) {
+			t.Errorf("fix slice %s Findings = %v, want [%s]", sliceID, fs.Findings, f1.ID)
+		}
+		if fs.Workspace != "alpha" || fs.Oracle != "test" {
+			t.Errorf("fix slice %s = %+v, want workspace alpha, oracle test", sliceID, fs)
+		}
 
-	// Round 2 runs --early: the fix slice routing just appended is still
-	// queued, and driving it green belongs to frontier, not this test
-	// (which only exercises Gate's own findings bookkeeping/routing).
-	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Early: true})
-	if err != nil {
-		t.Fatalf("Gate round 2: %v", err)
-	}
-	if report2.Verdict != "clean" {
-		t.Fatalf("round 2 Verdict = %q, want clean", report2.Verdict)
-	}
-	if report2.ReviewedSHA == nil || report2.ReviewedSHA["fixture-repo"] == "" {
-		t.Fatalf("round 2 ReviewedSHA = %+v, want a non-empty fixture-repo entry", report2.ReviewedSHA)
-	}
+		mdPath := filepath.Join(gateRoundDir(d.Store, fx.Ticket, 1), "findings.md")
+		if md, err := os.ReadFile(mdPath); err != nil || len(md) == 0 {
+			t.Fatalf("round 1 findings.md: data=%q err=%v", md, err)
+		}
+	})
 
-	ff2, ok, err := readFindingsYAML(d.Store, fx.Ticket, 2)
-	if err != nil {
-		t.Fatalf("read round 2 findings.yaml: %v", err)
-	}
-	if !ok {
-		t.Fatal("round 2 findings.yaml missing")
-	}
-	if !equalStrings(ff2.Cleared, []string{f1.ID}) {
-		t.Fatalf("round 2 cleared = %v, want [%s]", ff2.Cleared, f1.ID)
-	}
+	step(t, "round 2 clears the finding from lease-absolute reviewed paths", func(t *testing.T) {
+		// Round 2 runs --early: the fix slice routing just appended is still
+		// queued, and driving it green belongs to frontier, not this test
+		// (which only exercises Gate's own findings bookkeeping/routing).
+		report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Early: true})
+		if err != nil {
+			t.Fatalf("Gate round 2: %v", err)
+		}
+		if report2.Verdict != "clean" {
+			t.Fatalf("round 2 Verdict = %q, want clean (the absolute-path reviewed_paths should clear %s)", report2.Verdict, f1.ID)
+		}
+		if report2.ReviewedSHA == nil || report2.ReviewedSHA["fixture-repo"] == "" {
+			t.Fatalf("round 2 ReviewedSHA = %+v, want a non-empty fixture-repo entry", report2.ReviewedSHA)
+		}
 
-	cum, err := cumulativeFindings(d.Store, fx.Ticket, 3)
-	if err != nil {
-		t.Fatalf("cumulativeFindings: %v", err)
-	}
-	if !isClean(cum) {
-		t.Fatalf("cumulative state after round 2 = %+v, want clean", cum)
-	}
+		ff2, ok, err := readFindingsYAML(d.Store, fx.Ticket, 2)
+		if err != nil {
+			t.Fatalf("read round 2 findings.yaml: %v", err)
+		}
+		if !ok {
+			t.Fatal("round 2 findings.yaml missing")
+		}
+		if !equalStrings(ff2.Cleared, []string{f1.ID}) {
+			t.Fatalf("round 2 cleared = %v, want [%s]", ff2.Cleared, f1.ID)
+		}
+		for _, p := range ff2.ReviewedPaths {
+			if filepath.IsAbs(p) || strings.Contains(p, "\\") {
+				t.Errorf("round 2 findings.yaml reviewed_paths entry %q is not repo-relative", p)
+			}
+		}
+
+		cum, err := cumulativeFindings(d.Store, fx.Ticket, 3)
+		if err != nil {
+			t.Fatalf("cumulativeFindings: %v", err)
+		}
+		if !isClean(cum) {
+			t.Fatalf("cumulative state after round 2 = %+v, want clean", cum)
+		}
+	})
 }
 
 // --- the fix budget ----------------------------------------------------
@@ -1639,48 +1365,15 @@ func TestGateFixBudgetParksAfterRoundsUsed(t *testing.T) {
 	}
 }
 
-// TestGateFixBudgetZeroParksTheFirstRoundsFixImmediately pins
-// fix_rounds: 0 - no round ever queues a fix slice unattended, starting
-// with the very first one.
-func TestGateFixBudgetZeroParksTheFirstRoundsFixImmediately(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
-	fr := 0
-	d.Cfg.Gate = &project.GateConfig{FixRounds: &fr}
-
-	backend := stubBackend{run: func(sd session.Dispatch) error {
-		req := readReviewRequest(t, sd.SliceJSON)
-		result := ReviewResult{
-			Findings: []ResultFinding{{
-				File: "alpha/alpha.go", Line: 1, Title: "fix me",
-				Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "test",
-			}},
-			ReviewedPaths: req.MustReview,
-			Summary:       "round 1",
-		}
-		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
-	}}
-	src := newReviewerGateSource(backend)
-
-	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if len(report.FixSlices) != 0 {
-		t.Fatalf("FixSlices = %v, want none (fix_rounds: 0 parks every fix, starting round 1)", report.FixSlices)
-	}
-	if len(report.NeedsHuman) != 1 || report.NeedsHuman[0].RoutedWhy != RoutedWhyBudget {
-		t.Fatalf("NeedsHuman = %+v, want one budget-parked finding", report.NeedsHuman)
-	}
-}
-
 // TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached pins
 // the two halves of "who can keep a parked finding": a human at a
 // terminal keeping one queues its fix slice anyway, and the budget stays
-// reached afterward, so the next round parks again.
+// reached afterward, so the next round parks again. The budget here is
+// fix_rounds: 0 - no round ever queues a fix slice unattended, starting with
+// the very first one, whose finding is parked (routed_why budget) before the
+// person keeps it. The second round, unattended (nil Triage, i.e.
+// DefaultTriage, the way --yes and `jig solve` would leave it too), is that
+// rule: no fix slice, and the budget-parked finding in needs-a-human.
 func TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached(t *testing.T) {
 	t.Parallel()
 
@@ -1756,7 +1449,7 @@ func TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached(t *testin
 // slices, a (workspace, oracle) group over the bound splits into several
 // fix slices, each carrying only its own subset, and the split slices are
 // numbered "-1", "-2" from 1. A group that fits in one slice keeps today's
-// unsuffixed id, already pinned by TestGateRound1FixSlice; the packing
+// unsuffixed id, already pinned by TestGateCleanRound2; the packing
 // algorithm itself (file order, crowding, an oversized file getting its
 // own slice) is pinned at the lower seam by
 // TestRouteRoundSplitsAFixGroupPackingFilesGreedilyByPathOrder.
@@ -1809,131 +1502,26 @@ func TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices(t *testing
 	}
 }
 
-// TestGateScriptedRoundFixSlicesCountTowardTheBudget pins that the
-// scripted (scenario) gate source's own fix slices, appended unchanged
-// with no budget enforcement of its own, still count toward the budget:
-// report.yaml lists them the same way a reviewer round's own routing
-// does, so a later reviewer-driven round's UsedFixBudget sees them.
-func TestGateScriptedRoundFixSlicesCountTowardTheBudget(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
-	src := NewFakeGateSource(fx.ScenarioDir)
-
-	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if len(report.FixSlices) == 0 {
-		t.Fatalf("report.FixSlices = %v, want at least the scenario's own round-1 fix slice", report.FixSlices)
-	}
-
-	used, unreadable := UsedFixBudget(d.Store, fx.Ticket, 2)
-	if used != 1 || len(unreadable) != 0 {
-		t.Fatalf("UsedFixBudget = %d (unreadable %v), want 1 (the scripted round counts toward the budget)", used, unreadable)
-	}
-}
-
-// TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath reproduces the
-// review finding: a reviewer session whose file-read tool hands back
-// absolute paths (the ordinary case for a headless backend) must still
-// clear an open finding once its file is covered, and findings.yaml must
-// record the coverage as repo-relative paths only, never a host path.
-func TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
-
-	round := 0
-	backend := stubBackend{run: func(sd session.Dispatch) error {
-		round++
-		reviewData, err := os.ReadFile(sd.SliceJSON)
-		if err != nil {
-			t.Fatalf("read review.json: %v", err)
-		}
-		var req ReviewRequest
-		if err := json.Unmarshal(reviewData, &req); err != nil {
-			t.Fatalf("parse review.json: %v", err)
-		}
-
-		var result ReviewResult
-		switch round {
-		case 1:
-			result = ReviewResult{
-				Findings: []ResultFinding{{
-					File: "alpha/alpha.go", Line: 1, Title: "needs a fix",
-					Detail: "leaks a tenant id", Action: ActionFix,
-					Risk: RiskHigh, RiskRationale: "customer data", Oracle: "test",
-				}},
-				ReviewedPaths: req.MustReview,
-				Summary:       "round 1 summary",
-			}
-		case 2:
-			// Every entry is the lease-absolute form, as a headless backend's
-			// file-read tool would echo back.
-			abs := make([]string, len(req.MustReview))
-			for i, p := range req.MustReview {
-				abs[i] = filepath.Join(sd.Worktree, filepath.FromSlash(p))
-			}
-			result = ReviewResult{ReviewedPaths: abs, Summary: "round 2 summary"}
-		default:
-			t.Fatalf("unexpected round %d", round)
-		}
-
-		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
-	}}
-
-	src := newReviewerGateSource(backend)
-
-	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
-	if report1.Verdict != "fix-slices" {
-		t.Fatalf("round 1 Verdict = %q, want fix-slices", report1.Verdict)
-	}
-	ff1, ok, err := readFindingsYAML(d.Store, fx.Ticket, 1)
-	if err != nil || !ok {
-		t.Fatalf("read round 1 findings.yaml: ok=%v err=%v", ok, err)
-	}
-	f1 := ff1.Findings[0]
-
-	// --early: driving the fix slice green belongs to frontier, not this
-	// test, which only exercises the reviewer's clearing/coverage path.
-	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket, Early: true})
-	if err != nil {
-		t.Fatalf("Gate round 2: %v", err)
-	}
-	if report2.Verdict != "clean" {
-		t.Fatalf("round 2 Verdict = %q, want clean (the absolute-path reviewed_paths should clear %s)", report2.Verdict, f1.ID)
-	}
-
-	ff2, ok, err := readFindingsYAML(d.Store, fx.Ticket, 2)
-	if err != nil || !ok {
-		t.Fatalf("read round 2 findings.yaml: ok=%v err=%v", ok, err)
-	}
-	if !equalStrings(ff2.Cleared, []string{f1.ID}) {
-		t.Fatalf("round 2 cleared = %v, want [%s]", ff2.Cleared, f1.ID)
-	}
-	for _, p := range ff2.ReviewedPaths {
-		if filepath.IsAbs(p) || strings.Contains(p, "\\") {
-			t.Errorf("round 2 findings.yaml reviewed_paths entry %q is not repo-relative", p)
-		}
-	}
-}
-
-// TestGateFailedRoundCommitsAndPushesStore reproduces the review finding
-// that a round failing after its gate-open journal line (REVIEW_INVALID
-// here; a REVIEW_FAILED or a routing error take the exact same path) left
-// the journal line jig itself just appended uncommitted: the round returns
-// before Gate's own end-of-round Store.Push, so that tracked change sat
-// uncommitted and unpushed until whatever later command's own Store.Sync
-// happened to sweep it into an anonymous commit, on this ticket or any
-// other, rather than attributed to this round's own failure.
+// TestGateFailedRoundCommitsAndPushesStore is the chain of a gate round that
+// fails, on one ticket whose build and reviewer source are shared by its steps.
+//
+// A round failing after its gate-open journal line (REVIEW_INVALID here; a
+// REVIEW_FAILED or a routing error take the exact same path) left the journal
+// line jig itself just appended uncommitted: the round returns before Gate's
+// own end-of-round Store.Push, so that tracked change sat uncommitted and
+// unpushed until whatever later command's own Store.Sync happened to sweep it
+// into an anonymous commit, on this ticket or any other, rather than
+// attributed to this round's own failure.
+//
+// A failure between the gate-open journal line and the old roundNum assignment
+// (manifest.Resolve, runGateOracles, or existingGateRounds itself) committed a
+// permanent, pushed store subject reading "gate round 0" - roundNum's zero
+// value, never actually resolved - and interpolated the raw error with %v,
+// which for a manifest parse failure includes the gate lease's absolute host
+// path. The third step forces the failure to land on round 2 (not round 1) so a
+// wrong zero cannot be mistaken for a coincidentally-correct round number, and
+// breaks manifest.Resolve specifically so the raw error would carry an absolute
+// path if it leaked.
 func TestGateFailedRoundCommitsAndPushesStore(t *testing.T) {
 	t.Parallel()
 
@@ -1964,105 +1552,87 @@ func TestGateFailedRoundCommitsAndPushesStore(t *testing.T) {
 	}}
 	src := newReviewerGateSource(backend)
 
-	_, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
-	if err == nil {
-		t.Fatal("Gate: want an error (missing must_review coverage)")
-	}
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "REVIEW_INVALID" {
-		t.Fatalf("err = %v, want *axi.Error REVIEW_INVALID", err)
-	}
+	step(t, "a round that fails after its gate-open line commits and pushes the store", func(t *testing.T) {
+		_, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+		if err == nil {
+			t.Fatal("Gate: want an error (missing must_review coverage)")
+		}
+		var ae *axi.Error
+		if !errors.As(err, &ae) || ae.Code != "REVIEW_INVALID" {
+			t.Fatalf("err = %v, want *axi.Error REVIEW_INVALID", err)
+		}
 
-	// The store's working copy must already be clean and pushed, under a
-	// commit naming this round's own failure - no leftover tracked change
-	// from the failed round's own gate-open journal line, review.json or
-	// result.json, and no dependence on a later command's Sync to sweep
-	// and push it anonymously.
-	wantFailureCommit(t, d, "main", fx.Ticket+": gate round 1 failed: REVIEW_INVALID")
+		// The store's working copy must already be clean and pushed, under a
+		// commit naming this round's own failure - no leftover tracked change
+		// from the failed round's own gate-open journal line, review.json or
+		// result.json, and no dependence on a later command's Sync to sweep
+		// and push it anonymously.
+		wantFailureCommit(t, d, "main", fx.Ticket+": gate round 1 failed: REVIEW_INVALID")
+	})
 
-	// A plain rerun still works with no manual cleanup either way (Sync
-	// sweeps any leftover uncommitted state on its own before it pulls,
-	// push or no push): the corrected round succeeds as round 1 (the
-	// failed attempt above wrote no gate/round-1/ directory).
-	report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate rerun: %v", err)
-	}
-	if report.Round != 1 {
-		t.Fatalf("rerun Round = %d, want 1", report.Round)
-	}
-}
+	step(t, "a plain rerun works with no manual cleanup", func(t *testing.T) {
+		// Sync sweeps any leftover uncommitted state on its own before it pulls,
+		// push or no push: the corrected round succeeds as round 1 (the failed
+		// attempt above wrote no gate/round-1/ directory).
+		report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("Gate rerun: %v", err)
+		}
+		if report.Round != 1 {
+			t.Fatalf("rerun Round = %d, want 1", report.Round)
+		}
+	})
 
-// TestGateFailedRoundBeforeRoundKnownRecordsRealRoundAndNoRawError
-// reproduces the review finding that a failure between the gate-open
-// journal line and the old roundNum assignment (manifest.Resolve,
-// runGateOracles, or existingGateRounds itself) committed a permanent,
-// pushed store subject reading "gate round 0" - roundNum's zero value,
-// never actually resolved - and interpolated the raw error with %v, which
-// for a manifest parse failure includes the gate lease's absolute host
-// path. This forces the failure to land on round 2 (not round 1) so a
-// wrong zero cannot be mistaken for a coincidentally-correct round number,
-// and breaks manifest.Resolve specifically so the raw error would carry an
-// absolute path if it leaked.
-func TestGateFailedRoundBeforeRoundKnownRecordsRealRoundAndNoRawError(t *testing.T) {
-	t.Parallel()
+	step(t, "a failure before the round is known names the real round and no raw error", func(t *testing.T) {
+		// Push an unparsable .claude/jig.yaml onto the ticket branch: round 2's
+		// manifest.Resolve(lease.Dir) then fails after the gate-open journal
+		// line, naming the gate lease's own absolute path in its error text.
+		buildDir := buildLeaseDir(t, fx)
+		claudeDir := filepath.Join(buildDir, ".claude")
+		if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+			t.Fatalf("mkdir .claude: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(claudeDir, "jig.yaml"), []byte("workspaces: [this is not valid yaml"), 0o644); err != nil {
+			t.Fatalf("write broken jig.yaml: %v", err)
+		}
+		if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
+			t.Fatalf("git add jig.yaml: %v", err)
+		}
+		if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "break manifest"); err != nil {
+			t.Fatalf("commit jig.yaml: %v", err)
+		}
+		branch := ticketBranch(fx.Ticket)
+		if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
+			t.Fatalf("push branch: %v", err)
+		}
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
+		gateLease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Gate)
+		if err != nil {
+			t.Fatalf("reacquire gate lease: %v", err)
+		}
 
-	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}); err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
+		_, err = Gate(d, src, GateOpts{Ticket: fx.Ticket})
+		if err == nil {
+			t.Fatal("Gate round 2: want an error (broken manifest)")
+		}
 
-	// Push an unparsable .claude/jig.yaml onto the ticket branch: round 2's
-	// manifest.Resolve(lease.Dir) then fails after the gate-open journal
-	// line, naming the gate lease's own absolute path in its error text.
-	buildDir := buildLeaseDir(t, fx)
-	claudeDir := filepath.Join(buildDir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
-		t.Fatalf("mkdir .claude: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(claudeDir, "jig.yaml"), []byte("workspaces: [this is not valid yaml"), 0o644); err != nil {
-		t.Fatalf("write broken jig.yaml: %v", err)
-	}
-	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
-		t.Fatalf("git add jig.yaml: %v", err)
-	}
-	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "break manifest"); err != nil {
-		t.Fatalf("commit jig.yaml: %v", err)
-	}
-	branch := ticketBranch(fx.Ticket)
-	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
-		t.Fatalf("push branch: %v", err)
-	}
-
-	gateLease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Gate)
-	if err != nil {
-		t.Fatalf("reacquire gate lease: %v", err)
-	}
-
-	_, err = Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
-	if err == nil {
-		t.Fatal("Gate round 2: want an error (broken manifest)")
-	}
-
-	subject, gerr := gitx.Run(d.Store.Root, "log", "-1", "--format=%s")
-	if gerr != nil {
-		t.Fatalf("read store log: %v", gerr)
-	}
-	if strings.Contains(subject, "round 0") {
-		t.Fatalf("push subject = %q, round was never actually resolved before journaling", subject)
-	}
-	if !strings.Contains(subject, "round 2") {
-		t.Fatalf("push subject = %q, want it to name the real round 2", subject)
-	}
-	if strings.Contains(subject, gateLease.Dir) {
-		t.Fatalf("push subject = %q, leaked the gate lease's absolute host path", subject)
-	}
-	if strings.Contains(subject, "yaml") {
-		t.Fatalf("push subject = %q, leaked the raw manifest parse error instead of a code", subject)
-	}
+		subject, gerr := gitx.Run(d.Store.Root, "log", "-1", "--format=%s")
+		if gerr != nil {
+			t.Fatalf("read store log: %v", gerr)
+		}
+		if strings.Contains(subject, "round 0") {
+			t.Fatalf("push subject = %q, round was never actually resolved before journaling", subject)
+		}
+		if !strings.Contains(subject, "round 2") {
+			t.Fatalf("push subject = %q, want it to name the real round 2", subject)
+		}
+		if strings.Contains(subject, gateLease.Dir) {
+			t.Fatalf("push subject = %q, leaked the gate lease's absolute host path", subject)
+		}
+		if strings.Contains(subject, "yaml") {
+			t.Fatalf("push subject = %q, leaked the raw manifest parse error instead of a code", subject)
+		}
+	})
 }
 
 // TestGateRecurrenceBoundSurvivesANoteInBetween reproduces the review
@@ -2569,40 +2139,6 @@ func setupStaleOracleThroughRoundTwo(t *testing.T, round3 func(req ReviewRequest
 	renameOracle(t, buildDir, branch, "vet", "lint")
 
 	return d, fx, src
-}
-
-// TestGateStaleOracleRecurrenceNeedsAHumanUnattended proves the unattended
-// half of the build-target rule for an oracle, not only a workspace: a
-// second recurrence forces the finding to a human decision
-// regardless of its own reported action, and once forced, the oracle it
-// carries forward from a manifest that has since changed cannot resolve
-// on its own, so it stays asked and is listed under needs_a_human (the
-// exit-2 signal) - never silently rebuilt on some other oracle.
-func TestGateStaleOracleRecurrenceNeedsAHumanUnattended(t *testing.T) {
-	t.Parallel()
-
-	d, fx, src := setupStaleOracleThroughRoundTwo(t, func(req ReviewRequest) ReviewResult {
-		return ReviewResult{
-			Findings: []ResultFinding{{
-				File: "alpha/alpha.go", Line: 1, Title: "still there", Detail: "d",
-				Action: ActionNote, Risk: RiskLow, RiskRationale: "r", Prior: "r1-f1",
-			}},
-			ReviewedPaths: req.MustReview,
-			Summary:       "round 3",
-		}
-	})
-
-	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket}) // nil Triage: DefaultTriage, unattended
-	if err != nil {
-		t.Fatalf("Gate round 3: %v", err)
-	}
-	if len(report3.NeedsHuman) != 1 || report3.NeedsHuman[0].ID != "r1-f1" {
-		t.Fatalf("NeedsHuman = %+v, want exactly [r1-f1] (the stale-oracle recurrence)", report3.NeedsHuman)
-	}
-	f := report3.NeedsHuman[0]
-	if f.Status != StatusAsked || f.Oracle != "vet" || f.Triage != "" {
-		t.Fatalf("needs_a_human finding = %+v, want asked, the stale oracle vet still recorded, no triage decided", f)
-	}
 }
 
 // TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle

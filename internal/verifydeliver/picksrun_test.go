@@ -59,6 +59,7 @@ type picksFixture struct {
 	head     string   // the head the gate reviewed, which publish ships
 	built    []string // the commits jig built
 	logFile  string
+	setGh    func(vars ...string) // points the fake gh at other pulls, failures and bodies
 	warnings []string
 }
 
@@ -85,7 +86,7 @@ func newPicksFixture(t *testing.T) *picksFixture {
 	if pf.head == "" {
 		t.Fatal("the clean round recorded no reviewed head")
 	}
-	pf.logFile, _ = useGithubHost(t, &pf.d, "", "")
+	pf.logFile, pf.setGh = useGithubHost(t, &pf.d, "", "")
 	return pf
 }
 

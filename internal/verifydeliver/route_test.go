@@ -104,12 +104,21 @@ func TestDefaultTriageLeavesAnAskWithNoResolvableOracleUndecided(t *testing.T) {
 	man := oneOracleManifest()
 	man.Oracles["lint"] = "true" // now two oracles: no single default
 	in := TriageInput{
-		Asks:     []Finding{{ID: "r1-f1", Workspace: "root"}},
+		Asks: []Finding{
+			{ID: "r1-f1", Workspace: "root"},
+			// A recorded oracle the manifest has since lost (a rename between
+			// rounds) is no oracle jig can resolve either: it is left as it is
+			// recorded, undecided, for a person to answer, never rebuilt on some
+			// other oracle unattended.
+			{ID: "r1-f2", Workspace: "root", Oracle: "vet"},
+		},
 		Manifest: man,
 	}
 	out := DefaultTriage(in)
-	if _, ok := out.Asks["r1-f1"]; ok {
-		t.Error("Asks[r1-f1] decided, want undecided (no oracle jig can resolve)")
+	for _, id := range []string{"r1-f1", "r1-f2"} {
+		if _, ok := out.Asks[id]; ok {
+			t.Errorf("Asks[%s] decided, want undecided (no oracle jig can resolve)", id)
+		}
 	}
 }
 

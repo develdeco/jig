@@ -374,8 +374,66 @@ func TestRenderIntentSectionExplicitStripsFrontMatterWhenUnparseable(t *testing.
 // recorded from `jig gate --doc <path>` is a whole design doc, headings and
 // all. Its text is rendered intact, but every heading in it is demoted below
 // the section level, so the body still has exactly the three "## " headings
-// it promises and no heading of the doc's outranks them.
+// it promises and no heading of the doc's outranks them. The second doc carries
+// every shape that would otherwise break that: a title, two "## " sections, a
+// "### " subsection, and a fenced code block whose comment lines look like
+// headings and must come back untouched.
 func TestRenderIntentSectionExplicitDemotesADocsHeadings(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ name, doc, want string }{
+		{
+			"a title and sections",
+			"# Retry design\n\nCalls to the pricing API fail in bursts.\n\n## Approach\n\nExponential backoff, five tries.\n\n## Out of scope\n\nThe write path.",
+			"## Intent\n\n### Retry design\n\nCalls to the pricing API fail in bursts.\n\n#### Approach\n\nExponential backoff, five tries.\n\n#### Out of scope\n\nThe write path.\n\n",
+		},
+		{
+			"a subsection and a fenced sample",
+			"# Clamp and greeting rework\n\nBoth helpers misbehave at their edges.\n\n## Approach\n\nClamp percentages at the caller, and make the greeting casual.\n\n### Out of scope\n\nThe write path.\n\n```sh\n# how to check it\ngo test ./...\n```\n",
+			"## Intent\n\n### Clamp and greeting rework\n\nBoth helpers misbehave at their edges.\n\n#### Approach\n\nClamp percentages at the caller, and make the greeting casual.\n\n##### Out of scope\n\nThe write path.\n\n```sh\n# how to check it\ngo test ./...\n```\n\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newTestStore(t)
+			const ticket = "T-1"
+			if err := os.MkdirAll(st.TicketDir(ticket), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.WriteIntent(ticket, store.Intent{Source: IntentSourceExplicit, Text: tc.doc}); err != nil {
+				t.Fatalf("WriteIntent: %v", err)
+			}
+
+			rep := reportYAML{Intent: reportIntentYAML{Source: IntentSourceExplicit}}
+			section, _, err := renderIntentSection(rep, st, ticket)
+			if err != nil {
+				t.Fatalf("renderIntentSection: %v", err)
+			}
+			if section != tc.want {
+				t.Fatalf("renderIntentSection(--doc intent) =\n%q\nwant\n%q", section, tc.want)
+			}
+			var sectionHeadings int
+			for _, line := range strings.Split(section, "\n") {
+				if atxHeadingLevel(line) == 2 {
+					sectionHeadings++
+				}
+			}
+			if sectionHeadings != 1 {
+				t.Fatalf("renderIntentSection(--doc intent) has %d \"## \" headings, want only its own:\n%s", sectionHeadings, section)
+			}
+		})
+	}
+}
+
+// TestRenderIntentSectionOfABriefQuotingMarkdown: a brief whose first section
+// quotes markdown in a fenced code block - the shape any brief takes that shows
+// the sections of the very body being rendered, this repository's own among
+// them. The quoted "## " lines are a code sample's own text: they must not end
+// the Intent (which would publish half an example) and must not leave an
+// opening fence with no closing one in the body (which would render ## What
+// changed, ## Verification and the findings line as the inside of that code
+// block). So the whole example reaches the reviewer, the body's own sections
+// still render as sections, and its fences come out balanced.
+func TestRenderIntentSectionOfABriefQuotingMarkdown(t *testing.T) {
 	t.Parallel()
 
 	st := newTestStore(t)
@@ -383,28 +441,33 @@ func TestRenderIntentSectionExplicitDemotesADocsHeadings(t *testing.T) {
 	if err := os.MkdirAll(st.TicketDir(ticket), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	doc := "# Retry design\n\nCalls to the pricing API fail in bursts.\n\n## Approach\n\nExponential backoff, five tries.\n\n## Out of scope\n\nThe write path."
-	if err := st.WriteIntent(ticket, store.Intent{Source: IntentSourceExplicit, Text: doc}); err != nil {
-		t.Fatalf("WriteIntent: %v", err)
+	const goal = "The published body has exactly three sections, in this order:\n\n" +
+		"```md\n## Intent\n\n## What changed\n\n## Verification\n```\n\n" +
+		"Nothing else, and no heading above them."
+	brief := "# Fixture ticket brief\n\n## Goal\n\n" + goal + "\n\n## Slice A\n\nFix Clamp so TestClamp passes.\n"
+	if err := os.WriteFile(filepath.Join(st.TicketDir(ticket), "brief.md"), []byte(brief), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	rep := reportYAML{Intent: reportIntentYAML{Source: IntentSourceExplicit}}
-	section, _, err := renderIntentSection(rep, st, ticket)
+	rep := reportYAML{Intent: reportIntentYAML{Source: IntentSourceBrief}}
+	section, omittedBriefIntent, err := renderIntentSection(rep, st, ticket)
 	if err != nil {
 		t.Fatalf("renderIntentSection: %v", err)
 	}
-	want := "## Intent\n\n### Retry design\n\nCalls to the pricing API fail in bursts.\n\n#### Approach\n\nExponential backoff, five tries.\n\n#### Out of scope\n\nThe write path.\n\n"
-	if section != want {
-		t.Fatalf("renderIntentSection(--doc intent) =\n%q\nwant\n%q", section, want)
+	if want := "## Intent\n\n" + goal + "\n\n"; section != want {
+		t.Fatalf("renderIntentSection(brief quoting markdown) =\n%q\nwant\n%q", section, want)
 	}
-	var sectionHeadings int
+	if omittedBriefIntent {
+		t.Fatal("renderIntentSection reported the brief's intent omitted, want it published")
+	}
+	var fences int
 	for _, line := range strings.Split(section, "\n") {
-		if atxHeadingLevel(line) == 2 {
-			sectionHeadings++
+		if _, run, _ := codeFenceRun(line); run > 0 {
+			fences++
 		}
 	}
-	if sectionHeadings != 1 {
-		t.Fatalf("renderIntentSection(--doc intent) has %d \"## \" headings, want only its own:\n%s", sectionHeadings, section)
+	if fences%2 != 0 {
+		t.Fatalf("renderIntentSection embeds %d code fences, want them balanced:\n%s", fences, section)
 	}
 }
 
