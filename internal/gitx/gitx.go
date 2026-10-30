@@ -652,69 +652,13 @@ func isAbsPath(s string) bool {
 	return false
 }
 
-// identityRequiredCode is the axi.Error code IdentityEnv and CheckIdentity
-// return when git cannot resolve an author or committer identity in dir.
+// identityRequiredCode is the axi.Error code ResolveIdentity returns when
+// git cannot resolve an author identity in dir.
 const identityRequiredCode = "IDENTITY_REQUIRED"
 
 // identRe splits "git var GIT_AUTHOR_IDENT"'s output - "Name <email>
 // <timestamp> <zone>" - into its name and email.
 var identRe = regexp.MustCompile(`^(.*) <([^>]*)> \d+ [+-]\d{4}$`)
-
-// IdentityEnv resolves the author and committer identity a commit in dir
-// would get ("git var GIT_AUTHOR_IDENT" and "GIT_COMMITTER_IDENT", which
-// honor the environment and dir's config) and returns it as
-// GIT_AUTHOR_NAME/EMAIL and GIT_COMMITTER_NAME/EMAIL entries, without dates.
-// Passing them to RunEnv makes a commit in another clone carry dir's
-// identity. It fails with IDENTITY_REQUIRED when git has none.
-func IdentityEnv(dir string) ([]string, error) {
-	return identityEnv(dir, func(name string) (string, error) {
-		return Run(dir, "var", name)
-	})
-}
-
-// IdentityEnvWithBase is IdentityEnv, except when base is non-nil: dir's
-// identity is then resolved with base as the "git var" calls' whole process
-// environment, instead of appended to this process's own inherited one, so
-// an identity this process has pinned for its own commits (gittest.PinIdentity,
-// say) cannot shadow dir's own config, or its absence, while resolving some
-// other dir's identity. A nil base is IdentityEnv.
-func IdentityEnvWithBase(dir string, base []string) ([]string, error) {
-	if base == nil {
-		return IdentityEnv(dir)
-	}
-	return identityEnv(dir, func(name string) (string, error) {
-		return RunReplaceEnv(dir, base, "var", name)
-	})
-}
-
-// identityEnv resolves dir's author/committer identity via runVar (one of
-// IdentityEnv's or IdentityEnvWithBase's own "git var" call) and returns it
-// as GIT_AUTHOR_NAME/EMAIL and GIT_COMMITTER_NAME/EMAIL entries, without
-// dates.
-func identityEnv(dir string, runVar func(name string) (string, error)) ([]string, error) {
-	authorIdent, err := runVar("GIT_AUTHOR_IDENT")
-	if err != nil {
-		return nil, identityRequiredError(dir, err)
-	}
-	committerIdent, err := runVar("GIT_COMMITTER_IDENT")
-	if err != nil {
-		return nil, identityRequiredError(dir, err)
-	}
-	authorName, authorEmail, err := parseIdent(authorIdent)
-	if err != nil {
-		return nil, identityRequiredError(dir, err)
-	}
-	committerName, committerEmail, err := parseIdent(committerIdent)
-	if err != nil {
-		return nil, identityRequiredError(dir, err)
-	}
-	return []string{
-		"GIT_AUTHOR_NAME=" + authorName,
-		"GIT_AUTHOR_EMAIL=" + authorEmail,
-		"GIT_COMMITTER_NAME=" + committerName,
-		"GIT_COMMITTER_EMAIL=" + committerEmail,
-	}, nil
-}
 
 // Identity is the name and email a commit is authored with.
 type Identity struct {
@@ -756,12 +700,6 @@ func parseIdent(ident string) (name, email string, err error) {
 		return "", "", fmt.Errorf("unexpected identity format %q", ident)
 	}
 	return m[1], m[2], nil
-}
-
-// CheckIdentity reports IdentityEnv's error for dir, if any.
-func CheckIdentity(dir string) error {
-	_, err := IdentityEnv(dir)
-	return err
 }
 
 // identityRequiredError reports a missing identity in one line, keeping only
