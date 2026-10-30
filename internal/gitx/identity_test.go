@@ -105,6 +105,14 @@ func TestResolveIdentityRefusesWithoutOne(t *testing.T) {
 	if len(ae.Help) != 2 || !strings.Contains(ae.Help[0], "user.name") || !strings.Contains(ae.Help[1], "user.email") {
 		t.Errorf("Help = %q, want the user.name and user.email commands", ae.Help)
 	}
+	if !strings.Contains(ae.Msg, dir) {
+		t.Errorf("Msg = %q, want it to name %q", ae.Msg, dir)
+	}
+	for _, h := range ae.Help {
+		if !strings.HasPrefix(h, "Run `") {
+			t.Errorf("help line %q, want jig's \"Run `...`\" hint style", h)
+		}
+	}
 }
 
 // TestResolveIdentityOfAConfiguredRepo is the control: the exported function
