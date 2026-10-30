@@ -952,12 +952,12 @@ func requireStepOnExactly(t *testing.T, steps []interface{}, label, substr, want
 }
 
 // goTestListRun matches the test job's go test step: its one package
-// argument is the list another step prints, and on the Linux leg it runs
-// each test binary through the git process counter, uncached
-// (TestCIWorkflowCountsGitProcesses). listFilter matches a command that
-// could drop packages from that list.
+// argument is the list another step prints, it reuses no cached result
+// (TestWorkflowsReuseNoTestResult), and on the Linux leg it runs each test
+// binary through the git process counter (TestCIWorkflowCountsGitProcesses).
+// listFilter matches a command that could drop packages from that list.
 var (
-	goTestListRun = regexp.MustCompile(`^go test -timeout \S+ \$\{\{ runner\.os == 'Linux' && format\('-count=1 -exec=\{0\}/gitbudget', runner\.temp\) \|\| '' \}\} \$\{\{ steps\.([A-Za-z0-9_-]+)\.outputs\.list \}\}$`)
+	goTestListRun = regexp.MustCompile(`^go test -count=1 -timeout \S+ \$\{\{ runner\.os == 'Linux' && format\('-exec=\{0\}/gitbudget', runner\.temp\) \|\| '' \}\} \$\{\{ steps\.([A-Za-z0-9_-]+)\.outputs\.list \}\}$`)
 	listFilter    = regexp.MustCompile(`\b(awk|grep|sed|head|tail|sort|uniq|cut)\b`)
 )
 
@@ -1069,6 +1069,40 @@ func testedByAnotherJob(jobs map[string]interface{}, leg, pkg, rel string) bool 
 		}
 	}
 	return false
+}
+
+// TestWorkflowsReuseNoTestResult asserts every go test a workflow runs
+// passes -count=1. A cacheable go test has each test binary log every file
+// its tests open or stat, and checks that log path by path after the binary
+// exits, which on Windows took 110-210 s of windows-verifydeliver's step,
+// for a result no CI run reuses: setup-go saves its cache once per go.sum.
+func TestWorkflowsReuseNoTestResult(t *testing.T) {
+	root := repoRoot(t)
+	files, err := filepath.Glob(filepath.Join(root, workflowsDir, "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("no workflow under %s", workflowsDir)
+	}
+	for _, path := range files {
+		file := filepath.Base(path)
+		jobs := workflowJobs(t, root, file)
+		for _, name := range sortedKeys(jobs) {
+			job, _ := yamlMap(jobs[name])
+			steps, _ := yamlSlice(job["steps"])
+			for _, sv := range steps {
+				step, _ := yamlMap(sv)
+				run, _ := yamlString(step["run"])
+				for _, line := range strings.Split(run, "\n") {
+					words := strings.Fields(line)
+					if len(words) > 1 && words[0] == "go" && words[1] == "test" && !slices.Contains(words, "-count=1") {
+						t.Errorf("%s: the %s job runs %q without -count=1, so go test checks every file its tests touched after they finish, for a result no CI run reuses", file, name, strings.TrimSpace(line))
+					}
+				}
+			}
+		}
+	}
 }
 
 // TestReleaseWorkflowTriggers asserts release.yml fires only on a version
