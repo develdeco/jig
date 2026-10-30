@@ -1025,29 +1025,6 @@ func TestGatePostPublishRoundOnAnOrdinaryTicket(t *testing.T) {
 	}
 }
 
-// TestGateIntentRefusalLeavesNoAdoption: an adoption is recorded after
-// --intent/--doc has been written and the intent resolved, so a refusal by
-// either leaves no adopted branch behind. Recorded first, the refused round
-// would leave the ticket on the branch, and a later --branch naming another one
-// would be refused over an adoption that never happened.
-func TestGateIntentRefusalLeavesNoAdoption(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()}) // brief.md present by default
-	d := newDeps(t, fx)
-	authorBranch(t, fx, "add-retry")
-
-	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: "add-retry", Early: true, Intent: "explicit text"})
-	wantAxiCode(t, err, "INTENT_CONFLICT")
-	wantNoAdoption(t, d, fx.Ticket)
-
-	// A later round may adopt any other branch.
-	other := pushedBranch(t, fx)
-	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket, Branch: other, Early: true}); err != nil {
-		t.Fatalf("Gate --branch %s after the refusal: %v", other, err)
-	}
-}
-
 // advanceTargetEditing moves origin/main on by appending a line to rel, a file
 // that already exists at the fork point, the way advanceTarget does with a new
 // file.

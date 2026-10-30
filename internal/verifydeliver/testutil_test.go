@@ -63,6 +63,19 @@ func recordBranch(t *testing.T, st *store.Store, ticket, branch string) {
 	}
 }
 
+// step runs fn as one named step of a chain: the steps of a test run in order on
+// the one fixture the test built, each standing on what the steps before it left,
+// and the chain stops at the first step that fails, since a later step's
+// assertions would only report what the failed one broke. A host test that
+// absorbed other tests' variants names each step after the rule it checks, so a
+// failure reads as the rule's name.
+func step(t *testing.T, name string, fn func(t *testing.T)) {
+	t.Helper()
+	if !t.Run(name, fn) {
+		t.FailNow()
+	}
+}
+
 // wantAxiCode fails the test unless err is, or wraps, an *axi.Error with the
 // given code: the command under test must surface a refusal Store.TicketBranch
 // returned as its own failure, code included, not swallow it.
@@ -558,5 +571,32 @@ func linkDir(t *testing.T, link, target string) {
 	}
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatalf("symlink %s -> %s: %v", link, target, err)
+	}
+}
+
+// saveTicketRecord snapshots ticket's ticket.yaml, absent or not, and returns the
+// function that puts it back and pushes it, for a step that records something in
+// the record (or breaks it) and leaves the ticket as it found it.
+func saveTicketRecord(t *testing.T, d Deps, ticket string) func(t *testing.T) {
+	t.Helper()
+	path := d.Store.TicketFilePath(ticket)
+	saved, err := os.ReadFile(path)
+	existed := err == nil
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read the ticket record: %v", err)
+	}
+	return func(t *testing.T) {
+		t.Helper()
+		if existed {
+			err = os.WriteFile(path, saved, 0o644)
+		} else if err = os.Remove(path); os.IsNotExist(err) {
+			err = nil
+		}
+		if err != nil {
+			t.Fatalf("restore the ticket record: %v", err)
+		}
+		if err := d.Store.Push(ticket + ": restore the ticket record"); err != nil {
+			t.Fatalf("push the restored ticket record: %v", err)
+		}
 	}
 }
