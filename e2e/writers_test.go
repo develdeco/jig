@@ -67,6 +67,11 @@ var ticketIDLine = regexp.MustCompile(`(?m)^  id: (\S+)$`)
 func TestWritersMintRace(t *testing.T) {
 	t.Parallel()
 	w := newWritersWorld(t, true)
+	// How often a loser fetches, merges and pushes again is the scheduler's
+	// choice, not the code's, so the race runs without git's trace: the
+	// git-process budget counts only work that is the same on every run.
+	race := w
+	race.alice, race.bob = w.alice.without(gitTraceEnv), w.bob.without(gitTraceEnv)
 
 	type minted struct {
 		who string
@@ -81,9 +86,9 @@ func TestWritersMintRace(t *testing.T) {
 				defer wg.Done()
 				title := who + " ticket"
 				if who == "alice" {
-					results <- minted{who, w.jigAlice(t, "ticket", "new", "--title", title)}
+					results <- minted{who, race.jigAlice(t, "ticket", "new", "--title", title)}
 				} else {
-					results <- minted{who, w.jigBob(t, "ticket", "new", "--title", title)}
+					results <- minted{who, race.jigBob(t, "ticket", "new", "--title", title)}
 				}
 			}()
 		}
