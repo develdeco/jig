@@ -14,7 +14,7 @@ packages:
   internal/fixture: 708
   internal/gitbudget: 7
   internal/gittest: 6
-  internal/gitx: 1841
+  internal/gitx: 1818
   internal/intent: 51
   internal/locate: 95
   internal/mergefacts: 169
