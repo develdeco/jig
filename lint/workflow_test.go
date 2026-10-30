@@ -952,12 +952,12 @@ func requireStepOnExactly(t *testing.T, steps []interface{}, label, substr, want
 }
 
 // goTestListRun matches the test job's go test step: its one package
-// argument is the list another step prints, and on the Linux leg it runs
-// each test binary through the git process counter, uncached
-// (TestCIWorkflowCountsGitProcesses). listFilter matches a command that
-// could drop packages from that list.
+// argument is the list another step prints, it reuses no cached result
+// (TestWorkflowsReuseNoTestResult), and on the Linux leg it runs each test
+// binary through the git process counter (TestCIWorkflowCountsGitProcesses).
+// listFilter matches a command that could drop packages from that list.
 var (
-	goTestListRun = regexp.MustCompile(`^go test -timeout \S+ \$\{\{ runner\.os == 'Linux' && format\('-count=1 -exec=\{0\}/gitbudget', runner\.temp\) \|\| '' \}\} \$\{\{ steps\.([A-Za-z0-9_-]+)\.outputs\.list \}\}$`)
+	goTestListRun = regexp.MustCompile(`^go test -count=1 -timeout \S+ \$\{\{ runner\.os == 'Linux' && format\('-exec=\{0\}/gitbudget', runner\.temp\) \|\| '' \}\} \$\{\{ steps\.([A-Za-z0-9_-]+)\.outputs\.list \}\}$`)
 	listFilter    = regexp.MustCompile(`\b(awk|grep|sed|head|tail|sort|uniq|cut)\b`)
 )
 
@@ -985,7 +985,7 @@ func TestCIWorkflowTestsEveryPackageOnEveryOS(t *testing.T) {
 	}
 	list := byID[id]
 	if goTest == nil || list == nil {
-		t.Fatalf("ci.yml: no test job step runs go test -timeout with only ${{ steps.<id>.outputs.list }} as its packages, naming a step with that id, so the packages it tests are not the list step's and some could go untested")
+		t.Fatalf("ci.yml: no test job step runs go test -count=1 -timeout with only ${{ steps.<id>.outputs.list }} as its packages, naming a step with that id, so the packages it tests are not the list step's and some could go untested")
 	}
 	for _, step := range []map[string]interface{}{list, goTest} {
 		if _, hasIf := step["if"]; hasIf || hasContinueOnError(step) {
@@ -1069,6 +1069,86 @@ func testedByAnotherJob(jobs map[string]interface{}, leg, pkg, rel string) bool 
 		}
 	}
 	return false
+}
+
+// TestWorkflowsReuseNoTestResult asserts every go test a workflow runs
+// passes -count=1. A cacheable go test has each test binary log every file
+// its tests open or stat, and checks that log path by path after the binary
+// exits, which on Windows took 110-210 s of windows-verifydeliver's step,
+// for a result no CI run reuses: setup-go saves its cache once per go.sum.
+// A go test is found in each command of a line, after any prefix such as
+// env, a variable assignment or a cd joined by &&.
+func TestWorkflowsReuseNoTestResult(t *testing.T) {
+	root := repoRoot(t)
+	var files []string
+	for _, pattern := range []string{"*.yml", "*.yaml"} {
+		matched, err := filepath.Glob(filepath.Join(root, workflowsDir, pattern))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, matched...)
+	}
+	if len(files) == 0 {
+		t.Fatalf("no workflow under %s", workflowsDir)
+	}
+	for _, path := range files {
+		file := filepath.Base(path)
+		jobs := workflowJobs(t, root, file)
+		for _, name := range sortedKeys(jobs) {
+			job, _ := yamlMap(jobs[name])
+			steps, _ := yamlSlice(job["steps"])
+			for _, sv := range steps {
+				step, _ := yamlMap(sv)
+				run, _ := yamlString(step["run"])
+				for _, line := range strings.Split(run, "\n") {
+					for _, command := range splitShellCommands(line) {
+						if args, ok := goTestArgs(shellWords(command)); ok && !slices.Contains(args, "-count=1") {
+							t.Errorf("%s: the %s job runs %q without -count=1, so go test checks every file its tests touched after they finish, for a result no CI run reuses", file, name, strings.TrimSpace(command))
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// goTestArgs returns the words after go test in one shell command, wherever
+// in the command go test starts, and whether it runs go test at all.
+func goTestArgs(words []string) ([]string, bool) {
+	for i := 0; i+1 < len(words); i++ {
+		if words[i] == "go" && words[i+1] == "test" {
+			return words[i+2:], true
+		}
+	}
+	return nil, false
+}
+
+// TestGoTestArgs pins where TestWorkflowsReuseNoTestResult finds a go test
+// in a command, and which commands run none.
+func TestGoTestArgs(t *testing.T) {
+	for _, c := range []struct {
+		line string
+		want []string
+	}{
+		{"go test -count=1 ./lint", []string{"-count=1", "./lint"}},
+		{"env GOFLAGS=-v go test ./e2e", []string{"./e2e"}},
+		{"CGO_ENABLED=0 go test -run X ./e2e", []string{"-run", "X", "./e2e"}},
+		{"go build ./...", nil},
+		{"go vet ./...", nil},
+		{"echo go", nil},
+	} {
+		args, ok := goTestArgs(shellWords(c.line))
+		if ok != (c.want != nil) || !slices.Equal(args, c.want) {
+			t.Errorf("goTestArgs(%q) = %q, %v; want %q", c.line, args, ok, c.want)
+		}
+	}
+	commands := splitShellCommands("cd e2e && go test ./...")
+	if len(commands) != 2 {
+		t.Fatalf("splitShellCommands split %q into %q, want two commands", "cd e2e && go test ./...", commands)
+	}
+	if args, ok := goTestArgs(shellWords(commands[1])); !ok || !slices.Equal(args, []string{"./..."}) {
+		t.Errorf("goTestArgs(%q) = %q, %v; want [./...] true", commands[1], args, ok)
+	}
 }
 
 // TestReleaseWorkflowTriggers asserts release.yml fires only on a version
