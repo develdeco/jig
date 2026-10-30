@@ -94,6 +94,13 @@ func (e jigEnv) overrides() []string {
 	return replaceEnv(out, e.extra)
 }
 
+// gitTraceEnv is the variable the git-process budget counts git through
+// (internal/gitbudget, .github/git-budget.yaml): git writes a trace file per
+// process into the directory it names. A test whose amount of git work is
+// decided by scheduling, such as a race's retries, runs that work without
+// it, so the count stays a function of the code.
+const gitTraceEnv = "GIT_TRACE2_EVENT"
+
 // environ returns the process environment with e's variables replacing
 // whatever the process has under the same names (not appended beside them,
 // so the subprocess sees each name once), and without the names e leaves
