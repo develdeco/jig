@@ -18,7 +18,7 @@ func TestHoldKeepsWhatIsWrittenUntilRelease(t *testing.T) {
 	}
 	// The write end closes first, which ends the reader below with EOF. On
 	// Windows the read end's Close waits for a Read in flight, and the cancel
-	// it sends misses a Read not yet in the kernel, so closed first it can
+	// it sends misses a Read not yet in the kernel, so closing it first can
 	// wait for ever.
 	t.Cleanup(func() { _ = w.Close(); _ = r.Close() })
 	got := make(chan string, 16)
