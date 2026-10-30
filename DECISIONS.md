@@ -3735,3 +3735,9 @@ The budget was recorded after this run's cuts landed (#159's diet, #160's fixtur
 | all packages | 61,403 | 36,846 |
 
 `internal/gitx` and `internal/fixture` went up on purpose: their new tests hold the in-process reads and the fixture copies to the git program's answers.
+
+## No go test in CI caches its result
+
+`windows-verifydeliver`'s go test step ran 110 to 210 s longer than its package's own time in each of the nine runs on main from 59d9078 to 2f902f7, and the gap followed no change. It was not compile: the launcher step's gap, also on Windows, was 7 to 11 s, and verifydeliver's test binary built in 4 s on a cache filled at the 2026-10-23 commit. It was go test preparing a result to cache. A go test run without `-count=1` has the test binary log every file its tests open or stat and every environment variable they read, and after the binary exits go test checks each logged path against the module root, resolving symbolic links on any path outside it, line by line. verifydeliver's tests log 882,000 lines, nearly all under their temp directories. On the dev machine `go test ./internal/verifydeliver` took 403 s for a test binary that ran 134 s, and with `-count=1` it took 132 s for 131 s. The test job's 14 heaviest packages log another 708,000 lines (cmd/jig 294,000), about 200 s of the same check on the dev machine.
+
+No run reused what that work saved: setup-go keys its cache on go.sum's hash and saves it once, so every run since 2026-10-23 restored that day's cache and saved nothing, and none of the nine Windows runs reported a cached package. So every go test in the workflows now passes `-count=1`, as the Linux leg's did already for the git budget, and the lint test `TestWorkflowsReuseNoTestResult` holds every workflow to it. A test result cached across runs would need a cache saved per commit, and it would save only the packages a change leaves alone, which are the ones that cost nothing.
