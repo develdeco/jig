@@ -786,7 +786,9 @@ func TestPointAtBranchCopyFallsBackToTheBuildLeaseWithoutAClone(t *testing.T) {
 	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
-	gateToClean(t, fx, d)
+	// What the choice reads is the journal's built commits, the build lease and
+	// origin: no gate round is needed.
+	driveBuild(t, fx, "rung-a")
 	branch := ticketBranch(fx.Ticket)
 	acquire := func(t *testing.T, branch string) string {
 		t.Helper()

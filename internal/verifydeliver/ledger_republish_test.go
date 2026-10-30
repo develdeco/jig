@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/recall"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -393,34 +392,5 @@ func TestContractIndexLivesInTheConfiguredPlatformDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(st.Root, "platform")); !os.IsNotExist(err) {
 		t.Errorf("the default platform directory exists (stat err %v), want the configured one only", err)
-	}
-}
-
-// TestPublishAgainKeepsOneEntryInTheLedgerAndTheContractIndex is the same at
-// Publish: the second publish of a ticket (TestPublishRepublishesAPublishedTicket)
-// leaves ledger.md with one entry of it and the contract index with one line.
-func TestPublishAgainKeepsOneEntryInTheLedgerAndTheContractIndex(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	gateToClean(t, fx, d)
-
-	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
-		t.Fatalf("first Publish: %v", err)
-	}
-	ledger, index := readStoreDoc(t, d.Store.LedgerPath()), readStoreDoc(t, d.Store.ContractIndexPath(""))
-	if n := strings.Count(ledger, "## "+fx.Ticket+" - "); n != 1 {
-		t.Fatalf("test setup: ledger.md has %d entries of %s after the first publish, want 1:\n%s", n, fx.Ticket, ledger)
-	}
-
-	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
-		t.Fatalf("re-Publish: %v", err)
-	}
-	if got := readStoreDoc(t, d.Store.LedgerPath()); got != ledger {
-		t.Errorf("ledger.md after the re-publish =\n%s\nwant it as the first publish left it:\n%s", got, ledger)
-	}
-	if got := readStoreDoc(t, d.Store.ContractIndexPath("")); got != index {
-		t.Errorf("contract-index.md after the re-publish =\n%s\nwant it as the first publish left it:\n%s", got, index)
 	}
 }

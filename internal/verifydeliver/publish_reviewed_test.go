@@ -10,7 +10,6 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -48,127 +47,162 @@ func gateReviewedClean(t *testing.T, fx *fixture.Fixture, d Deps) GateReport {
 	return report
 }
 
-// TestPublishShipsOnlyTheHeadTheGateReviewed: publish refuses to ship a head
-// other than the one the last clean round reviewed. A commit lands on the
-// ticket's branch after the round - here in the build lease, the way another
-// `jig run` or a hand edit would put it there - and a publish would push work
-// no reviewer saw under a clean verdict. It is refused with an axi code and
-// help before anything is written: no journal line, no store commit, nothing
-// on origin, and the stale-head failure is not swept into a "publish failed"
-// store push, which only a publish that got as far as journaling makes. Once
-// a round has reviewed the branch as it is, the same publish goes through.
+// TestPublishShipsOnlyTheHeadTheGateReviewed is the chain of the reviewed-head
+// rule: publish refuses to ship anything the last clean round did not review,
+// on a ticket built and reviewed once. A refusal comes with an axi code and help
+// before anything is written: no journal line, no store commit, nothing on
+// origin, and the stale-head failure is not swept into a "publish failed" store
+// push, which only a publish that got as far as journaling makes. Once a round
+// has reviewed the branch as it is, the same publish goes through. The steps
+// run in order, each on what the one before left:
+//
+//   - a brief.md edited after the last clean round reviewed it is refused the
+//     same way a head the round never saw is (checkReviewedHead), the intent
+//     being what the round was handed (checkReviewedIntent). A round over the
+//     branch with the brief as it now reads records the edited brief's own
+//     sha256, and the publish is no longer stale;
+//   - a commit lands on the ticket's branch after the round - here in the build
+//     lease, the way another `jig run` or a hand edit would put it there - and a
+//     publish would push work no reviewer saw under a clean verdict;
+//   - the ticket's own jig/<ticket> was pushed as it is (by that publish), and a
+//     commit was pushed on top of it after the clean round. The build lease is
+//     behind origin's copy, which holds everything the lease does, so origin's is
+//     the copy publish ships, exactly as the gate would review it: the commit no
+//     round saw is not shipped (PUBLISH_UNREVIEWED_HEAD), where shipping the
+//     build lease's copy would have passed the head check and met a push that is
+//     not a fast-forward;
+//   - the head publish holds to the review is the head it ships: the target
+//     moves after a clean reviewer round, and publish merges nothing, so the
+//     branch on origin stays exactly the reviewed head - the move of the target
+//     is no refusal and no reason to rewrite anything (publish revalidates
+//     nothing, so the tier is none).
 func TestPublishShipsOnlyTheHeadTheGateReviewed(t *testing.T) {
 	t.Parallel()
 
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
-	reviewed := reviewedClean(t, fx, d).ReviewedSHA["fixture-repo"]
-
+	round := reviewedClean(t, fx, d)
+	reviewed := round.ReviewedSHA["fixture-repo"]
+	branch := ticketBranch(fx.Ticket)
 	buildDir := buildLeaseDir(t, fx)
 	if got := run(t, buildDir, "rev-parse", "HEAD"); got != reviewed {
 		t.Fatalf("test setup: the round reviewed %s, but the build lease is at %s", reviewed, got)
 	}
-	late := writeAndCommit(t, buildDir, "late.txt", "written after the review", "a change after the review")
-	journalBefore, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-	storeHead := run(t, d.Store.Root, "rev-parse", "HEAD")
+	// wantRefusedUntouched publishes, requires the refusal's code and that
+	// nothing was written, and returns the refusal.
+	wantRefusedUntouched := func(t *testing.T, code string) *axi.Error {
+		t.Helper()
+		journalBefore := journalLen(t, d, fx.Ticket)
+		storeHead := run(t, d.Store.Root, "rev-parse", "HEAD")
+		originBefore := originRef(t, fx.RepoRemote, "refs/heads/"+branch)
 
-	_, err = Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
-	wantAxiCode(t, err, "PUBLISH_UNREVIEWED_HEAD")
-	var ae *axi.Error
-	if !errors.As(err, &ae) {
-		t.Fatalf("err = %v, want an *axi.Error", err)
-	}
-	if !strings.Contains(ae.Msg, late) || !strings.Contains(ae.Msg, reviewed) {
-		t.Errorf("the refusal %q does not name both the head it would ship (%s) and the reviewed one (%s)", ae.Msg, late, reviewed)
-	}
-	if want := []string{"Run `jig gate " + fx.Ticket + "` to review the branch as it is now, then publish again."}; !slices.Equal(ae.Help, want) {
-		t.Errorf("the refusal's help = %q, want %q", ae.Help, want)
-	}
-
-	if got := originRef(t, fx.RepoRemote, "refs/heads/"+ticketBranch(fx.Ticket)); got != "" {
-		t.Fatalf("origin has %s = %s after the refused publish, want nothing pushed", ticketBranch(fx.Ticket), got)
-	}
-	journalAfter, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-	if len(journalAfter) != len(journalBefore) {
-		t.Fatalf("the journal grew from %d to %d lines over a refused publish", len(journalBefore), len(journalAfter))
-	}
-	if status := run(t, d.Store.Root, "status", "--porcelain"); status != "" {
-		t.Fatalf("the store working copy is dirty after the refused publish:\n%s", status)
-	}
-	if got := run(t, d.Store.Root, "rev-parse", "HEAD"); got != storeHead {
-		t.Fatalf("the store moved from %s to %s over a refused publish", storeHead, got)
+		_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+		wantAxiCode(t, err, code)
+		var ae *axi.Error
+		if !errors.As(err, &ae) {
+			t.Fatalf("err = %v, want an *axi.Error", err)
+		}
+		if got := originRef(t, fx.RepoRemote, "refs/heads/"+branch); got != originBefore {
+			t.Fatalf("origin has %s = %s after the refused publish, want %q untouched", branch, got, originBefore)
+		}
+		if got := journalLen(t, d, fx.Ticket); got != journalBefore {
+			t.Fatalf("the journal grew from %d to %d lines over a refused publish", journalBefore, got)
+		}
+		if status := run(t, d.Store.Root, "status", "--porcelain"); status != "" {
+			t.Fatalf("the store working copy is dirty after the refused publish:\n%s", status)
+		}
+		if got := run(t, d.Store.Root, "rev-parse", "HEAD"); got != storeHead {
+			t.Fatalf("the store moved from %s to %s over a refused publish", storeHead, got)
+		}
+		return ae
 	}
 
-	// A round over the branch as it is now reviews the late commit, and the
-	// publish is no longer stale.
-	if again := gateReviewedClean(t, fx, d).ReviewedSHA["fixture-repo"]; again != late {
-		t.Fatalf("the second round reviewed %s, want the late commit %s", again, late)
-	}
-	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
-	if err != nil {
-		t.Fatalf("Publish after a round over the branch as it is: %v", err)
-	}
-	if out := run(t, fx.RepoRemote, "ls-tree", "-r", "--name-only", ticketBranch(fx.Ticket)); !strings.Contains(out, "late.txt") {
-		t.Fatalf("origin's %s lacks late.txt: publish did not ship the head the second round reviewed (%s)", ticketBranch(fx.Ticket), report.Head["fixture-repo"])
-	}
-}
+	step(t, "an intent edited since the reviewed round is refused", func(t *testing.T) {
+		if round.Intent.Source != IntentSourceBrief || round.IntentSHA256 == "" {
+			t.Fatalf("test setup: round intent = %+v, want a clean round that recorded a brief intent sha256", round)
+		}
+		briefPath := filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md")
+		original, err := os.ReadFile(briefPath)
+		if err != nil {
+			t.Fatalf("read brief.md: %v", err)
+		}
+		if err := os.WriteFile(briefPath, append(original, []byte("\nEdited after the clean round.\n")...), 0o644); err != nil {
+			t.Fatalf("edit brief.md: %v", err)
+		}
+		// Committed before Publish runs, the way an edit to any other store
+		// file is: otherwise Publish's own unconditional Sync at the top would
+		// commit this edit itself, and the "nothing moved" assertions would be
+		// measuring that commit, not what Publish wrote once refused.
+		if err := d.Store.Push(fx.Ticket + ": edit brief.md after the clean round"); err != nil {
+			t.Fatalf("push the edited brief.md: %v", err)
+		}
 
-// TestPublishOfAScriptedRoundChecksNoHead: a scripted round records no
-// reviewed head, and publish keeps its behavior there: whatever the branch
-// holds is shipped, as before. (TestPublishFullChain and the tests around it
-// publish after scripted rounds; this one pins the reason.)
-func TestPublishOfAScriptedRoundChecksNoHead(t *testing.T) {
-	t.Parallel()
+		ae := wantRefusedUntouched(t, "PUBLISH_UNREVIEWED_INTENT")
+		if !strings.Contains(ae.Msg, briefPath) {
+			t.Errorf("the refusal %q does not name %s", ae.Msg, briefPath)
+		}
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	gateToClean(t, fx, d)
-	rep, err := latestGateReport(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatalf("latestGateReport: %v", err)
-	}
-	if len(rep.ReviewedSHA) != 0 {
-		t.Fatalf("test setup: a scripted round recorded reviewed_sha %v", rep.ReviewedSHA)
-	}
-	writeAndCommit(t, buildLeaseDir(t, fx), "late.txt", "written after the last round", "a change after the last round")
+		// A round over the branch with the brief as it now reads records the
+		// edited brief's own sha256, and the publish is no longer stale.
+		if again := gateReviewedClean(t, fx, d); again.IntentSHA256 == round.IntentSHA256 {
+			t.Fatalf("the second round recorded the same intent sha256 as the first, want the edited brief's")
+		}
+	})
 
-	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
-		t.Fatalf("Publish after a scripted round: %v", err)
-	}
-}
+	step(t, "a commit after the review is refused until a round has reviewed it", func(t *testing.T) {
+		late := writeAndCommit(t, buildDir, "late.txt", "written after the review", "a change after the review")
 
-// TestPublishShipsTheReviewedHeadAfterTheTargetMoves: the head publish holds
-// to the review is the one it would ship before reconcile, not the one it ends
-// with. The target moves after a clean reviewer round, so reconcile rebases the
-// ticket's branch onto it and the head publish pushes is not the head the round
-// reviewed - and that is not a refusal: it is what publish does to every
-// branch, the revalidation being what stands behind the moved target. Reading
-// the head after reconcile would refuse every publish once the target moved.
-func TestPublishShipsTheReviewedHeadAfterTheTargetMoves(t *testing.T) {
-	t.Parallel()
+		ae := wantRefusedUntouched(t, "PUBLISH_UNREVIEWED_HEAD")
+		if !strings.Contains(ae.Msg, late) || !strings.Contains(ae.Msg, reviewed) {
+			t.Errorf("the refusal %q does not name both the head it would ship (%s) and the reviewed one (%s)", ae.Msg, late, reviewed)
+		}
+		if want := []string{"Run `jig gate " + fx.Ticket + "` to review the branch as it is now, then publish again."}; !slices.Equal(ae.Help, want) {
+			t.Errorf("the refusal's help = %q, want %q", ae.Help, want)
+		}
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	reviewed := reviewedClean(t, fx, d).ReviewedSHA["fixture-repo"]
-	advanceTarget(t, fx)
+		// A round over the branch as it is now reviews the late commit, and the
+		// publish is no longer stale.
+		if again := gateReviewedClean(t, fx, d).ReviewedSHA["fixture-repo"]; again != late {
+			t.Fatalf("the second round reviewed %s, want the late commit %s", again, late)
+		}
+		report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+		if err != nil {
+			t.Fatalf("Publish after a round over the branch as it is: %v", err)
+		}
+		if out := run(t, fx.RepoRemote, "ls-tree", "-r", "--name-only", branch); !strings.Contains(out, "late.txt") {
+			t.Fatalf("origin's %s lacks late.txt: publish did not ship the head the second round reviewed (%s)", branch, report.Head["fixture-repo"])
+		}
+		reviewed = late
+	})
 
-	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
-	if err != nil {
-		t.Fatalf("Publish after a clean reviewer round and a moved target: %v", err)
-	}
-	if report.Tier != "none" {
-		t.Errorf("revalidation tier = %q, want none: publish revalidates nothing", report.Tier)
-	}
-	branch := ticketBranch(fx.Ticket)
-	if head := originRef(t, fx.RepoRemote, "refs/heads/"+branch); head != reviewed || report.Head["fixture-repo"] != reviewed {
-		t.Fatalf("origin's %s = %q (report head %q), want the reviewed head %s: publish reconciles nothing, so the moved target changes nothing it ships", branch, head, report.Head["fixture-repo"], reviewed)
-	}
+	var pushed string
+	step(t, "a commit pushed on top of the branch after the round is refused until a round has reviewed it", func(t *testing.T) {
+		other := cloneFrom(t, fx.RepoRemote)
+		run(t, other, "checkout", branch)
+		pushed = writeAndCommit(t, other, "more.txt", "pushed after the round", "a commit pushed to the ticket's branch")
+		run(t, other, "push", "origin", branch)
+
+		wantRefusedUntouched(t, "PUBLISH_UNREVIEWED_HEAD")
+		if got := gateReviewedClean(t, fx, d).ReviewedSHA["fixture-repo"]; got != pushed {
+			t.Fatalf("Gate reviewed %s, want origin's copy %s", got, pushed)
+		}
+		reviewed = pushed
+	})
+
+	step(t, "the reviewed head is shipped as it is after the target moves", func(t *testing.T) {
+		advanceTarget(t, fx)
+
+		report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+		if err != nil {
+			t.Fatalf("Publish after a clean reviewer round and a moved target: %v", err)
+		}
+		if report.Tier != "none" {
+			t.Errorf("revalidation tier = %q, want none: publish revalidates nothing", report.Tier)
+		}
+		if head := originRef(t, fx.RepoRemote, "refs/heads/"+branch); head != reviewed || report.Head["fixture-repo"] != reviewed {
+			t.Fatalf("origin's %s = %q (report head %q), want the reviewed head %s: publish reconciles nothing, so the moved target changes nothing it ships", branch, head, report.Head["fixture-repo"], reviewed)
+		}
+	})
 }
 
 // TestCheckReviewedHead: the rule on its own. A head equal to the recorded one
@@ -272,76 +306,5 @@ func TestCheckReviewedIntent(t *testing.T) {
 		if err := checkReviewedIntent(st, ticket, reportYAML{Intent: reportIntentYAML{Source: source}}); err != nil {
 			t.Errorf("source %s has nothing pinned: %v", source, err)
 		}
-	}
-}
-
-// TestPublishRefusesAnIntentEditedSinceTheReviewedRound: a brief.md edited
-// after the last clean round reviewed it is refused before anything is
-// written, the same way a head the round never saw is (checkReviewedHead):
-// no journal line, no store commit, nothing on origin. A round over the
-// branch with the brief as it now reads clears the refusal.
-func TestPublishRefusesAnIntentEditedSinceTheReviewedRound(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	round := reviewedClean(t, fx, d)
-	if round.Intent.Source != IntentSourceBrief || round.IntentSHA256 == "" {
-		t.Fatalf("test setup: round intent = %+v, want a clean round that recorded a brief intent sha256", round)
-	}
-
-	briefPath := filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md")
-	original, err := os.ReadFile(briefPath)
-	if err != nil {
-		t.Fatalf("read brief.md: %v", err)
-	}
-	if err := os.WriteFile(briefPath, append(original, []byte("\nEdited after the clean round.\n")...), 0o644); err != nil {
-		t.Fatalf("edit brief.md: %v", err)
-	}
-	// Committed before Publish runs, the way an edit to any other store
-	// file is: otherwise Publish's own unconditional Sync at the top would
-	// commit this edit itself, and the "nothing moved" assertions below
-	// would be measuring that commit, not what Publish wrote once refused.
-	if err := d.Store.Push(fx.Ticket + ": edit brief.md after the clean round"); err != nil {
-		t.Fatalf("push the edited brief.md: %v", err)
-	}
-
-	journalBefore, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-	storeHead := run(t, d.Store.Root, "rev-parse", "HEAD")
-
-	_, err = Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
-	wantAxiCode(t, err, "PUBLISH_UNREVIEWED_INTENT")
-	var ae *axi.Error
-	if !errors.As(err, &ae) {
-		t.Fatalf("err = %v, want an *axi.Error", err)
-	}
-	if !strings.Contains(ae.Msg, briefPath) {
-		t.Errorf("the refusal %q does not name %s", ae.Msg, briefPath)
-	}
-
-	if got := originRef(t, fx.RepoRemote, "refs/heads/"+ticketBranch(fx.Ticket)); got != "" {
-		t.Fatalf("origin has %s = %s after the refused publish, want nothing pushed", ticketBranch(fx.Ticket), got)
-	}
-	journalAfter, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-	if len(journalAfter) != len(journalBefore) {
-		t.Fatalf("the journal grew from %d to %d lines over a refused publish", len(journalBefore), len(journalAfter))
-	}
-	if got := run(t, d.Store.Root, "rev-parse", "HEAD"); got != storeHead {
-		t.Fatalf("the store moved from %s to %s over a refused publish", storeHead, got)
-	}
-
-	// A round over the branch with the brief as it now reads records the
-	// edited brief's own sha256, and the publish is no longer stale.
-	if again := gateReviewedClean(t, fx, d); again.IntentSHA256 == round.IntentSHA256 {
-		t.Fatalf("the second round recorded the same intent sha256 as the first, want the edited brief's")
-	}
-	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
-		t.Fatalf("Publish after a round over the brief as it is: %v", err)
 	}
 }

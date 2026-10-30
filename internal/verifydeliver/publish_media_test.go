@@ -88,10 +88,25 @@ func attachedFiles(argv []string) []string {
 	return out
 }
 
-// TestPublishAttachesPickedMediaOnUpdate: the attach path runs through
-// UpdatePRWithMedia when the branch already has an open pull request, with the
-// staging directory of the *reviewed* head as gh's own working directory and
-// one --attach per picked file, in the order the pull request shows them.
+// TestPublishAttachesPickedMediaOnUpdate is the chain of what a publish does
+// with the media it picked, on a ticket built, reviewed and recorded once, with
+// one fake gh the steps point at the pull requests and the body they are about.
+// Each step publishes the same pick again, over the pull request the one
+// before left alone:
+//
+//   - the attach path runs through UpdatePRWithMedia when the branch already
+//     has an open pull request, with the staging directory of the *reviewed*
+//     head as gh's own working directory and one --attach per picked file, in
+//     the order the pull request shows them;
+//   - once the attach call returns, publish reads the pull request's body back
+//     and, finding a ./<name> reference gh left unrewritten with no upload URL
+//     appended for it either (an image gh itself did not recognize, despite
+//     "Videos" saying it would), nothing here can patch it: publish warns, naming
+//     the file, not an arbitrary line of body prose;
+//   - an installed gh with no --attach on either subcommand
+//     (GH_STUB_NO_ATTACH) still opens the pull request, with no media and a
+//     warning naming why - never a silent pull request with broken ./<name>
+//     links and no explanation.
 func TestPublishAttachesPickedMediaOnUpdate(t *testing.T) {
 	t.Parallel()
 	pf := newPicksFixture(t)
@@ -99,85 +114,69 @@ func TestPublishAttachesPickedMediaOnUpdate(t *testing.T) {
 	spy := picksScenario(t, onboardingPick)
 	branch := ticketBranch(pf.fx.Ticket)
 	run(t, buildLeaseDir(t, pf.fx), "push", "origin", branch)
-	pf.logFile, _ = useGithubHost(t, &pf.d, openPullOf(t, branch), "")
-
-	report, err := Publish(pf.d, spy.opts(PublishOpts{Ticket: pf.fx.Ticket, Yes: true}))
-	if err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if !report.PRUpdated["fixture-repo"] {
-		t.Fatalf("report.PRUpdated = %v, want the existing pull request updated", report.PRUpdated)
-	}
-
-	edit := findGhCall(loggedGhCalls(t, pf.logFile), "pr", "edit", existingPR)
-	if edit == nil {
-		t.Fatal("no logged pr edit call")
-	}
-	if dir := pf.picksDir(t); !sameDir(t, edit.Dir, dir) {
-		t.Errorf("pr edit ran in %q, want the staging directory for the reviewed head %q", edit.Dir, dir)
-	}
-	if got, want := attachedFiles(edit.Argv), []string{"rec-1.png", "rec-2.svg", "rec-3.mp4"}; fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("pr edit --attach files = %v, want %v", got, want)
-	}
-}
-
-// TestPublishWarnsAboutAnUnrewrittenMediaReference: once the attach call
-// returns, publish reads the pull request's body back and, finding a
-// ./<name> reference gh left unrewritten with no upload URL appended for it
-// either (an image gh itself did not recognize, despite "Videos" saying it
-// would), nothing here can patch it: publish warns, naming the file, not an
-// arbitrary line of body prose.
-func TestPublishWarnsAboutAnUnrewrittenMediaReference(t *testing.T) {
-	t.Parallel()
-	pf := newPicksFixture(t)
-	pf.onboardingRecordings(t)
-	spy := picksScenario(t, onboardingPick)
-	_, addEnv := useGithubHost(t, &pf.d, "", "")
-	addEnv("GH_STUB_BODY=## Demo\n\n- ./rec-1.png: still here, unrewritten\n")
-
-	if _, err := Publish(pf.d, spy.opts(PublishOpts{Ticket: pf.fx.Ticket, Yes: true})); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-
-	var warning string
-	for _, w := range pf.warnings {
-		if strings.Contains(w, "unrewritten") {
-			warning = w
+	// The fixture's own fake gh is the one the steps share.
+	seen := 0
+	// publish points the fake gh at pulls and body (and, when noAttach, at a gh
+	// that predates --attach), publishes the pick, and returns the calls it made.
+	publish := func(t *testing.T, pulls, body, noAttach string) (PublishReport, []ghLogLine) {
+		t.Helper()
+		pf.setGh("GH_STUB_PULLS="+pulls, "GH_STUB_BODY="+body, "GH_STUB_NO_ATTACH="+noAttach)
+		pf.warnings = nil
+		seen = len(loggedGhCalls(t, pf.logFile))
+		report, err := Publish(pf.d, spy.opts(PublishOpts{Ticket: pf.fx.Ticket, Yes: true}))
+		if err != nil {
+			t.Fatalf("Publish: %v", err)
 		}
-	}
-	if warning == "" {
-		t.Fatalf("warnings = %v, want one about an unrewritten media reference", pf.warnings)
-	}
-	if !strings.Contains(warning, "rec-1.png") {
-		t.Errorf("warning = %q, want it to name rec-1.png", warning)
-	}
-}
-
-// TestPublishWarnsWhenGhLacksAttachSupport: an installed gh with no --attach
-// on either subcommand (GH_STUB_NO_ATTACH) still opens the pull request, with
-// no media and a warning naming why - never a silent pull request with
-// broken ./<name> links and no explanation.
-func TestPublishWarnsWhenGhLacksAttachSupport(t *testing.T) {
-	t.Parallel()
-	pf := newPicksFixture(t)
-	pf.onboardingRecordings(t)
-	spy := picksScenario(t, onboardingPick)
-	var addEnv func(...string)
-	pf.logFile, addEnv = useGithubHost(t, &pf.d, "", "")
-	addEnv("GH_STUB_NO_ATTACH=1")
-
-	if _, err := Publish(pf.d, spy.opts(PublishOpts{Ticket: pf.fx.Ticket, Yes: true})); err != nil {
-		t.Fatalf("Publish: %v", err)
+		return report, loggedGhCalls(t, pf.logFile)[seen:]
 	}
 
-	create := findGhCall(loggedGhCalls(t, pf.logFile), "pr", "create")
-	if create == nil {
-		t.Fatal("no logged pr create call")
-	}
-	if len(attachedFiles(create.Argv)) != 0 {
-		t.Errorf("pr create argv %v carries --attach despite no support", create.Argv)
-	}
-	if !pf.warned("--attach") {
-		t.Fatalf("warnings = %v, want one naming the installed gh's lack of --attach support", pf.warnings)
-	}
+	step(t, "the picked files are attached from the reviewed head's staging directory, in order", func(t *testing.T) {
+		report, calls := publish(t, openPullOf(t, branch), "", "")
+		if !report.PRUpdated["fixture-repo"] {
+			t.Fatalf("report.PRUpdated = %v, want the existing pull request updated", report.PRUpdated)
+		}
+
+		edit := findGhCall(calls, "pr", "edit", existingPR)
+		if edit == nil {
+			t.Fatal("no logged pr edit call")
+		}
+		if dir := pf.picksDir(t); !sameDir(t, edit.Dir, dir) {
+			t.Errorf("pr edit ran in %q, want the staging directory for the reviewed head %q", edit.Dir, dir)
+		}
+		if got, want := attachedFiles(edit.Argv), []string{"rec-1.png", "rec-2.svg", "rec-3.mp4"}; fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("pr edit --attach files = %v, want %v", got, want)
+		}
+	})
+
+	step(t, "a media reference gh left unrewritten is warned about, naming the file", func(t *testing.T) {
+		publish(t, "", "## Demo\n\n- ./rec-1.png: still here, unrewritten\n", "")
+
+		var warning string
+		for _, w := range pf.warnings {
+			if strings.Contains(w, "unrewritten") {
+				warning = w
+			}
+		}
+		if warning == "" {
+			t.Fatalf("warnings = %v, want one about an unrewritten media reference", pf.warnings)
+		}
+		if !strings.Contains(warning, "rec-1.png") {
+			t.Errorf("warning = %q, want it to name rec-1.png", warning)
+		}
+	})
+
+	step(t, "a gh that cannot attach opens the pull request with no media and says why", func(t *testing.T) {
+		_, calls := publish(t, "", "", "1")
+
+		create := findGhCall(calls, "pr", "create")
+		if create == nil {
+			t.Fatal("no logged pr create call")
+		}
+		if len(attachedFiles(create.Argv)) != 0 {
+			t.Errorf("pr create argv %v carries --attach despite no support", create.Argv)
+		}
+		if !pf.warned("--attach") {
+			t.Fatalf("warnings = %v, want one naming the installed gh's lack of --attach support", pf.warnings)
+		}
+	})
 }
