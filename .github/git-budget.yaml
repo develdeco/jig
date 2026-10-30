@@ -8,7 +8,7 @@
 margin: 1
 packages:
   cmd/jig: 3274
-  e2e: 5959
+  e2e: 5481
   internal/correct: 271
   internal/fileshare: 8
   internal/fixture: 708
@@ -34,4 +34,3 @@ packages:
   internal/verify: 562
   internal/verifydeliver: 14261
   lint: 21
-##[error]Process completed with exit code 1.
