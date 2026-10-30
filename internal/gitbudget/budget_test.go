@@ -39,6 +39,29 @@ func TestCheckHoldsEachCountToItsMarginBothWays(t *testing.T) {
 	}
 }
 
+// TestTheRepositoryBudgetIsWhatTheCheckPrints holds .github/git-budget.yaml
+// to the form the failing check prints for its numbers, so a line pasted in
+// with them, or a hand edit out of that form, fails here instead of
+// riding along.
+func TestTheRepositoryBudgetIsWhatTheCheckPrints(t *testing.T) {
+	root := filepath.Join("..", "..")
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
+		t.Fatalf("the module root is not two directories up: %v", err)
+	}
+	path := filepath.Join(root, ".github", "git-budget.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := readBudget(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.ReplaceAll(string(data), "\r\n", "\n"), string(b.encode()); got != want {
+		t.Errorf("%s is not what the check prints for its numbers; put the printed form there:\n%s", path, want)
+	}
+}
+
 func TestSetAndEncodeRoundTrip(t *testing.T) {
 	b := &budget{Margin: 10, Packages: map[string]int{"e2e": 1000, "lint": 4}}
 	b.set(map[string]int{"e2e": 900, "lint": 0, "cmd/jig": 12})
