@@ -3735,3 +3735,125 @@ The budget was recorded after this run's cuts landed (#159's diet, #160's fixtur
 | all packages | 61,403 | 36,846 |
 
 `internal/gitx` and `internal/fixture` went up on purpose: their new tests hold the in-process reads and the fixture copies to the git program's answers.
+
+## The second test diet: one chain for each path of the gate and the publish, their rules at the seams (ADR 0027)
+
+`internal/verifydeliver` is the suite's largest git cost: 14,261 processes in the budget recorded from CI's Linux leg, more than half of git's time there in clone, fetch and push to the fixture's local remotes, which are the pool's leases in the gate and publish chains. Those chains drove a whole fixture through a build, a gate and often a publish for every variant of a rule. The 2026-10-13 audit of the build-speed run had a verdict for each of those tests (keep, fold, narrow, delete, speed) and a host for every fold. This diet is that plan applied under ADR 0027, one chain per critical path with each variant a step of it or a test of the seam that decides it, after re-checking each verdict against today's code. No product file changed.
+
+**What the 17 days changed in the plan.** The audit priced a gate round at about 14 s, "the two `go test` runs plus the envtool up/down", and its first and largest action was a `passOraclesAt` helper that records oracle passes so a round reuses them. That is not needed: #97 had already made `Deps.Oracle` an injected function that every gate test not about the oracle run leaves as `passingOracle`, which passes at once. Only the tests that set it to nil run the real oracles (`TestGateCleanRound2`, `TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances`, the last step of `TestGateReusesAnOraclePassOnTheSameTree`), and they still do. A fixture is a copy of a template (#160) and starts no git process. So what a fold saves is the build's lease, its commits and store pushes, the gate rounds and the publishes with their pushes. Counted alone, a fixture with a build and one gate round is 52 processes, each further round 15 to 30, a publish 25 to 40 and a `driveBuild` about 40. Squash and the identity tests the audit names are gone (a publish ships the reviewed head as it is), and the demo-media tests became the picks tests (#114).
+
+**How a fold is written.** Every absorbed test becomes an ordered, non-parallel `t.Run` step of its host, on the host's fixture, named after the rule it checks; the doc comment of the host keeps each absorbed test's story, and every assertion of the absorbed test is in its step. `step` (testutil_test.go) runs a step and stops the chain at the first one that fails, since a later step stands on what the earlier ones left and would only report what the failed one broke. Hosts stay parallel to each other. Where a step makes the next one's setup wrong (a refusal that must see the ticket as it was, a failure whose store commit needs something new to commit), the step puts the state back: `saveTicketRecord` snapshots and restores `ticket.yaml`, `forgetRenderedPR` removes the pull request files a publish rendered, `pushRecorder` stands in for the push so a branch reaches origin only in the last step that means it to.
+
+**Which chain is the chain.**
+
+- The scripted gate: `TestGateCleanRound2`, on real oracles.
+- The reviewer: `TestGateReviewerFindingsBookkeepingAcrossRounds`.
+- A brief-less ticket's intent, whatever its source: `TestGateIntentFlagReplacesExistingIntentMD`.
+- The refusals that leave no trace: `TestGateRefusalsLeaveNoTrace` (new name, for the eight tests it took over).
+- Adoption and what a gate does with an adopted branch until jig builds on it: `TestGateAdoptsTheBranchItReviews`, with `TestGateReviewsTheBuildLeaseCopyOnceJigBuilt` for the build lease's copy.
+- The squash-less publish: `TestPublishFullChain`, with `TestPublishPushesABranchAlreadyOnOriginWithoutChangingIt` (a branch on origin and an open pull request), `TestPublishRepublishesAPublishedTicket` (a second publish) and `TestPublishShipsOnlyTheHeadTheGateReviewed` (the reviewed-head rule) for the states it cannot share.
+- An adopted branch: `TestPublishShipsAnAdoptedBranch`, `TestPublishOfAnAdoptedBranchHoldsTheHeadToTheReview`, `TestPublishUpdatesThePRTheAuthorOpened`.
+- Whose copy the lease was pointed at: `TestPointAtTicketBranchSaysWhoseCopyItChose`, two chains of one fixture each in place of eleven.
+
+**Where each deleted or merged test went.** A test is deleted only with the test that covers it named here. Folded means its steps are in a chain; narrowed means a smaller setup or the seam that decides it.
+
+- `TestGateRound1FixSlice`, `TestGateScriptedRoundFixSlicesCountTowardTheBudget`, `TestGateIntentBriefWins` and `TestGateIntentBriefWinsOverExistingIntentMD`: folded into `TestGateCleanRound2`, which writes the stale `intent.md` before round 1 (so the brief-wins step is the stronger one) and reads round 1's report for each. The model-disjoint test the audit also names is gone from the package.
+- `TestGateReviewerClearsFromAbsoluteInLeaseReviewedPath`: folded into `TestGateReviewerFindingsBookkeepingAcrossRounds`, whose round 2 now answers with lease-absolute reviewed paths and adds the repo-relative `findings.yaml` assertion. A reviewer that echoes the relative `must_review` list clears a finding the same way in every other reviewer round of the package and in `findings_test.go`'s `ApplyRound` tests, so that form loses no coverage.
+- `TestGateFailedRoundBeforeRoundKnownRecordsRealRoundAndNoRawError`: the third step of `TestGateFailedRoundCommitsAndPushesStore`, after the rerun that makes round 1 (the broken manifest then lands on round 2, as it did).
+- `TestGateWipesLeftoverLeaseDirtBeforeOracles`: into `TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances`, whose round 2 now also holds the untracked failing `zz_repro_test.go`, so the real `go test ./alpha/...` fails unless the wipe came first.
+- `TestGateEarlyAndFrontierGuard`, `TestGateRefusesStalledSlice` and `TestGateRefusesQueuedFixSlice`: into `TestGateIntentNotRecordedWhenNotGreen`, three steps of one ticket whose slice states are written directly. `checkFrontier` reads nothing else, so no step builds. `--early` over queued slices is what every adoption test's first round does, and `TestFrontierRefusalNamesThePromptItIsGiven` is the seam of the refusal's help.
+- `TestGateIntentNoneWithNoBriefOrIntent`, `TestGateIntentFlagOutsideBranch`, `TestGateDocFlagWritesIntentFromFile`, `TestGateResolvedIntentReachesReviewJSONExplicit` and `TestGateResolvedIntentReachesReviewJSONNone`: into `TestGateIntentFlagReplacesExistingIntentMD`, in the order none (reviewer, then report), `--intent` with the CRLF text, a second `--intent`, `--doc`, and the explicit intent reaching the reviewer. The "first take" round of the old test is the CRLF step; the replaced-not-appended assertion is on the second.
+- `TestGateIntentFlagConflictsWithBrief`, `TestGateDocFlagConflictsWithBrief`, `TestGateIntentDocMissingErrors`, `TestGateIntentAndDocBothSetRefused`, `TestGateEmptyDocFileRefused` (two cases), `TestGateIntentNotRecordedWhenBranchNotFound`, `TestGateBranchNotFoundOnOrigin` and `TestGateIntentRefusalLeavesNoAdoption`: into `TestGateRefusalsLeaveNoTrace`, one ticket and one pushed branch, each refusal checked with `gateRefused` (no journal line) as well as the old assertions; the adoption of another branch is the last step, since it changes the ticket.
+- `TestGateRefusesAnIntentMDItCannotBind`, `TestGateReusesAnOraclePassOnTheSameTree` and `TestGateFailsWithTheRefusalOfTicketBranch`: their cases are steps of one build instead of a build each (the oracle-reuse steps each commit a head with a tree of its own, so what an earlier step recorded stands for no later one; the last runs the real oracles over the red tests the first committed).
+- `TestGateFollowsTheAuthorOnAnAdoptedBranch`, `TestGateBranchDiscardsStaleLocalCopyAndTracksAdvancingOrigin` and `TestGateBranchDeletedOnOriginAfterEarlierGate`: into `TestGateAdoptsTheBranchItReviews` (a rewrite step, a leftover-commit step, a deletion step). `TestGateRefusesAnAdoptedBranchDeletedOnOriginOnceJigBuilt`: the last step of `TestGateReviewsTheBuildLeaseCopyOnceJigBuilt`.
+- The three cases of `TestGateReviewsOriginOnceItHoldsWhatJigBuilt`, the three of `TestGateRefusesWhenJigBuiltOnAnAdoptedBranchAndThisMachineHasNoCopy` and the two of `TestGateIgnoresACommitJigReportedButNeverVerified`: steps of one build of jig's each. The last case of the first now gates origin's head after the author pushed, where it gated jig's own commit; both hold everything jig built.
+- The eleven cases of `TestGateRefusesAnAdoptionThatCannotStand`: steps of one fixture, one `driveBuild`, each on a ticket of its own (the ones that only need a journal line use a minted ticket), the built ticket's cases in the order that leaves its journal as the next needs it. The last case is made by dropping the journal's lines and writing one slice green, which is the state the old test reached by dropping them after a build.
+- `TestPublishRefusesWhenLatestGateNotClean`, `TestPublishRefusesARecordedBranchEqualToTheTarget`, `TestPublishRefusesAnUnreadableTicketRecordBeforeWritingAnything`, `TestPublishRefusesWhenItCannotTellWhetherThereIsAPR`, `TestPublishConfirmWiring` (four cases), `TestPublishConfirmNamesTheOpenPR`, `TestPublishFailsLoudlyWhenThePRCannotBeWritten` (two), `TestPublishContinuesWhenCommentPostingFails`, `TestPublishOpensAPRWhenTheBranchHasNone`, `TestPublishPostsReviewNotesAsCommentOnCreate`, `TestPublishWarnsWhenTheBriefHasNoIntentToPublish`, `TestPublishWarnsAboutTheOmittedIntentBeforeTheConfirmationPrompt`, `TestPublishNoDivergenceLeavesTheStoreUntouched`, `TestPublishDoesNotRevalidateAfterTheTargetMoves`, `TestPublishWithNoHostOpensNoPullRequest`, `TestPublishOfAScriptedRoundChecksNoHead` and `TestBuildAcquireAfterPublishIsInStep`: into `TestPublishFullChain`, as 19 steps in the order its doc comment lists, with one fake gh built for the steps that need it (they were a `go build` each). The chain's brief has an empty first section, so the Intent-warning step reads the brief the omission covers; the brief with no `##` at all is `TestRenderIntentSectionOmittedForABriefWithNoSection` and `TestFirstBriefSectionEmptyWithNoHeading`.
+- `TestPublishUpdatesTheOpenPRInsteadOfOpeningASecond`, `TestPublishPostsReviewNotesAsCommentOnUpdate` and `TestPublishDropsThePublishLeasesStaleCopy`: into `TestPublishPushesABranchAlreadyOnOriginWithoutChangingIt`, whose one publish is now over an open pull request, read by four steps.
+- `TestPublishAgainKeepsOneEntryInTheLedgerAndTheContractIndex`: a step of `TestPublishRepublishesAPublishedTicket`, which already publishes twice.
+- `TestPublishChecksTheFastForwardBeforeItReconciles` and `TestPublishRefusesADivergedTicketBranchBeforeWriting`: into `TestPublishRefusesAPushThatIsNotAFastForward`, whose target now moves with a change that would conflict (publish merges nothing now, so the refusal is still the fast-forward one), and whose second step is a publish with no hook over the state the first left, which is the diverged one.
+- `TestPublishRefusesAnIntentEditedSinceTheReviewedRound`, `TestPublishShipsTheReviewedHeadAfterTheTargetMoves` and `TestPublishOfAnOrdinaryTicketHoldsTheHeadToTheReview`: into `TestPublishShipsOnlyTheHeadTheGateReviewed`, four steps (a brief edit, a late commit and its publish, a commit pushed on top of origin's copy, a moved target and the final publish).
+- `TestGoldenRenderAdoptedTicket`: the last step of `TestPublishShipsAnAdoptedBranch`, which advances the target and the golden still reads `Revalidation tier: none` and the same touched files.
+- `TestPublishOfAnAdoptedBranchShipsTheReviewedHeadAfterTheTargetMoves`: the first step of `TestPublishOfAnAdoptedBranchHoldsTheHeadToTheReview`. `TestPublishShipsAnAdoptedBranchJigBuiltNothingOn`: a step of `TestPublishUpdatesThePRTheAuthorOpened` (no build lease, origin's head the author's tip).
+- `TestPublishWarnsAboutAnUnrewrittenMediaReference` and `TestPublishWarnsWhenGhLacksAttachSupport`: into `TestPublishAttachesPickedMediaOnUpdate`, three steps over one picks fixture and the fixture's own fake gh (the picks fixture now keeps the function that points it elsewhere).
+- The cases of `TestPointAtTicketBranchSaysWhoseCopyItChose`: two chains, one fixture each (a ticket's own branch after a build and no round, an adopted branch that is only the author's push), instead of eleven fixtures of which nine had a gate round and two a publish. The two publish cases are the last two steps of `TestPublishFullChain`, which has a publish. The pool's publish lease is dropped before each step, since publish re-points it and a copy an earlier step left would be refused once origin moved.
+
+**Deleted, with the test that has the same assertions on the same path.**
+
+- `TestPublishOpensAPRWhenTheBranchHasNoOpenOneIntoTheTarget` (three fixtures, each gated, to check what GitHub's query leaves out): `repohost.TestFindsTheOpenPRForABranch` drives the same fake gh over the same closed, merged and other-base pull requests and wants no pull request found, and the create step of `TestPublishFullChain` asserts the lookup (`base=main`, `state=open`) and the one `gh pr create` that follows an empty answer.
+- `TestGateFixBudgetZeroParksTheFirstRoundsFixImmediately`: `TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached` has the same `fix_rounds: 0`, parks the first round's finding (routed_why budget) and has the same unattended round after it, no fix slice and the parked finding in needs-a-human; `TestApplyRoundBudgetReachedParksAWouldBeOpenFix` and `TestDefaultTriageLeavesABudgetParkedAskUndecidedEvenWithAFullBuildTarget` decide the rule.
+- `TestGateStaleOracleRecurrenceNeedsAHumanUnattended` (a three-round ticket to see a recurrence of a finding whose oracle the manifest lost stay asked): `TestApplyRoundStaleOracleAfterManifestChangeForcesAsk` forces the ask, and now also says the stale oracle stays recorded and no triage is decided; `TestDefaultTriageLeavesAnAskWithNoResolvableOracleUndecided` now has an ask whose recorded oracle is no longer in the manifest beside the one with none; `TestRouteRoundUndecidedInvalidOracleAskStaysAskedWithNoTriage` leaves it asked with no slice built. The Gate-level NeedsHuman list is read by `TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached`.
+- `TestGoldenRenderExplicitIntentTicket`: the same body as `TestGoldenRenderInferredIntentTicket` less its Intent block, which `TestGoldenRenderBriefSourcedTicket` assembles in front of What changed; the section for an explicit text is `renderIntentSection`'s own and `TestRenderIntentSectionExplicitDemotesADocsHeadings` pins it, and `jig gate --intent`'s text reaching `intent.md` is a step of the intent chain.
+
+**Narrowed.**
+
+- `TestGoldenRenderExplicitDocIntentTicket` and `TestGoldenRenderBriefQuotingMarkdownTicket`: the rule in both is what `renderIntentSection` does with a doc whose headings and fences need keeping, or a brief that quotes the body's own sections, so they are cases of `TestRenderIntentSectionExplicitDemotesADocsHeadings` (the doc with a `###` subsection and the fenced sample whose comment lines look like headings, with the exactly-one-`##` check) and the new `TestRenderIntentSectionOfABriefQuotingMarkdown` (the section, balanced fences, not reported omitted). The assembled body is the two goldens that stay.
+- `TestPublishRefusesABranchOriginIsAheadOf`: the refusal's commit counts moved to the "behind" case of `TestRequireFastForward` (one commit origin has that the copy lacks, none the other way); the wiring is the first step of `TestPublishRefusesAPushThatIsNotAFastForward`.
+- `TestPublishRefusesAnAdoptedBranchTheAuthorPushedToWhileJigBuilt` and `TestPublishRefusesWhenJigBuiltAnAdoptedBranchOnAnotherMachine`: `pointAtTicketBranch` decides both (BRANCH_DIVERGED naming the build lease; BUILD_LEASE_MISSING with the help that names `jig publish`), so they are steps of the adopted chain of `TestPointAtTicketBranchSaysWhoseCopyItChose`; that a publish refuses before writing anything is the second step of `TestPublishRefusesAPushThatIsNotAFastForward` for the same call.
+- `TestPointAtBranchCopyFallsBackToTheBuildLeaseWithoutAClone`: a build, not a build and two gate rounds, since it reads the journal's built commits, the build lease and origin.
+
+**Verdicts of the audit that were not carried out, and why.**
+
+- `passOraclesAt`, the audit's first action: not needed, see above.
+- `adoptDirectly` for the rounds that only adopt (the audit's fourth action): it would copy the two writes and the push of Gate's adoption block into the tests, to save about 25 processes in each of a dozen tests. Not done; the adoption chain and the refusal chain prove it once, and the rest still adopt through Gate.
+- The narrowings that seed rounds by hand (`TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle`, `TestGateRecurrenceBoundSurvivesANoteInBetween`, `TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerated`): each is a reproduction of a review finding whose steps are the wedge, and the audit's seeded rounds would be files written by the test in the shape `existingGateRounds`, `FoldBefore` and `UsedFixBudget` read, to save two gate rounds (about 50 processes) apiece. Left for a pass that adds the `ApplyRound` test the audit names (a noted known finding, a fix with a prior and a green slice) first.
+- `TestGateAndBuildJudgeADivergedLeaseAlike` (three subtests) and `TestGateRefusesABuildLeaseThatLacksWhatJigBuilt` (two): their cases are alternative end states of one setup (jig's commit pushed, not pushed, or pushed with a leftover on top; a lease cut afterwards or one that built its own), and the first case of each pushes what the second needs absent. Not steps.
+- `TestPublishTitlesThePullRequestWithTheRecordedTitle`: the title is recorded before the gate because it names the ticket's default branch, which would move `TestPublishFullChain` off `fx.Branch`.
+- `TestGatePostPublishRoundOnAnOrdinaryTicket`: the audit's squash is gone; the test builds the branch a publish used to leave by hand, a different state from any chain's, and is one build, one round and one refusal.
+- `TestPublishRefusesAnAdoptedBranchDeletedOnOrigin`, `TestGoldenRenderBriefSourcedTicket` and `TestGoldenRenderInferredIntentTicket`: kept as the audit has them (the wiring of `MustExistOnOrigin`; the two assembled goldens).
+- The audit's squash, identity and mapped-clone tests, and its demo-media host `TestPublishAttachesDemoMediaOnCreate`: gone from the package before this change; the picks tests (`picksrun_test.go`, nine tests that each build a picks fixture, about 1,000 processes) are not in the audit and are the next cut. Of them only the three of `publish_media_test.go` are folded here.
+
+**Measured**, on the Windows machine this was written on, with git's own trace (`GIT_TRACE2_EVENT` at a directory, one file per process) and the test binary of each tree run with `-count=1`, on the base of this branch (1c86153) and on the branch:
+
+| `internal/verifydeliver`, `go test -count=1` | 1c86153 | this branch |
+| --- | ---: | ---: |
+| git processes (trace, one file each) | 14,251 | 9,205 |
+| top-level tests | 401 | 336 |
+| summed top-level test seconds | 1,967.9 | 1,389.8 |
+| wall, `go test -json` of the binary (indicative) | 142 s | 89 s |
+| wall, the traced run (indicative) | 178 s | 115 s |
+
+Per test, each run alone, before and after (a run alone carries the shape template's own first build, about 20 processes, in both columns); the rows are the hosts, with what each took over:
+
+| host | tests it was | git processes before | git processes after |
+| --- | ---: | ---: | ---: |
+| `TestGateCleanRound2` | 5 | 288 | 80 |
+| `TestGateReviewerFindingsBookkeepingAcrossRounds` | 2 | 176 | 88 |
+| `TestGateFailedRoundCommitsAndPushesStore` | 2 | 186 | 134 |
+| `TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances` | 2 | 187 | 117 |
+| `TestGateIntentNotRecordedWhenNotGreen` | 4 | 143 | 19 |
+| `TestGateIntentFlagReplacesExistingIntentMD` | 6 | 347 | 174 |
+| `TestGateRefusalsLeaveNoTrace` | 9 | 316 | 142 |
+| `TestGateRefusesAnIntentMDItCannotBind` | 1 | 168 | 134 |
+| `TestGateReusesAnOraclePassOnTheSameTree` | 1 | 537 | 412 |
+| `TestGateFailsWithTheRefusalOfTicketBranch` | 1 | 60 | 39 |
+| `TestGateAdoptsTheBranchItReviews` | 4 | 330 | 182 |
+| `TestGateReviewsTheBuildLeaseCopyOnceJigBuilt` | 2 | 212 | 167 |
+| `TestGateReviewsOriginOnceItHoldsWhatJigBuilt` | 1 | 194 | 126 |
+| `TestGateRefusesWhenJigBuiltOnAnAdoptedBranchAndThisMachineHasNoCopy` | 1 | 152 | 98 |
+| `TestGateIgnoresACommitJigReportedButNeverVerified` | 1 | 89 | 68 |
+| `TestGateRefusesAnAdoptionThatCannotStand` | 1 | 281 | 89 |
+| `TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached` | 2 | 149 | 88 |
+| `TestGateStaleOracleRecurrenceNeedsAHumanUnattended` (deleted) | 1 | 148 | 0 |
+| `TestPublishFullChain` | 18 | 2183 | 481 |
+| `TestPublishOpensAPRWhenTheBranchHasNoOpenOneIntoTheTarget` (deleted) | 1 | 279 | 0 |
+| `TestPublishPushesABranchAlreadyOnOriginWithoutChangingIt` | 4 | 497 | 149 |
+| `TestPublishRepublishesAPublishedTicket` | 2 | 274 | 138 |
+| `TestPublishRefusesAPushThatIsNotAFastForward` | 4 | 492 | 164 |
+| `TestPublishShipsOnlyTheHeadTheGateReviewed` | 4 | 535 | 307 |
+| `TestPublishShipsAnAdoptedBranch` | 2 | 227 | 127 |
+| `TestPublishOfAnAdoptedBranchHoldsTheHeadToTheReview` | 2 | 204 | 164 |
+| `TestPublishUpdatesThePRTheAuthorOpened` | 2 | 117 | 60 |
+| `TestPointAtTicketBranchSaysWhoseCopyItChose` | 3 | 1022 | 281 |
+| `TestPointAtBranchCopyFallsBackToTheBuildLeaseWithoutAClone` | 1 | 114 | 72 |
+| the three goldens narrowed to `render_test.go` | 3 | 315 | 0 |
+| `TestPublishAttachesPickedMediaOnUpdate` | 3 | 280 | 168 |
+| all 31 rows | 95 | 10,502 | 4,268 |
+
+The count is exact; the seconds moved with what else the machine ran. Two things about the measure. Git's trace writes one file per process into the directory and silently writes none for a path over Windows' 260 characters, so a trace directory named after a long test name counts 0; the per-test counts were taken into a directory with a short name. And the summed seconds are the tests' own elapsed times (the `--- PASS` lines of the top-level tests); a chain's steps run one after another inside their parent, so its time includes them.
+
+A failing publish's deferred push commits only what the run wrote that the store did not already have. The second failing publish on one ticket renders the same pull request files and has nothing new to commit, so a chain's steps that check the failure commit (`wantFailureCommit`) remove the rendered files and push the removal first (`forgetRenderedPR`); the chain's first failure needs nothing.
+
+The longest chains are now the package's critical path: `TestGateReusesAnOraclePassOnTheSameTree` (seven rounds in a row, about 16 s alone and 61 s in the loaded run) and `TestPublishFullChain` (19 steps, about 20 s alone and 51 s loaded), where the slowest test was 30 s. The whole package took less wall time (89 s against 142 s), so they are not what it waits for yet; a chain that grows past them should split, as the audit says, into parents with a ticket of their own.
+
+`.github/git-budget.yaml` is not edited. Its `internal/verifydeliver` entry stays at 14,261 and the leg that holds the package to it will report the cut as outside the margin until the entry is set from CI's Linux log of the merge, which is where its numbers come from; the 9,205 above is a Windows count and a guide. Main moved on after this branch was cut (#166 and #168, which touch the workflow and the gitx identity tests), and nothing here depends on either.
