@@ -69,7 +69,7 @@ func (h *handler) collect(mem sessionMemory, commit string) []Note {
 var freshWorkNote = Note{
 	Ref: "fresh-work",
 	Text: "This session works on no ticket, and in this project work goes through one: a change the person asks for without naming a ticket is fresh work, " +
-		"planned first with the intake skill (`jig skill intake`), which mints its ticket and drafts its brief; change no code before the brief is approved, " +
+		"planned first with the intake skill (`jig skill intake`), which decides brief or chart and mints a ticket for a brief, then drafts it; change no code before the brief is approved, " +
 		"then build, review and publish with their skills as far as the prompt asks. A question that asks for no change needs no ticket.",
 }
 

@@ -25,7 +25,7 @@ const (
 	setupUsageGlobal    = "set up for you, on this machine: ~/.claude and ~/.agents skills, harness hooks, git's global hooks, the hint"
 	setupUsageProject   = "set up the named project of this machine, in its folder"
 	setupUsageHere      = "set up the project or repository you are in"
-	setupUsageSkills    = "the project skills (here, intake, build, review, publish): in full globally, as one stub in a project"
+	setupUsageSkills    = "the project skills (here, intake, chart, build, review, publish): in full globally, as one stub in a project"
 	setupUsageHooks     = "the harness hook entries that tell jig what a session does (Claude Code ignores project hooks in an untrusted folder and with --bare)"
 	setupUsageGithook   = "git's hooks, so that every commit is recorded"
 	setupUsageHint      = "the few lines in CLAUDE.md, AGENTS.md and GEMINI.md that send an agent to jig here"
