@@ -243,7 +243,7 @@ func TestRosterOrdersTheTicketsAndKeepsTheOnesTheStreamAdded(t *testing.T) {
 	t.Parallel()
 	w := newWorld()
 	w.apply([]events.Envelope{jl(at(0, 1), "JIG-9", "a", journal.EventClaim)})
-	w.setRoster([]rosterRow{{"JIG-2", "Two", "ready"}, {"JIG-1", "One", "blocked"}})
+	w.setRoster([]rosterRow{{ID: "JIG-2", Title: "Two", State: "ready"}, {ID: "JIG-1", Title: "One", State: "blocked"}})
 	if want := []string{"JIG-2", "JIG-1", "JIG-9"}; !reflect.DeepEqual(w.order, want) {
 		t.Errorf("order = %v, want the roster's, then the stream's", w.order)
 	}

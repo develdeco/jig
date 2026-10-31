@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"slices"
 
 	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/store"
@@ -20,7 +21,7 @@ const (
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"tui", "browse a store's tickets in the terminal and drive them: answer, decide asks, gate, publish", []flagSpec{
+		Spec: cmdSpec{"tui", "browse a store's tickets and charts in the terminal and drive them: answer, decide asks, gate, publish", []flagSpec{
 			{"store", tuiStoreUsage, false},
 			{"project", tuiProjectUsage, false},
 		}, false},
@@ -31,12 +32,13 @@ func init() {
 	})
 }
 
-// cmdTUI implements `jig tui [T] [--store P] [--project N]`: five screens (the
-// project, a ticket, its build, its review, a slice) over the event stream
-// `jig events` prints, acting only by running verbs (internal/tui). With a
-// ticket the screens open on it. It reads and writes nothing itself: what a
-// key does is a command, run in process as a person at a terminal would run
-// it.
+// cmdTUI implements `jig tui [T|C] [--store P] [--project N]`: eight screens
+// (the project, a ticket, its brief, build, review and publish, a slice, a
+// chart) over the event stream `jig events` prints, acting only by running
+// verbs (internal/tui). With a ticket the screens open on it, with a chart (a
+// word that is no ticket of the store) on the chart's screen. It reads and
+// writes nothing itself: what a key does is a command, run in process as a
+// person at a terminal would run it.
 //
 // A ticket the store has no folder for yet is waited for when the store could
 // mint it (a well-formed id under a declared key): the ticket screen says so
@@ -56,7 +58,7 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	} else if err != nil {
 		return renderErr(stdout, err)
 	}
-	ticket, err := atMostOne(positionals, "jig tui", "ticket")
+	ticket, err := atMostOne(positionals, "jig tui", "ticket or chart")
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -68,6 +70,10 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	st, cfg, _, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, io.Discard)
 	if err != nil {
 		return renderErr(stdout, err)
+	}
+	chart := ""
+	if chartNamed(st, ticket) {
+		chart, ticket = ticket, ""
 	}
 	awaiting := false
 	if ticket != "" {
@@ -97,6 +103,7 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		Source:   eventsSource{scope},
 		Run:      tuiRunner(e),
 		Ticket:   ticket,
+		Chart:    chart,
 		Awaiting: awaiting,
 		Scope:    []string{"--store", st.Root},
 		Project:  cfg.Name,
@@ -105,6 +112,19 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 	return 0
+}
+
+// chartNamed is whether word names a chart of the store and no ticket: a ticket
+// by that id or alias wins, as it does for `jig next`.
+func chartNamed(st *store.Store, word string) bool {
+	if word == "" {
+		return false
+	}
+	if id, err := st.ResolveTicket(word); err != nil || st.TicketExists(id) {
+		return false
+	}
+	names, err := st.ChartNames()
+	return err == nil && slices.Contains(names, word)
 }
 
 // mintableKey is the key of id when id is shaped like an id the store mints (a

@@ -106,22 +106,25 @@ func TestParseStatusReadsTheTablesJigStatusPrints(t *testing.T) {
 
 func TestParseRoster(t *testing.T) {
 	t.Parallel()
-	rows, err := parseRoster("a checkpoint note\n" + rosterJSON())
+	rows, charts, err := parseRoster("a checkpoint note\n" + rosterJSON())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []rosterRow{{"JIG-1", "Greeting copy", "ready"}, {"JIG-2", "Config loader", "ready"}, {"JIG-3", "Release notes", "blocked"}}
+	if len(charts) != 0 {
+		t.Errorf("a store with no charts listed %+v", charts)
+	}
+	want := []rosterRow{{ID: "JIG-1", Title: "Greeting copy", State: "ready"}, {ID: "JIG-2", Title: "Config loader", State: "ready"}, {ID: "JIG-3", Title: "Release notes", State: "blocked"}}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("rows = %+v, want %+v", rows, want)
 	}
 
-	if _, err := parseRoster("error: no jig store found\ncode: ERROR\n"); err == nil || !strings.Contains(err.Error(), "no jig store found") {
+	if _, _, err := parseRoster("error: no jig store found\ncode: ERROR\n"); err == nil || !strings.Contains(err.Error(), "no jig store found") {
 		t.Errorf("a refusal: err = %v, want the verb's words", err)
 	}
-	if _, err := parseRoster("tickets: none\n"); err == nil {
+	if _, _, err := parseRoster("tickets: none\n"); err == nil {
 		t.Errorf("a list that is not JSON read without error")
 	}
-	if _, err := parseRoster("{not json\n"); err == nil {
+	if _, _, err := parseRoster("{not json\n"); err == nil {
 		t.Errorf("broken JSON read without error")
 	}
 }
