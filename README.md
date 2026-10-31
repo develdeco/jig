@@ -121,6 +121,7 @@ and stops with the prompt that asks for the next one.
 | "Review SHOP-1" | in a session that did none of the ticket's work, reads `jig review context`, records findings and closes the round; in the session that built it, spawns a subagent to do that, since a reviewer must not have built what it reviews | routes findings into fix slices, and checks the reviewer built none of the change |
 | "Publish SHOP-1" | renders the body with `jig publish --body`, pushes and opens the PR, records it with `--pr` | or pushes and opens it itself with `jig publish` after your yes (the TUI's `p`) |
 | "Take SHOP-1 from brief to PR" (or "Build and review SHOP-1") | a start-to-finish run: does the phases in order, each with its skill, without waiting for a prompt per phase, still asking you its questions and approvals, and stops at a refusal | answers each phase as above; `jig next SHOP-1` names the phase a ticket is at and the prompt that asks for the next |
+| "Take checkout to PR" (a chart; or "Continue checkout") | a chart run from this session: briefs every ticket with you up front, then one build subagent per ticket in its own worktree, each reviewed by a subagent of its own; asks you what a subagent cannot, relays your answers and asks for the publish approvals together; stops at a ticket behind a `merged` dependency | derives the chart's standing (`jig next checkout`), holds a build subagent at its stop until its commits are verified, and tells each agent only what it has not heard |
 | "... and go with your recommendations" | answers its own questions and approvals with what it recommends, in one phase or a whole run | records them as the session's, never as yours |
 
 Four moments need you: agreeing on the brief, answering a question a session
@@ -170,8 +171,18 @@ sections and the slices that cite them, the build's slices with their workspace
 and oracle, their commits and every oracle run (with the end of a failed one),
 each review round with its reviewer, what it sent back and the asks it left, and
 the pull request's body and changelog. `jig tui` opened on no ticket opens the
-first ticket a session creates after it started, until you press a key; `jig tui
-SHOP-1` can be open before SHOP-1 exists, and fills in when it does.
+first ticket a session creates after it started (a brief verdict mints it; a
+chart verdict creates none), until you press a key; `jig tui SHOP-1` can be open
+before SHOP-1 exists, and fills in when it does.
+
+A chart is a row on the main screen after the tickets, with how many of its
+tickets published. Enter opens its screen: the chart's map (destination, what
+was decided, the fog), its tickets with the same four step marks and what each
+waits for ("waits for SHOP-2 merged · its PR is open") or is ready for, the run
+(what to say to your agent, the briefs to write, the build waves, and where it
+ends) and the tickets' activity together. The keys act on the ticket under the
+cursor, and the screen is the standing `jig next <chart>` prints, read again as
+events arrive and after a merge on the host.
 
 From it you answer a session's question (`a`), keep or dismiss a review's ask
 (`k`, `d`), open a review round (`g`), and approve and publish (`p`: after your
@@ -187,7 +198,7 @@ moments, and a directory in no project gets nothing:
   names, its slices and their states, open questions, verifications still running,
   and the prompt that asks for the ticket's next phase; on a branch with no ticket,
   that work asked for without one is planned first with the intake skill, which
-  mints its ticket.
+  decides brief or chart and mints a ticket for a brief.
   The harness's session id is set as `JIG_SESSION` for the session's shell
   commands where the harness allows it (Claude Code does), and asked of the
   agent where it does not.
@@ -201,7 +212,9 @@ moments, and a directory in no project gets nothing:
 - **Stop**: a person at the keys is shown what is left. A session that claimed its
   slice with `--unattended` is held back once for each loose end - a verification
   still running, uncommitted files, a failed run, an approved publish not yet
-  done, every slice green with no review opened.
+  done, every slice green with no review opened. In a chart run the same hold
+  falls on the build subagent that claimed (Claude Code's `SubagentStop`), never
+  on the main session that started it, and each of them hears a note once.
 
 The hooks always exit 0. `jig doctor` says whether a harness has ever called them,
 and `<jig home>/logs/observe.log` has what went wrong.

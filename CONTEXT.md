@@ -59,7 +59,7 @@ The file `record.yaml` in a remote item's folder in the tracker tree. The tree o
 _Avoid_: tracker file
 
 **Intake**:
-The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several. It starts from `jig recall`, which shows the open tickets and their edges, near-duplicates, the charts' fog, platform documents and past answers, and it ends when `jig validate` says `valid: yes` once the person has confirmed the brief, which is the brief's approval (`jig validate --check` checks the same without approving).
+The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several. The verdict comes before any ticket: a brief verdict mints the ticket (`jig ticket new`), a chart verdict mints none and writes the chart, whose tickets `jig graduate` mints. It starts from `jig recall`, which shows the open tickets and their edges, near-duplicates, the charts' fog, platform documents and past answers, and for a brief it ends when `jig validate` says `valid: yes` once the person has confirmed the brief, which is the brief's approval (`jig validate --check` checks the same without approving).
 _Avoid_: onboarding
 
 **Illustration**:
@@ -103,8 +103,16 @@ A part of a phase with a state of its own: a slice in the build; a gate round, t
 _Avoid_: task, sub-task
 
 **Start-to-finish run**:
-A prompt that names several phases ("Build and review SHOP-1", "Take SHOP-1 from brief to PR"), which the session runs in order, each with its skill, without waiting for a prompt to start the next. The span is the prompt and nothing records it; a refusal ends the run. It hands over no decision: the brief's questions and approval, a review's asks and the publish approval are asked of the person. For an unattended session the Stop hook's next-phase note says when the run has more to do ([ADR 0035](docs/adr/0035-start-to-finish-and-recommendations-are-separate.md)).
+A prompt that names several phases ("Build and review SHOP-1", "Take SHOP-1 from brief to PR"), which the session runs in order, each with its skill, without waiting for a prompt to start the next. The span is the prompt and nothing records it; a refusal ends the run, and so does a chart verdict (a chart is not a ticket: the session says why and asks whether to take the chart's tickets on, see **Chart run**). It hands over no decision: the brief's questions and approval, a review's asks and the publish approval are asked of the person. For an unattended session the Stop hook's next-phase note says when the run has more to do ([ADR 0035](docs/adr/0035-start-to-finish-and-recommendations-are-separate.md)).
 _Avoid_: automatic run, workflow, pipeline run
+
+**Chart run**:
+A prompt aimed at a chart, run from the main session: "Take <chart> to PR" when nothing of it started, "Continue <chart>" when something did, or a yes to the question a chart verdict asks. The main session briefs every ticket up front (one grilling round across the chart, one confirmation, `jig validate` for each), then starts one build subagent per ticket, each in its own worktree and in waves, and asks the person everything a subagent cannot: a subagent's question comes back to the main session, which asks, relays the answer with `jig answer` and resumes the subagent; a review's asks are decided there with `jig triage`; the publish approvals are asked together. The build subagent claims with `--unattended` and spawns its own reviewer subagent. A ticket behind a `merged` dependency ends the run; "Continue <chart>" resumes it once the pull request merged. jig starts no session and records no run: the span is the prompt, and the standing is derived (`jig skill chart`, [ADR 0037](docs/adr/0037-a-chart-is-run-from-the-main-session.md)).
+_Avoid_: batch, pipeline, campaign
+
+**Chart standing**:
+Where a chart is, derived from its tickets' journal lines and records and never recorded (`phase.DeriveChart`, shown by `jig next <chart>` and `jig status <chart>`, and by the TUI's chart screen): each ticket's wave and reach (done, here, after a merge, or blocked), the tickets to brief, the build waves that can run now, where the run would end and the pull requests it waits on, whether the chart started, and the verdict with the prompt that moves it ("Take <chart> to PR", "Continue <chart>", or none).
+_Avoid_: chart status, run state
 
 **Recommendations**:
 A hand-over the prompt says ("go with your recommendations"), in one phase or a start-to-finish run: the session answers the person's decisions itself with its recommended answers, recorded as its own (grilling answers tagged `defaulted`, the brief's approval with agent provenance, asks decided with `jig triage`, the publish the hand-off way, which asks for no approval). A start-to-finish run with recommendations has nobody to ask.
@@ -123,7 +131,7 @@ One run of a harness, known to jig by the id the harness gives it (or one jig mi
 _Avoid_: run, conversation
 
 **Fresh session**:
-A harness session that did none of a ticket's work: its id carries no journal line of the ticket except the gate's, triage and publish lines, and no ledger line of it changed a file or made a commit for the ticket. `jig gate` and `jig next <ticket>` say whether the calling session is fresh, not fresh or unknown. A fresh one reviews the ticket itself; one that is not has a subagent do it, waits for its verdict, and never reads the round itself (a subagent shares its session's id, so if both read it the ledger cannot say which closed it). Advice only: `jig review done` judges independence from who built, as before.
+A harness session that did none of a ticket's work: its id carries no journal line of the ticket except the gate's, triage and publish lines, and no ledger line of it changed a file or made a commit for the ticket. `jig gate` and `jig next <ticket>` say whether the calling session is fresh, not fresh or unknown. A fresh one reviews the ticket itself; one that is not has a subagent do it, waits for its verdict, and never reads the round itself (a subagent shares its session's id, so the ledger tells it from its parent only by the agent id its tool calls carry, and the round is independent only while the main session never reads it). Advice only: `jig review done` judges independence from who built, as before.
 _Avoid_: independent (that is the property of a recorded round)
 
 **Claim**:
@@ -155,7 +163,7 @@ What a harness (or git) calls when something happens in a session: session start
 _Avoid_: trigger, listener
 
 **Note**:
-What a session has not yet heard: a verification outcome, an answer, a correction, a spend warning, what comes next (to open the gate and review, to publish). Delivered once per session and fact at the session's next tool call or prompt; an enforced note also holds an **unattended** session back at Stop, once.
+What a session has not yet heard: a verification outcome, an answer, a correction, a spend warning, what comes next (to open the gate and review, to publish). Delivered once per session, agent and fact (a build subagent and the main session that started it each hear what they have not) at the next tool call or prompt; an enforced note also holds an **unattended** session or subagent back at its stop, once.
 _Avoid_: notification, alert
 
 **Correction**:
@@ -163,7 +171,7 @@ A fact told to a session from what the journal already holds, with no second rec
 _Avoid_: warning, lint
 
 **Unattended**:
-A claim made with `--unattended` (or a marker default) says no person is watching: an unmet claim condition refuses the claim, and an enforced note refuses a Stop once per fact. It is never an environment variable, since interactive cloud sessions exist.
+A claim made with `--unattended` (or a marker default) says no person is watching: an unmet claim condition refuses the claim, and an enforced note refuses a stop once per fact, the stop of the agent that made the claim (a build subagent's, never the main session's that started it; a harness without agent ids falls back to the whole session). It is never an environment variable, since interactive cloud sessions exist.
 _Avoid_: headless, background
 
 **Spend**:
@@ -279,7 +287,7 @@ The same failure signature recurring twice: two `oracle` failures of one slice w
 _Avoid_: retry loop, flaky failure
 
 **Chart**:
-The wayfinder layer for work spanning tickets: `charts/<name>/` holds `map.md` (for people and sessions; jig never reads it) and `tickets.yaml` (the handover jig reads and writes). The map decides what to build; it never builds anything itself. `jig graduate <name>` creates the chart's tickets and writes their ids back into `tickets.yaml`.
+The wayfinder layer for work spanning tickets: `charts/<name>/` holds `map.md` (for people and sessions; jig reads its sections, the fog for `jig recall` and all of them for `jig next <chart>`, and never writes it) and `tickets.yaml` (the handover jig reads and writes). The map decides what to build; it never builds anything itself. `jig graduate <name>` creates the chart's tickets and writes their ids back into `tickets.yaml`; an intake that reaches a chart verdict mints none of them. A chart's standing is derived and a chart run takes its tickets to a pull request (see **Chart standing**, **Chart run**).
 _Avoid_: roadmap, epic
 
 **Dependency**:
