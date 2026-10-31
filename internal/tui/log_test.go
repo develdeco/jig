@@ -86,6 +86,36 @@ func TestTheLogTagsEachCallWithWhatItWasFor(t *testing.T) {
 	}
 }
 
+// TestTheLogShowsAnAgentHeldAtItsStop: jig holding a build subagent back at
+// its stop (one stop-block line for each loose end it named) is a row of the
+// slice the subagent builds, naming the agent and the loose end; a hold for a
+// review still to open is the review's.
+func TestTheLogShowsAnAgentHeldAtItsStop(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "SHOP-2")
+	g.send(tea.WindowSizeMsg{Width: 140, Height: 40})
+	held := func(slice, ref, summary string) func(*journal.Line) {
+		return func(l *journal.Line) {
+			l.Session, l.Agent, l.Slice, l.Ref, l.Outcome, l.Summary = "s-main", "agent-4f2a91c0e7", slice, ref, outcomeStopBlock, summary
+		}
+	}
+	g.feed(
+		jl(at(0, 0), "SHOP-2", "apply", journal.EventClaim, with("s-main", "", "", "", "", "")),
+		jl(at(0, 30), "SHOP-2", "apply", journal.EventVerifyPending, with("s-main", sha('7'), "", "", "", "")),
+		ll(at(0, 31), "SHOP-2", journal.EventNoteDelivered, held("apply", "pending:777777777777:apply", "verification of 777777777777 for slice apply is still running")),
+		ll(at(1, 0), "SHOP-2", journal.EventNoteDelivered, held("apply", "review:SHOP-2:1", "every slice is green and no review round is open")),
+	)
+	act := strings.Join(panelLines(strings.Split(g.view(), "\n"), "Activity"), "\n")
+	for _, want := range []string{
+		"09:00:31 build·apply ⏸ agent 4f2a91c0 held at its stop · verification of 777777777777 for slice apply is still running",
+		"09:01:00 review      ⏸ agent 4f2a91c0 held at its stop · every slice is green and no review round is open",
+	} {
+		if !strings.Contains(act, want) {
+			t.Errorf("the activity lacks %q:\n%s", want, act)
+		}
+	}
+}
+
 // TestALiveLineSaysHowLongAgo: the live line gives how long ago its move was
 // made in a few cells: "0s" under a second, span's words above it.
 func TestALiveLineSaysHowLongAgo(t *testing.T) {

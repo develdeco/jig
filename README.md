@@ -181,8 +181,11 @@ was decided, the fog), its tickets with the same four step marks and what each
 waits for ("waits for SHOP-2 merged · its PR is open") or is ready for, the run
 (what to say to your agent, the briefs to write, the build waves, and where it
 ends) and the tickets' activity together. The keys act on the ticket under the
-cursor, and the screen is the standing `jig next <chart>` prints, read again as
-events arrive and after a merge on the host.
+cursor, and the screen is the standing `jig next <chart>` prints, read again once
+its tickets' events quiet down; a merge on the host writes no line, so `r` reads
+it. An agent jig holds back at its stop is an activity line of its own ("⏸ agent
+4f2a91c0 held at its stop · verification of 7f03c55 for slice apply is still
+running").
 
 From it you answer a session's question (`a`), keep or dismiss a review's ask
 (`k`, `d`), open a review round (`g`), and approve and publish (`p`: after your
