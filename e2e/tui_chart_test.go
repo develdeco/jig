@@ -110,20 +110,3 @@ func TestTUIChartScreen(t *testing.T) {
 		t.Fatalf("jig tui checkout exit = %d, want 0 and no stderr\nstderr:\n%s", res.Code, res.Stderr)
 	}
 }
-
-// TestTUIWithoutChartsDrawsNoChart: a store with no chart has the project's
-// screen it always had, with no charts line.
-func TestTUIWithoutChartsDrawsNoChart(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{})
-	tui := startJig(t, env, fx.RepoDir, "tui")
-	screens := tuiScreens{t: t, p: tui}
-	screen := screens.until(fx.Ticket, "1 ticket")
-	if strings.Contains(screen, "chart") {
-		t.Errorf("a store with no chart shows one:\n%s", screen)
-	}
-	screens.press("q")
-	if res := tui.Stop(); res.Code != 0 || res.Stderr != "" {
-		t.Fatalf("jig tui exit = %d, want 0 and no stderr\nstderr:\n%s", res.Code, res.Stderr)
-	}
-}

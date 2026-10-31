@@ -58,13 +58,29 @@ func (r *rig) pending(slice, name string) string {
 	return sha
 }
 
-func TestASubagentIsHeldAtItsOwnStopForItsOwnClaim(t *testing.T) {
+// TestTheHoldFallsOnTheAgentThatClaimed: a subagent's unattended claim holds
+// that subagent at its own stop and nobody else. The main session and a
+// sibling (a reviewer nested in the builder, say) are told and never held; the
+// claim holder is held once for each loose end: the running verification, a
+// second one, uncommitted tracked files. A later interactive claim of the same
+// agent only tells it.
+func TestTheHoldFallsOnTheAgentThatClaimed(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)
 	r.onTicketBranch()
 	r.handle(r.ev(KindSessionStart))
 	r.claimBy("a-7", "a", true)
 	sha := r.pending("a", "a.txt")
+
+	if main := r.handle(r.ev(KindStop)); main.Block != "" || !strings.Contains(main.Message, sha[:12]) {
+		t.Errorf("main Stop = %+v, want the verification said and no block", main)
+	}
+	if sibling := r.handle(r.ev(KindStop, func(e *Event) { e.Agent = "a-9" })); sibling.Block != "" {
+		t.Errorf("Stop of a subagent that holds no claim = %+v, want no block", sibling)
+	}
+	if got := r.ledgerOf(journal.EventNoteDelivered); len(got) != 0 {
+		t.Fatalf("note-delivered lines = %+v, want no refusal recorded", got)
+	}
 
 	first := r.handle(r.ev(KindStop, subagent))
 	if !strings.Contains(first.Block, "jig: this agent's claim is unattended, so it is held back from stopping") ||
@@ -80,41 +96,32 @@ func TestASubagentIsHeldAtItsOwnStopForItsOwnClaim(t *testing.T) {
 		t.Errorf("Stop while continuing with nothing new = %+v, want a message and no block", again)
 	}
 	sha2 := r.pending("b", "b.txt")
-	third := r.handle(r.ev(KindStop, subagent, func(e *Event) { e.StopActive = true }))
-	if !strings.Contains(third.Block, sha2[:12]) {
+	if third := r.handle(r.ev(KindStop, subagent, func(e *Event) { e.StopActive = true })); !strings.Contains(third.Block, sha2[:12]) {
 		t.Errorf("Stop while continuing with a new pending verification = %+v, want a block that names it", third)
 	}
+	if err := os.WriteFile(filepath.Join(r.fx.RepoDir, "go.mod"), []byte("module changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if dirty := r.handle(r.ev(KindStop, subagent, func(e *Event) { e.StopActive = true })); !strings.Contains(dirty.Block, "1 tracked file changed and not committed: go.mod") || !strings.Contains(dirty.Block, "Commit them") {
+		t.Errorf("subagent Stop with a tracked file changed = %+v, want the file named and the hold", dirty)
+	}
+
+	r.claimBy("a-7", "c", false)
+	if res := r.handle(r.ev(KindStop, subagent)); res.Block != "" || !strings.Contains(res.Message, sha2[:12]) {
+		t.Errorf("subagent Stop of an interactive claim = %+v, want a message and no block", res)
+	}
 }
 
-func TestTheMainStopIsNotHeldForASubagentsClaim(t *testing.T) {
+// TestAClaimWhoseHolderIsUnknownHoldsTheSession: with no tool line of the
+// claim's call (a harness without hooks) the whole session is the holder, as
+// before; a tool line of the session's own agent makes it the holder and no
+// subagent; tool lines of two agents make the holder unknown again.
+func TestAClaimWhoseHolderIsUnknownHoldsTheSession(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)
 	r.onTicketBranch()
 	r.handle(r.ev(KindSessionStart))
-	r.claimBy("a-7", "a", true)
-	sha := r.pending("a", "a.txt")
-
-	main := r.handle(r.ev(KindStop))
-	if main.Block != "" || !strings.Contains(main.Message, sha[:12]) {
-		t.Errorf("main Stop = %+v, want the verification said and no block", main)
-	}
-	// Another subagent of the session, a reviewer nested in a-7 say, holds no
-	// claim either.
-	reviewer := r.handle(r.ev(KindStop, func(e *Event) { e.Agent = "a-9" }))
-	if reviewer.Block != "" {
-		t.Errorf("Stop of a subagent that holds no claim = %+v, want no block", reviewer)
-	}
-	if got := r.ledgerOf(journal.EventNoteDelivered); len(got) != 0 {
-		t.Errorf("note-delivered lines = %+v, want no refusal recorded", got)
-	}
-}
-
-func TestAnUnknownClaimHolderFallsBackToTheSession(t *testing.T) {
-	t.Parallel()
-	r := newRig(t)
-	r.onTicketBranch()
-	r.handle(r.ev(KindSessionStart))
-	r.unattendedClaim("a") // no tool line of the call: a harness without hooks
+	r.unattendedClaim("a")
 	r.pending("a", "a.txt")
 	if res := r.handle(r.ev(KindStop)); res.Block == "" {
 		t.Errorf("main Stop with a claim of an unknown holder = %+v, want the session held, as before", res)
@@ -122,61 +129,19 @@ func TestAnUnknownClaimHolderFallsBackToTheSession(t *testing.T) {
 	if res := r.handle(r.ev(KindStop, subagent)); res.Block == "" {
 		t.Errorf("subagent Stop with a claim of an unknown holder = %+v, want it held too", res)
 	}
-}
 
-func TestTwoAgentsOnTheClaimLinesMakeTheHolderUnknown(t *testing.T) {
-	t.Parallel()
-	r := newRig(t)
-	r.onTicketBranch()
-	r.handle(r.ev(KindSessionStart))
-	r.claimBy("a-7", "a", true)
-	r.toolLine("", "jig claim "+r.fx.Ticket+" --slice a --unattended")
-	r.pending("a", "a.txt")
-	if res := r.handle(r.ev(KindStop)); res.Block == "" {
-		t.Errorf("main Stop with two agents on the claim lines = %+v, want the session-wide rule", res)
-	}
-}
-
-func TestTheClaimOfTheSessionsOwnAgentHoldsItAndNoSubagent(t *testing.T) {
-	t.Parallel()
-	r := newRig(t)
-	r.onTicketBranch()
-	r.handle(r.ev(KindSessionStart))
-	r.claimBy("", "a", true)
-	r.pending("a", "a.txt")
+	claim := "jig claim " + r.fx.Ticket + " --slice a --unattended"
+	r.toolLine("", claim)
 	if res := r.handle(r.ev(KindStop)); !strings.Contains(res.Block, "this session is unattended") {
 		t.Errorf("main Stop = %+v, want the session held with the session's reason", res)
 	}
 	if res := r.handle(r.ev(KindStop, subagent)); res.Block != "" {
 		t.Errorf("subagent Stop of a claim the session's own agent holds = %+v, want no block", res)
 	}
-}
 
-func TestASubagentStopOfAnInteractiveClaimOnlyShowsAMessage(t *testing.T) {
-	t.Parallel()
-	r := newRig(t)
-	r.onTicketBranch()
-	r.handle(r.ev(KindSessionStart))
-	r.claimBy("a-7", "a", false)
-	sha := r.pending("a", "a.txt")
-	res := r.handle(r.ev(KindStop, subagent))
-	if res.Block != "" || !strings.Contains(res.Message, sha[:12]) {
-		t.Errorf("subagent Stop of an interactive claim = %+v, want a message and no block", res)
-	}
-}
-
-func TestASubagentIsHeldForTrackedFilesNotCommitted(t *testing.T) {
-	t.Parallel()
-	r := newRig(t)
-	r.onTicketBranch()
-	r.handle(r.ev(KindSessionStart))
-	r.claimBy("a-7", "a", true)
-	if err := os.WriteFile(filepath.Join(r.fx.RepoDir, "go.mod"), []byte("module changed\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	res := r.handle(r.ev(KindStop, subagent))
-	if !strings.Contains(res.Block, "1 tracked file changed and not committed: go.mod") || !strings.Contains(res.Block, "Commit them") {
-		t.Errorf("subagent Stop = %+v, want the dirty file named and the hold", res)
+	r.toolLine("a-7", claim)
+	if res := r.handle(r.ev(KindStop)); res.Block == "" {
+		t.Errorf("main Stop with two agents on the claim lines = %+v, want the session-wide rule", res)
 	}
 }
 
