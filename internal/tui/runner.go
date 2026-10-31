@@ -62,8 +62,9 @@ type (
 	}
 	// rosterMsg is the store's ticket list, read.
 	rosterMsg struct {
-		rows []rosterRow
-		err  error
+		rows   []rosterRow
+		charts []chartListing
+		err    error
 	}
 )
 
@@ -121,8 +122,25 @@ func (m *Model) loadRoster() tea.Cmd {
 	run := m.run
 	return func() tea.Msg {
 		out, _ := run(args)
-		rows, err := parseRoster(out)
-		return rosterMsg{rows: rows, err: err}
+		rows, charts, err := parseRoster(out)
+		return rosterMsg{rows: rows, charts: charts, err: err}
+	}
+}
+
+// loadChart reads a chart's standing, one read of a chart at a time.
+func (m *Model) loadChart(name string) tea.Cmd {
+	c := m.w.charts[name]
+	if c == nil || c.loading || m.run == nil {
+		return nil
+	}
+	c.loading, c.dirty = true, false
+	m.lastRead = m.now()
+	args := m.verbArgs("next", name, "--json")
+	run := m.run
+	return func() tea.Msg {
+		out, _ := run(args)
+		info, err := parseChart(out)
+		return chartMsg{name: name, info: info, err: err}
 	}
 }
 

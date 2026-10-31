@@ -182,9 +182,10 @@ func closedPhrase(reason, by string) string {
 }
 
 // parseRoster reads `jig next --json` for the store: the tickets, in the order
-// the verb lists them. The verb may print a note before the object (a
-// checkpoint line); the object is the first line that starts with a brace.
-func parseRoster(out string) ([]rosterRow, error) {
+// the verb lists them, each with the blockers that are not met, and the charts
+// the store has. The verb may print a note before the object (a checkpoint
+// line); the object is the first line that starts with a brace.
+func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 	var obj string
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "{") {
@@ -194,25 +195,44 @@ func parseRoster(out string) ([]rosterRow, error) {
 	}
 	if obj == "" {
 		if doc := parseAxi(out); doc.Err != nil {
-			return nil, fmt.Errorf("%s", doc.Err.Msg)
+			return nil, nil, fmt.Errorf("%s", doc.Err.Msg)
 		}
-		return nil, fmt.Errorf("jig next printed no ticket list")
+		return nil, nil, fmt.Errorf("jig next printed no ticket list")
 	}
 	var next struct {
 		Tickets []struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
-			State string `json:"state"`
+			ID        string `json:"id"`
+			Title     string `json:"title"`
+			State     string `json:"state"`
+			BlockedBy []struct {
+				Ticket string `json:"ticket"`
+				Kind   string `json:"kind"`
+				Fact   string `json:"fact"`
+			} `json:"blocked_by"`
 		} `json:"tickets"`
+		Charts []struct {
+			Name        string   `json:"name"`
+			Title       string   `json:"title"`
+			Tickets     []string `json:"tickets"`
+			Ungraduated int      `json:"ungraduated"`
+		} `json:"charts"`
 	}
 	if err := json.Unmarshal([]byte(obj), &next); err != nil {
-		return nil, fmt.Errorf("jig next printed a ticket list that does not parse: %w", err)
+		return nil, nil, fmt.Errorf("jig next printed a ticket list that does not parse: %w", err)
 	}
 	rows := make([]rosterRow, 0, len(next.Tickets))
 	for _, t := range next.Tickets {
-		rows = append(rows, rosterRow{ID: t.ID, Title: t.Title, State: t.State})
+		row := rosterRow{ID: t.ID, Title: t.Title, State: t.State}
+		for _, b := range t.BlockedBy {
+			row.Blockers = append(row.Blockers, chartWait{Ticket: b.Ticket, Kind: b.Kind, Fact: b.Fact})
+		}
+		rows = append(rows, row)
 	}
-	return rows, nil
+	var charts []chartListing
+	for _, c := range next.Charts {
+		charts = append(charts, chartListing{Name: c.Name, Title: c.Title, Tickets: c.Tickets, Ungraduated: c.Ungraduated})
+	}
+	return rows, charts, nil
 }
 
 // firstWords is the start of what a verb printed, for a message about it.

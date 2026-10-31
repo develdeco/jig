@@ -37,10 +37,46 @@ type world struct {
 	// sessionInfo is what each session's session-start line in the ledger
 	// said of it (people.go), whatever ticket the line named.
 	sessionInfo map[string]sessionInfo
+	// charts by name, and the order the store listing gave them.
+	charts     map[string]*chart
+	chartOrder []string
 }
 
 func newWorld() *world {
-	return &world{tickets: map[string]*ticket{}, sessions: map[string]string{}, sessionInfo: map[string]sessionInfo{}}
+	return &world{tickets: map[string]*ticket{}, sessions: map[string]string{}, sessionInfo: map[string]sessionInfo{}, charts: map[string]*chart{}}
+}
+
+// chart is what is known of one chart: how the store listing names it, and
+// the verb's word on its standing once the chart screen has read it.
+type chart struct {
+	listing chartListing
+	// info is the last `jig next <chart> --json` read, nil before the first (and
+	// when the verb printed no chart).
+	info *chartInfo
+	// loading is set while the chart is being read; failures counts the reads
+	// that failed in a row.
+	loading  bool
+	failures int
+	// dirty is set when something happened to one of the chart's tickets since
+	// the read: the idle read of the chart screen is made for it.
+	dirty bool
+}
+
+// setCharts takes the charts the store listing named: the order they are
+// listed in, with what was read of each kept; a chart no longer listed is gone.
+func (w *world) setCharts(listed []chartListing) {
+	charts := make(map[string]*chart, len(listed))
+	order := make([]string, 0, len(listed))
+	for _, l := range listed {
+		c := w.charts[l.Name]
+		if c == nil {
+			c = &chart{}
+		}
+		c.listing = l
+		charts[l.Name] = c
+		order = append(order, l.Name)
+	}
+	w.charts, w.chartOrder = charts, order
 }
 
 // ticket is what is known of one ticket.
@@ -76,6 +112,9 @@ type ticket struct {
 	// briefLoading while a read is out.
 	brief                    *briefText
 	briefStale, briefLoading bool
+	// blockers are the blockers `jig next` listed for the ticket that are not
+	// met.
+	blockers []chartWait
 }
 
 // ticketFor returns the ticket id, making it known when it is not.
@@ -139,7 +178,7 @@ func (w *world) setRoster(rows []rosterRow) {
 	order := make([]string, 0, len(rows)+len(w.order))
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
-		t.title, t.rosterState = r.Title, r.State
+		t.title, t.rosterState, t.blockers = r.Title, r.State, r.Blockers
 		t.awaiting = false
 		listed[r.ID] = true
 		order = append(order, r.ID)
@@ -184,9 +223,11 @@ func short(sha string) string {
 	return sha
 }
 
-// rosterRow is one ticket of `jig next --json`.
+// rosterRow is one ticket of `jig next --json`, with the blockers of it that
+// are not met.
 type rosterRow struct {
 	ID, Title, State string
+	Blockers         []chartWait
 }
 
 // latest is the position of the last line of the ticket whose event is one

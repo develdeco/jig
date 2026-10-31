@@ -10,6 +10,7 @@ import (
 
 // The kinds of row a cursor can stand on.
 const (
+	rowChart    = "chart"
 	rowTicket   = "ticket"
 	rowBrief    = "brief"
 	rowBuild    = "build"
@@ -81,6 +82,8 @@ func (m *Model) page() page {
 		return m.briefPage(e.ticket)
 	case screenPublish:
 		return m.publishPage(e.ticket)
+	case screenChart:
+		return m.chartPage(e.chart)
 	}
 	return m.mainPage()
 }
@@ -208,7 +211,20 @@ func (m *Model) header(w int) []string {
 	switch e.screen {
 	case screenMain:
 		n := len(m.w.order)
-		right = m.st.dim(strconv.Itoa(n) + " " + plural(n, "ticket", "tickets"))
+		right = strconv.Itoa(n) + " " + plural(n, "ticket", "tickets")
+		if nc := len(m.w.chartOrder); nc > 0 {
+			right += " · " + strconv.Itoa(nc) + " " + plural(nc, "chart", "charts")
+		}
+		right = m.st.dim(right)
+	case screenChart:
+		crumbs += " › " + m.st.bold(e.chart)
+		if c := m.w.charts[e.chart]; c != nil {
+			if title := c.title(); title != "" && title != e.chart {
+				crumbs += "  " + title
+			}
+			state, label := m.chartStatus(c, m.chartRows(c))
+			right = m.st.icon(state) + " " + m.st.state(state, label)
+		}
 	default:
 		t := m.w.tickets[e.ticket]
 		crumbs += " › " + m.st.bold(e.ticket)
@@ -312,6 +328,8 @@ func (m *Model) keyHints() []string {
 	switch m.top().screen {
 	case screenMain:
 		keys = [][]string{move, open, gate, answer, tail, {"r", "refresh"}, quit}
+	case screenChart:
+		keys = [][]string{move, {"enter", "open ticket"}, back, gate, answer, tail, {"r", "refresh"}, quit}
 	case screenTicket:
 		keys = [][]string{move, open, back, answer, keep, dismiss, gate, publish, tail, quit}
 		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
@@ -384,6 +402,20 @@ func (m *Model) tailLines(w, n int) []string {
 	e := m.top()
 	if e.screen == screenMain {
 		envs = m.w.feed
+	} else if e.screen == screenChart {
+		// Every line of the chart's tickets, as the feed names them.
+		if c := m.w.charts[e.chart]; c != nil {
+			for _, id := range c.ids() {
+				if t := m.w.tickets[id]; t != nil {
+					envs = append(append(envs, t.lines...), t.ledger...)
+				}
+			}
+			sort.SliceStable(envs, func(i, j int) bool {
+				a, _ := envs[i].At()
+				b, _ := envs[j].At()
+				return a.Before(b)
+			})
+		}
 	} else if t := m.w.tickets[e.ticket]; t != nil {
 		envs = append(append(envs, t.lines...), t.ledger...)
 		sort.SliceStable(envs, func(i, j int) bool {
@@ -406,7 +438,7 @@ func (m *Model) tailLines(w, n int) []string {
 	}
 	out := make([]string, 0, n)
 	for _, l := range envs {
-		out = append(out, fit("  "+m.tailLine(l, e.screen == screenMain), w))
+		out = append(out, fit("  "+m.tailLine(l, e.screen == screenMain || e.screen == screenChart), w))
 	}
 	return out
 }
