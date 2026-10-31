@@ -18,8 +18,14 @@ import (
 	"github.com/develdeco/jig/internal/project"
 )
 
-// livePrompt is the one user prompt the scripted model answers.
-const livePrompt = "scripted hooks run: commit the slice"
+// livePrompt is the one user prompt the scripted model answers, and
+// liveSubagentPrompt the task the scripted model hands a subagent: a
+// subagent's conversation begins with its own prompt, which the scripted API
+// routes to a script of its own.
+const (
+	livePrompt         = "scripted hooks run: commit the slice"
+	liveSubagentPrompt = "scripted hooks run: commit the subagent's slice"
+)
 
 // TestHooksLive is the only proof that the hook JSON jig prints is what Claude
 // Code reads. The real `claude -p` runs in the fixture clone against a
@@ -31,7 +37,10 @@ const livePrompt = "scripted hooks run: commit the slice"
 // and, since only the PostToolUse hook saw the commit, a journal verify-pending
 // line from the worker that hook started. The project defaults to unattended,
 // so the Stop hook refuses to let the session end while that verification
-// runs, and the reason it gives must come back to the model.
+// runs, and the reason it gives must come back to the model. A subagent the
+// session starts commits a slice of its own: its tool call reaches the ledger
+// with its agent id, and its SubagentStop is held back, with a reason that
+// comes back to the subagent, while that verification runs.
 //
 // It is opt-in, like the other tests that need the CLI (set JIG_LIVE_CLAUDE=1,
 // with claude on PATH): CI's claude-cli job runs it.
@@ -67,18 +76,37 @@ func TestHooksLive(t *testing.T) {
 		mu   sync.Mutex
 		seen []string // the text of every message the model was sent
 	)
-	script := &claudetest.Session{Steps: []claudetest.Step{
+	var script *claudetest.Session
+	script = &claudetest.Session{Steps: []claudetest.Step{
 		{Name: "commit the slice", Call: claudetest.Bash(
 			"git -c user.name=jig-e2e -c user.email=e2e@example.invalid commit -q --allow-empty -m 'a: scripted' -m 'Jig-Slice: a' && git rev-parse HEAD")},
 		{Name: "read the session id jig set", Call: claudetest.Bash("printenv JIG_SESSION")},
+		{Name: "start a subagent", Call: func([]claudetest.ToolResult) claudetest.ToolCall {
+			// The tool is called Task in the CLI's older releases and Agent in
+			// the newer; the scripted API is offered whichever there is.
+			name := "Agent"
+			if script.ToolSchema(name) == nil {
+				name = "Task"
+			}
+			return claudetest.ToolCall{Name: name, Input: map[string]any{
+				"description": "commit the subagent's slice", "prompt": liveSubagentPrompt, "subagent_type": "general-purpose",
+			}}
+		}},
+	}}
+	subScript := &claudetest.Session{Steps: []claudetest.Step{
+		{Name: "commit the subagent's slice", Call: claudetest.Bash(
+			"git -c user.name=jig-e2e -c user.email=e2e@example.invalid commit -q --allow-empty -m 'b: scripted by a subagent' -m 'Jig-Slice: b' && git rev-parse HEAD")},
 	}}
 	claudetest.Serve(t, &claudetest.API{Route: func(p string) *claudetest.Session {
 		mu.Lock()
 		defer mu.Unlock()
-		if !strings.Contains(p, livePrompt) {
-			return nil
+		switch {
+		case strings.Contains(p, liveSubagentPrompt):
+			return subScript
+		case strings.Contains(p, livePrompt):
+			return script
 		}
-		return script
+		return nil
 	}, Observe: func(messages []string) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -87,7 +115,7 @@ func TestHooksLive(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, claude, "-p", "--permission-mode", "dontAsk", "--allowedTools", "Bash", "--no-session-persistence", "--", livePrompt)
+	cmd := exec.CommandContext(ctx, claude, "-p", "--permission-mode", "dontAsk", "--allowedTools", "Bash,Agent,Task", "--no-session-persistence", "--", livePrompt)
 	cmd.Dir = fx.RepoDir
 	cmd.Env = env.environ()
 	out, err := cmd.CombinedOutput()
@@ -159,6 +187,29 @@ func TestHooksLive(t *testing.T) {
 	})
 	if pending.Slice != "a" || pending.Session != start.Session {
 		t.Errorf("verify-pending line = %+v, want slice a asked for by session %s", pending, start.Session)
+	}
+
+	// The subagent: its tool calls carry its agent id (the main session's
+	// carry none), and its SubagentStop came back to it as a refusal whose
+	// ledger line names it.
+	subScript.Check(t)
+	var subTool, subHold journal.Line
+	for _, l := range readLedger(t, env) {
+		switch {
+		case l.Event == journal.EventTool && strings.Contains(l.Command, "Jig-Slice: b"):
+			subTool = l
+		case l.Event == journal.EventNoteDelivered && l.Outcome == "stop-block" && l.Agent != "":
+			subHold = l
+		}
+	}
+	if subTool.Agent == "" || subTool.Session != start.Session || subTool.Tool != "Bash" {
+		t.Errorf("subagent tool line = %+v, want its Bash commit in session %s with an agent id", subTool, start.Session)
+	}
+	if subHold.Session != start.Session || subHold.Agent != subTool.Agent {
+		t.Errorf("subagent refusal line = %+v, want a stop-block for agent %q in session %s", subHold, subTool.Agent, start.Session)
+	}
+	if !strings.Contains(got, "this agent's claim is unattended, so it is held back from stopping") {
+		t.Errorf("no request to the API carries the reason jig gave for holding the subagent back:\n%s", got)
 	}
 	h.WaitVerifiers()
 }

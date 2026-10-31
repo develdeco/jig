@@ -16,6 +16,7 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // spawnedFor counts the ledger lines that say a worker was started for sha.
@@ -142,5 +143,110 @@ func TestHooksDriveVerify(t *testing.T) {
 	}
 	if s := sessions["s-hooks"]; s.Live() || s.Ticket != fx.Ticket || s.Harness != "claude" || s.Model != "claude-test" {
 		t.Errorf("session s-hooks = %+v, want ended, on %s, of claude, model claude-test", s, fx.Ticket)
+	}
+}
+
+// TestSubagentStopHoldsOnlyTheClaimHolder is a chart run's build in miniature,
+// with the hooks installed: a subagent of the main session claims a slice
+// unattended and commits, and while the verification runs its own stop is held
+// back, with its reason, while the main session's stop, in the same session and
+// the same clone, is only told. Once the verification passes each agent hears
+// the outcome once, and neither stop has anything left to say.
+func TestSubagentStopHoldsOnlyTheClaimHolder(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	env = env.withGitGlobal(t)
+	main := newHarness(t, fx, env, "s-chart")
+	sub := newHarness(t, fx, env, "s-chart")
+	sub.Agent = "a-1"
+	main.Branch(fx.Branch)
+
+	if res := runJig(t, env, fx.RepoDir, "hooks", "--global", "--harness", "claude", "--yes"); res.Code != 0 {
+		t.Fatalf("jig hooks --global exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
+	if res := runJig(t, env, fx.RepoDir, "githook", "--global"); res.Code != 0 {
+		t.Fatalf("jig githook --global exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
+	subagentStop := installedHookCommand(t, claudeSettings(env), "SubagentStop")
+	if !strings.HasSuffix(subagentStop, "observe --harness claude") {
+		t.Fatalf("the installed SubagentStop command = %q, want jig observe --harness claude", subagentStop)
+	}
+	stopSub := func(active bool) jigResult {
+		t.Helper()
+		return runHookCommand(t, env, fx.RepoDir, subagentStop, sub.Payload("SubagentStop", map[string]any{"stop_hook_active": active}))
+	}
+
+	// An unattended claim needs the brief approved.
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum, err := st.BriefSHA256(fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := store.Approval{By: "Test Person", At: time.Now().UTC().Format(time.RFC3339), BriefSHA256: sum, Provenance: "person"}
+	if err := st.WriteApproval(fx.Ticket, approval); err != nil {
+		t.Fatal(err)
+	}
+
+	// The subagent claims its slice unattended: the hook that hears the call
+	// writes the tool line that says which agent made it.
+	if res := jigHooked(sub, "claim", fx.Ticket, "--slice", "a", "--unattended"); res.Code != 0 {
+		t.Fatalf("jig claim --unattended exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
+	release := sub.HoldVerifications("alpha", "beta")
+	sha := sub.CommitScenario("a", 1)
+	waitFor(t, 10*time.Second, "the worker git's hook started", func() bool { return spawnedFor(readLedger(t, env), sha) == 1 })
+	running := "verification of " + sha[:12] + " for slice a is still running"
+
+	held := decodeHook(t, stopSub(false))
+	if held.Decision != "block" || !strings.Contains(held.Reason, "this agent's claim is unattended, so it is held back from stopping") || !strings.Contains(held.Reason, running) {
+		t.Fatalf("SubagentStop = %+v, want a refusal that names the running verification", held)
+	}
+	if mainStop := decodeHook(t, main.Hook("Stop", map[string]any{"stop_hook_active": false})); mainStop.Decision != "" || !strings.Contains(mainStop.SystemMessage, running) {
+		t.Errorf("main Stop = %+v, want the verification said and no refusal: the claim is the subagent's", mainStop)
+	}
+	if again := decodeHook(t, stopSub(true)); again.Decision != "" || !strings.Contains(again.SystemMessage, running) {
+		t.Errorf("SubagentStop while continuing = %+v, want a message and no second refusal for the same fact", again)
+	}
+
+	release()
+	waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
+		return l.Event == journal.EventVerified && l.Commit == sha && l.Slice == "a"
+	})
+	sub.WaitVerifiers()
+
+	// Each agent hears the outcome, once, on its own.
+	verified := "verified " + sha[:12] + " for slice a"
+	if prompt := decodeHook(t, main.Hook("UserPromptSubmit", map[string]any{"prompt": "carry on"})); !strings.Contains(prompt.Specific.Context, verified) {
+		t.Errorf("main prompt context = %q, want %q", prompt.Specific.Context, verified)
+	}
+	if again := main.Hook("UserPromptSubmit", map[string]any{"prompt": "and again"}); again.Stdout != "" {
+		t.Errorf("a second main prompt = %q, want silence", again.Stdout)
+	}
+	tool := map[string]any{"tool_name": "Bash", "command": "ls"}
+	if call := decodeHook(t, sub.Hook("PostToolUse", tool)); !strings.Contains(call.Specific.Context, verified) {
+		t.Errorf("subagent tool context = %q, want %q: the main session hearing it is not the subagent hearing it", call.Specific.Context, verified)
+	}
+	if again := sub.Hook("PostToolUse", tool); again.Stdout != "" {
+		t.Errorf("a second subagent tool call = %q, want silence", again.Stdout)
+	}
+	told := map[string]int{}
+	for _, l := range readLedger(t, env) {
+		if l.Event == journal.EventNoteDelivered && strings.HasPrefix(l.Ref, "verified:") {
+			told[l.Agent]++
+		}
+	}
+	if len(told) != 2 || told[""] != 1 || told["a-1"] != 1 {
+		t.Errorf("verified notes delivered by agent = %v, want once to the main session and once to a-1", told)
+	}
+
+	// Nothing is outstanding for either.
+	if res := stopSub(false); res.Code != 0 || res.Stdout != "" {
+		t.Errorf("SubagentStop with everything verified = exit %d, %q, want silence", res.Code, res.Stdout)
+	}
+	if res := main.Hook("Stop", map[string]any{"stop_hook_active": false}); res.Code != 0 || res.Stdout != "" {
+		t.Errorf("main Stop with everything verified = exit %d, %q, want silence", res.Code, res.Stdout)
 	}
 }
