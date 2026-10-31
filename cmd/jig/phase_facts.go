@@ -113,7 +113,8 @@ func phaseFactsOf(st *store.Store, ticket string, seen map[string]bool, merges m
 			return f, nil, err
 		}
 		if p != nil {
-			f.Blockers = append(f.Blockers, phase.Blocker{Ticket: blocker, Kind: b.Kind, Reason: p.Message, Prompt: blockerPrompt(st, blocker, seen, merges)})
+			f.Blockers = append(f.Blockers, phase.Blocker{Ticket: blocker, Kind: b.Kind, Reason: p.Message, Prompt: blockerPrompt(st, blocker, seen, merges),
+				Code: p.Code, PRs: mergePRs(merges, blocker, b.Kind)})
 		}
 	}
 
@@ -194,6 +195,29 @@ func blockerPrompt(st *store.Store, blocker string, seen map[string]bool, merges
 		return ""
 	}
 	return phase.Derive(f, lines).Prompt
+}
+
+// mergePRs are the pull requests a merged blocker waits on: for each repo it
+// published in whose work has not merged, the recorded pull request and the
+// host's word on it. Nothing for a stacked blocker (met by a gate round, not a
+// merge), nothing when merges cannot be read, and nothing before the blocker
+// published (no pull request exists). Of is memoized, so this asks the host no
+// more than judging the blocker did.
+func mergePRs(merges mergeSource, blocker, kind string) []phase.MergePR {
+	if merges == nil || kind == "stacked" {
+		return nil
+	}
+	m, err := merges.Of(blocker)
+	if err != nil {
+		return nil
+	}
+	var out []phase.MergePR
+	for _, r := range m.Repos {
+		if !r.Met && r.PR != "" {
+			out = append(out, phase.MergePR{Repo: r.Repo, URL: r.PR, State: r.State})
+		}
+	}
+	return out
 }
 
 // promptHint is the clause that names the prompt a hint or a refusal sends a

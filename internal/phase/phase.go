@@ -194,12 +194,26 @@ type Ask struct {
 
 // Blocker is a blocker of the ticket that stops its claim: Reason says why in
 // a sentence, and Prompt is what to ask to meet it ("" when nothing a session
-// can do meets it).
+// can do meets it). Code is the claim's code for the condition
+// (CLAIM_BLOCKED_MERGED, ...), and PRs the pull requests the merge waits on,
+// when the blocker published and they are recorded: a chart's standing names
+// them where a run ends.
 type Blocker struct {
 	Ticket string
 	Kind   string
 	Reason string
 	Prompt string
+	Code   string
+	PRs    []MergePR
+}
+
+// MergePR is a pull request a blocker's merge waits on: the repo it is in, its
+// URL and the host's word on its state (OPEN, CLOSED or MERGED; "" when the
+// host could not be asked).
+type MergePR struct {
+	Repo  string
+	URL   string
+	State string
 }
 
 // VerdictClean is the verdict of a round that found nothing: the store's word
@@ -300,6 +314,15 @@ func (t Ticket) Of(n Name) Phase {
 		return t.Phases[i]
 	}
 	return Phase{}
+}
+
+// Blockers are the blockers of the ticket that stop its claim, as the facts
+// named them: nil for a ticket with none.
+func (t Ticket) Blockers() []Blocker {
+	if t.d == nil {
+		return nil
+	}
+	return t.d.f.Blockers
 }
 
 // Asked is the answer to "can phase p run now?" for a caller that wants p
