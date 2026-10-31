@@ -1,0 +1,40 @@
+jig  demo › checkout  Coupons at checkout                                              ◐ in progress
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ╭─ Map ───────────────────────────────────────────────────────────────── charts/checkout/map.md ─╮
+  │  destination  A customer takes a coupon code from the cart to a discounted order.              │
+  │  decided      ✓ Codes are single use                                                           │
+  │               ✓ Discounts apply before tax                                                     │
+  │  fog          ~ Stacking two codes                                                             │
+  │               ~ Codes in other currencies                                                      │
+  │  out of scope · Gift cards                                                                     │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Tickets ─────────────────────────────────────────────────────────────────── 1 of 5 published ─╮
+  │  ✓ JIG-4  Coupon model         ✓ ✓ ✓ ✓  published https://example.test/acme/demo/pull/7        │
+  │▸ ◑ JIG-5  Apply a coupon code  ✓ ◑ ○ ○  Build: 1 of 3 green · verifying slice s2 at 2222222    │
+  │  ◐ JIG-8  Show the discount    ◐ ○ ○ ○  ready · brief next                                     │
+  │  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○  stacked on JIG-5                                       │
+  │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○  waits for JIG-4 merged · its PR is open                │
+  │  ·        Stack two coupons    fog · not graduated                                             │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Run ──────────────────────────────────────────────────────────────────────────── in progress ─╮
+  │  next     say "Continue checkout"                                                              │
+  │  wave 1   JIG-8                                                                                │
+  │  wave 2   JIG-6                                                                                │
+  │  ends at  JIG-7 waits for JIG-4 merged · https://example.test/acme/shop/pull/7 is open         │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Activity ─────────────────────────────────────────────────────────────────── latest 12 of 18 ─╮
+  │  09:14:21 JIG-4 publish·done     ● finished                                                    │
+  │  09:14:20 JIG-4 publish·pr       ▲ opened https://example.test/acme/demo/pull/7                │
+  │  09:14:10 JIG-4 publish·approval ▲ you approved ccccccc                                        │
+  │  09:14:00 JIG-4 publish·body     ▲ written for ccccccc                                         │
+  │  09:13:30 JIG-4 review·r2        ● reviewer finished: clean                                    │
+  │  09:13:00 JIG-4 review·r2        ◎ opened                                                      │
+  │  09:12:05 JIG-4 review·asks      + you kept r1-f2                                              │
+  │  09:12:00 JIG-4 review·asks      - you dismissed r1-f1: not a bug                              │
+  │  09:11:30 JIG-4 review·r1        ! reviewer finished with findings                             │
+  │  09:11:00 JIG-4 review·r1        ◎ opened                                                      │
+  │  09:10:30 JIG-4 build·a          ● verified ccccccc                                            │
+  │  09:10:00 JIG-4 build·a          ◐ builder took it · Load the config                           │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move · enter open ticket · esc back · g gate · a answer · t tail · r refresh · q quit

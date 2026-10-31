@@ -1,0 +1,24 @@
+jig  demo › checkout  Coupons at checkout                          ◐ in progress
+────────────────────────────────────────────────────────────────────────────────
+  map: 2 decided · 2 fog
+  ╭─ Tickets ─────────────────────────────────────────────── 1 of 5 published ─╮
+  │  ✓ JIG-4  Coupon model    ✓ ✓ ✓ ✓  published https://example.test/acme/de… │
+  │▸ ◑ JIG-5  Apply a coupo…  ✓ ◑ ○ ○  Build: 1 of 3 green · verifying slice … │
+  │  ◐ JIG-8  Show the disc…  ◐ ○ ○ ○  ready · brief next                      │
+  │  ◐ JIG-6  Remove a coup…  ◐ ○ ○ ○  stacked on JIG-5                        │
+  │  ◐ JIG-7  Coupons in re…  ◐ ○ ○ ○  waits for JIG-4 merged · its PR is open │
+  │  ·        Stack two cou…  fog · not graduated                              │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Run ──────────────────────────────────────────────────────── in progress ─╮
+  │  next     say "Continue checkout"                                          │
+  │  wave 1   JIG-8                                                            │
+  │  wave 2   JIG-6                                                            │
+  │  ends at  JIG-7 waits for JIG-4 merged · https://example.test/acme/shop/p… │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Activity ──────────────────────────────────────────────── latest 2 of 18 ─╮
+  │  09:14:21 JIG-4 publish·done ● finished                                    │
+  │  09:14:20 JIG-4 publish·pr   ▲ opened https://example.test/acme/demo/pull… │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move · enter open ticket · esc back · g gate · a answer · t tail
+  r refresh · q quit
