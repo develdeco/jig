@@ -30,7 +30,7 @@ func TestReadMemoryFoldsOnlyTheSessionsOwnLinesBackToItsStart(t *testing.T) {
 	put(7, journal.Line{Event: journal.EventNoteDelivered, Session: "s1", Ref: "refused", Outcome: outcomeStopBlock})
 	put(8, journal.Line{Event: journal.EventTool, Session: "s1", Tool: "Edit"}) // an edit says nothing of HEAD
 
-	m, err := readMemory(root, "s1")
+	m, err := readMemory(root, "s1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,18 +58,65 @@ func TestReadMemoryFoldsOnlyTheSessionsOwnLinesBackToItsStart(t *testing.T) {
 func TestReadMemoryOfASessionTheLedgerNeverHeardOf(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if m, err := readMemory(root, "s1"); err != nil || !m.started.IsZero() || m.head != "" || len(m.delivered) != 0 {
+	if m, err := readMemory(root, "s1", ""); err != nil || !m.started.IsZero() || m.head != "" || len(m.delivered) != 0 {
 		t.Errorf("memory of an absent ledger = %+v, %v", m, err)
 	}
 	if err := ledger.Append(root, journal.Line{Event: journal.EventTool, Session: "s2", Commit: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if m, err := readMemory(root, "s1"); err != nil || !m.started.IsZero() || m.head != "" {
+	if m, err := readMemory(root, "s1", ""); err != nil || !m.started.IsZero() || m.head != "" {
 		t.Errorf("memory of another session's lines = %+v, %v", m, err)
 	}
 	// A session with no id has no memory: nothing could say which lines are its.
-	if m, err := readMemory(root, ""); err != nil || m.head != "" {
+	if m, err := readMemory(root, "", ""); err != nil || m.head != "" {
 		t.Errorf("memory of no session = %+v, %v", m, err)
+	}
+}
+
+func TestReadMemoryKeepsDeliveredPerAgent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	put := func(min int, l journal.Line) {
+		t.Helper()
+		l.TS = ledger.Stamp(at.Add(time.Duration(min) * time.Minute))
+		if err := ledger.Append(root, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put(0, journal.Line{Event: journal.EventSessionStart, Session: "s1", Ticket: "JIG-1"})
+	put(1, journal.Line{Event: journal.EventNoteDelivered, Session: "s1", Ref: "main's", Outcome: "prompt"})
+	put(2, journal.Line{Event: journal.EventNoteDelivered, Session: "s1", Agent: "a-1", Ref: "told", Outcome: "tool"})
+	put(3, journal.Line{Event: journal.EventNoteDelivered, Session: "s1", Agent: "a-1", Ref: "refused", Outcome: outcomeStopBlock})
+	put(4, journal.Line{Event: journal.EventNoteDelivered, Session: "s1", Agent: "a-2", Ref: "a-2's", Outcome: outcomeStopBlock})
+	put(5, journal.Line{Event: journal.EventTool, Session: "s1", Agent: "a-1", Ticket: "JIG-2", Cwd: "/wt/a-1"})
+	put(6, journal.Line{Event: journal.EventTool, Session: "s1", Agent: "a-2", Ticket: "JIG-3", Cwd: "/wt/a-2"})
+
+	m, err := readMemory(root, "s1", "a-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.delivered["told"] || !m.delivered["refused"] || !m.blocked["refused"] || m.blocked["told"] {
+		t.Errorf("a-1 remembers delivered %v, blocked %v, want its own two and the refusal", m.delivered, m.blocked)
+	}
+	for _, ref := range []string{"main's", "a-2's"} {
+		if m.delivered[ref] || m.blocked[ref] {
+			t.Errorf("a-1 remembers %q, which was given to another agent", ref)
+		}
+	}
+	if !m.started.Equal(at) || m.ticket != "JIG-3" {
+		t.Errorf("started %v, ticket %q: the session's facts stay the session's, want its start and its newest ticket", m.started, m.ticket)
+	}
+	if m.agentTicket != "JIG-2" || m.agentCwd != "/wt/a-1" {
+		t.Errorf("agent place = %q in %q, want the newest line of a-1 that named one", m.agentTicket, m.agentCwd)
+	}
+
+	main, err := readMemory(root, "s1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !main.delivered["main's"] || main.delivered["told"] || main.blocked["refused"] || main.agentCwd != "" {
+		t.Errorf("the session's own agent remembers delivered %v, blocked %v, place %q, want only its own", main.delivered, main.blocked, main.agentCwd)
 	}
 }
 

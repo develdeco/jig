@@ -192,6 +192,16 @@ func TestDoctorSeesAPartialAndAMovedBinaryAndAStaleWrapper(t *testing.T) {
 		t.Errorf("a missing event: %v\n%s", r, out)
 	}
 
+	// An install from before subagents had a stop entry of their own.
+	older := strings.Replace(string(partial), `"NotJigs"`, `"SessionEnd"`, 1)
+	older = strings.Replace(older, `"SubagentStop"`, `"NotJigsEither"`, 1)
+	writeTestFile(t, ie.settings(), older)
+	out, _ = runMain(t, ie.env, "", "doctor")
+	r = findRow(doctorRows(t, out), "hooks", "claude")
+	if r == nil || r["state"] != "partial" || !strings.Contains(r["detail"], "SubagentStop") {
+		t.Errorf("an install without SubagentStop: %v\n%s", r, out)
+	}
+
 	// Entries that run another jig.
 	moved, _, _ := setup.MergeClaude(nil, `"/old/place/jig"`)
 	writeTestFile(t, ie.settings(), string(moved))

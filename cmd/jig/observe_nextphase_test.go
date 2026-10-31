@@ -169,7 +169,7 @@ func TestNextPhaseSourceSendsAnUnattendedBuilderToTheGateAndASubagent(t *testing
 			t.Errorf("note %q lacks %q", n.Text, want)
 		}
 	}
-	if !n.Enforce || n.Ref != "review:1" {
+	if !n.Enforce || n.Ref != "review:"+c.Where.Ticket+":1" {
 		t.Errorf("note = %+v, want it enforced and named by the round to come", n)
 	}
 
@@ -189,7 +189,7 @@ func TestNextPhaseSourceSendsAnUnattendedBuilderToTheGateAndASubagent(t *testing
 	}
 
 	again := reviewCtx(t, "fix-slices", "", claim)
-	if notes, err := nextPhaseNotes(again); err != nil || len(notes) != 1 || notes[0].Ref != "review:2" {
+	if notes, err := nextPhaseNotes(again); err != nil || len(notes) != 1 || notes[0].Ref != "review:"+again.Where.Ticket+":2" {
 		t.Errorf("after a round that found things: nextPhaseNotes = %+v, %v, want the note for round 2", notes, err)
 	}
 }
@@ -231,5 +231,38 @@ func TestNextPhaseSourceNeverHoldsASessionThatIsNotUnattendedOrNotAtTheGate(t *t
 				t.Errorf("nextPhaseNotes = %+v, %v, want nothing", notes, err)
 			}
 		})
+	}
+}
+
+// TestNextPhaseSourceTellsASubagentOnlyToReviewWhatItClaimedUnattended: the
+// main session publishes, so a subagent's stop never hears the publish note;
+// it hears the review note when c.Unattended says the claim is its own, and
+// nothing otherwise.
+func TestNextPhaseSourceTellsASubagentOnlyToReviewWhatItClaimedUnattended(t *testing.T) {
+	t.Parallel()
+	claim := journal.Line{Event: journal.EventClaim, Session: "s-builder", Slice: "a"}
+
+	review := reviewCtx(t, "", "", claim)
+	review.Event.Agent = "a-1"
+	notes, err := nextPhaseNotes(review)
+	if err != nil || len(notes) != 1 || notes[0].Ref != "review:"+review.Where.Ticket+":1" || !notes[0].Enforce {
+		t.Fatalf("subagent that claimed unattended: nextPhaseNotes = %+v, %v, want the enforced review note", notes, err)
+	}
+
+	other := reviewCtx(t, "", "", claim)
+	other.Event.Agent = "a-2"
+	other.Unattended = false
+	if notes, err := nextPhaseNotes(other); err != nil || len(notes) != 0 {
+		t.Errorf("subagent that holds no unattended claim: nextPhaseNotes = %+v, %v, want nothing", notes, err)
+	}
+
+	approved := publishCtx(t, "clean", approval(publishHead, "person"))
+	approved.Unattended = true
+	if notes, err := nextPhaseNotes(approved); err != nil || len(notes) != 1 {
+		t.Fatalf("main stop on an approved ticket: nextPhaseNotes = %+v, %v, want the publish note", notes, err)
+	}
+	approved.Event.Agent = "a-1"
+	if notes, err := nextPhaseNotes(approved); err != nil || len(notes) != 0 {
+		t.Errorf("subagent stop on an approved ticket: nextPhaseNotes = %+v, %v, want no publish note: the main session publishes", notes, err)
 	}
 }

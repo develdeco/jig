@@ -28,6 +28,15 @@ func nextPhaseNotes(c observe.NoteCtx) ([]observe.Note, error) {
 	if c.Event.Kind != observe.KindStop || c.Store == nil || c.Where.Ticket == "" {
 		return nil, nil
 	}
+	if c.Event.IsSubagent() {
+		// The main session publishes (a build subagent never does), so a
+		// subagent's stop hears the review note alone, when it holds an
+		// unattended claim: c.Unattended is the claim of this agent.
+		if !c.Unattended {
+			return nil, nil
+		}
+		return reviewNotes(c)
+	}
 	notes, err := publishNotes(c)
 	if err != nil || len(notes) > 0 || !c.Unattended {
 		return notes, err
@@ -56,7 +65,7 @@ func reviewNotes(c observe.NoteCtx) ([]observe.Note, error) {
 		f = verifydeliver.Fresh{}
 	}
 	return []observe.Note{{
-		Ref:     fmt.Sprintf("review:%d", closedRounds(t)+1),
+		Ref:     fmt.Sprintf("review:%s:%d", c.Where.Ticket, closedRounds(t)+1),
 		Text:    reviewNoteText(f, c.Where.Ticket),
 		Enforce: true,
 	}}, nil
