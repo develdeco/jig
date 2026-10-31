@@ -121,7 +121,7 @@ func parseHarnesses(value string, def []string) ([]setup.Harness, error) {
 
 // projectSkillNames are the skills a project gets: the ones that run its work.
 func projectSkillNames() []string {
-	return []string{"here", "intake", "build", "review", "publish"}
+	return []string{"here", "intake", "chart", "build", "review", "publish"}
 }
 
 // helperSkillNames are the skills that set jig up: they let an agent in any
