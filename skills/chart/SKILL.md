@@ -17,17 +17,17 @@ You are the main session. Every question to the person is yours to ask; a subage
 
 ## Builds
 
-Go through `run` wave by wave; no edge lies inside a wave. Start one subagent for each ticket of the wave (the Agent tool, `subagent_type: general-purpose`, `model: sonnet`, in the background), each in its own worktree on the ticket's branch: `jig next <T>` names the branch; cut it from the repo's target, a stacked ticket's from its parent's branch (`git worktree add <dir> -b <branch> <base>`), one in each repo a ticket builds in. Its prompt:
+Go through `run` wave by wave; no edge lies inside a wave. Start one subagent for each ticket of the wave (the Agent tool, `subagent_type: general-purpose`, `model: sonnet` unless the person named another, in the background), each in its own worktree on the ticket's branch: `jig next <T>` names the branch and, for a stacked ticket, its start point (the parent's branch); cut it from there or the repo's target (`git worktree add <dir> -b <branch> <base>`), one in each repo a ticket builds in. Its prompt:
 
 ```
 You are building ticket <T>. Work only in <dir>, on branch <branch>; run every command there.
 Build it with the build skill (`jig skill build`): claim each slice with `--unattended`, commit with its `Jig-Slice` trailer.
 Stuck: `jig ask --slice <slice> "<question>"`, saying what you would do by default, then end your turn with the question, its id and the default. I answer and resume you.
-When every slice is green, open the gate (`jig gate <T>`) and have it reviewed by a reviewer subagent of your own (`jig skill review`). End your turn with its verdict.
+When every slice is green, open the gate (`jig gate <T>`) and have it reviewed by a reviewer subagent of your own (`jig skill review`). A round that only queues fixes: build them and have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict.
 Never publish. Never answer your own question.
 ```
 
-Wait for the hand-backs (TaskOutput, `block: true`). jig holds a subagent at its stop while a verification runs, changes are uncommitted or a round is open: it is not stuck, wait on.
+Wait for the hand-backs (TaskOutput, `block: true`). jig holds a subagent at its stop while a verification runs, tracked changes are uncommitted, or every slice is green and no round is open: it is not stuck, wait on.
 
 ## Relay
 

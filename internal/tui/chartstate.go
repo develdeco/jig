@@ -14,14 +14,6 @@ import (
 // four steps (the same rows the project's list draws), and which of them needs
 // the person.
 
-// The codes of a chart's verdict, as `jig next <chart>` prints them.
-const (
-	codeChartDone         = "CHART_DONE"
-	codeChartWaitsMerge   = "CHART_WAITS_MERGE"
-	codeChartBlocked      = "CHART_BLOCKED"
-	codeChartNotGraduated = "CHART_NOT_GRADUATED"
-)
-
 // The kinds of need a ticket can wait on.
 const kindStacked = "stacked"
 
@@ -207,13 +199,13 @@ func (m *Model) chartStatus(c *chart, rows []chartRow) (state, label string) {
 		return StateNeedsInput, "run needs you"
 	case c.info != nil:
 		switch c.info.Code {
-		case codeChartDone:
+		case phase.CodeChartDone:
 			return StatePublished, "done"
-		case codeChartWaitsMerge:
+		case phase.CodeChartWaitsMerge:
 			return StateQueued, "waits for a merge"
-		case codeChartBlocked:
+		case phase.CodeChartBlocked:
 			return StateStalled, "blocked"
-		case codeChartNotGraduated:
+		case phase.CodeChartNotGraduated:
 			return StateQueued, "not graduated"
 		}
 		switch {
@@ -269,9 +261,9 @@ func endNote(e chartEnd) string {
 // runWord is where the chart's run stands, for the Run panel's edge.
 func runWord(info *chartInfo) string {
 	switch {
-	case info.Code == codeChartDone:
+	case info.Code == phase.CodeChartDone:
 		return "done"
-	case info.Code == codeChartWaitsMerge:
+	case info.Code == phase.CodeChartWaitsMerge:
 		return "waits for a merge"
 	case info.Started:
 		return "in progress"

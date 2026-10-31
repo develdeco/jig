@@ -34,6 +34,7 @@ Every brief lists a `## Seams` section naming the public interfaces and critical
 - **critical paths:** one line each, a behavior rather than a test case.
 
 The section never lists test cases, asks for a test per rule, or asks that a test fail when its rule is removed. A critical path gets one end-to-end chain through its public seams; its rule variants are covered at the narrowest seam that decides them, not by more chains.
+
 ## Brief output (single ticket)
 
 - Mint the ticket: `jig ticket new --title "<title>"`; use the id and folder it prints, never make a folder yourself.

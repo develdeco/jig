@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"slices"
 
 	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/store"
@@ -72,8 +71,8 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 	chart := ""
-	if chartNamed(st, ticket) {
-		chart, ticket = ticket, ""
+	if name, ok := chartNamed(st, ticket); ok {
+		chart, ticket = name, ""
 	}
 	awaiting := false
 	if ticket != "" {
@@ -112,19 +111,6 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 	return 0
-}
-
-// chartNamed is whether word names a chart of the store and no ticket: a ticket
-// by that id or alias wins, as it does for `jig next`.
-func chartNamed(st *store.Store, word string) bool {
-	if word == "" {
-		return false
-	}
-	if id, err := st.ResolveTicket(word); err != nil || st.TicketExists(id) {
-		return false
-	}
-	names, err := st.ChartNames()
-	return err == nil && slices.Contains(names, word)
 }
 
 // mintableKey is the key of id when id is shaped like an id the store mints (a

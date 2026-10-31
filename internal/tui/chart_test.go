@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/phase"
 )
 
 func TestMainScreenWithCharts(t *testing.T) {
@@ -464,10 +465,10 @@ func TestChartStatusWords(t *testing.T) {
 	}{
 		{"ready and started", func(i *chartInfo) { i.Ready, i.Started = true, true }, StateBuilding, "in progress"},
 		{"ready, not started", func(i *chartInfo) { i.Ready, i.Started = true, false }, StateReady, "ready"},
-		{"waits for a merge", func(i *chartInfo) { i.Ready, i.Code = false, codeChartWaitsMerge }, StateQueued, "waits for a merge"},
-		{"done", func(i *chartInfo) { i.Ready, i.Code = false, codeChartDone }, StatePublished, "done"},
-		{"blocked", func(i *chartInfo) { i.Ready, i.Code = false, codeChartBlocked }, StateStalled, "blocked"},
-		{"not graduated", func(i *chartInfo) { i.Ready, i.Code = false, codeChartNotGraduated }, StateQueued, "not graduated"},
+		{"waits for a merge", func(i *chartInfo) { i.Ready, i.Code = false, phase.CodeChartWaitsMerge }, StateQueued, "waits for a merge"},
+		{"done", func(i *chartInfo) { i.Ready, i.Code = false, phase.CodeChartDone }, StatePublished, "done"},
+		{"blocked", func(i *chartInfo) { i.Ready, i.Code = false, phase.CodeChartBlocked }, StateStalled, "blocked"},
+		{"not graduated", func(i *chartInfo) { i.Ready, i.Code = false, phase.CodeChartNotGraduated }, StateQueued, "not graduated"},
 	} {
 		info, _ := parseChart(checkoutJSON())
 		tc.mod(info)

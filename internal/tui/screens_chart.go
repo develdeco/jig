@@ -376,21 +376,19 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow) {
 
 // mainCharts adds the project's charts to p after its tickets: a row each, with
 // how many of its tickets are published and whether one needs the person. The
-// columns follow the tickets' (idW, titleW) and widen for a longer name.
+// columns follow the tickets' (idW, titleW) and widen for a longer name or
+// title, as far as the row has room.
 func (m *Model) mainCharts(p *page, idW, titleW int) {
 	if len(m.w.chartOrder) == 0 {
 		return
 	}
-	nameW := idW
+	nameW, ownW := idW, 0
 	for _, name := range m.w.chartOrder {
 		nameW = max(nameW, width(name))
+		ownW = max(ownW, width(m.w.charts[name].title()))
 	}
-	if titleW == 0 {
-		for _, name := range m.w.chartOrder {
-			titleW = max(titleW, width(m.w.charts[name].title()))
-		}
-		titleW = min(titleW, max(0, (m.width-nameW-20)/3))
-	}
+	// The room left once the icon, the name, "chart" and the counts are drawn.
+	titleW = max(titleW, min(ownW, max(0, m.width-nameW-42)))
 	if len(p.lines) > 0 {
 		p.add("")
 	}
