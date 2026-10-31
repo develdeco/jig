@@ -12,6 +12,7 @@ import "path/filepath"
 //	     PostToolUse       tool_name, tool_input.command|file_path, tool_response
 //	     PostToolUseFailure  the same, for a tool call that failed
 //	     Stop              stop_hook_active
+//	     SubagentStop      stop_hook_active, agent_id (its session_id is the parent's)
 //	     SessionEnd        reason
 //	     agent_id          present when a subagent is speaking
 //	out  {"hookSpecificOutput":{"hookEventName","additionalContext"}}   context
@@ -68,6 +69,14 @@ func (a claudeShape) Parse(data []byte) (Event, error) {
 		ev.Files = p.editedFiles("tool_input")
 		ev.Exit = p.exitStatus("tool_response")
 	case "Stop":
+		ev.Kind = KindStop
+		ev.StopActive = p.flag("stop_hook_active")
+	case "SubagentStop":
+		// A subagent's stop carries its parent's session id; only agent_id
+		// tells it from the main Stop, so one without is never taken for it.
+		if ev.Agent == "" {
+			return Event{}, nil
+		}
 		ev.Kind = KindStop
 		ev.StopActive = p.flag("stop_hook_active")
 	case "SessionEnd":

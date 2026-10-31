@@ -52,6 +52,16 @@
         ]
       }
     ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jig observe --harness claude"
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "hooks": [
