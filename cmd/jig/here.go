@@ -413,9 +413,9 @@ func (v hereView) help(hc hereCtx) []string {
 	case w.Ticket != "":
 		return []string{fmt.Sprintf("Run `jig next %s` to see what is ready, `jig status %s` for the full state%s", w.Ticket, w.Ticket, promptHint(v.prompt))}
 	case w.Branch != "":
-		return []string{fmt.Sprintf("Branch %s binds no ticket: work asked for with no ticket is fresh work, planned first with the intake skill (`jig skill intake`), which mints its ticket; to take a ticket that exists run `jig next`, or name one: `jig here <ticket>`", w.Branch)}
+		return []string{fmt.Sprintf("Branch %s binds no ticket: work asked for with no ticket is fresh work, planned first with the intake skill (`jig skill intake`), which decides brief or chart and mints a ticket for a brief; to take a ticket that exists run `jig next`, or name one: `jig here <ticket>`", w.Branch)}
 	default:
-		return []string{"Work asked for with no ticket is fresh work, planned first with the intake skill (`jig skill intake`), which mints its ticket; to take a ticket that exists run `jig next`"}
+		return []string{"Work asked for with no ticket is fresh work, planned first with the intake skill (`jig skill intake`), which decides brief or chart and mints a ticket for a brief; to take a ticket that exists run `jig next`"}
 	}
 }
 

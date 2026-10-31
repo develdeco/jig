@@ -153,6 +153,43 @@ func isMove(l events.Envelope) bool {
 	return l.Src == events.SrcLedger && l.Event == journal.EventTool && l.Command != ""
 }
 
+// outcomeStopBlock is the outcome of a note jig held an unattended agent back
+// at its stop for (internal/observe writes it).
+const outcomeStopBlock = "stop-block"
+
+// isHold is whether a machine ledger line says jig held an agent back from
+// stopping, one line for each loose end it named: a subagent's own stop, or an
+// unattended session's.
+func isHold(l events.Envelope) bool {
+	return l.Src == events.SrcLedger && l.Event == journal.EventNoteDelivered && l.Outcome == outcomeStopBlock
+}
+
+// holdPlace is the step and sub-step a hold is about, from the note's ref: a
+// review or publish still to do, else the slice the agent builds (a running
+// verification, uncommitted changes, a red oracle).
+func holdPlace(l events.Envelope) (int, string) {
+	switch kind, _, _ := strings.Cut(l.Ref, ":"); kind {
+	case "review":
+		return stepReview, ""
+	case "publish":
+		return stepPublish, ""
+	}
+	if l.Slice != "" {
+		return stepBuild, "slice:" + l.Slice
+	}
+	return stepBuild, ""
+}
+
+// agentName is how a screen names a subagent: its id without the harness's
+// "agent-" lead, cut to eight characters, which tell a run's agents apart.
+func agentName(agent string) string {
+	agent = strings.TrimPrefix(agent, "agent-")
+	if len(agent) > 8 {
+		agent = agent[:8]
+	}
+	return "agent " + agent
+}
+
 // shownCommand is a command as a move shows it: without the `cd <dir> &&` a
 // harness puts before it to run it in a folder, nor the `2>&1` that sends its
 // errors where its output goes, which say nothing of what ran.
@@ -205,6 +242,13 @@ func (m *Model) tildeHome(cmd string) string {
 func (m *Model) moveText(t *ticket, l events.Envelope) string {
 	if l.Src != events.SrcLedger {
 		return m.st.icon(eventState(l)) + " " + m.say(t, l)
+	}
+	if isHold(l) {
+		who := "the session"
+		if l.Agent != "" {
+			who = agentName(l.Agent)
+		}
+		return m.st.state(StateVerifying, "⏸ "+who+" held at its stop") + " · " + l.Summary
 	}
 	text := "$ `" + m.tildeHome(shownCommand(l.Command)) + "`"
 	if d := strings.TrimSpace(l.Description); d != "" {

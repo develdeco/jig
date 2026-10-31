@@ -27,6 +27,14 @@ const (
 // a paragraph that is not a list, is one item; a heading inside a code fence
 // is not a heading. A map with no such section has no fog.
 func FogItems(mapMD string) []string {
+	return SectionItems(mapMD, isFogHeading)
+}
+
+// SectionItems returns the items of the first section of mapMD whose heading
+// text match accepts, read as FogItems reads the fog: up to the next heading of
+// the same or a higher level, a list item or a paragraph one item, headings
+// and code inside a fence skipped. A map with no such section has none.
+func SectionItems(mapMD string, match func(heading string) bool) []string {
 	lines := strings.Split(strings.ReplaceAll(mapMD, "\r\n", "\n"), "\n")
 	start, level, end := -1, 0, len(lines)
 	fence := false
@@ -49,7 +57,7 @@ func FogItems(mapMD string) []string {
 			}
 			continue
 		}
-		if isFogHeading(text) {
+		if match(text) {
 			start, level = i+1, lvl
 		}
 	}

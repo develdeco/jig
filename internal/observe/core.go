@@ -174,6 +174,11 @@ func (h *handler) locate() bool {
 		h.fail(errors.New("observe: the event names no directory"))
 		return false
 	}
+	return h.locateAt(cwd)
+}
+
+// locateAt is locate for the directory cwd.
+func (h *handler) locateAt(cwd string) bool {
 	w, err := locate.Locate(h.d.JigHome, cwd, locate.Opts{Session: h.ev.Session, Getenv: h.d.Getenv})
 	if err != nil {
 		h.fail(err)
@@ -205,7 +210,7 @@ func (h *handler) memory() sessionMemory {
 	if !h.memRead {
 		h.memRead = true
 		var err error
-		h.mem, err = readMemory(h.d.JigHome, h.ev.Session)
+		h.mem, err = readMemory(h.d.JigHome, h.ev.Session, h.ev.Agent)
 		h.fail(err)
 	}
 	return h.mem

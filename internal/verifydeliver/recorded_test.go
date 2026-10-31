@@ -475,31 +475,6 @@ func TestGateFinishFindsTheReviewerWhenNobodyNamedIt(t *testing.T) {
 	})
 }
 
-// TestRunsReviewContext: the command lines a harness records that count as
-// reading a round.
-func TestRunsReviewContext(t *testing.T) {
-	t.Parallel()
-	for cmd, want := range map[string]bool{
-		"jig review context JIG-1":                    true,
-		"jig review context":                          true,
-		"jig review context --session s-1 JIG-1":      true,
-		"jig.exe review context JIG-1 --json":         true,
-		"/usr/local/bin/jig review context JIG-1":     true,
-		"cd repo && jig review context JIG-1":         true,
-		"jig review context JIG-1 && echo done":       true,
-		"jig review context JIG-2":                    false,
-		"jig review context JIG-2 ; jig status JIG-1": false,
-		"jig review done JIG-1":                       false,
-		"jig finding JIG-1":                           false,
-		"git review context JIG-1":                    false,
-		"":                                            false,
-	} {
-		if got := runsReviewContext(cmd, "JIG-1"); got != want {
-			t.Errorf("runsReviewContext(%q) = %v, want %v", cmd, got, want)
-		}
-	}
-}
-
 // TestBuildersAreTheAgentsThatChangedTheBranch: the session and agent on the
 // journal's claim, verify-pending and oracle lines, and the ledger's
 // git-commit lines and tool lines that changed files, for the ticket or its

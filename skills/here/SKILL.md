@@ -29,7 +29,7 @@ Run it from the repo, a directory in it, or a linked worktree of it: all read as
 | `slices` | every slice of the ticket with its state; `blocked_by` shows what each waits for |
 | `questions`, `pending_verifications` | open questions to answer; commits whose oracle is still running |
 
-A branch that leads with no ticket (`main`, a feature branch) binds no ticket: name one, or run `jig next`. Work the person asks for with no ticket is fresh work: plan it with the intake skill, which mints its ticket. `jig claim` on such a branch records it as that ticket's branch.
+A branch that leads with no ticket (`main`, a feature branch) binds no ticket: name one, or run `jig next`. Work the person asks for with no ticket is fresh work: plan it with the intake skill, which decides brief or chart and mints a ticket for a brief. `jig claim` on such a branch records it as that ticket's branch.
 
 ## What to build next
 
@@ -49,7 +49,9 @@ The `next` table lists the ready tickets by the owner's rank (`jig rank <T> <n>`
 
 A ticket moves through four phases, each with a skill: brief (`intake`), build (`build`), review (`review`) and publish (`publish`). `jig next <T>` names the one it is at (`phase:`), whether it can start (`ready:`) and the prompt that asks for it (`prompt:`, such as "Build SHOP-1"). Each phase's skill starts with `jig next <T>` and stops if the phase is not its own; it ends by relaying the `prompt:` to the person, who decides when the next phase runs. When you only oriented, relay that `prompt:` and stop.
 
-**A start-to-finish run** is a prompt that names several phases ("Take SHOP-1 from brief to PR"): run them in order, each with its skill, without waiting for a prompt to start the next, and end the run at a refusal or a stop the skill gives. Wait for the review's subagent in the same turn as the review skill says (TaskOutput with `block: true` in Claude Code); do not end the turn or schedule a wakeup while it runs. Such a run hands over no decision: the brief's questions and approval, a review's asks and the publish approval stay the person's, so ask and wait. **Recommendations** are a separate hand-over: a prompt that tells you to go with your recommendations lets you answer those decisions yourself, recorded as yours (a brief approval with agent provenance, a publish the publish skill's first way, which asks for no approval). A prompt can ask for either or both.
+**A start-to-finish run** is a prompt that names several phases ("Take SHOP-1 from brief to PR"): run them in order, each with its skill, without waiting for a prompt to start the next, and end the run at a refusal or a stop the skill gives. A chart verdict ends it too: a chart is not a ticket, so say why and ask whether to take the chart's tickets on in this session (`jig skill chart`). Wait for the review's subagent in the same turn as the review skill says (TaskOutput with `block: true` in Claude Code); do not end the turn or schedule a wakeup while it runs. Such a run hands over no decision: the brief's questions and approval, a review's asks and the publish approval stay the person's, so ask and wait. **Recommendations** are a separate hand-over: a prompt that tells you to go with your recommendations lets you answer those decisions yourself, recorded as yours (a brief approval with agent provenance, a publish the publish skill's first way, which asks for no approval). A prompt can ask for either or both.
+
+**A chart run** is a prompt aimed at a chart: "Take <chart> to PR" (nothing started), "Continue <chart>" (started), or a yes to the verdict's question. `jig next <chart>` gives its standing and the prompt; run it with the chart skill (`jig skill chart`). `jig next` lists the charts.
 
 ## When here says nothing
 

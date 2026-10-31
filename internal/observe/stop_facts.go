@@ -13,9 +13,11 @@ import (
 	"github.com/develdeco/jig/internal/project"
 )
 
-// unattended reports whether nobody is watching the session: it holds a
-// claim made with --unattended that it has not released, or the project
-// defaults to unattended (the unattended key of its jig.yaml marker).
+// unattended reports whether nobody is watching the agent: it holds a claim
+// made with --unattended that it has not released, or the project defaults to
+// unattended (the unattended key of its jig.yaml marker). A claim is held by
+// the agent that made it: a subagent shares its session's id, and its claim
+// is no one else's.
 func (h *handler) unattended() bool {
 	if h.unattendedKnown {
 		return h.unattendedVal
@@ -25,8 +27,9 @@ func (h *handler) unattended() bool {
 	return h.unattendedVal
 }
 
-// claimedUnattended is true when the session latest claim on the ticket, not
-// released since, was made with --unattended.
+// claimedUnattended is true when the session's latest claim on the ticket, not
+// released since, was made with --unattended by the agent of the event. A
+// holder jig cannot tell (see claimHolder) leaves the claim the session's.
 func (h *handler) claimedUnattended() bool {
 	session := h.session()
 	if session == "" || h.st == nil || h.w.Ticket == "" {
@@ -50,7 +53,31 @@ func (h *handler) claimedUnattended() bool {
 			}
 		}
 	}
-	return claim != nil && claim.Unattended
+	if claim == nil || !claim.Unattended {
+		return false
+	}
+	holder, known := h.claimHolder(claim)
+	return !known || holder == h.ev.Agent
+}
+
+// claimHolder is the agent that ran the `jig claim` call that made claim ("" is
+// the session's own agent), and whether jig can tell. The claim line has the
+// session and no agent: the CLI cannot know which agent it runs for. The
+// hook that heard the call wrote the ledger a tool line with the agent on it,
+// after the claim, and that is read back. A harness without hooks leaves none,
+// and then nobody can say.
+func (h *handler) claimHolder(claim *journal.Line) (agent string, known bool) {
+	at, err := time.Parse(time.RFC3339Nano, claim.TS)
+	if err != nil {
+		return "", false
+	}
+	ticket := h.w.Ticket
+	agent, known, err = ledger.AgentOf(h.d.JigHome, memoryWindow, h.session(), at, func(l journal.Line) bool {
+		return ledger.RunsJig(l.Command, "", "claim") && !strings.Contains(l.Command, "--release") &&
+			(l.Ticket == ticket || ledger.RunsJig(l.Command, ticket, "claim"))
+	})
+	h.fail(err)
+	return agent, known
 }
 
 // markerUnattended reads the unattended default from the jig.yaml marker

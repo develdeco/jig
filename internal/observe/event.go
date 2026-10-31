@@ -13,7 +13,8 @@ const (
 	KindPrompt = "prompt"
 	// KindTool: a tool call finished.
 	KindTool = "tool"
-	// KindStop: the agent is about to end its turn.
+	// KindStop: the agent is about to end its turn. A subagent's stop is one
+	// too, with its Agent set: it ends the subagent's turn, not the session's.
 	KindStop = "stop"
 	// KindSessionEnd: the session ended.
 	KindSessionEnd = "session-end"
@@ -88,6 +89,10 @@ type Result struct {
 
 // Empty reports whether r says nothing.
 func (r Result) Empty() bool { return r.Context == "" && r.Message == "" && r.Block == "" }
+
+// IsSubagent reports whether the event is a subagent speaking, not the
+// session's own agent.
+func (e Event) IsSubagent() bool { return e.Agent != "" }
 
 // Validate reports why e cannot be acted on, or nil.
 func (e Event) Validate() error {

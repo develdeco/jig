@@ -32,15 +32,24 @@ type sessionMemory struct {
 	// harness and model are what the session's start (or a later touch)
 	// line said it runs.
 	harness, model string
-	// delivered holds the Refs of the notes already given to the session (as
+	// agentTicket and agentCwd are what the newest line of the event's agent
+	// that named a ticket says it works on and where: a subagent's own place,
+	// for a hook payload that names the session's directory instead. Empty
+	// for the session's own agent.
+	agentTicket, agentCwd string
+	// delivered holds the Refs of the notes already given to the agent (as
 	// context or in a refusal to stop), blocked the Refs it was refused a
-	// Stop for.
+	// Stop for. A subagent shares its session's id and hears its notes on its
+	// own, so these are the lines of that agent alone ("" is the session's
+	// own).
 	delivered, blocked map[string]bool
 }
 
-// readMemory reads what the ledger says of session. An empty session id has
-// no memory: nothing could say which lines are its own.
-func readMemory(root, session string) (sessionMemory, error) {
+// readMemory reads what the ledger says of session, and of its agent: what
+// the session is and has done is the session's, which notes the agent was
+// given is its own. An empty session id has no memory: nothing could say
+// which lines are its own.
+func readMemory(root, session, agent string) (sessionMemory, error) {
 	m := sessionMemory{delivered: map[string]bool{}, blocked: map[string]bool{}}
 	if session == "" {
 		return m, nil
@@ -54,6 +63,9 @@ func readMemory(root, session string) (sessionMemory, error) {
 		}
 		switch l.Event {
 		case journal.EventNoteDelivered:
+			if l.Agent != agent {
+				break
+			}
 			m.delivered[l.Ref] = true
 			if l.Outcome == outcomeStopBlock {
 				m.blocked[l.Ref] = true
@@ -70,6 +82,9 @@ func readMemory(root, session string) (sessionMemory, error) {
 			}
 			if m.harness == "" && l.Harness != "" {
 				m.harness = l.Harness
+			}
+			if agent != "" && l.Agent == agent && m.agentTicket == "" && l.Ticket != "" && l.Cwd != "" {
+				m.agentTicket, m.agentCwd = l.Ticket, l.Cwd
 			}
 		}
 		// A session-start line ends the walk: what came before it belongs to

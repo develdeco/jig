@@ -42,6 +42,12 @@ func Notes(c observe.NoteCtx) ([]observe.Note, error) {
 	if c.Store == nil || c.Where.Ticket == "" {
 		return nil, nil
 	}
+	if c.Event.Kind == observe.KindStop && c.Event.IsSubagent() {
+		// A subagent's stop is not the session's: its transcript total is the
+		// session's, which the session's own Stop and SessionEnd record, and
+		// a second line from here would count it twice.
+		return nil, nil
+	}
 	lines, err := c.Journal()
 	if err != nil {
 		return nil, err

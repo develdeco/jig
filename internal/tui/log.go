@@ -25,7 +25,7 @@ func (t *ticket) logLines() []events.Envelope {
 		out = insertSorted(out, s)
 	}
 	for _, l := range t.ledger {
-		if isMove(l) {
+		if isMove(l) || isHold(l) {
 			out = insertSorted(out, l)
 		}
 	}
@@ -138,6 +138,9 @@ func (t *ticket) doneTrack(step int, key string) subTrack {
 // line it wrote (wroteLine), else to the step of the next line, or to the step
 // under way in d when none came after it.
 func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelope, d phase.Ticket) (int, string) {
+	if isHold(l) {
+		return holdPlace(l)
+	}
 	if !isMove(l) {
 		return stepOfLine(l), t.subKey(l)
 	}

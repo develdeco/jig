@@ -24,7 +24,7 @@ import (
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"next", "name what is ready to build: a ticket's ready slices by repo, or the tickets of the store", []flagSpec{
+		Spec: cmdSpec{"next", "name what is ready to build: a ticket's ready slices by repo, a chart's standing, or the tickets of the store", []flagSpec{
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 			{"topology", "also print every slice of the ticket with its repo, wave and blockers", false},
@@ -51,6 +51,11 @@ func init() {
 // gets, for each repo it builds in, where its branch starts and where its pull
 // request goes (internal/stack): the parent's branch in a repo they share, the
 // target elsewhere and once the parent merged.
+// With a chart's name instead (a ticket of that name wins) it says where the
+// chart stands (internal/phase's DeriveChart): the tickets in dependency order
+// with their phases, which build in this run and which wait for a merge, and
+// the prompt that takes the chart on. Without a ticket it also lists the
+// charts of the store.
 // It reads the store and the clones and writes nothing.
 func cmdNext(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "next")
@@ -87,13 +92,25 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 
 	var out any
 	var blocks []string
-	if ticket != "" {
-		id, err := st.ResolveTicket(ticket)
-		if err == nil {
-			err = requireTicket(st, id)
+	if chart, ok := chartNamed(st, ticket); ok {
+		if *forFlag != "" || *topology {
+			return renderErr(stdout, &axi.Error{Msg: fmt.Sprintf("--for and --topology ask about a ticket: %s is a chart", chart), Code: "VALIDATION_ERROR"})
 		}
+		// A chart is read for its own sake as a ticket is: what its run waits on
+		// is asked of the host now.
+		c, m, err := deriveChart(st, cfg, chart, newMergeReader(e, st, cfg, mp, jigHome, 0))
 		if err != nil {
 			return renderErr(stdout, err)
+		}
+		n := chartOutput(c, m)
+		out, blocks = n, n.blocks("next")
+	} else if ticket != "" {
+		id, err := st.ResolveTicket(ticket)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		if err := requireTicket(st, id); err != nil {
+			return renderErr(stdout, orChartHint(st, id, err))
 		}
 		// A ticket is read for its own sake: the blockers it is held on are asked
 		// of the host now, not taken from what this machine remembers.
@@ -651,6 +668,9 @@ func (n nextTicket) switchAdvice() string {
 type nextStore struct {
 	// Tickets are every ticket of the store, in id order.
 	Tickets []nextRow `json:"tickets"`
+	// Charts are the charts of the store, each with its title and the ids of
+	// its tickets; `jig next <chart>` says where one stands.
+	Charts []nextChartRow `json:"charts,omitempty"`
 	// Next are the ids of the ready tickets in the order to start them: by
 	// rank, lowest first, then by id, the unranked last.
 	Next []string `json:"next"`
@@ -714,7 +734,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		inputs[i] = datas[i].in
 	}
 	readMerges(merges, inputs)
-	out := nextStore{Tickets: []nextRow{}, Next: []string{}}
+	out := nextStore{Tickets: []nextRow{}, Next: []string{}, Charts: chartRows(st)}
 	// The ready tickets in id order, with their ranks and slices.
 	var ranked []ready.Ranked
 	slicesOf := map[string][]store.Slice{}
@@ -773,7 +793,8 @@ func workspaceOverlaps(cfg project.Config, mp project.MachineProject, order []st
 
 func (n nextStore) blocks() []string {
 	if len(n.Tickets) == 0 {
-		return []string{"tickets: none", axi.Help("Run `jig ticket new --title \"...\"` to mint the first ticket")}
+		blocks := append([]string{"tickets: none"}, chartBlocks(n.Charts)...)
+		return append(blocks, axi.Help("Run `jig ticket new --title \"...\"` to mint the first ticket"))
 	}
 	var rows [][]string
 	for _, t := range n.Tickets {
@@ -807,6 +828,7 @@ func (n nextStore) blocks() []string {
 		}
 		blocks = append(blocks, axi.Table("next", []string{"ticket", "rank", "title"}, order))
 	}
+	blocks = append(blocks, chartBlocks(n.Charts)...)
 	for _, s := range n.SharedRanks {
 		blocks = append(blocks, fmt.Sprintf("warning: rank %d is shared by %s: they are ordered by id", s.Rank, andList(s.Tickets)))
 	}

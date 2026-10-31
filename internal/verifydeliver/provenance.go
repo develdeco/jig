@@ -1,7 +1,6 @@
 package verifydeliver
 
 import (
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -171,7 +170,7 @@ func LedgerReviewer(d Deps, ticket string, opened time.Time) (Provenance, bool, 
 	var bestAt time.Time
 	found := false
 	for _, l := range records {
-		if l.Event != journal.EventTool || l.Session == "" || !runsReviewContext(l.Command, ticket) {
+		if l.Event != journal.EventTool || l.Session == "" || !ledger.RunsJig(l.Command, ticket, "review", "context") {
 			continue
 		}
 		at, err := time.Parse(time.RFC3339Nano, l.TS)
@@ -195,56 +194,7 @@ func LedgerReviewerAgent(d Deps, ticket string, opened time.Time, session string
 	if d.Home == "" || session == "" {
 		return "", false, nil
 	}
-	records, err := ledger.Read(d.Home)
-	if err != nil {
-		return "", false, err
-	}
-	for _, l := range records {
-		if l.Event != journal.EventTool || l.Session != session || !runsReviewContext(l.Command, ticket) {
-			continue
-		}
-		at, err := time.Parse(time.RFC3339Nano, l.TS)
-		if err != nil || at.Before(opened) {
-			continue
-		}
-		if ok && l.Agent != agent {
-			return "", false, nil
-		}
-		agent, ok = l.Agent, true
-	}
-	return agent, ok, nil
-}
-
-// runsReviewContext reports whether the shell command line cmd runs `jig
-// review context` for ticket: jig (any path, with or without .exe), then
-// review and context, then the ticket among the words up to the next shell
-// separator, or no ticket word at all (the verb then takes the ticket from the
-// branch the clone is on).
-func runsReviewContext(cmd, ticket string) bool {
-	words := strings.Fields(cmd)
-	for i, w := range words {
-		base := strings.ToLower(filepath.Base(strings.ReplaceAll(strings.Trim(w, `"'`), `\`, "/")))
-		if base != "jig" && base != "jig.exe" {
-			continue
-		}
-		if i+2 >= len(words) || words[i+1] != "review" || words[i+2] != "context" {
-			continue
-		}
-		positional := false
-		for _, a := range words[i+3:] {
-			switch a {
-			case "&&", "||", ";", "|":
-				return !positional
-			}
-			if strings.HasPrefix(a, "-") {
-				continue
-			}
-			positional = true
-			if strings.Trim(a, `"'`) == ticket {
-				return true
-			}
-		}
-		return !positional
-	}
-	return false
+	return ledger.AgentOf(d.Home, 0, session, opened, func(l journal.Line) bool {
+		return ledger.RunsJig(l.Command, ticket, "review", "context")
+	})
 }

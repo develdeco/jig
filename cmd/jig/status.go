@@ -24,7 +24,7 @@ import (
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"status", "print a ticket's slice and question state", []flagSpec{
+		Spec: cmdSpec{"status", "print a ticket's slice and question state, or a chart's tickets and where they stand", []flagSpec{
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 		}, false},
@@ -36,7 +36,8 @@ func init() {
 	})
 }
 
-// cmdStatus implements `jig status [<ticket>]`.
+// cmdStatus implements `jig status <ticket>`, or `jig status <chart>` for the
+// tickets of a chart and where each stands.
 func cmdStatus(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "status")
 	storeFlag := fs.String("store", "", "explicit store path")
@@ -51,16 +52,26 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, _, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
+	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
+	}
+	// A chart (a ticket of that name wins) prints where it stands: the tables
+	// `jig next <chart>` prints, from the same derivation.
+	if chart, ok := chartNamed(st, ticket); ok {
+		c, m, err := deriveChart(st, cfg, chart, newMergeReader(e, st, cfg, mp, jigHome, 0))
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		axi.Render(stdout, chartOutput(c, m).blocks("status")...)
+		return 0
 	}
 	ticket, err = resolveTicketArg(st, ticket, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 	if err := requireTicket(st, ticket); err != nil {
-		return renderErr(stdout, err)
+		return renderErr(stdout, orChartHint(st, ticket, err))
 	}
 
 	out, err := RenderStatus(st, ticket)

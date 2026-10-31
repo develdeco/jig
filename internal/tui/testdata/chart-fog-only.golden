@@ -1,0 +1,24 @@
+jig  demo › ideas  Ideas                                         ○ not graduated
+────────────────────────────────────────────────────────────────────────────────
+  ╭─ Map ──────────────────────────────────────────────── charts/ideas/map.md ─╮
+  │  destination  A customer takes a coupon code from the cart to a discounted │
+  │               order.                                                       │
+  │  decided      ✓ Codes are single use                                       │
+  │               ✓ Discounts apply before tax                                 │
+  │  fog          ~ Stacking two codes                                         │
+  │               ~ Codes in other currencies                                  │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Tickets ───────────────────────────────────────────────── none graduated ─╮
+  │  ·   Gift cards      fog · not graduated                                   │
+  │  ·   Loyalty points  fog · not graduated                                   │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Run ──────────────────────────────────────────────────────── not started ─╮
+  │  next     run `jig graduate ideas`                                         │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Activity ─────────────────────────────────────────────────────────────────╮
+  │  nothing yet                                                               │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+
+────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move · enter open ticket · esc back · g gate · a answer · t tail
+  r refresh · q quit

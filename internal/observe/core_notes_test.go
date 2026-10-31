@@ -93,6 +93,63 @@ func TestAnAnswerReachesTheSessionThatAsked(t *testing.T) {
 	}
 }
 
+func TestAnAnswerReachesOnlyTheAgentThatAsked(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	r.handle(r.ev(KindSessionStart))
+	if err := r.st.WriteQuestion(r.fx.Ticket, store.Question{ID: "q-001", Slice: "a", Status: "answered", Body: "Which port?", Answer: "8080"}); err != nil {
+		t.Fatal(err)
+	}
+	// a-7 asked; the main session relayed the answer with `jig answer`, and
+	// its own call is on the ledger too.
+	r.add(journal.Line{Event: journal.EventQuestion, Slice: "a", Ref: "q-001", Session: "s1"})
+	r.toolLine("a-7", "jig ask "+r.fx.Ticket+" --slice a --default 8080 'Which port?'")
+	r.add(journal.Line{Event: journal.EventAnswer, Slice: "a", Ref: "q-001", Provenance: "person", Session: "s1"})
+	r.toolLine("", "jig answer "+r.fx.Ticket+" q-001 8080")
+
+	if res := r.handle(r.ev(KindPrompt)); res.Context != "" {
+		t.Errorf("the main session, which relayed the answer, was told %q", res.Context)
+	}
+	if res := r.handle(r.ev(KindPrompt, func(e *Event) { e.Agent = "a-9" })); res.Context != "" {
+		t.Errorf("another subagent was told %q", res.Context)
+	}
+	res := r.handle(r.ev(KindTool, subagent, func(e *Event) { e.Tool, e.Command = "Bash", "ls" }))
+	if !strings.Contains(res.Context, "q-001 was answered by the person: 8080") {
+		t.Fatalf("tool context for the asker = %q, want the answer", res.Context)
+	}
+	delivered := r.ledgerOf(journal.EventNoteDelivered)
+	if len(delivered) != 1 || delivered[0].Agent != "a-7" || delivered[0].Ref != "answer:"+r.fx.Ticket+":q-001" {
+		t.Errorf("note-delivered lines = %+v, want the answer given to a-7, its ref naming the ticket", delivered)
+	}
+}
+
+func TestANoteIsDeliveredToEachAgentOfASessionOnce(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	r.d.Sources = []NamedSource{{"fake", func(NoteCtx) ([]Note, error) {
+		return []Note{{Ref: "fake:1", Text: "mind the scope"}}, nil
+	}}}
+	r.handle(r.ev(KindSessionStart))
+	for _, agent := range []string{"", "a-1", "a-2"} {
+		edit := func(e *Event) { e.Agent = agent }
+		if res := r.handle(r.ev(KindPrompt, edit)); !strings.Contains(res.Context, "mind the scope") {
+			t.Errorf("agent %q was told %q, want the note once for its own", agent, res.Context)
+		}
+		if again := r.handle(r.ev(KindPrompt, edit)); again.Context != "" {
+			t.Errorf("agent %q was told %q again", agent, again.Context)
+		}
+	}
+	byAgent := map[string]int{}
+	for _, l := range r.ledgerOf(journal.EventNoteDelivered) {
+		byAgent[l.Agent]++
+	}
+	if len(byAgent) != 3 || byAgent[""] != 1 || byAgent["a-1"] != 1 || byAgent["a-2"] != 1 {
+		t.Errorf("note-delivered lines by agent = %v, want one each", byAgent)
+	}
+}
+
 func TestANoteSourceIsDeliveredOnceAndSeesTheEvent(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)

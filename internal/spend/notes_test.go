@@ -144,6 +144,33 @@ func TestNotesRecordSpendAtStopAndSessionEndWhenItChanged(t *testing.T) {
 	}
 }
 
+// TestNotesLeaveASubagentsStopAlone: a subagent's stop shares the session's
+// transcript, whose total the session's own stop records; a line from the
+// subagent's stop would count the same tokens twice.
+func TestNotesLeaveASubagentsStopAlone(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.say("s-1", 100)
+	notes, err := Notes(observe.NoteCtx{
+		Event:   observe.Event{Harness: "claude", Kind: observe.KindStop, Session: "s-1", Agent: "a-1", Transcript: r.transcript},
+		Where:   r.where,
+		Store:   r.st,
+		JigHome: r.home,
+		Now:     r.now,
+		Journal: func() ([]journal.Line, error) { return journal.Read(r.st, "T-1") },
+	})
+	if err != nil || len(notes) != 0 {
+		t.Errorf("notes at a subagent stop = %+v, %v, want none", notes, err)
+	}
+	if n := len(r.spendLines()); n != 0 {
+		t.Fatalf("%d spend lines after a subagent stop, want none", n)
+	}
+	r.event(observe.KindStop)
+	if n := len(r.spendLines()); n != 1 {
+		t.Errorf("%d spend lines after the session's own stop, want 1", n)
+	}
+}
+
 func journalLines(t *testing.T, r *rig) []journal.Line {
 	t.Helper()
 	all, err := journal.Read(r.st, "T-1")

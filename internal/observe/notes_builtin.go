@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/verify"
 )
 
@@ -80,7 +81,10 @@ func verificationNotes(c NoteCtx) ([]Note, error) {
 
 // answerNotes gives a session the answer to a question it asked: a question
 // line of the journal that names the session and a question, and an answer
-// line for that question made since the session began.
+// line for that question made since the session began. The answer goes to
+// the agent that asked, when the ledger says which one that was (askedBy):
+// the main session that relayed it with `jig answer` is not told its own
+// relay.
 func answerNotes(c NoteCtx) ([]Note, error) {
 	if !deliverable(c.Event.Kind) || c.Store == nil || c.Where.Ticket == "" || c.Event.Session == "" {
 		return nil, nil
@@ -89,10 +93,10 @@ func answerNotes(c NoteCtx) ([]Note, error) {
 	if err != nil {
 		return nil, err
 	}
-	asked := map[string]bool{}
+	asked := map[string]string{} // question id -> when it was asked
 	for _, l := range lines {
 		if l.Event == journal.EventQuestion && l.Ref != "" && l.Session == c.Event.Session {
-			asked[l.Ref] = true
+			asked[l.Ref] = l.TS
 		}
 	}
 	if len(asked) == 0 {
@@ -104,7 +108,8 @@ func answerNotes(c NoteCtx) ([]Note, error) {
 	}
 	var notes []Note
 	for _, l := range lines {
-		if l.Event != journal.EventAnswer || !asked[l.Ref] || !since(l.TS, c.Since) {
+		askedAt, ok := asked[l.Ref]
+		if l.Event != journal.EventAnswer || !ok || !since(l.TS, c.Since) || !askedBy(c, askedAt) {
 			continue
 		}
 		body := l.Summary
@@ -117,9 +122,26 @@ func answerNotes(c NoteCtx) ([]Note, error) {
 		if l.Provenance != "" {
 			by = " by the " + l.Provenance
 		}
-		notes = append(notes, Note{Ref: "answer:" + l.Ref, Text: fmt.Sprintf("%s was answered%s: %s", l.Ref, by, oneLine(body, 600))})
+		notes = append(notes, Note{Ref: "answer:" + c.Where.Ticket + ":" + l.Ref, Text: fmt.Sprintf("%s was answered%s: %s", l.Ref, by, oneLine(body, 600))})
 	}
 	return notes, nil
+}
+
+// askedBy reports whether the agent of the event is the one that asked the
+// question put at askedAt: the agent on the ledger's tool lines of the session
+// that ran `jig ask` for the ticket from then on, when they agree on one. When
+// the ledger cannot say (a harness without hooks, two agents asking on the
+// ticket) any agent of the session may be told, as when the session had one.
+func askedBy(c NoteCtx, askedAt string) bool {
+	at, err := time.Parse(time.RFC3339Nano, askedAt)
+	if err != nil {
+		return true
+	}
+	ticket := c.Where.Ticket
+	agent, known, err := ledger.AgentOf(c.JigHome, memoryWindow, c.Event.Session, at, func(l journal.Line) bool {
+		return ledger.RunsJig(l.Command, "", "ask") && (l.Ticket == ticket || ledger.RunsJig(l.Command, ticket, "ask"))
+	})
+	return err != nil || !known || agent == c.Event.Agent
 }
 
 // since reports whether the stamp ts is at or after t. A zero t admits

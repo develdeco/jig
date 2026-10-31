@@ -32,6 +32,7 @@ func ClaudeHooks() []ClaudeHook {
 		{Event: "PostToolUse", Matcher: claudeShellTools},
 		{Event: "PostToolUseFailure", Matcher: claudeShellTools},
 		{Event: "Stop"},
+		{Event: "SubagentStop"},
 		{Event: "SessionEnd"},
 	}
 }

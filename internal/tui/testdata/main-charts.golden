@@ -1,0 +1,24 @@
+jig  demo                                                    5 tickets · 1 chart
+────────────────────────────────────────────────────────────────────────────────
+▸ ✓ JIG-4  Coupon model        ✓ ✓ ✓ ✓  published https://example.test/acme/dem…
+  ◑ JIG-5  Apply a coupon co…  ✓ ◑ ○ ○  Build: 1 of 2 green · verifying slice s…
+  ◐ JIG-6  Remove a coupon     ◐ ○ ○ ○  Brief: drafted · waiting for your appro…
+  ◐ JIG-7  Coupons in receip…  ◐ ○ ○ ○  Brief: drafted · waiting for your appro…
+  ◐ JIG-8  Show the discount   ◐ ○ ○ ○  Brief: drafted · waiting for your appro…
+
+  charts
+  ◐ checkout  Coupons at checkout  chart  1 of 5 published
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move · enter open · g gate · a answer · t tail · r refresh · q quit

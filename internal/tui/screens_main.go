@@ -6,10 +6,14 @@ import (
 )
 
 // mainPage is the project: one row per ticket, with its four steps as a row
-// of icons and where its current step stands.
+// of icons and where its current step stands, then a row per chart.
 func (m *Model) mainPage() page {
 	var p page
 	ids := m.w.order
+	if len(ids) == 0 && len(m.w.chartOrder) > 0 {
+		m.mainCharts(&p, 4, 0)
+		return p
+	}
 	if len(ids) == 0 {
 		p.add(m.st.dim("no tickets yet"))
 		p.add(m.st.dim("ask your agent to plan one, or make one with `jig ticket new --title \"...\"`"))
@@ -42,6 +46,7 @@ func (m *Model) mainPage() page {
 		line += "  " + r.dots + "  " + r.detail
 		p.addRow(rowRef{kind: rowTicket, id: r.id, ticket: r.id}, line)
 	}
+	m.mainCharts(&p, idW, titleW)
 	return p
 }
 

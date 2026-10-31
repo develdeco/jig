@@ -78,12 +78,18 @@ func listed(items []string, max int) string {
 
 // stop says what is outstanding as the agent is about to stop. To a person
 // at the keyboard it is a message, and the facts the model has not heard
-// reach it at its next prompt or tool call. An unattended session is held
+// reach it at its next prompt or tool call. An unattended agent is held
 // back, with the findings as the reason, when one of them is blocking and
-// the session is not already continuing for the same findings (it is held
-// back once for each).
+// the agent is not already continuing for the same findings (it is held
+// back once for each). A subagent's stop is its own: it names the ticket the
+// subagent works on, and holds the subagent alone, never the session's own
+// agent.
 func (h *handler) stop() Result {
-	if !h.locate() {
+	located := h.locate()
+	if h.ev.IsSubagent() && !(located && h.w.Ticket != "") {
+		located = h.locateAgent() || located
+	}
+	if !located {
 		return Result{}
 	}
 	mem := h.memory()
@@ -126,10 +132,33 @@ func (h *handler) stop() Result {
 		h.delivered(f.ref, f.text, outcomeStopBlock)
 	}
 	h.hook("blocked: " + strings.Join(texts, "; "))
-	return Result{
-		Message: message,
-		Block:   "jig: this session is unattended, so it is held back from stopping until this is dealt with:\n" + bullets(lines),
+	return Result{Message: message, Block: h.holdReason() + bullets(lines)}
+}
+
+// holdReason is what a refusal to stop says before the findings.
+func (h *handler) holdReason() string {
+	if h.ev.IsSubagent() {
+		return "jig: this agent's claim is unattended, so it is held back from stopping until this is dealt with:\n"
 	}
+	return "jig: this session is unattended, so it is held back from stopping until this is dealt with:\n"
+}
+
+// locateAgent places a subagent where its own earlier lines in the ledger say
+// it works, for a stop whose payload names a directory that is on no ticket
+// (a harness that reports the session's directory for a subagent that works
+// in a worktree of its own). It reports false, and changes nothing, when the
+// ledger has no such line or the place is no better.
+func (h *handler) locateAgent() bool {
+	mem := h.memory()
+	if mem.agentCwd == "" {
+		return false
+	}
+	was, st, cfg := h.w, h.st, h.cfg
+	if h.locateAt(mem.agentCwd) && h.w.Ticket != "" {
+		return true
+	}
+	h.w, h.st, h.cfg = was, st, cfg
+	return false
 }
 
 func capitalize(s string) string {
