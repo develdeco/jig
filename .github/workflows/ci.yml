@@ -17,9 +17,14 @@ on:
     - cron: "37 9 * * *"
 
 concurrency:
-  # Include the event so a manual run on a tag never shares a group with
-  # release.yml's call to this workflow, which cancel-in-progress would kill.
-  group: ci-${{ github.event_name }}-${{ github.ref }}
+  # A pull request's newer push cancels the run of its older one, whose
+  # result nobody needs. Every other run - a push to main, the daily run, a
+  # dispatch, a release's call - is a group of its own, by its run id, and
+  # always finishes: main is where Windows tests each merge, so a merge's run
+  # is its only Windows verdict. A group shared by main's pushes cancels it at
+  # the next merge, and one that waits instead keeps a single run pending and
+  # drops it at the merge after (DECISIONS.md, "Every run on main finishes").
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
