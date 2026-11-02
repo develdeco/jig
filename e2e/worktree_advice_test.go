@@ -11,6 +11,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -308,5 +309,125 @@ func TestWorktreeAdviceEndsWithThePublish(t *testing.T) {
 	}
 	if text := runJig(t, env, clone, "next", b.fx.Ticket).Stdout; strings.Contains(text, "Remove the worktree") || strings.Contains(text, "worktrees[") {
 		t.Errorf("jig next after the remove still advises:\n%s", text)
+	}
+}
+
+// chartWtOut is the part of `jig next <chart> --json` this test reads.
+type chartWtOut struct {
+	Run     [][]string `json:"run"`
+	Tickets []struct {
+		ID        string  `json:"id"`
+		Worktrees []wtRow `json:"worktrees"`
+	} `json:"tickets"`
+}
+
+// worktreesOf is the rows the standing gives ticket id.
+func (c chartWtOut) worktreesOf(t *testing.T, id string) []wtRow {
+	t.Helper()
+	for _, row := range c.Tickets {
+		if row.ID == id {
+			return row.Worktrees
+		}
+	}
+	t.Fatalf("the standing has no ticket %s: %+v", id, c.Tickets)
+	return nil
+}
+
+// TestChartCarriesWorktrees: `jig next <chart>` gives each ticket of the run its
+// worktrees, so a session that takes the chart on has every add command at
+// once: the first ticket from the target, the second, stacked on it, from its
+// parent's branch (as the origin will have it, until the clone holds it).
+// Running the first's command makes it present; `jig status <chart>` carries
+// none.
+func TestChartCarriesWorktrees(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	env = env.without("JIG_SLICE", "JIG_SESSION")
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chartDir := filepath.Join(fx.StoreDir, "charts", "c")
+	if err := os.MkdirAll(chartDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileOrFatal(t, filepath.Join(chartDir, "tickets.yaml"), []byte("tickets:\n  - title: First\n  - title: Second\n    blocked_by:\n      - ref: \"#1\"\n        kind: stacked\n"))
+	if r := runJig(t, env, fx.StoreDir, "graduate", "c"); r.Code != 0 {
+		t.Fatalf("jig graduate c: exit %d\n%s", r.Code, r.Stdout)
+	}
+	pos := nextJSON[chartOut](t, env, fx.RepoDir, "c")
+	if len(pos.Tickets) != 2 {
+		t.Fatalf("the standing has %d tickets, want 2: %+v", len(pos.Tickets), pos.Tickets)
+	}
+	first, second := pos.Tickets[0].ID, pos.Tickets[1].ID
+	briefed(t, st, first)
+	briefed(t, st, second)
+	firstBranch := nextJSON[wtNextOut](t, env, fx.RepoDir, first).Branch
+	secondBranch := nextJSON[wtNextOut](t, env, fx.RepoDir, second).Branch
+	clone := wtPath(fx.RepoDir)
+	dirOf := func(id string) string { return clone + ".worktrees/" + id }
+	quoted := wtQuoted(fx.RepoDir)
+
+	c := nextJSON[chartWtOut](t, env, fx.RepoDir, "c")
+	if want := [][]string{{first}, {second}}; !reflect.DeepEqual(c.Run, want) {
+		t.Fatalf("run = %v, want %v", c.Run, want)
+	}
+	wantFirst := wtRow{
+		Repo: "fixture-repo", Action: "add", Branch: firstBranch, Clone: clone, Dir: dirOf(first), Base: "origin/main",
+		Command: "git -C " + quoted + " worktree add " + wtQuoted(dirOf(first)) + " -b " + firstBranch + " origin/main",
+	}
+	wantSecond := wtRow{
+		Repo: "fixture-repo", Action: "add", Branch: secondBranch, Clone: clone, Dir: dirOf(second), Base: "origin/" + firstBranch,
+		Command: "git -C " + quoted + " worktree add " + wtQuoted(dirOf(second)) + " -b " + secondBranch + " origin/" + firstBranch,
+	}
+	if got := c.worktreesOf(t, first); !reflect.DeepEqual(got, []wtRow{wantFirst}) {
+		t.Errorf("%s worktrees = %+v, want %+v", first, got, wantFirst)
+	}
+	if got := c.worktreesOf(t, second); !reflect.DeepEqual(got, []wtRow{wantSecond}) {
+		t.Errorf("%s worktrees = %+v, want %+v", second, got, wantSecond)
+	}
+	// The second is held by the first until the first's gate has a clean round,
+	// so `jig next <second>` advises nothing yet: the chart names its add ahead
+	// of its wave, and the session asks again when the wave starts.
+	if held := nextJSON[wtNextOut](t, env, fx.RepoDir, second); len(held.Worktrees) != 0 {
+		t.Errorf("jig next %s while its parent has no clean round: worktrees %+v, want none", second, held.Worktrees)
+	}
+
+	text := runJig(t, env, fx.RepoDir, "next", "c").Stdout
+	for _, want := range []string{
+		"worktrees[2]{ticket,repo,action,dir,base,command}:",
+		"  " + first + ",fixture-repo,add,",
+		"  " + second + ",fixture-repo,add,",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("jig next c lacks %q:\n%s", want, text)
+		}
+	}
+	if run, table := strings.Index(text, "run[2]"), strings.Index(text, "worktrees[2]"); run < 0 || table < run {
+		t.Errorf("the worktrees table must follow the run table:\n%s", text)
+	}
+	if status := runJig(t, env, fx.RepoDir, "status", "c"); status.Code != 0 || strings.Contains(status.Stdout, "worktrees") {
+		t.Errorf("jig status c: exit %d, want the standing with no worktrees\n%s", status.Code, status.Stdout)
+	}
+
+	// The first's branch now exists in the clone (cut by hand, say): the second
+	// starts from it, and the first's add is the existing-branch form.
+	gitLog(t, fx.RepoDir, "branch", firstBranch, "main")
+	c = nextJSON[chartWtOut](t, env, fx.RepoDir, "c")
+	firstRows, secondRows := c.worktreesOf(t, first), c.worktreesOf(t, second)
+	wantExisting := "git -C " + quoted + " worktree add " + wtQuoted(dirOf(first)) + " " + firstBranch
+	if len(firstRows) != 1 || firstRows[0].Action != "add" || firstRows[0].Command != wantExisting || firstRows[0].Base != "" {
+		t.Fatalf("%s after its branch exists: %+v, want the add %q", first, firstRows, wantExisting)
+	}
+	if len(secondRows) != 1 || secondRows[0].Base != firstBranch || !strings.HasSuffix(secondRows[0].Command, " -b "+secondBranch+" "+firstBranch) {
+		t.Fatalf("%s after its parent's branch exists: %+v, want the base %s", second, secondRows, firstBranch)
+	}
+	runAdvised(t, firstRows[0].Command)
+	c = nextJSON[chartWtOut](t, env, fx.RepoDir, "c")
+	if got := c.worktreesOf(t, first); len(got) != 1 || got[0].Action != "present" || !gitx.SameDir(got[0].Dir, dirOf(first)) || got[0].Command != "" {
+		t.Errorf("%s after the add: %+v, want present at %s", first, got, dirOf(first))
+	}
+	if got := c.worktreesOf(t, second); len(got) != 1 || got[0].Action != "add" {
+		t.Errorf("%s after the first's add: %+v, want its add still advised", second, got)
 	}
 }

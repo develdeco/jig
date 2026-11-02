@@ -54,6 +54,10 @@ type nextChartTicket struct {
 	Prompt   string          `json:"prompt"`
 	Problem  string          `json:"problem"`
 	WaitsFor []nextChartNeed `json:"waits_for,omitempty"`
+	// Worktrees are the worktrees jig advises for the ticket, one for each repo
+	// it builds in, as `jig next <ticket>` gives them (worktree_advice.go). Only
+	// a ticket of the run has them.
+	Worktrees []nextWorktree `json:"worktrees,omitempty"`
 }
 
 // nextChartNeed is an edge that is not met: the blocker (a ticket, or the entry
@@ -129,6 +133,32 @@ func chartOutput(c phase.Chart, m chartMap) nextChart {
 	return out
 }
 
+// setWorktrees lays on each graduated ticket of the run (any wave) the worktrees
+// jig advises for it: a ticket in the run is work of this run, so its work is
+// wanted. A ticket whose facts cannot be read gets none and never hides the
+// chart. The chart's standing is unchanged; `jig status <chart>` does not call
+// this.
+func (n *nextChart) setWorktrees(src *worktreeSource) {
+	inRun := map[string]bool{}
+	for _, wave := range n.Run {
+		for _, id := range wave {
+			inRun[id] = true
+		}
+	}
+	for i := range n.Tickets {
+		t := &n.Tickets[i]
+		if t.ID == "" || !inRun[t.ID] {
+			continue
+		}
+		facts, err := src.factsOf(t.ID)
+		if err != nil {
+			continue
+		}
+		facts.Wanted = true
+		t.Worktrees = src.rows(facts)
+	}
+}
+
 func orEmpty(s []string) []string {
 	if s == nil {
 		return []string{}
@@ -201,6 +231,15 @@ func (n nextChart) blocks(label string) []string {
 			wrows = append(wrows, []string{strconv.Itoa(i + 1), joinPlus(w)})
 		}
 		blocks = append(blocks, axi.Table("run", []string{"wave", "tickets"}, wrows))
+	}
+	var worktrees [][]string
+	for _, t := range n.Tickets {
+		for _, w := range t.Worktrees {
+			worktrees = append(worktrees, append([]string{t.ID}, worktreeCells(w)...))
+		}
+	}
+	if len(worktrees) > 0 {
+		blocks = append(blocks, axi.Table("worktrees", []string{"ticket", "repo", "action", "dir", "base", "command"}, worktrees))
 	}
 	if len(n.Ends) > 0 {
 		var erows [][]string

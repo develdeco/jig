@@ -98,11 +98,15 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		}
 		// A chart is read for its own sake as a ticket is: what its run waits on
 		// is asked of the host now.
-		c, m, err := deriveChart(st, cfg, mp, chart, newMergeReader(e, st, cfg, mp, jigHome, 0))
+		merges := newMergeReader(e, st, cfg, mp, jigHome, 0)
+		c, m, err := deriveChart(st, cfg, mp, chart, merges)
 		if err != nil {
 			return renderErr(stdout, err)
 		}
 		n := chartOutput(c, m)
+		// The tickets of the run carry the worktrees jig advises for them; the
+		// same reader says what a stacked parent's merge is.
+		n.setWorktrees(newWorktreeSource(st, cfg, mp, merges))
 		out, blocks = n, n.blocks("next")
 	} else if ticket != "" {
 		id, err := st.ResolveTicket(ticket)

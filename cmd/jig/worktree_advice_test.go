@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
@@ -635,4 +636,121 @@ func TestPublishPRWorktrees(t *testing.T) {
 			t.Errorf("blocks:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 		}
 	})
+}
+
+// TestNextChartWorktrees: the tickets of a chart's run carry the worktrees jig
+// advises for them, in any wave, a stacked ticket of a later wave naming its
+// parent's branch as the base before that branch exists; a ticket outside the
+// run has none; the text table and the JSON say the same rows; the standing
+// `jig status <chart>` prints has no worktrees; and a ticket that cannot be read
+// has none and never hides the chart.
+func TestNextChartWorktrees(t *testing.T) {
+	t.Parallel()
+	r := newChartRig(t)
+	r.shop(t, false)
+	clone := filepath.ToSlash(filepath.Join(t.TempDir(), "app"))
+	if err := os.MkdirAll(clone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := project.Config{Repos: []project.Repo{{Remote: "https://example.invalid/acme/app.git", Label: "app"}}}
+	mp := project.MachineProject{Clones: map[string]string{"app": clone}}
+	branchOf := func(id string) string {
+		t.Helper()
+		b, err := r.st.ResolveTicketBranch(id, mustTicket(t, r.st, id), "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	withWorktrees := func() nextChart {
+		t.Helper()
+		c, m, err := deriveChart(r.st, cfg, mp, "checkout", mergesOf{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := chartOutput(c, m)
+		src := newWorktreeSource(r.st, cfg, mp, mergesOf{})
+		src.branchExists = func(string, string) bool { return false }
+		src.listWorktrees = func(string) ([]gitx.Worktree, error) { return nil, nil }
+		n.setWorktrees(src)
+		return n
+	}
+
+	n := withWorktrees()
+	if want := [][]string{{"SHOP-1", "SHOP-2"}, {"SHOP-4"}}; !reflect.DeepEqual(n.Run, want) {
+		t.Fatalf("run = %v, want %v", n.Run, want)
+	}
+	add := func(id, base string) nextWorktree {
+		dir := clone + ".worktrees/" + id
+		return nextWorktree{
+			Repo: "app", Action: "add", Branch: branchOf(id), Clone: clone, Dir: dir, Base: base,
+			Command: "git -C " + clone + " worktree add " + dir + " -b " + branchOf(id) + " " + base,
+		}
+	}
+	want := map[string][]nextWorktree{
+		"SHOP-1": {add("SHOP-1", "origin/main")},
+		"SHOP-2": {add("SHOP-2", "origin/main")},
+		"SHOP-4": {add("SHOP-4", "origin/"+branchOf("SHOP-2"))},
+		"SHOP-3": nil,
+	}
+	for id, rows := range want {
+		if got := rowOf(t, n, id).Worktrees; !reflect.DeepEqual(got, rows) {
+			t.Errorf("%s worktrees = %+v, want %+v", id, got, rows)
+		}
+	}
+
+	text := strings.Join(n.blocks("next"), "\n")
+	var cells [][]string
+	for _, id := range []string{"SHOP-1", "SHOP-2", "SHOP-4"} {
+		for _, w := range want[id] {
+			cells = append(cells, append([]string{id}, worktreeCells(w)...))
+		}
+	}
+	table := axi.Table("worktrees", []string{"ticket", "repo", "action", "dir", "base", "command"}, cells)
+	if !strings.Contains(text, table) {
+		t.Errorf("the chart's text lacks the worktrees table:\n%s\nin:\n%s", table, text)
+	}
+	if run, worktrees := strings.Index(text, "run[2]"), strings.Index(text, "worktrees[3]"); run < 0 || worktrees < run {
+		t.Errorf("the worktrees table must follow the run table:\n%s", text)
+	}
+	if strings.Contains(text, "  SHOP-3,app,") {
+		t.Errorf("the text has a row for SHOP-3, which is not in the run:\n%s", text)
+	}
+
+	data, err := json.Marshal(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back nextChart
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	for id, rows := range want {
+		if got := rowOf(t, back, id).Worktrees; !reflect.DeepEqual(got, rows) {
+			t.Errorf("json: %s worktrees = %+v, want %+v", id, got, rows)
+		}
+	}
+
+	// The standing alone, as `jig status <chart>` prints it, has none.
+	c, m, err := deriveChart(r.st, cfg, mp, "checkout", mergesOf{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := chartOutput(c, m)
+	if status := strings.Join(plain.blocks("status"), "\n"); strings.Contains(status, "worktrees[") {
+		t.Errorf("a chart with no worktrees set prints a table:\n%s", status)
+	}
+	if data, err := json.Marshal(plain); err != nil || strings.Contains(string(data), "worktrees") {
+		t.Errorf("a chart with no worktrees set marshals %s, %v", data, err)
+	}
+
+	// A ticket whose files cannot be read has none; the others keep theirs.
+	r.put(t, "tickets/SHOP-2/slices.yaml", "slices: [not, valid")
+	broken := withWorktrees()
+	if got := rowOf(t, broken, "SHOP-2").Worktrees; len(got) != 0 {
+		t.Errorf("SHOP-2 with unreadable slices has worktrees %+v", got)
+	}
+	if got := rowOf(t, broken, "SHOP-1").Worktrees; len(got) != 1 {
+		t.Errorf("SHOP-1 = %+v, want its row kept", got)
+	}
 }
