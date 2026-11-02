@@ -181,17 +181,18 @@ func (s *worktreeSource) rows(f worktreeFacts) []nextWorktree {
 			held, isHeld = s.holder(clone, f.Branch)
 		}
 		row := nextWorktree{Repo: repo, Branch: f.Branch, Clone: clone}
+		advised := filepath.ToSlash(filepath.Clean(clone) + worktreesDirSuffix + f.Ticket)
 		switch {
 		case ended && isHeld && !held.Main:
-			row.Action, row.Dir = worktreeRemove, filepath.ToSlash(held.Dir)
+			row.Action, row.Dir = worktreeRemove, heldDir(held, advised)
 			row.Command = "git -C " + gitPath(clone) + " worktree remove " + gitPath(row.Dir)
 		case ended:
 			continue
 		case isHeld:
-			row.Action, row.Dir = worktreePresent, filepath.ToSlash(held.Dir)
+			row.Action, row.Dir = worktreePresent, heldDir(held, advised)
 		default:
 			row.Action = worktreeAdd
-			row.Dir = filepath.ToSlash(filepath.Clean(clone) + worktreesDirSuffix + f.Ticket)
+			row.Dir = advised
 			add := "git -C " + gitPath(clone) + " worktree add " + gitPath(row.Dir)
 			if exists {
 				row.Command = add + " " + f.Branch
@@ -240,6 +241,27 @@ func (s *worktreeSource) holder(clone, branch string) (gitx.Worktree, bool) {
 		}
 	}
 	return gitx.Worktree{}, false
+}
+
+// heldDir is the directory of the work tree held, spelled as jig advised it
+// when the two are one directory: git lists a work tree by its resolved path
+// (on macOS /var is /private/var), and the add, present and remove rows of a
+// ticket name the same directory alike. A work tree made anywhere else keeps
+// git's path.
+func heldDir(held gitx.Worktree, advised string) string {
+	listed := filepath.ToSlash(held.Dir)
+	if listed == advised {
+		return listed
+	}
+	a, err := os.Stat(listed)
+	if err != nil {
+		return listed
+	}
+	b, err := os.Stat(advised)
+	if err != nil || !os.SameFile(a, b) {
+		return listed
+	}
+	return advised
 }
 
 // gitPath writes a path into a git command: wrapped in double quotes when it
