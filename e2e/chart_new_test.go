@@ -123,8 +123,8 @@ func TestChartNewFlow(t *testing.T) {
 				t.Errorf("entry 1 = %+v, want no problem", row)
 			}
 		default:
-			if row.Reach != "blocked" || row.ID != "" || !strings.Contains(row.Problem, "run `jig validate coupons` to list every problem of the chart") {
-				t.Errorf("entry %d = %+v, want a blocked row whose problem names jig validate coupons", row.Pos, row)
+			if row.Reach != "blocked" || row.ID != "" || row.Problem == "" || strings.Contains(row.Problem, "jig validate") {
+				t.Errorf("entry %d = %+v, want a blocked row whose problem is the problem alone (the verdict names jig validate)", row.Pos, row)
 			}
 		}
 	}

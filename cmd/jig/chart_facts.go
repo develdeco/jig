@@ -64,8 +64,8 @@ func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, 
 		}
 	}
 	// A ref that does not resolve is its entry's problem, never a reason to
-	// refuse the chart: the entry is a blocked row that says what is wrong and
-	// names `jig validate`, which lists every problem of the chart.
+	// refuse the chart: the entry is a blocked row that says what is wrong, and
+	// the verdict names `jig validate`, which lists every problem of the chart.
 	refs, refProblems := resolveChartRefs(st, name, scoped)
 	problemOf := map[int][]string{}
 	for _, p := range refProblems {
@@ -78,7 +78,7 @@ func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, 
 		ce := phase.ChartEntry{Pos: pos, ID: e.ID, Title: e.Title}
 		if e.ID == "" {
 			if reasons := problemOf[pos]; len(reasons) > 0 {
-				ce.Problem = strings.Join(reasons, "; ") + fmt.Sprintf("; run `jig validate %s` to list every problem of the chart", name)
+				ce.Problem = strings.Join(reasons, "; ")
 			}
 			// The needs are the refs that did resolve.
 			for _, r := range refs[i] {

@@ -111,7 +111,7 @@ A prompt aimed at a chart, run from the main session: "Take <chart> to PR" when 
 _Avoid_: batch, pipeline, campaign
 
 **Chart standing**:
-Where a chart is, derived from its tickets' journal lines and records and never recorded (`phase.DeriveChart`, shown by `jig next <chart>` and `jig status <chart>`, and by the TUI's chart screen): each ticket's wave and reach (done, here, after a merge, or blocked), the tickets to brief, the build waves that can run now, where the run would end and the pull requests it waits on, whether the chart started, and the verdict with the prompt that moves it ("Take <chart> to PR", "Continue <chart>", or none). An entry with no ticket yet whose `blocked_by` ref does not resolve is a row with a problem (blocked, with the reason and a pointer to `jig validate <chart>`), not a refusal of the chart; a chart with no entries yet says to add them and check them with `jig validate`.
+Where a chart is, derived from its tickets' journal lines and records and never recorded (`phase.DeriveChart`, shown by `jig next <chart>` and `jig status <chart>`, and by the TUI's chart screen): each ticket's wave and reach (done, here, after a merge, or blocked), the tickets to brief, the build waves that can run now, where the run would end and the pull requests it waits on, whether the chart started, and the verdict with the prompt that moves it ("Take <chart> to PR", "Continue <chart>", or none). An entry with no ticket yet whose `blocked_by` ref does not resolve is a row with a problem (blocked, with the reason, while the verdict points to `jig validate <chart>`), not a refusal of the chart; a chart with no entries yet says to add them and check them with `jig validate`.
 _Avoid_: chart status, run state
 
 **Recommendations**:

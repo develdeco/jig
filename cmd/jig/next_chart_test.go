@@ -686,9 +686,8 @@ func TestNextChartShowsABadRefAsTheRowsProblem(t *testing.T) {
     blocked_by:
       - ref: "#1"
 `, "")
-	const pointer = "; run `jig validate c` to list every problem of the chart"
-	two := `blocked_by ref "#9" is out of range` + pointer
-	three := `blocked_by ref "#4" names a later entry that is also being created; it must point at an earlier one` + pointer
+	two := `blocked_by ref "#9" is out of range`
+	three := `blocked_by ref "#4" names a later entry that is also being created; it must point at an earlier one`
 
 	{
 		verb := "next"
@@ -727,7 +726,7 @@ func TestNextChartShowsABadRefAsTheRowsProblem(t *testing.T) {
 		}
 		for _, want := range []string{
 			"problems[2]{pos,id,problem}:",
-			"\n  2,-,", `blocked_by ref \"#9\" is out of range` + pointer,
+			"\n  2,-,", `blocked_by ref \"#9\" is out of range"`,
 			"\n  3,-,", `blocked_by ref \"#4\" names a later entry`,
 			"Run `jig validate c` to list the problems of the entries that have no ticket yet, fix them in charts/c/tickets.yaml, then run `jig graduate c`",
 		} {

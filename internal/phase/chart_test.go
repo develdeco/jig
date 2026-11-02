@@ -454,7 +454,7 @@ func TestChartWithNoEntries(t *testing.T) {
 // validate` first while any entry with no ticket has a problem.
 func TestChartEntryWithABadRefIsBlocked(t *testing.T) {
 	t.Parallel()
-	problem := `blocked_by ref "#9" is out of range; run ` + "`jig validate c`" + ` to list every problem of the chart`
+	problem := `blocked_by ref "#9" is out of range`
 	bad := ChartEntry{Pos: 2, Title: "bad", Problem: problem}
 	after := ChartEntry{Pos: 3, Title: "after", Needs: []ChartNeed{{Pos: 2, Kind: "merged", Why: "c#3 waits for entry #2, which has no ticket yet"}}}
 
