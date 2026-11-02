@@ -133,3 +133,31 @@ func FromLines(lines []journal.Line) Totals {
 	t.Models, t.Unpriced = sortedKeys(models), sortedKeys(unpriced)
 	return t
 }
+
+// Sum adds Totals up: the counts, the sessions and the agents, the dollars
+// (rounded as FromLines rounds them) and the models and unpriced models of
+// all of them, each sorted with no repeats. A chart's spend is the Sum of its
+// tickets' FromLines: a session that wrote lines on two tickets counts on each,
+// as it spent on both.
+func Sum(ts ...Totals) Totals {
+	var out Totals
+	models, unpriced := map[string]bool{}, map[string]bool{}
+	for _, t := range ts {
+		out.Input += t.Input
+		out.Output += t.Output
+		out.CacheRead += t.CacheRead
+		out.CacheWrite += t.CacheWrite
+		out.USD += t.USD
+		out.Sessions += t.Sessions
+		out.Agents += t.Agents
+		for _, m := range t.Models {
+			models[m] = true
+		}
+		for _, m := range t.Unpriced {
+			unpriced[m] = true
+		}
+	}
+	out.USD = math.Round(out.USD*1e6) / 1e6
+	out.Models, out.Unpriced = sortedKeys(models), sortedKeys(unpriced)
+	return out
+}

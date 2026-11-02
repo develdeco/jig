@@ -137,3 +137,31 @@ func TestFromLinesCountsAgentsApartFromSessions(t *testing.T) {
 		t.Errorf("totals with no agent line = %+v, want 2 sessions and no agents", plain)
 	}
 }
+
+// TestSumAddsTotals: Sum adds the counts, the sessions, the agents and the
+// dollars, and merges the models and the unpriced ones sorted with no repeats;
+// nothing sums to nothing.
+func TestSumAddsTotals(t *testing.T) {
+	t.Parallel()
+	a := Totals{Input: 10, Output: 20, CacheRead: 30, CacheWrite: 40, USD: 0.1, Sessions: 1, Agents: 2, Models: []string{"m2", "m1"}, Unpriced: []string{"m2"}}
+	b := Totals{Input: 1, Output: 2, CacheRead: 3, CacheWrite: 4, USD: 0.2, Sessions: 2, Agents: 1, Models: []string{"m3", "m1"}, Unpriced: []string{"m3", "m2"}}
+	got := Sum(a, b)
+	if got.Input != 11 || got.Output != 22 || got.CacheRead != 33 || got.CacheWrite != 44 || got.Tokens() != 110 {
+		t.Errorf("counts = %+v, want 11 in, 22 out, 33 read, 44 write", got)
+	}
+	if got.Sessions != 3 || got.Agents != 3 {
+		t.Errorf("sessions %d, agents %d, want 3 and 3", got.Sessions, got.Agents)
+	}
+	if got.USD != 0.3 {
+		t.Errorf("usd = %v, want 0.3 (0.1 + 0.2 rounded to 1e-6)", got.USD)
+	}
+	if !slices.Equal(got.Models, []string{"m1", "m2", "m3"}) || !slices.Equal(got.Unpriced, []string{"m2", "m3"}) {
+		t.Errorf("models = %q, unpriced = %q, want m1 m2 m3 and m2 m3", got.Models, got.Unpriced)
+	}
+	if got := Sum(); got.Tokens() != 0 || got.Sessions != 0 || got.Models != nil || got.Unpriced != nil {
+		t.Errorf("Sum() = %+v, want nothing", got)
+	}
+	if got := Sum(a); got.Input != 10 || got.Agents != 2 || !slices.Equal(got.Models, []string{"m1", "m2"}) {
+		t.Errorf("Sum(a) = %+v, want a with its models sorted", got)
+	}
+}

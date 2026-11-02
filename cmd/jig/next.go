@@ -102,7 +102,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		n := chartOutput(c, m)
+		n := chartOutput(c, m, chartSpend(st, c))
 		out, blocks = n, n.blocks("next")
 	} else if ticket != "" {
 		id, err := st.ResolveTicket(ticket)
