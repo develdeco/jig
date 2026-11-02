@@ -351,10 +351,13 @@ func TestPullRequestsByIDsFailsOnAnErrorThatIsNotAGoneNode(t *testing.T) {
 	}
 }
 
-// TestAddSubIssueAndAddBlockedBySendTheirMutations checks AddSubIssue and
-// AddBlockedBy post the mutation brief.md#The GitHub client names, with the
-// node ids they were given as variables.
-func TestAddSubIssueAndAddBlockedBySendTheirMutations(t *testing.T) {
+// TestAddSubIssueAndBlockedBySendTheirMutations checks AddSubIssue,
+// AddBlockedBy and RemoveBlockedBy post the mutation brief.md#The GitHub
+// client names, with the node ids they were given as variables. The
+// blocked-by pair must name the blocker by GitHub's input field,
+// blockingIssueId: GitHub checks the input field, not the variable's name,
+// and dropped blockedByIssueId.
+func TestAddSubIssueAndBlockedBySendTheirMutations(t *testing.T) {
 	var queries []string
 	var vars []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -378,6 +381,9 @@ func TestAddSubIssueAndAddBlockedBySendTheirMutations(t *testing.T) {
 	if err := c.AddBlockedBy(context.Background(), "ISSUE", "BLOCKER"); err != nil {
 		t.Fatalf("AddBlockedBy: %v", err)
 	}
+	if err := c.RemoveBlockedBy(context.Background(), "ISSUE", "BLOCKER"); err != nil {
+		t.Fatalf("RemoveBlockedBy: %v", err)
+	}
 
 	if !strings.Contains(queries[0], "addSubIssue") {
 		t.Fatalf("AddSubIssue sent query %q, want it to call addSubIssue", queries[0])
@@ -385,11 +391,13 @@ func TestAddSubIssueAndAddBlockedBySendTheirMutations(t *testing.T) {
 	if vars[0]["issueId"] != "PARENT" || vars[0]["subIssueId"] != "CHILD" {
 		t.Fatalf("AddSubIssue vars = %v, want issueId=PARENT, subIssueId=CHILD", vars[0])
 	}
-	if !strings.Contains(queries[1], "addBlockedBy") {
-		t.Fatalf("AddBlockedBy sent query %q, want it to call addBlockedBy", queries[1])
-	}
-	if vars[1]["issueId"] != "ISSUE" || vars[1]["blockingIssueId"] != "BLOCKER" {
-		t.Fatalf("AddBlockedBy vars = %v, want issueId=ISSUE, blockingIssueId=BLOCKER", vars[1])
+	for i, name := range map[int]string{1: "addBlockedBy", 2: "removeBlockedBy"} {
+		if !strings.Contains(queries[i], name+"(input: {issueId: $issueId, blockingIssueId: $blockingIssueId})") {
+			t.Fatalf("%s sent query %q, want its input to name issueId and blockingIssueId", name, queries[i])
+		}
+		if vars[i]["issueId"] != "ISSUE" || vars[i]["blockingIssueId"] != "BLOCKER" {
+			t.Fatalf("%s vars = %v, want issueId=ISSUE, blockingIssueId=BLOCKER", name, vars[i])
+		}
 	}
 }
 
