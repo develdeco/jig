@@ -357,6 +357,41 @@ func TestWorktreeRowsRemoveOnlyALinkedWorktree(t *testing.T) {
 	}
 }
 
+// TestWorktreeRowsNameTheAdvisedDirAsGitListsIt: git lists a work tree by its
+// resolved path (macOS lists /var as /private/var). When that is the directory
+// jig advised, the present and remove rows spell it as the add did; a work tree
+// in another directory keeps git's path.
+func TestWorktreeRowsNameTheAdvisedDirAsGitListsIt(t *testing.T) {
+	t.Parallel()
+	r := newWtRig(t, "api")
+	advised := r.clones["api"] + ".worktrees/" + wtTicket
+	if err := os.MkdirAll(advised, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.ToSlash(t.TempDir()) + "/alias"
+	if err := os.Symlink(r.root, alias); err != nil {
+		t.Skipf("no directory symlink here: %v", err)
+	}
+	r.holds("api", gitx.Worktree{Dir: alias + "/api.worktrees/" + wtTicket})
+
+	if row := rowOfRepo(t, r.src.rows(r.facts()), "api"); row.Action != "present" || row.Dir != advised {
+		t.Errorf("present row = %+v, want the dir spelled %s", row, advised)
+	}
+	f := r.facts()
+	f.Published = true
+	row := rowOfRepo(t, r.src.rows(f), "api")
+	if want := "git -C " + r.clones["api"] + " worktree remove " + advised; row.Action != "remove" || row.Dir != advised || row.Command != want {
+		t.Errorf("remove row = %+v, want the dir %s and the command %q", row, advised, want)
+	}
+
+	other := filepath.ToSlash(t.TempDir())
+	r2 := newWtRig(t, "api")
+	r2.holds("api", gitx.Worktree{Dir: other})
+	if row := rowOfRepo(t, r2.src.rows(r2.facts()), "api"); row.Dir != other {
+		t.Errorf("a work tree elsewhere = %+v, want git's path %s", row, other)
+	}
+}
+
 // TestWorktreeRowsAStackedTicketOwedAMergeKeepsItsWorktree: a published ticket
 // whose plan owes its branch a restack or a retarget has not ended: it is
 // advised a worktree to make the merge in (present while one is there, an add
