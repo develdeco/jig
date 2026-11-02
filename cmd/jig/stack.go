@@ -110,9 +110,16 @@ func stackBlocks(ticket string, rows []nextStack) []string {
 			blocks = append(blocks, fmt.Sprintf("note: the branch of %s moved past %s in %s: restack onto `%s` at `%s`: `git merge %s`; jig never rebases",
 				r.Parent, ticket, r.Repo, r.ParentBranch, shortSHA(r.ParentHead), r.StartFrom)+thenPublish("; ", r.Publish))
 		case r.Retarget:
+			// jig publish points the open PR at its target (ADR 0038), so the
+			// note asks only for the merge.
 			target := r.PRTarget
-			blocks = append(blocks, fmt.Sprintf("note: %s merged in %s: retarget the PR of %s to %s and merge %s (`git merge origin/%s`)",
-				r.Parent, r.Repo, ticket, target, target, target)+thenPublish(", ", r.Publish))
+			note := fmt.Sprintf("note: %s merged in %s: merge %s (`git merge origin/%s`)", r.Parent, r.Repo, target, target)
+			if r.Publish != "" {
+				note += fmt.Sprintf(", then run `%s`, which points the PR of %s at %s", r.Publish, ticket, target)
+			} else {
+				note += fmt.Sprintf("; the publish of %s points its PR at %s", ticket, target)
+			}
+			blocks = append(blocks, note)
 		case r.Parent != "" && !r.Merged && r.ParentHead == "":
 			blocks = append(blocks, fmt.Sprintf("note: the clone of %s holds no copy of %s, the branch of %s: fetch it (`git fetch origin`) before %s starts from it",
 				r.Repo, r.ParentBranch, r.Parent, ticket))
