@@ -170,3 +170,33 @@ func TestStatusShowsSpendAgainstTheBudget(t *testing.T) {
 		t.Errorf("budget (show) lacks the spend block:\n%s", out)
 	}
 }
+
+// TestStatusShowsAgentsInTheSpendBlock: a subagent's line is a pair of its own
+// in the spend block, right after sessions, and only when there is one: the
+// block of a ticket with none reads as it did. The session is counted once
+// however many agents it has, and `jig budget` shows the same block. The
+// block of a ticket with no agent line is TestStatusShowsSpendAgainstTheBudget's.
+func TestStatusShowsAgentsInTheSpendBlock(t *testing.T) {
+	t.Parallel()
+	fx, st, e := workFixture(t)
+	T := fx.Ticket
+
+	for _, l := range []journal.Line{
+		spend.Line("2026-01-01T10:00:00Z", "s-1", "claude", "a", spend.Totals{Input: 100}),
+		spend.AgentLine("2026-01-01T10:30:00Z", "s-1", "a-1", "claude", "a", spend.Totals{Input: 10}),
+		spend.AgentLine("2026-01-01T11:00:00Z", "s-1", "a-1", "claude", "a", spend.Totals{Input: 30}),
+		spend.AgentLine("2026-01-01T11:30:00Z", "s-1", "a-2", "claude", "a", spend.Totals{Input: 5}),
+	} {
+		if err := journal.Append(st, T, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, code := runMain(t, e, "", "status", T)
+	want := "spend:\n  sessions: 1\n  agents: 2\n  tokens: 135\n  input: 135\n"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("status: exit %d, want the block to hold one session and two agents (a-1 at its latest line)\n%s\ngot:\n%s", code, want, out)
+	}
+	if shown, _ := runMain(t, e, "", "budget", T); !strings.Contains(shown, want) {
+		t.Errorf("budget (show) lacks the agents pair:\n%s", shown)
+	}
+}

@@ -26,11 +26,13 @@ func spendStatusBlocks(st *store.Store, ticket string) ([]string, error) {
 }
 
 // spendBlock renders what ticket has spent, summed from the latest spend line
-// of each of its sessions, and how that stands against its budget record.
+// of each of its sessions and of their subagents, and how that stands against
+// its budget record.
 // ok is false when there is neither spend nor a budget to show.
 //
 //	spend:
 //	  sessions: 2
+//	  agents: 3
 //	  tokens: 31200000
 //	  input: 162
 //	  output: 429129
@@ -41,10 +43,12 @@ func spendStatusBlocks(st *store.Store, ticket string) ([]string, error) {
 //	  budget_usd: 10.00
 //	  budget: over
 //
-// tokens is the sum of the four counts below it. budget is none, ok, near
-// (at 80% of a limit) or over; budget_tokens and budget_usd are the limits
-// that are set. unpriced names the models whose tokens are counted but whose
-// dollars are not, because no price is known for them.
+// agents is the number of subagents that have a line of their own, and is
+// there only when it is above 0. tokens is the sum of the four counts below
+// it. budget is none, ok, near (at 80% of a limit) or over; budget_tokens and
+// budget_usd are the limits that are set. unpriced names the models whose
+// tokens are counted but whose dollars are not, because no price is known for
+// them.
 func spendBlock(st *store.Store, ticket string) (string, bool, error) {
 	lines, err := journal.Read(st, ticket)
 	if err != nil {
@@ -59,15 +63,18 @@ func spendBlock(st *store.Store, ticket string) (string, bool, error) {
 	if t.Sessions == 0 && !limited {
 		return "", false, nil
 	}
-	pairs := [][2]string{
-		{"sessions", strconv.Itoa(t.Sessions)},
-		{"tokens", strconv.FormatInt(t.Tokens(), 10)},
-		{"input", strconv.FormatInt(t.Input, 10)},
-		{"output", strconv.FormatInt(t.Output, 10)},
-		{"cache_write", strconv.FormatInt(t.CacheWrite, 10)},
-		{"cache_read", strconv.FormatInt(t.CacheRead, 10)},
-		{"usd", strconv.FormatFloat(t.USD, 'f', 2, 64)},
+	pairs := [][2]string{{"sessions", strconv.Itoa(t.Sessions)}}
+	if t.Agents > 0 {
+		pairs = append(pairs, [2]string{"agents", strconv.Itoa(t.Agents)})
 	}
+	pairs = append(pairs,
+		[2]string{"tokens", strconv.FormatInt(t.Tokens(), 10)},
+		[2]string{"input", strconv.FormatInt(t.Input, 10)},
+		[2]string{"output", strconv.FormatInt(t.Output, 10)},
+		[2]string{"cache_write", strconv.FormatInt(t.CacheWrite, 10)},
+		[2]string{"cache_read", strconv.FormatInt(t.CacheRead, 10)},
+		[2]string{"usd", strconv.FormatFloat(t.USD, 'f', 2, 64)},
+	)
 	if limited {
 		if budget.Tokens > 0 {
 			pairs = append(pairs, [2]string{"budget_tokens", strconv.FormatInt(budget.Tokens, 10)})
