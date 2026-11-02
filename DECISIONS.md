@@ -3944,3 +3944,21 @@ The brief for [ADR 0039](docs/adr/0039-jig-advises-a-tickets-worktree-and-makes-
 **`jig publish --pr` gives the removal when it records the last pull request, and a failure to read the facts is silence.** The pull request is recorded whatever the advice could read. A record with a repo still pending adds nothing, and bare `jig publish` is unchanged: `jig next <T>` gives the removal after it.
 
 **Left for later.** Listing worktrees in process (the git program answers while the ticket's branch exists in the clone), a branch that exists only on the origin, and the numbers in `.github/git-budget.yaml`, which are CI's to print on the Linux leg and go in the pull request's diff.
+
+## A chart is made by `jig chart new` and checked by `jig validate <chart>` (chart run, C8)
+
+The brief for [ADR 0040](docs/adr/0040-a-chart-is-made-and-checked-by-verbs.md) left a few choices; each took the recommended answer.
+
+**A name is lower case only.** Letters, digits, `-` and `_`, starting and ending with a letter or digit, at most 64 characters. Two chart folders that differ in case are one folder on some volumes, which `sameChartFile` already guards against for refs. A name that reads as a ticket (a ticket id or alias holds it) is refused, since a ticket wins over a chart name and the chart could never be reached by it. The same goes for a name ending in `-gate` or `-publish`, which `chartNamed` never reads as a chart: the brief did not name that case, and it follows from the same reason. A chart folder that differs from the name only in case counts as taken.
+
+**The skeleton has no placeholder prose.** `map.md` is the title and five headings, each followed by a blank line, and `tickets.yaml` is a comment that says how an entry is written and `tickets: []`. A paragraph under a heading is an item to `jig recall` and to the mirror, so a line of instructions would be shown as content. The how-to is in the `tickets.yaml` comment, which nothing reads.
+
+**The problem lines name the entry by position and title.** `entry N ("<title>"): ...`, the title quoted as graduate's own messages quote it, and `entry N` alone for an entry with no title. A duplicate id is listed once for each later entry, with the first holder named, and its folder is checked once. A ref with a bad kind is listed for its kind only.
+
+**The closing help line is one sentence.** A failure ends with "Fix them in charts/<chart>/tickets.yaml, then run `jig validate <chart>` again", and a pass names the one step that follows: `jig graduate` with the number of entries it will create (the 1 entry, the N entries), or `jig next <chart>` once every entry has a ticket.
+
+**`jig validate <chart>` covers the refs of graduated entries too.** `jig graduate` resolves every entry's refs after its run, so validate does the same; `jig next <chart>` still reads a graduated entry's edges from its ticket and ignores the chart's refs for it.
+
+**`jig next <chart>` reads a bad ref as the row's problem.** The row is blocked, and the entries behind it are blocked with it. `jig graduate` refuses the chart with the error it gave before. A chart with no entries keeps the code `CHART_NOT_GRADUATED` (the TUI reads it) and says to add entries and check them, not to graduate.
+
+**Left for later.** Verbs that edit a chart's entries, a `jig chart` family beyond `new`, checking a chart's map, and two writers making the same chart name at once in a writers-mode store (the claim retries only on a shared main branch).
