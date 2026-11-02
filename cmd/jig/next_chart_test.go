@@ -313,8 +313,9 @@ func TestChartEdgesComeFromTheTicket(t *testing.T) {
 
 // TestChartRefsOfEntriesWithNoTicket: an entry with no id takes its edges from
 // the chart's refs, which resolve as graduate resolves them: one on an entry
-// that has none either waits on its position, and a ref that does not resolve
-// is graduate's refusal.
+// that has none either waits on its position. A ref that does not resolve is
+// the entry's problem, not a refusal of the chart
+// (TestNextChartShowsABadRefAsTheRowsProblem).
 func TestChartRefsOfEntriesWithNoTicket(t *testing.T) {
 	t.Parallel()
 	r := newChartRig(t)
@@ -346,11 +347,6 @@ func TestChartRefsOfEntriesWithNoTicket(t *testing.T) {
 	}
 	if text, _ := r.run(t, "next", "c"); !strings.Contains(text, "Run `jig graduate c` to create the 2 missing ticket(s)") || !strings.Contains(text, "-,Two,-,here,SHOP-1(stacked)") {
 		t.Errorf("text:\n%s", text)
-	}
-
-	r.chart(t, "bad", "tickets:\n  - title: One\n    blocked_by:\n      - ref: \"#9\"\n", "")
-	if out, code := r.run(t, "next", "bad"); code == 0 || !strings.Contains(out, `blocked_by ref "#9" is out of range`) {
-		t.Errorf("jig next bad = exit %d\n%s, want graduate's refusal", code, out)
 	}
 }
 
@@ -664,4 +660,163 @@ func rowFor(c phase.Chart, id string) phase.ChartRow {
 		}
 	}
 	return phase.ChartRow{}
+}
+
+// TestNextChartShowsABadRefAsTheRowsProblem: an entry with no ticket whose ref
+// does not resolve is a row with its problem, for `jig next <chart>` and `jig
+// status <chart>` alike, in the JSON and in the text: its reasons joined, then
+// the pointer to `jig validate`; the refs that did resolve still hold it, the
+// other entries are read as before, the chart stays in the store listing, and
+// the help sends the person to validate before graduate.
+func TestNextChartShowsABadRefAsTheRowsProblem(t *testing.T) {
+	t.Parallel()
+	r := newChartRig(t)
+	r.ticket(t, "SHOP-1", "", false)
+	r.chart(t, "c", `tickets:
+  - id: SHOP-1
+    title: One
+  - title: Two
+    blocked_by:
+      - ref: "#9"
+  - title: Three
+    blocked_by:
+      - ref: "#4"
+      - ref: SHOP-1
+  - title: Four
+    blocked_by:
+      - ref: "#1"
+`, "")
+	const pointer = "; run `jig validate c` to list every problem of the chart"
+	two := `blocked_by ref "#9" is out of range` + pointer
+	three := `blocked_by ref "#4" names a later entry that is also being created; it must point at an earlier one` + pointer
+
+	{
+		verb := "next"
+		out, code := r.run(t, verb, "c", "--json")
+		var n nextChart
+		if err := json.Unmarshal([]byte(out), &n); code != 0 || err != nil {
+			t.Fatalf("jig %s c --json: exit %d, %v\n%s", verb, code, err, out)
+		}
+		byPos := map[int]nextChartTicket{}
+		for _, row := range n.Tickets {
+			byPos[row.Pos] = row
+		}
+		if row := byPos[2]; row.Problem != two || row.Reach != "blocked" || row.ID != "" {
+			t.Errorf("%s: entry 2 = %+v, want blocked with the problem %q", verb, row, two)
+		}
+		row := byPos[3]
+		if row.Problem != three || row.Reach != "blocked" || len(row.WaitsFor) != 1 || row.WaitsFor[0].Ticket != "SHOP-1" {
+			t.Errorf("%s: entry 3 = %+v, want blocked with the problem %q and the ref that resolved (SHOP-1) as its need", verb, row, three)
+		}
+		if row := byPos[4]; row.Problem != "" || len(row.WaitsFor) != 1 || row.WaitsFor[0].Ticket != "SHOP-1" {
+			t.Errorf("%s: entry 4 = %+v, want no problem and a wait on SHOP-1", verb, row)
+		}
+		if row := byPos[1]; row.Problem != "" || row.ID != "SHOP-1" {
+			t.Errorf("%s: SHOP-1 = %+v, want it read as before", verb, row)
+		}
+		if !n.Ready || n.Ungraduated != 3 || n.Code != "" {
+			t.Errorf("%s: verdict = ready %v ungraduated %d code %q, want the graduated ticket still runnable", verb, n.Ready, n.Ungraduated, n.Code)
+		}
+
+	}
+
+	for _, verb := range []string{"next", "status"} {
+		text, code := r.run(t, verb, "c")
+		if code != 0 {
+			t.Fatalf("jig %s c: exit %d\n%s", verb, code, text)
+		}
+		for _, want := range []string{
+			"problems[2]{pos,id,problem}:",
+			"\n  2,-,", `blocked_by ref \"#9\" is out of range` + pointer,
+			"\n  3,-,", `blocked_by ref \"#4\" names a later entry`,
+			"Run `jig validate c` to list the problems of the entries that have no ticket yet, fix them in charts/c/tickets.yaml, then run `jig graduate c`",
+		} {
+			if !strings.Contains(strings.ReplaceAll(text, "\r\n", "\n"), want) {
+				t.Errorf("jig %s c: text lacks %q:\n%s", verb, want, text)
+			}
+		}
+		if strings.Contains(text, "to create the 3 missing ticket(s)") {
+			t.Errorf("jig %s c: text still says to graduate the entries first:\n%s", verb, text)
+		}
+		if strings.Index(text, "problems[") < strings.Index(text, "tickets[") {
+			t.Errorf("jig %s c: the problems table comes before the tickets table:\n%s", verb, text)
+		}
+	}
+
+	// The chart is still listed, with its entries counted.
+	var listing struct {
+		Charts []nextChartRow `json:"charts"`
+	}
+	out, code := r.run(t, "next", "--json")
+	if err := json.Unmarshal([]byte(out), &listing); code != 0 || err != nil || len(listing.Charts) != 1 || listing.Charts[0].Name != "c" || listing.Charts[0].Ungraduated != 3 {
+		t.Errorf("jig next --json: exit %d, %v, charts %+v, want the chart listed with 3 ungraduated", code, err, listing.Charts)
+	}
+
+	// Nothing graduated: the verdict says validate first, and so does the help.
+	r.chart(t, "bad", "tickets:\n  - title: One\n    blocked_by:\n      - ref: \"#9\"\n", "")
+	n := r.next(t, "bad")
+	if want := "run `jig validate bad` first: it lists the problems of the entries that have no ticket yet"; n.Code != "CHART_NOT_GRADUATED" || n.Reason != want || n.Ready || n.Prompt != "" {
+		t.Errorf("a chart with only a bad entry = code %q reason %q ready %v prompt %q, want not graduated with %q", n.Code, n.Reason, n.Ready, n.Prompt, want)
+	}
+	if text, code := r.run(t, "next", "bad"); code != 0 || !strings.Contains(text, "Run `jig validate bad` to list the problems of the entries that have no ticket yet") || !strings.Contains(text, "problems[1]{pos,id,problem}:") {
+		t.Errorf("jig next bad: exit %d\n%s", code, text)
+	}
+
+	// A graduated ticket that cannot be read shows in the table too, with its id.
+	r.shop(t, false)
+	r.put(t, "tickets/SHOP-2/slices.yaml", "slices: [not: {valid")
+	text, code := r.run(t, "next", "checkout")
+	if code != 0 || !strings.Contains(text, "problems[1]{pos,id,problem}:") || !strings.Contains(text, "\n  2,SHOP-2,") {
+		t.Errorf("an unreadable ticket is not in the problems table: exit %d\n%s", code, text)
+	}
+	if text, _ := newChartRigWithShop(t).run(t, "next", "checkout"); strings.Contains(text, "problems[") {
+		t.Errorf("a chart with no problem prints a problems table:\n%s", text)
+	}
+}
+
+// newChartRigWithShop is a rig holding the mockup chart, all readable.
+func newChartRigWithShop(t *testing.T) chartRig {
+	t.Helper()
+	r := newChartRig(t)
+	r.shop(t, false)
+	return r
+}
+
+// TestNextChartWithNoEntries: a chart just made (jig chart new's skeleton, no
+// entries) keeps CHART_NOT_GRADUATED with no prompt, and its reason and help say
+// to add the entries and check them with `jig validate`, not to run `jig
+// graduate`, which refuses a chart with no entries. `jig status` says the same,
+// and the chart is listed.
+func TestNextChartWithNoEntries(t *testing.T) {
+	t.Parallel()
+	r := newChartRig(t)
+	if err := r.st.CreateChart("fresh", "Fresh chart"); err != nil {
+		t.Fatal(err)
+	}
+	const reason = "the chart has no entries yet: add them to charts/fresh/tickets.yaml and check them with `jig validate fresh`"
+
+	for _, verb := range []string{"next", "status"} {
+		if verb == "next" {
+			n := r.next(t, "fresh")
+			if n.Chart != "fresh" || n.Title != "Fresh chart" || n.Ready || n.Code != "CHART_NOT_GRADUATED" || n.Prompt != "" || n.Reason != reason || n.Ungraduated != 0 || len(n.Tickets) != 0 {
+				t.Errorf("jig next fresh = %+v, want not graduated, no prompt, no tickets, the reason %q", n, reason)
+			}
+			if n.Map == nil || len(n.Map.Destination)+len(n.Map.Decided)+len(n.Map.Fog)+len(n.Map.OutOfScope) != 0 {
+				t.Errorf("jig next fresh: map = %+v, want the skeleton's sections, all empty", n.Map)
+			}
+		}
+		text, code := r.run(t, verb, "fresh")
+		if code != 0 || strings.Count(text, reason) != 2 || strings.Contains(text, "jig graduate") || strings.Contains(text, "problems[") {
+			t.Errorf("jig %s fresh: exit %d, want the reason as reason and as help, no graduate and no problems:\n%s", verb, code, text)
+		}
+	}
+
+	var listing struct {
+		Charts []nextChartRow `json:"charts"`
+	}
+	out, code := r.run(t, "next", "--json")
+	want := []nextChartRow{{Name: "fresh", Title: "Fresh chart", Tickets: []string{}}}
+	if err := json.Unmarshal([]byte(out), &listing); code != 0 || err != nil || !reflect.DeepEqual(listing.Charts, want) {
+		t.Errorf("jig next --json: exit %d, %v, charts %+v, want %+v", code, err, listing.Charts, want)
+	}
 }

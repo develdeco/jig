@@ -23,7 +23,9 @@ const (
 	// CodeChartBlocked: nothing can start and no merge frees it.
 	CodeChartBlocked = "CHART_BLOCKED"
 	// CodeChartNotGraduated: the chart has entries with no ticket yet and
-	// nothing else to run: `jig graduate <chart>` mints them.
+	// nothing else to run: `jig graduate <chart>` mints them (`jig validate
+	// <chart>` first while one has a problem). A chart with no entries at all
+	// has it too: the entries are still to be written.
 	CodeChartNotGraduated = "CHART_NOT_GRADUATED"
 )
 
@@ -326,6 +328,10 @@ func (d *chartDeriver) reachOf(i int) string {
 	switch {
 	case d.done(i):
 		reach = ReachDone
+	case e.ID == "" && e.Problem != "":
+		// An entry with no ticket yet has a problem in the chart's own file (a
+		// ref that does not resolve), not an unreadable ticket.
+		reach, why = ReachBlocked, d.label(i)+" has a problem: "+e.Problem
 	case e.Problem != "" || e.ID != "" && e.Ticket == nil:
 		reach, why = ReachBlocked, d.label(i)+" cannot be read: "+e.Problem
 	default:
@@ -468,10 +474,14 @@ func (d *chartDeriver) verdict(c *Chart) {
 		if c.Ungraduated > 0 {
 			c.Reason = missing
 		}
+	case len(c.Rows) == 0:
+		// A chart just made: there is nothing to graduate, which graduate
+		// refuses, so the next step is to add entries and check them.
+		c.Code, c.Reason = CodeChartNotGraduated, fmt.Sprintf("the chart has no entries yet: add them to charts/%s/tickets.yaml and check them with `jig validate %s`", c.Name, c.Name)
 	case graduated == 0:
-		c.Code, c.Reason = CodeChartNotGraduated, fmt.Sprintf("run `jig graduate %s`", c.Name)
+		c.Code, c.Reason = CodeChartNotGraduated, c.graduateStep()
 	case done == graduated && c.Ungraduated > 0:
-		c.Code, c.Reason = CodeChartNotGraduated, fmt.Sprintf("%s: run `jig graduate %s`", missing, c.Name)
+		c.Code, c.Reason = CodeChartNotGraduated, missing+": "+c.graduateStep()
 	case done == graduated:
 		c.Code = CodeChartDone
 	case len(c.Ends) > 0:
@@ -486,6 +496,27 @@ func (d *chartDeriver) verdict(c *Chart) {
 			}
 		}
 	}
+}
+
+// HasUngraduatedProblem says an entry with no ticket yet has a problem in the
+// chart's own file: `jig graduate` would refuse it, so `jig validate <chart>`
+// is the step that lists what is wrong.
+func (c Chart) HasUngraduatedProblem() bool {
+	for _, r := range c.Rows {
+		if r.ID == "" && r.Problem != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// graduateStep is the step that mints the entries with no ticket: `jig
+// graduate`, or, while one of them has a problem, `jig validate` first.
+func (c Chart) graduateStep() string {
+	if c.HasUngraduatedProblem() {
+		return fmt.Sprintf("run `jig validate %s` first: it lists the problems of the entries that have no ticket yet", c.Name)
+	}
+	return fmt.Sprintf("run `jig graduate %s`", c.Name)
 }
 
 // entriesWithNoTicket says how many entries wait for `jig graduate`.

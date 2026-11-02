@@ -218,6 +218,18 @@ func (n nextChart) blocks(label string) []string {
 		rows = append(rows, []string{id, t.Title, steps, t.Reach, waits})
 	}
 	blocks = append(blocks, axi.Table("tickets", []string{"id", "title", "steps", "reach", "waits_for"}, rows))
+	// What the JSON carries as a row's problem: an entry whose ref does not
+	// resolve, or a ticket that cannot be read.
+	var problems [][]string
+	for _, t := range n.Tickets {
+		if t.Problem == "" {
+			continue
+		}
+		problems = append(problems, []string{strconv.Itoa(t.Pos), dashed(t.ID), t.Problem})
+	}
+	if len(problems) > 0 {
+		blocks = append(blocks, axi.Table("problems", []string{"pos", "id", "problem"}, problems))
+	}
 	if len(n.Briefs) > 0 {
 		var brows [][]string
 		for _, id := range n.Briefs {
@@ -262,9 +274,13 @@ func (n nextChart) help() []string { return chartHelp(n.derived) }
 
 // chartHelp says what to do for a chart at its standing: ask the prompt when
 // something can run, merge the pull request a run ends at then ask to continue,
-// graduate the entries that have no ticket, or what blocks it.
+// graduate the entries that have no ticket (validate them first while one has a
+// problem, which graduate would refuse), or what blocks it.
 func chartHelp(c phase.Chart) []string {
 	graduate := fmt.Sprintf("Run `jig graduate %s` to create the %d missing ticket(s)", c.Name, c.Ungraduated)
+	if c.HasUngraduatedProblem() {
+		graduate = fmt.Sprintf("Run `jig validate %s` to list the problems of the entries that have no ticket yet, fix them in charts/%s/tickets.yaml, then run `jig graduate %s`", c.Name, c.Name, c.Name)
+	}
 	switch {
 	case c.Ready:
 		help := []string{"Ask: " + c.Prompt}
