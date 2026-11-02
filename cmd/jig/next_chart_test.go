@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
@@ -389,7 +390,7 @@ func TestChartWaitsOnThePullRequestTheMergeReaderNames(t *testing.T) {
 	pr := "https://example.test/shop/pull/7"
 	open := ready.Merge{Published: true, Repos: []ready.RepoMerge{{Repo: "shop", PR: pr, State: ready.PROpen, Why: "its PR is open (" + pr + ")"}}}
 
-	c, _, err := deriveChart(r.st, project.Config{}, "checkout", mergesOf{"SHOP-1": open})
+	c, _, err := deriveChart(r.st, project.Config{}, project.MachineProject{}, "checkout", mergesOf{"SHOP-1": open})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +418,7 @@ func TestChartWaitsOnThePullRequestTheMergeReaderNames(t *testing.T) {
 	}
 
 	merged := ready.Merge{Published: true, Repos: []ready.RepoMerge{{Repo: "shop", PR: pr, State: ready.PRMerged, Met: true, By: "pr"}}}
-	c, _, err = deriveChart(r.st, project.Config{}, "checkout", mergesOf{"SHOP-1": merged})
+	c, _, err = deriveChart(r.st, project.Config{}, project.MachineProject{}, "checkout", mergesOf{"SHOP-1": merged})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,4 +515,153 @@ func TestChartWavesAndRankOrderMatchTheTicketOrder(t *testing.T) {
 			}
 		}
 	}
+}
+
+// owedRig is a chart of a parent (SHOP-1) and a child stacked on it (SHOP-2),
+// both published, with a project of one repo "app": the parent's branch merged
+// into main while the child's branch, cut from it, lacks main's new head.
+type owedRig struct {
+	chartRig
+	cfg   project.Config
+	mp    project.MachineProject
+	clone string
+	// child is the child's branch.
+	child string
+}
+
+func newOwedRig(t *testing.T) owedRig {
+	t.Helper()
+	r := owedRig{chartRig: newChartRig(t)}
+	r.ticket(t, "SHOP-1", "", false)
+	r.ticket(t, "SHOP-2", "blocked_by:\n  - ticket: SHOP-1\n    kind: stacked\n", false)
+	r.chart(t, "checkout", "tickets:\n  - id: SHOP-1\n    title: Parent\n  - id: SHOP-2\n    title: Child\n", "")
+	r.publish(t, "SHOP-1")
+	r.publish(t, "SHOP-2")
+
+	root := t.TempDir()
+	origin, clone := filepath.Join(root, "origin.git"), filepath.Join(root, "clone")
+	git := func(args ...string) {
+		t.Helper()
+		full := append([]string{"-c", "user.name=tester", "-c", "user.email=tester@example.invalid"}, args...)
+		if _, err := gitx.Run(clone, full...); err != nil {
+			t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+		}
+	}
+	if _, err := gitx.Run(root, "init", "--bare", "-b", "main", origin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(root, "init", "-b", "main", clone); err != nil {
+		t.Fatal(err)
+	}
+	commit := func(name string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(clone, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("add", "-A")
+		git("commit", "-m", "add "+name)
+	}
+	git("remote", "add", "origin", origin)
+	commit("base.txt")
+	git("push", "origin", "main")
+	parent, err := r.st.ResolveTicketBranch("SHOP-1", mustTicket(t, r.st, "SHOP-1"), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.child, err = r.st.ResolveTicketBranch("SHOP-2", mustTicket(t, r.st, "SHOP-2"), "main"); err != nil {
+		t.Fatal(err)
+	}
+	git("switch", "-c", parent)
+	commit("parent.txt")
+	git("push", "origin", parent)
+	git("switch", "-c", r.child)
+	commit("child.txt")
+	git("push", "origin", r.child)
+	git("switch", "main")
+	git("merge", "--no-ff", "--no-edit", parent)
+	git("push", "origin", "main")
+	git("fetch", "origin")
+	git("switch", r.child)
+
+	r.clone = clone
+	r.cfg = project.Config{Repos: []project.Repo{{Remote: origin, Label: "app"}}}
+	r.mp = project.MachineProject{Clones: map[string]string{"app": clone}}
+	return r
+}
+
+func mustTicket(t *testing.T, st *store.Store, id string) store.Ticket {
+	t.Helper()
+	rec, err := st.ReadTicket(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+// TestChartFactsOwedTicketIsWork: a published child whose parent merged while
+// its branch lacks the target's head is owed a merge: its row stands at the
+// publish, it is the run's only work, and the chart is done again once the
+// branch holds the target (or the child's own pull request merged: its work
+// landed). A child whose stack plan cannot be read is a row with its problem,
+// the chart still derived; a ticket stacked on nothing is read as before.
+func TestChartFactsOwedTicketIsWork(t *testing.T) {
+	t.Parallel()
+	r := newOwedRig(t)
+	const parentPR, childPR = "https://example.test/shop/pull/7", "https://example.test/shop/pull/8"
+	parentMerged := ready.Merge{Published: true, Repos: []ready.RepoMerge{{Repo: "app", PR: parentPR, State: ready.PRMerged, Met: true, By: "pr"}}}
+	childOpen := ready.Merge{Published: true, Repos: []ready.RepoMerge{{Repo: "app", PR: childPR, State: ready.PROpen}}}
+
+	c, _, err := deriveChart(r.st, r.cfg, r.mp, "checkout", mergesOf{"SHOP-1": parentMerged, "SHOP-2": childOpen})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := [][]string{{"SHOP-2"}}; !c.Ready || c.Code != "" || c.Prompt != "Continue checkout" || !reflect.DeepEqual(c.Run, want) {
+		t.Fatalf("chart = ready %v code %q prompt %q run %v, want ready under Continue with %v", c.Ready, c.Code, c.Prompt, c.Run, want)
+	}
+	for _, row := range c.Rows {
+		switch row.ID {
+		case "SHOP-1":
+			if !row.Done || row.Reach != phase.ReachDone {
+				t.Errorf("SHOP-1 = done %v reach %s, want done", row.Done, row.Reach)
+			}
+		case "SHOP-2":
+			if row.Done || row.Reach != phase.ReachHere || row.Ticket == nil || !row.Ticket.Behind() || row.Ticket.Current != phase.Publish || row.Prompt() != "Publish SHOP-2" {
+				t.Errorf("SHOP-2 = done %v reach %s ticket %+v prompt %q, want behind at the publish, here", row.Done, row.Reach, row.Ticket, row.Prompt())
+			}
+		}
+	}
+
+	// The child's own pull request merged: its work landed, nothing is owed.
+	childMerged := ready.Merge{Published: true, Repos: []ready.RepoMerge{{Repo: "app", PR: childPR, State: ready.PRMerged, Met: true, By: "pr"}}}
+	if c, _, err = deriveChart(r.st, r.cfg, r.mp, "checkout", mergesOf{"SHOP-1": parentMerged, "SHOP-2": childMerged}); err != nil || c.Code != phase.CodeChartDone {
+		t.Errorf("the child landed: code %q, %v, want CHART_DONE", c.Code, err)
+	}
+
+	// The session merges main into the child's branch: done.
+	if _, err := gitx.Run(r.clone, "-c", "user.name=tester", "-c", "user.email=tester@example.invalid", "merge", "--no-edit", "origin/main"); err != nil {
+		t.Fatal(err)
+	}
+	if c, _, err = deriveChart(r.st, r.cfg, r.mp, "checkout", mergesOf{"SHOP-1": parentMerged, "SHOP-2": childOpen}); err != nil || c.Code != phase.CodeChartDone || c.Ready {
+		t.Errorf("after the merge: code %q ready %v, %v, want CHART_DONE", c.Code, c.Ready, err)
+	}
+
+	// A plan that cannot be read is the row's problem, never a reason to hide
+	// the chart.
+	r.put(t, "tickets/SHOP-1/slices.yaml", "slices: [not, valid")
+	c, _, err = deriveChart(r.st, r.cfg, r.mp, "checkout", mergesOf{"SHOP-1": parentMerged, "SHOP-2": childOpen})
+	if err != nil {
+		t.Fatalf("a plan that cannot be read hid the chart: %v", err)
+	}
+	if row := rowFor(c, "SHOP-2"); row.Problem == "" || row.Done {
+		t.Errorf("SHOP-2 = %+v, want a row with its problem", row)
+	}
+}
+
+func rowFor(c phase.Chart, id string) phase.ChartRow {
+	for _, row := range c.Rows {
+		if row.ID == id {
+			return row
+		}
+	}
+	return phase.ChartRow{}
 }

@@ -23,8 +23,8 @@ type chartMap struct {
 // the facts chartFacts gathered, with the sections of its map.md. Every command
 // that says where a chart stands asks it, so `jig next <chart>`, `jig status
 // <chart>` and the TUI's chart screen agree.
-func deriveChart(st *store.Store, _ project.Config, name string, merges mergeSource) (phase.Chart, chartMap, error) {
-	facts, err := chartFacts(st, name, merges)
+func deriveChart(st *store.Store, cfg project.Config, mp project.MachineProject, name string, merges mergeSource) (phase.Chart, chartMap, error) {
+	facts, err := chartFacts(st, cfg, mp, name, merges)
 	if err != nil {
 		return phase.Chart{}, chartMap{}, err
 	}
@@ -42,8 +42,10 @@ func deriveChart(st *store.Store, _ project.Config, name string, merges mergeSou
 // resolves them. A ticket that cannot be read is a row with its problem, never
 // a reason to hide the chart. Each edge is judged as a claim judges it
 // (blockerProblem), so a stacked edge is met by the parent's clean gate round
-// and a merged one by what merges says.
-func chartFacts(st *store.Store, name string, merges mergeSource) (phase.ChartFacts, error) {
+// and a merged one by what merges says. A published ticket stacked on another
+// is read with its stack plan (chartTicket): one whose branch is owed a merge
+// is work of the run, not done.
+func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, name string, merges mergeSource) (phase.ChartFacts, error) {
 	entries, err := st.ReadChart(name)
 	if err != nil {
 		return phase.ChartFacts{}, &axi.Error{
@@ -100,7 +102,7 @@ func chartFacts(st *store.Store, name string, merges mergeSource) (phase.ChartFa
 			}
 			ce.Needs = append(ce.Needs, chartNeed(st, e.ID, blocker, b.Kind, merges))
 		}
-		if t, err := derivePhaseWith(st, e.ID, merges); err != nil {
+		if t, err := derivePhasePlanned(st, cfg, mp, e.ID, rec, merges); err != nil {
 			ce.Problem = err.Error()
 		} else {
 			ce.Ticket = &t

@@ -98,7 +98,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		}
 		// A chart is read for its own sake as a ticket is: what its run waits on
 		// is asked of the host now.
-		c, m, err := deriveChart(st, cfg, chart, newMergeReader(e, st, cfg, mp, jigHome, 0))
+		c, m, err := deriveChart(st, cfg, mp, chart, newMergeReader(e, st, cfg, mp, jigHome, 0))
 		if err != nil {
 			return renderErr(stdout, err)
 		}
@@ -221,15 +221,25 @@ func parseAskedPhase(word, ticket string) (phase.Name, error) {
 	return p, nil
 }
 
-// setPhase reads where the ticket stands and lays it on n, with the answer to
-// asked when --for named a phase. It is best-effort: a ticket whose phase
-// cannot be derived (a gate round it cannot read, say) still gets the rest of
-// `jig next`, and says why the phase is missing.
-func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merges mergeSource) {
-	t, err := derivePhaseWith(st, id, merges)
+// stateBehind is the state `jig next <ticket>` gives a ticket that published
+// and whose stack plan owes its branch a merge (phase.Ticket.Behind): not done,
+// since the merge and the publish that follows it are still to make.
+const stateBehind = "behind"
+
+// setPhase reads where the ticket stands, with its stack plan laid on it
+// (derivePhaseStacked), and lays it on n, with the answer to asked when --for
+// named a phase. A ticket that is behind is in state behind, not done. It is
+// best-effort: a ticket whose phase cannot be derived (a gate round it cannot
+// read, say) still gets the rest of `jig next`, and says why the phase is
+// missing.
+func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merges mergeSource, plan stack.Plan) {
+	t, err := derivePhaseStacked(st, id, merges, plan)
 	if err != nil {
 		n.PhaseProblem = err.Error()
 		return
+	}
+	if t.Behind() && n.State == ready.StateDone {
+		n.State = stateBehind
 	}
 	n.derived = &t
 	p := &nextPhase{Name: string(t.Current), Ready: t.Ready, Code: t.Code, Reason: t.Reason, Prompt: t.Prompt}
@@ -441,12 +451,12 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 			readySlices = append(readySlices, s)
 		}
 	}
-	n.Stack = stackRows(plan)
+	n.Stack = stackRows(plan, data.in.Published)
 	for _, b := range ready.Batches(readySlices, place.Repo) {
 		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices, Start: startPoint(cfg, plan, b.Repo)})
 	}
 	n.Advice = distributionAdvice(n.Ready)
-	n.setPhase(st, id, asked, merges)
+	n.setPhase(st, id, asked, merges, plan)
 	if topology {
 		waves := ready.Waves(data.in.Slices)
 		for _, s := range data.in.Slices {
@@ -617,6 +627,11 @@ func (n nextTicket) help() []string {
 		return []string{fmt.Sprintf("%s is closed (%s): run `jig reopen %s` to work it again, or `jig next` to see a ticket that is ready", n.Ticket, n.Closed, n.Ticket)}
 	case ready.StateDone:
 		return []string{n.Ticket + " is published: run `jig next` to see the tickets that are left"}
+	case stateBehind:
+		if help := n.behindHelp(); len(help) > 0 {
+			return help
+		}
+		return []string{phaseAdvice(*n.derived, n.Ticket)}
 	case ready.StateBlocked:
 		if t != nil && t.Code != phase.CodeBlocked {
 			prompt = ""
@@ -641,6 +656,25 @@ func (n nextTicket) help() []string {
 	}
 	help = append(help, n.Advice...)
 	return append(help, fmt.Sprintf("Work on branch %s in each repo (%s where it does not exist), then run `jig here` to confirm%s", n.Branch, n.switchAdvice(), prompt))
+}
+
+// behindHelp is the help of a published ticket that is behind: for each repo
+// whose row asks for a merge, the merge to make in the ticket's branch and the
+// publish that pushes it and points the open pull request at its base. A merge
+// git made by itself needs no new round; one resolved by hand does.
+func (n nextTicket) behindHelp() []string {
+	var help []string
+	for _, r := range n.Stack {
+		if r.Merge == "" || r.Publish == "" {
+			continue
+		}
+		help = append(help, fmt.Sprintf("in %s run `%s`, then `%s`, which pushes the merge and points the open pull request at %s; a merge resolved by hand needs `jig gate %s` first",
+			r.Repo, r.Merge, r.Publish, r.PRTarget, n.Ticket))
+	}
+	if t := n.derived; t != nil && len(help) > 0 && t.Prompt != "" {
+		help[len(help)-1] += promptHint(t.Prompt)
+	}
+	return help
 }
 
 // switchAdvice names the command that creates the ticket's branch in a repo,
