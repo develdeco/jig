@@ -167,7 +167,7 @@ What a session has not yet heard: a verification outcome, an answer, a correctio
 _Avoid_: notification, alert
 
 **Correction**:
-A fact told to a session from what the journal already holds, with no second record: a **stall**, a brief that changed under verified work (*brief drift*), a commit outside every slice workspace (*scope drift*), a commit that names no slice (*slice missing*: the note guesses the slice from the files, and verifies nothing), or, for a stacked ticket, a parent that moved past it or merged (*restack*, *retarget*; see **Stacked start point**). Advisory in an interactive session, enforced in an unattended one.
+A fact told to a session from what the journal already holds, with no second record: a **stall**, a brief that changed under verified work (*brief drift*), a commit outside every slice workspace (*scope drift*), a commit that names no slice (*slice missing*: the note guesses the slice from the files, and verifies nothing), or, for a stacked ticket, a parent that moved past it or merged (*restack*, *retarget*; see **Stacked start point**). Advisory in an interactive session, enforced in an unattended one. A session hears a correction, but it is not the only place a restack or a retarget is told: a published ticket that is owed one is **behind**, which `jig next` and a chart's standing say to anyone who reads them.
 _Avoid_: warning, lint
 
 **Unattended**:
@@ -303,5 +303,13 @@ Whether a ticket's work has merged, for each repo it builds in. A `merged` block
 _Avoid_: merge status
 
 **Stacked start point**:
-Where a stacked ticket's branch starts, and where its pull request goes, in each repo it shares with its parent: the parent's branch while the parent has not merged there, `origin/<target>` and the target otherwise. It is advice computed on read (`jig next`, `jig here`, the publish), and jig never rebases or merges. When the parent's branch moves past the child's, the child's session is told to *restack*, which is to merge the parent's branch into the child's; when the parent merges, to *retarget*, which is to point the pull request at the target and merge it.
+Where a stacked ticket's branch starts, and where its pull request goes, in each repo it shares with its parent: the parent's branch while the parent has not merged there, `origin/<target>` and the target otherwise. It is advice computed on read (`jig next`, `jig here`, the publish), and jig never rebases or merges. When the parent's branch moves past the child's, the child's session is told to *restack*, which is to merge the parent's branch into the child's; when the parent merges, to *retarget*, which is to point the pull request at the target and merge it. Restack and retarget are also the ticket's own standing: a published ticket that is owed one is **behind**, not done. A ticket whose own work has merged is owed neither.
 _Avoid_: base branch
+
+**Behind**:
+The standing of a published stacked ticket whose stack plan asks for a restack or a retarget: its brief, build and review are done and its publish is current again, ready, with the prompt "Publish T". `jig next <T>` says `state: behind`, names the merge to make (`git merge origin/main`) and the publish that follows (`jig publish T`), and a chart's standing keeps the ticket in its run, so the chart is done only once the branch holds the target. jig never makes the merge: the session does, then a bare `jig publish` pushes it and points the open pull request at its base. A closed ticket is never behind, and `jig here` and the hooks do not read it.
+_Avoid_: stale, out of date
+
+**Reviewed head**:
+The head a clean gate round reviewed (`reviewed_sha`), which a publish ships. A head is also reviewed when every commit between it and that head, along first parents, is a merge whose tree is git's own merge of its two parents (a *clean merge*): the target merged in brings nothing to review. Any other commit is not, and a merge resolved by hand needs a new round, whose delta is the resolution alone, the merge's tree against git's own.
+_Avoid_: approved head

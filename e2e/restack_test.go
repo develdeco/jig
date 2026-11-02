@@ -228,3 +228,73 @@ func TestHandResolvedMergeGetsADeltaRound(t *testing.T) {
 		t.Errorf("origin's %s = %s, want the merge commit %s", b.branch, got, merge)
 	}
 }
+
+// TestCleanMergePublishesAndRetargets: a built child published into its parent's
+// branch, its pull request open from the branch. The parent merges and the
+// session merges main into the child's branch, clean. The ticket is behind, and
+// a bare publish needs no new gate round: it pushes the merge commit, finds the
+// open pull request by its branch, and points it at main in the one edit, with
+// no second pull request.
+func TestCleanMergePublishesAndRetargets(t *testing.T) {
+	t.Parallel()
+	b, env, log := stackedBuiltTicket(t)
+	h := b.builder
+	h.Push(parentBranch)
+	// The host holds the child's pull request, into the parent's branch.
+	env = withPulls(t, env, fixture.GhPull{Number: 7, Repo: "fixture-repo", Owner: "acme", Head: b.branch, Base: parentBranch})
+	prURL := pullURLIn("fixture-repo", 7)
+
+	first := runJig(t, env, h.Clone, "publish", b.fx.Ticket, "--yes")
+	if first.Code != 0 || !strings.Contains(first.Stdout, "updated") {
+		t.Fatalf("the first jig publish: exit %d, want the open pull request updated\nstdout:\n%s\nstderr:\n%s", first.Code, first.Stdout, first.Stderr)
+	}
+	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != b.sha {
+		t.Fatalf("origin's %s = %s after the first publish, want %s", b.branch, got, b.sha)
+	}
+	if n := nextJSON[restackNextOut](t, env, b.fx.RepoDir, b.fx.Ticket); n.State != "done" {
+		t.Fatalf("jig next after the first publish: state %q, want done", n.State)
+	}
+
+	// The parent merges into main: the ticket is behind. The session merges main
+	// into the branch, clean; the branch then holds main's head, so the standing
+	// reads done again while the pull request still goes into the parent's branch
+	// (the host's word on its base is not read: the publish below fixes it).
+	mergeParentIntoMain(t, b)
+	if n := nextJSON[restackNextOut](t, env, b.fx.RepoDir, b.fx.Ticket); n.State != "behind" {
+		t.Fatalf("jig next after the parent merged: state %q, want behind", n.State)
+	}
+	h.git("merge", "--no-ff", "--no-edit", "origin/main")
+	merge := h.git("rev-parse", "HEAD")
+
+	pub := runJig(t, env, h.Clone, "publish", b.fx.Ticket, "--yes")
+	if pub.Code != 0 {
+		t.Fatalf("the bare jig publish after a clean merge: exit %d, want 0 with no new round\nstdout:\n%s\nstderr:\n%s", pub.Code, pub.Stdout, pub.Stderr)
+	}
+	if !strings.Contains(pub.Stdout, "updated, retargeted to main") {
+		t.Errorf("the pr_url table does not say the pull request was retargeted:\n%s", pub.Stdout)
+	}
+	if _, err := os.Stat(b.roundDir("2")); err == nil {
+		t.Errorf("a gate round 2 exists: a clean merge needs no new round")
+	}
+	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != merge {
+		t.Errorf("origin's %s = %s, want the merge commit %s", b.branch, got, merge)
+	}
+	var retargets int
+	for _, c := range ghCalls(t, log) {
+		if strings.HasPrefix(c, "pr create") {
+			t.Errorf("publish opened a second pull request: %q", c)
+		}
+		if strings.HasPrefix(c, "pr edit "+prURL) && strings.Contains(c, " --base main") {
+			retargets++
+			if !strings.Contains(c, "--body-file") {
+				t.Errorf("the retarget %q is not the same edit as the body's", c)
+			}
+		}
+	}
+	if retargets != 1 {
+		t.Errorf("pr edit calls with --base main = %d, want one: %v", retargets, ghCalls(t, log))
+	}
+	if n := nextJSON[restackNextOut](t, env, b.fx.RepoDir, b.fx.Ticket); n.State != "done" {
+		t.Errorf("jig next after the publish: state %q, want done", n.State)
+	}
+}

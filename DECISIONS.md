@@ -3914,3 +3914,17 @@ A subagent cannot ask the person, and `jig ask --wait` would hold a background a
 `CONTEXT.md` and `ARCHITECTURE.md` said jig never reads `map.md`, while `jig recall` reads its fog (`recall.FogItems`) and the intake skill said so. The chart screen and `jig next <chart>` need the rest of it (destination, what was decided, out of scope), so the docs now say what the code does: jig reads the sections, never writes the file, and treats a missing section as empty. Whether the rule behind each section is read is a parsing question (`recall.ParseMap`), not a promise that the map's prose is structured.
 
 Once a chart's entry has a ticket, the standing takes the ticket's edges and rank from its `ticket.yaml`, not from the chart's refs: after graduation the ticket is the source of truth, and a person who edited a dependency there would otherwise see the chart disagree with `jig next <T>`. An entry with no ticket yet takes its edges from the chart. A ticket whose files cannot be read is a row with a problem and does not hide the chart.
+
+## A published stacked ticket can be behind: the choices the brief left (GRAPH-13)
+
+The brief for [ADR 0038](docs/adr/0038-a-published-stacked-ticket-can-be-behind.md) left a few choices; each took the recommended answer.
+
+**`Landed` keeps a ticket whose own work merged from reading as behind for good.** Once the child's own pull request merged, its branch never holds the target's head again, and the plan would ask for a retarget forever. `stack.Read` asks the merge reader about the ticket itself, once, and `Judge` leaves `Behind` and `Retarget` false when it landed. The hooks' cached merge reader asks no host, so the correction notes stop for a landed ticket too.
+
+**The base of a hand-resolved merge's delta round is a tree.** The diff has to be the hand edits, and the only thing to diff against is git's own merge of the tip's parents, which exists as a tree and not as a commit. `base_sha` can therefore be a tree id; every reader passes it to `git diff`. A line that is not "clean merges, then at most a hand-resolved tip" (an ordinary commit, two hand-resolved merges, a hand-resolved merge that is not the tip, a conflict committed with its markers) stays the plain delta from the reviewed head: the reviewer sees more, never less.
+
+**`jig here` and the hooks stay stack-blind.** They run on every tool call, and reading the stack plan means reading clones and asking the merge reader. `jig next <T>`, `jig status <T>` and a chart's standing read the plan, so the verbs a person reads agree. One stack-aware derivation for every reader is a follow-up.
+
+**A built ticket that has not published keeps its phase.** Its merge is part of the work and its review and publish follow by phase, so only a published ticket can be behind. The row's `publish` command is named only for a published ticket, and only on a row that asks for a merge.
+
+**`jig next` says `behind` for a branch that does not hold the target.** Once the session has merged the target the ticket reads done again, though the pull request may still point at the parent's branch until the next `jig publish`. Reading the pull request's base from the host to hold the standing until it is retargeted was left out: it would make every `jig next` ask the host about the ticket's own pull request.

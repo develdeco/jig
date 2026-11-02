@@ -58,6 +58,23 @@ func TestPRURLTable(t *testing.T) {
 	}
 }
 
+// TestPRURLTableSaysRetargeted: a pull request publish updated and also pointed
+// at another base (a stacked ticket's, whose parent merged) says so in the action
+// column, with the base; one it updated and left where it was says "updated".
+func TestPRURLTableSaysRetargeted(t *testing.T) {
+	t.Parallel()
+
+	report := verifydeliver.PublishReport{
+		PRURL:        map[string]string{"api": "https://github.example/o/api/pull/9", "web": "https://github.example/o/web/pull/2"},
+		PRUpdated:    map[string]bool{"api": true, "web": true},
+		PRRetargeted: map[string]string{"api": "main"},
+	}
+	want := "pr_url[2]{repo,url,action}:\n  api,\"https://github.example/o/api/pull/9\",\"updated, retargeted to main\"\n  web,\"https://github.example/o/web/pull/2\",updated"
+	if got := prURLTable(report); got != want {
+		t.Errorf("a repo retargeted and a repo not:\n got %q\nwant %q", got, want)
+	}
+}
+
 // TestRenderBodies: what `jig publish --body` prints. The body of the one repo of
 // a ticket is a block of its facts, as it always was; a ticket in one repo of a
 // project of several is told to record its pull request with that repo; the

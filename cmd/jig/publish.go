@@ -290,7 +290,8 @@ func pushedTable(report verifydeliver.PublishReport) string {
 
 // prURLTable is the publish report's account of the pull request each repo's
 // publish left: its URL, and whether publish opened it or updated the one the
-// branch already had open. A repo with no pull request still gets a row,
+// branch already had open, which it says it also pointed at another base
+// ("updated, retargeted to main"). A repo with no pull request still gets a row,
 // naming why in the action column (report.PRNote) rather than being dropped
 // silently: the operator cannot otherwise tell "this remote has no
 // pull-request host" from "the host returned no URL".
@@ -307,6 +308,9 @@ func prURLTable(report verifydeliver.PublishReport) string {
 		switch {
 		case url != "" && report.PRUpdated[repo]:
 			action = "updated"
+			if base := report.PRRetargeted[repo]; base != "" {
+				action += ", retargeted to " + base
+			}
 		case url == "":
 			action = report.PRNote[repo]
 			if action == "" {
