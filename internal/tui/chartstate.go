@@ -54,6 +54,27 @@ func (c *chart) verbOf(id string) *chartTicket {
 	return nil
 }
 
+// waitsOnMerge is whether the chart's run ends at a merge: the last read that
+// printed a chart listed at least one entry in its ends, which the verb sets
+// from each entry's own unmet merged edge, so no text of a fact is read.
+func (c *chart) waitsOnMerge() bool { return c.mergeWait }
+
+// ticketWaitsOnMerge is whether the ticket's screens wait on a merge: it is
+// known and not awaited, it is published with a pull request on record, and it
+// is not closed. A merge on the host writes no line to any journal and a
+// closure made in another session writes none either, so the status is where
+// a screen would see either.
+func (m *Model) ticketWaitsOnMerge(id string) bool {
+	t := m.w.tickets[id]
+	if t == nil || t.awaiting {
+		return false
+	}
+	if p := t.publish(); !p.Done || p.PR == "" {
+		return false
+	}
+	return t.status == nil || t.status.Closed == ""
+}
+
 // has is whether id is one of the chart's tickets.
 func (c *chart) has(id string) bool {
 	for _, x := range c.ids() {

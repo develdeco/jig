@@ -65,6 +65,11 @@ type Config struct {
 	// IdleTick is how often the model looks at the clock for that; zero is 1s,
 	// and a negative value never looks (a test that drives the clock itself).
 	IdleTick time.Duration
+	// MergeEvery is how often a screen that waits on a merge is read again: a
+	// merge on the host writes no line to any journal, so the screen sees it
+	// only when its verb is read. Zero is 2m, and a negative value never reads
+	// it again (a test that settles Init).
+	MergeEvery time.Duration
 	// Now is the clock the idle read measures by. Nil is time.Now.
 	Now func() time.Time
 	// Home is the folder a command the screens show names as ~: a session's
@@ -83,6 +88,8 @@ const (
 	// Config.IdleTick when they are zero.
 	defaultIdleAfter = 3 * time.Second
 	defaultIdleTick  = time.Second
+	// defaultMergeEvery is Config.MergeEvery when it is zero.
+	defaultMergeEvery = 2 * time.Minute
 	// batchMax bounds how many lines of the stream one update takes.
 	batchMax = 512
 )
@@ -191,7 +198,9 @@ type Model struct {
 	// The idle read: when the screen last took an event of the ticket it shows
 	// and when it last started to read that ticket's status, by now.
 	idleAfter, idleTick time.Duration
-	now                 func() time.Time
+	// mergeEvery is how often a screen that waits on a merge is read again.
+	mergeEvery time.Duration
+	now        func() time.Time
 	// home matches the home folder in any of its spellings (homePattern).
 	home                *regexp.Regexp
 	lastEvent, lastRead time.Time
@@ -225,6 +234,10 @@ func New(cfg Config) *Model {
 	}
 	if m.idleTick == 0 {
 		m.idleTick = defaultIdleTick
+	}
+	m.mergeEvery = cfg.MergeEvery
+	if m.mergeEvery == 0 {
+		m.mergeEvery = defaultMergeEvery
 	}
 	m.now = cfg.Now
 	if m.now == nil {
@@ -274,7 +287,7 @@ func (m *Model) Init() tea.Cmd {
 	if m.awaitingTicket() {
 		cmds = append(cmds, m.awaitAfter())
 	}
-	cmds = append(cmds, m.idleAfterTick())
+	cmds = append(cmds, m.idleAfterTick(), m.mergeAfterTick())
 	return tea.Batch(cmds...)
 }
 
@@ -315,6 +328,39 @@ func (m *Model) idleAfterTick() tea.Cmd {
 		return nil
 	}
 	return tea.Tick(m.idleTick, func(time.Time) tea.Msg { return idleMsg{} })
+}
+
+// mergeMsg asks the model to read the screen on top again if it waits on a
+// merge.
+type mergeMsg struct{}
+
+// mergeAfterTick asks, after a moment, for that read. It runs for the life of
+// the model, whichever screen is on top: onMerge reads only for a screen that
+// waits.
+func (m *Model) mergeAfterTick() tea.Cmd {
+	if m.mergeEvery < 0 {
+		return nil
+	}
+	return tea.Tick(m.mergeEvery, func(time.Time) tea.Msg { return mergeMsg{} })
+}
+
+// onMerge reads what the screen on top shows of a merge. A chart whose run
+// ends at a merge reads the ticket list and the chart: the chart verb asks the
+// host about the pull requests it names each time, and a merge changes no
+// ticket's status. A ticket published with a pull request, not closed, reads
+// its status. Every other screen, the project's list included, reads nothing.
+// A read already out is not doubled: the loads refuse a second one.
+func (m *Model) onMerge() tea.Cmd {
+	if e := m.top(); e.screen == screenChart {
+		if c := m.w.charts[e.chart]; c != nil && c.waitsOnMerge() {
+			return tea.Batch(m.loadRoster(), m.loadChart(e.chart))
+		}
+		return nil
+	}
+	if id := m.watching(); id != "" && m.ticketWaitsOnMerge(id) {
+		return m.refreshStatus(id)
+	}
+	return nil
 }
 
 // onIdle reads the status of the ticket on the screen when it has had no event
@@ -449,6 +495,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case idleMsg:
 		return m, tea.Batch(m.onIdle(), m.idleAfterTick())
+	case mergeMsg:
+		return m, tea.Batch(m.onMerge(), m.mergeAfterTick())
 	case statusMsg:
 		return m, m.onStatus(msg)
 	case briefMsg:
@@ -631,6 +679,11 @@ func (m *Model) onChart(msg chartMsg) tea.Cmd {
 	}
 	c.failures = 0
 	c.info = msg.info
+	if msg.info != nil {
+		// A read that printed no chart leaves the wait as it was, so one blank
+		// read does not stop the timer.
+		c.mergeWait = len(msg.info.Ends) > 0
+	}
 	return nil
 }
 

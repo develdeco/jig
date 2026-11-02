@@ -318,7 +318,7 @@ func TestTicketsGraduatedIntoTheOpenChartAreReadAtOnce(t *testing.T) {
 func TestAChartScreenOpenedOnTheCommandLineWaitsForTheListing(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "")
-	g.m = New(Config{RetryDelay: time.Millisecond, IdleTick: -1, Run: g.r.run, Chart: "checkout", Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24,
+	g.m = New(Config{RetryDelay: time.Millisecond, IdleTick: -1, MergeEvery: -1, Run: g.r.run, Chart: "checkout", Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24,
 		Now: func() time.Time { return rigNow }, Home: rigHome})
 	lines, status := chartTickets()
 	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(), status)
