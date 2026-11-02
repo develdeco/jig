@@ -15,6 +15,7 @@ import (
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
+	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // The tests here decide the rows of a ticket's worktrees (worktree_advice.go)
@@ -574,4 +575,64 @@ func TestWorktreeRenderInNext(t *testing.T) {
 	if out := strings.Join(n.blocks(true), "\n"); strings.Contains(out, "worktrees[") || strings.Contains(out, "Add the worktree") {
 		t.Errorf("a ticket with no rows prints worktrees:\n%s", out)
 	}
+}
+
+// TestPublishPRWorktrees: the record that finishes a publish also says how to
+// remove the ticket's worktrees: their table after the pull request and each
+// command ahead of the status line. A record with no remove rows prints what it
+// always did, and a record with a repo still pending adds nothing, whatever rows
+// the ticket has: the publish is not done.
+func TestPublishPRWorktrees(t *testing.T) {
+	t.Parallel()
+	report := verifydeliver.RecordReport{
+		Repo: "api", URL: "https://example.invalid/acme/api/pull/7", Branch: wtBranch, Commit: "0123456789ab", Verified: true,
+	}
+	remove := nextWorktree{
+		Repo: "api", Action: "remove", Branch: wtBranch, Clone: "/src/api", Dir: "/src/api.worktrees/JIG-7",
+		Command: "git -C /src/api worktree remove /src/api.worktrees/JIG-7",
+	}
+	status := "Run `jig status JIG-7` to confirm the ticket is fully green"
+	head := strings.Join([]string{
+		"publish_pr:",
+		"  ticket: JIG-7",
+		"  repo: api",
+		`  url: "https://example.invalid/acme/api/pull/7"`,
+		"  branch: " + wtBranch,
+		"  commit: 0123456789ab",
+		"  verified: yes",
+	}, "\n")
+
+	t.Run("with a worktree to remove", func(t *testing.T) {
+		t.Parallel()
+		got := recordedBlocks("JIG-7", report, []nextWorktree{remove})
+		want := []string{
+			head,
+			"worktrees[1]{repo,action,dir,base,command}:\n  api,remove,/src/api.worktrees/JIG-7,-,git -C /src/api worktree remove /src/api.worktrees/JIG-7",
+			"help[2]:\n  Remove the worktree of JIG-7 in api (git refuses one with changes): `" + remove.Command + "`\n  " + status,
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("blocks:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+	})
+	t.Run("without rows, or with rows that are no removal", func(t *testing.T) {
+		t.Parallel()
+		want := []string{head, "help[1]:\n  " + status}
+		if got := recordedBlocks("JIG-7", report, nil); !reflect.DeepEqual(got, want) {
+			t.Errorf("no rows: blocks:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+		kept := []nextWorktree{{Repo: "api", Action: "present", Dir: "/src/api.worktrees/JIG-7"}, {Repo: "web", Action: "add", Command: "git -C /src/web worktree add x b"}}
+		if got := recordedBlocks("JIG-7", report, kept); !reflect.DeepEqual(got, want) {
+			t.Errorf("rows that stay: blocks:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+	})
+	t.Run("with a repo still pending", func(t *testing.T) {
+		t.Parallel()
+		pending := report
+		pending.Pending = []string{"web", "docs"}
+		got := recordedBlocks("JIG-7", pending, []nextWorktree{remove})
+		want := []string{head, "help[1]:\n  web and docs still needs its pull request: `jig publish JIG-7 --pr <url> --repo web`"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("blocks:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+	})
 }

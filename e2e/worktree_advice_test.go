@@ -214,3 +214,99 @@ func TestNextAdvisesAWorktreePerRepo(t *testing.T) {
 		t.Errorf("jig next still advises an add once both worktrees are there:\n%s", text)
 	}
 }
+
+// TestWorktreeAdviceEndsWithThePublish: a ticket built and reviewed clean is
+// advised no add while a work tree holds its branch (the clone's own: present);
+// once the clone switches away the add is the existing-branch form, and running
+// it makes a linked worktree that is present. Recording the pull request
+// finishes the publish, and its result says the removal; `jig next` says it
+// after, until the command is run, and then nothing.
+func TestWorktreeAdviceEndsWithThePublish(t *testing.T) {
+	t.Parallel()
+	b := newBuiltTicket(t, true)
+	env, _ := githubClone(t, b)
+	b.env = env
+	b.builder.env = env
+	approveBriefOf(t, b.st, b.fx.Ticket)
+	b.openRound(t)
+	b.reviewedClean(t, 1)
+	clone := b.builder.Clone
+
+	// The builder's clone is on the ticket's branch: that work tree is the
+	// ticket's worktree, and jig advises no add that git would refuse.
+	n := nextJSON[wtNextOut](t, env, clone, b.fx.Ticket)
+	if len(n.Worktrees) != 1 {
+		t.Fatalf("jig next: worktrees %+v, want one row", n.Worktrees)
+	}
+	if row := n.Worktrees[0]; row.Repo != "fixture-repo" || row.Action != "present" || !gitx.SameDir(row.Dir, clone) || row.Command != "" {
+		t.Fatalf("with the clone on the ticket's branch: %+v, want present at the clone", row)
+	}
+	if text := runJig(t, env, clone, "next", b.fx.Ticket).Stdout; strings.Contains(text, "Add the worktree") || !strings.Contains(text, "fixture-repo,present,") {
+		t.Errorf("jig next with the clone on the branch:\n%s", text)
+	}
+
+	// The clone goes back to main; the branch stays. The advice is to add a
+	// worktree on the branch that exists, with no -b and no base.
+	b.builder.Branch("main")
+	n = nextJSON[wtNextOut](t, env, clone, b.fx.Ticket)
+	add := rowIn(t, n.Worktrees, "fixture-repo")
+	dir := wtPath(clone) + ".worktrees/" + b.fx.Ticket
+	wantAdd := "git -C " + wtQuoted(clone) + " worktree add " + wtQuoted(dir) + " " + b.branch
+	if add.Action != "add" || add.Command != wantAdd || add.Base != "" || add.Dir != dir {
+		t.Fatalf("with the clone on main: %+v, want the existing-branch add %q", add, wantAdd)
+	}
+	runAdvised(t, add.Command)
+	n = nextJSON[wtNextOut](t, env, clone, b.fx.Ticket)
+	if row := rowIn(t, n.Worktrees, "fixture-repo"); row.Action != "present" || !gitx.SameDir(row.Dir, dir) || gitx.SameDir(row.Dir, clone) {
+		t.Fatalf("after the add: %+v, want present at the linked worktree %s", row, dir)
+	}
+
+	// The builder pushes the branch and the pull request is recorded: the
+	// record finishes the publish and says how to remove the worktree.
+	b.builder.Push(b.branch)
+	if body := runJig(t, env, clone, "publish", b.fx.Ticket, "--body"); body.Code != 0 {
+		t.Fatalf("jig publish --body exit = %d\nstdout:\n%s\nstderr:\n%s", body.Code, body.Stdout, body.Stderr)
+	}
+	const prURL = "https://github.com/acme/fixture-repo/pull/7"
+	rec := runJig(t, env.with("GH_STUB_HEAD_REF="+b.branch, "GH_STUB_HEAD_OID="+b.sha), clone, "publish", b.fx.Ticket, "--pr", prURL)
+	if rec.Code != 0 || !strings.Contains(rec.Stdout, "verified: yes") {
+		t.Fatalf("jig publish --pr exit = %d, want 0 and a verified pull request\nstdout:\n%s\nstderr:\n%s", rec.Code, rec.Stdout, rec.Stderr)
+	}
+	removeCmd := "git -C " + wtQuoted(clone) + " worktree remove " + wtQuoted(dir)
+	removeLine := "Remove the worktree of JIG-1 in fixture-repo (git refuses one with changes): `" + removeCmd + "`"
+	statusLine := "Run `jig status JIG-1` to confirm the ticket is fully green"
+	for _, want := range []string{"publish_pr:", "worktrees[1]{repo,action,dir,base,command}:", "fixture-repo,remove,", removeLine} {
+		if !strings.Contains(rec.Stdout, want) {
+			t.Errorf("jig publish --pr lacks %q:\n%s", want, rec.Stdout)
+		}
+	}
+	if table, prBlock, helpBlock := strings.Index(rec.Stdout, "worktrees[1]"), strings.Index(rec.Stdout, "publish_pr:"), strings.Index(rec.Stdout, "help["); !(prBlock < table && table < helpBlock) {
+		t.Errorf("jig publish --pr must print the pull request, then the worktrees, then the help:\n%s", rec.Stdout)
+	}
+	if rm, st := strings.Index(rec.Stdout, removeLine), strings.Index(rec.Stdout, statusLine); rm < 0 || st < 0 || rm > st {
+		t.Errorf("the remove line must come ahead of the status line:\n%s", rec.Stdout)
+	}
+
+	// jig next says the same remove while the worktree is there.
+	n = nextJSON[wtNextOut](t, env, clone, b.fx.Ticket)
+	row := rowIn(t, n.Worktrees, "fixture-repo")
+	if n.State != "done" || len(n.Worktrees) != 1 || row.Action != "remove" || row.Command != removeCmd || !gitx.SameDir(row.Dir, dir) {
+		t.Fatalf("jig next after the publish: state %q, worktrees %+v, want done with the remove %q", n.State, n.Worktrees, removeCmd)
+	}
+	if text := runJig(t, env, clone, "next", b.fx.Ticket).Stdout; !strings.Contains(text, removeLine) {
+		t.Errorf("jig next after the publish lacks %q:\n%s", removeLine, text)
+	}
+
+	// The session runs it: the folder is gone and jig has nothing more to say.
+	runAdvised(t, row.Command)
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("the worktree is still at %s after the remove: %v", dir, err)
+	}
+	n = nextJSON[wtNextOut](t, env, clone, b.fx.Ticket)
+	if n.State != "done" || len(n.Worktrees) != 0 {
+		t.Errorf("jig next after the remove: state %q, worktrees %+v, want done with none", n.State, n.Worktrees)
+	}
+	if text := runJig(t, env, clone, "next", b.fx.Ticket).Stdout; strings.Contains(text, "Remove the worktree") || strings.Contains(text, "worktrees[") {
+		t.Errorf("jig next after the remove still advises:\n%s", text)
+	}
+}
