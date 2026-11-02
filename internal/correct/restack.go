@@ -51,8 +51,9 @@ func restackText(ticket string, r stack.Repo) string {
 		ticket, r.Parent, r.ParentBranch, short12(r.ParentHead), r.ParentRef, r.Repo)
 }
 
-// retargetText is what the session is told when the parent merged.
+// retargetText is what the session is told when the parent merged: the merge
+// is the session's, and jig publish points the PR at the target.
 func retargetText(ticket string, r stack.Repo) string {
-	return fmt.Sprintf("%s is stacked on %s, and the parent merged in %s: retarget the PR to %s and merge %s (`git merge origin/%s`).",
+	return fmt.Sprintf("%s is stacked on %s, and the parent merged in %s: merge %s (`git merge origin/%s`); `jig publish` points the PR at %s.",
 		ticket, r.Parent, r.Repo, r.Target, r.Target, r.Target)
 }
