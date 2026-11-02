@@ -41,6 +41,20 @@ type chartInfo struct {
 	Ends []chartEnd
 	// Map is the chart's map.md; nil when it has none.
 	Map *chartMap
+	// Spend is what the run has cost so far; nil when no ticket has any, and
+	// for an older jig, which says none.
+	Spend *chartSpend
+}
+
+// chartSpend is the chart's spend: the sum of its tickets' latest spend lines,
+// subagents included. Tickets counts the tickets that have spend and Agents
+// the subagent lines among them; Unpriced are the models with tokens and no
+// price, whose dollars are not in USD.
+type chartSpend struct {
+	Tickets, Agents int
+	Tokens          int64
+	USD             float64
+	Unpriced        []string
 }
 
 // chartTicket is one entry of a chart: a ticket, or (ID "") an entry that has
@@ -139,6 +153,13 @@ func parseChart(out string) (*chartInfo, error) {
 			Fog         []string `json:"fog"`
 			OutOfScope  []string `json:"out_of_scope"`
 		} `json:"map"`
+		Spend *struct {
+			Tickets  int      `json:"tickets"`
+			Agents   int      `json:"agents"`
+			Tokens   int64    `json:"tokens"`
+			USD      float64  `json:"usd"`
+			Unpriced []string `json:"unpriced"`
+		} `json:"spend"`
 	}
 	if err := json.Unmarshal([]byte(obj), &v); err != nil {
 		var syntax *json.SyntaxError
@@ -166,6 +187,9 @@ func parseChart(out string) (*chartInfo, error) {
 	}
 	if v.Map != nil {
 		info.Map = &chartMap{Destination: v.Map.Destination, Decided: v.Map.Decided, Fog: v.Map.Fog, OutOfScope: v.Map.OutOfScope}
+	}
+	if v.Spend != nil {
+		info.Spend = &chartSpend{Tickets: v.Spend.Tickets, Agents: v.Spend.Agents, Tokens: v.Spend.Tokens, USD: v.Spend.USD, Unpriced: v.Spend.Unpriced}
 	}
 	return info, nil
 }

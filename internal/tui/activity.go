@@ -534,15 +534,20 @@ func askName(t *ticket, id string) string {
 	return id
 }
 
-// spendText is a spend line as the activity says it: what the session has
-// spent so far (the line is its running total), in tokens and, when a price
-// is known, dollars, and the models it went to.
+// spendText is a spend line as the activity says it: what the session, or one
+// of its subagents (a line with an agent), has spent so far (the line is its
+// running total), in tokens and, when a price is known, dollars, and the
+// models it went to.
 func spendText(l events.Envelope) string {
 	if l.Spend == nil {
 		return "spend recorded"
 	}
 	sp := l.Spend
-	text := "the session has spent " + tokens(sp.Input+sp.Output+sp.CacheRead+sp.CacheWrite) + " tokens"
+	who := "the session"
+	if l.Agent != "" {
+		who = "a subagent"
+	}
+	text := who + " has spent " + tokens(sp.Input+sp.Output+sp.CacheRead+sp.CacheWrite) + " tokens"
 	if sp.USD > 0 {
 		text += fmt.Sprintf(" ($%.2f)", sp.USD)
 	}
