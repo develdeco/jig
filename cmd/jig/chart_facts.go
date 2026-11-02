@@ -132,6 +132,15 @@ func chartNeed(st *store.Store, dependent, blocker, kind string, merges mergeSou
 	return n
 }
 
+// wordIsATicket reports whether word reads as a ticket of the store and so
+// never as a chart: an alias two tickets claim, an id jig cannot work, or a
+// ticket the store has under that id or alias. chartNamed and `jig chart new`
+// share this one rule, so a chart made under a name is a chart reached by it.
+func wordIsATicket(st *store.Store, word string) bool {
+	id, err := st.ResolveTicket(word)
+	return err != nil || checkTicketID(id) != nil || st.TicketExists(id)
+}
+
 // chartNamed is the chart a word names: a ticket of that name (or alias) wins,
 // then a chart that has a tickets.yaml. A ticket id is KEY-n and a chart name a
 // word, so the two seldom clash; when they do the ticket is the answer.
@@ -139,7 +148,7 @@ func chartNamed(st *store.Store, word string) (string, bool) {
 	if word == "" {
 		return "", false
 	}
-	if id, err := st.ResolveTicket(word); err != nil || checkTicketID(id) != nil || st.TicketExists(id) {
+	if wordIsATicket(st, word) {
 		return "", false
 	}
 	if validateChartName(word) != nil {
