@@ -388,8 +388,8 @@ func TestAddSubIssueAndAddBlockedBySendTheirMutations(t *testing.T) {
 	if !strings.Contains(queries[1], "addBlockedBy") {
 		t.Fatalf("AddBlockedBy sent query %q, want it to call addBlockedBy", queries[1])
 	}
-	if vars[1]["issueId"] != "ISSUE" || vars[1]["blockedByIssueId"] != "BLOCKER" {
-		t.Fatalf("AddBlockedBy vars = %v, want issueId=ISSUE, blockedByIssueId=BLOCKER", vars[1])
+	if vars[1]["issueId"] != "ISSUE" || vars[1]["blockingIssueId"] != "BLOCKER" {
+		t.Fatalf("AddBlockedBy vars = %v, want issueId=ISSUE, blockingIssueId=BLOCKER", vars[1])
 	}
 }
 

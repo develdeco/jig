@@ -660,15 +660,15 @@ func (c *GraphQLClient) AddSubIssue(ctx context.Context, parentID, subIssueID st
 
 // addBlockedByMutation records that one issue is blocked by another
 // (brief.md#The GitHub client).
-const addBlockedByMutation = `mutation($issueId: ID!, $blockedByIssueId: ID!) {
-  addBlockedBy(input: {issueId: $issueId, blockedByIssueId: $blockedByIssueId}) {
+const addBlockedByMutation = `mutation($issueId: ID!, $blockingIssueId: ID!) {
+  addBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
     issue { id }
   }
 }`
 
 // AddBlockedBy records that issueID is blocked by blockingID.
 func (c *GraphQLClient) AddBlockedBy(ctx context.Context, issueID, blockingID string) error {
-	vars := map[string]any{"issueId": issueID, "blockedByIssueId": blockingID}
+	vars := map[string]any{"issueId": issueID, "blockingIssueId": blockingID}
 	if err := c.do(ctx, addBlockedByMutation, vars, nil); err != nil {
 		return fmt.Errorf("github: add blocked-by %s on %s: %w", blockingID, issueID, err)
 	}
@@ -677,15 +677,15 @@ func (c *GraphQLClient) AddBlockedBy(ctx context.Context, issueID, blockingID st
 
 // removeBlockedByMutation removes one issue from another's blocked-by
 // edges (brief.md#The GitHub client).
-const removeBlockedByMutation = `mutation($issueId: ID!, $blockedByIssueId: ID!) {
-  removeBlockedBy(input: {issueId: $issueId, blockedByIssueId: $blockedByIssueId}) {
+const removeBlockedByMutation = `mutation($issueId: ID!, $blockingIssueId: ID!) {
+  removeBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
     issue { id }
   }
 }`
 
 // RemoveBlockedBy removes blockingID from issueID's blocked-by edges.
 func (c *GraphQLClient) RemoveBlockedBy(ctx context.Context, issueID, blockingID string) error {
-	vars := map[string]any{"issueId": issueID, "blockedByIssueId": blockingID}
+	vars := map[string]any{"issueId": issueID, "blockingIssueId": blockingID}
 	if err := c.do(ctx, removeBlockedByMutation, vars, nil); err != nil {
 		return fmt.Errorf("github: remove blocked-by %s on %s: %w", blockingID, issueID, err)
 	}
