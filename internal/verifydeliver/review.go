@@ -1094,6 +1094,15 @@ func priorReviewedSHA(st *store.Store, ticket string, round int, repoName string
 // ancestor of head, else full anchored at merge-base(origin/target, HEAD),
 // falling back to the ticket's recorded start sha only when the merge-base
 // call itself fails (e.g. no such ref).
+//
+// A delta over merges is the resolution alone (classifyLine, ADR 0038): when
+// the head is the reviewed head or only merges git itself would have made lie
+// past it, the base is the head and the scope diff is empty; when the tip is a
+// merge resolved by hand, the base is a tree, git's own merge of the tip's
+// parents, so the diff is the hand edits and not everything the target brought
+// in; any other line is the delta from the reviewed head, as before. The base
+// is then not always a commit: every reader of it gives it to git diff, which
+// takes a tree. A git too old to tell is an error.
 func resolveScopeBase(st *store.Store, ticket, leaseDir, repoName, target string, round int, head string) (scope, base string, err error) {
 	if round > 1 {
 		prior, perr := priorReviewedSHA(st, ticket, round-1, repoName)
@@ -1102,6 +1111,16 @@ func resolveScopeBase(st *store.Store, ticket, leaseDir, repoName, target string
 		}
 		if prior != "" {
 			if isAnc, ancErr := gitx.IsAncestor(leaseDir, prior, head); ancErr == nil && isAnc {
+				kind, ownTree, lerr := classifyLine(leaseDir, prior, head)
+				if lerr != nil {
+					return "", "", lerr
+				}
+				switch kind {
+				case lineSame, lineClean:
+					return "delta", head, nil
+				case lineResolved:
+					return "delta", ownTree, nil
+				}
 				return "delta", prior, nil
 			}
 		}

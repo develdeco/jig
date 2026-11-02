@@ -195,6 +195,68 @@ func TestPublishRecordPR(t *testing.T) {
 	}
 }
 
+// TestPublishRecordPRThroughMerges: a pull request whose head is past the
+// reviewed head by merges git itself would have made (the target merged into
+// the branch since the round) is recorded, though its sha is not the reviewed
+// one; one whose head carries a merge resolved by hand, a commit of the
+// session's own, or an object the clone does not hold is refused as it was.
+func TestPublishRecordPRThroughMerges(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	_, addEnv := useGithubHost(t, &d, "", "")
+	branch := ticketBranch(fx.Ticket)
+	addEnv("GH_STUB_HEAD_REF=" + branch)
+
+	// The target moves, and the branch merges it in without a conflict.
+	run(t, fx.RepoDir, "checkout", "main")
+	writeAndCommit(t, fx.RepoDir, "main1.txt", "from main", "the target moves")
+	run(t, fx.RepoDir, "checkout", branch)
+	run(t, fx.RepoDir, "merge", "--no-ff", "--no-edit", "main")
+	clean := run(t, fx.RepoDir, "rev-parse", "HEAD")
+
+	// A head the clone does not hold is refused, though it names a merge.
+	addEnv("GH_STUB_HEAD_OID=" + strings.Repeat("0", 40))
+	_, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
+	wantAxiCode(t, err, "PUBLISH_UNREVIEWED_HEAD")
+
+	// An ordinary commit past the merge is refused.
+	ordinary := writeAndCommit(t, fx.RepoDir, "late.txt", "after the merge", "a commit after the merge")
+	addEnv("GH_STUB_HEAD_OID=" + ordinary)
+	_, err = PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
+	wantAxiCode(t, err, "PUBLISH_UNREVIEWED_HEAD")
+
+	// A merge resolved by hand is refused.
+	run(t, fx.RepoDir, "reset", "--hard", head)
+	run(t, fx.RepoDir, "merge", "--no-ff", "--no-commit", "main")
+	resolved := writeAndCommit(t, fx.RepoDir, "hand.txt", "an edit the merge did not need", "merge main, by hand")
+	addEnv("GH_STUB_HEAD_OID=" + resolved)
+	_, err = PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
+	wantAxiCode(t, err, "PUBLISH_UNREVIEWED_HEAD")
+	if lines, _ := journal.Read(d.Store, fx.Ticket); hasEvent(lines, journal.EventPr) {
+		t.Fatal("a refused pull request was journaled")
+	}
+
+	// The clean merge is covered: recorded, at the head the host names.
+	addEnv("GH_STUB_HEAD_OID=" + clean)
+	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
+	if err != nil {
+		t.Fatalf("PublishRecordPR for a pull request a clean merge past the reviewed head: %v", err)
+	}
+	if !report.Verified || report.Commit != clean {
+		t.Errorf("report = %+v, want it verified at the merge %s", report, clean)
+	}
+}
+
+func hasEvent(lines []journal.Line, event string) bool {
+	for _, l := range lines {
+		if l.Event == event {
+			return true
+		}
+	}
+	return false
+}
+
 // TestPublishRecordPRWithNoHostRecordsItUnverified: a repo whose remote is no
 // pull-request host has nothing to ask, so the pull request is recorded as the
 // agent gave it, said so in the outcome and a warning.

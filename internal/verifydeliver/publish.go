@@ -445,7 +445,7 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: resolve the head to ship: %w", err)
 	}
-	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket); err != nil {
+	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket, lease.Dir); err != nil {
 		return nil, err
 	}
 	// Publish never rewrites what is on origin and never forces: a branch that
@@ -1180,18 +1180,24 @@ func readerDir(d Deps, t *publishTarget) (string, error) {
 	}
 }
 
+// branchTip is a commit the ticket's branch is at, with the repository it was
+// read in: the one that holds the commits between it and a reviewed head.
+type branchTip struct {
+	dir, sha string
+}
+
 // branchTips are the commits the ticket's branch is at in the places a
 // reviewed head can be found: the operator's clone (its branch, and its last
 // view of origin's), the repository dir reads from (its view of origin's) and,
 // for work an earlier jig built, the build lease.
-func branchTips(d Deps, t *publishTarget, dir string) []string {
-	var tips []string
+func branchTips(d Deps, t *publishTarget, dir string) []branchTip {
+	var tips []branchTip
 	add := func(repo, ref string) {
 		if repo == "" {
 			return
 		}
 		if sha, found, _ := gitx.Resolve(repo, ref); found {
-			tips = append(tips, sha)
+			tips = append(tips, branchTip{dir: repo, sha: sha})
 		}
 	}
 	clone := operatorClone(d, t.repoName)
@@ -1206,7 +1212,8 @@ func branchTips(d Deps, t *publishTarget, dir string) []string {
 
 // checkBodyHead refuses, with PUBLISH_UNREVIEWED_HEAD, a body for a head that
 // is not where the branch is: the reviewed head must be the tip of the clone's
-// branch or of origin's. A scripted round recorded no head and is let through.
+// branch or of origin's, or a tip that only merges git itself would have made
+// lie past (headReviewed). A scripted round recorded no head and is let through.
 func checkBodyHead(d Deps, t *publishTarget, dir string) error {
 	reviewed := t.reviewedHead()
 	if len(t.gateRep.ReviewedSHA) == 0 {
@@ -1214,10 +1221,14 @@ func checkBodyHead(d Deps, t *publishTarget, dir string) error {
 	}
 	help := []string{fmt.Sprintf("Run `jig gate %s` to review the branch as it is now, then render the body again.", t.ticket)}
 	if reviewed == "" {
-		return checkReviewedHead(t.gateRep, t.repoName, "", t.ticket)
+		return checkReviewedHead(t.gateRep, t.repoName, "", t.ticket, "")
 	}
 	for _, tip := range branchTips(d, t, dir) {
-		if tip == reviewed {
+		covered, err := headReviewed(tip.dir, reviewed, tip.sha)
+		if err != nil {
+			return err
+		}
+		if covered {
 			return nil
 		}
 	}
@@ -1296,7 +1307,13 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 				Help: []string{fmt.Sprintf("Open the pull request from %s, or record the one that is", pt.branch)},
 			}
 		}
-		if reviewed != "" && head.SHA != "" && head.SHA != reviewed {
+		covered := true
+		if reviewed != "" && head.SHA != "" {
+			if covered, err = prHeadReviewed(d, pt, reviewed, head.SHA); err != nil {
+				return RecordReport{}, err
+			}
+		}
+		if !covered {
 			return RecordReport{}, &axi.Error{
 				Msg:  fmt.Sprintf("pull request #%d is at %s, not %s, the head the last clean gate round reviewed", ref.Number, shortSHA(head.SHA), shortSHA(reviewed)),
 				Code: "PUBLISH_UNREVIEWED_HEAD",
@@ -1482,16 +1499,42 @@ func latestGateReport(st *store.Store, ticket string) (reportYAML, error) {
 	return rep, nil
 }
 
+// prHeadReviewed says the pull request's head is covered by the head the last
+// clean round reviewed: it is that head, or only merges git itself would have
+// made lie past it. The operator's clone is asked first, then the repository the
+// publish reads from; an object neither holds is not covered.
+func prHeadReviewed(d Deps, pt *publishTarget, reviewed, head string) (bool, error) {
+	if head == reviewed {
+		return true, nil
+	}
+	dirs := []string{operatorClone(d, pt.repoName)}
+	if dir, err := readerDir(d, pt); err == nil {
+		dirs = append(dirs, dir)
+	}
+	for _, dir := range dirs {
+		covered, err := headReviewed(dir, reviewed, head)
+		if err != nil {
+			return false, err
+		}
+		if covered {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // checkReviewedHead refuses, with PUBLISH_UNREVIEWED_HEAD, a head publish
 // would ship that is not the head the latest clean gate round reviewed: rep is
 // that round's report (a clean verdict is checked before this is reached), and
-// head the ticket branch's head before reconcile. A reviewer round records the
+// head the ticket branch's head before reconcile. A head past the reviewed one
+// by merges git itself would have made (headReviewed in dir, "" for no
+// repository to ask) is the reviewed head. A reviewer round records the
 // heads it reviewed (reviewed_sha), one per repo; a scripted round records
 // none at all, and there is nothing to hold the head to, so it is let through
 // as it always has been. A round that recorded heads, but none for this repo,
 // reviewed something else - a repo renamed since, say - and is refused like a
 // different head: what was reviewed is not what would ship.
-func checkReviewedHead(rep reportYAML, repoName, head, ticket string) error {
+func checkReviewedHead(rep reportYAML, repoName, head, ticket, dir string) error {
 	if len(rep.ReviewedSHA) == 0 {
 		return nil
 	}
@@ -1509,7 +1552,11 @@ func checkReviewedHead(rep reportYAML, repoName, head, ticket string) error {
 			Help: help,
 		}
 	}
-	if reviewed == head {
+	covered, err := headReviewed(dir, reviewed, head)
+	if err != nil {
+		return err
+	}
+	if covered {
 		return nil
 	}
 	return &axi.Error{
