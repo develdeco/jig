@@ -543,10 +543,10 @@ const oracleLimit = 30 * time.Minute
 // combined output: Deps.Oracle's type.
 type oracleFunc = func(cmd, dir string) (string, error)
 
-// shellOracle is the real oracle run: cmd in dir within oracleLimit, its
-// process tree killed past it.
+// shellOracle is the real oracle run: cmd through sh in dir within
+// oracleLimit, its process tree killed past it.
 func shellOracle(cmd, dir string) (string, error) {
-	return envrun.ShellOutput(envrun.ShortenQuotedPath(cmd), dir, oracleLimit)
+	return envrun.ShellOutput(cmd, dir, oracleLimit)
 }
 
 // runOracle runs one oracle command in dir through run. A failure carries

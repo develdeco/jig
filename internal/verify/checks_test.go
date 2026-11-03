@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -136,6 +137,20 @@ func TestRunFindsTheStartShaFromTheTargetBranch(t *testing.T) {
 			t.Fatalf("Run = %+v, %v, want a pass", res, err)
 		}
 	})
+}
+
+// TestRunNeedsAnSh: the oracle and the env class's commands run through sh,
+// so on a machine with none the oracle cannot be reached: the run ends in a
+// verify-error that says why, and the commit is not failed for it.
+func TestRunNeedsAnSh(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, fixture.Opts{})
+	r.deps.Sh = func() (string, error) {
+		return "", errors.New("jig runs oracles and env class commands with sh, and found none")
+	}
+	sha := r.fixClamp()
+	res, err := Run(r.deps, r.request("a", sha))
+	wantNoOracleRun(t, r, res, err, "with sh, and found none")
 }
 
 // TestRunUsesTheManifestOfTheCommit: the oracle is the one the manifest at the

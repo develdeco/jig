@@ -1,15 +1,18 @@
 // Package envrun runs a manifest env class through its up/check/down
 // lifecycle: it allocates a free port, substitutes {ticket} and {port} into
-// each command, and shells them out via the platform's command
-// interpreter.
+// each command, and runs them, as it runs an oracle, through sh on every OS
+// (Sh).
 package envrun
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -78,18 +81,13 @@ func (h *Handle) bestEffortDown() {
 	_ = h.Down()
 }
 
-// Shell runs cmd through the platform's command interpreter in dir,
-// inheriting the current process environment (ChildEnv: without
-// RecordDirEnv): `cmd /C` on Windows, `sh -c` elsewhere.
+// Shell runs cmd through sh (Sh) in dir, inheriting the current process
+// environment (ChildEnv: without RecordDirEnv).
 func Shell(cmd, dir string) error {
-	var c *exec.Cmd
-	if runtime.GOOS == "windows" {
-		c = exec.Command("cmd", "/C", cmd)
-	} else {
-		c = exec.Command("sh", "-c", cmd)
+	c, err := shCommand(context.Background(), cmd, dir, nil)
+	if err != nil {
+		return err
 	}
-	c.Dir = dir
-	c.Env = ChildEnv(c)
 	var stderr bytes.Buffer
 	c.Stderr = &stderr
 	if err := c.Run(); err != nil {
@@ -164,14 +162,10 @@ func ShellOutput(cmd, dir string, limit time.Duration) (string, error) {
 func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	var c *exec.Cmd
-	if runtime.GOOS == "windows" {
-		c = exec.CommandContext(ctx, "cmd", "/C", cmd)
-	} else {
-		c = exec.CommandContext(ctx, "sh", "-c", cmd)
+	c, err := shCommand(ctx, cmd, dir, env)
+	if err != nil {
+		return "", err
 	}
-	c.Dir = dir
-	c.Env = append(ChildEnv(c), env...)
 	NewProcessGroup(c)
 	c.Cancel = func() error { return KillTree(c) }
 	c.WaitDelay = 10 * time.Second
@@ -183,6 +177,77 @@ func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string,
 		return string(out), fmt.Errorf("shell %q: %w", cmd, err)
 	}
 	return string(out), nil
+}
+
+// Sh is the sh every command of this package runs through, on every OS, so
+// an oracle or an env class's command reads the same wherever jig runs it.
+// Off Windows it is the sh on PATH. On Windows it is Git for Windows'
+// bin\sh.exe, the launcher that gives a command Git Bash's environment
+// (/mingw64/bin and /usr/bin first on its PATH), as an agent session's own
+// shell there has it; it is found from the git on PATH, which an install
+// keeps in its cmd, bin, mingw64\bin or mingw64\libexec\git-core directory.
+// Without it, the sh on PATH. With neither, the error says how to get one.
+func Sh() (string, error) {
+	return findSh(runtime.GOOS, exec.LookPath, isFile)
+}
+
+// gitDepth is how far above the directory of the git on PATH findSh looks
+// for bin\sh.exe: three, the depth of mingw64\libexec\git-core in a Git for
+// Windows install.
+const gitDepth = 3
+
+// findSh is Sh on goos, with lookPath finding a program on PATH and isFile
+// saying whether a path is a regular file.
+func findSh(goos string, lookPath func(string) (string, error), isFile func(string) bool) (string, error) {
+	if goos == "windows" {
+		if git, err := lookPath("git"); err == nil {
+			dir := filepath.Dir(git)
+			for range gitDepth + 1 {
+				if sh := filepath.Join(dir, "bin", "sh.exe"); isFile(sh) {
+					return sh, nil
+				}
+				dir = filepath.Dir(dir)
+			}
+		}
+	}
+	if sh, err := lookPath("sh"); err == nil {
+		return sh, nil
+	}
+	if goos == "windows" {
+		return "", errors.New(`jig runs oracles and env class commands with sh, and found none: no bin\sh.exe of Git for Windows beside the git on PATH, and no sh on PATH; install Git for Windows, or put an sh on PATH`)
+	}
+	return "", errors.New("jig runs oracles and env class commands with sh, and found no sh on PATH")
+}
+
+// isFile reports whether path names a regular file.
+func isFile(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
+}
+
+// commandEnv carries a command to sh, which runs shScript to evaluate it.
+// Through the environment a command reaches sh exactly as written on every
+// OS. On the command line it would not on Windows, where the runtime of
+// Git's sh parses its command line by rules of its own before sh reads it
+// (two backslashes in single quotes came out as one).
+const commandEnv = "JIG_SHELL_COMMAND"
+
+// shScript is what sh runs: the command in commandEnv, with commandEnv unset
+// first, so neither the command nor what it starts sees it.
+const shScript = `eval "unset ` + commandEnv + `; $` + commandEnv + `"`
+
+// shCommand is cmd ready to run through sh in dir: its environment is the
+// inherited one (ChildEnv), then env, then commandEnv, so neither can stand
+// in for the command.
+func shCommand(ctx context.Context, cmd, dir string, env []string) (*exec.Cmd, error) {
+	sh, err := Sh()
+	if err != nil {
+		return nil, fmt.Errorf("shell %q: %w", cmd, err)
+	}
+	c := exec.CommandContext(ctx, sh, "-c", shScript)
+	c.Dir = dir
+	c.Env = append(append(ChildEnv(c), env...), commandEnv+"="+cmd)
+	return c, nil
 }
 
 // substitute replaces {ticket} and {port} placeholders in cmd.
