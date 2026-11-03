@@ -568,7 +568,7 @@ func spendText(l events.Envelope) string {
 		}
 	}
 	if len(names) > 0 {
-		text += " on " + strings.Join(names, " and ")
+		text += " on " + andList(names)
 	}
 	if rest, ok := strings.CutPrefix(l.Summary, "unpriced: "); ok {
 		if sp.USD == 0 {
@@ -578,7 +578,7 @@ func spendText(l events.Envelope) string {
 			for _, id := range strings.Split(rest, ",") {
 				unpriced = append(unpriced, modelName(strings.TrimSpace(id)))
 			}
-			text += ", no price known for " + strings.Join(unpriced, " and ")
+			text += ", no price known for " + andList(unpriced)
 		}
 	}
 	return text

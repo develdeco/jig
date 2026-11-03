@@ -158,6 +158,9 @@ func TestASpendLineSaysWhatTheSessionHasSpent(t *testing.T) {
 		{journal.Line{Model: "claude-opus-5,claude-sonnet-5", Summary: "unpriced: claude-opus-5",
 			Spend: &journal.Spend{Output: 980, USD: 0.5}},
 			"the session has spent 980 tokens ($0.50) on Opus 5 and Sonnet 5, no price known for Opus 5"},
+		{journal.Line{Model: "claude-opus-5,claude-sonnet-5,claude-haiku-5", Summary: "unpriced: claude-opus-5,claude-haiku-5",
+			Spend: &journal.Spend{Output: 980, USD: 0.5}},
+			"the session has spent 980 tokens ($0.50) on Opus 5, Sonnet 5 and Haiku 5, no price known for Opus 5 and Haiku 5"},
 		// A subagent's line carries the agent's id: it is the agent's total, not the session's.
 		{journal.Line{Agent: "a-1", Model: "claude-sonnet-5", Spend: &journal.Spend{Input: 400, Output: 25000, USD: 1.234}},
 			"a subagent has spent 25k tokens ($1.23) on Sonnet 5"},
