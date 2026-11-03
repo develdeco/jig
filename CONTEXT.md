@@ -319,7 +319,7 @@ Where a stacked ticket's branch starts, and where its pull request goes, in each
 _Avoid_: base branch
 
 **Behind**:
-The standing of a published stacked ticket whose stack plan asks for a restack or a retarget: its brief, build and review are done and its publish is current again, ready, with the prompt "Publish T". `jig next <T>` says `state: behind`, names the merge to make (`git merge origin/main`) and the publish that follows (`jig publish T`), and a chart's standing keeps the ticket in its run, so the chart is done only once the branch holds the target. jig never makes the merge: the session does, then a bare `jig publish` pushes it and points the open pull request at its base. A closed ticket is never behind, and `jig here` and the hooks do not read it.
+The standing of a published stacked ticket whose stack plan asks for a restack or a retarget: its brief, build and review are done and its publish is current again, ready, with the prompt "Publish T". `jig next <T>` says `state: behind`, names the merge to make (`git merge origin/main`) and the publish that follows (`jig publish T`), and a chart's standing keeps the ticket in its run, so the chart is done only once the branch holds the target; before the parent merges, the chart waits for that merge instead of reading done. jig never makes the merge: the session does, then a bare `jig publish` pushes it and points the open pull request at its base. A closed ticket is never behind, and `jig here`, the hooks and the TUI's ticket screens do not read it; the TUI's chart screen does.
 _Avoid_: stale, out of date
 
 **Reviewed head**:
