@@ -300,9 +300,9 @@ func (x *run) finishPass(lines []journal.Line) error {
 //  5. a push, tried three times; if it fails the lines stay local for the
 //     next checkpoint (Result.PushErr).
 //
-// A run that cannot reach the oracle (the descent check fails, the worktree
-// cannot be made, there is no sh to run it with, the slice names an env class
-// that is undeclared or will not come up) records a verify-error line with the reason and returns it as
+// A run that cannot reach the oracle (there is no sh to run it with, the
+// worktree cannot be made, the descent check fails, the slice names an env
+// class that is undeclared or will not come up) records a verify-error line with the reason and returns it as
 // State error: that is an outcome, not an error. Run returns an error only
 // when the run could not be recorded or was not set up.
 func Run(d Deps, r Request) (Result, error) {
@@ -454,6 +454,11 @@ func short(sha string) string {
 // not be reached ("" when it ran), or an error when a line could not be
 // written.
 func (x *run) execute() (why string, err error) {
+	// The oracle and the env class's commands run through sh: without one the
+	// oracle cannot be reached, which is no failure of the commit.
+	if _, err := x.d.sh(); err != nil {
+		return err.Error(), nil
+	}
 	// Removed on every way out, a checkout that failed half-way included.
 	defer x.removeWorktree()
 	if err := x.addWorktree(); err != nil {
@@ -473,11 +478,6 @@ func (x *run) execute() (why string, err error) {
 		return fmt.Sprintf("slice %s has no oracle to run", x.r.Slice), nil
 	}
 	x.res.Command, x.res.Env = cmd, x.sl.Env
-	// The oracle and the env class's commands run through sh: without one
-	// the oracle cannot be reached, which is no failure of the commit.
-	if _, err := x.d.sh(); err != nil {
-		return err.Error(), nil
-	}
 
 	down, why, err := x.bringUpEnv(m)
 	if why != "" || err != nil {
