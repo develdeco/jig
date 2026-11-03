@@ -103,6 +103,17 @@ func checkoutJSON(mod ...func(map[string]any)) string {
 	return jsonLine(v)
 }
 
+// storeCommit is a commit of the chart's folder in the verb's JSON: a sha of
+// forty copies of one hex digit, so a test names it by that digit.
+func storeCommit(digit, ts, subject string) map[string]any {
+	return map[string]any{"sha": strings.Repeat(digit, 40), "time": ts, "subject": subject}
+}
+
+// withHistory sets the verb's history, newest first as the verb prints it.
+func withHistory(commits ...map[string]any) func(map[string]any) {
+	return func(v map[string]any) { v["history"] = commits }
+}
+
 // jsonLine is v as the one line of JSON a verb prints.
 func jsonLine(v any) string {
 	data, _ := json.Marshal(v)

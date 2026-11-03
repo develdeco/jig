@@ -110,3 +110,52 @@ func TestTUIChartScreen(t *testing.T) {
 		t.Fatalf("jig tui checkout exit = %d, want 0 and no stderr\nstderr:\n%s", res.Code, res.Stderr)
 	}
 }
+
+// TestTUIChartActivityShowsTheChartsStoreHistory: a chart of one entry is
+// graduated and its map is edited by a commit in the store clone. `jig tui
+// <chart>` on a pipe shows the edit and the graduation as lines of the
+// Activity panel (the chart has no journal, so the commits are its activity). An
+// edit committed while the screen is open shows once r reads the chart again.
+func TestTUIChartActivityShowsTheChartsStoreHistory(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	dir := joinPath(fx.StoreDir, "charts", "checkout")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileOrFatal(t, joinPath(dir, "map.md"), []byte(chartMapText))
+	writeFileOrFatal(t, joinPath(dir, "tickets.yaml"), []byte("tickets:\n  - title: Apply a coupon code\n"))
+	if r := runJig(t, env, fx.RepoDir, "graduate", "checkout"); r.Code != 0 {
+		t.Fatalf("jig graduate exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
+	}
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := st.ReadChart("checkout")
+	if err != nil || len(entries) != 1 || entries[0].ID == "" {
+		t.Fatalf("chart entries after graduate = %+v, %v, want one with a ticket", entries, err)
+	}
+	id := entries[0].ID
+
+	mapPath := joinPath(dir, "map.md")
+	writeFileOrFatal(t, mapPath, []byte(strings.Replace(chartMapText, "- Codes are single use", "- Codes are single use\n- A code names its shop", 1)))
+	commitStorePath(t, fx.StoreDir, "charts/checkout/map.md", "checkout: a code names its shop")
+
+	tui := startJig(t, env, fx.RepoDir, "tui", "checkout")
+	screens := tuiScreens{t: t, p: tui}
+	screens.until("› checkout", "Activity", "checkout: a code names its shop", "chart checkout: graduate "+id, "chart store")
+
+	// An edit made while the screen is open is read with the chart again, on r.
+	writeFileOrFatal(t, mapPath, []byte(strings.Replace(chartMapText, "- Codes are single use", "- Codes are single use\n- A code has an expiry", 1)))
+	commitStorePath(t, fx.StoreDir, "charts/checkout/map.md", "checkout: a code has an expiry")
+	screens.press("r")
+	screens.until("Activity", "checkout: a code has an expiry", "checkout: a code names its shop")
+
+	screens.press("q")
+	if res := tui.Stop(); res.Code != 0 {
+		t.Fatalf("jig tui exit = %d, want 0 after q\nstderr:\n%s", res.Code, res.Stderr)
+	} else if res.Stderr != "" {
+		t.Errorf("jig tui wrote to stderr under its screens:\n%s", res.Stderr)
+	}
+}

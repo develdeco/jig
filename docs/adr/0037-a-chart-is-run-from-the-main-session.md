@@ -55,3 +55,24 @@ Consequences:
 - A merge judged by ancestry shows once something fetched the clone: a person's `git fetch`, or a pull. The timer does not fetch.
 - A ticket's screens show no host state of their own pull request, since no verb they read prints one. The tick changes what a ticket screen shows only when its status changed.
 - `CONTEXT.md` (*Chart standing*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row), the README and `DECISIONS.md` say the same.
+
+## Amendment: the chart screen's activity includes the chart's store history (GRAPH-16)
+
+A chart has no journal, so the chart screen's Activity panel showed its tickets' lines and nothing else. A map edit or a graduation leaves no ticket line: a chart whose map was just edited, or that was just graduated, read "nothing yet". The store is a git repo, and the commits that touched `charts/<name>/` are the chart's own history. The owner decided the chart screen shows them as part of its activity (chart flow, C13).
+
+- **The history.** `jig next <chart> --json` gains a `history` key: the commits of the store's `HEAD` that changed anything under `charts/<name>/`, as git's path-limited log gives them, newest first, each as `{sha, time, subject}` with the committer time in UTC. It is the 20 newest (`chartHistoryLimit`), always present, and `[]` when it cannot be read (the store is not a git repository, it has no commit, git fails): a problem is a row, never a reason to hide the chart. Only `--json` reads it. The text of `jig next` and `jig status` is the session's, which has no use for it, and starts no extra git process.
+- **One git call.** `gitx.PathLog` runs one `git log` with the paths taken literally. Path-limited history with git's merge simplification is what the git program computes, and `internal/gitx/read.go` keeps history walks on it. `Store.ChartHistory` asks it for the chart's folder, which `Store.ChartRelDir` names in one place beside `ChartFile`.
+- **On the screen.** `parseChart` reads `history` into the chart's info (a missing key is none, an entry whose time does not parse is left out). The Activity panel adds each commit to the tickets' lines, oldest first, and sorts the whole list by instant with a stable sort, so two commits of one second keep git's order and a commit stands above a ticket's line of the same second. A commit is drawn `HH:MM:SS chart  store  · <sha7> <subject>`, and the panel's count and its "nothing yet" take commits into account. With no history the panel is drawn as it was.
+- **Fresh as the read.** The history is as fresh as the chart's last read: on open, on `r`, when a graduation changes the listing, and after a quiet that follows a touch of one of its tickets. This adds no trigger and no timer.
+
+Rejected alternatives:
+
+- **A chart journal.** A file the chart's actions append to would record the run, which decision 4 of the chart's map rejected, and would be a second copy of what git holds.
+- **The TUI reading the store itself.** `TestTheScreensReadNoStore` forbids the screens importing `store`, `project` and `gitx`: they learn everything from a verb's output, and this stays one.
+- **An in-process log walk in `internal/gitx`.** Merge simplification and the path filter are git's to compute, and a second implementation would drift from it.
+
+Consequences:
+
+- Every JSON read of a chart starts one `git log` in the store clone, so the git budgets of the packages whose tests read one (`.github/git-budget.yaml`) move up.
+- The Activity shows the time of day of an old commit, as it does for a ticket's line, with no date.
+- `CONTEXT.md` (*Chart history*), `ARCHITECTURE.md` (the chart paragraph and the `internal/gitx/`, `internal/store/` and `internal/tui/` rows) and `DECISIONS.md` say the same.

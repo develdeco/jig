@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // A chart reaches the screens through two reads, both verbs: the store listing
@@ -39,6 +40,10 @@ type chartInfo struct {
 	Tickets []chartTicket
 	// Ends are the tickets the run stops at, each behind a merge.
 	Ends []chartEnd
+	// History are the commits of the store that changed something under the
+	// chart's folder, newest first, as the verb printed them; none for an older
+	// jig, which says none.
+	History []chartCommit
 	// Map is the chart's map.md; nil when it has none.
 	Map *chartMap
 	// Spend is what the run has cost so far; nil when no ticket has any, and
@@ -86,6 +91,13 @@ type chartPR struct{ Repo, URL, State string }
 type chartEnd struct {
 	Ticket, Blocker, Kind, Fact string
 	PRs                         []chartPR
+}
+
+// chartCommit is a commit of the store that touched the chart's folder: a map
+// edit, a graduation. It is the chart's own history, which no journal keeps.
+type chartCommit struct {
+	SHA, Subject string
+	Time         time.Time
 }
 
 // chartMap is the sections of a chart's map.md the screen shows.
@@ -147,6 +159,11 @@ func parseChart(out string) (*chartInfo, error) {
 			Fact    string    `json:"fact"`
 			PRs     []chartPR `json:"prs"`
 		} `json:"ends"`
+		History []struct {
+			SHA     string `json:"sha"`
+			Time    string `json:"time"`
+			Subject string `json:"subject"`
+		} `json:"history"`
 		Map *struct {
 			Destination []string `json:"destination"`
 			Decided     []string `json:"decided"`
@@ -184,6 +201,12 @@ func parseChart(out string) (*chartInfo, error) {
 	}
 	for _, e := range v.Ends {
 		info.Ends = append(info.Ends, chartEnd{Ticket: e.Ticket, Blocker: e.Blocker, Kind: e.Kind, Fact: e.Fact, PRs: e.PRs})
+	}
+	for _, h := range v.History {
+		// An entry whose time cannot be placed among the lines is left out.
+		if at, err := time.Parse(time.RFC3339, h.Time); err == nil {
+			info.History = append(info.History, chartCommit{SHA: h.SHA, Subject: h.Subject, Time: at})
+		}
 	}
 	if v.Map != nil {
 		info.Map = &chartMap{Destination: v.Map.Destination, Decided: v.Map.Decided, Fog: v.Map.Fog, OutOfScope: v.Map.OutOfScope}

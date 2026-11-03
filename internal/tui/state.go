@@ -216,6 +216,12 @@ func clock(e events.Envelope, zone *time.Location) string {
 	if !ok {
 		return "--:--:--"
 	}
+	return clockAt(at, zone)
+}
+
+// clockAt is an instant as the screens show the time of a line: HH:MM:SS in
+// zone.
+func clockAt(at time.Time, zone *time.Location) string {
 	return at.In(zone).Format("15:04:05")
 }
 

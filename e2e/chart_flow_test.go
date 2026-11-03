@@ -49,6 +49,11 @@ type chartOut struct {
 			State string `json:"state"`
 		} `json:"prs"`
 	} `json:"ends"`
+	History []struct {
+		SHA     string `json:"sha"`
+		Time    string `json:"time"`
+		Subject string `json:"subject"`
+	} `json:"history"`
 	Map *struct {
 		Destination []string `json:"destination"`
 		Decided     []string `json:"decided"`

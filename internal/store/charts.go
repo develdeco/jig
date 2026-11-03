@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/develdeco/jig/internal/gitx"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -481,19 +483,30 @@ func updateChartEntryInNode(node *yaml.Node, entry ChartEntry) {
 const chartsDirName = "charts"
 
 // ChartRelDir is charts/<name>, relative to the store root: the form Claim
-// takes for the paths it stages, as TicketRelDir is for a ticket.
+// takes for the paths it stages, as TicketRelDir is for a ticket, and the one
+// place the folder is named (ChartFile and ChartMapFile are built from it).
 func (s *Store) ChartRelDir(name string) string {
 	return filepath.Join(chartsDirName, name)
 }
 
 // ChartFile returns the path to charts/<name>/tickets.yaml.
 func (s *Store) ChartFile(name string) string {
-	return filepath.Join(s.Root, chartsDirName, name, "tickets.yaml")
+	return filepath.Join(s.Root, s.ChartRelDir(name), "tickets.yaml")
 }
 
 // ChartMapFile returns the path to charts/<name>/map.md.
 func (s *Store) ChartMapFile(name string) string {
-	return filepath.Join(s.Root, chartsDirName, name, "map.md")
+	return filepath.Join(s.Root, s.ChartRelDir(name), "map.md")
+}
+
+// ChartHistory returns the limit newest commits of the store's HEAD that
+// changed anything under charts/<name>/, newest first: the chart's own
+// history, which nothing records apart from git. A commit that touched only
+// another chart, or only a ticket, is not in it. The store must be a git
+// repository with a commit; otherwise it is an error.
+func (s *Store) ChartHistory(name string, limit int) ([]gitx.LogEntry, error) {
+	// A pathspec takes forward slashes on every system.
+	return gitx.PathLog(s.Root, "HEAD", limit, filepath.ToSlash(s.ChartRelDir(name)))
 }
 
 // ChartFolderTaken reports whether charts/<name> is taken: something of that

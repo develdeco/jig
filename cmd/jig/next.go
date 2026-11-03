@@ -107,6 +107,11 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		// The tickets of the run carry the worktrees jig advises for them; the
 		// same reader says what a stacked parent's merge is.
 		n.setWorktrees(newWorktreeSource(st, cfg, mp, merges))
+		if *jsonOut {
+			// The history is for the screens: the text form is the session's, and
+			// it starts no git process.
+			n.History = chartHistory(st, chart)
+		}
 		out, blocks = n, n.blocks("next")
 	} else if ticket != "" {
 		id, err := st.ResolveTicket(ticket)
