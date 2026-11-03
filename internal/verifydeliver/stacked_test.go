@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/stack"
 )
 
@@ -96,6 +98,84 @@ func TestPublishOfAStackedTicketWhoseParentMergedGoesIntoTheTarget(t *testing.T)
 	}
 	if strings.Contains(string(body), "## Stacked on") {
 		t.Errorf("the body of a ticket whose parent merged has a Stacked on section:\n%s", body)
+	}
+}
+
+// TestPublishRetargetsTheOpenPRFoundByBranch: a stacked ticket's pull request
+// that still goes into the branch of a parent that has merged since (GitHub does
+// not retarget it when the branch is kept) is the ticket's open pull request all
+// the same: publish updates it in one `gh pr edit` that also points it at the
+// target, opens no second one, and the report says it was retargeted. A pull
+// request already into the target is updated and left where it is.
+func TestPublishRetargetsTheOpenPRFoundByBranch(t *testing.T) {
+	t.Parallel()
+	mergedParent := func(ticket string) (stack.Plan, error) {
+		return stack.Plan{Ticket: ticket, Repos: []stack.Repo{{
+			Repo: "fixture-repo", Target: "main", StartFrom: "origin/main", PRTarget: "main",
+			Parent: "JIG-0", ParentBranch: "jig/JIG-0", Merged: true,
+		}}}, nil
+	}
+	for _, tc := range []struct {
+		name       string
+		base       string
+		retargeted string
+	}{
+		{"into the merged parent's branch", "jig/JIG-0", "main"},
+		{"already into the target", "main", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fx, d, head := reviewedInTheClone(t)
+			d.Stack = mergedParent
+			branch := ticketBranch(fx.Ticket)
+			pulls := fixture.GhPulls(t, fixture.GhPull{Number: 7, Owner: "owner", Head: branch, Base: tc.base})
+			logFile, _ := useGithubHost(t, &d, pulls, "")
+
+			report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+			if err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			const url = "https://github.example/owner/repo/pull/7"
+			if report.PRURL["fixture-repo"] != url || !report.PRUpdated["fixture-repo"] || report.PRRetargeted["fixture-repo"] != tc.retargeted {
+				t.Errorf("report = url %q updated %v retargeted %q, want %s updated, retargeted to %q", report.PRURL["fixture-repo"], report.PRUpdated["fixture-repo"], report.PRRetargeted["fixture-repo"], url, tc.retargeted)
+			}
+			if got := originRef(t, fx.RepoRemote, "refs/heads/"+branch); got != head {
+				t.Errorf("origin's %s = %s, want the reviewed head %s", branch, got, head)
+			}
+			var edits, creates [][]string
+			for _, argv := range loggedGh(t, logFile) {
+				switch {
+				case len(argv) >= 2 && argv[0] == "pr" && argv[1] == "edit":
+					edits = append(edits, argv)
+				case len(argv) >= 2 && argv[0] == "pr" && argv[1] == "create":
+					creates = append(creates, argv)
+				}
+			}
+			if len(creates) != 0 {
+				t.Errorf("publish opened a second pull request: %v", creates)
+			}
+			if len(edits) != 1 || edits[0][2] != url {
+				t.Fatalf("pr edit calls = %v, want exactly one, of %s", edits, url)
+			}
+			i := slices.Index(edits[0], "--base")
+			switch {
+			case tc.retargeted == "" && i >= 0:
+				t.Errorf("gh pr edit = %v, want no --base: the pull request already goes into main", edits[0])
+			case tc.retargeted != "" && (i < 0 || i+1 >= len(edits[0]) || edits[0][i+1] != tc.retargeted):
+				t.Errorf("gh pr edit = %v, want --base %s in the same call", edits[0], tc.retargeted)
+			case tc.retargeted != "" && !slices.Contains(edits[0], "--body-file"):
+				t.Errorf("gh pr edit = %v, want --body-file in the same call", edits[0])
+			}
+			lines, err := journal.Read(d.Store, fx.Ticket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, l := range lines {
+				if l.Event == journal.EventPr && l.Outcome != "updated" {
+					t.Errorf("pr line = %+v, want the outcome updated", l)
+				}
+			}
+		})
 	}
 }
 

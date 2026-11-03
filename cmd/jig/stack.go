@@ -27,7 +27,7 @@ func init() {
 			if !ok {
 				return nil, nil
 			}
-			return stackRows(plan), nil
+			return stackRows(plan, hereIsPublished(c)), nil
 		},
 	})
 }
@@ -37,7 +37,9 @@ func init() {
 // request goes (PRTarget), the parent it builds on there and the head of the
 // parent's branch, and whether the ticket is to merge the parent's branch in
 // (Restack) or retarget its pull request because the parent merged
-// (Retarget).
+// (Retarget). A row that asks for a merge names it (Merge), and, once the
+// ticket published, the publish that pushes the merge and points the open pull
+// request at its base (Publish): the merge is the session's, jig never makes it.
 type nextStack struct {
 	Repo         string `json:"repo"`
 	Parent       string `json:"parent,omitempty"`
@@ -48,20 +50,35 @@ type nextStack struct {
 	PRTarget     string `json:"pr_target"`
 	Restack      bool   `json:"restack,omitempty"`
 	Retarget     bool   `json:"retarget,omitempty"`
+	Merge        string `json:"merge,omitempty"`
+	Publish      string `json:"publish,omitempty"`
 }
 
 // stackRows are the repos of plan as nextStack rows; none when the ticket is
-// stacked on nothing.
-func stackRows(plan stack.Plan) []nextStack {
+// stacked on nothing. published says the ticket published: a row that asks for
+// a merge then names the publish that follows it, `jig publish <ticket>` (with
+// --repo when the ticket has several rows, since the plan, the lookup of the
+// pull request and the update are each repo's own).
+func stackRows(plan stack.Plan, published bool) []nextStack {
 	if !plan.Stacked() {
 		return nil
 	}
 	rows := make([]nextStack, 0, len(plan.Repos))
 	for _, r := range plan.Repos {
-		rows = append(rows, nextStack{
+		row := nextStack{
 			Repo: r.Repo, Parent: r.Parent, ParentBranch: r.ParentBranch, ParentHead: r.ParentHead, Merged: r.Merged,
 			StartFrom: r.StartFrom, PRTarget: r.PRTarget, Restack: r.Behind, Retarget: r.Retarget,
-		})
+		}
+		if r.Behind || r.Retarget {
+			row.Merge = "git merge " + r.StartFrom
+			if published {
+				row.Publish = "jig publish " + plan.Ticket
+				if len(plan.Repos) > 1 {
+					row.Publish += " --repo " + r.Repo
+				}
+			}
+		}
+		rows = append(rows, row)
 	}
 	return rows
 }
@@ -69,7 +86,8 @@ func stackRows(plan stack.Plan) []nextStack {
 // stackBlocks renders the rows of ticket: a table of each repo's start point
 // and pull request target, then one note for each repo whose parent's branch
 // moved past the ticket's, whose parent merged, or whose parent's branch the
-// clone has no copy of.
+// clone has no copy of. A restack or retarget note of a published ticket ends
+// with the publish that follows the merge.
 func stackBlocks(ticket string, rows []nextStack) []string {
 	if len(rows) == 0 {
 		return nil
@@ -90,17 +108,33 @@ func stackBlocks(ticket string, rows []nextStack) []string {
 		switch {
 		case r.Restack:
 			blocks = append(blocks, fmt.Sprintf("note: the branch of %s moved past %s in %s: restack onto `%s` at `%s`: `git merge %s`; jig never rebases",
-				r.Parent, ticket, r.Repo, r.ParentBranch, shortSHA(r.ParentHead), r.StartFrom))
+				r.Parent, ticket, r.Repo, r.ParentBranch, shortSHA(r.ParentHead), r.StartFrom)+thenPublish("; ", r.Publish))
 		case r.Retarget:
+			// jig publish points the open PR at its target (ADR 0038), so the
+			// note asks only for the merge.
 			target := r.PRTarget
-			blocks = append(blocks, fmt.Sprintf("note: %s merged in %s: retarget the PR of %s to %s and merge %s (`git merge origin/%s`)",
-				r.Parent, r.Repo, ticket, target, target, target))
+			note := fmt.Sprintf("note: %s merged in %s: merge %s (`git merge origin/%s`)", r.Parent, r.Repo, target, target)
+			if r.Publish != "" {
+				note += fmt.Sprintf(", then run `%s`, which points the PR of %s at %s", r.Publish, ticket, target)
+			} else {
+				note += fmt.Sprintf("; the publish of %s points its PR at %s", ticket, target)
+			}
+			blocks = append(blocks, note)
 		case r.Parent != "" && !r.Merged && r.ParentHead == "":
 			blocks = append(blocks, fmt.Sprintf("note: the clone of %s holds no copy of %s, the branch of %s: fetch it (`git fetch origin`) before %s starts from it",
 				r.Repo, r.ParentBranch, r.Parent, ticket))
 		}
 	}
 	return blocks
+}
+
+// thenPublish ends a note with the publish that follows its merge: the empty
+// string when the row names none.
+func thenPublish(sep, publish string) string {
+	if publish == "" {
+		return ""
+	}
+	return sep + "then run `" + publish + "`"
 }
 
 // stackInput is what a stack plan of the project cfg is read from, with merges
@@ -166,5 +200,12 @@ func hereStackBlocks(c hereCtx) ([]string, error) {
 	if !ok {
 		return nil, nil
 	}
-	return stackBlocks(plan.Ticket, stackRows(plan)), nil
+	return stackBlocks(plan.Ticket, stackRows(plan, hereIsPublished(c))), nil
+}
+
+// hereIsPublished says the located ticket published, as its journal records
+// it; a journal that cannot be read says no, and the rows name no publish.
+func hereIsPublished(c hereCtx) bool {
+	published, err := isPublished(c.Store, c.Where.Ticket)
+	return err == nil && published
 }

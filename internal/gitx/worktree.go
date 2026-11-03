@@ -154,6 +154,67 @@ func removeAllWithRetry(dir string) error {
 	return err
 }
 
+// Worktree is one work tree of a repository, as `git worktree list
+// --porcelain` names it.
+type Worktree struct {
+	// Dir is the work tree's directory, as git prints it (forward slashes,
+	// whatever the platform).
+	Dir string
+	// Branch is the short name of the branch checked out there ("main"); ""
+	// for a detached HEAD or a bare repository.
+	Branch string
+	// Main says it is the repository's own work tree, the first git lists.
+	Main bool
+	// Prunable says git would prune its record: the directory is gone.
+	Prunable bool
+}
+
+// Worktrees lists the work trees of repoDir's repository: its own and every
+// linked one, each with the branch it holds. It asks the git program once.
+func Worktrees(repoDir string) ([]Worktree, error) {
+	out, err := Run(repoDir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	return parseWorktrees(out), nil
+}
+
+// parseWorktrees reads the output of `git worktree list --porcelain`: blocks
+// separated by a blank line, each a `worktree <path>` line followed by the
+// attributes git has for it (`HEAD`, `branch refs/heads/<name>`, `detached`,
+// `bare`, `locked`, `prunable <reason>`). The first block is the repository's
+// own work tree. A block without a `worktree` line is skipped.
+func parseWorktrees(out string) []Worktree {
+	var trees []Worktree
+	block := Worktree{}
+	found := false
+	flush := func() {
+		if found {
+			block.Main = len(trees) == 0
+			trees = append(trees, block)
+		}
+		block, found = Worktree{}, false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			flush()
+			continue
+		}
+		key, value, _ := strings.Cut(line, " ")
+		switch key {
+		case "worktree":
+			block.Dir, found = value, true
+		case "branch":
+			block.Branch = strings.TrimPrefix(value, "refs/heads/")
+		case "prunable":
+			block.Prunable = true
+		}
+	}
+	flush()
+	return trees
+}
+
 // trailerKeyPattern is what a trailer key may be: a token of letters, digits
 // and dashes, so it can be written into a --format without changing it.
 var trailerKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
