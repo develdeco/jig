@@ -50,8 +50,9 @@ func nextPhaseNotes(c observe.NoteCtx) ([]observe.Note, error) {
 // waits for a decision), and the session is told to open the gate. It names
 // who reviews, from the freshness of the session that is about to stop
 // (verifydeliver.Freshness): that session built the ticket more often than not,
-// and then a subagent reviews. The Ref names the round to come, so a note is
-// given once for each round.
+// and then a subagent reviews, or a separate session where jig has no hook
+// record of the session's tool calls. The Ref names the round to come, so a
+// note is given once for each round.
 func reviewNotes(c observe.NoteCtx) ([]observe.Note, error) {
 	t, err := derivePhase(c.Store, c.Where.Ticket)
 	if err != nil {
