@@ -79,7 +79,7 @@ A tracer-bullet unit of work with a named oracle and blocking edges to other sli
 _Avoid_: task, subtask, step
 
 **Oracle**:
-The command that proves a slice done. Green is done - there is no separate test stage beyond the oracle, which jig runs itself, in the background, on each commit that names the slice (see **Verification**).
+The command that proves a slice done. Green is done - there is no separate test stage beyond the oracle, which jig runs itself, in the background, on each commit that names the slice (see **Verification**). It is an sh command on every OS: jig runs it through sh, on Windows Git for Windows' (ADR 0042).
 _Avoid_: test suite, check
 
 **Workspace**:
@@ -87,7 +87,7 @@ A slice's target: a repo, or a module inside one. In a project of several repos 
 _Avoid_: target dir, project root
 
 **Env class**:
-A repo-defined environment an oracle needs, with an up/check/down lifecycle and a stated unavailability policy.
+A repo-defined environment an oracle needs, with an up/check/down lifecycle and a stated unavailability policy. Its commands are sh commands, as an oracle is.
 _Avoid_: environment, test env
 
 **Frontier**:

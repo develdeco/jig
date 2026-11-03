@@ -302,9 +302,10 @@ func (x *run) finishPass(lines []journal.Line) error {
 //
 // A run that cannot reach the oracle (there is no sh to run it with, the
 // worktree cannot be made, the descent check fails, the slice names an env
-// class that is undeclared or will not come up) records a verify-error line with the reason and returns it as
-// State error: that is an outcome, not an error. Run returns an error only
-// when the run could not be recorded or was not set up.
+// class that is undeclared or will not come up) records a verify-error line
+// with the reason and returns it as State error: that is an outcome, not an
+// error. Run returns an error only when the run could not be recorded or was
+// not set up.
 func Run(d Deps, r Request) (Result, error) {
 	x, err := d.prepare(r)
 	if err != nil {
