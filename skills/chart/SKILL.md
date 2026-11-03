@@ -23,7 +23,7 @@ Go through `run` wave by wave; no edge lies inside a wave. Start one subagent fo
 You are building ticket <T>. Work only in <dir>, on branch <branch>; run every command there.
 Build it with the build skill (`jig skill build`): claim each slice with `--unattended`, commit with its `Jig-Slice` trailer.
 Stuck: `jig ask --slice <slice> "<question>"`, saying what you would do by default, then end your turn with the question, its id and the default. I answer and resume you.
-When every slice is green, open the gate (`jig gate <T>`) and have it reviewed by a reviewer subagent of your own (`jig skill review`). A round that only queues fixes: build them and have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict.
+When every slice is green, open the gate (`jig gate <T>`) and have it reviewed by the reviewer it advises (`jig skill review`): a subagent of your own, or a separate session when jig has no hook record of this session. A round that only queues fixes: build them and have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict.
 Never publish. Never answer your own question.
 ```
 
