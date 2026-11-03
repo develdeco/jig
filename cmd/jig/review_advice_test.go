@@ -52,8 +52,8 @@ func TestAdviceToSpawnSaysHowToWait(t *testing.T) {
 // as a session of its own, not a subagent, with the command that does it. The
 // command, read by sh's rules, unsets each variable jig reads a session from
 // and hands claude the reviewer's prompt as one word, a quote in the clone's
-// path and all. A session jig has no record of keeps the subagent: no builder
-// is that session.
+// path and all, with its input from /dev/null. A session jig has no record of
+// keeps the subagent: no builder is that session.
 func TestAdviceWithoutAgentIDsStartsASeparateSession(t *testing.T) {
 	t.Parallel()
 	const ticket, clone = "SHOP-1", "/work/o'brien/shop"
@@ -66,7 +66,11 @@ func TestAdviceWithoutAgentIDsStartsASeparateSession(t *testing.T) {
 	var argv []string
 	for _, l := range a.Lines {
 		if strings.HasPrefix(l, "env ") {
-			argv = shWords(t, l)
+			words, ok := strings.CutSuffix(l, " < /dev/null")
+			if !ok {
+				t.Errorf("the command %q does not take its input from /dev/null", l)
+			}
+			argv = shWords(t, words)
 		}
 	}
 	want := []string{"env", "-u", "JIG_SESSION", "-u", "CLAUDE_CODE_SESSION_ID", "claude", "-p", reviewerPromptText(ticket, clone), "--model", "opus", "--permission-mode", "bypassPermissions"}

@@ -89,13 +89,15 @@ func separateSessionAdvice(f verifydeliver.Fresh, ticket, clone string) reviewAd
 // reviewerCommand is the sh command line that starts the reviewer of ticket
 // in clone as a headless Claude Code session: with each variable jig reads a
 // session from unset, since a nested claude gives its tools a session id of
-// its own but keeps $JIG_SESSION, which jig reads first.
+// its own but keeps $JIG_SESSION, which jig reads first, and its input from
+// /dev/null, since claude -p otherwise waits for input on a shell tool's
+// stdin and warns.
 func reviewerCommand(ticket, clone string) string {
 	words := []string{"env"}
 	for _, name := range append([]string{locate.SessionEnv}, locate.HarnessSessionEnv...) {
 		words = append(words, "-u", name)
 	}
-	words = append(words, "claude", "-p", shQuote(reviewerPromptText(ticket, clone)), "--model", "opus", "--permission-mode", "bypassPermissions")
+	words = append(words, "claude", "-p", shQuote(reviewerPromptText(ticket, clone)), "--model", "opus", "--permission-mode", "bypassPermissions", "<", "/dev/null")
 	return strings.Join(words, " ")
 }
 
