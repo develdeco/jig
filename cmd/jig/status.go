@@ -75,8 +75,12 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 	}
 
 	// The advice it ends with reads where the ticket stands as `jig next` does,
-	// its stack plan laid on it: a published ticket owed a merge is not done.
-	out, err := renderStatusWith(st, ticket, statusSections(), plannedStanding(cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, 0)))
+	// its stack plan laid on it: a published ticket owed a merge is not done. The
+	// screens of the TUI run this command every few seconds on a quiet ticket, so
+	// the plan's open pull requests are read through the listing's max age rather
+	// than asked of the host each time: a parent that merged shows in the hint
+	// within that age, as it does in the listing.
+	out, err := renderStatusWith(st, ticket, statusSections(), plannedStanding(cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge)))
 	if err != nil {
 		return renderErr(stdout, err)
 	}
