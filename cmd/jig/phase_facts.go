@@ -12,6 +12,8 @@ import (
 
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
+	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -34,6 +36,64 @@ func derivePhaseWith(st *store.Store, ticket string, merges mergeSource) (phase.
 		return phase.Ticket{}, err
 	}
 	return phase.Derive(f, lines), nil
+}
+
+// derivePhaseStacked is derivePhaseWith for a verb a person reads (`jig next
+// <ticket>`, `jig status <ticket>`, a chart's standing): the ticket's stack plan
+// is laid on its facts, so a published ticket whose branch is owed a merge
+// (restackAsks) is at its publish again, not done. `jig here` and the hooks run
+// on every tool call and keep the stack-blind derivePhaseWith (ADR 0038).
+func derivePhaseStacked(st *store.Store, ticket string, merges mergeSource, plan stack.Plan) (phase.Ticket, error) {
+	f, lines, err := phaseFactsWith(st, ticket, merges)
+	if err != nil {
+		return phase.Ticket{}, err
+	}
+	f.Restacks = restackAsks(plan)
+	return phase.Derive(f, lines), nil
+}
+
+// derivePhasePlanned is derivePhaseStacked for a caller that has not read the
+// plan: a ticket that names a stacked blocker and has published (rec is its
+// record) is read with its stack plan, since only a published ticket can be owed
+// a merge; any other is read without one, and no plan is read for it. A plan
+// that cannot be read is an error.
+func derivePhasePlanned(st *store.Store, cfg project.Config, mp project.MachineProject, id string, rec store.Ticket, merges mergeSource) (phase.Ticket, error) {
+	if !mayBeBehind(st, id, rec) {
+		return derivePhaseWith(st, id, merges)
+	}
+	plan, err := stack.Read(stackInput(st, cfg, mp, merges), id)
+	if err != nil {
+		return phase.Ticket{}, err
+	}
+	return derivePhaseStacked(st, id, merges, plan)
+}
+
+// mayBeBehind says the ticket's stack plan can matter to where it stands: it
+// names a stacked blocker, published and is not closed. Any other ticket is
+// never owed a merge, so no plan is read for it.
+func mayBeBehind(st *store.Store, id string, rec store.Ticket) bool {
+	if !stack.StackedOnAny(rec) || rec.Closed != nil {
+		return false
+	}
+	published, err := isPublished(st, id)
+	return err == nil && published
+}
+
+// restackAsks are the merges the plan owes the ticket's branch, one for each
+// repo that is behind its parent's branch (RestackParent) or whose parent
+// merged while the branch lacks the target's head (RestackTarget). Ref is what
+// to merge: the repo's StartFrom, which is the parent's branch or origin/<target>.
+func restackAsks(plan stack.Plan) []phase.Restack {
+	var out []phase.Restack
+	for _, r := range plan.Repos {
+		switch {
+		case r.Behind:
+			out = append(out, phase.Restack{Repo: r.Repo, Kind: phase.RestackParent, Ref: r.StartFrom})
+		case r.Retarget:
+			out = append(out, phase.Restack{Repo: r.Repo, Kind: phase.RestackTarget, Ref: r.StartFrom})
+		}
+	}
+	return out
 }
 
 // phaseFacts gathers what internal/phase derives a ticket's phase from, and
@@ -238,6 +298,13 @@ func phaseAdvice(t phase.Ticket, ticket string) string {
 	switch {
 	case t.Code == phase.CodeClosed:
 		return t.Reason
+	case t.Behind():
+		asks := make([]string, 0, len(t.Restacks()))
+		for _, r := range t.Restacks() {
+			asks = append(asks, fmt.Sprintf("`git merge %s` in %s", r.Ref, r.Repo))
+		}
+		return fmt.Sprintf("%s is published but behind: run %s, then `jig publish %s`, which pushes the merge and points the open PR at its base%s",
+			ticket, strings.Join(asks, " and "), ticket, prompt)
 	case t.Code == phase.CodeDone:
 		return ticket + " is published: run `jig next` to see the tickets that are left"
 	case t.Current == phase.Brief && awaitsApproval(t):

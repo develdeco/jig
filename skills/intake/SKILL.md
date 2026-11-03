@@ -56,7 +56,7 @@ The section never lists test cases, asks for a test per rule, or asks that a tes
 
 ## Chart output (fog spans tickets)
 
-A chart is `charts/<name>/map.md` (jig reads its sections, never writes it), sectioned Destination · Notes · Decisions so far · Not yet specified (fog) · Out of scope, plus `charts/<name>/tickets.yaml`. Decision tickets: one per grilling session, entered into `tickets.yaml` as they resolve, each with a `key:` naming the store key it mints under (omit it only when the store declares one). `jig graduate <name>` creates the entries without ids and writes the ids back, so re-running it creates just the new ones.
+Make a chart with `jig chart new <name> --title "<t>"`, not by hand: it commits `charts/<name>/map.md` (five empty sections; jig only reads it after) and an empty `tickets.yaml`. Decision tickets: one per grilling session, entered into `tickets.yaml` as they resolve, each with a `key:` naming its store key (omit it when the store declares one). `jig validate <name>` lists every problem and mints nothing; `jig graduate <name>` creates the entries without ids and writes the ids back, so a re-run creates just the new ones.
 
 ## Done when
 

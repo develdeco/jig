@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -19,7 +20,7 @@ import (
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"validate", "check a ticket's brief, slices and manifest against the store, and approve a valid brief", []flagSpec{
+		Spec: cmdSpec{"validate", "check a ticket's brief, slices and manifest against the store, and approve a valid brief; or a chart's entries, minting nothing", []flagSpec{
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 			{"check", validateCheckUsage, false},
@@ -62,6 +63,12 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	st, cfg, mp, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
+	}
+	// A ticket id or alias wins over a chart name, as it does for `jig next`
+	// and `jig status`: chartNamed says no for a word a ticket holds. A word
+	// that is neither falls through, and is reported as a ticket with no brief.
+	if chart, ok := chartNamed(st, ticket); ok {
+		return validateChart(st, cfg, chart, stdout)
 	}
 	ticket, err = resolveTicketArg(st, ticket, stdout)
 	if err != nil {
@@ -123,6 +130,61 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 	blocks = append(blocks, axi.Help(next))
 	axi.Render(stdout, blocks...)
+	return 0
+}
+
+// validateChart implements `jig validate <chart>`: every problem of the chart's
+// entries, one line each, and nothing minted. It reads the store and writes
+// nothing: no sync, no commit, no mirror, and --check changes nothing because a
+// chart has no approval to record. The checks are checkChart's, the ones `jig
+// graduate` runs before it mints, so a chart that passes here is not refused
+// there for its entries. A tickets.yaml that cannot be read and a chart with no
+// entries are problems too.
+func validateChart(st *store.Store, cfg project.Config, chart string, stdout io.Writer) int {
+	entries, err := st.ReadChart(chart)
+	var lines []string
+	switch {
+	case err != nil:
+		lines = append(lines, fmt.Sprintf("charts/%s/tickets.yaml could not be read: %v", chart, err))
+	case len(entries) == 0:
+		lines = append(lines, fmt.Sprintf("charts/%s/tickets.yaml has no entries", chart))
+	default:
+		_, problems := checkChart(st, cfg, chart, entries)
+		for _, p := range problems {
+			lines = append(lines, p.Line)
+		}
+	}
+	if len(lines) > 0 {
+		return renderErr(stdout, &axi.Error{
+			Msg:  fmt.Sprintf("chart %s failed validation", chart),
+			Code: "VALIDATION_ERROR",
+			Help: append(lines, fmt.Sprintf("Fix them in charts/%s/tickets.yaml, then run `jig validate %s` again", chart, chart)),
+		})
+	}
+
+	graduated := 0
+	for _, e := range entries {
+		if e.ID != "" {
+			graduated++
+		}
+	}
+	ungraduated := len(entries) - graduated
+	next := fmt.Sprintf("Every entry has a ticket: `jig next %s` says where the chart stands", chart)
+	if ungraduated == 1 {
+		next = fmt.Sprintf("Run `jig graduate %s` to create the 1 entry that has no ticket yet", chart)
+	} else if ungraduated > 1 {
+		next = fmt.Sprintf("Run `jig graduate %s` to create the %d entries that have no ticket yet", chart, ungraduated)
+	}
+	axi.Render(stdout,
+		"valid: yes",
+		axi.KV("chart", [][2]string{
+			{"name", chart},
+			{"entries", strconv.Itoa(len(entries))},
+			{"graduated", strconv.Itoa(graduated)},
+			{"ungraduated", strconv.Itoa(ungraduated)},
+		}),
+		axi.Help(next),
+	)
 	return 0
 }
 

@@ -17,10 +17,12 @@ You are the main session. Every question to the person is yours to ask; a subage
 
 ## Builds
 
-Go through `run` wave by wave; no edge lies inside a wave. Start one subagent for each ticket of the wave (the Agent tool, `subagent_type: general-purpose`, `model: sonnet` unless the person named another, in the background), each in its own worktree on the ticket's branch: `jig next <T>` names the branch and, for a stacked ticket, its start point (the parent's branch); cut it from there or the repo's target (`git worktree add <dir> -b <branch> <base>`), one in each repo a ticket builds in. Its prompt:
+Before the first wave, ask the person once to allow what the builds run: `jig` and `git` (the worktree commands too) and the oracles named in the tickets' `slices.yaml`. One yes covers the run, in place of a prompt for each parallel subagent. jig sets no permission.
+
+Go through `run` wave by wave; no edge lies inside a wave. Start one subagent for each ticket of the wave (the Agent tool, `subagent_type: general-purpose`, `model: sonnet` unless the person named another, in the background), each in its own worktree: run the `add` commands in the ticket's `worktrees` from `jig next <T>` (the chart's `worktrees` carry them too), one at a time, since git's worktree records are not safe against parallel adds, and read `jig next <T>` again when a stacked ticket's wave starts. `present` means it exists: use its `dir`. `no_clone` means the repo has no clone here: tell the person and do not start that ticket. jig makes no worktree. Its prompt:
 
 ```
-You are building ticket <T>. Work only in <dir>, on branch <branch>; run every command there.
+You are building ticket <T>. Work only in the worktree of each repo (`dir` of its rows), on branch <branch>; run every command there.
 Build it with the build skill (`jig skill build`): claim each slice with `--unattended`, commit with its `Jig-Slice` trailer.
 Stuck: `jig ask --slice <slice> "<question>"`, saying what you would do by default, then end your turn with the question, its id and the default. I answer and resume you.
 When every slice is green, open the gate (`jig gate <T>`) and have it reviewed by a reviewer subagent of your own (`jig skill review`). A round that only queues fixes: build them and have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict.
@@ -29,13 +31,15 @@ Never publish. Never answer your own question.
 
 Wait for the hand-backs (TaskOutput, `block: true`). jig holds a subagent at its stop while a verification runs, tracked changes are uncommitted, or every slice is green and no round is open: it is not stuck, wait on.
 
+A ticket in `run` whose phase is publish is published and behind (`state: behind`): it needs no build subagent. For each of its `stack` rows with a `merge`, run that merge yourself in a checkout of the ticket's branch (its worktree; its `worktrees` give the add when it is gone). A clean merge needs no review; one resolved by hand needs `jig gate <T>` and a clean round first. Then publish it (Publish).
+
 ## Relay
 
 A subagent hands back a question: put it to the person with its default, record the answer with `jig answer <T> <question> "<answer>"` (off a terminal it is recorded as relayed), then resume the subagent with SendMessage. A review's asks are the person's too: put each to them, record `jig triage <T> <finding> keep|dismiss`, and resume the subagent to build the fixes and have them reviewed again.
 
 ## Publish
 
-Tickets whose `jig next <T>` names publish are reviewed clean. Ask the person once for the group (each reviewed head and the first lines of its body), then publish each here, the hand-off way (`jig skill publish`). A prompt that told you to go with your recommendations needs no yes.
+Tickets whose `jig next <T>` names publish are reviewed clean. Ask the person once for the group (each reviewed head and the first lines of its body), then publish each here, the hand-off way (`jig skill publish`). A prompt that told you to go with your recommendations needs no yes. Once a ticket is published, remove its worktrees with the `remove` commands `jig publish --pr` and `jig next <T>` give, one at a time. Git refuses a worktree with changes: commit or discard them first, never force.
 
 ## Ends
 
@@ -45,3 +49,4 @@ After each wave read `jig next <chart>` again and start the next. A ticket behin
 
 - Do not start a ticket `run` does not list, or build in this clone while subagents build.
 - Do not merge a pull request, or answer for the person unless the prompt told you to go with your recommendations.
+- Do not remove a worktree before its ticket is published.

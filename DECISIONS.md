@@ -3915,6 +3915,54 @@ A subagent cannot ask the person, and `jig ask --wait` would hold a background a
 
 Once a chart's entry has a ticket, the standing takes the ticket's edges and rank from its `ticket.yaml`, not from the chart's refs: after graduation the ticket is the source of truth, and a person who edited a dependency there would otherwise see the chart disagree with `jig next <T>`. An entry with no ticket yet takes its edges from the chart. A ticket whose files cannot be read is a row with a problem and does not hide the chart.
 
+## A published stacked ticket can be behind: the choices the brief left (GRAPH-13)
+
+The brief for [ADR 0038](docs/adr/0038-a-published-stacked-ticket-can-be-behind.md) left a few choices; each took the recommended answer.
+
+**`Landed` keeps a ticket whose own work merged from reading as behind for good.** Once the child's own pull request merged, its branch never holds the target's head again, and the plan would ask for a retarget forever. `stack.Read` asks the merge reader about the ticket itself, once, and `Judge` leaves `Behind` and `Retarget` false when it landed. The hooks' cached merge reader asks no host, so the correction notes stop for a landed ticket too.
+
+**The base of a hand-resolved merge's delta round is a tree.** The diff has to be the hand edits, and the only thing to diff against is git's own merge of the tip's parents, which exists as a tree and not as a commit. `base_sha` can therefore be a tree id; every reader passes it to `git diff`. A line that is not "clean merges, then at most a hand-resolved tip" (an ordinary commit, two hand-resolved merges, a hand-resolved merge that is not the tip, a conflict committed with its markers) stays the plain delta from the reviewed head: the reviewer sees more, never less.
+
+**`jig here` and the hooks stay stack-blind.** They run on every tool call, and reading the stack plan means reading clones and asking the merge reader. `jig next <T>`, `jig status <T>` and a chart's standing read the plan, so the verbs a person reads agree. One stack-aware derivation for every reader is a follow-up.
+
+**A built ticket that has not published keeps its phase.** Its merge is part of the work and its review and publish follow by phase, so only a published ticket can be behind. The row's `publish` command is named only for a published ticket, and only on a row that asks for a merge.
+
+**`jig next` says `behind` for a branch that does not hold the target.** Once the session has merged the target the ticket reads done again, though the pull request may still point at the parent's branch until the next `jig publish`. Reading the pull request's base from the host to hold the standing until it is retargeted was left out: it would make every `jig next` ask the host about the ticket's own pull request.
+
+## jig advises a ticket's worktree (chart flow, C6)
+
+The brief for [ADR 0039](docs/adr/0039-jig-advises-a-tickets-worktree-and-makes-none.md) left a few choices; each took the recommended answer.
+
+**`present` is a row of its own.** A resumed chart run has to know which worktrees exist, and the clone's own work tree can already be on the ticket's branch: an add for it would be one git refuses. A work tree is found by the branch it holds, so a worktree made by hand anywhere counts, and a prunable entry (its directory gone) holds nothing.
+
+**The command is `git -C <clone>` and the add of a branch the clone has takes no `-b`.** `-C` lets the session run it from any directory. A branch outlives a removed worktree, and a published ticket that is behind needs its worktree back, so the second add is the existing-branch form with no base.
+
+**A ticket that is not briefed, or is held by a blocker, has no worktree yet.** The rows of `jig next <T>` follow the phase's word (`PHASE_BLOCKED`, the brief phase), never the ticket's `state`: a stacked child of an unpublished parent reads `ready` in the state while its parent has no clean round, and is held all the same. A chart's rows are the exception: a ticket in the run is work of this run, so a later wave's stacked ticket gets its add ahead of its wave, and the skill reads `jig next <T>` again when the wave starts.
+
+**The remove is never forced and is offered only for a linked worktree.** Git refuses a worktree with changes and the person decides. The clone's own work tree is not a thing to remove. A published ticket that is behind has not ended, so it keeps its worktree rows.
+
+**`jig publish --pr` gives the removal when it records the last pull request, and a failure to read the facts is silence.** The pull request is recorded whatever the advice could read. A record with a repo still pending adds nothing, and bare `jig publish` is unchanged: `jig next <T>` gives the removal after it.
+
+**Left for later.** Listing worktrees in process (the git program answers while the ticket's branch exists in the clone), a branch that exists only on the origin, and the numbers in `.github/git-budget.yaml`, which are CI's to print on the Linux leg and go in the pull request's diff.
+
+## A chart is made by `jig chart new` and checked by `jig validate <chart>` (chart run, C8)
+
+The brief for [ADR 0040](docs/adr/0040-a-chart-is-made-and-checked-by-verbs.md) left a few choices; each took the recommended answer.
+
+**A name is lower case only.** Letters, digits, `-` and `_`, starting and ending with a letter or digit, at most 64 characters. Two chart folders that differ in case are one folder on some volumes, which `sameChartFile` already guards against for refs. A name that reads as a ticket (a ticket id or alias holds it) is refused, since a ticket wins over a chart name and the chart could never be reached by it. The same goes for a name ending in `-gate` or `-publish`, which `chartNamed` never reads as a chart: the brief did not name that case, and it follows from the same reason. A chart folder that differs from the name only in case counts as taken.
+
+**The skeleton has no placeholder prose.** `map.md` is the title and five headings, each followed by a blank line, and `tickets.yaml` is a comment that says how an entry is written and `tickets: []`. A paragraph under a heading is an item to `jig recall` and to the mirror, so a line of instructions would be shown as content. The how-to is in the `tickets.yaml` comment, which nothing reads.
+
+**The problem lines name the entry by position and title.** `entry N ("<title>"): ...`, the title quoted as graduate's own messages quote it, and `entry N` alone for an entry with no title. A duplicate id is listed once for each later entry, with the first holder named, and its folder is checked once. A ref with a bad kind is listed for its kind only.
+
+**The closing help line is one sentence.** A failure ends with "Fix them in charts/<chart>/tickets.yaml, then run `jig validate <chart>` again", and a pass names the one step that follows: `jig graduate` with the number of entries it will create (the 1 entry, the N entries), or `jig next <chart>` once every entry has a ticket.
+
+**`jig validate <chart>` covers the refs of graduated entries too.** `jig graduate` resolves every entry's refs after its run, so validate does the same; `jig next <chart>` still reads a graduated entry's edges from its ticket and ignores the chart's refs for it.
+
+**`jig next <chart>` reads a bad ref as the row's problem.** The row is blocked, and the entries behind it are blocked with it. `jig graduate` refuses the chart with the error it gave before. A chart with no entries keeps the code `CHART_NOT_GRADUATED` (the TUI reads it) and says to add entries and check them, not to graduate.
+
+**Left for later.** Verbs that edit a chart's entries, a `jig chart` family beyond `new`, checking a chart's map, and two writers making the same chart name at once in a writers-mode store (the claim retries only on a shared main branch).
+
 ## A subagent's spend is its own ticket's (chart run, C12)
 
 A chart run puts a build subagent on each ticket, and `spend` summed every subagent transcript into the main session's line, on the ticket the main session was placed at, or on none. A sum over the chart's tickets would have been wrong, and the ticket a subagent built showed none of what it cost.

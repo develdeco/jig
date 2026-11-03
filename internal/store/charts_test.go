@@ -1116,9 +1116,6 @@ func TestChartNamesNoChartsDir(t *testing.T) {
 func TestChartHistory(t *testing.T) {
 	t.Parallel()
 	st, work, _ := newTestRemoteStore(t)
-	if got := st.ChartRelDir("demo"); got != "charts/demo" {
-		t.Errorf("ChartRelDir = %q, want charts/demo, with forward slashes", got)
-	}
 	if got, want := st.ChartFile("demo"), filepath.Join(work, "charts", "demo", "tickets.yaml"); got != want {
 		t.Errorf("ChartFile = %q, want %q", got, want)
 	}

@@ -314,3 +314,99 @@ func TestReadOfATicketStackedOnNothing(t *testing.T) {
 		}
 	}
 }
+
+// TestJudgeLandedAsksNothing: once the ticket's own work landed in the repo, its
+// branch asks nothing of anyone: not a restack onto a parent's branch that moved
+// past it, and not a retarget though it never held the target's new head.
+func TestJudgeLandedAsksNothing(t *testing.T) {
+	t.Parallel()
+	parent := Parent{Ticket: "JIG-1", Branch: "jig/JIG-1", Ref: "jig/JIG-1", Head: "p1"}
+	for _, c := range []struct {
+		name   string
+		f      Facts
+		wantBy bool
+		wantRT bool
+	}{
+		{"the parent moved, the child landed", Facts{Repo: "app", Target: "main", Head: "c1", Landed: true, Parents: []Parent{parent}}, false, false},
+		{"the parent moved, the child did not land", Facts{Repo: "app", Target: "main", Head: "c1", Parents: []Parent{parent}}, true, false},
+		{"the parent merged, the child landed", Facts{Repo: "app", Target: "main", Head: "c1", Landed: true, Parents: []Parent{withMerged(parent)}}, false, false},
+		{"the parent merged, the child did not land", Facts{Repo: "app", Target: "main", Head: "c1", Parents: []Parent{withMerged(parent)}}, false, true},
+	} {
+		got := Judge(c.f)
+		if got.Behind != c.wantBy || got.Retarget != c.wantRT {
+			t.Errorf("%s: Behind %v Retarget %v, want %v and %v", c.name, got.Behind, got.Retarget, c.wantBy, c.wantRT)
+		}
+		// Landing changes what is asked, never where the branch starts or goes.
+		if want := Judge(withLanded(c.f, !c.f.Landed)); got.StartFrom != want.StartFrom || got.PRTarget != want.PRTarget || got.Merged != want.Merged {
+			t.Errorf("%s: landed changed the start or the target: %+v against %+v", c.name, got, want)
+		}
+	}
+}
+
+func withLanded(f Facts, landed bool) Facts { f.Landed = landed; return f }
+
+// TestReadSetsLandedFromTheTicketsOwnMerge: Read asks the merge reader about the
+// ticket itself, once, and its branch asks for no retarget in a repo where its
+// own work merged, though it never held the target's head; where the reader
+// says nothing of the ticket (or there is no reader) it still asks.
+func TestReadSetsLandedFromTheTicketsOwnMerge(t *testing.T) {
+	t.Parallel()
+	app := newRepo(t, "")
+	st := stackedStore(t, []string{"root"}, []string{"root"})
+	in := Input{Store: st, Cfg: project.Config{Repos: []project.Repo{{Remote: app.origin, Label: "app"}}}, Clones: map[string]string{"app": app.clone}}
+
+	// The parent's branch merges into main; the child's branch was cut before.
+	mustGit(t, app.clone, "switch", "-c", "JIG-1-parent")
+	app.commit(t, "parent.txt")
+	mustGit(t, app.clone, "push", "origin", "JIG-1-parent")
+	mustGit(t, app.clone, "switch", "-c", "JIG-2-child")
+	app.commit(t, "child.txt")
+	mustGit(t, app.clone, "push", "origin", "JIG-2-child")
+	mustGit(t, app.clone, "switch", "main")
+	mustGit(t, app.clone, "merge", "--no-ff", "--no-edit", "JIG-1-parent")
+	mustGit(t, app.clone, "push", "origin", "main")
+	mustGit(t, app.clone, "fetch", "origin")
+
+	counting := &countingMerges{fakeMerges: fakeMerges{"JIG-1": merged("app")}}
+	in.Merges = counting
+	plan, err := Read(in, "JIG-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := plan.Repos[0]; !r.Retarget || !r.Merged {
+		t.Fatalf("the child has not landed: %+v, want a retarget", r)
+	}
+	if counting.asked["JIG-2"] != 1 || counting.asked["JIG-1"] != 1 {
+		t.Errorf("merge reader asked %v, want JIG-1 and JIG-2 once each", counting.asked)
+	}
+
+	counting = &countingMerges{fakeMerges: fakeMerges{"JIG-1": merged("app"), "JIG-2": merged("app")}}
+	in.Merges = counting
+	plan, err = Read(in, "JIG-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := plan.Repos[0]; r.Retarget || !r.Merged || r.Head == "" {
+		t.Errorf("the child landed: %+v, want it merged and asking for nothing", r)
+	}
+
+	// No reader at all: nothing is taken to have landed, and nothing is asked.
+	in.Merges = nil
+	if plan, err = Read(in, "JIG-2"); err != nil || plan.Repos[0].Retarget {
+		t.Errorf("no merge reader: %+v, %v, want no panic and a plan with no retarget (no parent is taken to have merged)", plan, err)
+	}
+}
+
+// countingMerges is fakeMerges that counts the tickets it was asked about.
+type countingMerges struct {
+	fakeMerges
+	asked map[string]int
+}
+
+func (c *countingMerges) Of(ticket string) (ready.Merge, error) {
+	if c.asked == nil {
+		c.asked = map[string]int{}
+	}
+	c.asked[ticket]++
+	return c.fakeMerges.Of(ticket)
+}

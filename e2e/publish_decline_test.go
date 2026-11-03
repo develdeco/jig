@@ -27,7 +27,7 @@ func TestPublishDeclinedPromptCommitsAndPushesStore(t *testing.T) {
 	b := newBuiltTicket(t, true)
 	ticket := b.fx.Ticket
 	b.openRound(t)
-	b.reviewedClean(t)
+	b.reviewedClean(t, 1)
 
 	// --- decline: no --yes, no scripted stdin.
 	r6 := runJig(t, b.env, b.fx.StoreDir, "publish", ticket)

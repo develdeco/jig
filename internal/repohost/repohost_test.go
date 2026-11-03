@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -138,31 +139,33 @@ func anyLineContainsAll(lines [][]string, vals ...string) bool {
 	return false
 }
 
-var findOpenPRCall = []string{"api", "repos/owner/repo/pulls", "--method", "GET", "-f", "head=owner:jig/JIG-1", "-f", "base=main", "-f", "state=open"}
+var findOpenPRCall = []string{"api", "repos/owner/repo/pulls", "--method", "GET", "-f", "head=owner:jig/JIG-1", "-f", "state=open"}
 
 // TestFindsTheOpenPRForABranch: the host finds the open pull request from a
-// branch into its base by asking the pull requests endpoint for exactly that.
+// branch, whatever it is into, by asking the pull requests endpoint for exactly
+// that, and says which base it goes into.
 func TestFindsTheOpenPRForABranch(t *testing.T) {
-	const wantSeven = "https://github.example/owner/repo/pull/7"
+	wantSeven := repohost.OpenPR{URL: "https://github.example/owner/repo/pull/7", Base: "main"}
 	cases := []struct {
 		name    string
 		pulls   []fixture.GhPull
 		raw     string
-		want    string
+		want    repohost.OpenPR
 		wantErr string
 	}{
 		{name: "no pull request"},
 		{name: "one open pull request", pulls: []fixture.GhPull{openPull}, want: wantSeven},
 		{name: "only a closed pull request", pulls: []fixture.GhPull{closedPull}},
 		{name: "only a merged pull request", pulls: []fixture.GhPull{mergedPull}},
-		{name: "only a pull request into another base", pulls: []fixture.GhPull{otherBasePull}},
+		{name: "only a pull request into another base", pulls: []fixture.GhPull{otherBasePull}, want: repohost.OpenPR{URL: "https://github.example/owner/repo/pull/3", Base: "release"}},
 		{name: "only a pull request from another branch", pulls: []fixture.GhPull{otherHeadPull}},
-		{name: "the open pull request beside closed, merged and other ones", pulls: []fixture.GhPull{closedPull, mergedPull, otherBasePull, otherHeadPull, openPull}, want: wantSeven},
-		{name: "the owner's name compared without case", pulls: []fixture.GhPull{openPullCased}, want: "https://github.example/owner/repo/pull/9"},
+		{name: "the open pull request beside closed, merged and other ones", pulls: []fixture.GhPull{closedPull, mergedPull, otherHeadPull, openPull}, want: wantSeven},
+		{name: "the owner's name compared without case", pulls: []fixture.GhPull{openPullCased}, want: repohost.OpenPR{URL: "https://github.example/owner/repo/pull/9", Base: "main"}},
 		{name: "only a fork's pull request", pulls: []fixture.GhPull{forkPull}},
 		{name: "a fork's pull request beside this repo's", pulls: []fixture.GhPull{forkPull, openPull}, want: wantSeven},
 		{name: "more forks' pull requests than a page holds, this repo's after them", pulls: append(forkPulls(35), openPull), want: wantSeven},
 		{name: "two open pull requests", pulls: []fixture.GhPull{openPull, openPullCased}, wantErr: "2 open pull requests"},
+		{name: "two open pull requests into different bases", pulls: []fixture.GhPull{openPull, otherBasePull}, wantErr: "2 open pull requests from jig/JIG-1 in owner/repo"},
 		{name: "an answer that is not a list", raw: `{"message":"not a list"}`, wantErr: "parse"},
 	}
 	for _, tc := range cases {
@@ -172,7 +175,7 @@ func TestFindsTheOpenPRForABranch(t *testing.T) {
 				pulls = fixture.GhPulls(t, tc.pulls...)
 			}
 			h, logFile := hostUnderStub(t, pulls, "")
-			got, err := h.FindOpenPR("jig/JIG-1", "main")
+			got, err := h.FindOpenPR("jig/JIG-1")
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("FindOpenPR: err = %v, want one containing %q", err, tc.wantErr)
@@ -181,7 +184,7 @@ func TestFindsTheOpenPRForABranch(t *testing.T) {
 				t.Fatalf("FindOpenPR: %v", err)
 			}
 			if got != tc.want {
-				t.Errorf("FindOpenPR = %q, want %q", got, tc.want)
+				t.Errorf("FindOpenPR = %+v, want %+v", got, tc.want)
 			}
 
 			lines := readLoggedArgv(t, logFile)
@@ -198,13 +201,14 @@ func TestFindsTheOpenPRForABranch(t *testing.T) {
 // TestFindingAPRFailsLoudly: a gh that cannot answer is an error.
 func TestFindingAPRFailsLoudly(t *testing.T) {
 	h, _ := hostUnderStub(t, fixture.GhPulls(t, openPull), "api repos/owner/repo/pulls")
-	got, err := h.FindOpenPR("jig/JIG-1", "main")
+	got, err := h.FindOpenPR("jig/JIG-1")
 	if err == nil || !strings.Contains(err.Error(), "gh api repos/owner/repo/pulls") {
-		t.Fatalf("FindOpenPR over a failing gh: (%q, %v), want an error naming the call", got, err)
+		t.Fatalf("FindOpenPR over a failing gh: (%+v, %v), want an error naming the call", got, err)
 	}
 }
 
-// TestUpdatesAPRsBody: UpdatePR replaces the pull request's body from a file.
+// TestUpdatesAPRsBody: UpdatePR replaces the pull request's body from a file,
+// and, when it is given a base, points the pull request at it in the same call.
 func TestUpdatesAPRsBody(t *testing.T) {
 	h, logFile := hostUnderStub(t, "", "")
 	bodyFile := filepath.Join(t.TempDir(), "body.md")
@@ -213,13 +217,21 @@ func TestUpdatesAPRsBody(t *testing.T) {
 	}
 
 	const url = "https://github.example/owner/repo/pull/7"
-	if err := h.UpdatePR(url, bodyFile); err != nil {
+	if err := h.UpdatePR(url, bodyFile, ""); err != nil {
 		t.Fatalf("UpdatePR: %v", err)
 	}
 
 	lines := readLoggedArgv(t, logFile)
-	if len(lines) != 1 || !anyLineHasPrefix(lines, "pr", "edit", url, "--repo", "owner/repo", "--body-file", bodyFile) {
+	if len(lines) != 1 || !reflect.DeepEqual(lines[0][:7], []string{"pr", "edit", url, "--repo", "owner/repo", "--body-file", bodyFile}) || len(lines[0]) != 7 {
 		t.Fatalf("logged calls = %v, want exactly `pr edit %s --repo owner/repo --body-file %s`", lines, url, bodyFile)
+	}
+
+	if err := h.UpdatePR(url, bodyFile, "main"); err != nil {
+		t.Fatalf("UpdatePR with a base: %v", err)
+	}
+	lines = readLoggedArgv(t, logFile)
+	if len(lines) != 2 || !anyLineHasPrefix(lines[1:], "pr", "edit", url, "--repo", "owner/repo", "--body-file", bodyFile, "--base", "main") {
+		t.Fatalf("logged calls = %v, want a second `pr edit` with --body-file and --base main in the one call", lines)
 	}
 }
 

@@ -427,3 +427,93 @@ func TestTicketKeepsTheBlockersTheFactsNamed(t *testing.T) {
 		t.Errorf("the zero Ticket has blockers %+v", got)
 	}
 }
+
+// TestChartWithNoEntries: a chart just made has no entries. It keeps the code
+// CHART_NOT_GRADUATED (the TUI reads it) with no prompt, and its reason says to
+// add the entries and check them with `jig validate`, not to run `jig graduate`,
+// which refuses a chart with no entries.
+func TestChartWithNoEntries(t *testing.T) {
+	t.Parallel()
+	c := DeriveChart(ChartFacts{Name: "coupons"})
+	want := "the chart has no entries yet: add them to charts/coupons/tickets.yaml and check them with `jig validate coupons`"
+	if c.Ready || c.Code != CodeChartNotGraduated || c.Prompt != "" || c.Ungraduated != 0 || c.Reason != want {
+		t.Errorf("no entries = ready %v code %q prompt %q ungraduated %d reason %q, want not graduated with reason %q", c.Ready, c.Code, c.Prompt, c.Ungraduated, c.Reason, want)
+	}
+	if len(c.Rows) != 0 || len(c.Run) != 0 || len(c.Briefs) != 0 {
+		t.Errorf("no entries have rows, a run or briefs: %+v", c)
+	}
+	if c.HasUngraduatedProblem() {
+		t.Error("a chart with no entries has no entry with a problem")
+	}
+}
+
+// TestChartEntryWithABadRefIsBlocked: an entry with no ticket and a problem in
+// the chart's own file is a blocked row worded as the entry's problem (a
+// graduated one keeps "cannot be read"), the entries behind it are blocked, the
+// rest still run, and the not-graduated reasons send the person to `jig
+// validate` first while any entry with no ticket has a problem.
+func TestChartEntryWithABadRefIsBlocked(t *testing.T) {
+	t.Parallel()
+	problem := `blocked_by ref "#9" is out of range`
+	bad := ChartEntry{Pos: 2, Title: "bad", Problem: problem}
+	after := ChartEntry{Pos: 3, Title: "after", Needs: []ChartNeed{{Pos: 2, Kind: "merged", Why: "c#3 waits for entry #2, which has no ticket yet"}}}
+
+	c := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{
+		entry(1, "T-1", ticketAt("T-1")),
+		bad,
+		after,
+	}})
+	var row ChartRow
+	reachByPos := map[int]string{}
+	for _, r := range c.Rows {
+		reachByPos[r.Pos] = r.Reach
+		if r.Pos == 2 {
+			row = r
+		}
+	}
+	if reachByPos[1] != ReachHere || reachByPos[2] != ReachBlocked || reachByPos[3] != ReachBlocked {
+		t.Errorf("reach by position = %v, want here, blocked, blocked (the entry behind the bad one is blocked)", reachByPos)
+	}
+	if row.Reach != ReachBlocked || row.Problem != problem || row.ID != "" {
+		t.Errorf("the bad entry's row = %+v, want blocked with its problem and no id", row)
+	}
+	if !c.Ready || c.Prompt != "Continue c" || !reflect.DeepEqual(c.Run, [][]string{{"T-1"}}) {
+		t.Errorf("the graduated entry still runs: ready %v prompt %q run %v", c.Ready, c.Prompt, c.Run)
+	}
+	if !c.HasUngraduatedProblem() {
+		t.Error("HasUngraduatedProblem = false, want true")
+	}
+
+	// The blocked reason: an entry with no id has a problem; a graduated one
+	// cannot be read.
+	d := &chartDeriver{f: ChartFacts{Name: "c", Entries: []ChartEntry{bad}}, byPos: map[int]int{2: 0}, byID: map[string]int{},
+		reach: make([]string, 1), why: make([]string, 1), state: make([]int, 1), wave: make([]int, 1), wstat: make([]int, 1)}
+	d.reachOf(0)
+	if want := "entry #2 has a problem: " + problem; d.why[0] != want {
+		t.Errorf("blocked reason of an entry with no id = %q, want %q", d.why[0], want)
+	}
+	graduated := ChartEntry{Pos: 1, ID: "T-1", Title: "broken", Problem: "slices.yaml does not parse"}
+	blocked := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{graduated}})
+	if want := "T-1 cannot be read: slices.yaml does not parse"; blocked.Reason != want {
+		t.Errorf("reason for a graduated entry with a problem = %q, want %q", blocked.Reason, want)
+	}
+
+	// Nothing graduated: the verdict says validate first.
+	none := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{{Pos: 1, Title: "one"}, bad}})
+	if want := "run `jig validate c` first: it lists the problems of the entries that have no ticket yet"; none.Code != CodeChartNotGraduated || none.Reason != want {
+		t.Errorf("nothing graduated, one with a problem = code %q reason %q, want not graduated with %q", none.Code, none.Reason, want)
+	}
+	// Everything graduated is done, the rest missing: the count, then the step.
+	finished := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{
+		entry(1, "T-1", ticketPublished("T-1")),
+		{Pos: 2, Title: "later", Problem: "blocked_by ref \"#9\" is out of range"},
+	}})
+	if want := "1 entry has no ticket yet: run `jig validate c` first: it lists the problems of the entries that have no ticket yet"; finished.Code != CodeChartNotGraduated || finished.Reason != want {
+		t.Errorf("all graduated done, one with a problem = code %q reason %q, want %q", finished.Code, finished.Reason, want)
+	}
+	// Without a problem the step is graduate, as before.
+	plain := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{{Pos: 1, Title: "one"}}})
+	if plain.Reason != "run `jig graduate c`" {
+		t.Errorf("nothing graduated, no problem = reason %q, want run `jig graduate c`", plain.Reason)
+	}
+}
