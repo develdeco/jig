@@ -139,12 +139,19 @@ type Facts struct {
 	// TargetHeld says the ticket's branch holds the target's head on the
 	// origin (false when either is unknown).
 	TargetHeld bool
+	// Landed says the ticket's own work has merged in the repo: its branch
+	// asks nothing more of anyone, whatever the parent's branch or the target
+	// did since. Without it, once the ticket's own pull request merged its
+	// branch would never hold the target's head again, and the ticket would
+	// read as behind for good.
+	Landed bool
 }
 
 // Judge decides where the ticket's branch starts in the repo and where its
 // pull request goes. The parent it builds on is the first of the repo's
 // parents whose work has not merged there; when every one has merged, the
-// first, merged. A repo with no parent is the target's.
+// first, merged. A repo with no parent is the target's. A ticket whose own work
+// landed in the repo is told to restack or retarget nothing.
 func Judge(f Facts) Repo {
 	r := Repo{Repo: f.Repo, Target: f.Target, StartFrom: "origin/" + f.Target, PRTarget: f.Target, Head: f.Head}
 	if len(f.Parents) == 0 {
@@ -159,7 +166,7 @@ func Judge(f Facts) Repo {
 	}
 	r.Parent, r.ParentBranch, r.ParentRef, r.ParentHead, r.Merged = p.Ticket, p.Branch, p.Ref, p.Head, p.Merged
 	if p.Merged {
-		r.Retarget = f.Head != "" && !f.TargetHeld
+		r.Retarget = f.Head != "" && !f.TargetHeld && !f.Landed
 		return r
 	}
 	r.PRTarget = p.Branch
@@ -167,7 +174,7 @@ func Judge(f Facts) Repo {
 	if r.StartFrom == "" {
 		r.StartFrom = "origin/" + p.Branch
 	}
-	r.Behind = f.Head != "" && p.Head != "" && !p.InHead
+	r.Behind = f.Head != "" && p.Head != "" && !p.InHead && !f.Landed
 	return r
 }
 
@@ -233,6 +240,16 @@ func Read(in Input, ticket string) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
+	// Whether the ticket's own work has merged is asked once, of the same
+	// reader that says whether a parent's did.
+	var own *ready.Merge
+	if in.Merges != nil {
+		m, err := in.Merges.Of(ticket)
+		if err != nil {
+			return Plan{}, err
+		}
+		own = &m
+	}
 	for i := range parents {
 		names, err := builtIn(parents[i].id)
 		if err != nil {
@@ -263,7 +280,7 @@ func Read(in Input, ticket string) (Plan, error) {
 		}
 		plan.Branch = branch
 		dir := clone(in.Clones[name])
-		f := Facts{Repo: name, Target: target}
+		f := Facts{Repo: name, Target: target, Landed: mergedIn(own, name)}
 		_, f.Head = tip(dir, branch)
 		if f.Head != "" {
 			if t := commit(dir, "refs/remotes/origin/"+target); t != "" {

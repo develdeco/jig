@@ -415,54 +415,148 @@ func validateChartName(name string) error {
 	return nil
 }
 
-// validateChartEntries checks all entries are valid before any are created.
-// Every entry that has no id yet has its key checked against cfg's declared
-// keys here too, before claimOneChartEntry's write mints anything: an
+// chartProblem is one thing wrong in a chart's entries: what `jig graduate`
+// refuses on and `jig validate <chart>` lists. checkChart collects them all, in
+// the order graduate meets them; graduate stops at the first one's Err.
+type chartProblem struct {
+	// Entry is the 1-based position of the entry the problem is about (the
+	// later one, for an id two entries share).
+	Entry int
+	// Ref is the blocked_by ref a ref problem is about, "" for any other.
+	Ref string
+	// Reason is the reason alone: "is out of range" for a ref problem, and for
+	// any other the whole text that follows the entry's name in Line.
+	Reason string
+	// Err is the refusal `jig graduate` gives for it: its message, code and help.
+	Err *axi.Error
+	// Line is the one line `jig validate` lists for it.
+	Line string
+}
+
+// Text is the problem without its entry: `blocked_by ref "#9" is out of range`
+// for a ref problem, its Reason for any other.
+func (p chartProblem) Text() string {
+	if p.Ref != "" {
+		return fmt.Sprintf("blocked_by ref %q %s", p.Ref, p.Reason)
+	}
+	return p.Reason
+}
+
+// entryName names the entry at 0-based position i the way a problem line does:
+// by position and title, by position alone when it has no title.
+func entryName(i int, title string) string {
+	if title == "" {
+		return fmt.Sprintf("entry %d", i+1)
+	}
+	return fmt.Sprintf("entry %d (%q)", i+1, title)
+}
+
+// axiOf is err as the *axi.Error renderErr would print it: the one inside err
+// when there is one, else its text under the generic code.
+func axiOf(err error) *axi.Error {
+	var ae *axi.Error
+	if errors.As(err, &ae) {
+		return ae
+	}
+	return &axi.Error{Msg: err.Error(), Code: "ERROR"}
+}
+
+// checkChart is every problem of chart's entries in the order `jig graduate`
+// meets them (titles, then keys, then duplicate ids and ticket folders, then
+// refs), with the refs that resolved. It writes nothing. Both `jig graduate`
+// (through validateChartEntries and resolveChartEntryRefs, which stop at the
+// first problem) and `jig validate <chart>` (which lists them all) run it, so
+// what one lists is exactly what the other refuses.
+func checkChart(st *store.Store, cfg project.Config, chart string, entries []store.ChartEntry) ([][]entryRef, []chartProblem) {
+	problems := chartEntryProblems(st, cfg, entries, chart)
+	refs, refProblems := resolveChartRefs(st, chart, entries)
+	return refs, append(problems, refProblems...)
+}
+
+// validateChartEntries checks all entries are valid before any are created: it
+// returns the Err of the first chartEntryProblems finds, nil when there is
+// none. Every entry that has no id yet has its key checked against cfg's
+// declared keys here too, before claimOneChartEntry's write mints anything: an
 // undeclared key on any entry refuses the whole run, not just the entry it
 // names.
 func validateChartEntries(st *store.Store, cfg project.Config, entries []store.ChartEntry, chart string) error {
-	// Check each entry has a title
+	if problems := chartEntryProblems(st, cfg, entries, chart); len(problems) > 0 {
+		return problems[0].Err
+	}
+	return nil
+}
+
+// chartEntryProblems is every problem of the entries themselves, apart from
+// their refs: an entry with no title, a key the store does not declare on an
+// entry with no id yet, an id two entries share, and an id the store has no
+// ticket folder for. Each check runs over all the entries before the next
+// one starts, so the first problem is the one graduate has always refused on.
+func chartEntryProblems(st *store.Store, cfg project.Config, entries []store.ChartEntry, chart string) []chartProblem {
+	var out []chartProblem
+
 	for i, e := range entries {
 		if e.Title == "" {
-			return &axi.Error{
-				Msg:  fmt.Sprintf("entry %d in chart %q has no title", i+1, chart),
-				Code: "VALIDATION_ERROR",
-				Help: []string{fmt.Sprintf("Add a title to entry %d in charts/%s/tickets.yaml", i+1, chart)},
-			}
+			out = append(out, chartProblem{
+				Entry:  i + 1,
+				Reason: "has no title",
+				Err: &axi.Error{
+					Msg:  fmt.Sprintf("entry %d in chart %q has no title", i+1, chart),
+					Code: "VALIDATION_ERROR",
+					Help: []string{fmt.Sprintf("Add a title to entry %d in charts/%s/tickets.yaml", i+1, chart)},
+				},
+				Line: fmt.Sprintf("entry %d has no title", i+1),
+			})
 		}
 	}
 
 	// Check every not-yet-minted entry's key before any entry mints.
-	for _, e := range entries {
+	for i, e := range entries {
 		if e.ID != "" {
 			continue
 		}
 		if _, err := cfg.ResolveKey(e.Key); err != nil {
-			return err
+			ae := axiOf(err)
+			out = append(out, chartProblem{
+				Entry:  i + 1,
+				Reason: ae.Msg,
+				Err:    ae,
+				Line:   fmt.Sprintf("%s: %s", entryName(i, e.Title), ae.Msg),
+			})
 		}
 	}
 
-	// Check no duplicate IDs
 	seen := make(map[string]int)
 	for i, e := range entries {
-		if e.ID != "" {
-			if prev, exists := seen[e.ID]; exists {
-				return &axi.Error{
+		if e.ID == "" {
+			continue
+		}
+		if prev, exists := seen[e.ID]; exists {
+			out = append(out, chartProblem{
+				Entry:  i + 1,
+				Reason: fmt.Sprintf("has id %q, which entry %d has too", e.ID, prev+1),
+				Err: &axi.Error{
 					Msg:  fmt.Sprintf("entry %d and entry %d both have id %q", prev+1, i+1, e.ID),
 					Code: "VALIDATION_ERROR",
 					Help: []string{fmt.Sprintf("Give each entry a unique id in charts/%s/tickets.yaml", chart)},
-				}
-			}
-			seen[e.ID] = i
+				},
+				Line: fmt.Sprintf("entry %d and entry %d both have id %q", prev+1, i+1, e.ID),
+			})
+			continue
+		}
+		seen[e.ID] = i
 
-			// Check the store has a folder for this ID
-			if err := requireTicketID(st, e.ID); err != nil {
-				return err
-			}
+		// Check the store has a folder for this ID
+		if err := requireTicketID(st, e.ID); err != nil {
+			ae := axiOf(err)
+			out = append(out, chartProblem{
+				Entry:  i + 1,
+				Reason: ae.Msg,
+				Err:    ae,
+				Line:   fmt.Sprintf("%s: %s", entryName(i, e.Title), ae.Msg),
+			})
 		}
 	}
-
-	return nil
+	return out
 }
 
 // entryRef is one already-validated blocked_by ref for a chart entry,
@@ -536,7 +630,8 @@ func normalizeKind(kind string) (string, error) {
 
 // resolveChartEntryRefs checks every blocked_by ref in entries and resolves
 // each to an entryRef, in entry order. It refuses the whole run - returning
-// an error naming the failing entry and ref - on the first ref that:
+// the Err of the first problem resolveChartRefs finds, which names the failing
+// entry and ref - on the first ref that:
 //   - has a kind other than absent, "merged" or "stacked";
 //   - is a "#k" (or "<chart>#k" naming this chart) out of range, or naming
 //     the entry itself;
@@ -547,16 +642,32 @@ func normalizeKind(kind string) (string, error) {
 //   - is a ticket id the store has no folder for;
 //   - repeats a ticket already listed by an earlier ref in the same entry.
 func resolveChartEntryRefs(st *store.Store, chart string, entries []store.ChartEntry) ([][]entryRef, error) {
+	refs, problems := resolveChartRefs(st, chart, entries)
+	if len(problems) > 0 {
+		return nil, problems[0].Err
+	}
+	return refs, nil
+}
+
+// resolveChartRefs is resolveChartEntryRefs that keeps going: a ref with a
+// problem is left out of the refs it returns and noted, and the next ref is
+// resolved. The problems come in entry order, then ref order.
+func resolveChartRefs(st *store.Store, chart string, entries []store.ChartEntry) ([][]entryRef, []chartProblem) {
 	out := make([][]entryRef, len(entries))
+	var problems []chartProblem
 	otherCharts := map[string][]store.ChartEntry{}
 
 	for i := range entries {
 		pos := i + 1
 		seen := map[string]bool{}
 		for _, r := range entries[i].BlockedBy {
+			bad := func(reason string) {
+				problems = append(problems, refProblem(chart, entries, i, r.Ref, reason))
+			}
 			kind, err := normalizeKind(r.Kind)
 			if err != nil {
-				return nil, refErr(chart, entries, i, r.Ref, err.Error())
+				bad(err.Error())
+				continue
 			}
 
 			var er entryRef
@@ -565,33 +676,39 @@ func resolveChartEntryRefs(st *store.Store, chart string, entries []store.ChartE
 			case !isIndexRef:
 				resolved, rerr := st.ResolveTicket(r.Ref)
 				if rerr != nil {
-					return nil, refErr(chart, entries, i, r.Ref, rerr.Error())
+					bad(rerr.Error())
+					continue
 				}
 				if err := requireTicketID(st, resolved); err != nil {
-					return nil, refErr(chart, entries, i, r.Ref, err.Error())
+					bad(err.Error())
+					continue
 				}
 				er = entryRef{knownID: resolved, kind: kind}
 
 			case refChart == "" || sameChartFile(st, refChart, chart):
 				if k < 1 || k > len(entries) {
-					return nil, refErr(chart, entries, i, r.Ref, "is out of range")
+					bad("is out of range")
+					continue
 				}
 				if k == pos {
-					return nil, refErr(chart, entries, i, r.Ref, "names its own entry")
+					bad("names its own entry")
+					continue
 				}
 				target := entries[k-1]
 				if target.ID != "" {
 					er = entryRef{knownID: target.ID, kind: kind}
 				} else {
 					if entries[i].ID == "" && k > pos {
-						return nil, refErr(chart, entries, i, r.Ref, "names a later entry that is also being created; it must point at an earlier one")
+						bad("names a later entry that is also being created; it must point at an earlier one")
+						continue
 					}
 					er = entryRef{pending: k, kind: kind}
 				}
 
 			default:
 				if err := validateChartName(refChart); err != nil {
-					return nil, refErr(chart, entries, i, r.Ref, fmt.Sprintf("names an invalid chart: %v", err))
+					bad(fmt.Sprintf("names an invalid chart: %v", err))
+					continue
 				}
 				other, err := readOtherChart(st, otherCharts, refChart)
 				if err != nil {
@@ -599,14 +716,17 @@ func resolveChartEntryRefs(st *store.Store, chart string, entries []store.ChartE
 					if !os.IsNotExist(err) {
 						reason = fmt.Sprintf("names chart %q, whose charts/%s/tickets.yaml could not be read: %v", refChart, refChart, err)
 					}
-					return nil, refErr(chart, entries, i, r.Ref, reason)
+					bad(reason)
+					continue
 				}
 				if k < 1 || k > len(other) {
-					return nil, refErr(chart, entries, i, r.Ref, fmt.Sprintf("is out of range in chart %q", refChart))
+					bad(fmt.Sprintf("is out of range in chart %q", refChart))
+					continue
 				}
 				target := other[k-1]
 				if target.ID == "" {
-					return nil, refErr(chart, entries, i, r.Ref, fmt.Sprintf("names entry %d of chart %q, which has no id yet; graduate %q first", k, refChart, refChart))
+					bad(fmt.Sprintf("names entry %d of chart %q, which has no id yet; graduate %q first", k, refChart, refChart))
+					continue
 				}
 				er = entryRef{knownID: target.ID, kind: kind}
 			}
@@ -616,13 +736,14 @@ func resolveChartEntryRefs(st *store.Store, chart string, entries []store.ChartE
 				key = fmt.Sprintf("#%d", er.pending)
 			}
 			if seen[key] {
-				return nil, refErr(chart, entries, i, r.Ref, "is already listed in this entry's blocked_by")
+				bad("is already listed in this entry's blocked_by")
+				continue
 			}
 			seen[key] = true
 			out[i] = append(out[i], er)
 		}
 	}
-	return out, nil
+	return out, problems
 }
 
 // readOtherChart reads charts/<name>/tickets.yaml, caching the result in
@@ -639,14 +760,21 @@ func readOtherChart(st *store.Store, cache map[string][]store.ChartEntry, name s
 	return es, nil
 }
 
-// refErr reports a blocked_by ref failure, naming the failing entry by
-// position and title, and the ref that failed.
-func refErr(chart string, entries []store.ChartEntry, i int, ref, reason string) error {
+// refProblem is the problem of a blocked_by ref that fails, naming the failing
+// entry by position and title, and the ref that failed. Its Err is the refusal
+// `jig graduate` gives, its Line what `jig validate` lists.
+func refProblem(chart string, entries []store.ChartEntry, i int, ref, reason string) chartProblem {
 	pos := i + 1
-	return &axi.Error{
-		Msg:  fmt.Sprintf("chart %q entry %d (%q): blocked_by ref %q %s", chart, pos, entries[i].Title, ref, reason),
-		Code: "VALIDATION_ERROR",
-		Help: []string{fmt.Sprintf("Fix blocked_by ref %q on entry %d (%q) in charts/%s/tickets.yaml", ref, pos, entries[i].Title, chart)},
+	return chartProblem{
+		Entry:  pos,
+		Ref:    ref,
+		Reason: reason,
+		Err: &axi.Error{
+			Msg:  fmt.Sprintf("chart %q entry %d (%q): blocked_by ref %q %s", chart, pos, entries[i].Title, ref, reason),
+			Code: "VALIDATION_ERROR",
+			Help: []string{fmt.Sprintf("Fix blocked_by ref %q on entry %d (%q) in charts/%s/tickets.yaml", ref, pos, entries[i].Title, chart)},
+		},
+		Line: fmt.Sprintf("%s: blocked_by ref %q %s", entryName(i, entries[i].Title), ref, reason),
 	}
 }
 

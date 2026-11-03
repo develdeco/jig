@@ -78,7 +78,7 @@ func TestPublishPushesABranchAlreadyOnOriginWithoutChangingIt(t *testing.T) {
 
 	step(t, "the open pull request is updated instead of a second one being opened", func(t *testing.T) {
 		if n := ghCalls(calls, lookupCall(branch)...); n != 1 {
-			t.Errorf("the lookup of %s's open pull request into main called %d time(s), want once: %v", branch, n, calls)
+			t.Errorf("the lookup of %s's open pull request called %d time(s), want once: %v", branch, n, calls)
 		}
 		body := filepath.Join(d.Store.Root, filepath.FromSlash(report.PRBody["fixture-repo"]))
 		if n := ghCalls(calls, "pr", "edit", existingPR, "--repo", "owner/fixture-repo", "--body-file", body); n != 1 {
