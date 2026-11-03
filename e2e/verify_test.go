@@ -17,8 +17,10 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/outcome"
 	"github.com/develdeco/jig/internal/store"
+	"gopkg.in/yaml.v3"
 )
 
 // verifyWait is how long a test gives a detached verification to record its
@@ -270,5 +272,70 @@ func TestVerifyFailPersistsSignature(t *testing.T) {
 	})
 	if !strings.Contains(logBody, "the oracle failed") || !strings.Contains(logBody, "FAIL") {
 		t.Errorf("the worker's log under %s lacks the oracle's output tail:\n%s", logs, logBody)
+	}
+}
+
+// setSliceOracle sets slice's oracle in the store's slices.yaml to cmd, a
+// literal command, as dropEnvFromSlices edits it: a working-tree change of
+// the store, which the next checkpoint commits.
+func setSliceOracle(t *testing.T, fx *fixture.Fixture, slice, cmd string) {
+	t.Helper()
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	path := filepath.Join(st.TicketDir(fx.Ticket), "slices.yaml")
+	body := string(readFileOrFatal(t, path))
+	quoted, err := yaml.Marshal(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := "  - id: " + slice + "\n"
+	i := strings.Index(body, head)
+	j := strings.Index(body[max(i, 0):], "    oracle: test\n")
+	if i < 0 || j < 0 {
+		t.Fatalf("test setup: %s has no slice %s naming the test oracle:\n%s", path, slice, body)
+	}
+	at := i + j
+	body = body[:at] + "    oracle: " + strings.TrimSpace(string(quoted)) + "\n" + body[at+len("    oracle: test\n"):]
+	writeFileOrFatal(t, path, []byte(body))
+}
+
+// TestVerifyRunsAnOracleWrittenForSh: an oracle is an sh command on every OS.
+// Slice a's oracle here is the fixture's go test for alpha with a -run
+// pattern in single quotes, whose | cmd.exe would read as a pipe. On Windows
+// as elsewhere, `jig verify` fails it on a commit without the Clamp fix by
+// the test the pattern's second alternative names, passes it on the fix, and
+// records it as written.
+func TestVerifyRunsAnOracleWrittenForSh(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	m, err := manifest.Resolve(fx.RepoDir)
+	if err != nil {
+		t.Fatalf("resolve the fixture's manifest: %v", err)
+	}
+	oracle := m.OracleCmd("test", manifest.Workspace{Path: "alpha"}) + " -run 'TestAdd|TestClamp'"
+	setSliceOracle(t, fx, "a", oracle)
+	h := newHarness(t, fx, env, "s-sh")
+	h.Branch(fx.Branch)
+
+	unfixed := h.Commit("a", "a: a note, not the fix", map[string]string{"notes/a.txt": "not yet"})
+	res := h.Jig("verify", fx.Ticket, unfixed, "--slice", "a", "--wait")
+	if res.Code != 1 || !strings.Contains(res.Stdout, "state: fail") {
+		t.Fatalf("jig verify --wait of the unfixed commit exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
+	fixed := h.CommitScenario("a", 1)
+	res = h.Jig("verify", fx.Ticket, fixed, "--slice", "a", "--wait")
+	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+		t.Fatalf("jig verify --wait of the fix exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
+
+	lines := readJournal(t, fx, fx.Ticket)
+	failed, ok := oracleLine(lines, "a", unfixed, "fail")
+	if !ok || failed.Command != oracle || !strings.Contains(failed.Summary, "--- FAIL: TestClamp") {
+		t.Errorf("the unfixed commit's oracle line = %+v (found %v), want a failure of %q by TestClamp", failed, ok, oracle)
+	}
+	if passed, ok := oracleLine(lines, "a", fixed, "pass"); !ok || passed.Command != oracle {
+		t.Errorf("the fix's oracle line = %+v (found %v), want a pass of %q", passed, ok, oracle)
 	}
 }

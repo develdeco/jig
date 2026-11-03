@@ -2,7 +2,9 @@
 
 jig is a Go project. Building needs only Go 1.27.3+; testing also needs `git`
 on PATH, since the suite spawns real git commands against local, file-path
-repos.
+repos, and an sh, which jig runs every oracle and env class command through
+([ADR 0042](../docs/adr/0042-every-oracle-runs-through-sh.md)): on Windows,
+Git for Windows' own, found from that git.
 
 ## Build and test
 

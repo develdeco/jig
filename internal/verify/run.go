@@ -39,9 +39,11 @@ type Deps struct {
 	Target string
 	// Oracle runs an oracle command in dir with env (each "NAME=value") added
 	// to its environment, bounded by limit, and returns its combined output.
-	// nil means the real run: envrun.ShellOutputEnv with the Windows
-	// short-path workaround, as the frontier runs it.
+	// nil means the real run: envrun.ShellOutputEnv, through sh.
 	Oracle func(cmd, dir string, env []string, limit time.Duration) (string, error)
+	// Sh finds the sh the oracle and the env class's commands run through;
+	// nil is envrun.Sh.
+	Sh func() (string, error)
 	// Now is the clock the run's lines and its timing read; nil is time.Now.
 	Now func() time.Time
 	// Log, when set, is where the run writes what it did and the tail of a
@@ -148,7 +150,15 @@ func (d Deps) oracle(cmd, dir string, env []string, limit time.Duration) (string
 	if d.Oracle != nil {
 		return d.Oracle(cmd, dir, env, limit)
 	}
-	return envrun.ShellOutputEnv(envrun.ShortenQuotedPath(cmd), dir, limit, env)
+	return envrun.ShellOutputEnv(cmd, dir, limit, env)
+}
+
+// sh finds the sh commands run through, with envrun.Sh when Deps.Sh is nil.
+func (d Deps) sh() (string, error) {
+	if d.Sh != nil {
+		return d.Sh()
+	}
+	return envrun.Sh()
 }
 
 // prepare checks the request against the store and the clone and resolves
@@ -290,11 +300,12 @@ func (x *run) finishPass(lines []journal.Line) error {
 //  5. a push, tried three times; if it fails the lines stay local for the
 //     next checkpoint (Result.PushErr).
 //
-// A run that cannot reach the oracle (the descent check fails, the worktree
-// cannot be made, the slice names an env class that is undeclared or will not
-// come up) records a verify-error line with the reason and returns it as
-// State error: that is an outcome, not an error. Run returns an error only
-// when the run could not be recorded or was not set up.
+// A run that cannot reach the oracle (there is no sh to run it with, the
+// worktree cannot be made, the descent check fails, the slice names an env
+// class that is undeclared or will not come up) records a verify-error line
+// with the reason and returns it as State error: that is an outcome, not an
+// error. Run returns an error only when the run could not be recorded or was
+// not set up.
 func Run(d Deps, r Request) (Result, error) {
 	x, err := d.prepare(r)
 	if err != nil {
@@ -444,6 +455,11 @@ func short(sha string) string {
 // not be reached ("" when it ran), or an error when a line could not be
 // written.
 func (x *run) execute() (why string, err error) {
+	// The oracle and the env class's commands run through sh: without one the
+	// oracle cannot be reached, which is no failure of the commit.
+	if _, err := x.d.sh(); err != nil {
+		return err.Error(), nil
+	}
 	// Removed on every way out, a checkout that failed half-way included.
 	defer x.removeWorktree()
 	if err := x.addWorktree(); err != nil {

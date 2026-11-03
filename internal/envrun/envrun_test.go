@@ -16,23 +16,6 @@ import (
 	"github.com/develdeco/jig/internal/manifest"
 )
 
-// existsCmd and removeCmd build platform-appropriate shell fragments so the
-// marker-file test exercises the same substitution path Shell uses in
-// production, without depending on a particular OS.
-func existsCmd(name string) string {
-	if runtime.GOOS == "windows" {
-		return "if exist " + name + " (exit 0) else (exit 1)"
-	}
-	return "test -f " + name
-}
-
-func removeCmd(name string) string {
-	if runtime.GOOS == "windows" {
-		return "del " + name
-	}
-	return "rm -f " + name
-}
-
 // trimEOL strips the trailing line ending `echo` writes.
 func trimEOL(s string) string {
 	return strings.TrimRight(s, "\r\n")
@@ -60,12 +43,8 @@ func TestShellOutputReturnsOutputAndHonorsItsLimit(t *testing.T) {
 	if _, err := ShellOutput("exit 3", dir, time.Minute); err == nil {
 		t.Fatal("exit 3: want an error")
 	}
-	slow := "sleep 30"
-	if runtime.GOOS == "windows" {
-		slow = "ping -n 31 127.0.0.1 >nul"
-	}
 	start := time.Now()
-	_, err = ShellOutput(slow, dir, time.Second)
+	_, err = ShellOutput("sleep 30", dir, time.Second)
 	if err == nil || !strings.Contains(err.Error(), "did not finish within") {
 		t.Fatalf("a command past its limit: err=%v, want the limit named", err)
 	}
@@ -79,9 +58,9 @@ func TestShellOutputReturnsOutputAndHonorsItsLimit(t *testing.T) {
 // shows up as a check or down failure.
 func markerClass() manifest.EnvClass {
 	return manifest.EnvClass{
-		Up:    "echo {ticket}>up-{port}.marker",
-		Check: existsCmd("up-{port}.marker"),
-		Down:  removeCmd("up-{port}.marker"),
+		Up:    "echo {ticket} >up-{port}.marker",
+		Check: "test -f up-{port}.marker",
+		Down:  "rm -f up-{port}.marker",
 	}
 }
 
@@ -181,14 +160,13 @@ func TestAllocatePortLoopbackOnly(t *testing.T) {
 // without one (nil, empty, or ShellOutput) it is unset.
 func TestShellOutputEnvGivesTheChildItsVariables(t *testing.T) {
 	dir := t.TempDir()
-	// A variable the process has and the child must keep.
-	inherited := "PATH"
-	echo := `echo "$JIG_T $PATH"`
+	// A variable the process has and the child must keep: PATH, which Git's
+	// sh rewrites on Windows, so there SystemRoot, which it names SYSTEMROOT.
+	inherited, want := "PATH", os.Getenv("PATH")
 	if runtime.GOOS == "windows" {
-		inherited = "SystemRoot"
-		echo = "echo %JIG_T% %SystemRoot%"
+		inherited, want = "SYSTEMROOT", os.Getenv("SystemRoot")
 	}
-	want := os.Getenv(inherited)
+	echo := `echo "$JIG_T $` + inherited + `"`
 	if want == "" {
 		t.Skipf("%s is not set", inherited)
 	}
@@ -236,9 +214,6 @@ func TestShellOutputHelper(t *testing.T) {
 		t.Skip("only the child of TestShellOutputDoesNotPassOnTheRecordDirItInherited runs this")
 	}
 	show := `if [ -n "$JIG_RECORD_DIR" ]; then echo "set-$JIG_RECORD_DIR"; else echo unset; fi`
-	if runtime.GOOS == "windows" {
-		show = "if defined JIG_RECORD_DIR (echo set-%JIG_RECORD_DIR%) else (echo unset)"
-	}
 	dir := t.TempDir()
 	plain, err := ShellOutput(show, dir, time.Minute)
 	if err != nil {
@@ -251,11 +226,7 @@ func TestShellOutputHelper(t *testing.T) {
 	t.Logf("plain=%s", strings.TrimSpace(plain))
 	t.Logf("given=%s", strings.TrimSpace(given))
 	// An env class's up, check and down commands (Shell) must not see it either.
-	notSet := `test -z "$JIG_RECORD_DIR"`
-	if runtime.GOOS == "windows" {
-		notSet = "if defined JIG_RECORD_DIR exit 1"
-	}
-	if err := Shell(notSet, dir); err != nil {
+	if err := Shell(`test -z "$JIG_RECORD_DIR"`, dir); err != nil {
 		t.Logf("shell=saw it: %v", err)
 	} else {
 		t.Logf("shell=unset")
@@ -344,5 +315,153 @@ func TestShellOutputGivesTheChildThePWDOfItsDir(t *testing.T) {
 	}
 	if pwd != dir {
 		t.Errorf("ChildEnv PWD = %q, want %q", pwd, dir)
+	}
+}
+
+// TestACommandReachesShAsWritten: a command is sh's to read on every OS, so
+// a | in single quotes is no pipe and two backslashes in single quotes stay
+// two, and the variable that carried the command to sh does not reach it. It
+// goes the same through Shell, which an env class's commands take.
+func TestACommandReachesShAsWritten(t *testing.T) {
+	dir := t.TempDir()
+	cmd := `printf '[%s]\n' 'A|B' 'a\\b' "c d" "${` + commandEnv + `-unset}"`
+	out, err := ShellOutput(cmd, dir, time.Minute)
+	if want := "[A|B]\n[a\\\\b]\n[c d]\n[unset]\n"; err != nil || out != want {
+		t.Fatalf("ShellOutput(%q) = %q, %v, want %q", cmd, out, err, want)
+	}
+	if err := Shell(`test "$(printf '%s' 'A|B')" = 'A|B'`, dir); err != nil {
+		t.Errorf("Shell of a single-quoted |: %v", err)
+	}
+}
+
+// TestFindSh: off Windows sh is the one on PATH. On Windows it is Git for
+// Windows' bin\sh.exe, in the nearest of the PATH git's directory and the
+// three above it, then the sh on PATH; with neither the error says what to
+// install.
+func TestFindSh(t *testing.T) {
+	root := t.TempDir()
+	install := filepath.Join(root, "Git")
+	gitSh := filepath.Join(install, "bin", "sh.exe")
+	for _, p := range []string{gitSh, filepath.Join(root, "other", "sh.exe")} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, nil, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pathSh := filepath.Join(root, "other", "sh.exe")
+	notFound := errors.New("not found")
+	for _, tc := range []struct {
+		name      string
+		goos      string
+		git, sh   string // what PATH holds, "" for nothing
+		want, err string
+	}{
+		{"sh on PATH", "linux", "", "/bin/sh", "/bin/sh", ""},
+		{"no sh on PATH", "darwin", "/usr/bin/git", "", "", "found no sh on PATH"},
+		{"git in cmd", "windows", filepath.Join(install, "cmd", "git.exe"), pathSh, gitSh, ""},
+		{"git in bin", "windows", filepath.Join(install, "bin", "git.exe"), "", gitSh, ""},
+		{"git in mingw64/bin", "windows", filepath.Join(install, "mingw64", "bin", "git.exe"), "", gitSh, ""},
+		{"git in mingw64/libexec/git-core", "windows", filepath.Join(install, "mingw64", "libexec", "git-core", "git.exe"), "", gitSh, ""},
+		{"git deeper than the install's", "windows", filepath.Join(install, "a", "b", "c", "d", "git.exe"), pathSh, pathSh, ""},
+		{"git with no sh beside it", "windows", filepath.Join(root, "other", "git", "cmd", "git.exe"), pathSh, pathSh, ""},
+		{"no git", "windows", "", pathSh, pathSh, ""},
+		{"neither", "windows", filepath.Join(root, "nowhere", "cmd", "git.exe"), "", "", "install Git for Windows, or put an sh on PATH"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			look := func(name string) (string, error) {
+				if p := map[string]string{"git": tc.git, "sh": tc.sh}[name]; p != "" {
+					return p, nil
+				}
+				return "", notFound
+			}
+			got, err := findSh(tc.goos, look, isFile)
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) {
+					t.Fatalf("findSh = %q, %v, want an error that says %q", got, err, tc.err)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("findSh = %q, %v, want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// envrunShHelperEnv marks a run of this test binary as the child of one of
+// the tests that run TestShHelper.
+const envrunShHelperEnv = "JIG_ENVRUN_TEST_SH_HELPER"
+
+// TestShHelper runs in the children runShHelper starts and logs what running
+// `echo own` through this package gave: ShellOutput, ShellOutputEnv handed a
+// JIG_SHELL_COMMAND of its own among its variables, and Shell. Outside them
+// it does nothing.
+func TestShHelper(t *testing.T) {
+	if os.Getenv(envrunShHelperEnv) == "" {
+		t.Skip("only the children runShHelper starts run this")
+	}
+	dir := t.TempDir()
+	out, err := ShellOutput("echo own", dir, time.Minute)
+	t.Logf("output=%q err=%v", strings.TrimSpace(out), err)
+	out, err = ShellOutputEnv("echo own", dir, time.Minute, []string{commandEnv + "=echo given"})
+	t.Logf("outputenv=%q err=%v", strings.TrimSpace(out), err)
+	t.Logf("shell err=%v", Shell("echo own", dir))
+}
+
+// runShHelper runs TestShHelper in a child of this test binary whose
+// environment is this process's with the variables in set put in place of
+// any of the same name, and returns what the child printed. The variables are
+// set on the child, never on this process.
+func runShHelper(t *testing.T, set map[string]string) string {
+	t.Helper()
+	names := []string{envrunShHelperEnv}
+	for name := range set {
+		names = append(names, name)
+	}
+	env := append(environWithout(os.Environ(), runtime.GOOS, names...), envrunShHelperEnv+"=1")
+	for name, value := range set {
+		env = append(env, name+"="+value)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestShHelper$", "-test.v")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper: %v\n%s", err, out)
+	}
+	return string(out)
+}
+
+// TestWithNoShEveryCommandFails: on a machine with no sh, ShellOutput,
+// ShellOutputEnv and Shell each fail and say why, and none passes a command
+// it did not run: the gate's oracle runs and an env class's up and check
+// rest on it. The child's PATH is an empty directory, so it finds neither
+// git nor sh.
+func TestWithNoShEveryCommandFails(t *testing.T) {
+	out := runShHelper(t, map[string]string{"PATH": t.TempDir()})
+	why := "found no sh on PATH"
+	if runtime.GOOS == "windows" {
+		why = "install Git for Windows, or put an sh on PATH"
+	}
+	for _, run := range []string{`output="" err=`, `outputenv="" err=`, "shell err="} {
+		if !strings.Contains(out, run+`shell "echo own": jig runs oracles and env class commands with sh`) {
+			t.Errorf("the child's %s... line does not fail for want of sh:\n%s", run, out)
+		}
+	}
+	if n := strings.Count(out, why); n != 3 {
+		t.Errorf("the child said %q %d times, want once for each of the 3 runs:\n%s", why, n, out)
+	}
+}
+
+// TestTheVariableThatCarriesACommandNeverReplacesIt: sh runs the command jig
+// was handed, never a JIG_SHELL_COMMAND the process inherited or a caller
+// passed among a command's variables.
+func TestTheVariableThatCarriesACommandNeverReplacesIt(t *testing.T) {
+	out := runShHelper(t, map[string]string{commandEnv: "echo inherited"})
+	for _, want := range []string{`output="own" err=<nil>`, `outputenv="own" err=<nil>`, "shell err=<nil>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the child's output lacks %q:\n%s", want, out)
+		}
 	}
 }
