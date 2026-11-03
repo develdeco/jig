@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // activityFloor is the fewest rows the chart screen's Activity panel gets with
@@ -52,7 +53,11 @@ func (m *Model) chartPage(name string) page {
 		}
 		p.boxEnd()
 	}
-	m.chartActivityPanel(&p, rows)
+	var history []chartCommit
+	if c.info != nil {
+		history = c.info.History
+	}
+	m.chartActivityPanel(&p, rows, history)
 	return p
 }
 
@@ -342,17 +347,37 @@ func (m *Model) mapLines(mp *chartMap, w, n int) []string {
 	return out[:min(len(out), n)]
 }
 
-// chartLine is a line of the chart's activity: a ticket's log line.
+// chartLine is a line of the chart's activity: a ticket's log line, or (commit
+// set) a commit of the store that touched the chart's folder. at is its instant
+// either way.
 type chartLine struct {
 	id string
 	t  *ticket
 	placedLine
+	commit *chartCommit
+	at     time.Time
 }
 
-// chartActivityPanel adds the latest lines of every ticket of the chart to p,
-// newest first, each with the ticket and the step it belongs to: as many as the
-// rows left below p allow, two at least.
-func (m *Model) chartActivityPanel(p *page, rows []chartRow) {
+// The words of a commit's line: "chart" stands where a ticket's id does and
+// "store" where its step does.
+const (
+	chartCommitID  = "chart"
+	chartCommitTag = "store"
+)
+
+// tag is the line's place: the step it belongs to, or "store" for a commit.
+func (c chartLine) tag() string {
+	if c.commit != nil {
+		return chartCommitTag
+	}
+	return tagOf(c.step, c.key)
+}
+
+// chartActivityPanel adds the latest lines of the chart to p, newest first:
+// every ticket's, each with the ticket and the step it belongs to, and the
+// commits of the chart's folder in the store (history, newest first), as many
+// as the rows left below p allow, two at least.
+func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartCommit) {
 	var all []chartLine
 	idW := 0
 	for _, r := range rows {
@@ -361,14 +386,20 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow) {
 		}
 		idW = max(idW, width(r.id))
 		for _, pl := range m.placed(r.t, r.d) {
-			all = append(all, chartLine{r.id, r.t, pl})
+			at, _ := pl.l.At()
+			all = append(all, chartLine{id: r.id, t: r.t, placedLine: pl, at: at})
 		}
 	}
-	sort.SliceStable(all, func(i, j int) bool {
-		a, _ := all[i].l.At()
-		b, _ := all[j].l.At()
-		return a.Before(b)
-	})
+	if len(history) > 0 {
+		idW = max(idW, width(chartCommitID))
+	}
+	// The commits come after the tickets' lines, oldest first, so that at one
+	// instant the stable sort keeps git's order (the newer above the older) and
+	// a commit stands above a ticket's line.
+	for i := len(history) - 1; i >= 0; i-- {
+		all = append(all, chartLine{id: chartCommitID, commit: &history[i], at: history[i].Time})
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].at.Before(all[j].at) })
 	keep := max(activityFloor-2, m.bodyRows()-len(p.lines)-2)
 	right := ""
 	if n := len(all); n > keep {
@@ -381,11 +412,15 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow) {
 	var shown []chartLine
 	tagW := 0
 	for i := len(all) - 1; i >= 0 && len(shown) < keep; i-- {
-		tagW = max(tagW, min(tagMaxW, width(tagOf(all[i].step, all[i].key))))
+		tagW = max(tagW, min(tagMaxW, width(all[i].tag())))
 		shown = append(shown, all[i])
 	}
 	for _, e := range shown {
-		tag := pad(tagOf(e.step, e.key), tagW)
+		tag := pad(e.tag(), tagW)
+		if e.commit != nil {
+			p.boxAdd(m.st.dim(clockAt(e.at, m.zone)) + " " + pad(e.id, idW) + " " + m.st.dim(tag) + " " + m.st.dim("· "+short(e.commit.SHA)) + " " + e.commit.Subject)
+			continue
+		}
 		if e.step >= 0 {
 			tag = m.st.state(stepTagState[e.step], tag)
 		} else {
