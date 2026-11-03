@@ -16,13 +16,16 @@ jig  demo › checkout  Coupons at checkout                                     
   │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○  waits for JIG-4 merged · its PR is open                │
   │  ·        Stack two coupons    fog · not graduated                                             │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Detail ─────────────────────────────────────────────────────────────────────────────── JIG-5 ─╮
+  │  slice    s2 · verifying · builder                                                             │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ──────────────────────────────────────────────────────────────────────────── in progress ─╮
   │  next     say "Continue checkout"                                                              │
   │  wave 1   JIG-8                                                                                │
   │  wave 2   JIG-6                                                                                │
   │  ends at  JIG-7 waits for JIG-4 merged · https://example.test/acme/shop/pull/7 is open         │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Activity ─────────────────────────────────────────────────────────────────── latest 12 of 18 ─╮
+  ╭─ Activity ──────────────────────────────────────────────────────────────────── latest 9 of 18 ─╮
   │  09:14:21 JIG-4 publish·done     ● finished                                                    │
   │  09:14:20 JIG-4 publish·pr       ▲ opened https://example.test/acme/demo/pull/7                │
   │  09:14:10 JIG-4 publish·approval ▲ you approved ccccccc                                        │
@@ -32,9 +35,6 @@ jig  demo › checkout  Coupons at checkout                                     
   │  09:12:05 JIG-4 review·asks      + you kept r1-f2                                              │
   │  09:12:00 JIG-4 review·asks      - you dismissed r1-f1: not a bug                              │
   │  09:11:30 JIG-4 review·r1        ! reviewer finished with findings                             │
-  │  09:11:00 JIG-4 review·r1        ◎ opened                                                      │
-  │  09:10:30 JIG-4 build·a          ● verified ccccccc                                            │
-  │  09:10:00 JIG-4 build·a          ◐ builder took it · Load the config                           │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · enter open ticket · esc back · g gate · a answer · t tail · r refresh · q quit

@@ -76,3 +76,28 @@ Consequences:
 - Every JSON read of a chart starts one `git log` in the store clone, so the git budgets of the packages whose tests read one (`.github/git-budget.yaml`) move up.
 - The Activity shows the time of day of an old commit, as it does for a ticket's line, with no date.
 - `CONTEXT.md` (*Chart history*), `ARCHITECTURE.md` (the chart paragraph and the `internal/gitx/`, `internal/store/` and `internal/tui/` rows) and `DECISIONS.md` say the same.
+
+## Amendment: the chart screen details the ticket under the cursor (2026-11-02)
+
+The chart screen drew the same Run and Activity panels whichever ticket the cursor stood on. A run builds each ticket with a subagent of its own, so the person asked who holds a slice, which agent claimed it, how far it has come and whether that agent was held at its stop, and had to open the ticket to see. The owner decided the chart screen details the ticket under the cursor from what the ticket screens already read (chart flow, C10). What the owner left open was taken at the recommended answer (2026-11-02, proceed with the plan).
+
+- **The panel.** A Detail panel sits between the Tickets and the Run panels, and its top edge ends with the id of the ticket under the cursor. It is drawn whenever the chart has a ticket row, and not for a chart of fog entries only. Its rows are the Run panel's rows (label, text, weight), never rows the cursor can stand on, so what the cursor's index means does not change. It has four rows at most (`detailMax`).
+- **No new read.** The data is the stream and `jig status <T>`, which the ticket screens read. There is no new verb, no new field in any JSON and no new read. Moving the cursor draws the panel again and runs nothing.
+- **Slices.** One row for each slice the build has under way: a sub-step of the build whose key starts with `slice:` and whose state is active, needs you or failed. The row is the slice id, its stage (claimed, committed, verifying or verified while it is under way, "waits for your answer" or "stalled" otherwise), the session that holds its claim, named as the activity names it ("builder"), and the agent that claimed it. A slice has a holder only while its claim is live: its latest `claim` line, not followed by a `release` of the slice.
+- **The agent.** A claim line has no agent, because the CLI cannot know which agent runs it. The agent is read from the machine ledger as `claimHolder` reads it: the tool line of the claim's session that ran `jig claim` and not `--release`, the nearest in time to the claim line, stamped no more than a minute before it. When no such line is kept (the harness has no hooks, or the line fell out of the ledger lines the screens keep) there is no agent, and the row still names the holder. The screens may not import the ledger, so `claimCall` in `internal/tui` mirrors `ledger.RunsJig` for the claim verb and the `--release` refusal, and a test that may import both pins that they agree.
+- **A current hold.** A hold is a ledger line that says jig held an agent at its stop. It is current while no journal line that belongs to a step follows it: a verification landing, a gate opening or a pull request recorded ends it. A `spend` line belongs to no step, so the main session's own stop does not end a hold. The panel shows the newest two current holds, oldest first, after the slice rows, worded as the activity log words them ("the session" when no agent made the stop). The log keeps the history of the ones that ended.
+- **Nothing to detail.** A ticket with no slice under way and no hold has one dim `state` row: the words of the ticket's header, or "not read yet" for a ticket the screens do not know. The panel is there for every ticket, so the layout does not jump as the cursor moves.
+- **Rows given up.** A short screen gives rows up in this order: the Map, then the Run panel's rows down to one, then the Detail panel's rows down to one. The Tickets panel is never cut and the Activity panel keeps its floor. A hold weighs less than a slice row, so a slice row goes before a hold. `chartPage` counts the Detail panel with its frame before it cuts, and reads the cursor as the view clamps it, never through `selected()` or `page()`, which call it.
+
+Rejected alternatives:
+
+- **The agent on the claim line.** `jig claim` cannot know which agent runs it, and the hook that hears the call is what writes the agent, on the ledger's line.
+- **The harness and model of the holder.** A subagent runs on a model of its own, and the session's would mislead.
+- **A verb for the detail.** The ticket screens already read what the panel shows, so a verb would add a read for nothing.
+- **The ticket's worktree on the panel.** That is advice `jig next` does not give on this branch, and the panel reads nothing new.
+
+Consequences:
+
+- On an 80 by 24 screen the map line and the Run panel's waves give way to the panel, and a taller screen keeps them.
+- A harness with no hooks shows the holder and never the agent, and a hold only the hooks write is never shown.
+- `CONTEXT.md` (*Chart detail*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row), the README and `DECISIONS.md` say the same.

@@ -707,15 +707,15 @@ func TestTheTailOfAChartIsTheLinesOfItsTickets(t *testing.T) {
 }
 
 // historyRig is chartRig with the chart's history in the verb's JSON, on a
-// terminal tall enough for the activity to show a dozen lines, and the chart
-// screen open.
+// terminal tall enough for the activity to show a dozen lines beside the Detail
+// panel, and the chart screen open.
 func historyRig(t *testing.T, commits ...map[string]any) *rig {
 	t.Helper()
 	g := newRig(t, "")
 	lines, status := chartTickets()
 	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(withHistory(commits...)), status)
 	g.feed(lines...)
-	g.send(tea.WindowSizeMsg{Width: 100, Height: 40})
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 43})
 	g.press("end", "enter")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())

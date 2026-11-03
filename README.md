@@ -180,7 +180,11 @@ tickets published. Enter opens its screen: the chart's map (destination, what
 was decided, the fog), its tickets with the same four step marks and what each
 waits for ("waits for SHOP-2 merged · its PR is open") or is ready for, the run
 (what to say to your agent, the briefs to write, the build waves, and where it
-ends) and the tickets' activity together. The keys act on the ticket under the
+ends) and the tickets' activity together. Under the tickets, a Detail panel shows
+the ticket under the cursor: each slice being built, how far it has come, the
+session that holds it and the agent that claimed it, and an agent jig held at its
+stop until the ticket moves on. It reads what the screen already has, so moving
+the cursor runs nothing. The keys act on the ticket under the
 cursor, and the screen is the standing `jig next <chart>` prints, read again once
 its tickets' events quiet down; a merge on the host writes no line, so while the
 chart ends at a merge the screen reads it every two minutes, and `r` reads it

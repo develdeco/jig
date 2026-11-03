@@ -16,9 +16,10 @@ const activityFloor = 4
 const mapLabelW = 12
 
 // chartPage is one chart: its map, its tickets in the order the chart will run
-// them, what a run would do now, and the latest of what the tickets did. The
-// map is the first thing a short screen gives up, then the Run panel's detail;
-// the tickets are never cut, a longer page scrolls with the cursor.
+// them, the ticket under the cursor in detail, what a run would do now, and the
+// latest of what the tickets did. The map is the first thing a short screen
+// gives up, then the Run panel's detail, then the Detail panel's rows down to
+// one; the tickets are never cut, a longer page scrolls with the cursor.
 func (m *Model) chartPage(name string) page {
 	var p page
 	c := m.w.charts[name]
@@ -29,23 +30,47 @@ func (m *Model) chartPage(name string) page {
 	rows := m.chartRows(c)
 	tickets := m.chartTicketsPanel(c, rows)
 
+	// The ticket detailed is the one under the cursor. The cursor is read as
+	// View clamps it, and never through selected() or page(), which call this.
+	var detail []runRow
+	detailID := ""
+	if len(rows) > 0 {
+		r := rows[min(max(m.top().sel, 0), len(rows)-1)]
+		detail, detailID = trimRuns(m.chartDetailRows(r), detailMax), r.id
+	}
+	// The heights: the tickets, the Detail and Run panels and the activity at
+	// its floor come first, and the Run panel's detail goes before the Detail
+	// panel's, which goes before the tickets are cut; what is left is the map's.
+	frame := func(n int) int {
+		if n == 0 {
+			return 0
+		}
+		return 2 + n
+	}
 	var run []runRow
+	if c.info != nil {
+		run = m.runRows(c.info)
+	}
+	spare := m.bodyRows() - len(tickets.lines) - frame(len(detail)) - frame(len(run)) - activityFloor
+	if spare < 0 && len(run) > 1 {
+		cut := min(-spare, len(run)-1)
+		run = trimRuns(run, len(run)-cut)
+		spare += cut
+	}
+	if spare < 0 && len(detail) > 1 {
+		cut := min(-spare, len(detail)-1)
+		detail = trimRuns(detail, len(detail)-cut)
+		spare += cut
+	}
 	var mapPanel page
 	if c.info != nil {
-		// The heights: the tickets, the Run panel and the activity at its floor
-		// come first, and the Run panel's detail goes before the tickets are
-		// cut; what is left is the map's.
-		run = m.runRows(c.info)
-		spare := m.bodyRows() - len(tickets.lines) - (2 + len(run)) - activityFloor
-		if spare < 0 {
-			cut := min(-spare, len(run)-1)
-			run = trimRuns(run, len(run)-cut)
-			spare += cut
-		}
 		m.mapPanel(&mapPanel, c, spare)
 	}
 	p.lines = append(p.lines, mapPanel.lines...)
 	p.lines = append(p.lines, tickets.lines...)
+	if len(detail) > 0 {
+		m.detailPanel(&p, detailID, detail)
+	}
 	if c.info != nil {
 		p.boxTop("Run", runWord(c.info))
 		for _, r := range run {

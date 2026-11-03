@@ -8,6 +8,9 @@ jig  demo › checkout  Coupons at checkout                          ◐ in prog
   │  ◐ JIG-7  Coupons in re…  ◐ ○ ○ ○  waits for JIG-4 merged · its PR is open │
   │  ·        Stack two cou…  fog · not graduated                              │
   ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Detail ─────────────────────────────────────────────────────────── JIG-5 ─╮
+  │  slice    s2 · verifying · builder                                         │
+  ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ──────────────────────────────────────────────────────── in progress ─╮
   │  next     say "Continue checkout"                                          │
   │  wave 1   JIG-8                                                            │
