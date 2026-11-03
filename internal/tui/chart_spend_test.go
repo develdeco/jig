@@ -84,7 +84,9 @@ func TestChartSpendWords(t *testing.T) {
 		{"singular", chartSpend{Tickets: 1, Agents: 1, Tokens: 25_400, USD: 0.5}, "25k tokens · $0.50 · 1 ticket · 1 subagent"},
 		{"no dollars and no subagents", chartSpend{Tickets: 2, Tokens: 980}, "980 tokens · 2 tickets"},
 		{"under half a cent", chartSpend{Tickets: 2, Agents: 1, Tokens: 1_300, USD: 0.0039}, "1k tokens · <$0.01 · 2 tickets · 1 subagent"},
-		{"models with no price", chartSpend{Tickets: 1, Tokens: 4_000, Unpriced: []string{"a", "b"}}, "4k tokens · 1 ticket · no price for a and b"},
+		{"one model with no price", chartSpend{Tickets: 1, Tokens: 4_000, Unpriced: []string{"a"}}, "4k tokens · 1 ticket · no price for a"},
+		{"two models with no price", chartSpend{Tickets: 1, Tokens: 4_000, Unpriced: []string{"a", "b"}}, "4k tokens · 1 ticket · no price for a and b"},
+		{"three models with no price", chartSpend{Tickets: 1, Tokens: 4_000, Unpriced: []string{"a", "b", "c"}}, "4k tokens · 1 ticket · no price for a, b and c"},
 		{"all and unpriced", chartSpend{Tickets: 2, Agents: 1, Tokens: 2_000_000, USD: 1, Unpriced: []string{"m"}}, "2.0M tokens · $1.00 · 2 tickets · 1 subagent · no price for m"},
 	} {
 		if got := spendWords(&tc.in); got != tc.want {

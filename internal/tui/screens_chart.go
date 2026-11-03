@@ -229,9 +229,18 @@ func spendWords(s *chartSpend) string {
 		parts = append(parts, strconv.Itoa(s.Agents)+" "+plural(s.Agents, "subagent", "subagents"))
 	}
 	if len(s.Unpriced) > 0 {
-		parts = append(parts, "no price for "+strings.Join(s.Unpriced, " and "))
+		parts = append(parts, "no price for "+andList(s.Unpriced))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// andList joins words as prose, as the CLI's does for the models of its spend line:
+// "a", "a and b", "a, b and c".
+func andList(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }
 
 // trimRuns is rows cut to n lines, the least important first (the last of
