@@ -29,6 +29,8 @@ Never publish. Never answer your own question.
 
 Wait for the hand-backs (TaskOutput, `block: true`). jig holds a subagent at its stop while a verification runs, tracked changes are uncommitted, or every slice is green and no round is open: it is not stuck, wait on.
 
+A ticket in `run` whose phase is publish is published and behind (`state: behind`): it needs no build subagent. For each of its `stack` rows with a `merge`, run that merge yourself in a checkout of the ticket's branch (its worktree, or one added with `git worktree add <dir> <branch>`). A clean merge needs no review; one resolved by hand needs `jig gate <T>` and a clean round first. Then publish it (Publish).
+
 ## Relay
 
 A subagent hands back a question: put it to the person with its default, record the answer with `jig answer <T> <question> "<answer>"` (off a terminal it is recorded as relayed), then resume the subagent with SendMessage. A review's asks are the person's too: put each to them, record `jig triage <T> <finding> keep|dismiss`, and resume the subagent to build the fixes and have them reviewed again.

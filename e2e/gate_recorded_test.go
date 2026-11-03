@@ -8,6 +8,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,34 +154,51 @@ func (b builtTicket) openRound(t *testing.T) jigResult {
 	return res
 }
 
-// mustReview reads the paths the open round's review.json says a reviewer must
-// cover.
-func (b builtTicket) mustReview(t *testing.T) []string {
+// reviewRequest is the part of a round's review.json these tests read.
+type reviewRequest struct {
+	HeadSHA    string   `json:"head_sha"`
+	BaseSHA    string   `json:"base_sha"`
+	Scope      string   `json:"scope"`
+	Worktree   string   `json:"worktree"`
+	MustReview []string `json:"must_review"`
+}
+
+// request reads the review.json of the open round n.
+func (b builtTicket) request(t *testing.T, round int) reviewRequest {
 	t.Helper()
-	var req struct {
-		HeadSHA    string   `json:"head_sha"`
-		Worktree   string   `json:"worktree"`
-		MustReview []string `json:"must_review"`
-	}
-	data := readFileOrFatal(t, b.workFile("gate.round-1.review.json"))
+	var req reviewRequest
+	data := readFileOrFatal(t, b.workFile(fmt.Sprintf("gate.round-%d.review.json", round)))
 	if err := json.Unmarshal(data, &req); err != nil {
 		t.Fatalf("parse review.json: %v\n%s", err, data)
 	}
-	if req.HeadSHA != b.sha {
-		t.Fatalf("review.json head_sha = %s, want the clone's commit %s", req.HeadSHA, b.sha)
+	return req
+}
+
+// mustReview reads the paths the open round n's review.json says a reviewer
+// must cover. Round 1 reviews the commit the ticket was built at; a later round
+// the head the clone's branch is at now.
+func (b builtTicket) mustReview(t *testing.T, round int) []string {
+	t.Helper()
+	req := b.request(t, round)
+	want := b.sha
+	if round > 1 {
+		want = h2tip(t, b)
+	}
+	if req.HeadSHA != want {
+		t.Fatalf("review.json head_sha = %s, want the clone's commit %s", req.HeadSHA, want)
 	}
 	if len(req.MustReview) == 0 {
-		t.Fatalf("review.json must_review is empty:\n%s", data)
+		t.Fatalf("review.json must_review is empty (round %d)", round)
 	}
 	return req.MustReview
 }
 
 // cleanResult writes the result.json of a reviewer that found nothing and read
-// every file it had to, and returns its path.
-func (b builtTicket) cleanResult(t *testing.T) string {
+// every file it had to in round n, and returns its path.
+func (b builtTicket) cleanResult(t *testing.T, round int) string {
 	t.Helper()
 	data, err := json.Marshal(map[string]any{
-		"findings": []any{}, "still_present": []any{}, "reviewed_paths": b.mustReview(t), "summary": "nothing found",
+		"findings": []any{}, "still_present": []any{}, "reviewed_paths": b.mustReview(t, round), "summary": "nothing found",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -200,16 +218,16 @@ func (b builtTicket) report(t *testing.T, n string) map[string]any {
 	return rep
 }
 
-// reviewedClean has a reviewer in a session of its own read the open round and
-// report it clean, and returns the reviewer's `review done` result.
-func (b builtTicket) reviewedClean(t *testing.T) jigResult {
+// reviewedClean has a reviewer in a session of its own read the open round n
+// and report it clean, and returns the reviewer's `review done` result.
+func (b builtTicket) reviewedClean(t *testing.T, round int) jigResult {
 	t.Helper()
 	r2 := newHarness(t, b.fx, b.env, "s-reviewer")
 	if ctx := r2.Jig("review", "context", b.fx.Ticket); ctx.Code != 0 {
 		t.Fatalf("jig review context exit = %d\nstdout:\n%s\nstderr:\n%s", ctx.Code, ctx.Stdout, ctx.Stderr)
 	}
 	r2.Bash("git log --oneline -3")
-	done := r2.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t))
+	done := r2.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t, round))
 	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") {
 		t.Fatalf("jig review done exit = %d, want 0 and a clean verdict\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
 	}
@@ -294,7 +312,7 @@ func TestGateReviewsClonesCopy(t *testing.T) {
 	}
 	r2.Bash("git log --oneline -3")
 
-	done := r2.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t))
+	done := r2.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t, 1))
 	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "independent: true") {
 		t.Fatalf("jig review done exit = %d, want 0, clean and independent\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
 	}
@@ -313,7 +331,7 @@ func TestGateReviewsClonesCopy(t *testing.T) {
 		t.Errorf("report.yaml does not say `independent: true`")
 	}
 	// The round is closed: there is no open round to close again.
-	if again := r2.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t)); again.Code == 0 || !strings.Contains(again.Stdout, "REVIEW_NOT_OPEN") {
+	if again := r2.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t, 1)); again.Code == 0 || !strings.Contains(again.Stdout, "REVIEW_NOT_OPEN") {
 		t.Errorf("a second jig review done exit = %d, want REVIEW_NOT_OPEN\nstdout:\n%s", again.Code, again.Stdout)
 	}
 	// Nothing on the branch moved, and the gate pushed nothing of it.
@@ -349,7 +367,7 @@ func TestReviewNotIndependent(t *testing.T) {
 	if ctx := b.builder.Jig("review", "context", b.fx.Ticket); ctx.Code != 0 {
 		t.Fatalf("jig review context exit = %d\nstdout:\n%s\nstderr:\n%s", ctx.Code, ctx.Stdout, ctx.Stderr)
 	}
-	done := b.builder.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t))
+	done := b.builder.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t, 1))
 	if done.Code != 1 || !strings.Contains(done.Stdout, "REVIEW_NOT_INDEPENDENT") {
 		t.Fatalf("jig review done by the builder exit = %d, want 1 and REVIEW_NOT_INDEPENDENT\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
 	}
@@ -449,7 +467,7 @@ func TestPublishBodyThenPR(t *testing.T) {
 	b.env = env
 	b.builder.env = env
 	b.openRound(t)
-	b.reviewedClean(t)
+	b.reviewedClean(t, 1)
 
 	gateLease := filepath.Join(env.home, "pool", "fixture-repo", b.fx.Ticket+"-gate")
 	if _, err := os.Stat(gateLease); err != nil {
@@ -556,7 +574,7 @@ func TestPublishBare(t *testing.T) {
 	b.env = env
 	b.builder.env = env
 	b.openRound(t)
-	b.reviewedClean(t)
+	b.reviewedClean(t, 1)
 	cloneLog := gitLog(t, b.fx.RepoDir, "log", "--format=%H", b.branch)
 
 	// Without --yes (and with no approval) a bare publish asks, and stdin is
