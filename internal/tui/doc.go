@@ -3,8 +3,8 @@
 // now opened into its stages, its fields and its latest move, and one activity
 // log of every line and call tagged with its sub-step), the ticket's brief,
 // build, review and publish, a slice, and a chart (its map, its tickets in the
-// order a run would take them, what the run would do and where it ends, and the
-// tickets' activity). They are built only on the event stream and on running
+// order a run would take them, the ticket under the cursor in detail, what the
+// run would do and where it ends, and the tickets' activity). They are built only on the event stream and on running
 // verbs: a ticket's lines arrive as events.Envelopes from a Source, what the
 // store holds of its slices and asks arrives as the output of `jig status`, a
 // chart's standing as the output of `jig next <chart>` (the store listing,

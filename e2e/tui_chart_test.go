@@ -11,8 +11,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -151,6 +153,114 @@ func TestTUIChartActivityShowsTheChartsStoreHistory(t *testing.T) {
 	commitStorePath(t, fx.StoreDir, "charts/checkout/map.md", "checkout: a code has an expiry")
 	screens.press("r")
 	screens.until("Activity", "checkout: a code has an expiry", "checkout: a code names its shop")
+
+	screens.press("q")
+	if res := tui.Stop(); res.Code != 0 {
+		t.Fatalf("jig tui exit = %d, want 0 after q\nstderr:\n%s", res.Code, res.Stderr)
+	} else if res.Stderr != "" {
+		t.Errorf("jig tui wrote to stderr under its screens:\n%s", res.Stderr)
+	}
+}
+
+// detailPanelOf is the lines of the Detail panel of a screen, from its top edge
+// to its bottom one, "" when the screen has none.
+func detailPanelOf(screen string) string {
+	var panel []string
+	for _, line := range strings.Split(screen, "\n") {
+		switch {
+		case strings.Contains(line, "╭─ Detail"):
+			panel = []string{line}
+		case panel != nil && strings.Contains(line, "╰"):
+			return strings.Join(append(panel, line), "\n")
+		case panel != nil:
+			panel = append(panel, line)
+		}
+	}
+	return ""
+}
+
+// TestTUIChartScreenDetailsTheTicketUnderTheCursor: a subagent claims the
+// chart's ticket and commits, its verification runs, and its stop is held. The
+// real binary on a pipe, with the cursor on that ticket, shows on the chart
+// screen the slice, its stage, the session that holds it, the agent that
+// claimed it and the hold, and the hold is gone once the verification lands.
+// It is the hook chain of TestSubagentStopHoldsOnlyTheClaimHolder, watched from
+// the chart screen.
+func TestTUIChartScreenDetailsTheTicketUnderTheCursor(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	// A session id in the caller's environment would name a second builder: the
+	// run is the harness's session alone.
+	env = env.withGitGlobal(t).without("JIG_SESSION", "JIG_SLICE")
+	main := newHarness(t, fx, env, "s-chart")
+	sub := newHarness(t, fx, env, "s-chart")
+	sub.Agent = "a-1"
+	main.Branch(fx.Branch)
+
+	if res := runJig(t, env, fx.RepoDir, "hooks", "--global", "--harness", "claude", "--yes"); res.Code != 0 {
+		t.Fatalf("jig hooks --global exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
+	if res := runJig(t, env, fx.RepoDir, "githook", "--global"); res.Code != 0 {
+		t.Fatalf("jig githook --global exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
+	subagentStop := installedHookCommand(t, claudeSettings(env), "SubagentStop")
+
+	// An unattended claim needs the brief approved.
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum, err := st.BriefSHA256(fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := store.Approval{By: "Test Person", At: time.Now().UTC().Format(time.RFC3339), BriefSHA256: sum, Provenance: "person"}
+	if err := st.WriteApproval(fx.Ticket, approval); err != nil {
+		t.Fatal(err)
+	}
+
+	// The chart is the fixture's one ticket.
+	dir := joinPath(fx.StoreDir, "charts", "checkout")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileOrFatal(t, joinPath(dir, "map.md"), []byte(chartMapText))
+	writeFileOrFatal(t, joinPath(dir, "tickets.yaml"), []byte("tickets:\n  - id: "+fx.Ticket+"\n    title: Greet the person\n"))
+
+	// The subagent claims slice a unattended, commits it while its verification
+	// is held, and is held back from stopping.
+	if res := jigHooked(sub, "claim", fx.Ticket, "--slice", "a", "--unattended"); res.Code != 0 {
+		t.Fatalf("jig claim --unattended exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
+	release := sub.HoldVerifications("alpha", "beta")
+	sha := sub.CommitScenario("a", 1)
+	waitFor(t, 10*time.Second, "the worker git's hook started", func() bool { return spawnedFor(readLedger(t, env), sha) == 1 })
+	stop := runHookCommand(t, env, fx.RepoDir, subagentStop, sub.Payload("SubagentStop", map[string]any{"stop_hook_active": false}))
+	if held := decodeHook(t, stop); held.Decision != "block" {
+		t.Fatalf("SubagentStop = %+v, want a refusal while the verification runs", held)
+	}
+
+	// The chart screen, with the cursor on the chart's only ticket, details it.
+	tui := startJig(t, env, fx.RepoDir, "tui", "checkout")
+	screens := tuiScreens{t: t, p: tui}
+	screen := screens.until("› checkout", "╭─ Detail", "╭─ Run", "a · verifying · builder · agent a-1", "agent a-1 held at its stop", "verification of "+sha[:12])
+	if edge := detailPanelOf(screen); !strings.HasSuffix(strings.SplitN(edge, "\n", 2)[0], fx.Ticket+" ─╮") {
+		t.Errorf("the Detail panel's top edge does not end with the ticket %s:\n%s", fx.Ticket, screen)
+	}
+	if tickets, detail, run := strings.Index(screen, "╭─ Tickets"), strings.Index(screen, "╭─ Detail"), strings.Index(screen, "╭─ Run"); !(tickets < detail && detail < run) {
+		t.Errorf("the Detail panel is not between the Tickets and the Run panels:\n%s", screen)
+	}
+
+	// The verification lands: the hold is over, so the Detail panel no longer
+	// says it (the Activity panel keeps the history of it).
+	release()
+	waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
+		return l.Event == journal.EventVerified && l.Commit == sha && l.Slice == "a"
+	})
+	sub.WaitVerifiers()
+	if screen = screens.until("1 of 4 green"); strings.Contains(detailPanelOf(screen), "held at its stop") {
+		t.Errorf("the Detail panel still says the stop is held once the verification landed:\n%s", screen)
+	}
 
 	screens.press("q")
 	if res := tui.Stop(); res.Code != 0 {
