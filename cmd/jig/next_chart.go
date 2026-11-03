@@ -15,9 +15,9 @@ import (
 // nextChart is where a chart stands, as `jig next <chart>` says it and the TUI's
 // chart screen reads it (--json): the verdict (Ready, Code, Reason, Prompt), the
 // tickets in dependency order with each one's phases and reach, the briefs to
-// write and the waves to build, where the run ends, and what map.md says. Every
-// key is present but rank, steps, waits_for, prs and map, which are left out
-// when there is nothing to say.
+// write and the waves to build, where the run ends, what map.md says, and what
+// the run has spent. Every key is present but rank, steps, waits_for, prs, map
+// and spend, which are left out when there is nothing to say.
 type nextChart struct {
 	Chart       string            `json:"chart"`
 	Title       string            `json:"title"`
@@ -32,6 +32,7 @@ type nextChart struct {
 	Tickets     []nextChartTicket `json:"tickets"`
 	Ends        []nextChartEnd    `json:"ends"`
 	Map         *nextChartMap     `json:"map,omitempty"`
+	Spend       *nextChartSpend   `json:"spend,omitempty"`
 
 	// derived is the same derivation, for the help.
 	derived phase.Chart
@@ -96,11 +97,12 @@ type nextChartMap struct {
 	OutOfScope  []string `json:"out_of_scope"`
 }
 
-// chartOutput lays the standing and the map into what the verbs print.
-func chartOutput(c phase.Chart, m chartMap) nextChart {
+// chartOutput lays the standing, the map and the spend (nil when no ticket has
+// any) into what the verbs print.
+func chartOutput(c phase.Chart, m chartMap, spend *nextChartSpend) nextChart {
 	out := nextChart{
 		Chart: c.Name, Title: m.Title, Ready: c.Ready, Code: c.Code, Reason: c.Reason, Prompt: c.Prompt,
-		Started: c.Started, Ungraduated: c.Ungraduated,
+		Started: c.Started, Ungraduated: c.Ungraduated, Spend: spend,
 		Briefs: orEmpty(c.Briefs), Run: c.Run, Tickets: []nextChartTicket{}, Ends: []nextChartEnd{}, derived: c,
 	}
 	if out.Run == nil {
@@ -190,6 +192,9 @@ func (n nextChart) blocks(label string) []string {
 	add("code", n.Code)
 	add("reason", n.Reason)
 	pairs = append(pairs, [2]string{"started", yesNo(n.Started)}, [2]string{"ungraduated", strconv.Itoa(n.Ungraduated)})
+	if n.Spend != nil {
+		pairs = append(pairs, [2]string{"spend", n.Spend.line()})
+	}
 	blocks := []string{axi.KV(label, pairs)}
 
 	var rows [][]string

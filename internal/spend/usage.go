@@ -15,9 +15,9 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// Totals is what usage records sum to: a session's, when it comes from a
-// transcript, or a ticket's, when it comes from the spend lines of its
-// sessions (FromLines).
+// Totals is what usage records sum to: a session's or a subagent's, when it
+// comes from a transcript, or a ticket's, when it comes from the spend lines
+// of its sessions and their agents (FromLines).
 type Totals struct {
 	Input      int64
 	Output     int64
@@ -26,10 +26,12 @@ type Totals struct {
 	// USD is the cost of the priced models' usage at list price.
 	USD float64
 	// Messages counts the distinct API messages a transcript held; Sessions
-	// the sessions whose spend lines were added up. Each is set by the
-	// function that makes that kind of Totals and is zero in the other.
+	// the distinct sessions whose spend lines were added up, and Agents the
+	// subagent lines among them. Each is set by the function that makes that
+	// kind of Totals and is zero in the other.
 	Messages int
 	Sessions int
+	Agents   int
 	// Models are the models the usage came from, and Unpriced those of them
 	// no price is known for: their tokens are in the counts and their dollars
 	// are not in USD. Both are sorted.
@@ -119,14 +121,82 @@ type transcriptLine struct {
 // An empty path, or a transcript that is not there, is no spend. A line that
 // is not JSON, or has no usage, is skipped. Prices may be nil.
 func FromTranscript(path, session string, prices Prices) (Totals, error) {
+	return FromSession(path, session, nil, prices)
+}
+
+// FromSession is FromTranscript less the subagent transcripts of the agents
+// in own: those agents have a spend line of their own, so the session's line
+// does not count them twice. An agent in own with no transcript on disk is
+// nothing to leave out.
+func FromSession(path, session string, own map[string]bool, prices Prices) (Totals, error) {
 	if path == "" {
 		return Totals{}, nil
 	}
 	files := []string{path}
-	subagents, _ := filepath.Glob(filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents", "*.jsonl"))
+	subagents, _ := filepath.Glob(filepath.Join(subagentsDir(path), "*.jsonl"))
 	slices.Sort(subagents)
-	files = append(files, subagents...)
+	for _, f := range subagents {
+		if id, ok := agentFileID(f); ok && own[id] {
+			continue
+		}
+		files = append(files, f)
+	}
+	return sumFiles(files, session, prices)
+}
 
+// FromAgent sums the usage of one subagent of the session whose main
+// transcript is at path: the agent's own transcript, and nothing of the
+// session's or of its other agents'. An agent with no transcript on disk, or
+// an empty path, is no spend.
+func FromAgent(path, session, agent string, prices Prices) (Totals, error) {
+	if path == "" || agent == "" {
+		return Totals{}, nil
+	}
+	return sumFiles([]string{AgentTranscript(path, agent)}, session, prices)
+}
+
+// subagentsDir is where the transcripts of the session whose main transcript
+// is at path are kept.
+func subagentsDir(path string) string {
+	return filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
+}
+
+// AgentTranscript is the transcript of the subagent agent of the session
+// whose main transcript is at path: Claude Code keeps it flat in
+// <path without .jsonl>/subagents/agent-<agent>.jsonl, and a subagent's hook
+// payload names the agent by the id in that file name.
+func AgentTranscript(path, agent string) string {
+	return filepath.Join(subagentsDir(path), "agent-"+agent+".jsonl")
+}
+
+// agentFileID is the agent id a subagent transcript's file name carries
+// (agent-<id>.jsonl), and false for a file named otherwise.
+func agentFileID(file string) (string, bool) {
+	id, ok := strings.CutPrefix(filepath.Base(file), "agent-")
+	if !ok {
+		return "", false
+	}
+	id, ok = strings.CutSuffix(id, ".jsonl")
+	return id, ok && id != ""
+}
+
+// AgentsOnDisk are the ids of the subagents of the session whose main
+// transcript is at path that have a transcript there.
+func AgentsOnDisk(path string) []string {
+	files, _ := filepath.Glob(filepath.Join(subagentsDir(path), "agent-*.jsonl"))
+	var ids []string
+	for _, f := range files {
+		if id, ok := agentFileID(f); ok {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// sumFiles sums the usage of the transcript files for session, each API
+// message once whichever file it is in.
+func sumFiles(files []string, session string, prices Prices) (Totals, error) {
 	byID := map[string]*message{}
 	var anonymous []message
 	for _, f := range files {

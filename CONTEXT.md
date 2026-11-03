@@ -175,7 +175,7 @@ A claim made with `--unattended` (or a marker default) says no person is watchin
 _Avoid_: headless, background
 
 **Spend**:
-What a session cost, in tokens and list-price dollars summed from its transcript at Stop and SessionEnd, recorded as a cumulative `spend` line per session. A ticket's budget (`jig budget`) is held against the sum and told as a note at 80% and past it. Records and advice, never a stop.
+What a session cost, in tokens and list-price dollars summed from its transcript at Stop and SessionEnd, recorded as a cumulative `spend` line per session, and per subagent: a subagent's stop writes a line of its own, with its `agent` set, on the ticket it is placed at, and the session's line leaves out the agents that have one (a line is kept by session and agent). A ticket's budget (`jig budget`) is held against the sum and told as a note at 80% and past it. A chart's spend is a fold over its tickets' latest lines, shown by `jig next <chart>`. Records and advice, never a stop.
 _Avoid_: cost cap, quota
 
 **Driver**:

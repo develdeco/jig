@@ -151,7 +151,8 @@ type runRow struct {
 }
 
 // runRows are what a run of the chart would do: the prompt that starts it,
-// what it briefs, the waves it builds, and where it ends.
+// what it briefs, the waves it builds, where it ends, and last what it has
+// cost so far.
 func (m *Model) runRows(info *chartInfo) []runRow {
 	next := m.st.dim("nothing to run")
 	switch {
@@ -177,7 +178,28 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 		}
 		rows = append(rows, runRow{label, endNote(e), 1})
 	}
+	if info.Spend != nil {
+		rows = append(rows, runRow{"spend", spendWords(info.Spend), 2})
+	}
 	return rows
+}
+
+// spendWords is what a chart's run has cost, in the parts the Run panel's row
+// joins with " · ": the tokens, the dollars when a model has a price, how many
+// tickets and subagents it spans, and the models that have no price last.
+func spendWords(s *chartSpend) string {
+	parts := []string{tokens(s.Tokens) + " tokens"}
+	if s.USD > 0 {
+		parts = append(parts, dollars(s.USD))
+	}
+	parts = append(parts, strconv.Itoa(s.Tickets)+" "+plural(s.Tickets, "ticket", "tickets"))
+	if s.Agents > 0 {
+		parts = append(parts, strconv.Itoa(s.Agents)+" "+plural(s.Agents, "subagent", "subagents"))
+	}
+	if len(s.Unpriced) > 0 {
+		parts = append(parts, "no price for "+strings.Join(s.Unpriced, " and "))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // trimRuns is rows cut to n lines, the least important first (the last of

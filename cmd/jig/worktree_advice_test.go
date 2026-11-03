@@ -703,7 +703,7 @@ func TestNextChartWorktrees(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		n := chartOutput(c, m)
+		n := chartOutput(c, m, nil)
 		src := newWorktreeSource(r.st, cfg, mp, mergesOf{})
 		src.branchExists = func(string, string) bool { return false }
 		src.listWorktrees = func(string) ([]gitx.Worktree, error) { return nil, nil }
@@ -771,7 +771,7 @@ func TestNextChartWorktrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plain := chartOutput(c, m)
+	plain := chartOutput(c, m, nil)
 	if status := strings.Join(plain.blocks("status"), "\n"); strings.Contains(status, "worktrees[") {
 		t.Errorf("a chart with no worktrees set prints a table:\n%s", status)
 	}

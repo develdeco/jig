@@ -191,3 +191,84 @@ func TestFromTranscriptAbsentIsNoSpend(t *testing.T) {
 		t.Errorf("a directory where the transcript should be read as no error, want one")
 	}
 }
+
+// agentTranscripts writes a main transcript of tokens in session s-1 and a
+// transcript of 1, 10 and 100 input tokens for agents a-1, a-2 and a-3, and
+// one file in subagents that is no agent's, of 1000. It returns the main path.
+func agentTranscripts(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s-1.jsonl")
+	writeLines(t, path, asst("s-1", "main", "claude-sonnet-4-5", 100000, 0, 0, 0, 0))
+	for agent, n := range map[string]int64{"a-1": 1, "a-2": 10, "a-3": 100} {
+		writeLines(t, filepath.Join(dir, "s-1", "subagents", "agent-"+agent+".jsonl"), asst("s-1", "m-"+agent, "claude-sonnet-4-5", n, 0, 0, 0, 0))
+	}
+	writeLines(t, filepath.Join(dir, "s-1", "subagents", "side.jsonl"), asst("s-1", "m-side", "claude-sonnet-4-5", 1000, 0, 0, 0, 0))
+	return path
+}
+
+// TestFromSessionLeavesOutTheAgentsItNames: the session's total is the main
+// transcript and the subagent transcripts less those of the agents it is told
+// have a line of their own; FromTranscript is FromSession with none.
+func TestFromSessionLeavesOutTheAgentsItNames(t *testing.T) {
+	t.Parallel()
+	path := agentTranscripts(t)
+	for name, c := range map[string]struct {
+		own  map[string]bool
+		want int64
+	}{
+		"none":               {nil, 100000 + 1 + 10 + 100 + 1000},
+		"an empty set":       {map[string]bool{}, 100000 + 1 + 10 + 100 + 1000},
+		"one":                {map[string]bool{"a-2": true}, 100000 + 1 + 100 + 1000},
+		"two":                {map[string]bool{"a-1": true, "a-3": true}, 100000 + 10 + 1000},
+		"all three":          {map[string]bool{"a-1": true, "a-2": true, "a-3": true}, 100000 + 1000},
+		"an agent not here":  {map[string]bool{"a-9": true}, 100000 + 1 + 10 + 100 + 1000},
+		"a file of no agent": {map[string]bool{"side": true}, 100000 + 1 + 10 + 100 + 1000},
+	} {
+		got, err := FromSession(path, "s-1", c.own, nil)
+		if err != nil || got.Input != c.want {
+			t.Errorf("%s: input = %d, err = %v, want %d", name, got.Input, err, c.want)
+		}
+	}
+	whole, err := FromTranscript(path, "s-1", nil)
+	if err != nil || whole.Input != 100000+1+10+100+1000 {
+		t.Errorf("FromTranscript = %+v, %v, want every transcript", whole, err)
+	}
+	if got, err := FromSession("", "s-1", map[string]bool{"a-1": true}, nil); err != nil || got.Messages != 0 {
+		t.Errorf("FromSession with no path = %+v, %v, want zero", got, err)
+	}
+}
+
+// TestFromAgentSumsOneTranscript: an agent's total is its own transcript,
+// nothing of the session's or of the other agents', and an agent with no
+// transcript has spent nothing jig can see.
+func TestFromAgentSumsOneTranscript(t *testing.T) {
+	t.Parallel()
+	path := agentTranscripts(t)
+	got, err := FromAgent(path, "s-1", "a-2", nil)
+	if err != nil || got.Messages != 1 || got.Input != 10 {
+		t.Fatalf("FromAgent a-2 = %+v, %v, want its one message of 10 input tokens", got, err)
+	}
+	if want := AgentTranscript(path, "a-2"); filepath.Base(want) != "agent-a-2.jsonl" || filepath.Base(filepath.Dir(want)) != "subagents" {
+		t.Errorf("AgentTranscript = %q, want subagents/agent-a-2.jsonl", want)
+	}
+	for name, c := range map[string]struct{ path, agent string }{
+		"no such agent":   {path, "a-9"},
+		"no agent":        {path, ""},
+		"no main path":    {"", "a-1"},
+		"no subagent dir": {filepath.Join(t.TempDir(), "s-2.jsonl"), "a-1"},
+	} {
+		got, err := FromAgent(c.path, "s-1", c.agent, nil)
+		if err != nil || got.Messages != 0 || got.Tokens() != 0 {
+			t.Errorf("%s: %+v, %v, want zero and no error", name, got, err)
+		}
+	}
+	// A line of another session in the agent's file is that session's spend.
+	writeLines(t, AgentTranscript(path, "a-4"), asst("s-1", "mine", "claude-sonnet-4-5", 5, 0, 0, 0, 0), asst("s-0", "old", "claude-sonnet-4-5", 999, 0, 0, 0, 0))
+	if got, err := FromAgent(path, "s-1", "a-4", nil); err != nil || got.Input != 5 {
+		t.Errorf("FromAgent a-4 = %+v, %v, want only the lines of s-1", got, err)
+	}
+	if want := []string{"a-1", "a-2", "a-3", "a-4"}; !slices.Equal(AgentsOnDisk(path), want) {
+		t.Errorf("AgentsOnDisk = %q, want %q (side.jsonl is no agent's)", AgentsOnDisk(path), want)
+	}
+}

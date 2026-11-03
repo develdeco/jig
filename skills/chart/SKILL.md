@@ -43,7 +43,7 @@ Tickets whose `jig next <T>` names publish are reviewed clean. Ask the person on
 
 ## Ends
 
-After each wave read `jig next <chart>` again and start the next. A ticket behind a `merged` edge, or nothing reachable, ends the run: say what is published, what waits on which pull request (`ends`), and that "Continue <chart>" resumes it once that merged. Do not wait for a merge.
+After each wave read `jig next <chart>` again and start the next. A ticket behind a `merged` edge, or nothing reachable, ends the run: say what is published, what waits on which pull request (`ends`), and that "Continue <chart>" resumes it once that merged. Do not wait for a merge. Say the `spend` line of `jig next <chart>` with the ends: it is what the run cost so far, subagents included.
 
 ## Never
 
