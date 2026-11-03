@@ -573,6 +573,7 @@ func TestWaitAndEndNotes(t *testing.T) {
 		{chartEnd{Ticket: "A-2", Blocker: "A-1", PRs: []chartPR{{URL: "https://example.test/pull/3"}}}, "A-2 waits for A-1 merged · https://example.test/pull/3"},
 		{chartEnd{Ticket: "A-2", Blocker: "A-1", Fact: "it is not published yet"}, "A-2 waits for A-1 merged · it is not published yet"},
 		{chartEnd{Ticket: "A-2", Blocker: "A-1"}, "A-2 waits for A-1 merged"},
+		{chartEnd{Ticket: "A-2", Blocker: "A-1", Kind: "stacked", PRs: open}, "A-2 retargets when A-1 merges · https://example.test/pull/3 is open"},
 	} {
 		if got := endNote(tc.e); got != tc.want {
 			t.Errorf("endNote(%+v) = %q, want %q", tc.e, got, tc.want)

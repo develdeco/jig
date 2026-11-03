@@ -325,9 +325,15 @@ func waitNote(w chartWait) string {
 }
 
 // endNote is where a run stops, in words: "SHOP-5 waits for SHOP-2 merged ·
-// <pr> is open".
+// <pr> is open", or for a published ticket stacked on a parent whose pull
+// request is open, "SHOP-5 retargets when SHOP-2 merges · <pr> is open".
 func endNote(e chartEnd) string {
 	text := e.Ticket + " waits for " + e.Blocker + " " + firstOf(e.Kind, "merged")
+	if e.Kind == kindStacked {
+		// A published ticket on a parent whose pull request is open: it is done,
+		// and the parent's merge owes it a retarget (ADR 0038).
+		text = e.Ticket + " retargets when " + e.Blocker + " merges"
+	}
 	switch {
 	case len(e.PRs) > 0 && e.PRs[0].State != "":
 		return text + " · " + e.PRs[0].URL + " is " + strings.ToLower(e.PRs[0].State)
