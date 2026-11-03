@@ -135,11 +135,11 @@ func openPullOf(t *testing.T, branch string) string {
 	return fixture.GhPulls(t, fixture.GhPull{Number: 7, Owner: "owner", Head: branch, Base: "main"})
 }
 
-// lookupCall is the call publish makes to find branch's open pull request into
-// main: the pull requests endpoint, asked for the qualified head, the base and
-// the open state.
+// lookupCall is the call publish makes to find branch's open pull request,
+// whatever base it goes into: the pull requests endpoint, asked for the
+// qualified head and the open state.
 func lookupCall(branch string) []string {
-	return []string{"api", "repos/owner/fixture-repo/pulls", "--method", "GET", "-f", "head=owner:" + branch, "-f", "base=main", "-f", "state=open"}
+	return []string{"api", "repos/owner/fixture-repo/pulls", "--method", "GET", "-f", "head=owner:" + branch, "-f", "state=open"}
 }
 
 // reviewNotesCommentCalls returns every logged "pr comment" call, so a test

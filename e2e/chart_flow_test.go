@@ -33,6 +33,7 @@ type chartOut struct {
 		Steps    []string `json:"steps"`
 		Reach    string   `json:"reach"`
 		Prompt   string   `json:"prompt"`
+		Problem  string   `json:"problem"`
 		WaitsFor []struct {
 			Ticket string `json:"ticket"`
 			Kind   string `json:"kind"`

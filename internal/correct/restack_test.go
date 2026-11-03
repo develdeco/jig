@@ -79,7 +79,7 @@ func TestCheckTellsARetargetOnlyToTheSessionThatFoundIt(t *testing.T) {
 	if err != nil || len(notes) != 1 || notes[0].Kind != KindRetarget || notes[0].Ref != "retarget:JIG-0:app" {
 		t.Fatalf("Check = %+v, %v, want the retarget", notes, err)
 	}
-	if want := "the parent merged in app: retarget the PR to main and merge main (`git merge origin/main`)"; !strings.Contains(notes[0].Text, want) {
+	if want := "the parent merged in app: merge main (`git merge origin/main`); `jig publish` points the PR at main"; !strings.Contains(notes[0].Text, want) {
 		t.Errorf("the retarget text %q lacks %q", notes[0].Text, want)
 	}
 	if again, err := Check(in); err != nil || len(again) != 1 {

@@ -946,3 +946,83 @@ func TestEverClaimed(t *testing.T) {
 		}
 	}
 }
+
+// TestDerivePublishedWithRestacksIsBehind: a published ticket whose stack plan
+// owes its branch a merge is not done. Its brief, build and review stay done and
+// its publish is current, ready, with the publish prompt and no code; the
+// publish says what to merge, and a sub-step carries the commands. Without a
+// restack it is published and done; a closed ticket is never behind, whatever
+// it is owed; a built ticket that has not published keeps its phase.
+func TestDerivePublishedWithRestacksIsBehind(t *testing.T) {
+	t.Parallel()
+	lines := append(built(), ln(journal.EventGateOpen, attempt(1)), ln(journal.EventGateClean, attempt(1), by("s-rev")),
+		ln(journal.EventPr, outcome("opened"), func(l *journal.Line) { l.URL = "https://example.test/pull/7" }), ln(journal.EventPublishDone))
+	owed := []Restack{{Repo: "app", Kind: RestackTarget, Ref: "origin/main"}}
+
+	published := allGreen()
+	published.Published = true
+	if got := Derive(published, lines); got.Behind() || got.Code != CodeDone || got.Ready || got.Prompt != "" || got.Current != Publish || got.Restacks() != nil {
+		t.Errorf("published with nothing owed: behind %v code %q ready %v prompt %q restacks %v, want done", got.Behind(), got.Code, got.Ready, got.Prompt, got.Restacks())
+	}
+
+	behind := published
+	behind.Restacks = owed
+	got := Derive(behind, lines)
+	if !got.Behind() || got.Current != Publish || !got.Ready || got.Code != "" || got.Reason != "" || got.Prompt != "Publish SHOP-1" {
+		t.Fatalf("owed: behind %v current %s ready %v code %q reason %q prompt %q, want behind at a publish that is ready", got.Behind(), got.Current, got.Ready, got.Code, got.Reason, got.Prompt)
+	}
+	for i, want := range []string{StateDone, StateDone, StateDone, StateCurrent} {
+		if got.Phases[i].State != want {
+			t.Errorf("phase %s = %s, want %s", got.Phases[i].Name, got.Phases[i].State, want)
+		}
+	}
+	pub := got.Of(Publish)
+	if pub.Text != "published - behind: merge origin/main in app" {
+		t.Errorf("publish text = %q", pub.Text)
+	}
+	if s := sub(t, pub, "restack"); s.Label != "restack" || s.State != SubActive || s.Detail != "app: git merge origin/main" || pub.Subs[len(pub.Subs)-1].Key != "restack" {
+		t.Errorf("restack sub-step = %+v, want it last, active, with the command", s)
+	}
+	if s := sub(t, pub, "done"); s.State != SubDone {
+		t.Errorf("the published sub-step = %+v, want done: the ticket did publish", s)
+	}
+	if !reflect.DeepEqual(got.Restacks(), owed) {
+		t.Errorf("Restacks() = %v, want %v", got.Restacks(), owed)
+	}
+	if a := got.For(Publish); !a.Ready || a.Code != "" || a.Warning != "" {
+		t.Errorf("For(publish) = %+v, want ready with no warning", a)
+	}
+	if a := got.For(Review); !a.Ready || a.Warning == "" {
+		t.Errorf("For(review) = %+v, want it done, with a warning", a)
+	}
+
+	// Several repos: each says what to merge, joined by "; ".
+	several := behind
+	several.Restacks = []Restack{{Repo: "api", Kind: RestackParent, Ref: "origin/SHOP-0-parent"}, {Repo: "web", Kind: RestackTarget, Ref: "origin/main"}}
+	pub = Derive(several, lines).Of(Publish)
+	if want := "published - behind: merge origin/SHOP-0-parent in api; merge origin/main in web"; pub.Text != want {
+		t.Errorf("publish text = %q, want %q", pub.Text, want)
+	}
+	if s := sub(t, pub, "restack"); s.Detail != "api: git merge origin/SHOP-0-parent; web: git merge origin/main" {
+		t.Errorf("restack detail = %q", s.Detail)
+	}
+
+	// A closed ticket is never owed, whatever its journal says.
+	closed := behind
+	closed.Closed = "not planned"
+	if got := Derive(closed, lines); got.Behind() || got.Code != CodeClosed || got.Ready || got.Restacks() != nil {
+		t.Errorf("closed: behind %v code %q ready %v restacks %v, want closed and not behind", got.Behind(), got.Code, got.Ready, got.Restacks())
+	}
+
+	// A built ticket that has not published keeps its phase: the merge is part of
+	// the work, and the review and publish follow by phase.
+	unpublished := allGreen()
+	unpublished.Restacks = owed
+	got = Derive(unpublished, built())
+	if got.Behind() || got.Current != Review || got.Restacks() != nil {
+		t.Errorf("built, not published: behind %v current %s restacks %v, want the review", got.Behind(), got.Current, got.Restacks())
+	}
+	if text := got.Of(Publish).Text; strings.Contains(text, "behind") {
+		t.Errorf("publish text of an unpublished ticket = %q", text)
+	}
+}
