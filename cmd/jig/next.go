@@ -689,15 +689,22 @@ func (n nextTicket) help() []string {
 // behindHelp is the help of a published ticket that is behind: for each repo
 // whose row asks for a merge, the merge to make in the ticket's branch and the
 // publish that pushes it and points the open pull request at its base. A merge
-// git made by itself needs no new round; one resolved by hand does.
+// git made by itself needs no new round; one resolved by hand does. Only the
+// full publish points the pull request anywhere: after a parent merged, the
+// hand-off (`--body`, then `--pr`) records a pull request and leaves its base
+// alone, so a retarget row gives the edit for that path too.
 func (n nextTicket) behindHelp() []string {
 	var help []string
 	for _, r := range n.Stack {
 		if r.Merge == "" || r.Publish == "" {
 			continue
 		}
-		help = append(help, fmt.Sprintf("in %s run `%s`, then `%s`, which pushes the merge and points the open pull request at %s; a merge resolved by hand needs `jig gate %s` first",
-			r.Repo, r.Merge, r.Publish, r.PRTarget, n.Ticket))
+		byHand := ""
+		if r.Retarget {
+			byHand = fmt.Sprintf(" (the hand-off, `--body` then `--pr`, does not: run `gh pr edit <pr> --base %s`)", r.PRTarget)
+		}
+		help = append(help, fmt.Sprintf("in %s run `%s`, then `%s`, which pushes the merge and points the open pull request at %s%s; a merge resolved by hand needs `jig gate %s` first",
+			r.Repo, r.Merge, r.Publish, r.PRTarget, byHand, n.Ticket))
 	}
 	if t := n.derived; t != nil && len(help) > 0 && t.Prompt != "" {
 		help[len(help)-1] += promptHint(t.Prompt)

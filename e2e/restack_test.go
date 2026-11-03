@@ -146,7 +146,7 @@ func TestPublishedChildBehindItsMergedParentIsWork(t *testing.T) {
 		"phase: publish",
 		"prompt: Publish JIG-1",
 		"note: JIG-2 merged in fixture-repo: merge main (`git merge origin/main`), then run `jig publish JIG-1`, which points the PR of JIG-1 at main, but the hand-off (`--body`, then `--pr`) does not: run `gh pr edit <pr> --base main`",
-		"in fixture-repo run `git merge origin/main`, then `jig publish JIG-1`, which pushes the merge and points the open pull request at main",
+		"in fixture-repo run `git merge origin/main`, then `jig publish JIG-1`, which pushes the merge and points the open pull request at main (the hand-off, `--body` then `--pr`, does not: run `gh pr edit <pr> --base main`)",
 		"a merge resolved by hand needs `jig gate JIG-1` first",
 	} {
 		if !strings.Contains(text, want) {

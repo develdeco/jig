@@ -92,7 +92,7 @@ func TestStackBlocksNameThePublish(t *testing.T) {
 	help := n.behindHelp()
 	want := []string{
 		"in api run `git merge origin/jig/JIG-1`, then `jig publish JIG-2 --repo api`, which pushes the merge and points the open pull request at jig/JIG-1; a merge resolved by hand needs `jig gate JIG-2` first",
-		"in docs run `git merge origin/trunk`, then `jig publish JIG-2 --repo docs`, which pushes the merge and points the open pull request at trunk; a merge resolved by hand needs `jig gate JIG-2` first",
+		"in docs run `git merge origin/trunk`, then `jig publish JIG-2 --repo docs`, which pushes the merge and points the open pull request at trunk (the hand-off, `--body` then `--pr`, does not: run `gh pr edit <pr> --base trunk`); a merge resolved by hand needs `jig gate JIG-2` first",
 	}
 	if !reflect.DeepEqual(help, want) {
 		t.Errorf("behind help =\n%s\nwant\n%s", strings.Join(help, "\n"), strings.Join(want, "\n"))
