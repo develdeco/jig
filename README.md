@@ -182,8 +182,9 @@ waits for ("waits for SHOP-2 merged · its PR is open") or is ready for, the run
 (what to say to your agent, the briefs to write, the build waves, and where it
 ends) and the tickets' activity together. The keys act on the ticket under the
 cursor, and the screen is the standing `jig next <chart>` prints, read again once
-its tickets' events quiet down; a merge on the host writes no line, so `r` reads
-it. An agent jig holds back at its stop is an activity line of its own ("⏸ agent
+its tickets' events quiet down; a merge on the host writes no line, so while the
+chart ends at a merge the screen reads it every two minutes, and `r` reads it
+now. An agent jig holds back at its stop is an activity line of its own ("⏸ agent
 4f2a91c0 held at its stop · verification of 7f03c55 for slice apply is still
 running").
 

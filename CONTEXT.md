@@ -111,7 +111,7 @@ A prompt aimed at a chart, run from the main session: "Take <chart> to PR" when 
 _Avoid_: batch, pipeline, campaign
 
 **Chart standing**:
-Where a chart is, derived from its tickets' journal lines and records and never recorded (`phase.DeriveChart`, shown by `jig next <chart>` and `jig status <chart>`, and by the TUI's chart screen): each ticket's wave and reach (done, here, after a merge, or blocked), the tickets to brief, the build waves that can run now, where the run would end and the pull requests it waits on, whether the chart started, and the verdict with the prompt that moves it ("Take <chart> to PR", "Continue <chart>", or none).
+Where a chart is, derived from its tickets' journal lines and records and never recorded (`phase.DeriveChart`, shown by `jig next <chart>` and `jig status <chart>`, and by the TUI's chart screen): each ticket's wave and reach (done, here, after a merge, or blocked), the tickets to brief, the build waves that can run now, where the run would end and the pull requests it waits on, whether the chart started, and the verdict with the prompt that moves it ("Take <chart> to PR", "Continue <chart>", or none). The TUI reads it again every two minutes while the chart ends at a merge, since a merge on the host writes no journal line ([ADR 0037](docs/adr/0037-a-chart-is-run-from-the-main-session.md)).
 _Avoid_: chart status, run state
 
 **Recommendations**:
