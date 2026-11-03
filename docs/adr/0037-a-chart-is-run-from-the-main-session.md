@@ -33,3 +33,25 @@ The owner walked a harness session beside `jig tui` through the whole flow in a 
 - `ARCHITECTURE.md` changes in the hooks (a `SubagentStop`), notes (per session and agent, the claim holder), the TUI (eight screens), `internal/phase`, `internal/recall`, `internal/ledger` and `internal/observe` rows, and the skills paragraph.
 - A project that attached jig before this has no `SubagentStop` entry until it runs `jig attach` or `jig hooks` again; `jig doctor` lists the missing entry, and until then a build subagent is never held at its stop.
 - The skills stay under the 6000 bytes and 100 lines the lint allows: the new `chart` skill is its own, and intake gave up a few sentences to make room.
+
+## Amendment: a screen that waits on a merge is read again on a timer (GRAPH-15)
+
+The chart screen was read again on open, on `r`, and after the screen had been quiet since an event of one of the chart's tickets. A merge on the host writes no line to any journal, so a chart that ended at a pull request showed "waits for a merge" until a person pressed `r` or something happened to one of its tickets. The owner decided that a screen that waits on a merge is read again on a timer, every two minutes (chart flow, C14).
+
+- **The rule.** A screen waits on a merge when it shows a wait that only the host can end. The TUI reads that screen again every `Config.MergeEvery`, and a screen that waits on nothing is not read on the timer.
+- **Which screens wait.** The chart screen waits when the last read that printed a chart listed at least one entry in `ends`, the tickets the run stops at, each behind a merge. A read that printed no chart leaves that as it was, so one blank read does not stop the timer. A ticket's screens (ticket, brief, build, review, publish, slice) wait when the ticket is published with a pull request on record and is not closed. The project's list waits on nothing, an unpublished ticket waits on nothing, and a closed ticket waits on nothing.
+- **What a tick reads.** Only the screen on top, through the verbs the screens already read. A chart screen that waits reads the ticket list and the chart (`jig next --json` and `jig next <chart> --json`), the two reads the idle read makes. The statuses of the chart's tickets are not read, since a merge changes no status. A ticket screen that waits reads that ticket's status, which shows a closure made in another session. A read already out is not doubled, a read that fails is retried as before, and a tick moves no cursor and sets no notice.
+- **The field and the flag.** `Config.MergeEvery` is a duration: zero is two minutes, and a negative value never reads again, as `AwaitEvery` does, for a test that settles `Init`. The timer starts at `Init` and runs for the life of the model, whichever screen is on top. `jig tui --merge-every <duration>` sets it, so an end-to-end test can set it short and a person can see it in `jig tui -h`. A negative value is refused as `VALIDATION_ERROR` before any screen; turning the timer off is not offered to a person.
+
+Rejected alternatives:
+
+- **jig or the TUI fetching the clone on the tick.** A merge judged by ancestry (a ticket published with no pull request on record) shows once `refs/remotes/origin/<target>` holds the branch, and only a fetch moves it. A fetch from a screen is a network call and a write to the person's clone that nothing in jig makes today, and the screens read no store and call no host.
+- **A host watcher or a webhook.** Both need something to run beside the TUI, or a public address to call, for a state `jig next <chart>` already asks the host for.
+- **Reading every screen on the timer.** Most screens show nothing a merge changes. The timer would read the roster and a status every two minutes for each one, and the cost would show nowhere.
+
+Consequences:
+
+- The chart verb asks the host about the pull requests it names on every read, so a merge shows in the next tick's read. The listing `jig next --json`, which the tick also reads, may take an open pull request's state from this machine's memory when it is under two minutes old, so a blocker in the listing can read an open pull request up to two minutes late.
+- A merge judged by ancestry shows once something fetched the clone: a person's `git fetch`, or a pull. The timer does not fetch.
+- A ticket's screens show no host state of their own pull request, since no verb they read prints one. The tick changes what a ticket screen shows only when its status changed.
+- `CONTEXT.md` (*Chart standing*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row), the README and `DECISIONS.md` say the same.

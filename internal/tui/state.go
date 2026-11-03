@@ -60,6 +60,10 @@ type chart struct {
 	// dirty is set when something happened to one of the chart's tickets since
 	// the read: the idle read of the chart screen is made for it.
 	dirty bool
+	// mergeWait is whether the last read that printed a chart listed an entry
+	// in its ends: the run stops at a merge, and the chart screen is read again
+	// on the merge timer. A read that printed no chart leaves it as it was.
+	mergeWait bool
 }
 
 // setCharts takes the charts the store listing named: the order they are
