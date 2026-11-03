@@ -717,12 +717,25 @@ func testdataFixtureDir() (string, error) {
 // the same stub.
 func GhStub(t testing.TB) string {
 	t.Helper()
-	src := filepath.Join(RepoRoot(t), "testdata", "fixture", "ghstub")
+	return buildStub(t, "ghstub", "gh")
+}
 
+// ClaudeStub compiles testdata/fixture/claudestub into a binary named claude
+// (or claude.exe on Windows) inside a fresh directory, returning that
+// directory so it can be prepended to PATH: a `claude` that runs no model,
+// for a test of what a session starts as a Claude Code session of its own.
+func ClaudeStub(t testing.TB) string {
+	t.Helper()
+	return buildStub(t, "claudestub", "claude")
+}
+
+// buildStub compiles testdata/fixture/<src> into a binary named name (with
+// .exe on Windows) inside a fresh directory, and returns the directory.
+func buildStub(t testing.TB, src, name string) string {
+	t.Helper()
 	dir := t.TempDir()
-	name := "gh"
 	if runtime.GOOS == "windows" {
-		name = "gh.exe"
+		name += ".exe"
 	}
 	out := filepath.Join(dir, name)
 
@@ -730,9 +743,9 @@ func GhStub(t testing.TB) string {
 	if runtime.GOOS == "windows" {
 		goBin += ".exe"
 	}
-	cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, src)
+	cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", out, filepath.Join(RepoRoot(t), "testdata", "fixture", src))
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("fixture: build ghstub: %v\n%s", err, output)
+		t.Fatalf("fixture: build %s: %v\n%s", src, err, output)
 	}
 	return dir
 }

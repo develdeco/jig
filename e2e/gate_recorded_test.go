@@ -9,7 +9,9 @@ package e2e
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -372,6 +374,88 @@ func TestReviewNotIndependent(t *testing.T) {
 	pub := runJig(t, b.env, b.fx.StoreDir, "publish", b.fx.Ticket, "--body")
 	if pub.Code == 0 || !strings.Contains(pub.Stdout, "PUBLISH_NOT_CLEAN") {
 		t.Errorf("jig publish --body after a round that is not clean: exit = %d, want PUBLISH_NOT_CLEAN\nstdout:\n%s", pub.Code, pub.Stdout)
+	}
+}
+
+// TestHooklessSessionReviewsInASeparateSession: a session with no jig hooks
+// builds the ticket. Its commands name its session, and no hook writes its
+// tool calls to the ledger, so jig cannot tell a subagent of it from it: a
+// subagent's round would be recorded as the builder's, and not independent.
+// `jig gate` says so and advises a separate session, with the command that
+// starts one. Run as the advice says, in sh from the builder's own shell, with
+// a claude that behaves as Claude Code does (it keeps the environment it is
+// started with and gives its tools a session id of its own), the reviewer's
+// round is clean and independent.
+func TestHooklessSessionReviewsInASeparateSession(t *testing.T) {
+	t.Parallel()
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatalf("the advised command runs in sh, as a harness's shell tool runs it; put an sh on PATH (Git for Windows' bin on Windows): %v", err)
+	}
+	b := newBuiltTicket(t, false)
+	for _, l := range readLedger(t, b.env) {
+		if l.Event == journal.EventTool {
+			t.Fatalf("test setup: the ledger has a hook's tool line %+v, want a builder with no hooks", l)
+		}
+	}
+	gate := b.openRound(t)
+	var command string
+	for _, line := range strings.Split(gate.Stdout, "\n") {
+		if l := strings.TrimSpace(line); strings.HasPrefix(l, "env ") && strings.Contains(l, "claude -p ") {
+			command = l
+		}
+	}
+	if command == "" || strings.Contains(gate.Stdout, "spawn a subagent") {
+		t.Fatalf("jig gate by a session with no hooks advises no separate session, with the command that starts one:\n%s", gate.Stdout)
+	}
+
+	// The scripted session does what the prompt asks of a reviewer that found
+	// nothing: it reads the round and closes it.
+	run, err := json.Marshal([][]string{
+		{jigBinary, "review", "context", b.fx.Ticket, "--model", "opus"},
+		{jigBinary, "review", "done", b.fx.Ticket, "--result", b.cleanResult(t)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(t.TempDir(), "claude.log")
+	shell := b.env.with(
+		"JIG_SESSION="+b.builder.Session, "CLAUDE_CODE_SESSION_ID="+b.builder.Session,
+		"PATH="+fixture.ClaudeStub(t)+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"CLAUDE_STUB_SESSION=s-headless", "CLAUDE_STUB_RUN="+string(run), "CLAUDE_STUB_LOG="+log,
+		// The command reaches sh through the environment: Git for Windows' sh
+		// would parse it again from its command line.
+		"ADVISED="+command,
+	)
+	cmd := exec.Command(sh, "-c", `eval "$ADVISED"`)
+	cmd.Dir = b.fx.RepoDir
+	cmd.Env = shell.environ()
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "verdict: clean") || !strings.Contains(string(out), "independent: true") {
+		t.Fatalf("the advised command %s: %v, want a clean, independent round\n%s", command, err, out)
+	}
+	rep := b.report(t, "1")
+	reviewer, _ := rep["reviewer"].(map[string]any)
+	if rep["verdict"] != "clean" || rep["independent"] != true || reviewer["session"] != "s-headless" {
+		t.Errorf("report.yaml = %v, want a clean round, independent: true, reviewed by session s-headless", rep)
+	}
+
+	// The prompt reached claude whole, as the one argument after -p.
+	var call struct {
+		Argv []string `json:"argv"`
+	}
+	first, _, _ := strings.Cut(string(readFileOrFatal(t, log)), "\n")
+	if err := json.Unmarshal([]byte(first), &call); err != nil {
+		t.Fatalf("parse the claude log: %v\n%s", err, first)
+	}
+	i := slices.Index(call.Argv, "-p")
+	if i < 0 || i+1 >= len(call.Argv) {
+		t.Fatalf("claude argv = %q, want -p and the prompt", call.Argv)
+	}
+	for _, want := range []string{"You did not build " + b.fx.Ticket, "jig review context " + b.fx.Ticket, "jig review done " + b.fx.Ticket} {
+		if !strings.Contains(call.Argv[i+1], want) {
+			t.Errorf("the prompt claude got lacks %q: %q", want, call.Argv[i+1])
+		}
 	}
 }
 
