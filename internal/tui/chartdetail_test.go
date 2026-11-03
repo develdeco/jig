@@ -21,12 +21,24 @@ func claimLine(ts, ticket, session, agent, command string) events.Envelope {
 	})
 }
 
+// holdLine is the machine ledger's line for a stop jig held agent at ("" for
+// the session itself), about slice, with the fact it named.
+func holdLine(ts, ticket, agent, slice, fact string) events.Envelope {
+	return ll(ts, ticket, journal.EventNoteDelivered, func(l *journal.Line) {
+		l.Session, l.Agent, l.Slice, l.Outcome, l.Summary = "s-builder", agent, slice, outcomeStopBlock, fact
+		l.Ref = "pending:222222222222:" + slice
+	})
+}
+
 // heldChartRig is chartRig where the claim of JIG-5's slice s2 was made by a
-// subagent: the machine ledger has the tool line of the call, with the agent.
+// subagent: the machine ledger has the tool line of the call, with the agent,
+// and the hold of the agent's stop while the verification runs, later than every
+// journal line of the ticket.
 func heldChartRig(t *testing.T) *rig {
 	t.Helper()
 	g := chartRig(t)
-	return g.feed(claimLine(at(2, 1), "JIG-5", "s-builder", "agent-4f2a91c0e7", "jig claim JIG-5 --slice s2 --unattended"))
+	g.feed(claimLine(at(2, 1), "JIG-5", "s-builder", "agent-4f2a91c0e7", "jig claim JIG-5 --slice s2 --unattended"))
+	return g.feed(holdLine(at(2, 31), "JIG-5", "agent-4f2a91c0e7", "s2", "verification of 222222222222 for slice s2 is still running"))
 }
 
 // onChart opens the chart screen of a rig that shows the project's list.
@@ -339,4 +351,96 @@ func TestChartScreenDetailsAHeldAgent(t *testing.T) {
 	g.send(tea.WindowSizeMsg{Width: 100, Height: 36})
 	onChart(g)
 	golden(t, "chart-detail", g.view())
+}
+
+// wideChart is a rig of the chart screen of width 120, wide enough for a hold's
+// whole fact.
+func wideChart(g *rig) *rig {
+	g.t.Helper()
+	g.send(tea.WindowSizeMsg{Width: 120, Height: 36})
+	return g
+}
+
+// TestChartDetailShowsAHoldUntilTheTicketMoves: a stop jig held an agent at is
+// on the Detail panel until a line of a step follows it: a verification landing
+// ends it, what the ticket cost does not.
+func TestChartDetailShowsAHoldUntilTheTicketMoves(t *testing.T) {
+	t.Parallel()
+	g := onChart(wideChart(heldChartRig(t)))
+	const hold = "hold     ⏸ agent 4f2a91c0 held at its stop · verification of 222222222222 for slice s2 is still running"
+	if got := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(got, hold) {
+		t.Fatalf("the panel has no hold row:\n%s", got)
+	}
+	g.feed(jl(at(3, 0), "JIG-5", "", journal.EventSpend, func(l *journal.Line) { l.Session = "s-builder" }))
+	if got := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(got, hold) {
+		t.Errorf("what the ticket cost ended the hold:\n%s", got)
+	}
+	g.feed(jl(at(4, 0), "JIG-5", "s2", journal.EventVerified, with("", sha('2'), "", "", "", "")))
+	if got := strings.Join(detailPanelOf(t, g.view()), "\n"); strings.Contains(got, "held at its stop") {
+		t.Errorf("a verification landing did not end the hold:\n%s", got)
+	}
+}
+
+// TestChartDetailShowsTheSessionsOwnHold: a stop of the session itself reads so,
+// and a ticket with a hold and no slice being built has the hold row and no
+// state row.
+func TestChartDetailShowsTheSessionsOwnHold(t *testing.T) {
+	t.Parallel()
+	g := wideChart(chartRig(t))
+	g.feed(holdLine(at(2, 31), "JIG-5", "", "s2", "the oracle failed"), holdLine(at(3, 0), "JIG-8", "", "", "changes are not committed"))
+	onChart(g)
+	if got := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(got, "hold     ⏸ the session held at its stop · the oracle failed") {
+		t.Errorf("a stop of the session is not worded so:\n%s", got)
+	}
+	g.press("down")
+	panel := detailPanelOf(t, g.view())
+	if got := strings.Join(panel, "\n"); !strings.HasSuffix(panel[0], "JIG-8 ─╮") || len(panel) != 3 ||
+		!strings.Contains(got, "hold     ⏸ the session held at its stop · changes are not committed") || strings.Contains(got, "state") {
+		t.Errorf("a ticket with a hold and nothing building is not its hold row alone:\n%s", got)
+	}
+}
+
+// TestChartDetailShowsTheNewestTwoHoldsOldestFirst: of three holds the oldest is
+// left out, the other two stand in the order they were made, the label on the
+// first.
+func TestChartDetailShowsTheNewestTwoHoldsOldestFirst(t *testing.T) {
+	t.Parallel()
+	g := wideChart(chartRig(t))
+	g.feed(
+		holdLine(at(3, 0), "JIG-5", "agent-aaaaaaaa", "s2", "first fact"),
+		holdLine(at(3, 10), "JIG-5", "agent-bbbbbbbb", "s2", "second fact"),
+		holdLine(at(3, 20), "JIG-5", "", "s2", "third fact"),
+	)
+	onChart(g)
+	panel := detailPanelOf(t, g.view())
+	got := strings.Join(panel, "\n")
+	if strings.Contains(got, "first fact") {
+		t.Errorf("the oldest of three holds is drawn:\n%s", got)
+	}
+	second, third := strings.Index(got, "hold     ⏸ agent bbbbbbbb held at its stop · second fact"), strings.Index(got, "         ⏸ the session held at its stop · third fact")
+	if second < 0 || third < second {
+		t.Errorf("the newest two holds are not drawn in time order, the label on the first:\n%s", got)
+	}
+}
+
+// TestChartDetailGivesUpTheSliceRowsBeforeTheHold: three slices being built and
+// two holds are five rows, one over the panel's most, and the one that goes is
+// the last slice's.
+func TestChartDetailGivesUpTheSliceRowsBeforeTheHold(t *testing.T) {
+	t.Parallel()
+	g := buildingRig(t, 120, 50, 3)
+	g.feed(holdLine(at(7, 0), "JIG-5", "agent-a1", "s1", "first fact"), holdLine(at(7, 30), "JIG-5", "", "s2", "second fact"))
+	panel := detailPanelOf(t, g.view())
+	got := strings.Join(panel, "\n")
+	if len(panel)-2 != detailMax {
+		t.Fatalf("the panel has %d rows, want the most it has, %d:\n%s", len(panel)-2, detailMax, got)
+	}
+	for _, want := range []string{"slice    s1 · claimed", "         s2 · claimed", "hold     ⏸ agent a1 held at its stop · first fact", "         ⏸ the session held at its stop · second fact"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the panel lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "s3") {
+		t.Errorf("the panel kept the third slice and not a hold:\n%s", got)
+	}
 }

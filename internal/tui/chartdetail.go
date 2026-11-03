@@ -2,6 +2,7 @@ package tui
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,8 +17,12 @@ import (
 // the stream and `jig status`, so moving the cursor re-draws it and runs no
 // verb.
 
-// detailMax is the most rows the Detail panel has, its frame not counted.
-const detailMax = 4
+// detailMax is the most rows the Detail panel has, its frame not counted, and
+// holdsMax the most holds it names.
+const (
+	detailMax = 4
+	holdsMax  = 2
+)
 
 // claimSlack is how long before a claim line a tool line of the claim's call
 // may be stamped and still be read: the lines are stamped before the ledger's
@@ -27,8 +32,10 @@ const claimSlack = time.Minute
 
 // chartDetailRows are the rows of the Detail panel for the ticket of r: a row
 // for each slice being built (its id, its stage, the session that holds it and
-// the agent that claimed it), or, when nothing is, the one row that says where
-// the ticket stands.
+// the agent that claimed it), then the holds that are current, the newest two
+// oldest first, and, when there is neither, the one row that says where the
+// ticket stands. A hold weighs 0 so a short screen gives up slice rows before
+// it gives up a hold.
 func (m *Model) chartDetailRows(r chartRow) []runRow {
 	if r.t == nil {
 		return []runRow{{"state", m.st.dim("not read yet"), 0}}
@@ -45,6 +52,13 @@ func (m *Model) chartDetailRows(r chartRow) []runRow {
 			label = "slice"
 		}
 		rows = append(rows, runRow{label, m.sliceDetail(r.t, sub, subs, id), 1})
+	}
+	for i, l := range r.t.currentHolds() {
+		label := ""
+		if i == 0 {
+			label = "hold"
+		}
+		rows = append(rows, runRow{label, m.moveText(r.t, l), 0})
 	}
 	if len(rows) == 0 {
 		_, label := m.stepLabel(r.t)
@@ -109,6 +123,35 @@ func (t *ticket) claimAgent(claim events.Envelope) string {
 		}
 	}
 	return agent
+}
+
+// currentHolds are the holds of the ticket that no step has moved past: the
+// machine ledger's lines that say jig held an agent at its stop (isHold), the
+// newest two, oldest first, that are stamped after the latest journal line of a
+// step (a verification landing, a gate opening, a pull request recorded). A line
+// about the ticket as a whole (what it has cost) belongs to no step, so the
+// main session's stop does not end a hold, and the lines the screens wrote
+// themselves from a status are not the journal's. The activity log keeps the
+// history of the ones that ended.
+func (t *ticket) currentHolds() []events.Envelope {
+	var last time.Time
+	for _, l := range t.lines {
+		if at, ok := l.At(); ok && stepOfLine(l) >= 0 && at.After(last) {
+			last = at
+		}
+	}
+	var holds []events.Envelope
+	for _, l := range t.ledger {
+		if at, ok := l.At(); ok && isHold(l) && at.After(last) {
+			holds = append(holds, l)
+		}
+	}
+	slices.SortStableFunc(holds, func(a, b events.Envelope) int {
+		x, _ := a.At()
+		y, _ := b.At()
+		return x.Compare(y)
+	})
+	return holds[max(0, len(holds)-holdsMax):]
 }
 
 // claimCall is whether the shell command line cmd runs `jig claim` and does not
