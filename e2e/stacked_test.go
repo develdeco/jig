@@ -245,7 +245,7 @@ func TestMergedParentRetargets(t *testing.T) {
 	r := runJig(t, env, fx.RepoDir, "next", "JIG-1")
 	for _, want := range []string{
 		"stack[1]{repo,parent,start_from,pr_target}:\n  fixture-repo,JIG-2 (merged),origin/main,main\n",
-		"note: JIG-2 merged in fixture-repo: merge main (`git merge origin/main`); the publish of JIG-1 points its PR at main",
+		"note: JIG-2 merged in fixture-repo: merge main (`git merge origin/main`); the publish of JIG-1 points its PR at main, but the hand-off (`--body`, then `--pr`) does not: run `gh pr edit <pr> --base main`",
 	} {
 		if !strings.Contains(r.Stdout, want) {
 			t.Errorf("jig next JIG-1 lacks %q:\n%s", want, r.Stdout)
@@ -256,7 +256,7 @@ func TestMergedParentRetargets(t *testing.T) {
 		t.Fatalf("SessionStart exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	ctx := corrContext(t, h.Hook("UserPromptSubmit", map[string]any{"prompt": "go on"}))
-	if want := "JIG-1 is stacked on JIG-2, and the parent merged in fixture-repo: merge main (`git merge origin/main`); `jig publish` points the PR at main"; !strings.Contains(ctx, want) {
+	if want := "JIG-1 is stacked on JIG-2, and the parent merged in fixture-repo: merge main (`git merge origin/main`); `jig publish` points the PR at main, but the hand-off (`--body`, then `--pr`) does not: run `gh pr edit <pr> --base main`."; !strings.Contains(ctx, want) {
 		t.Fatalf("prompt context = %q, want %q", ctx, want)
 	}
 	if res := h.Hook("UserPromptSubmit", map[string]any{"prompt": "again"}); strings.Contains(res.Stdout, "the parent merged") {

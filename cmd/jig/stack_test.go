@@ -29,7 +29,7 @@ func TestStackBlocksNameWhereTheBranchStartsAndWhereItsPRGoes(t *testing.T) {
 	want := []string{
 		"stack[4]{repo,parent,start_from,pr_target}:\n  api,JIG-1,jig/JIG-1,jig/JIG-1\n  web,-,origin/main,main\n  docs,JIG-1 (merged),origin/trunk,trunk\n  ops,JIG-1,origin/jig/JIG-1,jig/JIG-1",
 		"note: the branch of JIG-1 moved past JIG-2 in api: restack onto `jig/JIG-1` at `aaaaaaaaaaaa`: `git merge jig/JIG-1`; jig never rebases",
-		"note: JIG-1 merged in docs: merge trunk (`git merge origin/trunk`); the publish of JIG-2 points its PR at trunk",
+		"note: JIG-1 merged in docs: merge trunk (`git merge origin/trunk`); the publish of JIG-2 points its PR at trunk, but the hand-off (`--body`, then `--pr`) does not: run `gh pr edit <pr> --base trunk`",
 		"note: the clone of ops holds no copy of jig/JIG-1, the branch of JIG-1: fetch it (`git fetch origin`) before JIG-2 starts from it",
 	}
 	for i := range got {
@@ -59,7 +59,7 @@ func TestStackBlocksNameThePublish(t *testing.T) {
 		t.Fatalf("one row = %+v, want the merge and a bare publish", rows)
 	}
 	got := stackBlocks("JIG-2", rows)
-	if want := "note: JIG-1 merged in docs: merge trunk (`git merge origin/trunk`), then run `jig publish JIG-2`, which points the PR of JIG-2 at trunk"; got[1] != want {
+	if want := "note: JIG-1 merged in docs: merge trunk (`git merge origin/trunk`), then run `jig publish JIG-2`, which points the PR of JIG-2 at trunk, but the hand-off (`--body`, then `--pr`) does not: run `gh pr edit <pr> --base trunk`"; got[1] != want {
 		t.Errorf("retarget note = %q, want %q", got[1], want)
 	}
 	if rows := stackRows(one, false); rows[0].Merge != "git merge origin/trunk" || rows[0].Publish != "" {
@@ -81,7 +81,7 @@ func TestStackBlocksNameThePublish(t *testing.T) {
 	if want := "note: the branch of JIG-1 moved past JIG-2 in api: restack onto `jig/JIG-1` at `aaaaaaaaaaaa`: `git merge origin/jig/JIG-1`; jig never rebases; then run `jig publish JIG-2 --repo api`"; got[1] != want {
 		t.Errorf("restack note = %q, want %q", got[1], want)
 	}
-	if want := "note: JIG-1 merged in docs: merge trunk (`git merge origin/trunk`), then run `jig publish JIG-2 --repo docs`, which points the PR of JIG-2 at trunk"; got[2] != want {
+	if want := "note: JIG-1 merged in docs: merge trunk (`git merge origin/trunk`), then run `jig publish JIG-2 --repo docs`, which points the PR of JIG-2 at trunk, but the hand-off (`--body`, then `--pr`) does not: run `gh pr edit <pr> --base trunk`"; got[2] != want {
 		t.Errorf("retarget note = %q, want %q", got[2], want)
 	}
 

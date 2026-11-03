@@ -52,8 +52,10 @@ func restackText(ticket string, r stack.Repo) string {
 }
 
 // retargetText is what the session is told when the parent merged: the merge
-// is the session's, and jig publish points the PR at the target.
+// is the session's, and jig publish points the PR at the target. Only that full
+// publish does: the hand-off ends in recording a pull request somebody opened,
+// which leaves its base alone, so the text gives the edit for that path too.
 func retargetText(ticket string, r stack.Repo) string {
-	return fmt.Sprintf("%s is stacked on %s, and the parent merged in %s: merge %s (`git merge origin/%s`); `jig publish` points the PR at %s.",
-		ticket, r.Parent, r.Repo, r.Target, r.Target, r.Target)
+	return fmt.Sprintf("%s is stacked on %s, and the parent merged in %s: merge %s (`git merge origin/%s`); `jig publish` points the PR at %s, but the hand-off (`--body`, then `--pr`) does not: run `gh pr edit <pr> --base %s`.",
+		ticket, r.Parent, r.Repo, r.Target, r.Target, r.Target, r.Target)
 }

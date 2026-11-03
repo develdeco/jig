@@ -110,8 +110,10 @@ func stackBlocks(ticket string, rows []nextStack) []string {
 			blocks = append(blocks, fmt.Sprintf("note: the branch of %s moved past %s in %s: restack onto `%s` at `%s`: `git merge %s`; jig never rebases",
 				r.Parent, ticket, r.Repo, r.ParentBranch, shortSHA(r.ParentHead), r.StartFrom)+thenPublish("; ", r.Publish))
 		case r.Retarget:
-			// jig publish points the open PR at its target (ADR 0038), so the
-			// note asks only for the merge.
+			// jig publish points the open PR at its target (ADR 0038), but only
+			// the full publish does: the hand-off ends in recording a pull
+			// request somebody opened, which leaves its base alone, so the note
+			// gives the edit for that path too.
 			target := r.PRTarget
 			note := fmt.Sprintf("note: %s merged in %s: merge %s (`git merge origin/%s`)", r.Parent, r.Repo, target, target)
 			if r.Publish != "" {
@@ -119,6 +121,7 @@ func stackBlocks(ticket string, rows []nextStack) []string {
 			} else {
 				note += fmt.Sprintf("; the publish of %s points its PR at %s", ticket, target)
 			}
+			note += fmt.Sprintf(", but the hand-off (`--body`, then `--pr`) does not: run `gh pr edit <pr> --base %s`", target)
 			blocks = append(blocks, note)
 		case r.Parent != "" && !r.Merged && r.ParentHead == "":
 			blocks = append(blocks, fmt.Sprintf("note: the clone of %s holds no copy of %s, the branch of %s: fetch it (`git fetch origin`) before %s starts from it",
