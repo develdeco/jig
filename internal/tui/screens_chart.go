@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // activityFloor is the fewest rows the chart screen's Activity panel gets with
@@ -15,9 +16,10 @@ const activityFloor = 4
 const mapLabelW = 12
 
 // chartPage is one chart: its map, its tickets in the order the chart will run
-// them, what a run would do now, and the latest of what the tickets did. The
-// map is the first thing a short screen gives up, then the Run panel's detail;
-// the tickets are never cut, a longer page scrolls with the cursor.
+// them, the ticket under the cursor in detail, what a run would do now, and the
+// latest of what the tickets did. The map is the first thing a short screen
+// gives up, then the Run panel's detail, then the Detail panel's rows down to
+// one; the tickets are never cut, a longer page scrolls with the cursor.
 func (m *Model) chartPage(name string) page {
 	var p page
 	c := m.w.charts[name]
@@ -28,23 +30,47 @@ func (m *Model) chartPage(name string) page {
 	rows := m.chartRows(c)
 	tickets := m.chartTicketsPanel(c, rows)
 
+	// The ticket detailed is the one under the cursor. The cursor is read as
+	// View clamps it, and never through selected() or page(), which call this.
+	var detail []runRow
+	detailID := ""
+	if len(rows) > 0 {
+		r := rows[min(max(m.top().sel, 0), len(rows)-1)]
+		detail, detailID = trimRuns(m.chartDetailRows(r), detailMax), r.id
+	}
+	// The heights: the tickets, the Detail and Run panels and the activity at
+	// its floor come first, and the Run panel's detail goes before the Detail
+	// panel's, which goes before the tickets are cut; what is left is the map's.
+	frame := func(n int) int {
+		if n == 0 {
+			return 0
+		}
+		return 2 + n
+	}
 	var run []runRow
+	if c.info != nil {
+		run = m.runRows(c.info)
+	}
+	spare := m.bodyRows() - len(tickets.lines) - frame(len(detail)) - frame(len(run)) - activityFloor
+	if spare < 0 && len(run) > 1 {
+		cut := min(-spare, len(run)-1)
+		run = trimRuns(run, len(run)-cut)
+		spare += cut
+	}
+	if spare < 0 && len(detail) > 1 {
+		cut := min(-spare, len(detail)-1)
+		detail = trimRuns(detail, len(detail)-cut)
+		spare += cut
+	}
 	var mapPanel page
 	if c.info != nil {
-		// The heights: the tickets, the Run panel and the activity at its floor
-		// come first, and the Run panel's detail goes before the tickets are
-		// cut; what is left is the map's.
-		run = m.runRows(c.info)
-		spare := m.bodyRows() - len(tickets.lines) - (2 + len(run)) - activityFloor
-		if spare < 0 {
-			cut := min(-spare, len(run)-1)
-			run = trimRuns(run, len(run)-cut)
-			spare += cut
-		}
 		m.mapPanel(&mapPanel, c, spare)
 	}
 	p.lines = append(p.lines, mapPanel.lines...)
 	p.lines = append(p.lines, tickets.lines...)
+	if len(detail) > 0 {
+		m.detailPanel(&p, detailID, detail)
+	}
 	if c.info != nil {
 		p.boxTop("Run", runWord(c.info))
 		for _, r := range run {
@@ -52,7 +78,11 @@ func (m *Model) chartPage(name string) page {
 		}
 		p.boxEnd()
 	}
-	m.chartActivityPanel(&p, rows)
+	var history []chartCommit
+	if c.info != nil {
+		history = c.info.History
+	}
+	m.chartActivityPanel(&p, rows, history)
 	return p
 }
 
@@ -129,6 +159,8 @@ func (m *Model) chartNote(r chartRow) (note string, own bool) {
 	switch {
 	case r.verb != nil && r.verb.Problem != "":
 		return m.st.state(StateStalled, r.verb.Problem), true
+	case r.behind:
+		return m.st.state(StateReady, behindWord) + m.st.dim(" · "+behindOwes), true
 	case r.t != nil && (r.done || r.needs || len(r.t.stepLines(stepBuild)) > 0):
 		return m.ticketDetail(r.t, r.steps), false
 	case r.done:
@@ -151,7 +183,8 @@ type runRow struct {
 }
 
 // runRows are what a run of the chart would do: the prompt that starts it,
-// what it briefs, the waves it builds, and where it ends.
+// what it briefs, the waves it builds, where it ends, and last what it has
+// cost so far.
 func (m *Model) runRows(info *chartInfo) []runRow {
 	next := m.st.dim("nothing to run")
 	switch {
@@ -177,7 +210,37 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 		}
 		rows = append(rows, runRow{label, endNote(e), 1})
 	}
+	if info.Spend != nil {
+		rows = append(rows, runRow{"spend", spendWords(info.Spend), 2})
+	}
 	return rows
+}
+
+// spendWords is what a chart's run has cost, in the parts the Run panel's row
+// joins with " · ": the tokens, the dollars when a model has a price, how many
+// tickets and subagents it spans, and the models that have no price last.
+func spendWords(s *chartSpend) string {
+	parts := []string{tokens(s.Tokens) + " tokens"}
+	if s.USD > 0 {
+		parts = append(parts, dollars(s.USD))
+	}
+	parts = append(parts, strconv.Itoa(s.Tickets)+" "+plural(s.Tickets, "ticket", "tickets"))
+	if s.Agents > 0 {
+		parts = append(parts, strconv.Itoa(s.Agents)+" "+plural(s.Agents, "subagent", "subagents"))
+	}
+	if len(s.Unpriced) > 0 {
+		parts = append(parts, "no price for "+andList(s.Unpriced))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// andList joins words as prose, as the CLI's does for the models of its spend line:
+// "a", "a and b", "a, b and c".
+func andList(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }
 
 // trimRuns is rows cut to n lines, the least important first (the last of
@@ -320,17 +383,37 @@ func (m *Model) mapLines(mp *chartMap, w, n int) []string {
 	return out[:min(len(out), n)]
 }
 
-// chartLine is a line of the chart's activity: a ticket's log line.
+// chartLine is a line of the chart's activity: a ticket's log line, or (commit
+// set) a commit of the store that touched the chart's folder. at is its instant
+// either way.
 type chartLine struct {
 	id string
 	t  *ticket
 	placedLine
+	commit *chartCommit
+	at     time.Time
 }
 
-// chartActivityPanel adds the latest lines of every ticket of the chart to p,
-// newest first, each with the ticket and the step it belongs to: as many as the
-// rows left below p allow, two at least.
-func (m *Model) chartActivityPanel(p *page, rows []chartRow) {
+// The words of a commit's line: "chart" stands where a ticket's id does and
+// "store" where its step does.
+const (
+	chartCommitID  = "chart"
+	chartCommitTag = "store"
+)
+
+// tag is the line's place: the step it belongs to, or "store" for a commit.
+func (c chartLine) tag() string {
+	if c.commit != nil {
+		return chartCommitTag
+	}
+	return tagOf(c.step, c.key)
+}
+
+// chartActivityPanel adds the latest lines of the chart to p, newest first:
+// every ticket's, each with the ticket and the step it belongs to, and the
+// commits of the chart's folder in the store (history, newest first), as many
+// as the rows left below p allow, two at least.
+func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartCommit) {
 	var all []chartLine
 	idW := 0
 	for _, r := range rows {
@@ -339,14 +422,20 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow) {
 		}
 		idW = max(idW, width(r.id))
 		for _, pl := range m.placed(r.t, r.d) {
-			all = append(all, chartLine{r.id, r.t, pl})
+			at, _ := pl.l.At()
+			all = append(all, chartLine{id: r.id, t: r.t, placedLine: pl, at: at})
 		}
 	}
-	sort.SliceStable(all, func(i, j int) bool {
-		a, _ := all[i].l.At()
-		b, _ := all[j].l.At()
-		return a.Before(b)
-	})
+	if len(history) > 0 {
+		idW = max(idW, width(chartCommitID))
+	}
+	// The commits come after the tickets' lines, oldest first, so that at one
+	// instant the stable sort keeps git's order (the newer above the older) and
+	// a commit stands above a ticket's line.
+	for i := len(history) - 1; i >= 0; i-- {
+		all = append(all, chartLine{id: chartCommitID, commit: &history[i], at: history[i].Time})
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].at.Before(all[j].at) })
 	keep := max(activityFloor-2, m.bodyRows()-len(p.lines)-2)
 	right := ""
 	if n := len(all); n > keep {
@@ -359,11 +448,15 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow) {
 	var shown []chartLine
 	tagW := 0
 	for i := len(all) - 1; i >= 0 && len(shown) < keep; i-- {
-		tagW = max(tagW, min(tagMaxW, width(tagOf(all[i].step, all[i].key))))
+		tagW = max(tagW, min(tagMaxW, width(all[i].tag())))
 		shown = append(shown, all[i])
 	}
 	for _, e := range shown {
-		tag := pad(tagOf(e.step, e.key), tagW)
+		tag := pad(e.tag(), tagW)
+		if e.commit != nil {
+			p.boxAdd(m.st.dim(clockAt(e.at, m.zone)) + " " + pad(e.id, idW) + " " + m.st.dim(tag) + " " + m.st.dim("· "+short(e.commit.SHA)) + " " + e.commit.Subject)
+			continue
+		}
 		if e.step >= 0 {
 			tag = m.st.state(stepTagState[e.step], tag)
 		} else {

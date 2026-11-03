@@ -1108,3 +1108,59 @@ func TestChartNamesNoChartsDir(t *testing.T) {
 		t.Fatalf("ChartNames = %v, want none", names)
 	}
 }
+
+// TestChartHistory reads the commits of one chart's folder: its own and no
+// neighbor's (charts/<name>-two/ shares the prefix, tickets/ is another
+// folder), newest first, bounded by the limit. A store with no commit has no
+// history to read, which is an error, and a chart no commit touched has none.
+func TestChartHistory(t *testing.T) {
+	t.Parallel()
+	st, work, _ := newTestRemoteStore(t)
+	if got, want := st.ChartFile("demo"), filepath.Join(work, "charts", "demo", "tickets.yaml"); got != want {
+		t.Errorf("ChartFile = %q, want %q", got, want)
+	}
+	if got, err := st.ChartHistory("demo", 10); err != nil || len(got) != 0 {
+		t.Errorf("ChartHistory before any commit under it = %+v, %v, want none", got, err)
+	}
+
+	commit := func(path, subject string) string {
+		t.Helper()
+		full := filepath.Join(work, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(subject), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, work, "add", path)
+		runGit(t, work, "commit", "-m", subject)
+		return strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+	}
+	graduate := commit("charts/demo/tickets.yaml", "chart demo: graduate SHOP-1")
+	commit("charts/demo-two/tickets.yaml", "chart demo-two: graduate SHOP-9")
+	commit("tickets/SHOP-9/ticket.yaml", "SHOP-9: a ticket only")
+	edit := commit("charts/demo/map.md", "demo: edit the map")
+
+	got, err := st.ChartHistory("demo", 10)
+	if err != nil {
+		t.Fatalf("ChartHistory: %v", err)
+	}
+	if len(got) != 2 || got[0].SHA != edit || got[1].SHA != graduate {
+		t.Fatalf("ChartHistory = %+v, want %s then %s: only charts/demo/, newest first", got, edit, graduate)
+	}
+	if got[0].Subject != "demo: edit the map" || got[1].Subject != "chart demo: graduate SHOP-1" || got[0].Time.IsZero() {
+		t.Errorf("ChartHistory = %+v, want the subjects and a time", got)
+	}
+	if got, err := st.ChartHistory("demo", 1); err != nil || len(got) != 1 || got[0].SHA != edit {
+		t.Errorf("ChartHistory with limit 1 = %+v, %v, want only %s", got, err, edit)
+	}
+	if got, err := st.ChartHistory("no-such-chart", 10); err != nil || len(got) != 0 {
+		t.Errorf("ChartHistory of a chart no commit touched = %+v, %v, want none", got, err)
+	}
+
+	unborn := t.TempDir()
+	runGit(t, unborn, "init", "-b", "main")
+	if got, err := (&Store{Root: unborn}).ChartHistory("demo", 10); err == nil {
+		t.Errorf("ChartHistory of a store with no commit = %+v, want an error", got)
+	}
+}

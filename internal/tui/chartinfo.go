@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // A chart reaches the screens through two reads, both verbs: the store listing
@@ -39,8 +40,26 @@ type chartInfo struct {
 	Tickets []chartTicket
 	// Ends are the tickets the run stops at, each behind a merge.
 	Ends []chartEnd
+	// History are the commits of the store that changed something under the
+	// chart's folder, newest first, as the verb printed them; none for an older
+	// jig, which says none.
+	History []chartCommit
 	// Map is the chart's map.md; nil when it has none.
 	Map *chartMap
+	// Spend is what the run has cost so far; nil when no ticket has any, and
+	// for an older jig, which says none.
+	Spend *chartSpend
+}
+
+// chartSpend is the chart's spend: the sum of its tickets' latest spend lines,
+// subagents included. Tickets counts the tickets that have spend and Agents
+// the subagent lines among them; Unpriced are the models with tokens and no
+// price, whose dollars are not in USD.
+type chartSpend struct {
+	Tickets, Agents int
+	Tokens          int64
+	USD             float64
+	Unpriced        []string
 }
 
 // chartTicket is one entry of a chart: a ticket, or (ID "") an entry that has
@@ -72,6 +91,13 @@ type chartPR struct{ Repo, URL, State string }
 type chartEnd struct {
 	Ticket, Blocker, Kind, Fact string
 	PRs                         []chartPR
+}
+
+// chartCommit is a commit of the store that touched the chart's folder: a map
+// edit, a graduation. It is the chart's own history, which no journal keeps.
+type chartCommit struct {
+	SHA, Subject string
+	Time         time.Time
 }
 
 // chartMap is the sections of a chart's map.md the screen shows.
@@ -133,12 +159,24 @@ func parseChart(out string) (*chartInfo, error) {
 			Fact    string    `json:"fact"`
 			PRs     []chartPR `json:"prs"`
 		} `json:"ends"`
+		History []struct {
+			SHA     string `json:"sha"`
+			Time    string `json:"time"`
+			Subject string `json:"subject"`
+		} `json:"history"`
 		Map *struct {
 			Destination []string `json:"destination"`
 			Decided     []string `json:"decided"`
 			Fog         []string `json:"fog"`
 			OutOfScope  []string `json:"out_of_scope"`
 		} `json:"map"`
+		Spend *struct {
+			Tickets  int      `json:"tickets"`
+			Agents   int      `json:"agents"`
+			Tokens   int64    `json:"tokens"`
+			USD      float64  `json:"usd"`
+			Unpriced []string `json:"unpriced"`
+		} `json:"spend"`
 	}
 	if err := json.Unmarshal([]byte(obj), &v); err != nil {
 		var syntax *json.SyntaxError
@@ -164,8 +202,17 @@ func parseChart(out string) (*chartInfo, error) {
 	for _, e := range v.Ends {
 		info.Ends = append(info.Ends, chartEnd{Ticket: e.Ticket, Blocker: e.Blocker, Kind: e.Kind, Fact: e.Fact, PRs: e.PRs})
 	}
+	for _, h := range v.History {
+		// An entry whose time cannot be placed among the lines is left out.
+		if at, err := time.Parse(time.RFC3339, h.Time); err == nil {
+			info.History = append(info.History, chartCommit{SHA: h.SHA, Subject: h.Subject, Time: at})
+		}
+	}
 	if v.Map != nil {
 		info.Map = &chartMap{Destination: v.Map.Destination, Decided: v.Map.Decided, Fog: v.Map.Fog, OutOfScope: v.Map.OutOfScope}
+	}
+	if v.Spend != nil {
+		info.Spend = &chartSpend{Tickets: v.Spend.Tickets, Agents: v.Spend.Agents, Tokens: v.Spend.Tokens, USD: v.Spend.USD, Unpriced: v.Spend.Unpriced}
 	}
 	return info, nil
 }

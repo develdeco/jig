@@ -39,7 +39,7 @@ jig next JIG-4        # its ready slices by repo, and the branch to work on
 jig next JIG-4 --topology   # every slice with its repo, wave and blockers
 ```
 
-A ticket is `ready` when it has a slice that is queued with every blocker green and nothing blocks the ticket; a blocked ticket names the ticket it waits for. Slices of one repo build one after the other; repos are independent, so a ready set that spans repos can go to one session each. Create the branch `jig next` names in each repo; `jig here` then binds it to the ticket.
+A ticket is `ready` when it has a slice that is queued with every blocker green and nothing blocks the ticket; a blocked ticket names the ticket it waits for. Slices of one repo build one after the other; repos are independent, so a ready set that spans repos can go to one session each. Create the branch `jig next` names in each repo, or add its worktree (`worktrees` in `jig next <T>`); `jig here` then binds it to the ticket.
 
 When `jig next` ends with an `overlap` table, two tickets' local branches change the same file: build them one after the other.
 

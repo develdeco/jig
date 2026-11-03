@@ -245,7 +245,7 @@ func TestMergedParentRetargets(t *testing.T) {
 	r := runJig(t, env, fx.RepoDir, "next", "JIG-1")
 	for _, want := range []string{
 		"stack[1]{repo,parent,start_from,pr_target}:\n  fixture-repo,JIG-2 (merged),origin/main,main\n",
-		"note: JIG-2 merged in fixture-repo: retarget the PR of JIG-1 to main and merge main (`git merge origin/main`)",
+		"note: JIG-2 merged in fixture-repo: merge main (`git merge origin/main`); the publish of JIG-1 points its PR at main, but the hand-off (`--body`, then `--pr`) does not: run `gh pr edit <pr> --base main`",
 	} {
 		if !strings.Contains(r.Stdout, want) {
 			t.Errorf("jig next JIG-1 lacks %q:\n%s", want, r.Stdout)
@@ -256,17 +256,17 @@ func TestMergedParentRetargets(t *testing.T) {
 		t.Fatalf("SessionStart exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	ctx := corrContext(t, h.Hook("UserPromptSubmit", map[string]any{"prompt": "go on"}))
-	if want := "JIG-1 is stacked on JIG-2, and the parent merged in fixture-repo: retarget the PR to main and merge main (`git merge origin/main`)"; !strings.Contains(ctx, want) {
+	if want := "JIG-1 is stacked on JIG-2, and the parent merged in fixture-repo: merge main (`git merge origin/main`); `jig publish` points the PR at main, but the hand-off (`--body`, then `--pr`) does not: run `gh pr edit <pr> --base main`."; !strings.Contains(ctx, want) {
 		t.Fatalf("prompt context = %q, want %q", ctx, want)
 	}
-	if res := h.Hook("UserPromptSubmit", map[string]any{"prompt": "again"}); strings.Contains(res.Stdout, "retarget") {
+	if res := h.Hook("UserPromptSubmit", map[string]any{"prompt": "again"}); strings.Contains(res.Stdout, "the parent merged") {
 		t.Errorf("a second prompt was told the retarget again: %q", res.Stdout)
 	}
 	later := newHarness(t, fx, env, "s-later")
 	if res := later.Hook("SessionStart", map[string]any{"source": "startup"}); res.Code != 0 {
 		t.Fatalf("SessionStart of s-later exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	if res := later.Hook("UserPromptSubmit", map[string]any{"prompt": "hello"}); strings.Contains(res.Stdout, "retarget") {
+	if res := later.Hook("UserPromptSubmit", map[string]any{"prompt": "hello"}); strings.Contains(res.Stdout, "the parent merged") {
 		t.Errorf("a later session was told the retarget: %q", res.Stdout)
 	}
 	var retargets int

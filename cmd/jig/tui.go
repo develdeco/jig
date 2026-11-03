@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/tui"
@@ -13,8 +14,9 @@ import (
 // The usage lines of `jig tui`'s flags: the help row and the FlagSet carry the
 // same text, which the help parity test compares.
 const (
-	tuiStoreUsage   = "explicit store path"
-	tuiProjectUsage = "project name, resolved via the machine mapping"
+	tuiStoreUsage      = "explicit store path"
+	tuiProjectUsage    = "project name, resolved via the machine mapping"
+	tuiMergeEveryUsage = "how often a screen that waits on a merge is read again (default 2m)"
 )
 
 // init registers this file's verb with the registry (registry.go).
@@ -23,6 +25,7 @@ func init() {
 		Spec: cmdSpec{"tui", "browse a store's tickets and charts in the terminal and drive them: answer, decide asks, gate, publish", []flagSpec{
 			{"store", tuiStoreUsage, false},
 			{"project", tuiProjectUsage, false},
+			{"merge-every", tuiMergeEveryUsage, false},
 		}, false},
 		Order: 360,
 		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
@@ -31,7 +34,7 @@ func init() {
 	})
 }
 
-// cmdTUI implements `jig tui [T|C] [--store P] [--project N]`: eight screens
+// cmdTUI implements `jig tui [T|C] [--store P] [--project N] [--merge-every D]`: eight screens
 // (the project, a ticket, its brief, build, review and publish, a slice, a
 // chart) over the event stream `jig events` prints, acting only by running
 // verbs (internal/tui). With a ticket the screens open on it, with a chart (a
@@ -44,6 +47,12 @@ func init() {
 // and fills in once the ticket exists. A malformed id, or one under a key the
 // project does not declare, is refused as before.
 //
+// A merge on the host writes no line to any journal, so a screen that waits on
+// one (a chart whose run ends at a merge, a published ticket with a pull
+// request that is not closed) is read again on a timer: every two minutes, or
+// every --merge-every, a duration such as 30s or 5m. A negative duration is
+// refused; the timer is turned off only by the Config, for tests.
+//
 // On a terminal the screens take over the screen. Where stdout is not one,
 // each screen is printed whole as it changes, and keys are read from stdin
 // as they arrive, so a script can drive it.
@@ -51,6 +60,7 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	fs := newFlagSet(e, "tui")
 	storeFlag := fs.String("store", "", tuiStoreUsage)
 	projectFlag := fs.String("project", "", tuiProjectUsage)
+	mergeEvery := fs.Duration("merge-every", 0, tuiMergeEveryUsage)
 	positionals, handled, err := parseWithPositionals(stdout, fs, args)
 	if handled {
 		return 0
@@ -60,6 +70,13 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, err := atMostOne(positionals, "jig tui", "ticket or chart")
 	if err != nil {
 		return renderErr(stdout, err)
+	}
+	if *mergeEvery < 0 {
+		return renderErr(stdout, &axi.Error{
+			Msg:  "--merge-every must not be negative",
+			Code: "VALIDATION_ERROR",
+			Help: []string{"Give a duration such as 30s or 5m; leave the flag out for the default of 2m"},
+		})
 	}
 	if *storeFlag, err = e.abs(*storeFlag); err != nil {
 		return renderErr(stdout, err)
@@ -99,13 +116,14 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		Journals: func() ([]events.Journal, error) { return storeJournals(st, cfg.Name) },
 	}
 	err = tui.Run(e.ctx, tui.Config{
-		Source:   eventsSource{scope},
-		Run:      tuiRunner(e),
-		Ticket:   ticket,
-		Chart:    chart,
-		Awaiting: awaiting,
-		Scope:    []string{"--store", st.Root},
-		Project:  cfg.Name,
+		Source:     eventsSource{scope},
+		Run:        tuiRunner(e),
+		Ticket:     ticket,
+		Chart:      chart,
+		Awaiting:   awaiting,
+		Scope:      []string{"--store", st.Root},
+		Project:    cfg.Name,
+		MergeEvery: *mergeEvery,
 	}, stdin, stdout, e.stdoutIsTerminal(stdout))
 	if err != nil {
 		return renderErr(stdout, err)

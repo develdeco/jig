@@ -126,6 +126,7 @@ func TestTUIRefusesWhatItCannotOpen(t *testing.T) {
 		{"a ticket under a key the project does not declare", e, []string{"NOPE-1"}, 2, `does not declare key "NOPE"`},
 		{"two tickets", e, []string{fx.Ticket, "JIG-2"}, 2, "at most one ticket"},
 		{"unknown flag", e, []string{"--nope"}, 2, "--nope"},
+		{"a negative merge interval", e, []string{"--merge-every", "-1s"}, 2, "--merge-every must not be negative"},
 		{"unknown project", e, []string{"--project", "nope"}, 2, `no project "nope"`},
 		{"no store", testEnv(t.TempDir()).inDir(t.TempDir()), nil, 2, "jig store"},
 	} {
@@ -139,11 +140,27 @@ func TestTUIRefusesWhatItCannotOpen(t *testing.T) {
 func TestTUIHelpListsItsFlags(t *testing.T) {
 	t.Parallel()
 	out, code := runMain(t, testEnv(t.TempDir()), "", "tui", "-h")
-	if code != 0 || !strings.Contains(out, "--store") || !strings.Contains(out, "--project") {
+	if code != 0 || !strings.Contains(out, "--store") || !strings.Contains(out, "--project") || !strings.Contains(out, "--merge-every") {
 		t.Errorf("jig tui -h: exit %d\n%s", code, out)
 	}
 	if help, _ := runMain(t, testEnv(t.TempDir()), "", "-h"); !strings.Contains(help, "tui,") {
 		t.Errorf("jig -h does not list tui:\n%s", help)
+	}
+}
+
+// TestTUIMergeEveryTakesADuration: --merge-every sets how often a screen that
+// waits on a merge is read again. A duration opens the screens as usual, and
+// text that is no duration is refused before any screen, naming the flag.
+func TestTUIMergeEveryTakesADuration(t *testing.T) {
+	t.Parallel()
+	_, _, e := workFixture(t)
+	out, code := runMain(t, e, "q", "tui", "--merge-every", "1h")
+	if code != 0 || !strings.Contains(out, "\f") {
+		t.Errorf("jig tui --merge-every 1h: exit %d, want 0 with a screen\n%s", code, out)
+	}
+	out, code = runMain(t, e, "q", "tui", "--merge-every", "soon")
+	if code != 2 || !strings.Contains(out, "merge-every") || strings.Contains(out, "\f") {
+		t.Errorf("jig tui --merge-every soon: exit %d, want 2 naming the flag and no screen\n%s", code, out)
 	}
 }
 

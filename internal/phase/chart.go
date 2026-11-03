@@ -15,15 +15,20 @@ import (
 // The chart codes: why the chart cannot be taken on in this run. Like the
 // ticket codes, they are the same wherever they are read.
 const (
-	// CodeChartDone: every ticket of the chart is published or closed.
+	// CodeChartDone: every ticket of the chart is published or closed, and none
+	// of the published ones is stacked on a parent whose pull request is open.
 	CodeChartDone = "CHART_DONE"
 	// CodeChartWaitsMerge: nothing can start in this run and a pull request
-	// has to merge first; "Continue <chart>" resumes once it has.
+	// has to merge first (so has the pull request of a parent that a published
+	// ticket is stacked on, which owes it a retarget); "Continue <chart>"
+	// resumes once it has.
 	CodeChartWaitsMerge = "CHART_WAITS_MERGE"
 	// CodeChartBlocked: nothing can start and no merge frees it.
 	CodeChartBlocked = "CHART_BLOCKED"
 	// CodeChartNotGraduated: the chart has entries with no ticket yet and
-	// nothing else to run: `jig graduate <chart>` mints them.
+	// nothing else to run: `jig graduate <chart>` mints them (`jig validate
+	// <chart>` first while one has a problem). A chart with no entries at all
+	// has it too: the entries are still to be written.
 	CodeChartNotGraduated = "CHART_NOT_GRADUATED"
 )
 
@@ -66,7 +71,10 @@ type ChartNeed struct {
 	// claim's code and its sentence.
 	Code, Why string
 	// PRs are the pull requests a merged need waits on, once the blocker
-	// published and they are recorded.
+	// published and they are recorded. For a stacked need of a published ticket
+	// they are the parent's pull requests that have not merged: the merge of one
+	// owes the ticket a retarget, so the ticket is done and still waits on it
+	// (Why says so).
 	PRs []MergePR
 }
 
@@ -116,7 +124,9 @@ type ChartRow struct {
 	Problem string
 }
 
-// ChartEnd is where a run ends: row Pos waits on Because, a merged edge.
+// ChartEnd is where a run ends: row Pos waits on Because, a merged edge, or the
+// stacked edge of a published ticket whose parent's pull request is open (the
+// ticket is done until that merges, and owed a retarget after).
 type ChartEnd struct {
 	Pos     int
 	ID      string
@@ -138,7 +148,10 @@ type Chart struct {
 	// earlier one.
 	Run [][]string
 	// Ends are the entries after a merge because of their own unmet merged
-	// edge (not through another entry), with the pull requests it waits on.
+	// edge (not through another entry), with the pull requests it waits on, and
+	// the published entries stacked on a parent whose pull request is open. The
+	// chart is not done while there is one: the parent's merge makes the entry's
+	// branch owed a retarget, a change that nothing else in the chart announces.
 	Ends []ChartEnd
 	// Started says the run began before: a graduated ticket's brief is done
 	// (so is any ticket past it). It is the line between "Take" and
@@ -222,7 +235,11 @@ func DeriveChart(f ChartFacts) Chart {
 
 	d.runWaves(&c)
 	for _, r := range c.Rows {
-		if r.ID == "" || r.Done {
+		if r.ID == "" {
+			continue
+		}
+		if r.Done {
+			c.Ends = append(c.Ends, d.retargetEnds(r)...)
 			continue
 		}
 		if r.Ticket != nil && r.Ticket.Current == Brief && (r.Reach == ReachHere || r.Reach == ReachAfterMerge) {
@@ -245,6 +262,25 @@ func DeriveChart(f ChartFacts) Chart {
 	c.Ready = len(c.Briefs) > 0 || len(c.Run) > 0
 	d.verdict(&c)
 	return c
+}
+
+// retargetEnds are the ends of done row r: a published ticket (a closed one
+// owes nothing) stacked on a parent whose pull request is still open. A stacked
+// edge is met by the parent's clean gate round, so the row is done now; once the
+// parent merges the ticket is owed a retarget (ADR 0038) and the chart is ready
+// again. The reader names the open pull requests only on such a need, so a
+// stacked need that has none is no end.
+func (d *chartDeriver) retargetEnds(r ChartRow) []ChartEnd {
+	if r.Ticket == nil || r.Ticket.Code != CodeDone {
+		return nil
+	}
+	var out []ChartEnd
+	for _, n := range d.f.Entries[d.byPos[r.Pos]].Needs {
+		if n.stacked() && len(n.PRs) > 0 {
+			out = append(out, ChartEnd{Pos: r.Pos, ID: r.ID, Because: n})
+		}
+	}
+	return out
 }
 
 // rowBefore orders the rows: by wave (a cycle last), then rank (none last),
@@ -326,6 +362,10 @@ func (d *chartDeriver) reachOf(i int) string {
 	switch {
 	case d.done(i):
 		reach = ReachDone
+	case e.ID == "" && e.Problem != "":
+		// An entry with no ticket yet has a problem in the chart's own file (a
+		// ref that does not resolve), not an unreadable ticket.
+		reach, why = ReachBlocked, d.label(i)+" has a problem: "+e.Problem
 	case e.Problem != "" || e.ID != "" && e.Ticket == nil:
 		reach, why = ReachBlocked, d.label(i)+" cannot be read: "+e.Problem
 	default:
@@ -468,11 +508,15 @@ func (d *chartDeriver) verdict(c *Chart) {
 		if c.Ungraduated > 0 {
 			c.Reason = missing
 		}
+	case len(c.Rows) == 0:
+		// A chart just made: there is nothing to graduate, which graduate
+		// refuses, so the next step is to add entries and check them.
+		c.Code, c.Reason = CodeChartNotGraduated, fmt.Sprintf("the chart has no entries yet: add them to charts/%s/tickets.yaml and check them with `jig validate %s`", c.Name, c.Name)
 	case graduated == 0:
-		c.Code, c.Reason = CodeChartNotGraduated, fmt.Sprintf("run `jig graduate %s`", c.Name)
+		c.Code, c.Reason = CodeChartNotGraduated, c.graduateStep()
 	case done == graduated && c.Ungraduated > 0:
-		c.Code, c.Reason = CodeChartNotGraduated, fmt.Sprintf("%s: run `jig graduate %s`", missing, c.Name)
-	case done == graduated:
+		c.Code, c.Reason = CodeChartNotGraduated, missing+": "+c.graduateStep()
+	case done == graduated && len(c.Ends) == 0:
 		c.Code = CodeChartDone
 	case len(c.Ends) > 0:
 		c.Code, c.Prompt = CodeChartWaitsMerge, ContinuePrompt(c.Name)
@@ -488,6 +532,27 @@ func (d *chartDeriver) verdict(c *Chart) {
 	}
 }
 
+// HasUngraduatedProblem says an entry with no ticket yet has a problem in the
+// chart's own file: `jig graduate` would refuse it, so `jig validate <chart>`
+// is the step that lists what is wrong.
+func (c Chart) HasUngraduatedProblem() bool {
+	for _, r := range c.Rows {
+		if r.ID == "" && r.Problem != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// graduateStep is the step that mints the entries with no ticket: `jig
+// graduate`, or, while one of them has a problem, `jig validate` first.
+func (c Chart) graduateStep() string {
+	if c.HasUngraduatedProblem() {
+		return fmt.Sprintf("run `jig validate %s` first: it lists the problems of the entries that have no ticket yet", c.Name)
+	}
+	return fmt.Sprintf("run `jig graduate %s`", c.Name)
+}
+
 // entriesWithNoTicket says how many entries wait for `jig graduate`.
 func entriesWithNoTicket(n int) string {
 	if n == 1 {
@@ -497,7 +562,9 @@ func entriesWithNoTicket(n int) string {
 }
 
 // waitsReason says what the run waits for at end: "SHOP-5 waits for SHOP-2 to
-// merge (https://... OPEN)".
+// merge (https://... OPEN)", and for a stacked end, which owes a retarget once
+// the parent has merged, "SHOP-5 waits for SHOP-2 to merge (https://... OPEN),
+// then its pull request is retargeted".
 func (d *chartDeriver) waitsReason(end ChartEnd) string {
 	blocker := end.Because.Ticket
 	if blocker == "" {
@@ -514,6 +581,9 @@ func (d *chartDeriver) waitsReason(end ChartEnd) string {
 	out := fmt.Sprintf("%s waits for %s to merge", end.ID, blocker)
 	if len(prs) > 0 {
 		out += " (" + strings.Join(prs, ", ") + ")"
+	}
+	if end.Because.stacked() {
+		out += ", then its pull request is retargeted"
 	}
 	return out
 }

@@ -237,6 +237,28 @@ type OpenRound struct {
 	Reviewer string
 }
 
+// The kinds of a Restack.
+const (
+	// RestackParent: the parent's branch moved past the ticket's, so the
+	// ticket is to merge it in.
+	RestackParent = "restack"
+	// RestackTarget: the parent merged into the target, so the ticket is to
+	// merge the target in and its pull request goes there.
+	RestackTarget = "retarget"
+)
+
+// Restack is a merge a stacked ticket's branch is owed in one repo: what its
+// stack plan asks of it (internal/stack). jig never makes the merge, the
+// session does; a published ticket that is owed one is not done.
+type Restack struct {
+	Repo string
+	// Kind is RestackParent or RestackTarget.
+	Kind string
+	// Ref is what to merge: the parent's branch ("JIG-2-parent", or
+	// "origin/JIG-2-parent" when only the origin has it) or "origin/main".
+	Ref string
+}
+
 // Facts are what the store knows of a ticket, gathered by the caller.
 type Facts struct {
 	Ticket string
@@ -271,6 +293,12 @@ type Facts struct {
 	// it is open. A closed ticket is done whatever its journal says, and no
 	// phase of it can run.
 	Closed string
+	// Restacks are the merges a stack plan owes the ticket's branch, one for
+	// each repo that asks for one: a caller that reads the plan sets them. A
+	// published ticket that has some is owed (Ticket.Behind): its publish is not
+	// done, and the ticket's own standing says so. The brief, build and review
+	// phases stay done, since the merge is part of the work that follows them.
+	Restacks []Restack
 
 	// SessionName words a session id wherever the answer names a session (who
 	// took a round, who holds a slice). role is the part the session plays in
@@ -314,6 +342,21 @@ func (t Ticket) Of(n Name) Phase {
 		return t.Phases[i]
 	}
 	return Phase{}
+}
+
+// Behind says the ticket published and its stack plan owes its branch a merge
+// (Facts.Restacks): the merge is the session's to make, and the publish that
+// follows pushes it and points the open pull request at its base. A closed
+// ticket is never behind.
+func (t Ticket) Behind() bool { return t.d != nil && t.d.owed() }
+
+// Restacks are the merges a ticket that is behind is owed, one for each repo;
+// nil for a ticket that is not.
+func (t Ticket) Restacks() []Restack {
+	if !t.Behind() {
+		return nil
+	}
+	return t.d.f.Restacks
 }
 
 // Blockers are the blockers of the ticket that stop its claim, as the facts
@@ -518,7 +561,10 @@ func EverClaimed(lines []journal.Line) bool {
 // ticket's journal lines, in order. A phase is done only when every phase
 // before it is: a review that found fixes takes the build back, and the build
 // is not done again until they are green. A published ticket is done whatever
-// it says of the earlier phases, and so is a closed one, with no prompt.
+// it says of the earlier phases, and so is a closed one, with no prompt. The one
+// exception is a published ticket whose stack plan owes its branch a merge
+// (Facts.Restacks): its publish is not done, so it is at the publish again,
+// ready, with the prompt that asks for it.
 func Derive(f Facts, lines []journal.Line) Ticket {
 	d := newDigest(f, lines)
 	pub := f.Published || f.Closed != ""
@@ -530,7 +576,7 @@ func Derive(f Facts, lines []journal.Line) Ticket {
 	reviewP, own := d.review(buildDone)
 	reviewDone := pub || own && buildDone
 	publishP, own := d.publish(reviewDone)
-	publishDone := pub || own && reviewDone
+	publishDone := pub && !d.owed() || own && reviewDone
 
 	t := Ticket{Phases: [4]Phase{briefP, buildP, reviewP, publishP}, d: d}
 	done := [4]bool{briefDone, buildDone, reviewDone, publishDone}
@@ -557,6 +603,12 @@ func Derive(f Facts, lines []journal.Line) Ticket {
 		t.stand()
 	}
 	return t
+}
+
+// owed says the ticket published and its stack plan owes its branch a merge. A
+// closed ticket is never owed.
+func (d *digest) owed() bool {
+	return d.f.Published && d.f.Closed == "" && len(d.f.Restacks) > 0
 }
 
 // stand puts the sub-steps of a closed ticket at rest: nothing of it is being
@@ -1244,6 +1296,16 @@ func (d *digest) publish(prevDone bool) (Phase, bool) {
 	case d.f.Closed != "":
 		p.Text = "closed · " + d.f.Closed
 		return p, true
+	case d.owed():
+		asks := make([]string, len(d.f.Restacks))
+		cmds := make([]string, len(d.f.Restacks))
+		for i, r := range d.f.Restacks {
+			asks[i] = "merge " + r.Ref + " in " + r.Repo
+			cmds[i] = r.Repo + ": git merge " + r.Ref
+		}
+		p.Text = "published - behind: " + strings.Join(asks, "; ")
+		p.Subs = append(p.Subs, Sub{Key: "restack", Label: "restack", State: SubActive, Detail: strings.Join(cmds, "; ")})
+		return p, false
 	case d.f.Published:
 		p.Text = "published"
 		switch {
@@ -1277,6 +1339,8 @@ func (d *digest) ready(t *Ticket) {
 	switch {
 	case f.Closed != "":
 		t.Ready, t.Code, t.Reason, t.Prompt = false, CodeClosed, d.closedReason(), ""
+	case d.owed():
+		// Published, and owed a merge: the publish is ready again.
 	case f.Published:
 		t.Ready, t.Code, t.Reason, t.Prompt = false, CodeDone, f.Ticket+" is published", ""
 	case t.Current == Build && len(f.Blockers) > 0:

@@ -386,3 +386,102 @@ func TestTrailer(t *testing.T) {
 		t.Error("an unknown commit was read")
 	}
 }
+
+// TestParseWorktrees reads the porcelain list the way git writes it: the
+// first block is the repository's own work tree, a detached or bare entry has
+// no branch, a prunable one says so, and a path with spaces is kept whole.
+func TestParseWorktrees(t *testing.T) {
+	t.Parallel()
+	const sha = "0123456789012345678901234567890123456789"
+	cases := []struct {
+		name string
+		out  string
+		want []Worktree
+	}{
+		{"nothing listed", "", nil},
+		{"the repository's own work tree", "worktree /src/repo\nHEAD " + sha + "\nbranch refs/heads/main\n",
+			[]Worktree{{Dir: "/src/repo", Branch: "main", Main: true}}},
+		{"a linked one on a branch with a slash", "worktree /src/repo\nHEAD " + sha + "\nbranch refs/heads/main\n\nworktree /src/repo.worktrees/T-1\nHEAD " + sha + "\nbranch refs/heads/feat/t-1\n",
+			[]Worktree{{Dir: "/src/repo", Branch: "main", Main: true}, {Dir: "/src/repo.worktrees/T-1", Branch: "feat/t-1"}}},
+		{"detached has no branch", "worktree /src/repo\nHEAD " + sha + "\nbranch refs/heads/main\n\nworktree /tmp/verify\nHEAD " + sha + "\ndetached\n",
+			[]Worktree{{Dir: "/src/repo", Branch: "main", Main: true}, {Dir: "/tmp/verify"}}},
+		{"a bare repository", "worktree /src/repo.git\nbare\n\nworktree /src/wt\nHEAD " + sha + "\nbranch refs/heads/main\n",
+			[]Worktree{{Dir: "/src/repo.git", Main: true}, {Dir: "/src/wt", Branch: "main"}}},
+		{"prunable and locked", "worktree /src/repo\nHEAD " + sha + "\nbranch refs/heads/main\n\nworktree /gone/wt\nHEAD " + sha + "\nbranch refs/heads/old\nlocked\nprunable gitdir file points to non-existent location\n",
+			[]Worktree{{Dir: "/src/repo", Branch: "main", Main: true}, {Dir: "/gone/wt", Branch: "old", Prunable: true}}},
+		{"a path with spaces and windows line ends", "worktree C:/My Work/repo one\r\nHEAD " + sha + "\r\nbranch refs/heads/main\r\n\r\nworktree C:/My Work/repo one.worktrees/T-1\r\nHEAD " + sha + "\r\nbranch refs/heads/t-1\r\n",
+			[]Worktree{{Dir: "C:/My Work/repo one", Branch: "main", Main: true}, {Dir: "C:/My Work/repo one.worktrees/T-1", Branch: "t-1"}}},
+		{"blank lines between blocks are only separators", "\n\nworktree /src/repo\nbranch refs/heads/main\n\n\n\nworktree /src/wt\nbranch refs/heads/b\n\n",
+			[]Worktree{{Dir: "/src/repo", Branch: "main", Main: true}, {Dir: "/src/wt", Branch: "b"}}},
+		{"a block without a worktree line is skipped", "HEAD " + sha + "\nbranch refs/heads/x\n\nworktree /src/repo\nbranch refs/heads/main\n",
+			[]Worktree{{Dir: "/src/repo", Branch: "main", Main: true}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			got := parseWorktrees(c.out)
+			if len(got) != len(c.want) {
+				t.Fatalf("parseWorktrees = %+v, want %+v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Errorf("worktree %d = %+v, want %+v", i, got[i], c.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestWorktrees lists what the git program says about a real repository: its
+// own work tree first, a linked worktree with the branch it holds, a detached
+// one with none, and one whose directory is gone as prunable.
+func TestWorktrees(t *testing.T) {
+	t.Parallel()
+	repo := initRepo(t, filepath.Join(t.TempDir(), "origin.git"))
+	outside := t.TempDir()
+	linked := filepath.Join(outside, "repo with space.worktrees", "T-1")
+	detached := filepath.Join(outside, "detached")
+	gone := filepath.Join(outside, "gone")
+	mustRun(t, repo, "worktree", "add", "-q", linked, "-b", "feat/t-1")
+	if err := WorktreeAddDetached(repo, detached, "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, repo, "worktree", "add", "-q", gone, "-b", "gone-branch")
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+
+	trees, err := Worktrees(repo)
+	if err != nil {
+		t.Fatalf("Worktrees: %v", err)
+	}
+	byBranch := map[string]Worktree{}
+	var detachedTrees []Worktree
+	for _, w := range trees {
+		if w.Branch == "" {
+			detachedTrees = append(detachedTrees, w)
+			continue
+		}
+		byBranch[w.Branch] = w
+	}
+	if len(trees) != 4 || !trees[0].Main || !SameDir(trees[0].Dir, repo) || trees[0].Branch != "main" || trees[0].Prunable {
+		t.Fatalf("Worktrees = %+v, want the repo's own work tree first on main among four", trees)
+	}
+	if w, ok := byBranch["feat/t-1"]; !ok || w.Main || w.Prunable || !SameDir(w.Dir, linked) {
+		t.Errorf("the linked worktree = %+v, %v, want %s on feat/t-1, not main, not prunable", w, ok, linked)
+	}
+	if w, ok := byBranch["gone-branch"]; !ok || !w.Prunable || w.Main {
+		t.Errorf("the worktree whose directory is gone = %+v, %v, want it prunable", w, ok)
+	}
+	if len(detachedTrees) != 1 || detachedTrees[0].Main || detachedTrees[0].Prunable || !SameDir(detachedTrees[0].Dir, detached) {
+		t.Errorf("detached worktrees = %+v, want %s alone", detachedTrees, detached)
+	}
+}
+
+// TestWorktreesOfANonRepository is an error, not an empty list.
+func TestWorktreesOfANonRepository(t *testing.T) {
+	t.Parallel()
+	if trees, err := Worktrees(t.TempDir()); err == nil {
+		t.Errorf("Worktrees of a directory that is no repository = %+v, want an error", trees)
+	}
+}

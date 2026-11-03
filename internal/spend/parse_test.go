@@ -31,7 +31,9 @@ func TestParseAndFormat(t *testing.T) {
 			t.Errorf("Compact(%d) = %q, want %q", n, got, want)
 		}
 	}
-	if got := Dollars(12.5); got != "$12.50" {
-		t.Errorf("Dollars(12.5) = %q", got)
+	for usd, want := range map[float64]string{12.5: "$12.50", 0: "$0.00", 0.0049: "<$0.01", 0.005: "$0.01"} {
+		if got := Dollars(usd); got != want {
+			t.Errorf("Dollars(%v) = %q, want %q", usd, got, want)
+		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -664,6 +665,111 @@ func TestResolveScopeBaseDeltaWhenPriorReviewedSHAIsAncestor(t *testing.T) {
 	if base != round1Head {
 		t.Errorf("base = %q, want round 1's reviewed sha %q", base, round1Head)
 	}
+}
+
+// TestResolveScopeBaseAfterAMerge: a delta round after the session merged the
+// target into the branch reviews the merge's resolution, not everything the
+// target brought in. The base is the head itself for a merge git made on its own
+// (the diff is empty), a tree - git's own merge of the tip's parents - for a tip
+// resolved by hand (the diff is the hand edits), and the reviewed head for any
+// other line. The scope is a delta in all of them.
+func TestResolveScopeBaseAfterAMerge(t *testing.T) {
+	t.Parallel()
+
+	setup := func(t *testing.T) (dir string, st *store.Store, run func(args ...string) string, round1 string) {
+		t.Helper()
+		dir = newReviewLease(t, "main")
+		run = func(args ...string) string {
+			t.Helper()
+			out, err := gitx.RunEnv(dir, reviewGitEnv, args...)
+			if err != nil {
+				t.Fatalf("git %v: %v", args, err)
+			}
+			return out
+		}
+		run("config", "core.autocrlf", "false")
+		run("switch", "-c", "work")
+		writeReviewFile(t, dir, "work.go", "1")
+		round1 = commitReviewLease(t, dir, "round 1")
+		st = newReviewStore(t)
+		if err := os.MkdirAll(gateRoundDir(st, "JIG-1", 1), 0o755); err != nil {
+			t.Fatalf("mkdir round 1 dir: %v", err)
+		}
+		if err := writeReportYAML(gateRoundDir(st, "JIG-1", 1), GateReport{Round: 1, ReviewedSHA: map[string]string{"fixture-repo": round1}}); err != nil {
+			t.Fatalf("write round 1 report.yaml: %v", err)
+		}
+		// The target moves, by files the branch never touched.
+		run("switch", "main")
+		writeReviewFile(t, dir, "target-a.go", "a")
+		writeReviewFile(t, dir, "target-b.go", "b")
+		commitReviewLease(t, dir, "the target moves")
+		run("switch", "work")
+		return dir, st, run, round1
+	}
+	changed := func(t *testing.T, dir, base, head string) []string {
+		t.Helper()
+		diff, err := computeScopeDiff(dir, base, head, nil)
+		if err != nil {
+			t.Fatalf("computeScopeDiff(%s): %v", base, err)
+		}
+		return diff.Changed
+	}
+
+	t.Run("a merge git made on its own", func(t *testing.T) {
+		t.Parallel()
+		dir, st, run, _ := setup(t)
+		run("merge", "--no-ff", "--no-edit", "main")
+		head := run("rev-parse", "HEAD")
+		scope, base, err := resolveScopeBase(st, "JIG-1", dir, "fixture-repo", "main", 2, head)
+		if err != nil || scope != "delta" || base != head {
+			t.Fatalf("resolveScopeBase = %q, %q, %v, want a delta from the head itself", scope, base, err)
+		}
+		if got := changed(t, dir, base, head); len(got) != 0 {
+			t.Errorf("the scope diff = %v, want it empty", got)
+		}
+	})
+
+	t.Run("the same head", func(t *testing.T) {
+		t.Parallel()
+		dir, st, run, round1 := setup(t)
+		scope, base, err := resolveScopeBase(st, "JIG-1", dir, "fixture-repo", "main", 2, run("rev-parse", "HEAD"))
+		if err != nil || scope != "delta" || base != round1 {
+			t.Fatalf("resolveScopeBase = %q, %q, %v, want a delta from the reviewed head", scope, base, err)
+		}
+	})
+
+	t.Run("a merge resolved by hand", func(t *testing.T) {
+		t.Parallel()
+		dir, st, run, _ := setup(t)
+		run("merge", "--no-ff", "--no-commit", "main")
+		writeReviewFile(t, dir, "hand.go", "the hand edit")
+		head := commitReviewLease(t, dir, "merge main, by hand")
+		scope, base, err := resolveScopeBase(st, "JIG-1", dir, "fixture-repo", "main", 2, head)
+		if err != nil || scope != "delta" {
+			t.Fatalf("resolveScopeBase = %q, %q, %v, want a delta", scope, base, err)
+		}
+		if kind := run("cat-file", "-t", base); kind != "tree" {
+			t.Fatalf("the base %s is a %s, want a tree: git's own merge of the tip's parents", base, kind)
+		}
+		if got, want := changed(t, dir, base, head), []string{"hand.go"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("the scope diff = %v, want only the hand edit %v, none of the files the target brought in", got, want)
+		}
+	})
+
+	t.Run("a commit of the session's own", func(t *testing.T) {
+		t.Parallel()
+		dir, st, run, round1 := setup(t)
+		run("merge", "--no-ff", "--no-edit", "main")
+		writeReviewFile(t, dir, "own.go", "2")
+		head := commitReviewLease(t, dir, "a commit of its own")
+		scope, base, err := resolveScopeBase(st, "JIG-1", dir, "fixture-repo", "main", 2, head)
+		if err != nil || scope != "delta" || base != round1 {
+			t.Fatalf("resolveScopeBase = %q, %q, %v, want a delta from the reviewed head: the reviewer sees more, never less", scope, base, err)
+		}
+		if got := changed(t, dir, base, head); len(got) != 3 {
+			t.Errorf("the scope diff = %v, want the merge's files and the commit's", got)
+		}
+	})
 }
 
 func TestResolveScopeBaseFullWhenPriorReviewedSHAIsNotAncestor(t *testing.T) {

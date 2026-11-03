@@ -60,6 +60,10 @@ type PublishReport struct {
 	// PRUpdated is repo -> true when the branch already had an open pull
 	// request, which publish updated instead of opening another.
 	PRUpdated map[string]bool
+	// PRRetargeted is repo -> the base the open pull request was pointed at,
+	// only where it changed: a stacked ticket's pull request that still went
+	// into the branch of a parent that has merged since.
+	PRRetargeted map[string]string
 	// PRNote is repo -> why PRURL[repo] is empty - today always "no
 	// pull-request host" (the journal's own "none:no-host" outcome), the one
 	// way PRURL ends up empty - so a repo with no pull-request host still
@@ -383,12 +387,14 @@ func (d Deps) publishFuncs() publishFuncs {
 // the head to ship, what was learned of the repo before anything was written,
 // and the pull request body rendered for it.
 type shipment struct {
-	pt          *publishTarget
-	lease       pool.Lease
-	shipping    branchCopy
-	head        string
-	host        repohost.Host
-	openPR      string
+	pt       *publishTarget
+	lease    pool.Lease
+	shipping branchCopy
+	head     string
+	host     repohost.Host
+	// openPR is the pull request the host holds open from the branch, whatever
+	// base it goes into: the zero value when there is none.
+	openPR      repohost.OpenPR
 	touched     []string
 	oracleNames []string
 	pub         publication
@@ -445,7 +451,7 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: resolve the head to ship: %w", err)
 	}
-	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket); err != nil {
+	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket, lease.Dir); err != nil {
 		return nil, err
 	}
 	// Publish never rewrites what is on origin and never forces: a branch that
@@ -471,9 +477,9 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	// store write: a host that cannot be reached, or cannot say, refuses the
 	// publish before it has written or pushed anything, not after the branch
 	// is on origin.
-	openPR := ""
+	var openPR repohost.OpenPR
 	if host != nil {
-		if openPR, err = host.FindOpenPR(branch, pt.base()); err != nil {
+		if openPR, err = host.FindOpenPR(branch); err != nil {
 			return nil, fmt.Errorf("verifydeliver: publish: look for an open pull request from %s: %w", branch, err)
 		}
 	}
@@ -577,7 +583,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	journaled = true
 	known := recordedPRs(jlines)
 	for _, sh := range ships {
-		known[sh.pt.repoName] = sh.openPR
+		known[sh.pt.repoName] = sh.openPR.URL
 	}
 	for _, sh := range ships {
 		sh.linked = linksFor(sh.pt, known)
@@ -631,7 +637,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 
 	report = PublishReport{
 		Tier: "none", Head: map[string]string{}, PRBody: map[string]string{}, PRURL: map[string]string{},
-		PRUpdated: map[string]bool{}, PRNote: map[string]string{},
+		PRUpdated: map[string]bool{}, PRRetargeted: map[string]string{}, PRNote: map[string]string{},
 	}
 	for _, sh := range ships {
 		pt := sh.pt
@@ -646,7 +652,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		if err := fn.guardedPush(sh.lease.Dir, "origin", pt.branch, confirmed); err != nil {
 			return PublishReport{}, inRepo(pt.qualified, pt.repoName, err)
 		}
-		prURL, prOutcome, err := openOrUpdatePR(d, sh.host, pt, sh.pub, sh.openPR, fn.warn)
+		prURL, prOutcome, retargeted, err := openOrUpdatePR(d, sh.host, pt, sh.pub, sh.openPR, fn.warn)
 		if err != nil {
 			return PublishReport{}, inRepo(pt.qualified, pt.repoName, err)
 		}
@@ -661,6 +667,9 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		report.PRBody[pt.repoName] = sh.pub.prPath
 		report.PRURL[pt.repoName] = prURL
 		report.PRUpdated[pt.repoName] = prOutcome == "updated"
+		if retargeted != "" {
+			report.PRRetargeted[pt.repoName] = retargeted
+		}
 		if sh.host == nil {
 			report.PRNote[pt.repoName] = "no pull-request host"
 		}
@@ -681,7 +690,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 			return PublishReport{}, inRepo(sh.pt.qualified, sh.pt.repoName, err)
 		}
 		sh.linked = links
-		if _, _, err := openOrUpdatePR(d, sh.host, sh.pt, sh.pub, url, fn.warn); err != nil {
+		if _, _, _, err := openOrUpdatePR(d, sh.host, sh.pt, sh.pub, repohost.OpenPR{URL: url, Base: sh.pt.base()}, fn.warn); err != nil {
 			return PublishReport{}, inRepo(sh.pt.qualified, sh.pt.repoName, err)
 		}
 		checkMediaReferences(d, sh.host, ticket, url, sh.pub, fn.warn)
@@ -733,7 +742,7 @@ func allApproved(lines []journal.Line, ships []*shipment) bool {
 // is said with the repos, and there is no one pull request to name.
 func confirmation(ships []*shipment) (branch, openPR string, hasHost bool) {
 	if len(ships) == 1 {
-		return ships[0].pt.branch, ships[0].openPR, ships[0].host != nil
+		return ships[0].pt.branch, ships[0].openPR.URL, ships[0].host != nil
 	}
 	names := make([]string, len(ships))
 	for i, sh := range ships {
@@ -945,47 +954,52 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	}, nil
 }
 
-// openOrUpdatePR opens the branch's pull request, or updates the one it
-// already has open into its base (the target, or the branch of the parent the
-// ticket is stacked on) with this publish's body: none is opened
-// beside an open one. A closed or merged pull request, or one into another
-// base, is not that one (FindOpenPR): the operator asked to publish, so one is
-// opened, and the others are left as they are. A repo with no pull-request
-// host gets neither, and the outcome says so.
-func openOrUpdatePR(d Deps, host repohost.Host, t *publishTarget, r publication, openPR string, warn func(format string, args ...any)) (url, outcome string, err error) {
+// openOrUpdatePR opens the branch's pull request, or updates the one the host
+// holds open from it with this publish's body: none is opened beside an open
+// one, whatever base it goes into (FindOpenPR). When that pull request goes
+// into another base than the one the stack plan names (a stacked ticket's, which
+// still goes into the branch of a parent that has merged since), the same
+// update points it at the base, and retargeted says so. A closed or merged pull
+// request is not found, so one is opened and the others are left as they are. A
+// repo with no pull-request host gets neither, and the outcome says so.
+func openOrUpdatePR(d Deps, host repohost.Host, t *publishTarget, r publication, open repohost.OpenPR, warn func(format string, args ...any)) (url, outcome, retargeted string, err error) {
 	if host == nil {
-		return "", "none:no-host", nil
+		return "", "none:no-host", "", nil
 	}
 	bodyFile := filepath.Join(d.Store.Root, r.prPath)
-	if openPR != "" {
+	if open.URL != "" {
+		base := ""
+		if open.Base != "" && open.Base != t.base() {
+			base = t.base()
+		}
 		if len(r.mediaFiles) > 0 {
-			attached, err := host.UpdatePRWithMedia(openPR, bodyFile, r.mediaDir, r.mediaFiles)
+			attached, err := host.UpdatePRWithMedia(open.URL, bodyFile, base, r.mediaDir, r.mediaFiles)
 			if err != nil {
-				return "", "", fmt.Errorf("verifydeliver: publish: update PR %s with media: %w", openPR, err)
+				return "", "", "", fmt.Errorf("verifydeliver: publish: update PR %s with media: %w", open.URL, err)
 			}
 			if !attached {
 				warn("jig: the installed gh does not support --attach; the pull request updated for %s carries no media\n", t.ticket)
 			}
-		} else if err := host.UpdatePR(openPR, bodyFile); err != nil {
-			return "", "", fmt.Errorf("verifydeliver: publish: update PR %s: %w", openPR, err)
+		} else if err := host.UpdatePR(open.URL, bodyFile, base); err != nil {
+			return "", "", "", fmt.Errorf("verifydeliver: publish: update PR %s: %w", open.URL, err)
 		}
-		return openPR, "updated", nil
+		return open.URL, "updated", base, nil
 	}
 	if len(r.mediaFiles) > 0 {
 		url, attached, err := host.CreatePRWithMedia(t.branch, t.base(), r.title, bodyFile, r.mediaDir, r.mediaFiles)
 		if err != nil {
-			return "", "", fmt.Errorf("verifydeliver: publish: create PR with media: %w", err)
+			return "", "", "", fmt.Errorf("verifydeliver: publish: create PR with media: %w", err)
 		}
 		if !attached {
 			warn("jig: the installed gh does not support --attach; the pull request opened for %s carries no media\n", t.ticket)
 		}
-		return url, "opened", nil
+		return url, "opened", "", nil
 	}
 	url, err = host.CreatePR(t.branch, t.base(), r.title, bodyFile)
 	if err != nil {
-		return "", "", fmt.Errorf("verifydeliver: publish: create PR: %w", err)
+		return "", "", "", fmt.Errorf("verifydeliver: publish: create PR: %w", err)
 	}
-	return url, "opened", nil
+	return url, "opened", "", nil
 }
 
 // postPublishChecks does what follows a pull request that now exists: reads
@@ -1032,7 +1046,7 @@ func checkMediaReferences(d Deps, host repohost.Host, ticket, prURL string, r pu
 				bodyPath := filepath.Join(d.Store.Root, r.prPath)
 				if err := os.WriteFile(bodyPath, []byte(patched), 0o644); err != nil {
 					warn("jig: write the patched pull request body for %s: %v\n", ticket, err)
-				} else if err := host.UpdatePR(prURL, bodyPath); err != nil {
+				} else if err := host.UpdatePR(prURL, bodyPath, ""); err != nil {
 					warn("jig: rewrite unrewritten media references in the pull request body for %s: %v\n", ticket, err)
 				}
 			}
@@ -1180,18 +1194,24 @@ func readerDir(d Deps, t *publishTarget) (string, error) {
 	}
 }
 
+// branchTip is a commit the ticket's branch is at, with the repository it was
+// read in: the one that holds the commits between it and a reviewed head.
+type branchTip struct {
+	dir, sha string
+}
+
 // branchTips are the commits the ticket's branch is at in the places a
 // reviewed head can be found: the operator's clone (its branch, and its last
 // view of origin's), the repository dir reads from (its view of origin's) and,
 // for work an earlier jig built, the build lease.
-func branchTips(d Deps, t *publishTarget, dir string) []string {
-	var tips []string
+func branchTips(d Deps, t *publishTarget, dir string) []branchTip {
+	var tips []branchTip
 	add := func(repo, ref string) {
 		if repo == "" {
 			return
 		}
 		if sha, found, _ := gitx.Resolve(repo, ref); found {
-			tips = append(tips, sha)
+			tips = append(tips, branchTip{dir: repo, sha: sha})
 		}
 	}
 	clone := operatorClone(d, t.repoName)
@@ -1206,7 +1226,8 @@ func branchTips(d Deps, t *publishTarget, dir string) []string {
 
 // checkBodyHead refuses, with PUBLISH_UNREVIEWED_HEAD, a body for a head that
 // is not where the branch is: the reviewed head must be the tip of the clone's
-// branch or of origin's. A scripted round recorded no head and is let through.
+// branch or of origin's, or a tip that only merges git itself would have made
+// lie past (headReviewed). A scripted round recorded no head and is let through.
 func checkBodyHead(d Deps, t *publishTarget, dir string) error {
 	reviewed := t.reviewedHead()
 	if len(t.gateRep.ReviewedSHA) == 0 {
@@ -1214,10 +1235,14 @@ func checkBodyHead(d Deps, t *publishTarget, dir string) error {
 	}
 	help := []string{fmt.Sprintf("Run `jig gate %s` to review the branch as it is now, then render the body again.", t.ticket)}
 	if reviewed == "" {
-		return checkReviewedHead(t.gateRep, t.repoName, "", t.ticket)
+		return checkReviewedHead(t.gateRep, t.repoName, "", t.ticket, "")
 	}
 	for _, tip := range branchTips(d, t, dir) {
-		if tip == reviewed {
+		covered, err := headReviewed(tip.dir, reviewed, tip.sha)
+		if err != nil {
+			return err
+		}
+		if covered {
 			return nil
 		}
 	}
@@ -1296,7 +1321,13 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 				Help: []string{fmt.Sprintf("Open the pull request from %s, or record the one that is", pt.branch)},
 			}
 		}
-		if reviewed != "" && head.SHA != "" && head.SHA != reviewed {
+		covered := true
+		if reviewed != "" && head.SHA != "" {
+			if covered, err = prHeadReviewed(d, pt, reviewed, head.SHA); err != nil {
+				return RecordReport{}, err
+			}
+		}
+		if !covered {
 			return RecordReport{}, &axi.Error{
 				Msg:  fmt.Sprintf("pull request #%d is at %s, not %s, the head the last clean gate round reviewed", ref.Number, shortSHA(head.SHA), shortSHA(reviewed)),
 				Code: "PUBLISH_UNREVIEWED_HEAD",
@@ -1482,16 +1513,42 @@ func latestGateReport(st *store.Store, ticket string) (reportYAML, error) {
 	return rep, nil
 }
 
+// prHeadReviewed says the pull request's head is covered by the head the last
+// clean round reviewed: it is that head, or only merges git itself would have
+// made lie past it. The operator's clone is asked first, then the repository the
+// publish reads from; an object neither holds is not covered.
+func prHeadReviewed(d Deps, pt *publishTarget, reviewed, head string) (bool, error) {
+	if head == reviewed {
+		return true, nil
+	}
+	dirs := []string{operatorClone(d, pt.repoName)}
+	if dir, err := readerDir(d, pt); err == nil {
+		dirs = append(dirs, dir)
+	}
+	for _, dir := range dirs {
+		covered, err := headReviewed(dir, reviewed, head)
+		if err != nil {
+			return false, err
+		}
+		if covered {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // checkReviewedHead refuses, with PUBLISH_UNREVIEWED_HEAD, a head publish
 // would ship that is not the head the latest clean gate round reviewed: rep is
 // that round's report (a clean verdict is checked before this is reached), and
-// head the ticket branch's head before reconcile. A reviewer round records the
+// head the ticket branch's head before reconcile. A head past the reviewed one
+// by merges git itself would have made (headReviewed in dir, "" for no
+// repository to ask) is the reviewed head. A reviewer round records the
 // heads it reviewed (reviewed_sha), one per repo; a scripted round records
 // none at all, and there is nothing to hold the head to, so it is let through
 // as it always has been. A round that recorded heads, but none for this repo,
 // reviewed something else - a repo renamed since, say - and is refused like a
 // different head: what was reviewed is not what would ship.
-func checkReviewedHead(rep reportYAML, repoName, head, ticket string) error {
+func checkReviewedHead(rep reportYAML, repoName, head, ticket, dir string) error {
 	if len(rep.ReviewedSHA) == 0 {
 		return nil
 	}
@@ -1509,7 +1566,11 @@ func checkReviewedHead(rep reportYAML, repoName, head, ticket string) error {
 			Help: help,
 		}
 	}
-	if reviewed == head {
+	covered, err := headReviewed(dir, reviewed, head)
+	if err != nil {
+		return err
+	}
+	if covered {
 		return nil
 	}
 	return &axi.Error{

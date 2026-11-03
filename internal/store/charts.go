@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
+
+	"github.com/develdeco/jig/internal/gitx"
 
 	"gopkg.in/yaml.v3"
 )
@@ -476,14 +479,107 @@ func updateChartEntryInNode(node *yaml.Node, entry ChartEntry) {
 	}
 }
 
+// chartsDirName is the store-root folder that holds one folder per chart.
+const chartsDirName = "charts"
+
+// ChartRelDir is charts/<name>, relative to the store root: the form Claim
+// takes for the paths it stages, as TicketRelDir is for a ticket, and the one
+// place the folder is named (ChartFile and ChartMapFile are built from it).
+func (s *Store) ChartRelDir(name string) string {
+	return filepath.Join(chartsDirName, name)
+}
+
 // ChartFile returns the path to charts/<name>/tickets.yaml.
 func (s *Store) ChartFile(name string) string {
-	return filepath.Join(s.Root, "charts", name, "tickets.yaml")
+	return filepath.Join(s.Root, s.ChartRelDir(name), "tickets.yaml")
 }
 
 // ChartMapFile returns the path to charts/<name>/map.md.
 func (s *Store) ChartMapFile(name string) string {
-	return filepath.Join(s.Root, "charts", name, "map.md")
+	return filepath.Join(s.Root, s.ChartRelDir(name), "map.md")
+}
+
+// ChartHistory returns the limit newest commits of the store's HEAD that
+// changed anything under charts/<name>/, newest first: the chart's own
+// history, which nothing records apart from git. A commit that touched only
+// another chart, or only a ticket, is not in it. The store must be a git
+// repository with a commit; otherwise it is an error.
+func (s *Store) ChartHistory(name string, limit int) ([]gitx.LogEntry, error) {
+	// A pathspec takes forward slashes on every system.
+	return gitx.PathLog(s.Root, "HEAD", limit, filepath.ToSlash(s.ChartRelDir(name)))
+}
+
+// ChartFolderTaken reports whether charts/<name> is taken: something of that
+// name is in charts/ in any form (a folder, a file, a link), or a name that
+// differs from it only in case, since two such folders are one folder on a
+// volume that ignores case. An absent charts/ folder takes no name.
+func (s *Store) ChartFolderTaken(name string) (bool, error) {
+	entries, err := os.ReadDir(filepath.Join(s.Root, chartsDirName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("store: list charts: %w", err)
+	}
+	for _, e := range entries {
+		if strings.EqualFold(e.Name(), name) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// chartMapSkeleton is the map.md of a chart just made: the title as its
+// heading and the five sections of the chart template, each empty. It holds
+// no placeholder prose, because a paragraph under a heading is an item to
+// recall and to the GitHub mirror.
+func chartMapSkeleton(title string) string {
+	return "# " + title + "\n\n" +
+		"## Destination\n\n" +
+		"## Notes\n\n" +
+		"## Decisions so far\n\n" +
+		"## Not yet specified (fog)\n\n" +
+		"## Out of scope\n\n"
+}
+
+// chartTicketsSkeleton is the tickets.yaml of a chart just made: a header
+// that says how an entry is written and an empty list. ReadChart reads it as
+// no entries and WriteChart accepts it once entries are added.
+func chartTicketsSkeleton(name string) string {
+	return "# Handover to `jig graduate " + name + "`: one entry per ticket, in order. An entry has\n" +
+		"# a title (required), a body, a key (when the store declares more than one) and\n" +
+		"# blocked_by refs: \"#k\" names an earlier entry of this file, \"<chart>#k\" an entry\n" +
+		"# of another chart, anything else is a ticket id; kind is merged (the default) or\n" +
+		"# stacked. jig writes each ticket's id back into its entry when it graduates.\n" +
+		"tickets: []\n"
+}
+
+// CreateChart makes the chart name: charts/<name>/ with its map.md (the title
+// and the empty sections of the template) and an empty tickets.yaml, each
+// written with AtomicWrite. jig writes this skeleton once, when the chart is
+// made, and only reads the map after. It refuses a name ChartFolderTaken
+// reports and writes nothing then; a failed write removes the folder it made,
+// so no half-made chart is left. The caller checks the name's rules and the
+// title.
+func (s *Store) CreateChart(name, title string) error {
+	taken, err := s.ChartFolderTaken(name)
+	if err != nil {
+		return err
+	}
+	if taken {
+		return fmt.Errorf("store: chart %q already exists in %s", name, filepath.Join(s.Root, chartsDirName))
+	}
+	dir := filepath.Join(s.Root, chartsDirName, name)
+	// tickets.yaml goes last: a folder is a chart once it has one.
+	if err := AtomicWrite(s.ChartMapFile(name), []byte(chartMapSkeleton(title))); err != nil {
+		_ = os.RemoveAll(dir)
+		return err
+	}
+	if err := AtomicWrite(s.ChartFile(name), []byte(chartTicketsSkeleton(name))); err != nil {
+		_ = os.RemoveAll(dir)
+		return err
+	}
+	return nil
 }
 
 // ChartNames lists the store's chart names, in alphabetical order: the
@@ -491,7 +587,7 @@ func (s *Store) ChartMapFile(name string) string {
 // subdirectory of charts/ that has a tickets.yaml; an absent charts/
 // directory lists no charts.
 func (s *Store) ChartNames() ([]string, error) {
-	entries, err := os.ReadDir(filepath.Join(s.Root, "charts"))
+	entries, err := os.ReadDir(filepath.Join(s.Root, chartsDirName))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
