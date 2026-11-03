@@ -16,13 +16,20 @@ import (
 // and one that touched none of it can read it in its own context.
 //
 // Known is false when jig cannot tell: the session is empty, or neither the
-// ticket's journal nor the machine ledger has a line of it (a harness with no
-// hooks). Fresh is true only for a known session with nothing of the ticket's
-// work in its name. Why lists, in words, what makes a session not fresh.
+// ticket's journal nor the machine ledger has a line of it. Fresh is true only
+// for a known session with nothing of the ticket's work in its name. Why lists,
+// in words, what makes a session not fresh.
+//
+// AgentIDs is true when the machine ledger has a tool line of the session,
+// which only a harness hook writes (PostToolUse), with the agent that made the
+// call: jig can then tell a subagent of the session from the session itself,
+// as a round's close does (LedgerReviewerAgent). False, as in a session with no
+// jig hooks, a subagent's review reaches jig as the session's own.
 type Fresh struct {
-	Known bool
-	Fresh bool
-	Why   []string
+	Known    bool
+	Fresh    bool
+	Why      []string
+	AgentIDs bool
 }
 
 // Freshness reads session's record against ticket.
@@ -39,7 +46,9 @@ type Fresh struct {
 // the commands they run do not), so this is a fact about the whole session.
 // That is why the advice for a session that is not fresh has a subagent do the
 // review and the main session never read the round: if both read it, the
-// ledger cannot say which of them closed it (LedgerReviewerAgent).
+// ledger cannot say which of them closed it (LedgerReviewerAgent). Without the
+// hook's agent ids (AgentIDs false) the subagent is the session to jig, so
+// the advice is a separate session instead.
 func Freshness(d Deps, ticket, session string) (Fresh, error) {
 	if session == "" {
 		return Fresh{}, nil
@@ -65,7 +74,7 @@ func Freshness(d Deps, ticket, session string) (Fresh, error) {
 		add(journalWork(l))
 	}
 
-	seen := false
+	seen, agentIDs := false, false
 	if d.Home != "" {
 		records, err := ledger.Read(d.Home)
 		if err != nil {
@@ -76,6 +85,7 @@ func Freshness(d Deps, ticket, session string) (Fresh, error) {
 				continue
 			}
 			seen = true
+			agentIDs = agentIDs || l.Event == journal.EventTool
 			if l.Ticket != ticket {
 				continue
 			}
@@ -87,9 +97,9 @@ func Freshness(d Deps, ticket, session string) (Fresh, error) {
 
 	switch {
 	case len(why) > 0:
-		return Fresh{Known: true, Why: why}, nil
+		return Fresh{Known: true, Why: why, AgentIDs: agentIDs}, nil
 	case seen:
-		return Fresh{Known: true, Fresh: true}, nil
+		return Fresh{Known: true, Fresh: true, AgentIDs: agentIDs}, nil
 	}
 	return Fresh{}, nil
 }

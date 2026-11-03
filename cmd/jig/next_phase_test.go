@@ -340,12 +340,14 @@ func TestTheScreensStandWhereJigNextDoes(t *testing.T) {
 // TestNextAndGateAdviseWhoReviews: when review is the phase that can start,
 // `jig next` and `jig gate` tell the session that asks whether it built the
 // ticket, and so whether it may read the round itself or has a subagent do it.
-// A session that claimed a slice and had it verified is told to spawn a
-// subagent, and why; a session that touched nothing of the ticket is told to
-// review it in its own context; a session jig has no record of is told to
-// spawn one, as the builder is, saying jig cannot tell; and no session, as when
-// the TUI's g opens the round, is told nothing about itself. With a round open
-// its reviewer is at work and `jig next` advises nothing.
+// A session that claimed a slice and had it verified, with hooks that report
+// its tool calls, is told to spawn a subagent, and why; the same work by a
+// session no hook reports is told to start a separate session, since its
+// subagent would review as the session; a session that touched nothing of the
+// ticket is told to review it in its own context; a session jig has no record
+// of is told to spawn one, as the builder is, saying jig cannot tell; and no
+// session, as when the TUI's g opens the round, is told nothing about itself.
+// With a round open its reviewer is at work and `jig next` advises nothing.
 func TestNextAndGateAdviseWhoReviews(t *testing.T) {
 	t.Parallel()
 	r := newPhaseRig(t)
@@ -354,8 +356,15 @@ func TestNextAndGateAdviseWhoReviews(t *testing.T) {
 	r.line(t, journal.Line{Event: journal.EventApproval, Session: "s-builder", Provenance: "person"})
 	r.line(t, journal.Line{Event: journal.EventClaim, Slice: "a", Session: "s-builder"})
 	r.green(t, "s-builder")
-	if err := ledger.Append(r.home, journal.Line{Event: journal.EventSessionStart, Session: "s-fresh"}); err != nil {
-		t.Fatal(err)
+	r.line(t, journal.Line{Event: journal.EventNote, Slice: "a", Session: "s-hookless"})
+	for _, l := range []journal.Line{
+		{Event: journal.EventSessionStart, Session: "s-fresh"},
+		{Event: journal.EventTool, Session: "s-builder", Ticket: T, Command: "jig next " + T},
+		{Event: journal.EventSessionTouch, Session: "s-hookless", Ticket: T},
+	} {
+		if err := ledger.Append(r.home, l); err != nil {
+			t.Fatal(err)
+		}
 	}
 	deps := verifydeliver.Deps{Store: r.st, Home: r.home}
 
@@ -369,7 +378,12 @@ func TestNextAndGateAdviseWhoReviews(t *testing.T) {
 		name, session, fresh string
 		wants, nots          []string
 	}{
-		{"the builder", "s-builder", "no", append([]string{"claimed slice a", "approved the brief"}, spawn...), []string{"review it in this session"}},
+		{"the builder", "s-builder", "no", append([]string{"claimed slice a", "approved the brief"}, spawn...), []string{"review it in this session", "separate session"}},
+		{"a builder no hook reports", "s-hookless", "no", []string{
+			"left a note", "no hook record of its tool calls", "start a separate session to review " + T,
+			"env -u JIG_SESSION -u CLAUDE_CODE_SESSION_ID claude -p 'You did not build " + T, "--model opus --permission-mode bypassPermissions",
+			"run_in_background", "relay the verdict line", "Do not review it in this session or a subagent of it",
+		}, []string{"so review it in this session", "spawn a subagent", "Agent tool"}},
 		{"a session that touched nothing", "s-fresh", "yes", []string{"review it in this session", "jig skill review"}, []string{"spawn a subagent"}},
 		{"a session jig has no record of", "s-unseen", "unknown", append([]string{"cannot tell whether this session built " + T}, spawn...), []string{"review it in this session"}},
 	} {

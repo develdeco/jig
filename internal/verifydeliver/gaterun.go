@@ -620,7 +620,7 @@ func notIndependentError(ticket string, report GateReport) error {
 		Code: "REVIEW_NOT_INDEPENDENT",
 		Help: []string{
 			fmt.Sprintf("The round is recorded as %q, not clean: publish needs a review by an agent that did not build the change", report.Verdict),
-			fmt.Sprintf("Have a fresh-context reviewer (a different session or subagent, with the `review` skill) review the next round: run `jig gate %s` again", ticket),
+			fmt.Sprintf("Run `jig gate %s` again from the session that built it, and have the reviewer it advises review the next round: a subagent, or a separate session where jig has no hook record of the session's tool calls, whose subagents it cannot tell from it", ticket),
 		},
 	}
 }

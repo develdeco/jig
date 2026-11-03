@@ -23,9 +23,9 @@ func TestAdviceToSpawnSaysHowToWait(t *testing.T) {
 		state string
 		spawn bool
 	}{
-		{"built it", verifydeliver.Fresh{Known: true, Why: []string{"claimed slice a"}}, freshNo, true},
+		{"built it", verifydeliver.Fresh{Known: true, Why: []string{"claimed slice a"}, AgentIDs: true}, freshNo, true},
 		{"unknown", verifydeliver.Fresh{}, freshUnknown, true},
-		{"fresh", verifydeliver.Fresh{Known: true, Fresh: true}, freshYes, false},
+		{"fresh", verifydeliver.Fresh{Known: true, Fresh: true, AgentIDs: true}, freshYes, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -45,4 +45,82 @@ func TestAdviceToSpawnSaysHowToWait(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAdviceWithoutAgentIDsStartsASeparateSession: a session that built the
+// ticket and that no hook reports (no agent ids) is told to start the reviewer
+// as a session of its own, not a subagent, with the command that does it. The
+// command, read by sh's rules, unsets each variable jig reads a session from
+// and hands claude the reviewer's prompt as one word, a quote in the clone's
+// path and all. A session jig has no record of keeps the subagent: no builder
+// is that session.
+func TestAdviceWithoutAgentIDsStartsASeparateSession(t *testing.T) {
+	t.Parallel()
+	const ticket, clone = "SHOP-1", "/work/o'brien/shop"
+	a := adviceFor(verifydeliver.Fresh{Known: true, Why: []string{"claimed slice a"}}, ticket, clone)
+	text := strings.Join(a.Lines, "\n")
+	if a.State != freshNo || !strings.Contains(text, "claimed slice a") || !strings.Contains(text, "start a separate session to review "+ticket) ||
+		strings.Contains(text, "spawn a subagent") || strings.Contains(text, "Agent tool") {
+		t.Errorf("advice for a builder with no agent ids = %s, %q, want a separate session and why, no subagent", a.State, text)
+	}
+	var argv []string
+	for _, l := range a.Lines {
+		if strings.HasPrefix(l, "env ") {
+			argv = shWords(t, l)
+		}
+	}
+	want := []string{"env", "-u", "JIG_SESSION", "-u", "CLAUDE_CODE_SESSION_ID", "claude", "-p", reviewerPromptText(ticket, clone), "--model", "opus", "--permission-mode", "bypassPermissions"}
+	if strings.Join(argv, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("the command's words = %q, want %q", argv, want)
+	}
+	if prompt := reviewerPromptText(ticket, clone); !strings.Contains(prompt, "In "+clone+",") || !strings.Contains(prompt, "jig review done "+ticket) {
+		t.Errorf("prompt = %q, want the clone and the review verbs", prompt)
+	}
+
+	if unknown := adviceFor(verifydeliver.Fresh{}, ticket, clone); !strings.Contains(strings.Join(unknown.Lines, "\n"), "spawn a subagent") {
+		t.Errorf("advice for a session jig has no record of = %q, want a subagent", unknown.Lines)
+	}
+}
+
+// shWords splits line into words as a POSIX shell does for words with no
+// expansion: blanks separate them, single quotes keep everything to the next
+// one, and a backslash outside them keeps the next character.
+func shWords(t *testing.T, line string) []string {
+	t.Helper()
+	var words []string
+	var word strings.Builder
+	inWord, quoted := false, false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case quoted && c == '\'':
+			quoted = false
+		case quoted:
+			word.WriteByte(c)
+		case c == '\'':
+			quoted, inWord = true, true
+		case c == '\\' && i+1 < len(line):
+			i++
+			word.WriteByte(line[i])
+			inWord = true
+		case c == ' ' || c == '\t':
+			if inWord {
+				words = append(words, word.String())
+				word.Reset()
+				inWord = false
+			}
+		case strings.ContainsRune("\"$`|&;<>()", rune(c)):
+			t.Fatalf("shWords: %q has %q outside single quotes, which sh would read as more than a word", line, c)
+		default:
+			word.WriteByte(c)
+			inWord = true
+		}
+	}
+	if quoted {
+		t.Fatalf("shWords: %q leaves a single quote open", line)
+	}
+	if inWord {
+		words = append(words, word.String())
+	}
+	return words
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
@@ -45,12 +46,19 @@ func sessionAdvice(e env, d verifydeliver.Deps, ticket string) (reviewAdvice, bo
 // reviews in its own context. One that is not, or that jig cannot tell, has a
 // subagent review: the line that says why, how to start the subagent in Claude
 // Code, the prompt that makes it a reviewer, and why the main session must not
-// read the round as well.
+// read the round as well. A session that built the ticket and whose tool calls
+// reach jig with no agent id (no jig hooks) has a separate session review
+// instead (separateSessionAdvice): a subagent of it would review as the
+// session itself. A session jig has no record of keeps the subagent: none of
+// the builders is that session, so neither is its subagent.
 func adviceFor(f verifydeliver.Fresh, ticket, clone string) reviewAdvice {
 	if f.Known && f.Fresh {
 		return reviewAdvice{State: freshYes, Lines: []string{
 			fmt.Sprintf("Nothing in this session built %s, so review it in this session: run the review skill (`jig skill review`)", ticket),
 		}}
+	}
+	if f.Known && !f.AgentIDs {
+		return separateSessionAdvice(f, ticket, clone)
 	}
 	state, first := freshNo, fmt.Sprintf("This session %s: spawn a subagent to review %s", whyWords(f.Why), ticket)
 	if !f.Known {
@@ -65,14 +73,52 @@ func adviceFor(f verifydeliver.Fresh, ticket, clone string) reviewAdvice {
 	}}
 }
 
+// separateSessionAdvice is the advice for a session that built ticket and
+// whose subagents jig cannot tell from it: start the reviewer as a headless
+// session of its own, with the command that does it in Claude Code
+// (reviewerCommand), and never review in this session or a subagent of it.
+func separateSessionAdvice(f verifydeliver.Fresh, ticket, clone string) reviewAdvice {
+	return reviewAdvice{State: freshNo, Lines: []string{
+		fmt.Sprintf("This session %s, and jig has no hook record of its tool calls, so a subagent's review would be recorded as this session's: start a separate session to review %s", whyWords(f.Why), ticket),
+		"In Claude Code, run this command with the Bash tool in the background (`run_in_background`: a review outlasts a shell call's time limit), with `--model opus` unless the person named another model; another harness starts a fresh session of its own with the same prompt. The command unsets the variables jig reads a session from, so the new session reviews under an id of its own, and allows every tool, since it cannot ask. Wait for it in this turn with TaskOutput (`block: true`, the task id the call returned) where your tools have it, else at the notice that it exited, then relay the verdict line it prints",
+		reviewerCommand(ticket, clone),
+		"Do not review it in this session or a subagent of it: jig records whoever closes the round with `jig review done`, and here that is this session, which built it",
+	}}
+}
+
+// reviewerCommand is the sh command line that starts the reviewer of ticket
+// in clone as a headless Claude Code session: with each variable jig reads a
+// session from unset, since a nested claude gives its tools a session id of
+// its own but keeps $JIG_SESSION, which jig reads first.
+func reviewerCommand(ticket, clone string) string {
+	words := []string{"env"}
+	for _, name := range append([]string{locate.SessionEnv}, locate.HarnessSessionEnv...) {
+		words = append(words, "-u", name)
+	}
+	words = append(words, "claude", "-p", shQuote(reviewerPromptText(ticket, clone)), "--model", "opus", "--permission-mode", "bypassPermissions")
+	return strings.Join(words, " ")
+}
+
+// shQuote quotes s as one word for a POSIX shell: in single quotes, each
+// single quote of s closed, escaped and reopened.
+func shQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // reviewerPrompt is the self-contained prompt of the subagent that reviews
-// ticket in clone.
+// ticket in clone, in double quotes as the advice shows it.
 func reviewerPrompt(ticket, clone string) string {
+	return `"` + reviewerPromptText(ticket, clone) + `"`
+}
+
+// reviewerPromptText is the prompt that makes an agent, a subagent or a
+// session of its own, the reviewer of ticket in clone.
+func reviewerPromptText(ticket, clone string) string {
 	where := "your working directory"
 	if clone != "" {
 		where = clone
 	}
-	return fmt.Sprintf("\"You did not build %s. In %s, run the review skill (`jig skill review`): `jig review context %s --model <your model id>`, then `jig finding` for each problem, then `jig review done %s`. You are the reviewer: do not spawn a subagent. Reply with the verdict line only.\"",
+	return fmt.Sprintf("You did not build %s. In %s, run the review skill (`jig skill review`): `jig review context %s --model <your model id>`, then `jig finding` for each problem, then `jig review done %s`. You are the reviewer: do not have a subagent or another session review it. Reply with the verdict line only.",
 		ticket, where, ticket, ticket)
 }
 

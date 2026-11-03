@@ -7,8 +7,8 @@
 # A package that starts no git process has no entry.
 margin: 1
 packages:
-  cmd/jig: 3298
-  e2e: 5532
+  cmd/jig: 3302
+  e2e: 5590
   internal/correct: 271
   internal/fileshare: 8
   internal/fixture: 708

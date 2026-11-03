@@ -13,7 +13,10 @@ import (
 // when its id carries no journal line of the ticket but the gate's, triage and
 // publish lines, and no ledger line of it names the ticket with a changed file
 // or a commit. Each kind of work makes it not fresh and is named in words; a
-// session jig has no record of is not known; an empty one is not either.
+// session jig has no record of is not known; an empty one is not either. A
+// session has agent ids when a hook's tool line of it is in the ledger, on any
+// ticket; jig's own lines (a claim's touch, a spawned verification) and git's
+// commit line are none.
 func TestFreshnessIsWhatASessionDidToATicket(t *testing.T) {
 	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
@@ -50,6 +53,9 @@ func TestFreshnessIsWhatASessionDidToATicket(t *testing.T) {
 		{Event: journal.EventTool, Session: "s-shell", Ticket: ticket, Command: `"C:\Program Files\Git\bin\git.exe" -C clone commit -m x`},
 		{Event: journal.EventGitCommit, Session: "s-committer", Ticket: ticket, Commit: sha},
 		{Event: journal.EventSessionStart, Session: "s-elsewhere-editor"},
+		// What jig's own claim and verify write for a session with no hooks.
+		{Event: journal.EventSessionTouch, Session: "s-claimer", Ticket: ticket},
+		{Event: journal.EventVerifySpawned, Session: "s-claimer", Ticket: ticket, Commit: sha},
 	} {
 		if err := ledger.Append(d.Home, l); err != nil {
 			t.Fatal(err)
@@ -60,15 +66,15 @@ func TestFreshnessIsWhatASessionDidToATicket(t *testing.T) {
 		name, session string
 		want          Fresh
 	}{
-		{"claims and verification", "s-claimer", Fresh{Known: true, Why: []string{"claimed slice round", "verified d7101d0"}}},
+		{"claims and verification, by a session with no hooks", "s-claimer", Fresh{Known: true, Why: []string{"claimed slice round", "verified d7101d0"}}},
 		{"approval", "s-approver", Fresh{Known: true, Why: []string{"approved the brief"}}},
 		{"question", "s-asker", Fresh{Known: true, Why: []string{"asked question q-001"}}},
 		{"note", "s-noter", Fresh{Known: true, Why: []string{"left a note"}}},
-		{"a reviewer: gate, triage and publish lines, and tools that only read", "s-reviewer", Fresh{Known: true, Fresh: true}},
-		{"a changed file in the ledger", "s-editor", Fresh{Known: true, Why: []string{"changed alpha/alpha.go"}}},
-		{"a commit a shell made", "s-shell", Fresh{Known: true, Why: []string{"ran git commit"}}},
-		{"a commit in the ledger", "s-committer", Fresh{Known: true, Why: []string{"made commit d7101d0"}}},
-		{"work on another ticket", "s-elsewhere-editor", Fresh{Known: true, Fresh: true}},
+		{"a reviewer: gate, triage and publish lines, and tools that only read", "s-reviewer", Fresh{Known: true, Fresh: true, AgentIDs: true}},
+		{"a changed file in the ledger", "s-editor", Fresh{Known: true, Why: []string{"changed alpha/alpha.go"}, AgentIDs: true}},
+		{"a commit a shell made", "s-shell", Fresh{Known: true, Why: []string{"ran git commit"}, AgentIDs: true}},
+		{"a commit in the ledger, from git's hook alone", "s-committer", Fresh{Known: true, Why: []string{"made commit d7101d0"}}},
+		{"work on another ticket", "s-elsewhere-editor", Fresh{Known: true, Fresh: true, AgentIDs: true}},
 		{"a session jig has no record of", "s-nobody", Fresh{}},
 		{"no session", "", Fresh{}},
 	} {
