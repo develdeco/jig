@@ -18,8 +18,9 @@ import (
 )
 
 // The tests here ask the readers of a chart's standing what they say: `jig next
-// <chart>` and `jig status <chart>` over a store made of files alone (no test
-// here starts git), and deriveChart with a fake merge source where a pull
+// <chart>` and `jig status <chart>` over a store made of files alone (the one
+// git call is the history of --json, which a store with no repository answers
+// with an empty list), and deriveChart with a fake merge source where a pull
 // request's state matters. The rules behind each answer are internal/phase's
 // (DeriveChart); this is the seam where what is read from the store is laid in,
 // and the words and JSON the verbs print are pinned. The end-to-end chain with
@@ -209,6 +210,10 @@ func TestNextChartTextAndJSONAgree(t *testing.T) {
 		}
 	}
 
+	if strings.Contains(text, "history") {
+		t.Errorf("text has a history, which is for the JSON only:\n%s", text)
+	}
+
 	status, code := r.run(t, "status", "checkout")
 	if code != 0 {
 		t.Fatalf("jig status checkout: exit %d\n%s", code, status)
@@ -235,6 +240,43 @@ func TestNextChartTextAndJSONAgree(t *testing.T) {
 	}
 	if table(status) != table(text) || !strings.HasPrefix(status, "status:\n") {
 		t.Errorf("status = \n%s\nwant the tickets table of next:\n%s", status, table(text))
+	}
+}
+
+// TestNextChartHistoryIsEmptyWhenTheStoreHasNoGit: a store of files alone has
+// no history to read, and the JSON of `jig next <chart>` says so with an empty
+// list (not null, not a missing key) after ends, with the rest of the chart
+// unchanged and nothing but the one JSON line printed. The text form of next
+// and of status has no history.
+func TestNextChartHistoryIsEmptyWhenTheStoreHasNoGit(t *testing.T) {
+	t.Parallel()
+	r := newChartRig(t)
+	r.shop(t, false)
+
+	out, code := r.run(t, "next", "checkout", "--json")
+	if code != 0 || strings.Count(out, "\n") != 1 {
+		t.Fatalf("jig next checkout --json: exit %d, want 0 and one line\n%s", code, out)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &keys); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(keys["history"]); got != "[]" {
+		t.Errorf("history = %s, want []", got)
+	}
+	if ends, history := strings.Index(out, `"ends":`), strings.Index(out, `"history":`); ends < 0 || history < ends {
+		t.Errorf("history at %d, ends at %d: want history after ends", history, ends)
+	}
+	n := r.next(t, "checkout")
+	if n.Chart != "checkout" || len(n.Tickets) != 4 || n.Map == nil || !n.Ready || n.History == nil || len(n.History) != 0 {
+		t.Errorf("chart = %+v, want the whole chart with an empty, non-nil history", n)
+	}
+
+	for _, verb := range []string{"next", "status"} {
+		text, code := r.run(t, verb, "checkout")
+		if code != 0 || strings.Contains(text, "history") {
+			t.Errorf("jig %s checkout: exit %d, want no history in the text form\n%s", verb, code, text)
+		}
 	}
 }
 

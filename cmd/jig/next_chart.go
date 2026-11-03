@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/phase"
@@ -15,9 +16,11 @@ import (
 // nextChart is where a chart stands, as `jig next <chart>` says it and the TUI's
 // chart screen reads it (--json): the verdict (Ready, Code, Reason, Prompt), the
 // tickets in dependency order with each one's phases and reach, the briefs to
-// write and the waves to build, where the run ends, what map.md says, and what
-// the run has spent. Every key is present but rank, steps, waits_for, prs, map
-// and spend, which are left out when there is nothing to say.
+// write and the waves to build, where the run ends, what map.md says, what the
+// run has spent and, for --json, the commits of the store that touched the
+// chart's folder. Every key is present but rank, steps, waits_for, prs, map and
+// spend, which are left out when there is nothing to say; history is [] when
+// the text form is read or the history cannot be.
 type nextChart struct {
 	Chart       string            `json:"chart"`
 	Title       string            `json:"title"`
@@ -31,6 +34,7 @@ type nextChart struct {
 	Run         [][]string        `json:"run"`
 	Tickets     []nextChartTicket `json:"tickets"`
 	Ends        []nextChartEnd    `json:"ends"`
+	History     []nextChartCommit `json:"history"`
 	Map         *nextChartMap     `json:"map,omitempty"`
 	Spend       *nextChartSpend   `json:"spend,omitempty"`
 
@@ -85,6 +89,37 @@ type nextChartEnd struct {
 	PRs     []nextChartPR `json:"prs,omitempty"`
 }
 
+// nextChartCommit is one commit of the store that changed something under the
+// chart's folder: its full hash, its committer time in UTC (RFC 3339) and the
+// first line of its message.
+type nextChartCommit struct {
+	SHA     string `json:"sha"`
+	Time    string `json:"time"`
+	Subject string `json:"subject"`
+}
+
+// chartHistoryLimit is how many of the chart's newest commits `jig next --json`
+// carries. The chart screen never shows more lines than the terminal has rows,
+// so this is more than a screen holds.
+const chartHistoryLimit = 20
+
+// chartHistory is the chart's store history for --json: the newest commits that
+// touched charts/<name>/, newest first. It is never nil, and it is empty when
+// the history cannot be read (the store is not a git repository, it has no
+// commit yet, git fails): a problem is an empty list, never a reason to hide
+// the chart, and nothing is printed for it.
+func chartHistory(st *store.Store, name string) []nextChartCommit {
+	out := []nextChartCommit{}
+	entries, err := st.ChartHistory(name, chartHistoryLimit)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		out = append(out, nextChartCommit{SHA: e.SHA, Time: e.Time.UTC().Format(time.RFC3339), Subject: e.Subject})
+	}
+	return out
+}
+
 // nextChartMap is the sections of the chart's map.md.
 type nextChartMap struct {
 	Destination []string `json:"destination"`
@@ -99,7 +134,7 @@ func chartOutput(c phase.Chart, m chartMap, spend *nextChartSpend) nextChart {
 	out := nextChart{
 		Chart: c.Name, Title: m.Title, Ready: c.Ready, Code: c.Code, Reason: c.Reason, Prompt: c.Prompt,
 		Started: c.Started, Ungraduated: c.Ungraduated, Spend: spend,
-		Briefs: orEmpty(c.Briefs), Run: c.Run, Tickets: []nextChartTicket{}, Ends: []nextChartEnd{}, derived: c,
+		Briefs: orEmpty(c.Briefs), Run: c.Run, Tickets: []nextChartTicket{}, Ends: []nextChartEnd{}, History: []nextChartCommit{}, derived: c,
 	}
 	if out.Run == nil {
 		out.Run = [][]string{}

@@ -7,6 +7,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/develdeco/jig/internal/gitx"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -476,14 +478,30 @@ func updateChartEntryInNode(node *yaml.Node, entry ChartEntry) {
 	}
 }
 
+// ChartRelDir returns a chart's folder relative to the store root,
+// charts/<name>, with forward slashes: the form a git pathspec takes, and the
+// one place the folder is named (ChartFile and ChartMapFile are built from it).
+func (s *Store) ChartRelDir(name string) string {
+	return filepath.ToSlash(filepath.Join("charts", name))
+}
+
 // ChartFile returns the path to charts/<name>/tickets.yaml.
 func (s *Store) ChartFile(name string) string {
-	return filepath.Join(s.Root, "charts", name, "tickets.yaml")
+	return filepath.Join(s.Root, filepath.FromSlash(s.ChartRelDir(name)), "tickets.yaml")
 }
 
 // ChartMapFile returns the path to charts/<name>/map.md.
 func (s *Store) ChartMapFile(name string) string {
-	return filepath.Join(s.Root, "charts", name, "map.md")
+	return filepath.Join(s.Root, filepath.FromSlash(s.ChartRelDir(name)), "map.md")
+}
+
+// ChartHistory returns the limit newest commits of the store's HEAD that
+// changed anything under charts/<name>/, newest first: the chart's own
+// history, which nothing records apart from git. A commit that touched only
+// another chart, or only a ticket, is not in it. The store must be a git
+// repository with a commit; otherwise it is an error.
+func (s *Store) ChartHistory(name string, limit int) ([]gitx.LogEntry, error) {
+	return gitx.PathLog(s.Root, "HEAD", limit, s.ChartRelDir(name))
 }
 
 // ChartNames lists the store's chart names, in alphabetical order: the

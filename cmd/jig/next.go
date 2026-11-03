@@ -103,6 +103,11 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 			return renderErr(stdout, err)
 		}
 		n := chartOutput(c, m, chartSpend(st, c))
+		if *jsonOut {
+			// The history is for the screens: the text form is the session's, and
+			// it starts no git process.
+			n.History = chartHistory(st, chart)
+		}
 		out, blocks = n, n.blocks("next")
 	} else if ticket != "" {
 		id, err := st.ResolveTicket(ticket)
