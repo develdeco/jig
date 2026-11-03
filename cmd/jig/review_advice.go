@@ -140,8 +140,9 @@ func whyWords(why []string) string {
 
 // reviewNoteText is the next-phase note an unattended session gets at Stop when
 // every slice of ticket is green and no round has been opened: open the gate,
-// and who reviews. The lines `jig gate` prints carry the Agent call and the
-// prompt, so the note points at them instead of repeating them.
+// and who reviews, as adviceFor tells it. The lines `jig gate` prints carry the
+// Agent call or the command, and the prompt, so the note points at them
+// instead of repeating them.
 func reviewNoteText(f verifydeliver.Fresh, ticket string) string {
 	head := fmt.Sprintf("%s is built, every slice green, and no review round is open: open the gate and review", ticket)
 	if f.Known && f.Fresh {
@@ -150,6 +151,9 @@ func reviewNoteText(f verifydeliver.Fresh, ticket string) string {
 	why := "jig cannot tell whether this session built it"
 	if f.Known {
 		why = "this session " + whyWords(f.Why)
+	}
+	if f.Known && !f.AgentIDs {
+		return fmt.Sprintf("%s: run `jig gate %s`, then have a separate session review it, not this session or a subagent of it (%s, and jig has no hook record of its tool calls); `jig gate` gives the command to run", head, ticket, why)
 	}
 	return fmt.Sprintf("%s: run `jig gate %s`, then have a subagent review it, not this session (%s); `jig gate` gives the Agent call and the prompt to pass", head, ticket, why)
 }

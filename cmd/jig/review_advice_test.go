@@ -86,6 +86,37 @@ func TestAdviceWithoutAgentIDsStartsASeparateSession(t *testing.T) {
 	}
 }
 
+// TestReviewNoteFollowsTheAdvice: the note an unattended session gets at Stop
+// names the reviewer the gate advises: itself when fresh, a subagent when the
+// hooks give its tool calls agent ids, and a separate session when they do not.
+func TestReviewNoteFollowsTheAdvice(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		fresh       verifydeliver.Fresh
+		wants, nots []string
+	}{
+		{"fresh", verifydeliver.Fresh{Known: true, Fresh: true, AgentIDs: true}, []string{"review it in this session"}, []string{"subagent", "separate session"}},
+		{"built it, with agent ids", verifydeliver.Fresh{Known: true, Why: []string{"claimed slice a"}, AgentIDs: true},
+			[]string{"have a subagent review it, not this session", "claimed slice a", "Agent call"}, []string{"separate session"}},
+		{"built it, no agent ids", verifydeliver.Fresh{Known: true, Why: []string{"claimed slice a"}},
+			[]string{"have a separate session review it, not this session or a subagent of it", "claimed slice a", "no hook record", "the command to run"}, []string{"Agent call"}},
+		{"unknown", verifydeliver.Fresh{}, []string{"have a subagent review it", "cannot tell"}, []string{"separate session"}},
+	} {
+		note := reviewNoteText(tc.fresh, "SHOP-1")
+		for _, want := range tc.wants {
+			if !strings.Contains(note, want) {
+				t.Errorf("%s: the note lacks %q: %s", tc.name, want, note)
+			}
+		}
+		for _, not := range tc.nots {
+			if strings.Contains(note, not) {
+				t.Errorf("%s: the note has %q: %s", tc.name, not, note)
+			}
+		}
+	}
+}
+
 // shWords splits line into words as a POSIX shell does for words with no
 // expansion: blanks separate them, single quotes keep everything to the next
 // one, and a backslash outside them keeps the next character.
