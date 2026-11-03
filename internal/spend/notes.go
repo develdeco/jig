@@ -149,12 +149,15 @@ func write(c observe.NoteCtx, lines []journal.Line, line journal.Line) ([]journa
 const ledgerWindow = 16 << 20
 
 // ownAgents are the subagents of session, among those that have a transcript
-// beside the main one, that have a spend line of their own: their last stop
-// was placed at a ticket. The machine ledger says it, with a hook line of the
-// session, of that agent, at a stop, that names a ticket. The session's line
-// leaves their transcripts out; an agent with no such line (still running,
-// crashed, placed at no ticket, or of a harness that sends no subagent stops)
-// stays in it, so its tokens are not lost.
+// beside the main one, that have a spend line of their own: some stop of theirs
+// was placed at a ticket, not necessarily the last. The machine ledger says it,
+// with a hook line of the session, of that agent, at a stop, that names a
+// ticket. The session's line leaves their transcripts out; an agent with no
+// such line (still running, crashed, placed at no ticket, or of a harness that
+// sends no subagent stops) stays in it, so its tokens are not lost. An agent
+// that stopped at a ticket and later stopped at no ticket is left out all the
+// same, and its own line ends at the stop that was placed: what it spent after
+// that stop is counted in no line.
 //
 // The walk goes back from the end of the ledger and ends when every agent on
 // disk is found. It does not end at the session's start: a session that is
