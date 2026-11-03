@@ -38,9 +38,10 @@ func deriveChart(st *store.Store, cfg project.Config, mp project.MachineProject,
 // chartFacts reads each entry of chart name's tickets.yaml with what the store
 // says of it. A graduated entry takes its edges and rank from its ticket, the
 // source of truth once it is minted (graduate only advises on a drift); one with
-// no id yet takes them from the chart's refs, which must resolve as graduate
-// resolves them. A ticket that cannot be read is a row with its problem, never
-// a reason to hide the chart. Each edge is judged as a claim judges it
+// no id yet takes them from the chart's refs, which resolve as graduate
+// resolves them, and a ref that does not makes the entry a row with its problem.
+// A ticket that cannot be read is a row with its problem too, never a reason to
+// hide the chart. Each edge is judged as a claim judges it
 // (blockerProblem), so a stacked edge is met by the parent's clean gate round
 // and a merged one by what merges says. A published ticket stacked on another
 // is read with its stack plan (chartTicket): one whose branch is owed a merge
@@ -62,9 +63,13 @@ func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, 
 			scoped[i].BlockedBy = nil
 		}
 	}
-	refs, err := resolveChartEntryRefs(st, name, scoped)
-	if err != nil {
-		return phase.ChartFacts{}, err
+	// A ref that does not resolve is its entry's problem, never a reason to
+	// refuse the chart: the entry is a blocked row that says what is wrong, and
+	// the verdict names `jig validate`, which lists every problem of the chart.
+	refs, refProblems := resolveChartRefs(st, name, scoped)
+	problemOf := map[int][]string{}
+	for _, p := range refProblems {
+		problemOf[p.Entry] = append(problemOf[p.Entry], p.Text())
 	}
 
 	facts := phase.ChartFacts{Name: name}
@@ -72,6 +77,10 @@ func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, 
 		pos := i + 1
 		ce := phase.ChartEntry{Pos: pos, ID: e.ID, Title: e.Title}
 		if e.ID == "" {
+			if reasons := problemOf[pos]; len(reasons) > 0 {
+				ce.Problem = strings.Join(reasons, "; ")
+			}
+			// The needs are the refs that did resolve.
 			for _, r := range refs[i] {
 				if r.knownID != "" {
 					ce.Needs = append(ce.Needs, chartNeed(st, fmt.Sprintf("%s#%d", name, pos), r.knownID, r.kind, merges))
@@ -132,6 +141,15 @@ func chartNeed(st *store.Store, dependent, blocker, kind string, merges mergeSou
 	return n
 }
 
+// wordIsATicket reports whether word reads as a ticket of the store and so
+// never as a chart: an alias two tickets claim, an id jig cannot work, or a
+// ticket the store has under that id or alias. chartNamed and `jig chart new`
+// share this one rule, so a chart made under a name is a chart reached by it.
+func wordIsATicket(st *store.Store, word string) bool {
+	id, err := st.ResolveTicket(word)
+	return err != nil || checkTicketID(id) != nil || st.TicketExists(id)
+}
+
 // chartNamed is the chart a word names: a ticket of that name (or alias) wins,
 // then a chart that has a tickets.yaml. A ticket id is KEY-n and a chart name a
 // word, so the two seldom clash; when they do the ticket is the answer.
@@ -139,7 +157,7 @@ func chartNamed(st *store.Store, word string) (string, bool) {
 	if word == "" {
 		return "", false
 	}
-	if id, err := st.ResolveTicket(word); err != nil || checkTicketID(id) != nil || st.TicketExists(id) {
+	if wordIsATicket(st, word) {
 		return "", false
 	}
 	if validateChartName(word) != nil {

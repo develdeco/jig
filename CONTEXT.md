@@ -59,7 +59,7 @@ The file `record.yaml` in a remote item's folder in the tracker tree. The tree o
 _Avoid_: tracker file
 
 **Intake**:
-The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several. The verdict comes before any ticket: a brief verdict mints the ticket (`jig ticket new`), a chart verdict mints none and writes the chart, whose tickets `jig graduate` mints. It starts from `jig recall`, which shows the open tickets and their edges, near-duplicates, the charts' fog, platform documents and past answers, and for a brief it ends when `jig validate` says `valid: yes` once the person has confirmed the brief, which is the brief's approval (`jig validate --check` checks the same without approving).
+The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several. The verdict comes before any ticket: a brief verdict mints the ticket (`jig ticket new`), a chart verdict mints none and makes the chart with `jig chart new`, whose tickets `jig graduate` mints. It starts from `jig recall`, which shows the open tickets and their edges, near-duplicates, the charts' fog, platform documents and past answers, and for a brief it ends when `jig validate` says `valid: yes` once the person has confirmed the brief, which is the brief's approval (`jig validate --check` checks the same without approving).
 _Avoid_: onboarding
 
 **Illustration**:
@@ -111,7 +111,7 @@ A prompt aimed at a chart, run from the main session: "Take <chart> to PR" when 
 _Avoid_: batch, pipeline, campaign
 
 **Chart standing**:
-Where a chart is, derived from its tickets' journal lines and records and never recorded (`phase.DeriveChart`, shown by `jig next <chart>` and `jig status <chart>`, and by the TUI's chart screen): each ticket's wave and reach (done, here, after a merge, or blocked), the tickets to brief, the build waves that can run now, where the run would end and the pull requests it waits on, whether the chart started, and the verdict with the prompt that moves it ("Take <chart> to PR", "Continue <chart>", or none).
+Where a chart is, derived from its tickets' journal lines and records and never recorded (`phase.DeriveChart`, shown by `jig next <chart>` and `jig status <chart>`, and by the TUI's chart screen): each ticket's wave and reach (done, here, after a merge, or blocked), the tickets to brief, the build waves that can run now, where the run would end and the pull requests it waits on, whether the chart started, and the verdict with the prompt that moves it ("Take <chart> to PR", "Continue <chart>", or none). An entry with no ticket yet whose `blocked_by` ref does not resolve is a row with a problem (blocked, with the reason, while the verdict points to `jig validate <chart>`), not a refusal of the chart; a chart with no entries yet says to add them and check them with `jig validate`.
 _Avoid_: chart status, run state
 
 **Recommendations**:
@@ -291,7 +291,7 @@ The same failure signature recurring twice: two `oracle` failures of one slice w
 _Avoid_: retry loop, flaky failure
 
 **Chart**:
-The wayfinder layer for work spanning tickets: `charts/<name>/` holds `map.md` (for people and sessions; jig reads its sections, the fog for `jig recall` and all of them for `jig next <chart>`, and never writes it) and `tickets.yaml` (the handover jig reads and writes). The map decides what to build; it never builds anything itself. `jig graduate <name>` creates the chart's tickets and writes their ids back into `tickets.yaml`; an intake that reaches a chart verdict mints none of them. A chart's standing is derived and a chart run takes its tickets to a pull request (see **Chart standing**, **Chart run**).
+The wayfinder layer for work spanning tickets: `charts/<name>/` holds `map.md` (for people and sessions; jig reads its sections, the fog for `jig recall` and all of them for `jig next <chart>`) and `tickets.yaml` (the handover jig reads and writes). `jig chart new <name> --title <t>` makes it and commits it, and `jig validate <name>` checks its entries and lists every problem, minting nothing. jig writes only the skeleton, once, when the chart is made (the title and five empty sections, and an empty `tickets:` list), and reads the map after. The map decides what to build; it never builds anything itself. `jig graduate <name>` creates the chart's tickets and writes their ids back into `tickets.yaml`; an intake that reaches a chart verdict makes the chart and mints none of them. A chart's standing is derived and a chart run takes its tickets to a pull request (see **Chart standing**, **Chart run**; [ADR 0040](docs/adr/0040-a-chart-is-made-and-checked-by-verbs.md)).
 _Avoid_: roadmap, epic
 
 **Dependency**:
