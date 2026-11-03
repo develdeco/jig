@@ -159,6 +159,8 @@ func (m *Model) chartNote(r chartRow) (note string, own bool) {
 	switch {
 	case r.verb != nil && r.verb.Problem != "":
 		return m.st.state(StateStalled, r.verb.Problem), true
+	case r.behind:
+		return m.st.state(StateReady, behindWord) + m.st.dim(" · "+behindOwes), true
 	case r.t != nil && (r.done || r.needs || len(r.t.stepLines(stepBuild)) > 0):
 		return m.ticketDetail(r.t, r.steps), false
 	case r.done:

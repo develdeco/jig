@@ -61,10 +61,25 @@ func (m *Model) chartDetailRows(r chartRow) []runRow {
 		rows = append(rows, runRow{label, m.moveText(r.t, l), 0})
 	}
 	if len(rows) == 0 {
-		_, label := m.stepLabel(r.t)
-		rows = append(rows, runRow{"state", m.st.dim(label), 0})
+		rows = append(rows, runRow{"state", m.st.dim(chartStateWord(r)), 0})
 	}
 	return rows
+}
+
+// chartStateWord is where the ticket of r stands, in the words of a header: its
+// current step in its state, from the row's own steps, which follow the verb
+// (followVerb), and not from the screens' derivation alone as stepLabel's do. A
+// ticket that is behind owes a merge and a publish, and is not said to be
+// published.
+func chartStateWord(r chartRow) string {
+	if r.behind {
+		return behindText
+	}
+	cur := r.steps[currentStep(r.steps)]
+	if cur.Done {
+		return "published"
+	}
+	return stepWords(cur.Step, cur.State)
 }
 
 // sliceDetail is a slice being built in the words of a Detail row: its id, its
