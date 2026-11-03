@@ -29,6 +29,6 @@ The variables are the ones jig names a session by (`locate.SessionEnv` and `loca
 ## Consequences
 
 - Amends decision 39 and [ADR 0037](0037-a-chart-is-run-from-the-main-session.md)'s reading of it: the reviewer of a session's ticket is a subagent only where the session's hooks give its tool calls agent ids. In a chart run from a session with no hooks every build subagent shares the session's id, so each ticket's reviewer is a separate session, as `jig gate` advises.
-- The review and chart skills defer to the advice; `CONTEXT.md`'s *Fresh session* and `ARCHITECTURE.md`'s "Who reviews" name the separate session.
+- The review and chart skills defer to the advice; `CONTEXT.md`'s *Fresh session* and `ARCHITECTURE.md`'s "Who reviews" name the separate session, and so does the next-phase note an unattended session gets at Stop, for a session whose record has no agent ids (a harness that reports its stops but not its tool calls, say).
 - The advice is written for Claude Code; another harness starts a fresh session of its own with the same prompt. A harness that sets no session id for its tools gives a round with no known reviewer, `independent: unknown`, which publish accepts and counts.
 - `e2e`'s `TestHooklessSessionReviewsInASeparateSession` runs the advised command in sh with `testdata/fixture/claudestub` as `claude`, standing in for Claude Code's measured behavior (it keeps the environment it starts with and sets its own session id for its tools); a change to that behavior in Claude Code is not caught by it.
