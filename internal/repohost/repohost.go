@@ -23,14 +23,19 @@ type Host interface {
 	// CreatePRWithMedia opens a pull request with optional media files attached.
 	CreatePRWithMedia(head, base, title, bodyFile, mediaDir string, mediaFiles []string) (url string, attached bool, err error)
 
-	// FindOpenPR returns the URL of the open pull request from head into base, or "" when there is none.
-	FindOpenPR(head, base string) (url string, err error)
+	// FindOpenPR returns the open pull request from head, whatever branch it is
+	// into: its URL and the base it goes into. The zero OpenPR means there is
+	// none. A stacked ticket's pull request that the host did not retarget when
+	// its parent merged is found all the same, and publish points it at its base.
+	FindOpenPR(head string) (OpenPR, error)
 
-	// UpdatePR replaces the body of the pull request at url.
-	UpdatePR(url, bodyFile string) error
+	// UpdatePR replaces the body of the pull request at url, and points it at
+	// base in the same call when base is not "".
+	UpdatePR(url, bodyFile, base string) error
 
-	// UpdatePRWithMedia replaces the body of the pull request at url with optional media attached.
-	UpdatePRWithMedia(url, bodyFile, mediaDir string, mediaFiles []string) (attached bool, err error)
+	// UpdatePRWithMedia replaces the body of the pull request at url with optional
+	// media attached, and points it at base in the same call when base is not "".
+	UpdatePRWithMedia(url, bodyFile, base, mediaDir string, mediaFiles []string) (attached bool, err error)
 
 	// CommentPR posts a comment on the pull request at url.
 	CommentPR(url, bodyFile string) error
@@ -288,56 +293,70 @@ func (h *githubHost) CreatePRWithMedia(head, base, title, bodyFile, mediaDir str
 	return url, attached, nil
 }
 
+// OpenPR is an open pull request: its URL and the branch it goes into.
+type OpenPR struct {
+	URL, Base string
+}
+
 // pullRequest is one row of the pull requests REST endpoint's answer.
 type pullRequest struct {
 	HTMLURL string `json:"html_url"`
+	Base    struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
 }
 
-// FindOpenPR returns the open pull request from head into base in this
-// repo, asked of the pull requests endpoint with the qualified head filter
-// (`owner:branch`), which GitHub applies itself: a pull request from a fork
-// whose branch happens to share head's name is another head and is never in
+// FindOpenPR returns the open pull request from head in this repo, into
+// whatever branch, asked of the pull requests endpoint with the qualified head
+// filter (`owner:branch`), which GitHub applies itself: a pull request from a
+// fork whose branch happens to share head's name is another head and is never in
 // the answer. (`gh pr list --head` takes the bare branch name, so it lists
 // every fork's, one page of 30 at a time, and an answer the page cut short
-// reads as "none".) At most one open pull request can exist for a head and
-// base, so more than one is an error, not a choice.
-func (h *githubHost) FindOpenPR(head, base string) (string, error) {
+// reads as "none".) The base is not asked for: a stacked ticket's pull request
+// that GitHub did not retarget when its parent merged is still the ticket's.
+// More than one open pull request from a head is an error, not a choice.
+func (h *githubHost) FindOpenPR(head string) (OpenPR, error) {
 	out, err := h.run("api", "repos/"+h.repoSpec()+"/pulls", "--method", "GET",
-		"-f", "head="+h.owner+":"+head, "-f", "base="+base, "-f", "state=open")
+		"-f", "head="+h.owner+":"+head, "-f", "state=open")
 	if err != nil {
-		return "", err
+		return OpenPR{}, err
 	}
 	var rows []pullRequest
 	if err := json.Unmarshal([]byte(out), &rows); err != nil {
-		return "", fmt.Errorf("repohost: parse gh api pulls output %q: %w", out, err)
+		return OpenPR{}, fmt.Errorf("repohost: parse gh api pulls output %q: %w", out, err)
+	}
+	switch len(rows) {
+	case 0:
+		return OpenPR{}, nil
+	case 1:
+		return OpenPR{URL: rows[0].HTMLURL, Base: rows[0].Base.Ref}, nil
 	}
 	urls := make([]string, len(rows))
 	for i, r := range rows {
 		urls[i] = r.HTMLURL
 	}
-	switch len(urls) {
-	case 0:
-		return "", nil
-	case 1:
-		return urls[0], nil
-	}
-	return "", fmt.Errorf("repohost: gh api pulls found %d open pull requests from %s into %s in %s: %s", len(urls), head, base, h.repoSpec(), strings.Join(urls, " "))
+	return OpenPR{}, fmt.Errorf("repohost: gh api pulls found %d open pull requests from %s in %s: %s", len(urls), head, h.repoSpec(), strings.Join(urls, " "))
 }
 
-// UpdatePR replaces the body of the pull request at url.
-func (h *githubHost) UpdatePR(url, bodyFile string) error {
-	_, err := h.UpdatePRWithMedia(url, bodyFile, "", nil)
+// UpdatePR replaces the body of the pull request at url, and points it at base
+// in the same call when base is not "".
+func (h *githubHost) UpdatePR(url, bodyFile, base string) error {
+	_, err := h.UpdatePRWithMedia(url, bodyFile, base, "", nil)
 	return err
 }
 
 // UpdatePRWithMedia replaces the body of the pull request at url via `gh pr
 // edit --body-file`, run with mediaDir as gh's own working directory, adding
-// one `--attach <file>` per file when mediaFiles is non-empty and the
-// installed gh's `pr edit` supports it (checked on its own: `pr create` and
-// `pr edit` do not necessarily agree). attached reports whether the flags
-// were added, the same as CreatePRWithMedia's own.
-func (h *githubHost) UpdatePRWithMedia(url, bodyFile, mediaDir string, mediaFiles []string) (bool, error) {
+// `--base <base>` when base is not "" (the retarget of a stacked pull request
+// is the same edit) and one `--attach <file>` per file when mediaFiles is
+// non-empty and the installed gh's `pr edit` supports it (checked on its own:
+// `pr create` and `pr edit` do not necessarily agree). attached reports whether
+// the flags were added, the same as CreatePRWithMedia's own.
+func (h *githubHost) UpdatePRWithMedia(url, bodyFile, base, mediaDir string, mediaFiles []string) (bool, error) {
 	args := []string{"pr", "edit", url, "--repo", h.repoSpec(), "--body-file", bodyFile}
+	if base != "" {
+		args = append(args, "--base", base)
+	}
 
 	attached := len(mediaFiles) > 0 && h.supportsAttach("pr edit")
 	if attached {

@@ -180,6 +180,104 @@ func TestChartWaitsForAnOpenPullRequest(t *testing.T) {
 	}
 }
 
+// ticketClosed is a ticket closed as covered by another's work.
+func ticketClosed(id string) *Ticket {
+	t := Derive(Facts{Ticket: id, Closed: "covered by x/y#1"}, nil)
+	return &t
+}
+
+// ticketBehind is a published ticket whose branch is owed a merge: its publish
+// is current again (the stack plan's word, as a chart reads it).
+func ticketBehind(id string) *Ticket {
+	f := allGreen()
+	f.Ticket, f.Published = id, true
+	f.Restacks = []Restack{{Repo: "shop", Kind: RestackTarget, Ref: "origin/main"}}
+	t := Derive(f, nil)
+	return &t
+}
+
+// stackedOpen is the stacked need of a published ticket on a parent whose pull
+// requests have not merged: the reader names them on the need.
+func stackedOpen(blocker string, prs ...MergePR) ChartNeed {
+	return ChartNeed{Ticket: blocker, Kind: "stacked", Met: true, PRs: prs}
+}
+
+// TestChartWaitsForAStackedParentToMerge: a parent and a child stacked on it,
+// both published, are done, but while the parent's pull request is open the
+// child is owed a retarget once it merges: the chart waits on that merge, under
+// the prompt to ask afterwards, with the child as the end, and the reason says
+// the child's pull request is then retargeted. Once it merged the child is
+// behind, so the chart is ready with it as the run. The wait is a published
+// ticket's alone: a closed one, a stacked need with no pull request to name and
+// a chart with no stacked edge are done, and an entry still to graduate or a
+// ticket still to run keep the verdict they had, the end listed beside them.
+func TestChartWaitsForAStackedParentToMerge(t *testing.T) {
+	t.Parallel()
+	open := MergePR{Repo: "shop", URL: "https://example.test/shop/pull/7", State: "OPEN"}
+	chart := func(extra ...ChartEntry) Chart {
+		return DeriveChart(ChartFacts{Name: "c", Entries: append([]ChartEntry{
+			entry(1, "T-1", ticketPublished("T-1")),
+			entry(2, "T-2", ticketPublished("T-2"), stackedOpen("T-1", open)),
+		}, extra...)})
+	}
+
+	c := chart()
+	if c.Ready || c.Code != CodeChartWaitsMerge || c.Prompt != "Continue c" || len(c.Run) != 0 || !c.Started {
+		t.Fatalf("verdict = ready %v code %q prompt %q run %v started %v, want waits-merge under Continue", c.Ready, c.Code, c.Prompt, c.Run, c.Started)
+	}
+	if want := "T-2 waits for T-1 to merge (https://example.test/shop/pull/7 OPEN), then its pull request is retargeted"; c.Reason != want {
+		t.Errorf("Reason = %q, want %q", c.Reason, want)
+	}
+	if len(c.Ends) != 1 || c.Ends[0].ID != "T-2" || c.Ends[0].Pos != 2 || c.Ends[0].Because.Ticket != "T-1" || !c.Ends[0].Because.stacked() || !reflect.DeepEqual(c.Ends[0].Because.PRs, []MergePR{open}) {
+		t.Errorf("Ends = %+v, want T-2 on T-1's open pull request, stacked", c.Ends)
+	}
+	for _, r := range c.Rows {
+		if !r.Done || r.Reach != ReachDone || len(r.Waits) != 0 || r.Prompt() != "" {
+			t.Errorf("%s = done %v reach %s waits %v prompt %q, want done with nothing to ask", r.ID, r.Done, r.Reach, r.Waits, r.Prompt())
+		}
+	}
+
+	// The parent's pull request merged: the child is owed a retarget, which is
+	// the run, and nothing is left to wait on.
+	merged := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{
+		entry(1, "T-1", ticketPublished("T-1")),
+		entry(2, "T-2", ticketBehind("T-2"), stackedOpen("T-1")),
+	}})
+	if want := [][]string{{"T-2"}}; !merged.Ready || merged.Code != "" || merged.Prompt != "Continue c" || !reflect.DeepEqual(merged.Run, want) || len(merged.Ends) != 0 {
+		t.Errorf("parent merged: ready %v code %q prompt %q run %v ends %v, want ready under Continue with %v", merged.Ready, merged.Code, merged.Prompt, merged.Run, merged.Ends, want)
+	}
+
+	// Nothing to name: the parent's pull request is not on record. A closed
+	// ticket owes nothing. Neither waits.
+	for name, e := range map[string]ChartEntry{
+		"no pull request": entry(2, "T-2", ticketPublished("T-2"), stackedOpen("T-1")),
+		"closed ticket":   entry(2, "T-2", ticketClosed("T-2"), stackedOpen("T-1", open)),
+	} {
+		if c := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{entry(1, "T-1", ticketPublished("T-1")), e}}); c.Code != CodeChartDone || len(c.Ends) != 0 {
+			t.Errorf("%s: code %q ends %v, want CHART_DONE", name, c.Code, c.Ends)
+		}
+	}
+
+	// An entry with no ticket yet is still the step to take; a ticket to build
+	// keeps the chart ready. The end is listed in both.
+	if c := chart(ChartEntry{Pos: 3, Title: "later"}); c.Code != CodeChartNotGraduated || len(c.Ends) != 1 {
+		t.Errorf("entry to graduate: code %q ends %v, want not graduated with the end", c.Code, c.Ends)
+	}
+	if c := chart(entry(3, "T-3", ticketAt("T-3"))); !c.Ready || c.Code != "" || !reflect.DeepEqual(c.Run, [][]string{{"T-3"}}) || len(c.Ends) != 1 {
+		t.Errorf("ticket to build: ready %v code %q run %v ends %v, want ready with the end", c.Ready, c.Code, c.Run, c.Ends)
+	}
+
+	// Two pull requests (a parent in two repos) are both named.
+	api := MergePR{Repo: "api", URL: "https://example.test/api/pull/3", State: "OPEN"}
+	two := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{
+		entry(1, "T-1", ticketPublished("T-1")),
+		entry(2, "T-2", ticketPublished("T-2"), stackedOpen("T-1", open, api)),
+	}})
+	if want := "T-2 waits for T-1 to merge (https://example.test/shop/pull/7 OPEN, https://example.test/api/pull/3 OPEN), then its pull request is retargeted"; two.Reason != want {
+		t.Errorf("Reason = %q, want %q", two.Reason, want)
+	}
+}
+
 // TestChartBuildsAStackedTicketInALaterWave: a ticket stacked on one that
 // builds here builds here too, in the wave after it; independent tickets share
 // the parent's wave.
@@ -425,5 +523,95 @@ func TestTicketKeepsTheBlockersTheFactsNamed(t *testing.T) {
 	}
 	if got := (Ticket{}).Blockers(); got != nil {
 		t.Errorf("the zero Ticket has blockers %+v", got)
+	}
+}
+
+// TestChartWithNoEntries: a chart just made has no entries. It keeps the code
+// CHART_NOT_GRADUATED (the TUI reads it) with no prompt, and its reason says to
+// add the entries and check them with `jig validate`, not to run `jig graduate`,
+// which refuses a chart with no entries.
+func TestChartWithNoEntries(t *testing.T) {
+	t.Parallel()
+	c := DeriveChart(ChartFacts{Name: "coupons"})
+	want := "the chart has no entries yet: add them to charts/coupons/tickets.yaml and check them with `jig validate coupons`"
+	if c.Ready || c.Code != CodeChartNotGraduated || c.Prompt != "" || c.Ungraduated != 0 || c.Reason != want {
+		t.Errorf("no entries = ready %v code %q prompt %q ungraduated %d reason %q, want not graduated with reason %q", c.Ready, c.Code, c.Prompt, c.Ungraduated, c.Reason, want)
+	}
+	if len(c.Rows) != 0 || len(c.Run) != 0 || len(c.Briefs) != 0 {
+		t.Errorf("no entries have rows, a run or briefs: %+v", c)
+	}
+	if c.HasUngraduatedProblem() {
+		t.Error("a chart with no entries has no entry with a problem")
+	}
+}
+
+// TestChartEntryWithABadRefIsBlocked: an entry with no ticket and a problem in
+// the chart's own file is a blocked row worded as the entry's problem (a
+// graduated one keeps "cannot be read"), the entries behind it are blocked, the
+// rest still run, and the not-graduated reasons send the person to `jig
+// validate` first while any entry with no ticket has a problem.
+func TestChartEntryWithABadRefIsBlocked(t *testing.T) {
+	t.Parallel()
+	problem := `blocked_by ref "#9" is out of range`
+	bad := ChartEntry{Pos: 2, Title: "bad", Problem: problem}
+	after := ChartEntry{Pos: 3, Title: "after", Needs: []ChartNeed{{Pos: 2, Kind: "merged", Why: "c#3 waits for entry #2, which has no ticket yet"}}}
+
+	c := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{
+		entry(1, "T-1", ticketAt("T-1")),
+		bad,
+		after,
+	}})
+	var row ChartRow
+	reachByPos := map[int]string{}
+	for _, r := range c.Rows {
+		reachByPos[r.Pos] = r.Reach
+		if r.Pos == 2 {
+			row = r
+		}
+	}
+	if reachByPos[1] != ReachHere || reachByPos[2] != ReachBlocked || reachByPos[3] != ReachBlocked {
+		t.Errorf("reach by position = %v, want here, blocked, blocked (the entry behind the bad one is blocked)", reachByPos)
+	}
+	if row.Reach != ReachBlocked || row.Problem != problem || row.ID != "" {
+		t.Errorf("the bad entry's row = %+v, want blocked with its problem and no id", row)
+	}
+	if !c.Ready || c.Prompt != "Continue c" || !reflect.DeepEqual(c.Run, [][]string{{"T-1"}}) {
+		t.Errorf("the graduated entry still runs: ready %v prompt %q run %v", c.Ready, c.Prompt, c.Run)
+	}
+	if !c.HasUngraduatedProblem() {
+		t.Error("HasUngraduatedProblem = false, want true")
+	}
+
+	// The blocked reason: an entry with no id has a problem; a graduated one
+	// cannot be read.
+	d := &chartDeriver{f: ChartFacts{Name: "c", Entries: []ChartEntry{bad}}, byPos: map[int]int{2: 0}, byID: map[string]int{},
+		reach: make([]string, 1), why: make([]string, 1), state: make([]int, 1), wave: make([]int, 1), wstat: make([]int, 1)}
+	d.reachOf(0)
+	if want := "entry #2 has a problem: " + problem; d.why[0] != want {
+		t.Errorf("blocked reason of an entry with no id = %q, want %q", d.why[0], want)
+	}
+	graduated := ChartEntry{Pos: 1, ID: "T-1", Title: "broken", Problem: "slices.yaml does not parse"}
+	blocked := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{graduated}})
+	if want := "T-1 cannot be read: slices.yaml does not parse"; blocked.Reason != want {
+		t.Errorf("reason for a graduated entry with a problem = %q, want %q", blocked.Reason, want)
+	}
+
+	// Nothing graduated: the verdict says validate first.
+	none := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{{Pos: 1, Title: "one"}, bad}})
+	if want := "run `jig validate c` first: it lists the problems of the entries that have no ticket yet"; none.Code != CodeChartNotGraduated || none.Reason != want {
+		t.Errorf("nothing graduated, one with a problem = code %q reason %q, want not graduated with %q", none.Code, none.Reason, want)
+	}
+	// Everything graduated is done, the rest missing: the count, then the step.
+	finished := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{
+		entry(1, "T-1", ticketPublished("T-1")),
+		{Pos: 2, Title: "later", Problem: "blocked_by ref \"#9\" is out of range"},
+	}})
+	if want := "1 entry has no ticket yet: run `jig validate c` first: it lists the problems of the entries that have no ticket yet"; finished.Code != CodeChartNotGraduated || finished.Reason != want {
+		t.Errorf("all graduated done, one with a problem = code %q reason %q, want %q", finished.Code, finished.Reason, want)
+	}
+	// Without a problem the step is graduate, as before.
+	plain := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{{Pos: 1, Title: "one"}}})
+	if plain.Reason != "run `jig graduate c`" {
+		t.Errorf("nothing graduated, no problem = reason %q, want run `jig graduate c`", plain.Reason)
 	}
 }

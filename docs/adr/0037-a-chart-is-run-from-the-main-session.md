@@ -33,3 +33,71 @@ The owner walked a harness session beside `jig tui` through the whole flow in a 
 - `ARCHITECTURE.md` changes in the hooks (a `SubagentStop`), notes (per session and agent, the claim holder), the TUI (eight screens), `internal/phase`, `internal/recall`, `internal/ledger` and `internal/observe` rows, and the skills paragraph.
 - A project that attached jig before this has no `SubagentStop` entry until it runs `jig attach` or `jig hooks` again; `jig doctor` lists the missing entry, and until then a build subagent is never held at its stop.
 - The skills stay under the 6000 bytes and 100 lines the lint allows: the new `chart` skill is its own, and intake gave up a few sentences to make room.
+
+## Amendment: a screen that waits on a merge is read again on a timer (GRAPH-15)
+
+The chart screen was read again on open, on `r`, and after the screen had been quiet since an event of one of the chart's tickets. A merge on the host writes no line to any journal, so a chart that ended at a pull request showed "waits for a merge" until a person pressed `r` or something happened to one of its tickets. The owner decided that a screen that waits on a merge is read again on a timer, every two minutes (chart flow, C14).
+
+- **The rule.** A screen waits on a merge when it shows a wait that only the host can end. The TUI reads that screen again every `Config.MergeEvery`, and a screen that waits on nothing is not read on the timer.
+- **Which screens wait.** The chart screen waits when the last read that printed a chart listed at least one entry in `ends`, the tickets the run stops at, each behind a merge. A read that printed no chart leaves that as it was, so one blank read does not stop the timer. A ticket's screens (ticket, brief, build, review, publish, slice) wait when the ticket is published with a pull request on record and is not closed. The project's list waits on nothing, an unpublished ticket waits on nothing, and a closed ticket waits on nothing.
+- **What a tick reads.** Only the screen on top, through the verbs the screens already read. A chart screen that waits reads the ticket list and the chart (`jig next --json` and `jig next <chart> --json`), the two reads the idle read makes. The statuses of the chart's tickets are not read, since a merge changes no status. A ticket screen that waits reads that ticket's status, which shows a closure made in another session. A read already out is not doubled, a read that fails is retried as before, and a tick moves no cursor and sets no notice.
+- **The field and the flag.** `Config.MergeEvery` is a duration: zero is two minutes, and a negative value never reads again, as `AwaitEvery` does, for a test that settles `Init`. The timer starts at `Init` and runs for the life of the model, whichever screen is on top. `jig tui --merge-every <duration>` sets it, so an end-to-end test can set it short and a person can see it in `jig tui -h`. A negative value is refused as `VALIDATION_ERROR` before any screen; turning the timer off is not offered to a person.
+
+Rejected alternatives:
+
+- **jig or the TUI fetching the clone on the tick.** A merge judged by ancestry (a ticket published with no pull request on record) shows once `refs/remotes/origin/<target>` holds the branch, and only a fetch moves it. A fetch from a screen is a network call and a write to the person's clone that nothing in jig makes today, and the screens read no store and call no host.
+- **A host watcher or a webhook.** Both need something to run beside the TUI, or a public address to call, for a state `jig next <chart>` already asks the host for.
+- **Reading every screen on the timer.** Most screens show nothing a merge changes. The timer would read the roster and a status every two minutes for each one, and the cost would show nowhere.
+
+Consequences:
+
+- The chart verb asks the host about the pull requests it names on every read, so a merge shows in the next tick's read. The listing `jig next --json`, which the tick also reads, may take an open pull request's state from this machine's memory when it is under two minutes old, so a blocker in the listing can read an open pull request up to two minutes late.
+- A merge judged by ancestry shows once something fetched the clone: a person's `git fetch`, or a pull. The timer does not fetch.
+- A ticket's screens show no host state of their own pull request, since no verb they read prints one. The tick changes what a ticket screen shows only when its status changed.
+- `CONTEXT.md` (*Chart standing*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row), the README and `DECISIONS.md` say the same.
+
+## Amendment: the chart screen's activity includes the chart's store history (GRAPH-16)
+
+A chart has no journal, so the chart screen's Activity panel showed its tickets' lines and nothing else. A map edit or a graduation leaves no ticket line: a chart whose map was just edited, or that was just graduated, read "nothing yet". The store is a git repo, and the commits that touched `charts/<name>/` are the chart's own history. The owner decided the chart screen shows them as part of its activity (chart flow, C13).
+
+- **The history.** `jig next <chart> --json` gains a `history` key: the commits of the store's `HEAD` that changed anything under `charts/<name>/`, as git's path-limited log gives them, newest first, each as `{sha, time, subject}` with the committer time in UTC. It is the 20 newest (`chartHistoryLimit`), always present, and `[]` when it cannot be read (the store is not a git repository, it has no commit, git fails): a problem is a row, never a reason to hide the chart. Only `--json` reads it. The text of `jig next` and `jig status` is the session's, which has no use for it, and starts no extra git process.
+- **One git call.** `gitx.PathLog` runs one `git log` with the paths taken literally. Path-limited history with git's merge simplification is what the git program computes, and `internal/gitx/read.go` keeps history walks on it. `Store.ChartHistory` asks it for the chart's folder, which `Store.ChartRelDir` names in one place beside `ChartFile`.
+- **On the screen.** `parseChart` reads `history` into the chart's info (a missing key is none, an entry whose time does not parse is left out). The Activity panel adds each commit to the tickets' lines, oldest first, and sorts the whole list by instant with a stable sort, so two commits of one second keep git's order and a commit stands above a ticket's line of the same second. A commit is drawn `HH:MM:SS chart  store  · <sha7> <subject>`, and the panel's count and its "nothing yet" take commits into account. With no history the panel is drawn as it was.
+- **Fresh as the read.** The history is as fresh as the chart's last read: on open, on `r`, when a graduation changes the listing, and after a quiet that follows a touch of one of its tickets. This adds no trigger and no timer.
+
+Rejected alternatives:
+
+- **A chart journal.** A file the chart's actions append to would record the run, which decision 4 of the chart's map rejected, and would be a second copy of what git holds.
+- **The TUI reading the store itself.** `TestTheScreensReadNoStore` forbids the screens importing `store`, `project` and `gitx`: they learn everything from a verb's output, and this stays one.
+- **An in-process log walk in `internal/gitx`.** Merge simplification and the path filter are git's to compute, and a second implementation would drift from it.
+
+Consequences:
+
+- Every JSON read of a chart starts one `git log` in the store clone, so the git budgets of the packages whose tests read one (`.github/git-budget.yaml`) move up.
+- The Activity shows the time of day of an old commit, as it does for a ticket's line, with no date.
+- `CONTEXT.md` (*Chart history*), `ARCHITECTURE.md` (the chart paragraph and the `internal/gitx/`, `internal/store/` and `internal/tui/` rows) and `DECISIONS.md` say the same.
+
+## Amendment: the chart screen details the ticket under the cursor (2026-11-02)
+
+The chart screen drew the same Run and Activity panels whichever ticket the cursor stood on. A run builds each ticket with a subagent of its own, so the person asked who holds a slice, which agent claimed it, how far it has come and whether that agent was held at its stop, and had to open the ticket to see. The owner decided the chart screen details the ticket under the cursor from what the ticket screens already read (chart flow, C10). What the owner left open was taken at the recommended answer (2026-11-02, proceed with the plan).
+
+- **The panel.** A Detail panel sits between the Tickets and the Run panels, and its top edge ends with the id of the ticket under the cursor. It is drawn whenever the chart has a ticket row, and not for a chart of fog entries only. Its rows are the Run panel's rows (label, text, weight), never rows the cursor can stand on, so what the cursor's index means does not change. It has four rows at most (`detailMax`).
+- **No new read.** The data is the stream and `jig status <T>`, which the ticket screens read. There is no new verb, no new field in any JSON and no new read. Moving the cursor draws the panel again and runs nothing.
+- **Slices.** One row for each slice the build has under way: a sub-step of the build whose key starts with `slice:` and whose state is active, needs you or failed. The row is the slice id, its stage (claimed, committed, verifying or verified while it is under way, "waits for your answer" or "stalled" otherwise), the session that holds its claim, named as the activity names it ("builder"), and the agent that claimed it. A slice has a holder only while its claim is live: its latest `claim` line, not followed by a `release` of the slice.
+- **The agent.** A claim line has no agent, because the CLI cannot know which agent runs it. The agent is read from the machine ledger as `claimHolder` reads it: the tool line of the claim's session that ran `jig claim` and not `--release`, the nearest in time to the claim line, stamped no more than a minute before it. When no such line is kept (the harness has no hooks, or the line fell out of the ledger lines the screens keep) there is no agent, and the row still names the holder. The screens may not import the ledger, so `claimCall` in `internal/tui` mirrors `ledger.RunsJig` for the claim verb and the `--release` refusal, and a test that may import both pins that they agree.
+- **A current hold.** A hold is a ledger line that says jig held an agent at its stop. It is current while no journal line that belongs to a step follows it: a verification landing, a gate opening or a pull request recorded ends it. A `spend` line belongs to no step, so the main session's own stop does not end a hold. The panel shows the newest two current holds, oldest first, after the slice rows, worded as the activity log words them ("the session" when no agent made the stop). The log keeps the history of the ones that ended.
+- **Nothing to detail.** A ticket with no slice under way and no hold has one dim `state` row: the words of the ticket's header, or "not read yet" for a ticket the screens do not know. The panel is there for every ticket, so the layout does not jump as the cursor moves.
+- **Rows given up.** A short screen gives rows up in this order: the Map, then the Run panel's rows down to one, then the Detail panel's rows down to one. The Tickets panel is never cut and the Activity panel keeps its floor. A hold weighs less than a slice row, so a slice row goes before a hold. `chartPage` counts the Detail panel with its frame before it cuts, and reads the cursor as the view clamps it, never through `selected()` or `page()`, which call it.
+
+Rejected alternatives:
+
+- **The agent on the claim line.** `jig claim` cannot know which agent runs it, and the hook that hears the call is what writes the agent, on the ledger's line.
+- **The harness and model of the holder.** A subagent runs on a model of its own, and the session's would mislead.
+- **A verb for the detail.** The ticket screens already read what the panel shows, so a verb would add a read for nothing.
+- **The ticket's worktree on the panel.** That is advice `jig next` does not give on this branch, and the panel reads nothing new.
+
+Consequences:
+
+- On an 80 by 24 screen the map line and the Run panel's waves give way to the panel, and a taller screen keeps them.
+- A harness with no hooks shows the holder and never the agent, and a hold only the hooks write is never shown.
+- `CONTEXT.md` (*Chart detail*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row), the README and `DECISIONS.md` say the same.

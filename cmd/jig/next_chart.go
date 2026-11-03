@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/phase"
@@ -15,9 +16,11 @@ import (
 // nextChart is where a chart stands, as `jig next <chart>` says it and the TUI's
 // chart screen reads it (--json): the verdict (Ready, Code, Reason, Prompt), the
 // tickets in dependency order with each one's phases and reach, the briefs to
-// write and the waves to build, where the run ends, and what map.md says. Every
-// key is present but rank, steps, waits_for, prs and map, which are left out
-// when there is nothing to say.
+// write and the waves to build, where the run ends, what map.md says, what the
+// run has spent and, for --json, the commits of the store that touched the
+// chart's folder. Every key is present but rank, steps, waits_for, prs, map and
+// spend, which are left out when there is nothing to say; history is [] when
+// the text form is read or the history cannot be.
 type nextChart struct {
 	Chart       string            `json:"chart"`
 	Title       string            `json:"title"`
@@ -31,7 +34,9 @@ type nextChart struct {
 	Run         [][]string        `json:"run"`
 	Tickets     []nextChartTicket `json:"tickets"`
 	Ends        []nextChartEnd    `json:"ends"`
+	History     []nextChartCommit `json:"history"`
 	Map         *nextChartMap     `json:"map,omitempty"`
+	Spend       *nextChartSpend   `json:"spend,omitempty"`
 
 	// derived is the same derivation, for the help.
 	derived phase.Chart
@@ -54,6 +59,10 @@ type nextChartTicket struct {
 	Prompt   string          `json:"prompt"`
 	Problem  string          `json:"problem"`
 	WaitsFor []nextChartNeed `json:"waits_for,omitempty"`
+	// Worktrees are the worktrees jig advises for the ticket, one for each repo
+	// it builds in, as `jig next <ticket>` gives them (worktree_advice.go). Only
+	// a ticket of the run has them.
+	Worktrees []nextWorktree `json:"worktrees,omitempty"`
 }
 
 // nextChartNeed is an edge that is not met: the blocker (a ticket, or the entry
@@ -84,6 +93,37 @@ type nextChartEnd struct {
 	PRs     []nextChartPR `json:"prs,omitempty"`
 }
 
+// nextChartCommit is one commit of the store that changed something under the
+// chart's folder: its full hash, its committer time in UTC (RFC 3339) and the
+// first line of its message.
+type nextChartCommit struct {
+	SHA     string `json:"sha"`
+	Time    string `json:"time"`
+	Subject string `json:"subject"`
+}
+
+// chartHistoryLimit is how many of the chart's newest commits `jig next --json`
+// carries. The chart screen never shows more lines than the terminal has rows,
+// so this is more than a screen holds.
+const chartHistoryLimit = 20
+
+// chartHistory is the chart's store history for --json: the newest commits that
+// touched charts/<name>/, newest first. It is never nil, and it is empty when
+// the history cannot be read (the store is not a git repository, it has no
+// commit yet, git fails): a problem is an empty list, never a reason to hide
+// the chart, and nothing is printed for it.
+func chartHistory(st *store.Store, name string) []nextChartCommit {
+	out := []nextChartCommit{}
+	entries, err := st.ChartHistory(name, chartHistoryLimit)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		out = append(out, nextChartCommit{SHA: e.SHA, Time: e.Time.UTC().Format(time.RFC3339), Subject: e.Subject})
+	}
+	return out
+}
+
 // nextChartMap is the sections of the chart's map.md.
 type nextChartMap struct {
 	Destination []string `json:"destination"`
@@ -92,12 +132,13 @@ type nextChartMap struct {
 	OutOfScope  []string `json:"out_of_scope"`
 }
 
-// chartOutput lays the standing and the map into what the verbs print.
-func chartOutput(c phase.Chart, m chartMap) nextChart {
+// chartOutput lays the standing, the map and the spend (nil when no ticket has
+// any) into what the verbs print.
+func chartOutput(c phase.Chart, m chartMap, spend *nextChartSpend) nextChart {
 	out := nextChart{
 		Chart: c.Name, Title: m.Title, Ready: c.Ready, Code: c.Code, Reason: c.Reason, Prompt: c.Prompt,
-		Started: c.Started, Ungraduated: c.Ungraduated,
-		Briefs: orEmpty(c.Briefs), Run: c.Run, Tickets: []nextChartTicket{}, Ends: []nextChartEnd{}, derived: c,
+		Started: c.Started, Ungraduated: c.Ungraduated, Spend: spend,
+		Briefs: orEmpty(c.Briefs), Run: c.Run, Tickets: []nextChartTicket{}, Ends: []nextChartEnd{}, History: []nextChartCommit{}, derived: c,
 	}
 	if out.Run == nil {
 		out.Run = [][]string{}
@@ -127,6 +168,32 @@ func chartOutput(c phase.Chart, m chartMap) nextChart {
 		out.Map = &nextChartMap{Destination: m.Destination, Decided: m.Decided, Fog: m.Fog, OutOfScope: m.OutOfScope}
 	}
 	return out
+}
+
+// setWorktrees lays on each graduated ticket of the run (any wave) the worktrees
+// jig advises for it: a ticket in the run is work of this run, so its work is
+// wanted. A ticket whose facts cannot be read gets none and never hides the
+// chart. The chart's standing is unchanged; `jig status <chart>` does not call
+// this.
+func (n *nextChart) setWorktrees(src *worktreeSource) {
+	inRun := map[string]bool{}
+	for _, wave := range n.Run {
+		for _, id := range wave {
+			inRun[id] = true
+		}
+	}
+	for i := range n.Tickets {
+		t := &n.Tickets[i]
+		if t.ID == "" || !inRun[t.ID] {
+			continue
+		}
+		facts, err := src.factsOf(t.ID)
+		if err != nil {
+			continue
+		}
+		facts.Wanted = true
+		t.Worktrees = src.rows(facts)
+	}
 }
 
 func orEmpty(s []string) []string {
@@ -160,6 +227,9 @@ func (n nextChart) blocks(label string) []string {
 	add("code", n.Code)
 	add("reason", n.Reason)
 	pairs = append(pairs, [2]string{"started", yesNo(n.Started)}, [2]string{"ungraduated", strconv.Itoa(n.Ungraduated)})
+	if n.Spend != nil {
+		pairs = append(pairs, [2]string{"spend", n.Spend.line()})
+	}
 	blocks := []string{axi.KV(label, pairs)}
 
 	var rows [][]string
@@ -188,6 +258,18 @@ func (n nextChart) blocks(label string) []string {
 		rows = append(rows, []string{id, t.Title, steps, t.Reach, waits})
 	}
 	blocks = append(blocks, axi.Table("tickets", []string{"id", "title", "steps", "reach", "waits_for"}, rows))
+	// What the JSON carries as a row's problem: an entry whose ref does not
+	// resolve, or a ticket that cannot be read.
+	var problems [][]string
+	for _, t := range n.Tickets {
+		if t.Problem == "" {
+			continue
+		}
+		problems = append(problems, []string{strconv.Itoa(t.Pos), dashed(t.ID), t.Problem})
+	}
+	if len(problems) > 0 {
+		blocks = append(blocks, axi.Table("problems", []string{"pos", "id", "problem"}, problems))
+	}
 	if len(n.Briefs) > 0 {
 		var brows [][]string
 		for _, id := range n.Briefs {
@@ -201,6 +283,15 @@ func (n nextChart) blocks(label string) []string {
 			wrows = append(wrows, []string{strconv.Itoa(i + 1), joinPlus(w)})
 		}
 		blocks = append(blocks, axi.Table("run", []string{"wave", "tickets"}, wrows))
+	}
+	var worktrees [][]string
+	for _, t := range n.Tickets {
+		for _, w := range t.Worktrees {
+			worktrees = append(worktrees, append([]string{t.ID}, worktreeCells(w)...))
+		}
+	}
+	if len(worktrees) > 0 {
+		blocks = append(blocks, axi.Table("worktrees", []string{"ticket", "repo", "action", "dir", "base", "command"}, worktrees))
 	}
 	if len(n.Ends) > 0 {
 		var erows [][]string
@@ -223,9 +314,13 @@ func (n nextChart) help() []string { return chartHelp(n.derived) }
 
 // chartHelp says what to do for a chart at its standing: ask the prompt when
 // something can run, merge the pull request a run ends at then ask to continue,
-// graduate the entries that have no ticket, or what blocks it.
+// graduate the entries that have no ticket (validate them first while one has a
+// problem, which graduate would refuse), or what blocks it.
 func chartHelp(c phase.Chart) []string {
 	graduate := fmt.Sprintf("Run `jig graduate %s` to create the %d missing ticket(s)", c.Name, c.Ungraduated)
+	if c.HasUngraduatedProblem() {
+		graduate = fmt.Sprintf("Run `jig validate %s` to list the problems of the entries that have no ticket yet, fix them in charts/%s/tickets.yaml, then run `jig graduate %s`", c.Name, c.Name, c.Name)
+	}
 	switch {
 	case c.Ready:
 		help := []string{"Ask: " + c.Prompt}

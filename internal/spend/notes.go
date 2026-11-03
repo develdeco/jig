@@ -19,13 +19,19 @@ import (
 //
 //   - at a stop and a session end it reads the session's transcript
 //     (Event.Transcript) and, when the session's total differs from its
-//     latest spend line, appends a new one. The first time it records spend
-//     for a ticket that has no budget record, it records the project's
-//     default budget (the jig.yaml marker's), when there is one, as the
-//     ticket's, so status and every later event read one budget.
+//     latest spend line, appends a new one. The total leaves out the
+//     transcripts of the subagents that have a line of their own (see
+//     ownAgents). The first time it records spend for a ticket that has no
+//     budget record, it records the project's default budget (the jig.yaml
+//     marker's), when there is one, as the ticket's, so status and every
+//     later event read one budget.
+//   - at a subagent's stop it does the same for the agent's own transcript,
+//     on the ticket the agent is placed at, and the line it appends has the
+//     agent's id set (AgentLine). An agent placed at no ticket, or with no
+//     transcript, writes none.
 //   - at every event but the session end it holds the ticket's spend, the sum
-//     of its sessions' latest lines, against its budget record, and returns a
-//     note when the ticket is near or over it.
+//     of its sessions' and agents' latest lines, against its budget record,
+//     and returns a note when the ticket is near or over it.
 //
 // The note is never Enforce: spend is reported, and nothing is stopped. A
 // ticket with no budget record, and a session whose transcript cannot be
@@ -42,20 +48,18 @@ func Notes(c observe.NoteCtx) ([]observe.Note, error) {
 	if c.Store == nil || c.Where.Ticket == "" {
 		return nil, nil
 	}
-	if c.Event.Kind == observe.KindStop && c.Event.IsSubagent() {
-		// A subagent's stop is not the session's: its transcript total is the
-		// session's, which the session's own Stop and SessionEnd record, and
-		// a second line from here would count it twice.
-		return nil, nil
-	}
 	lines, err := c.Journal()
 	if err != nil {
 		return nil, err
 	}
-	if c.Event.Kind == observe.KindStop || c.Event.Kind == observe.KindSessionEnd {
-		if lines, err = record(c, lines); err != nil {
-			return nil, err
-		}
+	switch {
+	case c.Event.Kind == observe.KindStop && c.Event.IsSubagent():
+		lines, err = recordAgent(c, lines)
+	case c.Event.Kind == observe.KindStop || c.Event.Kind == observe.KindSessionEnd:
+		lines, err = record(c, lines)
+	}
+	if err != nil {
+		return nil, err
 	}
 	if c.Event.Kind == observe.KindSessionEnd {
 		return nil, nil
@@ -71,26 +75,63 @@ func Notes(c observe.NoteCtx) ([]observe.Note, error) {
 // The next checkpoint's commit, or `jig trackers sync`, carries it to origin
 // (ADR 0030, "Amendment: a checkpoint lands what its sync wrote").
 func record(c observe.NoteCtx, lines []journal.Line) ([]journal.Line, error) {
-	transcript := c.Event.Transcript
-	session := c.Event.Session
-	if session == "" && transcript != "" {
-		session = strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
-	}
+	transcript, session := transcriptOf(c.Event)
 	if transcript == "" || session == "" {
 		return lines, nil
 	}
 	// A prices file that does not parse adds no prices: the models it would
 	// have priced show as unpriced, which status and the notes say.
 	prices, _ := LoadPrices(c.JigHome)
-	t, err := FromTranscript(transcript, session, prices)
+	own, err := ownAgents(c, transcript, session)
+	if err != nil {
+		return lines, err
+	}
+	t, err := FromSession(transcript, session, own, prices)
 	if err != nil {
 		return lines, err
 	}
 	if t.Messages == 0 {
 		return lines, nil
 	}
-	line := Line(ledger.Stamp(c.Now), session, c.Event.Harness, c.Where.Slice, t)
-	if prev, ok := Latest(lines)[session]; ok && Same(prev, line) {
+	return write(c, lines, Line(ledger.Stamp(c.Now), session, c.Event.Harness, c.Where.Slice, t))
+}
+
+// recordAgent appends the spend line of the subagent the event is, on the
+// ticket it is placed at, when its total changed. The total is that agent's
+// own transcript, which the session's line leaves out once the agent has a
+// line (ownAgents). A subagent's event names the session it belongs to and
+// the session's main transcript; the agent's transcript is beside it.
+func recordAgent(c observe.NoteCtx, lines []journal.Line) ([]journal.Line, error) {
+	transcript, session := transcriptOf(c.Event)
+	if transcript == "" || session == "" {
+		return lines, nil
+	}
+	prices, _ := LoadPrices(c.JigHome)
+	t, err := FromAgent(transcript, session, c.Event.Agent, prices)
+	if err != nil {
+		return lines, err
+	}
+	if t.Messages == 0 {
+		return lines, nil
+	}
+	return write(c, lines, AgentLine(ledger.Stamp(c.Now), session, c.Event.Agent, c.Event.Harness, c.Where.Slice, t))
+}
+
+// transcriptOf is the transcript the event names and the session it belongs
+// to, which is the name of the transcript when the event names none.
+func transcriptOf(e observe.Event) (transcript, session string) {
+	transcript, session = e.Transcript, e.Session
+	if session == "" && transcript != "" {
+		session = strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
+	}
+	return transcript, session
+}
+
+// write appends line to the ticket journal unless its key (the session, or the
+// session and the agent) has said the same already, and returns lines with it
+// added.
+func write(c observe.NoteCtx, lines []journal.Line, line journal.Line) ([]journal.Line, error) {
+	if prev, ok := Latest(lines)[Key(line.Session, line.Agent)]; ok && Same(prev, line) {
 		return lines, nil
 	}
 	if err := seedBudget(c); err != nil {
@@ -101,6 +142,46 @@ func record(c observe.NoteCtx, lines []journal.Line) ([]journal.Line, error) {
 	}
 	line.Ticket = c.Where.Ticket
 	return append(slices.Clone(lines), line), nil
+}
+
+// ledgerWindow bounds how far back in the ledger the agents of a session are
+// looked for, as the core bounds its memory of a session.
+const ledgerWindow = 16 << 20
+
+// ownAgents are the subagents of session, among those that have a transcript
+// beside the main one, that have a spend line of their own: some stop of theirs
+// was placed at a ticket, not necessarily the last. The machine ledger says it,
+// with a hook line of the session, of that agent, at a stop, that names a
+// ticket. The session's line leaves their transcripts out; an agent with no
+// such line (still running, crashed, placed at no ticket, or of a harness that
+// sends no subagent stops) stays in it, so its tokens are not lost. An agent
+// that stopped at a ticket and later stopped at no ticket is left out all the
+// same, and its own line ends at the stop that was placed: what it spent after
+// that stop is counted in no line.
+//
+// The walk goes back from the end of the ledger and ends when every agent on
+// disk is found. It does not end at the session's start: a session that is
+// resumed or compacted starts again under the same id, and the lines its
+// agents wrote to the store outlive that. It reads nothing for a session
+// without subagent transcripts.
+func ownAgents(c observe.NoteCtx, transcript, session string) (map[string]bool, error) {
+	onDisk := AgentsOnDisk(transcript)
+	if len(onDisk) == 0 {
+		return nil, nil
+	}
+	want := map[string]bool{}
+	for _, id := range onDisk {
+		want[id] = true
+	}
+	own := map[string]bool{}
+	err := ledger.ReadBackward(c.JigHome, ledgerWindow, func(l journal.Line) bool {
+		if l.Session == session && l.Event == journal.EventHook && l.Outcome == observe.KindStop &&
+			l.Ticket != "" && want[l.Agent] {
+			own[l.Agent] = true
+		}
+		return len(own) < len(want)
+	})
+	return own, err
 }
 
 // seedBudget records the project's default budget as the ticket's when the
@@ -152,7 +233,11 @@ func alertText(ticket string, t Totals, b project.Budget, v Verdict) string {
 	} else {
 		s = fmt.Sprintf("%s has used %d%% of its spend budget: %s", ticket, int(v.Ratio*100), strings.Join(parts, ", "))
 	}
-	s += fmt.Sprintf(" (%d %s).", t.Sessions, plural(t.Sessions, "session", "sessions"))
+	s += fmt.Sprintf(" (%d %s", t.Sessions, plural(t.Sessions, "session", "sessions"))
+	if t.Agents > 0 {
+		s += fmt.Sprintf(", %d %s", t.Agents, plural(t.Agents, "subagent", "subagents"))
+	}
+	s += ")."
 	if b.USD > 0 && len(t.Unpriced) > 0 {
 		s += " No price for " + strings.Join(t.Unpriced, ", ") + ": its dollars are not counted."
 	}

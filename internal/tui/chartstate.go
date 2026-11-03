@@ -17,6 +17,15 @@ import (
 // The kinds of need a ticket can wait on.
 const kindStacked = "stacked"
 
+// The words of a ticket that published and whose parent merged since: the
+// verb's own for it (behind, a merge, a publish). The chart verb does not say
+// which merge, so the screens cannot name it.
+const (
+	behindWord = "behind"
+	behindOwes = "owes a merge, then a publish"
+	behindText = behindWord + " · " + behindOwes
+)
+
 // stepUnderWay is the state a step is drawn in while it is under way, for a
 // ticket the screens know only from the verb's word.
 var stepUnderWay = [stepCount]string{StateBuilding, StateBuilding, StateReviewing, StatePublishing}
@@ -54,6 +63,27 @@ func (c *chart) verbOf(id string) *chartTicket {
 	return nil
 }
 
+// waitsOnMerge is whether the chart's run ends at a merge: the last read that
+// printed a chart listed at least one entry in its ends, which the verb sets
+// from each entry's own unmet merged edge, so no text of a fact is read.
+func (c *chart) waitsOnMerge() bool { return c.mergeWait }
+
+// ticketWaitsOnMerge is whether the ticket's screens wait on a merge: it is
+// known and not awaited, it is published with a pull request on record, and it
+// is not closed. A merge on the host writes no line to any journal and a
+// closure made in another session writes none either, so the status is where
+// a screen would see either.
+func (m *Model) ticketWaitsOnMerge(id string) bool {
+	t := m.w.tickets[id]
+	if t == nil || t.awaiting {
+		return false
+	}
+	if p := t.publish(); !p.Done || p.PR == "" {
+		return false
+	}
+	return t.status == nil || t.status.Closed == ""
+}
+
 // has is whether id is one of the chart's tickets.
 func (c *chart) has(id string) bool {
 	for _, x := range c.ids() {
@@ -86,12 +116,15 @@ type chartRow struct {
 	// ticket list's blockers until the verb has been read.
 	waits []chartWait
 	// done is whether the ticket is published; needs, whether it waits for the
-	// person.
-	done, needs bool
+	// person; behind, whether the verb has a ticket the screens derive as
+	// published at its publish again (followVerb).
+	done, needs, behind bool
 }
 
 // chartRows are the chart's tickets that have a ticket, in the verb's order (the
-// chart's own before it was read).
+// chart's own before it was read). A ticket the verb lists stands where the verb
+// says (followVerb); the screens' own derivation adds the detail the verb has no
+// word for.
 func (m *Model) chartRows(c *chart) []chartRow {
 	var rows []chartRow
 	add := func(id, title string, verb *chartTicket) {
@@ -100,15 +133,20 @@ func (m *Model) chartRows(c *chart) []chartRow {
 			r.t, r.title = t, firstOf(title, t.title)
 			r.d = m.phaseOf(t)
 			r.steps = m.stepRows(t, r.d)
-			r.done = r.steps[len(r.steps)-1].Done
 			r.needs = needsYou(r.d)
 			r.waits = t.blockers
 		}
 		if verb != nil {
 			r.waits = verb.Waits
-			if r.t == nil {
-				r.done = len(verb.Steps) > 0 && verb.Steps[len(verb.Steps)-1] == phase.StateDone
+			if r.steps != nil {
+				r.steps, r.behind = followVerb(r.steps, *verb)
 			}
+		}
+		switch {
+		case r.steps != nil:
+			r.done = r.steps[len(r.steps)-1].Done
+		case verb != nil:
+			r.done = len(verb.Steps) > 0 && verb.Steps[len(verb.Steps)-1] == phase.StateDone
 		}
 		rows = append(rows, r)
 	}
@@ -121,6 +159,49 @@ func (m *Model) chartRows(c *chart) []chartRow {
 		}
 	}
 	return rows
+}
+
+// followVerb is the rows of a ticket with each step done as the verb says. The
+// verb derives a chart's tickets with their stack plans read and the screens
+// derive a ticket from its journal and status alone, so the two part when a
+// stack plan owes a published ticket a merge: the verb has its publish current
+// again, and the journal says it published. A chart is the verb's word, so a
+// step the verb has done is done and one it has not is not, whatever the rows
+// say; a step the two agree on keeps its row whole, with the detail only the
+// screens have. behind says the verb has the ticket at its publish again while
+// the screens have it published, the one way a stack plan undoes a step. The
+// ticket screens read no verb and stay as the screens derive them.
+func followVerb(rows []stepRow, verb chartTicket) (followed []stepRow, behind bool) {
+	followed = slices.Clone(rows)
+	for i := range followed {
+		if i >= len(verb.Steps) {
+			break
+		}
+		s := &followed[i]
+		done := verb.Steps[i] == phase.StateDone
+		if s.Done == done {
+			continue
+		}
+		was := s.Done
+		s.Done = done
+		switch {
+		case done && i == stepPublish:
+			s.State, s.Text = StatePublished, ""
+		case done:
+			s.State, s.Text = StateOK, ""
+		case verb.Steps[i] == phase.StateCurrent && verb.Ready:
+			s.State = StateReady
+			s.Text = stepWords(i, s.State)
+		default:
+			s.State = StateQueued
+			s.Text = stepWords(i, s.State)
+		}
+		if was && i == stepPublish && verb.Steps[i] == phase.StateCurrent {
+			behind = true
+			s.Text = behindText
+		}
+	}
+	return followed, behind
 }
 
 // needsYou is whether a phase that is under way waits for the person: an open
@@ -244,9 +325,15 @@ func waitNote(w chartWait) string {
 }
 
 // endNote is where a run stops, in words: "SHOP-5 waits for SHOP-2 merged ·
-// <pr> is open".
+// <pr> is open", or for a published ticket stacked on a parent whose pull
+// request is open, "SHOP-5 retargets when SHOP-2 merges · <pr> is open".
 func endNote(e chartEnd) string {
 	text := e.Ticket + " waits for " + e.Blocker + " " + firstOf(e.Kind, "merged")
+	if e.Kind == kindStacked {
+		// A published ticket on a parent whose pull request is open: it is done,
+		// and the parent's merge owes it a retarget (ADR 0038).
+		text = e.Ticket + " retargets when " + e.Blocker + " merges"
+	}
 	switch {
 	case len(e.PRs) > 0 && e.PRs[0].State != "":
 		return text + " · " + e.PRs[0].URL + " is " + strings.ToLower(e.PRs[0].State)

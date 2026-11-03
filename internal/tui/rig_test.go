@@ -355,7 +355,7 @@ const rigHome = `C:\Users\Ada`
 func newRig(t *testing.T, ticket string) *rig {
 	t.Helper()
 	r := newRunner()
-	m := New(Config{RetryDelay: time.Millisecond, IdleTick: -1, Run: r.run, Ticket: ticket, Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24,
+	m := New(Config{RetryDelay: time.Millisecond, IdleTick: -1, MergeEvery: -1, Run: r.run, Ticket: ticket, Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24,
 		Now: func() time.Time { return rigNow }, Home: rigHome})
 	return &rig{t: t, m: m, r: r}
 }

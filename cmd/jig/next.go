@@ -98,11 +98,20 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		}
 		// A chart is read for its own sake as a ticket is: what its run waits on
 		// is asked of the host now.
-		c, m, err := deriveChart(st, cfg, chart, newMergeReader(e, st, cfg, mp, jigHome, 0))
+		merges := newMergeReader(e, st, cfg, mp, jigHome, 0)
+		c, m, err := deriveChart(st, cfg, mp, chart, merges)
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		n := chartOutput(c, m)
+		n := chartOutput(c, m, chartSpend(st, c))
+		// The tickets of the run carry the worktrees jig advises for them; the
+		// same reader says what a stacked parent's merge is.
+		n.setWorktrees(newWorktreeSource(st, cfg, mp, merges))
+		if *jsonOut {
+			// The history is for the screens: the text form is the session's, and
+			// it starts no git process.
+			n.History = chartHistory(st, chart)
+		}
 		out, blocks = n, n.blocks("next")
 	} else if ticket != "" {
 		id, err := st.ResolveTicket(ticket)
@@ -170,6 +179,10 @@ type nextTicket struct {
 	// JSON because `ready` above is already the slices ready to build.
 	Phase        *nextPhase `json:"phase,omitempty"`
 	PhaseProblem string     `json:"phase_problem,omitempty"`
+	// Worktrees are, for each repo the ticket builds in, the worktree jig
+	// advises (worktree_advice.go): the git command that adds one where the
+	// work is wanted, or removes it once the ticket ended. jig makes none.
+	Worktrees []nextWorktree `json:"worktrees,omitempty"`
 
 	// derived is the same derivation, for the help.
 	derived *phase.Ticket
@@ -221,15 +234,25 @@ func parseAskedPhase(word, ticket string) (phase.Name, error) {
 	return p, nil
 }
 
-// setPhase reads where the ticket stands and lays it on n, with the answer to
-// asked when --for named a phase. It is best-effort: a ticket whose phase
-// cannot be derived (a gate round it cannot read, say) still gets the rest of
-// `jig next`, and says why the phase is missing.
-func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merges mergeSource) {
-	t, err := derivePhaseWith(st, id, merges)
+// stateBehind is the state `jig next <ticket>` gives a ticket that published
+// and whose stack plan owes its branch a merge (phase.Ticket.Behind): not done,
+// since the merge and the publish that follows it are still to make.
+const stateBehind = "behind"
+
+// setPhase reads where the ticket stands, with its stack plan laid on it
+// (derivePhaseStacked), and lays it on n, with the answer to asked when --for
+// named a phase. A ticket that is behind is in state behind, not done. It is
+// best-effort: a ticket whose phase cannot be derived (a gate round it cannot
+// read, say) still gets the rest of `jig next`, and says why the phase is
+// missing.
+func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merges mergeSource, plan stack.Plan) {
+	t, err := derivePhaseStacked(st, id, merges, plan)
 	if err != nil {
 		n.PhaseProblem = err.Error()
 		return
+	}
+	if t.Behind() && n.State == ready.StateDone {
+		n.State = stateBehind
 	}
 	n.derived = &t
 	p := &nextPhase{Name: string(t.Current), Ready: t.Ready, Code: t.Code, Reason: t.Reason, Prompt: t.Prompt}
@@ -394,12 +417,9 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		return nextTicket{}, err
 	}
 	place := ready.Place(ready.ProjectRepos(cfg, mp.Clones), data.in.Slices)
-	// The branch is cut in every repo, so it must not be the target of any.
-	var branch string
-	for _, target := range projectTargets(cfg) {
-		if branch, err = st.ResolveTicketBranch(id, data.rec, target); err != nil {
-			return nextTicket{}, err
-		}
+	branch, err := ticketBranch(st, cfg, id, data.rec)
+	if err != nil {
+		return nextTicket{}, err
 	}
 
 	// Its blockers' own journals say whether they published, and merges whether
@@ -441,12 +461,16 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 			readySlices = append(readySlices, s)
 		}
 	}
-	n.Stack = stackRows(plan)
+	n.Stack = stackRows(plan, data.in.Published)
 	for _, b := range ready.Batches(readySlices, place.Repo) {
 		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices, Start: startPoint(cfg, plan, b.Repo)})
 	}
 	n.Advice = distributionAdvice(n.Ready)
-	n.setPhase(st, id, asked, merges)
+	n.setPhase(st, id, asked, merges, plan)
+	n.Worktrees = newWorktreeSource(st, cfg, mp, merges).rows(worktreeFacts{
+		Ticket: id, Branch: branch, Slices: data.in.Slices, Plan: plan,
+		Closed: data.rec.Closed != nil, Published: data.in.Published, Wanted: n.worktreeWanted(),
+	})
 	if topology {
 		waves := ready.Waves(data.in.Slices)
 		for _, s := range data.in.Slices {
@@ -461,6 +485,19 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		}
 	}
 	return n, nil
+}
+
+// ticketBranch is the branch of ticket id, which has one name in every repo:
+// it is cut in each of them, so it must not be the target of any.
+func ticketBranch(st *store.Store, cfg project.Config, id string, rec store.Ticket) (string, error) {
+	var branch string
+	for _, target := range projectTargets(cfg) {
+		var err error
+		if branch, err = st.ResolveTicketBranch(id, rec, target); err != nil {
+			return "", err
+		}
+	}
+	return branch, nil
 }
 
 // startPoint is where the ticket's branch starts in repo: the branch of the
@@ -554,6 +591,7 @@ func (n nextTicket) blocks(topology bool) []string {
 	if n.PhaseProblem != "" {
 		blocks = append(blocks, "note: the phase of "+n.Ticket+" could not be told: "+n.PhaseProblem)
 	}
+	blocks = append(blocks, worktreeBlocks(n.Worktrees)...)
 	if topology {
 		var rows [][]string
 		for _, s := range n.Topology {
@@ -565,7 +603,7 @@ func (n nextTicket) blocks(topology bool) []string {
 		}
 		blocks = append(blocks, axi.Table("topology", []string{"slice", "workspace", "repo", "state", "wave", "blocked_by"}, rows))
 	}
-	return append(blocks, axi.Help(n.help()...))
+	return append(blocks, axi.Help(append(worktreeHelp(n.Ticket, n.Worktrees), n.help()...)...))
 }
 
 // phasePairs are the lines `jig next <ticket>` adds to its next block: the
@@ -617,6 +655,11 @@ func (n nextTicket) help() []string {
 		return []string{fmt.Sprintf("%s is closed (%s): run `jig reopen %s` to work it again, or `jig next` to see a ticket that is ready", n.Ticket, n.Closed, n.Ticket)}
 	case ready.StateDone:
 		return []string{n.Ticket + " is published: run `jig next` to see the tickets that are left"}
+	case stateBehind:
+		if help := n.behindHelp(); len(help) > 0 {
+			return help
+		}
+		return []string{phaseAdvice(*n.derived, n.Ticket)}
 	case ready.StateBlocked:
 		if t != nil && t.Code != phase.CodeBlocked {
 			prompt = ""
@@ -641,6 +684,32 @@ func (n nextTicket) help() []string {
 	}
 	help = append(help, n.Advice...)
 	return append(help, fmt.Sprintf("Work on branch %s in each repo (%s where it does not exist), then run `jig here` to confirm%s", n.Branch, n.switchAdvice(), prompt))
+}
+
+// behindHelp is the help of a published ticket that is behind: for each repo
+// whose row asks for a merge, the merge to make in the ticket's branch and the
+// publish that pushes it and points the open pull request at its base. A merge
+// git made by itself needs no new round; one resolved by hand does. Only the
+// full publish points the pull request anywhere: after a parent merged, the
+// hand-off (`--body`, then `--pr`) records a pull request and leaves its base
+// alone, so a retarget row gives the edit for that path too.
+func (n nextTicket) behindHelp() []string {
+	var help []string
+	for _, r := range n.Stack {
+		if r.Merge == "" || r.Publish == "" {
+			continue
+		}
+		byHand := ""
+		if r.Retarget {
+			byHand = fmt.Sprintf(" (the hand-off, `--body` then `--pr`, does not: run `gh pr edit <pr> --base %s`)", r.PRTarget)
+		}
+		help = append(help, fmt.Sprintf("in %s run `%s`, then `%s`, which pushes the merge and points the open pull request at %s%s; a merge resolved by hand needs `jig gate %s` first",
+			r.Repo, r.Merge, r.Publish, r.PRTarget, byHand, n.Ticket))
+	}
+	if t := n.derived; t != nil && len(help) > 0 && t.Prompt != "" {
+		help[len(help)-1] += promptHint(t.Prompt)
+	}
+	return help
 }
 
 // switchAdvice names the command that creates the ticket's branch in a repo,

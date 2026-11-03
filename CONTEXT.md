@@ -59,7 +59,7 @@ The file `record.yaml` in a remote item's folder in the tracker tree. The tree o
 _Avoid_: tracker file
 
 **Intake**:
-The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several. The verdict comes before any ticket: a brief verdict mints the ticket (`jig ticket new`), a chart verdict mints none and writes the chart, whose tickets `jig graduate` mints. It starts from `jig recall`, which shows the open tickets and their edges, near-duplicates, the charts' fog, platform documents and past answers, and for a brief it ends when `jig validate` says `valid: yes` once the person has confirmed the brief, which is the brief's approval (`jig validate --check` checks the same without approving).
+The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several. The verdict comes before any ticket: a brief verdict mints the ticket (`jig ticket new`), a chart verdict mints none and makes the chart with `jig chart new`, whose tickets `jig graduate` mints. It starts from `jig recall`, which shows the open tickets and their edges, near-duplicates, the charts' fog, platform documents and past answers, and for a brief it ends when `jig validate` says `valid: yes` once the person has confirmed the brief, which is the brief's approval (`jig validate --check` checks the same without approving).
 _Avoid_: onboarding
 
 **Illustration**:
@@ -107,12 +107,20 @@ A prompt that names several phases ("Build and review SHOP-1", "Take SHOP-1 from
 _Avoid_: automatic run, workflow, pipeline run
 
 **Chart run**:
-A prompt aimed at a chart, run from the main session: "Take <chart> to PR" when nothing of it started, "Continue <chart>" when something did, or a yes to the question a chart verdict asks. The main session briefs every ticket up front (one grilling round across the chart, one confirmation, `jig validate` for each), then starts one build subagent per ticket, each in its own worktree and in waves, and asks the person everything a subagent cannot: a subagent's question comes back to the main session, which asks, relays the answer with `jig answer` and resumes the subagent; a review's asks are decided there with `jig triage`; the publish approvals are asked together. The build subagent claims with `--unattended` and spawns its own reviewer subagent. A ticket behind a `merged` dependency ends the run; "Continue <chart>" resumes it once the pull request merged. jig starts no session and records no run: the span is the prompt, and the standing is derived (`jig skill chart`, [ADR 0037](docs/adr/0037-a-chart-is-run-from-the-main-session.md)).
+A prompt aimed at a chart, run from the main session: "Take <chart> to PR" when nothing of it started, "Continue <chart>" when something did, or a yes to the question a chart verdict asks. The main session briefs every ticket up front (one grilling round across the chart, one confirmation, `jig validate` for each), then starts one build subagent per ticket, each in its own worktree (jig advises it, see **Ticket worktree**) and in waves, and asks the person everything a subagent cannot: a subagent's question comes back to the main session, which asks, relays the answer with `jig answer` and resumes the subagent; a review's asks are decided there with `jig triage`; the publish approvals are asked together. The build subagent claims with `--unattended` and spawns its own reviewer subagent. A ticket behind a `merged` dependency ends the run; "Continue <chart>" resumes it once the pull request merged. jig starts no session and records no run: the span is the prompt, and the standing is derived (`jig skill chart`, [ADR 0037](docs/adr/0037-a-chart-is-run-from-the-main-session.md)).
 _Avoid_: batch, pipeline, campaign
 
 **Chart standing**:
-Where a chart is, derived from its tickets' journal lines and records and never recorded (`phase.DeriveChart`, shown by `jig next <chart>` and `jig status <chart>`, and by the TUI's chart screen): each ticket's wave and reach (done, here, after a merge, or blocked), the tickets to brief, the build waves that can run now, where the run would end and the pull requests it waits on, whether the chart started, and the verdict with the prompt that moves it ("Take <chart> to PR", "Continue <chart>", or none).
+Where a chart is, derived from its tickets' journal lines and records and never recorded (`phase.DeriveChart`, shown by `jig next <chart>` and `jig status <chart>`, and by the TUI's chart screen): each ticket's wave and reach (done, here, after a merge, or blocked), the tickets to brief, the build waves that can run now, where the run would end and the pull requests it waits on, whether the chart started, and the verdict with the prompt that moves it ("Take <chart> to PR", "Continue <chart>", or none). An entry with no ticket yet whose `blocked_by` ref does not resolve is a row with a problem (blocked, with the reason, while the verdict points to `jig validate <chart>`), not a refusal of the chart; a chart with no entries yet says to add them and check them with `jig validate`. The TUI reads it again every two minutes while the chart ends at a merge, since a merge on the host writes no journal line ([ADR 0037](docs/adr/0037-a-chart-is-run-from-the-main-session.md)).
 _Avoid_: chart status, run state
+
+**Chart detail**:
+The Detail panel of the TUI's chart screen: the ticket under the cursor, in four rows at most, between the Tickets and the Run panels. One row for each slice being built (its id, its stage, the session that holds its claim and the agent whose call claimed it), then the stops jig held an agent at that no step has moved past, the newest two (a hold is current until a journal line of a step follows it), or one `state` row when there is neither. It reads nothing beyond the stream and `jig status`, so moving the cursor runs no verb ([ADR 0037](docs/adr/0037-a-chart-is-run-from-the-main-session.md)).
+_Avoid_: ticket card, preview
+
+**Chart history**:
+The commits of the store that changed something under a chart's folder (`charts/<name>/`): a map edit, a graduation, a hand edit of its `tickets.yaml`. A chart has no journal, so this is what was done to it that no ticket's line says, and git already keeps it. `jig next <chart> --json` lists the newest twenty (`history`, newest first, each with its sha, its commit time in UTC and its subject), and the TUI's chart screen shows them among its tickets' lines. It is read, never written, and records nothing of a run ([ADR 0037](docs/adr/0037-a-chart-is-run-from-the-main-session.md)).
+_Avoid_: chart journal, chart log
 
 **Recommendations**:
 A hand-over the prompt says ("go with your recommendations"), in one phase or a start-to-finish run: the session answers the person's decisions itself with its recommended answers, recorded as its own (grilling answers tagged `defaulted`, the brief's approval with agent provenance, asks decided with `jig triage`, the publish the hand-off way, which asks for no approval). A start-to-finish run with recommendations has nobody to ask.
@@ -167,7 +175,7 @@ What a session has not yet heard: a verification outcome, an answer, a correctio
 _Avoid_: notification, alert
 
 **Correction**:
-A fact told to a session from what the journal already holds, with no second record: a **stall**, a brief that changed under verified work (*brief drift*), a commit outside every slice workspace (*scope drift*), a commit that names no slice (*slice missing*: the note guesses the slice from the files, and verifies nothing), or, for a stacked ticket, a parent that moved past it or merged (*restack*, *retarget*; see **Stacked start point**). Advisory in an interactive session, enforced in an unattended one.
+A fact told to a session from what the journal already holds, with no second record: a **stall**, a brief that changed under verified work (*brief drift*), a commit outside every slice workspace (*scope drift*), a commit that names no slice (*slice missing*: the note guesses the slice from the files, and verifies nothing), or, for a stacked ticket, a parent that moved past it or merged (*restack*, *retarget*; see **Stacked start point**). Advisory in an interactive session, enforced in an unattended one. A session hears a correction, but it is not the only place a restack or a retarget is told: a published ticket that is owed one is **behind**, which `jig next` and a chart's standing say to anyone who reads them.
 _Avoid_: warning, lint
 
 **Unattended**:
@@ -175,7 +183,7 @@ A claim made with `--unattended` (or a marker default) says no person is watchin
 _Avoid_: headless, background
 
 **Spend**:
-What a session cost, in tokens and list-price dollars summed from its transcript at Stop and SessionEnd, recorded as a cumulative `spend` line per session. A ticket's budget (`jig budget`) is held against the sum and told as a note at 80% and past it. Records and advice, never a stop.
+What a session cost, in tokens and list-price dollars summed from its transcript at Stop and SessionEnd, recorded as a cumulative `spend` line per session, and per subagent: a subagent's stop writes a line of its own, with its `agent` set, on the ticket it is placed at, and the session's line leaves out the agents that have one (a line is kept by session and agent). A ticket's budget (`jig budget`) is held against the sum and told as a note at 80% and past it. A chart's spend is a fold over its tickets' latest lines, shown by `jig next <chart>`. Records and advice, never a stop.
 _Avoid_: cost cap, quota
 
 **Driver**:
@@ -225,6 +233,10 @@ _Avoid_: blocked finding, deferred fix
 **Lease**:
 A pooled worktree checked out for one phase's work (a gate round, a publish) and returned warm when that phase ends. A lease of a branch that exists on origin is synced with it when acquired: fast-forwarded when it has no commits of its own, kept when it is ahead, and refused as diverged when both sides have commits the other lacks. The work itself happens in the operator's clone, not in a lease.
 _Avoid_: checkout, sandbox
+
+**Ticket worktree**:
+The git worktree a ticket's work is done in, in one repo: `<clone>.worktrees/<TICKET>`, beside the clone, one folder for each clone, never inside it and never in jig's pool. jig advises it and makes none: `jig next <T>` gives a row for each repo the ticket builds in (`worktrees`), whose action is `add` (the work is wanted and no work tree holds the ticket's branch: the `git worktree add` to run, from the plan's start point for a branch the clone lacks), `present` (a work tree holds the branch, the clone's own or a linked one), `remove` (the ticket ended and a linked worktree still holds the branch: the `git worktree remove` to run, never forced) or `no_clone` (the repo has no clone on this machine). A work tree is found by the branch it holds, not by its path. `jig next <chart>` carries the rows of each ticket of the run, and `jig publish --pr` gives the removal when it records the last pull request ([ADR 0039](docs/adr/0039-jig-advises-a-tickets-worktree-and-makes-none.md)).
+_Avoid_: ticket checkout
 
 **Adopted branch**:
 A branch recorded in a ticket's `ticket.yaml` as its own: by the first `jig gate <ticket> --branch <name>` for a branch built outside jig, or by a `jig claim` on a branch that names no ticket. Every later gate round reviews the copy of it in the operator's clone (or origin's), and `jig publish` ships the reviewed head as it is: nothing is reconciled, squashed or committed on it, and origin's branch is fast-forwarded. A ticket has at most one, for good: it needs no brief and no slices to be gated.
@@ -287,7 +299,7 @@ The same failure signature recurring twice: two `oracle` failures of one slice w
 _Avoid_: retry loop, flaky failure
 
 **Chart**:
-The wayfinder layer for work spanning tickets: `charts/<name>/` holds `map.md` (for people and sessions; jig reads its sections, the fog for `jig recall` and all of them for `jig next <chart>`, and never writes it) and `tickets.yaml` (the handover jig reads and writes). The map decides what to build; it never builds anything itself. `jig graduate <name>` creates the chart's tickets and writes their ids back into `tickets.yaml`; an intake that reaches a chart verdict mints none of them. A chart's standing is derived and a chart run takes its tickets to a pull request (see **Chart standing**, **Chart run**).
+The wayfinder layer for work spanning tickets: `charts/<name>/` holds `map.md` (for people and sessions; jig reads its sections, the fog for `jig recall` and all of them for `jig next <chart>`) and `tickets.yaml` (the handover jig reads and writes). `jig chart new <name> --title <t>` makes it and commits it, and `jig validate <name>` checks its entries and lists every problem, minting nothing. jig writes only the skeleton, once, when the chart is made (the title and five empty sections, and an empty `tickets:` list), and reads the map after. The map decides what to build; it never builds anything itself. `jig graduate <name>` creates the chart's tickets and writes their ids back into `tickets.yaml`; an intake that reaches a chart verdict makes the chart and mints none of them. A chart's standing is derived and a chart run takes its tickets to a pull request (see **Chart standing**, **Chart run**; [ADR 0040](docs/adr/0040-a-chart-is-made-and-checked-by-verbs.md)).
 _Avoid_: roadmap, epic
 
 **Dependency**:
@@ -303,5 +315,13 @@ Whether a ticket's work has merged, for each repo it builds in. A `merged` block
 _Avoid_: merge status
 
 **Stacked start point**:
-Where a stacked ticket's branch starts, and where its pull request goes, in each repo it shares with its parent: the parent's branch while the parent has not merged there, `origin/<target>` and the target otherwise. It is advice computed on read (`jig next`, `jig here`, the publish), and jig never rebases or merges. When the parent's branch moves past the child's, the child's session is told to *restack*, which is to merge the parent's branch into the child's; when the parent merges, to *retarget*, which is to point the pull request at the target and merge it.
+Where a stacked ticket's branch starts, and where its pull request goes, in each repo it shares with its parent: the parent's branch while the parent has not merged there, `origin/<target>` and the target otherwise. It is advice computed on read (`jig next`, `jig here`, the publish), and jig never rebases or merges. When the parent's branch moves past the child's, the child's session is told to *restack*, which is to merge the parent's branch into the child's; when the parent merges, to *retarget*, which is to point the pull request at the target and merge it. Restack and retarget are also the ticket's own standing: a published ticket that is owed one is **behind**, not done. A ticket whose own work has merged is owed neither.
 _Avoid_: base branch
+
+**Behind**:
+The standing of a published stacked ticket whose stack plan asks for a restack or a retarget: its brief, build and review are done and its publish is current again, ready, with the prompt "Publish T". `jig next <T>` says `state: behind`, names the merge to make (`git merge origin/main`) and the publish that follows (`jig publish T`), and a chart's standing keeps the ticket in its run, so the chart is done only once the branch holds the target; before the parent merges, the chart waits for that merge instead of reading done. jig never makes the merge: the session does, then a bare `jig publish` pushes it and points the open pull request at its base. A closed ticket is never behind, and `jig here`, the hooks and the TUI's ticket screens do not read it; the TUI's chart screen does.
+_Avoid_: stale, out of date
+
+**Reviewed head**:
+The head a clean gate round reviewed (`reviewed_sha`), which a publish ships. A head is also reviewed when every commit between it and that head, along first parents, is a merge whose tree is git's own merge of its two parents (a *clean merge*): the target merged in brings nothing to review. Any other commit is not, and a merge resolved by hand needs a new round, whose delta is the resolution alone, the merge's tree against git's own.
+_Avoid_: approved head

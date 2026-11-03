@@ -103,6 +103,8 @@ func TestPerCommandHelpFlag(t *testing.T) {
 		{"ticket new -h", []string{"ticket", "new", "-h"}, "flags{ticket}"},
 		{"version --help", []string{"version", "--help"}, "flags{version}"},
 		{"ticket -h", []string{"ticket", "-h"}, "flags{ticket}"},
+		{"chart new -h", []string{"chart", "new", "-h"}, "flags{chart}"},
+		{"chart -h", []string{"chart", "-h"}, "flags{chart}"},
 		{"skills --help", []string{"skills", "--help"}, "flags{skills}"},
 	}
 	for _, c := range cases {

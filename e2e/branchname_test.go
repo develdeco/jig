@@ -357,7 +357,7 @@ func TestPublishBodyTargetsRecordedName(t *testing.T) {
 	}
 
 	b.openRound(t)
-	b.reviewedClean(t)
+	b.reviewedClean(t, 1)
 	body := runJig(t, env, h.Clone, "publish", fx.Ticket, "--body")
 	if body.Code != 0 || !strings.Contains(body.Stdout, "branch: "+recordedName+"\n") || !strings.Contains(body.Stdout, "head: "+sha) {
 		t.Fatalf("jig publish --body exit = %d, want 0, branch %s and the reviewed head\nstdout:\n%s\nstderr:\n%s", body.Code, recordedName, body.Stdout, body.Stderr)

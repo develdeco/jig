@@ -318,7 +318,7 @@ func TestTicketsGraduatedIntoTheOpenChartAreReadAtOnce(t *testing.T) {
 func TestAChartScreenOpenedOnTheCommandLineWaitsForTheListing(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "")
-	g.m = New(Config{RetryDelay: time.Millisecond, IdleTick: -1, Run: g.r.run, Chart: "checkout", Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24,
+	g.m = New(Config{RetryDelay: time.Millisecond, IdleTick: -1, MergeEvery: -1, Run: g.r.run, Chart: "checkout", Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24,
 		Now: func() time.Time { return rigNow }, Home: rigHome})
 	lines, status := chartTickets()
 	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(), status)
@@ -378,6 +378,59 @@ func TestParseChart(t *testing.T) {
 	}
 	if _, err := parseChart(`{"chart":"checkout","tickets":3}` + "\n"); err == nil {
 		t.Errorf("a chart of the wrong shape read without error")
+	}
+}
+
+// TestParseChartReadsTheHistory: the commits of the chart's folder are read in
+// the order the verb printed them; no key (an older jig) or null is none, an
+// entry whose time does not parse is left out, and a history of the wrong shape
+// is an error like any other wrong shape.
+func TestParseChartReadsTheHistory(t *testing.T) {
+	t.Parallel()
+	none, err := parseChart(checkoutJSON())
+	if err != nil || none == nil || none.History != nil {
+		t.Errorf("a chart with no history key: %+v, %v, want none", none, err)
+	}
+	null, err := parseChart(checkoutJSON(func(v map[string]any) { v["history"] = nil }))
+	if err != nil || null == nil || null.History != nil {
+		t.Errorf("a null history: %+v, %v, want none", null, err)
+	}
+	empty, err := parseChart(checkoutJSON(withHistory()))
+	if err != nil || empty == nil || len(empty.History) != 0 {
+		t.Errorf("an empty history: %+v, %v, want none", empty, err)
+	}
+
+	info, err := parseChart(checkoutJSON(withHistory(
+		storeCommit("a", at(14, 25), "edit the map"),
+		storeCommit("b", "not a time", "left out"),
+		storeCommit("c", "2026-10-23T11:10:00+02:00", "chart checkout: graduate JIG-8"),
+		storeCommit("d", "", "left out as well"),
+	)))
+	if err != nil || info == nil {
+		t.Fatalf("info, err = %v, %v", info, err)
+	}
+	want := []chartCommit{
+		{SHA: strings.Repeat("a", 40), Subject: "edit the map", Time: time.Date(2026, 10, 23, 9, 14, 25, 0, time.UTC)},
+		{SHA: strings.Repeat("c", 40), Subject: "chart checkout: graduate JIG-8", Time: time.Date(2026, 10, 23, 9, 10, 0, 0, time.UTC)},
+	}
+	if len(info.History) != len(want) {
+		t.Fatalf("history = %+v, want %+v: the two with no time are left out", info.History, want)
+	}
+	for i, w := range want {
+		if g := info.History[i]; g.SHA != w.SHA || g.Subject != w.Subject || !g.Time.Equal(w.Time) {
+			t.Errorf("history[%d] = %+v, want %+v", i, g, w)
+		}
+	}
+
+	for name, v := range map[string]any{
+		"a string":                "none",
+		"an object":               map[string]any{"sha": "a"},
+		"entries that are text":   []string{"a commit"},
+		"a time that is a number": []map[string]any{{"sha": "a", "time": 7, "subject": "x"}},
+	} {
+		if _, err := parseChart(checkoutJSON(func(m map[string]any) { m["history"] = v })); err == nil {
+			t.Errorf("a history that is %s read without error", name)
+		}
 	}
 }
 
@@ -520,6 +573,7 @@ func TestWaitAndEndNotes(t *testing.T) {
 		{chartEnd{Ticket: "A-2", Blocker: "A-1", PRs: []chartPR{{URL: "https://example.test/pull/3"}}}, "A-2 waits for A-1 merged · https://example.test/pull/3"},
 		{chartEnd{Ticket: "A-2", Blocker: "A-1", Fact: "it is not published yet"}, "A-2 waits for A-1 merged · it is not published yet"},
 		{chartEnd{Ticket: "A-2", Blocker: "A-1"}, "A-2 waits for A-1 merged"},
+		{chartEnd{Ticket: "A-2", Blocker: "A-1", Kind: "stacked", PRs: open}, "A-2 retargets when A-1 merges · https://example.test/pull/3 is open"},
 	} {
 		if got := endNote(tc.e); got != tc.want {
 			t.Errorf("endNote(%+v) = %q, want %q", tc.e, got, tc.want)
@@ -650,5 +704,97 @@ func TestTheTailOfAChartIsTheLinesOfItsTickets(t *testing.T) {
 	v := g.view()
 	if !strings.Contains(v, "tail ") || !strings.Contains(v, "JIG-4") || strings.Contains(v, "JIG-1 ") {
 		t.Errorf("the tail of the chart:\n%s", v)
+	}
+}
+
+// historyRig is chartRig with the chart's history in the verb's JSON, on a
+// terminal tall enough for the activity to show a dozen lines beside the Detail
+// panel, and the chart screen open.
+func historyRig(t *testing.T, commits ...map[string]any) *rig {
+	t.Helper()
+	g := newRig(t, "")
+	lines, status := chartTickets()
+	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(withHistory(commits...)), status)
+	g.feed(lines...)
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 43})
+	g.press("end", "enter")
+	if g.m.Screen() != "chart" {
+		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
+	}
+	return g
+}
+
+// TestChartScreenShowsTheChartsHistoryAmongTheTicketsLines: the chart's store
+// commits are lines of its Activity, in time order with its tickets' lines,
+// drawn "time chart store sha subject". A commit between two ticket lines
+// stands between them, one in the second of a ticket's line above it, and of
+// two in one second the newer (the verb's first) above the older. The panel
+// counts them with the tickets' lines.
+func TestChartScreenShowsTheChartsHistoryAmongTheTicketsLines(t *testing.T) {
+	t.Parallel()
+	g := historyRig(t,
+		storeCommit("a", at(14, 25), "chart checkout: tighten the destination"),
+		storeCommit("b", at(14, 21), "chart checkout: graduate JIG-8"),
+		storeCommit("c", at(13, 45), "chart checkout: second edit in the second"),
+		storeCommit("d", at(13, 45), "chart checkout: first edit in the second"),
+		storeCommit("e", at(13, 10), "chart checkout: graduate JIG-5"),
+	)
+	v := g.view()
+	golden(t, "chart-history", v)
+
+	order := []string{
+		"09:14:25 chart", "09:14:21 chart", "09:14:21 JIG-4 publish·done", "09:14:20 JIG-4 publish·pr",
+		"09:13:45 chart", "second edit in the second", "first edit in the second", "09:13:30 JIG-4 review·r2",
+		"09:13:10 chart", "09:13:00 JIG-4 review·r2",
+	}
+	last := -1
+	for _, want := range order {
+		at := strings.Index(v, want)
+		if at < 0 || at < last {
+			t.Fatalf("%q is not below what precedes it in the Activity (at %d after %d):\n%s", want, at, last, v)
+		}
+		last = at
+	}
+	for _, want := range []string{"latest 12 of 23", "09:14:25 chart store ", "· " + strings.Repeat("a", 7) + " chart checkout: tighten the destination"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("the Activity lacks %q:\n%s", want, v)
+		}
+	}
+}
+
+// TestAChartWithOnlyHistoryHasActivityAndNoNothingYet: a chart no ticket has a
+// line of still has its commits as activity, and "nothing yet" is for neither.
+func TestAChartWithOnlyHistoryHasActivityAndNoNothingYet(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		commits []map[string]any
+		nothing bool
+	}{
+		"no history":  {nil, true},
+		"one commit":  {[]map[string]any{storeCommit("f", at(5, 0), "chart ideas: graduate nothing")}, false},
+		"two commits": {[]map[string]any{storeCommit("f", at(6, 0), "edit the map"), storeCommit("e", at(5, 0), "start the map")}, false},
+	} {
+		g := newRig(t, "")
+		roster := jsonLine(map[string]any{
+			"tickets": []map[string]any{},
+			"charts":  []map[string]any{{"name": "ideas", "title": "Ideas", "tickets": []string{}, "ungraduated": 2}},
+		})
+		verb := jsonLine(map[string]any{
+			"chart": "ideas", "title": "Ideas", "ready": false, "code": "CHART_NOT_GRADUATED",
+			"reason": "run `jig graduate ideas`", "prompt": "", "started": false, "ungraduated": 2,
+			"tickets": []map[string]any{{"id": "", "title": "Gift cards"}, {"id": "", "title": "Loyalty points"}},
+			"map":     checkoutMap(), "history": tc.commits,
+		})
+		answerChart(g, roster, "ideas", verb, nil)
+		g.feed().press("enter")
+		v := g.view()
+		if got := strings.Contains(v, "nothing yet"); got != tc.nothing {
+			t.Errorf("%s: nothing yet = %v, want %v:\n%s", name, got, tc.nothing, v)
+		}
+		for _, c := range tc.commits {
+			if sub := c["subject"].(string); !strings.Contains(v, sub) {
+				t.Errorf("%s: the Activity lacks %q:\n%s", name, sub, v)
+			}
+		}
 	}
 }

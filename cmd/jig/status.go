@@ -59,11 +59,11 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 	// A chart (a ticket of that name wins) prints where it stands: the tables
 	// `jig next <chart>` prints, from the same derivation.
 	if chart, ok := chartNamed(st, ticket); ok {
-		c, m, err := deriveChart(st, cfg, chart, newMergeReader(e, st, cfg, mp, jigHome, 0))
+		c, m, err := deriveChart(st, cfg, mp, chart, newMergeReader(e, st, cfg, mp, jigHome, 0))
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		axi.Render(stdout, chartOutput(c, m).blocks("status")...)
+		axi.Render(stdout, chartOutput(c, m, chartSpend(st, c)).blocks("status")...)
 		return 0
 	}
 	ticket, err = resolveTicketArg(st, ticket, stdout)
@@ -74,7 +74,13 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, orChartHint(st, ticket, err))
 	}
 
-	out, err := RenderStatus(st, ticket)
+	// The advice it ends with reads where the ticket stands as `jig next` does,
+	// its stack plan laid on it: a published ticket owed a merge is not done. The
+	// screens of the TUI run this command every few seconds on a quiet ticket, so
+	// the plan's open pull requests are read through the listing's max age rather
+	// than asked of the host each time: a parent that merged shows in the hint
+	// within that age, as it does in the listing.
+	out, err := renderStatusWith(st, ticket, statusSections(), plannedStanding(cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge)))
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -101,6 +107,12 @@ func RenderStatus(st *store.Store, ticket string) (string, error) {
 // renderStatus is RenderStatus over the given sections: each one's blocks
 // follow the status blocks and come before the help line.
 func renderStatus(st *store.Store, ticket string, sections []statusSection) (string, error) {
+	return renderStatusWith(st, ticket, sections, derivePhase)
+}
+
+// renderStatusWith is renderStatus with the word on where the ticket stands
+// given: the advice it ends with is the advice of that phase.
+func renderStatusWith(st *store.Store, ticket string, sections []statusSection, standing standingOf) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		return "", err
@@ -327,7 +339,7 @@ func renderStatus(st *store.Store, ticket string, sections []statusSection) (str
 		// `jig ticket new` and the refusal of `jig claim` give.
 		helpLines = getWorkHints(ticket)
 	} else {
-		hint, err := nextStepHint(st, ticket)
+		hint, err := nextStepHintWith(st, ticket, standing)
 		if err != nil {
 			return "", err
 		}
@@ -547,6 +559,34 @@ func sliceByID(slices []store.Slice, id string) (store.Slice, bool) {
 // agent for it. `jig next`, `jig here` and the claim and gate refusals name
 // the same prompt.
 func nextStepHint(st *store.Store, ticket string) (string, error) {
+	return nextStepHintWith(st, ticket, derivePhase)
+}
+
+// standingOf says where a ticket stands: derivePhase, or the same with the
+// ticket's stack plan laid on it (plannedStanding).
+type standingOf func(st *store.Store, ticket string) (phase.Ticket, error)
+
+// plannedStanding is the standing `jig next <ticket>` gives: a published ticket
+// stacked on another is read with its stack plan (derivePhasePlanned), so one
+// owed a merge is not done. A ticket that cannot be read that way stands as
+// derivePhase says: the advice of a status must not fail for it.
+func plannedStanding(cfg project.Config, mp project.MachineProject, merges mergeSource) standingOf {
+	return func(st *store.Store, ticket string) (phase.Ticket, error) {
+		rec, err := st.ReadTicket(ticket)
+		if err != nil {
+			return phase.Ticket{}, err
+		}
+		if mayBeBehind(st, ticket, rec) {
+			if t, err := derivePhasePlanned(st, cfg, mp, ticket, rec, merges); err == nil {
+				return t, nil
+			}
+		}
+		return derivePhase(st, ticket)
+	}
+}
+
+// nextStepHintWith is nextStepHint with the phase advice read from standing.
+func nextStepHintWith(st *store.Store, ticket string, standing standingOf) (string, error) {
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		return "", err
@@ -629,7 +669,7 @@ func nextStepHint(st *store.Store, ticket string) (string, error) {
 		), nil
 	}
 
-	t, err := derivePhase(st, ticket)
+	t, err := standing(st, ticket)
 	if err != nil {
 		return "", err
 	}

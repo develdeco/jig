@@ -16,7 +16,9 @@ import (
 // listing of many tickets must not wait on the network for each blocker. A
 // merged pull request is never asked again, and a command about one ticket (a
 // claim, `jig next <ticket>`) asks about the pull requests it is held on every
-// time. An answer older than this run's is dated where it is shown.
+// time. `jig status <ticket>` is the exception: it reads its closing hint
+// through this age, since the TUI runs it every few seconds on a quiet ticket.
+// An answer older than this run's is dated where it is shown.
 const listingMergeAge = 2 * time.Minute
 
 // newMergeReader reads whether the work of a ticket has merged

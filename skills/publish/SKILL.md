@@ -20,7 +20,7 @@ gh pr create --head <branch> --base <base> --title "<title>" --body-file <pr_bod
 jig publish T-1 --pr <url>             # checks the PR is from the ticket's branch (and the reviewed head), then records it
 ```
 
-The `--body` output gives the branch, base, title and the absolute `pr_body` path to hand to `gh`. The base is the repo's target, or, for a ticket stacked on another, the parent's branch until the parent merges. The branch is the one the ticket records, else `<id>-<slug>` (the GitHub issue number leads it once the ticket is mirrored); `jig next T-1` names it too. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so.
+The `--body` output gives the branch, base, title and the absolute `pr_body` path to hand to `gh`. The base is the repo's target, or, for a ticket stacked on another, the parent's branch until the parent merges. The branch is the one the ticket records, else `<id>-<slug>` (the GitHub issue number leads it once the ticket is mirrored); `jig next T-1` names it too. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so. When the last pull request is recorded, the result gives the `git worktree remove` for each worktree the ticket still has: run it (git refuses one with changes).
 
 Or jig pushes and opens it:
 
@@ -52,11 +52,15 @@ When the build recorded end-to-end scenarios and nobody picked, `--body` and `ji
 
 then run `jig publish T-1 --body --picks answer.json` (or the bare publish with `--picks`). Pick at least one and a few at most; an id is a candidate and used once; flows keep their step order. A pick jig refuses publishes with no demo and says why; the next publish of the same head and recordings reuses a pick that stood.
 
+## A published ticket that is behind
+
+`jig next T-1` says `state: behind` for a published ticket stacked on a parent that has since moved or merged. In a checkout of its branch run the `merge` its `stack` row names (`git merge origin/main`), then bare `jig publish T-1`: it pushes the merge, finds the open pull request by its branch and points it at its base, and opens no second one. A merge git made by itself needs no new round. A merge you resolved by hand, or any other commit, needs `jig gate T-1` first (`PUBLISH_UNREVIEWED_HEAD`); its round reviews your resolution alone.
+
 ## Then
 
 Relay `jig next <T>`'s `prompt:` to the person (there is none once the pull request is recorded) and stop. Publish is the last phase: no skill (intake, build, review) follows it, even in a start-to-finish run.
 
 ## Never
 
-- Do not squash, rebase or merge on the ticket's branch to "tidy" it before publishing: the reviewed head is what ships.
+- Do not squash, rebase or merge on the ticket's branch to "tidy" it before publishing: the reviewed head is what ships. The one merge is the target's, for a ticket that is behind.
 - Do not edit `pr/<repo>.md` by hand; render it again.

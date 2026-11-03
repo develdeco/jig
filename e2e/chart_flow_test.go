@@ -33,6 +33,7 @@ type chartOut struct {
 		Steps    []string `json:"steps"`
 		Reach    string   `json:"reach"`
 		Prompt   string   `json:"prompt"`
+		Problem  string   `json:"problem"`
 		WaitsFor []struct {
 			Ticket string `json:"ticket"`
 			Kind   string `json:"kind"`
@@ -48,6 +49,11 @@ type chartOut struct {
 			State string `json:"state"`
 		} `json:"prs"`
 	} `json:"ends"`
+	History []struct {
+		SHA     string `json:"sha"`
+		Time    string `json:"time"`
+		Subject string `json:"subject"`
+	} `json:"history"`
 	Map *struct {
 		Destination []string `json:"destination"`
 		Decided     []string `json:"decided"`
