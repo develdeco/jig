@@ -4,7 +4,27 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
+
+// spendHeight is the height of the terminal the spend tests draw on: three rows
+// more than the 80 by 24 screen, which the Detail panel takes, so the Run panel
+// keeps every row, the spend one among them.
+const spendHeight = 27
+
+// chartScreenOfHeight is chartScreenRig on a terminal of 80 columns and height
+// rows.
+func chartScreenOfHeight(t *testing.T, height int) *rig {
+	t.Helper()
+	g := chartRig(t)
+	g.send(tea.WindowSizeMsg{Width: 80, Height: height})
+	g.press("end", "enter")
+	if g.m.Screen() != "chart" {
+		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
+	}
+	return g
+}
 
 // spendObject is the spend object `jig next checkout --json` prints when the
 // chart's tickets have spend lines.
@@ -26,6 +46,7 @@ func chartWithSpendRig(t *testing.T, spend map[string]any) *rig {
 		}
 	}), status)
 	g.feed(lines...)
+	g.send(tea.WindowSizeMsg{Width: 80, Height: spendHeight})
 	g.press("end", "enter")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
@@ -35,7 +56,7 @@ func chartWithSpendRig(t *testing.T, spend map[string]any) *rig {
 
 // TestChartScreenShowsItsSpend: the Run panel ends with a row that says what the
 // chart's run has cost, from the spend object of the verb; a chart whose verb
-// says none draws what it drew before (the golden of TestChartScreen).
+// says none draws what it drew before, on the same terminal.
 func TestChartScreenShowsItsSpend(t *testing.T) {
 	t.Parallel()
 	v := chartWithSpendRig(t, spendObject()).view()
@@ -44,7 +65,7 @@ func TestChartScreenShowsItsSpend(t *testing.T) {
 	}
 	golden(t, "chart-spend", v)
 
-	if plain := chartWithSpendRig(t, nil).view(); strings.Contains(plain, "spend") || plain != chartScreenRig(t).view() {
+	if plain := chartWithSpendRig(t, nil).view(); strings.Contains(plain, "spend") || plain != chartScreenOfHeight(t, spendHeight).view() {
 		t.Errorf("a chart with no spend draws a spend row or differs from the chart screen:\n%s", plain)
 	}
 }
