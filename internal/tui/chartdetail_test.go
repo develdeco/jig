@@ -444,3 +444,81 @@ func TestChartDetailGivesUpTheSliceRowsBeforeTheHold(t *testing.T) {
 		t.Errorf("the panel kept the third slice and not a hold:\n%s", got)
 	}
 }
+
+// TestChartDetailNamesNoAgentForAClaimWhoseOwnCallIsGone: two slices of one
+// session are claimed close in time by different agents, and the ledger lines
+// the screens keep hold only the later claim's call. The older slice's row must
+// not name the newer call's agent, which made another claim; the newer slice's
+// row does name it.
+func TestChartDetailNamesNoAgentForAClaimWhoseOwnCallIsGone(t *testing.T) {
+	t.Parallel()
+	g := buildingRig(t, 100, 50, 2)
+	tk := g.m.w.tickets["JIG-5"]
+	tk.ledger = nil
+	g.feed(claimLine(at(4, 2), "JIG-5", "s-builder", "agent-newer", "jig claim JIG-5 --slice s2"))
+	panel := detailPanelOf(t, g.view())
+	got := strings.Join(panel, "\n")
+	if !strings.Contains(panel[1], "slice    s1 · claimed · builder") || strings.Contains(panel[1], "agent") {
+		t.Errorf("the older slice's row does not name the builder alone:\n%s", got)
+	}
+	if !strings.Contains(panel[2], "         s2 · claimed · builder · agent newer") {
+		t.Errorf("the newer slice's row does not name the agent of its own call:\n%s", got)
+	}
+}
+
+// TestChartDetailReadsTheAgentFromACallThatNamesTheSlice: the agent is the one
+// of the claim call that names the claim's slice, nearest to the claim, even
+// when a call that names another slice or none is nearer. A call that names only
+// another slice is not this claim's, so with no other the row names no agent; a
+// call that names no slice (it came from the environment) is the fallback.
+func TestChartDetailReadsTheAgentFromACallThatNamesTheSlice(t *testing.T) {
+	t.Parallel()
+	claim := jl(at(5, 0), "JIG-5", "s2", journal.EventClaim, with("s-builder", "", "", "", "", ""))
+	call := func(ts, agent, command string) events.Envelope {
+		return claimLine(ts, "JIG-5", "s-builder", agent, command)
+	}
+	for _, tc := range []struct {
+		name   string
+		ledger []events.Envelope
+		want   string
+	}{
+		{"no call is kept", nil, ""},
+		{"the call of another slice is nearer", []events.Envelope{
+			call(at(5, 1), "agent-other", "jig claim JIG-5 --slice s3"),
+			call(at(5, 20), "agent-own", "jig claim JIG-5 --slice s2"),
+		}, "agent-own"},
+		{"the call that names no slice is nearer", []events.Envelope{
+			call(at(5, 1), "agent-unnamed", "jig claim JIG-5"),
+			call(at(5, 20), "agent-own", "jig claim JIG-5 --slice s2"),
+		}, "agent-own"},
+		{"only the call of another slice is kept", []events.Envelope{
+			call(at(5, 1), "agent-other", "jig claim JIG-5 --slice s3"),
+		}, ""},
+		{"only a call that names no slice is kept", []events.Envelope{
+			call(at(5, 1), "agent-unnamed", "jig claim JIG-5"),
+		}, "agent-unnamed"},
+		{"the nearer of two calls that name the slice", []events.Envelope{
+			call(at(4, 30), "agent-early", "jig claim JIG-5 --slice s2"),
+			call(at(5, 5), "agent-near", "jig claim JIG-5 --slice s2"),
+		}, "agent-near"},
+		{"a slice that only begins with the claim's", []events.Envelope{
+			call(at(5, 1), "agent-other", "jig claim JIG-5 --slice s22"),
+		}, ""},
+		{"the flag with an equals sign, one dash or quotes", []events.Envelope{
+			call(at(4, 30), "agent-equals", "jig claim JIG-5 --slice=s2"),
+			call(at(4, 40), "agent-dash", "jig claim JIG-5 -slice s2"),
+			call(at(4, 50), "agent-quoted", `jig claim JIG-5 --slice "s2"`),
+		}, "agent-quoted"},
+		{"one call that claims two slices", []events.Envelope{
+			call(at(5, 1), "agent-both", "jig claim JIG-5 --slice s1 && jig claim JIG-5 --slice s2"),
+		}, "agent-both"},
+		{"the slice of another command in the line is not named by the claim", []events.Envelope{
+			call(at(5, 1), "agent-unnamed", "jig claim JIG-5 && jig context JIG-5 --slice s3"),
+		}, "agent-unnamed"},
+	} {
+		tk := &ticket{id: "JIG-5", lines: []events.Envelope{claim}, ledger: tc.ledger}
+		if got := tk.claimAgent(claim); got != tc.want {
+			t.Errorf("%s: the agent is %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

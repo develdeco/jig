@@ -112,29 +112,38 @@ func (t *ticket) liveClaim(slice string) (events.Envelope, bool) {
 }
 
 // claimAgent is the agent that made the call that wrote claim: the agent of the
-// ledger tool line of the claim's session that ran `jig claim`, the nearest in
-// time to the claim among those stamped no more than a minute before it. A
-// claim line has no agent of its own, since the CLI cannot know which agent it
-// runs for. Empty when no such line is kept (the harness has no hooks, or the
-// line fell out of the ledger's last lines) and for a call of the session
-// itself.
+// ledger tool line of the claim's session that ran `jig claim` for the claim's
+// slice, the nearest in time to the claim among those stamped no more than a
+// minute before it. A claim line has no agent of its own, since the CLI cannot
+// know which agent it runs for, and a session's calls for different slices can
+// sit close together, so a call is read by the slice it names: one that names
+// the slice comes before any other, however much nearer; one that names only
+// other slices made another claim and is never read; one that names none (the
+// slice came from the environment) is the fallback when no call names the
+// slice. Empty when no such line is kept (the harness has no hooks, or the line
+// fell out of the ledger's last lines) and for a call of the session itself.
 func (t *ticket) claimAgent(claim events.Envelope) string {
 	at, ok := claim.At()
 	if !ok {
 		return ""
 	}
-	agent, best, found := "", time.Duration(0), false
+	agent, best, found, named := "", time.Duration(0), false, false
 	for _, l := range t.ledger {
 		lat, ok := l.At()
 		if !ok || !isMove(l) || l.Session != claim.Session || !claimCall(l.Command) || lat.Before(at.Add(-claimSlack)) {
+			continue
+		}
+		claimed := claimedSlices(l.Command)
+		if len(claimed) > 0 && !slices.Contains(claimed, claim.Slice) {
 			continue
 		}
 		gap := lat.Sub(at)
 		if gap < 0 {
 			gap = -gap
 		}
-		if !found || gap < best {
-			agent, best, found = l.Agent, gap, true
+		names := len(claimed) > 0
+		if !found || names && !named || names == named && gap < best {
+			agent, best, found, named = l.Agent, gap, true, names
 		}
 	}
 	return agent
@@ -176,17 +185,51 @@ func (t *ticket) currentHolds() []events.Envelope {
 // internal/observe makes, because the screens may not import the ledger
 // (TestTheScreensReadNoStore); a test that may pins that they agree.
 func claimCall(cmd string) bool {
-	if strings.Contains(cmd, "--release") {
-		return false
-	}
+	return !strings.Contains(cmd, "--release") && len(claimArgs(cmd)) > 0
+}
+
+// claimArgs are the words after each `jig claim` in the shell command line cmd,
+// up to the next shell separator, one entry for each such claim.
+func claimArgs(cmd string) [][]string {
+	var calls [][]string
 	words := strings.Fields(cmd)
 	for i, w := range words {
 		base := strings.ToLower(filepath.Base(strings.ReplaceAll(strings.Trim(w, `"'`), `\`, "/")))
-		if (base == "jig" || base == "jig.exe") && i+1 < len(words) && words[i+1] == "claim" {
-			return true
+		if (base != "jig" && base != "jig.exe") || i+1 >= len(words) || words[i+1] != "claim" {
+			continue
+		}
+		args := words[i+2:]
+		if end := slices.IndexFunc(args, func(a string) bool { return a == "&&" || a == "||" || a == ";" || a == "|" }); end >= 0 {
+			args = args[:end]
+		}
+		calls = append(calls, args)
+	}
+	return calls
+}
+
+// claimedSlices are the slices the shell command line cmd names in its `jig
+// claim`s: the value of each --slice (one dash or two, the value after a space
+// or an equals sign, quotes taken off). None when a claim names no slice, as
+// when the environment gives it, and a flag of another command in the line is
+// not read.
+func claimedSlices(cmd string) []string {
+	var named []string
+	for _, args := range claimArgs(cmd) {
+		for i := 0; i < len(args); i++ {
+			flag, value, hasValue := strings.Cut(args[i], "=")
+			if flag != "--slice" && flag != "-slice" {
+				continue
+			}
+			if !hasValue && i+1 < len(args) {
+				i++
+				value = args[i]
+			}
+			if value = strings.Trim(value, `"'`); value != "" {
+				named = append(named, value)
+			}
 		}
 	}
-	return false
+	return named
 }
 
 // detailPanel adds the Detail panel of ticket id to p: a row a line, drawn as
