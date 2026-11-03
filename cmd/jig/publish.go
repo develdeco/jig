@@ -123,21 +123,18 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		verified := "yes"
-		if !report.Verified {
-			verified = "no (the repo has no pull-request host to ask)"
+		// The record that finished the publish is the moment the ticket's
+		// worktrees have done their work: say how to remove them. The facts are
+		// read from this machine alone, and a failure to read them is silence,
+		// never an error: the pull request is recorded.
+		var rows []nextWorktree
+		if len(report.Pending) == 0 {
+			src := newWorktreeSource(st, cfg, mp, cachedMergeReader(st, cfg, mp, jigHome))
+			if facts, err := src.factsOf(ticket); err == nil {
+				rows = src.rows(facts)
+			}
 		}
-		help := "Run `jig status " + ticket + "` to confirm the ticket is fully green"
-		if len(report.Pending) > 0 {
-			help = fmt.Sprintf("%s still needs its pull request: `jig publish %s --pr <url> --repo %s`", joinWords(report.Pending), ticket, report.Pending[0])
-		}
-		axi.Render(stdout,
-			axi.KV("publish_pr", [][2]string{
-				{"ticket", ticket}, {"repo", report.Repo}, {"url", report.URL}, {"branch", report.Branch},
-				{"commit", report.Commit}, {"verified", verified},
-			}),
-			axi.Help(help),
-		)
+		axi.Render(stdout, recordedBlocks(ticket, report, rows)...)
 		return 0
 	case *approve:
 		provenance := "agent"
@@ -190,6 +187,35 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		axi.Help(help),
 	)
 	return 0
+}
+
+// recordedBlocks is what `jig publish --pr` prints once the pull request is
+// recorded: the pull request, and the help, which names the repo that still
+// needs its pull request or, when this record finished the publish, confirms
+// the ticket is green. A finished publish also gives the worktrees the ticket
+// still has (the remove rows of rows): their table after the pull request, and
+// the command that removes each ahead of the status line. A publish with a repo
+// pending is not done, and adds nothing.
+func recordedBlocks(ticket string, report verifydeliver.RecordReport, rows []nextWorktree) []string {
+	verified := "yes"
+	if !report.Verified {
+		verified = "no (the repo has no pull-request host to ask)"
+	}
+	blocks := []string{axi.KV("publish_pr", [][2]string{
+		{"ticket", ticket}, {"repo", report.Repo}, {"url", report.URL}, {"branch", report.Branch},
+		{"commit", report.Commit}, {"verified", verified},
+	})}
+	if len(report.Pending) > 0 {
+		return append(blocks, axi.Help(fmt.Sprintf("%s still needs its pull request: `jig publish %s --pr <url> --repo %s`", joinWords(report.Pending), ticket, report.Pending[0])))
+	}
+	var removals []nextWorktree
+	for _, r := range rows {
+		if r.Action == worktreeRemove {
+			removals = append(removals, r)
+		}
+	}
+	help := append(worktreeHelp(ticket, removals), "Run `jig status "+ticket+"` to confirm the ticket is fully green")
+	return append(append(blocks, worktreeBlocks(removals)...), axi.Help(help...))
 }
 
 // renderBodies prints what `jig publish --body` rendered. A body for one repo

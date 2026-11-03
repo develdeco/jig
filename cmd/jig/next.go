@@ -98,11 +98,15 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		}
 		// A chart is read for its own sake as a ticket is: what its run waits on
 		// is asked of the host now.
-		c, m, err := deriveChart(st, cfg, mp, chart, newMergeReader(e, st, cfg, mp, jigHome, 0))
+		merges := newMergeReader(e, st, cfg, mp, jigHome, 0)
+		c, m, err := deriveChart(st, cfg, mp, chart, merges)
 		if err != nil {
 			return renderErr(stdout, err)
 		}
 		n := chartOutput(c, m)
+		// The tickets of the run carry the worktrees jig advises for them; the
+		// same reader says what a stacked parent's merge is.
+		n.setWorktrees(newWorktreeSource(st, cfg, mp, merges))
 		out, blocks = n, n.blocks("next")
 	} else if ticket != "" {
 		id, err := st.ResolveTicket(ticket)
@@ -170,6 +174,10 @@ type nextTicket struct {
 	// JSON because `ready` above is already the slices ready to build.
 	Phase        *nextPhase `json:"phase,omitempty"`
 	PhaseProblem string     `json:"phase_problem,omitempty"`
+	// Worktrees are, for each repo the ticket builds in, the worktree jig
+	// advises (worktree_advice.go): the git command that adds one where the
+	// work is wanted, or removes it once the ticket ended. jig makes none.
+	Worktrees []nextWorktree `json:"worktrees,omitempty"`
 
 	// derived is the same derivation, for the help.
 	derived *phase.Ticket
@@ -404,12 +412,9 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		return nextTicket{}, err
 	}
 	place := ready.Place(ready.ProjectRepos(cfg, mp.Clones), data.in.Slices)
-	// The branch is cut in every repo, so it must not be the target of any.
-	var branch string
-	for _, target := range projectTargets(cfg) {
-		if branch, err = st.ResolveTicketBranch(id, data.rec, target); err != nil {
-			return nextTicket{}, err
-		}
+	branch, err := ticketBranch(st, cfg, id, data.rec)
+	if err != nil {
+		return nextTicket{}, err
 	}
 
 	// Its blockers' own journals say whether they published, and merges whether
@@ -457,6 +462,10 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	}
 	n.Advice = distributionAdvice(n.Ready)
 	n.setPhase(st, id, asked, merges, plan)
+	n.Worktrees = newWorktreeSource(st, cfg, mp, merges).rows(worktreeFacts{
+		Ticket: id, Branch: branch, Slices: data.in.Slices, Plan: plan,
+		Closed: data.rec.Closed != nil, Published: data.in.Published, Wanted: n.worktreeWanted(),
+	})
 	if topology {
 		waves := ready.Waves(data.in.Slices)
 		for _, s := range data.in.Slices {
@@ -471,6 +480,19 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		}
 	}
 	return n, nil
+}
+
+// ticketBranch is the branch of ticket id, which has one name in every repo:
+// it is cut in each of them, so it must not be the target of any.
+func ticketBranch(st *store.Store, cfg project.Config, id string, rec store.Ticket) (string, error) {
+	var branch string
+	for _, target := range projectTargets(cfg) {
+		var err error
+		if branch, err = st.ResolveTicketBranch(id, rec, target); err != nil {
+			return "", err
+		}
+	}
+	return branch, nil
 }
 
 // startPoint is where the ticket's branch starts in repo: the branch of the
@@ -564,6 +586,7 @@ func (n nextTicket) blocks(topology bool) []string {
 	if n.PhaseProblem != "" {
 		blocks = append(blocks, "note: the phase of "+n.Ticket+" could not be told: "+n.PhaseProblem)
 	}
+	blocks = append(blocks, worktreeBlocks(n.Worktrees)...)
 	if topology {
 		var rows [][]string
 		for _, s := range n.Topology {
@@ -575,7 +598,7 @@ func (n nextTicket) blocks(topology bool) []string {
 		}
 		blocks = append(blocks, axi.Table("topology", []string{"slice", "workspace", "repo", "state", "wave", "blocked_by"}, rows))
 	}
-	return append(blocks, axi.Help(n.help()...))
+	return append(blocks, axi.Help(append(worktreeHelp(n.Ticket, n.Worktrees), n.help()...)...))
 }
 
 // phasePairs are the lines `jig next <ticket>` adds to its next block: the

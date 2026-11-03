@@ -3928,3 +3928,19 @@ The brief for [ADR 0038](docs/adr/0038-a-published-stacked-ticket-can-be-behind.
 **A built ticket that has not published keeps its phase.** Its merge is part of the work and its review and publish follow by phase, so only a published ticket can be behind. The row's `publish` command is named only for a published ticket, and only on a row that asks for a merge.
 
 **`jig next` says `behind` for a branch that does not hold the target.** Once the session has merged the target the ticket reads done again, though the pull request may still point at the parent's branch until the next `jig publish`. Reading the pull request's base from the host to hold the standing until it is retargeted was left out: it would make every `jig next` ask the host about the ticket's own pull request.
+
+## jig advises a ticket's worktree (chart flow, C6)
+
+The brief for [ADR 0039](docs/adr/0039-jig-advises-a-tickets-worktree-and-makes-none.md) left a few choices; each took the recommended answer.
+
+**`present` is a row of its own.** A resumed chart run has to know which worktrees exist, and the clone's own work tree can already be on the ticket's branch: an add for it would be one git refuses. A work tree is found by the branch it holds, so a worktree made by hand anywhere counts, and a prunable entry (its directory gone) holds nothing.
+
+**The command is `git -C <clone>` and the add of a branch the clone has takes no `-b`.** `-C` lets the session run it from any directory. A branch outlives a removed worktree, and a published ticket that is behind needs its worktree back, so the second add is the existing-branch form with no base.
+
+**A ticket that is not briefed, or is held by a blocker, has no worktree yet.** The rows of `jig next <T>` follow the phase's word (`PHASE_BLOCKED`, the brief phase), never the ticket's `state`: a stacked child of an unpublished parent reads `ready` in the state while its parent has no clean round, and is held all the same. A chart's rows are the exception: a ticket in the run is work of this run, so a later wave's stacked ticket gets its add ahead of its wave, and the skill reads `jig next <T>` again when the wave starts.
+
+**The remove is never forced and is offered only for a linked worktree.** Git refuses a worktree with changes and the person decides. The clone's own work tree is not a thing to remove. A published ticket that is behind has not ended, so it keeps its worktree rows.
+
+**`jig publish --pr` gives the removal when it records the last pull request, and a failure to read the facts is silence.** The pull request is recorded whatever the advice could read. A record with a repo still pending adds nothing, and bare `jig publish` is unchanged: `jig next <T>` gives the removal after it.
+
+**Left for later.** Listing worktrees in process (the git program answers while the ticket's branch exists in the clone), a branch that exists only on the origin, and the numbers in `.github/git-budget.yaml`, which are CI's to print on the Linux leg and go in the pull request's diff.

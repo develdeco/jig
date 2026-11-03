@@ -20,7 +20,7 @@ gh pr create --head <branch> --base <base> --title "<title>" --body-file <pr_bod
 jig publish T-1 --pr <url>             # checks the PR is from the ticket's branch (and the reviewed head), then records it
 ```
 
-The `--body` output gives the branch, base, title and the absolute `pr_body` path to hand to `gh`. The base is the repo's target, or, for a ticket stacked on another, the parent's branch until the parent merges. The branch is the one the ticket records, else `<id>-<slug>` (the GitHub issue number leads it once the ticket is mirrored); `jig next T-1` names it too. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so.
+The `--body` output gives the branch, base, title and the absolute `pr_body` path to hand to `gh`. The base is the repo's target, or, for a ticket stacked on another, the parent's branch until the parent merges. The branch is the one the ticket records, else `<id>-<slug>` (the GitHub issue number leads it once the ticket is mirrored); `jig next T-1` names it too. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so. When the last pull request is recorded, the result gives the `git worktree remove` for each worktree the ticket still has: run it (git refuses one with changes).
 
 Or jig pushes and opens it:
 
