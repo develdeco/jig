@@ -11,10 +11,10 @@ A session with no jig hooks (GATE-3 was built from a Claude desktop session with
 **A session that built the ticket and has no agent ids is told to start a separate session.** `jig gate` and `jig next` say why (what the session did, and that jig has no hook record of its tool calls) and give the command, for the Bash tool in the background (a review outlasts a shell call's time limit):
 
 ```
-env -u JIG_SESSION -u CLAUDE_CODE_SESSION_ID claude -p '<the reviewer prompt>' --model opus --permission-mode bypassPermissions
+env -u JIG_SESSION -u CLAUDE_CODE_SESSION_ID claude -p '<the reviewer prompt>' --model opus --permission-mode bypassPermissions < /dev/null
 ```
 
-The variables are the ones jig names a session by (`locate.SessionEnv` and `locate.HarnessSessionEnv`), so the new session reviews under its own id; the prompt is the subagent's, quoted for sh; the session waits for it to exit and relays the verdict line it prints. Neither the session nor a subagent of it may close the round. A fresh session still reviews itself, a session with agent ids still spawns a subagent, and so does a session jig has no record of: none of the builders is that session, so neither is its subagent.
+The variables are the ones jig names a session by (`locate.SessionEnv` and `locate.HarnessSessionEnv`), so the new session reviews under its own id; the prompt is the subagent's, quoted for sh; the input is `/dev/null`, since `claude -p` otherwise waits for input on the shell tool's stdin (2.1.232 waited 3 s and warned in GATE-4's own first round); the session waits for it to exit and relays the verdict line it prints. Neither the session nor a subagent of it may close the round. A fresh session still reviews itself, a session with agent ids still spawns a subagent, and so does a session jig has no record of: none of the builders is that session, so neither is its subagent.
 
 **The refusal points at the advice.** The help of `REVIEW_NOT_INDEPENDENT` says to run `jig gate` again from the session that built the change and have the reviewer it advises review the next round.
 
