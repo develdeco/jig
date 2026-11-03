@@ -389,3 +389,79 @@ func TestFindSh(t *testing.T) {
 		})
 	}
 }
+
+// envrunShHelperEnv marks a run of this test binary as the child of one of
+// the tests that run TestShHelper.
+const envrunShHelperEnv = "JIG_ENVRUN_TEST_SH_HELPER"
+
+// TestShHelper runs in the children runShHelper starts and logs what running
+// `echo own` through this package gave: ShellOutput, ShellOutputEnv handed a
+// JIG_SHELL_COMMAND of its own among its variables, and Shell. Outside them
+// it does nothing.
+func TestShHelper(t *testing.T) {
+	if os.Getenv(envrunShHelperEnv) == "" {
+		t.Skip("only the children runShHelper starts run this")
+	}
+	dir := t.TempDir()
+	out, err := ShellOutput("echo own", dir, time.Minute)
+	t.Logf("output=%q err=%v", strings.TrimSpace(out), err)
+	out, err = ShellOutputEnv("echo own", dir, time.Minute, []string{commandEnv + "=echo given"})
+	t.Logf("outputenv=%q err=%v", strings.TrimSpace(out), err)
+	t.Logf("shell err=%v", Shell("echo own", dir))
+}
+
+// runShHelper runs TestShHelper in a child of this test binary whose
+// environment is this process's with the variables in set put in place of
+// any of the same name, and returns what the child printed. The variables are
+// set on the child, never on this process.
+func runShHelper(t *testing.T, set map[string]string) string {
+	t.Helper()
+	names := []string{envrunShHelperEnv}
+	for name := range set {
+		names = append(names, name)
+	}
+	env := append(environWithout(os.Environ(), runtime.GOOS, names...), envrunShHelperEnv+"=1")
+	for name, value := range set {
+		env = append(env, name+"="+value)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestShHelper$", "-test.v")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper: %v\n%s", err, out)
+	}
+	return string(out)
+}
+
+// TestWithNoShEveryCommandFails: on a machine with no sh, ShellOutput,
+// ShellOutputEnv and Shell each fail and say why, and none passes a command
+// it did not run: the gate's oracle runs and an env class's up and check
+// rest on it. The child's PATH is an empty directory, so it finds neither
+// git nor sh.
+func TestWithNoShEveryCommandFails(t *testing.T) {
+	out := runShHelper(t, map[string]string{"PATH": t.TempDir()})
+	why := "found no sh on PATH"
+	if runtime.GOOS == "windows" {
+		why = "install Git for Windows, or put an sh on PATH"
+	}
+	for _, run := range []string{`output="" err=`, `outputenv="" err=`, "shell err="} {
+		if !strings.Contains(out, run+`shell "echo own": jig runs oracles and env class commands with sh`) {
+			t.Errorf("the child's %s... line does not fail for want of sh:\n%s", run, out)
+		}
+	}
+	if n := strings.Count(out, why); n != 3 {
+		t.Errorf("the child said %q %d times, want once for each of the 3 runs:\n%s", why, n, out)
+	}
+}
+
+// TestTheVariableThatCarriesACommandNeverReplacesIt: sh runs the command jig
+// was handed, never a JIG_SHELL_COMMAND the process inherited or a caller
+// passed among a command's variables.
+func TestTheVariableThatCarriesACommandNeverReplacesIt(t *testing.T) {
+	out := runShHelper(t, map[string]string{commandEnv: "echo inherited"})
+	for _, want := range []string{`output="own" err=<nil>`, `outputenv="own" err=<nil>`, "shell err=<nil>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the child's output lacks %q:\n%s", want, out)
+		}
+	}
+}
