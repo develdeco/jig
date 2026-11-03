@@ -465,6 +465,108 @@ func TestChartWaitsOnThePullRequestTheMergeReaderNames(t *testing.T) {
 	}
 }
 
+// TestChartWaitsOnAStackedParentsOpenPullRequest: a parent and a child stacked
+// on it, both published, are done, but while the parent's pull request is open
+// the child is owed a retarget once it merges. The chart waits on it (and lists
+// the end, which is what keeps a screen rereading it), and `jig next <chart>`
+// says so in the text and in the JSON, naming the parent's pull request and the
+// stacked kind. It does so whether or not the parent's gate has a clean round
+// (a re-gate leaves it with none for a while); a child whose own work merged, a
+// parent that is closed and a parent with no pull request on record leave the
+// chart done.
+func TestChartWaitsOnAStackedParentsOpenPullRequest(t *testing.T) {
+	t.Parallel()
+	r := newChartRig(t)
+	r.ticket(t, "SHOP-1", "", false)
+	r.ticket(t, "SHOP-2", "blocked_by:\n  - ticket: SHOP-1\n    kind: stacked\n", false)
+	r.chart(t, "checkout", "tickets:\n  - id: SHOP-1\n    title: Parent\n  - id: SHOP-2\n    title: Child\n", "")
+	r.publish(t, "SHOP-1")
+	r.publish(t, "SHOP-2")
+	r.put(t, "tickets/SHOP-1/gate/round-1/report.yaml", "verdict: clean\n")
+	const parentPR, childPR = "https://example.test/shop/pull/7", "https://example.test/shop/pull/8"
+	repo := func(pr, state string, met bool) ready.Merge {
+		return ready.Merge{Published: true, Repos: []ready.RepoMerge{{Repo: "shop", PR: pr, State: state, Met: met}}}
+	}
+	parentOpen, childOpen := repo(parentPR, ready.PROpen, false), repo(childPR, ready.PROpen, false)
+	derive := func(merges mergesOf) (phase.Chart, chartMap) {
+		t.Helper()
+		c, m, err := deriveChart(r.st, project.Config{}, project.MachineProject{}, "checkout", merges)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c, m
+	}
+
+	c, m := derive(mergesOf{"SHOP-1": parentOpen, "SHOP-2": childOpen})
+	if c.Ready || c.Code != phase.CodeChartWaitsMerge || c.Prompt != "Continue checkout" || len(c.Run) != 0 {
+		t.Fatalf("chart = ready %v code %q prompt %q run %v, want waits-merge under Continue", c.Ready, c.Code, c.Prompt, c.Run)
+	}
+	if want := "SHOP-2 waits for SHOP-1 to merge (" + parentPR + " OPEN), then its pull request is retargeted"; c.Reason != want {
+		t.Errorf("reason = %q, want %q", c.Reason, want)
+	}
+	n := chartOutput(c, m, nil)
+	end := nextChartEnd{
+		Ticket: "SHOP-2", Blocker: "SHOP-1", Kind: "stacked",
+		Fact: "SHOP-2 is stacked on SHOP-1, whose work has not merged: once it has, the pull request of SHOP-2 is retargeted",
+		PRs:  []nextChartPR{{Repo: "shop", URL: parentPR, State: "OPEN"}},
+	}
+	if len(n.Ends) != 1 || !reflect.DeepEqual(n.Ends[0], end) {
+		t.Fatalf("ends = %+v, want %+v", n.Ends, end)
+	}
+	// The JSON carries the end as the chart screen reads it, and the rows stay
+	// done with nothing they wait for.
+	data, err := json.Marshal(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back nextChart
+	if err := json.Unmarshal(data, &back); err != nil || !reflect.DeepEqual(back.Ends, n.Ends) || back.Code != "CHART_WAITS_MERGE" {
+		t.Errorf("json = %s (%v), want CHART_WAITS_MERGE and the end", data, err)
+	}
+	for _, row := range n.Tickets {
+		if row.Reach != "done" || len(row.WaitsFor) != 0 || row.Prompt != "" {
+			t.Errorf("%s = reach %s waits %v prompt %q, want done with nothing to wait for", row.ID, row.Reach, row.WaitsFor, row.Prompt)
+		}
+	}
+	text := strings.Join(n.blocks("next"), "\n")
+	for _, want := range []string{
+		"code: CHART_WAITS_MERGE",
+		"waits[1]{ticket,blocker,kind,pr,state,fact}:",
+		"SHOP-2,SHOP-1,stacked,\"" + parentPR + "\",OPEN,",
+		"Merge " + parentPR + ", then ask: Continue checkout",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text lacks %q:\n%s", want, text)
+		}
+	}
+
+	// The parent's gate has no clean round: the child is still owed the retarget.
+	if err := os.RemoveAll(filepath.Join(r.root, "tickets", "SHOP-1", "gate")); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := derive(mergesOf{"SHOP-1": parentOpen, "SHOP-2": childOpen}); c.Code != phase.CodeChartWaitsMerge || len(c.Ends) != 1 {
+		t.Errorf("parent not clean: code %q ends %v, want waits-merge with the end", c.Code, c.Ends)
+	}
+
+	// Nothing is owed: the child's own work merged, the parent's pull request
+	// merged (the child is behind then, which is the owed-ticket test's), the
+	// parent has none on record, or the parent was closed.
+	for name, merges := range map[string]mergesOf{
+		"child landed":    {"SHOP-1": parentOpen, "SHOP-2": repo(childPR, ready.PRMerged, true)},
+		"no pull request": {"SHOP-1": {Published: true, Repos: []ready.RepoMerge{{Repo: "shop"}}}, "SHOP-2": childOpen},
+	} {
+		if c, _ := derive(merges); c.Code != phase.CodeChartDone || len(c.Ends) != 0 {
+			t.Errorf("%s: code %q ends %v, want CHART_DONE", name, c.Code, c.Ends)
+		}
+	}
+	if err := r.st.CloseTicket("SHOP-1", store.Closed{Reason: store.CloseCovered, By: "develdeco/jig#82"}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := derive(mergesOf{"SHOP-1": parentOpen, "SHOP-2": childOpen}); c.Code != phase.CodeChartDone || len(c.Ends) != 0 {
+		t.Errorf("parent closed: code %q ends %v, want CHART_DONE", c.Code, c.Ends)
+	}
+}
+
 // TestNextListsTheCharts: the listing of the store names each chart with its
 // title and tickets, in text and JSON, and says nothing when there are none.
 func TestNextListsTheCharts(t *testing.T) {

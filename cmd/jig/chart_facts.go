@@ -44,8 +44,10 @@ func deriveChart(st *store.Store, cfg project.Config, mp project.MachineProject,
 // hide the chart. Each edge is judged as a claim judges it
 // (blockerProblem), so a stacked edge is met by the parent's clean gate round
 // and a merged one by what merges says. A published ticket stacked on another
-// is read with its stack plan (chartTicket): one whose branch is owed a merge
-// is work of the run, not done.
+// is read with its stack plan (derivePhasePlanned): one whose branch is owed a
+// merge is work of the run, not done. One that is not owed it yet, because its
+// parent's pull request is still open, is done and waits on that merge: its
+// stacked needs name the parent's open pull requests (layOpenParents).
 func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, name string, merges mergeSource) (phase.ChartFacts, error) {
 	entries, err := st.ReadChart(name)
 	if err != nil {
@@ -115,10 +117,44 @@ func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, 
 			ce.Problem = err.Error()
 		} else {
 			ce.Ticket = &t
+			if t.Code == phase.CodeDone {
+				layOpenParents(st, ce.Needs, e.ID, merges)
+			}
 		}
 		facts.Entries = append(facts.Entries, ce)
 	}
 	return facts, nil
+}
+
+// layOpenParents names, on each stacked need of published ticket, the pull
+// requests of the parent that have not merged. The ticket is done, but the
+// parent's merge owes its pull request a retarget (ADR 0038), a change the chart
+// has to be read again for: a need with pull requests is where the chart's run
+// ends. The parent's gate round does not matter here (a re-gate of the parent
+// leaves the need unmet for a while), but a parent that is closed is not built
+// on (stack.Read), so it owes nothing. Nor does a ticket whose own work has
+// merged, or a parent with no recorded pull request, which gives nothing to
+// wait on. It reads what the needs were judged by (Of is memoized), so it asks
+// the host no more than judging them did.
+func layOpenParents(st *store.Store, needs []phase.ChartNeed, ticket string, merges mergeSource) {
+	if merges == nil {
+		return
+	}
+	if own, err := merges.Of(ticket); err != nil || own.Met() {
+		return
+	}
+	for i, n := range needs {
+		if n.Kind != "stacked" {
+			continue
+		}
+		if parent, err := st.ReadTicket(n.Ticket); err != nil || parent.Closed != nil {
+			continue
+		}
+		if prs := unmergedPRs(merges, n.Ticket); len(prs) > 0 {
+			needs[i].PRs = prs
+			needs[i].Why = fmt.Sprintf("%s is stacked on %s, whose work has not merged: once it has, the pull request of %s is retargeted", ticket, n.Ticket, ticket)
+		}
+	}
 }
 
 // chartNeed is the edge from dependent (a ticket, or a chart entry that has no

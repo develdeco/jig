@@ -260,11 +260,21 @@ func blockerPrompt(st *store.Store, blocker string, seen map[string]bool, merges
 // mergePRs are the pull requests a merged blocker waits on: for each repo it
 // published in whose work has not merged, the recorded pull request and the
 // host's word on it. Nothing for a stacked blocker (met by a gate round, not a
-// merge), nothing when merges cannot be read, and nothing before the blocker
-// published (no pull request exists). Of is memoized, so this asks the host no
-// more than judging the blocker did.
+// merge; a published ticket's wait on its stacked parent is openParentPRs),
+// nothing when merges cannot be read, and nothing before the blocker published
+// (no pull request exists). Of is memoized, so this asks the host no more than
+// judging the blocker did.
 func mergePRs(merges mergeSource, blocker, kind string) []phase.MergePR {
-	if merges == nil || kind == "stacked" {
+	if kind == "stacked" {
+		return nil
+	}
+	return unmergedPRs(merges, blocker)
+}
+
+// unmergedPRs are the pull requests recorded for blocker, in each repo it
+// published in whose work has not merged.
+func unmergedPRs(merges mergeSource, blocker string) []phase.MergePR {
+	if merges == nil {
 		return nil
 	}
 	m, err := merges.Of(blocker)

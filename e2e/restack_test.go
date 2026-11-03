@@ -42,13 +42,15 @@ type restackNextOut struct {
 	} `json:"stack"`
 }
 
-// TestPublishedChildBehindItsMergedParentIsWork: a chart run ends with the
-// child published into its parent's branch and the parent's pull request open,
-// and the chart is done. Once the parent's pull request merged into main the
-// child is owed a merge of main and a publish: the chart is ready again with the
-// child as its only work, `jig next <child>` says it is behind and names the
-// merge and the publish that follow, and the chart is done once the session has
-// merged main into the child's branch.
+// TestPublishedChildBehindItsMergedParentIsWork: a chart run reaches the
+// child published into its parent's branch and the parent's pull request open.
+// Nothing is left to build, but the chart is not done: it waits on that merge,
+// with the child as the end (a screen that rereads a chart on a timer keeps
+// reading it for as long as it lists one). Once the parent's pull request merged
+// into main the child is owed a merge of main and a publish: the chart is ready
+// again with the child as its only work, `jig next <child>` says it is behind
+// and names the merge and the publish that follow, and the chart is done once the
+// session has merged main into the child's branch.
 func TestPublishedChildBehindItsMergedParentIsWork(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
@@ -72,10 +74,32 @@ func TestPublishedChildBehindItsMergedParentIsWork(t *testing.T) {
 	publishedWith(t, st, "JIG-1", childPR)
 	env = withPulls(t, env, fixture.GhPull{Number: 7}, fixture.GhPull{Number: 8})
 
-	// Both are published and the parent has not merged: nothing is left to do.
+	// Both are published and the parent has not merged: nothing is left to build
+	// and the chart waits for the parent's pull request, then for the retarget.
 	c := nextJSON[chartOut](t, env, fx.RepoDir, "c")
-	if c.Ready || c.Code != "CHART_DONE" || len(c.Run) != 0 {
-		t.Fatalf("parent unmerged: ready %v code %q run %v, want CHART_DONE", c.Ready, c.Code, c.Run)
+	if c.Ready || c.Code != "CHART_WAITS_MERGE" || c.Prompt != "Continue c" || len(c.Run) != 0 || !strings.Contains(c.Reason, parentPR) {
+		t.Fatalf("parent unmerged: ready %v code %q prompt %q run %v reason %q, want CHART_WAITS_MERGE under Continue c naming %s", c.Ready, c.Code, c.Prompt, c.Run, c.Reason, parentPR)
+	}
+	if len(c.Ends) != 1 || c.Ends[0].Ticket != "JIG-1" || c.Ends[0].Blocker != "JIG-2" || c.Ends[0].Kind != "stacked" ||
+		len(c.Ends[0].PRs) != 1 || c.Ends[0].PRs[0].URL != parentPR || c.Ends[0].PRs[0].State != "OPEN" {
+		t.Errorf("ends = %+v, want JIG-1 stacked on JIG-2's open pull request", c.Ends)
+	}
+	for _, row := range c.Tickets {
+		if row.Reach != "done" || row.Prompt != "" || len(row.WaitsFor) != 0 {
+			t.Errorf("%s = reach %s prompt %q waits %v, want done with nothing to ask", row.ID, row.Reach, row.Prompt, row.WaitsFor)
+		}
+	}
+	waiting := runJig(t, env, fx.RepoDir, "next", "c").Stdout
+	for _, want := range []string{
+		"code: CHART_WAITS_MERGE",
+		"then its pull request is retargeted",
+		"waits[1]{ticket,blocker,kind,pr,state,fact}:",
+		"JIG-1,JIG-2,stacked,\"" + parentPR + "\",OPEN,",
+		"Merge " + parentPR + ", then ask: Continue c",
+	} {
+		if !strings.Contains(waiting, want) {
+			t.Errorf("jig next c lacks %q:\n%s", want, waiting)
+		}
 	}
 	if n := nextJSON[restackNextOut](t, env, fx.RepoDir, "JIG-1"); n.State != "done" || n.Phase == nil || n.Phase.Code != "PHASE_DONE" {
 		t.Fatalf("jig next JIG-1 with the parent unmerged: %+v, want done", n)
@@ -90,8 +114,8 @@ func TestPublishedChildBehindItsMergedParentIsWork(t *testing.T) {
 	env = withPulls(t, env, fixture.GhPull{Number: 7, State: "closed", Merged: true}, fixture.GhPull{Number: 8})
 
 	c = nextJSON[chartOut](t, env, fx.RepoDir, "c")
-	if !c.Ready || c.Code != "" || c.Prompt != "Continue c" || !reflect.DeepEqual(c.Run, [][]string{{"JIG-1"}}) {
-		t.Fatalf("parent merged: ready %v code %q prompt %q run %v, want ready under Continue c with [[JIG-1]]", c.Ready, c.Code, c.Prompt, c.Run)
+	if !c.Ready || c.Code != "" || c.Prompt != "Continue c" || !reflect.DeepEqual(c.Run, [][]string{{"JIG-1"}}) || len(c.Ends) != 0 {
+		t.Fatalf("parent merged: ready %v code %q prompt %q run %v ends %v, want ready under Continue c with [[JIG-1]] and nothing to wait for", c.Ready, c.Code, c.Prompt, c.Run, c.Ends)
 	}
 	for _, row := range c.Tickets {
 		switch row.ID {
@@ -133,8 +157,8 @@ func TestPublishedChildBehindItsMergedParentIsWork(t *testing.T) {
 	// The session merges main into the child's branch: the chart is done again.
 	h.git("merge", "--no-edit", "origin/main")
 	c = nextJSON[chartOut](t, env, fx.RepoDir, "c")
-	if c.Ready || c.Code != "CHART_DONE" || len(c.Run) != 0 {
-		t.Errorf("after the merge: ready %v code %q run %v, want CHART_DONE", c.Ready, c.Code, c.Run)
+	if c.Ready || c.Code != "CHART_DONE" || len(c.Run) != 0 || len(c.Ends) != 0 {
+		t.Errorf("after the merge: ready %v code %q run %v ends %v, want CHART_DONE", c.Ready, c.Code, c.Run, c.Ends)
 	}
 	if n := nextJSON[restackNextOut](t, env, fx.RepoDir, "JIG-1"); n.State != "done" {
 		t.Errorf("jig next JIG-1 after the merge: state %q, want done", n.State)
