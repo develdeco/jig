@@ -175,5 +175,11 @@ func Compact(n int64) string {
 	return strings.TrimSuffix(strconv.FormatFloat(f, 'f', 1, 64), ".0") + unit
 }
 
-// Dollars writes an amount as dollars with cents: $12.50.
-func Dollars(usd float64) string { return "$" + strconv.FormatFloat(usd, 'f', 2, 64) }
+// Dollars writes an amount as dollars with cents: $12.50. An amount above 0
+// that rounds to no cent is "<$0.01", so a priced spend never reads as free.
+func Dollars(usd float64) string {
+	if usd > 0 && usd < 0.005 {
+		return "<$0.01"
+	}
+	return "$" + strconv.FormatFloat(usd, 'f', 2, 64)
+}

@@ -534,6 +534,16 @@ func askName(t *ticket, id string) string {
 	return id
 }
 
+// dollars is an amount with cents, as spend.Dollars writes it, which the
+// screens may not import: "<$0.01" for an amount above 0 that rounds to no
+// cent, so a priced spend never reads as free.
+func dollars(usd float64) string {
+	if usd > 0 && usd < 0.005 {
+		return "<$0.01"
+	}
+	return fmt.Sprintf("$%.2f", usd)
+}
+
 // spendText is a spend line as the activity says it: what the session, or one
 // of its subagents (a line with an agent), has spent so far (the line is its
 // running total), in tokens and, when a price is known, dollars, and the
@@ -549,7 +559,7 @@ func spendText(l events.Envelope) string {
 	}
 	text := who + " has spent " + tokens(sp.Input+sp.Output+sp.CacheRead+sp.CacheWrite) + " tokens"
 	if sp.USD > 0 {
-		text += fmt.Sprintf(" ($%.2f)", sp.USD)
+		text += " (" + dollars(sp.USD) + ")"
 	}
 	var names []string
 	for _, id := range strings.Split(l.Model, ",") {
