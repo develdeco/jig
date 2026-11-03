@@ -1,10 +1,16 @@
 package verifydeliver
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
 )
@@ -223,6 +229,112 @@ func TestClassifyLineGivesTheRefusalItHadWhenGitCannotTell(t *testing.T) {
 		kind, own, err := classifyLine(c.dir, c.reviewed, c.head)
 		if err != nil || kind != c.kind || own != "" {
 			t.Errorf("%s: classifyLine = %d, %q, %v, want %d with no error", name, kind, own, err, c.kind)
+		}
+	}
+}
+
+// gitBefore238 writes a git that answers `merge-tree` as a git before 2.38 does
+// (a usage error, exit 129) and runs every other command through the real git,
+// and returns the directory it is in, to put first on a PATH.
+func gitBefore238(t *testing.T) string {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "git"
+	body := "#!/bin/sh\n" +
+		"for a in \"$@\"; do\n" +
+		"\tif [ \"$a\" = merge-tree ]; then echo 'usage: git merge-tree' >&2; exit 129; fi\n" +
+		"done\n" +
+		"exec '" + real + "' \"$@\"\n"
+	if runtime.GOOS == "windows" {
+		name = "git.bat"
+		body = "@echo off\r\n" +
+			"for %%a in (%*) do if \"%%a\"==\"merge-tree\" (\r\n" +
+			"\techo usage: git merge-tree 1>&2\r\n" +
+			"\texit /b 129\r\n" +
+			")\r\n" +
+			"\"" + real + "\" %*\r\n"
+	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+// oldGitHelperEnv marks a run of this test binary as the child that
+// TestClassifyLineAsksAnOldGitOnlyForALineOfMerges starts with a git before 2.38
+// first on its PATH. Its value is the repository, the reviewed head and the
+// heads to classify, separated by "|".
+const oldGitHelperEnv = "JIG_VERIFYDELIVER_TEST_OLD_GIT"
+
+// TestClassifyLineOldGitHelper runs as that child: it logs, for each head, what
+// classifyLine says of it, and whether git can make a merge at all. Outside that
+// it does nothing. The PATH is the child's, so the test process's own is left
+// as it is.
+func TestClassifyLineOldGitHelper(t *testing.T) {
+	arg := os.Getenv(oldGitHelperEnv)
+	if arg == "" {
+		t.Skip("only TestClassifyLineAsksAnOldGitOnlyForALineOfMerges runs this")
+	}
+	fields := strings.Split(arg, "|")
+	dir, reviewed, heads := fields[0], fields[1], fields[2:]
+	code := func(err error) string {
+		var ae *axi.Error
+		switch {
+		case err == nil:
+			return "none"
+		case errors.As(err, &ae):
+			return ae.Code
+		}
+		return "error: " + err.Error()
+	}
+	_, _, err := gitx.MergeTree(dir, reviewed, reviewed)
+	t.Logf("merge-tree: %s", code(err))
+	for i, head := range heads {
+		kind, own, err := classifyLine(dir, reviewed, head)
+		t.Logf("head[%d]: kind=%d own=%q err=%s", i, kind, own, code(err))
+	}
+}
+
+// TestClassifyLineAsksAnOldGitOnlyForALineOfMerges: with a git before 2.38 a line
+// of merges is refused with GIT_TOO_OLD, as it was, but a line with an ordinary
+// commit in it never reaches git's merge: it is lineOther with no error, whether
+// the merge or the ordinary commit comes first. The git is the child's: the
+// package's tests do not edit the environment they share.
+func TestClassifyLineAsksAnOldGitOnlyForALineOfMerges(t *testing.T) {
+	t.Parallel()
+	r := newLineRepo(t)
+	reviewed := r.commit("work.txt", "the work\n")
+	r.onMain("main1.txt", "from main\n")
+	merged := r.merge()
+	mergeThenOrdinary := r.commit("top.txt", "after the merge\n")
+	r.git("reset", "--hard", reviewed)
+	ordinary := r.commit("more.txt", "an ordinary commit\n")
+	r.onMain("main2.txt", "from main again\n")
+	ordinaryThenMerge := r.merge()
+
+	heads := []string{ordinary, mergeThenOrdinary, ordinaryThenMerge, merged}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestClassifyLineOldGitHelper$", "-test.v")
+	cmd.Env = append(os.Environ(),
+		oldGitHelperEnv+"="+strings.Join(append([]string{r.dir, reviewed}, heads...), "|"),
+		"PATH="+gitBefore238(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper: %v\n%s", err, out)
+	}
+	got := string(out)
+	for _, want := range []string{
+		"merge-tree: " + gitx.CodeGitTooOld,
+		fmt.Sprintf("head[0]: kind=%d own=\"\" err=none", lineOther),
+		fmt.Sprintf("head[1]: kind=%d own=\"\" err=none", lineOther),
+		fmt.Sprintf("head[2]: kind=%d own=\"\" err=none", lineOther),
+		fmt.Sprintf("head[3]: kind=%d own=\"\" err=%s", lineOther, gitx.CodeGitTooOld),
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("helper output lacks %q:\n%s", want, got)
 		}
 	}
 }

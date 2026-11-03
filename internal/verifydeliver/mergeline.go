@@ -33,7 +33,11 @@ const (
 // is, for lineResolved, git's own merge of the tip's parents. A git failure (an
 // object dir lacks, say) or an empty dir is lineOther with no error, so a refusal
 // stays what it was; only a git too old to merge without a work tree
-// (gitx.CodeGitTooOld) is an error.
+// (gitx.CodeGitTooOld) is an error. The log alone says whether every commit of
+// the line is a merge, so a line with an ordinary commit in it is lineOther
+// before git is asked to merge anything: only a line that could be reviewed
+// through merges reaches git's merge, and a git too old to make it is an error
+// for that line alone.
 func classifyLine(dir, reviewed, head string) (kind lineKind, ownTree string, err error) {
 	if reviewed != "" && head == reviewed {
 		return lineSame, "", nil
@@ -45,10 +49,12 @@ func classifyLine(dir, reviewed, head string) (kind lineKind, ownTree string, er
 	if lerr != nil || len(line) == 0 || len(line[0].Parents) == 0 || line[0].Parents[0] != reviewed {
 		return lineOther, "", nil
 	}
-	for i, c := range line {
+	for _, c := range line {
 		if len(c.Parents) != 2 {
 			return lineOther, "", nil
 		}
+	}
+	for i, c := range line {
 		tree, clean, merr := gitx.MergeTree(dir, c.Parents[0], c.Parents[1])
 		if merr != nil {
 			if tooOld(merr) {
