@@ -142,6 +142,23 @@ func lineCases(t *testing.T) (dir string, cases []lineCase) {
 	// A reviewed head that is not behind the head at all.
 	cases = append(cases, lineCase{name: "a reviewed head that is not behind the head", reviewed: after, head: resolved, kind: lineOther})
 
+	// A line of the target's own clean merges that does not start at the reviewed
+	// head: the reviewed head came in through the last merge's second parent, and
+	// every commit of the line is a two-parent merge git itself would have made.
+	// Only the line's start tells it from a line grown from the reviewed head.
+	seed := r.git("rev-list", "--max-parents=0", "main")
+	r.git("switch", "-c", "mainline", seed)
+	for _, name := range []string{"first", "second"} {
+		r.git("switch", "-c", name, seed)
+		r.commit(name+".txt", "a feature merged into the target\n")
+		r.git("switch", "mainline")
+		r.git("merge", "--no-ff", "--no-edit", name)
+	}
+	r.git("merge", "--no-ff", "--no-edit", reviewed)
+	mainline := r.git("rev-parse", "HEAD")
+	r.git("switch", "work")
+	cases = append(cases, lineCase{name: "clean merges that do not start at the reviewed head", reviewed: reviewed, head: mainline, kind: lineOther})
+
 	// An octopus merge is any other commit.
 	r.git("switch", "-c", "side", "main")
 	side := r.commit("side.txt", "a side branch\n")
