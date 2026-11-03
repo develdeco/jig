@@ -34,9 +34,9 @@ type chartSpendOut struct {
 }
 
 // spendLineRE is the spend line of the chart's text: the tokens, the dollars of
-// a priced model (the fake transcript's is, at list price: a cent or less here),
-// the tickets and the subagents.
-var spendLineRE = regexp.MustCompile(`(?m)^\s*spend: 1\.3k tokens( \(\$\d+\.\d\d\))? over 2 tickets with 1 subagent$`)
+// a priced model (the fake transcript's is, at list price: under half a cent
+// here, which reads "<$0.01" and never "$0.00"), the tickets and the subagents.
+var spendLineRE = regexp.MustCompile(`(?m)^\s*spend: 1\.3k tokens \(<\$0\.01\) over 2 tickets with 1 subagent$`)
 
 // TestChartSpendIsTheSumOfItsTickets: a chart of two graduated tickets has no
 // spend until a session writes some. The main session works on the first ticket

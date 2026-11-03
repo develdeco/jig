@@ -161,6 +161,9 @@ func TestASpendLineSaysWhatTheSessionHasSpent(t *testing.T) {
 		// A subagent's line carries the agent's id: it is the agent's total, not the session's.
 		{journal.Line{Agent: "a-1", Model: "claude-sonnet-5", Spend: &journal.Spend{Input: 400, Output: 25000, USD: 1.234}},
 			"a subagent has spent 25k tokens ($1.23) on Sonnet 5"},
+		// Under half a cent is still a price, never "$0.00".
+		{journal.Line{Agent: "a-1", Model: "claude-sonnet-5", Spend: &journal.Spend{Input: 300, USD: 0.0009}},
+			"a subagent has spent 300 tokens (<$0.01) on Sonnet 5"},
 	} {
 		if got := spendText(events.Envelope{Line: tc.line}); got != tc.want {
 			t.Errorf("spendText = %q, want %q", got, tc.want)
