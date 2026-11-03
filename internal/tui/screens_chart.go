@@ -220,7 +220,7 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 func spendWords(s *chartSpend) string {
 	parts := []string{tokens(s.Tokens) + " tokens"}
 	if s.USD > 0 {
-		parts = append(parts, fmt.Sprintf("$%.2f", s.USD))
+		parts = append(parts, dollars(s.USD))
 	}
 	parts = append(parts, strconv.Itoa(s.Tickets)+" "+plural(s.Tickets, "ticket", "tickets"))
 	if s.Agents > 0 {
