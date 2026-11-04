@@ -14,9 +14,11 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// VerdictNotIndependent is a round's verdict when the reviewer was one of the
-// agents that built what it reviewed: whatever it found, the round cannot
-// stand behind a publish, so it is not clean (REVIEW_NOT_INDEPENDENT).
+// VerdictNotIndependent is the verdict an older jig gave a round whose
+// reviewer was one of the agents that built what it reviewed. This jig records
+// who reviewed as the round's `independent`, a fact of the round and not a
+// condition of it (ADR 0046), and gives no round this verdict; one an older
+// jig wrote is still read as not clean, and the next round clears it.
 const VerdictNotIndependent = "not-independent"
 
 // gateRun is one gate round as far as its review: every precondition has
@@ -508,16 +510,13 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		}
 		updated := cloneFindings(cum)
 		foldFindings(updated, routed, cleared)
+		// The verdict follows the findings alone. Who reviewed is the
+		// round's Independent, recorded beside it and shown wherever the
+		// round is, never a reason the round is not clean (ADR 0046).
 		if isClean(updated) {
 			report.Verdict = "clean"
 		} else {
 			report.Verdict = "fix-slices"
-		}
-		// A review whose reviewer was one of the builders is no review the
-		// publish can stand behind: the round is recorded, with its
-		// findings, but it is not clean.
-		if report.Verdict == "clean" && report.Independent == IndependentNo {
-			report.Verdict = VerdictNotIndependent
 		}
 		// reviewed_sha is recorded on every reviewer round, clean or not,
 		// so the next round's scope can resolve a delta against it.
@@ -591,9 +590,6 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 	if err := d.Store.Push(fmt.Sprintf("%s: gate round %d %s", ticket, n, report.Verdict)); err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: push store: %w", err)
 	}
-	if report.Independent == IndependentNo {
-		return report, notIndependentError(ticket, report)
-	}
 	return report, nil
 }
 
@@ -605,24 +601,6 @@ func firstNonEmpty(ss ...string) string {
 		}
 	}
 	return ""
-}
-
-// notIndependentError is the refusal of a round whose reviewer built what it
-// reviewed. The round is on disk when it is returned; what is missing is a
-// reviewer who is not one of the builders.
-func notIndependentError(ticket string, report GateReport) error {
-	who := report.Reviewer.Session
-	if report.Reviewer.Agent != "" {
-		who += "/" + report.Reviewer.Agent
-	}
-	return &axi.Error{
-		Msg:  fmt.Sprintf("round %d of %s was reviewed by %s, which built part of what it reviewed", report.Round, ticket, who),
-		Code: "REVIEW_NOT_INDEPENDENT",
-		Help: []string{
-			fmt.Sprintf("The round is recorded as %q, not clean: publish needs a review by an agent that did not build the change", report.Verdict),
-			fmt.Sprintf("Have a fresh-context reviewer (a different session or subagent, with the `review` skill) review the next round: run `jig gate %s` again", ticket),
-		},
-	}
 }
 
 // errNoOpenRound is the refusal for a verb that closes or extends a round

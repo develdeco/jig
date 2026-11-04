@@ -1005,6 +1005,37 @@ type otherFinding struct {
 	repo, file, title string // file is repo-relative
 }
 
+// reviewedBy is who reviewed a round and whether they are independent of the
+// builders, as its report.yaml records them. A round no recorded reviewer
+// reported (a scripted one) has neither.
+type reviewedBy struct {
+	Reviewer    *Provenance
+	Independent Independence
+}
+
+// line is the review notes' sentence on who reviewed the round, or "" when
+// the round records no reviewer.
+func (r reviewedBy) line() string {
+	if r.Independent == "" {
+		return ""
+	}
+	who := "a reviewer jig could not identify"
+	if r.Reviewer != nil && r.Reviewer.Known() {
+		who = "session `" + r.Reviewer.Session + "`"
+		if r.Reviewer.Agent != "" {
+			who += ", agent `" + r.Reviewer.Agent + "`"
+		}
+	}
+	switch r.Independent {
+	case IndependentYes:
+		return "Reviewed by " + who + ", none of the builders."
+	case IndependentNo:
+		return "Reviewed by " + who + ", one of the builders: not an independent review."
+	default:
+		return "Reviewed by " + who + "; jig could not tell whether the reviewer built part of the change."
+	}
+}
+
 // reviewNotesFile is the name, in the ticket's pr directory, of the review notes
 // that go with the pull request of repo: review-notes.md, or for a ticket that
 // publishes in several repos review-notes-<repo>.md, since each pull request
@@ -1022,16 +1053,25 @@ func reviewNotesFile(repo string, several bool) string {
 // change touched (touchedFiles, Publish's own diff of the ship range)
 // against the files the reviewer read (reviewedPaths), and, for a reviewer's
 // rounds, the behavior they tested (behavior, ADR 0036; nil for scripted
-// rounds). outcomes, reviewedPaths and lastSummary all come from the one pass
+// rounds). The last round's section opens with who reviewed it (by, from its
+// report.yaml), since whether they built part of the change is a fact of the
+// round for whoever merges to weigh, not a condition publish checks (ADR
+// 0046). outcomes, reviewedPaths and lastSummary all come from the one pass
 // collectFindingsWithOutcomes already makes over every round's
 // findings.yaml; this function reads nothing on its own.
-func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
+func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, by reviewedBy, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
 
-	if lastSummary != "" {
-		fmt.Fprintf(&b, "## Round %d\n\n%s\n\n", lastRound, lastSummary)
+	if who := by.line(); who != "" || lastSummary != "" {
+		fmt.Fprintf(&b, "## Round %d\n\n", lastRound)
+		if who != "" {
+			b.WriteString(who + "\n\n")
+		}
+		if lastSummary != "" {
+			b.WriteString(lastSummary + "\n\n")
+		}
 	}
 
 	sorted := append([]findingOutcome(nil), outcomes...)

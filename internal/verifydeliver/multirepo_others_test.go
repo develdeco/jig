@@ -72,7 +72,7 @@ func TestWriteReviewNotesListsOtherRepos(t *testing.T) {
 		{repo: "api", file: "server/handler.go", title: "The handler drops the currency"},
 	}
 	own := []findingOutcome{{finding: Finding{ID: "r1-f3", Title: "Own", Risk: "high", RiskRationale: "why"}, detail: "fixed"}}
-	if err := writeReviewNotes(st, "T-1", "review-notes-docs.md", 2, "Round summary.", own, others, nil, []string{"a.go"}, nil); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes-docs.md", 2, reviewedBy{}, "Round summary.", own, others, nil, []string{"a.go"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got := readNotes(t, st, "T-1", "review-notes-docs.md")
@@ -85,7 +85,7 @@ func TestWriteReviewNotesListsOtherRepos(t *testing.T) {
 		t.Errorf("sections out of order (Findings %d, other repos %d, Coverage %d):\n%s", f, o, c, got)
 	}
 
-	if err := writeReviewNotes(st, "T-1", "review-notes-none.md", 2, "Round summary.", nil, others, nil, nil, nil); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes-none.md", 2, reviewedBy{}, "Round summary.", nil, others, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := "# Review Notes\n\n## Round 2\n\nRound summary.\n\n" + section + "## Coverage\n\n"
@@ -99,7 +99,7 @@ func TestWriteReviewNotesListsOtherRepos(t *testing.T) {
 func TestWriteReviewNotesWithoutOthersIsUnchanged(t *testing.T) {
 	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", 1, "", nil, nil, nil, nil, nil); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", 1, reviewedBy{}, "", nil, nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := readNotes(t, st, "T-1", "review-notes.md"), "# Review Notes\n\n## Coverage\n\n"; got != want {
@@ -110,7 +110,7 @@ func TestWriteReviewNotesWithoutOthersIsUnchanged(t *testing.T) {
 		{finding: Finding{ID: "r1-f2", Title: "Low one", Risk: "low", RiskRationale: "minor"}, detail: "fixed"},
 		{finding: Finding{ID: "r1-f1", Title: "High one", Risk: "high", RiskRationale: "major", Oracle: "test"}, detail: "fixed by fix-1"},
 	}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", 2, "All fixed.", own, nil, []string{"x.go"}, []string{"x.go", "y.go"}, nil); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", 2, reviewedBy{}, "All fixed.", own, nil, []string{"x.go"}, []string{"x.go", "y.go"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := "# Review Notes\n\n## Round 2\n\nAll fixed.\n\n" +
