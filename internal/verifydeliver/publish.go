@@ -173,18 +173,10 @@ func (t *publishTarget) ownFindings(outcomes []findingOutcome, reviewed []string
 	if !t.qualified {
 		return outcomes, reviewed
 	}
-	repoOf := func(file string) string {
-		name, _, _ := strings.Cut(file, "/")
-		for _, c := range t.covered {
-			if c == name {
-				return name
-			}
-		}
-		return ""
-	}
+	repoOf := t.repoNamed
 	var mine []findingOutcome
 	for _, o := range outcomes {
-		if owner := repoOf(o.finding.File); owner == t.repoName || (owner == "" && t.covered[0] == t.repoName) {
+		if t.ownerOf(o.finding.File) == t.repoName {
 			mine = append(mine, o)
 		}
 	}
@@ -195,6 +187,44 @@ func (t *publishTarget) ownFindings(outcomes []findingOutcome, reviewed []string
 		}
 	}
 	return mine, paths
+}
+
+// repoNamed is the repo of the ticket whose name begins file, or "" when none
+// does.
+func (t *publishTarget) repoNamed(file string) string {
+	name, _, _ := strings.Cut(file, "/")
+	for _, c := range t.covered {
+		if c == name {
+			return name
+		}
+	}
+	return ""
+}
+
+// ownerOf is the repo a finding on file belongs to: the repo whose name begins
+// the file, else the first repo of the ticket, so each finding is told in full
+// once.
+func (t *publishTarget) ownerOf(file string) string {
+	if name := t.repoNamed(file); name != "" {
+		return name
+	}
+	return t.covered[0]
+}
+
+// otherFindings are the outcomes that belong to another repo of the ticket:
+// this repo's review notes tell each in one line. A project of one repo has
+// none.
+func (t *publishTarget) otherFindings(outcomes []findingOutcome) []findingOutcome {
+	if !t.qualified {
+		return nil
+	}
+	var others []findingOutcome
+	for _, o := range outcomes {
+		if t.ownerOf(o.finding.File) != t.repoName {
+			others = append(others, o)
+		}
+	}
+	return others
 }
 
 // oracleNames are the manifest's oracle names the last clean round recorded
@@ -858,7 +888,15 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, err
 	}
+	all := outcomes
 	outcomes, reviewedPaths = t.ownFindings(outcomes, reviewedPaths)
+	others := t.otherFindings(all)
+	sortFindingOutcomes(others)
+	var otherLines []otherFinding
+	for _, o := range others {
+		owner := t.ownerOf(o.finding.File)
+		otherLines = append(otherLines, otherFinding{repo: owner, file: strings.TrimPrefix(o.finding.File, owner+"/"), title: o.finding.Title})
+	}
 	// The recordings the build made, picked for the pull request (ADR 0029).
 	// A pick that stands renders the ## Demo section; one that does not, or
 	// none to make, leaves the pull request without one. The pick is made for
@@ -940,7 +978,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		}
 		behavior = &cov
 	}
-	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, lastSummary, outcomes, reviewedPaths, in.touched, behavior); err != nil {
+	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior); err != nil {
 		return publication{}, err
 	}
 	return publication{
