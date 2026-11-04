@@ -9,8 +9,10 @@ import (
 
 // TestAdviceToSpawnSaysHowToWait: the advice that tells a session to spawn a
 // reviewer says how to wait for it as Claude Code runs it, in the background
-// whatever the session asks, in a Claude Code that has TaskOutput and in one
-// that has none (2.1.277 removed it): in the same turn with TaskOutput where
+// whatever the session asks unless its background tasks are off (then the
+// Agent call's own result holds the verdict, as in a headless session jig
+// starts), in a Claude Code that has TaskOutput and in one that has none
+// (2.1.277 removed it): in the same turn with TaskOutput where
 // the session's tools have it, else at the harness's notice that the subagent
 // finished, ending the turn as waiting, not done, since the notice resumes an
 // unattended `claude -p` run too; never scheduling a wakeup or stalling with
@@ -22,6 +24,7 @@ import (
 func TestAdviceToSpawnSaysHowToWait(t *testing.T) {
 	t.Parallel()
 	rule := []string{
+		"Where the call's own result is the subagent's reply", "that result holds the verdict",
 		"TaskOutput (`block: true`", "where your tools have it", "search for it with ToolSearch when they do not list it",
 		"Where they have none", "the harness's notice that the subagent finished is the wait",
 		"end the turn as waiting, not done", "resumes an unattended `claude -p` run too",
