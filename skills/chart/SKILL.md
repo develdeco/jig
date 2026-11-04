@@ -5,9 +5,9 @@ description: Runs a chart's tickets from the main session - every brief first, t
 
 # chart
 
-Run `jig next <chart>`. If the chart is not `ready`, tell the person its `reason` and the `prompt` that does it, and stop. Entries with no ticket yet need `jig graduate <chart>` first. The standing is derived: read it again, never remember it.
+Run `jig next <chart>`. If the chart is not `ready`, tell the person its `reason` and `prompt`, and stop. Entries with no ticket yet need `jig graduate <chart>` first. The standing is derived: read it again.
 
-A yes to intake's question "take the chart's tickets on in this session?" is this run's prompt; "only the first" is not a chart run, so run that ticket alone.
+A yes to intake's "take the chart's tickets on in this session?" is this run's prompt; "only the first" is not a chart run: run that ticket alone.
 
 You are the main session. Every question to the person is yours to ask; a subagent cannot ask one. jig starts no session and records no run.
 
@@ -17,9 +17,11 @@ You are the main session. Every question to the person is yours to ask; a subage
 
 ## Builds
 
-Before the first wave, ask the person once to allow what the builds run: `jig` and `git` (the worktree commands too) and the oracles named in the tickets' `slices.yaml`. One yes covers the run. jig sets no permission.
+Before the first wave, ask once to allow what the builds run: `jig` and `git` (the worktree commands too) and the oracles named in the tickets' `slices.yaml`. One yes covers the run. jig sets no permission.
 
-Go through `run` wave by wave; no edge lies inside a wave. Start one subagent per ticket of the wave (Agent tool, `subagent_type: general-purpose`, `model: sonnet` unless the person named another, in the background), each in its own worktree: run the `add` commands in the ticket's `worktrees` from `jig next <T>` (the chart's `worktrees` carry them too), one at a time (git's worktree records are not safe against parallel adds), and read `jig next <T>` again when a stacked ticket's wave starts. `present` means it exists: use its `dir`. `no_clone` means the repo has no clone here: tell the person, do not start that ticket. jig makes no worktree. Its prompt:
+Before each wave, stack every pair in `workspace_overlaps`: the later ticket (Plan order) gets a `stacked` `blocked_by` on the earlier in its `ticket.yaml`; check it with `jig validate <T>`, read the chart again, say so. Two in parallel only if the person says so; they merge by hand.
+
+Go through `run` wave by wave; no edge lies inside a wave. Start one subagent per ticket of the wave (Agent tool, `subagent_type: general-purpose`, `model: sonnet` unless the person named another, in the background), each in its own worktree: run the `add` commands in the ticket's `worktrees` from `jig next <T>` (the chart's `worktrees` carry them too), one at a time (git's worktree records are unsafe in parallel), and read `jig next <T>` again when a stacked ticket's wave starts. `present` means it exists: use its `dir`. `no_clone` means the repo has no clone here: tell the person, do not start that ticket. jig makes no worktree. Its prompt:
 
 ```
 You are building ticket <T>. Work only in the worktree of each repo (`dir` of its rows), on branch <branch>; run every command there.
@@ -40,11 +42,11 @@ A subagent hands back a question: put it to the person with its default, record 
 
 ## Publish
 
-Tickets whose `jig next <T>` names publish are reviewed clean. Ask the person once for the group (each reviewed head and the first lines of its body), then publish each here, the hand-off way (`jig skill publish`). A prompt that told you to go with your recommendations needs no yes. Once a ticket is published, remove its worktrees with the `remove` commands `jig publish --pr` and `jig next <T>` give, one at a time. Git refuses a worktree with changes: commit or discard them, never force.
+Tickets whose `jig next <T>` names publish are reviewed clean. Ask once for the group (each reviewed head and the first lines of its body), then publish each here, the hand-off way (`jig skill publish`). A prompt that told you to go with your recommendations needs no yes. Once a ticket is published, remove its worktrees with the `remove` commands `jig publish --pr` and `jig next <T>` give, one at a time. Git refuses a worktree with changes: commit or discard them, never force.
 
 ## Ends
 
-After each wave read `jig next <chart>` again and start the next. A ticket behind a `merged` edge, or nothing reachable, ends the run: say what is published, what waits on which pull request (`ends`), and that "Continue <chart>" resumes it once that merged. Do not wait for a merge. Say the `spend` line of `jig next <chart>` with the ends: the run's cost so far.
+After each wave read `jig next <chart>` again and start the next. A ticket behind a `merged` edge, or nothing reachable, ends the run: say what is published, what waits on which pull request (`ends`), and that "Continue <chart>" resumes it once that merged. Do not wait for a merge. Say the `spend` line of `jig next <chart>` with the ends.
 
 ## Never
 
