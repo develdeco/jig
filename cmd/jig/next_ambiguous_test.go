@@ -27,7 +27,10 @@ func TestNextNotesAnAmbiguousWorkspace(t *testing.T) {
 		t.Errorf("jig next lacks %q:\n%s", want, out)
 	}
 	advice := strings.Join(distributionAdvice(n.Ready), "\n")
-	if want := "2 repos have ready slices (api, web)"; !strings.Contains(advice, want) {
+	if want := "2 repos have ready slices (api, web): one builder per repo can build them in parallel"; !strings.Contains(advice, want) {
 		t.Errorf("jig next's advice lacks %q:\n%s", want, advice)
+	}
+	if strings.Contains(advice, "one session per repo") {
+		t.Errorf("jig next's advice still says one session per repo:\n%s", advice)
 	}
 }

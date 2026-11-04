@@ -147,7 +147,7 @@ func TestTwoRepoTicketBuildsInEachRepo(t *testing.T) {
 		t.Errorf("unplaced %v, ambiguous %v, want none: both slices name their repo", n.Unplaced, n.Ambiguous)
 	}
 	r := runJig(t, env, webDir, "next", ticket)
-	for _, want := range []string{"ready[2]{repo,slices,start}:\n  api,server,origin/main\n  web,ui,origin/main\n", "2 repos have ready slices (api, web)"} {
+	for _, want := range []string{"ready[2]{repo,slices,start}:\n  api,server,origin/main\n  web,ui,origin/main\n", "2 repos have ready slices (api, web): one builder per repo can build them in parallel"} {
 		if !strings.Contains(r.Stdout, want) {
 			t.Errorf("jig next %s from web lacks %q:\n%s", ticket, want, r.Stdout)
 		}

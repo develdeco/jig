@@ -280,3 +280,20 @@ func TestChartFlow(t *testing.T) {
 		t.Errorf("jig next c --for build: exit %d, want a refusal\n%s", r.Code, r.Stdout)
 	}
 }
+
+// TestChartSkillNesting runs the built binary and reads the chart skill a
+// session gets: it carries the rule for a multi-repo ticket (a nested builder
+// per repo) and the fallback when the ticket subagent has no Agent tool.
+func TestChartSkillNesting(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	r := runJig(t, env, fx.RepoDir, "skill", "chart")
+	if r.Code != 0 {
+		t.Fatalf("jig skill chart exit = %d\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
+	}
+	for _, want := range []string{"nested builder", "only its repo's slices, never gate or nest", "No Agent tool", "if you have the Agent tool"} {
+		if !strings.Contains(r.Stdout, want) {
+			t.Errorf("jig skill chart lacks %q:\n%s", want, r.Stdout)
+		}
+	}
+}
