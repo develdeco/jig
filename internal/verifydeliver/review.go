@@ -1299,6 +1299,20 @@ func (rv *Review) headOf(repo string) string {
 	return ""
 }
 
+// baseOf is where the review read repo from: the one BaseSHA of a round over
+// one repo, whatever its name, else the base of the entry for repo.
+func (rv *Review) baseOf(repo string) string {
+	if len(rv.Repos) == 0 {
+		return rv.BaseSHA
+	}
+	for _, r := range rv.Repos {
+		if r.Repo == repo {
+			return r.BaseSHA
+		}
+	}
+	return ""
+}
+
 // scope is the scope of the review: its one scope, or for a round over several
 // repos the scope they all had, "mixed" when they differ.
 func (rv *Review) scope() string {

@@ -161,12 +161,8 @@ func ReadRounds(st *store.Store, ticket string) ([]RoundRecord, error) {
 			}
 		}
 		rec.Head = reviewedHeadOf(rep)
-		rec.Base = roundBase(st, ticket, n, rec.Scope, priorHead, rec.Head)
-		// A delta round reviews from the latest earlier round a builder did
-		// not review (priorReviewedSHA), so a builder's round is no anchor.
-		if rec.Independent != IndependentNo {
-			priorHead = rec.Head
-		}
+		rec.Base = roundBase(st, ticket, n, rec.Scope, priorHead, rec.Head, rep.ReviewedBase)
+		priorHead = rec.Head
 		out = append(out, rec)
 	}
 	return out, nil
@@ -254,10 +250,13 @@ func namedSHAs(shas map[string]string) string {
 
 // roundBase is where round n's review started: the base its request recorded
 // when the request is still in the work folder (with several repos, the base of
-// each, named as the head is), else, when this round's scope is a delta, the
-// head of the latest earlier round a builder did not review (priorHead, the
-// anchor priorReviewedSHA gave the round), else nothing is known.
-func roundBase(st *store.Store, ticket string, n int, scope, priorHead, head string) string {
+// each, named as the head is), else the base the round recorded (recorded,
+// report.yaml's reviewed_base), else the head the round before reviewed when
+// this round's scope is a delta, which is the rule a round an older jig
+// recorded was resolved by, else nothing is known. A round this jig records
+// carries its base, since its delta passes over a builder's round
+// (priorReviewedSHA), which the round before need not be.
+func roundBase(st *store.Store, ticket string, n int, scope, priorHead, head string, recorded map[string]string) string {
 	if data, err := os.ReadFile(reviewJSONPath(st, ticket, n)); err == nil {
 		var req struct {
 			BaseSHA string `json:"base_sha"`
@@ -281,6 +280,9 @@ func roundBase(st *store.Store, ticket string, n int, scope, priorHead, head str
 				return req.BaseSHA
 			}
 		}
+	}
+	if len(recorded) > 0 {
+		return namedSHAs(recorded)
 	}
 	if scope == "delta" {
 		return priorHead

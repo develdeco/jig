@@ -348,8 +348,8 @@ func TestGateFinishRecordsTheRoundAndJudgesTheReviewer(t *testing.T) {
 				t.Fatalf("report = round %d, verdict %q, independent %q, reviewer %+v; want verdict clean, independent %q, reviewer %+v", report.Round, report.Verdict, report.Independent, report.Reviewer, tc.wantIndep, tc.reviewer)
 			}
 			rep := reportYAMLAt(t, d, fx.Ticket, 1)
-			if rep.Verdict != "clean" || rep.Independent != tc.wantIndep || !reflect.DeepEqual(rep.OracleNames, p.Request.Oracles) || rep.ReviewedSHA["fixture-repo"] != p.Head {
-				t.Errorf("report.yaml = %+v, want verdict clean, independent %q, the oracle names and the reviewed head %s", rep, tc.wantIndep, p.Head)
+			if rep.Verdict != "clean" || rep.Independent != tc.wantIndep || !reflect.DeepEqual(rep.OracleNames, p.Request.Oracles) || rep.ReviewedSHA["fixture-repo"] != p.Head || rep.ReviewedBase["fixture-repo"] != p.Base || p.Base == "" {
+				t.Errorf("report.yaml = %+v, want verdict clean, independent %q, the oracle names and the reviewed range %s..%s", rep, tc.wantIndep, p.Base, p.Head)
 			}
 			if tc.reviewer.Model != "" && (rep.Model != tc.reviewer.Model || rep.Effort != tc.reviewer.Effort) {
 				t.Errorf("report.yaml model = %q, effort = %q, want what the reviewer reported", rep.Model, rep.Effort)

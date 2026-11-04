@@ -174,20 +174,26 @@ func TestReadRoundsSkipsWhatItCannotRead(t *testing.T) {
 	}
 }
 
-// TestReadRoundsPassesOverABuildersRoundForADeltasBase: with its request gone,
-// a delta round's base is the head of the latest earlier round a builder did
-// not review, the anchor priorReviewedSHA gave it, not the round just before.
-func TestReadRoundsPassesOverABuildersRoundForADeltasBase(t *testing.T) {
+// TestReadRoundsTakesTheBaseTheRoundRecorded: with its request gone, a round's
+// base is the one its report.yaml recorded (reviewed_base), which for a delta
+// after a builder's round is an earlier round's head, not the round just
+// before (priorReviewedSHA passes over a builder's round). A round an older
+// jig recorded carries no base, and a delta of it is read from the round
+// before, the rule it was resolved by.
+func TestReadRoundsTakesTheBaseTheRoundRecorded(t *testing.T) {
 	t.Parallel()
 	st, ticket, record := roundStore(t)
 	record(1, "round: 1\nverdict: clean\nreviewed_sha: {repo: "+sha40("2")+"}\nindependent: true\nreviewer: {session: s-rev}\n", "scope: full\nreviewed_paths: []\nfindings: []\n")
 	record(2, "round: 2\nverdict: clean\nreviewed_sha: {repo: "+sha40("3")+"}\nindependent: false\nreviewer: {session: s-builder}\n", "scope: delta\nreviewed_paths: []\nfindings: []\n")
-	record(3, "round: 3\nverdict: clean\nreviewed_sha: {repo: "+sha40("4")+"}\nindependent: true\nreviewer: {session: s-rev}\n", "scope: delta\nreviewed_paths: []\nfindings: []\n")
+	record(3, "round: 3\nverdict: clean\nreviewed_sha: {repo: "+sha40("4")+"}\nreviewed_base: {repo: "+sha40("2")+"}\nindependent: true\nreviewer: {session: s-rev}\n", "scope: delta\nreviewed_paths: []\nfindings: []\n")
 	got, err := ReadRounds(st, ticket)
 	if err != nil || len(got) != 3 {
 		t.Fatalf("ReadRounds = %+v (%v), want three rounds", got, err)
 	}
-	if got[1].Base != sha40("2") || got[2].Base != sha40("2") {
-		t.Errorf("bases = %q, %q, want both from round 1's head %s: round 2 is a builder's, no anchor", got[1].Base, got[2].Base, sha40("2"))
+	if got[1].Base != sha40("2") {
+		t.Errorf("round 2 base = %q, want round 1's head %s: no base recorded, read from the round before", got[1].Base, sha40("2"))
+	}
+	if got[2].Base != sha40("2") {
+		t.Errorf("round 3 base = %q, want the base it recorded, %s", got[2].Base, sha40("2"))
 	}
 }

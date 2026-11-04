@@ -519,10 +519,15 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 			report.Verdict = "fix-slices"
 		}
 		// reviewed_sha is recorded on every reviewer round, clean or not,
-		// so the next round's scope can resolve a delta against it.
-		report.ReviewedSHA = map[string]string{}
+		// so the next round's scope can resolve a delta against it, and
+		// reviewed_base beside it, so the range the round read is its own
+		// record and not a reconstruction once its request is gone.
+		report.ReviewedSHA, report.ReviewedBase = map[string]string{}, map[string]string{}
 		for _, gr := range r.repos {
 			report.ReviewedSHA[gr.name] = round.Review.headOf(gr.name)
+			if base := round.Review.baseOf(gr.name); base != "" {
+				report.ReviewedBase[gr.name] = base
+			}
 		}
 		report.Scope = round.Review.scope()
 		// Findings and NeedsHuman are sorted by risk, high first, then id
