@@ -104,6 +104,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 			return renderErr(stdout, err)
 		}
 		n := chartOutput(c, m, chartSpend(st, c))
+		n.setWorkspaceOverlaps(st, cfg, mp)
 		// The tickets of the run carry the worktrees jig advises for them; the
 		// same reader says what a stacked parent's merge is.
 		n.setWorktrees(newWorktreeSource(st, cfg, mp, merges))
