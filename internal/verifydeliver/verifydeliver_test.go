@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/store"
 )
 
 // TestFailureCode pins failureCode's own branches directly, as a pure
@@ -42,49 +41,19 @@ func TestFailureCode(t *testing.T) {
 	}
 }
 
-// TestConsolidatedTitlePrefersSliceGoal covers the top precedence arm: a
-// slice's own goal wins even when the ticket has a recorded title.
-func TestConsolidatedTitlePrefersSliceGoal(t *testing.T) {
+// TestPublishTitle: the title is the ticket's name on one line, else the
+// ticket id. The slices are not an input: a goal never titles a ticket.
+func TestPublishTitle(t *testing.T) {
 	t.Parallel()
 
-	got := consolidatedTitle("Recorded title", "T-1", []store.Slice{{ID: "s-1", Goal: "Slice goal"}})
-	if got != "Slice goal" {
-		t.Fatalf("consolidatedTitle = %q, want %q", got, "Slice goal")
-	}
-}
-
-// TestConsolidatedTitleFallsBackToRecordedTitle covers a ticket with no
-// usable slice goal - no slices yet, or a first slice whose goal is empty (the
-// first decides, a later slice's goal is not looked for): it falls back to
-// ticket.yaml's own title rather than the bare ticket id.
-func TestConsolidatedTitleFallsBackToRecordedTitle(t *testing.T) {
-	t.Parallel()
-
-	for name, slices := range map[string][]store.Slice{
-		"no slices":                       nil,
-		"empty first goal":                {{ID: "s-1"}},
-		"empty first goal, a later one's": {{ID: "s-1"}, {ID: "s-2", Goal: "Later goal"}},
+	for _, c := range []struct{ name, want string }{
+		{"Recorded title", "Recorded title"},
+		{"  A title\nover two lines\t", "A title over two lines"},
+		{"", "T-1"},
+		{" \n\t", "T-1"},
 	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := consolidatedTitle("Recorded title", "T-1", slices)
-			if got != "Recorded title" {
-				t.Fatalf("consolidatedTitle = %q, want %q", got, "Recorded title")
-			}
-		})
-	}
-}
-
-// TestConsolidatedTitleFallsBackToTicketID covers a ticket with no slices
-// and no recorded title: the last resort is still the bare ticket id, the
-// only fallback consolidatedTitle had before it could read a recorded
-// title at all.
-func TestConsolidatedTitleFallsBackToTicketID(t *testing.T) {
-	t.Parallel()
-
-	got := consolidatedTitle("", "T-1", nil)
-	if got != "T-1" {
-		t.Fatalf("consolidatedTitle = %q, want %q", got, "T-1")
+		if got := publishTitle(c.name, "T-1"); got != c.want {
+			t.Errorf("publishTitle(%q, T-1) = %q, want %q", c.name, got, c.want)
+		}
 	}
 }

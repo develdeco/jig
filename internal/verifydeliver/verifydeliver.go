@@ -120,28 +120,16 @@ func operatorClone(d Deps, repoName string) string {
 	return ""
 }
 
-// consolidatedTitle picks the ticket's headline title: the goal of the first
-// slice that did not come from a gate round. A gate round's fix slice records
-// the round in FromGate, and its goal names a batch of findings, not the work,
-// so it never heads a ticket: the slices of an adopted branch are all gate
-// fixes, and it is titled by what follows. Falling back - when there is no
-// such slice or its goal is empty - to recorded, the ticket's own recorded
-// title (jig ticket new and jig graduate write one for every ticket they mint;
-// empty when the record has none), and then to the ticket id itself. The
-// caller passes the title from the record it already read, so choosing a
-// title never touches the store.
-func consolidatedTitle(recorded, ticket string, slices []store.Slice) string {
-	for _, s := range slices {
-		if s.FromGate != 0 {
-			continue
-		}
-		if s.Goal != "" {
-			return s.Goal
-		}
-		break
-	}
-	if recorded != "" {
-		return recorded
+// publishTitle is the title publish gives the pull request and the ledger
+// entry: name, the ticket's name (store.Store.TicketName: its recorded title,
+// else its brief's heading), on one line, else the ticket id. The slices have
+// no say. A slice's goal is an instruction to its builder, often a paragraph,
+// and a gate round's fix slice names a batch of findings; neither names the
+// ticket, and an adopted ticket, whose slices are all fixes, keeps the name it
+// was minted with.
+func publishTitle(name, ticket string) string {
+	if name = oneLine(name); name != "" {
+		return name
 	}
 	return ticket
 }

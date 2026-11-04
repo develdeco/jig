@@ -91,6 +91,9 @@ type publishTarget struct {
 	rec      store.Ticket
 	// branch is the ticket's branch, which has one name in every repo.
 	branch string
+	// title heads the pull request in every repo and the ledger entry
+	// (publishTitle).
+	title string
 	// slices are all the ticket's slices, repoSlices those that build in this
 	// repo.
 	slices     []store.Slice
@@ -302,10 +305,13 @@ func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
 			return nil, fmt.Errorf("verifydeliver: publish: read what %s is stacked on: %w", ticket, err)
 		}
 	}
+	// The title is settled once, from the record read above: every repo's pull
+	// request and the ledger entry carry the same one.
+	title := publishTitle(d.Store.TicketName(ticket, rec), ticket)
 	targets := make([]*publishTarget, len(repos))
 	for i, gr := range repos {
 		targets[i] = &publishTarget{
-			ticket: ticket, repo: gr.repo, repoName: gr.name, target: gr.target, rec: rec, branch: branch,
+			ticket: ticket, repo: gr.repo, repoName: gr.name, target: gr.target, rec: rec, branch: branch, title: title,
 			slices: slices, repoSlices: gr.slices, gateRep: gateRep, lastRound: lastRound,
 			covered: names, qualified: len(d.Cfg.Repos) > 1,
 		}
@@ -781,8 +787,7 @@ func writeStoreDocs(d Deps, t *publishTarget, oracleNames []string) error {
 	if err := writeChangelogs(d.Store, ticket, t.slices, lines); err != nil {
 		return err
 	}
-	title := consolidatedTitle(t.rec.Title, ticket, t.slices)
-	if err := writeLedgerEntry(d.Store, ticket, title, t.slices, questions); err != nil {
+	if err := writeLedgerEntry(d.Store, ticket, t.title, t.slices, questions); err != nil {
 		return err
 	}
 	if err := writeContractIndexEntry(d.Store, d.Cfg.Platform, ticket, t.slices, oracleNames); err != nil {
@@ -838,7 +843,6 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
-	title := consolidatedTitle(t.rec.Title, ticket, t.bodySlices())
 	commits := lastGreenCommits(lines)
 	// An adopted ticket's own commits, from the merge base with target up to
 	// the start sha recorded at adoption: the author's work, listed ahead of
@@ -944,7 +948,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		return publication{}, err
 	}
 	return publication{
-		prPath: prPath, title: title, picks: picksReport, picked: picked, demoResult: demoResult,
+		prPath: prPath, title: t.title, picks: picksReport, picked: picked, demoResult: demoResult,
 		mediaDir: demoResult.MediaDir, mediaFiles: mediaFiles,
 		notesName: t.notesName(),
 		rewrite: func(links []prLink) error {
