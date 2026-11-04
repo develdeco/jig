@@ -36,7 +36,7 @@ func TestAdviceToSpawnSaysHowToWait(t *testing.T) {
 		"end the turn as waiting, not done", "resumes an unattended `claude -p` run too",
 		"A subagent (a chart run's build subagent) cannot wait: its turn's end is its hand-back",
 		"hand back at once, saying the round is open and giving the reviewer's agent id, never that SHOP-1 is reviewed",
-		"the session above reads the verdict with `jig status SHOP-1`",
+		"asking the session above to read the verdict with `jig status SHOP-1` when the reviewer's notice comes and then resume you",
 		"Never schedule a wakeup or call another tool to stall",
 	}
 	cases := []struct {
