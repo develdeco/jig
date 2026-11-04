@@ -162,7 +162,11 @@ func ReadRounds(st *store.Store, ticket string) ([]RoundRecord, error) {
 		}
 		rec.Head = reviewedHeadOf(rep)
 		rec.Base = roundBase(st, ticket, n, rec.Scope, priorHead, rec.Head)
-		priorHead = rec.Head
+		// A delta round reviews from the latest earlier round a builder did
+		// not review (priorReviewedSHA), so a builder's round is no anchor.
+		if rec.Independent != IndependentNo {
+			priorHead = rec.Head
+		}
 		out = append(out, rec)
 	}
 	return out, nil
@@ -250,8 +254,9 @@ func namedSHAs(shas map[string]string) string {
 
 // roundBase is where round n's review started: the base its request recorded
 // when the request is still in the work folder (with several repos, the base of
-// each, named as the head is), else the head the round before reviewed when this
-// round's scope is a delta, else nothing is known.
+// each, named as the head is), else, when this round's scope is a delta, the
+// head of the latest earlier round a builder did not review (priorHead, the
+// anchor priorReviewedSHA gave the round), else nothing is known.
 func roundBase(st *store.Store, ticket string, n int, scope, priorHead, head string) string {
 	if data, err := os.ReadFile(reviewJSONPath(st, ticket, n)); err == nil {
 		var req struct {

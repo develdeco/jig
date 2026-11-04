@@ -127,8 +127,9 @@ func TestWriteReviewNotesWithoutOthersIsUnchanged(t *testing.T) {
 // reviewer round, oldest first, its scope, the range it read and who reviewed
 // it, so a builder's full round stays on record after a later delta round by
 // someone else; a scripted round is left out, a reviewer jig could not
-// identify is named so, a round over several repos gives no range, and the
-// list stands without a summary.
+// identify is named so, a round over several repos or with no known base
+// gives no range, one with no scope no parentheses, and the list stands
+// without a summary.
 func TestWriteReviewNotesListsWhoReviewedEachRound(t *testing.T) {
 	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
@@ -138,6 +139,8 @@ func TestWriteReviewNotesListsWhoReviewedEachRound(t *testing.T) {
 		{Round: 2},
 		{Round: 3, Scope: "delta", Base: sha('b'), Head: sha('c'), Independent: IndependentUnknown},
 		{Round: 4, Scope: "delta", Base: sha('c'), Head: "api:" + sha('d') + "+web:" + sha('e'), Reviewer: Provenance{Session: "s-rev", Agent: "a-1"}, Independent: IndependentYes},
+		{Round: 5, Scope: "full", Head: sha('f'), Reviewer: Provenance{Session: "s-rev"}, Independent: IndependentYes},
+		{Round: 6, Head: sha('f'), Reviewer: Provenance{Session: "s-rev"}, Independent: IndependentYes},
 	}
 	if err := writeReviewNotes(st, "T-1", "review-notes.md", 4, rounds, "", nil, nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
@@ -145,7 +148,9 @@ func TestWriteReviewNotesListsWhoReviewedEachRound(t *testing.T) {
 	want := "# Review Notes\n\n## Reviewers\n\n" +
 		"- Round 1 (full, aaaaaaa..bbbbbbb): reviewed by session `s-builder`, one of the builders: not an independent review.\n" +
 		"- Round 3 (delta, bbbbbbb..ccccccc): reviewed by a reviewer jig could not identify; jig could not tell whether the reviewer built part of the change.\n" +
-		"- Round 4 (delta): reviewed by session `s-rev`, agent `a-1`, none of the builders.\n\n" +
+		"- Round 4 (delta): reviewed by session `s-rev`, agent `a-1`, none of the builders.\n" +
+		"- Round 5 (full): reviewed by session `s-rev`, none of the builders.\n" +
+		"- Round 6: reviewed by session `s-rev`, none of the builders.\n\n" +
 		"## Coverage\n\n"
 	if got := readNotes(t, st, "T-1", "review-notes.md"); got != want {
 		t.Errorf("notes =\n%q\nwant\n%q", got, want)

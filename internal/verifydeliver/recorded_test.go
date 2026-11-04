@@ -908,3 +908,49 @@ func TestRecordReviewerJournalsWhoReadsTheRound(t *testing.T) {
 		t.Errorf("after a gate-open the reviewer was not said after = %q, want it said again", got)
 	}
 }
+
+// TestPublishListsEveryRoundsReviewer: a builder whose hooks report its calls
+// reviews round 1 (independent: false), and the round after it is the whole
+// change again, which a reviewer who built none of it reviews. The review
+// notes of the publish list both rounds, so the builder's review stays on
+// record beside the independent one.
+func TestPublishListsEveryRoundsReviewer(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := cloneBuilt(t)
+	useGithubHost(t, &d, "", "")
+	if err := journal.Append(d.Store, fx.Ticket, journal.Line{Slice: "a", Event: journal.EventVerifyPending, Session: "s-builder", Commit: strings.Repeat("a", 40)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Append(d.Home, journal.Line{Event: journal.EventTool, Session: "s-builder", Ticket: fx.Ticket, Command: "go test ./..."}); err != nil {
+		t.Fatal(err)
+	}
+	for n, reviewer := range []Provenance{{Session: "s-builder", How: ReviewerByEnv}, {Session: "s-rev", How: ReviewerByFlag}} {
+		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("GatePrepare round %d: %v", n+1, err)
+		}
+		if p.Request.Scope != "full" {
+			t.Errorf("round %d scope = %q, want full: round 1 is the first, and round 2 follows a builder's round", n+1, p.Request.Scope)
+		}
+		if _, err := GateFinish(d, p, cleanReport(p), reviewer); err != nil {
+			t.Fatalf("GateFinish round %d: %v", n+1, err)
+		}
+	}
+	report, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	notes, err := os.ReadFile(filepath.Join(d.Store.Root, filepath.FromSlash(report.Repos[0].ReviewNotes)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"- Round 1 (full",
+		"): reviewed by session `s-builder`, one of the builders: not an independent review.\n- Round 2 (full",
+		"): reviewed by session `s-rev`, none of the builders.\n",
+	} {
+		if !strings.Contains(string(notes), want) {
+			t.Errorf("the review notes lack %q:\n%s", want, notes)
+		}
+	}
+}
