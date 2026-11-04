@@ -180,7 +180,7 @@ func TestStubBodyListsTheSkillsAndSendsToTheBinary(t *testing.T) {
 	body := string(StubBody([]StubEntry{{Name: "here", Summary: "Names where the work is."}, {Name: "x", Summary: "a | b"}}))
 	for _, want := range []string{"name: jig\n", "run `jig here`", "`jig skill <name>`", "| `here` | Names where the work is. |", "| `x` | a / b |",
 		"`jig next <ticket>` names the phase it is at", "is a start-to-finish run", "hands over no decision", "go with your recommendations hands those decisions over", "either or both",
-		"An Agent call whose result is the review's verdict needs no wait", "Wait for the review's subagent with TaskOutput (`block: true`) in this turn where your tools have it", "else end the turn as waiting and go on from the notice that it finished", "never schedule a wakeup or call another tool to stall",
+		"Start the review's reviewer and wait for it as `jig gate` says", "a subagent hands back with the round open", "never schedule a wakeup or call another tool to stall",
 		"A request that names none", "is fresh work: its brief comes first, with the `intake` skill", "asks for two of them",
 		"\"then build it, review it and publish it\"", "or a chart verdict (a chart is not a ticket", "runs the chart with that skill", "decides brief or chart and mints a ticket for a brief"} {
 		if !strings.Contains(body, want) {

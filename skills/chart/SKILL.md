@@ -25,17 +25,17 @@ Go through `run` wave by wave; no edge lies inside a wave. Start one subagent fo
 You are building ticket <T>. Work only in the worktree of each repo (`dir` of its rows), on branch <branch>; run every command there.
 Build it with the build skill (`jig skill build`): claim each slice with `--unattended`, commit with its `Jig-Slice` trailer.
 Stuck: `jig ask --slice <slice> "<question>"`, saying what you would do by default, then end your turn with the question, its id and the default. I answer and resume you.
-When every slice is green, open the gate (`jig gate <T>`) and have it reviewed by a reviewer subagent of your own (`jig skill review`). A round that only queues fixes: build them and have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict.
+When every slice is green, open the gate (`jig gate <T>`) and have it reviewed by a reviewer subagent of your own (`jig skill review`), waiting as `jig gate` says. A round that only queues fixes: build them and have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict, or at once with the round open and the reviewer's agent id when it runs in the background.
 Never publish. Never answer your own question.
 ```
 
-Wait for the hand-backs: an Agent call whose result is the reply (background tasks off) needs no wait; else TaskOutput (`block: true`) in this turn where your tools have it, else the notice each subagent's end brings, which resumes the run; never schedule a wakeup or stall. jig holds a subagent at its stop while a verification runs, tracked changes are uncommitted, or every slice is green and no round is open: it is not stuck, wait on.
+Wait for the hand-backs: TaskOutput (`block: true`) in this turn where your tools have it, else the notice each subagent's end brings, which resumes the run; never schedule a wakeup or stall. jig holds a subagent at its stop while a verification runs, tracked changes are uncommitted, or every slice is green and no round is open: it is not stuck, wait on.
 
 A ticket in `run` whose phase is publish is published and behind (`state: behind`): it needs no build subagent. For each of its `stack` rows with a `merge`, run that merge yourself in a checkout of the ticket's branch (its worktree; its `worktrees` give the add when it is gone). A clean merge needs no review; one resolved by hand needs `jig gate <T>` and a clean round first. Then publish it (Publish).
 
 ## Relay
 
-A subagent hands back a question: put it to the person with its default, record the answer with `jig answer <T> <question> "<answer>"` (off a terminal it is recorded as relayed), then resume the subagent with SendMessage. A review's asks are the person's too: put each to them, record `jig triage <T> <finding> keep|dismiss`, and resume the subagent to build the fixes and have them reviewed again.
+A subagent hands back a question: put it to the person with its default, record the answer with `jig answer <T> <question> "<answer>"` (off a terminal it is recorded as relayed), then resume the subagent with SendMessage. A review's asks are the person's too: put each to them, record `jig triage <T> <finding> keep|dismiss`, and resume the subagent to build the fixes and have them reviewed again. A subagent that hands back a round still open has a reviewer at work, whose notice comes to you: then read the verdict with `jig status <T>` and resume the subagent with SendMessage to go on from it.
 
 ## Publish
 

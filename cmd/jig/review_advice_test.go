@@ -8,27 +8,35 @@ import (
 )
 
 // TestAdviceToSpawnSaysHowToWait: the advice that tells a session to spawn a
-// reviewer says how to wait for it by what the session sees, never by a claim
-// about the harness it cannot check: the Agent call's own result where that is
-// the subagent's reply (background tasks off, as in a headless session jig
-// starts); else, the call having returned an agent id, TaskOutput in the same
-// turn where the session's tools have it, or, where they have none (Claude
-// Code 2.1.277 removed it), the harness's notice that the subagent finished,
-// ending the turn as waiting, not done, since the notice resumes an unattended
-// `claude -p` run too; never scheduling a wakeup or stalling with another
-// tool. It says so for a session that built the ticket and for one jig cannot
-// tell, and never forbids ending the turn outright (a session with no
-// TaskOutput could not then wait at all). It names no `run_in_background`:
-// Claude Code 2.1.232 ignored a foreground ask (DF-1), and where a harness
-// honours it the call's result is the reply, the first case. A fresh session
-// is told to review itself, with no subagent to wait for.
+// reviewer asks for the foreground where the Agent tool takes it
+// (`run_in_background: false`, honoured by Claude Code 2.1.232, 2.1.309 and
+// 2.1.317 headless, top level and nested) and says how to wait by what the call
+// returns, never by a claim about the harness the session cannot check: the
+// subagent's reply holds the verdict; a launch notice means it runs in the
+// background, and then a top-level session waits in the same turn with
+// TaskOutput where its tools have it, or, where they have none (2.1.277 removed
+// it), at the harness's notice, ending the turn as waiting, not done, since the
+// notice resumes an unattended `claude -p` run too; while a subagent, whose
+// turn's end is its hand-back and whose reviewer's notice goes to the session
+// above it, hands back at once with the round open, never claiming the ticket
+// reviewed, and the session above reads the verdict from the store. Never a
+// wakeup or a stalling tool. It says so for a session that built the ticket and
+// for one jig cannot tell, never forbids ending the turn outright (a session
+// with no TaskOutput could not then wait at all), and never asks for the
+// background. A fresh session is told to review itself, with no subagent to
+// wait for.
 func TestAdviceToSpawnSaysHowToWait(t *testing.T) {
 	t.Parallel()
 	rule := []string{
-		"Where the call's own result is the subagent's reply", "that result holds the verdict",
-		"Otherwise the call returns an agent id and the subagent runs in the background", "TaskOutput (`block: true`", "where your tools have it", "search for it with ToolSearch when they do not list it",
-		"Where they have none", "the harness's notice that the subagent finished is the wait",
+		"`run_in_background: false` where the tool takes it",
+		"If the call's own result is the subagent's reply, that result holds the verdict",
+		"If the call returns without the reply (a launch notice and an agent id), the subagent runs in the background",
+		"A top-level session waits for its verdict in this turn with TaskOutput (`block: true`", "search for it with ToolSearch when they do not list it",
+		"where they have none", "the harness's notice that the subagent finished is the wait",
 		"end the turn as waiting, not done", "resumes an unattended `claude -p` run too",
+		"A subagent (a chart run's build subagent) cannot wait: its turn's end is its hand-back",
+		"hand back at once, saying the round is open and giving the reviewer's agent id, never that SHOP-1 is reviewed",
+		"the session above reads the verdict with `jig status SHOP-1`",
 		"Never schedule a wakeup or call another tool to stall",
 	}
 	cases := []struct {
@@ -54,8 +62,8 @@ func TestAdviceToSpawnSaysHowToWait(t *testing.T) {
 					t.Errorf("advice has %q = %v, want %v:\n%s", want, got, tc.spawn, text)
 				}
 			}
-			if strings.Contains(text, "run_in_background") {
-				t.Errorf("advice names run_in_background, which Claude Code 2.1.232 ignored and whose foreground result the first case covers:\n%s", text)
+			if strings.Contains(text, "run_in_background: true") {
+				t.Errorf("advice asks for the background, where the foreground gives the verdict in the call's result:\n%s", text)
 			}
 			if strings.Contains(text, "Do not end the turn") {
 				t.Errorf("advice forbids ending the turn, the only wait a Claude Code without TaskOutput has:\n%s", text)
