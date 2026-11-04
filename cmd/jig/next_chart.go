@@ -3,12 +3,14 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/phase"
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/recall"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -37,6 +39,10 @@ type nextChart struct {
 	History     []nextChartCommit `json:"history"`
 	Map         *nextChartMap     `json:"map,omitempty"`
 	Spend       *nextChartSpend   `json:"spend,omitempty"`
+	// WorkspaceOverlaps are the tickets of one wave that build in one workspace
+	// of a repo, the pair in Plan order: the later one is to be stacked on the
+	// earlier. Same element as `jig next`'s workspace_overlaps. [] when none.
+	WorkspaceOverlaps []nextWorkspaceOverlap `json:"workspace_overlaps"`
 
 	// derived is the same derivation, for the help.
 	derived phase.Chart
@@ -138,7 +144,7 @@ func chartOutput(c phase.Chart, m chartMap, spend *nextChartSpend) nextChart {
 	out := nextChart{
 		Chart: c.Name, Title: m.Title, Ready: c.Ready, Code: c.Code, Reason: c.Reason, Prompt: c.Prompt,
 		Started: c.Started, Ungraduated: c.Ungraduated, Spend: spend,
-		Briefs: orEmpty(c.Briefs), Run: c.Run, Tickets: []nextChartTicket{}, Ends: []nextChartEnd{}, History: []nextChartCommit{}, derived: c,
+		Briefs: orEmpty(c.Briefs), Run: c.Run, WorkspaceOverlaps: []nextWorkspaceOverlap{}, Tickets: []nextChartTicket{}, Ends: []nextChartEnd{}, History: []nextChartCommit{}, derived: c,
 	}
 	if out.Run == nil {
 		out.Run = [][]string{}
@@ -193,6 +199,62 @@ func (n *nextChart) setWorktrees(src *worktreeSource) {
 		}
 		facts.Wanted = true
 		t.Worktrees = src.rows(facts)
+	}
+}
+
+// setWorkspaceOverlaps lists, for each wave of the run, the tickets that build
+// in one workspace of a repo, each pair in Plan order (the entry's position in
+// tickets.yaml), by the rule `jig next` warns with (workspaceOverlaps). Only
+// tickets still to build are listed: a ticket whose build is done (its current
+// phase is past build: reviewed, published or behind) is left out. A pair with
+// an edge between them, met or not, is left out too: a wave drops the needs
+// that are met, so a stacked pair whose parent is reviewed clean shares a wave
+// again, and it is already stacked. A ticket whose slices or edges cannot be
+// read has no site and no edge, and never hides the chart.
+func (n *nextChart) setWorkspaceOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject) {
+	pos := map[string]int{}
+	built := map[string]bool{}
+	for _, t := range n.Tickets {
+		if t.ID == "" {
+			continue
+		}
+		pos[t.ID] = t.Pos
+		built[t.ID] = t.Phase == string(phase.Review) || t.Phase == string(phase.Publish)
+	}
+	slicesOf := map[string][]store.Slice{}
+	edges := map[string]map[string]bool{}
+	for _, wave := range n.Run {
+		ids := make([]string, 0, len(wave))
+		for _, id := range wave {
+			if !built[id] {
+				ids = append(ids, id)
+			}
+		}
+		sort.SliceStable(ids, func(i, j int) bool { return pos[ids[i]] < pos[ids[j]] })
+		for _, id := range ids {
+			if _, read := slicesOf[id]; read {
+				continue
+			}
+			if slices, err := st.ReadSlices(id); err == nil {
+				slicesOf[id] = slices
+			}
+			if rec, err := st.ReadTicket(id); err == nil {
+				edges[id] = map[string]bool{}
+				for _, b := range rec.BlockedBy {
+					blocker := b.Ticket
+					if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
+						blocker = resolved
+					}
+					edges[id][blocker] = true
+				}
+			}
+		}
+		for _, o := range workspaceOverlaps(cfg, mp, ids, slicesOf) {
+			if edges[o.Tickets[0]][o.Tickets[1]] || edges[o.Tickets[1]][o.Tickets[0]] {
+				continue
+			}
+			n.WorkspaceOverlaps = append(n.WorkspaceOverlaps, o)
+		}
 	}
 }
 
@@ -284,6 +346,14 @@ func (n nextChart) blocks(label string) []string {
 		}
 		blocks = append(blocks, axi.Table("run", []string{"wave", "tickets"}, wrows))
 	}
+	if len(n.WorkspaceOverlaps) > 0 {
+		var orows [][]string
+		for _, o := range n.WorkspaceOverlaps {
+			orows = append(orows, []string{o.Repo, o.Workspace, joinPlus(o.Tickets)})
+		}
+		blocks = append(blocks, "warning: tickets of one wave build in the same workspace",
+			axi.Table("workspace_overlap", []string{"repo", "workspace", "tickets"}, orows))
+	}
 	var worktrees [][]string
 	for _, t := range n.Tickets {
 		for _, w := range t.Worktrees {
@@ -310,7 +380,13 @@ func (n nextChart) blocks(label string) []string {
 
 // help is the next step for the chart: the one chartHelp says, from the same
 // derivation, so `jig next` and `jig status` never name different steps.
-func (n nextChart) help() []string { return chartHelp(n.derived) }
+func (n nextChart) help() []string {
+	help := chartHelp(n.derived)
+	if len(n.WorkspaceOverlaps) > 0 {
+		help = append(help, "Stack the later ticket of each `workspace_overlap` pair on the earlier: add `blocked_by` with `kind: stacked` to its `ticket.yaml`, check it with `jig validate <T> --check`, then run `jig next <chart>` again")
+	}
+	return help
+}
 
 // chartHelp says what to do for a chart at its standing: ask the prompt when
 // something can run, merge the pull request a run ends at then ask to continue,

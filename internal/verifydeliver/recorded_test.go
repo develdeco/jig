@@ -437,18 +437,21 @@ func TestGateFinishFindsTheReviewerWhenNobodyNamedIt(t *testing.T) {
 	// session name nobody, and reads by two agents of the session (the
 	// builder itself and a subagent) cannot say which one closes the round,
 	// so neither makes a builder's own review independent.
-	t.Run("an environment session's agent from the ledger", func(t *testing.T) {
+	t.Run("an environment or flag session's agent from the ledger", func(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct {
 			name      string
+			how       string
 			ledger    []journal.Line
 			wantAgent string
 			wantIndep Independence
 		}{
-			{"read by a subagent", []journal.Line{{Session: "s-builder", Agent: "sub-2"}}, "sub-2", IndependentYes},
-			{"read by a subagent, then in another session", []journal.Line{{Session: "s-builder", Agent: "sub-2"}, {Session: "s-other"}}, "sub-2", IndependentYes},
-			{"read in another session", []journal.Line{{Session: "s-other", Agent: "sub-2"}}, "", IndependentNo},
-			{"read by the builder and a subagent", []journal.Line{{Session: "s-builder"}, {Session: "s-builder", Agent: "sub-2"}}, "", IndependentNo},
+			{"read by a subagent", ReviewerByEnv, []journal.Line{{Session: "s-builder", Agent: "sub-2"}}, "sub-2", IndependentYes},
+			{"read by a subagent, then in another session", ReviewerByEnv, []journal.Line{{Session: "s-builder", Agent: "sub-2"}, {Session: "s-other"}}, "sub-2", IndependentYes},
+			{"read in another session", ReviewerByEnv, []journal.Line{{Session: "s-other", Agent: "sub-2"}}, "", IndependentNo},
+			{"read by the builder and a subagent", ReviewerByEnv, []journal.Line{{Session: "s-builder"}, {Session: "s-builder", Agent: "sub-2"}}, "", IndependentNo},
+			{"flag, read by a subagent", ReviewerByFlag, []journal.Line{{Session: "s-builder", Agent: "sub-2"}}, "sub-2", IndependentYes},
+			{"flag, read by the builder and a subagent", ReviewerByFlag, []journal.Line{{Session: "s-builder"}, {Session: "s-builder", Agent: "sub-2"}}, "", IndependentNo},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -466,9 +469,9 @@ func TestGateFinishFindsTheReviewerWhenNobodyNamedIt(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				report, _ := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-builder", How: ReviewerByEnv})
-				if report.Reviewer.Session != "s-builder" || report.Reviewer.Agent != tc.wantAgent || report.Reviewer.How != ReviewerByEnv || report.Independent != tc.wantIndep {
-					t.Errorf("report reviewer = %+v, independent %q, want s-builder/%q by env, %q", report.Reviewer, report.Independent, tc.wantAgent, tc.wantIndep)
+				report, _ := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-builder", How: tc.how})
+				if report.Reviewer.Session != "s-builder" || report.Reviewer.Agent != tc.wantAgent || report.Reviewer.How != tc.how || report.Independent != tc.wantIndep {
+					t.Errorf("report reviewer = %+v, independent %q, want s-builder/%q by %s, %q", report.Reviewer, report.Independent, tc.wantAgent, tc.how, tc.wantIndep)
 				}
 			})
 		}

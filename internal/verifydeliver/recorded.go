@@ -817,10 +817,11 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 			prov.Session, prov.Agent, prov.How = found.Session, found.Agent, found.How
 		}
 	}
-	if prov.How == ReviewerByEnv && prov.Agent == "" {
+	if (prov.How == ReviewerByEnv || prov.How == ReviewerByFlag) && prov.Agent == "" {
 		// A session from the environment is the harness session, which a
-		// subagent shares with its parent and so with builders it never was:
-		// the ledger says which agent of that session read the round.
+		// subagent shares with its parent and so with builders it never was;
+		// a session from the flag can be that same id. The ledger says which
+		// agent of that session read the round.
 		if agent, ok, err := LedgerReviewerAgent(d, p.Ticket, p.Opened, prov.Session); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: review done: read the ledger: %w", err)
 		} else if ok {
