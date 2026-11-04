@@ -96,7 +96,7 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	advisories := validateAdvisories(st, ticket, slices)
+	advisories := validateAdvisories(st, ticket, slices, ready.ProjectRepos(cfg, mp.Clones))
 	blocks := []string{"valid: yes"}
 	next := fmt.Sprintf("Run `jig next %s` to see what is ready, then `jig claim %s --slice <slice>` to take one", ticket, ticket)
 	if *check {
