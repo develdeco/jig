@@ -355,7 +355,7 @@ func (n nextChart) blocks(label string) []string {
 func (n nextChart) help() []string {
 	help := chartHelp(n.derived)
 	if len(n.WorkspaceOverlaps) > 0 {
-		help = append(help, "Stack the later ticket of each `workspace_overlap` pair on the earlier: add `blocked_by` with `kind: stacked` to its `ticket.yaml`, check it with `jig validate <T>`, then run `jig next <chart>` again")
+		help = append(help, "Stack the later ticket of each `workspace_overlap` pair on the earlier: add `blocked_by` with `kind: stacked` to its `ticket.yaml`, check it with `jig validate <T> --check`, then run `jig next <chart>` again")
 	}
 	return help
 }
