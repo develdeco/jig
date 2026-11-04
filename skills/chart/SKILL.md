@@ -29,7 +29,7 @@ When every slice is green, open the gate (`jig gate <T>`) and have it reviewed b
 Never publish. Never answer your own question.
 ```
 
-Wait for the hand-backs: TaskOutput (`block: true`) in this turn where your tools have it, else the notice each subagent's end brings, which resumes the run; never schedule a wakeup or stall. jig holds a subagent at its stop while a verification runs, tracked changes are uncommitted, or every slice is green and no round is open: it is not stuck, wait on.
+Wait for the hand-backs: an Agent call whose own result is the hand-back needs no wait; else TaskOutput (`block: true`) in this turn where your tools have it, else the notice each subagent's end brings, which resumes the run; never schedule a wakeup or stall. jig holds a subagent at its stop while a verification runs, tracked changes are uncommitted, or every slice is green and no round is open: it is not stuck, wait on.
 
 A ticket in `run` whose phase is publish is published and behind (`state: behind`): it needs no build subagent. For each of its `stack` rows with a `merge`, run that merge yourself in a checkout of the ticket's branch (its worktree; its `worktrees` give the add when it is gone). A clean merge needs no review; one resolved by hand needs `jig gate <T>` and a clean round first. Then publish it (Publish).
 
