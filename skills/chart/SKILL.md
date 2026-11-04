@@ -9,15 +9,15 @@ Run `jig next <chart>`. If the chart is not `ready`, tell the person its `reason
 
 A yes to intake's "take the chart's tickets on in this session?" is this run's prompt; "only the first" is not a chart run: run that ticket alone.
 
-You are the main session. Every question to the person is yours to ask; a subagent cannot ask one. jig starts no session and records no run.
+You are the main session. Every question to the person is yours; a subagent cannot ask one. jig starts no session and records no run.
 
 ## Briefs
 
-`briefs` lists the tickets to brief. Brief them all before any build, here, with intake: one grilling round for all (numbered, each with a recommended answer), one confirmation, then `jig validate <T>` for each. The person's moments stay theirs: ask and wait, unless the prompt told you to go with your recommendations (ADR 0035). Nothing to brief: go on.
+`briefs` lists the tickets to brief. Brief them all before any build: a subagent per ticket (sonnet, background) drafts its brief with intake, marks each recommended answer it takes, checks it with `jig validate <T> --check` and hands back its questions. Meanwhile ask one numbered round (with recommendations), record answers, send a changed one to its drafter, confirm once, then `jig validate <T>` for each. The person's moments stay theirs: ask and wait, unless told to go with your recommendations (ADR 0035). Nothing to brief: go on.
 
 ## Builds
 
-Before the first wave, ask once to allow what the builds run: `jig` and `git` (the worktree commands too) and the oracles named in the tickets' `slices.yaml`. One yes covers the run. jig sets no permission.
+Before the first wave, ask once to allow what the builds run: `jig` and `git` and the oracles named in the tickets' `slices.yaml`. One yes covers the run. jig sets no permission.
 
 Before each wave, stack every pair in `workspace_overlaps`: the later ticket (Plan order) gets a `stacked` `blocked_by` on the earlier in its `ticket.yaml`; check it with `jig validate <T>`, read the chart again, say so. Two in parallel only if the person says so; they merge by hand.
 
@@ -42,11 +42,11 @@ A subagent hands back a question: put it to the person with its default, record 
 
 ## Publish
 
-Tickets whose `jig next <T>` names publish are reviewed clean. Ask once for the group (each reviewed head and the first lines of its body), then publish each here, the hand-off way (`jig skill publish`). A prompt that told you to go with your recommendations needs no yes. Once a ticket is published, remove its worktrees with the `remove` commands `jig publish --pr` and `jig next <T>` give, one at a time. Git refuses a worktree with changes: commit or discard them, never force.
+Tickets whose `jig next <T>` names publish are reviewed clean. Ask once for the group (each reviewed head, its body's first lines), then a subagent per ticket publishes it (`jig skill publish`: demo, body, CI budgets) and hands back the url. A go-with-your-recommendations prompt needs no yes. Remove a published ticket's worktrees with the `remove` commands `jig publish --pr` and `jig next <T>` give, one at a time. Git refuses a worktree with changes: commit or discard them, never force.
 
 ## Ends
 
-After each wave read `jig next <chart>` again and start the next. A ticket behind a `merged` edge, or nothing reachable, ends the run: say what is published, what waits on which pull request (`ends`), and that "Continue <chart>" resumes it once that merged. Do not wait for a merge. Say the `spend` line of `jig next <chart>` with the ends.
+After each wave read `jig next <chart>` again and start the next. A ticket behind a `merged` edge, or nothing reachable, ends the run: say what is published, what waits on which pull request (`ends`), and that "Continue <chart>" resumes it after the merge. Do not wait for a merge. Say the `spend` line of `jig next <chart>` too.
 
 ## Never
 
