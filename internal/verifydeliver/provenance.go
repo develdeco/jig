@@ -48,13 +48,15 @@ func (i *Independence) UnmarshalYAML(n *yaml.Node) error {
 
 // How jig learned who a reviewer is, in Provenance.How.
 const (
-	// ReviewerByFlag: `--session` (and `--agent-id`) on the verb that closed
-	// the round.
+	// ReviewerByFlag: `--session` on the verb that closed the round (there is
+	// no `--agent-id` on it: an agent named by flag is the reviewer's own
+	// word). It names a session, and a subagent can share its parent's id, so
+	// the ledger's lookup gives the agent, as for ReviewerByEnv.
 	ReviewerByFlag = "flag"
 	// ReviewerByEnv: the session the environment of the verb that closed the
 	// round names ($JIG_SESSION, else the harness's own variable). It names
 	// the harness session and never the agent in it, since a subagent
-	// inherits its parent's environment.
+	// inherits its parent's environment; the ledger's lookup gives the agent.
 	ReviewerByEnv = "env"
 	// ReviewerRecorded: the session the reviewer named when it opened the
 	// round with `jig review context --session`.
