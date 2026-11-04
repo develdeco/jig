@@ -9,14 +9,24 @@ import (
 
 // TestAdviceToSpawnSaysHowToWait: the advice that tells a session to spawn a
 // reviewer says how to wait for it as Claude Code runs it, in the background
-// whatever the session asks: in the same turn with TaskOutput, neither ending
-// the turn nor scheduling a wakeup, and never stalling with another tool. It says so for a session that built the
-// ticket and for one jig cannot tell, and never asks for a foreground run the
-// harness does not give. A fresh session is told to review itself, with no
+// whatever the session asks, in a Claude Code that has TaskOutput and in one
+// that has none (2.1.277 removed it): in the same turn with TaskOutput where
+// the session's tools have it, else at the harness's notice that the subagent
+// finished, ending the turn as waiting, not done, since the notice resumes an
+// unattended `claude -p` run too; never scheduling a wakeup or stalling with
+// another tool. It says so for a session that built the ticket and for one jig
+// cannot tell, never forbids ending the turn outright (a session with no
+// TaskOutput could not then wait at all), and never asks for a foreground run
+// the harness does not give. A fresh session is told to review itself, with no
 // subagent to wait for.
 func TestAdviceToSpawnSaysHowToWait(t *testing.T) {
 	t.Parallel()
-	rule := []string{"TaskOutput (`block: true`", "load the tool with ToolSearch", "Do not end the turn or schedule a wakeup while it runs", "never call another tool to stall"}
+	rule := []string{
+		"TaskOutput (`block: true`", "where your tools have it", "search for it with ToolSearch when they do not list it",
+		"Where they have none", "the harness's notice that the subagent finished is the wait",
+		"end the turn as waiting, not done", "resumes an unattended `claude -p` run too",
+		"Never schedule a wakeup or call another tool to stall",
+	}
 	cases := []struct {
 		name  string
 		fresh verifydeliver.Fresh
@@ -42,6 +52,9 @@ func TestAdviceToSpawnSaysHowToWait(t *testing.T) {
 			}
 			if strings.Contains(text, "run_in_background") {
 				t.Errorf("advice asks for a foreground run, which Claude Code does not give:\n%s", text)
+			}
+			if strings.Contains(text, "Do not end the turn") {
+				t.Errorf("advice forbids ending the turn, the only wait a Claude Code without TaskOutput has:\n%s", text)
 			}
 		})
 	}

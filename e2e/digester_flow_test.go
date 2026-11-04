@@ -359,7 +359,7 @@ func TestDigesterFlow(t *testing.T) {
 	spawn := []string{
 		"spawn a subagent to review", "claimed slice a", "approved the brief",
 		"Agent tool", "subagent_type: general-purpose", "model: opus", "no worktree isolation",
-		"TaskOutput (`block: true`", "Do not end the turn or schedule a wakeup while it runs", "never call another tool to stall",
+		"TaskOutput (`block: true`", "the harness's notice that the subagent finished is the wait", "Never schedule a wakeup or call another tool to stall",
 		"You did not build " + ticket, "jig skill review", "jig review context " + ticket, "Reply with the verdict line only",
 		"must not run `jig review context` itself",
 	}

@@ -361,7 +361,7 @@ func TestNextAndGateAdviseWhoReviews(t *testing.T) {
 
 	spawn := []string{
 		"spawn a subagent to review", "Agent tool", "subagent_type: general-purpose", "model: opus", "no worktree isolation",
-		"TaskOutput (`block: true`", "Do not end the turn or schedule a wakeup while it runs", "never call another tool to stall",
+		"TaskOutput (`block: true`", "the harness's notice that the subagent finished is the wait", "Never schedule a wakeup or call another tool to stall",
 		"You did not build " + T, "jig skill review", "jig review context " + T, "Reply with the verdict line only",
 		"must not run `jig review context` itself",
 	}
