@@ -355,41 +355,53 @@ func originRefOrEmpty(t *testing.T, remote, refname string) string {
 	return gitLog(t, remote, "for-each-ref", "--format=%(objectname)", refname)
 }
 
-// TestReviewNotIndependent: the agent that built the change opens and reports
-// the round itself. The round is recorded, with its report saying the reviewer
-// was not independent, and it is not clean: `jig review done` refuses it with
-// REVIEW_NOT_INDEPENDENT, and a publish after it with PUBLISH_NOT_CLEAN.
-func TestReviewNotIndependent(t *testing.T) {
+// TestReviewByTheBuilderIsRecorded: the agent that built the change reads and
+// reports the round itself, in a session whose hooks report its calls (its
+// read of the round is a ledger tool line with no agent). Independence is a
+// fact of the round, not a condition of it: the round is recorded clean with
+// `independent: false`, `jig review done` exits 0 and says one of the builders
+// reviewed it, publish takes it, and the pull request's review notes say who
+// reviewed.
+func TestReviewByTheBuilderIsRecorded(t *testing.T) {
 	t.Parallel()
 	b := newBuiltTicket(t, true)
+	env, _ := githubClone(t, b)
+	b.env = env
+	b.builder.env = env
 	b.openRound(t)
 
 	if ctx := b.builder.Jig("review", "context", b.fx.Ticket); ctx.Code != 0 {
 		t.Fatalf("jig review context exit = %d\nstdout:\n%s\nstderr:\n%s", ctx.Code, ctx.Stdout, ctx.Stderr)
 	}
-	done := b.builder.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t, 1))
-	if done.Code != 1 || !strings.Contains(done.Stdout, "REVIEW_NOT_INDEPENDENT") {
-		t.Fatalf("jig review done by the builder exit = %d, want 1 and REVIEW_NOT_INDEPENDENT\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
+	if hook := b.builder.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "command": "jig review context " + b.fx.Ticket}); hook.Code != 0 {
+		t.Fatalf("hook exit = %d\nstdout:\n%s\nstderr:\n%s", hook.Code, hook.Stdout, hook.Stderr)
 	}
-	if !strings.Contains(done.Stdout, "independent: false") {
-		t.Errorf("the output does not name the round as not independent:\n%s", done.Stdout)
+	done := b.builder.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t, 1))
+	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "independent: false") {
+		t.Fatalf("jig review done by the builder exit = %d, want 0, verdict clean and independent: false\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
+	}
+	if !strings.Contains(done.Stdout, "one of the builders") {
+		t.Errorf("the output does not say one of the builders reviewed the round:\n%s", done.Stdout)
 	}
 	rep := b.report(t, "1")
-	if rep["verdict"] == "clean" || rep["independent"] != false {
-		t.Errorf("report.yaml = %v, want a round that is not clean and independent: false", rep)
+	if rep["verdict"] != "clean" || rep["independent"] != false {
+		t.Errorf("report.yaml = %v, want a clean round with independent: false", rep)
 	}
-	if !strings.Contains(string(readFileOrFatal(t, filepath.Join(b.roundDir("1"), "report.yaml"))), "independent: false") {
-		t.Errorf("report.yaml does not say `independent: false`")
-	}
+	clean := false
 	for _, l := range readJournal(t, b.fx, b.fx.Ticket) {
-		if l.Event == journal.EventGateClean {
-			t.Errorf("journal has %+v, want no clean round", l)
-		}
+		clean = clean || l.Event == journal.EventGateClean
+	}
+	if !clean {
+		t.Errorf("the journal has no clean round")
 	}
 
-	pub := runJig(t, b.env, b.fx.StoreDir, "publish", b.fx.Ticket, "--body")
-	if pub.Code == 0 || !strings.Contains(pub.Stdout, "PUBLISH_NOT_CLEAN") {
-		t.Errorf("jig publish --body after a round that is not clean: exit = %d, want PUBLISH_NOT_CLEAN\nstdout:\n%s", pub.Code, pub.Stdout)
+	pub := runJig(t, env, b.builder.Clone, "publish", b.fx.Ticket, "--body")
+	if pub.Code != 0 {
+		t.Fatalf("jig publish --body after a builder's clean round exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", pub.Code, pub.Stdout, pub.Stderr)
+	}
+	notes := string(readFileOrFatal(t, filepath.Join(b.st.TicketDir(b.fx.Ticket), "pr", "review-notes.md")))
+	if !strings.Contains(notes, "`s-builder`") || !strings.Contains(notes, "one of the builders") {
+		t.Errorf("the review notes do not say one of the builders, s-builder, reviewed the round:\n%s", notes)
 	}
 }
 
