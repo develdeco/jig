@@ -143,7 +143,7 @@ One run of a harness, known to jig by the id the harness gives it (or one jig mi
 _Avoid_: run, conversation
 
 **Fresh session**:
-A harness session that did none of a ticket's work: its id carries no journal line of the ticket except the gate's, triage and publish lines, and no ledger line of it changed a file or made a commit for the ticket. `jig gate` and `jig next <ticket>` say whether the calling session is fresh, not fresh or unknown. A fresh one reviews the ticket itself; one that is not has a subagent do it, waits for its verdict, and never reads the round itself (a subagent shares its session's id, so the ledger tells it from its parent only by the agent id its tool calls carry, and the round is independent only while the main session never reads it). Advice only: `jig review done` judges independence from who built, as before.
+A harness session that did none of a ticket's work: its id carries no journal line of the ticket except the gate's, triage and publish lines, and no ledger line of it changed a file or made a commit for the ticket. `jig gate` and `jig next <ticket>` say whether the calling session is fresh, not fresh or unknown. A fresh one reviews the ticket itself; one that is not has a subagent do it, waits for its verdict, and never reads the round itself (a subagent shares its session's id, so the ledger tells it from its parent only by the agent id its tool calls carry, and the round is independent only while the main session never reads it). Advice only: `jig review done` records whether the reviewer built part of the change as the round's *independent*, and refuses nothing for it.
 _Avoid_: independent (that is the property of a recorded round)
 
 **Claim**:
@@ -251,7 +251,7 @@ Out-of-band verification of a ticket's branch, run on its own lease: `jig gate` 
 _Avoid_: code review, QA pass
 
 **Recorded round**:
-A gate round that is opened by `jig gate` and closed by a reviewer's `jig review done`, not launched by jig. Its request, the reviewer's drafts and its result live in the store's `work/` until it is closed and folded into `gate/round-N/`; a branch that moved before `done` is `REVIEW_STALE_HEAD`. It is *independent* unless the reviewer built part of the change, judged from the sessions on the ticket's claim, verification and ledger lines (`not-independent` is refused by publish; unknown is allowed and counted). For a session given by `--session` or the environment, the agent in it comes from the ledger: the one that ran `jig review context` for the round.
+A gate round that is opened by `jig gate` and closed by a reviewer's `jig review done`, not launched by jig. Its request, the reviewer's drafts and its result live in the store's `work/` until it is closed and folded into `gate/round-N/`; a branch that moved before `done` is `REVIEW_STALE_HEAD`. Its *independent* says whether the reviewer built part of the change, judged from the sessions on the ticket's claim, verification and ledger lines: `false` where the records show it, `unknown` where jig cannot tell (no reviewer named, or a builder's session with no hook record of its agents). It is a fact of the round, which the pull request's review notes show, never a reason the round is not clean (a round an older jig recorded `not-independent` still is not). For a session given by `--session` or the environment, the agent in it comes from the ledger: the one that ran `jig review context` for the round.
 _Avoid_: review job, launched review
 
 **Intent**:
