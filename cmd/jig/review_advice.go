@@ -44,8 +44,10 @@ func sessionAdvice(e env, d verifydeliver.Deps, ticket string) (reviewAdvice, bo
 // adviceFor is the advice for a session with freshness f. A fresh session
 // reviews in its own context. One that is not, or that jig cannot tell, has a
 // subagent review: the line that says why, how to start the subagent in Claude
-// Code, the prompt that makes it a reviewer, and why the main session must not
-// read the round as well.
+// Code and wait for it (with TaskOutput where the session's tools have it, else
+// at the harness's notice that it finished, since Claude Code 2.1.277 removed
+// TaskOutput), the prompt that makes it a reviewer, and why the main session
+// must not read the round as well.
 func adviceFor(f verifydeliver.Fresh, ticket, clone string) reviewAdvice {
 	if f.Known && f.Fresh {
 		return reviewAdvice{State: freshYes, Lines: []string{
@@ -59,7 +61,7 @@ func adviceFor(f verifydeliver.Fresh, ticket, clone string) reviewAdvice {
 	}
 	return reviewAdvice{State: state, Lines: []string{
 		first,
-		"In Claude Code, call the Agent tool (Task in older versions) with `subagent_type: general-purpose`, `model: opus` unless the person named another model, and no worktree isolation (the round has its own); another harness starts a fresh session instead. Claude Code runs it in the background whatever you ask: wait for its verdict in this turn with TaskOutput (`block: true`, the agent id the call returned; load the tool with ToolSearch when your tools do not list it). Do not end the turn or schedule a wakeup while it runs, and never call another tool to stall. Pass it this prompt",
+		"In Claude Code, call the Agent tool (Task in older versions) with `subagent_type: general-purpose`, `model: opus` unless the person named another model, and no worktree isolation (the round has its own); another harness starts a fresh session instead. Claude Code runs it in the background whatever you ask, so wait for its verdict in this turn with TaskOutput (`block: true`, the agent id the call returned) where your tools have it (search for it with ToolSearch when they do not list it). Where they have none (Claude Code 2.1.277 removed it), the harness's notice that the subagent finished is the wait: end the turn as waiting, not done, and go on from the notice, which resumes an unattended `claude -p` run too. Never schedule a wakeup or call another tool to stall. Pass it this prompt",
 		reviewerPrompt(ticket, clone),
 		"The main session must not run `jig review context` itself: jig sees a session and its subagents as one session, so if both read the round it cannot tell which of them closed it, and the round is not independent",
 	}}
