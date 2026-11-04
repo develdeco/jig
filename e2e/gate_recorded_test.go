@@ -393,6 +393,32 @@ func TestReviewNotIndependent(t *testing.T) {
 	}
 }
 
+// TestReviewDoneFlagSessionFindsTheAgent: a lone reviewer subagent shares its
+// parent's session id, which is a builder's. It reads the round, then reports
+// it with `--session` naming that id. The ledger says which agent of the
+// session read the round, so the round is recorded as that agent and is
+// independent of the builders, as it is with the environment's session.
+func TestReviewDoneFlagSessionFindsTheAgent(t *testing.T) {
+	t.Parallel()
+	b := newBuiltTicket(t, true)
+	b.openRound(t)
+
+	sub := newHarness(t, b.fx, b.env, "s-builder")
+	sub.Agent = "sub-rev"
+	if hook := sub.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "command": "jig review context " + b.fx.Ticket}); hook.Code != 0 {
+		t.Fatalf("hook exit = %d\nstdout:\n%s\nstderr:\n%s", hook.Code, hook.Stdout, hook.Stderr)
+	}
+	done := runJig(t, b.env, b.fx.StoreDir, "review", "done", b.fx.Ticket, "--result", b.cleanResult(t, 1), "--session", "s-builder")
+	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "independent: true") {
+		t.Fatalf("jig review done --session exit = %d, want 0, verdict clean and independent: true\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
+	}
+	rep := b.report(t, "1")
+	reviewer, _ := rep["reviewer"].(map[string]any)
+	if rep["independent"] != true || reviewer["session"] != "s-builder" || reviewer["agent"] != "sub-rev" || reviewer["how"] != "flag" {
+		t.Errorf("report.yaml = %v, want independent, reviewer s-builder/sub-rev by flag", rep)
+	}
+}
+
 // githubClone makes the fixture's repo a GitHub repo as far as jig can tell:
 // the project names its remote by a GitHub URL, which the git config of the
 // test rewrites to the bare remote on disk, and a fake gh is first on PATH. It
