@@ -1070,27 +1070,39 @@ func SortedOracleNames(man manifest.Manifest) []string {
 	return names
 }
 
-// priorReviewedSHA reads round-n's report.yaml and returns its
-// reviewed_sha[repoName], or "" when the round has no report.yaml (a
-// scripted round, or one that hasn't happened yet) or no reviewed_sha for
-// repoName.
+// priorReviewedSHA is the head a delta round after round reviews from: the
+// reviewed_sha[repoName] of the latest round up to round whose reviewer the
+// records do not show to be one of the builders. A round recorded
+// `independent: false` is passed over, so the round after a builder's review
+// covers what that review covered: a builder's review is recorded, never a
+// reason to refuse the round (ADR 0046), but it is not what a delta takes as
+// reviewed. "" when the round reached has no report.yaml (a scripted round,
+// or one that hasn't happened yet), no reviewed_sha for repoName, or every
+// round down to the first was a builder's.
 func priorReviewedSHA(st *store.Store, ticket string, round int, repoName string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(gateRoundDir(st, ticket, round), "report.yaml"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
+	for n := round; n >= 1; n-- {
+		data, err := os.ReadFile(filepath.Join(gateRoundDir(st, ticket, n), "report.yaml"))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return "", nil
+			}
+			return "", err
 		}
-		return "", err
+		var rep reportYAML
+		if err := yaml.Unmarshal(data, &rep); err != nil {
+			return "", err
+		}
+		if rep.Independent == IndependentNo {
+			continue
+		}
+		return rep.ReviewedSHA[repoName], nil
 	}
-	var rep reportYAML
-	if err := yaml.Unmarshal(data, &rep); err != nil {
-		return "", err
-	}
-	return rep.ReviewedSHA[repoName], nil
+	return "", nil
 }
 
 // resolveScopeBase resolves one round's scope and base sha: delta from the
-// previous reviewer round's reviewed_sha when it is an
+// previous reviewer round's reviewed_sha (passing over a round a builder
+// reviewed, priorReviewedSHA) when it is an
 // ancestor of head, else full anchored at merge-base(origin/target, HEAD),
 // falling back to the ticket's recorded start sha only when the merge-base
 // call itself fails (e.g. no such ref).

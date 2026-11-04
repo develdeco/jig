@@ -321,3 +321,45 @@ func TestPrintGateReportListsWhatTheHintPointsAt(t *testing.T) {
 		}
 	}
 }
+
+// TestGateReportHintSaysABuilderReviewedFirst: a round the records show one of
+// the builders reviewed says so before its way forward, whatever that way is -
+// asks to decide with the frontier short of green or green, or nothing left -
+// and a round an independent reviewer closed says nothing of it.
+func TestGateReportHintSaysABuilderReviewedFirst(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := journal.Append(st, fx.Ticket, journal.Line{Event: journal.EventGateRound, Attempt: 1}); err != nil {
+		t.Fatalf("journal.Append: %v", err)
+	}
+	ask := []verifydeliver.Finding{{ID: "r1-f1", File: "beta/beta.go", Line: 4, Title: "ASK-TITLE", Status: verifydeliver.StatusAsked, Risk: "medium", RiskRationale: "ASK-RATIONALE"}}
+	const builder = "Recorded as reviewed by one of the builders (independent: false)"
+	check := func(name string, report verifydeliver.GateReport, wantLines int) {
+		t.Helper()
+		lines := gateReportHint(st, fx.Ticket, report)
+		if len(lines) != wantLines || !strings.HasPrefix(lines[0], builder) || !strings.Contains(lines[0], "jig gate "+fx.Ticket) {
+			t.Errorf("%s: hint = %q, want %d lines with the builder line first", name, lines, wantLines)
+		}
+	}
+	check("asks, frontier short of green", verifydeliver.GateReport{Round: 1, Verdict: "fix-slices", Independent: verifydeliver.IndependentNo, NeedsHuman: ask}, 3)
+
+	slices, err := st.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range slices {
+		if err := st.WriteSliceState(fx.Ticket, s.ID, store.SliceState{State: "green", Attempts: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check("asks, frontier green", verifydeliver.GateReport{Round: 1, Verdict: "fix-slices", Independent: verifydeliver.IndependentNo, NeedsHuman: ask}, 2)
+	check("nothing left", verifydeliver.GateReport{Round: 1, Verdict: "clean", Independent: verifydeliver.IndependentNo}, 2)
+
+	if lines := gateReportHint(st, fx.Ticket, verifydeliver.GateReport{Round: 1, Verdict: "clean", Independent: verifydeliver.IndependentYes}); strings.Contains(strings.Join(lines, "\n"), "one of the builders") {
+		t.Errorf("an independent round's hint = %q, want nothing of the builders", lines)
+	}
+}

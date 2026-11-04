@@ -973,7 +973,11 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		}
 		behavior = &cov
 	}
-	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, reviewedBy{t.gateRep.Reviewer, t.gateRep.Independent}, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior); err != nil {
+	rounds, err := ReadRounds(d.Store, ticket)
+	if err != nil {
+		return publication{}, err
+	}
+	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior); err != nil {
 		return publication{}, err
 	}
 	return publication{

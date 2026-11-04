@@ -216,8 +216,8 @@ type reportYAML struct {
 	Intent      reportIntentYAML  `yaml:"intent"`
 	// Independent says whether the reviewer of a recorded round is
 	// independent of the builders (true, false or unknown); absent for a
-	// scripted or launched round. Publish refuses a round whose reviewer
-	// built what it reviewed.
+	// scripted or launched round. A fact of the round, never a reason it
+	// is not clean (ADR 0046).
 	Independent Independence `yaml:"independent,omitempty"`
 	// Reviewer is who reported the round, as the reviewer's session and
 	// agent ids and how jig learned them.

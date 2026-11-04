@@ -1005,35 +1005,60 @@ type otherFinding struct {
 	repo, file, title string // file is repo-relative
 }
 
-// reviewedBy is who reviewed a round and whether they are independent of the
-// builders, as its report.yaml records them. A round no recorded reviewer
-// reported (a scripted one) has neither.
-type reviewedBy struct {
-	Reviewer    *Provenance
-	Independent Independence
+// reviewerLines are the review notes' list of who reviewed each reviewer
+// round, oldest first, with the round's scope and the range it read (a round
+// no recorded reviewer reported, a scripted one, is left out). Every round is
+// listed, not the last alone: a delta round reads only part of the change, so
+// what the whole change had for a review is the rounds together.
+func reviewerLines(rounds []RoundRecord) []string {
+	var out []string
+	for _, r := range rounds {
+		if r.Independent == "" {
+			continue
+		}
+		var what []string
+		if r.Scope != "" {
+			what = append(what, r.Scope)
+		}
+		if rng := shortRange(r.Base, r.Head); rng != "" {
+			what = append(what, rng)
+		}
+		label := fmt.Sprintf("Round %d", r.Round)
+		if len(what) > 0 {
+			label += " (" + strings.Join(what, ", ") + ")"
+		}
+		out = append(out, "- "+label+": reviewed by "+reviewerWho(r.Reviewer, r.Independent)+".")
+	}
+	return out
 }
 
-// line is the review notes' sentence on who reviewed the round, or "" when
-// the round records no reviewer.
-func (r reviewedBy) line() string {
-	if r.Independent == "" {
-		return ""
-	}
+// reviewerWho names a round's reviewer and says whether they are one of the
+// builders, as the round recorded it.
+func reviewerWho(p Provenance, independent Independence) string {
 	who := "a reviewer jig could not identify"
-	if r.Reviewer != nil && r.Reviewer.Known() {
-		who = "session `" + r.Reviewer.Session + "`"
-		if r.Reviewer.Agent != "" {
-			who += ", agent `" + r.Reviewer.Agent + "`"
+	if p.Known() {
+		who = "session `" + p.Session + "`"
+		if p.Agent != "" {
+			who += ", agent `" + p.Agent + "`"
 		}
 	}
-	switch r.Independent {
+	switch independent {
 	case IndependentYes:
-		return "Reviewed by " + who + ", none of the builders."
+		return who + ", none of the builders"
 	case IndependentNo:
-		return "Reviewed by " + who + ", one of the builders: not an independent review."
+		return who + ", one of the builders: not an independent review"
 	default:
-		return "Reviewed by " + who + "; jig could not tell whether the reviewer built part of the change."
+		return who + "; jig could not tell whether the reviewer built part of the change"
 	}
+}
+
+// shortRange is base..head with each sha cut to 7 characters, or "" when the
+// round's base is not known or its head names several repos.
+func shortRange(base, head string) string {
+	if base == "" || head == "" || strings.Contains(head, ":") {
+		return ""
+	}
+	return shortSHA(base) + ".." + shortSHA(head)
 }
 
 // reviewNotesFile is the name, in the ticket's pr directory, of the review notes
@@ -1048,30 +1073,28 @@ func reviewNotesFile(repo string, several bool) string {
 }
 
 // writeReviewNotes writes <ticket>/pr/<name> (see reviewNotesFile), the pull
-// request's first comment: the last round's own summary, every finding across
-// every round ordered by risk with how it ended, and coverage - the files the
-// change touched (touchedFiles, Publish's own diff of the ship range)
-// against the files the reviewer read (reviewedPaths), and, for a reviewer's
-// rounds, the behavior they tested (behavior, ADR 0036; nil for scripted
-// rounds). The last round's section opens with who reviewed it (by, from its
-// report.yaml), since whether they built part of the change is a fact of the
+// request's first comment: who reviewed each round (rounds, ReadRounds), the
+// last round's own summary, every finding across every round ordered by risk
+// with how it ended, and coverage - the files the change touched
+// (touchedFiles, Publish's own diff of the ship range) against the files the
+// reviewer read (reviewedPaths), and, for a reviewer's rounds, the behavior
+// they tested (behavior, ADR 0036; nil for scripted rounds). Who reviewed
+// comes first: whether a reviewer built part of the change is a fact of the
 // round for whoever merges to weigh, not a condition publish checks (ADR
 // 0046). outcomes, reviewedPaths and lastSummary all come from the one pass
 // collectFindingsWithOutcomes already makes over every round's
 // findings.yaml; this function reads nothing on its own.
-func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, by reviewedBy, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
+func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
 
-	if who := by.line(); who != "" || lastSummary != "" {
-		fmt.Fprintf(&b, "## Round %d\n\n", lastRound)
-		if who != "" {
-			b.WriteString(who + "\n\n")
-		}
-		if lastSummary != "" {
-			b.WriteString(lastSummary + "\n\n")
-		}
+	if lines := reviewerLines(rounds); len(lines) > 0 {
+		b.WriteString("## Reviewers\n\n" + strings.Join(lines, "\n") + "\n\n")
+	}
+
+	if lastSummary != "" {
+		fmt.Fprintf(&b, "## Round %d\n\n%s\n\n", lastRound, lastSummary)
 	}
 
 	sorted := append([]findingOutcome(nil), outcomes...)

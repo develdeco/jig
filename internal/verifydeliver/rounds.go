@@ -23,8 +23,8 @@ import (
 )
 
 // The verdicts a RoundRecord reports. A round that is not clean is "findings"
-// whether the findings were fixes, asks or notes; VerdictNotIndependent is its
-// own, since such a round raised nothing a person can act on but its reviewer.
+// whether the findings were fixes, asks or notes; VerdictNotIndependent, an
+// older jig's verdict for a round a builder reviewed, is its own.
 const (
 	RoundClean    = "clean"
 	RoundFindings = "findings"

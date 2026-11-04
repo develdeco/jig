@@ -315,11 +315,13 @@ func reviewerLabel(p verifydeliver.Provenance) string {
 // unanswered question advances only once it is answered (`jig answer`). With
 // nothing undecided the hint is that same next-step line alone. A round the
 // records show one of the builders reviewed is said so first: it is recorded
-// as it is, and the way forward is the same (ADR 0046).
+// as it is, the way forward is the same (ADR 0046), and the next round's scope
+// passes over it, so a reviewer who did not build the change covers what it
+// covered (priorReviewedSHA).
 func gateReportHint(st *store.Store, ticket string, report verifydeliver.GateReport) []string {
 	var lines []string
 	if report.Independent == verifydeliver.IndependentNo {
-		lines = append(lines, fmt.Sprintf("Recorded as reviewed by one of the builders (independent: false), which the pull request's review notes say; for an independent review, have a reviewer who did not build the change review the next round (`jig gate %s`)", ticket))
+		lines = append(lines, fmt.Sprintf("Recorded as reviewed by one of the builders (independent: false), which the pull request's review notes say; for an independent review, have a reviewer who did not build the change review the next round (`jig gate %s`), which covers what this round covered", ticket))
 	}
 	if len(report.NeedsHuman) > 0 {
 		decide := fmt.Sprintf("Decide the listed asks with `jig triage %s <id> keep|dismiss`, then run `jig gate %s`: the next round applies the decisions", ticket, ticket)

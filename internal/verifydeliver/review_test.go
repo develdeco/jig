@@ -667,6 +667,49 @@ func TestResolveScopeBaseDeltaWhenPriorReviewedSHAIsAncestor(t *testing.T) {
 	}
 }
 
+// TestResolveScopeBasePassesOverABuildersRound: a round the records show one of
+// the builders reviewed (independent: false) is not what a delta takes as
+// reviewed. The round after it reviews from the latest earlier round that was
+// not a builder's, or, when there is none, the whole change; an unknown
+// reviewer's round still anchors the delta.
+func TestResolveScopeBasePassesOverABuildersRound(t *testing.T) {
+	t.Parallel()
+
+	dir := newReviewLease(t, "main")
+	st := newReviewStore(t)
+	fullBase, err := gitx.RevParse(dir, "origin/main")
+	if err != nil {
+		t.Fatalf("rev-parse origin/main: %v", err)
+	}
+	record := func(n int, independent Independence, head string) {
+		t.Helper()
+		if err := os.MkdirAll(gateRoundDir(st, "JIG-1", n), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeReportYAML(gateRoundDir(st, "JIG-1", n), GateReport{Round: n, Independent: independent, ReviewedSHA: map[string]string{"fixture-repo": head}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeReviewFile(t, dir, "a.go", "1")
+	round1Head := commitReviewLease(t, dir, "round 1")
+
+	// Round 1 was a builder's: round 2, at the same head, is the whole change.
+	record(1, IndependentNo, round1Head)
+	if scope, base, err := resolveScopeBase(st, "JIG-1", dir, "fixture-repo", "main", 2, round1Head); err != nil || scope != "full" || base != fullBase {
+		t.Errorf("after a builder's round 1: scope %q, base %q (%v), want full from %s", scope, base, err, fullBase)
+	}
+
+	// Round 2 was an unknown reviewer's at round 1's head, round 3 a
+	// builder's at a later head: round 4 reviews from round 2's head.
+	record(2, IndependentUnknown, round1Head)
+	writeReviewFile(t, dir, "b.go", "2")
+	round3Head := commitReviewLease(t, dir, "round 3")
+	record(3, IndependentNo, round3Head)
+	if scope, base, err := resolveScopeBase(st, "JIG-1", dir, "fixture-repo", "main", 4, round3Head); err != nil || scope != "delta" || base != round1Head {
+		t.Errorf("after a builder's round 3: scope %q, base %q (%v), want a delta from round 2's head %s", scope, base, err, round1Head)
+	}
+}
+
 // TestResolveScopeBaseAfterAMerge: a delta round after the session merged the
 // target into the branch reviews the merge's resolution, not everything the
 // target brought in. The base is the head itself for a merge git made on its own

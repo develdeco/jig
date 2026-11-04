@@ -718,9 +718,9 @@ func TestPublishTakesARoundWhateverItsReviewer(t *testing.T) {
 		t.Fatalf("report.yaml = %s", data)
 	}
 	for _, tc := range []struct{ independent, notes string }{
-		{"true", "Reviewed by session `s-rev`, none of the builders."},
-		{"false", "Reviewed by session `s-rev`, one of the builders: not an independent review."},
-		{"unknown", "Reviewed by session `s-rev`; jig could not tell whether the reviewer built part of the change."},
+		{"true", "reviewed by session `s-rev`, none of the builders."},
+		{"false", "reviewed by session `s-rev`, one of the builders: not an independent review."},
+		{"unknown", "reviewed by session `s-rev`; jig could not tell whether the reviewer built part of the change."},
 	} {
 		edited := strings.Replace(string(data), "independent: true", "independent: "+tc.independent, 1)
 		if err := os.WriteFile(reportPath, []byte(edited), 0o644); err != nil {
@@ -734,8 +734,8 @@ func TestPublishTakesARoundWhateverItsReviewer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(notes), "## Round 1\n\n"+tc.notes+"\n") {
-			t.Errorf("independent: %s: the review notes lack %q under the round:\n%s", tc.independent, tc.notes, notes)
+		if !strings.Contains(string(notes), "## Reviewers\n\n- Round 1 (full, ") || !strings.Contains(string(notes), "): "+tc.notes+"\n") {
+			t.Errorf("independent: %s: the review notes do not list round 1, a full round, as %q:\n%s", tc.independent, tc.notes, notes)
 		}
 	}
 
