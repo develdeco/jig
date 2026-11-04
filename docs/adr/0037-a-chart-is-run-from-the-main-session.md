@@ -101,3 +101,23 @@ Consequences:
 - On an 80 by 24 screen the map line and the Run panel's waves give way to the panel, and a taller screen keeps them.
 - A harness with no hooks shows the holder and never the agent, and a hold only the hooks write is never shown.
 - `CONTEXT.md` (*Chart detail*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row), the README and `DECISIONS.md` say the same.
+
+## Amendment: a subagent drafts each brief and publishes each ticket (2026-11-03)
+
+A chart run kept the briefs and the publish work in the main session. The main session ran out of context once, in the publish work (rendering bodies, picking demos, keeping each pull request within the CI budgets), not while briefing, and it had spent a share of its context on seven briefs. The owner decided the `chart` skill hands both to subagents (chart run, C16, map decision 30). What the owner left open was taken at the recommended answer (2026-11-03, take them, continue).
+
+- **A drafter per ticket.** The main session starts one subagent per ticket (Agent tool, `model: sonnet`, in the background) that drafts `brief.md` and `slices.yaml` with the intake skill, takes the recommended answer for every question the ticket leaves open and marks it, checks the files with `jig validate <T> --check` until it prints `valid: yes`, and hands back its questions with their defaults. Meanwhile the main session asks the person one numbered round across the tickets, records the answers, sends a changed answer to its drafter (SendMessage) to redraft, confirms once and runs `jig validate <T>` for each. The person's moments stay theirs (ADR 0035).
+- **A publisher per ticket.** After the one yes for the group (a prompt to go with recommendations needs none) the main session starts one subagent per ticket that follows `jig skill publish`: it renders the body, picks the demo, keeps the pull request within the budgets CI asks, opens it, records it and hands back the url. It asks the person nothing: a question it cannot settle ends its turn with the question and its default. The main session keeps the waves, the questions, the approvals and the removal of the worktrees, one at a time.
+
+Rejected alternatives:
+
+- **The drafting stays in the main session.** It spent its context on seven briefs, and the questions wait on the drafts.
+- **One subagent for all the briefs.** It cannot take a changed answer for one ticket without redrafting the rest.
+- **The publish in the build subagent.** It is held at its stop and has no round to publish in.
+
+Consequences:
+
+- The main session keeps the run: the waves, the questions and the approvals. Drafters and publishers are Sonnet subagents with no approval of their own.
+- The skill text grew by at most 150 net bytes, inside the budget the chart skill shares with ADRs 0044 and 0045 (6000 bytes and 100 lines).
+- A publisher's `gh` and push may meet a permission prompt the one yes for the builds does not cover: the group's yes is the place to say it.
+- `CONTEXT.md` (*Chart run*), `ARCHITECTURE.md` (the Phases paragraph) and `DECISIONS.md` say the same.

@@ -113,7 +113,7 @@ func TestNextReadySetsAndTickets(t *testing.T) {
 	for _, want := range []string{
 		"next:\n  ticket: JIG-1\n  state: ready\n  branch: " + fx.Branch + "\n",
 		"ready[2]{repo,slices,start}:\n  fixture-repo,a+c+d,origin/main\n  second-repo,e,origin/main\n",
-		"2 repos have ready slices (fixture-repo, second-repo)",
+		"2 repos have ready slices (fixture-repo, second-repo): one builder per repo can build them in parallel",
 		"git switch -c " + fx.Branch,
 	} {
 		if !strings.Contains(r.Stdout, want) {

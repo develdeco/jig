@@ -24,7 +24,13 @@ type chartOut struct {
 	Ungraduated int        `json:"ungraduated"`
 	Briefs      []string   `json:"briefs"`
 	Run         [][]string `json:"run"`
-	Tickets     []struct {
+	// WorkspaceOverlaps are the tickets of one wave that build in one workspace.
+	WorkspaceOverlaps []struct {
+		Repo      string   `json:"repo"`
+		Workspace string   `json:"workspace"`
+		Tickets   []string `json:"tickets"`
+	} `json:"workspace_overlaps"`
+	Tickets []struct {
 		Pos      int      `json:"pos"`
 		ID       string   `json:"id"`
 		Title    string   `json:"title"`
@@ -278,5 +284,117 @@ func TestChartFlow(t *testing.T) {
 	}
 	if r := runJig(t, env, fx.RepoDir, "next", "c", "--for", "build"); r.Code != 2 || !strings.Contains(r.Stdout, "is a chart") {
 		t.Errorf("jig next c --for build: exit %d, want a refusal\n%s", r.Code, r.Stdout)
+	}
+}
+
+// TestChartSkillNesting runs the built binary and reads the chart skill a
+// session gets: it carries the rule for a multi-repo ticket (a nested builder
+// per repo) and the fallback when the ticket subagent has no Agent tool.
+func TestChartSkillNesting(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	r := runJig(t, env, fx.RepoDir, "skill", "chart")
+	if r.Code != 0 {
+		t.Fatalf("jig skill chart exit = %d\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
+	}
+	for _, want := range []string{"nested builder", "only its repo's slices, never gate or nest", "No Agent tool", "if you have the Agent tool"} {
+		if !strings.Contains(r.Stdout, want) {
+			t.Errorf("jig skill chart lacks %q:\n%s", want, r.Stdout)
+		}
+	}
+}
+
+// TestChartWorkspaceOverlapBecomesAStackedEdge: two independent tickets of a
+// chart that build in one workspace are listed as an overlap by `jig next
+// <chart>` and `jig status <chart>`; once the later one is stacked on the earlier
+// in its ticket.yaml and `jig validate` passes it, the list is empty and the
+// later ticket is in the next wave. `jig next` with no ticket keeps its own
+// warning for the two.
+func TestChartWorkspaceOverlapBecomesAStackedEdge(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chartDir := filepath.Join(fx.StoreDir, "charts", "c")
+	if err := os.MkdirAll(chartDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileOrFatal(t, filepath.Join(chartDir, "map.md"), []byte("# Two in one workspace\n\n## Destination\n\nBoth change the same code.\n"))
+	writeFileOrFatal(t, filepath.Join(chartDir, "tickets.yaml"), []byte("tickets:\n  - title: First\n  - title: Second\n"))
+	if r := runJig(t, env, fx.StoreDir, "graduate", "c"); r.Code != 0 {
+		t.Fatalf("jig graduate c: exit %d\n%s", r.Code, r.Stdout)
+	}
+	c := nextJSON[chartOut](t, env, fx.RepoDir, "c")
+	id := map[int]string{}
+	for _, row := range c.Tickets {
+		id[row.Pos] = row.ID
+	}
+	briefed(t, st, id[1])
+	briefed(t, st, id[2])
+
+	c = nextJSON[chartOut](t, env, fx.RepoDir, "c")
+	if want := [][]string{{id[1], id[2]}}; !reflect.DeepEqual(c.Run, want) {
+		t.Fatalf("run = %v, want one wave %v", c.Run, want)
+	}
+	if len(c.WorkspaceOverlaps) != 1 || c.WorkspaceOverlaps[0].Repo != "fixture-repo" || c.WorkspaceOverlaps[0].Workspace != "alpha" ||
+		!reflect.DeepEqual(c.WorkspaceOverlaps[0].Tickets, []string{id[1], id[2]}) {
+		t.Fatalf("workspace_overlaps = %+v, want fixture-repo alpha %s+%s in Plan order", c.WorkspaceOverlaps, id[1], id[2])
+	}
+	for _, verb := range []string{"next", "status"} {
+		out := runJig(t, env, fx.RepoDir, verb, "c").Stdout
+		for _, want := range []string{
+			"warning: tickets of one wave build in the same workspace\n",
+			"workspace_overlap[1]{repo,workspace,tickets}:\n  fixture-repo,alpha," + id[1] + "+" + id[2] + "\n",
+			"Stack the later ticket",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("jig %s c lacks %q:\n%s", verb, want, out)
+			}
+		}
+	}
+
+	// jig next with no ticket keeps its own warning while both are ready.
+	out := runJig(t, env, fx.RepoDir, "next").Stdout
+	for _, want := range []string{"warning: ready tickets build in the same workspace\n", "fixture-repo,alpha," + id[1] + "+" + id[2] + "\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("jig next lacks %q:\n%s", want, out)
+		}
+	}
+
+	// The session stacks the later ticket on the earlier, in its own file.
+	yaml := filepath.Join(st.TicketDir(id[2]), "ticket.yaml")
+	data, err := os.ReadFile(yaml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		data = append(data, '\n')
+	}
+	data = append(data, []byte("blocked_by:\n  - ticket: "+id[1]+"\n    kind: stacked\n")...)
+	writeFileOrFatal(t, yaml, data)
+	if r := runJig(t, env, fx.RepoDir, "validate", id[2], "--check"); r.Code != 0 || !strings.Contains(r.Stdout, "valid: yes") {
+		t.Fatalf("jig validate %s --check: exit %d\n%s", id[2], r.Code, r.Stdout)
+	}
+
+	r := runJig(t, env, fx.RepoDir, "next", "c", "--json")
+	if r.Code != 0 || !strings.Contains(r.Stdout, `"workspace_overlaps":[]`) {
+		t.Fatalf("jig next c --json after the edge: exit %d, want the empty list present\n%s", r.Code, r.Stdout)
+	}
+	c = nextJSON[chartOut](t, env, fx.RepoDir, "c")
+	if want := [][]string{{id[1]}, {id[2]}}; !reflect.DeepEqual(c.Run, want) || len(c.WorkspaceOverlaps) != 0 {
+		t.Errorf("after the edge: run %v overlaps %+v, want %v and none", c.Run, c.WorkspaceOverlaps, want)
+	}
+	for _, row := range c.Tickets {
+		if row.ID != id[2] {
+			continue
+		}
+		if len(row.WaitsFor) != 1 || row.WaitsFor[0].Ticket != id[1] || row.WaitsFor[0].Kind != "stacked" {
+			t.Errorf("%s waits for %+v, want %s stacked", id[2], row.WaitsFor, id[1])
+		}
+	}
+	if out := runJig(t, env, fx.RepoDir, "next", "c").Stdout; strings.Contains(out, "workspace_overlap") {
+		t.Errorf("jig next c after the edge still says overlap:\n%s", out)
 	}
 }

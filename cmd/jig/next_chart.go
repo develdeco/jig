@@ -3,12 +3,14 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/phase"
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/recall"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -37,6 +39,10 @@ type nextChart struct {
 	History     []nextChartCommit `json:"history"`
 	Map         *nextChartMap     `json:"map,omitempty"`
 	Spend       *nextChartSpend   `json:"spend,omitempty"`
+	// WorkspaceOverlaps are the tickets of one wave that build in one workspace
+	// of a repo, the pair in Plan order: the later one is to be stacked on the
+	// earlier. Same element as `jig next`'s workspace_overlaps. [] when none.
+	WorkspaceOverlaps []nextWorkspaceOverlap `json:"workspace_overlaps"`
 
 	// derived is the same derivation, for the help.
 	derived phase.Chart
@@ -138,7 +144,7 @@ func chartOutput(c phase.Chart, m chartMap, spend *nextChartSpend) nextChart {
 	out := nextChart{
 		Chart: c.Name, Title: m.Title, Ready: c.Ready, Code: c.Code, Reason: c.Reason, Prompt: c.Prompt,
 		Started: c.Started, Ungraduated: c.Ungraduated, Spend: spend,
-		Briefs: orEmpty(c.Briefs), Run: c.Run, Tickets: []nextChartTicket{}, Ends: []nextChartEnd{}, History: []nextChartCommit{}, derived: c,
+		Briefs: orEmpty(c.Briefs), Run: c.Run, WorkspaceOverlaps: []nextWorkspaceOverlap{}, Tickets: []nextChartTicket{}, Ends: []nextChartEnd{}, History: []nextChartCommit{}, derived: c,
 	}
 	if out.Run == nil {
 		out.Run = [][]string{}
@@ -193,6 +199,34 @@ func (n *nextChart) setWorktrees(src *worktreeSource) {
 		}
 		facts.Wanted = true
 		t.Worktrees = src.rows(facts)
+	}
+}
+
+// setWorkspaceOverlaps lists, for each wave of the run, the tickets that build
+// in one workspace of a repo, each pair in Plan order (the entry's position in
+// tickets.yaml), by the rule `jig next` warns with (workspaceOverlaps). Only a
+// pair in one wave counts: a pair in different waves already has an edge. A
+// ticket whose slices cannot be read has no site, and never hides the chart.
+func (n *nextChart) setWorkspaceOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject) {
+	pos := map[string]int{}
+	for _, t := range n.Tickets {
+		if t.ID != "" {
+			pos[t.ID] = t.Pos
+		}
+	}
+	slicesOf := map[string][]store.Slice{}
+	for _, wave := range n.Run {
+		ids := append([]string(nil), wave...)
+		sort.SliceStable(ids, func(i, j int) bool { return pos[ids[i]] < pos[ids[j]] })
+		for _, id := range ids {
+			if _, read := slicesOf[id]; read {
+				continue
+			}
+			if slices, err := st.ReadSlices(id); err == nil {
+				slicesOf[id] = slices
+			}
+		}
+		n.WorkspaceOverlaps = append(n.WorkspaceOverlaps, workspaceOverlaps(cfg, mp, ids, slicesOf)...)
 	}
 }
 
@@ -284,6 +318,14 @@ func (n nextChart) blocks(label string) []string {
 		}
 		blocks = append(blocks, axi.Table("run", []string{"wave", "tickets"}, wrows))
 	}
+	if len(n.WorkspaceOverlaps) > 0 {
+		var orows [][]string
+		for _, o := range n.WorkspaceOverlaps {
+			orows = append(orows, []string{o.Repo, o.Workspace, joinPlus(o.Tickets)})
+		}
+		blocks = append(blocks, "warning: tickets of one wave build in the same workspace",
+			axi.Table("workspace_overlap", []string{"repo", "workspace", "tickets"}, orows))
+	}
 	var worktrees [][]string
 	for _, t := range n.Tickets {
 		for _, w := range t.Worktrees {
@@ -310,7 +352,13 @@ func (n nextChart) blocks(label string) []string {
 
 // help is the next step for the chart: the one chartHelp says, from the same
 // derivation, so `jig next` and `jig status` never name different steps.
-func (n nextChart) help() []string { return chartHelp(n.derived) }
+func (n nextChart) help() []string {
+	help := chartHelp(n.derived)
+	if len(n.WorkspaceOverlaps) > 0 {
+		help = append(help, "Stack the later ticket of each `workspace_overlap` pair on the earlier: add `blocked_by` with `kind: stacked` to its `ticket.yaml`, check it with `jig validate <T>`, then run `jig next <chart>` again")
+	}
+	return help
+}
 
 // chartHelp says what to do for a chart at its standing: ask the prompt when
 // something can run, merge the pull request a run ends at then ask to continue,
