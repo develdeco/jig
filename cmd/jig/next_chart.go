@@ -204,19 +204,32 @@ func (n *nextChart) setWorktrees(src *worktreeSource) {
 
 // setWorkspaceOverlaps lists, for each wave of the run, the tickets that build
 // in one workspace of a repo, each pair in Plan order (the entry's position in
-// tickets.yaml), by the rule `jig next` warns with (workspaceOverlaps). Only a
-// pair in one wave counts: a pair in different waves already has an edge. A
-// ticket whose slices cannot be read has no site, and never hides the chart.
+// tickets.yaml), by the rule `jig next` warns with (workspaceOverlaps). Only
+// tickets still to build are listed: a ticket whose build is done (its current
+// phase is past build: reviewed, published or behind) is left out. A pair with
+// an edge between them, met or not, is left out too: a wave drops the needs
+// that are met, so a stacked pair whose parent is reviewed clean shares a wave
+// again, and it is already stacked. A ticket whose slices or edges cannot be
+// read has no site and no edge, and never hides the chart.
 func (n *nextChart) setWorkspaceOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject) {
 	pos := map[string]int{}
+	built := map[string]bool{}
 	for _, t := range n.Tickets {
-		if t.ID != "" {
-			pos[t.ID] = t.Pos
+		if t.ID == "" {
+			continue
 		}
+		pos[t.ID] = t.Pos
+		built[t.ID] = t.Phase == string(phase.Review) || t.Phase == string(phase.Publish)
 	}
 	slicesOf := map[string][]store.Slice{}
+	edges := map[string]map[string]bool{}
 	for _, wave := range n.Run {
-		ids := append([]string(nil), wave...)
+		ids := make([]string, 0, len(wave))
+		for _, id := range wave {
+			if !built[id] {
+				ids = append(ids, id)
+			}
+		}
 		sort.SliceStable(ids, func(i, j int) bool { return pos[ids[i]] < pos[ids[j]] })
 		for _, id := range ids {
 			if _, read := slicesOf[id]; read {
@@ -225,8 +238,23 @@ func (n *nextChart) setWorkspaceOverlaps(st *store.Store, cfg project.Config, mp
 			if slices, err := st.ReadSlices(id); err == nil {
 				slicesOf[id] = slices
 			}
+			if rec, err := st.ReadTicket(id); err == nil {
+				edges[id] = map[string]bool{}
+				for _, b := range rec.BlockedBy {
+					blocker := b.Ticket
+					if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
+						blocker = resolved
+					}
+					edges[id][blocker] = true
+				}
+			}
 		}
-		n.WorkspaceOverlaps = append(n.WorkspaceOverlaps, workspaceOverlaps(cfg, mp, ids, slicesOf)...)
+		for _, o := range workspaceOverlaps(cfg, mp, ids, slicesOf) {
+			if edges[o.Tickets[0]][o.Tickets[1]] || edges[o.Tickets[1]][o.Tickets[0]] {
+				continue
+			}
+			n.WorkspaceOverlaps = append(n.WorkspaceOverlaps, o)
+		}
 	}
 }
 

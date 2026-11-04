@@ -1063,6 +1063,115 @@ func TestChartWorkspaceOverlaps(t *testing.T) {
 		}
 	})
 
+	// clean has TK-1's latest gate round clean, which meets a stacked edge on it.
+	clean := func(t *testing.T, r chartRig) {
+		t.Helper()
+		r.put(t, "tickets/TK-1/gate/round-1/report.yaml", "verdict: clean\n")
+	}
+	stackedOn := func(id string) string { return "blocked_by:\n  - ticket: " + id + "\n    kind: stacked\n" }
+
+	t.Run("a ticket outside the run is not listed", func(t *testing.T) {
+		t.Parallel()
+		r := newChartRig(t)
+		r.overlapRig(t, one, map[string][2]string{
+			"TK-1": {"", sliceFile("alpha")},
+			"TK-2": {"", sliceFile("beta")},
+			"TK-3": {"blocked_by:\n  - ticket: TK-2\n    kind: merged\n", sliceFile("alpha")},
+		})
+		n := r.next(t, "c")
+		if want := [][]string{{"TK-1", "TK-2"}}; !reflect.DeepEqual(n.Run, want) {
+			t.Fatalf("run = %v, want %v with TK-3 outside it", n.Run, want)
+		}
+		if got := overlapsOf(n); len(got) != 0 {
+			t.Errorf("overlaps = %v, want none: TK-3 is not in the run", got)
+		}
+	})
+
+	t.Run("a stacked pair whose parent is reviewed clean is not listed", func(t *testing.T) {
+		t.Parallel()
+		r := newChartRig(t)
+		r.overlapRig(t, one, map[string][2]string{
+			"TK-1": {"", sliceFile("alpha")},
+			"TK-2": {stackedOn("TK-1"), sliceFile("alpha")},
+		})
+		clean(t, r)
+		n := r.next(t, "c")
+		if want := [][]string{{"TK-1", "TK-2"}}; !reflect.DeepEqual(n.Run, want) {
+			t.Fatalf("run = %v, want the met edge to put the pair in one wave %v", n.Run, want)
+		}
+		if got := overlapsOf(n); len(got) != 0 {
+			t.Errorf("overlaps = %v, want none: the pair is stacked", got)
+		}
+		out, _ := r.run(t, "next", "c")
+		if strings.Contains(out, "workspace_overlap") || strings.Contains(out, "Stack the later ticket") {
+			t.Errorf("jig next c warns of a stacked pair:\n%s", out)
+		}
+	})
+
+	t.Run("a pair with an edge either way is not listed", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name         string
+			first, later string
+			clean        bool
+		}{
+			{"met, later on earlier", "", stackedOn("TK-1"), true},
+			{"met, earlier on later", "", "", true},
+			{"unmet, later on earlier", "", "blocked_by:\n  - ticket: TK-1\n    kind: merged\n", false},
+			{"unmet, earlier on later", "blocked_by:\n  - ticket: TK-2\n    kind: merged\n", "", false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				r := newChartRig(t)
+				first, later := tc.first, tc.later
+				if tc.name == "met, earlier on later" {
+					// TK-1 is stacked on TK-2, whose round is the clean one.
+					first = stackedOn("TK-2")
+				}
+				r.overlapRig(t, one, map[string][2]string{
+					"TK-1": {first, sliceFile("alpha")},
+					"TK-2": {later, sliceFile("alpha")},
+				})
+				if tc.clean {
+					id := "TK-1"
+					if tc.name == "met, earlier on later" {
+						id = "TK-2"
+					}
+					r.put(t, "tickets/"+id+"/gate/round-1/report.yaml", "verdict: clean\n")
+				}
+				if got := overlapsOf(r.next(t, "c")); len(got) != 0 {
+					t.Errorf("overlaps = %v, want none", got)
+				}
+			})
+		}
+	})
+
+	t.Run("a ticket whose build is done is not listed", func(t *testing.T) {
+		t.Parallel()
+		r := newChartRig(t)
+		r.overlapRig(t, one, map[string][2]string{
+			"TK-1": {"", sliceFile("alpha")},
+			"TK-2": {"", sliceFile("alpha")},
+		})
+		cfg, err := project.LoadStoreConfig(r.root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for phaseName, listed := range map[string]bool{"build": true, "review": false, "publish": false} {
+			n := r.next(t, "c")
+			n.WorkspaceOverlaps = nil
+			for i := range n.Tickets {
+				if n.Tickets[i].ID == "TK-1" {
+					n.Tickets[i].Phase = phaseName
+				}
+			}
+			n.setWorkspaceOverlaps(r.st, cfg, project.MachineProject{})
+			if got := len(n.WorkspaceOverlaps) == 1; got != listed {
+				t.Errorf("TK-1 at %s: overlaps = %v, listed %v, want %v", phaseName, n.WorkspaceOverlaps, got, listed)
+			}
+		}
+	})
+
 	t.Run("of two repos only the shared workspace", func(t *testing.T) {
 		t.Parallel()
 		r := newChartRig(t)
