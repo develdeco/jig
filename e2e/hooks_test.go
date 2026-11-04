@@ -250,3 +250,85 @@ func TestSubagentStopHoldsOnlyTheClaimHolder(t *testing.T) {
 		t.Errorf("main Stop with everything verified = exit %d, %q, want silence", res.Code, res.Stdout)
 	}
 }
+
+// TestSubagentStopHoldsEachClaimHolder is a chart run's build with two agents
+// of one session at once (a ticket subagent and a repo builder nested in it):
+// each claims a different slice of the same ticket unattended and commits.
+// While their verifications run, the stop of each is held back with its own
+// reason, however the claims interleave; the main session's stop, in the same
+// session, is only told.
+func TestSubagentStopHoldsEachClaimHolder(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	env = env.withGitGlobal(t)
+	main := newHarness(t, fx, env, "s-chart")
+	first := newHarness(t, fx, env, "s-chart")
+	first.Agent = "a-1"
+	second := newHarness(t, fx, env, "s-chart")
+	second.Agent = "a-2"
+	main.Branch(fx.Branch)
+
+	if res := runJig(t, env, fx.RepoDir, "hooks", "--global", "--harness", "claude", "--yes"); res.Code != 0 {
+		t.Fatalf("jig hooks --global exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
+	if res := runJig(t, env, fx.RepoDir, "githook", "--global"); res.Code != 0 {
+		t.Fatalf("jig githook --global exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
+	subagentStop := installedHookCommand(t, claudeSettings(env), "SubagentStop")
+	stopOf := func(h *fakeHarness) hookOutput {
+		t.Helper()
+		return decodeHook(t, runHookCommand(t, env, fx.RepoDir, subagentStop, h.Payload("SubagentStop", map[string]any{"stop_hook_active": false})))
+	}
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum, err := st.BriefSHA256(fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := store.Approval{By: "Test Person", At: time.Now().UTC().Format(time.RFC3339), BriefSHA256: sum, Provenance: "person"}
+	if err := st.WriteApproval(fx.Ticket, approval); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both agents claim, one after the other, each a slice of its own.
+	for _, c := range []struct {
+		h     *fakeHarness
+		slice string
+	}{{first, "a"}, {second, "c"}} {
+		if res := jigHooked(c.h, "claim", fx.Ticket, "--slice", c.slice, "--unattended"); res.Code != 0 {
+			t.Fatalf("jig claim --slice %s --unattended exit = %d\nstdout:\n%s\nstderr:\n%s", c.slice, res.Code, res.Stdout, res.Stderr)
+		}
+	}
+	release := first.HoldVerifications("alpha", "beta")
+	shaA := first.CommitScenario("a", 1)
+	waitFor(t, 10*time.Second, "the first worker git's hook started", func() bool { return spawnedFor(readLedger(t, env), shaA) == 1 })
+	second.git("commit", "--allow-empty", "-m", "c: nothing yet", "-m", "Jig-Slice: c")
+	shaC := second.git("rev-parse", "HEAD")
+	waitFor(t, 10*time.Second, "the second worker git's hook started", func() bool { return spawnedFor(readLedger(t, env), shaC) == 1 })
+
+	for _, c := range []struct {
+		h     *fakeHarness
+		agent string
+		sha   string
+		slice string
+	}{{first, "a-1", shaA, "a"}, {second, "a-2", shaC, "c"}} {
+		held := stopOf(c.h)
+		running := "verification of " + c.sha[:12] + " for slice " + c.slice + " is still running"
+		if held.Decision != "block" || !strings.Contains(held.Reason, "this agent's claim is unattended, so it is held back from stopping") || !strings.Contains(held.Reason, running) {
+			t.Errorf("SubagentStop of %s = %+v, want a refusal that names %q", c.agent, held, running)
+		}
+	}
+	if mainStop := decodeHook(t, main.Hook("Stop", map[string]any{"stop_hook_active": false})); mainStop.Decision != "" || !strings.Contains(mainStop.SystemMessage, "is still running") {
+		t.Errorf("main Stop = %+v, want the verifications said and no refusal: the claims are the subagents'", mainStop)
+	}
+
+	release()
+	waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
+		return l.Event == journal.EventVerified && l.Commit == shaA && l.Slice == "a"
+	})
+	first.WaitVerifiers()
+	second.WaitVerifiers()
+}
