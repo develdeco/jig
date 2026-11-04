@@ -539,9 +539,11 @@ func (s *Store) defaultBranch(ticket string, rec Ticket) (string, error) {
 // TicketName is the name a person reads a ticket by: the title recorded when
 // it was minted, else, for a ticket whose folder was made by hand, its brief's
 // heading (briefName), else "". rec must be ticket's own record, as
-// ReadTicket returned it. The default branch takes its slug from the same two
-// sources (defaultBranch), and publish titles the pull request and the ledger
-// entry with it, so a ticket's branch and its pull request say the same name.
+// ReadTicket returned it. Publish titles the pull request and the ledger entry
+// with it. The default branch's slug comes from the same two sources
+// (defaultBranch), but it is fixed when the ticket is minted and a title with
+// no ASCII word gives none, so a title edited later, or one like that, names
+// the pull request and not the branch.
 func (s *Store) TicketName(ticket string, rec Ticket) string {
 	if title := strings.TrimSpace(rec.Title); title != "" {
 		return title
