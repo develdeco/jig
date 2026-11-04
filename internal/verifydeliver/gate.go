@@ -139,7 +139,7 @@ type GateOpts struct {
 // GateReport is Gate's result.
 type GateReport struct {
 	Round     int
-	Verdict   string // clean|fix-slices|not-independent
+	Verdict   string // clean|fix-slices (not-independent is an older jig's, read back from report.yaml)
 	TargetSHA map[string]string
 	// Model and Effort are what the reviewer said it ran on: self-reported,
 	// "" when it said nothing or no reviewer ran. jig chooses no model.

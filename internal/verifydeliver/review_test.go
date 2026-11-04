@@ -613,6 +613,23 @@ func equalStrings(got, want []string) bool {
 	return true
 }
 
+// TestReviewBaseOfNamesEachRepo: the base a round records for a repo is the one
+// base of a round over one repo, whatever the repo's name, and for a round over
+// several the base of that repo's own entry, never its head, nor another's.
+func TestReviewBaseOfNamesEachRepo(t *testing.T) {
+	t.Parallel()
+	one := &Review{BaseSHA: "b-one", HeadSHA: "h-one"}
+	if got := one.baseOf("any"); got != "b-one" {
+		t.Errorf("one repo: baseOf = %q, want b-one", got)
+	}
+	several := &Review{Repos: []ReviewedRepo{{Repo: "api", BaseSHA: "b-api", HeadSHA: "h-api"}, {Repo: "web", BaseSHA: "b-web", HeadSHA: "h-web"}}}
+	for repo, want := range map[string]string{"api": "b-api", "web": "b-web", "docs": ""} {
+		if got := several.baseOf(repo); got != want {
+			t.Errorf("several repos: baseOf(%q) = %q, want %q", repo, got, want)
+		}
+	}
+}
+
 // --- resolveScopeBase ---------------------------------------------------------
 
 func TestResolveScopeBaseRound1IsFullFromMergeBase(t *testing.T) {
