@@ -104,6 +104,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 			return renderErr(stdout, err)
 		}
 		n := chartOutput(c, m, chartSpend(st, c))
+		n.setWorkspaceOverlaps(st, cfg, mp)
 		// The tickets of the run carry the worktrees jig advises for them; the
 		// same reader says what a stacked parent's merge is.
 		n.setWorktrees(newWorktreeSource(st, cfg, mp, merges))
@@ -538,7 +539,7 @@ func distributionAdvice(all []nextBatch) []string {
 		repos[i] = b.Repo
 	}
 	return []string{
-		fmt.Sprintf("%d repos have ready slices (%s): one session per repo can build them in parallel", len(batches), strings.Join(repos, ", ")),
+		fmt.Sprintf("%d repos have ready slices (%s): one builder per repo can build them in parallel", len(batches), strings.Join(repos, ", ")),
 		"Within a repo the slices build one after the other, in the order listed",
 	}
 }
