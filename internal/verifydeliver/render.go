@@ -999,6 +999,12 @@ func sortFindingOutcomes(outcomes []findingOutcome) {
 	})
 }
 
+// otherFinding is a finding that belongs to another repo of the ticket,
+// told in one line in this repo's review notes.
+type otherFinding struct {
+	repo, file, title string // file is repo-relative
+}
+
 // reviewNotesFile is the name, in the ticket's pr directory, of the review notes
 // that go with the pull request of repo: review-notes.md, or for a ticket that
 // publishes in several repos review-notes-<repo>.md, since each pull request
@@ -1019,7 +1025,7 @@ func reviewNotesFile(repo string, several bool) string {
 // rounds). outcomes, reviewedPaths and lastSummary all come from the one pass
 // collectFindingsWithOutcomes already makes over every round's
 // findings.yaml; this function reads nothing on its own.
-func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastSummary string, outcomes []findingOutcome, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
+func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
@@ -1042,6 +1048,14 @@ func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastS
 			}
 			b.WriteString("\n")
 		}
+	}
+
+	if len(others) > 0 {
+		b.WriteString("## Findings in other repos\n\n")
+		for _, o := range others {
+			fmt.Fprintf(&b, "- %s: %s: %s\n", o.repo, o.file, o.title)
+		}
+		b.WriteString("\n")
 	}
 
 	// Coverage: the files the change touched, against the files the

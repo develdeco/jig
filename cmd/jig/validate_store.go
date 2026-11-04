@@ -10,6 +10,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/recall"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -105,10 +106,65 @@ func unmintedAdvisories(st *store.Store, ticket string) []advisory {
 	}}
 }
 
+// unconnectedAdvisories warns about planned slices no blocked_by edge
+// connects. The groups are taken over the whole planned graph, an edge across
+// repos counting. A project of fewer than two repos is one repo that owns every
+// slice: more than one group is one advisory. With several repos each repo
+// whose own slices fall in two or more groups gets an advisory, in the order of
+// repos; repos built in parallel, each connected inside, are not warned. A
+// slice no repo owns is skipped (validate has refused it already).
+func unconnectedAdvisories(repos []ready.Repo, planned []store.Slice) []advisory {
+	const help = "If they are, give each group a ticket of its own; if one builds on another, add the blocked_by edge"
+	groups := sliceGroups(planned)
+	if len(groups) < 2 {
+		return nil
+	}
+	if len(repos) < 2 {
+		parts := make([]string, len(groups))
+		for i, g := range groups {
+			parts[i] = strings.Join(g, "+")
+		}
+		return []advisory{{
+			Code:    advisorySlicesUnconnected,
+			Message: fmt.Sprintf("the slices split into %d groups no blocked_by edge connects (%s): they may be independent concerns", len(groups), strings.Join(parts, " | ")),
+			Help:    help,
+		}}
+	}
+	place := ready.Place(repos, planned)
+	repoOf := map[string]string{}
+	for _, sl := range planned {
+		repoOf[sl.ID] = place.Repo[sl.Workspace]
+	}
+	var out []advisory
+	for _, repo := range repos {
+		var parts []string
+		for _, g := range groups {
+			var mine []string
+			for _, id := range g {
+				if repoOf[id] == repo.Name && repo.Name != ready.Unplaced {
+					mine = append(mine, id)
+				}
+			}
+			if len(mine) > 0 {
+				parts = append(parts, strings.Join(mine, "+"))
+			}
+		}
+		if len(parts) < 2 {
+			continue
+		}
+		out = append(out, advisory{
+			Code:    advisorySlicesUnconnected,
+			Message: fmt.Sprintf("repo %s: its slices split into %d groups no blocked_by edge connects (%s): they may be independent concerns", repo.Name, len(parts), strings.Join(parts, " | ")),
+			Help:    help,
+		})
+	}
+	return out
+}
+
 // validateAdvisories gathers the advisories for the slices of ticket: a ticket
 // that was never minted first, then independent groups of slices, then every
 // slice goal that reads like shipped work.
-func validateAdvisories(st *store.Store, ticket string, slices []store.Slice) []advisory {
+func validateAdvisories(st *store.Store, ticket string, slices []store.Slice, repos []ready.Repo) []advisory {
 	out := unmintedAdvisories(st, ticket)
 	// Whether the plan is one concern is a question about the slices the
 	// brief planned: a fix slice is a gate round's (from_gate), joined to the
@@ -119,17 +175,7 @@ func validateAdvisories(st *store.Store, ticket string, slices []store.Slice) []
 			planned = append(planned, s)
 		}
 	}
-	if groups := sliceGroups(planned); len(groups) > 1 {
-		parts := make([]string, len(groups))
-		for i, g := range groups {
-			parts[i] = strings.Join(g, "+")
-		}
-		out = append(out, advisory{
-			Code:    advisorySlicesUnconnected,
-			Message: fmt.Sprintf("the slices split into %d groups no blocked_by edge connects (%s): they may be independent concerns", len(groups), strings.Join(parts, " | ")),
-			Help:    "If they are, give each group a ticket of its own; if one builds on another, add the blocked_by edge",
-		})
-	}
+	out = append(out, unconnectedAdvisories(repos, planned)...)
 	out = append(out, coveredAdvisories(st, ticket, slices)...)
 	return append(out, trackerTreeAdvisories(st)...)
 }
