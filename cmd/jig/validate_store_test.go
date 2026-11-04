@@ -11,6 +11,7 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -137,7 +138,7 @@ func TestValidateAdvisoriesNameShippedWorkTheGoalComesNear(t *testing.T) {
 		{ID: "c", Goal: "Smoke-test the rig environment class"},
 		{ID: "d", Goal: "A brand new thing"},
 	}
-	got := validateAdvisories(st, "T-9", slices)
+	got := validateAdvisories(st, "T-9", slices, nil)
 	var codes []string
 	for _, a := range got {
 		codes = append(codes, a.Code)
@@ -181,7 +182,7 @@ func TestValidateAdvisesATicketWithABriefAndNoRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := validateAdvisories(st, "SHOP-1", nil)
+	got := validateAdvisories(st, "SHOP-1", nil, nil)
 	if len(got) != 1 || got[0].Code != advisoryNotMinted {
 		t.Fatalf("advisories of a ticket with a brief and no record = %+v, want %s alone", got, advisoryNotMinted)
 	}
@@ -191,10 +192,10 @@ func TestValidateAdvisesATicketWithABriefAndNoRecord(t *testing.T) {
 	if h := got[0].Help; !strings.Contains(h, "jig ticket new") {
 		t.Errorf("help = %q, want it to name jig ticket new", h)
 	}
-	if got := validateAdvisories(st, "SHOP-2", nil); len(got) != 0 {
+	if got := validateAdvisories(st, "SHOP-2", nil, nil); len(got) != 0 {
 		t.Errorf("advisories of a minted ticket = %+v, want none", got)
 	}
-	if got := validateAdvisories(st, "SHOP-3", nil); len(got) != 0 {
+	if got := validateAdvisories(st, "SHOP-3", nil, nil); len(got) != 0 {
 		t.Errorf("advisories of a ticket with no brief = %+v, want none", got)
 	}
 }
@@ -211,7 +212,7 @@ func TestValidateAdvisoriesLeaveFixSlicesOutOfTheGroups(t *testing.T) {
 		{ID: "fix-1-cart-test", Goal: "Fix these gate findings", FromGate: 1},
 		{ID: "fix-2-cart-test", Goal: "Fix these gate findings", FromGate: 2},
 	}
-	for _, a := range validateAdvisories(st, "T-9", slices) {
+	for _, a := range validateAdvisories(st, "T-9", slices, nil) {
 		if a.Code == advisorySlicesUnconnected {
 			t.Errorf("advisory %q: fix slices counted as unconnected groups", a.Message)
 		}
@@ -356,6 +357,65 @@ func TestValidateApprovesAsAPersonOnlyAtATerminal(t *testing.T) {
 			}
 			if a, ok, err := st.ReadApproval(fx.Ticket); err != nil || !ok || a.Provenance != c.wantProv {
 				t.Errorf("approval = %+v, %v, %v, want provenance %s", a, ok, err, c.wantProv)
+			}
+		})
+	}
+}
+
+func TestUnconnectedAdvisories(t *testing.T) {
+	t.Parallel()
+	sl := func(id, ws string, blockedBy ...string) store.Slice {
+		return store.Slice{ID: id, Workspace: ws, BlockedBy: blockedBy}
+	}
+	api := ready.Repo{Name: "api", Workspaces: []string{"server"}}
+	web := ready.Repo{Name: "web", Workspaces: []string{"ui"}}
+	two := []ready.Repo{api, web}
+	one := "the slices split into 2 groups no blocked_by edge connects (a | b): they may be independent concerns"
+	cases := []struct {
+		name    string
+		repos   []ready.Repo
+		planned []store.Slice
+		want    []string
+	}{
+		{"one repo, two groups", []ready.Repo{api}, []store.Slice{sl("a", "server"), sl("b", "server")}, []string{one}},
+		{"nil repos, two groups", nil, []store.Slice{sl("a", "x"), sl("b", "y")}, []string{one}},
+		{"two repos, one slice each", two, []store.Slice{sl("a", "api/server"), sl("b", "web/ui")}, nil},
+		{"two repos, each connected inside", two, []store.Slice{
+			sl("a", "api/server"), sl("a2", "api/server", "a"), sl("w", "web/ui"), sl("w2", "web/ui", "w"),
+		}, nil},
+		{"one repo split", two, []store.Slice{sl("a", "api/server"), sl("b", "api/server"), sl("w", "web/ui")}, []string{
+			"repo api: its slices split into 2 groups no blocked_by edge connects (a | b): they may be independent concerns",
+		}},
+		{"joined only through the other repo", two, []store.Slice{
+			sl("a", "api/server"), sl("w", "web/ui", "a"), sl("b", "api/server", "w"),
+		}, nil},
+		{"both repos split", two, []store.Slice{
+			sl("a", "api/server"), sl("b", "api/server"), sl("w", "web/ui"), sl("x", "web/ui"),
+		}, []string{
+			"repo api: its slices split into 2 groups no blocked_by edge connects (a | b): they may be independent concerns",
+			"repo web: its slices split into 2 groups no blocked_by edge connects (w | x): they may be independent concerns",
+		}},
+		{"bare workspace placed by its one declaring repo", two, []store.Slice{sl("a", "server"), sl("b", "api/server"), sl("w", "ui")}, []string{
+			"repo api: its slices split into 2 groups no blocked_by edge connects (a | b): they may be independent concerns",
+		}},
+		{"unplaced slice skipped", two, []store.Slice{sl("a", "api/server"), sl("b", "nowhere"), sl("c", "nowhere")}, nil},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var got []string
+			for _, a := range unconnectedAdvisories(tc.repos, tc.planned) {
+				if a.Code != advisorySlicesUnconnected {
+					t.Errorf("code = %q", a.Code)
+				}
+				if !strings.HasPrefix(a.Help, "If they are, give each group") {
+					t.Errorf("help = %q", a.Help)
+				}
+				got = append(got, a.Message)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
 	}
