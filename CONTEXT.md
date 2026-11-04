@@ -247,7 +247,7 @@ Out-of-band verification of a ticket's branch, run on its own lease: `jig gate` 
 _Avoid_: code review, QA pass
 
 **Recorded round**:
-A gate round that is opened by `jig gate` and closed by a reviewer's `jig review done`, not launched by jig. Its request, the reviewer's drafts and its result live in the store's `work/` until it is closed and folded into `gate/round-N/`; a branch that moved before `done` is `REVIEW_STALE_HEAD`. It is *independent* unless the reviewer built part of the change, judged from the sessions on the ticket's claim, verification and ledger lines (`not-independent` is refused by publish; unknown is allowed and counted).
+A gate round that is opened by `jig gate` and closed by a reviewer's `jig review done`, not launched by jig. Its request, the reviewer's drafts and its result live in the store's `work/` until it is closed and folded into `gate/round-N/`; a branch that moved before `done` is `REVIEW_STALE_HEAD`. It is *independent* unless the reviewer built part of the change, judged from the sessions on the ticket's claim, verification and ledger lines (`not-independent` is refused by publish; unknown is allowed and counted). For a session given by `--session` or the environment, the agent in it comes from the ledger: the one that ran `jig review context` for the round.
 _Avoid_: review job, launched review
 
 **Intent**:
