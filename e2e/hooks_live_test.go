@@ -388,6 +388,9 @@ func TestHooksLiveNested(t *testing.T) {
 			t.Fatalf("NESTED_STEPS_MISSING: the %s has no Bash tool line in session %q: %+v", what, start.Session, l)
 		}
 	}
+	if ticketTool.Agent == "" {
+		t.Fatalf("NESTED_PARENT_HAS_NO_ID: the ticket subagent's printenv line carries no agent id: %+v", ticketTool)
+	}
 	if claimTool.Agent == "" || claimTool.Agent == ticketTool.Agent || commitTool.Agent != claimTool.Agent {
 		t.Fatalf("NESTED_ID_IS_PARENTS: ticket subagent printenv agent=%q, builder claim agent=%q, builder commit agent=%q", ticketTool.Agent, claimTool.Agent, commitTool.Agent)
 	}
