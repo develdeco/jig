@@ -26,7 +26,8 @@ import (
 const (
 	apiHandlerSource = "package server\n\n// Handler names what the api serves.\nfunc Handler() string { return \"total\" }\n"
 	webPageSource    = "package ui\n\n// Page names what the web page shows.\nfunc Page() string { return \"order total\" }\n"
-	webPageFixed     = "package ui\n\n// Page names what the web page shows, as dollars.\nfunc Page() string { return \"$4.00\" }\n"
+	apiHandlerFixed  = "package server\n\n// Handler names what the api serves, with the currency.\nfunc Handler() string { return \"total in USD\" }\n"
+	webPageFixed     ="package ui\n\n// Page names what the web page shows, as dollars.\nfunc Page() string { return \"$4.00\" }\n"
 )
 
 // gateRequest is the part of a round's review.json that the tests of a gate
