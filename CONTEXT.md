@@ -107,7 +107,7 @@ A prompt that names several phases ("Build and review SHOP-1", "Take SHOP-1 from
 _Avoid_: automatic run, workflow, pipeline run
 
 **Repo builder**:
-A subagent a ticket subagent starts for one repo of a multi-repo ticket, with the build prompt. It builds that repo's slices and holds its own `--unattended` claim, so a hold at its stop is its own: the hooks tell it from its parent by its agent id. Its question goes to the ticket subagent, which hands it up to the main session and resumes the builder with the answer. With no Agent tool there is none, and the ticket subagent builds its repos in turn ([ADR 0044](docs/adr/0044-a-multi-repo-ticket-is-built-by-nested-builders.md)).
+A subagent a ticket subagent starts for one repo of a multi-repo ticket, with the build prompt. It builds only that repo's slices, never gates or nests, and holds its own `--unattended` claim; each agent of a session is held by its own latest claim, so a hold at its stop is its own: the hooks tell it from its parent by its agent id. Its question goes to the ticket subagent, which hands it up to the main session and resumes the builder with the answer. With no Agent tool there is none, and the ticket subagent builds its repos in turn ([ADR 0044](docs/adr/0044-a-multi-repo-ticket-is-built-by-nested-builders.md)).
 _Avoid_: worker, child session
 
 **Chart run**:
