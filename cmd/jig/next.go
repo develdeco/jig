@@ -538,7 +538,7 @@ func distributionAdvice(all []nextBatch) []string {
 		repos[i] = b.Repo
 	}
 	return []string{
-		fmt.Sprintf("%d repos have ready slices (%s): one session per repo can build them in parallel", len(batches), strings.Join(repos, ", ")),
+		fmt.Sprintf("%d repos have ready slices (%s): one builder per repo can build them in parallel", len(batches), strings.Join(repos, ", ")),
 		"Within a repo the slices build one after the other, in the order listed",
 	}
 }
