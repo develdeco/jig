@@ -297,7 +297,7 @@ func TestChartSkillNesting(t *testing.T) {
 	if r.Code != 0 {
 		t.Fatalf("jig skill chart exit = %d\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
-	for _, want := range []string{"nested builder", "only its repo's slices, never gate or nest", "No Agent tool", "if you have the Agent tool"} {
+	for _, want := range []string{"nested builder", "in the background", "only its repo's slices, never gate or nest", "a hold saying to gate is yours", "wait for them before the gate", "the question, its id and default", "No Agent tool", "if you have the Agent tool", "A hand-back at green with no reviewer"} {
 		if !strings.Contains(r.Stdout, want) {
 			t.Errorf("jig skill chart lacks %q:\n%s", want, r.Stdout)
 		}

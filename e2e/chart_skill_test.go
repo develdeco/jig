@@ -41,12 +41,12 @@ func TestChartSkillHandsOff(t *testing.T) {
 	skillSection(t, out, "## Builds", "## Publish")
 	skillSection(t, out, "## Ends", "")
 
-	for _, want := range []string{"subagent", "intake", "jig validate <T> --check", "ADR 0035"} {
+	for _, want := range []string{"subagent", "intake", "never mint or approve", "jig validate <T> --check", "ADR 0035"} {
 		if !strings.Contains(briefs, want) {
 			t.Errorf("the Briefs section lacks %q:\n%s", want, briefs)
 		}
 	}
-	for _, want := range []string{"subagent", "jig skill publish", "once for the group", "never force"} {
+	for _, want := range []string{"subagent", "jig skill publish", "removing no worktree", "after its parent's hands back", "once for the group", "never force"} {
 		if !strings.Contains(publish, want) {
 			t.Errorf("the Publish section lacks %q:\n%s", want, publish)
 		}
