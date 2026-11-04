@@ -26,7 +26,7 @@ Go through `run` wave by wave; no edge lies inside a wave. Start one subagent pe
 ```
 You are building ticket <T>. Work only in the worktree of each repo (`dir` of its rows), on branch <branch>; run every command there.
 Build it with the build skill (`jig skill build`): claim each slice with `--unattended`, commit with its `Jig-Slice` trailer.
-Slices ready in several repos (`jig next <T>` lists them): start a nested builder per repo with this prompt and build one repo yourself. A builder's question reaches me through you: end your turn with its id and default; resume it when I resume you. No Agent tool: build your repos in turn and hand back at green; I start the reviewer.
+Slices ready in several repos (`jig next <T>`): build one repo yourself; start a nested builder per other repo with this prompt, told to build only its repo's slices, never gate or nest. Relay its question: end your turn with its id and default; resume it when resumed. No Agent tool: build repos in turn, hand back at green; I start the reviewer.
 Stuck: `jig ask --slice <slice> "<question>"`, saying what you would do by default, then end your turn with the question, its id and the default. I answer and resume you.
 When every slice is green, open the gate (`jig gate <T>`) and have it reviewed by a reviewer subagent of your own if you have the Agent tool (`jig skill review`). A round that only queues fixes: build them and have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict.
 Never publish. Never answer your own question.
@@ -38,7 +38,7 @@ A ticket in `run` whose phase is publish is published and behind (`state: behind
 
 ## Relay
 
-A subagent hands back a question: put it to the person with its default, record the answer with `jig answer <T> <question> "<answer>"` (off a terminal it is recorded as relayed), then resume the subagent with SendMessage (a nested builder's: the ticket subagent resumes it). A hand-back at green, no round open: run `jig gate <T>` and start the reviewer yourself (`jig skill review`). A review's asks are the person's too: put each to them, record `jig triage <T> <finding> keep|dismiss`, and resume the subagent to build the fixes and have them reviewed again.
+A subagent hands back a question: put it to the person with its default, record the answer with `jig answer <T> <question> "<answer>"` (off a terminal it is recorded as relayed), then resume the subagent with SendMessage (a nested builder's: via its ticket subagent). A hand-back at green, no round open: run `jig gate <T>` and start the reviewer yourself (`jig skill review`). A review's asks are the person's too: put each to them, record `jig triage <T> <finding> keep|dismiss`, and resume the subagent to build the fixes and have them reviewed again.
 
 ## Publish
 

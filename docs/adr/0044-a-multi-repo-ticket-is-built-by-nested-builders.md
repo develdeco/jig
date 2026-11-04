@@ -6,7 +6,7 @@ The open question was whether a subagent can start a subagent of its own and sti
 
 ## Decision
 
-**A ticket subagent may start one nested builder per repo.** With ready slices in several repos, the ticket subagent starts a repo builder for each repo but one and builds that repo itself. A repo builder is a subagent of the ticket subagent. It builds its repo's slices with the build skill and claims with `--unattended`, so its claim holds it, and only it, at its stop.
+**A ticket subagent may start one nested builder per repo.** With ready slices in several repos, the ticket subagent starts a repo builder for each repo but one and builds that repo itself. A repo builder is a subagent of the ticket subagent. It builds its repo's slices with the build skill and claims with `--unattended`, so its claim holds it, and only it, at its stop. It builds only its repo's slices, opens no gate and starts no builder: the gate and the reviewer stay the ticket subagent's.
 
 **Questions go up one level at a time.** A builder's question comes to the ticket subagent, which ends its turn with the question, the builder's id and its default. The main session relays the person's answer, resumes the ticket subagent, and the ticket subagent resumes the builder. The main session never talks to a builder.
 
