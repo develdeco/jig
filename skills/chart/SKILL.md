@@ -5,9 +5,9 @@ description: Runs a chart's tickets from the main session - every brief first, t
 
 # chart
 
-Run `jig next <chart>`. If the chart is not `ready`, relay its `reason` and `prompt` and stop. Entries with no ticket need `jig graduate <chart>` first. The standing is derived: re-read it.
+Run `jig next <chart>` (several tickets: `--tickets A,B`; their chart is in `jig next`'s `charts`). If the chart is not `ready`, relay its `reason` and `prompt` and stop. Entries with no ticket need `jig graduate <chart>` first. The standing is derived: re-read it.
 
-Three prompts make a chart run: one aimed at a chart, or naming several of its tickets ("Take A and B to PR", "Continue A and B": `jig next <chart> --tickets A,B`, its chart in `jig next`'s `charts`), a yes to intake's confirm question, intake's explicit launch. One ticket alone is not a chart run: run it alone.
+Three prompts make a chart run: one aimed at a chart or at several of its tickets ("Take A and B to PR", "Continue A and B"), a yes to intake's confirm question, intake's explicit launch. One ticket alone is not a chart run: run it alone.
 
 You are the main session. Every question to the person is yours; a subagent cannot ask. jig starts no session, records no run.
 
