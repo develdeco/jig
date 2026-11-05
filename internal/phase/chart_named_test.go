@@ -186,4 +186,62 @@ func TestDeriveChartNamed(t *testing.T) {
 			t.Errorf("reason = %q, want %q", c.Reason, want)
 		}
 	})
+
+	t.Run("a named chain behind an unnamed ticket waits on that ticket, not a merge", func(t *testing.T) {
+		t.Parallel()
+		// T-3 waits for T-2 to merge, but T-2 cannot start: it waits for T-1,
+		// which the run does not take. That end is the one to act on.
+		c := DeriveChart(ChartFacts{Name: "c", Named: []string{"T-2", "T-3"}, Entries: []ChartEntry{
+			entry(1, "T-1", ticketAt("T-1")),
+			entry(2, "T-2", ticketAt("T-2"), mergedOn("T-1", false)),
+			entry(3, "T-3", ticketAt("T-3"), mergedOn("T-2", false)),
+		}})
+		if got := endsOf(c); !reflect.DeepEqual(got, []string{"T-2>T-1(merged)", "T-3>T-2(merged)"}) {
+			t.Fatalf("ends = %v, want both", got)
+		}
+		root := c.RootEnds()
+		if len(root) != 1 || root[0].ID != "T-2" {
+			t.Errorf("root ends = %+v, want T-2's wait on T-1 only", root)
+		}
+		if c.Ready || c.Code != CodeNeedNotNamed || c.Reason != "T-2 waits for T-1, which this run does not take and is not done" {
+			t.Errorf("ready %v code %q reason %q, want the wait on T-1", c.Ready, c.Code, c.Reason)
+		}
+		// A whole chart keeps its first merge wait: T-2's end on T-1 is the root.
+		whole := DeriveChart(ChartFacts{Name: "c", Entries: []ChartEntry{
+			entry(1, "T-1", ticketAt("T-1"), mergedOn("X-9", false)),
+			entry(2, "T-2", ticketAt("T-2"), mergedOn("T-1", false)),
+		}})
+		if whole.Code != CodeChartWaitsMerge || !strings.HasPrefix(whole.Reason, "T-1 waits for X-9 to merge") || len(whole.RootEnds()) != 1 {
+			t.Errorf("whole chart: code %q reason %q root %d, want the wait on X-9 as the one root", whole.Code, whole.Reason, len(whole.RootEnds()))
+		}
+	})
+
+	t.Run("a cycle through an unnamed ticket reads as a wait on it until both are named", func(t *testing.T) {
+		t.Parallel()
+		entries := []ChartEntry{
+			entry(1, "T-1", ticketAt("T-1"), mergedOn("T-2", false)),
+			entry(2, "T-2", ticketAt("T-2"), mergedOn("T-1", false)),
+		}
+		one := DeriveChart(ChartFacts{Name: "c", Named: []string{"T-1"}, Entries: entries})
+		if one.Code != CodeNeedNotNamed || one.Reason != "T-1 waits for T-2, which this run does not take and is not done" {
+			t.Errorf("one named: code %q reason %q, want the wait on T-2", one.Code, one.Reason)
+		}
+		both := DeriveChart(ChartFacts{Name: "c", Named: []string{"T-1", "T-2"}, Entries: entries})
+		if both.Code != CodeChartBlocked || reachOfRow(t, both, "T-1") != ReachBlocked || reachOfRow(t, both, "T-2") != ReachBlocked {
+			t.Errorf("both named: code %q reason %q, want both blocked on the cycle", both.Code, both.Reason)
+		}
+	})
+
+	t.Run("a run whose named tickets are all done is done", func(t *testing.T) {
+		t.Parallel()
+		c := DeriveChart(ChartFacts{Name: "c", Named: []string{"T-1", "T-2"}, Entries: []ChartEntry{
+			entry(1, "T-1", ticketPublished("T-1")),
+			entry(2, "T-2", ticketPublished("T-2")),
+			entry(3, "T-3", ticketAt("T-3")),
+			{Pos: 4, Title: "later"},
+		}})
+		if c.Code != CodeChartDone || !reflect.DeepEqual(c.Named, []string{"T-1", "T-2"}) {
+			t.Errorf("code %q named %v, want %s over the named tickets", c.Code, c.Named, CodeChartDone)
+		}
+	})
 }

@@ -614,8 +614,9 @@ func (d *chartDeriver) verdict(c *Chart) {
 	case done == graduated && len(c.Ends) == 0:
 		c.Code = CodeChartDone
 	case len(c.Ends) > 0:
-		end, onlyNotNamed := c.Ends[0], true
-		for _, e := range c.Ends {
+		root := c.RootEnds()
+		end, onlyNotNamed := root[0], true
+		for _, e := range root {
 			if e.Because.Code != CodeNeedNotNamed {
 				if onlyNotNamed {
 					end = e
@@ -639,6 +640,37 @@ func (d *chartDeriver) verdict(c *Chart) {
 			}
 		}
 	}
+}
+
+// RootEnds are the ends a run waits on first. An end whose blocker is a row of
+// this run that is itself after a merge follows from that row's own end: "C
+// waits for B to merge" is nothing to act on while B waits for a ticket the run
+// does not take, or for a merge of its own. Every end, when none is a root.
+func (c Chart) RootEnds() []ChartEnd {
+	waits := map[string]bool{}
+	for _, r := range c.Rows {
+		if !r.Done && r.Reach == ReachAfterMerge {
+			waits[endKey(r.ID, r.Pos)] = true
+		}
+	}
+	var root []ChartEnd
+	for _, e := range c.Ends {
+		if !waits[endKey(e.Because.Ticket, e.Because.Pos)] {
+			root = append(root, e)
+		}
+	}
+	if len(root) == 0 {
+		return c.Ends
+	}
+	return root
+}
+
+// endKey names a row or a need's blocker: its ticket, else its place.
+func endKey(id string, pos int) string {
+	if id != "" {
+		return id
+	}
+	return fmt.Sprintf("#%d", pos)
 }
 
 // prompt is what to ask for the run: the chart's, the tickets' it was named

@@ -411,27 +411,54 @@ func chartHelp(c phase.Chart) []string {
 		}
 		return help
 	case c.Code == phase.CodeChartWaitsMerge:
-		return []string{fmt.Sprintf("Merge %s, then ask: %s", mergeTargets(c.Ends), c.Prompt)}
-	case c.Code == phase.CodeNeedNotNamed && len(c.Ends) > 0:
-		a := c.Ends[0].Because.Ticket
-		if a == "" {
-			a = fmt.Sprintf("entry #%d", c.Ends[0].Because.Pos)
+		help := []string{fmt.Sprintf("Merge %s, then ask: %s", mergeTargets(c.RootEnds()), c.Prompt)}
+		if name := notNamedHelp(c.RootEnds()); name != "" {
+			help = append(help, name)
 		}
-		return []string{fmt.Sprintf("Name %s too, or take %s first", a, a)}
+		return help
+	case c.Code == phase.CodeNeedNotNamed && notNamedHelp(c.RootEnds()) != "":
+		return []string{notNamedHelp(c.RootEnds())}
 	case c.Code == phase.CodeChartNotGraduated && c.Ungraduated > 0:
 		return []string{graduate}
+	case c.Code == phase.CodeChartDone && len(c.Named) > 0:
+		are := " are"
+		if len(c.Named) == 1 {
+			are = " is"
+		}
+		return []string{andList(c.Named) + are + " done: each is published or closed; run `jig next " + c.Name + "` for the whole chart"}
 	case c.Code == phase.CodeChartDone:
 		return []string{c.Name + " is done: every ticket is published or closed; run `jig next` to see what else is ready"}
 	}
 	return []string{c.Reason}
 }
 
+// notNamedHelp is the step for a named ticket that waits on a ticket the run
+// does not take: no merge frees it, so name that ticket too or take it first.
+// "" when no end is such a wait.
+func notNamedHelp(ends []phase.ChartEnd) string {
+	for _, e := range ends {
+		if e.Because.Code != phase.CodeNeedNotNamed {
+			continue
+		}
+		a := e.Because.Ticket
+		if a == "" {
+			a = fmt.Sprintf("entry #%d", e.Because.Pos)
+		}
+		return fmt.Sprintf("Name %s too, or take %s first", a, a)
+	}
+	return ""
+}
+
 // mergeTargets names what a run waits on to merge: the pull request URLs of its
-// ends, else the tickets whose work is to merge.
+// ends, else the tickets whose work is to merge. A wait on a ticket the run does
+// not take is no merge.
 func mergeTargets(ends []phase.ChartEnd) string {
 	var urls, tickets []string
 	seen := map[string]bool{}
 	for _, e := range ends {
+		if e.Because.Code == phase.CodeNeedNotNamed {
+			continue
+		}
 		for _, p := range e.Because.PRs {
 			if !seen[p.URL] {
 				seen[p.URL] = true

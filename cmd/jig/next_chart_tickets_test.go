@@ -171,3 +171,33 @@ func (r chartRig) nextTickets(t *testing.T, chart, list string) nextChart {
 	}
 	return n
 }
+
+// TestChartHelpNamedRun: over named tickets, a wait on a ticket the run does not
+// take is never a merge to do (the help names it to add or take first), an end
+// behind a named ticket that waits itself names nothing to merge, and a done run
+// names its tickets rather than the chart.
+func TestChartHelpNamedRun(t *testing.T) {
+	t.Parallel()
+	rows := []phase.ChartRow{
+		{Pos: 2, ID: "T-2", Reach: phase.ReachAfterMerge},
+		{Pos: 4, ID: "T-4", Reach: phase.ReachAfterMerge},
+		{Pos: 3, ID: "T-3", Reach: phase.ReachAfterMerge},
+	}
+	onT1 := phase.ChartEnd{Pos: 2, ID: "T-2", Because: phase.ChartNeed{Ticket: "T-1", Kind: "merged", Code: phase.CodeNeedNotNamed}}
+	onX9 := phase.ChartEnd{Pos: 4, ID: "T-4", Because: phase.ChartNeed{Ticket: "X-9", Kind: "merged"}}
+	onT2 := phase.ChartEnd{Pos: 3, ID: "T-3", Because: phase.ChartNeed{Ticket: "T-2", Kind: "merged"}}
+
+	chain := phase.Chart{Name: "c", Code: phase.CodeNeedNotNamed, Prompt: "Continue T-2 and T-3", Rows: []phase.ChartRow{rows[0], rows[2]}, Ends: []phase.ChartEnd{onT2, onT1}}
+	if got, want := chartHelp(chain), []string{"Name T-1 too, or take T-1 first"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("chain: help = %q, want %q", got, want)
+	}
+	mixed := phase.Chart{Name: "c", Code: phase.CodeChartWaitsMerge, Prompt: "Continue T-2, T-3 and T-4", Rows: rows, Ends: []phase.ChartEnd{onT1, onX9, onT2}}
+	want := []string{"Merge the work of X-9, then ask: Continue T-2, T-3 and T-4", "Name T-1 too, or take T-1 first"}
+	if got := chartHelp(mixed); !reflect.DeepEqual(got, want) {
+		t.Errorf("mixed: help = %q, want %q", got, want)
+	}
+	done := phase.Chart{Name: "c", Code: phase.CodeChartDone, Named: []string{"T-1", "T-2"}}
+	if got, want := chartHelp(done), []string{"T-1 and T-2 are done: each is published or closed; run `jig next c` for the whole chart"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("done: help = %q, want %q", got, want)
+	}
+}
