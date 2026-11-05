@@ -377,6 +377,37 @@ func TestBranchFromBriefHeadingWhenNoTitle(t *testing.T) {
 	}
 }
 
+// TestTicketName covers the name a ticket goes by: its recorded title, else,
+// for a folder made by hand, its brief's first "# " heading without the
+// "<id>:" (or an alias's) it leads with, the heading its branch is named after;
+// else nothing. A title with no ASCII word names the ticket all the same,
+// though it gives its branch no slug.
+func TestTicketName(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	for _, tc := range []struct {
+		name, ticket, brief string
+		rec                 Ticket
+		want                string
+	}{
+		{"the title wins over the heading", "SHOP-1", "# SHOP-1: Gift wrap\n", Ticket{Title: "  Returns page "}, "Returns page"},
+		{"a title with no ASCII word", "SHOP-2", "# SHOP-2: Gift wrap\n", Ticket{Title: "日本語"}, "日本語"},
+		{"the heading without its id", "SHOP-3", "# shop-3:   Show the cart total\n\n## Goal\n\nx\n", Ticket{}, "Show the cart total"},
+		{"the heading without an alias", "SHOP-4", "# OLD-7: Wishlist\n", Ticket{Aliases: []string{"OLD-7"}}, "Wishlist"},
+		{"a heading that is only the id", "SHOP-5", "# SHOP-5:\n", Ticket{}, ""},
+		{"a section is not a heading", "SHOP-6", "## Goal\n\nx\n", Ticket{}, ""},
+		{"no brief", "SHOP-7", "", Ticket{}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.brief != "" {
+				writeBrief(t, st, tc.ticket, tc.brief)
+			}
+			if got := st.TicketName(tc.ticket, tc.rec); got != tc.want {
+				t.Fatalf("TicketName(%s, %+v) = %q, want %q", tc.ticket, tc.rec, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestBranchIsTheBareIdWithNoTitleAtAll covers a ticket with no slug from its
 // record or its brief (no folder, no brief, a brief with no heading, a heading
 // that is only the id, or a title with no ASCII word): its branch is its bare

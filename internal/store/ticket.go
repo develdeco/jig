@@ -536,11 +536,26 @@ func (s *Store) defaultBranch(ticket string, rec Ticket) (string, error) {
 	return lead + "-" + slug, nil
 }
 
-// briefSlug is the slug of ticket's brief heading: the first "# " heading of
-// brief.md, with a leading "<id>:" taken off (the id the ticket has or had),
-// run through Slug. It is "" when the ticket has no brief, no heading, or a
-// heading that is nothing but its id.
-func (s *Store) briefSlug(ticket string, rec Ticket) string {
+// TicketName is the name a person reads a ticket by: the title recorded when
+// it was minted, else, for a ticket whose folder was made by hand, its brief's
+// heading (briefName), else "". rec must be ticket's own record, as
+// ReadTicket returned it. Publish titles the pull request and the ledger entry
+// with it. The default branch's slug comes from the same two sources
+// (defaultBranch), but it is fixed when the ticket is minted and a title with
+// no ASCII word gives none, so a title edited later, or one like that, names
+// the pull request and not the branch.
+func (s *Store) TicketName(ticket string, rec Ticket) string {
+	if title := strings.TrimSpace(rec.Title); title != "" {
+		return title
+	}
+	return s.briefName(ticket, rec)
+}
+
+// briefName is ticket's brief heading: the first "# " heading of brief.md,
+// with a leading "<id>:" taken off (the id the ticket has or had). It is ""
+// when the ticket has no brief, no heading, or a heading that is nothing but
+// "<id>:".
+func (s *Store) briefName(ticket string, rec Ticket) string {
 	brief, err := os.ReadFile(filepath.Join(s.TicketDir(ticket), "brief.md"))
 	if err != nil {
 		return ""
@@ -552,7 +567,13 @@ func (s *Store) briefSlug(ticket string, rec Ticket) string {
 			break
 		}
 	}
-	return Slug(title)
+	return strings.TrimSpace(title)
+}
+
+// briefSlug is the slug of ticket's brief heading (briefName), run through
+// Slug: "" when there is no heading, or one with no ASCII word.
+func (s *Store) briefSlug(ticket string, rec Ticket) string {
+	return Slug(s.briefName(ticket, rec))
 }
 
 // defaultBranchOr is defaultBranch for a message that only wants to name the

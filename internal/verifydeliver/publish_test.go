@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
@@ -774,8 +772,10 @@ func TestPublishFullChain(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read ledger.md: %v", err)
 		}
-		if !strings.Contains(string(ledger), "## "+fx.Ticket) {
-			t.Fatalf("ledger.md missing ## %s entry:\n%s", fx.Ticket, ledger)
+		// The fixture's ticket has no record, so its name is its brief's
+		// heading, the one its branch is named after.
+		if !strings.Contains(string(ledger), "## "+fx.Ticket+" - Fixture ticket brief\n") {
+			t.Fatalf("ledger.md missing the ## %s entry headed by the brief's heading:\n%s", fx.Ticket, ledger)
 		}
 		if !strings.Contains(string(ledger), "**Answers:**") {
 			t.Fatalf("ledger.md missing Answers tail:\n%s", ledger)
@@ -826,11 +826,10 @@ func TestPublishFullChain(t *testing.T) {
 	})
 }
 
-// TestPublishTitlesThePullRequestWithTheRecordedTitle covers the title
-// fallback through publish itself (consolidatedTitle is only unit-tested with
-// the title handed to it): when no slice has a goal, the pull request opened
-// through the host carries the title recorded in ticket.yaml, not the bare
-// ticket id.
+// TestPublishTitlesThePullRequestWithTheRecordedTitle: the pull request opened
+// through the host and the ledger entry carry the title recorded in
+// ticket.yaml, though the ticket's slices have goals: a slice's goal is an
+// instruction to its builder, never the ticket's name.
 func TestPublishTitlesThePullRequestWithTheRecordedTitle(t *testing.T) {
 	t.Parallel()
 
@@ -844,23 +843,9 @@ func TestPublishTitlesThePullRequestWithTheRecordedTitle(t *testing.T) {
 		t.Fatalf("CreateTicketRecord: %v", err)
 	}
 	gateToClean(t, fx, d)
-
 	sls, err := d.Store.ReadSlices(fx.Ticket)
-	if err != nil {
-		t.Fatalf("ReadSlices: %v", err)
-	}
-	for i := range sls {
-		sls[i].Goal = ""
-	}
-	data, err := yaml.Marshal(store.SliceFile{Slices: sls})
-	if err != nil {
-		t.Fatalf("marshal slices: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "slices.yaml"), data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Store.Push(fx.Ticket + ": no slice goals"); err != nil {
-		t.Fatalf("push the slices: %v", err)
+	if err != nil || len(sls) == 0 || sls[0].Goal == "" {
+		t.Fatalf("ReadSlices = %+v, %v, want slices whose first has a goal", sls, err)
 	}
 
 	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
@@ -874,6 +859,10 @@ func TestPublishTitlesThePullRequestWithTheRecordedTitle(t *testing.T) {
 	}
 	titleAt := slices.Index(create, "--title")
 	if titleAt < 0 || titleAt+1 >= len(create) || create[titleAt+1] != "Recorded title" {
-		t.Fatalf("gh pr create = %v, want --title \"Recorded title\"", create)
+		t.Fatalf("gh pr create = %v, want --title \"Recorded title\", not the first slice's goal %q", create, sls[0].Goal)
+	}
+	ledger, err := os.ReadFile(d.Store.LedgerPath())
+	if err != nil || !strings.Contains(string(ledger), "## "+fx.Ticket+" - Recorded title\n") {
+		t.Fatalf("ledger.md = %q, %v, want the entry headed by the recorded title", ledger, err)
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
-	"github.com/develdeco/jig/internal/store"
 )
 
 // TestPublishShipsAnAdoptedBranch is the hand-written-branch loop's last step:
@@ -438,39 +437,6 @@ func TestPublishUpdatesThePRTheAuthorOpened(t *testing.T) {
 			t.Errorf("a build lease exists at %s (stat err %v): publishing a branch jig built nothing on needs none", buildLeaseOf(t, fx, ticket), err)
 		}
 	})
-}
-
-// TestPublishTitleOfAnAdoptedTicket: an adopted ticket's slices are the fixes
-// its gate rounds queued, so the goal of the first slice names one of them, not
-// the work. A slice records the gate round that queued it (FromGate), and the
-// headline of the pull request and the ledger entry is the goal of the first
-// slice that did not come from a gate round, whatever kind of ticket it is;
-// with none, it is the ticket's own title, the one recorded when it was
-// minted, and then the id. There is no adopted case in that rule: the
-// slices say what they are.
-func TestPublishTitleOfAnAdoptedTicket(t *testing.T) {
-	t.Parallel()
-
-	fixes := []store.Slice{
-		{ID: "fix-1", Goal: "Fix these gate findings:\n\nthe off-by-one in Retry", FromGate: 1},
-		{ID: "fix-2", Goal: "Fix these gate findings:\n\nthe missing test", FromGate: 2},
-	}
-	work := store.Slice{ID: "s-1", Goal: "Add Retry to alpha"}
-	if got := consolidatedTitle("Add retry", "JIG-2", fixes); got != "Add retry" {
-		t.Errorf("title of a ticket with only gate fixes = %q, want its recorded title", got)
-	}
-	if got := consolidatedTitle("", "JIG-2", fixes); got != "JIG-2" {
-		t.Errorf("title of a ticket with only gate fixes and no recorded title = %q, want the id, not a fix's goal", got)
-	}
-	if got := consolidatedTitle("Add retry", "JIG-2", nil); got != "Add retry" {
-		t.Errorf("title of a ticket with no slices = %q, want its recorded title", got)
-	}
-	if got := consolidatedTitle("Add retry", "JIG-2", append([]store.Slice{work}, fixes...)); got != "Add Retry to alpha" {
-		t.Errorf("title of a ticket whose work precedes its fixes = %q, want the work's goal", got)
-	}
-	if got := consolidatedTitle("Add retry", "JIG-2", append(append([]store.Slice{}, fixes...), work)); got != "Add Retry to alpha" {
-		t.Errorf("title of a ticket whose fixes precede its work = %q, want the work's goal", got)
-	}
 }
 
 // TestPublishRefusesAnAdoptedBranchDeletedOnOrigin: a branch a ticket adopted
