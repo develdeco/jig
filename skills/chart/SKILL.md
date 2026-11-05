@@ -42,7 +42,7 @@ A subagent hands back a question: put it to the person with its default, record 
 
 ## Publish
 
-Tickets whose `jig next <T>` names publish are reviewed clean. Ask once for the group (each reviewed head, its body's first lines), then a subagent per ticket publishes it (`jig skill publish`: demo, body, CI budgets), removing no worktree, and hands back the url; a stacked ticket's publisher starts after its parent's hands back. A go-with-your-recommendations prompt needs no yes. Remove a published ticket's worktrees one at a time with the `remove` commands of `jig publish --pr` or `jig next <T>`; git refuses one with changes: commit or discard them, never force.
+Tickets whose `jig next <T>` names publish are reviewed clean. Ask once for the group (each reviewed head, its body's first lines), then a subagent per ticket publishes it (`jig skill publish`: demo, body, CI budgets), removing no worktree, and hands back the url; a stacked ticket's publisher starts after its parent's hands back. A go-with-your-recommendations prompt needs no yes. Remove a ticket's worktrees only once it is published, one at a time, with the `remove` commands of `jig publish --pr` or `jig next <T>`; git refuses one with changes: commit or discard them, never force.
 
 ## Ends
 
