@@ -14,19 +14,21 @@ import (
 // Independence says whether a recorded round's reviewer is independent of the
 // agents that built what it reviewed. jig starts no reviewer, so it cannot
 // make one fresh; it can only notice, from the records of who did what, that
-// the reviewer is one of the builders.
+// the reviewer is one of the builders. It is a fact of the round, recorded
+// beside its verdict and shown wherever the round is (the review notes of the
+// pull request among them), never a condition of it: a round is clean by its
+// findings, whoever reviewed it (ADR 0046).
 type Independence string
 
 const (
 	// IndependentYes: the reviewer is known and is none of the builders.
 	IndependentYes Independence = "true"
-	// IndependentNo: the reviewer is one of the builders. The round is
-	// recorded but is not clean (REVIEW_NOT_INDEPENDENT), and publish refuses
-	// it.
+	// IndependentNo: the records show the reviewer is one of the builders.
 	IndependentNo Independence = "false"
-	// IndependentUnknown: jig could not tell who reviewed. The round stands,
-	// counted as unknown and said so; publish accepts it, because refusing
-	// would make a missing hook the end of every review.
+	// IndependentUnknown: jig could not tell whether the reviewer is one of
+	// the builders: it does not know who reviewed, or it knows the session
+	// but has no record of that session's agents (no hook reported its tool
+	// calls), so a subagent and the session itself look alike.
 	IndependentUnknown Independence = "unknown"
 )
 
@@ -48,17 +50,18 @@ func (i *Independence) UnmarshalYAML(n *yaml.Node) error {
 
 // How jig learned who a reviewer is, in Provenance.How.
 const (
-	// ReviewerByFlag: `--session` (and `--agent-id`) on the verb that closed
-	// the round.
+	// ReviewerByFlag: `--session` on `jig review done`, or on `jig review
+	// context`, whose recorded reviewer a `done` with no session of its own
+	// falls back to (there is no `--agent-id`: an agent named by flag is the
+	// reviewer's own word). It names a session, and a subagent can share its
+	// parent's id, so the ledger's lookup gives the agent, as for
+	// ReviewerByEnv.
 	ReviewerByFlag = "flag"
 	// ReviewerByEnv: the session the environment of the verb that closed the
 	// round names ($JIG_SESSION, else the harness's own variable). It names
 	// the harness session and never the agent in it, since a subagent
-	// inherits its parent's environment.
+	// inherits its parent's environment; the ledger's lookup gives the agent.
 	ReviewerByEnv = "env"
-	// ReviewerRecorded: the session the reviewer named when it opened the
-	// round with `jig review context --session`.
-	ReviewerRecorded = "recorded"
 	// ReviewerByLedger: the machine ledger's record of a tool call that ran
 	// `jig review context` for the ticket after the round opened.
 	ReviewerByLedger = "ledger"
@@ -136,7 +139,10 @@ func buildersOf(st *store.Store, jigHome, ticket, branch string) ([]Provenance, 
 
 // JudgeIndependence says whether reviewer is independent of the builders:
 // unknown when the reviewer is not identified, false when it is one of them (the
-// same session and the same agent), true otherwise.
+// same session and the same agent), true otherwise. A match with no agent is
+// false only where jig has a record of the session's agents: without one, the
+// agent is "" because nothing said which agent it was, not because it was the
+// session's own, and the match is unknown.
 func JudgeIndependence(d Deps, ticket, branch string, reviewer Provenance) (Independence, error) {
 	if !reviewer.Known() {
 		return IndependentUnknown, nil
@@ -146,11 +152,42 @@ func JudgeIndependence(d Deps, ticket, branch string, reviewer Provenance) (Inde
 		return "", err
 	}
 	for _, b := range builders {
-		if b.Session == reviewer.Session && b.Agent == reviewer.Agent {
-			return IndependentNo, nil
+		if b.Session != reviewer.Session || b.Agent != reviewer.Agent {
+			continue
 		}
+		if reviewer.Agent == "" {
+			reported, err := hooksReported(d.Home, reviewer.Session)
+			if err != nil {
+				return "", err
+			}
+			if !reported {
+				return IndependentUnknown, nil
+			}
+		}
+		return IndependentNo, nil
 	}
 	return IndependentYes, nil
+}
+
+// hooksReported says whether the machine ledger under jigHome has a tool line
+// of session: a harness hook reported the session's tool calls, each with the
+// agent that made it, so an agent of "" there is the session's own. Only the
+// PostToolUse hook writes a tool line; a session with none is one jig knows of
+// only from the verbs it ran.
+func hooksReported(jigHome, session string) (bool, error) {
+	if jigHome == "" {
+		return false, nil
+	}
+	records, err := ledger.Read(jigHome)
+	if err != nil {
+		return false, err
+	}
+	for _, l := range records {
+		if l.Session == session && l.Event == journal.EventTool {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // LedgerReviewer finds the reviewer of the round a ticket opened at opened

@@ -1,8 +1,12 @@
 package e2e
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/store"
@@ -51,5 +55,63 @@ func TestValidateCheckRecordsNoApproval(t *testing.T) {
 	}
 	if r := runJig(t, env, fx.StoreDir, "validate", fx.Ticket); r.Code != 0 || !strings.Contains(r.Stdout, "result: recorded") {
 		t.Fatalf("jig validate after --check exit = %d, want the approval recorded\nstdout:\n%s", r.Code, r.Stdout)
+	}
+}
+
+// TestValidateSlicesUnconnectedInOneRepo: SLICES_UNCONNECTED is about one
+// repo's slices falling in two groups. Repos built in parallel with no edge
+// between them are not warned; two groups inside one repo are; and two groups
+// of a repo that connect only through the other repo's slice are one group.
+func TestValidateSlicesUnconnectedInOneRepo(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{Orchestrator: true})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(label string) string {
+		t.Helper()
+		r := runJig(t, env, fx.OrchestratorDir, "validate", fx.Ticket, "--check")
+		if r.Code != 0 || !strings.Contains(r.Stdout, "valid: yes") {
+			t.Fatalf("%s: jig validate exit = %d, want 0 and valid\nstdout:\n%s\nstderr:\n%s", label, r.Code, r.Stdout, r.Stderr)
+		}
+		return r.Stdout
+	}
+
+	if out := validate("two repos, no edge"); strings.Contains(out, "SLICES_UNCONNECTED") {
+		t.Fatalf("a ticket whose repos build in parallel is warned:\n%s", out)
+	}
+
+	slices, err := st.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendSlices(fx.Ticket, []store.Slice{{ID: "server-2", Workspace: "api/server", Goal: "A second server concern.", Oracle: "test", BlockedBy: []string{}, FromBrief: slices[0].FromBrief}}); err != nil {
+		t.Fatal(err)
+	}
+	out := validate("two groups in api")
+	if !strings.Contains(out, "SLICES_UNCONNECTED") || !strings.Contains(out, "repo api") || strings.Contains(out, "repo web") {
+		t.Fatalf("want one SLICES_UNCONNECTED for repo api and none for repo web:\n%s", out)
+	}
+
+	byID := map[string]*store.Slice{}
+	all, err := st.ReadSlices(fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range all {
+		byID[all[i].ID] = &all[i]
+	}
+	byID["ui"].BlockedBy = []string{"server"}
+	byID["server-2"].BlockedBy = []string{"ui"}
+	data, err := yaml.Marshal(store.SliceFile{Slices: all})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(st.TicketDir(fx.Ticket), "slices.yaml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := validate("api groups joined through web"); strings.Contains(out, "SLICES_UNCONNECTED") {
+		t.Fatalf("two groups that connect only through the other repo are warned:\n%s", out)
 	}
 }

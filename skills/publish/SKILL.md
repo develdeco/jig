@@ -1,13 +1,13 @@
 ---
 name: publish
-description: Publishes a ticket's reviewed branch - renders the pull request body, pushes the reviewed head, opens or records the pull request, and records a person's approval - with jig publish. Use after a gate round is clean and independent, when asked to open or update the PR.
+description: Publishes a ticket's reviewed branch - renders the pull request body, pushes the reviewed head, opens or records the pull request, and records a person's approval - with jig publish. Use after a gate round is clean, when asked to open or update the PR.
 ---
 
 # publish
 
 Run `jig next <T>`. If the phase it names is not publish, tell the person what the ticket needs and the prompt that does it, and stop. Do not run an earlier phase on your own.
 
-jig publishes the head the last clean gate round reviewed, **unchanged**: it reconciles, squashes and commits nothing on the branch, so the person's branch never diverges from origin's. Publishing needs every slice green and a clean round whose reviewer did not build the change (`PUBLISH_NOT_CLEAN`, `PUBLISH_NOT_INDEPENDENT`). A branch that moved since the round (`PUBLISH_UNREVIEWED_HEAD`) needs `jig gate T-1` again.
+jig publishes the head the last clean gate round reviewed, **unchanged**: it reconciles, squashes and commits nothing on the branch, so the person's branch never diverges from origin's. Publishing needs every slice green and a clean round (`PUBLISH_NOT_CLEAN`); the review notes say whether its reviewer built part of the change. A branch that moved since the round (`PUBLISH_UNREVIEWED_HEAD`) needs `jig gate T-1` again.
 
 ## Two ways, one hand-off
 

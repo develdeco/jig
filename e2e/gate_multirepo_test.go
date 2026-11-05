@@ -10,6 +10,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,6 +27,7 @@ import (
 const (
 	apiHandlerSource = "package server\n\n// Handler names what the api serves.\nfunc Handler() string { return \"total\" }\n"
 	webPageSource    = "package ui\n\n// Page names what the web page shows.\nfunc Page() string { return \"order total\" }\n"
+	apiHandlerFixed  = "package server\n\n// Handler names what the api serves, with the currency.\nfunc Handler() string { return \"total in USD\" }\n"
 	webPageFixed     = "package ui\n\n// Page names what the web page shows, as dollars.\nfunc Page() string { return \"$4.00\" }\n"
 )
 
@@ -464,10 +466,13 @@ func TestGateCoversEveryRepo(t *testing.T) {
 }
 
 // TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo: a session that built
-// in one repo of the ticket may not review the ticket, whichever repo its work
+// in one repo of the ticket is a builder of the ticket, whichever repo its work
 // is in - the builder of the api, the builder of the web, and a session that
 // only edited a file of the web with its tools - and jig tells it so before the
-// review. A session that built none of it reviews both repos.
+// review. Its round is recorded clean (independence is a fact of the round,
+// not a condition of it): unknown where no hook reported the session's calls
+// (the two builders commit with none), false where one did (the edit). A
+// session that built none of it reviews both repos, independent.
 func TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo(t *testing.T) {
 	t.Parallel()
 	b := buildOrchestratorTicket(t)
@@ -499,22 +504,24 @@ func TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo(t *testing.T) {
 			t.Fatalf("jig gate for round %s: exit %d\nstdout:\n%s\nstderr:\n%s", round, r.Code, r.Stdout, r.Stderr)
 		}
 	}
-	notIndependent := func(h *fakeHarness, round string) {
+	// byABuilder has h, a builder of the ticket, review round n: the round is
+	// recorded clean with the independence jig could tell (want).
+	byABuilder := func(h *fakeHarness, round string, want any) {
 		t.Helper()
 		done := closedBy(h, round)
-		if done.Code != 1 || !strings.Contains(done.Stdout, "REVIEW_NOT_INDEPENDENT") || !strings.Contains(done.Stdout, "independent: false") {
-			t.Fatalf("jig review done by %s: exit %d, want REVIEW_NOT_INDEPENDENT\nstdout:\n%s\nstderr:\n%s", h.Session, done.Code, done.Stdout, done.Stderr)
+		if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, fmt.Sprintf("independent: %v", want)) {
+			t.Fatalf("jig review done by %s: exit %d, want a clean round with independent: %v\nstdout:\n%s\nstderr:\n%s", h.Session, done.Code, want, done.Stdout, done.Stderr)
 		}
-		if rep := b.report(t, round); rep.Verdict != "not-independent" || rep.Independent != false {
-			t.Errorf("report.yaml of round %s = %+v, want a round that is not independent", round, rep)
+		if rep := b.report(t, round); rep.Verdict != "clean" || rep.Independent != want {
+			t.Errorf("report.yaml of round %s = %+v, want a clean round with independent: %v", round, rep, want)
 		}
 	}
 
 	// The web's builder never touched the api, and the api's builder never
 	// touched the web; each built part of what the round reviews.
-	notIndependent(b.web, "1")
+	byABuilder(b.web, "1", "unknown")
 	opened("2")
-	notIndependent(b.api, "2")
+	byABuilder(b.api, "2", "unknown")
 
 	// A session that only edited a file in the web clone with its tools: the
 	// ledger names it a builder by the ticket the branch of that clone binds, in
@@ -523,7 +530,7 @@ func TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo(t *testing.T) {
 	edited.Clone = b.fx.NestedDirs["web"]
 	edited.Hook("PostToolUse", map[string]any{"tool_name": "Edit", "tool_input": map[string]any{"file_path": filepath.Join(edited.Clone, "ui", "page.go")}})
 	opened("3")
-	notIndependent(edited, "3")
+	byABuilder(edited, "3", false)
 
 	// A session that built none of it reviews round 4, over both repos.
 	opened("4")

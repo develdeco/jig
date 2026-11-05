@@ -400,13 +400,13 @@ func TestNextAndGateAdviseWhoReviews(t *testing.T) {
 	}
 
 	// No session: nothing is said of it, and the gate says only what a reviewer
-	// does and who must not be one.
+	// does and who should not be one.
 	out, text := r.next(t, r.env(""))
 	if out.Phase.Name != "review" || !out.Phase.Ready || out.Fresh != "" || len(out.Advice) != 0 || strings.Contains(text, "fresh:") || strings.Contains(text, "spawn a subagent") {
 		t.Errorf("jig next with no session: %+v\n%s", out, text)
 	}
 	gate := strings.Join(gateAdvice(r.env(""), deps, T), "\n")
-	if !strings.Contains(gate, "`jig review context "+T+"`") || !strings.Contains(gate, "REVIEW_NOT_INDEPENDENT") || strings.Contains(gate, "this session") || strings.Contains(gate, "spawn a subagent") {
+	if !strings.Contains(gate, "`jig review context "+T+"`") || !strings.Contains(gate, "should not review it") || strings.Contains(gate, "REVIEW_NOT_INDEPENDENT") || strings.Contains(gate, "this session") || strings.Contains(gate, "spawn a subagent") {
 		t.Errorf("jig gate advice with no session:\n%s", gate)
 	}
 

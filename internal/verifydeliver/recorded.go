@@ -711,9 +711,8 @@ func inStrings(list []string, s string) bool {
 // Session: jig looks for them, LedgerReviewer, and otherwise says it does not
 // know); whether they built what they reviewed decides independent - over the
 // builders of every repo the ticket's slices build in, since the ledger and the
-// journal name a builder by the ticket and its branch - and a reviewer who did
-// makes the round not clean (REVIEW_NOT_INDEPENDENT, returned with the report
-// of the round that was recorded).
+// journal name a builder by the ticket and its branch - which the round records
+// beside its verdict and never turns into a refusal (ADR 0046).
 func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report GateReport, err error) {
 	var run *gateRun
 	defer func() { run.pushFailure(err) }()
@@ -817,10 +816,11 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 			prov.Session, prov.Agent, prov.How = found.Session, found.Agent, found.How
 		}
 	}
-	if prov.How == ReviewerByEnv && prov.Agent == "" {
+	if (prov.How == ReviewerByEnv || prov.How == ReviewerByFlag) && prov.Agent == "" {
 		// A session from the environment is the harness session, which a
-		// subagent shares with its parent and so with builders it never was:
-		// the ledger says which agent of that session read the round.
+		// subagent shares with its parent and so with builders it never was;
+		// a session from the flag can be that same id. The ledger says which
+		// agent of that session read the round.
 		if agent, ok, err := LedgerReviewerAgent(d, p.Ticket, p.Opened, prov.Session); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: review done: read the ledger: %w", err)
 		} else if ok {

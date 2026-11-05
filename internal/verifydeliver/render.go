@@ -999,6 +999,68 @@ func sortFindingOutcomes(outcomes []findingOutcome) {
 	})
 }
 
+// otherFinding is a finding that belongs to another repo of the ticket,
+// told in one line in this repo's review notes.
+type otherFinding struct {
+	repo, file, title string // file is repo-relative
+}
+
+// reviewerLines are the review notes' list of who reviewed each reviewer
+// round, oldest first, with the round's scope and the range it read (a round
+// no recorded reviewer reported, a scripted one, is left out). Every round is
+// listed, not the last alone: a delta round reads only part of the change, so
+// what the whole change had for a review is the rounds together.
+func reviewerLines(rounds []RoundRecord) []string {
+	var out []string
+	for _, r := range rounds {
+		if r.Independent == "" {
+			continue
+		}
+		var what []string
+		if r.Scope != "" {
+			what = append(what, r.Scope)
+		}
+		if rng := shortRange(r.Base, r.Head); rng != "" {
+			what = append(what, rng)
+		}
+		label := fmt.Sprintf("Round %d", r.Round)
+		if len(what) > 0 {
+			label += " (" + strings.Join(what, ", ") + ")"
+		}
+		out = append(out, "- "+label+": reviewed by "+reviewerWho(r.Reviewer, r.Independent)+".")
+	}
+	return out
+}
+
+// reviewerWho names a round's reviewer and says whether they are one of the
+// builders, as the round recorded it.
+func reviewerWho(p Provenance, independent Independence) string {
+	who := "a reviewer jig could not identify"
+	if p.Known() {
+		who = "session `" + p.Session + "`"
+		if p.Agent != "" {
+			who += ", agent `" + p.Agent + "`"
+		}
+	}
+	switch independent {
+	case IndependentYes:
+		return who + ", none of the builders"
+	case IndependentNo:
+		return who + ", one of the builders: not an independent review"
+	default:
+		return who + "; jig could not tell whether the reviewer built part of the change"
+	}
+}
+
+// shortRange is base..head with each sha cut to 7 characters, or "" when the
+// round's base is not known or its head names several repos.
+func shortRange(base, head string) string {
+	if base == "" || head == "" || strings.Contains(head, ":") {
+		return ""
+	}
+	return shortSHA(base) + ".." + shortSHA(head)
+}
+
 // reviewNotesFile is the name, in the ticket's pr directory, of the review notes
 // that go with the pull request of repo: review-notes.md, or for a ticket that
 // publishes in several repos review-notes-<repo>.md, since each pull request
@@ -1011,18 +1073,25 @@ func reviewNotesFile(repo string, several bool) string {
 }
 
 // writeReviewNotes writes <ticket>/pr/<name> (see reviewNotesFile), the pull
-// request's first comment: the last round's own summary, every finding across
-// every round ordered by risk with how it ended, and coverage - the files the
-// change touched (touchedFiles, Publish's own diff of the ship range)
-// against the files the reviewer read (reviewedPaths), and, for a reviewer's
-// rounds, the behavior they tested (behavior, ADR 0036; nil for scripted
-// rounds). outcomes, reviewedPaths and lastSummary all come from the one pass
+// request's first comment: who reviewed each round (rounds, ReadRounds), the
+// last round's own summary, every finding across every round ordered by risk
+// with how it ended, and coverage - the files the change touched
+// (touchedFiles, Publish's own diff of the ship range) against the files the
+// reviewer read (reviewedPaths), and, for a reviewer's rounds, the behavior
+// they tested (behavior, ADR 0036; nil for scripted rounds). Who reviewed
+// comes first: whether a reviewer built part of the change is a fact of the
+// round for whoever merges to weigh, not a condition publish checks (ADR
+// 0046). outcomes, reviewedPaths and lastSummary all come from the one pass
 // collectFindingsWithOutcomes already makes over every round's
 // findings.yaml; this function reads nothing on its own.
-func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastSummary string, outcomes []findingOutcome, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
+func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
+
+	if lines := reviewerLines(rounds); len(lines) > 0 {
+		b.WriteString("## Reviewers\n\n" + strings.Join(lines, "\n") + "\n\n")
+	}
 
 	if lastSummary != "" {
 		fmt.Fprintf(&b, "## Round %d\n\n%s\n\n", lastRound, lastSummary)
@@ -1042,6 +1111,14 @@ func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, lastS
 			}
 			b.WriteString("\n")
 		}
+	}
+
+	if len(others) > 0 {
+		b.WriteString("## Findings in other repos\n\n")
+		for _, o := range others {
+			fmt.Fprintf(&b, "- %s: %s: %s\n", o.repo, o.file, o.title)
+		}
+		b.WriteString("\n")
 	}
 
 	// Coverage: the files the change touched, against the files the
