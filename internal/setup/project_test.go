@@ -182,7 +182,7 @@ func TestStubBodyListsTheSkillsAndSendsToTheBinary(t *testing.T) {
 		"`jig next <ticket>` names the phase it is at", "is a start-to-finish run", "hands over no decision", "go with your recommendations hands those decisions over", "either or both",
 		"Start the review's reviewer and wait for it as `jig gate` says", "a subagent hands back with the round open", "never schedule a wakeup or call another tool to stall",
 		"A request that names none", "is fresh work: its brief comes first, with the `intake` skill", "asks for two of them",
-		"\"then build it, review it and publish it\"", "or a chart verdict (a chart is not a ticket", "runs the chart with that skill", "decides brief or chart and mints a ticket for a brief"} {
+		"\"then build it, review it and publish it\"", "or a chart verdict (a chart is not a ticket)", "What follows a chart verdict depends on the prompt's intent to launch", "a fully explicit one starts the chart run", "read `jig skill intake`, \"Then\"", "runs the chart with that skill", "decides brief or chart and mints a ticket for a brief"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("stub lacks %q:\n%s", want, body)
 		}
