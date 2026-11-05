@@ -15,7 +15,7 @@ import (
 // TestChartVerdictIntent runs the built binary and reads what a session reads
 // at a chart verdict: the three outcomes in intake, the chart skill's three
 // prompts and its skipped allow question, the here skill's pointer, and the
-// stub jig attach writes. The text stays within the skill budget.
+// stub jig attach writes. The skills' byte budget is the lint's to hold.
 func TestChartVerdictIntent(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
@@ -31,7 +31,7 @@ func TestChartVerdictIntent(t *testing.T) {
 
 	for _, want := range []string{
 		"**No intent**", "**Intent, not fully explicit**", "**Fully explicit**",
-		"\"Take <ticket> to PR\"", "\"Take <chart> to PR\"", "ask nothing", "\"not now\" the other answer", "unattended, stop",
+		"\"Take <ticket> to PR\"", "\"Take <chart> to PR\"", "ask nothing", "\"not now\" the other answer", "only if the yes says so", "unattended, stop",
 		"Why: a ticket's terms ask for a ticket run, which a chart verdict ends", "unsure, ask",
 		"run `jig skill chart`", "its own `id`, `title` and `body` scoped to its part", "graduate keeps it `existing`",
 	} {
