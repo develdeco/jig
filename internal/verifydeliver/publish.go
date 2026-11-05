@@ -304,13 +304,8 @@ func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
 			Help: []string{fmt.Sprintf("Run `jig gate %s` until it reports clean before publishing.", ticket)},
 		}
 	}
-	if gateRep.Independent == IndependentNo {
-		return nil, &axi.Error{
-			Msg:  fmt.Sprintf("the latest gate round for %s was reviewed by an agent that built part of it", ticket),
-			Code: "PUBLISH_NOT_INDEPENDENT",
-			Help: []string{fmt.Sprintf("Have a fresh-context reviewer review it: `jig gate %s`", ticket)},
-		}
-	}
+	// Who reviewed the round is not checked here: it is a fact of the round,
+	// which the review notes say (ADR 0046).
 	if err := checkReviewedIntent(d.Store, ticket, gateRep); err != nil {
 		return nil, err
 	}
@@ -978,7 +973,11 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		}
 		behavior = &cov
 	}
-	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior); err != nil {
+	rounds, err := ReadRounds(d.Store, ticket)
+	if err != nil {
+		return publication{}, err
+	}
+	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior); err != nil {
 		return publication{}, err
 	}
 	return publication{

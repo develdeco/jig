@@ -353,8 +353,8 @@ func (l *stringList) Set(v string) error {
 // round. The report is the result file, or the findings drafted with `jig
 // finding` and the paths the reviewer read; either is held to the same strict
 // parse and checks, so a report that fails any leaves the round open for the
-// reviewer to correct. A report from a reviewer that built part of the change
-// is recorded but is not clean (REVIEW_NOT_INDEPENDENT).
+// reviewer to correct. Whether the reviewer built part of the change is
+// recorded with the round (`independent`), never a reason to refuse it.
 func cmdReviewDone(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "review done")
 	result := fs.String("result", "", reviewResultUsage)

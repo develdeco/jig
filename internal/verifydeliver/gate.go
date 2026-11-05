@@ -139,7 +139,7 @@ type GateOpts struct {
 // GateReport is Gate's result.
 type GateReport struct {
 	Round     int
-	Verdict   string // clean|fix-slices|not-independent
+	Verdict   string // clean|fix-slices (not-independent is an older jig's, read back from report.yaml)
 	TargetSHA map[string]string
 	// Model and Effort are what the reviewer said it ran on: self-reported,
 	// "" when it said nothing or no reviewer ran. jig chooses no model.
@@ -160,6 +160,10 @@ type GateReport struct {
 	// scope resolves against (review.go's resolveScopeBase). nil for a
 	// scripted round.
 	ReviewedSHA map[string]string
+	// ReviewedBase is repoName -> the base the reviewer read repo from, on
+	// every reviewer round: with ReviewedSHA, the range the round read. nil
+	// for a scripted round and for a round an older jig recorded.
+	ReviewedBase map[string]string
 	// Scope is this round's scope diff kind (full|delta), "" for a
 	// scripted round.
 	Scope string
@@ -213,11 +217,14 @@ type reportYAML struct {
 	Effort      string            `yaml:"effort,omitempty"`
 	TargetSHA   map[string]string `yaml:"target_sha"`
 	ReviewedSHA map[string]string `yaml:"reviewed_sha,omitempty"`
-	Intent      reportIntentYAML  `yaml:"intent"`
+	// ReviewedBase is the base the reviewer read each repo from, so the
+	// range a round read is on its own record (ReadRounds).
+	ReviewedBase map[string]string `yaml:"reviewed_base,omitempty"`
+	Intent       reportIntentYAML  `yaml:"intent"`
 	// Independent says whether the reviewer of a recorded round is
 	// independent of the builders (true, false or unknown); absent for a
-	// scripted or launched round. Publish refuses a round whose reviewer
-	// built what it reviewed.
+	// scripted or launched round. A fact of the round, never a reason it
+	// is not clean (ADR 0046).
 	Independent Independence `yaml:"independent,omitempty"`
 	// Reviewer is who reported the round, as the reviewer's session and
 	// agent ids and how jig learned them.
@@ -714,16 +721,17 @@ func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope s
 
 func writeReportYAML(dir string, report GateReport) error {
 	rep := reportYAML{
-		Round:       report.Round,
-		Verdict:     report.Verdict,
-		Model:       report.Model,
-		Effort:      report.Effort,
-		TargetSHA:   report.TargetSHA,
-		ReviewedSHA: report.ReviewedSHA,
-		Intent:      reportIntentYAML{Source: report.Intent.Source, SHA256: report.IntentSHA256},
-		FixSlices:   report.FixSlices,
-		Independent: report.Independent,
-		OracleNames: report.OracleNames,
+		Round:        report.Round,
+		Verdict:      report.Verdict,
+		Model:        report.Model,
+		Effort:       report.Effort,
+		TargetSHA:    report.TargetSHA,
+		ReviewedSHA:  report.ReviewedSHA,
+		ReviewedBase: report.ReviewedBase,
+		Intent:       reportIntentYAML{Source: report.Intent.Source, SHA256: report.IntentSHA256},
+		FixSlices:    report.FixSlices,
+		Independent:  report.Independent,
+		OracleNames:  report.OracleNames,
 	}
 	if report.Independent != "" {
 		reviewer := report.Reviewer

@@ -386,18 +386,17 @@ func gateRoundsOf(st *store.Store, ticket string) ([]phase.Round, error) {
 		r := phase.Round{N: n}
 		data, err := os.ReadFile(filepath.Join(dir, e.Name(), "report.yaml"))
 		if err == nil {
+			// The verdict is the round's own: a clean round is clean whoever
+			// reviewed it (ADR 0046), and one an older jig recorded
+			// not-independent is read as it was written, not clean.
 			var rep struct {
-				Verdict     string `yaml:"verdict"`
-				Independent string `yaml:"independent"`
-				Reviewer    *struct {
+				Verdict  string `yaml:"verdict"`
+				Reviewer *struct {
 					Session string `yaml:"session"`
 				} `yaml:"reviewer"`
 			}
 			if yaml.Unmarshal(data, &rep) == nil {
 				r.Verdict = rep.Verdict
-				if r.Verdict == phase.VerdictClean && rep.Independent == string(verifydeliver.IndependentNo) {
-					r.Verdict = verifydeliver.VerdictNotIndependent
-				}
 				if rep.Reviewer != nil {
 					r.Reviewer = rep.Reviewer.Session
 				}
