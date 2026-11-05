@@ -19,7 +19,7 @@ The owner clarified (2026-11-05) that the question was asked too often and too u
 ## Rejected alternatives
 
 - **Ask after every chart verdict.** The old rule: it asks a person who asked for no launch, and it stops a run the person left unattended on purpose.
-- **Read "fix this" as asking for the result.** A problem described is a request for a brief; reading it as a launch would start work the person never named.
+- **Read "fix this" as asking for the result.** It names no phase past the brief, so a ticket run already stops after the brief and relays "Build T". Reading it as a launch would put it among the prompts that confirm, and a single ticket would then ask "build it now?" after every brief instead of stopping.
 - **Code that classifies prompts.** ADR 0035 puts the reading in the session; a phrase list in Go would misread the next phrasing. The skills give examples and the session judges.
 - **Close or rewrite the named ticket.** It would change a ticket outside the chart's own flow; keeping its id as an entry reuses what `jig graduate` already does.
 
@@ -27,5 +27,4 @@ The owner clarified (2026-11-05) that the question was asked too often and too u
 
 - Supersedes [ADR 0037](0037-a-chart-is-run-from-the-main-session.md)'s decision "A chart verdict ends a ticket run, and the session asks": the verdict still ends the run, and what follows is the three outcomes above. Amends [ADR 0035](0035-start-to-finish-and-recommendations-are-separate.md): the intent to launch is one more thing the session reads from the prompt.
 - This is skill text and the project stub, as the rule it replaces was: `skills/intake`, `skills/chart`, `skills/here` and `StubBody`. `jig graduate`, `jig next` and the chart's derived standing are unchanged.
-- The `intake` and `chart` skills stay at most 5880 bytes, so the next change to either has room under the lint's 6000.
 - `CONTEXT.md` says what follows a verdict in *Start-to-finish run* and *Chart run*.
