@@ -21,18 +21,18 @@ Before the first wave, ask once to allow what the builds run: `jig`, `git` and t
 
 Before each wave, stack every pair in `workspace_overlaps`: the later ticket (Plan order) gets a `stacked` `blocked_by` on the earlier in its `ticket.yaml`; check it with `jig validate <T> --check`, read the chart again, say so. Two in parallel only if the person says so (merged by hand).
 
-Go through `run` wave by wave; no edge lies inside a wave. Start a subagent per ticket of the wave (Agent tool, `subagent_type: general-purpose`, `model: sonnet` unless the person named another, in the background), each in its own worktree: run the `add` commands of the ticket's `worktrees` (`jig next <T>`, or the chart's), one at a time (unsafe in parallel), and read `jig next <T>` again when a stacked ticket's wave starts. `present`: use its `dir`. `no_clone`: no clone here; tell the person, do not start that ticket. jig makes no worktree. Its prompt:
+Go through `run` wave by wave; no edge lies inside a wave. Start a subagent per ticket of the wave (Agent tool, `subagent_type: general-purpose`, `model: sonnet` unless the person named another, in the background), each in its own worktree: run the `add` commands of the ticket's `worktrees` (`jig next <T>`, or the chart's), one at a time, and read `jig next <T>` again when a stacked ticket's wave starts. `present`: use its `dir`. `no_clone`: tell the person, do not start that ticket. Its prompt:
 
 ```
 You are building ticket <T>. Work only in the worktree of each repo (`dir` of its rows), on branch <branch>; run every command there.
 Build it with the build skill (`jig skill build`): claim each slice with `--unattended`, commit with its `Jig-Slice` trailer.
 Slices ready in several repos (`jig next <T>`): build one repo yourself; start a nested builder per other repo in the background with this prompt, told to build only its repo's slices, never gate or nest (a hold saying to gate is yours: it hands back), and wait for them before the gate. Relay a builder's question: end your turn with the question, its id and default; resume it when resumed. No Agent tool: build repos in turn, hand back at green; I start the reviewer.
 Stuck: `jig ask --slice <slice> "<question>"` with your default, then end your turn with the question, its id and the default. I answer and resume you.
-When every slice is green, open the gate (`jig gate <T>`) and have it reviewed by your own reviewer subagent if you have the Agent tool (`jig skill review`). A round that only queues fixes: build them and have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict.
+When every slice is green, open the gate (`jig gate <T>`) and have it reviewed by your own reviewer subagent if you have the Agent tool (`jig skill review`). A round that only queues fixes: build them and have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict, or as `jig gate` says.
 Never publish. Never answer your own question.
 ```
 
-Wait for the hand-backs (TaskOutput, `block: true`). jig holds a subagent at its stop while a verification runs, tracked changes are uncommitted, or every slice is green and no round is open: not stuck, wait.
+Wait for the hand-backs (TaskOutput `block: true`, else the notice; none if the call returned one). jig holds a subagent at its stop while a verification runs, tracked changes are uncommitted, or every slice is green and no round is open: not stuck, wait.
 
 A `run` ticket in publish is published and behind (`state: behind`): no build subagent. For each of its `stack` rows with a `merge`, run that merge yourself in a checkout of the ticket's branch (its worktree; its `worktrees` give the add when it is gone). A clean merge needs no review; one resolved by hand needs `jig gate <T>` and a clean round first. Then publish it (Publish).
 

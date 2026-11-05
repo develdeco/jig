@@ -51,7 +51,7 @@ func TestChartSkillHandsOff(t *testing.T) {
 			t.Errorf("the Publish section lacks %q:\n%s", want, publish)
 		}
 	}
-	for _, want := range []string{"block: true", "`ends`"} {
+	for _, want := range []string{"block: true", "`ends`", "none if the call returned one", "or as `jig gate` says"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("jig skill chart lacks %q", want)
 		}
