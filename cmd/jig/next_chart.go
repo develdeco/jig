@@ -24,21 +24,24 @@ import (
 // spend, which are left out when there is nothing to say; history is [] when
 // the text form is read or the history cannot be.
 type nextChart struct {
-	Chart       string            `json:"chart"`
-	Title       string            `json:"title"`
-	Ready       bool              `json:"ready"`
-	Code        string            `json:"code"`
-	Reason      string            `json:"reason"`
-	Prompt      string            `json:"prompt"`
-	Started     bool              `json:"started"`
-	Ungraduated int               `json:"ungraduated"`
-	Briefs      []string          `json:"briefs"`
-	Run         [][]string        `json:"run"`
-	Tickets     []nextChartTicket `json:"tickets"`
-	Ends        []nextChartEnd    `json:"ends"`
-	History     []nextChartCommit `json:"history"`
-	Map         *nextChartMap     `json:"map,omitempty"`
-	Spend       *nextChartSpend   `json:"spend,omitempty"`
+	Chart       string `json:"chart"`
+	Title       string `json:"title"`
+	Ready       bool   `json:"ready"`
+	Code        string `json:"code"`
+	Reason      string `json:"reason"`
+	Prompt      string `json:"prompt"`
+	Started     bool   `json:"started"`
+	Ungraduated int    `json:"ungraduated"`
+	// Named echoes the tickets a run was named over (--tickets), in the order of
+	// the rows; left out for the whole chart.
+	Named   []string          `json:"named,omitempty"`
+	Briefs  []string          `json:"briefs"`
+	Run     [][]string        `json:"run"`
+	Tickets []nextChartTicket `json:"tickets"`
+	Ends    []nextChartEnd    `json:"ends"`
+	History []nextChartCommit `json:"history"`
+	Map     *nextChartMap     `json:"map,omitempty"`
+	Spend   *nextChartSpend   `json:"spend,omitempty"`
 	// WorkspaceOverlaps are the tickets of one wave that build in one workspace
 	// of a repo, the pair in Plan order: the later one is to be stacked on the
 	// earlier. Same element as `jig next`'s workspace_overlaps. [] when none.
@@ -289,6 +292,9 @@ func (n nextChart) blocks(label string) []string {
 	add("code", n.Code)
 	add("reason", n.Reason)
 	pairs = append(pairs, [2]string{"started", yesNo(n.Started)}, [2]string{"ungraduated", strconv.Itoa(n.Ungraduated)})
+	if len(n.Named) > 0 {
+		pairs = append(pairs, [2]string{"named", joinPlus(n.Named)})
+	}
 	if n.Spend != nil {
 		pairs = append(pairs, [2]string{"spend", n.Spend.line()})
 	}
@@ -406,6 +412,12 @@ func chartHelp(c phase.Chart) []string {
 		return help
 	case c.Code == phase.CodeChartWaitsMerge:
 		return []string{fmt.Sprintf("Merge %s, then ask: %s", mergeTargets(c.Ends), c.Prompt)}
+	case c.Code == phase.CodeNeedNotNamed && len(c.Ends) > 0:
+		a := c.Ends[0].Because.Ticket
+		if a == "" {
+			a = fmt.Sprintf("entry #%d", c.Ends[0].Because.Pos)
+		}
+		return []string{c.Reason, fmt.Sprintf("Name %s too, or take %s first", a, a)}
 	case c.Code == phase.CodeChartNotGraduated && c.Ungraduated > 0:
 		return []string{graduate}
 	case c.Code == phase.CodeChartDone:

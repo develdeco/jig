@@ -24,10 +24,17 @@ type chartMap struct {
 // that says where a chart stands asks it, so `jig next <chart>`, `jig status
 // <chart>` and the TUI's chart screen agree.
 func deriveChart(st *store.Store, cfg project.Config, mp project.MachineProject, name string, merges mergeSource) (phase.Chart, chartMap, error) {
+	return deriveChartNamed(st, cfg, mp, name, merges, nil)
+}
+
+// deriveChartNamed is deriveChart over the tickets a prompt named (ids of the
+// chart, checked by namedTickets); none means the whole chart.
+func deriveChartNamed(st *store.Store, cfg project.Config, mp project.MachineProject, name string, merges mergeSource, named []string) (phase.Chart, chartMap, error) {
 	facts, err := chartFacts(st, cfg, mp, name, merges)
 	if err != nil {
 		return phase.Chart{}, chartMap{}, err
 	}
+	facts.Named = named
 	m := chartMap{MapSections: recall.ParseMap("")}
 	if data, err := os.ReadFile(st.ChartMapFile(name)); err == nil {
 		m = chartMap{MapSections: recall.ParseMap(string(data)), Exists: true}
