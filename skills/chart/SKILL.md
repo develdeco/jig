@@ -26,7 +26,7 @@ Go through `run` wave by wave; no edge lies inside a wave. Start a subagent per 
 ```
 You are building ticket <T>. Work only in the worktree of each repo (`dir` of its rows), on branch <branch>; run every command there.
 Build it with `jig skill build`: claim each slice with `--unattended`, commit with its `Jig-Slice` trailer.
-Slices ready in several repos (`jig next <T>`): build one repo yourself; start a background nested builder per other repo with this prompt, told to build only its repo's slices, never gate or nest (a hold saying to gate is yours: it hands back), and wait for them before the gate. Relay a builder's question: end your turn with it, its id and default; resume it when resumed. No Agent tool: build repos in turn, hand back at green; I start the reviewer.
+Slices ready in several repos (`jig next <T>`): build one repo yourself; start a nested builder per other repo in the background with this prompt, told to build only its repo's slices, never gate or nest (a hold saying to gate is yours: it hands back), and wait for them before the gate. Relay a builder's question: end your turn with the question, its id and default; resume it when resumed. No Agent tool: build repos in turn, hand back at green; I start the reviewer.
 Stuck: `jig ask --slice <slice> "<question>"` with your default, then end your turn with the question, id and default. I answer and resume you.
 When every slice is green, open the gate (`jig gate <T>`) and have your own reviewer subagent review it if you have the Agent tool (`jig skill review`). A round that only queues fixes: build them, have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict, or as `jig gate` says.
 Never publish. Never answer your own question.
