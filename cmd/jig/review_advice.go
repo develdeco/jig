@@ -44,8 +44,14 @@ func sessionAdvice(e env, d verifydeliver.Deps, ticket string) (reviewAdvice, bo
 // adviceFor is the advice for a session with freshness f. A fresh session
 // reviews in its own context. One that is not, or that jig cannot tell, has a
 // subagent review: the line that says why, how to start the subagent in Claude
-// Code, the prompt that makes it a reviewer, and why the main session must not
-// read the round as well.
+// Code in the foreground where the Agent tool takes it, and how to wait for it,
+// keyed on what the call returns: the subagent's reply holds the verdict; a
+// launch notice means it runs in the background, and then a top-level session
+// waits with TaskOutput where its tools have it, else at the harness's notice
+// (Claude Code 2.1.277 removed TaskOutput), while a subagent hands back with
+// the round open, since its turn's end is its hand-back and the reviewer's
+// notice goes to the session above it. Then the prompt that makes it a
+// reviewer, and why the main session must not read the round as well.
 func adviceFor(f verifydeliver.Fresh, ticket, clone string) reviewAdvice {
 	if f.Known && f.Fresh {
 		return reviewAdvice{State: freshYes, Lines: []string{
@@ -59,7 +65,7 @@ func adviceFor(f verifydeliver.Fresh, ticket, clone string) reviewAdvice {
 	}
 	return reviewAdvice{State: state, Lines: []string{
 		first,
-		"In Claude Code, call the Agent tool (Task in older versions) with `subagent_type: general-purpose`, `model: opus` unless the person named another model, and no worktree isolation (the round has its own); another harness starts a fresh session instead. Claude Code runs it in the background whatever you ask: wait for its verdict in this turn with TaskOutput (`block: true`, the agent id the call returned; load the tool with ToolSearch when your tools do not list it). Do not end the turn or schedule a wakeup while it runs, and never call another tool to stall. Pass it this prompt",
+		fmt.Sprintf("In Claude Code, call the Agent tool (Task in older versions) with `subagent_type: general-purpose`, `model: opus` unless the person named another model, `run_in_background: false` where the tool takes it, and no worktree isolation (the round has its own); another harness starts a fresh session instead. If the call's own result is the subagent's reply, that result holds the verdict. If the call returns without the reply (a launch notice and an agent id), the subagent runs in the background, and how you wait depends on where you are. A top-level session waits for its verdict in this turn with TaskOutput (`block: true`, that agent id) where your tools have it (search for it with ToolSearch when they do not list it); where they have none (Claude Code 2.1.277 removed it), the harness's notice that the subagent finished is the wait: end the turn as waiting, not done, and go on from the notice, which resumes an unattended `claude -p` run too. A subagent (a chart run's build subagent) cannot wait: its turn's end is its hand-back, and the reviewer's notice goes to the session above it. So hand back at once, saying the round is open and giving the reviewer's agent id, never that %s is reviewed, and asking the session above to read the verdict with `jig status %s` when the reviewer's notice comes and then resume you: `jig review done` records it whoever waited. Never schedule a wakeup or call another tool to stall. Pass it this prompt", ticket, ticket),
 		reviewerPrompt(ticket, clone),
 		"The main session must not run `jig review context` itself: jig sees a session and its subagents as one session, so if both read the round it cannot tell which of them closed it, and the round is not independent",
 	}}
