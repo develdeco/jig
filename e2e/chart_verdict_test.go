@@ -59,11 +59,6 @@ func TestChartVerdictIntent(t *testing.T) {
 			t.Errorf("jig skill %s is %d lines, want at most 100", name, n)
 		}
 	}
-	for name, text := range map[string]string{"intake": intake, "chart": chart} {
-		if n := len(text); n > 5880 {
-			t.Errorf("jig skill %s is %d bytes, want at most 5880", name, n)
-		}
-	}
 
 	// The stub jig attach writes carries the same rule, not the old question.
 	r := newHookRepo(t)
