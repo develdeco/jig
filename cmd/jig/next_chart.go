@@ -417,7 +417,7 @@ func chartHelp(c phase.Chart) []string {
 		if a == "" {
 			a = fmt.Sprintf("entry #%d", c.Ends[0].Because.Pos)
 		}
-		return []string{c.Reason, fmt.Sprintf("Name %s too, or take %s first", a, a)}
+		return []string{fmt.Sprintf("Name %s too, or take %s first", a, a)}
 	case c.Code == phase.CodeChartNotGraduated && c.Ungraduated > 0:
 		return []string{graduate}
 	case c.Code == phase.CodeChartDone:
