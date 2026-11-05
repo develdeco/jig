@@ -144,7 +144,8 @@ classDiagram
     range: base..head
     reviewer: a fresh session
     intent: brief, explicit, inferred or none
-    verdict: clean, findings or not-independent
+    verdict: clean or findings
+    independent: true, false or unknown
   }
   class Finding {
     file:line

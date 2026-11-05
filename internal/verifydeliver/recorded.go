@@ -711,9 +711,8 @@ func inStrings(list []string, s string) bool {
 // Session: jig looks for them, LedgerReviewer, and otherwise says it does not
 // know); whether they built what they reviewed decides independent - over the
 // builders of every repo the ticket's slices build in, since the ledger and the
-// journal name a builder by the ticket and its branch - and a reviewer who did
-// makes the round not clean (REVIEW_NOT_INDEPENDENT, returned with the report
-// of the round that was recorded).
+// journal name a builder by the ticket and its branch - which the round records
+// beside its verdict and never turns into a refusal (ADR 0046).
 func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report GateReport, err error) {
 	var run *gateRun
 	defer func() { run.pushFailure(err) }()

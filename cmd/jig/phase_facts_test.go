@@ -138,7 +138,7 @@ func TestPhaseFactsReadTheStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	approveBrief(t, st, "JIG-2")
-	for n, body := range map[int]string{1: "verdict: fix-slices\nreviewer:\n  session: s-rev\n", 2: "verdict: clean\nindependent: false\n", 3: "verdict: clean\n", 4: "not: [yaml"} {
+	for n, body := range map[int]string{1: "verdict: fix-slices\nreviewer:\n  session: s-rev\n", 2: "verdict: clean\nindependent: false\n", 3: "verdict: not-independent\nindependent: false\n", 4: "not: [yaml"} {
 		dir := filepath.Join(st.TicketDir("JIG-2"), "gate", fmt.Sprintf("round-%d", n))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -172,7 +172,9 @@ func TestPhaseFactsReadTheStore(t *testing.T) {
 	for _, r := range f.Rounds {
 		rounds = append(rounds, fmt.Sprintf("%d:%s:%s", r.N, r.Verdict, r.Reviewer))
 	}
-	if want := "1:fix-slices:s-rev 2:not-independent: 3:clean: 4::"; strings.Join(rounds, " ") != want {
+	// A clean round is clean whoever reviewed it; a round an older jig
+	// recorded not-independent keeps its verdict.
+	if want := "1:fix-slices:s-rev 2:clean: 3:not-independent: 4::"; strings.Join(rounds, " ") != want {
 		t.Errorf("rounds = %v, want %s (an unreadable report is a round with no verdict)", rounds, want)
 	}
 	if len(f.Blockers) != 1 || f.Blockers[0].Ticket != "JIG-1" || f.Blockers[0].Kind != "merged" {

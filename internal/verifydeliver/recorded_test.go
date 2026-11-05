@@ -303,23 +303,25 @@ func mustMarshalResult(t *testing.T, r ReviewResult) []byte {
 // TestGateFinishRecordsTheRoundAndJudgesTheReviewer: the report of a reviewer
 // who did not build the change closes the round clean and independent; its
 // words reach the round's files and the journal's line carries who reported
-// it. The same report from one of the builders is recorded too, and is not
-// clean: the report says independent: false and the error is
-// REVIEW_NOT_INDEPENDENT. A reviewer jig cannot identify is independent:
-// unknown, and the round stands.
+// it. Independence is a fact of the round, not a condition of it: the same
+// report from one of the builders closes the round clean too, with no error,
+// and records independent: false where a hook reported the builder's calls,
+// and unknown where none did (its agent is "" for want of a record, so a
+// subagent and the builder look alike). A reviewer jig cannot identify is
+// independent: unknown.
 func TestGateFinishRecordsTheRoundAndJudgesTheReviewer(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name        string
-		reviewer    Provenance
-		wantIndep   Independence
-		wantVerdict string
-		wantErr     string
+		name      string
+		reviewer  Provenance
+		hooked    bool // a hook reported a tool call of s-builder
+		wantIndep Independence
 	}{
-		{"a fresh reviewer", Provenance{Session: "s-reviewer", How: ReviewerByFlag, Model: "m1", Effort: "high"}, IndependentYes, "clean", ""},
-		{"a builder", Provenance{Session: "s-builder", How: ReviewerByEnv}, IndependentNo, VerdictNotIndependent, "REVIEW_NOT_INDEPENDENT"},
-		{"the builder's subagent", Provenance{Session: "s-builder", Agent: "sub-1", How: ReviewerByLedger}, IndependentYes, "clean", ""},
-		{"nobody known", Provenance{}, IndependentUnknown, "clean", ""},
+		{"a fresh reviewer", Provenance{Session: "s-reviewer", How: ReviewerByFlag, Model: "m1", Effort: "high"}, false, IndependentYes},
+		{"a builder its hooks report", Provenance{Session: "s-builder", How: ReviewerByEnv}, true, IndependentNo},
+		{"a builder no hook reports", Provenance{Session: "s-builder", How: ReviewerByEnv}, false, IndependentUnknown},
+		{"the builder's subagent", Provenance{Session: "s-builder", Agent: "sub-1", How: ReviewerByLedger}, true, IndependentYes},
+		{"nobody known", Provenance{}, false, IndependentUnknown},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -328,25 +330,26 @@ func TestGateFinishRecordsTheRoundAndJudgesTheReviewer(t *testing.T) {
 			if err := journal.Append(d.Store, fx.Ticket, journal.Line{Slice: "a", Event: journal.EventVerifyPending, Session: "s-builder", Commit: strings.Repeat("a", 40)}); err != nil {
 				t.Fatal(err)
 			}
+			if tc.hooked {
+				if err := ledger.Append(d.Home, journal.Line{Event: journal.EventTool, Session: "s-builder", Ticket: fx.Ticket, Command: "go test ./..."}); err != nil {
+					t.Fatal(err)
+				}
+			}
 			p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
 			if err != nil {
 				t.Fatalf("GatePrepare: %v", err)
 			}
 
 			report, err := GateFinish(d, p, cleanReport(p), tc.reviewer)
-			if tc.wantErr == "" {
-				if err != nil {
-					t.Fatalf("GateFinish: %v", err)
-				}
-			} else {
-				wantAxiCode(t, err, tc.wantErr)
+			if err != nil {
+				t.Fatalf("GateFinish: %v", err)
 			}
-			if report.Round != 1 || report.Verdict != tc.wantVerdict || report.Independent != tc.wantIndep || report.Reviewer != tc.reviewer {
-				t.Fatalf("report = round %d, verdict %q, independent %q, reviewer %+v; want verdict %q, independent %q, reviewer %+v", report.Round, report.Verdict, report.Independent, report.Reviewer, tc.wantVerdict, tc.wantIndep, tc.reviewer)
+			if report.Round != 1 || report.Verdict != "clean" || report.Independent != tc.wantIndep || report.Reviewer != tc.reviewer {
+				t.Fatalf("report = round %d, verdict %q, independent %q, reviewer %+v; want verdict clean, independent %q, reviewer %+v", report.Round, report.Verdict, report.Independent, report.Reviewer, tc.wantIndep, tc.reviewer)
 			}
 			rep := reportYAMLAt(t, d, fx.Ticket, 1)
-			if rep.Verdict != tc.wantVerdict || rep.Independent != tc.wantIndep || !reflect.DeepEqual(rep.OracleNames, p.Request.Oracles) || rep.ReviewedSHA["fixture-repo"] != p.Head {
-				t.Errorf("report.yaml = %+v, want verdict %q, independent %q, the oracle names and the reviewed head %s", rep, tc.wantVerdict, tc.wantIndep, p.Head)
+			if rep.Verdict != "clean" || rep.Independent != tc.wantIndep || !reflect.DeepEqual(rep.OracleNames, p.Request.Oracles) || rep.ReviewedSHA["fixture-repo"] != p.Head || rep.ReviewedBase["fixture-repo"] != p.Base || p.Base == "" {
+				t.Errorf("report.yaml = %+v, want verdict clean, independent %q, the oracle names and the reviewed range %s..%s", rep, tc.wantIndep, p.Base, p.Head)
 			}
 			if tc.reviewer.Model != "" && (rep.Model != tc.reviewer.Model || rep.Effort != tc.reviewer.Effort) {
 				t.Errorf("report.yaml model = %q, effort = %q, want what the reviewer reported", rep.Model, rep.Effort)
@@ -359,10 +362,7 @@ func TestGateFinishRecordsTheRoundAndJudgesTheReviewer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			event := journal.EventGateRound
-			if tc.wantVerdict == "clean" {
-				event = journal.EventGateClean
-			}
+			event := journal.EventGateClean
 			var round journal.Line
 			for _, l := range lines {
 				if l.Event == event {
@@ -434,9 +434,11 @@ func TestGateFinishFindsTheReviewerWhenNobodyNamedIt(t *testing.T) {
 	// A session from the environment is the harness session: a subagent
 	// reviewing in the session its builders ran in is told apart from them by
 	// the agent the ledger recorded reading the round. Reads in another
-	// session name nobody, and reads by two agents of the session (the
-	// builder itself and a subagent) cannot say which one closes the round,
-	// so neither makes a builder's own review independent.
+	// session name nobody, and with no tool line of the builder's session jig
+	// has no record of its agents, so its review is unknown; reads by two
+	// agents of the session (the builder itself and a subagent) cannot say
+	// which one closes the round, so neither makes a builder's own review
+	// independent.
 	t.Run("an environment or flag session's agent from the ledger", func(t *testing.T) {
 		t.Parallel()
 		for _, tc := range []struct {
@@ -448,7 +450,7 @@ func TestGateFinishFindsTheReviewerWhenNobodyNamedIt(t *testing.T) {
 		}{
 			{"read by a subagent", ReviewerByEnv, []journal.Line{{Session: "s-builder", Agent: "sub-2"}}, "sub-2", IndependentYes},
 			{"read by a subagent, then in another session", ReviewerByEnv, []journal.Line{{Session: "s-builder", Agent: "sub-2"}, {Session: "s-other"}}, "sub-2", IndependentYes},
-			{"read in another session", ReviewerByEnv, []journal.Line{{Session: "s-other", Agent: "sub-2"}}, "", IndependentNo},
+			{"read in another session", ReviewerByEnv, []journal.Line{{Session: "s-other", Agent: "sub-2"}}, "", IndependentUnknown},
 			{"read by the builder and a subagent", ReviewerByEnv, []journal.Line{{Session: "s-builder"}, {Session: "s-builder", Agent: "sub-2"}}, "", IndependentNo},
 			{"flag, read by a subagent", ReviewerByFlag, []journal.Line{{Session: "s-builder", Agent: "sub-2"}}, "sub-2", IndependentYes},
 			{"flag, read by the builder and a subagent", ReviewerByFlag, []journal.Line{{Session: "s-builder"}, {Session: "s-builder", Agent: "sub-2"}}, "", IndependentNo},
@@ -482,7 +484,9 @@ func TestGateFinishFindsTheReviewerWhenNobodyNamedIt(t *testing.T) {
 // journal's claim, verify-pending and oracle lines, and the ledger's
 // git-commit lines and tool lines that changed files, for the ticket or its
 // branch. A tool line that read, searched or listed is no building: a
-// reviewer reads with the same tools.
+// reviewer reads with the same tools. A builder's session reviewing with no
+// agent is independent: false only where a tool line of the session says
+// hooks reported its agents, and unknown where none does.
 func TestBuildersAreTheAgentsThatChangedTheBranch(t *testing.T) {
 	t.Parallel()
 	fx, d, _ := cloneBuilt(t)
@@ -525,7 +529,9 @@ func TestBuildersAreTheAgentsThatChangedTheBranch(t *testing.T) {
 		{Session: "s-opener"}:               IndependentYes,
 		{Session: "s-oracle"}:               IndependentYes, // the main agent of a session whose subagent built
 		{Session: "s-oracle", Agent: "a-2"}: IndependentNo,
-		{Session: "s-claimer"}:              IndependentNo,
+		{Session: "s-editor"}:               IndependentNo,      // its hooks report its calls
+		{Session: "s-claimer"}:              IndependentUnknown, // a claim, and no tool line of its own
+		{Session: "s-committer"}:            IndependentUnknown, // a commit, and no tool line of its own
 		{}:                                  IndependentUnknown,
 	} {
 		if got, err := JudgeIndependence(d, ticket, branch, who); err != nil || got != want {
@@ -687,17 +693,20 @@ func TestRecordedTriageAppliesWhatAPersonDecidedAndNothingElse(t *testing.T) {
 	}
 }
 
-// TestPublishRefusesARoundThatIsNotIndependent: publish takes a round whose
-// reviewer was independent or unknown, and refuses one that is recorded as
-// not independent even if its verdict was edited to clean.
-func TestPublishRefusesARoundThatIsNotIndependent(t *testing.T) {
+// TestPublishTakesARoundWhateverItsReviewer: who reviewed a round is a fact of
+// it, not a condition of publishing it (ADR 0046). Publish takes a clean round
+// whether its reviewer was independent, one of the builders or unknown, and
+// the review notes say which. A round an older jig recorded not-independent
+// is not clean, and publish refuses it as such.
+func TestPublishTakesARoundWhateverItsReviewer(t *testing.T) {
 	t.Parallel()
 	fx, d, _ := cloneBuilt(t)
+	useGithubHost(t, &d, "", "")
 	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-rev"}); err != nil {
+	if _, err := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-rev", How: ReviewerByFlag}); err != nil {
 		t.Fatalf("GateFinish: %v", err)
 	}
 	reportPath := filepath.Join(gateRoundDir(d.Store, fx.Ticket, 1), "report.yaml")
@@ -708,17 +717,35 @@ func TestPublishRefusesARoundThatIsNotIndependent(t *testing.T) {
 	if !strings.Contains(string(data), "independent: true") {
 		t.Fatalf("report.yaml = %s", data)
 	}
-	edited := strings.Replace(string(data), "independent: true", "independent: false", 1)
-	if err := os.WriteFile(reportPath, []byte(edited), 0o644); err != nil {
+	for _, tc := range []struct{ independent, notes string }{
+		{"true", "reviewed by session `s-rev`, none of the builders."},
+		{"false", "reviewed by session `s-rev`, one of the builders: not an independent review."},
+		{"unknown", "reviewed by session `s-rev`; jig could not tell whether the reviewer built part of the change."},
+	} {
+		edited := strings.Replace(string(data), "independent: true", "independent: "+tc.independent, 1)
+		if err := os.WriteFile(reportPath, []byte(edited), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		report, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("PublishBody over a clean round recorded independent: %s: %v", tc.independent, err)
+		}
+		notes, err := os.ReadFile(filepath.Join(d.Store.Root, filepath.FromSlash(report.Repos[0].ReviewNotes)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(notes), "## Reviewers\n\n- Round 1 (full, ") || !strings.Contains(string(notes), "): "+tc.notes+"\n") {
+			t.Errorf("independent: %s: the review notes do not list round 1, a full round, as %q:\n%s", tc.independent, tc.notes, notes)
+		}
+	}
+
+	older := strings.Replace(strings.Replace(string(data), "independent: true", "independent: false", 1), "verdict: clean", "verdict: "+VerdictNotIndependent, 1)
+	if err := os.WriteFile(reportPath, []byte(older), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err == nil {
-		t.Fatal("PublishBody over a round recorded as not independent succeeded")
-	} else {
-		var ae *axi.Error
-		if !errors.As(err, &ae) || ae.Code != "PUBLISH_NOT_INDEPENDENT" {
-			t.Fatalf("err = %v, want PUBLISH_NOT_INDEPENDENT", err)
-		}
+	var ae *axi.Error
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); !errors.As(err, &ae) || ae.Code != "PUBLISH_NOT_CLEAN" {
+		t.Fatalf("PublishBody over a round an older jig recorded not-independent: err = %v, want PUBLISH_NOT_CLEAN", err)
 	}
 }
 
@@ -879,5 +906,51 @@ func TestRecordReviewerJournalsWhoReadsTheRound(t *testing.T) {
 	}
 	if got := gate(); got[len(got)-2] != "open 1" || got[len(got)-1] != "s-other 1  " {
 		t.Errorf("after a gate-open the reviewer was not said after = %q, want it said again", got)
+	}
+}
+
+// TestPublishListsEveryRoundsReviewer: a builder whose hooks report its calls
+// reviews round 1 (independent: false), and the round after it is the whole
+// change again, which a reviewer who built none of it reviews. The review
+// notes of the publish list both rounds, so the builder's review stays on
+// record beside the independent one.
+func TestPublishListsEveryRoundsReviewer(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := cloneBuilt(t)
+	useGithubHost(t, &d, "", "")
+	if err := journal.Append(d.Store, fx.Ticket, journal.Line{Slice: "a", Event: journal.EventVerifyPending, Session: "s-builder", Commit: strings.Repeat("a", 40)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Append(d.Home, journal.Line{Event: journal.EventTool, Session: "s-builder", Ticket: fx.Ticket, Command: "go test ./..."}); err != nil {
+		t.Fatal(err)
+	}
+	for n, reviewer := range []Provenance{{Session: "s-builder", How: ReviewerByEnv}, {Session: "s-rev", How: ReviewerByFlag}} {
+		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("GatePrepare round %d: %v", n+1, err)
+		}
+		if p.Request.Scope != "full" {
+			t.Errorf("round %d scope = %q, want full: round 1 is the first, and round 2 follows a builder's round", n+1, p.Request.Scope)
+		}
+		if _, err := GateFinish(d, p, cleanReport(p), reviewer); err != nil {
+			t.Fatalf("GateFinish round %d: %v", n+1, err)
+		}
+	}
+	report, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	notes, err := os.ReadFile(filepath.Join(d.Store.Root, filepath.FromSlash(report.Repos[0].ReviewNotes)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"- Round 1 (full",
+		"): reviewed by session `s-builder`, one of the builders: not an independent review.\n- Round 2 (full",
+		"): reviewed by session `s-rev`, none of the builders.\n",
+	} {
+		if !strings.Contains(string(notes), want) {
+			t.Errorf("the review notes lack %q:\n%s", want, notes)
+		}
 	}
 }

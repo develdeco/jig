@@ -72,7 +72,7 @@ func TestWriteReviewNotesListsOtherRepos(t *testing.T) {
 		{repo: "api", file: "server/handler.go", title: "The handler drops the currency"},
 	}
 	own := []findingOutcome{{finding: Finding{ID: "r1-f3", Title: "Own", Risk: "high", RiskRationale: "why"}, detail: "fixed"}}
-	if err := writeReviewNotes(st, "T-1", "review-notes-docs.md", 2, "Round summary.", own, others, nil, []string{"a.go"}, nil); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes-docs.md", 2, nil, "Round summary.", own, others, nil, []string{"a.go"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got := readNotes(t, st, "T-1", "review-notes-docs.md")
@@ -85,7 +85,7 @@ func TestWriteReviewNotesListsOtherRepos(t *testing.T) {
 		t.Errorf("sections out of order (Findings %d, other repos %d, Coverage %d):\n%s", f, o, c, got)
 	}
 
-	if err := writeReviewNotes(st, "T-1", "review-notes-none.md", 2, "Round summary.", nil, others, nil, nil, nil); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes-none.md", 2, nil, "Round summary.", nil, others, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := "# Review Notes\n\n## Round 2\n\nRound summary.\n\n" + section + "## Coverage\n\n"
@@ -99,7 +99,7 @@ func TestWriteReviewNotesListsOtherRepos(t *testing.T) {
 func TestWriteReviewNotesWithoutOthersIsUnchanged(t *testing.T) {
 	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", 1, "", nil, nil, nil, nil, nil); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", 1, nil, "", nil, nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := readNotes(t, st, "T-1", "review-notes.md"), "# Review Notes\n\n## Coverage\n\n"; got != want {
@@ -110,7 +110,7 @@ func TestWriteReviewNotesWithoutOthersIsUnchanged(t *testing.T) {
 		{finding: Finding{ID: "r1-f2", Title: "Low one", Risk: "low", RiskRationale: "minor"}, detail: "fixed"},
 		{finding: Finding{ID: "r1-f1", Title: "High one", Risk: "high", RiskRationale: "major", Oracle: "test"}, detail: "fixed by fix-1"},
 	}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", 2, "All fixed.", own, nil, []string{"x.go"}, []string{"x.go", "y.go"}, nil); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", 2, nil, "All fixed.", own, nil, []string{"x.go"}, []string{"x.go", "y.go"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	want := "# Review Notes\n\n## Round 2\n\nAll fixed.\n\n" +
@@ -120,5 +120,39 @@ func TestWriteReviewNotesWithoutOthersIsUnchanged(t *testing.T) {
 		"## Coverage\n\nTouched files:\n\n- x.go\n- y.go\n\nReviewed paths:\n\n- x.go\n\n"
 	if got := readNotes(t, st, "T-1", "review-notes.md"); got != want {
 		t.Errorf("notes with findings =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestWriteReviewNotesListsWhoReviewedEachRound: the notes open with every
+// reviewer round, oldest first, its scope, the range it read and who reviewed
+// it, so a builder's full round stays on record after a later delta round by
+// someone else; a scripted round is left out, a reviewer jig could not
+// identify is named so, a round over several repos or with no known base
+// gives no range, one with no scope no parentheses, and the list stands
+// without a summary.
+func TestWriteReviewNotesListsWhoReviewedEachRound(t *testing.T) {
+	t.Parallel()
+	st := &store.Store{Root: t.TempDir()}
+	sha := func(c byte) string { return strings.Repeat(string(c), 40) }
+	rounds := []RoundRecord{
+		{Round: 1, Scope: "full", Base: sha('a'), Head: sha('b'), Reviewer: Provenance{Session: "s-builder", How: ReviewerByEnv}, Independent: IndependentNo},
+		{Round: 2},
+		{Round: 3, Scope: "delta", Base: sha('b'), Head: sha('c'), Independent: IndependentUnknown},
+		{Round: 4, Scope: "delta", Base: sha('c'), Head: "api:" + sha('d') + "+web:" + sha('e'), Reviewer: Provenance{Session: "s-rev", Agent: "a-1"}, Independent: IndependentYes},
+		{Round: 5, Scope: "full", Head: sha('f'), Reviewer: Provenance{Session: "s-rev"}, Independent: IndependentYes},
+		{Round: 6, Head: sha('f'), Reviewer: Provenance{Session: "s-rev"}, Independent: IndependentYes},
+	}
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", 4, rounds, "", nil, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := "# Review Notes\n\n## Reviewers\n\n" +
+		"- Round 1 (full, aaaaaaa..bbbbbbb): reviewed by session `s-builder`, one of the builders: not an independent review.\n" +
+		"- Round 3 (delta, bbbbbbb..ccccccc): reviewed by a reviewer jig could not identify; jig could not tell whether the reviewer built part of the change.\n" +
+		"- Round 4 (delta): reviewed by session `s-rev`, agent `a-1`, none of the builders.\n" +
+		"- Round 5 (full): reviewed by session `s-rev`, none of the builders.\n" +
+		"- Round 6: reviewed by session `s-rev`, none of the builders.\n\n" +
+		"## Coverage\n\n"
+	if got := readNotes(t, st, "T-1", "review-notes.md"); got != want {
+		t.Errorf("notes =\n%q\nwant\n%q", got, want)
 	}
 }

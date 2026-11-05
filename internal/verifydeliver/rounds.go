@@ -23,8 +23,8 @@ import (
 )
 
 // The verdicts a RoundRecord reports. A round that is not clean is "findings"
-// whether the findings were fixes, asks or notes; VerdictNotIndependent is its
-// own, since such a round raised nothing a person can act on but its reviewer.
+// whether the findings were fixes, asks or notes; VerdictNotIndependent, an
+// older jig's verdict for a round a builder reviewed, is its own.
 const (
 	RoundClean    = "clean"
 	RoundFindings = "findings"
@@ -161,7 +161,7 @@ func ReadRounds(st *store.Store, ticket string) ([]RoundRecord, error) {
 			}
 		}
 		rec.Head = reviewedHeadOf(rep)
-		rec.Base = roundBase(st, ticket, n, rec.Scope, priorHead, rec.Head)
+		rec.Base = roundBase(st, ticket, n, rec.Scope, priorHead, rec.Head, rep.ReviewedBase)
 		priorHead = rec.Head
 		out = append(out, rec)
 	}
@@ -250,9 +250,13 @@ func namedSHAs(shas map[string]string) string {
 
 // roundBase is where round n's review started: the base its request recorded
 // when the request is still in the work folder (with several repos, the base of
-// each, named as the head is), else the head the round before reviewed when this
-// round's scope is a delta, else nothing is known.
-func roundBase(st *store.Store, ticket string, n int, scope, priorHead, head string) string {
+// each, named as the head is), else the base the round recorded (recorded,
+// report.yaml's reviewed_base), else the head the round before reviewed when
+// this round's scope is a delta, which is the rule a round an older jig
+// recorded was resolved by, else nothing is known. A round this jig records
+// carries its base, since its delta passes over a builder's round
+// (priorReviewedSHA), which the round before need not be.
+func roundBase(st *store.Store, ticket string, n int, scope, priorHead, head string, recorded map[string]string) string {
 	if data, err := os.ReadFile(reviewJSONPath(st, ticket, n)); err == nil {
 		var req struct {
 			BaseSHA string `json:"base_sha"`
@@ -276,6 +280,9 @@ func roundBase(st *store.Store, ticket string, n int, scope, priorHead, head str
 				return req.BaseSHA
 			}
 		}
+	}
+	if len(recorded) > 0 {
+		return namedSHAs(recorded)
 	}
 	if scope == "delta" {
 		return priorHead

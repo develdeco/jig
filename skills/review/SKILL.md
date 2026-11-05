@@ -7,7 +7,7 @@ description: Reviews a ticket's branch in a fresh context and reports to the ope
 
 Run `jig next <T>`. If the phase it names is not review (an open round is review), tell the person what the ticket needs and the prompt that does it, and stop. Do not run an earlier phase on your own.
 
-`jig gate` opens a round and starts no reviewer. The reviewer is an agent with a fresh context that did **not** build the change: a round reported by a builder is recorded but is not clean (`REVIEW_NOT_INDEPENDENT`), and publish refuses it. `jig next` and `jig gate` say whether this session is fresh:
+`jig gate` opens a round and starts no reviewer. The reviewer is an agent with a fresh context that did **not** build the change: the round records whether it did (`independent`), and the pull request's review notes say so. `jig next` and `jig gate` say whether this session is fresh:
 
 - **Fresh** ("review it in this session"): review below, yourself.
 - **Not fresh, or unknown**: you briefed or built it. Spawn the subagent they advise (the Agent tool, `subagent_type: general-purpose`, `model: opus`, no worktree) with their prompt. Wait for it as `jig gate` says: as a subagent, whose turn's end is its hand-back, you hand back with the round open instead. Never schedule a wakeup or stall with another tool. Then relay its verdict line. Never run `jig review context` yourself: jig sees you and your subagents as one session, so it could not tell who closed the round.
