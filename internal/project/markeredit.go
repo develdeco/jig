@@ -2,11 +2,11 @@ package project
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -65,7 +65,7 @@ func SetMarkerStore(dir, storeRemote string) error {
 // person's comments.
 func editMarker(dir string, fn func(root *yaml.Node) error) error {
 	path := filepath.Join(dir, MarkerFile)
-	data, err := os.ReadFile(path)
+	data, err := fileshare.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("project: read marker: %w", err)
 	}

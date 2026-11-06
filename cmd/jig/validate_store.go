@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ready"
@@ -278,7 +279,7 @@ func coveredAdvisories(st *store.Store, ticket string, slices []store.Slice) []a
 	}
 	shipped := shippedTicketsNear(st, goals)
 	var entries []recall.LedgerEntry
-	if data, err := os.ReadFile(filepath.Join(st.Root, "ledger.md")); err == nil {
+	if data, err := fileshare.ReadFile(filepath.Join(st.Root, "ledger.md")); err == nil {
 		entries = recall.ParseLedger(string(data))
 	}
 	var out []advisory

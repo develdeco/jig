@@ -36,7 +36,7 @@ func (s *Store) slicesFile(ticket string) string {
 // ReadSlices reads a ticket's slices.yaml. An absent file reads as no
 // slices.
 func (s *Store) ReadSlices(ticket string) ([]Slice, error) {
-	data, err := os.ReadFile(s.slicesFile(ticket))
+	data, err := readFile(s.slicesFile(ticket))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -64,7 +64,7 @@ func (s *Store) AppendSlices(ticket string, add []Slice) error {
 	defer release()
 
 	var sf SliceFile
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return err

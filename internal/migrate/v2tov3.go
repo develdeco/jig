@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
@@ -93,7 +94,7 @@ func planV2toV3(in Input) (Plan, error) {
 	}
 	w.marker = markerFor(in, cfg, repo, repoName, clone)
 
-	data, err := os.ReadFile(filepath.Join(in.Store.Root, project.LegacyStoreFile))
+	data, err := fileshare.ReadFile(filepath.Join(in.Store.Root, project.LegacyStoreFile))
 	if err != nil {
 		return Plan{}, err
 	}

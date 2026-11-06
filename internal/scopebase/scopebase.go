@@ -5,9 +5,9 @@ package scopebase
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -22,7 +22,7 @@ func Resolve(st *store.Store, ticket, leaseDir, repoName, target, head string) (
 	}
 
 	startPath := st.StartSHAPath(ticket, repoName)
-	data, rerr := os.ReadFile(startPath)
+	data, rerr := fileshare.ReadFile(startPath)
 	if rerr != nil {
 		return "", fmt.Errorf("verifydeliver: review: resolve scope base: merge-base origin/%s failed (%v) and no start sha: %w", target, mbErr, rerr)
 	}

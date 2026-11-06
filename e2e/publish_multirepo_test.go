@@ -212,7 +212,7 @@ func TestPublishOpensOnePRPerRepo(t *testing.T) {
 
 	// jig status lists each repo's pull request.
 	status := runJig(t, env, b.fx.OrchestratorDir, "status", ticket)
-	for _, want := range []string{"publish_prs[2]{repo,pr,state,head,body_file}:", "  api,\"" + apiPR + "\",opened," + b.shaAPI + ",tickets/" + ticket + "/pr/api.md", "  web,\"" + webPR + "\",opened," + b.shaWeb + ",tickets/" + ticket + "/pr/web.md"} {
+	for _, want := range []string{"publish_prs[2]{repo,pr,state,approval,head,body_file}:", "  api,\"" + apiPR + "\",opened,none," + b.shaAPI + ",tickets/" + ticket + "/pr/api.md", "  web,\"" + webPR + "\",opened,none," + b.shaWeb + ",tickets/" + ticket + "/pr/web.md"} {
 		if !strings.Contains(status.Stdout, want) {
 			t.Errorf("jig status lacks %q\n%s", want, status.Stdout)
 		}

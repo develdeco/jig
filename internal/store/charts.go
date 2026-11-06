@@ -58,7 +58,7 @@ type ChartFile struct {
 // ReadChart reads charts/<name>/tickets.yaml. An absent file is an error.
 func (s *Store) ReadChart(name string) ([]ChartEntry, error) {
 	path := s.ChartFile(name)
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (s *Store) WriteChart(name string, entries []ChartEntry) error {
 	}
 	defer release()
 
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		return err
 	}
