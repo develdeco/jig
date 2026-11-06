@@ -153,7 +153,7 @@ func parseStatus(out string) *statusInfo {
 		info.Stalled = append(info.Stalled, statusStalled{Slice: r["slice"], Reason: r["reason"], Summary: dash(r["summary"])})
 	}
 	if kv, ok := doc.KV["brief"]; ok {
-		b := &statusBrief{Approval: kv["approval"], ApprovedBy: firstOf(kv["identity"], kv["approved_by"]), ApprovedAt: kv["approved_at"], Provenance: kv["provenance"]}
+		b := &statusBrief{Approval: kv["approval"], ApprovedBy: firstOf(kv["identity"], bareIdentity(kv["approved_by"])), ApprovedAt: kv["approved_at"], Provenance: kv["provenance"]}
 		for _, r := range doc.Tables["brief_sections"].Maps() {
 			var cited []string
 			if c := dash(r["slices"]); c != "" {
@@ -245,4 +245,17 @@ func firstWords(out string) string {
 		out = out[:60] + "..."
 	}
 	return strconv.Quote(out)
+}
+
+// bareIdentity is the identity inside an approved_by a status already worded
+// ("an agent (as Dana)" is Dana), so a reader that words an approval itself
+// (phase.Approver) never words it twice. A value that is not worded is its own
+// identity.
+func bareIdentity(by string) string {
+	if inner, ok := strings.CutPrefix(by, "an agent (as "); ok {
+		if inner, ok := strings.CutSuffix(inner, ")"); ok {
+			return inner
+		}
+	}
+	return by
 }
