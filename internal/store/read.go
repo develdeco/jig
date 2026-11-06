@@ -19,7 +19,7 @@ const (
 	replaceBackoff = fileshare.ReplaceBackoff
 )
 
-// readFile is os.ReadFile that rides out the moment AtomicWrite replaces the
+// ReadFile is os.ReadFile that rides out the moment AtomicWrite replaces the
 // file. On Windows it opens the file with delete sharing and AtomicWrite
 // renames with POSIX semantics (fileshare.Rename), which together make the
 // replacement atomic for readers; a failure that can still be that moment
@@ -27,7 +27,7 @@ const (
 // holding the file) is retried until replaceWindow has passed. Elsewhere the
 // rename is atomic for readers, and only a read during a file's first write
 // can wait.
-func readFile(path string) ([]byte, error) {
+func ReadFile(path string) ([]byte, error) {
 	deadline := time.Now().Add(replaceWindow)
 	for {
 		data, err := fileshare.ReadFile(path)

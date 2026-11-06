@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/develdeco/jig/internal/fileshare"
 )
 
 // Doc is one markdown document of the store's platform directory: where it is,
@@ -89,7 +91,7 @@ func readDocs(root, dir string) ([]DocText, error) {
 
 // readHead reads at most max bytes of the file at path.
 func readHead(path string, max int) (string, error) {
-	f, err := os.Open(path)
+	f, err := fileshare.Open(path)
 	if err != nil {
 		return "", err
 	}

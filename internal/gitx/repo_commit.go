@@ -486,7 +486,7 @@ func (s *scan) tracksUnder(prefix string) bool {
 
 // writeBlob stores the file at path as a blob, as is, and returns its hash.
 func (s *scan) writeBlob(path string) (plumbing.Hash, error) {
-	data, err := os.ReadFile(path)
+	data, err := fileshare.ReadFile(path)
 	if err != nil {
 		return plumbing.ZeroHash, err
 	}

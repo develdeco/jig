@@ -165,32 +165,24 @@ func TestUpdateMachineNeverWritesWithoutTheLock(t *testing.T) {
 	}
 }
 
-// TestReadRetryingRidesOutAFailure: a read that fails for a moment is tried
-// again and returns the data; a missing file is not retried; one that keeps
-// failing gives up after the window with its error.
-func TestReadRetryingRidesOutAFailure(t *testing.T) {
-	calls := 0
-	flaky := func(string) ([]byte, error) {
-		calls++
-		if calls < 4 {
-			return nil, errors.New("The process cannot access the file because it is being used by another process.")
-		}
-		return []byte("ok"), nil
+// TestSaveMachineWaitsOutAHeldLock: a SaveMachine that finds the mapping's
+// lock held waits for its holder and then writes, instead of failing at once.
+func TestSaveMachineWaitsOutAHeldLock(t *testing.T) {
+	jigHome := t.TempDir()
+	path := home.MachinePath(jigHome)
+	release, held, err := filelock.TryLock(path, time.Second)
+	if err != nil || !held {
+		t.Fatalf("holding the lock: held=%v err=%v", held, err)
 	}
-	data, err := readRetrying("p", flaky, 5*time.Second)
-	if err != nil || string(data) != "ok" || calls != 4 {
-		t.Fatalf("readRetrying = %q, %v after %d calls; want ok after 4", data, err, calls)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		release()
+	}()
+	want := map[string]MachineProject{"p": {Store: "/s", Clones: map[string]string{"k": "/c"}}}
+	if err := saveMachine(jigHome, want, 30*time.Second); err != nil {
+		t.Fatalf("saveMachine waiting on a lock released in 150ms = %v", err)
 	}
-
-	calls = 0
-	missing := func(string) ([]byte, error) { calls++; return nil, os.ErrNotExist }
-	if _, err := readRetrying("p", missing, 5*time.Second); !os.IsNotExist(err) || calls != 1 {
-		t.Fatalf("a missing file: err=%v calls=%d, want ErrNotExist after 1 call", err, calls)
-	}
-
-	stuck := errors.New("stuck")
-	calls = 0
-	if _, err := readRetrying("p", func(string) ([]byte, error) { calls++; return nil, stuck }, 50*time.Millisecond); !errors.Is(err, stuck) || calls < 2 {
-		t.Fatalf("a read that keeps failing: err=%v calls=%d, want its error after retries", err, calls)
+	if got, err := LoadMachine(jigHome); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("mapping after the wait = %+v, %v; want %+v", got, err, want)
 	}
 }
