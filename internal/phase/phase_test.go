@@ -277,8 +277,8 @@ func TestBriefSubSteps(t *testing.T) {
 	bare.ApprovedBy, bare.ApprovedHow = "", ""
 	line := ln(journal.EventApproval, provenance("agent"))
 	line.Summary = "Dana Q <dana@example.invalid>"
-	if s := sub(t, Derive(bare, []journal.Line{line}).Of(Brief), "approved"); s.Detail != "Dana Q (agent)" {
-		t.Errorf("approved by the line: %+v, want Dana Q (agent)", s)
+	if s := sub(t, Derive(bare, []journal.Line{line}).Of(Brief), "approved"); s.Detail != "an agent, as Dana Q" {
+		t.Errorf("approved by the line: %+v, want an agent, as Dana Q", s)
 	}
 
 	changed := approved()
