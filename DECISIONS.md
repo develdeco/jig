@@ -4121,9 +4121,14 @@ Rejected: a column per label and per status, since the table answers what the ro
 
 Rejected: renaming `by` in `approval.yaml`, a record format change for a wording problem. Defaulted (owner: take the recommended answer, 2026-11-06): both choices.
 
+## An edit before a slice is claimed hears to claim one (RUN-12)
+
+A session could edit a ticket's files with nothing claimed, or before the brief was approved, and hear nothing until a commit. Chosen (defaulted 2026-11-06): a core note (`internal/observe/unclaimed_edit.go`) at a tool event whose files lie inside the checkout of the ticket the branch binds: at the brief phase it says to finish the brief with intake and `jig validate` before changing code, at the build phase with no slice claimed it says to claim one and names the ready slices. The Ref names the ticket and which of the two (`unclaimed-edit:<ticket>:brief|claim`), so each is said once; it is advice, never enforced. A needs-input or failed slice counts as claimed, and an edit outside the checkout (the store, a scratch directory) says nothing.
+
+Rejected: refusing or holding the session, since jig records and shows, never refuses (ADR 0046's rule) and a person may have chosen to edit first.
+
 ## The review notes and the pr line say which approval the publish had (PUB-8)
 
 The hand-off way (`--body`, the session's push, `--pr`) asks for no approval and recorded none, so a pull request's notes did not say whether a person at a terminal, an agent or nobody approved publishing its head. Chosen: the review notes carry one line beside the brief's approval line, from the `publish-approved` lines for the reviewed head: "Publish approved by <identity> at a terminal", "Publish approved by an agent, as <identity>, not by a person at a terminal", or "Published without a recorded approval"; `jig publish --approve` now journals the identity on its line (`summary`); `--pr` journals its `pr` line with `approval` (`person`, `agent` or `none`), and `jig status`'s publish block shows it. Also the TUI's fallback to `approved_by` on a status with no `identity` key took the already-worded value out of its wording before wording it, so an agent's approval is worded once.
 
 Rejected: asking for an approval on the hand-off way, since a run that went with the recommendations publishes without one by design (ADR 0035). Recorded and shown, never refused. Defaulted (owner: take the recommended answer, 2026-11-06): both choices.
-
