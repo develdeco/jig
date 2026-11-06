@@ -585,6 +585,8 @@ func TestCollectRecordings(t *testing.T) {
 			`{"flow":"f"}`:                   {Scenario: "a", Flow: "f"},
 			`{"caption":"c","scenario":"s"}`: {Scenario: "s", Caption: "c"},
 			"  {\"flow\": \"f\"}\n\n":        {Scenario: "a", Flow: "f"},
+			`{"flow":"f","later":{"x":1}}`:   {Scenario: "a", Flow: "f"},
+			`{"path":"/home/someone/a.png","dir":"/home/someone"}`: {Scenario: "a"},
 		} {
 			recs, _, err := collect(t, map[string]string{"a.png": "x", "a.png.json": body})
 			if err != nil || len(recs) != 1 {

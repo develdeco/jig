@@ -14,9 +14,9 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/outcome"
+	"github.com/develdeco/jig/internal/scopebase"
 	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // Deps is what a verification works with.
@@ -534,7 +534,7 @@ func (x *run) startSHA() string {
 
 // changedFiles lists the files the commit changed against the base the gate's
 // full scope uses (merge-base of origin/<target> and the commit, the start sha
-// only when that fails: verifydeliver.ResolveFullBase), as the scope diff reads
+// only when that fails: scopebase.Resolve), as the scope diff reads
 // them (added, modified or type-changed). The start sha alone would list, after
 // an integration merge, every file the target changed since it too. nil when the
 // base is unknown or the diff fails, which ranks every recording alike.
@@ -557,7 +557,7 @@ func (x *run) changedBase() string {
 	if d.Repo == "" || d.Target == "" {
 		return x.startSHA()
 	}
-	base, err := verifydeliver.ResolveFullBase(d.Store, x.r.Ticket, x.dir, d.Repo, d.Target, x.sha)
+	base, err := scopebase.Resolve(d.Store, x.r.Ticket, x.dir, d.Repo, d.Target, x.sha)
 	if err != nil {
 		return x.startSHA()
 	}
