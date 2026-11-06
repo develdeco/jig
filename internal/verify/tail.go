@@ -106,13 +106,22 @@ func failureOutput(out string, err error, baseline map[string]bool) (tail, summa
 		return old, oneLine(old)
 	}
 	// A run the wedge guard killed says so in today's tail; the reason is
-	// not in the output, so it follows the new lines to reach the summary
-	// and the signature.
+	// not in the output, so it follows the new lines in the tail and keeps
+	// its own room in the summary, whatever the new lines' length.
+	reason := ""
 	if strings.Contains(err.Error(), "did not finish within") {
-		fresh = append(fresh, err.Error())
+		reason = err.Error()
 	}
-	tail = headBytes(fresh, tailBytes) + "\n" + markerOldTail + "\n" + old
-	return tail, strings.Join(strings.Fields(headBytes(fresh, summaryBytes)), " ")
+	if reason == "" {
+		tail = headBytes(fresh, tailBytes) + "\n" + markerOldTail + "\n" + old
+		return tail, strings.Join(strings.Fields(headBytes(fresh, summaryBytes)), " ")
+	}
+	tail = headBytes(append(append([]string(nil), fresh...), reason), tailBytes) + "\n" + markerOldTail + "\n" + old
+	room := summaryBytes - len(reason) - 1
+	if room < 0 {
+		room = 0
+	}
+	return tail, strings.Join(strings.Fields(headBytes(fresh, room)+" "+reason), " ")
 }
 
 // baselineText is the file body for a passing run's output: its distinct

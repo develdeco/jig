@@ -47,6 +47,23 @@ func TestKilledRunSummaryCarriesTheTimeout(t *testing.T) {
 	}
 }
 
+// TestKilledRunSummaryKeepsTheTimeoutWhenNewLinesFillIt: new lines past the
+// summary's bound do not push the timeout out of summary or signature.
+func TestKilledRunSummaryKeepsTheTimeoutWhenNewLinesFillIt(t *testing.T) {
+	t.Parallel()
+	killed := errors.New("the oracle did not finish within 30m0s")
+	base := baselineOf("ok  pkg/a 0.3s\n")
+	out := "ok  pkg/a 0.4s\n" + strings.Repeat("=== RUN   TestSlowThing/case_x  waiting for the server to come up\n", 12)
+	_, summary := failureOutput(out, killed, base)
+	if !strings.HasSuffix(summary, "did not finish within 30m0s") || !strings.HasPrefix(summary, "=== RUN") || len(summary) > summaryBytes {
+		t.Errorf("summary = %q (%d bytes)", summary, len(summary))
+	}
+	long := "ok  pkg/a 0.4s\n" + strings.Repeat("x", 2*summaryBytes) + "\n"
+	if _, s := failureOutput(long, killed, base); !strings.HasSuffix(s, "did not finish within 30m0s") || len(s) > summaryBytes {
+		t.Errorf("summary of one long line = %q", s)
+	}
+}
+
 // TestNormalizeKeepsPassingLinesOutOfTheSummary: digit runs of any length and
 // trailing whitespace or CR do not make a line new.
 func TestNormalizeKeepsPassingLinesOutOfTheSummary(t *testing.T) {

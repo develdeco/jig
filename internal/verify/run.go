@@ -600,7 +600,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 		x.res.Signature = outcome.Signature(x.r.Slice, outcome.CodeBug, x.res.Summary)
 		x.res.State = journal.VerifyFail
 		line.Outcome, line.Summary, line.Signature = "fail", x.res.Summary, x.res.Signature
-		x.logf("the oracle failed after %ds (limit %s); the last %d bytes of its output:\n%s", seconds, limit, tailBytes, x.res.Tail)
+		x.logf("the oracle failed after %ds (limit %s); the lines a passing run did not print (when it kept a baseline), then the last %d bytes of its output:\n%s", seconds, limit, tailBytes, x.res.Tail)
 	}
 	if err := x.journal(line); err != nil {
 		return err
