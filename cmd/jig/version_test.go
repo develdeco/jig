@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/journal"
 )
 
 // TestCmdVersion checks the `jig version` output shape: the AXI version
@@ -34,6 +35,9 @@ func TestCmdVersion(t *testing.T) {
 	}
 	if !strings.Contains(out, "  commit: "+axi.Quote(wantCommit)) {
 		t.Errorf("expected \"commit: %s\", got:\n%s", wantCommit, out)
+	}
+	if !strings.Contains(out, "  build: "+axi.Quote(journal.Stamp())) {
+		t.Errorf("expected \"build: %s\", got:\n%s", journal.Stamp(), out)
 	}
 	if !strings.Contains(out, "go: ") {
 		t.Errorf("expected a go line, got:\n%s", out)

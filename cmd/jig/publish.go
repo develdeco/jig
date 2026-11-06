@@ -108,6 +108,9 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 
 	deps := verifydeliverDeps(e, st, cfg, mp, jigHome)
+	// The confirmation reads stdin, so its terminal-ness decides whether a
+	// yes is a person's.
+	deps.StdinIsTerminal = func() bool { return e.stdinIsTerminal(stdin) }
 	opts := verifydeliver.PublishOpts{Ticket: ticket, Repo: *repo, Yes: *yes, Picks: *picks}
 
 	switch {

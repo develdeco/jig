@@ -6,6 +6,7 @@ import (
 	"runtime/debug"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/journal"
 )
 
 // init registers this file's verb with the registry (registry.go).
@@ -33,6 +34,7 @@ func cmdVersion(e env, args []string, stdout io.Writer) int {
 		axi.KV("version", [][2]string{
 			{"version", formatVersion(info)},
 			{"commit", formatCommit(info)},
+			{"build", journal.Stamp()},
 			{"go", runtime.Version()},
 		}),
 		axi.Help("Run `jig` to see every command"),

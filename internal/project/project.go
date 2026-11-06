@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -544,7 +545,7 @@ func (c Config) ResolvedGateConfig() GateConfig {
 // caller that has a store rather than a file reads it with LoadStoreConfig,
 // which knows which of the two the store has.
 func Load(path string) (Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := fileshare.ReadFile(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("project: read %s: %w", path, err)
 	}
@@ -622,7 +623,7 @@ func LoadMachine(jigHome string) (map[string]MachineProject, error) {
 	if jigHome == "" {
 		return nil, fmt.Errorf("project: no jig home given")
 	}
-	data, err := os.ReadFile(home.MachinePath(jigHome))
+	data, err := readRetrying(home.MachinePath(jigHome), fileshare.ReadFile, machineReadWindow)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]MachineProject{}, nil
@@ -640,8 +641,47 @@ func LoadMachine(jigHome string) (map[string]MachineProject, error) {
 }
 
 // machineLockTimeout is how long a write of the machine mapping waits for
-// another jig process to finish its own.
-const machineLockTimeout = 10 * time.Second
+// another jig process to finish its own. It is long enough for a loaded
+// machine; past it the write fails rather than going ahead unlocked, which
+// would lose the holder's update.
+const machineLockTimeout = 2 * time.Minute
+
+// machineReadWindow is how long a read of the machine mapping rides out a
+// failure that another process replacing the file can cause (on Windows, a
+// sharing violation).
+const machineReadWindow = 5 * time.Second
+
+// lockFile takes the exclusive lock on path's sidecar, waiting up to
+// wait. what names the file in the error. A lock it cannot take
+// is an error naming the lock's path, never a write without it.
+func lockFile(path, what string, wait time.Duration) (release func(), err error) {
+	release, held, err := store.TryLock(path, wait)
+	if err != nil {
+		return nil, fmt.Errorf("project: lock %s: %w", what, err)
+	}
+	if !held {
+		return nil, fmt.Errorf("project: lock %s: still held by another jig process after %s, not writing without it (lock file %s)", what, wait, path+".lock")
+	}
+	return release, nil
+}
+
+// readRetrying is read(path) that tries again, with a growing pause, for up
+// to window when it fails for any reason but the file not being there: a
+// writer replacing the file can fail a read for a moment.
+func readRetrying(path string, read func(string) ([]byte, error), window time.Duration) ([]byte, error) {
+	deadline := time.Now().Add(window)
+	pause := 5 * time.Millisecond
+	for {
+		data, err := read(path)
+		if err == nil || os.IsNotExist(err) || time.Now().After(deadline) {
+			return data, err
+		}
+		time.Sleep(pause)
+		if pause < 200*time.Millisecond {
+			pause *= 2
+		}
+	}
+}
 
 // SaveMachine writes the per-machine project mapping under the jig home root
 // jigHome, creating its parent directory if needed. It replaces the whole
@@ -649,12 +689,17 @@ const machineLockTimeout = 10 * time.Second
 // of it; a caller that reads the mapping, changes it and writes it back
 // uses UpdateMachine, which holds the lock across all three.
 func SaveMachine(jigHome string, m map[string]MachineProject) error {
+	return saveMachine(jigHome, m, machineLockTimeout)
+}
+
+// saveMachine is SaveMachine waiting up to wait for the lock.
+func saveMachine(jigHome string, m map[string]MachineProject, wait time.Duration) error {
 	if jigHome == "" {
 		return fmt.Errorf("project: no jig home given")
 	}
-	release, _, err := store.Lock(home.MachinePath(jigHome), machineLockTimeout)
+	release, err := lockFile(home.MachinePath(jigHome), "machine mapping", wait)
 	if err != nil {
-		return fmt.Errorf("project: lock machine mapping: %w", err)
+		return err
 	}
 	defer release()
 	return writeMachine(jigHome, m)
@@ -667,12 +712,17 @@ func SaveMachine(jigHome string, m map[string]MachineProject) error {
 // fresh clone) both land. fn gets the mapping to change in place; if fn
 // returns an error nothing is written and the error is returned.
 func UpdateMachine(jigHome string, fn func(map[string]MachineProject) error) error {
+	return updateMachine(jigHome, fn, machineLockTimeout)
+}
+
+// updateMachine is UpdateMachine waiting up to wait for the lock.
+func updateMachine(jigHome string, fn func(map[string]MachineProject) error, wait time.Duration) error {
 	if jigHome == "" {
 		return fmt.Errorf("project: no jig home given")
 	}
-	release, _, err := store.Lock(home.MachinePath(jigHome), machineLockTimeout)
+	release, err := lockFile(home.MachinePath(jigHome), "machine mapping", wait)
 	if err != nil {
-		return fmt.Errorf("project: lock machine mapping: %w", err)
+		return err
 	}
 	defer release()
 	m, err := LoadMachine(jigHome)

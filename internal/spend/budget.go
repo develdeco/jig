@@ -11,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -30,7 +31,7 @@ func BudgetPath(st *store.Store, ticket string) string {
 // when the ticket has none. A record that exists but sets no limit is a
 // budget the ticket was deliberately given none of (see WriteBudget).
 func ReadBudget(st *store.Store, ticket string) (b project.Budget, recorded bool, err error) {
-	data, err := os.ReadFile(BudgetPath(st, ticket))
+	data, err := fileshare.ReadFile(BudgetPath(st, ticket))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return project.Budget{}, false, nil

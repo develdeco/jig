@@ -155,7 +155,7 @@ One run of a slice's oracle on a commit, in a detached worktree of the operator'
 _Avoid_: CI run, test run
 
 **Journal**:
-The append-only record of every claim, verification, question, round and publish of a ticket, in the store. Changelogs render from it; they are never authored by hand.
+The append-only record of every claim, verification, question, round and publish of a ticket, in the store. Changelogs render from it; they are never authored by hand. Each line, and each gate round's `report.yaml`, names the jig build that wrote it in a `jig` field.
 _Avoid_: log file, history
 
 **Ledger**:
@@ -203,7 +203,7 @@ The orphan branch `claims` holding the append-only claims log (`claims.ndjson`),
 _Avoid_: lock branch
 
 **Provenance**:
-Who a fact speaks for: `person`, `agent` or `jig`. Recorded on an answer, a triage decision, an approval, a note, a publish approval and on an intent (brief, explicit, inferred or none). A person is whoever is at a terminal; an agent's word never stands in for a person's where a rule asks for one. A brief's approval recorded by an agent reads as an agent's everywhere it is shown: `jig status` prints `approved_by: an agent (as <identity>)`, the TUI and `jig next` say "an agent, as <identity>", and the pull request's review notes say it was not a person at a terminal; `approval.yaml` keeps the identity in `by`.
+Who a fact speaks for: `person`, `agent` or `jig`. Recorded on an answer, a triage decision, an approval, a note, a publish approval and on an intent (brief, explicit, inferred or none). A person is whoever is at a terminal; an agent's word never stands in for a person's where a rule asks for one. A brief's approval recorded by an agent reads as an agent's everywhere it is shown: `jig status` prints `approved_by: an agent (as <identity>)`, the TUI and `jig next` say "an agent, as <identity>", and the pull request's review notes say it was not a person at a terminal; `approval.yaml` keeps the identity in `by`. A pull request published or recorded by any `jig publish` form says which publish approval its head had, in its review notes and on its `pr` journal line (`person`, `agent` or `none`), recorded and never refused.
 _Avoid_: author, source
 
 **Receipt**:

@@ -211,10 +211,13 @@ type GateReport struct {
 
 // reportYAML is gate/round-<n>/report.yaml's exact on-disk shape.
 type reportYAML struct {
-	Round       int               `yaml:"round"`
-	Verdict     string            `yaml:"verdict"`
-	Model       string            `yaml:"model,omitempty"`
-	Effort      string            `yaml:"effort,omitempty"`
+	Round   int    `yaml:"round"`
+	Verdict string `yaml:"verdict"`
+	Model   string `yaml:"model,omitempty"`
+	Effort  string `yaml:"effort,omitempty"`
+	// Jig is the build stamp of the jig that wrote the report
+	// (journal.Stamp); absent from a report an older jig wrote.
+	Jig         string            `yaml:"jig,omitempty"`
 	TargetSHA   map[string]string `yaml:"target_sha"`
 	ReviewedSHA map[string]string `yaml:"reviewed_sha,omitempty"`
 	// ReviewedBase is the base the reviewer read each repo from, so the
@@ -725,6 +728,7 @@ func writeReportYAML(dir string, report GateReport) error {
 		Verdict:      report.Verdict,
 		Model:        report.Model,
 		Effort:       report.Effort,
+		Jig:          journal.Stamp(),
 		TargetSHA:    report.TargetSHA,
 		ReviewedSHA:  report.ReviewedSHA,
 		ReviewedBase: report.ReviewedBase,

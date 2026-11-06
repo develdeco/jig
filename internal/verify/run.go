@@ -4,11 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/develdeco/jig/internal/envrun"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
@@ -525,7 +525,7 @@ func (x *run) startSHA() string {
 	d := x.d
 	var recorded string
 	if d.Repo != "" {
-		if data, err := os.ReadFile(d.Store.StartSHAPath(x.r.Ticket, d.Repo)); err == nil {
+		if data, err := fileshare.ReadFile(d.Store.StartSHAPath(x.r.Ticket, d.Repo)); err == nil {
 			recorded = string(data)
 		}
 	}
@@ -736,7 +736,7 @@ func (x *run) keepBaseline(cmd, out string) {
 // command's baseline when a pass left one (failureOutput).
 func (x *run) failureOf(out string, oerr error, cmd string) (tail, summary string) {
 	var base map[string]bool
-	if data, err := os.ReadFile(x.baselinePath(cmd)); err == nil {
+	if data, err := fileshare.ReadFile(x.baselinePath(cmd)); err == nil {
 		base = parseBaseline(string(data))
 	}
 	return failureOutput(out, oerr, base)

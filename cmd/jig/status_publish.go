@@ -33,6 +33,7 @@ const (
 //	  ticket: JIG-2
 //	  pr: "https://example.test/acme/demo/pull/7"
 //	  pr_state: opened
+//	  approval: person
 //	  head: <the reviewed head, 40 hex digits>
 //	  branch: jig/JIG-2
 //	  body_file: tickets/JIG-2/pr/demo.md
@@ -41,7 +42,8 @@ const (
 //	  changelog: "<the first lines of the consolidated changelog>"
 //
 // Each key is there once the publish has recorded it: the body once `jig
-// publish --body` wrote it, the pull request once one was opened or recorded,
+// publish --body` wrote it, the pull request once one was opened or recorded
+// (approval is the publish approval its head had then: person, agent or none),
 // the changelog once the publish finished. head is the head of the latest pr,
 // publish-approved or pr-body line. A ticket whose publish has not begun has no
 // block.
@@ -51,11 +53,11 @@ const (
 // (one name in every repo) and the changelog, and a table beside it has a row
 // for each repo:
 //
-//	publish_prs[2]{repo,pr,state,head,body_file}:
-//	  api,https://example.test/acme/api/pull/7,opened,<sha>,tickets/JIG-2/pr/api.md
-//	  web,-,-,<sha>,tickets/JIG-2/pr/web.md
+//	publish_prs[2]{repo,pr,state,approval,head,body_file}:
+//	  api,https://example.test/acme/api/pull/7,opened,person,<sha>,tickets/JIG-2/pr/api.md
+//	  web,-,-,-,<sha>,tickets/JIG-2/pr/web.md
 //
-// A row's pr and state are "-" until the repo's pull request is opened or
+// A row's pr, state and approval are "-" until the repo's pull request is opened or
 // recorded.
 func publishBlocks(st *store.Store, ticket string) ([]string, error) {
 	lines, err := journal.Read(st, ticket)
@@ -111,6 +113,7 @@ func publishBlocks(st *store.Store, ticket string) ([]string, error) {
 	if !several {
 		add("pr", pr.URL)
 		add("pr_state", pr.Outcome)
+		add("approval", pr.Approval)
 		add("head", firstNonEmptyString(pr.Commit, approved.Commit, body.Commit))
 	}
 	add("branch", firstNonEmptyString(pr.Branch, approved.Branch, body.Branch))
@@ -141,11 +144,11 @@ func publishBlocks(st *store.Store, ticket string) ([]string, error) {
 				bodyFile = rp.body.Ref
 			}
 			rows = append(rows, []string{
-				name, dashed(rp.pr.URL), dashed(rp.pr.Outcome),
+				name, dashed(rp.pr.URL), dashed(rp.pr.Outcome), dashed(rp.pr.Approval),
 				dashed(firstNonEmptyString(rp.pr.Commit, rp.approved.Commit, rp.body.Commit)), bodyFile,
 			})
 		}
-		blocks = append(blocks, axi.Table("publish_prs", []string{"repo", "pr", "state", "head", "body_file"}, rows))
+		blocks = append(blocks, axi.Table("publish_prs", []string{"repo", "pr", "state", "approval", "head", "body_file"}, rows))
 	}
 	return blocks, nil
 }
