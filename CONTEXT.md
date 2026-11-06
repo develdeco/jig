@@ -287,7 +287,7 @@ The human seam for a gate round's `ask` findings, and for a note a person takes 
 _Avoid_: review comment triage, auto-dismiss
 
 **Finding outcome**:
-How a finding ended, as the review notes and the pull request body's count give it: *fixed* (a round cleared it, by a fix slice or an open finding's coverage), *addressed* (a note the risk floor routed whose file a later round changed and read without reporting it again: no slice fixed it), *dismissed* (a human's decision), *noted* (a record nothing changed: a reviewer's own `note`, or a routed one nobody addressed) or *asked*. A finding a later round continued with another title or risk keeps its first version in the notes.
+How a finding ended, as the review notes give it: *fixed* (a round cleared it, by a fix slice or an open finding's coverage), *addressed* (a note the risk floor routed whose file a later round changed and read without reporting it again: no slice fixed it), *dismissed* (a human's decision), *noted* (a record nothing changed: a reviewer's own `note`, or a routed one nobody addressed) or *asked*. A finding a later round continued with another title or risk keeps its first version in the notes.
 _Avoid_: resolved, closed
 
 **Gold**:
