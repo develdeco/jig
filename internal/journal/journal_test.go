@@ -437,3 +437,14 @@ func TestPickRoundTripsAndOtherLinesWriteNone(t *testing.T) {
 		t.Errorf("a line with no pick writes the key: %s", written[1])
 	}
 }
+
+// TestReviewNotesEventNameIsPinned: the dedupe of the review notes reads the
+// review-notes lines earlier jig versions wrote, so the event's name is a
+// stored spelling that a rename would orphan: every pull request would get its
+// notes again after an upgrade.
+func TestReviewNotesEventNameIsPinned(t *testing.T) {
+	t.Parallel()
+	if EventReviewNotes != "review-notes" {
+		t.Fatalf("EventReviewNotes = %q, want the stored spelling %q", EventReviewNotes, "review-notes")
+	}
+}

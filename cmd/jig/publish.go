@@ -321,10 +321,13 @@ func pushedTable(report verifydeliver.PublishReport) string {
 
 // reviewNotesWords says what publish did with a pull request's review notes:
 // "posted", "already posted", or "not posted" with the reason and the file to
-// post by hand.
+// post by hand, or, for notes never rendered, the command that renders them.
 func reviewNotesWords(r verifydeliver.ReviewNotesReport) string {
 	if r.Status != verifydeliver.ReviewNotesNotPosted {
 		return r.Status
+	}
+	if r.File == "" {
+		return fmt.Sprintf("%s: %s; render them with `jig publish <ticket> --body`, then post them by hand", r.Status, r.Reason)
 	}
 	return fmt.Sprintf("%s: %s; post %s as a comment on the pull request by hand", r.Status, r.Reason, r.File)
 }

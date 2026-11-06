@@ -507,3 +507,103 @@ func TestPublishShipsTheClonesCopyUnchanged(t *testing.T) {
 		t.Fatalf("the publish lease is at %s, want the reviewed head %s", got, head)
 	}
 }
+
+// TestPublishRecordPRPostsTheSameNotesOncePerPullRequest: one pull request is
+// one pull request however its url is spelled (a trailing slash, /files, a
+// fragment, http), and the journal keeps the canonical url; the same notes
+// still post to a different pull request, such as the replacement of a closed
+// one.
+func TestPublishRecordPRPostsTheSameNotesOncePerPullRequest(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	logFile, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	record := func(url, want string) {
+		t.Helper()
+		report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, url, nil)
+		if err != nil {
+			t.Fatalf("PublishRecordPR %s: %v", url, err)
+		}
+		if report.ReviewNotes.Status != want {
+			t.Fatalf("--pr %s: review notes %q, want %q", url, report.ReviewNotes.Status, want)
+		}
+	}
+	record(prURL, ReviewNotesPosted)
+	for _, spelled := range []string{prURL + "/", prURL + "/files", prURL + "#issuecomment-1", "http://github.com/owner/fixture-repo/pull/7"} {
+		record(spelled, ReviewNotesAlreadyPosted)
+	}
+	if n := len(reviewNotesCommentCalls(loggedGh(t, logFile))); n != 1 {
+		t.Fatalf("five spellings of one pull request posted %d comment(s), want 1", n)
+	}
+	if posted := reviewNotesLines(t, d, fx.Ticket); len(posted) != 1 || posted[0].URL != prURL {
+		t.Fatalf("review-notes lines = %+v, want one with the canonical url %s", posted, prURL)
+	}
+
+	record("https://github.com/owner/fixture-repo/pull/8", ReviewNotesPosted)
+	if n := len(reviewNotesCommentCalls(loggedGh(t, logFile))); n != 2 {
+		t.Fatalf("the same notes on a second pull request posted %d comment(s) in all, want 2", n)
+	}
+}
+
+// TestPublishRecordPRRendersTheReviewNotesItPosts: --pr posts notes rendered
+// for the reviewed head. Run before --body they are rendered first, and notes
+// an earlier head's body left behind are rendered again.
+func TestPublishRecordPRRendersTheReviewNotesItPosts(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	logFile, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	bodyLines := func() int {
+		n := 0
+		lines, err := journal.Read(d.Store, fx.Ticket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range lines {
+			if l.Event == journal.EventPrBody && l.Commit == head {
+				n++
+			}
+		}
+		return n
+	}
+
+	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
+	if err != nil {
+		t.Fatalf("PublishRecordPR before any --body: %v", err)
+	}
+	if report.ReviewNotes.Status != ReviewNotesPosted || bodyLines() != 1 || len(reviewNotesCommentCalls(loggedGh(t, logFile))) != 1 {
+		t.Fatalf("--pr before --body: %+v, %d body line(s), want the notes rendered and posted", report.ReviewNotes, bodyLines())
+	}
+
+	// The store's latest body is an earlier head's.
+	if err := journal.Append(d.Store, fx.Ticket, journal.Line{Event: journal.EventPrBody, Commit: "0000000"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil); err != nil {
+		t.Fatalf("PublishRecordPR after an earlier head's body: %v", err)
+	}
+	if bodyLines() != 2 {
+		t.Errorf("notes of an earlier head were posted as found: %d body line(s) for the reviewed head, want them rendered again", bodyLines())
+	}
+}
+
+// TestPostReviewNotesSaysWhenTheNotesAreNotRendered: notes that are not in the
+// store are not posted, and the report names no file to post by hand.
+func TestPostReviewNotesSaysWhenTheNotesAreNotRendered(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	useGithubHost(t, &d, "", "")
+	host, err := d.publishHost(fx.RepoRemote)
+	if err != nil || host == nil {
+		t.Skipf("no host for the fixture remote: %v", err)
+	}
+	report := postReviewNotes(d, host, fx.Ticket, "https://github.com/owner/fixture-repo/pull/7", "", "review-notes.md", func(string, ...any) {})
+	if report.Status != ReviewNotesNotPosted || report.File != "" || !strings.Contains(report.Reason, "not rendered") {
+		t.Fatalf("report = %+v, want not posted, not rendered, with no file", report)
+	}
+}

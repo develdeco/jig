@@ -273,6 +273,26 @@ func TestPublishRecordsTheOnePRPerRepoTheHarnessOpened(t *testing.T) {
 	if len(prs) != 2 || prs[1].Repo != "web" || prs[1].URL != webPR || !done {
 		t.Errorf("after the second pr: lines %+v, publish-done %v, want both and publish-done after the web's", prs, done)
 	}
+	// Each repo's pull request carries that repo's own notes file, and the
+	// review-notes line names the repo.
+	comments := map[string]string{}
+	for _, c := range ghCalls(t, log) {
+		if strings.HasPrefix(c, "pr comment ") {
+			comments[strings.Fields(c)[2]] = filepath.Base(filepath.ToSlash(c))
+		}
+	}
+	if len(comments) != 2 || comments[apiPR] != "review-notes-api.md" || comments[webPR] != "review-notes-web.md" {
+		t.Errorf("pr comments = %v, want the api's notes on %s and the web's on %s", comments, apiPR, webPR)
+	}
+	posted := map[string]string{}
+	for _, l := range readJournal(t, b.fx, ticket) {
+		if l.Event == journal.EventReviewNotes {
+			posted[l.Repo] = l.URL
+		}
+	}
+	if len(posted) != 2 || posted["api"] != apiPR || posted["web"] != webPR {
+		t.Errorf("review-notes lines = %v, want one for each repo with its pull request", posted)
+	}
 	// Recording a pull request is not publishing it: jig opened none.
 	for _, c := range ghCalls(t, log) {
 		if strings.HasPrefix(c, "pr create") || strings.HasPrefix(c, "pr edit") {
