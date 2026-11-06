@@ -500,3 +500,9 @@ func ticketDepsCycle(st *store.Store, ticket string) string {
 	dfs(ticket)
 	return found
 }
+
+// defaultedDecisions counts the decisions of brief's Decision section tagged
+// defaulted.
+func defaultedDecisions(brief []byte) int {
+	return 0
+}

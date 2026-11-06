@@ -420,3 +420,97 @@ func TestUnconnectedAdvisories(t *testing.T) {
 		})
 	}
 }
+
+// appendToBrief appends text to the fixture ticket's brief.md. A new last
+// section leaves the hashes the slices cite unchanged.
+func appendToBrief(t *testing.T, storeDir, ticket, text string) {
+	t.Helper()
+	st, err := store.Open(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(st.TicketDir(ticket), "brief.md")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(text); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const twoDefaultedDecisions = "\n## Decision\n\n- **First** (defaulted 2026-11-06): a.\n- **Second** (defaulted 2026-11-06): b.\n- **Third** (user-confirmed 2026-11-06): c.\n"
+
+// TestValidateCheckSaysToShowTheBriefAndAsk: --check tells the session to show
+// the person the brief and ask about its decisions, naming how many are tagged
+// defaulted, and says whose approval the plain validate will record: an
+// agent's off a terminal, the person's at one. Nothing is refused or recorded.
+func TestValidateCheckSaysToShowTheBriefAndAsk(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		e    func(env) env
+		want []string
+		not  []string
+	}{
+		{"off a terminal", func(e env) env { return e },
+			[]string{"show the person the brief and ask about its decisions", "2 are tagged defaulted", "go with the recommendations", "will record an agent's approval, not a person's"},
+			nil},
+		{"at a terminal", env.atTerminal,
+			[]string{"show the person the brief and ask about its decisions", "2 are tagged defaulted", "the approval will be the person's"},
+			[]string{"an agent's approval"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			fx := newFixture(t, fixture.Opts{})
+			appendToBrief(t, fx.StoreDir, fx.Ticket, twoDefaultedDecisions)
+			out, code := runMain(t, c.e(testEnv(fx.Home)), "", "validate", fx.Ticket, "--check", "--store", fx.StoreDir)
+			if code != 0 || !strings.HasPrefix(out, "valid: yes\napproval:\n  result: "+approvalChecked+"\n") {
+				t.Fatalf("validate --check: exit %d, want valid with no approval recorded\n%s", code, out)
+			}
+			for _, w := range c.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("output lacks %q\n%s", w, out)
+				}
+			}
+			for _, n := range c.not {
+				if strings.Contains(out, n) {
+					t.Errorf("output has %q\n%s", n, out)
+				}
+			}
+			if !strings.Contains(out, "jig validate "+fx.Ticket) {
+				t.Errorf("output does not name `jig validate %s`\n%s", fx.Ticket, out)
+			}
+		})
+	}
+}
+
+// TestValidateCheckWithNoDefaultedTagNamesNoCount: a brief whose decisions are
+// all user-confirmed, or that has none, still says to show it and ask, with no
+// count of defaulted ones.
+func TestValidateCheckWithNoDefaultedTagNamesNoCount(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	appendToBrief(t, fx.StoreDir, fx.Ticket, "\n## Decision\n\n- **Only** (user-confirmed 2026-11-06): a.\n")
+	out, code := runMain(t, testEnv(fx.Home), "", "validate", fx.Ticket, "--check", "--store", fx.StoreDir)
+	if code != 0 || !strings.Contains(out, "show the person the brief and ask about its decisions") {
+		t.Fatalf("validate --check: exit %d, want the ask line\n%s", code, out)
+	}
+	if strings.Contains(out, "defaulted") {
+		t.Errorf("output names defaulted decisions though the brief has none\n%s", out)
+	}
+}
+
+// TestDefaultedDecisions counts the decisions tagged defaulted, in the
+// Decision section alone.
+func TestDefaultedDecisions(t *testing.T) {
+	t.Parallel()
+	brief := "# T-1: x\n\n## Context\n\n- a fact (defaulted in prose)\n\n## Decision\n\n- **A** (defaulted 2026-11-06): a.\n  more defaulted words on a continuation line.\n- **B** (user-confirmed 2026-11-06): b.\n- **C** (defaulted 2026-11-06): c.\n\n## Seams\n\n- defaulted\n"
+	if got := defaultedDecisions([]byte(brief)); got != 2 {
+		t.Errorf("defaultedDecisions = %d, want 2", got)
+	}
+	if got := defaultedDecisions([]byte("# T-1: x\n\n## Goal\n\nx\n")); got != 0 {
+		t.Errorf("defaultedDecisions of a brief with no Decision section = %d, want 0", got)
+	}
+}
