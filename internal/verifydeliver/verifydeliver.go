@@ -52,6 +52,10 @@ type Deps struct {
 	Host repohost.Host
 	// Confirm asks the interactive confirmation question. nil means the default.
 	Confirm func(branch, ticket, openPR string, hasHost bool) bool
+	// StdinIsTerminal says whether the confirmation's answer is read from an
+	// interactive terminal. nil means it is not: a yes counts as a person's
+	// approval only when this says so, as `jig publish --approve` does.
+	StdinIsTerminal func() bool
 	// GuardedPush pushes branch to origin. nil means gitx.GuardedPush.
 	GuardedPush func(dir, remote, branch string, confirmed bool) error
 	// FetchOrigin refreshes the view of origin. nil means the default fetch.

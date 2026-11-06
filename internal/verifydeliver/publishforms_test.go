@@ -780,15 +780,18 @@ func TestPublishBareFormApprovalComesFromHowItWasConfirmed(t *testing.T) {
 	for _, c := range []struct {
 		name     string
 		yes      bool
+		terminal bool
 		approval string
 	}{
-		{"interactive yes", false, "person"},
-		{"--yes", true, "none"},
+		{"interactive yes at a terminal", false, true, "person"},
+		{"piped y, not a terminal", false, false, "agent"},
+		{"--yes", true, true, "none"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			fx, d, head := reviewedInTheClone(t)
 			d.Confirm = func(string, string, string, bool) bool { return true }
+			d.StdinIsTerminal = func() bool { return c.terminal }
 			d.GuardedPush = func(string, string, string, bool) error { return nil }
 			if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: c.yes}); err != nil {
 				t.Fatalf("Publish: %v", err)
@@ -803,8 +806,8 @@ func TestPublishBareFormApprovalComesFromHowItWasConfirmed(t *testing.T) {
 				switch l.Event {
 				case journal.EventPublishApproved:
 					approved++
-					if l.Commit != head || l.Provenance != "person" {
-						t.Errorf("publish-approved line = %+v, want a person's for %s", l, head)
+					if l.Commit != head || l.Provenance != c.approval {
+						t.Errorf("publish-approved line = %+v, want provenance %s for %s", l, c.approval, head)
 					}
 				case journal.EventPr:
 					if l.Approval != c.approval {
@@ -814,6 +817,11 @@ func TestPublishBareFormApprovalComesFromHowItWasConfirmed(t *testing.T) {
 			}
 			if c.approval == "person" {
 				want := "Publish approved by " + approverName(t, d) + " at a terminal\n"
+				if approved != 1 || !strings.Contains(notes, want) {
+					t.Errorf("%d publish-approved line(s); notes lack %q:\n%s", approved, want, notes)
+				}
+			} else if c.approval == "agent" {
+				want := "Publish approved by an agent, as " + approverName(t, d) + ", not by a person at a terminal\n"
 				if approved != 1 || !strings.Contains(notes, want) {
 					t.Errorf("%d publish-approved line(s); notes lack %q:\n%s", approved, want, notes)
 				}

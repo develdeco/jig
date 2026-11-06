@@ -675,18 +675,23 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		answeredYes = true
 	}
 
-	// A yes given at the terminal is a person's approval of the head each
-	// repo publishes, journaled as `jig publish --approve` would: --yes
-	// stands in for no person, and a recorded approval is journaled already.
+	// A yes is an approval of the head each repo publishes, journaled as
+	// `jig publish --approve` would: a person's when stdin is a terminal, an
+	// agent's otherwise (a piped y). --yes stands in for no one, and a
+	// recorded approval is journaled already.
 	// The review notes are written again after it, so the approval line and
 	// the pr line's approval are the journal's on every publish form.
 	if answeredYes {
+		provenance := "agent"
+		if d.StdinIsTerminal != nil && d.StdinIsTerminal() {
+			provenance = "person"
+		}
 		for _, sh := range ships {
 			head := sh.pt.reviewedHead()
 			if head == "" {
 				continue
 			}
-			line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: sh.pt.branch, Provenance: "person", Repo: sh.pt.lineRepo(), Summary: approverIdentity(d.Store.Root)}
+			line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: sh.pt.branch, Provenance: provenance, Repo: sh.pt.lineRepo(), Summary: approverIdentity(d.Store.Root)}
 			if err := journal.Append(d.Store, ticket, line); err != nil {
 				return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal publish-approved: %w", err)
 			}
