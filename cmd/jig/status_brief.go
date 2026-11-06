@@ -23,6 +23,16 @@ const (
 	briefApprovalChanged = "changed"
 )
 
+// approvedByWords is who the brief block says approved: the identity for a
+// person, "an agent (as <identity>)" when an agent recorded the approval, so
+// an agent's never reads as a person's.
+func approvedByWords(a store.Approval) string {
+	if a.Provenance == "agent" {
+		return "an agent (as " + a.By + ")"
+	}
+	return a.By
+}
+
 // briefBlocks is the brief's part of `jig status`: whether the brief as it is
 // now is the one approved, who approved it and when, and its "## " sections,
 // each with the slices that cite it (their from_brief hashes). A ticket with
@@ -45,7 +55,7 @@ func briefBlocks(st *store.Store, ticket string) ([]string, error) {
 	}
 	pairs := [][2]string{{"approval", state}}
 	if state != briefApprovalNone {
-		pairs = append(pairs, [2]string{"approved_by", approval.By}, [2]string{"approved_at", approval.At})
+		pairs = append(pairs, [2]string{"approved_by", approvedByWords(approval)}, [2]string{"approved_at", approval.At})
 		if approval.Provenance != "" {
 			pairs = append(pairs, [2]string{"provenance", approval.Provenance})
 		}
