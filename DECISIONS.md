@@ -4120,3 +4120,9 @@ Rejected: a column per label and per status, since the table answers what the ro
 `approval.yaml` records `by` (the git identity the command ran as) and `provenance`, and every surface showed the identity first, so an approval an agent recorded read as a person's. Chosen: with `provenance: agent`, `jig status` prints `approved_by: an agent (as <identity>)`, the TUI writes "approved <when> by an agent, as <identity>", and `phase.Approver` (used by `who()`) gives "an agent, as <identity>"; a person's approval reads as before. The review notes carry one line before the reviewers, "Brief approved by <identity> at a terminal" or "Brief approved by an agent, as <identity>, not by a person at a terminal", and none for a ticket with no approval. `approval.yaml` is unchanged.
 
 Rejected: renaming `by` in `approval.yaml`, a record format change for a wording problem. Defaulted (owner: take the recommended answer, 2026-11-06): both choices.
+
+## An edit before a slice is claimed hears to claim one (RUN-12)
+
+A session could edit a ticket's files with nothing claimed, or before the brief was approved, and hear nothing until a commit. Chosen (defaulted 2026-11-06): a core note (`internal/observe/unclaimed_edit.go`) at a tool event whose files lie inside the checkout of the ticket the branch binds: at the brief phase it says to finish the brief with intake and `jig validate` before changing code, at the build phase with no slice claimed it says to claim one and names the ready slices. The Ref names the ticket and which of the two (`unclaimed-edit:<ticket>:brief|claim`), so each is said once; it is advice, never enforced. A needs-input or failed slice counts as claimed, and an edit outside the checkout (the store, a scratch directory) says nothing.
+
+Rejected: refusing or holding the session, since jig records and shows, never refuses (ADR 0046's rule) and a person may have chosen to edit first.

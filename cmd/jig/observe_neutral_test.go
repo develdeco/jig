@@ -20,7 +20,8 @@ func TestObserveBuildsTheEventFromFlagsForAScript(t *testing.T) {
 	if err := jsonUnmarshal(out, &neutral); err != nil || !strings.Contains(neutral.Context, "ticket: "+fx.Ticket) {
 		t.Errorf("output = %q (%v), want the neutral JSON with the context", out, err)
 	}
-	if out, code := runMain(t, e, "", "observe", "--event", "tool", "--session", "crew-1", "--cwd", fx.RepoDir, "--tool", "Bash", "--command", "ls", "--exit", "0", "--files", "a.go, b.go"); out != "" || code != 0 {
+	if out, code := runMain(t, e, "", "observe", "--event", "tool", "--session", "crew-1", "--cwd", fx.RepoDir, "--tool", "Bash", "--command", "ls", "--exit", "0", "--files", "a.go, b.go"); !strings.Contains(out, "no approved brief") || code != 0 {
+		// Files in the clone of a ticket whose brief has no approval hear to finish it.
 		t.Fatalf("tool: exit %d, output %q", code, out)
 	}
 	tools := ledgerEvents(t, fx.Home, journal.EventTool)
