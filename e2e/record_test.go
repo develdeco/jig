@@ -46,11 +46,12 @@ const (
 	recordMaxHeight = 100
 	recordMinHeight = 4
 
-	// maxRecordings is how many recordings a directory may hold: the most the
-	// collection of an oracle run accepts, each verified on its own. (The 50
-	// of gh's --attach binds publish's pick, not the collection.) Recording
-	// stops here rather than lose the whole collection.
-	maxRecordings = 200
+	// maxRecordings is a safety bound on how many recordings a directory may
+	// hold, well above the suite's size: every scenario is recorded, and jig's
+	// collection chooses among them (the change's own first) when a run holds
+	// more than it keeps. Stopping here only keeps a runaway test from filling
+	// the disk.
+	maxRecordings = 2000
 
 	// maxTagText bounds a tag's scenario and flow (the most jig accepts is
 	// 200 bytes); maxCaptionText bounds its caption (jig accepts 1000, a
@@ -156,7 +157,7 @@ func (r *recordings) reserve(t recordT) (step int, ok bool) {
 	if r.written >= r.limit {
 		if !r.full {
 			r.full = true
-			t.Logf("record: %s holds %d recordings, the most a collection accepts; the rest of this run is not recorded", recordDirEnv, r.limit)
+			t.Logf("record: %s holds %d recordings, the safety bound on one run's recordings; the rest of this run is not recorded", recordDirEnv, r.limit)
 		}
 		return 0, false
 	}
@@ -192,6 +193,7 @@ func (r *recordings) write(test string, step int, paths *pathScrubber, args []st
 		Flow:     capText(paths.scrub(test), maxTagText),
 		Step:     step,
 		Caption:  capText(paths.scrub(caption(args)), maxCaptionText),
+		File:     testFile(),
 	})
 	if err != nil {
 		return err
@@ -256,6 +258,9 @@ type recordingTag struct {
 	Flow     string `json:"flow"`
 	Step     int    `json:"step"`
 	Caption  string `json:"caption"`
+	// File is the repo-relative source file of the test, which lets jig keep a
+	// change's own scenarios first when a run holds more than it collects.
+	File string `json:"file,omitempty"`
 }
 
 func encodeTag(tag recordingTag) ([]byte, error) {
@@ -558,4 +563,46 @@ func (l *lineScrubber) emit(b []byte) {
 	if len(b) > 0 {
 		_, _ = io.WriteString(l.w, l.s.scrub(string(b)))
 	}
+}
+
+// testFile is the repo-relative source file, with forward slashes, of the
+// test the calling goroutine is running: the innermost frame of its stack in a
+// function named Test<...> of this package (a subtest's closure counts). jig
+// reads it from a recording's tag to keep the scenarios of a file the branch
+// changed first. It is "" when the stack holds no test, as a helper running a
+// goroutine of its own has none.
+func testFile() string {
+	pcs := make([]uintptr, 64)
+	n := runtime.Callers(2, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		f, more := frames.Next()
+		if i := strings.LastIndex(f.Function, "/e2e.Test"); i >= 0 && strings.HasSuffix(f.File, "_test.go") {
+			return repoRelative(f.File)
+		}
+		if !more {
+			return ""
+		}
+	}
+}
+
+// repoRelative is file relative to the module root (the nearest directory
+// above it holding go.mod), or relative to its package directory under "e2e"
+// when no root is found (a binary built with -trimpath).
+func repoRelative(file string) string {
+	dir := filepath.Dir(file)
+	for root := dir; ; {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			if rel, err := filepath.Rel(root, file); err == nil {
+				return filepath.ToSlash(rel)
+			}
+			break
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			break
+		}
+		root = parent
+	}
+	return "e2e/" + filepath.Base(file)
 }

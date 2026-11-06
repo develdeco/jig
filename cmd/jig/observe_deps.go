@@ -25,6 +25,7 @@ func observeDeps(e env, jigHome string) observe.Deps {
 		Getenv:    e.getenv,
 		Start:     e.spawn,
 		OpenStore: openLocatedStore,
+		Derive:    derivePhase,
 		Here: func(w locate.Where, st *store.Store) (string, error) {
 			return hereText(e, w, jigHome, st)
 		},
