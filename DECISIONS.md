@@ -4121,6 +4121,20 @@ Rejected: a column per label and per status, since the table answers what the ro
 
 Rejected: renaming `by` in `approval.yaml`, a record format change for a wording problem. Defaulted (owner: take the recommended answer, 2026-11-06): both choices.
 
+## An edit before a slice is claimed hears to claim one (RUN-12)
+
+A session could edit a ticket's files with nothing claimed, or before the brief was approved, and hear nothing until a commit. Chosen (defaulted 2026-11-06): a core note (`internal/observe/unclaimed_edit.go`) at a tool event whose files lie inside the checkout of the ticket the branch binds: at the brief phase it says to finish the brief with intake and `jig validate` before changing code, at the build phase with no slice claimed it says to claim one and names the ready slices. The Ref names the ticket and which of the two (`unclaimed-edit:<ticket>:brief|claim`), so each is said once; it is advice, never enforced. A needs-input or failed slice counts as claimed, and an edit outside the checkout (the store, a scratch directory) says nothing.
+
+Rejected: refusing or holding the session, since jig records and shows, never refuses (ADR 0046's rule) and a person may have chosen to edit first.
+
+## Two load flakes, and a lock timeout that lost an update (DEV-6)
+
+Under load, `TestFollowDeliversEveryAppendOnceAndBlocksNone` failed with "no envelope within 20s" and `TestUpdateMachineConcurrent` found 30 projects where it wanted 40. The first was a real fault: `events.Reader` read a journal with `os.ReadFile`, which on Windows does not share a file for deletion, so the writer's rename over it was refused and waited, the reader's polls failed meanwhile, and `Follow` gave up after 40 failed polls in a row without anyone hearing of it. Chosen: the journal is read with `fileshare.ReadFile`, as every file jig reads beside a writer is, and the follower test fails with `Follow`'s own error when it ends early. The second was the lock: `store.Lock` lets a timed-out writer carry on, so `UpdateMachine` wrote the mapping unlocked and lost another writer's entry. Chosen: `UpdateMachine`, `SaveMachine` and the ignored list wait for their lock up to two minutes (`filelock.TryLock` now backs off to 200ms between tries) and past that fail naming the lock file, never writing; a read of the mapping that fails for any reason but the file being absent is tried again for up to five seconds.
+
+Proven: before the fix `go test -count=20` of the events test, with other whole-suite runs on the machine, failed at least 6 of 20 runs (3 of 20 in a second run, each with the sharing violation); after it, 20 of 20 passed. The lost update shows deterministically with a held lock and a 150ms wait (`TestUpdateMachineNeverWritesWithoutTheLock`, red before the fix); `TestUpdateMachineConcurrent` did not fail in 20 runs on either side of the fix here, so the held-lock test carries the proof.
+
+Rejected: a longer test deadline, which only hides a follower that has stopped, and keeping the unlocked write as a fallback, which is the lost update.
+
 ## Each record names the jig build that wrote it (STORE-9)
 
 A fix to jig itself is judged by records written by builds that may not have it, and nothing on a journal line or a round report said which build wrote it. Chosen (defaulted 2026-11-06): a build stamp (version, short vcs revision, `-dirty` when the build had uncommitted changes, `unknown` with no build info), computed once per process in `internal/journal` and shared with `jig version`, written as a `jig` field by `journal.Append` on every line jig writes and on each round's `report.yaml`; `jig status` lists the builds with the first and last line each wrote when a ticket names more than one.

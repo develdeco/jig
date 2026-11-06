@@ -175,7 +175,7 @@ What a harness (or git) calls when something happens in a session: session start
 _Avoid_: trigger, listener
 
 **Note**:
-What a session has not yet heard: a verification outcome, an answer, a correction, a spend warning, what comes next (to open the gate and review, to publish), and where a ticket stands that a prompt names (its phase and state, the skill for the phase, `jig next` for what it needs; the prompt's tokens are matched against the store's declared keys and its tickets, never read for intent). Delivered once per session, agent and fact (a build subagent and the main session that started it each hear what they have not) at the next tool call or prompt; an enforced note also holds an **unattended** session or subagent back at its stop, once.
+What a session has not yet heard: a verification outcome, an answer, a correction, a spend warning, what comes next (to open the gate and review, to publish), and where a ticket stands that a prompt names (its phase and state, the skill for the phase, `jig next` for what it needs; the prompt's tokens are matched against the store's declared keys and its tickets, never read for intent), and, at an edit in the checkout of the ticket the branch binds when no slice of it is claimed, to claim one (naming the ready slices) or, while its brief has no approval, to finish the brief first (never enforced). Delivered once per session, agent and fact (a build subagent and the main session that started it each hear what they have not) at the next tool call or prompt; an enforced note also holds an **unattended** session or subagent back at its stop, once.
 _Avoid_: notification, alert
 
 **Correction**:

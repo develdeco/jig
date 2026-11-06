@@ -30,7 +30,9 @@ func (h *handler) noteCtx(mem sessionMemory, commit string) NoteCtx {
 // source to look at; a prompt then hears how work comes to have one
 // (freshWorkNote), unless it names a ticket of the store, which hears that
 // ticket's phase note instead (prompt_tickets.go). A prompt that names tickets
-// hears their phase notes after the sources' own, on a ticket too.
+// hears their phase notes after the sources' own, on a ticket too, and an edit
+// in the ticket's checkout with no slice claimed hears to claim one
+// (unclaimed_edit.go).
 func (h *handler) collect(mem sessionMemory, commit string) []Note {
 	if h.st == nil {
 		return nil
@@ -64,10 +66,12 @@ func (h *handler) collect(mem sessionMemory, commit string) []Note {
 			out = append(out, n)
 		}
 	}
-	for _, n := range named {
+	for _, n := range append(h.unclaimedEditNotes(mem), named...) {
 		if !seen[n.Ref] {
 			seen[n.Ref] = true
-			n.Source = "phase"
+			if n.Source == "" {
+				n.Source = "phase"
+			}
 			out = append(out, n)
 		}
 	}

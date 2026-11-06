@@ -48,6 +48,8 @@ func (f *follower) next() Envelope {
 	select {
 	case e := <-f.out:
 		return e
+	case err := <-f.done:
+		f.t.Fatalf("Follow ended before the next envelope: %v", err)
 	case <-time.After(followWait):
 		f.t.Fatalf("no envelope within %s", followWait)
 	}
