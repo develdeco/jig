@@ -186,7 +186,7 @@ Reviewed head:
 
 Revalidation tier: none
 
-Findings: 2 fixed, 0 dismissed, 2 noted, 0 asked. See the pull request's first comment for detail.
+Findings: 2 fixed, 0 addressed, 0 dismissed, 2 noted, 0 asked. See the pull request's first comment for detail.
 `,
 		greenShortSHA(t, d, fx.Ticket, "a"),
 		greenShortSHA(t, d, fx.Ticket, "b"),
@@ -210,6 +210,7 @@ round 3: nothing new; the shared-helper note from round 1 remains on record
 
 - **Add's doc comment still omits overflow behavior** (high): silent overflow could misfeed a downstream money calculation
   - Status: fixed by slice fix-2-alpha-test and cleared at round 3
+  - History: high at round 1: Add's doc comment omits overflow behavior; continued at round 2 as high: Add's doc comment still omits overflow behavior
   - Oracle: test
 
 - **Greeting formality beyond casual is not decided** (medium): the wrong formality reaches every caller of Greet
@@ -335,7 +336,7 @@ Oracles:
 
 Revalidation tier: none
 
-Findings: 0 fixed, 0 dismissed, 0 noted, 0 asked. See the pull request's first comment for detail.
+Findings: 0 fixed, 0 addressed, 0 dismissed, 0 noted, 0 asked. See the pull request's first comment for detail.
 `,
 		greenShortSHA(t, d, fx.Ticket, "a"),
 		greenShortSHA(t, d, fx.Ticket, "b"),

@@ -134,7 +134,7 @@ Oracles:
 
 Revalidation tier: none
 
-Findings: 0 fixed, 0 dismissed, 0 noted, 0 asked. See the pull request's first comment for detail.
+Findings: 0 fixed, 0 addressed, 0 dismissed, 0 noted, 0 asked. See the pull request's first comment for detail.
 `, shortSHA(tip))
 		if body != wantBody {
 			t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)

@@ -58,11 +58,11 @@ jig review done T-1 --reviewed alpha/alpha.go,beta/beta.go --summary "<what you 
 jig review done T-1 --result result.json     # or: the whole report as one file
 ```
 
-`--reviewed` lists every file you read, every `must_review` path among them. A refused report (`REVIEW_INVALID`) leaves the round open: correct it and run the command again. `REVIEW_STALE_HEAD`: the branch moved; run `jig gate T-1`, review the new head. The output is the round's verdict: `clean`, or `fix-slices` with the findings; asks wait for a person (`jig triage`).
+`--reviewed` lists every file you read, every `must_review` path among them. A refused report (`REVIEW_INVALID`) leaves the round open: correct it and run the command again. `REVIEW_STALE_HEAD`: the branch moved; run `jig gate T-1`, review the new head. The output is the round's verdict: `clean`, or `fix-slices` with the findings; asks wait for a person (`jig triage`), and a person may take up a note with it too.
 
 ## Then
 
-Relay `jig next <T>`'s `prompt:` to the person and stop, unless the person's prompt named later phases (a start-to-finish run): then go on to the next phase's skill the prompt named: build when the round queued fixes, publish when it is clean. Asks the round left are the person's: put each to them and record their answer with `jig triage`, or, when the prompt told you to go with your recommendations, decide them yourself. A subagent stops at its verdict line.
+Relay `jig next <T>`'s `prompt:` to the person and stop, unless the person's prompt named later phases (a start-to-finish run): then go on to the next phase's skill the prompt named: build when the round queued fixes, publish when it is clean. Asks the round left are the person's: put each to them and record their answer with `jig triage`, or, when the prompt told you to go with your recommendations, decide them yourself. A note you filed below the floor reads `addressed` once a later round changes its file and you no longer see it: report it again (`--prior`, `--still-present`) while it stands. A subagent stops at its verdict line.
 
 ## Never
 
