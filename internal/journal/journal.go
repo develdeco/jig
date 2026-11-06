@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -257,7 +258,7 @@ func endsMidLine(f *os.File) (bool, error) {
 // The lines of a ticket's journal are appended by several writers and merged
 // by git, so a reader must not assume they are in time order either.
 func Read(st *store.Store, ticket string) ([]Line, error) {
-	data, err := os.ReadFile(journalPath(st, ticket))
+	data, err := fileshare.ReadFile(journalPath(st, ticket))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

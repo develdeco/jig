@@ -13,6 +13,7 @@ import (
 	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // jline is one journal line as text: the raw bytes of a line written by some
@@ -27,21 +28,19 @@ func jline(ts, ticket, event, rest string) string {
 }
 
 // writeFile replaces path with lines, one per line, the way journal.Append
-// replaces a journal: a temp file renamed over it.
+// replaces a journal in this repo's store: a temp file renamed over it.
 func writeFile(t *testing.T, path string, lines ...string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	tmp := path + ".tmp"
 	body := strings.Join(lines, "\n")
 	if len(lines) > 0 {
 		body += "\n"
 	}
-	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	// The way jig's own writers replace a file: a rename that lands while a
+	// reader holds the old one (os.Rename fails with access denied on Windows).
+	if err := store.AtomicWrite(path, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 }
