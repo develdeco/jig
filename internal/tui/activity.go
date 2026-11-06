@@ -51,7 +51,7 @@ func stepOfLine(l events.Envelope) int {
 		journal.EventFixSlice, journal.EventAdopt, journal.EventRoute:
 		return stepReview
 	case journal.EventPrBody, journal.EventPublishApproved, journal.EventPr, journal.EventPublishDone,
-		journal.EventSquash, journal.EventMemorize, journal.EventChangelog, journal.EventPublishPicks:
+		journal.EventSquash, journal.EventMemorize, journal.EventChangelog, journal.EventPublishPicks, journal.EventReviewNotes:
 		return stepPublish
 	case journal.EventSpend:
 		return -1
@@ -430,6 +430,8 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return firstOf(m.byWhom(t, l.Provenance, l.Session), "someone") + " approved " + repoWords(l) + short(l.Commit)
 	case journal.EventPr:
 		return strings.TrimSpace(firstOf(l.Outcome, "recorded") + " " + l.URL)
+	case journal.EventReviewNotes:
+		return strings.TrimSpace("review notes posted " + l.URL)
 	case journal.EventSquash:
 		return strings.TrimSpace("the branch was squashed " + short(l.Commit))
 	case journal.EventChangelog:
