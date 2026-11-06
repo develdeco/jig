@@ -20,7 +20,7 @@ gh pr create --head <branch> --base <base> --title "<title>" --body-file <pr_bod
 jig publish T-1 --pr <url>             # checks the PR is from the ticket's branch (and the reviewed head), then records it
 ```
 
-The `--body` output gives the branch, base, title and the absolute `pr_body` path to hand to `gh`. The base is the repo's target, or, for a ticket stacked on another, the parent's branch until the parent merges. The branch is the one the ticket records, else `<id>-<slug>` (the GitHub issue number leads it once the ticket is mirrored); `jig next T-1` names it too. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so. When the last pull request is recorded, the result gives the `git worktree remove` for each worktree the ticket still has: run it (git refuses one with changes).
+The `--body` output gives the branch, base, title and the absolute `pr_body` path to hand to `gh`. The base is the repo's target, or, for a ticket stacked on another, the parent's branch until the parent merges. The branch is the one the ticket records, else `<id>-<slug>` (the GitHub issue number leads it once the ticket is mirrored); `jig next T-1` names it too. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so. `--pr` also posts the review notes, once per content (a `review_notes` row says what happened): post nothing yourself. When the last pull request is recorded, the result gives the `git worktree remove` for each worktree the ticket still has: run it (git refuses one with changes).
 
 Or jig pushes and opens it:
 
@@ -28,7 +28,7 @@ Or jig pushes and opens it:
 jig publish T-1            # asks before it pushes; --yes stands in for the answer
 ```
 
-It pushes the reviewed head as it is (never forced: `PUBLISH_NOT_FAST_FORWARD` when origin has moved past it), opens the pull request or updates the one the branch has open, and posts the review notes as its first comment.
+It pushes the reviewed head as it is (never forced: `PUBLISH_NOT_FAST_FORWARD` when origin has moved past it), opens the pull request or updates the one the branch has open, and posts the review notes as a comment, unless these exact notes are already on it.
 
 A ticket whose slices build in several repos publishes one pull request for each, all from the same branch name, and each body names the others under `## Part of T-1` (`pending` until that repo's pull request is recorded). `--body` renders them all, or one with `--repo <r>`; push and open each, then record each with `jig publish T-1 --pr <url> --repo <r>`. The ticket is published when the last is recorded; render the bodies again then, and update the pull requests with the urls. Bare `jig publish` does it all, and `--approve` approves every repo's head.
 
