@@ -433,6 +433,20 @@ func TestPublishWithRecordingsAndNoPickWritesTheRequestAnAgentPicksFrom(t *testi
 		{ID: "r2", Scenario: "login", Flow: "onboard", Step: 1, Caption: "signs in", Commit: pf.built[len(pf.built)-1], Kind: "image", Name: "onboard-1.png"},
 		{ID: "r3", Scenario: "profile", Flow: "onboard", Step: 2, Commit: pf.built[0], RecordedAt: pf.built[0][:7], Kind: "image", Name: "onboard-2.svg"},
 	}
+	// The wire name is what the picking agent reads: a round trip through the
+	// same struct cannot see it, so the raw JSON is checked.
+	var raw struct {
+		Candidates []map[string]any `json:"candidates"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil || len(raw.Candidates) != 3 {
+		t.Fatalf("raw candidates = %+v, %v", raw.Candidates, err)
+	}
+	for i, wantKey := range []string{pf.built[0][:7], "", pf.built[0][:7]} {
+		got, has := raw.Candidates[i]["recorded_at"]
+		if wantKey == "" && has || wantKey != "" && got != wantKey {
+			t.Errorf("candidate %d recorded_at = %v (present %v), want %q (absent when empty)", i, got, has, wantKey)
+		}
+	}
 	if req.Ticket != pf.fx.Ticket || req.HeadSHA != pf.head || req.Intent.Source != IntentSourceBrief || !reflect.DeepEqual(req.Candidates, wantCands) {
 		t.Errorf("picks.json = %+v\nwant ticket %s, head %s, the brief, candidates %+v", req, pf.fx.Ticket, pf.head, wantCands)
 	}

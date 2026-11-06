@@ -787,7 +787,7 @@ func TestOlderMarkNamesACommitOtherThanTheHead(t *testing.T) {
 func TestRenderPicksSectionSaysWhichCommitAnOlderRecordingWasMadeAt(t *testing.T) {
 	t.Parallel()
 	cands := pickTestCands()
-	cands[0].RecordedAt = "0123456" // home, no caption of its own: a note alone
+	cands[0].RecordedAt = "0123456" // home, no caption: its scenario names it
 	cands[1].RecordedAt = "0123456" // login, "signs in"
 	cands[2].RecordedAt = "89abcde" // profile, a video
 	res := PicksResult{
@@ -809,5 +809,37 @@ func TestRenderPicksSectionSaysWhichCommitAnOlderRecordingWasMadeAt(t *testing.T
 		"- ![saves](./d.png)\n\n"
 	if got != want {
 		t.Errorf("section:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestRenderPicksSectionMarksAnOlderRecordingWhoseCaptionWasScrubbed: a caption
+// that names a host path is left out, and an older recording then shows its
+// commit alone - an image as its alt text, a video after its name - while one
+// recorded at the head stays bare.
+func TestRenderPicksSectionMarksAnOlderRecordingWhoseCaptionWasScrubbed(t *testing.T) {
+	t.Parallel()
+	host := t.TempDir()
+	leak := filepath.Join(host, "shot.png")
+	cands := pickTestCands()
+	cands[0].RecordedAt = "0123456" // an image
+	cands[2].RecordedAt = "89abcde" // a video
+	res := PicksResult{
+		Summary: "s",
+		Flows: []PicksFlow{
+			{Title: "F", Items: []PicksItem{{ID: "r1", Caption: leak}, {ID: "r3", Caption: leak}, {ID: "r4", Caption: leak}}},
+		},
+	}
+	p, err := resolvePicks(res, cands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := []DemoFile{{Name: "a.svg"}, {Name: "c.mp4"}, {Name: "d.png"}}
+	out := renderPicksSection(p, "/stage", files, []hostDir{{host, "<host>"}})
+	want := "## Demo\n\ns\n\n### F\n\n" +
+		"- ![recorded at 0123456](./a.svg)\n" +
+		"- ./c.mp4: recorded at 89abcde\n" +
+		"- ![](./d.png)\n\n"
+	if out.Section != want {
+		t.Errorf("section:\n%s\nwant:\n%s", out.Section, want)
 	}
 }

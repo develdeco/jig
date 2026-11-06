@@ -1,10 +1,12 @@
 package e2e
 
 import (
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,32 +37,77 @@ func TestRecordTagNamesTheTestsSourceFile(t *testing.T) {
 		if got := readTagFile(t, filepath.Join(dir, name)).File; got != want {
 			t.Errorf("tag %s file = %q, want %q", name, got, want)
 		}
+		// jig reads the tag by its wire name, which the harness struct cannot pin.
+		raw, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil || fields["file"] != want {
+			t.Errorf("tag %s = %s, want a \"file\" key of %q", name, raw, want)
+		}
 	}
 	if tags != 2 {
 		t.Errorf("%d tags, want 2", tags)
 	}
 }
 
-// TestRecordBoundIsWellAboveTheSuite: the harness records every scenario, so
-// its safety bound must stay well above the number of tests the suite has
-// (each makes a few recordings at most).
+// TestRecordBoundIsWellAboveTheSuite: the harness records every jig call, so
+// its safety bound must stay well above what the suite can record. The floor
+// is read from the suite's source: the call sites of runJig and runJigIn and
+// of every helper that reaches them (by name, to a fixed point), times 3 for
+// the loops and subtests that run a site more than once. A bound the suite
+// reaches stops recording in finish order, which is the bug this ticket fixes.
 func TestRecordBoundIsWellAboveTheSuite(t *testing.T) {
 	t.Parallel()
 	pkgs, err := parser.ParseDir(token.NewFileSet(), ".", nil, parser.SkipObjectResolution)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var tests int
-	for _, pkg := range pkgs {
-		for _, f := range pkg.Files {
-			for _, d := range f.Decls {
-				if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil && strings.HasPrefix(fn.Name.Name, "Test") {
-					tests++
+	// Only plain calls: a method of the same name elsewhere would inflate the
+	// count.
+	calleeName := func(c *ast.CallExpr) string {
+		if id, ok := c.Fun.(*ast.Ident); ok {
+			return id.Name
+		}
+		return ""
+	}
+	recorded := map[string]bool{"runJig": true, "runJigIn": true}
+	for grew := true; grew; {
+		grew = false
+		for _, pkg := range pkgs {
+			for _, f := range pkg.Files {
+				for _, d := range f.Decls {
+					fn, ok := d.(*ast.FuncDecl)
+					if !ok || fn.Body == nil || recorded[fn.Name.Name] {
+						continue
+					}
+					ast.Inspect(fn.Body, func(n ast.Node) bool {
+						if c, ok := n.(*ast.CallExpr); ok && recorded[calleeName(c)] && !recorded[fn.Name.Name] {
+							recorded[fn.Name.Name] = true
+							grew = true
+						}
+						return true
+					})
 				}
 			}
 		}
 	}
-	if maxRecordings < 3*tests {
-		t.Errorf("maxRecordings = %d, want well above the %d tests of the suite", maxRecordings, tests)
+	var sites int
+	for _, pkg := range pkgs {
+		for _, f := range pkg.Files {
+			ast.Inspect(f, func(n ast.Node) bool {
+				if c, ok := n.(*ast.CallExpr); ok && recorded[calleeName(c)] {
+					sites++
+				}
+				return true
+			})
+		}
+	}
+	if sites < 100 {
+		t.Fatalf("found %d recorded call sites; the scan no longer sees the suite", sites)
+	}
+	if maxRecordings < 3*sites {
+		t.Errorf("maxRecordings = %d, want at least 3 x the %d recorded call sites of the suite", maxRecordings, sites)
 	}
 }
