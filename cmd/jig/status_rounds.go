@@ -27,9 +27,9 @@ var roundColumns = []string{"round", "verdict", "reviewer", "harness", "model", 
 // reported the round, and harness and model are what the journal and the
 // reviewer's own report say of it. independent is true, false or unknown for a
 // round a reviewer ran. fix, ask and note count the findings by the status jig
-// routed them to (open, asked, noted; a dismissed one counts in none). scope is full or delta, base and head are the shas the round
-// reviewed, and files is how many paths the reviewer read. A cell that is not
-// known is "-". A ticket with no recorded round has no block.
+// routed them to (open, asked, noted; a dismissed one counts in none). scope
+// is full or delta, base and head are the shas the round reviewed, and files
+// is how many paths the reviewer read. A cell that is not known is "-". A ticket with no recorded round has no block.
 func roundsBlocks(st *store.Store, ticket string) ([]string, error) {
 	recs, err := verifydeliver.ReadRounds(st, ticket)
 	if err != nil {
